@@ -19,6 +19,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Part(_) => Some("parts.insert"),
         Kind::PartSize(_) => Some("parts.resize"),
         Kind::SaveMesh(k) => Some(crate::dialogs_save_mesh::command_id(k)),
+        Kind::UrdfExport(_) => Some("file.export"),
         Kind::ViewDxf { .. } => Some("file.export_view_dxf"),
         Kind::ViewNavigator(_) => Some("view.navigator"),
         Kind::InsertDrawing(p) => Some(if p.command.ends_with("dxf") { "sketch.insert_dxf" } else { "sketch.insert_svg" }),
@@ -33,6 +34,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Measure { .. } => Some("inspect.measure"),
         Kind::Section { .. } => Some("inspect.section"),
         Kind::Rename { .. } => Some("timeline.rename"),
+        Kind::RenameGroup { .. } => Some("timeline.rename_group"),
         Kind::ConfirmDelete { .. } => Some("timeline.delete"),
         Kind::Extrude { .. } => Some("solid.extrude"),
         Kind::Fillet { chamfer, .. } => Some(if *chamfer { "solid.chamfer" } else { "solid.fillet" }),
@@ -45,6 +47,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Sweep { .. } => Some("solid.sweep"),
         Kind::Midplane => Some("construct.plane.midplane"),
         Kind::MeshConvert { .. } => Some("mesh.convert"),
+        Kind::MeshReduce { .. } => Some("mesh.reduce"),
         Kind::Construct { command, .. } => Some(command),
         Kind::ConstructAuto { command, .. } => Some(command),
         Kind::PathPlane { .. } => Some("construct.plane.along_path"),
@@ -88,6 +91,8 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Frame(_) => Some("frame.member"),
         Kind::EndCap(_) => Some("frame.end_cap"),
         Kind::RotateMember(_) => Some("frame.rotate_member"),
+        Kind::FrameTrim(_) => Some("frame.trim"),
+        Kind::Gusset(_) => Some("frame.gusset"),
         Kind::FramePlate(_) => Some("frame.plate"),
         Kind::Plastic(k) => match k {
             crate::dialogs_plastic::Pl::SnapFit { .. } => Some("plastic.snap_fit"),
@@ -300,6 +305,12 @@ fn fillet_turn_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>
 /// The most instances a solid pattern makes in one direction (the document's own limit).
 const MAX_PATTERN_INSTANCES: i64 = 1000;
 
+/// A length row that refuses zero and negative values when `positive` (a spacing that sets the
+/// count with an extent), else any length (a spacing may run backwards).
+fn expr_row_positive_if(ui: &mut egui::Ui, label: &str, value: &mut String, positive: bool) -> bool {
+    if positive { expr_row_positive(ui, label, value) } else { expr_row(ui, label, value) }
+}
+
 /// A solid pattern's quantity row, with step arrows from 1 to `MAX_PATTERN_INSTANCES`. The
 /// count goes to the command as typed, so it is evaluated as the document evaluates it.
 fn quantity_row(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label: &str, value: &mut String) -> bool {
@@ -317,26 +328,64 @@ fn count_row_to(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label
     ui_kit::count_row(ui, label, value, &ui_kit::Count { min: 1, max, eval: &eval })
 }
 
+/// The distance types a rectangular pattern direction offers, in the order of
+/// [`PatternDistance`]'s words.
+const PATTERN_DISTANCES: [(PatternDistance, &str); 3] = [
+    (PatternDistance::CountSpacing, "ui.pattern_count_spacing"),
+    (PatternDistance::CountExtent, "ui.pattern_count_extent"),
+    (PatternDistance::SpacingExtent, "ui.pattern_spacing_extent"),
+];
+
 /// One rectangular pattern direction (`index` 0 or 1) as its own titled group: the direction's
-/// pick, then its Quantity, Spacing and (for features) Alignment, in the same order for both
-/// directions, so a direction's settings sit together (#9634).
+/// pick, its Distance Type, the values that type takes (Quantity, Spacing, Extent, Copy at the
+/// end) and (for features) Alignment, in the same order for both directions, so a direction's
+/// settings sit together (#9634, #8523).
 fn pattern_direction_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, index: usize) -> bool {
     let (key, title, quantity_label, spacing_label) = if index == 0 {
         ("pattern_direction1", "Direction 1", "Quantity", "Spacing")
     } else {
         ("pattern_direction2", "Direction 2", "Quantity 2", "Spacing 2")
     };
+    let (type_label, extent_label, end_label, type_key, end_key) = if index == 0 {
+        ("ui.pattern_distance_type", "ui.pattern_extent", "ui.pattern_copy_at_end", "distance1", "copy_at_end1")
+    } else {
+        ("ui.pattern_distance_type_2", "ui.pattern_extent_2", "ui.pattern_copy_at_end_2", "distance2", "copy_at_end2")
+    };
     let features = d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES);
     ui_kit::section(ui, key, title, true, |ui| {
         let mut enter = false;
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, index + 1..index + 2);
-        if let Kind::PatternRect { count, spacing, count2, spacing2 } = &mut d.kind {
-            let (count, spacing) = if index == 0 { (count, spacing) } else { (count2, spacing2) };
-            enter |= quantity_row(ui, &app.session.doc, quantity_label, count);
-            enter |= expr_row(ui, spacing_label, spacing);
+        let distance = pattern_distance(&d.extra, index);
+        let mut chosen = PATTERN_DISTANCES.iter().position(|(kind, _)| *kind == distance).unwrap_or(0);
+        let labels = PATTERN_DISTANCES.map(|(_, label)| label);
+        choice_row(ui, type_label, type_key, &mut chosen, &labels);
+        let distance = PATTERN_DISTANCES.get(chosen).map(|(kind, _)| *kind).unwrap_or_default();
+        if distance.is_default() {
+            d.extra.remove(type_key);
+        } else {
+            d.extra.insert(type_key.into(), json!(distance.as_str()));
+        }
+        if let Kind::PatternRect { count, spacing, count2, spacing2, extent, extent2 } = &mut d.kind {
+            let (count, spacing, extent) = if index == 0 { (count, spacing, extent) } else { (count2, spacing2, extent2) };
+            if distance.uses_count() {
+                enter |= quantity_row(ui, &app.session.doc, quantity_label, count);
+            }
+            if distance.uses_spacing() {
+                enter |= expr_row_positive_if(ui, spacing_label, spacing, distance.uses_extent());
+            }
+            if distance.uses_extent() {
+                enter |= expr_row_positive(ui, extent_label, extent);
+            }
+        }
+        if distance == PatternDistance::SpacingExtent {
+            form_row(ui, end_label, |ui| {
+                extra_check(ui, &mut d.extra, end_key);
+            });
+        } else {
+            d.extra.remove(end_key);
         }
         if features {
-            feature_pattern_alignment_row(ui, &mut d.extra, index);
+            solid_pattern_alignment_row(ui, &mut d.extra, index);
         }
         enter
     })
@@ -446,6 +495,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::Part(k) => enter |= crate::dialogs_parts::rows(app, ui, k, &d.inputs),
         Kind::PartSize(k) => enter |= crate::dialogs_part_size::rows(app, ui, k),
         Kind::SaveMesh(k) => enter |= crate::dialogs_save_mesh::rows(app, ui, k, &mut d.inputs),
+        Kind::UrdfExport(f) => enter |= crate::dialogs_urdf::rows(ui, f),
         Kind::ViewDxf { dashed, tolerance, zero_origin } => crate::dialogs_view_dxf::rows(app, ui, dashed, tolerance, zero_origin),
         Kind::ViewNavigator(form) => crate::view_gizmo::rows(app, ui, form, &d.inputs),
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::rows(ui, p),
@@ -462,6 +512,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     tr("This face cannot provide a durable attachment. Choose another face or explicitly use a fixed plane."),
                     ui_kit::Text::Hint("attachment"),
                 );
+                // What the button does, said plainly: the sketch is made on the face's plane as it is
+                // now, and does not follow later edits of the face (#16523).
+                ui_kit::text(ui, solidcraft_ui_text::tr("ui.sketch_use_fixed_plane_explained"), ui_kit::Text::Hint("attachment"));
                 if ui_kit::button(ui, tr("Use fixed plane"), ui_kit::Button::Normal).clicked() {
                     d.extra.insert("fixed_plane".into(), json!(true));
                 }
@@ -543,9 +596,18 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             let cur = if to_object_on(&d.inputs) { 1 } else { usize::from(*all) * 2 };
             let mut ext = cur;
             form_row(ui, "Extent Type", |ui| {
-                combo(ui, "ex_ext", &["Distance", "To Object", "All"], &mut ext);
+                // The dropdown says when the user picked an option, the one shown included: a
+                // pick of To Object takes the pick, so the next click in the view picks the face
+                // to run to (#19671).
+                let picked = ui_kit::dropdown_picked(ui, "ex_ext", &mut ext, &["Distance", "To Object", "All"]);
                 *all = ext == 2;
                 set_to_object(&mut d.inputs, &mut d.active, ext == 1);
+                if picked
+                    && ext == 1
+                    && let Some(at) = d.inputs.iter().position(|i| i.label == TO_OBJECT)
+                {
+                    d.active = at;
+                }
             });
             if ext == 0 {
                 enter |= expr_row(ui, "Distance", distance);
@@ -746,9 +808,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::PatternCirc { count, angle } => {
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
             enter |= expr_row(ui, "Total angle", angle);
-            if d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
-                feature_pattern_alignment_row(ui, &mut d.extra, 0);
-            }
+            solid_pattern_alignment_row(ui, &mut d.extra, 0);
         }
         Kind::Hole { kind, opts, cb_diameter, cb_depth, cs_diameter, cs_angle, .. } => {
             let doc = &app.session.doc;
@@ -1042,6 +1102,16 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::MeshConvert { tolerance } => {
             form_row(ui, "Tolerance", |ui| enter |= field(ui, tolerance));
         }
+        Kind::MeshReduce { mode, count, percentage } => {
+            form_row(ui, "Target", |ui| {
+                ui_kit::segmented(ui, mode, &["Retained percentage", "Triangle count"], Default::default());
+            });
+            if *mode == 0 {
+                form_row(ui, "Retained percentage", |ui| enter |= field(ui, percentage));
+            } else {
+                form_row(ui, "Triangle count", |ui| enter |= field(ui, count));
+            }
+        }
         Kind::Construct { t: Some(t), .. } => {
             form_row(ui, "Position (0 to 1)", |ui| enter |= field(ui, t));
         }
@@ -1282,6 +1352,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
         Kind::RotateMember(k) => enter |= crate::dialogs_rotate_member::rows(app, ui, k, &mut d.inputs),
+        Kind::FrameTrim(k) => enter |= crate::dialogs_frame::trim_rows(ui, k),
+        Kind::Gusset(k) => enter |= crate::dialogs_gusset::rows(app, ui, k),
         Kind::FramePlate(k) => enter |= crate::dialogs_frame_plate::rows(app, ui, k),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
         Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
@@ -1296,7 +1368,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 ui_kit::text(ui, tr("section.off_hint"), ui_kit::Text::Hint("section_off"));
             }
         }
-        Kind::Rename { name, .. } => {
+        Kind::Rename { name, .. } | Kind::RenameGroup { name, .. } => {
             form_row(ui, "Name", |ui| {
                 enter |= ui_kit::focused_text_field(ui, name, "");
             });

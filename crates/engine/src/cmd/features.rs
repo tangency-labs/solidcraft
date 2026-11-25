@@ -80,6 +80,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "start_offset?: expr (along the sketch normal, also with direction: negative); ",
             "symmetric_offset?: bool (with direction: symmetric and start_offset: offset both sides symmetrically away from the sketch plane, leaving a clearance gap); ",
             "to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); ",
+            "to_body_apart?: bool (Join To Object: keep the body the To Object pick is on apart, so the join changes only the bodies in `targets`; a call that names its targets keeps that body apart, and `false` takes it too); ",
             "from?: [x,y,z] (From Object: start at that face or point; on a flat face at a slant the start follows the face, and a distance moves it along the extrusion); ",
             "operation?: new|join|cut|intersect|auto (cut into a body, otherwise join existing solids; new in an empty component); ",
             "touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); ",
@@ -238,6 +239,11 @@ pub static COMMANDS: &[CommandSpec] = &[
             "count1; ",
             "spacing1; ",
             "dir2?, count2?, spacing2?; ",
+            "distance1?, distance2?: count_spacing|count_extent|spacing_extent (what sets each direction; default count_spacing; ",
+            "count_extent: count<k> and extent<k>, the distance from the first copy to the last, spacing = extent / (count - 1); ",
+            "spacing_extent: spacing<k> and extent<k>, as many copies as fit, none past the extent's end); ",
+            "extent1?, extent2?: expr (greater than zero); ",
+            "copy_at_end1?, copy_at_end2?: bool (spacing_extent: one more copy exactly at the extent's end when the spacing doesn't divide it, so only the last gap is shorter); ",
             "alignment?, alignment2?: left|center|right (default right; counts include the original); ",
             "reversed?, reversed2?: bool (Flip)",
         )),
@@ -457,7 +463,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "bodies: [names]; ",
             "translate?: [x,y,z] (length exprs or numbers, applied after rotation); ",
             "axis?: [x,y,z] (default: world Z with origin, else the body's component's Z, world Z at the root); ",
-            "about?: {edge|face: [x,y,z], body?} (the edge or round face the turn is about, kept as a reference so the turn follows it when an earlier step moves the body; axis and origin give the turn's sense and where it is now); ",
+            "about?: {edge|face: [x,y,z], body?} (the edge or round face the turn is about, kept as a reference so the turn follows it when an earlier step moves the body; axis gives the turn's sense, and with origin the line used when the edge is not found); ",
             "angle?: angle expr; ",
             "origin?: [x,y,z] (length exprs or numbers in world coordinates; default: the body's component's origin, the world origin at the root); ",
             "matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); ",
@@ -1380,15 +1386,16 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
     let (sketch, face_profile, face_body) = if let Some(grouped) = grouped {
         grouped
     } else {
-        match p.get("face").and_then(vec3) {
-            Some(fp) => {
+        match p.get("face") {
+            Some(value) => {
+                let fp = vec3(value).ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z]"))?;
                 let (id, inside, body) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"), fixed_param(p, cmd)?)?;
                 (id, Some(ProfileSel::Points { points: vec![inside] }), Some(body))
             }
             None => (feature_sketch(s, p, cmd)?, None, None),
         }
     };
-    let extent = extent_param(s, p, cmd)?;
+    let mut extent = extent_param(s, p, cmd)?;
     let thin = match bool_(p, "thin") {
         Some(true) => {
             if face_profile.is_some() || p.get("profiles").is_some() {
@@ -1412,6 +1419,16 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
         operation(p, cmd)?
     };
     let mut targets = string_list(cmd, p, "targets")?;
+    // Only a Join takes the body it runs to, so only a Join can keep it apart (#19671).
+    if extent.to_body_apart && (operation != Operation::Join || extent.to.is_none()) {
+        return Err(bad(cmd, "`to_body_apart: true` needs a Join that runs to an object (`to`)"));
+    }
+    // A Join To Object joins the bodies named in Target Bodies, and no other: the body it runs
+    // to stays its own body, unless the call names no targets at all (then it is the scope the
+    // app picks, as it was since 0.24.1, #6424) or asks for it (#19671).
+    if extent.to.is_some() && operation == Operation::Join && p.get("to_body_apart").is_none() {
+        extent.to_body_apart = named;
+    }
     let mut p = std::borrow::Cow::Borrowed(p);
     if operation == Operation::Join && targets.is_empty() && string_list(cmd, &p, "participants")?.is_empty() {
         // A face's outward extension joins that body, and so does a profile sketched on a body's
@@ -1583,7 +1600,9 @@ fn body_reachable(s: &Session, body_name: &str, path: &[u64]) -> Result<()> {
         if c == s.active_component || c == 0 {
             break;
         }
-        if s.doc.links.contains_key(&c) {
+        // STEP links remain editable import bases: downstream features rebuild when their
+        // source updates. Linked designs keep their own editable history in the source file.
+        if s.doc.links.get(&c).is_some_and(|link| link.step_names.is_none()) {
             return Err(EngineError::Other(format!(
                 "`{}` is in {}, which is linked to a design file: open that design to change it, or break the link first",
                 body.name,
@@ -1802,6 +1821,13 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         check_expr(s, d, Kind::Length, cmd, "start_offset")?;
     }
     let symmetric_offset = bool_(p, "symmetric_offset").unwrap_or(false);
+    // A Join To Object can leave the body it runs to apart (#19671): the extent says so, and the
+    // command refuses it where no body would be taken.
+    let to_body_apart = match p.get("to_body_apart") {
+        None => false,
+        Some(Value::Bool(apart)) => *apart,
+        Some(_) => return Err(bad(cmd, "`to_body_apart` must be true or false")),
+    };
     // A symmetric distance the call doesn't qualify is the total, split evenly around the start
     // plane, for solid and surface extrudes alike.
     let convention = match p.get("convention") {
@@ -1822,7 +1848,7 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         to: p.get("to").and_then(vec3).map(FacePick),
         to_offset: expr(p, "to_offset"),
         from: p.get("from").and_then(vec3).map(FacePick),
-        to_body_apart: false,
+        to_body_apart,
         from_level: false,
         picked_placements: Vec::new(),
         one_sided_direction: None,
@@ -2209,7 +2235,7 @@ struct RowHit {
 }
 
 /// How many bodies a refusal names before "and N more".
-const NAMED_BODIES: usize = 8;
+pub(crate) const NAMED_BODIES: usize = 8;
 
 /// A body's size, its edges' polylines and which of them are seams.
 type EdgeShape = (f64, Vec<Vec<Vec3>>, Vec<bool>, Option<solidcraft_geom::Mesh>);
@@ -2220,7 +2246,7 @@ fn polyline_dist(points: &[Vec3], q: Vec3) -> f64 {
 }
 
 /// How far from an edge of a body this big a pick still means it.
-fn edge_reach(size: f64) -> f64 {
+pub(crate) fn edge_reach(size: f64) -> f64 {
     size * 0.05 + 1e-3
 }
 
@@ -2529,7 +2555,7 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
 }
 
 /// "A", "A and B", "A, B and C", and past `most` names "A, B and 3 more".
-fn and_list(names: &[String], most: usize) -> String {
+pub(crate) fn and_list(names: &[String], most: usize) -> String {
     let mut shown: Vec<String> = names.iter().take(most).cloned().collect();
     if names.len() > most {
         shown.push(format!("{} more", names.len() - most));
@@ -2543,7 +2569,7 @@ fn and_list(names: &[String], most: usize) -> String {
 
 /// The distance from `q` to edge `index` of `body` on its exact curve, and the point there:
 /// samples, then a golden-section search between the best one's neighbours.
-fn edge_foot(body: &solidcraft_kernel::Body, index: usize, q: Vec3) -> Option<(f64, Vec3)> {
+pub(crate) fn edge_foot(body: &solidcraft_kernel::Body, index: usize, q: Vec3) -> Option<(f64, Vec3)> {
     const SAMPLES: usize = 32;
     const STEPS: usize = 40;
     let e = body.record().edges.get(index)?;
@@ -2957,7 +2983,7 @@ fn move_split(s: &mut Session, moves: &[Value]) -> Result<Value> {
     let mut features = Vec::new();
     let mut lists: [(&str, Vec<Value>); 3] = [("created_bodies", Vec::new()), ("changed_bodies", Vec::new()), ("removed_bodies", Vec::new())];
     let mut last = Value::Null;
-    for p in moves {
+    for p in &about_once(moves) {
         let reply = move_body_feature(s, p)?;
         features.push(reply.get("feature").cloned().unwrap_or(Value::Null));
         for (key, list) in &mut lists {
@@ -3106,19 +3132,43 @@ fn move_placements(s: &mut Session, p: &Value, plan: crate::frames::PlacementMov
     Ok(out)
 }
 
+/// The parts of a split move with the turn's `about` (#17974) kept by one part only: the one
+/// that moves the edge's body (`about.body`), else the first. The parts run one after another, so
+/// a later part would look for the edge where an earlier part has already moved it, and a Move
+/// turning other bodies about an edge it doesn't move would follow that edge when it moves. The
+/// other parts turn about the line they are given.
+fn about_once(moves: &[Value]) -> Vec<Value> {
+    let Some(about) = moves.iter().find_map(|p| p.get("about")) else { return moves.to_vec() };
+    let holds = |p: &Value| {
+        let body = about.get("body").and_then(Value::as_str);
+        body.is_some_and(|b| p.get("bodies").and_then(Value::as_array).is_some_and(|l| l.iter().any(|n| n.as_str() == Some(b))))
+    };
+    let keeper = moves.iter().position(holds).unwrap_or(0);
+    moves
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let mut p = p.clone();
+            if i != keeper
+                && let Some(o) = p.as_object_mut()
+            {
+                o.remove("about");
+            }
+            p
+        })
+        .collect()
+}
+
 /// The edge or round face of the model a move's turn is about (`about`, #17974), kept so the turn
-/// follows it. It needs `axis`, along it, and `angle`; `axis` gives the turn's sense, and with
-/// `origin` the line the move turns about when the edge is no longer found.
+/// follows it. It needs `axis` and `angle`: the edge gives the line the move turns about, `axis`
+/// the sense of the turn, and with `origin` the line it turns about when the edge is not found.
 fn move_turn_about(s: &Session, p: &Value, cmd: &str) -> Result<Option<solidcraft_doc::construct::GeoRef>> {
     let Some(v) = p.get("about") else { return Ok(None) };
-    let Some((geo, _, d)) = super::construct::model_axis_param(s, Some(v), cmd)? else {
+    let Some((geo, ..)) = super::construct::model_axis_param(s, Some(v), cmd)? else {
         return Err(bad(cmd, "`about` must be {edge: [x,y,z], body?} or {face: [x,y,z], body?}"));
     };
-    let (Some(axis), Some(_)) = (p.get("axis").and_then(vec3).and_then(|a| a.normalized()), p.get("angle")) else {
+    if p.get("axis").and_then(vec3).is_none() || p.get("angle").is_none() {
         return Err(bad(cmd, "`about` needs `axis` and `angle`"));
-    };
-    if axis.cross(d).len() > 1e-6 {
-        return Err(bad(cmd, "`about` does not lie along `axis`"));
     }
     Ok(Some(geo))
 }
@@ -3174,6 +3224,18 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
 /// the sources' order.
 fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd: &str) -> Result<()> {
     let id = reply.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "the copy has no feature id"))?;
+    copy_keeps_appearance_for(s, id, sources, None, cmd)
+}
+
+/// Copy each source body's body-level appearance and physical material onto its copies created by
+/// feature `id`. Bodies in `preserve` keep any explicit assignment they already have (#21245).
+pub(super) fn copy_keeps_appearance_for(
+    s: &mut Session,
+    id: u64,
+    sources: &[String],
+    preserve: Option<&std::collections::HashSet<String>>,
+    cmd: &str,
+) -> Result<()> {
     let copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
     let each = copies.len().checked_div(sources.len()).filter(|each| *each > 0 && each * sources.len() == copies.len());
     let Some(each) = each else {
@@ -3181,11 +3243,21 @@ fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd
     };
     for (source, copies) in sources.iter().zip(copies.chunks(each)) {
         for copy in copies {
+            if preserve.is_some_and(|existing| existing.contains(copy)) {
+                continue;
+            }
             if let Some(look) = s.doc.appearances.bodies.get(source).cloned() {
                 s.doc_mut().appearances.bodies.insert(copy.clone(), look);
+            } else {
+                s.doc_mut().appearances.bodies.remove(copy);
             }
             if let Some(material) = s.doc.materials.get(source).cloned() {
                 s.doc_mut().materials.insert(copy.clone(), material);
+            } else {
+                s.doc_mut().materials.remove(copy);
+            }
+            if let Some(shape) = s.doc.collision_shapes.get(source).copied() {
+                s.doc_mut().collision_shapes.insert(copy.clone(), shape);
             }
         }
     }
@@ -3392,31 +3464,101 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.pattern.rectangular";
     let (features, bodies) = pattern_sources(s, p, cmd)?;
     let dir1 = p.get("dir1").and_then(vec3).ok_or_else(|| bad(cmd, "`dir1` must be [x, y, z]"))?;
-    let count1 = req_expr(cmd, p, "count1")?;
-    let spacing1 = req_expr(cmd, p, "spacing1")?;
-    check_count(s, &count1, cmd, "count1")?;
-    check_expr(s, &spacing1, Kind::Length, cmd, "spacing1")?;
+    let row1 = pattern_direction(s, p, cmd, "1", true)?;
     let dir2 = p.get("dir2").and_then(vec3);
-    let (count2, spacing2) = (expr(p, "count2"), expr(p, "spacing2"));
-    if let Some(c) = &count2 {
-        check_count(s, c, cmd, "count2")?;
-    }
-    if let Some(c) = &spacing2 {
-        check_expr(s, c, Kind::Length, cmd, "spacing2")?;
-    }
+    let row2 = pattern_direction(s, p, cmd, "2", dir2.is_some())?;
+    let (alignment, alignment2) = (super::alignment_param(p, "alignment", cmd)?, super::alignment_param(p, "alignment2", cmd)?);
     let pattern = solidcraft_doc::PatternKind::Rectangular {
         dir1: Dir(dir1),
-        count1,
-        spacing1,
+        // Direction 1 always has a count and a spacing: one worked out is kept as a number.
+        count1: row1.count.unwrap_or_else(|| "1".into()),
+        spacing1: row1.spacing.unwrap_or_else(|| "0".into()),
         dir2: dir2.map(Dir),
-        count2,
-        spacing2,
-        alignment: super::alignment_param(p, "alignment", cmd)?,
-        alignment2: super::alignment_param(p, "alignment2", cmd)?,
+        count2: row2.count,
+        spacing2: row2.spacing,
+        alignment,
+        alignment2,
         reversed: super::reversed_param(p, "reversed", cmd)?,
         reversed2: super::reversed_param(p, "reversed2", cmd)?,
+        distance1: row1.distance,
+        distance2: row2.distance,
+        extent1: row1.extent,
+        extent2: row2.extent,
+        copy_at_end1: row1.copy_at_end,
+        copy_at_end2: row2.copy_at_end,
     };
     finish_pattern(s, p, features, pattern, bodies)
+}
+
+/// One direction of a rectangular pattern as the command gives it (#8523).
+struct PatternDirection {
+    distance: solidcraft_doc::PatternDistance,
+    count: Option<Expr>,
+    spacing: Option<Expr>,
+    extent: Option<Expr>,
+    copy_at_end: bool,
+}
+
+/// Direction `k`'s `distance<k>`, `count<k>`, `spacing<k>`, `extent<k>` and `copy_at_end<k>`.
+/// When `used` (direction 1, or a direction 2 with its `dir2`), the values its distance type
+/// needs are required and the row is worked out now, so a count over the limit or a spacing
+/// longer than the extent is refused with its own message; a count or spacing worked out and
+/// not given is kept as the number it came to, so switching the distance type back finds it.
+fn pattern_direction(s: &Session, p: &Value, cmd: &str, k: &str, used: bool) -> Result<PatternDirection> {
+    use solidcraft_doc::PatternDistance;
+    let key = |what: &str| format!("{what}{k}");
+    // Read again where the pattern is built; a malformed one is refused there.
+    let alignment = super::alignment_param(p, if k == "1" { "alignment" } else { "alignment2" }, cmd).unwrap_or_default();
+    let distance = match p.get(key("distance").as_str()) {
+        None | Some(Value::Null) => PatternDistance::default(),
+        Some(v) => v
+            .as_str()
+            .and_then(PatternDistance::from_word)
+            .ok_or_else(|| bad(cmd, format!("`{}` must be count_spacing, count_extent or spacing_extent", key("distance"))))?,
+    };
+    let copy_at_end = match p.get(key("copy_at_end").as_str()) {
+        None | Some(Value::Null) => false,
+        Some(v) => v.as_bool().ok_or_else(|| bad(cmd, format!("`{}` must be true or false", key("copy_at_end"))))?,
+    };
+    // A second direction set by count and spacing is left out without either, as it always was.
+    let used = used && (k == "1" || !distance.is_default() || (expr(p, &key("count")).is_some() && expr(p, &key("spacing")).is_some()));
+    let given = |what: &str, needed: bool| -> Result<Option<Expr>> {
+        let name = key(what);
+        if used && needed { req_expr(cmd, p, &name).map(Some) } else { Ok(expr(p, &name)) }
+    };
+    let count = given("count", distance.uses_count())?;
+    let spacing = given("spacing", distance.uses_spacing())?;
+    let extent = given("extent", distance.uses_extent())?;
+    if let Some(c) = &count {
+        check_count(s, c, cmd, &key("count"))?;
+    }
+    for (name, e) in [(key("spacing"), &spacing), (key("extent"), &extent)] {
+        if let Some(e) = e {
+            check_expr(s, e, Kind::Length, cmd, &name)?;
+        }
+    }
+    let mut direction = PatternDirection { distance, count, spacing, extent, copy_at_end: copy_at_end && distance == PatternDistance::SpacingExtent };
+    if !used {
+        return Ok(direction);
+    }
+    let vals = s.doc.evaluation_values();
+    let row = solidcraft_doc::pattern_row(
+        &vals,
+        distance,
+        direction.count.as_deref(),
+        direction.spacing.as_deref(),
+        direction.extent.as_deref(),
+        direction.copy_at_end,
+        alignment,
+    )
+    .map_err(|e| bad(cmd, format!("direction {k}: {e}")))?;
+    if direction.count.is_none() {
+        direction.count = Some(row.count.to_string().into());
+    }
+    if direction.spacing.is_none() {
+        direction.spacing = Some(format!("{} mm", row.step).into());
+    }
+    Ok(direction)
 }
 
 /// The line a circular pattern or a plane at an angle turns about, as [`axis_line`] reads it,
@@ -4253,7 +4395,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             if single && (ids.len() != 1 || flip) {
                 return Err(bad(cmd, "a `single` hole takes one sketch point and no `flip`"));
             }
-            Some((solidcraft_doc::SketchPoints { sketch: SketchId(sketch), ids, flip, single }, first, -n))
+            Some((solidcraft_doc::SketchPoints { sketch: SketchId(sketch), ids, flip, single, legacy_face_roles: false }, first, -n))
         }
         _ => None,
     };
@@ -4714,7 +4856,8 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
             ends.push(*p);
         }
     }
-    ss.sketch.points.iter().enumerate().filter(|(i, p)| p.id != "origin" && !ends.contains(i)).map(|(_, p)| p.id.clone()).collect()
+    // A point marked construction (#18448) is reference geometry too.
+    ss.sketch.points.iter().enumerate().filter(|(i, p)| p.id != "origin" && !p.construction && !ends.contains(i)).map(|(_, p)| p.id.clone()).collect()
 }
 
 fn face_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
@@ -5156,7 +5299,7 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         Some("chamfer") => return Err(bad(cmd, "tip `chamfer` is now `both` (every free end) or `start` (the end the thread starts from)")),
         Some(t) => return Err(bad(cmd, format!("unknown tip `{t}` (none, start or both)"))),
     };
-    let angled = |key: &str, kind: Kind| -> Result<Option<solidcraft_doc::Expr>> {
+    let angled = |key: &str, kind: Kind| -> Result<Option<Expr>> {
         let e = expr(p, key);
         if let Some(e) = &e {
             check_expr(s, e, kind, cmd, key)?;

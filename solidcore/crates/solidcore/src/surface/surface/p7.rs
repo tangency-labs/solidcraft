@@ -1327,8 +1327,22 @@ impl Surface {
         // charge infinite), and keep the stationary test on the solve's own `F'`
         // (its charge zero): what they accept is upstream's stationary answer only.
         let certified = certified_alignment_evaluator(k, self)?;
+        // A search asks for the certified slopes at the same parameters more than once (the
+        // interval's ends, its chosen guess, the samples it re-examines as it brackets); they
+        // are kept for the rest of this search ([`KeptSlopes`]) and reused: the same numbers,
+        // the same answers, fewer evaluations.
+        let kept = KeptSlopes::default();
         let charges_at = |t: f64, f: f64, f_prime: f64| -> (f64, f64, f64) {
-            charges_or_unproven(certified.as_ref(), uv, s_dir, singular_dir, t, f, f_prime)
+            charges_or_unproven(
+                certified.as_ref(),
+                &kept,
+                uv,
+                s_dir,
+                singular_dir,
+                t,
+                f,
+                f_prime,
+            )
         };
         let charges = |t: f64, f: f64, f_prime: f64| -> (f64, f64) {
             let (cf, cfp, _) = charges_at(t, f, f_prime);
@@ -1697,7 +1711,7 @@ impl Surface {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn global_point_solve_0_in<O: SolutionObject>(
+    pub(crate) fn global_point_solve_0_in<O: SolutionObject>(
         &self,
         k: &Kernel,
         surface: O,
@@ -3933,19 +3947,9 @@ pub fn collapsed_end_slope(
 /// solve's own is added (they are both computed: the exact value is within the bound
 /// of the first, so within that plus the gap of the second; a one-sided evaluation at
 /// a knot that differs from the certified side shows up in that gap), and a bound on
-/// `|F'_exact|` at `s`. `None` where the evaluator gives no bound or `|w|` is not above
-/// its error.
-#[allow(clippy::too_many_arguments)]
-fn slope_charges(
-    eval: &EvalSurface,
-    uv: Point2,
-    dir: Vec3,
-    singular_dir: SurfParamType,
-    s: f64,
-    f: f64,
-    f_prime: f64,
-) -> Option<(f64, f64, f64)> {
-    let e = alignment_slopes(eval, uv, dir, singular_dir, s)?;
+/// `|F'_exact|` at `s`, from [`alignment_slopes`]' certified values there. `None` where a
+/// charge is not finite.
+fn slope_charges(e: &AlignmentSlopes, f: f64, f_prime: f64) -> Option<(f64, f64, f64)> {
     let scale = 1.0 + gamma(16);
     let cf = (e.f_error + (e.f - f).abs()) * scale;
     let cfp = (e.f_prime_error + (e.f_prime - f_prime).abs()) * scale;
@@ -3953,14 +3957,47 @@ fn slope_charges(
     (cf.is_finite() && cfp.is_finite() && curvature.is_finite()).then_some((cf, cfp, curvature))
 }
 
+/// The certified slopes one search has evaluated, by the bits of their parameter: they
+/// depend on the net, `uv`, `dir` and the singular direction (fixed for the search) and
+/// the parameter alone, not on the solve's `f`/`f_prime`, so a parameter asked about
+/// again reuses the same numbers.
+type KeptSlopes = std::cell::RefCell<Vec<(u64, AlignmentSlopes)>>;
+
+/// [`alignment_slopes`] at `s`, from `kept` where this search already evaluated them
+/// there (an evaluation that fails is not kept, and is retried: it fails again).
+fn kept_alignment_slopes(
+    kept: &KeptSlopes,
+    eval: &EvalSurface,
+    uv: Point2,
+    dir: Vec3,
+    singular_dir: SurfParamType,
+    s: f64,
+) -> Option<AlignmentSlopes> {
+    let key = s.to_bits();
+    let known = kept
+        .try_borrow()
+        .ok()
+        .and_then(|k| k.iter().find(|(at, _)| *at == key).map(|(_, e)| *e));
+    if known.is_some() {
+        return known;
+    }
+    let e = alignment_slopes(eval, uv, dir, singular_dir, s)?;
+    if let Ok(mut k) = kept.try_borrow_mut() {
+        k.push((key, e));
+    }
+    Some(e)
+}
+
 /// [`slope_charges`] where `eval` (the net's certified evaluator) is given, infinite
 /// charges where it cannot bound them (no sign is proven then, and no curvature is
 /// bounded); for the kinds without a certified evaluator, which evaluate their own way,
 /// an infinite charge on `F` and the drift (no end or kink sign is proven) and none on
-/// `F'` (the stationary test is the solve's own) (WR-57).
+/// `F'` (the stationary test is the solve's own) (WR-57). The certified slopes are taken
+/// from `kept`, the search's, where it has them at `s`.
 #[allow(clippy::too_many_arguments)]
 fn charges_or_unproven(
     eval: Option<&EvalSurface>,
+    kept: &KeptSlopes,
     uv: Point2,
     dir: Vec3,
     singular_dir: SurfParamType,
@@ -3969,11 +4006,9 @@ fn charges_or_unproven(
     f_prime: f64,
 ) -> (f64, f64, f64) {
     match eval {
-        Some(e) => slope_charges(e, uv, dir, singular_dir, s, f, f_prime).unwrap_or((
-            f64::INFINITY,
-            f64::INFINITY,
-            f64::INFINITY,
-        )),
+        Some(e) => kept_alignment_slopes(kept, e, uv, dir, singular_dir, s)
+            .and_then(|e| slope_charges(&e, f, f_prime))
+            .unwrap_or((f64::INFINITY, f64::INFINITY, f64::INFINITY)),
         None => (f64::INFINITY, 0.0, f64::INFINITY),
     }
 }
@@ -5269,8 +5304,17 @@ mod tests {
             alignment_slopes(&eval, uv, dir, SurfParamType::U, u_min),
             None
         );
-        let (cf, cfp, curvature) =
-            charges_or_unproven(Some(&eval), uv, dir, SurfParamType::U, u_min, 0.25, -0.5);
+        let kept = KeptSlopes::default();
+        let (cf, cfp, curvature) = charges_or_unproven(
+            Some(&eval),
+            &kept,
+            uv,
+            dir,
+            SurfParamType::U,
+            u_min,
+            0.25,
+            -0.5,
+        );
         assert!(
             cf == f64::INFINITY && cfp == f64::INFINITY && curvature == f64::INFINITY,
             "{cf} {cfp} {curvature}"
@@ -5284,13 +5328,50 @@ mod tests {
             inside.f_error.is_finite() && inside.f_error < 1e-6,
             "{inside:?}"
         );
-        let (cf, _, _) =
-            charges_or_unproven(Some(&eval), uv, dir, SurfParamType::U, 1.78, inside.f, 0.0);
+        let (cf, _, _) = charges_or_unproven(
+            Some(&eval),
+            &kept,
+            uv,
+            dir,
+            SurfParamType::U,
+            1.78,
+            inside.f,
+            0.0,
+        );
         assert!(cf.is_finite(), "{cf}");
+        // (the search keeps the slopes it evaluated, not the failed ones, and a kept
+        // parameter asked about again, with another `f`/`f_prime`, charges exactly what
+        // a fresh evaluation does)
+        assert_eq!(kept.borrow().as_slice(), &[(1.78f64.to_bits(), inside)]);
+        for (f, f_prime) in [(inside.f, 0.0), (0.5, -2.0), (-1.0e-3, 3.0)] {
+            let again = charges_or_unproven(
+                Some(&eval),
+                &kept,
+                uv,
+                dir,
+                SurfParamType::U,
+                1.78,
+                f,
+                f_prime,
+            );
+            let fresh = charges_or_unproven(
+                Some(&eval),
+                &KeptSlopes::default(),
+                uv,
+                dir,
+                SurfParamType::U,
+                1.78,
+                f,
+                f_prime,
+            );
+            assert_eq!(again, fresh);
+            assert_eq!(Some(again), slope_charges(&inside, f, f_prime));
+        }
+        assert_eq!(kept.borrow().len(), 1);
         // (a kind without a certified evaluator proves no slope sign, and keeps the
         // solve's own curvature for its stationary test)
         assert_eq!(
-            charges_or_unproven(None, uv, dir, SurfParamType::U, u_min, 0.25, -0.5),
+            charges_or_unproven(None, &kept, uv, dir, SurfParamType::U, u_min, 0.25, -0.5),
             (f64::INFINITY, 0.0, f64::INFINITY)
         );
     }

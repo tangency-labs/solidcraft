@@ -1387,9 +1387,10 @@ dependencies = [
 
 [[package]]
 name = "craft-plugin"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "image",
+ "naga",
  "schemars",
  "serde",
  "serde_json",
@@ -1398,7 +1399,7 @@ dependencies = [
 
 [[package]]
 name = "craft-plugin-wasm"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "cap-std",
  "craft-plugin",
@@ -4034,6 +4035,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
+ "objc2-quartz-core 0.3.2",
 ]
 
 [[package]]
@@ -4233,6 +4235,30 @@ dependencies = [
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
  "objc2-metal 0.3.2",
+]
+
+[[package]]
+name = "objc2-quick-look-thumbnailing"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac8e00da1ca87ffe3ea8d20981026f013df91072a140432f0f88da9a356d9b3c"
+dependencies = [
+ "block2 0.6.2",
+ "objc2 0.6.5",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
+name = "objc2-quick-look-ui"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef5bce23577f7bcbb88339d4f4fcba83bcc376ca6a7f556d1707e49e7986d329"
+dependencies = [
+ "block2 0.6.2",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
 ]
 
 [[package]]
@@ -6078,7 +6104,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "block2 0.6.2",
  "eframe",
@@ -6125,11 +6151,11 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-3dx-client"
-version = "0.47.0"
+version = "0.48.0"
 
 [[package]]
 name = "solidcraft-cli"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "image",
  "log",
@@ -6147,11 +6173,11 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-color"
-version = "0.47.0"
+version = "0.48.0"
 
 [[package]]
 name = "solidcraft-control"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "getrandom 0.3.4",
  "serde",
@@ -6160,7 +6186,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-control-egui"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "egui",
  "image",
@@ -6170,7 +6196,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-derive"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6178,29 +6204,36 @@ dependencies = [
 ]
 
 [[package]]
-name = "solidcraft-develop"
-version = "0.47.0"
+name = "solidcraft-design-preview"
+version = "0.48.0"
 dependencies = [
- "solidcore-ops",
+ "serde",
+ "serde_json",
+ "zip",
+]
+
+[[package]]
+name = "solidcraft-develop"
+version = "0.48.0"
+dependencies = [
  "solidcore-record",
+ "solidcraft-kernel",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "solidcraft-display-units"
-version = "0.47.0"
+version = "0.48.0"
 
 [[package]]
 name = "solidcraft-doc"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "log",
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "solidcore-ops",
  "solidcore-record",
- "solidcore-tess",
  "solidcraft-color",
  "solidcraft-derive",
  "solidcraft-develop",
@@ -6217,7 +6250,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-dynamics"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -6228,7 +6261,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-engine"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "craft-plugin",
  "craft-plugin-wasm",
@@ -6236,13 +6269,13 @@ dependencies = [
  "image",
  "log",
  "png",
+ "quick-xml",
  "resvg",
  "schemars",
  "serde",
  "serde_json",
  "serde_path_to_error",
  "sha2 0.10.9",
- "solidcore-ops",
  "solidcore-record",
  "solidcraft-color",
  "solidcraft-control",
@@ -6270,8 +6303,9 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-format"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
+ "crc32fast",
  "serde_json",
  "sha2 0.10.9",
  "zip",
@@ -6279,7 +6313,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-geom"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -6292,7 +6326,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-gpu"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "image",
  "log",
@@ -6302,7 +6336,6 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcore-record",
- "solidcore-tess",
  "solidcraft-color",
  "solidcraft-engine",
  "solidcraft-geom",
@@ -6317,7 +6350,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-io"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "cadmpeg-core",
  "cadmpeg-ir",
@@ -6345,10 +6378,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "solidcore-cadir",
- "solidcore-ops",
  "solidcore-record",
- "solidcore-step",
- "solidcore-tess",
  "solidcraft-color",
  "solidcraft-doc",
  "solidcraft-format",
@@ -6368,7 +6398,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-kernel"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "log",
  "proptest",
@@ -6380,6 +6410,7 @@ dependencies = [
  "solidcore-step",
  "solidcore-tess",
  "solidcraft-geom",
+ "solidcraft-kernel-api",
  "solidcraft-profile",
  "solidcraft-smlib",
  "spade",
@@ -6389,8 +6420,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-kernel-api"
+version = "0.48.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "solidcore-record",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "solidcraft-look"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "egui",
  "log",
@@ -6402,7 +6443,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-mcp"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "image",
  "serde_json",
@@ -6418,14 +6459,14 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-mcp-server"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "solidcraft-panel-layout"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "schemars",
  "serde",
@@ -6435,15 +6476,32 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-profile"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "serde_json",
  "web-time",
 ]
 
 [[package]]
+name = "solidcraft-quicklook"
+version = "0.48.0"
+dependencies = [
+ "block2 0.6.2",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation 0.3.2",
+ "objc2-metal 0.3.2",
+ "objc2-quartz-core 0.3.2",
+ "objc2-quick-look-thumbnailing",
+ "objc2-quick-look-ui",
+ "solidcraft-design-preview",
+]
+
+[[package]]
 name = "solidcraft-render"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "flate2",
  "image",
@@ -6455,7 +6513,6 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "solidcore-record",
- "solidcore-tess",
  "solidcraft-color",
  "solidcraft-geom",
  "solidcraft-viewport",
@@ -6466,15 +6523,15 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-sketch"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "harfrust",
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "solidcore-ops",
  "solidcore-record",
  "solidcraft-geom",
+ "solidcraft-kernel",
  "thiserror 2.0.21",
  "ttf-parser",
  "unicode-bidi",
@@ -6482,7 +6539,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-smlib"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "flate2",
  "log",
@@ -6496,18 +6553,18 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-space-mouse"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "solidcraft-testkit"
-version = "0.47.0"
+version = "0.48.0"
 
 [[package]]
 name = "solidcraft-theme"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "egui",
  "serde",
@@ -6517,7 +6574,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-ui-egui"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "arboard",
  "egui",
@@ -6535,14 +6592,13 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "solidcore-ops",
  "solidcore-record",
- "solidcore-tess",
  "solidcraft-color",
  "solidcraft-control",
  "solidcraft-control-egui",
  "solidcraft-engine",
  "solidcraft-gpu",
+ "solidcraft-kernel",
  "solidcraft-look",
  "solidcraft-space-mouse",
  "solidcraft-theme",
@@ -6564,7 +6620,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-ui-kit"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "arboard",
  "egui",
@@ -6587,14 +6643,14 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-ui-registry"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "solidcraft-ui-text"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "flate2",
  "log",
@@ -6605,7 +6661,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "image",
  "serde",
@@ -6617,7 +6673,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport-egui"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "egui",
  "egui-wgpu",
@@ -6628,7 +6684,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport-gpu"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "log",
  "naga",
@@ -6644,7 +6700,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-views"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "schemars",
  "serde",
@@ -6654,7 +6710,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-web"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "eframe",
  "egui",
@@ -7187,7 +7243,7 @@ dependencies = [
 
 [[package]]
 name = "ui-kit-gallery"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "eframe",
  "egui",
@@ -7604,6 +7660,7 @@ dependencies = [
  "wasmtime-internal-jit-icache-coherence",
  "wasmtime-internal-unwinder",
  "wasmtime-internal-versioned-export-macros",
+ "wasmtime-internal-winch",
  "windows-sys 0.61.2",
 ]
 
@@ -7772,6 +7829,23 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "wasmtime-internal-winch"
+version = "48.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "849d03032a216778879ea6f5cc5dae3a963472c6ff7425c3c56475a7e50d3d95"
+dependencies = [
+ "cranelift-codegen",
+ "gimli",
+ "log",
+ "object",
+ "target-lexicon",
+ "wasmparser 0.254.2",
+ "wasmtime-environ",
+ "wasmtime-internal-cranelift",
+ "winch-codegen",
 ]
 
 [[package]]
@@ -8221,6 +8295,25 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[package]]
+name = "winch-codegen"
+version = "48.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d501dbdf26da1b21761ab091f5494327af23d23c7ae671b0c92229118708dda"
+dependencies = [
+ "cranelift-assembler-x64",
+ "cranelift-codegen",
+ "gimli",
+ "regalloc2",
+ "smallvec",
+ "target-lexicon",
+ "thiserror 2.0.21",
+ "wasmparser 0.254.2",
+ "wasmtime-environ",
+ "wasmtime-internal-core",
+ "wasmtime-internal-cranelift",
+]
 
 [[package]]
 name = "windows"
@@ -8745,7 +8838,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "flate2",
  "proc-macro2",

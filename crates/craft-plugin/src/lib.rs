@@ -28,6 +28,12 @@ pub const MAX_EXPORT_FILE_BYTES: usize = 256 * 1024 * 1024;
 /// A command entry finishes within 30 s; an importer converting a large assembly may take minutes.
 pub const MAX_COMMAND_DEADLINE_MS: u64 = 30_000;
 pub const MAX_IMPORTER_DEADLINE_MS: u64 = 600_000;
+/// A long job (an entry with `"job": true`) runs for at most ten minutes. The limit is fixed: a
+/// plugin that needs longer asks for it through its own limits, not an app-wide setting.
+pub const JOB_DEADLINE_SECONDS: u64 = 600;
+/// The most host calls a long job makes (its progress reports among them); an ordinary command
+/// makes at most 256.
+pub const MAX_JOB_CALLS: usize = 1 << 20;
 /// The most extensions one import or export slot claims.
 pub const MAX_EXTENSIONS: usize = 32;
 /// Memory32 has at most 65536 pages of 64 KiB.
@@ -35,6 +41,8 @@ pub const MAX_MEMORY_MIB: usize = 4096;
 /// Hard ceiling for fuel approved at install: ten trillion fuel units (10^13).
 /// The user's Max plugin fuel remains the default for packages without an approval.
 pub const MAX_APPROVED_FUEL: u64 = 10_000_000_000_000;
+
+pub mod shader;
 
 pub type Result<T> = std::result::Result<T, HostError>;
 
@@ -75,6 +83,7 @@ mod schema_refs;
 pub mod swatches;
 pub mod ui;
 pub use input::check_input;
+pub use input::check_input_field;
 pub use input::prepare_input;
 pub use input::strict_input_schema;
 
@@ -168,6 +177,7 @@ pub const CAPABILITIES: &[(&str, (u32, u32))] = &[
     ("evaluate", (0, 2)),
     ("formats", (0, 2)),
     ("forms", (0, 1)),
+    ("shaders", (0, 1)),
     ("storage", (0, 1)),
     ("ui", (0, 1)),
 ];
@@ -549,6 +559,9 @@ pub struct Entry {
     /// Opt in to the read-only dialog-provider export (dialog@0.1).
     pub dialog_hook: bool,
     pub slots: Vec<UiSlot>,
+    /// A long job: it runs for up to [`JOB_DEADLINE_SECONDS`] instead of the runtime's `deadline_ms`,
+    /// and shows its progress in the app's operations.
+    pub job: bool,
 }
 
 impl Entry {
@@ -595,6 +608,8 @@ struct DeclaredEntry {
     dialog_hook: bool,
     #[serde(default)]
     slots: Vec<UiSlot>,
+    #[serde(default)]
+    job: bool,
 }
 impl From<EntryDeclaration> for Entry {
     fn from(value: EntryDeclaration) -> Self {
@@ -609,6 +624,7 @@ impl From<EntryDeclaration> for Entry {
                 input_schema: empty_input_schema(),
                 dialog_hook: false,
                 slots: Vec::new(),
+                job: false,
             },
             EntryDeclaration::Declared(value) => Self {
                 name: value.name,
@@ -625,6 +641,7 @@ impl From<EntryDeclaration> for Entry {
                 input_schema: value.input_schema,
                 dialog_hook: value.dialog_hook,
                 slots: value.slots,
+                job: value.job,
             },
         }
     }
@@ -645,6 +662,9 @@ pub struct Manifest {
     pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RuntimeManifest>,
+    /// View backgrounds (`shaders@0.1`); a plugin may ship shaders and no runtime.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shaders: Vec<shader::Shader>,
 }
 
 /// A read-only entry called after a coalesced design or linked-file invalidation. Listeners refresh
@@ -704,12 +724,27 @@ impl RuntimeManifest {
             return Err(invalid("runtime.module", "must be one lowercase .wasm file name"));
         }
         if self.entries.is_empty() || self.entries.len() > 32 {
-            return Err(invalid("runtime.entries", "requires 1..32 distinct ids"));
+            return Err(invalid("runtime.entries", format!("declares {} entries; a plugin has 1 to 32", self.entries.len())));
         }
         let mut names = BTreeSet::new();
         for entry in &self.entries {
-            if !valid_id(&entry.name) || !names.insert(&entry.name) {
-                return Err(invalid("runtime.entries", "requires 1..32 distinct ids"));
+            // The name as written, quoted and cut short: it comes from an untrusted manifest. A cut
+            // name says so and gives its length, as its first 64 characters may be valid alone.
+            let length = entry.name.chars().count();
+            let shown = match length {
+                0..=64 => format!("{:?}", entry.name),
+                _ => format!("{:?}… ({length} characters)", entry.name.chars().take(64).collect::<String>()),
+            };
+            if !valid_id(&entry.name) {
+                return Err(invalid(
+                    "runtime.entries",
+                    format!(
+                        "entry {shown} is not a valid name: use 1 to 64 lowercase letters, digits and dashes, not starting or ending with a dash (no underscores or capitals)"
+                    ),
+                ));
+            }
+            if !names.insert(&entry.name) {
+                return Err(invalid("runtime.entries", format!("entry {shown} is declared more than once")));
             }
             validate_kind(self, entry)?;
             let field = format!("runtime.entries.{}.input_schema", entry.name);
@@ -807,6 +842,9 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
         }
         EntryKind::Command if entry.effect == Effect::Open => {
             Err(invalid(format!("{field}.effect"), "only an importer opens a file as a new design; a command's effect is read or edit"))
+        }
+        EntryKind::Importer if entry.job => {
+            Err(invalid(format!("{field}.job"), "an import already runs as a long job; only a command is declared one"))
         }
         EntryKind::Command => Ok(()),
         EntryKind::Importer | EntryKind::Exporter => {
@@ -1042,6 +1080,12 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
     }
     if manifest.runtime.as_ref().and_then(|runtime| runtime.ui.as_ref()).is_some() && !has_ui {
         return Err(invalid("runtime.ui", "panel declarations require ui@0.1"));
+    }
+    if !manifest.shaders.is_empty() {
+        if !manifest.capabilities.iter().any(|capability| capability.starts_with("shaders@")) {
+            return Err(invalid("capabilities", "a plugin with shaders needs the shaders capability: \"capabilities\": [\"shaders@0.1\"]"));
+        }
+        shader::validate(&manifest.shaders)?;
     }
     Ok(manifest)
 }

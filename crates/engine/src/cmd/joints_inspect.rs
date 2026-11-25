@@ -10,7 +10,7 @@ use solidcraft_doc::persistent_name::{Base, EdgeName, FaceName, Role};
 use solidcraft_doc::{Document, MAX_PLACEMENT_DEPTH, ModelState};
 
 use super::filter::{Row, RowFilter, contents_groups, omit};
-use super::{component_of, joint_id, link_info, named_value_list, occurrence_name, reply};
+use super::{active_joint_values, component_of, joint_id, link_info, named_value_list, occurrence_name, reply};
 use crate::schema::joints::{
     EdgeReference, FaceReference, InspectJointResult, InspectedJoint, JointLink, JointSide, LinkRole, MadeBy, Omitted, Reference, ReferenceRole,
     Referent, SweptFrom, WorldFrame,
@@ -39,7 +39,7 @@ pub(super) fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let st = s.model.state();
     let sol = joints::solve(&s.doc, &st);
-    let vals = joints::joint_values(&s.doc.assembly);
+    let vals = active_joint_values(&s.doc);
     let out: Vec<InspectedJoint> = ids
         .iter()
         .filter_map(|id| s.doc.assembly.joints.iter().find(|j| j.id == *id))
