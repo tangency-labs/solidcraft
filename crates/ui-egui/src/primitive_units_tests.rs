@@ -394,13 +394,15 @@ fn a_size_switched_between_diameter_and_radius_keeps_its_unit_and_its_text() {
 fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
     // #3862: Edit Feature on a coil opens the Coil dialog with every setting it was made with,
     // not the command line; OK changes what was edited and keeps the rest.
+    use solidcore_record::Vec3;
     use solidcraft_engine::doc::{CoilSection, FeatureKind};
+    use solidcraft_engine::geom::prelude::*;
     let mut h = design("mm");
     h.app
         .run(
             "solid.coil",
             json!({"diameter": 40, "revolutions": 4, "pitch": 8, "section_size": 3, "section_position": "outside",
-                   "clockwise": true, "start_angle": "30 deg", "base": [5, 0, 0], "operation": "new"}),
+                   "clockwise": true, "reversed": true, "start_angle": "30 deg", "base": [5, 0, 0], "axis": [1, 2, 3], "operation": "new"}),
         )
         .unwrap();
     let id = h.app.session.doc.features.first().map(|f| f.id).unwrap();
@@ -420,7 +422,9 @@ fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
     ok(&mut h);
     assert_eq!(h.app.session.doc.features.len(), 1, "OK redefines the coil instead of adding one");
     match h.app.session.doc.feature(id).map(|f| &f.kind) {
-        Some(FeatureKind::Coil { base, pitch, turns, section, position, clockwise, start_angle, .. }) => {
+        Some(FeatureKind::Coil { base, axis, reversed, pitch, turns, section, position, clockwise, start_angle, .. }) => {
+            assert!(*reversed);
+            assert!(axis.0.dist(Vec3::new(1.0, 2.0, 3.0).normalized().unwrap()) < 1e-9);
             assert_eq!((pitch.to_string(), turns.to_string()), ("10".to_string(), "4".to_string()));
             assert_eq!((*section, *position, *clockwise), (CoilSection::Square, 1, true));
             assert_eq!(start_angle.as_ref().map(|a| a.to_string()).as_deref(), Some("30 deg"));
@@ -428,6 +432,195 @@ fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
         }
         other => panic!("not a coil: {other:?}"),
     }
+}
+
+#[test]
+fn editing_a_coil_keeps_an_explicit_axis_origin_expression() {
+    let mut h = design("mm");
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[5,0],"p1":[6,1]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("parameters.add", json!({"name":"axis_x","expression":"30 mm"})).unwrap();
+    let made = h
+        .app
+        .run("solid.coil", json!({"axis":{"origin":["axis_x",0,0],"dir":[0,0,1]},"diameter":20,"section_size":1,"revolutions":1,"pitch":8}))
+        .unwrap();
+    let id = made["feature"].as_u64().unwrap();
+    h.app.session.selection = vec![solidcraft_engine::Sel::Feature { id: sketch }, solidcraft_engine::Sel::Axis { name: "Y".into() }];
+    h.app.edit_feature(id);
+    h.frames(3);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(d.inputs.iter().all(|input| input.items.is_empty()));
+    type_into(&mut h, "pitch", "10");
+    ok(&mut h);
+    match &h.app.session.doc.feature(id).unwrap().kind {
+        solidcraft_engine::doc::FeatureKind::Coil { axis_ref: Some(solidcraft_engine::doc::AxisRef::Line { origin, .. }), .. } => {
+            assert_eq!(origin[0].to_string(), "axis_x");
+        }
+        other => panic!("expected explicit coil axis: {other:?}"),
+    }
+}
+
+#[test]
+fn editing_a_coil_preserves_its_axis_reference_and_reverse_option() {
+    let mut h = design("mm");
+    h.app.run("construct.axis.two_points", json!({"a":{"point":[30,0,0]},"b":{"point":[30,0,10]},"name":"Spin"})).unwrap();
+    h.app.run("parameters.add", json!({"name":"offset","expression":"40 mm"})).unwrap();
+    let reply = h
+        .app
+        .run(
+            "solid.coil",
+            json!({
+                "axis":"Spin","base":["offset",0,0],"diameter":20,"section_size":1,"revolutions":1,"pitch":8,"reversed":true
+            }),
+        )
+        .unwrap();
+    let id = reply["feature"].as_u64().unwrap();
+    h.app.edit_feature(id);
+    h.frames(3);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[1].items, vec![solidcraft_engine::Sel::Axis { name: "Spin".into() }]);
+    assert_eq!(d.extra["reversed"], true);
+    assert_eq!(d.extra["axis"], "Spin");
+    type_into(&mut h, "pitch", "10");
+    ok(&mut h);
+    match &h.app.session.doc.feature(id).unwrap().kind {
+        solidcraft_engine::doc::FeatureKind::Coil { base, axis_ref, reversed, .. } => {
+            assert_eq!(base[0].as_str(), "offset");
+            assert!(matches!(axis_ref, Some(solidcraft_engine::doc::AxisRef::Construction { name }) if name.as_ref() == "Spin"));
+            assert!(*reversed);
+        }
+        other => panic!("expected coil: {other:?}"),
+    }
+}
+
+#[test]
+fn editing_a_coil_keeps_its_explicit_world_axis_and_saved_base() {
+    let mut h = design("mm");
+    h.app.run("parameters.add", json!({"name":"offset","expression":"15 mm"})).unwrap();
+    let world = json!({"type":"world","axis":"Z"});
+    let feature = h
+        .app
+        .run(
+            "solid.coil",
+            json!({
+                "axis":world,"base":["offset",0,0],"diameter":20,"section_size":1,"revolutions":1,"pitch":8
+            }),
+        )
+        .unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    h.app.edit_feature(feature);
+    let mut d = h.app.dialog.take().unwrap();
+    let command = |d: &crate::dialogs::Dialog| crate::dialogs::apply_commands(&h.app, d).unwrap()[0].1["params"].clone();
+    assert_eq!(command(&d)["axis"], world);
+    assert_eq!(command(&d)["base"], json!(["offset", 0.0, 0.0]));
+
+    d.active = 1;
+    d.pick(&h.app.session, solidcraft_engine::Sel::Axis { name: "Y".into() });
+    assert_eq!(command(&d)["axis"], json!({"type":"world","axis":"Y"}));
+    assert_eq!(command(&d)["base"], json!([0.0, 0.0, 0.0]));
+}
+
+#[test]
+fn editing_a_coil_keeps_a_saved_sketch_coordinate_axis() {
+    use solidcraft_engine::doc::{AxisRef, FeatureKind};
+
+    for (axis, world) in [("x", "Y"), ("y", "Z")] {
+        let mut h = design("mm");
+        let sketch = h.app.run("sketch.create", json!({"plane":"YZ"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[10,2],"p1":[12,4]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let id = h.app.run("solid.coil", json!({"sketch":sketch,"axis":world,"revolutions":1,"pitch":8})).unwrap()["feature"].as_u64().unwrap();
+        match &mut h.app.session.doc_mut().feature_mut(id).unwrap().kind {
+            FeatureKind::Coil { axis_ref, .. } => *axis_ref = Some(AxisRef::SketchAxis { axis: axis.into() }),
+            other => panic!("expected a coil: {other:?}"),
+        }
+        h.app.session.refresh();
+
+        h.app.edit_feature(id);
+        h.frames(3);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[1].items, vec![solidcraft_engine::Sel::Axis { name: axis.into() }]);
+        let commands = apply_commands(&h.app, d).unwrap();
+        assert_eq!(commands[0].1["params"]["axis"], json!({"type":"sketch_axis","axis":axis}));
+        type_into(&mut h, "pitch", "10");
+        ok(&mut h);
+        assert!(matches!(
+            &h.app.session.doc.feature(id).unwrap().kind,
+            FeatureKind::Coil { axis_ref: Some(AxisRef::SketchAxis { axis: stored }), pitch, .. }
+            if stored == axis && pitch.as_str() == "10"
+        ));
+    }
+}
+
+#[test]
+fn editing_a_coil_keeps_its_sketch_axis_when_the_profile_owner_changes() {
+    use solidcraft_engine::Sel;
+
+    let mut h = design("mm");
+    let mut add_sketch = |axis_x| {
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.line", json!({"points":[[axis_x,0],[axis_x,10]],"construction":true})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[20,-1],"p1":[22,1]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        sketch
+    };
+    let original = add_sketch(0);
+    let replacement = add_sketch(5);
+    let id = h.app.run("solid.coil", json!({"sketch":original,"axis":"l1","revolutions":1,"pitch":8})).unwrap()["feature"].as_u64().unwrap();
+    let mut d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let params = |d: &crate::dialogs::Dialog| -> serde_json::Value { apply_commands(&h.app, d).unwrap()[0].1["params"].clone() };
+    assert_eq!(params(&d)["axis"], json!({"curve":"l1"}));
+    assert_eq!(d.inputs[1].items, vec![Sel::SketchCurve { sketch: Some(original), id: "l1".into() }]);
+
+    d.active = 0;
+    d.pick(&h.app.session, Sel::Profile { sketch: replacement, index: 0 });
+    assert_eq!(params(&d)["sketch"], replacement);
+    assert_eq!(params(&d)["axis"], json!({"sketch":original,"curve":"l1"}));
+
+    d.active = 1;
+    d.pick(&h.app.session, Sel::SketchCurve { sketch: Some(replacement), id: "l1".into() });
+    assert_eq!(params(&d)["axis"], "l1");
+}
+
+#[test]
+fn editing_a_coil_can_replace_a_deleted_sketch_axis() {
+    let mut h = design("mm");
+    let sketch = h.app.run("sketch.create", json!({"plane":"XZ"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.line", json!({"points":[[30,0],[30,10]]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let saved_axis = json!({"sketch":sketch,"curve":"l1"});
+    let id = h.app.run("solid.coil", json!({"axis":saved_axis,"diameter":20,"section_size":1,"revolutions":1,"pitch":8})).unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    assert_eq!(d.inputs[1].items, vec![solidcraft_engine::Sel::SketchCurve { id: "l1".into(), sketch: Some(sketch) }]);
+
+    h.app.run("sketch.edit", json!({"sketch":sketch})).unwrap();
+    h.app.run("sketch.delete", json!({"entities":["l1"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.edit_feature(id);
+    h.frames(3);
+    assert_eq!(crate::scenario::count_of("dialog:selection:Axis:filled"), Some(0.0));
+    assert!(h.widget(&saved_axis.to_string()).is_none());
+    let mut d = h.app.dialog.take().expect("Edit Coil opens with a broken axis");
+    assert!(d.inputs[1].items.is_empty());
+    assert_eq!(d.extra["axis"], saved_axis);
+    assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1["params"]["axis"], saved_axis);
+
+    d.active = 1;
+    d.pick(&h.app.session, solidcraft_engine::Sel::Axis { name: "Z".into() });
+    assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1["params"]["axis"], json!({"type":"world","axis":"Z"}));
+    h.app.dialog = Some(d);
+    h.frames(2);
+    ok(&mut h);
+    assert!(matches!(
+        &h.app.session.doc.feature(id).unwrap().kind,
+        solidcraft_engine::doc::FeatureKind::Coil {
+            axis_ref: Some(solidcraft_engine::doc::AxisRef::World { axis }), ..
+        } if axis == "Z"
+    ));
 }
 
 /// #3271: cover secondary and optional lengths as well as each tool's primary canvas value.
@@ -442,14 +635,14 @@ fn operation_length_defaults_follow_every_design_unit() {
         ("solid.web", &["2", ""]),
         ("solid.emboss", &["1"]),
         ("solid.offset_face", &["2"]),
-        ("solid.pattern.rectangular", &["20", "20"]),
-        ("solid.pattern.path", &["20"]),
+        ("solid.pattern.rectangular", &["20", "20", "100", "100"]),
+        ("solid.pattern.path", &["20", ""]),
         ("solid.pipe", &["5", ""]),
         ("solid.bounding_solid", &["2"]),
         ("solid.move", &["0", "0", "0"]),
         ("construct.plane.offset", &["0"]),
         ("inspect.section", &["0"]),
-        ("surface.extrude", &["10"]),
+        ("surface.extrude", &["10", ""]),
         ("surface.offset", &["2"]),
         ("surface.ruled", &["10"]),
         ("surface.thicken", &["2"]),
@@ -1183,4 +1376,16 @@ fn coil_dialog_sizes_by_any_two_of_height_pitch_and_revolutions() {
     reference.app.run("solid.coil", json!({"diameter": 40, "revolutions": 4, "pitch": 5, "section_size": 3, "operation": "new"})).unwrap();
     let (got, expected) = (volume(&mut h.app.session), volume(&mut reference.app.session));
     assert!((got - expected).abs() <= expected * 1e-6, "{got} vs {expected}");
+}
+
+#[test]
+fn coil_start_angle_steps_by_ten_degrees() {
+    let mut h = design("mm");
+    h.app.start("solid.coil");
+    h.frames(3);
+    let extra = |h: &Harness| h.app.dialog.as_ref().unwrap().extra["start_angle"].clone();
+    h.step(&json!({"click":{"handle":"dialog:Start angle up"}})).unwrap();
+    assert_eq!(extra(&h), json!("10 deg"));
+    h.step(&json!({"click":{"handle":"dialog:Start angle down"}})).unwrap();
+    assert_eq!(extra(&h), json!("0 deg"));
 }

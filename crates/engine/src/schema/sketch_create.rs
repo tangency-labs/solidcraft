@@ -1127,6 +1127,92 @@ pub struct FitPointSplineParams {
     pub sketch: Option<SketchTarget>,
 }
 
+/// A contour of points for a tolerance fit (#20048): plain [x, y] coordinates, 2 to 10000 of
+/// them. A contour is data, not picks, so no point references.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContourPoints(pub Vec<[f64; 2]>);
+
+impl<'de> Deserialize<'de> for ContourPoints {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let Value::Array(list) = Value::deserialize(d)? else {
+            return Err(D::Error::custom(whole("`points` must be a list")));
+        };
+        if list.len() < 2 || list.len() > 10_000 {
+            return Err(D::Error::custom(whole("a contour needs 2 to 10000 points")));
+        }
+        let mut out = Vec::with_capacity(list.len());
+        for v in &list {
+            let bad = || D::Error::custom(whole("each point is [x, y]"));
+            let pair = v.as_array().filter(|a| a.len() == 2).ok_or_else(bad)?;
+            let x = pair[0].as_f64().filter(|x| x.is_finite()).ok_or_else(bad)?;
+            let y = pair[1].as_f64().filter(|y| y.is_finite()).ok_or_else(bad)?;
+            out.push([x, y]);
+        }
+        Ok(ContourPoints(out))
+    }
+}
+
+impl JsonSchema for ContourPoints {
+    fn schema_name() -> Cow<'static, str> {
+        "ContourPoints".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<[f64; 2]>();
+        json_schema!({
+            "description": "The contour's points, 2 to 10000, in order along it, each [x, y].",
+            "type": "array", "items": point, "minItems": 2, "maxItems": 10000
+        })
+    }
+}
+
+/// Fit one spline to a contour of many points within a tolerance (#20048), passing through as
+/// few of the points as the tolerance needs.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = points_required)]
+pub struct ToleranceSplineParams {
+    /// The contour's points, in order along it.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ContourPoints")]
+    pub points: Option<ContourPoints>,
+    /// How far (mm) any given point may stray from the spline. Default: 0.01.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub tolerance: Option<crate::schema::sketch_equation::Tolerance>,
+    /// Close the contour smoothly. Default: false.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Periodic")]
+    pub periodic: Option<Periodic>,
+    /// Make it construction geometry. Default: false.
+    #[serde(default)]
+    pub construction: Option<bool>,
+    /// The sketch (default: the one being edited).
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+/// What `sketch.spline.fit_tolerance` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ToleranceSplineResult {
+    /// The new curve's id, as a list (as other drawing commands return it).
+    pub curves: Vec<String>,
+    /// The new curve's id.
+    pub curve: String,
+    /// How many of the given points the spline goes through (a closed contour's start counted
+    /// once).
+    pub points: usize,
+    /// The contour closes smoothly where it ends.
+    pub closed: bool,
+    /// The largest distance (mm) found between the spline and the given points.
+    pub deviation: f64,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// What it added: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Value>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// Draw a control point spline: a cubic one (`sketch.spline.control_point`) or one of degree 5
 /// (`sketch.spline.control_point_5`), shaped by its control points.
 #[derive(Debug, Deserialize, JsonSchema)]

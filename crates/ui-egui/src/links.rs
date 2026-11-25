@@ -36,6 +36,8 @@ pub struct Link {
     pub fill: egui::Color32,
     pub shown: fn(&Prefs) -> bool,
     pub hide: fn(&mut Prefs),
+    /// The `ui.prefs` name of that switch (an organization's policy can set it).
+    pub pref: &'static str,
 }
 
 pub const LINKS: &[Link] = &[
@@ -54,6 +56,7 @@ pub const LINKS: &[Link] = &[
         fill: solidcraft_ui_kit::app_bar::brand::KOFI,
         shown: |p| p.show_donate_button,
         hide: |p| p.show_donate_button = false,
+        pref: "show_donate_button",
     },
     Link {
         id: "discord",
@@ -70,6 +73,7 @@ pub const LINKS: &[Link] = &[
         fill: solidcraft_ui_kit::app_bar::brand::DISCORD,
         shown: |p| p.show_discord_button,
         hide: |p| p.show_discord_button = false,
+        pref: "show_discord_button",
     },
 ];
 

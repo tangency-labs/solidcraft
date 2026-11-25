@@ -28,8 +28,12 @@ fn bar(steps: usize, marker: usize) -> Bar<'static> {
 /// What the app does on the strip before a step, other than drawing steps.
 #[derive(Clone, Copy, Debug)]
 enum Between {
+    /// A group with no history steps of its own.
+    EmptyGroup,
     /// Something inline that draws nothing.
     Inline,
+    /// Inline content with enough width to separate two drop slots.
+    Spacer,
     /// Takes the strip's ui.
     Ui,
 }
@@ -63,7 +67,11 @@ impl Contents for Steps {
                 continue;
             }
             match self.between.filter(|(at, _)| *at == slot).map(|(_, between)| between) {
+                Some(Between::EmptyGroup) => {
+                    strip.chip(slot, slot, false, 0, |_, _, _| 200.0);
+                }
                 Some(Between::Inline) => strip.inline(|_, _, x, _| x),
+                Some(Between::Spacer) => strip.inline(|_, _, x, _| x + 200.0),
                 Some(Between::Ui) => {
                     let _ = strip.ui();
                 }
@@ -210,6 +218,209 @@ fn a_click_on_a_step_returns_select_with_its_modifiers_and_runs_nothing() {
 }
 
 #[test]
+fn ordinary_steps_keep_the_original_pitch_at_every_marker_position() {
+    let mut rig = Rig::new(&["A", "B", "C", "D"], 4);
+    for marker in 0..=4 {
+        rig.bar.marker = marker;
+        rig.frame(Vec::new());
+        for pair in [["test:A", "test:B"], ["test:B", "test:C"], ["test:C", "test:D"]] {
+            assert_eq!(rig.at(pair[1]).x - rig.at(pair[0]).x, 32.0, "marker {marker}");
+        }
+    }
+}
+
+#[test]
+fn moving_the_marker_keeps_flat_and_folded_steps_at_the_same_click_targets() {
+    for folded in [None, Some((1, 3))] {
+        let mut rig = Rig::new(&["A", "B", "C", "D"], 4);
+        rig.folded = folded;
+        rig.frame(Vec::new());
+        let original = solidcraft_ui_registry::handles("test:");
+        let d = rig.at("test:D");
+        for marker in 0..=4 {
+            rig.bar.marker = marker;
+            rig.frame(Vec::new());
+            assert_eq!(solidcraft_ui_registry::handles("test:"), original, "marker {marker}, folded {folded:?}");
+            for (name, at) in &original {
+                if name == "test:folded" {
+                    continue;
+                }
+                let step = match name.as_str() {
+                    "test:A" => 1,
+                    "test:B" => 2,
+                    "test:C" => 3,
+                    "test:D" => 4,
+                    _ => panic!("unexpected step {name}"),
+                };
+                for dx in [-13.5, 0.0, 13.5] {
+                    for dy in [-13.5, 0.0, 13.5] {
+                        assert_eq!(
+                            rig.click(*at + vec2(dx, dy)),
+                            vec![Action::Select { step, modifiers: Modifiers::NONE }],
+                            "marker {marker} must not steal clicks on {name} at ({dx}, {dy})"
+                        );
+                    }
+                }
+            }
+            assert_eq!(rig.click(d), vec![Action::Select { step: 4, modifiers: Modifiers::NONE }]);
+        }
+    }
+}
+
+#[test]
+fn dragging_a_chip_edge_beside_the_marker_reorders_the_chip() {
+    let rig = Rig::new(&["A", "B", "C"], 1);
+    let end = rig.at("test:C") + vec2(40.0, 0.0);
+    for (label, step, dx) in [("test:A", 1, 13.5), ("test:B", 2, -13.5)] {
+        for dy in [-13.5, 0.0, 13.5] {
+            assert_eq!(rig.drag(rig.at(label) + vec2(dx, dy), end), vec![Action::Reorder { step, slot: 3, before: false }]);
+        }
+    }
+}
+
+#[test]
+fn dropping_the_marker_before_a_wide_open_group_keeps_its_slot() {
+    struct Groups;
+    impl Contents for Groups {
+        fn entries(&mut self, strip: &mut Strip<'_, '_>) {
+            for slot in 0..3 {
+                if slot == 1 {
+                    strip.chip(1, 3, true, 0, |_, _, _| 160.0);
+                }
+                strip.step(&Step {
+                    id: slot as u64,
+                    slot,
+                    label: "Step",
+                    icon: "box",
+                    icon_accent: None,
+                    state: StepState::default(),
+                    error: false,
+                    warning: false,
+                    ink: None,
+                    tip: &|| crate::StatusTip::default(),
+                    handle: None,
+                });
+            }
+            strip.end_tray();
+        }
+    }
+    let ctx = crate::test_support::context();
+    let rect = Rect::from_min_size(pos2(0.0, 100.0), vec2(700.0, 40.0));
+    let mut time = 0.0;
+    let mut frame = |events| {
+        time += 1.0 / 60.0;
+        let mut actions = Vec::new();
+        crate::test_support::raw_frame(
+            &ctx,
+            RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 300.0))),
+                time: Some(time),
+                events,
+                focused: true,
+                ..Default::default()
+            },
+            |ui| {
+                actions = strip(ui, &bar(3, 1), rect, rect, "grouped_drag", &mut Groups).actions;
+            },
+        );
+        actions
+    };
+    frame(Vec::new());
+    let marker = solidcraft_ui_registry::rect_of("test:marker").expect("marker is drawn").center();
+    frame(vec![Event::PointerMoved(marker)]);
+    frame(vec![Event::PointerButton { pos: marker, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }]);
+    frame(vec![Event::PointerMoved(marker + vec2(0.0, 10.0))]);
+    frame(vec![Event::PointerMoved(marker)]);
+    assert_eq!(
+        frame(vec![Event::PointerButton { pos: marker, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }]),
+        vec![Action::Seek { slot: 1, before: false }]
+    );
+}
+
+#[test]
+fn the_marker_after_a_folded_group_stays_with_its_slot_past_empty_content() {
+    for between in [Between::EmptyGroup, Between::Spacer] {
+        let mut rig = Rig::new(&["A", "B", "C"], 2);
+        rig.folded = Some((0, 2));
+        rig.between = Some((2, between));
+        rig.frame(Vec::new());
+        let marker = rig.marker();
+        assert_eq!(rig.drag(marker, marker), vec![Action::Seek { slot: 2, before: false }], "{between:?}");
+        let original = solidcraft_ui_registry::handles("test:");
+        for slot in 0..=3 {
+            rig.bar.marker = slot;
+            rig.frame(Vec::new());
+            assert_eq!(solidcraft_ui_registry::handles("test:"), original, "{between:?}, marker {slot}");
+        }
+    }
+}
+
+#[test]
+fn moving_the_marker_keeps_nested_open_groups_trays_and_trailing_content_still() {
+    struct Groups {
+        rects: Vec<Rect>,
+        trailing: f32,
+    }
+    impl Contents for Groups {
+        fn entries(&mut self, strip: &mut Strip<'_, '_>) {
+            self.rects.clear();
+            // Both groups and the first step start at slot zero. The nested tray ends
+            // before the outer one, and an empty group takes no history slots.
+            self.rects.push(strip.chip(0, 3, true, 0, |_, _, _| 60.0));
+            self.rects.push(strip.chip(0, 2, true, 1, |_, _, _| 40.0));
+            for slot in 0..4 {
+                if slot == 2 {
+                    strip.end_tray();
+                }
+                if slot == 3 {
+                    strip.end_tray();
+                    self.rects.push(strip.chip(3, 3, true, 0, |_, _, _| 30.0));
+                    strip.end_tray();
+                }
+                self.rects.push(strip.step(&Step {
+                    id: slot as u64,
+                    slot,
+                    label: "Step",
+                    icon: "box",
+                    icon_accent: None,
+                    state: StepState::default(),
+                    error: false,
+                    warning: false,
+                    ink: None,
+                    tip: &|| crate::StatusTip::default(),
+                    handle: None,
+                }));
+            }
+        }
+
+        fn trailing(&mut self, _: &mut egui::Ui, _: &Painter, end: f32, _: Rect) -> f32 {
+            self.trailing = end;
+            end
+        }
+    }
+    let ctx = crate::test_support::context();
+    let rect = Rect::from_min_size(pos2(0.0, 100.0), vec2(700.0, 40.0));
+    let mut groups = Groups { rects: Vec::new(), trailing: 0.0 };
+    let mut baseline = None;
+    for marker in [4, 0, 1, 2, 3, 4] {
+        let output = crate::test_support::raw_frame(
+            &ctx,
+            RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 300.0))), ..Default::default() },
+            |ui| {
+                strip(ui, &bar(4, marker), rect, rect, "nested", &mut groups);
+            },
+        );
+        let painted_rects: Vec<_> = painted(&output).0.into_iter().map(|shape| shape.rect).collect();
+        let layout = (groups.rects.clone(), groups.trailing, painted_rects);
+        if let Some(baseline) = &baseline {
+            assert_eq!(&layout, baseline, "marker at slot {marker} must not change the layout");
+        } else {
+            baseline = Some(layout);
+        }
+    }
+}
+
+#[test]
 fn a_double_click_returns_edit_after_the_select_and_a_right_click_its_menu() {
     let rig = Rig::new(&["A", "B", "C"], 2);
     let c = rig.at("test:C");
@@ -280,6 +491,53 @@ fn a_folded_chip_of_the_apps_own_takes_its_slots_and_the_marker_inside_it_goes_a
     assert!(folded.x < marker.x && marker.x < d.x, "the marker inside a folded chip is drawn after it");
     assert_eq!(rig.drag(a, folded), vec![Action::Reorder { step: 1, slot: 1, before: true }], "a drop on a folded chip lands before it");
     assert_eq!(rig.drag(d, folded - vec2(20.0, 0.0)), vec![Action::Reorder { step: 4, slot: 1, before: true }]);
+}
+
+/// An open chip's first slot is a drop's place both before its tray and after the chip: left of
+/// the chip the bar goes before the tray, on the chip or after it, before its first step (#18471).
+#[test]
+fn an_open_chips_first_slot_is_before_its_tray_or_after_the_chip() {
+    // Marker places: slot 0 (before step A) at 0, slot 1 at 30 before a tray whose chip spans
+    // 36..96 and holds step B (its slot shares the place before the tray), the end at 132.
+    let (xs, end) = ([0.0, 30.0], 132.0);
+    let heads = [Head { slot: 1, chip: (36.0, 96.0), inside: 98.0 }];
+    assert_eq!(slot_at(&xs, &[], &heads, end, 31.0), (1, 30.0), "just before the tray");
+    assert_eq!(slot_at(&xs, &[], &heads, end, 40.0), (1, 98.0), "on the chip's left end: after it");
+    assert_eq!(slot_at(&xs, &[], &heads, end, 97.0), (1, 98.0), "between the chip and its step");
+    assert_eq!(slot_at(&xs, &[], &heads, end, 10.0), (0, 0.0), "before A");
+    assert_eq!(slot_at(&xs, &[], &[], end, 70.0), (1, 30.0), "no open chip: before the tray");
+    // The chip's first slot opens another one: a tray from 100 whose chip spans 104..150, then B
+    // (its slot still at 30). On the outer chip the bar goes right after it, before the inner
+    // tray, not past it.
+    let (xs, end) = ([0.0, 30.0], 184.0);
+    let heads = [Head { slot: 1, chip: (36.0, 96.0), inside: 98.0 }, Head { slot: 1, chip: (104.0, 150.0), inside: 152.0 }];
+    assert_eq!(slot_at(&xs, &[], &heads, end, 60.0), (1, 98.0), "on the outer chip: before the inner tray");
+    assert_eq!(slot_at(&xs, &[], &heads, end, 120.0), (1, 152.0), "on the inner chip: before B");
+}
+
+/// The drop bar at the marker's slot goes beside the marker, unless the drop is on or past an
+/// open chip whose first slot that is: then it is inside its tray, and the bar shows it there.
+#[test]
+fn the_drop_bar_at_the_marker_before_an_open_chip_shows_a_drop_on_the_chip_inside_it() {
+    // The marker at slot 1 spans 24..36 (centred at 30, before the tray), the chip spans 36..96.
+    let marker = Rect::from_min_max(pos2(24.0, 5.0), pos2(36.0, 35.0));
+    let heads = [Head { slot: 1, chip: (36.0, 96.0), inside: 98.0 }];
+    assert_eq!(bar_x(1, 98.0, 60.0, Some(marker), &heads), 98.0, "on the chip: inside, after it");
+    assert_eq!(bar_x(1, 98.0, 97.0, Some(marker), &heads), 98.0, "past the chip: inside");
+    assert_eq!(bar_x(1, 30.0, 31.0, Some(marker), &heads), 38.0, "right of the marker's centre: after it");
+    assert_eq!(bar_x(1, 30.0, 26.0, Some(marker), &heads), 22.0, "left of the marker's centre: before it");
+    assert_eq!(bar_x(1, 98.0, 60.0, None, &heads), 98.0, "the marker elsewhere");
+}
+
+#[test]
+fn dropping_on_a_folded_chip_at_the_start_lands_before_the_group() {
+    let mut rig = Rig::new(&["A", "B", "C"], 3);
+    rig.folded = Some((0, 2));
+    rig.frame(Vec::new());
+    let (folded, c) = (rig.at("test:folded"), rig.at("test:C"));
+    for dx in [0.0, -19.0, 19.0] {
+        assert_eq!(rig.drag(c, folded + vec2(dx, 0.0)), vec![Action::Reorder { step: 3, slot: 0, before: true }]);
+    }
 }
 
 #[test]
@@ -418,7 +676,13 @@ fn a_step_out_of_view_keeps_its_handle_but_is_neither_painted_nor_hovered() {
     let (tips, output) = hover_still(&rig, s39);
     assert_eq!(tips, 0, "its hover text is not written");
     let drawn = chips_painted(&rig, &output);
-    assert!(drawn.contains(&"S0") && drawn.contains(&"S20"), "the steps in view are painted: {drawn:?}");
+    let visible: Vec<_> = rig
+        .labels
+        .iter()
+        .copied()
+        .filter(|label| rig.rect.intersects(Rect::from_center_size(rig.at(&format!("test:{label}")), vec2(28.0, 28.0))))
+        .collect();
+    assert_eq!(drawn, visible, "every chip intersecting the viewport is painted, regardless of slot spacing");
     assert!(!drawn.contains(&"S30") && !drawn.contains(&"S39"), "those out of view are not: {drawn:?}");
     assert_eq!(rig.hovered.get(), None, "nor hovered");
     assert_eq!(rig.at("test:S39"), s39, "it still keeps its place");
@@ -533,4 +797,9 @@ fn scrolled_to_its_end_the_strip_shows_the_marker_after_the_last_step() {
     let last = rig.at("test:Step 39");
     assert!(rig.rect.contains(last), "scrolled to the end: the last step {last:?} shows in {:?}", rig.rect);
     assert!(marker.left() >= rig.rect.left() && marker.right() <= rig.rect.right(), "the marker {marker:?} lies inside the strip {:?}", rig.rect);
+    for slot in [0, 20, 39, 40] {
+        rig.bar.marker = slot;
+        rig.frame(Vec::new());
+        assert_eq!(rig.at("test:Step 39"), last, "moving the marker must not clamp the horizontal scroll position");
+    }
 }
