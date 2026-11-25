@@ -78,6 +78,7 @@ fn the_chamfer_runs_round_the_corner_rounds_with_the_fix() {
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_executive::{FitKind, NoRoomReason};
 use solidcore::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
+use solidcore::surface::procedural_blend::convert::{rebuild, to_record};
 use solidcore::surface::procedural_blend::{BlendRef, ProceduralBlend};
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::edgeuse::p1 as eu1;
