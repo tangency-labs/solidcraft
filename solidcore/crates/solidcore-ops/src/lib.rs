@@ -34,6 +34,7 @@
 
 pub mod affine;
 pub mod axial_section;
+pub mod bead;
 pub mod blend;
 pub mod blend_definition;
 pub mod blend_surface;
@@ -150,6 +151,7 @@ pub use body::TurnedOver;
 pub use boolean::BooleanOp;
 pub use check::CheckLevel;
 pub use check::CheckReport;
+pub use contact::flush_contact_points;
 pub use contact::Gap;
 pub use error::Error;
 pub use error::FailureCode;
@@ -162,9 +164,9 @@ pub use error::SolidTest;
 pub use error::Unblendable;
 pub use error::Unsoundness;
 pub use faceted::faceted_volume;
+pub use measure::centroid_and_mean_radius;
 pub use measure::point_displacement;
 pub use measure::point_distance;
-pub use measure::point_set_summary;
 pub use measure::points_meet;
 pub use measure::ClassifiedPoint;
 pub use measure::Distance;

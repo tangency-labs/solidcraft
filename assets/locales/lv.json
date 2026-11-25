@@ -990,7 +990,7 @@
   "ai.prefs.control_listening": "Klausās 127.0.0.1:{port}",
   "ai.prefs.control_not_listening": "Neklausās",
   "ai.prefs.control_port": "Ports",
-  "ai.prefs.control_port_note": "Ports, kuram MI aģenti pieslēdzas šajā datorā (127.0.0.1). Noklusējums ir 27878: ja tas ir aizņemts, tiek izmantots nākamais brīvais ports. Jebkurš cits ports tiek izmantots tieši tāds, kāds norādīts. Norādiet savam MCP klientam to pašu portu, piemēram, solidcraft-cli mcp --connect 127.0.0.1:7878.",
+  "ai.prefs.control_port_note": "Ports, kuram MI aģenti pieslēdzas šajā datorā (127.0.0.1). Noklusējums ir 27878: ja tas ir aizņemts, tiek izmantots nākamais brīvais ports. Jebkurš cits ports tiek izmantots tieši tāds, kāds norādīts. Norādiet savam MCP klientam to pašu portu, piemēram, solidcraft-cli mcp --connect 127.0.0.1:27878.",
   "ai.prefs.control_port_taken": "Portu {port} izmanto cita programma (vai cits SolidCraft logs). Izvēlieties citu portu.",
   "ai.prefs.follow_camera": "Sekot kamerai",
   "ai.prefs.follow_camera_off": "Automātiskā kameras sekošana ir izslēgta.",
