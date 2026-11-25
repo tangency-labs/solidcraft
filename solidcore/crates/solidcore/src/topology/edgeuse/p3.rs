@@ -1968,7 +1968,7 @@ struct TrimBeforeMove {
 ///
 /// # Errors
 ///
-/// [`SolidError::NotFound`] for a dangling id; those of the copies.
+/// The kernel's unported and cancelled statuses (an edge whose copy fails otherwise is not checked).
 pub(crate) fn trims_before_move(
     k: &Kernel,
     b: &Brep,
@@ -1979,36 +1979,48 @@ pub(crate) fn trims_before_move(
     }
     let mut out = Vec::new();
     for &e in edges {
-        let rec = b.edge(e)?;
-        let Some(curve) = rec.curve.as_ref() else {
-            continue;
-        };
-        let mut trims = Vec::new();
-        for &eu in &rec.edgeuses {
-            let Some(trim) = b.edgeuse(eu)?.uv_trim_curve.as_ref() else {
-                continue;
-            };
-            let Some((_, surface)) = trim_pair_surface(b, eu)? else {
-                continue;
-            };
-            trims.push(TrimBeforeMove {
-                eu,
-                trim: trim.clone_for_evaluation()?,
-                surface,
-            });
+        // (the check is not upstream: an edge it cannot copy is not checked, as before it; only
+        // unported and cancelled work is passed on)
+        match edge_before_move(b, e) {
+            Ok(Some(edge)) => out.push(edge),
+            Ok(None) => {}
+            Err(err) if err.is_unported_or_cancelled() => return Err(err),
+            Err(_) => {}
         }
-        if trims.is_empty() {
-            continue;
-        }
-        out.push(EdgeBeforeMove {
-            e,
-            tolerance: rec.tolerance,
-            curve: curve.clone_for_evaluation()?,
-            range: [rec.interval.min(), rec.interval.max()],
-            trims,
-        });
     }
     Ok(Some(TrimsBeforeMove { edges: out }))
+}
+
+/// [`trims_before_move`] for one edge: `None` without a curve or a trim.
+fn edge_before_move(b: &Brep, e: EdgeId) -> Result<Option<EdgeBeforeMove>> {
+    let rec = b.edge(e)?;
+    let Some(curve) = rec.curve.as_ref() else {
+        return Ok(None);
+    };
+    let mut trims = Vec::new();
+    for &eu in &rec.edgeuses {
+        let Some(trim) = b.edgeuse(eu)?.uv_trim_curve.as_ref() else {
+            continue;
+        };
+        let Some((_, surface)) = trim_pair_surface(b, eu)? else {
+            continue;
+        };
+        trims.push(TrimBeforeMove {
+            eu,
+            trim: trim.clone_for_evaluation()?,
+            surface,
+        });
+    }
+    if trims.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(EdgeBeforeMove {
+        e,
+        tolerance: rec.tolerance,
+        curve: curve.clone_for_evaluation()?,
+        range: [rec.interval.min(), rec.interval.max()],
+        trims,
+    }))
 }
 
 /// Not upstream (#19910): raises the tolerance of each edge a rigid move left farther from
@@ -2047,108 +2059,127 @@ pub(crate) fn trims_before_move(
 ///
 /// # Errors
 ///
-/// [`SolidError::NotFound`] for a dangling id; the kernel's unported and cancelled statuses.
+/// The kernel's unported and cancelled statuses (an edge whose check fails otherwise keeps what the
+/// move left it).
 pub(crate) fn cover_moved_trims(
     k: &Kernel,
     b: &mut Brep,
     before: TrimsBeforeMove,
     m: [[f64; 4]; 4],
 ) -> Result<()> {
-    use crate::blend::fillet_section::interval::Ivl;
-    use crate::query::curve_surface_gap::{
-        affine_linear_norm_upper, moved_pair_room, trim_image_gap_bound_within,
-    };
-
-    let Some(norm) = affine_linear_norm_upper(m) else {
+    let Some(norm) = crate::query::curve_surface_gap::affine_linear_norm_upper(m) else {
         return Ok(());
     };
+    let limit = crate::geom::tol::LARGE_SMALL_SIZE_RATIO * b.tolerance();
+    for edge in &before.edges {
+        // (the check is not upstream: an edge it cannot read or raise keeps what the move left
+        // it, as before it; only unported and cancelled work is passed on)
+        if let Err(err) = cover_moved_edge(k, b, edge, m, norm, limit) {
+            if err.is_unported_or_cancelled() {
+                return Err(err);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// [`cover_moved_trims`] for one edge: `m` is the move's matrix, `norm` its `‖A‖` and `limit`
+/// the B-rep check's edge tolerance limit.
+fn cover_moved_edge(
+    k: &Kernel,
+    b: &mut Brep,
+    edge: &EdgeBeforeMove,
+    m: [[f64; 4]; 4],
+    norm: f64,
+    limit: f64,
+) -> Result<()> {
+    use crate::blend::fillet_section::interval::Ivl;
+    use crate::query::curve_surface_gap::{moved_pair_room, trim_image_gap_bound_within};
+
     // (each of a sum's or product's roundings is at most one `EPSILON` relative: `4 EPSILON`
     // rounds the few here up)
     let up = |x: f64| x * (1.0 + 4.0 * f64::EPSILON);
-    let limit = crate::geom::tol::LARGE_SMALL_SIZE_RATIO * b.tolerance();
-    for edge in before.edges {
-        let rec = b.edge(edge.e)?;
-        let tol = rec.tolerance;
-        let range = [rec.interval.min(), rec.interval.max()];
-        let Some(curve) = rec.curve.as_ref() else {
+    let rec = b.edge(edge.e)?;
+    let tol = rec.tolerance;
+    let range = [rec.interval.min(), rec.interval.max()];
+    let Some(curve) = rec.curve.as_ref() else {
+        return Ok(());
+    };
+    let curve = curve.clone_for_evaluation()?;
+    // (a tolerance the move changed is not the one proved)
+    if tol.to_bits() != edge.tolerance.to_bits() || !(tol.is_finite() && tol > 0.0) {
+        return Ok(());
+    }
+    let floor = TRIM_BOUND_FLOOR * tol;
+    let mut need = 0.0_f64;
+    for t in &edge.trims {
+        let Some(trim) = b.edgeuse(t.eu)?.uv_trim_curve.as_ref() else {
             continue;
         };
-        let curve = curve.clone_for_evaluation()?;
-        // (a tolerance the move changed is not the one proved)
-        if tol.to_bits() != edge.tolerance.to_bits() || !(tol.is_finite() && tol > 0.0) {
+        let trim = trim.clone_for_evaluation()?;
+        let Some((_, surface)) = trim_pair_surface(b, t.eu)? else {
+            continue;
+        };
+        // (the distance before the move, proved within `T` or not covered)
+        let bound_before = |floor: f64, enough: f64| {
+            trim_image_gap_bound_within(
+                k,
+                &t.surface,
+                &edge.curve,
+                &t.trim,
+                edge.range,
+                floor,
+                [enough, tol],
+                None,
+            )
+        };
+        let room = if range == edge.range {
+            moved_pair_room(
+                k,
+                (&t.surface, &edge.curve, &t.trim),
+                (&surface, &curve, &trim),
+                range,
+                m,
+            )?
+        } else {
+            None
+        };
+        if let Some(room) = room {
+            // (a distance before the move within `covered` stays within `T` after it)
+            let covered = ((Ivl::from(tol) - Ivl::from(room)) / Ivl::from(norm)).lo;
+            // (the raise `‖A‖ B0 + room` is wanted to [`TRIM_BOUND_FLOOR`] of itself, not
+            // of `T`: where `room` passes `T`, a `B0` cut finer than a thousandth of
+            // `room` changes the raise by less, and a floor of `T` cuts each piece of a
+            // tightly lowered edge down to its own rounding)
+            let floor = TRIM_BOUND_FLOOR * tol.max(room);
+            let b0 = match bound_before(floor, covered.max(floor))? {
+                Some(b0) if b0.is_finite() && b0 > covered => b0,
+                _ => continue,
+            };
+            need = need.max(up((Ivl::from(norm) * Ivl::from(b0) + Ivl::from(room)).hi));
             continue;
         }
-        let floor = TRIM_BOUND_FLOOR * tol;
-        let mut need = 0.0_f64;
-        for t in &edge.trims {
-            let Some(trim) = b.edgeuse(t.eu)?.uv_trim_curve.as_ref() else {
-                continue;
-            };
-            let trim = trim.clone_for_evaluation()?;
-            let Some((_, surface)) = trim_pair_surface(b, t.eu)? else {
-                continue;
-            };
-            // (the distance before the move, proved within `T` or not covered)
-            let bound_before = |floor: f64, enough: f64| {
-                trim_image_gap_bound_within(
-                    k,
-                    &t.surface,
-                    &edge.curve,
-                    &t.trim,
-                    edge.range,
-                    floor,
-                    [enough, tol],
-                    None,
-                )
-            };
-            let room = if range == edge.range {
-                moved_pair_room(
-                    k,
-                    (&t.surface, &edge.curve, &t.trim),
-                    (&surface, &curve, &trim),
-                    range,
-                    m,
-                )?
-            } else {
-                None
-            };
-            if let Some(room) = room {
-                // (a distance before the move within `covered` stays within `T` after it)
-                let covered = ((Ivl::from(tol) - Ivl::from(room)) / Ivl::from(norm)).lo;
-                // (the raise `‖A‖ B0 + room` is wanted to [`TRIM_BOUND_FLOOR`] of itself, not
-                // of `T`: where `room` passes `T`, a `B0` cut finer than a thousandth of
-                // `room` changes the raise by less, and a floor of `T` cuts each piece of a
-                // tightly lowered edge down to its own rounding)
-                let floor = TRIM_BOUND_FLOOR * tol.max(room);
-                let b0 = match bound_before(floor, covered.max(floor))? {
-                    Some(b0) if b0.is_finite() && b0 > covered => b0,
-                    _ => continue,
-                };
-                need = need.max(up((Ivl::from(norm) * Ivl::from(b0) + Ivl::from(room)).hi));
-                continue;
-            }
-            // (the structure changed: the distance after the move is proved directly, for a
-            // trim covered before it)
-            if !matches!(bound_before(floor, tol)?, Some(b0) if b0.is_finite()) {
-                continue;
-            }
-            let b1 = trim_image_gap_bound_within(
-                k,
-                &surface,
-                &curve,
-                &trim,
-                range,
-                floor,
-                [tol, limit],
-                None,
-            )?;
-            if let Some(b1) = b1.filter(|&b1| b1.is_finite() && b1 > tol) {
-                need = need.max(b1);
-            }
+        // (the structure changed: the distance after the move is proved directly, for a
+        // trim covered before it)
+        if !matches!(bound_before(floor, tol)?, Some(b0) if b0.is_finite()) {
+            continue;
         }
-        if need > tol && need.is_finite() && within_edge_tolerance_limit(b, need) {
-            crate::topology::edge::set_tolerance(b, edge.e, need, true, true)?;
+        let b1 = trim_image_gap_bound_within(
+            k,
+            &surface,
+            &curve,
+            &trim,
+            range,
+            floor,
+            [tol, limit],
+            None,
+        )?;
+        if let Some(b1) = b1.filter(|&b1| b1.is_finite() && b1 > tol) {
+            need = need.max(b1);
         }
+    }
+    if need > tol && need.is_finite() && within_edge_tolerance_limit(b, need) {
+        crate::topology::edge::set_tolerance(b, edge.e, need, true, true)?;
     }
     Ok(())
 }
@@ -4127,7 +4158,8 @@ mod tests {
     /// `eps * 8e8`, enclosed from the data before and after as `room` ([`moved_pair_room`]),
     /// which is above `2 B0`: the distance after the move is only proved within `‖A‖ B0 +
     /// room`, and [`cover_moved_trims`] raises the edge to cover it (at least `room`);
-    /// without it the tolerance stays at `2 B0`, below `room`.
+    /// without it the tolerance stays at `2 B0`, below `room`. The sphere's other edges, at
+    /// their build tolerance, are left as they are.
     ///
     /// [`moved_pair_room`]: crate::query::curve_surface_gap::moved_pair_room
     #[test]
@@ -4161,6 +4193,14 @@ mod tests {
         let lowered = 2.0 * b0;
         crate::topology::edge::set_tolerance(&mut b, e, lowered, false, true).unwrap();
         assert_eq!(b.edge(e).unwrap().tolerance, lowered);
+        // (the other edges keep their build tolerance, far above their trims' distance plus
+        // the move's rounding: the move leaves them as they are)
+        let others: Vec<(EdgeId, f64)> = b
+            .edges()
+            .iter()
+            .filter(|&(o, _)| o != e)
+            .map(|(o, rec)| (o, rec.tolerance))
+            .collect();
         let curve0 = b
             .edge(e)
             .unwrap()
@@ -4198,10 +4238,19 @@ mod tests {
             "the rounding {room:e} is within {lowered:e}"
         );
         assert!(tol >= room, "edge {e:?}: {tol:e} below {room:e}");
-        assert!(
-            tol <= norm * lowered + room + 1e-12,
-            "edge {e:?} raised past the bound: {tol:e}"
-        );
+        // (the raise is `‖A‖ B0' + room` for a bound `B0' <= 2 B0` of the trims before the
+        // move, rounded up: one rounding of the interval product, one of the sum, and `4 eps` in
+        // `up`, under `8 eps` relative with this bound's own two roundings; `16 eps` covers it)
+        let most = (norm * lowered + room) * (1.0 + 16.0 * f64::EPSILON);
+        assert!(tol <= most, "edge {e:?} raised past {most:e}: {tol:e}");
+        for (o, before) in others {
+            let after = b.edge(o).unwrap().tolerance;
+            assert_eq!(
+                after.to_bits(),
+                before.to_bits(),
+                "edge {o:?} moved to {after:e}"
+            );
+        }
     }
 
     #[test]
