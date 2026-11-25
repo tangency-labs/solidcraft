@@ -435,13 +435,16 @@ pub use route::extrude;
 pub use route::fillet;
 pub use route::offset_faces;
 pub use route::plan_cell_grid;
+pub use route::read_cadir;
 pub use route::revolve;
 pub use route::revolve_whole;
 pub use route::shell;
 pub use route::sphere;
+pub use route::step_string;
 pub use route::thicken;
 pub use route::torus;
 pub use route::which;
+pub use route::write_cadir;
 pub use sew::EdgeSpec;
 pub use sew::FaceSpec;
 pub use sew::MAX_CHAIN_POINTS;
@@ -456,6 +459,7 @@ pub use solidcore_ops::measure::turn_to_parallel;
 /// SolidCraft's kernel interface: the trait each kernel's adapter implements, its operations,
 /// inputs and errors.
 pub use solidcraft_kernel_api as api;
+pub use solidcraft_kernel_api::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten};
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
