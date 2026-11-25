@@ -635,6 +635,7 @@ fn surface_cache_of_face(
             match e {
                 SolidError::Unported { .. }
                 | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }
                 | SolidError::InvalidInput { .. }
                 | SolidError::PortInvariant { .. }
                 | SolidError::NotFound { .. } => Err(e),
@@ -1432,6 +1433,7 @@ pub fn classify_param_on_faces(
             Err(
                 e @ (SolidError::Unported { .. }
                 | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }
                 | SolidError::InvalidInput { .. }
                 | SolidError::PortInvariant { .. }
                 | SolidError::NotFound { .. }),

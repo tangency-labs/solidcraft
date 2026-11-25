@@ -55,6 +55,22 @@ members and point pairs retain Auto, corner, fitting and gap behavior described 
   gap). A new Frame Member and the command both start on None.
 - **Anchor**, **Angle**, **Mirror** and **Up Axis** place the section on each line, as below.
   **Name** names the members (default: after the profile).
+- **Offset A** and **Offset B** move the section from its anchor by a length, along the
+  section's own axes as drawn (A across its width, B across its height; they turn with **Angle**,
+  so they are not the world's X and Y): Anchor **Bottom Middle** with Offset B `50 mm` puts a
+  tube's bottom 50 mm above its line. Both empty: the anchor sits on the line. They are kept as the member's `locate`
+  (the point of the section on the line), so a member made with `locate` shows it here from its
+  anchor; changing the anchor keeps the member where it is and shows the offset from the new one.
+- **Hot points**: while the dialog is open, the view draws the section at the start of the first
+  chosen line, as the member will be placed (angle and mirror applied), with a dot at each anchor
+  (origin, centre, centroid and the corners and edge middles of its bounding box; anchors that
+  fall on the same point share one dot). The anchor in use is ringed. Click a dot to make it the
+  **Anchor**; a located point the member had is dropped. Drag the marker at the line's start over
+  the section, or past it to put the member off its line, to put that point on the line
+  (`locate`, rounded to 0.1 mm; hold Alt or Ctrl for no rounding; Offset A and B follow); let go
+  near a dot and it takes that anchor instead. A click on a dot empties Offset A and B. Only the first line
+  of the group shown gets the section; the anchor is the same on every line of the group. Nothing is drawn until the lines and
+  the profile make a member.
 - **Groups**: one feature can lay several groups of lines in the same profile, each with its own
   lines, **Anchor**, **Angle**, **Mirror** and **Name** (uprights turned one way, rails another).
   **New Group** starts an empty group and shows it; click a group to show and edit it, **Remove
@@ -64,7 +80,8 @@ members and point pairs retain Auto, corner, fitting and gap behavior described 
   selected settings; they are not silently dropped. Use separate Frame Members for joined
   corners or point pairs. A single group uses the normal flat form and retains all corner,
   pair and finishing options. Later flat frames can fit their ends to earlier grouped members,
-  using each group's actual anchor, mirror and rotation.
+  using each group's actual anchor, mirror and rotation. **Offset A**, **Offset B** and the hot
+  points act on the group shown and are kept with it.
 - The preview shows the members as you change the values. **Edit Feature** reopens the dialog with
   the feature's values; the members keep their names through the edit, and a new **Name**
   renames them all. A member made with a whole profile sketch keeps it (the **Section** row shows

@@ -1323,6 +1323,79 @@ fn joint_origin_can_be_the_origin_or_a_sketch_point() {
     }
     assert_eq!(app.session.doc.assembly.joints.len(), 1, "a joint was made from the origin and the sketch point");
 }
+/// A part placed more than once shows its sketches on every copy, not only on the one they are
+/// edited at, and a sketch point picked on a copy holds that copy: before, the pick named no copy
+/// and the joint took the first copy, also when the one picked lay right on top of it.
+#[test]
+fn a_sketch_point_picked_on_another_copy_of_a_part_holds_that_copy() {
+    let mut app = two_boxes();
+    // A sketch point on B's top face, at world (35, 5, 10).
+    app.session.execute("component.activate", &json!({"component": "B"})).unwrap();
+    app.session
+        .execute("sketch.create", &json!({"plane": {"origin": [30.0, 0.0, 10.0], "x_dir": [1.0, 0.0, 0.0], "y_dir": [0.0, 1.0, 0.0]}, "name": "S"}))
+        .unwrap();
+    app.session.execute("sketch.point", &json!({"point": [5.0, 5.0], "id": "q"})).unwrap();
+    app.session.execute("sketch.finish", &json!({})).unwrap();
+    app.session.execute("component.activate", &json!({"component": "root"})).unwrap();
+    let sketch = app.session.doc.find_feature("S").unwrap().id;
+    let part = app.session.doc.find_component("B").unwrap();
+    let first = app.session.doc.occurrence_of(part).unwrap().id;
+    // One copy right on top of the first, one 40 mm along Y.
+    let on_top = app.run("occurrence.copy", json!({"occurrence": first})).unwrap()["occurrence"].as_u64().unwrap();
+    let moved = app.run("occurrence.copy", json!({"occurrence": first, "translate": [0, 40, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+
+    // The sketch is drawn at the first copy and at both others.
+    let world = app.session.world_state().unwrap();
+    let paths: Vec<Vec<u64>> = world.sketch_copies.get(&sketch).expect("the sketch's other placements").iter().map(|c| c.path.clone()).collect();
+    assert_eq!(paths, [vec![on_top], vec![moved]]);
+    let (at, z) = world.placed_sketch_point(sketch, &[moved], "q").unwrap();
+    assert!(at.dist(Vec3::new(35.0, 45.0, 10.0)) < 1e-9 && z.dist(Vec3::Z) < 1e-9, "{at:?} {z:?}");
+
+    // A pick of the sketch where it is edited holds the first copy; one on the copy on top of it,
+    // at the same place, holds that copy.
+    let own = snap_of(&app.session, &Sel::SketchPoint { id: format!("{sketch}:q") }).unwrap();
+    assert_eq!(own.param["occurrence"], first);
+    let top = snap_of(&app.session, &Sel::PlacedSketchPoint { sketch, id: "q".into(), path: vec![on_top] }).unwrap();
+    assert!(top.at.dist(Vec3::new(35.0, 5.0, 10.0)) < 1e-9, "{top:?}");
+    assert_eq!((top.param["occurrence"].clone(), top.param["path"].clone()), (json!(on_top), json!([on_top])));
+
+    // In a joint's origin input the view picks the point on the moved copy, where it is drawn.
+    app.start("joint.create");
+    let proj = crate::viewport::projection(&app, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)));
+    let screen = proj.to_screen(Vec3::new(35.0, 45.0, 10.0)).unwrap();
+    let hits = crate::viewport::pick(&app, &proj, screen);
+    let Some(crate::viewport::Hit::PlacedSketchPoint { path, .. }) = hits.first() else { panic!("the copy's point is picked: {hits:?}") };
+    assert_eq!(*path, [moved]);
+    let pick = app.dialog.as_ref().unwrap().candidate(&app.session, &hits[0]).expect("the joint's origin takes it");
+    assert_eq!(pick, Sel::PlacedSketchPoint { sketch, id: "q".into(), path: vec![moved] });
+
+    // And the joint it makes moves that copy, the point onto the world origin, and no other copy.
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, Sel::Vertex { body: String::new(), point: Vec3::ZERO });
+    d.pick(&app.session, pick);
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints.len(), 1);
+    let transform = |o: u64| app.session.doc.occurrences.iter().find(|x| x.id == o).unwrap().transform;
+    let q = solidcraft_engine::doc::apply_point(&transform(moved), Vec3::new(35.0, 5.0, 10.0));
+    assert!(q.dist(Vec3::ZERO) < 1e-6, "the moved copy's point is on the origin: {q:?}");
+    for o in [first, on_top] {
+        assert!(solidcraft_engine::doc::is_identity(&transform(o)), "copy {o} stays");
+    }
+
+    // Edited at the moved copy, the sketch is drawn there, and at the two others as copies.
+    app.session.execute("component.activate", &json!({"component": part, "occurrence": moved, "path": [moved]})).unwrap();
+    let world = app.session.world_state().unwrap();
+    let paths: Vec<Vec<u64>> = world.sketch_copies.get(&sketch).unwrap().iter().map(|c| c.path.clone()).collect();
+    assert_eq!(paths, [vec![first], vec![on_top]]);
+    let drawn = world.sketch(sketch).unwrap();
+    let q = drawn.plane.to_world(drawn.sketch.point(drawn.sketch.resolve_point("q").unwrap()).unwrap());
+    assert!(q.dist(Vec3::ZERO) < 1e-6, "{q:?}");
+    let (at, _) = world.placed_sketch_point(sketch, &[first], "q").unwrap();
+    assert!(at.dist(Vec3::new(35.0, 5.0, 10.0)) < 1e-6, "{at:?}");
+}
+
 #[test]
 fn revolute_joint_uses_the_picked_straight_edges() {
     let mut app = two_boxes();

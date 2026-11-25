@@ -969,8 +969,11 @@ pub enum FeatureKind {
         /// from the vertex instead of where the rounds meet (a constant-radius fillet only).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         setbacks: Vec<CornerSetback>,
-        /// How two rounds turn where they meet at a sharp side edge: in a mitre (the default) or
-        /// swept round it (a constant-radius, exact, rolling-corner fillet without setbacks only).
+        /// How two rounds turn where they meet at a sharp side edge: in a mitre, swept round it
+        /// (a constant-radius, exact, rolling-corner fillet without setbacks only), or each turn
+        /// swept where the swept turn builds and mitred where not (`auto`, what `solid.fillet`
+        /// gives a new fillet). A fillet saved without it, as every fillet before `auto` was
+        /// (`format/pending/fillet-auto-turn.rs`), is mitred.
         #[serde(default, skip_serializing_if = "FilletTurn::is_mitre")]
         turn: FilletTurn,
         /// Round each picked edge's tangent chain with it (the default: edges continuing it
@@ -2690,6 +2693,10 @@ pub enum FilletTurn {
     /// The rounds end at the side edge and the corner is their section revolved about it, a
     /// torus tangent to both (`solidcraft_kernel::FilletTurn::Swept`).
     Swept,
+    /// Each turn swept where the swept turn builds (the rolling ball can pass the side edge) and
+    /// mitred where it does not, decided per corner (`solidcraft_kernel::FilletTurn::Auto`):
+    /// never refused where the mitre builds, and taking every option the mitre takes.
+    Auto,
 }
 
 /// Why a swept turn is refused with a fillet's other options: the kernel sweeps the turn of two
@@ -2713,6 +2720,7 @@ impl FilletTurn {
         match self {
             FilletTurn::Mitre => solidcraft_kernel::FilletTurn::Mitre,
             FilletTurn::Swept => solidcraft_kernel::FilletTurn::Swept,
+            FilletTurn::Auto => solidcraft_kernel::FilletTurn::Auto,
         }
     }
 }
