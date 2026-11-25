@@ -7333,7 +7333,8 @@ fn hole_on_surface_in(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String], fro
     for b in st.bodies.iter().filter(|b| in_hole_scope(scope, b)) {
         // The ray runs along the line through `p`: a body whose exact box that line misses has
         // nothing for it to meet (in an assembly of hundreds of parts, most of them).
-        if b.body.exact_bounds().is_ok_and(|bb| !line_meets_box(p, dir, &bb.inflated(eps * 8.0))) {
+        let pad = (eps * 8.0).max(b.body.record().tolerance * 4.0);
+        if b.body.exact_bounds().is_ok_and(|bb| !line_meets_box(p, dir, &bb.inflated(pad))) {
             continue;
         }
         let inside = match b.body.classify_point(p) {
@@ -8245,24 +8246,81 @@ pub(crate) fn construction_axis_in(doc: Option<&Document>, st: &ModelState, name
     Ok((crate::apply_point(&relative, *origin), crate::apply_vector(&relative, *dir)))
 }
 
-/// Whether a drill from `p` along `d` reaches material: it starts into a body (`touches`), or,
-/// when `ahead` is set, a body lies further along `d`. A spot exactly on a surface counts only
-/// when the drill enters there, not when it leaves. Only the bodies in `scope` count.
-fn hole_reaches(st: &ModelState, p: Vec3, d: Vec3, ahead: bool, scope: &[String]) -> bool {
-    let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
-    let eps = size * 1e-6;
-    let q = p + d * eps;
-    st.bodies.iter().filter(|b| in_hole_scope(scope, b)).any(|b| exactly_inside(b, q) || (ahead && ray_face(b, q, d).is_some()))
+/// Which sides of the plane through `p` with unit normal `n` immediately enter material of `b`:
+/// `(down, up)` for `-n` and `+n`. Decided on exact B-rep classification and outward face
+/// normals (no display mesh, and no tiny fixed step that can land inside the boundary tolerance
+/// band). A point strictly inside `b` has material on both sides; a point on a face, edge or
+/// vertex enters the side opposite the outward normals of the faces holding it; an ambiguous
+/// boundary (a grazing side wall or sharp ridge/groove) falls back to an exact probe outside the
+/// boundary tolerance band.
+fn spot_touch_sides(b: &ModelBody, p: Vec3, n: Vec3) -> (bool, bool) {
+    if b.is_surface() {
+        return (false, false);
+    }
+    let tol = b.body.record().tolerance.max(1e-5);
+    let pad = (b.body.size() * 1e-4).max(tol * 16.0).max(1e-3);
+    if b.body.exact_bounds().is_ok_and(|bb| !bb.inflated(pad).contains(p)) {
+        return (false, false);
+    }
+    if b.body.is_mesh() {
+        let step = (b.body.size() * 1e-5).max(tol * 4.0).max(1e-5);
+        let in_dir = |d: Vec3| matches!(b.body.classify_point(p + d * step), Ok(kernel::PointClass::Inside));
+        return (in_dir(-n), in_dir(n));
+    }
+    match b.body.classify_point(p) {
+        Ok(kernel::PointClass::Inside) => (true, true),
+        Ok(kernel::PointClass::Outside) | Err(_) => (false, false),
+        Ok(kernel::PointClass::OnBoundary) => {
+            let normals = b.body.boundary_normals_at(p).unwrap_or_default();
+            let (mut any_pos, mut any_neg) = (false, false);
+            for normal in normals {
+                let along = kernel::services::affine::distance_along([0.0; 3], n.into(), normal.into());
+                if along > 1e-6 {
+                    any_pos = true;
+                } else if along < -1e-6 {
+                    any_neg = true;
+                }
+            }
+            match (any_pos, any_neg) {
+                // Outward normals point along +n: material lies in -n (down).
+                (true, false) => (true, false),
+                // Outward normals point along -n: material lies in +n (up).
+                (false, true) => (false, true),
+                // Grazing wall (neither) or sharp ridge/groove (both): probe strictly outside
+                // the boundary tolerance band.
+                (false, false) => {
+                    let step = (b.body.size() * 1e-5).max(tol * 16.0).max(2e-4);
+                    let along_wall =
+                        |d: Vec3| matches!(b.body.classify_point(p + d * step), Ok(kernel::PointClass::Inside | kernel::PointClass::OnBoundary));
+                    (along_wall(-n), along_wall(n))
+                }
+                (true, true) => {
+                    let step = (b.body.size() * 1e-5).max(tol * 16.0).max(2e-4);
+                    let inside = |d: Vec3| matches!(b.body.classify_point(p + d * step), Ok(kernel::PointClass::Inside));
+                    (inside(-n), inside(n))
+                }
+            }
+        }
+    }
 }
 
-/// Whether `p` is inside `b`, decided on its exact faces. A point the kernel finds on the
-/// boundary (within its tolerance), or cannot place, is decided on the display mesh as before.
-fn exactly_inside(b: &ModelBody, p: Vec3) -> bool {
-    match b.body.classify_point(p) {
-        Ok(kernel::PointClass::Inside) => true,
-        Ok(kernel::PointClass::Outside) => false,
-        _ => b.mesh().contains(p),
+/// The nearest positive hit distance along `d` from `p` to any solid body in `scope`.
+fn spot_ahead_distance(st: &ModelState, p: Vec3, d: Vec3, scope: &[String]) -> Option<f64> {
+    let mut best: Option<f64> = None;
+    for b in st.bodies.iter().filter(|b| !b.is_surface() && in_hole_scope(scope, b)) {
+        let pad = (b.body.size() * 1e-4).max(b.body.record().tolerance * 16.0).max(1e-3);
+        if b.body.exact_bounds().is_ok_and(|bb| !line_meets_box(p, d, &bb.inflated(pad))) {
+            continue;
+        }
+        if let Some((t, _)) = ray_face(b, p, d)
+            && t.is_finite()
+            && t > 0.0
+            && best.is_none_or(|bt| t < bt)
+        {
+            best = Some(t);
+        }
     }
+    best
 }
 
 /// The first face of `b` the ray from `o` along `d` meets, as `(distance, face)`, found on its
@@ -8280,10 +8338,9 @@ fn ray_face(b: &ModelBody, o: Vec3, d: Vec3) -> Option<(f64, usize)> {
 
 /// The side hole centres on a sketch drill to: into the material, whichever way the sketch plane
 /// faces. Material that touches a spot (the drill starts in it) wins over material further away,
-/// so a sketch on a plate's face drills that plate rather than one across an air gap: `-n` (away
-/// from the plane's normal) if any spot touches material that way, else `+n` if any spot touches
-/// material that way. With no touching on either side it goes by the nearest body ahead: `-n` if
-/// any spot has a body ahead that way, else `+n` if any has, else `-n`.
+/// so a sketch on a plate's face drills that plate rather than one across an air gap: whichever
+/// side (`-n` or `+n`) more spots immediately enter wins, with ties going to `-n`. With no
+/// touching on either side it goes by the nearest body ahead, with ties going to `-n`.
 /// The way holes at these points of a sketch drill (see [`sketch_hole_dir`]), flipped or not.
 /// None when the sketch or a point is not there.
 pub fn sketch_hole_direction(st: &ModelState, sketch: u64, ids: &[String], flip: bool) -> Option<Vec3> {
@@ -8296,15 +8353,46 @@ pub fn sketch_hole_direction(st: &ModelState, sketch: u64, ids: &[String], flip:
 
 fn sketch_hole_dir(st: &ModelState, spots: impl Iterator<Item = Vec3> + Clone, n: Vec3, scope: &[String]) -> Vec3 {
     let down = -n;
-    let any = |d: Vec3, ahead: bool| spots.clone().any(|p| hole_reaches(st, p, d, ahead, scope));
-    if any(down, false) {
-        down
-    } else if any(n, false) {
-        n
-    } else if any(down, true) || !any(n, true) {
-        down
-    } else {
-        n
+    let (mut touch_down, mut touch_up) = (0usize, 0usize);
+    for p in spots.clone() {
+        let (mut d_hit, mut u_hit) = (false, false);
+        for b in st.bodies.iter().filter(|b| in_hole_scope(scope, b)) {
+            let (d, u) = spot_touch_sides(b, p, n);
+            d_hit |= d;
+            u_hit |= u;
+            if d_hit && u_hit {
+                break;
+            }
+        }
+        if d_hit {
+            touch_down += 1;
+        }
+        if u_hit {
+            touch_up += 1;
+        }
+    }
+    if touch_down > 0 || touch_up > 0 {
+        return if touch_up > touch_down { n } else { down };
+    }
+    let (mut best_down, mut best_up): (Option<f64>, Option<f64>) = (None, None);
+    for p in spots {
+        if let Some(t) = spot_ahead_distance(st, p, down, scope)
+            && best_down.is_none_or(|bt| t < bt)
+        {
+            best_down = Some(t);
+        }
+        if let Some(t) = spot_ahead_distance(st, p, n, scope)
+            && best_up.is_none_or(|bt| t < bt)
+        {
+            best_up = Some(t);
+        }
+    }
+    let size = st.bodies.iter().filter(|b| in_hole_scope(scope, b)).map(|b| b.body.size()).fold(1.0, f64::max);
+    let tie = (size * 1e-6).max(1e-6);
+    match (best_down, best_up) {
+        (Some(dd), Some(du)) if du + tie < dd => n,
+        (None, Some(_)) => n,
+        _ => down,
     }
 }
 
@@ -12096,6 +12184,31 @@ fn new_surface_faces(old: &Body, new: &Body) -> Vec<bool> {
         .collect()
 }
 
+/// Whether a cut left every body in `before` with the same material as before: identical body,
+/// or no new face surface and either every face traced to the body itself or the exact same
+/// volume (#9969, #18825). Measuring volumes takes far longer than the cut, so it runs only when
+/// a body was rebuilt without a new surface and with a tool-traced face.
+fn cut_left_bodies_unchanged(before: &[Body], st: &ModelState) -> bool {
+    if before.is_empty() || st.bodies.len() != before.len() {
+        return false;
+    }
+    // Equal to rounding only: a body the cut rebuilt without removing anything has the same exact
+    // volume (the faces it split add up to the faces they were), while a cut can remove very
+    // little of a large body (a 0.005 mm wall between two pockets in a 1 m cube is 5e-10 of it).
+    let same_volume = |old: &Body, new: &Body| {
+        #[cfg(test)]
+        cost_tests::count(|c| c.measures += 1);
+        match (old.volume_at(0.0), new.volume_at(0.0)) {
+            (Some(a), Some(b)) => (a - b).abs() <= 1e-12 * a.abs().max(b.abs()),
+            _ => false,
+        }
+    };
+    st.bodies.iter().zip(before).all(|(b, old)| {
+        old.same(&b.body)
+            || (!b.body.is_mesh() && !old.is_mesh() && !has_a_new_surface(old, &b.body) && (no_face_from_tools(b) || same_volume(old, &b.body)))
+    })
+}
+
 /// Whether hole tool `tool` is clear of every body the hole cuts, by their exact boxes (#10701).
 /// Boxes only: a probe boolean for every hole of a large hole pattern would double its work. A
 /// body whose exact box is unknown, or one of another component (in another frame), leaves the
@@ -14631,32 +14744,7 @@ fn eval_feature_kind(
             // they are only compared when the body shows no such face.
             let before: Option<Vec<Body>> = (*operation == Operation::Cut).then(|| st.bodies.iter().map(|b| b.body.clone()).collect());
             let unchanged = |st: &ModelState, warning: &mut Option<String>| {
-                // Equal to rounding only: a body the cut rebuilt without removing anything has the
-                // same exact volume (the faces it split add up to the faces they were), while a cut
-                // can remove very little of a large body (a 0.005 mm wall between two pockets in a
-                // 1 m cube is 5e-10 of it).
-                let same_volume = |old: &Body, new: &Body| {
-                    #[cfg(test)]
-                    cost_tests::count(|c| c.measures += 1);
-                    match (old.volume_at(0.0), new.volume_at(0.0)) {
-                        (Some(a), Some(b)) => (a - b).abs() <= 1e-12 * a.abs().max(b.abs()),
-                        _ => false,
-                    }
-                };
-                // A body every face of which the cut's history traces to the body itself took no
-                // material from the tools: its volume is what it was, without measuring it.
-                let kept = |b: &ModelBody, old: &Body| {
-                    old.same(&b.body)
-                        || (!b.body.is_mesh()
-                            && !old.is_mesh()
-                            && !has_a_new_surface(old, &b.body)
-                            && (no_face_from_tools(b) || same_volume(old, &b.body)))
-                };
-                if let Some(before) = &before
-                    && !before.is_empty()
-                    && st.bodies.len() == before.len()
-                    && st.bodies.iter().zip(before).all(|(b, old)| kept(b, old))
-                {
+                if before.as_deref().is_some_and(|before| cut_left_bodies_unchanged(before, st)) {
                     append_warning(warning, "the cut removes no material; check where its profile lies, the direction and the distance".into());
                 }
             };
@@ -14788,12 +14876,22 @@ fn eval_feature_kind(
             let tools: Vec<Traced> = tools.into_iter().map(|tool| tool.traced).collect();
             if handled.is_empty() {
                 // A hole moved off the material (a changed position, parameter or sketch point)
-                // cuts nothing: it says so, as a pattern does of its copies (#10701).
+                // cuts nothing: it says so, as a pattern does of its copies (#10701). Also catch
+                // a hole whose tool merely touches a face from the empty side and removes nothing.
                 let missed = tools.iter().filter(|tool| hole_misses(st, f, &tool.body)).count();
                 let total = tools.len();
                 let targets: Vec<String> = hole_targets(st, f).iter().map(|b| b.name.clone()).collect();
+                let before: Vec<Body> = st.bodies.iter().map(|b| b.body.clone()).collect();
                 apply_traced(doc, st, f, tools, Operation::Cut, &[])?;
                 match (missed, total) {
+                    (0, _) if cut_left_bodies_unchanged(&before, st) => {
+                        let msg = if spots.len() <= 1 {
+                            "the hole removes no material".into()
+                        } else {
+                            format!("{} of {} holes remove no material", spots.len(), spots.len())
+                        };
+                        append_warning(warning, msg);
+                    }
                     (0, _) => {}
                     (_, 1) => append_warning(warning, "the hole removes no material".into()),
                     _ => append_warning(warning, format!("{missed} of {total} holes remove no material")),

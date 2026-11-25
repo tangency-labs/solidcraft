@@ -2261,6 +2261,36 @@ impl Body {
         })
     }
 
+    /// Outward unit normals of every trimmed face of `self` holding `p` within its boundary
+    /// classification tolerance (the band of [`Self::classify_point`]), decided exactly on the
+    /// B-rep, no mesh. Empty for a mesh body, a non-finite point, or a point on no face.
+    pub fn boundary_normals_at(&self, p: Vec3) -> Result<Vec<Vec3>> {
+        if !p.is_finite() {
+            return Ok(Vec::new());
+        }
+        let Some(form) = self.ops_body() else { return Ok(Vec::new()) };
+        let (ops, order) = &*form;
+        let pt = [p.x, p.y, p.z];
+        let search = self.record.tolerance.max(self.size() * 1e-5).max(1e-4) * 4.0;
+        let dists = ops.face_distances_within(order, &[pt], search).map_err(|e| KernelError::Failed(format!("boundary normals: {e}")))?;
+        let mut out = Vec::new();
+        for (fi, row) in dists.into_iter().enumerate() {
+            if row.first().copied().flatten().is_none_or(|d| d > search) {
+                continue;
+            }
+            if let Ok(Some(n)) = ops.face_normal_at_point(order, fi, pt) {
+                out.push(Vec3::new(n.value[0], n.value[1], n.value[2]));
+            }
+        }
+        if out.is_empty()
+            && let Ok(classes) = ops.classify_points_with_normals(order, &[pt], None)
+            && let Some(solidcore_ops::ClassifiedPoint::On { normal, .. }) = classes.first()
+        {
+            out.push(Vec3::new(normal.value[0], normal.value[1], normal.value[2]));
+        }
+        Ok(out)
+    }
+
     /// Where the line through `through` along `direction` meets face `face_index`, of its
     /// meetings the nearest `through` on either side, decided exactly on the face's surface and
     /// trim ([`solidcore_ops::Body::face_line_hits`]), no mesh. Meetings as near as each other
