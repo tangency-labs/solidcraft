@@ -616,13 +616,40 @@ impl Camera {
         *self = fitted;
         true
     }
-    /// The roll rounded to the nearest quarter turn, in [0, 2π). A view chosen on a navigator
-    /// keeps it, so a view on its side or upside down stays that way while a small tilt squares
-    /// up (#21480). 0 when the roll isn't finite.
-    pub fn quarter_roll(&self) -> f64 {
-        let q = std::f64::consts::FRAC_PI_2;
-        let roll = (self.roll / q).round() * q;
-        if roll.is_finite() { roll.rem_euclid(std::f64::consts::TAU) } else { 0.0 }
+    /// The same camera turned the shortest way to look from `back` (target → eye), as a
+    /// navigator click turns the view (#21480). The axis of the turn keeps its place on the
+    /// screen, so how the screen is turned carries over: from Top, looking from X keeps Y up
+    /// and swings Z to the side. Turning right round has no shortest way, so it turns about the
+    /// screen's up axis. With `square`, for a view along a world axis, the picture then turns
+    /// to the nearest quarter turn that lays a world axis across the screen; a halfway tie takes
+    /// the first of X, Y, Z, −X, −Y, −Z in the up-axis frame. Unchanged for a direction that
+    /// isn't finite and nonzero.
+    pub fn turned_to(&self, back: Vec3, square: bool) -> Camera {
+        let Some(back) = back.normalized() else { return *self };
+        let (right, up, old_back) = self.basis();
+        // The new direction in screen coordinates; the turn is about their cross product.
+        let (x, y, z) = (back.dot(right), back.dot(up), back.dot(old_back));
+        let side = x.hypot(y);
+        let mut cam = *self;
+        if side > 1e-12 {
+            cam.rotate_in_view(Vec3::new(-y, x, 0.0) * (side.atan2(z) / side));
+        } else if z < 0.0 {
+            cam.rotate_in_view(Vec3::new(0.0, std::f64::consts::PI, 0.0));
+        }
+        let right = cam.basis().0;
+        let mut across = right;
+        if square {
+            let mut best = f64::NEG_INFINITY;
+            for axis in [Vec3::X, Vec3::Y, Vec3::Z, Vec3::X * -1.0, Vec3::Y * -1.0, Vec3::Z * -1.0] {
+                let axis = self.up.from_frame(axis);
+                if axis.dot(right) > best + 1e-9 {
+                    best = axis.dot(right);
+                    across = axis;
+                }
+            }
+        }
+        // Rebuilt on the exact direction, so the view looks along it without rounding drift.
+        cam.with_frame(across, back).unwrap_or(cam)
     }
     /// The same camera looking from direction `back` (target → eye). Straight up or down
     /// keeps the yaw, rounded to the nearest quarter turn so the view stays square.
@@ -1154,28 +1181,62 @@ mod tests {
         assert!(c.is_valid());
     }
 
-    /// #21480: the roll a navigator click keeps is the nearest quarter turn, in [0, 2π).
+    /// #21480: a navigator click turns the view the shortest way. The turn's axis keeps its place
+    /// on the screen, so from Top, looking from X keeps Y up and swings Z to the side. A view
+    /// along an axis squares up to a quarter turn; a slanted one keeps its exact tilt.
     #[test]
-    fn quarter_roll_rounds_to_the_nearest_quarter_turn() {
-        use std::f64::consts::{FRAC_PI_2, PI, TAU};
-        for (roll, kept) in [
-            (0.0, 0.0),
-            (-0.0, 0.0),
-            (0.3, 0.0),
-            (-0.7, 0.0),
-            (FRAC_PI_2 - 0.2, FRAC_PI_2),
-            (FRAC_PI_2, FRAC_PI_2),
-            (PI + 0.1, PI),
-            (-FRAC_PI_2, 3.0 * FRAC_PI_2),
-            (TAU - 0.1, 0.0),
-            (TAU + FRAC_PI_2, FRAC_PI_2),
-            (-10.0 * TAU - PI, PI),
-            (f64::NAN, 0.0),
-            (f64::INFINITY, 0.0),
-            (f64::NEG_INFINITY, 0.0),
-        ] {
-            let got = Camera { roll, ..Camera::default() }.quarter_roll();
-            assert!((got - kept).abs() < 1e-9 && (0.0..TAU).contains(&got), "{roll} → {got}, expected {kept}");
+    fn turned_to_turns_the_shortest_way_and_squares_views_along_an_axis() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        let near = |a: Vec3, b: Vec3| a.dist(b) < 1e-9;
+        let frame = |c: &Camera| c.basis();
+        // The issue's case: Top, then X. Y stays up the screen and Z points left.
+        let front = Camera { yaw: 0.0, pitch: 0.0, roll: 0.0, ..Camera::default() };
+        let top = Camera { pitch: FRAC_PI_2, ..front };
+        let (r, u, b) = frame(&top.turned_to(Vec3::X, true));
+        assert!(near(b, Vec3::X) && near(u, Vec3::Y) && near(r, Vec3::Z * -1.0), "{r:?} {u:?} {b:?}");
+        // Upright views turn as they always did: Front to Top has Y up, Front to Right has Z up.
+        let (_, u, b) = frame(&front.turned_to(Vec3::Z, true));
+        assert!(near(b, Vec3::Z) && near(u, Vec3::Y), "{u:?} {b:?}");
+        let (_, u, b) = frame(&front.turned_to(Vec3::X, true));
+        assert!(near(b, Vec3::X) && near(u, Vec3::Z), "{u:?} {b:?}");
+        // From the isometric view, Top squares up; the halfway tie lays X across the screen.
+        let iso = Camera { yaw: -PI / 4.0, pitch: 0.6155, ..front };
+        let (r, u, b) = frame(&iso.turned_to(Vec3::Z, true));
+        assert!(near(b, Vec3::Z) && near(r, Vec3::X) && near(u, Vec3::Y), "{r:?} {u:?} {b:?}");
+        for up in [UpAxis::Z, UpAxis::Y] {
+            for (yaw, pitch) in [(0.0, 0.0), (FRAC_PI_2, 0.0), (0.0, FRAC_PI_2), (PI, -FRAC_PI_2)] {
+                for roll in [0.0, FRAC_PI_2, PI, -FRAC_PI_2] {
+                    // A square start (along an axis, a quarter turn) to each axis: the turn's axis
+                    // keeps its place on screen, and the result is square without squaring.
+                    let cam = Camera { up, yaw, pitch, roll, ..Camera::default() };
+                    let (r0, u0, b0) = frame(&cam);
+                    for axis in [Vec3::X, Vec3::Y, Vec3::Z, Vec3::X * -1.0, Vec3::Y * -1.0, Vec3::Z * -1.0] {
+                        let to = cam.turned_to(axis, true);
+                        let msg = format!("{axis:?} from {cam:?}");
+                        let (r, u, b) = frame(&to);
+                        assert!(near(b, axis), "looks from {axis:?}: {msg}");
+                        let pivot = match b0.cross(axis).normalized() {
+                            Some(p) => p,
+                            // Right round: the screen's up axis; no turn: anything stays.
+                            None => u0,
+                        };
+                        assert!((pivot.dot(r) - pivot.dot(r0)).abs() < 1e-9 && (pivot.dot(u) - pivot.dot(u0)).abs() < 1e-9, "{msg}");
+                    }
+                    // A slanted direction: the turn's axis keeps its place and the tilt is exact.
+                    for dir in [Vec3::new(1.0, 1.0, 1.0), Vec3::new(0.0, 0.3, -0.9), Vec3::new(-0.2, 0.7, 0.1)] {
+                        let to = cam.turned_to(dir, false);
+                        let (r, u, b) = frame(&to);
+                        let d = dir.normalized().unwrap();
+                        let pivot = b0.cross(d).normalized().unwrap();
+                        assert!(near(b, d), "{dir:?} from {cam:?}");
+                        assert!((pivot.dot(r) - pivot.dot(r0)).abs() < 1e-9 && (pivot.dot(u) - pivot.dot(u0)).abs() < 1e-9, "{dir:?} from {cam:?}");
+                    }
+                }
+            }
+        }
+        // Nothing to look from leaves the camera alone.
+        for bad in [Vec3::ZERO, Vec3::new(f64::NAN, 0.0, 1.0), Vec3::new(f64::INFINITY, 0.0, 0.0)] {
+            assert_eq!(top.turned_to(bad, true), top);
         }
     }
 
