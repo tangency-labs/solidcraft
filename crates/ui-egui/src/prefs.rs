@@ -11147,6 +11147,16 @@ mod tests {
                         .any(|(keys, action)| keys.iter().any(|key| key == "Ctrl/Cmd") && action == solidcraft_ui_text::tr("prefs.gesture_zoom"))
                 );
             }
+            // NX lists its two-button drags (#22063).
+            if preset.id == "nx" {
+                let chord = |other: NavButton, mode: &str| {
+                    rows.iter().any(|(keys, action)| {
+                        keys == &[navigation::button_label(NavButton::Middle), navigation::button_label(other)]
+                            && action == solidcraft_ui_text::tr(mode)
+                    })
+                };
+                assert!(chord(NavButton::Right, "prefs.gesture_pan") && chord(NavButton::Left, "prefs.gesture_zoom"), "{rows:?}");
+            }
             if preset.id == TOUCHPAD_NAV {
                 assert!(rows.iter().any(|(keys, action)| keys == &[solidcraft_ui_text::tr("prefs.shift").to_owned()]
                     && action == solidcraft_ui_text::tr("prefs.gesture_pan")));
