@@ -1216,7 +1216,8 @@ pub fn find_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<Vec3, String> 
 /// Names of the edges nearest each point on a body (for storing references).
 pub fn edge_names_at(b: &ModelBody, pts: &[Vec3]) -> Vec<String> {
     let names = edge_names(b);
-    b.body.edges_at(pts).into_iter().map(|i| i.and_then(|i| names.get(i).cloned()).unwrap_or_default()).collect()
+    let lines = b.edge_lines();
+    pts.iter().map(|p| lines.nearest(*p).and_then(|i| names.get(i).cloned()).unwrap_or_default()).collect()
 }
 
 /// Incident face indices (sorted, deduplicated) for each B-rep vertex in `record`.

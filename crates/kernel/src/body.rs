@@ -1106,27 +1106,14 @@ impl Body {
         }
     }
 
-    /// The edge of `self` nearest each of `pts`, or `None` for a mesh body or empty body. Each
-    /// edge's curve is drawn once for all the points.
-    pub fn edges_at(&self, pts: &[Vec3]) -> Vec<Option<usize>> {
-        if self.is_mesh() || pts.iter().all(|p| !p.is_finite()) {
-            return vec![None; pts.len()];
+    /// Every edge of `self` drawn as a polyline within a thousandth of the body's size, for
+    /// finding the edge nearest a point ([`EdgeLines::nearest`]). Empty for a mesh body.
+    pub fn edge_lines(&self) -> EdgeLines {
+        if self.is_mesh() {
+            return EdgeLines::default();
         }
         let chord = (self.size() * 1e-3).max(1e-4);
-        let lines: Vec<(usize, Vec<Vec3>)> =
-            self.record.edges.iter().enumerate().filter_map(|(i, e)| edge_points(e, chord).ok().map(|pts| (i, pts))).collect();
-        pts.iter()
-            .map(|p| {
-                if !p.is_finite() {
-                    return None;
-                }
-                lines
-                    .iter()
-                    .map(|(i, pts)| (pts.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::MAX, f64::min), *i))
-                    .min_by(|a, b| a.0.total_cmp(&b.0))
-                    .map(|(_, i)| i)
-            })
-            .collect()
+        EdgeLines(self.record.edges.iter().enumerate().filter_map(|(i, e)| edge_points(e, chord).ok().map(|pts| (i, pts))).collect())
     }
 
     /// The face of `self` nearest `p` and its exact distance, or `None` for a mesh body or empty body.
@@ -2459,6 +2446,25 @@ fn edge_chord(e: &brep::Edge, chord: f64) -> f64 {
         return chord;
     }
     chord.min((b.diagonal() * 1e-3).max(1e-9))
+}
+
+/// A body's edges as polylines ([`Body::edge_lines`]), by record edge index.
+#[derive(Clone, Debug, Default)]
+pub struct EdgeLines(Vec<(usize, Vec<Vec3>)>);
+
+impl EdgeLines {
+    /// The edge nearest `p` (the first of equally near ones), or `None` when there is none or
+    /// `p` is not a finite point.
+    pub fn nearest(&self, p: Vec3) -> Option<usize> {
+        if !p.is_finite() {
+            return None;
+        }
+        self.0
+            .iter()
+            .map(|(i, pts)| (pts.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::MAX, f64::min), *i))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, i)| i)
+    }
 }
 
 /// Points of an edge's curve over its interval, within `chord` of it: lines by their ends, the
