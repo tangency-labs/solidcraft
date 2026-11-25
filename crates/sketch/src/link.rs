@@ -1421,9 +1421,9 @@ impl Sketch {
             let old: Option<Vec<Vec2>> = points.iter().map(|i| self.point(*i)).collect();
             let fresh: Option<Vec<Vec2>> = order.iter().map(|i| lay.pts.get(*i).copied()).collect();
             parameters_agree
-                && old
-                    .zip(fresh)
-                    .is_some_and(|(old, fresh)| solidcore_ops::point_identity::ordered_nearby_points(&old, &fresh, 1e-6, 4_000_000).unwrap_or(false))
+                && old.zip(fresh).is_some_and(|(old, fresh)| {
+                    solidcraft_kernel::services::point_identity::ordered_nearby_points(&old, &fresh, 1e-6, 4_000_000).unwrap_or(false)
+                })
         } else {
             false
         };
