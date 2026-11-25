@@ -30,7 +30,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<EquationCurveResult>)
         .params(concat!(
             "x: x(t), y: y(t): formulas of t in the design's expression language and parameters (\"r * (cos(t rad) + t * sin(t rad))\"); or explicit: true and y: f(x) alone (no x); \
-             start, end: the range of t (or of x): a number or an expression (\"360 deg\" is 360 for a new curve, a length is in the design's unit); \
+             start, end: the range of t (or of x): a number or an expression. An angle result gives its number of radians (\"360 deg\" gives 2 * pi); a length gives its number in the design's unit; \
              tolerance?: mm (default 0.01): how far the curve may stray from the formulas (0.0001 to 10); construction?: bool; \
              variable_unit?: \"number\" (default) or \"range\". \
              Plain numbers in sin(), cos() and tan() read degrees (sin(90) is 1); use rad for radians. A result without a unit is in the design's length unit. \

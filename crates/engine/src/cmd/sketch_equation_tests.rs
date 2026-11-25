@@ -107,7 +107,7 @@ fn the_variable_hides_a_parameter_of_its_name_and_a_rename_leaves_it_alone() {
 fn a_full_turn_closes_smoothly_and_extrudes_as_a_disc() {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
-    let r = run(&mut s, "sketch.equation_curve", json!({"x": "20 * cos(t rad)", "y": "20 * sin(t rad)", "start": 0, "end": "2 * pi"}));
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "20 * cos(t rad)", "y": "20 * sin(t rad)", "start": 0, "end": "360 deg"}));
     assert_eq!(r["closed"], true, "{r}");
     let id = r["curve"].as_str().unwrap().to_string();
     run(&mut s, "sketch.finish", json!({}));
@@ -181,7 +181,7 @@ fn an_edit_can_switch_between_the_two_forms() {
     let r = run(&mut s, "sketch.equation_curve", json!({"explicit": true, "y": "x / 2", "start": 0, "end": 10}));
     let id = r["curve"].as_str().unwrap().to_string();
     // To a closed parametric curve: the old end point goes, the start stays.
-    let r = run(&mut s, "sketch.equation_curve.edit", json!({"curve": id, "x": "10 * cos(t)", "y": "10 * sin(t)", "start": 0, "end": "360 deg"}));
+    let r = run(&mut s, "sketch.equation_curve.edit", json!({"curve": id, "x": "10 * cos(t)", "y": "10 * sin(t)", "start": 0, "end": 360}));
     assert_eq!(r["closed"], true, "{r}");
     let f = s.doc.find_feature("S").unwrap().id;
     let sk = s.doc.sketch(f).unwrap();
@@ -254,6 +254,21 @@ fn a_curve_its_parameters_break_is_an_error_not_a_crash() {
     assert!(r.error.as_deref().is_some_and(|e| e.contains("equation curve")), "{:?}", r.error);
     run(&mut s, "parameters.change", json!({"name": "k", "expression": "1 mm"}));
     no_trouble(&s);
+}
+
+#[test]
+fn an_angle_parameter_bound_matches_explicit_radian_division_after_an_edit() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "limit", "unit": "deg", "expression": "29"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "t", "y": "sqrt(limit / (1 rad) - t)^2", "start": 0, "end": "limit"}));
+    let id = r["curve"].as_str().unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+    run(&mut s, "parameters.change", json!({"name": "limit", "expression": "30"}));
+    no_trouble(&s);
+    let end = *curve_points(&s, id).last().unwrap();
+    assert!((end.x - std::f64::consts::FRAC_PI_6).abs() < 1e-12 && end.y == 0.0, "{end:?}");
 }
 
 /// The issue's curve (#9333): `a = 10 mm`, y = a^2 / (4 t) over t from a to 3a. Each point is on

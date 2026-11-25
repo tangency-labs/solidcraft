@@ -83,28 +83,13 @@ fn formula(vals: &BTreeMap<String, Value>, e: &str, variable: &str, at: Value, d
     if v.is_finite() && v.abs() < MAX_COORD { Ok(v) } else { Err(DocError::Expr("the curve goes out of range".into())) }
 }
 
-/// Read an angle as a scalar in the curve's default unit. Two adjacent scalars can round to
-/// the same radians (e.g. 7.5 and 7.499999999999999 degrees). Prefer the shorter decimal in
-/// that case, without rounding away a distinguishable angle.
-fn angle_number(radians: f64, scale: f64) -> f64 {
-    let number = radians / scale;
-    if scale == 1.0 || number == 0.0 || !number.is_finite() {
-        return number;
-    }
-    [number, number.next_down(), number.next_up()]
-        .into_iter()
-        .filter(|candidate| candidate * scale == radians)
-        .min_by_key(|candidate| format!("{candidate:e}").len())
-        .unwrap_or(number)
-}
-
-/// Where the variable starts or ends, as a number: a number, an angle in the curve's default angle unit
-/// or a length in the design's unit; and which of them it is.
+/// Read a range bound as a number, keeping its kind for range validation. A length is in the
+/// design's unit. An angle that the expression yields gives its value in radians, as before;
+/// the default angle unit affects evaluation, not this conversion to the variable's number.
 fn range_end(vals: &BTreeMap<String, Value>, e: &str, d: Defaults) -> Result<(f64, Kind)> {
     let v = expr::eval_with_defaults(e, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))), d)?;
     let (out, kind) = match v.kind() {
-        Some(Kind::Unitless) => (v.v, Kind::Unitless),
-        Some(Kind::Angle) => (angle_number(v.v, d.ang), Kind::Angle),
+        Some(kind @ (Kind::Unitless | Kind::Angle)) => (v.v, kind),
         Some(Kind::Length) => (v.v / d.len, Kind::Length),
         None => return Err(DocError::Expr(format!("expected a number, an angle or a length, got {}", v.describe()))),
     };
@@ -342,9 +327,9 @@ mod tests {
         let radians = with_radians(eq(Some("10 * cos(t)"), "10 * sin(t)", "0", "2 * pi"));
         // The same circle written now: the variable runs in degrees, `rad` spells radians out.
         let degrees = eq(Some("10 * cos(t)"), "10 * sin(t)", "0", "360");
-        let explicit_bounds = eq(Some("10 * cos(t)"), "10 * sin(t)", "0 deg", "360 deg");
-        let legacy_bounds = with_radians(explicit_bounds.clone());
-        for e in [radians, degrees, explicit_bounds, legacy_bounds] {
+        let explicit_radians = eq(Some("10 * cos(t rad)"), "10 * sin(t rad)", "0 deg", "360 deg");
+        let legacy_bounds = with_radians(eq(Some("10 * cos(t)"), "10 * sin(t)", "0 deg", "360 deg"));
+        for e in [radians, degrees, explicit_radians, legacy_bounds] {
             let fit = fit(&vals, &e).unwrap();
             assert!(fit.closed);
             assert!(fit.deviation <= DEFAULT_TOLERANCE, "{}", fit.deviation);
@@ -356,22 +341,17 @@ mod tests {
     }
 
     #[test]
-    fn exact_degree_bounds_keep_formulas_defined_at_the_endpoints() {
+    fn angle_bounds_keep_their_radian_scalar_even_in_new_curves() {
         let vals = BTreeMap::new();
-        for (y, start, end, expected) in [
-            ("sqrt(t - 30)^2", "30 deg", "40", [30.0, 40.0]),
-            ("sqrt(29 - t)^2", "28", "29 deg", [28.0, 29.0]),
-            ("sqrt(t - 7.5)^2", "7.5 deg", "10", [7.5, 10.0]),
-        ] {
-            let fit = fit(&vals, &eq(Some("t"), y, start, end)).unwrap();
-            let bounds = [fit.points.first().unwrap().x, fit.points.last().unwrap().x];
-            assert_eq!(bounds, expected);
-        }
-        // Don't snap a genuinely different bound, even one a single float away.
-        let radians = (30.0 * Defaults::default().ang).next_down();
-        let mut vals = vals;
-        vals.insert("bound".into(), Value::angle(radians));
-        assert!(range_end(&vals, "bound", Defaults::default()).unwrap().0 < 30.0);
+        let e = eq(None, "x / 2", "0", "90 deg");
+        let simple = fit(&vals, &e).unwrap();
+        let half_pi = std::f64::consts::FRAC_PI_2;
+        assert_eq!(simple.points.last(), Some(&Vec2::new(half_pi, half_pi / 2.0)));
+        // The default still applies while evaluating the bound expression itself.
+        let compound = eq(None, "x / 2", "0", "1 + 90 deg");
+        let fit = fit(&vals, &compound).unwrap();
+        let radians = 91.0_f64.to_radians();
+        assert!((fit.points.last().unwrap().x - radians).abs() < 1e-12);
     }
 
     /// A new curve reads plain numbers in trig as degrees, like the rest of the expression

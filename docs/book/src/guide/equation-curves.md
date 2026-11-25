@@ -64,13 +64,18 @@ while the clock runs, so the pen moves outwards as it goes round.
 
 In a new curve, `sin`, `cos` and `tan` read a number without a unit in **degrees**:
 `sin(90)` is 1, whether you type `90` or the formula calculates it. Write `rad` for
-**radians**, as in `sin((pi / 2) rad)`. For a degree-based circle, **End** can be `360`
-or `360 deg`. If the formulas use `sin(t rad)` and `cos(t rad)`, use the plain number
-`2 * pi` for a full turn instead.
+**radians**, as in `sin((pi / 2) rad)`. For a new circle using `sin(t)` and `cos(t)`,
+use the plain number `360` for **End**.
+
+**Start** and **End** give the numbers that `t` runs through. If a bound evaluates to an
+angle, it gives its number of radians, as before: `360 deg` gives `2 * pi`, not `360`.
+Use either of those bounds for a full turn with `sin(t rad)` and `cos(t rad)`.
 
 A curve saved before this change still reads plain angles in radians, even when edited.
 The edit window shows which convention that curve uses. Explicit `deg` and `rad` in trig
-arguments work with either convention.
+arguments work with either convention. Open and edit designs with new Equation Curves
+in a build that supports them. An older build can leave a sketch unread. Saving an edit
+elsewhere in that build can still remove a parameter that the unread sketch needs.
 
 A formula result without a unit is in your design's length unit (millimetres unless you changed it).
 
@@ -142,7 +147,8 @@ in it; change them and click **OK**.
   never goes past 1, so `sin(x)` alone is at most 1 mm high. Multiply it (`8 * sin(x)`).
 - **The wave has too few bumps, or far too many.** Check the angle convention: `sin(x)` repeats every
   `360` along x in a new curve, and every `2 * pi` in an older radians curve.
-- **The circle has a gap.** For `sin(t)` and `cos(t)` starting at `0`, use `360 deg` for a full turn.
+- **The circle has a gap.** Starting at `0`, use `360` for `sin(t)` and `cos(t)` in a new curve.
+  Use `2 * pi` or `360 deg` for a curve that reads `t` in radians.
 - **A rule is rejected.** Use `*` for multiply (`2 * t`, not `2t`), and close every bracket.
 
 ## For scripts and agents
