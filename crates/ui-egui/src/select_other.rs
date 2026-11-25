@@ -72,6 +72,7 @@ impl Category {
             Sel::SketchPoint { .. }
             | Sel::SketchMidpoint { .. }
             | Sel::ExternalSketchPoint { .. }
+            | Sel::PlacedSketchPoint { .. }
             | Sel::SketchCurve { .. }
             | Sel::ExternalSketchCurve { .. }
             | Sel::SketchConstraint { .. }
@@ -512,7 +513,7 @@ fn short_label(app: &SolveApp, sel: &Sel) -> String {
         Sel::Edge { index, .. } => format!("Edge {}", index + 1),
         Sel::Face { index, .. } => format!("Face {}", index + 1),
         Sel::Body { name } => body_display_name(app, name),
-        Sel::ExternalSketchPoint { sketch, id } => in_sketch(*sketch, &|sk| point_label(sk, id)),
+        Sel::ExternalSketchPoint { sketch, id } | Sel::PlacedSketchPoint { sketch, id, .. } => in_sketch(*sketch, &|sk| point_label(sk, id)),
         Sel::ExternalSketchCurve { sketch, id } => in_sketch(*sketch, &|sk| curve_label(sk, id)),
         Sel::Profile { index, .. } => format!("Profile {}", index + 1),
         Sel::Occurrence { path } => path
@@ -622,6 +623,17 @@ fn hierarchy_for(app: &SolveApp, sel: &Sel) -> Vec<GroupSeg> {
             let mut segs = component_chain(app, comp);
             segs.push(GroupSeg {
                 key: format!("sketch:{sketch}"),
+                name: sketch_name(app, *sketch),
+                icon: "sketch",
+                kind: GroupKind::Sketch,
+                path: None,
+            });
+            segs
+        }
+        Sel::PlacedSketchPoint { sketch, path, .. } => {
+            let mut segs = occurrence_chain(app, path);
+            segs.push(GroupSeg {
+                key: format!("sketch:{sketch}:{}", join_path(path)),
                 name: sketch_name(app, *sketch),
                 icon: "sketch",
                 kind: GroupKind::Sketch,
@@ -1234,6 +1246,13 @@ fn paint_elided_label(ui: &egui::Ui, text_rect: Rect, cy: f32, text: &str, font:
     elided
 }
 
+/// Left edge of a tree row at `depth`, bounded so deeply nested rows keep room inside the popup
+/// for the disclosure chevron, icon, label and count while preserving shallow positions.
+fn tree_row_base_x(r: Rect, depth: usize) -> f32 {
+    let max_indent = (r.width() - 96.0).max(0.0);
+    r.left() + 6.0 + ((depth as f32) * INDENT_STEP).min(max_indent)
+}
+
 /// Draw the open list; handle its hover, clicks, and a press elsewhere (which closes it).
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if app.viewport.select_other.popup.is_none() {
@@ -1338,7 +1357,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         match drow {
                             DisplayRow::Group { key, name, icon, depth, count, collapsed, occurrence_path } => {
                                 let (r, row_resp) = ui.allocate_exact_size(vec2(w, ROW_HEIGHT), Sense::hover());
-                                let base_x = r.left() + 6.0 + (*depth as f32) * INDENT_STEP;
+                                let base_x = tree_row_base_x(r, *depth);
                                 let chev_rect = Rect::from_min_size(pos2(base_x, r.top()), vec2(16.0, ROW_HEIGHT));
                                 let chev_resp = ui.interact(chev_rect, ui.scope_id().with(("select_other_group_chev", key)), Sense::click());
                                 crate::scenario::publish_handle(&format!("select_other:toggle:{key}"), chev_rect.center());
@@ -1397,7 +1416,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             DisplayRow::Item { row_idx, label, tooltip, icon, depth, toggle } => {
                                 let (r, row_resp) = ui.allocate_exact_size(vec2(w, ROW_HEIGHT), Sense::hover());
                                 let (icon_cx, text_left, toggle_clicked) = if show_tree {
-                                    let base_x = r.left() + 6.0 + (*depth as f32) * INDENT_STEP;
+                                    let base_x = tree_row_base_x(r, *depth);
                                     let mut tclick = false;
                                     if let Some((key, collapsed, _)) = toggle {
                                         let chev_rect = Rect::from_min_size(pos2(base_x, r.top()), vec2(16.0, ROW_HEIGHT));

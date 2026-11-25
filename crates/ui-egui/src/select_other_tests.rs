@@ -1397,3 +1397,34 @@ fn multi_component_assembly_nests_by_occurrence_tree_and_filters_cleanly() {
     assert!(!super::is_open(&h.app));
     assert_eq!(h.app.session.selection, vec![Sel::Occurrence { path: vec![housing, lid] }]);
 }
+
+#[test]
+fn deeply_nested_tree_rows_stay_inside_the_popup() {
+    let (mut h, at) = two_lines();
+    h.step(&json!({"hold": at})).unwrap();
+    let depth = 20usize;
+    let mut hierarchy = Vec::with_capacity(depth);
+    for i in 1..=depth {
+        let path: Vec<u64> = (1..=i as u64).collect();
+        hierarchy.push(super::GroupSeg {
+            key: format!("occ:{i}"),
+            name: format!("Sub{i}:1"),
+            icon: "component",
+            kind: super::GroupKind::Occurrence,
+            path: Some(path),
+        });
+    }
+    let popup = h.app.viewport.select_other.popup.as_mut().unwrap();
+    let mut row = popup.rows[0].clone();
+    row.hierarchy = hierarchy;
+    popup.rows = vec![row];
+    popup.total = 1;
+    h.frames(4);
+    let rect = crate::scenario::rect_of("select_other").unwrap();
+    let deep_group = crate::scenario::handle_at("select_other:group:occ:20").unwrap();
+    let deep_chev = crate::scenario::handle_at("select_other:toggle:occ:20").unwrap();
+    let deep_leaf = crate::scenario::handle_at("select_other:0").unwrap();
+    assert!(rect.contains(deep_chev), "deep chevron must stay inside popup: {deep_chev:?} vs {rect:?}");
+    assert!(rect.contains(deep_group), "deep group row must stay inside popup: {deep_group:?} vs {rect:?}");
+    assert!(rect.contains(deep_leaf), "deep leaf row must stay inside popup: {deep_leaf:?} vs {rect:?}");
+}
