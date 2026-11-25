@@ -335,6 +335,44 @@ mod tests {
         assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::StartDrag)), "{cmds:?}");
     }
 
+    /// A drag that starts on a tab or an application bar button belongs to that control, in the
+    /// custom title bar (Windows, Linux) and the integrated one (macOS) alike: it never asks the OS
+    /// to move the window, whatever its direction and however many tabs there are. Empty bar space
+    /// still does.
+    #[test]
+    fn drags_from_tabs_and_bar_items_never_move_the_window() {
+        for integrated in [false, true] {
+            for tabs in [1, 3] {
+                let mut w = Win::new(1600.0);
+                w.app.custom_titlebar = !integrated;
+                w.app.integrated_titlebar = integrated;
+                w.app.home.open = false;
+                for _ in 1..tabs {
+                    assert!(crate::documents::open_tab(&mut w.app, Session::default()).is_ok());
+                }
+                w.frame(vec![]);
+                w.frame(vec![]);
+                let starts = |cmds: &[ViewportCommand]| cmds.iter().filter(|c| matches!(c, ViewportCommand::StartDrag)).count();
+                let mut names = vec!["tab:design:0", "appbar:file", "appbar:undo", "titlebar:home"];
+                if tabs > 1 {
+                    names.push("tab:design:2");
+                }
+                for name in names {
+                    let from = crate::scenario::handle_at(name).unwrap_or_else(|| panic!("{name}"));
+                    for by in [vec2(40.0, 0.0), vec2(-30.0, 0.0), vec2(4.0, 30.0), vec2(30.0, -2.0)] {
+                        w.time += 1.0;
+                        let cmds = w.gesture(&[from, from + by * 0.25, from + by * 0.5, from + by]);
+                        assert_eq!(starts(&cmds), 0, "integrated={integrated} tabs={tabs}: a drag from {name} by {by:?} moved the window: {cmds:?}");
+                    }
+                }
+                w.time += 1.0;
+                let empty = pos2(900.0, 17.0);
+                let cmds = w.gesture(&[empty, empty + vec2(12.0, 4.0), empty + vec2(30.0, 8.0)]);
+                assert_eq!(starts(&cmds), 1, "integrated={integrated} tabs={tabs}: empty bar space moves the window: {cmds:?}");
+            }
+        }
+    }
+
     /// On X11 the window manager keeps the release of the press that started a window move or
     /// resize: every drag on the bar or the design's tab still moves the window and every edge
     /// drag still resizes, not every other one (#13334).
@@ -354,13 +392,16 @@ mod tests {
             let cmds = w.gesture_os_keeps_release(&[east, east + vec2(6.0, 0.0)]);
             assert_eq!(cmds, vec![ViewportCommand::BeginResize(ResizeDirection::East)], "resize {round}");
         }
-        // The only design's tab is part of the title bar: a drag on it moves the window too.
+        // A drag on the design's tab belongs to the tab: it never moves the window.
         let tab = crate::scenario::handle_at("tab:design:0").expect("the design's tab");
         for round in 1..=2 {
-            let cmds = w.gesture_os_keeps_release(&[tab, tab + vec2(4.0, 12.0), tab + vec2(8.0, 30.0)]);
-            assert_eq!(starts(&cmds), 1, "tab drag {round}: {cmds:?}");
+            let cmds = w.gesture(&[tab, tab + vec2(4.0, 12.0), tab + vec2(8.0, 30.0)]); // no OS move starts, so the release arrives
+            assert_eq!(starts(&cmds), 0, "tab drag {round}: {cmds:?}");
             w.time += 1.0;
         }
+        let cmds = w.gesture_os_keeps_release(&[empty, empty + vec2(12.0, 4.0), empty + vec2(30.0, 8.0)]);
+        assert_eq!(starts(&cmds), 1, "bar drag after the tab drags: {cmds:?}");
+        w.time += 1.0;
         // A real release that does arrive later is ignored: no click, so no maximize.
         let mut cmds = w.gesture(&[empty, empty + vec2(12.0, 4.0), empty + vec2(30.0, 8.0)]);
         cmds.extend(w.frame(vec![]).viewport_output.remove(&ViewportId::ROOT).map(|v| v.commands).unwrap_or_default());
