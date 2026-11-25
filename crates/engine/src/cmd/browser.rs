@@ -4370,6 +4370,55 @@ mod tests {
         assert_eq!(opacity_of(&s, "Block"), 0.4);
     }
 
+    /// A copy's own changes of it are adopted with the copy (a plugin's run): what the copy set, in
+    /// the names its own renames gave, and the placements it moved. What it left alone keeps the
+    /// percentage set meanwhile.
+    #[test]
+    fn display_opacity_a_computation_sets_is_adopted_with_it() {
+        let (mut s, first, second) = placed_twice();
+        run(&mut s, "browser.opacity", json!({"percent": 80, "bodies": ["Root"], "paths": [first, second]}));
+        let mut scratch = s.scratch();
+        run(&mut scratch, "body.rename", json!({"body": "Root", "name": "Base"}));
+        run(&mut scratch, "browser.opacity", json!({"percent": 30, "bodies": ["KB"]}));
+        run(&mut scratch, "browser.opacity", json!({"percent": 100, "paths": [second]}));
+        run(&mut s, "browser.opacity", json!({"percent": 60, "bodies": ["Root"]}));
+        s.accept_computed(scratch).unwrap();
+        let set = s.visibility.opacity.clone();
+        assert_eq!((set.body("Base"), set.body("Root"), set.body("KB")), (60, 100, 30), "{set:?}");
+        assert_eq!((set.placement(&first), set.placement(&second)), (80, 100), "{set:?}");
+        // A placement the copy moved.
+        let mut scratch = s.scratch();
+        run(&mut scratch, "occurrence.reparent", json!({"occurrence": first[1], "parent": 0}));
+        s.accept_computed(scratch).unwrap();
+        assert_eq!(s.visibility.opacity.placement(&first[1..]), 80, "{:?}", s.visibility.opacity);
+        // A copy that touches none of it changes none of it.
+        let before = s.visibility.opacity.clone();
+        let mut scratch = s.scratch();
+        run(&mut scratch, "solid.box", json!({"body_name": "More", "length": 1, "width": 1, "height": 1, "corner": [90, 0, 0]}));
+        s.accept_computed(scratch).unwrap();
+        assert_eq!(s.visibility.opacity.bodies(), before.bodies());
+    }
+
+    /// A body in a moved placement can be told apart from its copies by another name there: its
+    /// percentage follows it, and the copy that stays keeps its own.
+    #[test]
+    fn display_opacity_of_a_body_follows_its_placements_move() {
+        let (mut s, first, second) = placed_twice();
+        run(&mut s, "browser.opacity", json!({"percent": 30, "bodies": [COPY]}));
+        run(&mut s, "browser.opacity", json!({"percent": 70, "bodies": ["KB"]}));
+        run(&mut s, "occurrence.reparent", json!({"occurrence": second[1], "parent": 0}));
+        let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+        assert!(!names.iter().any(|n| n == COPY), "the move changes its name: {names:?}");
+        let of = |s: &Session, path: &[u64]| {
+            let world = s.occurrence_bodies(path, true).unwrap();
+            assert_eq!(world.len(), 1, "{world:?}");
+            s.display_opacity(&world[0])
+        };
+        assert_eq!((of(&s, &first), of(&s, &second[1..])), (0.7, 0.3), "{:?} {names:?}", s.visibility.opacity);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!((of(&s, &first), of(&s, &second)), (0.7, 0.3), "{:?}", s.visibility.opacity);
+    }
+
     /// Renders, exports and modelling do not see it: their scenes and files are the same, and a
     /// cut still cuts a body at 0%.
     #[test]
@@ -4438,7 +4487,15 @@ mod tests {
         run(&mut s, "browser.opacity", json!({"percent": 0, "bodies": ["Block"]}));
         assert_eq!(drawn(&s).0, vec![]);
         assert_eq!(hit(&mut s), Value::Null);
+        run(&mut s, "inspect.isocurve", json!({"faces": [[5, 5, 10]], "count": 3}));
+        assert!(s.isocurve_lines().is_empty(), "nor are its isocurves");
         run(&mut s, "browser.opacity", json!({"percent": 100, "bodies": ["Block"]}));
+        assert!(!s.isocurve_lines().is_empty());
         assert_eq!(drawn(&s), (vec![(true, 0.5)], 1.0), "the appearance is as it was");
+        // Selected, a body is drawn solid but for its display opacity.
+        run(&mut s, "select.set", json!({"items": [{"type": "body", "name": "Block"}]}));
+        assert_eq!(drawn(&s), (vec![(false, 1.0)], 1.0));
+        run(&mut s, "browser.opacity", json!({"percent": 30, "bodies": ["Block"]}));
+        assert_eq!(drawn(&s), (vec![(true, 0.3)], 0.3));
     }
 }

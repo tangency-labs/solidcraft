@@ -378,3 +378,50 @@ fn opacity_started_on_its_own_asks_for_the_selection() {
     h.app.run("browser.opacity", json!({"percent": 10, "bodies": ["Block"]})).unwrap();
     assert!(h.app.menu.opacity.is_none() && block_opacity(&h) == 10);
 }
+
+/// With a feature dialog open under the card, Escape and Enter answer the card alone.
+#[test]
+fn custom_opacity_over_a_feature_dialog_takes_escape_and_enter_for_itself() {
+    // With the viewport's status off, nothing else keeps Escape from the dialog under a card.
+    for (status, key, percent) in [(true, "Escape", 70), (true, "Enter", 25), (false, "Escape", 70), (false, "Enter", 25)] {
+        let mut h = custom_opacity(70);
+        h.app.menu.opacity = None;
+        h.app.preferences.viewport_analysis_status = status;
+        h.app.preferences.viewport_section_status = status;
+        h.step(&json!({"start": "solid.fillet"})).unwrap();
+        let item = {
+            let body = crate::context_menu::Target::Body { name: "Block".into() };
+            crate::context_menu::entries(&h.app, &body).into_iter().find(|i| i.label == "Custom Opacity").unwrap()
+        };
+        crate::context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+        card_is_drawn(&mut h);
+        h.step(&json!({"text": "25"})).unwrap();
+        h.frames(2);
+        let features = h.app.session.doc.features.len();
+        h.step(&json!({ "key": key })).unwrap();
+        h.frames(3);
+        assert!(h.app.menu.opacity.is_none(), "{key} answers the card");
+        assert!(h.app.dialog.is_some(), "{key} leaves the dialog open (status {status})");
+        assert_eq!((block_opacity(&h), h.app.session.doc.features.len()), (percent, features), "{key}");
+    }
+}
+
+/// Opacity on a selection of a placement and another body sets both, and a body selected inside
+/// the placement only through it.
+#[test]
+fn opacity_of_a_mixed_selection_sets_the_placement_and_the_other_bodies() {
+    let mut h = custom_opacity(100);
+    h.app.menu.opacity = None;
+    let part = h.app.run("component.create", json!({"name": "K"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0], "body_name": "Inner"})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let picked = vec![Sel::Body { name: "Block".into() }, Sel::Body { name: "Inner".into() }, Sel::Occurrence { path: vec![part] }];
+    h.app.run("select.set", json!({ "items": picked })).unwrap();
+    h.app.start("browser.opacity");
+    card_is_drawn(&mut h);
+    h.step(&json!({"text": "40"})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(3);
+    let set = &h.app.session.visibility.opacity;
+    assert_eq!((set.body("Block"), set.body("Inner"), set.placement(&[part])), (40, 100, 40), "{set:?}");
+}

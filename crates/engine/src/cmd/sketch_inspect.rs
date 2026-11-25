@@ -441,8 +441,9 @@ fn isocurves(s: &mut Session, p: &Value) -> Result<Value> {
 
 impl Session {
     /// The curves Isocurve Analysis shows, for the viewport to draw: those of each face in
-    /// [`Session::isocurves`] of a visible body, found again from its picked point (worked out
-    /// once per face and count, [`solidcraft_doc::ModelBody::iso_lines`]). A pick whose body or
+    /// [`Session::isocurves`] of a visible body drawn at all ([`Session::display_opacity`]), found
+    /// again from its picked point (worked out once per face and count,
+    /// [`solidcraft_doc::ModelBody::iso_lines`]). A pick whose body or
     /// face is gone shows nothing.
     pub fn isocurve_lines(&self) -> Vec<std::sync::Arc<[crate::kernel::IsoLine]>> {
         if self.isocurves.is_empty() {
@@ -452,7 +453,7 @@ impl Session {
         self.isocurves
             .iter()
             .filter_map(|k| {
-                let b = st.body(&k.body).filter(|b| self.body_visible(&b.name))?;
+                let b = st.body(&k.body).filter(|b| self.body_visible(&b.name) && self.display_opacity(&b.name) > 0.0)?;
                 let face = solidcraft_doc::appearance::face_index_at(b, k.at)?;
                 b.iso_lines(face, k.count).ok()
             })

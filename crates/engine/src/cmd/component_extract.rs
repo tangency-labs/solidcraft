@@ -745,6 +745,19 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let stem = file.file_stem().map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|| sc.name.clone());
     let (mut part, notices) = part_design(s, &sc, &stem, CMD)?;
+    // The display opacity of the placements inside it goes along, from where the component was.
+    let mut opacity = solidcraft_doc::display_opacity::DisplayOpacity::default();
+    for entry in s.visibility.opacity.placements() {
+        let mut path = entry.path;
+        if path.iter().any(|o| sc.own.contains(o)) {
+            local_path(&mut path, &sc.own);
+            // Of several placements of the component, the first one's.
+            if !path.is_empty() && opacity.placement(&path) == solidcraft_doc::display_opacity::OPAQUE {
+                opacity.set_placement(&path, entry.percent);
+            }
+        }
+    }
+    part.visibility.opacity = opacity.into();
 
     // This design: the component's history becomes an Import feature of the new design's bodies
     let shown = file.display().to_string();
@@ -1006,6 +1019,10 @@ mod tests {
         run(&mut s, "component.extract", json!({"component": "Plate", "path": dir.join("plate.solidcraft")}));
         let opacity = &s.visibility.opacity;
         assert_eq!((opacity.placement(&[outer]), opacity.placement(&[outer, inner]), opacity.len()), (40, 100, 1), "{opacity:?}");
+        let mut part = Session::default();
+        run(&mut part, "doc.open", json!({"path": dir.join("plate.solidcraft")}));
+        let opacity = &part.visibility.opacity;
+        assert_eq!((opacity.placement(&[inner]), opacity.len()), (40, 1), "in the new design: {opacity:?}");
     }
 
     #[test]

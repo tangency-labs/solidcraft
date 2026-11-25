@@ -133,6 +133,9 @@ impl VisibilityIndex {
     }
 }
 
+/// The bodies' names in the placed design, by body and placement ([`Session::placed_body_names`]).
+pub(crate) type PlacedNames = std::collections::HashMap<(String, Vec<u64>), String>;
+
 /// How much of their own opacity the bodies drawn below 100% keep ([`Session::display_opacity`]),
 /// by name in the placed design.
 pub(crate) struct OpacityCache {
@@ -399,7 +402,11 @@ impl Session {
         rename: Option<(&str, &str)>,
     ) {
         let selected: std::collections::BTreeSet<&str> = self.selection.iter().filter_map(|s| s.body_name()).collect();
-        if self.visibility.hidden_bodies.is_empty() && selected.is_empty() && self.visibility.opacity.bodies().is_empty() {
+        if self.visibility.hidden_bodies.is_empty()
+            && selected.is_empty()
+            && self.visibility.opacity.bodies().is_empty()
+            && self.opacity_base.bodies().is_empty()
+        {
             return;
         }
         if rename.is_none() {
@@ -429,7 +436,11 @@ impl Session {
                 if old != new {
                     destinations.insert(new.clone());
                 }
-                if hidden.contains(old.as_str()) || selected.contains(old.as_str()) || self.visibility.opacity.bodies().contains_key(&old) {
+                if hidden.contains(old.as_str())
+                    || selected.contains(old.as_str())
+                    || self.visibility.opacity.bodies().contains_key(&old)
+                    || self.opacity_base.bodies().contains_key(&old)
+                {
                     names.insert(old, new);
                 }
             }
@@ -444,11 +455,11 @@ impl Session {
                 !destinations.contains(hidden)
             }
         });
-        if !self.visibility.opacity.bodies().is_empty() {
-            let mut opacity = (*self.visibility.opacity).clone();
+        for set in [&mut self.visibility.opacity, &mut self.opacity_base] {
+            let mut opacity = (**set).clone();
             opacity.rename_bodies(&names, &destinations);
-            if opacity != *self.visibility.opacity {
-                self.visibility.opacity = opacity.into();
+            if opacity != **set {
+                *set = opacity.into();
             }
         }
         for sel in &mut self.selection {
@@ -461,6 +472,48 @@ impl Session {
                 name.clone_from(new);
             }
         }
+    }
+
+    /// Every body's name in the placed design, by the body and the placement that shows it.
+    pub(crate) fn placed_body_names(&self) -> PlacedNames {
+        let st = self.model.state();
+        let components = self.doc.model_body_components(&st);
+        let names = solidcraft_doc::WorldNames::new(&self.doc, &st);
+        let mut out = PlacedNames::new();
+        for (component, path, _) in self.doc.placements() {
+            for body in st.bodies.iter().zip(&components).filter(|(_, c)| **c == component).map(|(b, _)| b.name.as_str()) {
+                out.insert((body.to_string(), path.clone()), names.name(body, component, &path));
+            }
+        }
+        out
+    }
+
+    /// The bodies' display opacity follows their names through a move of placements (`moves`: each
+    /// one's path before and after), which can change how a body in them is told apart from its
+    /// copies. `before`: their names before the move.
+    pub(crate) fn follow_moved_body_opacity(&mut self, before: &PlacedNames, moves: &[(Vec<u64>, Vec<u64>)]) {
+        if self.visibility.opacity.bodies().is_empty() {
+            return;
+        }
+        let mut renamed = std::collections::BTreeMap::new();
+        for ((body, path), new) in self.placed_body_names() {
+            let mut was = path;
+            for (old, new) in moves.iter().rev() {
+                if let Some(rest) = was.strip_prefix(new.as_slice()) {
+                    was = old.iter().chain(rest).copied().collect();
+                }
+            }
+            if let Some(old) = before.get(&(body, was)).filter(|old| **old != new) {
+                renamed.insert(old.clone(), new);
+            }
+        }
+        if renamed.is_empty() {
+            return;
+        }
+        let destinations = renamed.values().cloned().collect();
+        let mut opacity = (*self.visibility.opacity).clone();
+        opacity.rename_bodies(&renamed, &destinations);
+        self.visibility.opacity = opacity.into();
     }
 
     /// Visibility keeps construction names, while undo history keeps feature ids. Follow the

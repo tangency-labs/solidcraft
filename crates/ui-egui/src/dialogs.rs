@@ -4564,7 +4564,10 @@ pub(crate) fn corner_confirms(d: &Dialog) -> bool {
 /// view, sized to its content. The right edge is its place, except while a sketch is open: the
 /// Sketch Palette keeps the right there, and the dialog takes the left so both stay on screen.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
-    let escape_routed_here = !crate::viewport_status::enabled(app) || app.escape_owner.is_none_or(|owner| owner == crate::EscapeOwner::Dialog);
+    // The Custom Opacity card is drawn after this dialog and owns the keyboard while it is open.
+    let opacity_card = crate::opacity_menu::asking(app);
+    let escape_routed_here =
+        !opacity_card && (!crate::viewport_status::enabled(app) || app.escape_owner.is_none_or(|owner| owner == crate::EscapeOwner::Dialog));
     // A click in the view's corner is for the dialog open this frame, or for none.
     let corner = app.viewport.corner.take();
     app.viewport.corner_ok = false;
@@ -4858,7 +4861,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // Each prompt draws only for its own dialog, so both run (`|`, not `||`).
     let preset_prompt = crate::hole_presets::name_prompt(ctx, &mut d, &mut app.preferences.hole_presets, &app.session.doc)
-        | crate::personal_sheet_rules::name_prompt(ctx, &mut d, &mut app.preferences.personal_sheet_rules, &app.session.doc);
+        | crate::personal_sheet_rules::name_prompt(ctx, &mut d, &mut app.preferences.personal_sheet_rules, &app.session.doc)
+        | opacity_card;
     crate::sheet_rule_library::run_request(ctx, app);
     if preset_prompt {
         enter = false;
@@ -9735,7 +9739,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     if let Some(body) = model.body(&anchor.target.body) {
                         let owner = s.doc.model_body_component(body);
                         let name = s.doc.world_body_name(&model, &body.name, owner, &anchor.path);
-                        if st.body(&name).is_some() && !s.body_visible(&name) {
+                        if st.body(&name).is_some() && (!s.body_visible(&name) || s.display_opacity(&name) <= 0.0) {
                             d.edit_source_bodies.push(name);
                         }
                     }

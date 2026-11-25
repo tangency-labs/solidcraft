@@ -161,8 +161,10 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, format!("moving {} would break {}: {error}", o.name, f.name)));
         }
     }
+    let names = s.placed_body_names();
     s.accept_computed(scratch)?;
     follow_visibility(s, &old_path, &new_path);
+    s.follow_moved_body_opacity(&names, &[(old_path, new_path.clone())]);
     Ok(json!({"occurrence": id, "parent": to, "path": new_path, "transform": transform}))
 }
 

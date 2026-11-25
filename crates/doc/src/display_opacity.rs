@@ -98,6 +98,31 @@ impl DisplayOpacity {
         (1..=path.len()).filter_map(|n| path.get(..n)).map(|above| f64::from(self.placement(above)) / 100.0).product()
     }
 
+    /// Take in what changed from `base` to `changed` (a copy's edits, adopted): each percentage set
+    /// or changed there is set here, and one taken away there is taken away here while
+    /// `body_there` or `placement_there` says its target still exists (a target that is gone lost
+    /// its percentage with it, which is no edit). What did not change there stays as it is here.
+    pub fn take_changes(
+        &mut self,
+        base: &DisplayOpacity,
+        changed: &DisplayOpacity,
+        body_there: impl Fn(&str) -> bool,
+        placement_there: impl Fn(&[u64]) -> bool,
+    ) {
+        for name in base.bodies.keys().chain(changed.bodies.keys()) {
+            let percent = changed.body(name);
+            if percent != base.body(name) && (percent < OPAQUE || body_there(name)) {
+                self.set_body(name, percent);
+            }
+        }
+        for path in base.placements.keys().chain(changed.placements.keys()) {
+            let percent = changed.placement(path);
+            if percent != base.placement(path) && (percent < OPAQUE || placement_there(path)) {
+                self.set_placement(path, percent);
+            }
+        }
+    }
+
     /// Keep only the placements `kept` says are still there.
     pub fn retain_placements(&mut self, kept: impl Fn(&Vec<u64>) -> bool) {
         self.placements.retain(|path, _| kept(path));
@@ -200,6 +225,23 @@ mod tests {
         for junk in [json!(null), json!(5), json!([]), json!({"bodies": [], "placements": {}})] {
             assert!(serde_json::from_value::<DisplayOpacity>(junk).unwrap().is_empty());
         }
+    }
+
+    /// Only what a copy changed comes back from it: what it left alone keeps the value set
+    /// meanwhile, and a target that is gone there is not an edit.
+    #[test]
+    fn a_copys_changes_are_taken_in_and_nothing_else() {
+        let of = |bodies: &[(&str, u8)], paths: &[(&[u64], u8)]| {
+            let mut o = DisplayOpacity::default();
+            bodies.iter().for_each(|(b, p)| o.set_body(b, *p));
+            paths.iter().for_each(|(path, p)| o.set_placement(path, *p));
+            o
+        };
+        let base = of(&[("Kept", 80), ("Cleared", 70), ("Gone", 60)], &[(&[1], 50), (&[2], 40)]);
+        let copy = of(&[("Kept", 80), ("New", 30)], &[(&[1], 20)]);
+        let mut live = of(&[("Kept", 10), ("Cleared", 70), ("Gone", 60), ("Meanwhile", 90)], &[(&[1], 50), (&[2], 40)]);
+        live.take_changes(&base, &copy, |b| b != "Gone", |p| p != [2]);
+        assert_eq!(live, of(&[("Kept", 10), ("Gone", 60), ("Meanwhile", 90), ("New", 30)], &[(&[1], 20), (&[2], 40)]));
     }
 
     /// An entry left by a deleted body does not land on a body renamed to its name.

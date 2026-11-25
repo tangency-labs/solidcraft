@@ -3598,21 +3598,32 @@ impl SolveApp {
     /// Visibility in the editor's scene: hidden face-profile sources are temporarily shown
     /// without changing the session's visibility or either history stack.
     pub(crate) fn body_visible(&self, name: &str) -> bool {
-        self.session.body_visible(name) || self.dialog.as_ref().is_some_and(|d| d.edit_source_bodies.iter().any(|source| source == name))
+        self.session.body_visible(name) || self.edits_source(name)
     }
 
     /// How much of its appearance's opacity the modelling view draws a body with, 0 to 1
-    /// (`browser.opacity`). The Render workspace draws bodies as their appearances say.
+    /// (`browser.opacity`). The Render workspace draws bodies as their appearances say, and a body
+    /// at 0% that the open dialog takes its source from is drawn so too.
     #[inline]
     pub(crate) fn display_opacity(&self, name: &str) -> f64 {
-        if self.session.visibility.opacity.is_empty() || render_workspace::active(self) { 1.0 } else { self.session.display_opacity(name) }
+        if self.session.visibility.opacity.is_empty() || render_workspace::active(self) {
+            return 1.0;
+        }
+        match self.session.display_opacity(name) {
+            shown if shown <= 0.0 && self.edits_source(name) => 1.0,
+            shown => shown,
+        }
+    }
+
+    /// Does the open dialog take its source from this body, shown for it though it is hidden?
+    fn edits_source(&self, name: &str) -> bool {
+        self.dialog.as_ref().is_some_and(|d| d.edit_source_bodies.iter().any(|source| source == name))
     }
 
     /// Is a body drawn in the view, and picked there? A shown body at 0% ([`Self::display_opacity`])
-    /// is neither, though the Browser shows it as shown; one a dialog asks for is both.
+    /// is neither, though the Browser shows it as shown.
     pub(crate) fn body_drawn(&self, name: &str) -> bool {
-        self.body_visible(name)
-            && (self.display_opacity(name) > 0.0 || self.dialog.as_ref().is_some_and(|d| d.edit_source_bodies.iter().any(|source| source == name)))
+        self.body_visible(name) && self.display_opacity(name) > 0.0
     }
 
     /// Everything shown as selected: the selection plus the open dialog's inputs.

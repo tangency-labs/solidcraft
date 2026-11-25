@@ -982,6 +982,10 @@ pub struct Session {
     /// How opaque each body is drawn ([`Session::display_opacity`]): asked of every body several
     /// times a frame.
     opacity_cache: std::sync::Mutex<Option<occurrences::OpacityCache>>,
+    /// The display opacity a copy ([`Session::scratch`]) began with, its bodies' names followed
+    /// as the copy's are: what the copy changed since is adopted with it
+    /// ([`Session::accept_computed`]).
+    opacity_base: Arc<solidcraft_doc::display_opacity::DisplayOpacity>,
     /// The hidden joints, folders and bodies of the view, as sets: the browser asks about every
     /// joint of the design on every frame (#3892), the viewport about every body, and an answer
     /// that walked the hidden lists made a frame cost grow with the size of the design.
@@ -1471,6 +1475,7 @@ impl Session {
             names_pinned: None,
             occurrence_visibility_cache: Default::default(),
             opacity_cache: Default::default(),
+            opacity_base: Default::default(),
             visibility_index_cache: Default::default(),
             consumed_sketches_cache: Default::default(),
             made_bodies: MadeBodies::new(),
@@ -3584,6 +3589,7 @@ impl Session {
             names_pinned: None,
             occurrence_visibility_cache: Default::default(),
             opacity_cache: Default::default(),
+            opacity_base: self.visibility.opacity.clone(),
             visibility_index_cache: Default::default(),
             consumed_sketches_cache: Default::default(),
             removed_later_cache: Default::default(),
@@ -3980,9 +3986,18 @@ impl Session {
         }
         let rename = computed.body_rename(&self.doc);
         computed.visibility.hidden_bodies.clone_from(&self.visibility.hidden_bodies);
-        computed.visibility.opacity.clone_from(&self.visibility.opacity);
+        // What the copy itself changed, in its names for the bodies, for the live percentages below.
+        let base = std::mem::take(&mut computed.opacity_base);
+        let changed = std::mem::replace(&mut computed.visibility.opacity, self.visibility.opacity.clone());
         computed.remap_hidden_bodies(&self.doc, &self.model.state(), rename.as_ref().map(|(old, new, _)| (old.as_str(), new.as_str())));
         self.visibility.hidden_bodies = std::mem::take(&mut computed.visibility.hidden_bodies);
+        if computed.is_copy && changed != base {
+            let bodies: std::collections::HashSet<String> =
+                computed.world_state().map(|world| world.bodies.iter().map(|b| b.name.clone()).collect()).unwrap_or_default();
+            let mut opacity = (*computed.visibility.opacity).clone();
+            opacity.take_changes(&base, &changed, |name| bodies.contains(name), |path| computed.occurrence_placement(path).is_ok());
+            computed.visibility.opacity = opacity.into();
+        }
         self.visibility.opacity = std::mem::take(&mut computed.visibility.opacity);
         self.body_renames = computed.body_renames;
         // Only committed source reads cross back from the worker. A no-op read must not

@@ -1072,8 +1072,8 @@ fn build_scene(
             s.doc.face_colors(body).into_iter().map(|(f, l)| (f as u32, Rgb(l.color[0], l.color[1], l.color[2]))).collect()
         };
         // A see-through appearance is drawn see-through, as the viewport draws it; a selected
-        // body is drawn solid, so the selection colour reads.
-        let (opacity, shown) = if selected { (1.0, 1.0) } else { (s.doc.model_body_opacity(body) as f32, shown) };
+        // body is drawn solid but for its display opacity, so the selection colour reads.
+        let opacity = if selected { 1.0 } else { s.doc.model_body_opacity(body) as f32 };
         let cut_solid = !section.is_empty() && body.is_closed() && opacity * shown >= solidcraft_viewport::SEE_THROUGH;
         sc.meshes.push(SceneMesh {
             mesh: Arc::clone(&mesh),

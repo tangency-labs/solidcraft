@@ -117,9 +117,10 @@ pub fn ask_for_selection(app: &mut SolveApp) {
             }
         }
     }
-    // A placement selected stands for its bodies.
-    if !paths.is_empty() {
-        bodies.clear();
+    // A placement selected stands for the bodies in it; other bodies selected count on their own.
+    for path in &paths {
+        let held = app.session.occurrence_bodies(path, true).unwrap_or_default();
+        bodies.retain(|b| !held.contains(b));
     }
     let targets = Targets { bodies, paths };
     if targets.is_empty() {

@@ -7563,7 +7563,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     let lit = crate::snap_wake::lit_face(app);
     match lit.as_ref().or(hover) {
         Some(Hit::Face { body, index, .. }) if !crate::selection_mode::lights_whole(app) && body_hover.as_ref() != Some(body) && !replaced(body) => {
-            if let Some(b) = st.body(body) {
+            if let Some(b) = st.body(body).filter(|_| app.display_opacity(body) > 0.0) {
                 let k = t.hover_face_lift;
                 let m = if outlines { shown(b) } else { drawn(b) };
                 let patch = m.surface_patch(*index);
@@ -7617,7 +7617,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             }
         }
         Some(Hit::Edge { body, index, mid, .. }) if !moving(body) => {
-            if let Some(b) = st.body(body) {
+            if let Some(b) = st.body(body).filter(|_| app.display_opacity(body) > 0.0) {
                 // Lit over the drawn edges (finer away from Normal display quality).
                 let m = drawn(b);
                 // Measure measures the piece picked of an edge a seam splits: light that piece.
@@ -10211,14 +10211,17 @@ fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             painter.circle(p, 3.5, fill, stroke);
         }
     }
+    // No dot on a vertex of a body at 0%, which is not drawn.
     for x in app.highlighted() {
         if let Sel::Vertex { point, .. } | Sel::PointCloudPoint { point, .. } = x
+            && !matches!(&x, Sel::Vertex { body, .. } if app.display_opacity(body) <= 0.0)
             && let Some(p) = proj.to_screen(point)
         {
             painter.circle(p, 4.0, t.sel_vertex, Stroke::new(1.5, t.sel_edge));
         }
     }
-    if let Some(Hit::Vertex { point, .. } | Hit::PointCloudPoint { point, .. }) = &app.viewport.hover
+    if let Some(hit @ (Hit::Vertex { point, .. } | Hit::PointCloudPoint { point, .. })) = &app.viewport.hover
+        && !matches!(hit, Hit::Vertex { body, .. } if app.display_opacity(body) <= 0.0)
         && let Some(p) = proj.to_screen(*point)
     {
         painter.circle(p, 4.5, t.hover_edge_halo, Stroke::new(1.5, t.hover_edge));
@@ -14821,7 +14824,30 @@ mod tests {
             names
         };
         assert_eq!(boxed(&mut h), ["Behind"], "the box takes what is drawn");
+        // What a dialog still lists of it lights nothing.
+        let lit = |app: &SolveApp| {
+            let scene = build_highlight(app).merged();
+            scene.tris.len() + scene.lines.len()
+        };
+        h.app.run("select.clear", json!({})).unwrap();
+        h.app.viewport.hover = None;
+        let none = lit(&h.app);
+        let face = |body: &str| Some(Hit::Face { body: body.into(), index: 0, point: Vec3::new(10.0, 10.0, 5.0) });
+        h.app.viewport.hover = face("Front");
+        assert_eq!(lit(&h.app), none, "a face of a body at 0%");
+        // A dialog that takes its source from it shows it as its appearance says.
+        h.app.start("solid.fillet");
+        let dialog = |app: &mut SolveApp, sources: Vec<String>| app.dialog.as_mut().unwrap().edit_source_bodies = sources;
+        assert!(!h.app.body_drawn("Front"));
+        dialog(&mut h.app, vec!["Front".into()]);
+        assert!(h.app.body_drawn("Front") && h.app.display_opacity("Front") == 1.0);
+        h.app.run("browser.opacity", json!({"percent": 40, "bodies": ["Front"]})).unwrap();
+        assert_eq!(h.app.display_opacity("Front"), 0.4, "above 0% it is drawn as set");
+        h.app.dialog = None;
         h.app.run("browser.opacity", json!({"percent": 100, "bodies": ["Front"]})).unwrap();
+        h.app.viewport.hover = face("Front");
+        assert!(lit(&h.app) > none, "at 100% the same face lights");
+        h.app.viewport.hover = None;
         assert_eq!(hit(&mut h).as_deref(), Some("Front"));
         assert_eq!(boxed(&mut h), ["Behind", "Front"]);
     }
