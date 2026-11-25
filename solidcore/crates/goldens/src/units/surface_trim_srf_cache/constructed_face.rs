@@ -19,7 +19,7 @@ use super::{SolidError, Surface, SurfaceCacheOptions, TrimSrfCache};
 
 fn operation_status<T>(result: &solidcore::Result<T>) -> solidcore::Result<f64> {
     match result {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         Err(error) if error.is_unported() => Err(error.clone()),
         Err(error) => Ok(super::status(error)),
     }

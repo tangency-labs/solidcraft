@@ -326,8 +326,8 @@ fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, So
             o.push(f64::from(crate::status::kind_slot(&e, e.sm_status().unwrap_or(solidcore::error::SM_ERR))));
             Ok(None)
         }
-        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
-            o.push(NULL_DEREF);
+        Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
+            o.push(crate::status::kind_slot(&kernel_err, NULL_DEREF));
             Ok(None)
         }
         Err(e) => Err(e),
@@ -588,7 +588,7 @@ fn run_rust_merge(i: &Inputs, p: Prepared) -> Result<Vec<f64>, SolidError> {
                     }
                 };
                 if refuse {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     return Ok(o);
                 }
             }
@@ -619,7 +619,7 @@ fn run_rust_merge(i: &Inputs, p: Prepared) -> Result<Vec<f64>, SolidError> {
         } => {
             o.push(2.0);
             if !class_ok(&two, &c1) || !class_ok(&two, &c2) {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let mut cc1 = new_class(&k, &c1)?;
@@ -638,11 +638,11 @@ fn run_rust_merge(i: &Inputs, p: Prepared) -> Result<Vec<f64>, SolidError> {
         MergeR::CoincidentSurfaces { s1, s2 } => {
             o.push(3.0);
             let (Some(s1), Some(s2)) = (s1, s2) else {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             };
             if face_of_surface(&two, s1).is_none() || face_of_surface(&two, s2).is_none() {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let r = ti.merge_coincident_surfaces(&mut k, &mut two, s1, s2, Some(TI_HANDLE));

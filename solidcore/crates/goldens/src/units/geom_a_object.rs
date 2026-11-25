@@ -738,14 +738,14 @@ impl RustRun {
             }
             op::MR_SET_OPERATION => {
                 let Some(at) = self.resolve(a1) else {
-                    return Ok(Step::Status(ST_INVALID));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::NoSuchEntity, ST_INVALID)));
                 };
                 let Some(d) = self
                     .store
                     .get_mut(at)
                     .and_then(Attribute::merge_region_data_mut)
                 else {
-                    return Ok(Step::Status(ST_SKIP));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                 };
                 d.set_operation(a2 as i32);
                 Ok(Step::Status(0))
@@ -753,7 +753,7 @@ impl RustRun {
             op::ADD | op::REMOVE => {
                 let key = self.obj(a1)?.r.key;
                 let Some(at) = self.resolve(a2) else {
-                    return Ok(Step::Status(ST_INVALID));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::NoSuchEntity, ST_INVALID)));
                 };
                 if code == op::ADD {
                     if let Some(c) = usize::try_from(a2)
@@ -820,7 +820,7 @@ impl RustRun {
                     ));
                 } else {
                     if !self.notify_is_safe(opn, a2, [a3, a4, a5])? {
-                        return Ok(Step::Status(ST_SKIP));
+                        return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                     }
                     tryr!(a_object::notify_with_regions(
                         &mut self.store,
@@ -841,7 +841,7 @@ impl RustRun {
             op::COPY_CONSTRUCT => {
                 let src = self.obj(a1)?.r.key;
                 if self.objs.len() >= MAX_OBJECTS {
-                    return Ok(Step::Status(ST_SKIP));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                 }
                 let new = Self::key(self.objs.len());
                 self.objs.push(Obj {
@@ -888,7 +888,7 @@ impl RustRun {
             op::CHECK_OUT | op::CHECK_IN | op::SOFT_DELETE | op::GUARD_OPEN => {
                 let c = self.cache_arg(a1)?;
                 if !self.live(c) {
-                    return Ok(Step::Status(ST_SKIP));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                 }
                 match code {
                     op::CHECK_OUT => tryr!(self.caches.check_out_cache(c)),
@@ -906,10 +906,10 @@ impl RustRun {
             }
             op::GUARD_CLOSE => {
                 let Some(g) = self.guards.pop() else {
-                    return Ok(Step::Status(ST_SKIP));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                 };
                 if !self.live(g.cache()) {
-                    return Ok(Step::Status(ST_SKIP));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                 }
                 tryr!(g.release(&mut self.caches));
                 Ok(Step::Status(0))
@@ -918,7 +918,7 @@ impl RustRun {
                 cache_type(a3)?;
                 let cur = self.obj(a1)?.a.cache_obj();
                 if !self.live(cur) {
-                    return Ok(Step::Status(ST_SKIP));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                 }
                 let mut o = self.obj(a1)?.a;
                 tryr!(a_object::delete_objects_cache(&mut self.caches, &mut o));

@@ -533,7 +533,7 @@ fn put_state(k: &Kernel, o: &mut Vec<f64>, s: &Cone) -> solidcore::Result<()> {
     let mx = s.max_analytic_domain(k)?;
     o.extend([mx.min().x, mx.min().y, mx.max().x, mx.max().y]);
     let apex = s.apex(k)?;
-    o.push(if apex.is_cylinder { SM_ERR } else { SUCCESS });
+    o.push(if apex.is_cylinder { SM_ERR } else { crate::status::ok_slot(SUCCESS) });
     o.push(flag(apex.is_cylinder));
     push_v(o, apex.point);
     o.push(apex.param);
@@ -605,12 +605,12 @@ fn rust_op(k: &Kernel, s: &Cone, op: &OpIn, o: &mut Vec<f64>) -> Result<solidcor
             let uv = Point2::new(*u, *v);
             if *point {
                 s.evaluate_step_point(uv).map(|p| {
-                    o.push(SUCCESS);
+                    o.push(crate::status::ok_slot(SUCCESS));
                     push_v(o, p);
                 })
             } else {
                 s.evaluate_step(uv, *hu, *hv).map(|d| {
-                    o.push(SUCCESS);
+                    o.push(crate::status::ok_slot(SUCCESS));
                     for v in d {
                         push_v(o, v);
                     }
@@ -634,26 +634,26 @@ fn rust_op(k: &Kernel, s: &Cone, op: &OpIn, o: &mut Vec<f64>) -> Result<solidcor
                 non_zero_tangents: *non_zero,
             };
             s.evaluate(k, Point2::new(*u, *v), *hu, *hv, flags).map(|d| {
-                o.push(SUCCESS);
+                o.push(crate::status::ok_slot(SUCCESS));
                 for v in d {
                     push_v(o, v);
                 }
             })
         }
         OpIn::EvalPoint { u, v } => s.evaluate_point(k, Point2::new(*u, *v)).map(|p| {
-            o.push(SUCCESS);
+            o.push(crate::status::ok_slot(SUCCESS));
             push_v(o, p);
         }),
         OpIn::ToStep { u, v } => s.convert_uv_from_nurbs_to_step(k, Point2::new(*u, *v)).map(|p| {
-            o.extend([SUCCESS, p.x, p.y]);
+            o.extend([crate::status::ok_slot(SUCCESS), p.x, p.y]);
         }),
         OpIn::ToNurbs { u, v } => {
             if s.rev().polar_curve().is_none() {
-                o.push(SC_ERR_ARG);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, SC_ERR_ARG));
                 Ok(())
             } else {
                 s.convert_uv_from_step_to_nurbs(k, Point2::new(*u, *v)).map(|p| {
-                    o.extend([SUCCESS, p.x, p.y]);
+                    o.extend([crate::status::ok_slot(SUCCESS), p.x, p.y]);
                 })
             }
         }
@@ -661,20 +661,20 @@ fn rust_op(k: &Kernel, s: &Cone, op: &OpIn, o: &mut Vec<f64>) -> Result<solidcor
             let d = dom.map(|[a, b, c, e]| Extent2d::from_bounds(a, b, c, e));
             s.create_iso_parametric_curve(k, param_of(*param), *iso, d.as_ref(), *uv)
                 .map(|c| {
-                    o.extend([SUCCESS, c.max_gap_3d]);
+                    o.extend([crate::status::ok_slot(SUCCESS), c.max_gap_3d]);
                     put_curve(o, Some(&c.curve));
                     put_curve(o, c.uv_iso_curve.as_ref());
                 })
         }
         OpIn::IsoCircle { p, tol } => {
             if s.rev().polar_curve().is_none() {
-                o.push(SC_ERR_ARG);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, SC_ERR_ARG));
                 Ok(())
             } else {
                 // (WR-704: the function makes no STEP inversion, so the reference shim's
                 // test of one before the call no longer applies)
                 s.create_iso_circle_from_point(k, v3(*p), *tol).map(|c| {
-                    o.push(SUCCESS);
+                    o.push(crate::status::ok_slot(SUCCESS));
                     put_curve(o, c.as_ref());
                 })
             }
@@ -682,11 +682,11 @@ fn rust_op(k: &Kernel, s: &Cone, op: &OpIn, o: &mut Vec<f64>) -> Result<solidcor
         OpIn::Inversion { p, tol, guess } => s
             .step_inversion(k, v3(*p), *tol, guess.map(|[a, b]| Point2::new(a, b)))
             .map(|inv| {
-                o.push(if inv.inside { SUCCESS } else { SM_ERR });
+                o.push(if inv.inside { crate::status::ok_slot(SUCCESS) } else { SM_ERR });
                 o.extend([inv.uv.x, inv.uv.y, f64::from(inv.location as u8)]);
             }),
         OpIn::Positive { p } => s.positive_point(k, v3(*p)).map(|pp| {
-            o.extend([SUCCESS, flag(pp.negated)]);
+            o.extend([crate::status::ok_slot(SUCCESS), flag(pp.negated)]);
             push_v(o, pp.point);
             o.push(pp.apex_param);
         }),
@@ -695,7 +695,7 @@ fn rust_op(k: &Kernel, s: &Cone, op: &OpIn, o: &mut Vec<f64>) -> Result<solidcor
             let mut t = s.clone();
             t.adjust_step_uv_domain(&Kernel::default(), &Extent2d::from_bounds(a, b, c, e))
                 .and_then(|()| {
-                    o.push(SUCCESS);
+                    o.push(crate::status::ok_slot(SUCCESS));
                     put_state(k, o, &t)
                 })
         }
@@ -708,7 +708,7 @@ fn rust_op(k: &Kernel, s: &Cone, op: &OpIn, o: &mut Vec<f64>) -> Result<solidcor
             let a2p = Axis2Placement::new(v3(*origin), v3(*x), v3(*y));
             let mut t = s.clone();
             t.transform(k, &a2p, scale.map(v3)).and_then(|()| {
-                o.push(SUCCESS);
+                o.push(crate::status::ok_slot(SUCCESS));
                 put_state(k, o, &t)
             })
         }
@@ -721,14 +721,14 @@ fn rust_op(k: &Kernel, s: &Cone, op: &OpIn, o: &mut Vec<f64>) -> Result<solidcor
                     o.push(status(&e));
                 }
                 Ok(oc) => {
-                    o.extend([SUCCESS, flag(s.approx_eq(&oc)), flag(oc.approx_eq(s))]);
+                    o.extend([crate::status::ok_slot(SUCCESS), flag(s.approx_eq(&oc)), flag(oc.approx_eq(s))]);
                 }
             }
             Ok(())
         }
         OpIn::Copy {} => {
             let c = s.clone();
-            o.extend([SUCCESS, flag(c.approx_eq(s))]);
+            o.extend([crate::status::ok_slot(SUCCESS), flag(c.approx_eq(s))]);
             put_state(k, o, &c)
         }
         OpIn::Coincidence { .. } => return Err(harness("not a cone op")),
@@ -800,7 +800,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         );
         let flat = match r {
             Ok(c) => vec![
-                SUCCESS,
+                crate::status::ok_slot(SUCCESS),
                 flag(c.coincident),
                 c.reversed.map_or(2.0, flag),
             ],
@@ -824,7 +824,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             o.push(status(&e));
         }
         Ok(cone) => {
-            o.push(SUCCESS);
+            o.push(crate::status::ok_slot(SUCCESS));
             let at = o.len();
             if let Err(e) = rust_op(&k, &cone, &i.op, &mut o)? {
                 if let Some(out) = Output::unported(&e) {
@@ -959,7 +959,7 @@ pub(super) fn const_make_rust(value: Value) -> Result<Output, HarnessError> {
     }
     fn eval(k: &Kernel, s: &Surface, uv: Point2, out: &mut Vec<f64>) -> solidcore::Result<()> {
         match s.evaluate_point(k, uv) {
-            Ok(p) => { out.push(SUCCESS); push_v(out, p); }
+            Ok(p) => { out.push(crate::status::ok_slot(SUCCESS)); push_v(out, p); }
             Err(e) if e.is_unported() => return Err(e),
             Err(e) => out.push(status(&e)),
         }
@@ -975,7 +975,7 @@ pub(super) fn const_make_rust(value: Value) -> Result<Output, HarnessError> {
         Ok(c) => Surface::from(c),
         Err(e) => return const_make_output(&[status(&e)]),
     };
-    let mut out = vec![SUCCESS, SUCCESS];
+    let mut out = vec![crate::status::ok_slot(SUCCESS), crate::status::ok_slot(SUCCESS)];
     let result = (|| -> solidcore::Result<()> {
         out.push(flag(has_nurb(&surface)));
         let d = surface.natural_uv_domain_with_nurb(&k)?;
@@ -985,7 +985,7 @@ pub(super) fn const_make_rust(value: Value) -> Result<Output, HarnessError> {
         eval(&k, &surface, d.evaluate(0.3, 0.6), &mut out)?;
         match surface.copy(&k) {
             Ok(copy) => {
-                out.push(SUCCESS);
+                out.push(crate::status::ok_slot(SUCCESS));
                 out.push(flag(has_nurb(&copy)));
                 out.push(flag(copy.approx_eq(&k, &surface)?));
                 eval(&k, &copy, d.evaluate(0.7, 0.2), &mut out)?;
@@ -995,7 +995,7 @@ pub(super) fn const_make_rust(value: Value) -> Result<Output, HarnessError> {
         }
         let rot = Axis2Placement::new(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(-1.0, 0.0, 0.0));
         match surface.transform(&k, &rot, None) {
-            Ok(()) => out.push(SUCCESS),
+            Ok(()) => out.push(crate::status::ok_slot(SUCCESS)),
             Err(e) if e.is_unported() => return Err(e),
             Err(e) => out.push(status(&e)),
         }
@@ -1051,7 +1051,7 @@ pub(super) fn const_make_nurb_rust(k: &Kernel, built: solidcore::Result<solidcor
     }
     fn eval(k: &Kernel, s: &Surface, uv: Point2, out: &mut Vec<f64>) -> solidcore::Result<()> {
         match s.evaluate_point(k, uv) {
-            Ok(p) => { out.push(SUCCESS); push_v(out, p); }
+            Ok(p) => { out.push(crate::status::ok_slot(SUCCESS)); push_v(out, p); }
             Err(e) if e.is_unported() => return Err(e),
             Err(e) => out.push(status(&e)),
         }
@@ -1078,14 +1078,14 @@ pub(super) fn const_make_nurb_rust(k: &Kernel, built: solidcore::Result<solidcor
             let uv = d.evaluate(f64::from(c & 1), f64::from(c >> 1));
             eval(k, &surface, uv, &mut out)?;
             match surface.evaluate_normal(k, uv, Side::Left, Side::Left) {
-                Ok(n) => { out.push(SUCCESS); push_v(&mut out, n); }
+                Ok(n) => { out.push(crate::status::ok_slot(SUCCESS)); push_v(&mut out, n); }
                 Err(e) if e.is_unported() => return Err(e),
                 Err(e) => out.push(status(&e)),
             }
         }
         match surface.copy(k) {
             Ok(copy) => {
-                out.push(SUCCESS);
+                out.push(crate::status::ok_slot(SUCCESS));
                 out.push(flag(nurb(&copy).is_some()));
                 put_nurb(&copy, &mut out);
                 out.push(flag(copy.approx_eq(k, &surface)?));
@@ -1096,7 +1096,7 @@ pub(super) fn const_make_nurb_rust(k: &Kernel, built: solidcore::Result<solidcor
         }
         let rot = Axis2Placement::new(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(-1.0, 0.0, 0.0));
         match surface.transform(k, &rot, None) {
-            Ok(()) => out.push(SUCCESS),
+            Ok(()) => out.push(crate::status::ok_slot(SUCCESS)),
             Err(e) if e.is_unported() => return Err(e),
             Err(e) => out.push(status(&e)),
         }
@@ -1127,7 +1127,7 @@ pub(super) fn common_rust(value: Value, database: Option<&Value>, lazy: bool, su
     let i: Inputs = serde_json::from_value(value).map_err(|e| harness(e.to_string()))?;
     let k = Kernel::default();
     let cone = i.cone.as_ref().ok_or_else(|| harness("missing cone"))?;
-    let mut out = vec![SUCCESS];
+    let mut out = vec![crate::status::ok_slot(SUCCESS)];
     let built = if let Some(database) = database {
         use solidcore::topology::database_io::{DatabaseReader, FileType};
         let bytes: Vec<u8> = serde_json::from_value(database.get("bytes").ok_or_else(|| harness("database bytes"))?.clone()).map_err(|e| harness(e.to_string()))?;
@@ -1145,17 +1145,17 @@ pub(super) fn common_rust(value: Value, database: Option<&Value>, lazy: bool, su
         let low = natural.evaluate(0.2, 0.2); let high = natural.evaluate(0.8, 0.8);
         let domain = if subdomain { Extent2d::from_bounds(low.x, low.y, high.x, high.y) } else { natural };
         let result = (|| -> solidcore::Result<()> {
-            out.push(SUCCESS);
+            out.push(crate::status::ok_slot(SUCCESS));
             let tolerance = k.tolerances.zone_tol_3d / 10.0;
             out.push(flag(surface.is_degenerate_point(&k, tolerance, Some(&domain))?));
             out.push(flag(surface.is_degenerate_curve(&k, solidcore::math::EFF_ZERO_DEG, Some(&domain), tolerance)?));
             match surface.evaluate_normal(&k, domain.mid(), Side::Left, Side::Left) {
-                Ok(n) => { out.push(SUCCESS); push_v(&mut out, n); }
+                Ok(n) => { out.push(crate::status::ok_slot(SUCCESS)); push_v(&mut out, n); }
                 Err(e) if e.is_unported() => return Err(e),
                 Err(e) => out.push(status(&e)),
             }
             match surface.calculate_bounding_box(&k, &domain, [true,false,false], false) {
-                Ok(b) => { out.push(SUCCESS); let b = b.normal_box.ok_or_else(|| SolidError::invalid_input("common_queries", "missing box"))?;
+                Ok(b) => { out.push(crate::status::ok_slot(SUCCESS)); let b = b.normal_box.ok_or_else(|| SolidError::invalid_input("common_queries", "missing box"))?;
                     push_v(&mut out, b.min()); push_v(&mut out, b.max()); }
                 Err(e) if e.is_unported() => return Err(e),
                 Err(e) => out.push(status(&e)),
@@ -1169,7 +1169,7 @@ pub(super) fn common_rust(value: Value, database: Option<&Value>, lazy: bool, su
         use solidcore::surface::surface::p2::SurfaceEval;
         let OpIn::EvalPoint {u, v} = i.op else { return Err(harness("lazy parameters")); };
         let mut eval = SurfaceEval::with_uv(&k, Some(&surface), u, v);
-        out.push(SUCCESS);
+        out.push(crate::status::ok_slot(SUCCESS));
         for p in [eval.pos(), eval.su(), eval.sv(), eval.suu(), eval.suv(), eval.svv()] {
             push_v(&mut out, p.map_err(|e| harness(e.to_string()))?);
         }
@@ -1181,46 +1181,46 @@ pub(super) fn common_rust(value: Value, database: Option<&Value>, lazy: bool, su
             surface.evaluate(&k, uv(*u, *v), *hu, *hv, EvaluateFlags {
                 u_side: side(*u_left), v_side: side(*v_left), only_upper_half: *upper,
                 non_zero_tangents: *non_zero,
-            }).map(|d| { out.push(SUCCESS); for p in d.into_iter().flatten() { push_v(&mut out, p); } })
+            }).map(|d| { out.push(crate::status::ok_slot(SUCCESS)); for p in d.into_iter().flatten() { push_v(&mut out, p); } })
         }
         OpIn::EvalPoint { u, v } => surface.evaluate_point(&k, uv(*u, *v))
-            .map(|p| { out.push(SUCCESS); push_v(&mut out, p); }),
+            .map(|p| { out.push(crate::status::ok_slot(SUCCESS)); push_v(&mut out, p); }),
         OpIn::EvalStep { u, v, hu, hv, point } => {
             if *point { surface.evaluate_step_point(&k, uv(*u, *v))
-                .map(|p| { out.push(SUCCESS); push_v(&mut out, p); }) }
+                .map(|p| { out.push(crate::status::ok_slot(SUCCESS)); push_v(&mut out, p); }) }
             else { surface.evaluate_step(&k, uv(*u, *v), *hu, *hv, EvaluateFlags::default())
-                .map(|d| { out.push(SUCCESS); for p in d.into_iter().flatten() { push_v(&mut out, p); } }) }
+                .map(|d| { out.push(crate::status::ok_slot(SUCCESS)); for p in d.into_iter().flatten() { push_v(&mut out, p); } }) }
         }
         OpIn::ToStep { u, v } => surface.convert_uv_from_nurbs_to_step(&k, uv(*u, *v))
-            .map(|p| out.extend([SUCCESS, p.x, p.y])),
+            .map(|p| out.extend([crate::status::ok_slot(SUCCESS), p.x, p.y])),
         OpIn::ToNurbs { u, v } => {
             let no_polar = matches!(surface.kind(), SurfaceKind::Cone(c) if c.rev().polar_curve().is_none());
-            if no_polar { out.push(SC_ERR_ARG); Ok(()) }
+            if no_polar { out.push(crate::status::state_slot(crate::status::RunnerState::Skipped, SC_ERR_ARG)); Ok(()) }
             else { surface.convert_uv_from_step_to_nurbs(&k, uv(*u, *v))
-                .map(|p| out.extend([SUCCESS, p.x, p.y])) }
+                .map(|p| out.extend([crate::status::ok_slot(SUCCESS), p.x, p.y])) }
         }
         OpIn::Iso { param, iso, dom, uv } => {
             let domain = dom.map(|[a,b,c,d]| Extent2d::from_bounds(a,b,c,d));
             surface.create_iso_parametric_curve(&k, param_of(*param), *iso, 0.0, domain.as_ref(), *uv)
-                .map(|c| { out.extend([SUCCESS, c.max_gap_3d]); put_curve(&mut out, Some(&c.curve)); put_curve(&mut out, c.uv_iso_curve.as_ref()); })
+                .map(|c| { out.extend([crate::status::ok_slot(SUCCESS), c.max_gap_3d]); put_curve(&mut out, Some(&c.curve)); put_curve(&mut out, c.uv_iso_curve.as_ref()); })
         }
         OpIn::Inversion { p, tol, guess } => {
             let natural = surface.step_uv_domain();
             let domain = if subdomain { { let low = natural.evaluate(0.2, 0.2); let high = natural.evaluate(0.8, 0.8); Extent2d::from_bounds(low.x,low.y,high.x,high.y) } } else { natural };
             surface.step_inversion(&k, &domain, v3(*p), *tol, guess.map(|[u,v]| Point2::new(u,v)))
-                .map(|(uv,location)| out.extend([SUCCESS,uv.x,uv.y,f64::from(location as u8)]))
+                .map(|(uv,location)| out.extend([crate::status::ok_slot(SUCCESS),uv.x,uv.y,f64::from(location as u8)]))
         }
         OpIn::Copy {} => surface.copy(&k).and_then(|copy| {
-            out.extend([SUCCESS, flag(copy.approx_eq(&k, &surface)?)]);
+            out.extend([crate::status::ok_slot(SUCCESS), flag(copy.approx_eq(&k, &surface)?)]);
             match copy.kind() { SurfaceKind::Cone(c) => put_state(&k, &mut out, c),
                 _ => Err(SolidError::invalid_input("difftest::common_cone", "copy erased cone class")) }
         }),
         // Edits are still exercised through the common API. Failed dependencies remain deferrals.
         OpIn::Adjust { dom } => surface.adjust_step_uv_domain(&k, &Extent2d::from_bounds(dom[0], dom[1], dom[2], dom[3]))
-            .and_then(|()| { out.push(SUCCESS); match surface.kind() { SurfaceKind::Cone(c) => put_state(&k, &mut out, c), _ => unreachable!() } }),
+            .and_then(|()| { out.push(crate::status::ok_slot(SUCCESS)); match surface.kind() { SurfaceKind::Cone(c) => put_state(&k, &mut out, c), _ => unreachable!() } }),
         OpIn::Transform { origin, x, y, scale } => surface.transform(&k,
             &Axis2Placement::new(v3(*origin), v3(*x), v3(*y)), scale.map(v3))
-            .and_then(|()| { out.push(SUCCESS); match surface.kind() { SurfaceKind::Cone(c) => put_state(&k, &mut out, c), _ => unreachable!() } }),
+            .and_then(|()| { out.push(crate::status::ok_slot(SUCCESS)); match surface.kind() { SurfaceKind::Cone(c) => put_state(&k, &mut out, c), _ => unreachable!() } }),
         _ => return Err(harness("unsupported common surface operation")),
     };
     if let Err(e) = r {

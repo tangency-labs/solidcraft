@@ -849,7 +849,7 @@ fn run_op(run: &mut Run, si: &mut SurfaceIntersector<'_>, op: &OpIn, o: &mut Vec
         OpIn::AddCurve { i } | OpIn::AddStart { i } | OpIn::AddThrough { i } => {
             pt_of(si, *i)?;
             if si.is_linked(id(*i)) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else {
                 let r = match op {
                     OpIn::AddCurve { .. } => si.add_point_to_curve(id(*i)),
@@ -902,7 +902,7 @@ fn run_op(run: &mut Run, si: &mut SurfaceIntersector<'_>, op: &OpIn, o: &mut Vec
         OpIn::Trace { i } => {
             pt_of(si, *i)?;
             if si.curve_points().is_empty() && si.is_linked(id(*i)) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else {
                 let r = si.trace_curve(&k, id(*i), &run.outs.curves_3d);
                 st(o, r)?;
@@ -929,7 +929,7 @@ fn run_op(run: &mut Run, si: &mut SurfaceIntersector<'_>, op: &OpIn, o: &mut Vec
             ang_tol,
         } => {
             if points_rejected(si, points) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else {
                 let ids: Vec<TsectId> = points.iter().map(|&i| id(i)).collect();
                 let opts = PointIntersectionOptions {
@@ -957,7 +957,7 @@ fn run_op(run: &mut Run, si: &mut SurfaceIntersector<'_>, op: &OpIn, o: &mut Vec
         } => {
             let curve = run.curves.get(*curve).ok_or_else(|| harness("curve index"))?;
             if points_rejected(si, points) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else {
                 let ids: Vec<TsectId> = points.iter().map(|&i| id(i)).collect();
                 let opts = LawIntersectionOptions {

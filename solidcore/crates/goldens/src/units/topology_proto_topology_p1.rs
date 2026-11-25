@@ -833,7 +833,7 @@ fn st3<T>(r: solidcore::Result<T>) -> Result<Result<T, f64>, Fail> {
 /// The status of a call (0 on success).
 fn st0<T>(r: solidcore::Result<T>) -> Result<f64, Fail> {
     Ok(match st(r)? {
-        Ok(_) => 0.0,
+        Ok(_) => crate::status::ok_slot(0.0),
         Err(s) => s,
     })
 }

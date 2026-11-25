@@ -832,7 +832,7 @@ impl From<HarnessError> for Stop {
 /// The status of `r` (deferring on `Unported`).
 fn st<T>(r: &solidcore::Result<T>) -> Result<f64, Stop> {
     match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         Err(e) => match Output::unported(e) {
             Some(d) => Err(Stop::Deferred(Box::new(d))),
             None => Ok(status(e)),

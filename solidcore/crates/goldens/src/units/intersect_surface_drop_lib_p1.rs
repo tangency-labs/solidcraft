@@ -603,7 +603,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             test,
         } => {
             let Some(s) = rust_surface(k, surface)? else {
-                o.push(NO_SURFACE);
+                o.push(crate::status::state_slot(crate::status::RunnerState::NotReached, NO_SURFACE));
                 return Ok(());
             };
             let p = pt_in(pt)?;
@@ -616,7 +616,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                 test_bdry(*test),
             ))? {
                 Ok(poc) => o.push(f64::from(poc.code())),
-                Err(_) => o.push(REJECTED),
+                Err(kernel_err) => o.push(crate::status::kind_slot(&kernel_err, REJECTED)),
             }
         }
         Inputs::Span {
@@ -630,7 +630,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             refine,
         } => {
             let Some(s) = rust_surface(k, surface)? else {
-                o.push(NO_SURFACE);
+                o.push(crate::status::state_slot(crate::status::RunnerState::NotReached, NO_SURFACE));
                 return Ok(());
             };
             let c = rust_curve(k, curve)?;
@@ -660,7 +660,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             end,
         } => {
             let Some(s) = rust_surface(k, surface)? else {
-                o.push(NO_SURFACE);
+                o.push(crate::status::state_slot(crate::status::RunnerState::NotReached, NO_SURFACE));
                 return Ok(());
             };
             let a = pt_in(start)?;
@@ -718,7 +718,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                         put_vec(o, p);
                     }
                 }
-                Err(_) => o.push(REJECTED),
+                Err(kernel_err) => o.push(crate::status::kind_slot(&kernel_err, REJECTED)),
             }
         }
         Inputs::Dups { uv_tol, uvs } => {
@@ -749,7 +749,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             tol,
         } => {
             let Some(s) = rust_surface(k, surface)? else {
-                o.push(NO_SURFACE);
+                o.push(crate::status::state_slot(crate::status::RunnerState::NotReached, NO_SURFACE));
                 return Ok(());
             };
             let c = rust_curve(k, curve)?;
@@ -786,7 +786,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             on_surface,
         } => {
             let Some(s) = rust_surface(k, surface)? else {
-                o.push(NO_SURFACE);
+                o.push(crate::status::state_slot(crate::status::RunnerState::NotReached, NO_SURFACE));
                 return Ok(());
             };
             let c = rust_curve(k, curve)?;

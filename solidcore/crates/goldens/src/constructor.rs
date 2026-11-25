@@ -195,7 +195,7 @@ fn make_table_curve(k: &Kernel, c: &ScriptCurve) -> Result<Curve, SolidError> {
 /// The geometry status of a construction: `0` made, else its upstream status.
 fn geometry_status<T>(r: &Result<T, SolidError>, notes: &mut Vec<String>) -> Result<f64, Deferred> {
     match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         Err(e) => match outcome(e, notes)? {
             Outcome::Code(c) => Ok(c),
             Outcome::Crash => Ok(-1.0),
@@ -310,7 +310,7 @@ fn run_into(
                 natural,
                 domain,
             } => match surfaces.get_mut(*surface).and_then(Option::take) {
-                None => Ok(SKIPPED),
+                None => Ok(crate::status::state_slot(crate::status::RunnerState::NotReached, SKIPPED)),
                 Some(s) => {
                     // `GetNaturalUVDomain`, which makes a lazy analytic's NURB
                     // (`Surface::natural_uv_domain_with_nurb`)
@@ -350,7 +350,7 @@ fn run_into(
             Op::SetEdgeCurve { curve, uv } => match curve {
                 None => status(&c.set_edge_curve(k, None, *uv), notes)?,
                 Some(j) => match curves.get_mut(*j).and_then(Option::take) {
-                    None => Ok(SKIPPED),
+                    None => Ok(crate::status::state_slot(crate::status::RunnerState::NotReached, SKIPPED)),
                     Some(cv) => status(&c.set_edge_curve(k, Some(cv), *uv), notes)?,
                 },
             },
@@ -379,7 +379,7 @@ fn run_into(
             }
             Op::AdjustStepUvDomain { surface, domain } => {
                 match surfaces.get_mut(*surface).and_then(Option::as_mut) {
-                    None => Ok(SKIPPED),
+                    None => Ok(crate::status::state_slot(crate::status::RunnerState::NotReached, SKIPPED)),
                     Some(s) => {
                         let d = Extent2d::from_bounds(domain[0], domain[1], domain[2], domain[3]);
                         status(&s.adjust_step_uv_domain(k, &d), notes)?
@@ -466,7 +466,7 @@ fn pointer<T>(
     notes: &mut Vec<String>,
 ) -> Result<Result<f64, ()>, Deferred> {
     Ok(match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         Err(e) => match outcome(e, notes)? {
             Outcome::Code(_) => Ok(1.0),
             Outcome::Crash => Err(()),
@@ -480,7 +480,7 @@ fn status<T>(
     notes: &mut Vec<String>,
 ) -> Result<Result<f64, ()>, Deferred> {
     Ok(match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         Err(e) => match outcome(e, notes)? {
             Outcome::Code(c) => Ok(c),
             Outcome::Crash => Err(()),
@@ -711,7 +711,7 @@ fn counts(k: &mut Kernel, b: &Brep) -> Result<Vec<f64>, SolidError> {
 /// The status of a stage call (as `step.rs` reports it).
 fn stage_status<T>(r: &Result<T, SolidError>, notes: &mut Vec<String>) -> Result<f64, Deferred> {
     match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         Err(e) => match outcome(e, notes)? {
             Outcome::Code(c) => Ok(c),
             Outcome::Crash => Ok(f64::from(solidcore::error::SM_ERR_INVALID_INPUT)),

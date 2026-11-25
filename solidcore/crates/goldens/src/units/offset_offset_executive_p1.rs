@@ -970,7 +970,7 @@ fn decode(input: &Inputs, raw: &[f64]) -> HResult<Output> {
     if tag == -1 {
         let status = snapshot.integer()?;
         snapshot.done()?;
-        if status == i64::from(NATIVE_SUCCESS) {
+        if status == i64::from(crate::status::ok_slot(NATIVE_SUCCESS)) {
             return Err(bad("success tagged as rejected fixture"));
         }
         return Ok(Output::rejected(format!(
@@ -1040,7 +1040,7 @@ fn decode(input: &Inputs, raw: &[f64]) -> HResult<Output> {
                         integers.extend(snapshot.integers(4)?);
                         let status = *at(&integers, 1)?;
                         output = output.ints(&format!("{key}.result"), integers);
-                        if status == i64::from(NATIVE_SUCCESS) {
+                        if status == i64::from(crate::status::ok_slot(NATIVE_SUCCESS)) {
                             output = output
                                 .int(&format!("{key}.kind"), snapshot.integer()?)
                                 .values(&format!("{key}.domain"), snapshot.take(4)?.to_vec());
@@ -1246,7 +1246,7 @@ impl From<SolidError> for RunError {
 type RResult<T> = Result<T, RunError>;
 fn operation<T>(result: solidcore::Result<T>) -> RResult<(i64, Option<T>)> {
     match result {
-        Ok(value) => Ok((i64::from(NATIVE_SUCCESS), Some(value))),
+        Ok(value) => Ok((i64::from(crate::status::ok_slot(NATIVE_SUCCESS)), Some(value))),
         Err(SolidError::Upstream { code, .. }) => Ok((i64::from(code), None)),
         // a failure in solidcore's terms (#2615): its C++ comparison status
         Err(e @ SolidError::Failed(_)) => Ok((i64::from(crate::status::kind_slot(&e, e.sm_status().unwrap_or(solidcore::error::SM_ERR))), None)),
@@ -1708,7 +1708,7 @@ fn rust_config(k: &Kernel, input: &Config) -> HResult<Output> {
     let mut statuses = Vec::new();
     for &[first, second] in &input.relations {
         executive.relate_edgeuses(*at(&originals, first)?, *at(&offsets, second)?);
-        statuses.push(i64::from(NATIVE_SUCCESS));
+        statuses.push(i64::from(crate::status::ok_slot(NATIVE_SUCCESS)));
     }
     Ok(output
         .int("original_edgeuse_count", originals.len() as i64)
@@ -2664,7 +2664,7 @@ fn rust_replace(input: &ReplaceIn) -> RResult<Output> {
                 (1.0 - fv) * n.min().y + fv * n.max().y,
             );
             match surface.evaluate_point(&kernel, uv) {
-                Ok(p) => raw.extend([f64::from(NATIVE_SUCCESS), p.x, p.y, p.z]),
+                Ok(p) => raw.extend([f64::from(crate::status::ok_slot(NATIVE_SUCCESS)), p.x, p.y, p.z]),
                 Err(SolidError::Upstream { code, .. }) => {
                     raw.extend([f64::from(code), 0.0, 0.0, 0.0]);
                 }

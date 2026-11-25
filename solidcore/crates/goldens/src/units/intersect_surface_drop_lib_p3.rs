@@ -151,7 +151,7 @@ fn put_record(o: &mut Vec<f64>, f: &DropCurveFail<NoObject>) -> Result<(), Harne
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let k = crate::runner_kernel();
     let Some(srf) = rust_surface(&k, &i.surface)? else {
-        return Ok(Output::new().values("rec", vec![NO_SURFACE]));
+        return Ok(Output::new().values("rec", vec![crate::status::state_slot(crate::status::RunnerState::NotReached, NO_SURFACE)]));
     };
     let curve = rust_curve(&k, &i.curve)?;
     let mut fail: DropCurveFail<NoObject> = DropCurveFail::default();

@@ -612,7 +612,7 @@ macro_rules! tri {
 /// The status of `r` (`0` for `Ok`), or the deferral.
 fn st_of<T>(r: &solidcore::Result<T>) -> Result<f64, Box<Output>> {
     match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         Err(e) => match Output::unported(e) {
             Some(o) => Err(Box::new(o)),
             None => Ok(status(e)),

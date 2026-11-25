@@ -1005,7 +1005,7 @@ fn rust_static(i: &Inputs, o: &mut Vec<f64>) -> Result<Result<(), SolidError>, H
                         Some(_) if !both => Some(vec![-2.0]),
                         Some(r) => {
                             let st = match e.evaluate(&k, *r) {
-                                Ok(_) => 0.0,
+                                Ok(_) => crate::status::ok_slot(0.0),
                                 Err(err @ SolidError::Unported { .. }) => return Err(err),
                                 Err(err) => status(&err),
                             };
@@ -1333,7 +1333,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                         none,
                         none,
                     ) {
-                        Ok(_) => 0.0,
+                        Ok(_) => crate::status::ok_slot(0.0),
                         Err(e) => status(&e),
                     },
                 );

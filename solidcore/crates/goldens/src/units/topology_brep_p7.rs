@@ -934,7 +934,7 @@ fn cpp_null_deref(label: &str, symbol: &str) -> Fail {
 /// `InvalidInput`); a deferral or another error ends the case.
 fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
     match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         Err(e) if crate::status::is_kernel(e, solidcore::error::upstream_status(e).is_some()) => Ok(f64::from(crate::status::kind_slot(e, solidcore::error::upstream_status(e).unwrap_or(-1)))),
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(SM_ERR_INVALID_INPUT),
         Err(e) => Err(match Output::unported(e) {
@@ -1411,7 +1411,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, built: Option<Brep>) -> Record {
                         }
                         Err(e) if e.is_unported() => return Err(defer(e)),
                         // (the shim cannot build the loop either)
-                        Err(_) => return Ok(vec![NOT_RUN]),
+                        Err(kernel_err) => return Ok(vec![crate::status::kind_slot(&kernel_err, NOT_RUN)]),
                     }
                 }
                 let (c, ivl) = line(3)?;
@@ -1428,7 +1428,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, built: Option<Brep>) -> Record {
                 ) {
                     Ok(e) => es.push(e),
                     Err(e) if e.is_unported() => return Err(defer(e)),
-                    Err(_) => return Ok(vec![SC_ERR_ARG]),
+                    Err(kernel_err) => return Ok(vec![crate::status::kind_slot(&kernel_err, SC_ERR_ARG)]),
                 }
                 let mut eus = Vec::new();
                 for &e in &es {

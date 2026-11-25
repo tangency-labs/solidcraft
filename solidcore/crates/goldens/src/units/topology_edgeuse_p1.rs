@@ -623,7 +623,7 @@ impl ImportTypes {
 fn slot<T>(r: Result<T, SolidError>, f: impl FnOnce(T) -> i64) -> Result<i64, SolidError> {
     match r {
         Ok(v) => Ok(f(v)),
-        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(NULL_DEREF),
+        Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => Ok(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
         Err(e) => Err(e),
     }
 }
@@ -1006,8 +1006,8 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             let e = eid(*eu);
             let mate = match eu1::mate(b, e) {
                 Ok(m) => m,
-                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
-                    return Ok(Output::new().values("state", vec![NULL_DEREF as f64]))
+                Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
+                    return Ok(Output::new().values("state", vec![crate::status::kind_slot(&kernel_err, NULL_DEREF) as f64]))
                 }
                 Err(x) => return Err(x.into()),
             };
@@ -1038,8 +1038,8 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             };
             match r {
                 Ok(()) => {}
-                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
-                    return Ok(Output::new().values("state", vec![NULL_DEREF as f64]))
+                Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
+                    return Ok(Output::new().values("state", vec![crate::status::kind_slot(&kernel_err, NULL_DEREF) as f64]))
                 }
                 Err(x) => return Err(x.into()),
             }
@@ -1221,7 +1221,7 @@ fn run_rust_geom(k: &Kernel, op: &OpIn) -> Result<Output, Fail> {
             }
             let res = e.evaluate(x, &mut f, if *jac { Some(&mut m) } else { None });
             let failed = match res {
-                Ok(_) => 0,
+                Ok(_) => crate::status::ok_slot(0),
                 Err(x) if x.is_unported() => return Err(x.into()),
                 Err(_) => 1,
             };

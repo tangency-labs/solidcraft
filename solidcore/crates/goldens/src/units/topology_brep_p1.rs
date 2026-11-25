@@ -1261,7 +1261,7 @@ fn run_rust_op(
                 return Ok(Ok(if indexed.is_empty() {
                     vec![0.0, 0.0]
                 } else {
-                    vec![NULL_DEREF]
+                    vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]
                 }));
             };
             let mut store = AttributeStore::default();
@@ -1539,7 +1539,7 @@ fn run_rust_op(
             let en = EdgeuseId::from_index(*eu_new as u32);
             if b.edgeuse(eo)?.uv_trim_curve.is_some() {
                 let Some(e) = b.edgeuse(eo)?.edge else {
-                    return Ok(Ok(vec![NULL_DEREF]));
+                    return Ok(Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]));
                 };
                 let face = solidcore::topology::edgeuse::p1::face(b, eo)?;
                 let fs: Vec<FaceId> = face.into_iter().collect();
@@ -1724,7 +1724,7 @@ fn run_rust_op(
             want_faces,
         } => {
             if b.faces().iter().any(|(_, r)| r.surface.is_none()) {
-                return Ok(Ok(vec![NULL_DEREF]));
+                return Ok(Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]));
             }
             if let Some(d) = inexact(types, None, Some(&[])) {
                 return Ok(Err(d));
@@ -1928,7 +1928,7 @@ fn independent_face(k: &mut Kernel, input: &BrepIn) -> Result<(Brep, f64), Fail>
         &domain,
         &mut fenv,
     ) {
-        Ok(_) => 0.0,
+        Ok(_) => crate::status::ok_slot(0.0),
         Err(e) if e.is_unported() => return Err(e.into()),
         Err(e) => {
             eprintln!("cross-body face construction failed: {e:?}; {e}; domain={domain:?}");

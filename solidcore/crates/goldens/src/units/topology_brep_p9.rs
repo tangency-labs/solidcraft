@@ -129,7 +129,7 @@ fn status(e: &SolidError) -> Result<Output, HarnessError> {
 }
 fn ordinary<T>(r: solidcore::Result<T>) -> Result<i32, SolidError> {
     match r {
-        Ok(_) => Ok(0),
+        Ok(_) => Ok(crate::status::ok_slot(0)),
         Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => Ok(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))),
         Err(e) => Err(e),
     }

@@ -136,7 +136,7 @@ fn status_of(e: &SolidError) -> Result<f64, HarnessError> {
 
 fn status<T>(r: &solidcore::Result<T>) -> Result<f64, HarnessError> {
     match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         Err(e) => status_of(e),
     }
 }

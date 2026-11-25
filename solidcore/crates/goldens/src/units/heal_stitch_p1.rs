@@ -829,7 +829,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
             if matches!((a, c), (EntityRef::Edge(_), EntityRef::Edge(_))) {
                 for f in b.faces().ids().collect::<Vec<_>>() {
                     if fp2::surface(b, f)?.is_none() {
-                        return Ok(vec![NULL_DEREF]);
+                        return Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]);
                     }
                 }
             }

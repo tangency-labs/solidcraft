@@ -993,7 +993,7 @@ fn run_op(k: &Kernel, run: &mut Run<'_>, si: &mut SurfaceIntersector<'_>, op: &O
         OpIn::AddCurve { i } | OpIn::AddStart { i } | OpIn::AddThrough { i } => {
             pt_of(si, *i)?;
             if si.is_linked(id(*i)) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else {
                 let r = match op {
                     OpIn::AddCurve { .. } => si.add_point_to_curve(id(*i)),
@@ -1046,7 +1046,7 @@ fn run_op(k: &Kernel, run: &mut Run<'_>, si: &mut SurfaceIntersector<'_>, op: &O
         OpIn::Test { i, done } => {
             pt_of(si, *i)?;
             if test_rejected(si, *i) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else {
                 let r = si.test_point(&Kernel::default(), id(*i));
                 if let Some(d) = st(o, r)? {
@@ -1066,7 +1066,7 @@ fn run_op(k: &Kernel, run: &mut Run<'_>, si: &mut SurfaceIntersector<'_>, op: &O
             pt_of(si, *prev)?;
             pt_of(si, *next)?;
             if prev == next {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else {
                 let r = si.compute_next_point(&Kernel::default(), id(*prev), *step, id(*next));
                 if let Some(n) = st(o, r)? {

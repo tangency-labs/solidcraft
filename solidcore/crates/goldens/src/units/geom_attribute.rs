@@ -668,7 +668,7 @@ impl RustRun {
                 let o = self.obj(a[1])?;
                 // Attributes made earlier would keep naming the replaced object.
                 if !self.handles.is_empty() || !self.all.is_empty() {
-                    return Ok(Step::Status(ST_SKIP));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                 }
                 self.regions.make_infinite(o).map_err(|e| harness(&e))?;
                 return Ok(Step::Status(0));
@@ -683,7 +683,7 @@ impl RustRun {
             }
             op::READ_INDEXED => {
                 if !self.read_is_safe() {
-                    return Ok(Step::Status(ST_SKIP));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                 }
                 let before = self.all.clone();
                 let reader = self
@@ -742,7 +742,7 @@ impl RustRun {
             op::ADD_ATTRIBUTE | op::REMOVE_ATTRIBUTE => {
                 let o = self.obj(a[1])?;
                 let Some(h) = self.resolve(a[2]) else {
-                    return Ok(Step::Status(ST_INVALID));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::NoSuchEntity, ST_INVALID)));
                 };
                 return if code == op::ADD_ATTRIBUTE {
                     Self::status(self.store.add_attribute(o, h))
@@ -754,7 +754,7 @@ impl RustRun {
         }
 
         let Some(h) = self.resolve(a[1]) else {
-            return Ok(Step::Status(ST_INVALID));
+            return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::NoSuchEntity, ST_INVALID)));
         };
         match code {
             op::MAKE_COPY => {
@@ -777,11 +777,11 @@ impl RustRun {
                     let f = [find(m), find(o1), find(o2)];
                     for x in f.iter().flatten() {
                         if kind(self.attr(*x)?) != KIND_MERGE_REGION {
-                            return Ok(Step::Status(ST_SKIP));
+                            return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                         }
                     }
                     if f[1].is_some() && f[2].is_some() && f[0].is_none() {
-                        return Ok(Step::Status(ST_SKIP));
+                        return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                     }
                 }
                 Self::status(self.store.merge_with_regions(h, o1, o2, m, &self.regions))
@@ -811,7 +811,7 @@ impl RustRun {
                     let (c1, c2, cm) = (find(o1), find(o2), find(m));
                     if c1.is_some() && c2.is_some() && !(is_vec(c1)? && is_vec(c2)? && is_vec(cm)?)
                     {
-                        return Ok(Step::Status(ST_SKIP));
+                        return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                     }
                 }
                 Self::status(self.store.propagate_regions_through_booleans(h, o1, o2, m))
@@ -823,7 +823,7 @@ impl RustRun {
             op::REMOVE_USER | op::FROM_CLEAR => {
                 let o = self.obj(a[2])?;
                 if !self.listings(h).is_empty() {
-                    return Ok(Step::Status(ST_SKIP));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                 }
                 if code == op::FROM_CLEAR {
                     Self::status(self.store.from_clear_attributes(h, o).map(|_| ()))
@@ -855,7 +855,7 @@ impl RustRun {
             op::MR_QUERY => {
                 let at = self.attr(h)?;
                 let Some(d) = at.merge_region_data() else {
-                    return Ok(Step::Status(ST_SKIP));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                 };
                 let prop = self
                     .store
@@ -882,7 +882,7 @@ impl RustRun {
                     .and_then(Attribute::merge_region_data)
                     .is_none()
                 {
-                    return Ok(Step::Status(ST_SKIP));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                 }
                 let (r1, r2) = (self.obj(a[3])?, self.obj(a[5])?);
                 let Some(d) = self
@@ -890,7 +890,7 @@ impl RustRun {
                     .get_mut(h)
                     .and_then(Attribute::merge_region_data_mut)
                 else {
-                    return Ok(Step::Status(ST_SKIP));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                 };
                 let idx = a[2] as u64;
                 let n_this = d.this_regions().len() as u64;
@@ -900,7 +900,7 @@ impl RustRun {
                     d.other_types.len(),
                 ];
                 if idx < n_this && others.iter().any(|&n| idx >= n as u64) {
-                    return Ok(Step::Status(ST_SKIP));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                 }
                 let index = usize::try_from(idx).unwrap_or(usize::MAX);
                 Self::status(d.set_regions(index, r1, a[4] as u64 as i64, r2, a[6] as u64 as i64))
@@ -911,7 +911,7 @@ impl RustRun {
                     .get_mut(h)
                     .and_then(Attribute::merge_region_data_mut)
                 else {
-                    return Ok(Step::Status(ST_SKIP));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                 };
                 d.set_operation(a[2] as i32);
                 Ok(Step::Status(0))
@@ -923,7 +923,7 @@ impl RustRun {
                     .get_mut(h)
                     .ok_or_else(|| HarnessError::new("dead"))?;
                 if at.vector3d_value().is_none() {
-                    return Ok(Step::Status(ST_SKIP));
+                    return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                 }
                 Self::status(at.set_vector3d_value(v))
             }
@@ -931,14 +931,14 @@ impl RustRun {
                 let users = self.attr(h)?.users().to_vec();
                 if !users.is_empty() {
                     if !self.attr(h)?.behavior().is_standalone() {
-                        return Ok(Step::Status(ST_SKIP));
+                        return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                     }
                     let mut u = users;
                     let mut l = self.listings(h);
                     u.sort_unstable();
                     l.sort_unstable();
                     if u != l {
-                        return Ok(Step::Status(ST_SKIP));
+                        return Ok(Step::Status(crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP)));
                     }
                 }
                 Self::status(self.store.destroy(h))

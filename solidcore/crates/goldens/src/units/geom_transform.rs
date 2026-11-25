@@ -290,7 +290,7 @@ fn put_mat(out: &mut Vec<f64>, t: &Transform) {
 
 fn put_status<T>(out: &mut Vec<f64>, r: &solidcore::Result<T>) {
     out.push(match r {
-        Ok(_) => 0.0,
+        Ok(_) => crate::status::ok_slot(0.0),
         Err(e) => status_code(e),
     });
 }

@@ -592,7 +592,7 @@ impl From<SolidError> for RunError {
 // Unported must escape even when the static offset collapses ordinary errors.
 fn operation<T>(result: solidcore::Result<T>) -> RResult<(i32, Option<T>)> {
     match result {
-        Ok(value) => Ok((NATIVE_SUCCESS, Some(value))),
+        Ok(value) => Ok((crate::status::ok_slot(NATIVE_SUCCESS), Some(value))),
         Err(e) if crate::status::is_kernel(&e, false) => Ok((crate::status::kind_slot(&e, 0), None)),
         Err(SolidError::Upstream { code, .. }) => Ok((code, None)),
         // a failure in solidcore's terms (#2615): its C++ comparison status
@@ -1134,7 +1134,7 @@ fn rust_projection(kernel: &Kernel, fixture: &Fixture, brep: &Brep) -> HResult<P
                 let normal = surface
                     .evaluate_normal(kernel, uv, Side::Left, Side::Left)
                     .map_err(setup)?;
-                result.statuses.extend([i64::from(NATIVE_SUCCESS); 2]);
+                result.statuses.extend([i64::from(crate::status::ok_slot(NATIVE_SUCCESS)); 2]);
                 result.values.extend(xyz(point));
                 result.values.extend(xyz(normal));
             }
@@ -1157,7 +1157,7 @@ fn rust_projection(kernel: &Kernel, fixture: &Fixture, brep: &Brep) -> HResult<P
             ]);
             for parameter in [edge.interval.min(), edge.interval.max()] {
                 let point = curve.evaluate_point(kernel, parameter).map_err(setup)?;
-                result.statuses.push(i64::from(NATIVE_SUCCESS));
+                result.statuses.push(i64::from(crate::status::ok_slot(NATIVE_SUCCESS)));
                 result.values.extend(xyz(point));
             }
         }

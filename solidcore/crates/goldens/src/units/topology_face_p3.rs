@@ -973,7 +973,7 @@ fn run_rust_case(i: &Inputs) -> Result<Output, HarnessError> {
                 || face_geometry_complete(&b, FaceId::from_index(a[1] as u32)))
     };
     if op as i32 >= Op::LoopOrient as i32 && !complete {
-        out.push(NULL_DEREF);
+        out.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
         return Ok(Output::new().values("out", out));
     }
     match &i.op {

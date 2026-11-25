@@ -542,7 +542,7 @@ fn run_op(
             pt(si, *dst)?;
             let s = pt(si, *src)?;
             if si.is_linked(id(*dst)) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else {
                 si.point_mut(id(*dst))
                     .map_err(|e| Fail::Harness(harness(format!("{e}"))))?
@@ -646,7 +646,7 @@ fn run_op(
         OpIn::AddCurve { i } | OpIn::AddStart { i } | OpIn::AddThrough { i } => {
             pt(si, *i)?;
             if si.is_linked(id(*i)) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else {
                 let r = match op {
                     OpIn::AddCurve { .. } => si.add_point_to_curve(id(*i)),

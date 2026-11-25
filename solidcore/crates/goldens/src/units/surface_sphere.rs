@@ -585,8 +585,8 @@ fn rust_op(
             );
             match probe {
                 Err(e) if e.is_unported() => Err(e),
-                Err(_) => {
-                    o.push(SC_ERR_ARG);
+                Err(kernel_err) => {
+                    o.push(crate::status::kind_slot(&kernel_err, SC_ERR_ARG));
                     Ok(())
                 }
                 Ok(_) => t

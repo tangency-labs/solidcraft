@@ -596,8 +596,8 @@ fn rust_op(
             let frame = Axis2Placement::new(v3(*origin), v3(*x), v3(*y));
             let plane = match Plane::create_canonical(&frame) {
                 Err(e) if e.is_unported() => return Ok(Err(e)),
-                Err(_) => {
-                    o.push(SC_ERR_ARG);
+                Err(kernel_err) => {
+                    o.push(crate::status::kind_slot(&kernel_err, SC_ERR_ARG));
                     return Ok(Ok(()));
                 }
                 Ok(p) => p,

@@ -120,7 +120,7 @@ fn rust_record(op: &Level0Op, b: &Brep, c: [usize; 10]) -> Result<Vec<f64>, Soli
                     guard |= null_curve(b, eu)?;
                 }
                 if guard {
-                    o.extend([SKIPPED; 3]);
+                    o.extend([crate::status::state_slot(crate::status::RunnerState::Skipped, SKIPPED); 3]);
                     continue;
                 }
                 let r = solidcore::topology::loopuse::is_loopuse_side_in_surface(
@@ -161,7 +161,7 @@ fn rust_record(op: &Level0Op, b: &Brep, c: [usize; 10]) -> Result<Vec<f64>, Soli
                     Err(e) => return Err(e),
                 }
                 if null_curve(b, eu)? {
-                    o.extend([SKIPPED; 2]);
+                    o.extend([crate::status::state_slot(crate::status::RunnerState::Skipped, SKIPPED); 2]);
                     continue;
                 }
                 let r = eu2::is_edgeuse_side_in_surface(

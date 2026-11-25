@@ -676,7 +676,7 @@ fn run_op(
         OpIn::AddCurve { i } | OpIn::AddStart { i } => {
             pt_of(si, *i)?;
             if si.is_linked(id(*i)) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else {
                 let r = if matches!(op, OpIn::AddCurve { .. }) {
                     si.add_point_to_curve(id(*i))
@@ -700,7 +700,7 @@ fn run_op(
         OpIn::Classify { i } => {
             let p = pt_of(si, *i)?;
             if classify_rejected(&p) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else if let Some(d) = st(o, si.classify_boundary_start_point_intersection(k, &p))? {
                 o.push(b(d));
             }

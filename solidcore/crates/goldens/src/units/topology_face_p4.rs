@@ -273,7 +273,7 @@ fn put_list<I: ArenaId>(o: &mut Vec<f64>, r: Result<Vec<I>, SolidError>) -> Resu
             o.push(v.len() as f64);
             o.extend(v.iter().map(|x| f64::from(x.index())));
         }
-        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.push(NULL_DEREF),
+        Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => o.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
         Err(e) => return Err(fail(&e)),
     }
     Ok(())
@@ -601,7 +601,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
         OpIn::Connected { kind, index } => match fp4::is_connected_to(&b, f, target(*kind, *index))
         {
             Ok(c) => o.push(flag(c)),
-            Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.push(NULL_DEREF),
+            Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => o.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
             Err(e) => return Err(fail(&e)),
         },
         OpIn::Line {
@@ -613,7 +613,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
         } => {
             let face = b.face(f).map_err(|e| fail(&e))?;
             let Some(surface) = face.surface.as_ref() else {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             };
             let handle = SurfaceHandle(
@@ -750,7 +750,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
                 .map_err(|e| fail(&e))?
                 .len();
             if no_surface && n_loops >= 2 {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
             } else {
                 o.push(flag(
                     fp4::assert_test_face37(&k, &mut b, f).map_err(|e| fail(&e))?,

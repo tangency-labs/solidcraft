@@ -109,7 +109,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 Some([dx, dy, dz]) => {
                     match create_box(&mut k, Point3::new(0.0, 0.0, 0.0), dx, dy, dz) {
                         Ok(mut b) => {
-                            create_status = SM_SUCCESS;
+                            create_status = crate::status::ok_slot(SM_SUCCESS);
                             api_heal_brep(&mut k, Some(&mut b))
                         }
                         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
@@ -123,7 +123,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 }
             };
             Ok(match r {
-                Ok(()) => Output::new().values("out", vec![create_status, SM_SUCCESS]),
+                Ok(()) => Output::new().values("out", vec![create_status, crate::status::ok_slot(SM_SUCCESS)]),
                 Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
                     Output::new().values("out", vec![create_status, SM_ERR_INVALID_INPUT])
                 }

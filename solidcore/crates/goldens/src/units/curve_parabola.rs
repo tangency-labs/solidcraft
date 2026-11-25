@@ -275,7 +275,7 @@ fn st<T>(r: &solidcore::Result<T>) -> f64 {
 /// [`st`] as recorded before kinds.
 fn legacy_st<T>(r: &solidcore::Result<T>) -> f64 {
     match r {
-        Ok(_) => 0.0,
+        Ok(_) => crate::status::ok_slot(0.0),
         Err(e) => status_code(e),
     }
 }

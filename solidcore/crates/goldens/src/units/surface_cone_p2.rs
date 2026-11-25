@@ -505,7 +505,7 @@ fn put_state(k: &Kernel, o: &mut Vec<f64>, s: &Cone) -> solidcore::Result<()> {
     let mx = s.max_analytic_domain(k)?;
     o.extend([mx.min().x, mx.min().y, mx.max().x, mx.max().y]);
     let apex = s.apex(k)?;
-    o.push(if apex.is_cylinder { SM_ERR } else { SUCCESS });
+    o.push(if apex.is_cylinder { SM_ERR } else { crate::status::ok_slot(SUCCESS) });
     o.push(flag(apex.is_cylinder));
     push_v(o, apex.point);
     o.push(apex.param);
@@ -671,12 +671,12 @@ fn rust_op(k: &Kernel, s: &mut Cone, op: &OpIn, o: &mut Vec<f64>) -> solidcore::
     match op {
         OpIn::Offset { distance, tol } => {
             if !offset_defined(k, s, *distance, *tol)? {
-                o.push(SC_ERR_ARG);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, SC_ERR_ARG));
                 return Ok(());
             }
             match s.create_offset_surface(k, *distance, *tol) {
                 Ok(off) => {
-                    o.push(SUCCESS);
+                    o.push(crate::status::ok_slot(SUCCESS));
                     o.push(flag(off.is_some()));
                     if let Some(off) = off {
                         put_state(k, o, &off)?;
@@ -722,7 +722,7 @@ fn rust_op(k: &Kernel, s: &mut Cone, op: &OpIn, o: &mut Vec<f64>) -> solidcore::
             let swap = s.rev().swap_uv();
             edit_nurb(s.base_mut().get_or_create_gw_nurb()?, &edit_of(edit), swap)?;
             match s.rebuild_step_from_nurb_parameters(k) {
-                Ok(()) => o.push(SUCCESS),
+                Ok(()) => o.push(crate::status::ok_slot(SUCCESS)),
                 Err(e) if e.is_unported() => return Err(e),
                 Err(e) => o.push(status(&e)),
             }
@@ -742,12 +742,12 @@ fn rust_op(k: &Kernel, s: &mut Cone, op: &OpIn, o: &mut Vec<f64>) -> solidcore::
             let dom = trim_domain(s, *dom);
             let (origin, x, y) = (v3(*origin), v3(*x), v3(*y));
             if !trim_defined(k, s, x, y, origin, &dom) {
-                o.push(SC_ERR_ARG);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, SC_ERR_ARG));
                 return Ok(());
             }
             match ellipse_trim_intervals(k, origin, x, y, *rx, *ry, *start, *end, s, &dom, *tol) {
                 Ok(ivls) => {
-                    o.push(SUCCESS);
+                    o.push(crate::status::ok_slot(SUCCESS));
                     o.push(ivls.len() as f64);
                     for ivl in ivls {
                         o.extend([ivl.min(), ivl.max()]);
@@ -773,7 +773,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             return to_output(&o);
         }
         Ok(mut s) => {
-            o.push(SUCCESS);
+            o.push(crate::status::ok_slot(SUCCESS));
             if let Err(e) = rust_op(&k, &mut s, &i.op, &mut o) {
                 return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())));
             }

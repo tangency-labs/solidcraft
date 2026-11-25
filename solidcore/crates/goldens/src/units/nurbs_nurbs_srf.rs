@@ -248,7 +248,7 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
 
 fn status<T>(r: &SolidResult<T>) -> f64 {
     match r {
-        Ok(_) => 0.0,
+        Ok(_) => crate::status::ok_slot(0.0),
         Err(e) if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
         Err(SolidError::Upstream { code, .. }) => f64::from(*code),
         // Upstream's NLib flag without an error number (see the module docs of

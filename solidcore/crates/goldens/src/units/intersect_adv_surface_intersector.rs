@@ -525,7 +525,7 @@ fn run_op(k: &Kernel, cx: &mut Ctx<'_>, si: &mut Si<'_>, op: &OpIn, o: &mut Vec<
         }
         OpIn::Push { i } => {
             if si.base.is_linked(TsectId(*i)) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else {
                 st(o, si.base.add_point_to_curve(TsectId(*i)))?;
             }
@@ -614,7 +614,7 @@ fn run_op(k: &Kernel, cx: &mut Ctx<'_>, si: &mut Si<'_>, op: &OpIn, o: &mut Vec<
                 cx.aux.get(t).and_then(|a| a.get(i)).copied() == Some(AuxDataType::BezierSurface)
             };
             if !is_patch(0, *a) || !is_patch(1, *bb) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
                 return Ok(());
             }
             std::mem::swap(&mut si.solver.solutions, &mut cx.sols);

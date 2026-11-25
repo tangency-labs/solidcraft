@@ -151,7 +151,7 @@ fn members(e: &PeriodicExtent1d) -> [f64; 4] {
 
 fn status_of(r: &solidcore::Result<()>) -> Result<i64, HarnessError> {
     match r {
-        Ok(()) => Ok(SM_SUCCESS),
+        Ok(()) => Ok(crate::status::ok_slot(SM_SUCCESS)),
         Err(err) if crate::status::is_kernel(err, solidcore::error::upstream_status(err).is_some()) => Ok(i64::from(crate::status::kind_slot(err, solidcore::error::upstream_status(err).unwrap_or(-1)))),
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(SM_ERR_INVALID_INPUT),
         Err(e) => Err(HarnessError::new(format!("rust_error: {e}"))),

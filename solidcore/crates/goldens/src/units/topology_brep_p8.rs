@@ -289,7 +289,7 @@ fn this_face(f: FaceId) -> ObjectRef {
 /// case.
 fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
     match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         // the port's refusal of FindOuterLoops' zero-area loop: upstream reads past its
         // arrays there (plan/upstream-issues.md UB-119) and goes on with garbage counts,
         // so the case is not comparable (the shim cannot tell it beforehand)

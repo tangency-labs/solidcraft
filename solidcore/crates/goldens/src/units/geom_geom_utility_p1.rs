@@ -274,7 +274,7 @@ fn put3(o: &mut Vec<f64>, v: Vec3) {
 /// The Rust result `[status, values...]` (or the error to classify).
 fn rust_values(op: Op, args: &[f64]) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
     let mut a = Args::new(args);
-    let mut o = vec![SM_SUCCESS];
+    let mut o = vec![crate::status::ok_slot(SM_SUCCESS)];
     macro_rules! tri {
         ($e:expr) => {
             match $e {
@@ -637,7 +637,7 @@ fn static_rust(name: &str, args: &[f64]) -> Result<Output, HarnessError> {
             distances: [s5, s6],
         };
         cp.add(a.f()?, a.f()?, a.f()?, a.f()?);
-        v.push(SM_SUCCESS);
+        v.push(crate::status::ok_slot(SM_SUCCESS));
         v.push(cp.count as f64);
         v.extend(cp.params1);
         v.extend(cp.params2);

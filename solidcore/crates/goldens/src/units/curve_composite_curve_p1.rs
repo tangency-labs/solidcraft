@@ -756,7 +756,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 o.push(b(ftry(c.has_repeated_end_control_points(&k, 1e-6))?));
                 o.push(c.type_code() as f64);
                 o.push(match c.evaluate_point(&k, ivl.min()) {
-                    Ok(_) => 0.0,
+                    Ok(_) => crate::status::ok_slot(0.0),
                     Err(e) => status(&e),
                 });
                 o.push(b(x.segment(x.num_segments()).is_none()));

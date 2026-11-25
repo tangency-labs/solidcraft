@@ -283,7 +283,7 @@ fn rust_write_read(i: &Inputs, a: HermiteCurve, out: &mut Vec<f64>) -> solidcore
     let version = u64::try_from(i.n).unwrap_or(0);
     let a = Curve::from(a);
     let bytes = write_record(&a, ft, version)?;
-    out.push(SM_SUCCESS);
+    out.push(crate::status::ok_slot(SM_SUCCESS));
     put_bytes(out, &bytes);
     let mut db = DatabaseReader::new();
     db.open_for_read(bytes, ft);
@@ -301,7 +301,7 @@ fn rust_write_read(i: &Inputs, a: HermiteCurve, out: &mut Vec<f64>) -> solidcore
             return Ok(());
         }
     };
-    out.push(SM_SUCCESS);
+    out.push(crate::status::ok_slot(SM_SUCCESS));
     out.push(c.type_code() as f64);
     out.push(c.dim() as f64);
     let CurveKind::Hermite(h) = c.kind() else {
@@ -311,7 +311,7 @@ fn rust_write_read(i: &Inputs, a: HermiteCurve, out: &mut Vec<f64>) -> solidcore
     out.push(flag(c.approx_eq(&k, &a)?));
     match c.evaluate_point(&k, i.t) {
         Ok(p) => {
-            out.push(SM_SUCCESS);
+            out.push(crate::status::ok_slot(SM_SUCCESS));
             put_v(out, p);
         }
         Err(e) if e.is_unported() => return Err(e),
@@ -319,7 +319,7 @@ fn rust_write_read(i: &Inputs, a: HermiteCurve, out: &mut Vec<f64>) -> solidcore
     }
     match write_record(&c, ft, version) {
         Ok(again) => {
-            out.push(SM_SUCCESS);
+            out.push(crate::status::ok_slot(SM_SUCCESS));
             put_bytes(out, &again);
         }
         Err(e) if e.is_unported() => return Err(e),
@@ -362,7 +362,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             if n > solidcore::curve::MAX_EVAL_DERIVS {
                 return Err(HarnessError::new("derivative order above MAX_EVAL_DERIVS"));
             }
-            out.push(SM_SUCCESS);
+            out.push(crate::status::ok_slot(SM_SUCCESS));
             for v in a
                 .evaluate(i.t, n, i.flags & 1 != 0)
                 .map_err(|e| HarnessError::new(e.to_string()))?
@@ -371,7 +371,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             }
         }
         Op::EvaluatePoint => {
-            out.push(SM_SUCCESS);
+            out.push(crate::status::ok_slot(SM_SUCCESS));
             put_v(&mut out, a.evaluate_point(i.t));
         }
         Op::Bbox => {
@@ -394,7 +394,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             if let Err(e) = r {
                 return Ok(Err(e));
             }
-            out.push(SM_SUCCESS);
+            out.push(crate::status::ok_slot(SM_SUCCESS));
             if i.flags & 1 != 0 {
                 out.extend([
                     nb.u_min(),
@@ -429,7 +429,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
         Op::Knots => {
             let ivl = Extent1d::from_min_max(i.w[0], i.w[1]);
             let (knots, mults) = a.knots((i.flags & 1 != 0).then_some(&ivl));
-            out.push(SM_SUCCESS);
+            out.push(crate::status::ok_slot(SM_SUCCESS));
             out.push(knots.len() as f64);
             out.extend(knots);
             if i.flags & 2 != 0 {
@@ -441,7 +441,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
         }
         Op::Continuities => {
             let (min, conts) = a.calculate_continuities();
-            out.push(SM_SUCCESS);
+            out.push(crate::status::ok_slot(SM_SUCCESS));
             out.push(f64::from(min as i32));
             out.push(conts.len() as f64);
             out.extend(conts.iter().map(|&c| f64::from(c as i32)));
@@ -479,7 +479,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             db.open_for_read(db_bytes(i)?, ft);
             match HermiteCurve::read_from_db(&mut db) {
                 Ok(h) => {
-                    out.push(SM_SUCCESS);
+                    out.push(crate::status::ok_slot(SM_SUCCESS));
                     out.push(h.type_code() as f64);
                     out.push(h.dim() as f64);
                     put_members(&mut out, &h);

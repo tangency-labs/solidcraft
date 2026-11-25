@@ -680,7 +680,7 @@ fn push_matrix(
 /// The status of a call that only reports one (unported errors propagate).
 fn st<T>(r: solidcore::Result<T>) -> solidcore::Result<f64> {
     match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         Err(e) if e.is_unported() => Err(e),
         Err(e) => Ok(status(&e)),
     }

@@ -661,7 +661,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             nparam,
         } => {
             let Some(edge) = br.edgeuse(euid(eu)).ok().and_then(|x| x.edge) else {
-                return Ok(Output::new().int("failed", NULL_DEREF));
+                return Ok(Output::new().int("failed", crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)));
             };
             match qe::radial_sector_classify(&k, br, edge, nparam, euid(eu), euid(classify)) {
                 Ok(c) => ok.int("result", i64::from(c.code())),
@@ -676,7 +676,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             force,
         } => {
             let Some(edge) = br.edgeuse(euid(eu)).ok().and_then(|x| x.edge) else {
-                return Ok(Output::new().int("failed", NULL_DEREF));
+                return Ok(Output::new().int("failed", crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)));
             };
             let ivl = Extent1d::from_min_max(line.domain[0], line.domain[1]);
             let c = build_curve(&k, &CurveIn::Line(line))?;

@@ -278,7 +278,7 @@ fn engine_probe(k: &mut Kernel, i: &Inputs, pool: &mut Pool) -> Result<Output, H
         .into_engine()
         .ok_or_else(|| harness("adopted engine was not returned"))?;
     let code = match &result {
-        Ok(_) => 0,
+        Ok(_) => crate::status::ok_slot(0),
         Err(error) => match Output::unported(error) {
             Some(deferred) => return Ok(deferred),
             None => status(error),

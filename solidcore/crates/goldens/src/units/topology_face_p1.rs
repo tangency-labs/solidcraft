@@ -256,7 +256,7 @@ fn fail(e: &SolidError) -> Fail {
 /// `SM_ERR_INVALID_INPUT`); a deferral or another error ends the case.
 fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
     match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         Err(up_err) if crate::status::is_kernel(up_err, solidcore::error::upstream_status(up_err).is_some()) => Ok(f64::from(crate::status::kind_slot(up_err, solidcore::error::upstream_status(up_err).unwrap_or(-1)))),
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(SM_ERR_INVALID_INPUT),
         Err(e) => Err(fail(e)),
@@ -693,7 +693,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
         }
         OpIn::SetSurface { delete } => {
             let Some(s) = b.face(f).map_err(e)?.surface.clone() else {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             };
             let r = fp1::set_surface(&k, &mut b, f, key_of(EntityRef::Face(f)), s, *delete);
@@ -762,7 +762,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
         } => {
             let face = b.face(f).map_err(e)?;
             if face.surface.is_none() || face.faceuse.is_none() {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let (problem, mut cu, mut cv) = seam_problem(&k, &mut b, f, &mut o)?;
@@ -808,7 +808,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
         OpIn::SplitAtSeam { props } => {
             let face = b.face(f).map_err(e)?;
             if face.surface.is_none() || face.faceuse.is_none() {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let (problem, mut cu, mut cv) = seam_problem(&k, &mut b, f, &mut o)?;
@@ -889,7 +889,7 @@ fn delete_inner_loop_record(
         guard |= mate.is_none();
     }
     if guard {
-        o.push(NULL_DEREF);
+        o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
         return Ok(());
     }
     let mut store = AttributeStore::default();

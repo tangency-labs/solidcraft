@@ -600,7 +600,7 @@ fn run_rust_op(b: &mut Brep, op: &Resolved) -> Result<Vec<f64>, Fail> {
                 slot(lu1::is_closed_3d(&k, b, LoopuseId::from_index(u(*index)), *all).map(Some))?
             };
             match r {
-                None => o.push(NULL_DEREF),
+                None => o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)),
                 Some(None) => o.extend([1.0, -5.0, -7.0, 777.0]),
                 Some(Some(c)) => {
                     o.push(flag(c.closed));

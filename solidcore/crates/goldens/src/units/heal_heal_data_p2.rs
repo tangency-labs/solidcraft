@@ -1056,8 +1056,8 @@ fn rust_prob(kind: u8, n: u64, ops: &[[i64; 4]]) -> Result<Output, HarnessError>
                 let r = match kind {
                     1 => match pair.remove(&arena, p) {
                         Ok(r) => r,
-                        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
-                            o.push(NULL_DEREF);
+                        Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
+                            o.push(crate::status::kind_slot(&kernel_err, NULL_DEREF));
                             stop = true;
                             continue;
                         }

@@ -276,7 +276,7 @@ fn status(error: SolidError) -> SolidResult<f64> {
 fn test(out: &mut Vec<f64>, result: SolidResult<(bool, Option<EntityRef>)>) -> SolidResult<()> {
     match result {
         Ok((ok, value)) => {
-            out.extend([SUCCESS, flag(ok)]);
+            out.extend([crate::status::ok_slot(SUCCESS), flag(ok)]);
             object(out, value);
         }
         Err(error) => {
@@ -290,7 +290,7 @@ fn test(out: &mut Vec<f64>, result: SolidResult<(bool, Option<EntityRef>)>) -> S
 fn classify(out: &mut Vec<f64>, result: SolidResult<(i32, Option<EntityRef>)>) -> SolidResult<()> {
     match result {
         Ok((class, value)) => {
-            out.extend([SUCCESS, f64::from(class)]);
+            out.extend([crate::status::ok_slot(SUCCESS), f64::from(class)]);
             object(out, value);
         }
         Err(error) => {
@@ -322,7 +322,7 @@ fn rust_record(input: &Inputs, brep: &mut Brep, face: FaceId) -> SolidResult<Vec
         .as_ref()
         .ok_or_else(|| SolidError::null_pointer("difftest::native_face"))?;
     let mut out = vec![
-        SUCCESS,
+        crate::status::ok_slot(SUCCESS),
         f64::from(face.index()),
         source.type_code() as f64,
         f64::from(input.loops),

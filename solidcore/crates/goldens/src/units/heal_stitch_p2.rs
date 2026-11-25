@@ -464,7 +464,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                 Err(e) => return failed(e),
             };
             if tol < dist / 200.0 && tol <= 0.0 {
-                return Ok(vec![NO_RETURN]);
+                return Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NO_RETURN)]);
             }
             match st::stitch_into_solid(k, b) {
                 Ok(r) => {
@@ -488,7 +488,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
         } => {
             // the shim's guard: the doubling from max_tol / 100 cannot end
             if *max_tol / 100.0 == 0.0 && 0.0 < *max_tol {
-                return Ok(vec![NO_RETURN]);
+                return Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NO_RETURN)]);
             }
             match st::stitch_into_shell(k, b, *well_formed, *max_tol) {
                 Ok(r) => {
