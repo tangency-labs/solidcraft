@@ -90,6 +90,20 @@ The part of the 2D Timeline that lists a design's joints in order, with a row fo
 - **Elsewhere:** joint track.
 - **For translators:** not an assembly, which is a design with several components.
 
+### base feature
+
+A timeline feature that holds bodies as fixed B-rep, with no steps that rebuild them.
+
+A base feature has no parameters to edit. Its bodies are changed by direct edits after it, such as
+Press Pull, Delete Face and Move Face.
+
+- **In SolidCraft:** the Import feature that `file.insert_step` adds, and the one Remove History
+  (`body.remove_history`) puts in place of the features that built only that body. Its B-rep is
+  kept in the design file as a STEP part of its own.
+- **Don't use:** dumb solid, frozen feature.
+- **Elsewhere:** base feature, dumb solid, imported body.
+- **For translators:** not a base flange of sheet metal, and not a base sketch.
+
 ### bill of materials
 
 The list of the components placed in a design or in one component, with the quantity of each.
@@ -819,7 +833,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Instance | one copy a pattern makes | *pattern instance* | pattern commands |
 | | one placed copy of a component | *occurrence* | "Paste (Instance)" on `occurrence.copy` |
 | History | the undo and redo history | history | Undo, Redo |
-| | the list of features | *timeline* | "Feature history" (`ui.feature_history`), "Roll History Marker" |
+| | the list of features | *timeline* | "Feature history" (`ui.feature_history`), "Roll History Marker", "Remove History" (`body.remove_history`) |
 | Part | a standard part | *standard part* | `parts.*` |
 | | a body, an occurrence or the design | *body*, *occurrence*, *design* | catalogue texts that say "part" |
 | | a design property | *part number* | Design Properties |
