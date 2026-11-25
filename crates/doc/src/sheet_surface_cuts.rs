@@ -8,7 +8,10 @@
 //!   outline runs to that line, past its material, and the rip cuts back what is left of it;
 //! - where it stops inside the thickness on a floor parallel to the panel, the panel keeps a
 //!   recess, from its own face or the face one thickness into the material, to the floor's depth;
-//!   a later cut through a recess takes it with the material.
+//!   a later cut through a recess takes it with the material;
+//! - where a conical countersink opens from a flat panel's face square to the panel, the panel
+//!   keeps the countersink and its through-hole (or blind floor) as its flat cut-out, and folds,
+//!   unfolds and refolds with it.
 //!
 //! The panels' faces are read before and after the feature, exactly, from the bodies' B-rep
 //! records. A cut through a roll, or with walls not square to a flat panel (a hole at a slant),
@@ -25,11 +28,11 @@
 //! whole flat at once, up to the sheet's outline where it reaches it. Every face the cut made
 //! must be read; checking each step, the sheet built again must also weigh what the cut body
 //! does, or, where a shadow was cut, no more (a tab weighs flat). Refused: walls that don't run
-//! through the sheet from face to face (a countersink, a rounded or chamfered face edge, a cut
-//! that stops inside a bend, a bore lying in the sheet that reaches one face or none), a recess in
-//! a roll, a bore lying in a panel that reaches its edge or ends other than square to its axis,
-//! and, folded, a cut through the sheet's outline at a slant, on a roll or across a bend (not
-//! supported yet).
+//! through the sheet from face to face (a rounded or chamfered face edge, a drill point, a cut
+//! that stops inside a bend, a bore lying in the sheet that reaches one face or none), a recess or
+//! countersink in a roll or bend, a bore lying in a panel that reaches its edge or ends other than
+//! square to its axis, and, folded, a cut through the sheet's outline at a slant, on a roll or
+//! across a bend (not supported yet).
 //! A piece a cut parts from a panel that holds none of its joints (a letter's counter, the end
 //! of a flange cut off beside its bend) stays where it was, a loose piece of the sheet: in the
 //! folded body, in the flat and in its DXF. A cut that parts a panel into pieces that each hold
@@ -67,15 +70,50 @@ pub struct Recess {
     pub depth: f64,
 }
 
+/// A conical countersink cut into a flat panel of a sheet made from surfaces: centred at `center`
+/// (in the panel's chart), opening at `outer_radius` on the panel's own face (the sheet's surface)
+/// or on its other face when `far`, tapering at half angle `half_angle` (radians) to `depth` into
+/// the thickness (at most the thickness, where the cone meets its bore or exits the other face).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Countersink {
+    pub panel: usize,
+    pub center: Vec2,
+    pub far: bool,
+    pub outer_radius: f64,
+    pub half_angle: f64,
+    pub depth: f64,
+}
+
+impl Countersink {
+    /// The cone's radius where it ends `depth` into the thickness.
+    pub fn inner_radius(&self) -> f64 {
+        (self.outer_radius - self.depth * self.half_angle.tan()).max(0.0)
+    }
+
+    /// The outer opening circle in the panel's chart (counter-clockwise).
+    pub(crate) fn outer_loop(&self) -> Loop2 {
+        Loop2::circle(self.center, self.outer_radius)
+    }
+
+    /// The 2D annulus covered by the conical wall in the panel's chart.
+    pub(crate) fn footprint(&self) -> Region2 {
+        let r_in = self.inner_radius();
+        let holes = if r_in > 1e-9 { vec![Loop2::circle(self.center, r_in).reversed()] } else { Vec::new() };
+        Region2 { outer: self.outer_loop(), holes }
+    }
+}
+
 /// What a body has of a flat panel, each in the panel's chart: the material of the panel's own
-/// face (`near`) and of its face one thickness into the material (`far`), and the floors between,
-/// with their depths from the face they are seen from.
+/// face (`near`) and of its face one thickness into the material (`far`), the floors between with
+/// their depths from the face they are seen from, and any conical countersinks opening from either
+/// face with the face indices of each cone.
 #[derive(Default)]
 struct OnPanel {
     near: Vec<Region2>,
     far: Vec<Region2>,
     near_floors: Vec<(f64, Region2)>,
     far_floors: Vec<(f64, Region2)>,
+    countersinks: Vec<(Countersink, Vec<usize>)>,
 }
 
 /// An extrude as it was drawn: its sketch plane and the interval along the plane's normal it ran
@@ -103,48 +141,144 @@ fn drawn_depth(measured: f64, face: Vec3, floor: Vec3, z: Vec3, drawn: Option<&D
 }
 
 /// The planar faces of `b` parallel to a panel whose frame is `frame` (its material toward
-/// `z`, `t` deep), within its region `own` (or, unfolded, the whole flat's regions). A floor the
-/// extrude `drawn` made is as deep as it ran (see [`drawn_depth`]).
+/// `z`, `t` deep), within its region `own` (or, unfolded, the whole flat's regions), together with
+/// any conical countersinks square to the panel opening from either face. A floor the extrude
+/// `drawn` made is as deep as it ran (see [`drawn_depth`]).
 fn on_panel(b: &Body, q: &Query, frame: &Rigid3, t: f64, own: &[Region2], tol: f64, drawn: Option<&Drawn>) -> Result<OnPanel> {
+    struct ConeGroup {
+        center: Vec2,
+        far: bool,
+        outer_radius: f64,
+        half_angle: f64,
+        z_min: f64,
+        z_max: f64,
+        faces: Vec<usize>,
+    }
     let mut out = OnPanel::default();
+    let inv = frame.inverse();
+    let size = b.size();
+    let sag = (size * 1e-4).max(1e-4);
+    let z_tol = tol * 10.0;
+    let mut cone_groups: Vec<ConeGroup> = Vec::new();
     for f in 0..q.record().faces.len() {
-        let Some(FaceSurface::Plane { normal, .. }) = face_surface(b, f) else { continue };
-        // Parallel to the panel within the body's tolerance across it: a body built again can
-        // lean its planes by rounding.
-        if normal.cross(frame.z).len() * b.size() > tol {
+        match face_surface(b, f) {
+            Some(FaceSurface::Plane { normal, .. }) => {
+                // Parallel to the panel within the body's tolerance across it: a body built again can
+                // lean its planes by rounding.
+                if normal.cross(frame.z).len() * size > tol {
+                    continue;
+                }
+                let Some((plane, face_out)) = crate::sheet_surface_convert::planar_face(b, q, f, tol) else { continue };
+                let depth = (plane.origin - frame.shift).dot(frame.z);
+                if !(depth > -tol && depth < t + tol) {
+                    continue;
+                }
+                // The panel's chart, at the face's depth.
+                let Some(at) = Plane::new(frame.shift + frame.z * depth, frame.x, frame.y) else { continue };
+                let Some(region) = crate::sheet_surface_convert::face_region(b, q, &at, face_out, f, tol) else {
+                    return err(format!("a face of the sheet's body at depth {depth:.3} can't be read"));
+                };
+                // A face that is the panel's own outline with holes in it needs no boolean to keep to it.
+                let mine = if inside_by_loops(std::slice::from_ref(&region), own, tol) {
+                    vec![region]
+                } else {
+                    planar_regions_boolean(&[region], own, BoolOp::Intersect, tol)?
+                };
+                if mine.is_empty() {
+                    continue;
+                }
+                let toward = face_out.dot(frame.z) > 0.0;
+                if depth.abs() <= tol && !toward {
+                    out.near.extend(mine);
+                } else if (depth - t).abs() <= tol && toward {
+                    out.far.extend(mine);
+                } else if !toward && depth > tol {
+                    let depth = drawn_depth(depth, frame.shift, plane.origin, frame.z, drawn, rounding(b));
+                    out.near_floors.extend(mine.into_iter().map(|r| (depth, r)));
+                } else if toward && depth < t - tol {
+                    let depth = drawn_depth(t - depth, frame.shift + frame.z * t, plane.origin, frame.z, drawn, rounding(b));
+                    out.far_floors.extend(mine.into_iter().map(|r| (depth, r)));
+                }
+            }
+            Some(FaceSurface::Cone { apex, axis, half_angle }) if !own.is_empty() => {
+                let a = inv.vector(axis.vec());
+                if Vec2::new(a.x, a.y).len() * size > tol {
+                    continue;
+                }
+                if !(half_angle.is_finite() && half_angle > 1e-6 && half_angle < FRAC_PI_2 - 1e-6) {
+                    continue;
+                }
+                let far = a.z > 0.0;
+                let apex_p = inv.point(apex);
+                let tan_h = half_angle.tan();
+                let outer_radius = if far { (t - apex_p.z) * tan_h } else { apex_p.z * tan_h };
+                if !(outer_radius.is_finite() && outer_radius > tol) {
+                    continue;
+                }
+                let Some(face) = q.record().faces.get(f) else { continue };
+                let (mut z_min, mut z_max) = (f64::INFINITY, f64::NEG_INFINITY);
+                let mut pts_3d = Vec::new();
+                let mut pts_2d = Vec::new();
+                for l in &face.loops {
+                    let Bounds::Edges { edges } = l else { continue };
+                    for oe in edges {
+                        let Some(pts) = q.edge_points(oe.edge as usize, sag) else { continue };
+                        for (_, p) in pts {
+                            let loc = inv.point(p);
+                            z_min = z_min.min(loc.z);
+                            z_max = z_max.max(loc.z);
+                            pts_3d.push(p);
+                            pts_2d.push(Vec2::new(loc.x, loc.y));
+                        }
+                    }
+                }
+                if !(z_min.is_finite() && z_max.is_finite()) || pts_2d.is_empty() || z_min < -z_tol || z_max > t + z_tol {
+                    continue;
+                }
+                if !pts_2d.iter().all(|q2| own.iter().any(|r| holds(&r.outer, *q2) || outline_gap(r, *q2) <= tol * 100.0)) {
+                    continue;
+                }
+                let concave = pts_3d.iter().find_map(|p| {
+                    let uv = q.face_uv(f, *p, z_tol)?;
+                    let n = inv.vector(q.face_normal(f, uv)?);
+                    Some(if far { n.z > 0.5 * half_angle.sin() } else { n.z < -0.5 * half_angle.sin() })
+                });
+                if concave != Some(true) {
+                    continue;
+                }
+                let center = Vec2::new(apex_p.x, apex_p.y);
+                if let Some(group) = cone_groups.iter_mut().find(|g| {
+                    g.far == far
+                        && g.center.dist(center) <= z_tol
+                        && (g.outer_radius - outer_radius).abs() <= z_tol
+                        && (g.half_angle - half_angle).abs() <= 1e-6
+                }) {
+                    group.z_min = group.z_min.min(z_min);
+                    group.z_max = group.z_max.max(z_max);
+                    group.faces.push(f);
+                } else {
+                    cone_groups.push(ConeGroup { center, far, outer_radius, half_angle, z_min, z_max, faces: vec![f] });
+                }
+            }
+            _ => continue,
+        }
+    }
+    for g in cone_groups {
+        let opens = if g.far { (t - g.z_max).abs() <= z_tol } else { g.z_min.abs() <= z_tol };
+        if !opens {
             continue;
         }
-        let Some((plane, face_out)) = crate::sheet_surface_convert::planar_face(b, q, f, tol) else { continue };
-        let depth = (plane.origin - frame.shift).dot(frame.z);
-        if !(depth > -tol && depth < t + tol) {
+        let raw_depth = if g.far { t - g.z_min } else { g.z_max };
+        let depth = if (t - raw_depth).abs() <= z_tol { t } else { raw_depth.clamp(0.0, t) };
+        if depth <= z_tol {
             continue;
         }
-        // The panel's chart, at the face's depth.
-        let Some(at) = Plane::new(frame.shift + frame.z * depth, frame.x, frame.y) else { continue };
-        let Some(region) = crate::sheet_surface_convert::face_region(b, q, &at, face_out, f, tol) else {
-            return err(format!("a face of the sheet's body at depth {depth:.3} can't be read"));
-        };
-        // A face that is the panel's own outline with holes in it needs no boolean to keep to it.
-        let mine = if inside_by_loops(std::slice::from_ref(&region), own, tol) {
-            vec![region]
-        } else {
-            planar_regions_boolean(&[region], own, BoolOp::Intersect, tol)?
-        };
-        if mine.is_empty() {
+        let inner_radius = g.outer_radius - depth * g.half_angle.tan();
+        if inner_radius <= tol {
             continue;
         }
-        let toward = face_out.dot(frame.z) > 0.0;
-        if depth.abs() <= tol && !toward {
-            out.near.extend(mine);
-        } else if (depth - t).abs() <= tol && toward {
-            out.far.extend(mine);
-        } else if !toward && depth > tol {
-            let depth = drawn_depth(depth, frame.shift, plane.origin, frame.z, drawn, rounding(b));
-            out.near_floors.extend(mine.into_iter().map(|r| (depth, r)));
-        } else if toward && depth < t - tol {
-            let depth = drawn_depth(t - depth, frame.shift + frame.z * t, plane.origin, frame.z, drawn, rounding(b));
-            out.far_floors.extend(mine.into_iter().map(|r| (depth, r)));
-        }
+        out.countersinks
+            .push((Countersink { panel: 0, center: g.center, far: g.far, outer_radius: g.outer_radius, half_angle: g.half_angle, depth }, g.faces));
     }
     Ok(out)
 }
@@ -238,7 +372,7 @@ fn lying(
         }
         if !(near && far) {
             return Err(format!(
-                "leaves walls that are not square to the sheet and don't run through it on {name}: not supported yet (a countersink, a rounded or chamfered face edge)"
+                "leaves walls that are not square to the sheet and don't run through it on {name}: not supported yet (a rounded or chamfered face edge, a drill point)"
             ));
         }
         if stray {
@@ -361,6 +495,128 @@ fn same_recesses(a: &[Recess], b: Vec<&Recess>, tol: f64) -> bool {
                     && same_regions(std::slice::from_ref(&x.region), std::slice::from_ref(&y.region), tol)
             })
         })
+}
+
+/// Whether the countersinks `a` read from a panel are the ones `b` it has, to `tol`.
+fn same_countersinks(a: &[Countersink], b: Vec<&Countersink>, tol: f64) -> bool {
+    a.len() == b.len()
+        && a.iter().all(|x| {
+            b.iter().any(|y| {
+                x.far == y.far
+                    && x.center.dist(y.center) <= tol
+                    && (x.outer_radius - y.outer_radius).abs() <= tol
+                    && (x.half_angle - y.half_angle).abs() <= 1e-6
+                    && (x.depth - y.depth).abs() <= tol
+            })
+        })
+}
+
+/// `list` unioned whenever any two regions come near each other, so a boolean taking them as one
+/// operand never sees overlapping pieces.
+fn disjoint(list: Vec<Region2>, tol: f64) -> std::result::Result<Vec<Region2>, String> {
+    if list.len() <= 1 || apart(&list, tol) {
+        return Ok(list);
+    }
+    let mut out: Vec<Region2> = Vec::new();
+    for r in list {
+        out = if out.is_empty() {
+            vec![r]
+        } else {
+            planar_regions_boolean(&out, std::slice::from_ref(&r), BoolOp::Union, tol).map_err(|e| e.to_string())?
+        };
+    }
+    Ok(out)
+}
+
+/// Where countersinks from both faces overlap on the same hole, material between them is seen on
+/// neither face; their common footprint (clipped to `own`) is still part of the panel's footprint
+/// before the cut.
+fn double_countersink_footprint(countersinks: &[(Countersink, Vec<usize>)], own: &[Region2], tol: f64) -> std::result::Result<Vec<Region2>, String> {
+    let near: Vec<Region2> = countersinks.iter().filter(|(c, _)| !c.far).map(|(c, _)| c.footprint()).collect();
+    let far: Vec<Region2> = countersinks.iter().filter(|(c, _)| c.far).map(|(c, _)| c.footprint()).collect();
+    if near.is_empty() || far.is_empty() || own.is_empty() {
+        return Ok(Vec::new());
+    }
+    let near = disjoint(near, tol)?;
+    let far = disjoint(far, tol)?;
+    let common = planar_regions_boolean(&near, &far, BoolOp::Intersect, tol).map_err(|e| e.to_string())?;
+    if common.is_empty() {
+        return Ok(Vec::new());
+    }
+    planar_regions_boolean(&common, own, BoolOp::Intersect, tol).map_err(|e| e.to_string())
+}
+
+/// Adds the 2D material behind `countersinks` back onto each side's seen regions (`near_raw`,
+/// `far_raw`), clipped to `footprint` and to what the opposite side still holds, so that a
+/// countersunk hole reads as its through-bore (or blind floor) rather than as unequal faces.
+fn fill_countersinks(
+    near_raw: Vec<Region2>,
+    far_raw: Vec<Region2>,
+    countersinks: &[(Countersink, Vec<usize>)],
+    footprint: &[Region2],
+    tol: f64,
+) -> std::result::Result<(Vec<Region2>, Vec<Region2>), String> {
+    if countersinks.is_empty() {
+        return Ok((near_raw, far_raw));
+    }
+    let has_near = countersinks.iter().any(|(c, _)| !c.far);
+    let has_far = countersinks.iter().any(|(c, _)| c.far);
+    let both = has_near && has_far;
+    let side_regions = |far_side: bool| -> std::result::Result<Vec<Region2>, String> {
+        let raw: Vec<Region2> = countersinks
+            .iter()
+            .filter(|(c, _)| c.far == far_side)
+            .map(|(c, _)| if both { c.footprint() } else { Region2 { outer: c.outer_loop(), holes: Vec::new() } })
+            .collect();
+        if raw.is_empty() || footprint.is_empty() {
+            return Ok(Vec::new());
+        }
+        let raw = disjoint(raw, tol)?;
+        planar_regions_boolean(&raw, footprint, BoolOp::Intersect, tol).map_err(|e| e.to_string())
+    };
+    let cs_near = side_regions(false)?;
+    let cs_far = side_regions(true)?;
+    let near = if cs_near.is_empty() {
+        near_raw.clone()
+    } else {
+        let opp = if cs_far.is_empty() {
+            far_raw.clone()
+        } else if far_raw.is_empty() {
+            cs_far.clone()
+        } else {
+            planar_regions_boolean(&far_raw, &cs_far, BoolOp::Union, tol).map_err(|e| e.to_string())?
+        };
+        let fill =
+            if opp.is_empty() { Vec::new() } else { planar_regions_boolean(&cs_near, &opp, BoolOp::Intersect, tol).map_err(|e| e.to_string())? };
+        if fill.is_empty() {
+            near_raw.clone()
+        } else if near_raw.is_empty() {
+            fill
+        } else {
+            planar_regions_boolean(&near_raw, &fill, BoolOp::Union, tol).map_err(|e| e.to_string())?
+        }
+    };
+    let far = if cs_far.is_empty() {
+        far_raw
+    } else {
+        let opp = if cs_near.is_empty() {
+            near_raw
+        } else if near_raw.is_empty() {
+            cs_near
+        } else {
+            planar_regions_boolean(&near_raw, &cs_near, BoolOp::Union, tol).map_err(|e| e.to_string())?
+        };
+        let fill =
+            if opp.is_empty() { Vec::new() } else { planar_regions_boolean(&cs_far, &opp, BoolOp::Intersect, tol).map_err(|e| e.to_string())? };
+        if fill.is_empty() {
+            far_raw
+        } else if far_raw.is_empty() {
+            fill
+        } else {
+            planar_regions_boolean(&far_raw, &fill, BoolOp::Union, tol).map_err(|e| e.to_string())?
+        }
+    };
+    Ok((near, far))
 }
 
 /// Whether every region of `a` lies in a region of `b` by their loops (so `a` ∩ `b` is `a`): its
@@ -966,7 +1222,11 @@ pub(crate) fn absorb(before: &ModelState, after: &ModelState, f: &Feature, weigh
     for i in 0..after.surface_sheets.len() {
         let Some(sk) = after.surface_sheets.get(i).cloned() else { continue };
         // A sheet the feature changed itself (a cut read straight into it) has its body already.
-        if before.surface_sheets.iter().any(|b| b.body == sk.body && (b.sheet != sk.sheet || b.loose != sk.loose || b.bores != sk.bores)) {
+        if before
+            .surface_sheets
+            .iter()
+            .any(|b| b.body == sk.body && (b.sheet != sk.sheet || b.loose != sk.loose || b.bores != sk.bores || b.countersinks != sk.countersinks))
+        {
             continue;
         }
         let (Some(was), Some(now)) = (before.body(&sk.body), after.body(&sk.body)) else { continue };
@@ -1047,7 +1307,7 @@ fn weighed(sk: &SurfaceSheet, out: &SurfaceSheet, built: &Body, now: &Body, shad
 /// corners has them), that is how it was drawn, not a cut.
 pub(crate) fn engraved(sk: &SurfaceSheet, built: &Body, body: &Body) -> Result<(SurfaceSheet, Body)> {
     let (mut out, _) = onto_panels(sk, built, body, None, None).map_err(DocError::Invalid)?;
-    if out.recesses.is_empty() && out.sheet == sk.sheet {
+    if out.recesses.is_empty() && out.countersinks.is_empty() && out.sheet == sk.sheet {
         return Ok((out, built.clone()));
     }
     let solid = out.build()?;
@@ -1264,6 +1524,7 @@ fn onto_panels(
     let mut out = sk.clone();
     let mut taken = Read::default();
     let mut recesses: Vec<Recess> = sk.recesses.clone();
+    let mut countersinks: Vec<Countersink> = sk.countersinks.clone();
     // A cut whose walls cross a joint is read once across every piece it reaches, its shadow in
     // the flat, and kept as a cut of the sheet's, drawn in the flat chart of a panel it reaches;
     // the panels' own reading leaves it be. Unfolded, where the cut's walls are square to the
@@ -1363,18 +1624,22 @@ fn onto_panels(
         }
         // A bore lying in the panel takes its shadow, read in closed form (see [`lying`]); the
         // cut's other walls here are read as before. Whether they are square is read from their
-        // surfaces too: a wall that leans is not square to the panel, whatever its faces show.
+        // surfaces too: a wall that leans is not square to the panel, whatever its faces show,
+        // except a conical countersink opening square from either face, which the panel keeps.
         let (bands, bored) = lying(now, &qb, frame, t, &here, &panel.name, tol)?;
-        let others: Vec<usize> = here.iter().copied().filter(|f| !bored.contains(f)).collect();
-        let leaning = others.iter().any(|f| !matches!(lean(now, *f, frame.z, tol), Lean::Square));
         let read = |b: &Body, q: &Query| on_panel(b, q, frame, t, std::slice::from_ref(&panel.region), tol, drawn).map_err(|e| e.to_string());
         let (before, after) = (read(was, &qa)?, read(now, &qb)?);
+        let cs_faces: BTreeSet<usize> = after.countersinks.iter().flat_map(|(_, faces)| faces.iter().copied()).collect();
+        let others: Vec<usize> = here.iter().copied().filter(|f| !bored.contains(f) && !cs_faces.contains(f)).collect();
+        let leaning = others.iter().any(|f| !matches!(lean(now, *f, frame.z, tol), Lean::Square));
         // The panel's flat material before the cut, and each face's after it (its own face, or
         // a floor seen from it).
         let all = |o: &OnPanel| {
             o.near.iter().chain(&o.far).cloned().chain(o.near_floors.iter().chain(&o.far_floors).map(|x| x.1.clone())).collect::<Vec<_>>()
         };
-        let footprint = union(all(&before), tol).map_err(|e| e.to_string())?;
+        let mut before_parts = all(&before);
+        before_parts.extend(double_countersink_footprint(&before.countersinks, std::slice::from_ref(&panel.region), tol)?);
+        let footprint = union(before_parts, tol).map_err(|e| e.to_string())?;
         // What the cuts across joints took here is theirs, read with them, not here: a region
         // that lies within theirs, by the planar booleans (none of its area left outside them).
         // So is what a bore lying in the panel took, which its band holds, whatever the panel's
@@ -1406,8 +1671,9 @@ fn onto_panels(
             }
             planar_regions_boolean(&r, &footprint, BoolOp::Intersect, tol).map_err(|e| e.to_string())
         };
-        let near = within(seen(&after.near, &after.near_floors).map_err(|e| e.to_string())?)?;
-        let far = within(seen(&after.far, &after.far_floors).map_err(|e| e.to_string())?)?;
+        let near_raw = within(seen(&after.near, &after.near_floors).map_err(|e| e.to_string())?)?;
+        let far_raw = within(seen(&after.far, &after.far_floors).map_err(|e| e.to_string())?)?;
+        let (near, far) = fill_countersinks(near_raw, far_raw, &after.countersinks, &footprint, tol)?;
         // Square walls: each face sees material wherever the other does.
         let apart = |a: &[Region2], b: &[Region2]| planar_regions_boolean(a, b, BoolOp::Cut, tol).map(|r| area(&r)).map_err(|e| e.to_string());
         let slack = tol * 10.0 * perimeter(&footprint).max(1.0);
@@ -1466,7 +1732,7 @@ fn onto_panels(
             return Err("can't be kept in the sheet yet: it reaches a bend or a seam".into());
         } else {
             return Err(format!(
-                "leaves walls that are not square to the sheet on {}: not supported yet (a countersink, a rounded or chamfered face edge, a hole at a slant)",
+                "leaves walls that are not square to the sheet on {}: not supported yet (a rounded or chamfered face edge, a drill point, a hole at a slant)",
                 panel.name
             ));
         };
@@ -1522,8 +1788,21 @@ fn onto_panels(
             recesses.retain(|r| r.panel != p);
             recesses.extend(fresh);
         }
+        let fresh_cs: Vec<Countersink> = after
+            .countersinks
+            .into_iter()
+            .map(|(mut c, _)| {
+                c.panel = p;
+                c
+            })
+            .collect();
+        if !same_countersinks(&fresh_cs, countersinks.iter().filter(|c| c.panel == p).collect(), tol * 10.0) {
+            countersinks.retain(|c| c.panel != p);
+            countersinks.extend(fresh_cs);
+        }
     }
     out.recesses = recesses;
+    out.countersinks = countersinks;
     // Folded, a stretch of a bend beside which the cut took both panels' material, with no wall
     // of its own (the cut went through it whole), would come back with the sheet. A stretch that
     // a wall of the cut reaches was read with its walls (above). Whether a panel still holds one
@@ -1652,8 +1931,11 @@ fn flat_gone(
     let seen = |own: &[Region2], floors: &[(f64, Region2)]| {
         union(own.iter().cloned().chain(floors.iter().map(|x| x.1.clone())).collect(), tol).map_err(|e| e.to_string())
     };
-    let footprint = seen(&[before.near, before.far].concat(), &[before.near_floors, before.far_floors].concat())?;
-    let (near, far) = (seen(&after.near, &after.near_floors)?, seen(&after.far, &after.far_floors)?);
+    let mut before_parts = [before.near, before.far].concat();
+    before_parts.extend(double_countersink_footprint(&before.countersinks, &sk.regions, tol)?);
+    let footprint = seen(&before_parts, &[before.near_floors, before.far_floors].concat())?;
+    let (near_raw, far_raw) = (seen(&after.near, &after.near_floors)?, seen(&after.far, &after.far_floors)?);
+    let (near, far) = fill_countersinks(near_raw, far_raw, &after.countersinks, &footprint, tol)?;
     // Square walls: each face sees material wherever the other does.
     let apart = |a: &[Region2], b: &[Region2]| planar_regions_boolean(a, b, BoolOp::Cut, tol).map(|r| area(&r)).map_err(|e| e.to_string());
     let slack = tol * 10.0 * perimeter(&footprint).max(1.0);

@@ -157,7 +157,7 @@ fn a_large_base_flange_keeps_a_small_corner_round_in_the_body_and_flat() {
     assert_eq!(dxf_entities(&mut s), (4, 1, 0));
 }
 
-/// What a sheet can't keep is refused, and the sheet stays as it was: a countersink and a
+/// What a sheet can't keep is refused, and the sheet stays as it was: a blind drill point and a
 /// chamfered face edge (walls not square to the sheet), a notch through a bend from the edge.
 #[test]
 fn cuts_a_sheet_cannot_keep_are_refused_with_the_reason() {
@@ -169,7 +169,7 @@ fn cuts_a_sheet_cannot_keep_are_refused_with_the_reason() {
         assert!((exact_volume(&s) - v).abs() < 1e-9 * v, "{cmd}: the sheet changed");
         e
     };
-    let e = refused("solid.hole", json!({"position": [50, 30, T], "type": "countersink", "diameter": 6, "cs_diameter": 8, "cs_angle": 90}));
+    let e = refused("solid.hole", json!({"position": [50, 30, T], "type": "drilled", "diameter": 4, "depth": 1, "tip_angle": "118 deg"}));
     assert!(e.contains("not square to the sheet"), "{e}");
     let e = refused("solid.chamfer", json!({"edges": [[50, 60, T]], "distance": 0.5}));
     assert!(e.contains("not square to the sheet"), "{e}");
@@ -1214,4 +1214,122 @@ fn a_cut_out_with_a_corner_on_the_sheets_edge_at_a_bend_folds_with_the_sheet() {
     check(&s, whole - 3.0, "cut on the flat");
     run(&mut s, "sheet.refold", json!({}));
     check(&s, whole - 3.0, "folded again");
+}
+
+/// Volume removed by a through countersunk hole of bore radius `r`, outer countersink radius `rc`,
+/// included angle `angle_deg` through a flat panel `t` thick.
+fn countersink_volume(r: f64, rc: f64, angle_deg: f64, t: f64) -> f64 {
+    let tan_h = (angle_deg.to_radians() / 2.0).tan();
+    let cs_depth = ((rc - r) / tan_h).min(t);
+    let r_end = (rc - cs_depth * tan_h).max(r);
+    let frustum = PI * cs_depth / 3.0 * (rc * rc + rc * r_end + r_end * r_end);
+    let bore = PI * r * r * (t - cs_depth).max(0.0);
+    frustum + bore
+}
+
+/// #22051: a countersunk hole on a bent 2 mm contour flange (created directly or edited from a
+/// plain hole via `timeline.edit`) keeps its conical countersink in 3D, places its bore circle in
+/// the flat pattern and DXF, survives Unfold / Refold, and lets later holes cut the same or other
+/// panels cleanly.
+#[test]
+fn a_countersunk_hole_on_a_bent_sheet_and_timeline_edit_keep_its_cone_and_flat() {
+    let mut s = session();
+    rule(&mut s, "Test", T, 0.44, 2.0, 0.5);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.line", json!({"points": [[0.0, 0.0], [60.0, 0.0], [60.0, 30.0]], "ids": ["l1", "l2"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"type": "contour", "sketch": "Profile", "curves": ["l1", "l2"], "distance": 40, "body_name": "Plate"}));
+    let v0 = exact_volume(&s);
+    // Start with a plain hole on the first leg, then edit it to a 120 deg countersink.
+    run(&mut s, "solid.hole", json!({"position": [20, 0, 20], "diameter": 4.1, "name": "RivetHoles"}));
+    run(
+        &mut s,
+        "timeline.edit",
+        json!({
+            "feature": "RivetHoles",
+            "set": {"diameter": "3.35", "hole": {"type": "countersink", "cs_diameter": "7.85", "cs_angle": "120 deg"}}
+        }),
+    );
+    let (r, rc) = (3.35 / 2.0, 7.85 / 2.0);
+    let want = v0 - countersink_volume(r, rc, 120.0, T);
+    assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", exact_volume(&s));
+    let circles = flat_circles(&mut s);
+    assert!(circles.len() == 1 && (circles[0].0 - r).abs() < 1e-6, "flat circles: {circles:?}");
+    assert!(pockets(&mut s).is_empty(), "countersink is not a flat-bottomed pocket");
+    let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
+    assert!(dxf.contains("CIRCLE"), "flat DXF carries the through-hole circle");
+    // Unfold and refold preserve the 3D countersink.
+    run(&mut s, "sheet.unfold", json!({}));
+    run(&mut s, "sheet.refold", json!({}));
+    assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "after refold: {} vs {want}", exact_volume(&s));
+    // A later plain hole on the same panel and another on the second leg keep the countersink.
+    run(&mut s, "solid.hole", json!({"position": [40, 0, 20], "diameter": 4.0}));
+    run(&mut s, "solid.hole", json!({"position": [60, 18, 20], "diameter": 5.0}));
+    let want2 = want - PI * (2.0 * 2.0 + 2.5 * 2.5) * T;
+    assert!((exact_volume(&s) - want2).abs() < 1e-6 * want2, "after later holes: {} vs {want2}", exact_volume(&s));
+    let mut radii: Vec<f64> = flat_circles(&mut s).iter().map(|c| c.0).collect();
+    radii.sort_by(f64::total_cmp);
+    assert!(
+        radii.len() == 3 && (radii[0] - r).abs() < 1e-6 && (radii[1] - 2.0).abs() < 1e-6 && (radii[2] - 2.5).abs() < 1e-6,
+        "flat radii: {radii:?}"
+    );
+}
+
+/// A full-thickness countersink (`cs_depth > T`, leaving a frustum from `rc` to `rc - T tan(half)`)
+/// and a countersink drilled from the far face both keep their exact 3D cones and flat circles.
+#[test]
+fn a_countersunk_hole_deeper_than_the_sheet_and_from_the_far_face_stay_exact() {
+    let mut s = plate();
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
+    let v0 = exact_volume(&s);
+    // 90 deg countersink: cs_depth = (3.925 - 1.675) / tan(45 deg) = 2.25 > T = 2.0 -> exit radius 1.925.
+    run(&mut s, "solid.hole", json!({"position": [30, 30, T], "type": "countersink", "diameter": 3.35, "cs_diameter": 7.85, "cs_angle": "90 deg"}));
+    // Countersink from the far face (z = 0, drilling +Z): cs_depth = (3.5 - 2.0) / tan(45 deg) = 1.5 < T.
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [70, 30, 0], "direction": [0, 0, 1], "type": "countersink", "diameter": 4, "cs_diameter": 7, "cs_angle": "90 deg"}),
+    );
+    let want = v0 - countersink_volume(1.675, 3.925, 90.0, T) - countersink_volume(2.0, 3.5, 90.0, T);
+    assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", exact_volume(&s));
+    let mut radii: Vec<f64> = flat_circles(&mut s).iter().map(|c| c.0).collect();
+    radii.sort_by(f64::total_cmp);
+    assert!(radii.len() == 2 && (radii[0] - 1.925).abs() < 1e-6 && (radii[1] - 2.0).abs() < 1e-6, "flat radii: {radii:?}");
+    run(&mut s, "sheet.unfold", json!({}));
+    run(&mut s, "sheet.refold", json!({}));
+    assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "after refold: {} vs {want}", exact_volume(&s));
+}
+
+/// A countersunk hole drilled into a flange while the sheet is unfolded folds cleanly with its
+/// panel on `sheet.refold`.
+#[test]
+fn a_countersunk_hole_cut_while_unfolded_folds_with_its_panel() {
+    let mut s = plate();
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
+    let v0 = exact_volume(&s);
+    run(&mut s, "sheet.unfold", json!({}));
+    // Unfolded, the flange leg lies in y ∈ [-16.524, -0.524], x ∈ [0, 100], top at z = T.
+    run(&mut s, "solid.hole", json!({"position": [50, -9, T], "type": "countersink", "diameter": 4, "cs_diameter": 7, "cs_angle": "90 deg"}));
+    run(&mut s, "sheet.refold", json!({}));
+    let want = v0 - countersink_volume(2.0, 3.5, 90.0, T);
+    assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", exact_volume(&s));
+    let circles = flat_circles(&mut s);
+    assert!(circles.len() == 1 && (circles[0].0 - 2.0).abs() < 1e-6, "flat circles: {circles:?}");
+}
+
+/// A countersunk hole whose cone reaches into a bend zone is still refused, leaving the sheet
+/// unchanged.
+#[test]
+fn a_countersunk_hole_across_a_bend_is_refused() {
+    let mut s = wide_bend();
+    let v = exact_volume(&s);
+    // The plate's tangent line into the R 10 bend lies at y = 12; a 8 mm countersink centered at
+    // y = 12.5 reaches to y = 8.5, well into the bend.
+    let e = s
+        .execute("solid.hole", &json!({"position": [50, 12.5, T], "type": "countersink", "diameter": 4, "cs_diameter": 8, "cs_angle": "90 deg"}))
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
+    assert!(e.contains("not square to the sheet") || e.contains("don't run through"), "{e}");
+    assert!((exact_volume(&s) - v).abs() < 1e-9 * v, "the sheet changed");
 }

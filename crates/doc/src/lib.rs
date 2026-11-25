@@ -140,6 +140,7 @@ pub use sheet_surface_convert::SurfaceConversion;
 pub use sheet_surface_convert::SurfaceSheet;
 pub use sheet_surface_convert::convert_surfaces;
 pub use sheet_surface_convert::measure_sheet_body;
+pub use sheet_surface_cuts::Countersink;
 pub use sheet_surface_cuts::Loose;
 pub use sheet_surface_cuts::Recess;
 pub use sheet_surface_features::OUTSIDE_BEND_OPEN;
