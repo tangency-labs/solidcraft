@@ -322,10 +322,19 @@ mod tests {
 
     #[test]
     fn direction_cosine_uses_unit_directions() {
-        assert_eq!(direction_cosine([0.0, 0.0, 2.0], [0.0, 0.0, 3.0]), Some(1.0));
-        assert_eq!(direction_cosine([0.0, 0.0, 2.0], [0.0, 0.0, -1.0]), Some(-1.0));
+        assert_eq!(
+            direction_cosine([0.0, 0.0, 2.0], [0.0, 0.0, 3.0]),
+            Some(1.0)
+        );
+        assert_eq!(
+            direction_cosine([0.0, 0.0, 2.0], [0.0, 0.0, -1.0]),
+            Some(-1.0)
+        );
         assert_eq!(direction_cosine([0.0; 3], [1.0, 0.0, 0.0]), None);
-        assert_eq!(direction_cosine([f64::NAN, 0.0, 0.0], [1.0, 0.0, 0.0]), None);
+        assert_eq!(
+            direction_cosine([f64::NAN, 0.0, 0.0], [1.0, 0.0, 0.0]),
+            None
+        );
     }
 
     /// A face's plane tilted by rounding comes back square to the axes; one tilted for real
