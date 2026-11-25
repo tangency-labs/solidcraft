@@ -312,6 +312,21 @@ impl Body {
         })))
     }
 
+    /// The order of the body's own lists: record face, edge and vertex `i` is the kernel's
+    /// `i`th, as the kernel holds them now (no edges split). An operation's result numbers its
+    /// entities afresh, so an order is the body's as it is when this is called; picks by point
+    /// ([`crate::pick::edges`], [`crate::pick::vertices`]) give indices into these lists.
+    #[must_use]
+    pub fn own_order(&self) -> Order {
+        let g = self.lock();
+        Order {
+            split_edges: 0,
+            faces: g.face_list().to_vec(),
+            edges: g.edge_list().to_vec(),
+            vertices: g.vertex_list().to_vec(),
+        }
+    }
+
     /// A deep copy with `order` mapped to the copy's own entity IDs. The ordering of each
     /// vector is preserved, including an importer's order that differs from the body's lists.
     /// No correspondence by numeric ID or list position is assumed.
@@ -463,6 +478,15 @@ impl Body {
                 b.vertex_list().len(),
             ])
         })
+    }
+
+    /// The body's own tolerance, the kernel's: how near two of its points must be to be one
+    /// point.
+    ///
+    /// # Errors
+    /// Those of [`with_body`].
+    pub fn tolerance(&self) -> Result<f64> {
+        read_body("tolerance", self, |_, b| Ok(b.tolerance()))
     }
 
     /// The enclosed volume (`SmApiBrepComputeVolume`) at `relative_accuracy`, as the kernel's

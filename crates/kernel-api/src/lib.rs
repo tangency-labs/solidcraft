@@ -9,6 +9,10 @@
 //!
 //! This crate holds the contract only: the trait, the operations it covers ([`OpKind`]), their
 //! inputs, and the typed error every adapter maps its kernel's failures into ([`BackendError`]).
+//! The trait comes in families, one module each ([`modelling`]): a family brings its trait over
+//! [`Backend`], its inputs and its [`OpKind`]s, solidcore's adapter for it in
+//! `crates/kernel/src/backend/<family>.rs`, and the router's entry points in
+//! `crates/kernel/src/route/<family>.rs`.
 //! It computes nothing. Bodies cross it as the record (`solidcore_record::brep::Brep`), the body
 //! format, with the operation's history in the record's indices.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -17,7 +21,12 @@
 use serde::{Deserialize, Serialize};
 use solidcore_record::brep::Brep;
 use solidcore_record::brep::history::History;
-use solidcore_record::{Plane, Region2, Vec2, Vec3};
+
+pub mod cell_grid;
+pub mod modelling;
+
+pub use cell_grid::{CellGrid, CellGridLimits};
+pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
 
 /// A kernel's stable name: what build features, the support matrix and reports call it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -29,9 +38,10 @@ impl std::fmt::Display for BackendId {
     }
 }
 
-/// The operations the router sends to a kernel, one per family of body-making calls. Queries,
-/// meshing, the validity check and import and export are not here: they run on the record, the
-/// same code whichever kernel made the body.
+/// The operations the router sends to a kernel, by family: the body-making calls ([`Modelling`]).
+/// The services that read records (queries, meshing, the validity check, import and export)
+/// join as families of their own (`docs/design/kernel-layer.md` §2); until then they run on
+/// solidcore whichever kernel made the body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OpKind {
@@ -43,22 +53,24 @@ pub enum OpKind {
     Sphere,
     /// A torus ([`Primitive::Torus`]).
     Torus,
-    /// Planar regions extruded along their plane's normal ([`Backend::extrude`]).
+    /// Planar regions extruded along their plane's normal ([`Modelling::extrude`]).
     Extrude,
-    /// Planar regions turned about an axis ([`Backend::revolve`]).
+    /// Planar regions turned about an axis ([`Modelling::revolve`]).
     Revolve,
-    /// Union, cut or intersection of two bodies ([`Backend::boolean`]).
+    /// Union, cut or intersection of two bodies ([`Modelling::boolean`]).
     Boolean,
-    /// Constant-radius rounds of edges ([`Backend::fillet`]).
+    /// Constant-radius rounds of edges ([`Modelling::fillet`]).
     Fillet,
-    /// Equal and unequal chamfers of edges ([`Backend::chamfer`], [`Backend::chamfer_sides`]).
+    /// Equal and unequal chamfers of edges ([`Modelling::chamfer`], [`Modelling::chamfer_sides`]).
     Chamfer,
-    /// A body hollowed to a wall ([`Backend::shell`]).
+    /// A body hollowed to a wall ([`Modelling::shell`]).
     Shell,
-    /// A sheet thickened into a solid ([`Backend::thicken`]).
+    /// A sheet thickened into a solid ([`Modelling::thicken`]).
     Thicken,
-    /// Faces moved along their normals ([`Backend::offset_faces`]).
+    /// Faces moved along their normals ([`Modelling::offset_faces`]).
     OffsetFaces,
+    /// A cell grid planned over a profile ([`CellGrid`]).
+    CellGrid,
 }
 
 impl OpKind {
@@ -76,6 +88,7 @@ impl OpKind {
         OpKind::Shell,
         OpKind::Thicken,
         OpKind::OffsetFaces,
+        OpKind::CellGrid,
     ];
 
     /// The operation's stable name, as the support matrix and route files spell it.
@@ -93,6 +106,7 @@ impl OpKind {
             OpKind::Shell => "shell",
             OpKind::Thicken => "thicken",
             OpKind::OffsetFaces => "offset_faces",
+            OpKind::CellGrid => "cell_grid",
         }
     }
 
@@ -116,89 +130,6 @@ pub enum Support {
     No,
     /// Taken only in part; the reason says which part.
     Some(String),
-}
-
-/// Which boolean: the names are saved in designs, so they never change.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BoolOp {
-    /// Material in either body.
-    Union,
-    /// The first body with the second taken away.
-    Cut,
-    /// Material in both bodies.
-    Intersect,
-}
-
-/// How two constant rounds of one radius turn round a sharp, straight, convex side edge square to
-/// both on a plane, such as the rounds along a boss's base at its upright edges.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum FilletTurn {
-    /// The rounds run on to where they cross and meet in a mitre.
-    #[default]
-    Mitre,
-    /// The rounds end at the side edge and the corner is their section revolved about it, a
-    /// torus tangent to both. Refused where it is not built (unequal or variable rounds, a
-    /// concave, curved or tangent side edge, a corner of four edges), with the reason.
-    Swept,
-}
-
-/// The second side of an unequal chamfer: a distance along the other face, or the angle the
-/// chamfer makes with the first face.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ChamferSide {
-    /// The setback along the other face, in millimetres.
-    Distance(f64),
-    /// The angle the chamfer makes with the first face, in radians.
-    Angle(f64),
-}
-
-/// A primitive solid, in millimetres.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Primitive {
-    /// The axis-aligned box between two opposite corners.
-    Box {
-        /// One corner.
-        a: Vec3,
-        /// The opposite corner.
-        b: Vec3,
-    },
-    /// A cylinder standing on `base`, along `axis`, `height` long.
-    Cylinder {
-        /// The centre of its base.
-        base: Vec3,
-        /// The direction it stands along.
-        axis: Vec3,
-        /// Its radius.
-        radius: f64,
-        /// Its length along `axis`.
-        height: f64,
-    },
-    /// A sphere about `center`.
-    Sphere {
-        /// Its centre.
-        center: Vec3,
-        /// Its radius.
-        radius: f64,
-    },
-    /// A ring torus about the z axis through `center`.
-    Torus {
-        /// Its centre.
-        center: Vec3,
-        /// The radius of the ring's centre line.
-        major: f64,
-        /// The radius of the ring's section.
-        minor: f64,
-    },
-}
-
-/// The axis a profile turns about, in the profile plane's coordinates.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Axis2 {
-    /// A point on the axis.
-    pub origin: Vec2,
-    /// The axis's direction.
-    pub dir: Vec2,
 }
 
 /// A body as it leaves a kernel: its record in canonical order, and the operation's history over
@@ -265,9 +196,12 @@ pub enum BackendError {
 /// The router holds each compiled-in adapter in a closed enum, so a build with solidcore only
 /// makes exactly the call it would make without the router.
 ///
-/// Edges and faces are picked by points, as the application picks them: the edge or face nearest
-/// each point. A body is the kernel's own form ([`Backend::Form`]); it enters as the record
+/// A body is the kernel's own form ([`Backend::Form`]); it enters as the record
 /// ([`Backend::import`]) and leaves as the record with its history ([`Backend::export`]).
+///
+/// What a kernel does is in families, one trait over this one for each, in its own module:
+/// [`Modelling`], the body-making operations. A family names its operations in [`OpKind`], so
+/// [`Backend::supports`] and the kernel support matrix (`docs/kernel-support.md`) list them.
 pub trait Backend: Send + Sync + 'static {
     /// The kernel's own body.
     type Form: Send + Sync + 'static;
@@ -287,35 +221,12 @@ pub trait Backend: Send + Sync + 'static {
     fn import(&self, record: &Brep) -> Result<Self::Form, Self::Error>;
     /// The form as a record in canonical order, with the history that made it.
     fn export(&self, form: &Self::Form) -> Result<Exported, Self::Error>;
-
-    /// A primitive solid.
-    fn primitive(&self, p: &Primitive) -> Result<Self::Form, Self::Error>;
-    /// `regions` on `plane`, extruded from `start` to `end` along its normal: one body per region
-    /// that stays apart.
-    fn extrude(&self, plane: &Plane, regions: &[Region2], start: f64, end: f64) -> Result<Vec<Self::Form>, Self::Error>;
-    /// `regions` on `plane`, turned by `angle` (radians) about `axis`. `whole` asks for the whole
-    /// revolution's form where the angle is a full turn.
-    fn revolve(&self, plane: &Plane, regions: &[Region2], axis: Axis2, angle: f64, whole: bool) -> Result<Vec<Self::Form>, Self::Error>;
-    /// `a` with `b` by `op`. `None` when nothing is left.
-    fn boolean(&self, a: &Self::Form, b: &Self::Form, op: BoolOp) -> Result<Option<Self::Form>, Self::Error>;
-    /// Constant-radius rounds of the edges nearest `edges`, turning at side edges as `turn` says.
-    fn fillet(&self, body: &Self::Form, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<Self::Form, Self::Error>;
-    /// An equal chamfer of the edges nearest `edges`.
-    fn chamfer(&self, body: &Self::Form, edges: &[Vec3], distance: f64) -> Result<Self::Form, Self::Error>;
-    /// An unequal chamfer: `d1` along the first face (the one facing up most, the other with
-    /// `flip`), the second side by distance or angle.
-    fn chamfer_sides(&self, body: &Self::Form, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<Self::Form, Self::Error>;
-    /// The body hollowed to `thickness`, open at the faces nearest `open`.
-    fn shell(&self, body: &Self::Form, open: &[Vec3], thickness: f64) -> Result<Self::Form, Self::Error>;
-    /// A sheet thickened to `thickness`, to both sides when `symmetric`.
-    fn thicken(&self, sheet: &Self::Form, thickness: f64, symmetric: bool) -> Result<Self::Form, Self::Error>;
-    /// The faces nearest `at` moved `distance` along their normals.
-    fn offset_faces(&self, body: &Self::Form, at: &[Vec3], distance: f64) -> Result<Self::Form, Self::Error>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore_record::Vec3;
 
     #[test]
     fn every_operation_has_its_own_name() {

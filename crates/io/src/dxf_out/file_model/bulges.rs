@@ -9,8 +9,8 @@ use solidcore_record::Vec2;
 #[cfg(test)]
 const MAX_WORK: usize = 64 << 20;
 pub(super) fn bounds(vertices: &[DxfVertex], closed: bool, max_vertices: usize, max_work: usize) -> Result<DxfGeometryBounds> {
-    let data = vertices.iter().map(|v| solidcraft_kernel::services::path_export::Vertex { at: v.at, bulge: v.bulge });
-    let b = solidcraft_kernel::services::export_geometry::bulged_bounds(data, vertices.len(), closed, max_vertices, max_work)
+    let data = vertices.iter().map(|v| solidcraft_kernel::services::dxf::export::Vertex { at: v.at, bulge: v.bulge });
+    let b = solidcraft_kernel::services::dxf::export::bulged_bounds(data, vertices.len(), closed, max_vertices, max_work)
         .map_err(super::geometry::export_error)?;
     Ok(DxfGeometryBounds { min: b.min, max: b.max })
 }

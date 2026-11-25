@@ -37,6 +37,7 @@ pub use pick::DrawnPoint;
 pub use pick::nearest_drawn_point;
 pub use raster::Canvas;
 pub use raster::render;
+pub use raster::render_picture;
 pub use raster::render_png;
 pub use raster::render_transparent;
 pub use raster::shade;

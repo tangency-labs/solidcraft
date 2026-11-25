@@ -12,6 +12,7 @@
 //! The shared host owns panel placement. In Classic, the palette docks at the right edge and its
 //! header drags it, like a command dialog's title (#8923).
 
+use crate::i18n::LocaleNames as _;
 use crate::ui_kit::BackingTooltipExt as _;
 use std::cell::Cell;
 
@@ -375,8 +376,13 @@ pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime
     let world = crate::open_meshing::session_world(&app.session);
     let sketch = world.sketch(active)?;
     let solved = sketch.report.shown_ok();
-    let title =
-        if sketch.name.trim().is_empty() || sketch.name.len() > 256 { app.tr("ui.palette_sketch_options").to_owned() } else { sketch.name.clone() };
+    // A default name such as `Sketch1` reads as the browser shows it (`Esquisse1` in French); a
+    // name the user gave stays as typed.
+    let title = if sketch.name.trim().is_empty() || sketch.name.len() > 256 {
+        app.tr("ui.palette_sketch_options").to_owned()
+    } else {
+        solidcraft_ui_text::Locale::for_language(&app.preferences.language).given_name(&sketch.name)
+    };
     Some(crate::panel_runtime::PanelPresentation {
         title,
         icon: "sketch".into(),
@@ -442,6 +448,10 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let image_tool = image_tool(app);
     let framing = app.preferences.frame_images_in_sketch;
     let mut frame_image = false;
+    // The 3-Point Arc's tangent snap (#20719): a mode of that tool, so it is here and not in
+    // Preferences; kept for the next time the tool runs.
+    let arc_snap = app.preferences.sketch_arc_tangent_snap;
+    let mut arc_snap_clicked = false;
     let has_curves = !selected_curves(app).is_empty();
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
     // A construction line tool that takes a length has a line type of its own, which the Line
@@ -494,6 +504,10 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .collect();
                 let section = ui.vertical(|ui| crate::ui_kit::tool_choices(ui, app.tr_label(family.label), current, &choices));
                 crate::scenario::publish_rect("sketch_palette:feature_options", section.response.rect);
+                if current == "sketch.arc.three_point" {
+                    arc_snap_clicked =
+                        crate::ui_kit::checkbox_row(ui, "arc_tangent_snap", solidcraft_ui_text::tr("ui.palette_arc_tangent_snap"), arc_snap);
+                }
                 section.inner
             });
             start = section.flatten();
@@ -621,6 +635,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     if frame_image {
         app.preferences.frame_images_in_sketch = !framing;
     }
+    if arc_snap_clicked {
+        app.preferences.sketch_arc_tangent_snap = !arc_snap;
+    }
     if let Some(id) = start {
         app.start(id);
     }
@@ -713,6 +730,23 @@ mod tests {
             h.call("ui.click", json!({"x":at.x,"y":at.y}));
             assert_eq!(h.app.preferences.frame_images_in_sketch, on, "{cmd}");
         }
+    }
+
+    /// The palette's title names the sketch as the browser does: a default name is translated, a
+    /// name the user gave is kept.
+    #[test]
+    fn palette_title_translates_a_default_sketch_name() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        let title = |app: &SolveApp| shared_presentation(app).map(|p| p.title);
+        assert_eq!(title(&h.app).as_deref(), Some("Sketch1"));
+        h.app.preferences.language = "fr".into();
+        assert_eq!(title(&h.app).as_deref(), Some("Esquisse1"));
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY", "name":"Leg"})).unwrap();
+        h.settle();
+        assert_eq!(title(&h.app).as_deref(), Some("Leg"));
     }
 
     #[test]

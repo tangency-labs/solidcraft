@@ -90,7 +90,7 @@ pub const MAX_PALETTE: usize = 1 << 20;
 pub struct Palette {
     entries: Vec<[u8; 4]>,
     /// The interned entries by colour and motion slot.
-    lookup: std::collections::HashMap<([u8; 4], u32), u32>,
+    lookup: std::collections::HashMap<([u8; 4], u32), u32, std::hash::BuildHasherDefault<PaletteHasher>>,
     stable_len: usize,
     /// Per entry, 1 + its body's hatch, or 0 for the cap's own (empty: 0 for every entry).
     hatches: Vec<u8>,
@@ -155,7 +155,7 @@ impl Palette {
         Palette {
             stable_len: entries.len(),
             entries,
-            lookup: std::collections::HashMap::new(),
+            lookup: Default::default(),
             hatches: Vec::new(),
             motions: Vec::new(),
             raw: Vec::new(),
@@ -523,6 +523,46 @@ impl std::hash::Hasher for WeldHasher {
 
     fn write_u32(&mut self, x: u32) {
         self.0 = (self.0.rotate_left(5) ^ u64::from(x)).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+}
+
+/// A multiply-and-rotate hasher for [`Palette`]'s lookup, whose keys are four colour bytes and a
+/// slot: the standard SipHash cost about 2% of a frame on a busy design, since every face and
+/// edge is interned each build. The table is never iterated for output (only rekeyed), so the
+/// hash order cannot reach the picture.
+#[derive(Default)]
+pub(crate) struct PaletteHasher(u64);
+
+impl PaletteHasher {
+    const K: u64 = 0x51_7c_c1_b7_27_22_0a_95;
+
+    fn add(&mut self, x: u64) {
+        self.0 = (self.0.rotate_left(5) ^ x).wrapping_mul(Self::K);
+    }
+}
+
+impl std::hash::Hasher for PaletteHasher {
+    fn finish(&self) -> u64 {
+        // The multiply leaves its entropy in the high bits; the table reads the low ones too.
+        self.0.rotate_left(26)
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        let (chunks, rest) = bytes.as_chunks::<8>();
+        for c in chunks {
+            self.add(u64::from_le_bytes(*c));
+        }
+        for b in rest {
+            self.add(u64::from(*b));
+        }
+    }
+
+    fn write_u32(&mut self, x: u32) {
+        self.add(u64::from(x));
+    }
+
+    fn write_usize(&mut self, x: usize) {
+        self.add(x as u64);
     }
 }
 
@@ -6385,6 +6425,71 @@ pub fn analysis_colors(c: &solidcraft_color::AnalysisColors) -> [f32; 36] {
 
 #[cfg(test)]
 mod tests {
+    /// The (colour, slot) -> index lookups of a fixed pseudo-random stream: the new hasher must
+    /// intern exactly what the standard one does. Also the timing the PR quotes
+    /// (`cargo test -p solidcraft-viewport-gpu --release palette_hasher -- --nocapture --ignored`).
+    fn stream() -> Vec<([u8; 4], u32)> {
+        let mut x = 0x2545_f491_4f6c_dd1du64;
+        (0..400_000)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                let c = (x % 600) as u32;
+                ([(c * 7) as u8, ((c * 13) >> 2) as u8, (c % 251) as u8, 255], (x >> 40) as u32 % 3)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn palette_lookup_interns_the_same_entries_as_the_standard_hasher() {
+        use super::*;
+        let mut reference: std::collections::HashMap<([u8; 4], u32), u32> = Default::default();
+        let mut entries: Vec<[u8; 4]> = Vec::new();
+        let mut palette = Palette::default();
+        for (rgba, slot) in stream() {
+            let want = *reference.entry((rgba, slot)).or_insert_with(|| {
+                entries.push(rgba);
+                entries.len() as u32 - 1
+            });
+            assert_eq!(palette.intern_moved(rgba, slot).0, want);
+        }
+        assert_eq!(palette.entries(), entries.as_slice());
+    }
+
+    #[test]
+    #[ignore = "timing"]
+    fn palette_hasher_timing() {
+        use super::*;
+        let keys = stream();
+        let mut std_map: std::collections::HashMap<([u8; 4], u32), u32> = Default::default();
+        let mut fast: std::collections::HashMap<([u8; 4], u32), u32, std::hash::BuildHasherDefault<PaletteHasher>> = Default::default();
+        for (i, k) in keys.iter().enumerate() {
+            std_map.insert(*k, i as u32);
+            fast.insert(*k, i as u32);
+        }
+        for _ in 0..3 {
+            let t = std::time::Instant::now();
+            let mut sum = 0u64;
+            for _ in 0..20 {
+                for k in &keys {
+                    sum += u64::from(*std_map.get(k).unwrap_or(&0));
+                }
+            }
+            let a = t.elapsed();
+            let t = std::time::Instant::now();
+            let mut sum2 = 0u64;
+            for _ in 0..20 {
+                for k in &keys {
+                    sum2 += u64::from(*fast.get(k).unwrap_or(&0));
+                }
+            }
+            let b = t.elapsed();
+            assert_eq!(sum, sum2);
+            println!("lookups: {} ; siphash {:?} ; palette hasher {:?}", keys.len() * 20, a, b);
+        }
+    }
+
     #[test]
     fn retaining_live_picture_slots_releases_closed_active_and_parked_uploads() {
         use super::*;
@@ -8768,6 +8873,105 @@ mod glass_tests {
                 assert_eq!(renderer.check_msaa(&device, &queue).unwrap(), super::MsaaCheck::Passed);
             }
         }
+    }
+
+    /// An OpenGL adapter under the tests' policy, with the window's device as egui-wgpu asks for it
+    /// (WebGL2 limits, textures up to 8192). `None` where no OpenGL adapter qualifies; on Linux with
+    /// `VIEWPORT_TEST_REQUIRE_GPU=1`, as in CI (Mesa's llvmpipe), a missing one fails.
+    fn opengl_window_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+        let mut descriptor = crate::instance_descriptor_from_env();
+        descriptor.backends = wgpu::Backends::GL;
+        // As in `opengl_draws_grid_lines_in_every_direction_and_at_a_point` (#15410).
+        descriptor.flags.remove(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL);
+        let instance = crate::select::start_instance(descriptor);
+        // Never dropped, as in that test (#10232).
+        std::mem::forget(instance.clone());
+        let policy = crate::test_env::policy();
+        let Some((adapter, _)) = crate::select::pick_among(pollster::block_on(instance.enumerate_adapters(wgpu::Backends::GL)), policy) else {
+            let why = format!("no OpenGL adapter qualifies under {}", policy.name());
+            assert!(!(cfg!(target_os = "linux") && crate::test_env::required()), "{why}");
+            eprintln!("skipped: {why}");
+            return None;
+        };
+        assert_eq!(adapter.get_info().backend, wgpu::Backend::Gl);
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits:
+                wgpu::Limits { max_texture_dimension_2d: 8192, ..wgpu::Limits::downlevel_webgl2_defaults() }.using_resolution(adapter.limits()),
+            ..Default::default()
+        }))
+        .expect("the OpenGL adapter opens a device");
+        Some((adapter, device, queue))
+    }
+
+    /// The window formats `adapter` multisamples 4x together with `depth`, as viewport targets.
+    fn opengl_4x_windows(adapter: &wgpu::Adapter, depth: wgpu::TextureFormat) -> Vec<GpuTarget> {
+        [wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Bgra8Unorm, wgpu::TextureFormat::Bgra8UnormSrgb]
+            .into_iter()
+            .filter(|format| [*format, depth].iter().all(|f| adapter.get_texture_format_features(*f).flags.sample_count_supported(4)))
+            .map(|format| GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false })
+            .collect()
+    }
+
+    /// Desktop OpenGL draws the scene at the saved anti-aliasing count where the startup check
+    /// shows it draws, and 1x where it doesn't; either way, what the check keeps keeps drawing.
+    /// Each format is drawn again five times at the count the check kept: a driver whose 4x passed
+    /// the check once and came out black afterwards would fail here. Mesa's llvmpipe OpenGL (CI's
+    /// software adapter) has given both answers at 4x: 4x on Mesa 26.0, and a black 4x resolve
+    /// that the check turned into 1x on Mesa 25.2 in CI.
+    #[test]
+    fn opengl_startup_msaa_check_decides_from_what_it_draws() {
+        let Some((adapter, device, queue)) = opengl_window_device() else { return };
+        let depth = crate::depth_format(&device, true);
+        let windows = opengl_4x_windows(&adapter, depth);
+        for window in &windows {
+            let mut renderer = Renderer::with_window_target(&device, GpuTarget { depth: Some(depth), samples: 4, ..*window }, *window, None);
+            let decided = renderer.check_msaa(&device, &queue).unwrap();
+            let kept = renderer.target().samples;
+            match decided {
+                super::MsaaCheck::Passed => assert_eq!(kept, 4, "{:?}: 4x kept where it draws", window.format),
+                super::MsaaCheck::Fallback => assert_eq!(kept, 1, "{:?}: 1x where 4x came out blank", window.format),
+                super::MsaaCheck::FailedAtOne => panic!("{:?}: OpenGL drew nothing at 1x either", window.format),
+            }
+            for again in 0..5 {
+                assert_eq!(
+                    renderer.check_msaa(&device, &queue).unwrap(),
+                    super::MsaaCheck::Passed,
+                    "{:?}: the kept {kept}x stops drawing (draw {again})",
+                    window.format
+                );
+            }
+            eprintln!("OpenGL anti-aliasing check: {} {:?} at 4x: {decided:?}, keeps {kept}x", adapter.get_info().name, window.format);
+        }
+        assert!(!windows.is_empty() || !cfg!(target_os = "linux"), "llvmpipe's OpenGL multisamples every window format");
+    }
+
+    /// The black frames OpenGL multisampling once gave (#5605): a driver whose 4x resolve comes out
+    /// black. The check's test seam (`check_msaa_with`'s blank count) clears the multisampled
+    /// resolve to black after the scene is drawn, as such a driver leaves it, on a real OpenGL
+    /// device. The check must see the blank picture and replace the renderer with a 1x one that
+    /// draws; the app then runs at 1x for the session (`build_wgpu`'s `MsaaCheck::Fallback`).
+    #[test]
+    fn opengl_a_black_multisampled_resolve_falls_back_to_1x() {
+        let Some((adapter, device, queue)) = opengl_window_device() else { return };
+        let depth = crate::depth_format(&device, true);
+        let windows = opengl_4x_windows(&adapter, depth);
+        for window in &windows {
+            let mut renderer = Renderer::with_window_target(&device, GpuTarget { depth: Some(depth), samples: 4, ..*window }, *window, None);
+            assert_eq!(
+                renderer.check_msaa_with(&device, &queue, 4).unwrap(),
+                super::MsaaCheck::Fallback,
+                "{:?}: a black 4x resolve is caught",
+                window.format
+            );
+            assert_eq!(renderer.target().samples, 1, "{:?}: the session draws 1x", window.format);
+            // The 1x replacement really draws.
+            assert_eq!(renderer.check_msaa(&device, &queue).unwrap(), super::MsaaCheck::Passed, "{:?}: 1x draws", window.format);
+            assert_eq!(renderer.target().samples, 1);
+            // Black at 1x too: nothing proves another count, so the check changes nothing.
+            let mut both = Renderer::with_window_target(&device, GpuTarget { depth: Some(depth), samples: 4, ..*window }, *window, None);
+            assert_eq!(both.check_msaa_with(&device, &queue, 1).unwrap(), super::MsaaCheck::FailedAtOne);
+        }
+        assert!(!windows.is_empty() || !cfg!(target_os = "linux"), "llvmpipe's OpenGL multisamples every window format");
     }
 
     /// Two see-through squares, one at z = 5 (near) and one at z = -5, in `near` and `far`

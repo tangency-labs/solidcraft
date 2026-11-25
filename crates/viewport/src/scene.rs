@@ -119,6 +119,9 @@ pub struct Scene {
     pub grid: Vec<SceneLine>,
     /// Background gradient top → bottom.
     pub background: Option<(Rgb, Rgb)>,
+    /// No background at all: a picture drawn over transparent pixels (the parts library's cards,
+    /// whose tile shows through).
+    pub transparent: bool,
     /// Scene radius for clipping planes.
     pub radius: f64,
     /// A section cut by up to [`MAX_SECTION_PLANES`] planes, each (normal, d): what lies where

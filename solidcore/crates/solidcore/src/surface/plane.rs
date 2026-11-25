@@ -8,5 +8,6 @@
 pub mod cover;
 pub mod p1;
 pub mod p2;
+pub(crate) mod spline_section;
 
 pub use p1::{Coincidence, Plane, PlaneDropCurve, PlaneIsoCurve};
