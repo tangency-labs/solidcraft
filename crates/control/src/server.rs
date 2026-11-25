@@ -6,7 +6,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -36,6 +36,10 @@ pub struct Summary {
 /// What an app's requests mean to its control server.
 pub trait Protocol: Send + Sync {
     fn summary(&self, method: &str, params: &Value) -> Summary;
+    /// Whether a request belongs to this live connection and should stop on disconnect.
+    fn stop_on_disconnect(&self, _method: &str) -> bool {
+        false
+    }
     /// What the app calls its document in messages ("design").
     fn document(&self) -> &'static str;
     /// The event a subscribed connection is sent when the document moves ("design.changed").
@@ -49,6 +53,21 @@ pub trait Protocol: Send + Sync {
     /// version has, for a client to find out before it relies on it (an older app answers
     /// `control.capabilities` with "unknown method").
     fn capabilities(&self) -> Value;
+    /// Work the app runs for no connection's request in particular (a plugin package job, say) that
+    /// still holds something the others need. `control.pending` and `control.running` list it, so a
+    /// client that is refused can see what holds the app. Each entry is a JSON object.
+    fn background(&self) -> Vec<Value> {
+        Vec::new()
+    }
+}
+
+/// `result` with the app's background work added as `background`, when there is any.
+fn with_background(mut result: Value, protocol: &dyn Protocol) -> Value {
+    let jobs = protocol.background();
+    if !jobs.is_empty() {
+        result["background"] = Value::Array(jobs);
+    }
+    result
 }
 
 /// An app's control server: its [`Protocol`], how it wakes the window for a request, and the
@@ -120,8 +139,9 @@ impl Hub {
             // Dropped when this thread ends, after `accept` has dropped the listener: `Stop::stop`
             // waits for that.
             let _closed = closed_tx;
+            let connections = Arc::clone(&shared);
             accept(listener, open, MAX_CONNECTIONS, max_line, REFUSAL_DRAIN, &shared, move |stream| {
-                hub.serve(stream, &token, requests.clone(), patient)
+                hub.serve_inner(stream, &token, requests.clone(), patient, Some(Arc::clone(&connections)))
             });
         });
         Ok(stop)
@@ -196,7 +216,7 @@ fn accept(
             open.fetch_sub(1, Ordering::Relaxed);
             if let Ok(socket) = stream.try_clone() {
                 let mut out = stream;
-                let mut reader = BufReader::new(ClientInput { socket, deadline: None });
+                let mut reader = BufReader::new(ClientInput { socket, deadline: None, stopped: None });
                 refuse(&mut out, &mut reader, &json!({"ok": false, "error": TOO_MANY_CONNECTIONS}), max_line, drain);
             }
             continue;
@@ -336,18 +356,83 @@ fn refuse(out: &mut TcpStream, reader: &mut BufReader<ClientInput>, reply: &Valu
 struct ClientInput {
     socket: TcpStream,
     deadline: Option<Instant>,
+    stopped: Option<Arc<Accepted>>,
 }
 
 impl ClientInput {
+    fn stop_requested(&self) -> bool {
+        cfg!(windows) && self.stopped.as_ref().is_some_and(|connections| connections.stopped.load(Ordering::SeqCst))
+    }
+
     /// No deadline any more: the client showed the token.
     fn admit(&mut self) -> std::io::Result<()> {
         self.deadline = None;
         self.socket.set_read_timeout(None)
     }
+
+    /// Wait for a connection-owned request's reply. While it is still working, look for EOF
+    /// without consuming the next line. A client's unread pipelined input can mask EOF.
+    fn wait_for_reply(&self, reply: &Receiver<Value>, wait: Duration) -> std::io::Result<Option<Value>> {
+        const CHECK_INTERVAL: Duration = Duration::from_millis(100);
+        const PEEK_WAIT: Duration = Duration::from_millis(1);
+        let start = Instant::now();
+        loop {
+            let left = wait.saturating_sub(start.elapsed());
+            match reply.recv_timeout(left.min(CHECK_INTERVAL)) {
+                Ok(reply) => return Ok(Some(reply)),
+                Err(RecvTimeoutError::Disconnected) => return Ok(None),
+                Err(RecvTimeoutError::Timeout) => {}
+            }
+
+            if self.stop_requested() {
+                return Err(std::io::ErrorKind::UnexpectedEof.into());
+            }
+            self.socket.set_read_timeout(Some(PEEK_WAIT))?;
+            let probe = self.socket.peek(&mut [0u8; 1]);
+            self.socket.set_read_timeout(None)?;
+            match probe {
+                Ok(0) => return Err(std::io::ErrorKind::UnexpectedEof.into()),
+                Ok(_) => {}
+                Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted) => {}
+                Err(e) => return Err(e),
+            }
+            if start.elapsed() >= wait {
+                return Ok(None);
+            }
+        }
+    }
 }
 
 impl std::io::Read for ClientInput {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        // On Windows, shutdown can leave an already-blocked receive waiting even
+        // on the same socket handle. Only a stoppable listener needs these bounded
+        // waits: their timeouts stay internal while it is live, including idle
+        // authenticated clients. The token still has its one absolute deadline.
+        #[cfg(windows)]
+        if self.stopped.is_some() && !buf.is_empty() {
+            const STOP_POLL: Duration = Duration::from_millis(100);
+            loop {
+                if self.stop_requested() {
+                    return Ok(0);
+                }
+                let wait = match self.deadline {
+                    Some(deadline) => {
+                        let left = deadline.saturating_duration_since(Instant::now());
+                        if left.is_zero() {
+                            return Err(std::io::ErrorKind::TimedOut.into());
+                        }
+                        left.min(STOP_POLL)
+                    }
+                    None => STOP_POLL,
+                };
+                self.socket.set_read_timeout(Some(wait))?;
+                match self.socket.read(buf) {
+                    Err(e) if matches!(e.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) => continue,
+                    result => return result,
+                }
+            }
+        }
         if let Some(deadline) = self.deadline {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
@@ -615,8 +700,8 @@ impl Drop for Seat {
     }
 }
 
-/// A connection's `control.subscribe` (#6985): its `design.changed` lines, sent from a thread of
-/// their own until the connection ends.
+/// A connection's `control.subscribe` (#6985): its events and `design.changed` lines, sent from a
+/// thread of their own until the connection ends.
 struct Subscription {
     lines: Arc<Lines>,
     stop: Arc<AtomicBool>,
@@ -637,6 +722,7 @@ impl Subscription {
     ) -> Option<(Self, std::io::Result<()>)> {
         let lines = Arc::new(Lines { socket: out.try_clone().ok()?, turn: Mutex::new(()) });
         let stop = Arc::new(AtomicBool::new(false));
+        let from = counted.from();
         let seat = Arc::new(Seat::new(counted));
         let first = lines.turn.lock().unwrap_or_else(PoisonError::into_inner);
         let (l, s, watch_seat) = (lines.clone(), stop.clone(), Arc::clone(&seat));
@@ -644,7 +730,7 @@ impl Subscription {
         // does, so the next failed write to a closed client retires it even while the connection's
         // own thread is slow to see the end of the stream (#7226). The connection's own thread
         // leaves it too, so a closed connection stops counting at once (#8315).
-        std::thread::Builder::new().stack_size(64 * 1024).spawn(move || send_events(watch, event, &l, &s, seen, watch_seat)).ok()?;
+        std::thread::Builder::new().stack_size(64 * 1024).spawn(move || send_events(watch, event, &l, &s, seen, from, watch_seat)).ok()?;
         let sent = send(&mut &lines.socket, reply);
         drop(first);
         Some((Subscription { lines, stop, seat }, sent))
@@ -669,13 +755,25 @@ impl Drop for Subscription {
     }
 }
 
-/// The `design.changed` lines of a subscribed connection, each time the design differs from the
-/// last one it was told of (`seen`), until `stop`. Holds the connection's seat on the watch
-/// (`seat`), which it leaves when the thread ends: on `stop`, or on the first write a closed
-/// client refuses (#7226).
-fn send_events(watch: &DocumentWatch, event: &str, lines: &Lines, stop: &AtomicBool, mut seen: (String, u64), seat: Arc<Seat>) {
-    while !stop.load(Ordering::Relaxed) {
-        let Some(now) = watch.wait(&seen, stop, Duration::from_secs(1)).filter(|now| *now != seen) else { continue };
+/// The events of a subscribed connection, until `stop`. From `cursor` (the subscriber's first
+/// posted event), each round sends `events.dropped` if the connection fell behind the watch's
+/// bound, then the one-off events posted since, in order; then the `design.changed` line if the
+/// design differs from the last one the connection was told of (`seen`), after those events. Holds
+/// the connection's seat on the watch (`seat`), which it leaves when the thread ends: on `stop`, or
+/// on the first write a closed client refuses (#7226).
+fn send_events(watch: &DocumentWatch, event: &str, lines: &Lines, stop: &AtomicBool, mut seen: (String, u64), mut cursor: u64, seat: Arc<Seat>) {
+    'events: while !stop.load(Ordering::Relaxed) {
+        let n = watch.next(&seen, cursor, stop, Duration::from_secs(1));
+        cursor = n.cursor;
+        if n.dropped > 0 && lines.send(&json!({"event": "events.dropped", "params": {"count": n.dropped}})).is_err() {
+            break;
+        }
+        for posted in &n.events {
+            if lines.send(posted).is_err() {
+                break 'events;
+            }
+        }
+        let Some(now) = n.design.filter(|now| *now != seen) else { continue };
         if lines.send(&json!({"event": event, "params": {"document_id": now.0, "revision": now.1}})).is_err() {
             break;
         }
@@ -699,11 +797,16 @@ impl Hub {
     /// Serve one connection until it closes: the token first, then one request per line, each
     /// sent to the window on `requests` and its reply written back.
     pub fn serve(&self, stream: TcpStream, token: &str, requests: Sender<ControlRequest>, patient: bool) {
+        self.serve_inner(stream, token, requests, patient, None);
+    }
+
+    fn serve_inner(&self, stream: TcpStream, token: &str, requests: Sender<ControlRequest>, patient: bool, stopped: Option<Arc<Accepted>>) {
         let (waits, running, documents, tx) = (self.waits, &self.running, self.watch, requests);
         let connection = running.connections.fetch_add(1, Ordering::Relaxed) + 1;
         let Ok(read) = stream.try_clone() else { return };
+        let connection_owner = Arc::new(());
         let mut out = stream;
-        let mut reader = BufReader::new(ClientInput { socket: read, deadline: Some(Instant::now() + waits.token) });
+        let mut reader = BufReader::new(ClientInput { socket: read, deadline: Some(Instant::now() + waits.token), stopped });
         let mut bad = 0usize;
         let mut authenticated = false;
         let mut pending: Option<Pending> = None;
@@ -711,7 +814,12 @@ impl Hub {
         loop {
             // A first `control.subscribe` on its way to the window (#6985).
             let mut joining = None;
-            let line = match read_line(&mut reader, self.max_line) {
+            let input = read_line(&mut reader, self.max_line);
+            // A stop-induced EOF must not turn a buffered partial line into a request.
+            if reader.get_ref().stop_requested() {
+                break;
+            }
+            let line = match input {
                 Ok(Some(l)) => String::from_utf8_lossy(&l).into_owned(),
                 Ok(None) => break,
                 // Closed without a word: a client that connected early and only now sends its first
@@ -756,7 +864,7 @@ impl Hub {
                         }
                     });
                     let mut r = if method == "control.running" {
-                        json!({"ok": true, "result": running.result(connection)})
+                        json!({"ok": true, "result": with_background(running.result(connection), &*self.protocol)})
                     } else if method == "control.capabilities" {
                         json!({"ok": true, "result": self.protocol.capabilities()})
                     } else if method == "control.cancel" {
@@ -765,12 +873,12 @@ impl Hub {
                         r
                     } else if method == "control.pending" {
                         match (pending.take(), late) {
-                            (None, _) => json!({"ok": true, "result": {"pending": null}}),
+                            (None, _) => json!({"ok": true, "result": with_background(json!({"pending": null}), &*self.protocol)}),
                             (Some(p), Some(reply)) => {
-                                json!({"ok": true, "result": {"pending": p.id, "method": p.method, "done": true, "reply": reply}})
+                                json!({"ok": true, "result": with_background(json!({"pending": p.id, "method": p.method, "done": true, "reply": reply}), &*self.protocol)})
                             }
                             (Some(p), None) => {
-                                let r = json!({"ok": true, "result": {"pending": p.id, "method": p.method, "done": false}});
+                                let r = json!({"ok": true, "result": with_background(json!({"pending": p.id, "method": p.method, "done": false}), &*self.protocol)});
                                 pending = Some(p);
                                 r
                             }
@@ -801,19 +909,32 @@ impl Hub {
                         // Counted before the window answers, so it publishes every change from its
                         // answer on.
                         joining = (method == "control.subscribe").then(|| documents.join());
-                        let (req, rrx) = ControlRequest::new(method.clone(), params);
+                        let (mut req, rrx) = ControlRequest::new(method.clone(), params);
+                        req.connection = Some(Arc::downgrade(&connection_owner));
                         let job = Arc::clone(&req.ticket);
                         let ticket = running.add(connection, &id, &req, command, steps);
+                        if reader.get_ref().stop_requested() {
+                            break;
+                        }
                         if tx.send(req).is_err() {
                             break;
                         }
                         (self.wake)();
-                        match rrx.recv_timeout(wait) {
-                            Ok(r) => r,
-                            Err(_) => {
+                        let reply = if self.protocol.stop_on_disconnect(&method) {
+                            reader.get_ref().wait_for_reply(&rrx, wait)
+                        } else {
+                            Ok(rrx.recv_timeout(wait).ok())
+                        };
+                        match reply {
+                            Ok(Some(r)) => r,
+                            Ok(None) => {
                                 let r = json!({"ok": false, "running": true, "error": timeout_message(&what, effect, self.protocol.document())});
                                 pending = Some(Pending { id: id.clone(), method, what, reply: watch(rrx, ticket), job });
                                 r
+                            }
+                            Err(_) => {
+                                job.stop();
+                                break;
                             }
                         }
                     };
@@ -848,6 +969,14 @@ impl Hub {
                 break;
             }
         }
+        // The window can discard work owned by this connection even with no requests left.
+        drop(connection_owner);
+        if let Some(pending) = pending.filter(|p| self.protocol.stop_on_disconnect(&p.method)) {
+            pending.job.stop();
+        }
+        if authenticated {
+            (self.wake)();
+        }
     }
 }
 
@@ -865,6 +994,9 @@ mod tests {
         fn summary(&self, method: &str, _: &Value) -> Summary {
             Summary { what: format!("`{method}`"), effect: Effect::Changes, command: None, steps: None, long: false }
         }
+        fn stop_on_disconnect(&self, method: &str) -> bool {
+            method == "test.connection_owned"
+        }
         fn document(&self) -> &'static str {
             "design"
         }
@@ -880,6 +1012,42 @@ mod tests {
         fn capabilities(&self) -> Value {
             json!({})
         }
+    }
+
+    /// An app with a job of its own running: `control.pending` and `control.running` name it.
+    struct Busy;
+
+    impl Protocol for Busy {
+        fn summary(&self, method: &str, p: &Value) -> Summary {
+            Plain.summary(method, p)
+        }
+        fn document(&self) -> &'static str {
+            "design"
+        }
+        fn change_event(&self) -> &'static str {
+            "design.changed"
+        }
+        fn revision_method(&self) -> &'static str {
+            "document.revision"
+        }
+        fn docs(&self) -> &'static str {
+            "docs/control-protocol.md"
+        }
+        fn capabilities(&self) -> Value {
+            json!({})
+        }
+        fn background(&self) -> Vec<Value> {
+            vec![json!({"job": "package", "command": "plugin.install"})]
+        }
+    }
+
+    #[test]
+    fn background_work_is_listed_only_when_there_is_some() {
+        let plain = with_background(json!({"pending": null}), &Plain);
+        assert_eq!(plain, json!({"pending": null}));
+        let busy = with_background(json!({"pending": null}), &Busy);
+        assert_eq!(busy["background"][0]["command"], "plugin.install", "{busy}");
+        assert_eq!(busy["pending"], Value::Null);
     }
 
     /// A server for [`Plain`] with these waits and this document watch.
@@ -1273,6 +1441,176 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert!(!WATCH.subscribed());
+    }
+
+    /// The one-off events a window posts (`DocumentWatch::post`): a subscribed connection gets them
+    /// in order after the subscribe reply, ahead of the `design.changed` line of the same moment;
+    /// a connection that subscribes later gets none of the events posted before it joined.
+    #[test]
+    fn subscribed_connections_are_sent_posted_events_in_order() {
+        static WATCH: DocumentWatch = DocumentWatch::new();
+        let token = "0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        // The window: a subscribe that asks for it posts an event before its reply, as the app
+        // does when a design opens; the reply names the design as it is now.
+        std::thread::spawn(move || {
+            for req in rx {
+                if req.method == "control.subscribe" {
+                    if req.params.get("post").is_some() {
+                        WATCH.post("design.opened", json!({"document_id": "d-1"}));
+                    }
+                    let (document_id, revision) = WATCH.current().unwrap_or_else(|| ("none".to_string(), 0));
+                    let _ = req.reply.send(json!({"ok": true, "result": {"document_id": document_id, "revision": revision}}));
+                } else {
+                    let _ = req.reply.send(json!({"ok": true, "result": req.method}));
+                }
+            }
+        });
+        WATCH.publish("d-1", 3);
+        let hub = hub(Waits::default(), &WATCH);
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let (tx, hub) = (tx.clone(), Arc::clone(&hub));
+                std::thread::spawn(move || hub.serve(stream, token, tx, false));
+            }
+        });
+        let open = || {
+            let s = TcpStream::connect(addr).unwrap();
+            s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            (s.try_clone().unwrap(), BufReader::new(s))
+        };
+        let next = |lines: &mut BufReader<TcpStream>| -> Value {
+            let mut l = String::new();
+            lines.read_line(&mut l).unwrap();
+            serde_json::from_str(&l).unwrap()
+        };
+        let event = |name: &str, params: Value| json!({"event": name, "params": params});
+
+        // The reply comes first; the event the window posted while handling the subscribe after it.
+        let (mut first_out, mut first) = open();
+        writeln!(first_out, "{}", json!({"id": 1, "method": "control.subscribe", "token": token, "params": {"post": true}})).unwrap();
+        assert_eq!(next(&mut first), json!({"id": 1, "ok": true, "result": {"document_id": "d-1", "revision": 3}}));
+        assert_eq!(next(&mut first), event("design.opened", json!({"document_id": "d-1"})), "posted while subscribing: after the reply");
+
+        // Later posts come in order, and an event posted in the same moment as a publish comes
+        // before its `design.changed` line.
+        WATCH.post("step", json!({"n": 1}));
+        WATCH.post("step", json!({"n": 2}));
+        WATCH.publish("d-1", 4);
+        assert_eq!(next(&mut first), event("step", json!({"n": 1})));
+        assert_eq!(next(&mut first), event("step", json!({"n": 2})));
+        assert_eq!(next(&mut first), json!({"event": "design.changed", "params": {"document_id": "d-1", "revision": 4}}));
+
+        // A connection that subscribes now is sent nothing posted before it joined.
+        WATCH.post("earlier", json!({"n": 3}));
+        let (mut second_out, mut second) = open();
+        writeln!(second_out, "{}", json!({"id": 1, "method": "control.subscribe", "token": token})).unwrap();
+        assert_eq!(next(&mut second), json!({"id": 1, "ok": true, "result": {"document_id": "d-1", "revision": 4}}));
+        WATCH.post("later", json!({"n": 4}));
+        assert_eq!(next(&mut second), event("later", json!({"n": 4})), "only what was posted after it joined");
+        assert_eq!(next(&mut first), event("earlier", json!({"n": 3})));
+        assert_eq!(next(&mut first), event("later", json!({"n": 4})));
+    }
+
+    #[test]
+    fn requests_keep_their_connection_identity_until_it_closes() {
+        let token = "0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        let (wake, wakes) = channel();
+        let hub = Arc::new(Hub::new(
+            Plain,
+            move || {
+                let _ = wake.send(());
+            },
+            MAX_LINE,
+        ));
+        let stop = hub.listen_stoppable(listener, token.into(), tx, false).unwrap();
+        let timeout = Duration::from_secs(10);
+        let connect = || {
+            let stream = TcpStream::connect(addr).unwrap();
+            stream.set_read_timeout(Some(timeout)).unwrap();
+            BufReader::new(stream)
+        };
+        let ask = |client: &mut BufReader<TcpStream>, request: Value| {
+            writeln!(client.get_mut(), "{request}").unwrap();
+            wakes.recv_timeout(timeout).unwrap();
+            let req = rx.recv_timeout(timeout).unwrap();
+            let owner = req.connection.unwrap();
+            assert_eq!(owner.strong_count(), 1);
+            req.reply.send(json!({"ok": true})).unwrap();
+            let mut line = String::new();
+            client.read_line(&mut line).unwrap();
+            assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), json!({"id": 1, "ok": true}));
+            owner
+        };
+        let first_request = || json!({"id": 1, "method": "ui.view", "token": token});
+        assert!(ControlRequest::new("ui.view", json!({})).0.connection.is_none());
+
+        let mut first = connect();
+        let first_owner = ask(&mut first, first_request());
+        let same_owner = ask(&mut first, json!({"id": 1, "method": "ui.view"}));
+        assert!(first_owner.ptr_eq(&same_owner));
+
+        let mut other = connect();
+        let other_owner = ask(&mut other, first_request());
+        assert!(!first_owner.ptr_eq(&other_owner));
+        drop(first);
+        wakes.recv_timeout(timeout).unwrap();
+        assert_eq!(first_owner.strong_count(), 0, "the idle client is gone before the window wakes");
+        assert_eq!(other_owner.strong_count(), 1);
+
+        let mut reconnected = connect();
+        let reconnected_owner = ask(&mut reconnected, first_request());
+        assert!(!first_owner.ptr_eq(&reconnected_owner));
+        assert!(!other_owner.ptr_eq(&reconnected_owner));
+
+        stop.stop();
+        wakes.recv_timeout(timeout).unwrap();
+        wakes.recv_timeout(timeout).unwrap();
+        assert_eq!(other_owner.strong_count(), 0);
+        assert_eq!(reconnected_owner.strong_count(), 0);
+    }
+
+    #[test]
+    fn disconnect_stops_a_connection_owned_request_before_its_reply() {
+        let token = "0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        let (wake, wakes) = channel();
+        let hub = Arc::new(Hub::new(
+            Plain,
+            move || {
+                let _ = wake.send(());
+            },
+            MAX_LINE,
+        ));
+        let stop = hub.listen_stoppable(listener, token.into(), tx, false).unwrap();
+        let mut client = TcpStream::connect(addr).unwrap();
+        send(&mut client, &json!({"id": 1, "method": "test.connection_owned", "token": token})).unwrap();
+
+        let timeout = Duration::from_secs(10);
+        wakes.recv_timeout(timeout).unwrap();
+        let request = rx.recv_timeout(timeout).unwrap();
+        let owner = request.connection.as_ref().unwrap();
+        assert_eq!(owner.strong_count(), 1);
+        let (stopped, stop_seen) = channel();
+        request.ticket.on_stop(move || {
+            let _ = stopped.send(());
+        });
+        request.ticket.computing(false);
+        // Keep the request held so the server cannot reach EOF by first receiving its reply.
+        drop(client);
+        wakes.recv_timeout(timeout).unwrap();
+        assert_eq!(owner.strong_count(), 0);
+        assert!(request.ticket.is_cancelled());
+        stop_seen.try_recv().unwrap();
+        assert!(request.reply.send(Value::Null).is_err());
+        stop.stop();
     }
 
     /// #8315: a closed connection leaves the watch at once. The seat of a subscribed connection

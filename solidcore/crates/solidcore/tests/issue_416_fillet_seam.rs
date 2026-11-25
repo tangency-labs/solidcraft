@@ -47,15 +47,13 @@ fn edges_where(k: &Kernel, b: &Brep, keep: impl Fn(Point3) -> bool) -> Vec<EdgeI
         .collect()
 }
 
-/// The tray rounded on the default kernel, or with every fix but `geometric_g2_continuity`
+/// The tray rounded on the default kernel, or with every fix
 /// (`all`, where the blend corner's mitres between the bottom rounds are exact: its rounds'
 /// sections the ball's exact circles).
 fn tray(all: bool) -> (f64, f64, solidcore::Result<()>) {
     let mut k = Kernel::default();
     if all {
-        let mut f = UpstreamFixes::all();
-        f.geometric_g2_continuity = false;
-        k.fixes = f;
+        k.fixes = UpstreamFixes::all();
     }
     let mut tray = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 25.0, 25.0, 10.0).unwrap();
     let bottom = edges_where(&k, &tray, |m| m.z.abs() < 1e-6);

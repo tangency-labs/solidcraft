@@ -19,6 +19,7 @@ const CONTRACT: TypedContract<MatchSurfaceParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("surface.match", "Match Surface", crate::checked!("surface.match", match_surface))
+        .begins_edit()
         .at("SURFACE", "MODIFY")
         .icon("continuity")
         .contract(&CONTRACT)

@@ -6,9 +6,9 @@
 
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
-use solidcore_ops::curve::CubicStanding;
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::services::curve::CubicStanding;
 use std::collections::HashMap;
 use std::ops::Range;
 
@@ -72,6 +72,9 @@ fn geom_is_finite(g: &Geom2) -> bool {
         Geom2::Arc { c, a, b } => c.is_finite() && a.is_finite() && b.is_finite(),
         Geom2::Ellipse { c, major, minor } => c.is_finite() && major.is_finite() && minor.is_finite(),
         Geom2::Spline { pts, .. } => pts.iter().all(|p| p.is_finite()),
+        Geom2::Nurbs { pts, knots, weights, .. } => {
+            pts.iter().all(|p| p.is_finite()) && knots.iter().all(|k| k.is_finite()) && weights.iter().all(|w| w.is_finite())
+        }
         Geom2::Conic { a, apex, b, rho } => a.is_finite() && apex.is_finite() && b.is_finite() && rho.is_finite(),
         Geom2::Text { at, height, angle, .. } => at.is_finite() && height.is_finite() && angle.is_finite(),
     }
@@ -253,7 +256,7 @@ impl Out {
         // is that line; one the kernel's curve check refuses is split exactly into pieces it keeps
         // (lines where a piece lies within the zone tolerance of its chord). Only a cubic that no
         // such split serves stays as drawn, with a warning naming it (#16190).
-        let pieces = match solidcore_ops::curve::cubic_pieces(p.map(|q| [q.x, q.y, 0.0])) {
+        let pieces = match solidcraft_kernel::services::curve::cubic_pieces(p.map(|q| [q.x, q.y, 0.0])) {
             Ok(pieces) => pieces,
             Err(e) => {
                 let number = self.g.len() + 1;

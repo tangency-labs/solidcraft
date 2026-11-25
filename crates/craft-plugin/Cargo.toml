@@ -9,6 +9,8 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+image = { workspace = true, features = ["jpeg"] }
+naga = { workspace = true, features = ["wgsl-in", "wgsl-out"] }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

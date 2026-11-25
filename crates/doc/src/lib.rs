@@ -8,16 +8,20 @@
 pub mod appearance;
 pub mod appearance_pack;
 mod assembly;
+pub mod blob;
 mod body_transfer;
 mod body_transfer_sheet;
 pub mod bom;
 mod browser_tree;
 pub mod newer_file;
 pub mod pbr_appearance;
-pub use body_transfer::{valid_transfer_matrix, validate_body_transfer};
+pub use body_transfer::valid_transfer_matrix;
+pub use body_transfer::validate_body_transfer;
 pub mod canvas;
 mod clipboard;
-pub use clipboard::{clone_expression, remap_topology, remap_topology_faces};
+pub use clipboard::clone_expression;
+pub use clipboard::remap_topology;
+pub use clipboard::remap_topology_faces;
 pub mod component_color;
 mod component_removal;
 pub use component_removal::RemovedTree;
@@ -27,26 +31,37 @@ pub mod csv;
 pub mod display_quality;
 pub mod display_units;
 mod document;
+pub mod drafting_profile;
 pub mod drawing;
 pub mod drawing_view;
 pub mod end_cap;
+mod envelope;
 mod eval;
 pub mod expr;
 pub mod face_anchor;
 mod feature_geometry;
 mod feature_refs;
-pub use face_anchor::{FaceAnchor, FaceAttachmentStatus};
+mod flush_join;
+pub use face_anchor::FaceAnchor;
+pub use face_anchor::FaceAttachmentStatus;
 pub mod format;
 mod format_offsets;
 pub mod frame;
+pub mod frame_corners;
+pub mod frame_layout;
+mod frame_multi_trim;
+mod frame_plate;
 pub mod gpu_plan;
+pub mod gusset;
 mod history_names;
 pub mod hole_reference;
 pub mod ids;
+pub mod import_defects;
 mod inline_params;
 pub use format_offsets::whole_profile_selection_from_value;
 pub use inline_params::Defined;
 pub mod joints;
+pub mod json_layout;
 mod lineage;
 pub mod metadata;
 pub use metadata::Metadata;
@@ -67,15 +82,25 @@ pub mod plugin_data;
 pub mod point_cloud;
 mod point_cloud_complex;
 pub mod point_cloud_distribution;
+mod point_expr;
 mod points;
 mod profile_refs;
 pub mod progress;
 mod thread_catalog;
-pub use thread_catalog::{
-    DRILL_ALLOWANCE, TaperDrill, TappedThread, TappedThreadFamily, metric_tap_drill, parse_tapped_thread, tapped_thread_sizes, untabulated_taper_tap,
-};
+pub use thread_catalog::DRILL_ALLOWANCE;
+pub use thread_catalog::TaperDrill;
+pub use thread_catalog::TappedThread;
+pub use thread_catalog::TappedThreadFamily;
+pub use thread_catalog::metric_tap_drill;
+pub use thread_catalog::parse_tapped_thread;
+pub use thread_catalog::tapped_thread_sizes;
+pub use thread_catalog::untabulated_taper_tap;
 mod walk;
-pub use profile_refs::{capture_profile_selection, profile_fallback_notes, profile_selection_indices, profile_selection_indices_lenient};
+pub use profile_refs::WHOLE_PROFILE_TOO_MANY_CURVES;
+pub use profile_refs::capture_profile_selection;
+pub use profile_refs::profile_fallback_notes;
+pub use profile_refs::profile_selection_indices;
+pub use profile_refs::profile_selection_indices_lenient;
 pub mod plastic;
 mod print_face;
 pub use print_face::PrintFace;
@@ -90,33 +115,142 @@ pub mod render_settings;
 pub mod render_surface;
 pub mod render_texture_resources;
 pub mod sheet;
+pub mod sheet_library;
+mod sheet_surface;
+mod sheet_surface_bead;
+mod sheet_surface_convert;
+mod sheet_surface_cuts;
+mod sheet_surface_features;
+mod sheet_surface_fold;
+mod sheet_surface_perforation;
+mod sheet_surface_shadow;
+mod sheet_surface_tab;
 pub mod sketch_equation;
+pub use sheet_surface_bead::MAX_BEADS;
+pub use sheet_surface_bead::SurfaceBead;
+pub use sheet_surface_convert::ConvertRule;
+pub use sheet_surface_convert::RollEdge;
+pub use sheet_surface_convert::RollInfo;
+pub use sheet_surface_convert::RollLine;
+pub use sheet_surface_convert::SheetFaces;
+pub use sheet_surface_convert::SheetMeasure;
+pub use sheet_surface_convert::SurfaceBendLine;
+pub use sheet_surface_convert::SurfaceConversion;
+pub use sheet_surface_convert::SurfaceSheet;
+pub use sheet_surface_convert::convert_surfaces;
+pub use sheet_surface_convert::measure_sheet_body;
+pub use sheet_surface_cuts::Loose;
+pub use sheet_surface_cuts::Recess;
+pub use sheet_surface_features::OUTSIDE_BEND_OPEN;
 pub mod text_params;
 pub mod thread_forms;
 pub mod tolerance;
+pub mod weld_spot;
 
-pub use assembly::{
-    BomType, ExpressedAt, ExpressedMove, ExpressedShift, IDENTITY, MAX_EXPRESSED_MOVES, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence,
-    WorldNames, apply_point, apply_vector, capture_sketch_plane_placement, is_identity, is_placement, map_plane, map_point_expr, map_vector_expr,
-    mat_inverse, mat_mul, mat_volume_scale, reframe_plane_placements, rigid,
-};
+pub use assembly::BomType;
+pub use assembly::ExpressedAt;
+pub use assembly::ExpressedMove;
+pub use assembly::ExpressedShift;
+pub use assembly::IDENTITY;
+pub use assembly::MAX_EXPRESSED_MOVES;
+pub use assembly::MAX_PLACEMENT_DEPTH;
+pub use assembly::MAX_PLACEMENTS;
+pub use assembly::Mat;
+pub use assembly::Occurrence;
+pub use assembly::WorldNames;
+pub use assembly::apply_point;
+pub use assembly::apply_vector;
+pub use assembly::capture_sketch_plane_placement;
+pub use assembly::is_identity;
+pub use assembly::is_placement;
+pub use assembly::map_dir_expr;
+pub use assembly::map_plane;
+pub use assembly::map_plane_ref;
+pub use assembly::map_point_expr;
+pub use assembly::map_vector_expr;
+pub use assembly::mat_inverse;
+pub use assembly::mat_mul;
+pub use assembly::mat_volume_scale;
+pub use assembly::reframe_plane_placements;
+pub use assembly::rigid;
 pub use document::*;
-pub use eval::cell_grid::{MAX_CUT_CELLS, SLOW_CUT_CELLS};
-pub use eval::{
-    EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PendingChecks, PlacedBodies, RevolveExtent, SavedModel, SolvedSketch,
-    ThreadInfo, blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state,
-    from_slope_height, hole_direction_at, hole_on_surface, hole_start, import_body_names, join_pieces_added, keep_one_sided_direction, map_wire,
-    metric_thread_sizes, object_height, parse_metric_thread, pattern_matrices, revolve_extent, revolve_extent_for_handle,
-    revolve_extent_with_convention, same_extrude_from_face, select_profiles, sketch_hole_direction, sketch_line_plane, state_in_frame,
-    state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance, with_placed_copies, world_state,
-    world_state_reusing,
-};
-pub use eval::{EvalCache, KeptResults};
+pub use eval::EdgeRef;
+pub use eval::EvalCache;
+pub use eval::ExtrudeEnds;
+pub use eval::FeatureResult;
+pub use eval::KeptResults;
+pub use eval::KeptSeparate;
+pub use eval::Model;
+pub use eval::ModelBody;
+pub use eval::ModelState;
+pub use eval::PatternRow;
+pub use eval::PendingChecks;
+pub use eval::PlacedBodies;
+pub use eval::PreparedMeshImport;
+pub use eval::RevolveExtent;
+pub use eval::SavedModel;
+pub use eval::SketchCopy;
+pub use eval::SolvedSketch;
+pub use eval::ThreadInfo;
+pub use eval::blend_target;
+pub use eval::cell_grid::MAX_CUT_CELLS;
+pub use eval::cell_grid::SLOW_CUT_CELLS;
+pub use eval::curve_pick_error;
+pub use eval::draft_corner_options;
+pub use eval::edge_names_for;
+pub use eval::edge_refs;
+pub use eval::face_point_names;
+pub use eval::face_point_state;
+pub use eval::feature_operation;
+pub use eval::from_slope_height;
+pub use eval::hole_direction_at;
+pub use eval::hole_on_surface;
+pub use eval::hole_start;
+pub use eval::import_body_names;
+pub use eval::join_pieces_added;
+pub use eval::keep_one_sided_direction;
+pub use eval::map_wire;
+pub use eval::metric_thread_sizes;
+pub use eval::object_height;
+pub use eval::parse_metric_thread;
+pub use eval::pattern_matrices;
+pub use eval::pattern_row;
+pub use eval::reconcile_component_patterns;
+pub use eval::revolve_extent;
+pub use eval::revolve_extent_for_handle;
+pub use eval::revolve_extent_with_convention;
+pub use eval::same_extrude_from_face;
+pub use eval::select_profiles;
+pub use eval::sketch_hole_direction;
+pub use eval::sketch_line_plane;
+pub use eval::state_in_frame;
+pub use eval::state_in_frame_at;
+pub use eval::suggested_thread;
+pub use eval::suggested_thread_in;
+pub use eval::tangent_face_chain;
+pub use eval::through_all_distance;
+pub use eval::to_end_is_flat;
+pub use eval::with_placed_copies;
+pub use eval::world_body_paths;
+pub use eval::world_state;
+pub use eval::world_state_moved_reusing;
+pub use eval::world_state_reusing;
 pub use expr::Expr;
 pub use feature_geometry::restored_thread_pick;
-pub use names::{BodyName, FeatureId, FeatureName, SketchId, copy_name};
-pub use params::{ParamRow, ParamUser, cycles, name_words_match};
-pub use points::{Dir, FacePick, Position, plain};
+pub use names::BodyName;
+pub use names::FeatureId;
+pub use names::FeatureName;
+pub use names::SketchId;
+pub use names::copy_name;
+pub use params::ParamRow;
+pub use params::ParamUser;
+pub use params::cycles;
+pub use params::name_words_match;
+pub use points::Dir;
+pub use points::FacePick;
+pub use points::Position;
+pub use points::plain;
+pub use solidcraft_develop as develop;
 pub use solidcraft_kernel as kernel;
 pub use solidcraft_sketch as sketch;
 
@@ -137,6 +271,11 @@ pub enum DocError {
     /// empty until the evaluation of the feature fills it in ([`DocError::in_feature`]).
     #[error("{}", reselect_message(feature, reference))]
     Reselect { feature: String, reference: String },
+    /// An id or index read from a body's record or a sheet's own lists names no entry there:
+    /// `what` (say "face") number `index`, where the list holds `count`. The data naming it is
+    /// stale or corrupt; the operation fails instead of reading past the list.
+    #[error("{what} {index} doesn't exist (there are {count}): the data naming it is stale or corrupt")]
+    Missing { what: &'static str, index: usize, count: usize },
     /// A sketch's projections whose face or edge, kept by its persistent name, finds nothing any
     /// more: the sketch fails, naming them as the user sees them. `feature` as for `Reselect`.
     #[error("{}", lost_projections_message(feature, links))]
@@ -155,19 +294,28 @@ pub struct LostProjection {
     pub points: Vec<String>,
     /// The persistent name that finds nothing, never shown.
     pub name: String,
+    /// The names of the features in the design that made the lost face, edge or vertex, as
+    /// `name` gives them, each once: where to look for the edit that lost it (#5048).
+    pub from: Vec<String>,
 }
 
 impl LostProjection {
-    /// `projected face of Tray (curve l1)`.
+    /// `projected face of Tray (curve l1; made by Extrude1, Fillet2)`.
     pub fn label(&self) -> String {
         const SHOWN: usize = 4;
         let (ids, one, several) = if self.curves.is_empty() { (&self.points, "point", "points") } else { (&self.curves, "curve", "curves") };
         let listed = ids.iter().take(SHOWN).map(String::as_str).collect::<Vec<_>>().join(", ");
-        match ids.len() {
-            0 => self.what.clone(),
-            1 => format!("{} ({one} {listed})", self.what),
-            n if n > SHOWN => format!("{} ({several} {listed}, …)", self.what),
-            _ => format!("{} ({several} {listed})", self.what),
+        let entities = match ids.len() {
+            0 => None,
+            1 => Some(format!("{one} {listed}")),
+            n if n > SHOWN => Some(format!("{several} {listed}, …")),
+            _ => Some(format!("{several} {listed}")),
+        };
+        let from = (!self.from.is_empty()).then(|| format!("made by {}", self.from.join(", ")));
+        match (entities, from) {
+            (Some(e), Some(f)) => format!("{} ({e}; {f})", self.what),
+            (Some(x), None) | (None, Some(x)) => format!("{} ({x})", self.what),
+            (None, None) => self.what.clone(),
         }
     }
 
@@ -267,11 +415,15 @@ pub type Result<T> = std::result::Result<T, DocError>;
 #[cfg(test)]
 mod coil_tests;
 #[cfg(test)]
+mod drafting_profile_tests;
+#[cfg(test)]
 mod feature_walk_tests;
 #[cfg(test)]
 mod named_projection_tests;
 #[cfg(test)]
 mod old_cap_anchor_tests;
+#[cfg(test)]
+mod saved_text_font_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

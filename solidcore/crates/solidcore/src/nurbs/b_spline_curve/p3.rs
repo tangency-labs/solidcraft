@@ -51,6 +51,12 @@
 //!   `GlobalPropertyAnalysis` fails, and fails tests 11/12 (`value` `SM_UNDEF_DOUBLE`)
 //!   when a derivative at a first-derivative solution cannot be evaluated.
 //!   [`SolidError::Unported`] is always passed on.
+//! - **A UV trim's corner.** Not upstream: `AssertValid` test 7 on a UV trim of a face
+//!   (a curve checked on its surface) reads the turn at a knot on the trim's image, each
+//!   tangent mapped by the surface's first derivatives on the side its piece lies on
+//!   ([`trim_turn_on_surface`]). Where the trim crosses a knot line across which the
+//!   surface is only `C0` in its parameters, the trim of a smooth curve turns a corner
+//!   and its image does not; anywhere else the image turns as the trim does.
 //! - **Crashes.** Where upstream dereferences a `NULL` (a curve without NURB in
 //!   `GetControlPoint` / `IsSegmentLine`, an extension `TrimGap` did not make, an
 //!   unclamped knot vector indexing before the control points in `HasInternalPole`)
@@ -523,6 +529,12 @@ fn is_zero_speed_tangent_end(
 /// than the curve, or at the stretch's far end the radius is off `radius_tol` by more
 /// than half of it.
 ///
+/// Not upstream (#17744): the curve is read with the end's control point subtracted from
+/// every control point (the same curve, moved). At the stretch's far end `C' x C''` is
+/// about `|C'' x C'''| t² / 2`; read at the curve's own coordinates, `C'` carries their
+/// rounding times the basis' derivatives, which swamps it where the stretch is short (a
+/// G3 round's end rib 40 mm from the origin, stretch 1.9e-6: about 7e-13 against 1e-12).
+///
 /// # Errors
 ///
 /// A [`SolidError::Unported`] of the evaluations (none for a B-spline).
@@ -531,6 +543,16 @@ fn zero_speed_radius_stretch(
     end: usize,
     radius_tol: f64,
 ) -> Result<Option<f64>> {
+    let mut local = curve.clone();
+    if let Some(cur) = local.nurb.as_mut() {
+        let i = if end == 0 { 0 } else { cur.n() };
+        if let Some(o) = cur.cpts().get(i).map(|p| p.to_euclid()) {
+            for pw in cur.cpts_mut() {
+                *pw = pw.translate(-o);
+            }
+        }
+    }
+    let curve = &local;
     let ivl = curve.natural_interval();
     let param = if end == 0 { ivl.min() } else { ivl.max() };
     let pv = match curve.evaluate(param, 3, end == 0, false) {
@@ -806,6 +828,51 @@ fn trim_metric(
     let b = efg[1] / a;
     let c = (efg[0] * efg[2] - efg[1] * efg[1]).sqrt() / a;
     Ok(Some([a, b, c]))
+}
+
+/// Not upstream: the cosine of the angle the image on `surface` of the UV trim `trim`
+/// turns through at its parameter `param`: the trim's first derivative from each side,
+/// mapped by the surface's first derivatives at the trim's point there, each taken on the
+/// side its piece of the trim lies on (the arriving piece behind its tangent, the leaving
+/// piece ahead of it). The sides differ only at a knot of the surface, where its
+/// parameterisation may be only `C0`. `None` where the trim or the surface cannot be
+/// evaluated, an image tangent vanishes or the image is not finite (the caller keeps the
+/// trim's own turn).
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] and cancellation.
+fn trim_turn_on_surface(
+    k: &Kernel,
+    surface: &Surface,
+    trim: &BSplineCurve,
+    param: f64,
+) -> Result<Option<f64>> {
+    let image = |leaving: bool| -> Result<Option<Vec3>> {
+        let Some(eval) = ignored(trim.evaluate(param, 1, leaving, false))? else {
+            return Ok(None);
+        };
+        let (Some(point), Some(tangent)) = (eval.first(), eval.get(1)) else {
+            return Ok(None);
+        };
+        // the span starting at the knot is ahead of a rising parameter
+        let rising = |rate: f64| if leaving { rate >= 0.0 } else { rate < 0.0 };
+        let derivatives = surface.evaluate_1st_derivatives(
+            k,
+            Point2::new(point.x, point.y),
+            rising(tangent.x),
+            rising(tangent.y),
+        );
+        Ok(ignored(derivatives)?
+            .and_then(|(_, du, dv)| (du * tangent.x + dv * tangent.y).unitize().ok()))
+    };
+    let (Some(arriving), Some(leaving)) = (image(false)?, image(true)?) else {
+        return Ok(None);
+    };
+    // a non-finite image (a surface with a non-finite pole) decides nothing: the caller
+    // keeps the turn it read in the parameters
+    let turn = arriving.dot(leaving);
+    Ok(turn.is_finite().then_some(turn))
 }
 
 /// A copy of `trim` with its control points mapped by [`trim_metric`]'s `l` (the
@@ -1326,11 +1393,15 @@ impl BSplineCurve {
         *other = other_back;
         let composite = match composite {
             Ok(c) => c,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(e) => {
                 return Err(crate::error::Failure::new(
                     OP_JOIN,
-                    crate::error::nurbs::NurbsFailure::BSpline(BSplineFailure::StageFailed),
+                    crate::error::nurbs::NurbsFailure::BSpline(BSplineFailure::JoinNotBuilt),
                 )
                 .caused_by(e)
                 .into_error());
@@ -1358,10 +1429,8 @@ impl BSplineCurve {
         let (knots, _) = self.knots(None)?; // Unique knot vector
         let (_, continuities) = self.calculate_continuities(k, continuity_angle_tol)?;
 
-        // check state
-        if knots.len() != continuities.len() {
-            return Err(SolidError::b_spline(OP_SUBDIV, BSplineFailure::StageFailed));
-        }
+        // (upstream's check that the two lengths agree is not ported: `calculate_continuities`
+        // returns one continuity per unique knot of this same curve)
 
         // init iter params
         let mut start = *knots
@@ -1924,7 +1993,21 @@ impl BSplineCurve {
                 };
 
                 // Check the angle between the unitized 1st derivatives
-                let dot = u1.dot(u2);
+                let mut dot = u1.dot(u2);
+
+                // Not upstream: a UV trim turns a corner where it crosses a knot line
+                // across which its face's surface is only C0 in its parameters, and its
+                // image on the surface is smooth there. A trim's turn is a kink only
+                // where its image turns: each tangent mapped by the surface's first
+                // derivatives on the side its piece lies on (off such a line the two
+                // sides are one, and the image turns as the trim does).
+                if dot < COSINE_TOL && dim == 2 {
+                    if let Some(surface) = ovr.trim_surface {
+                        if let Some(on_surface) = trim_turn_on_surface(k, surface, self, param)? {
+                            dot = on_surface;
+                        }
+                    }
+                }
 
                 // when angle between lower and upper ivl 1st Derivs is too big - not G1
                 if dot < COSINE_TOL {
@@ -2499,9 +2582,11 @@ mod tests {
         assert_eq!(
             e.nurbs_failure(),
             Some(&crate::error::nurbs::NurbsFailure::BSpline(
-                BSplineFailure::StageFailed
+                BSplineFailure::JoinNotBuilt
             ))
         );
+        // the class is the cause's: an argument check, neither a defect nor a refusal
+        assert!(!e.is_defect() && !e.is_refusal(), "{e:?}");
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
         let cause = e.cause().expect("the join construction's error is kept");
         assert!(
@@ -3626,6 +3711,24 @@ mod tests {
         assert!(!is_zero_speed_tangent_end(&c, 1, 1e-15, Some(&tangent)).unwrap());
     }
 
+    /// The stretch is read in the end's frame (#17744): the Bezier of
+    /// [`zero_speed_end_curve`] without its knot, moved to (40, 0, 8), at a tolerance whose
+    /// stretch (7.5e-9) leaves `C' x C''` there (3.4e-16) under the rounding `C'` carries
+    /// at those coordinates. Read there, the radius at the stretch's far end is off the
+    /// tolerance and no stretch is found.
+    #[test]
+    fn wr_668_radius_stretch_is_read_in_the_end_frame() {
+        let tol = 1e-8;
+        let at = |x: f64, y: f64| [40.0 + x, y, 8.0];
+        let c = curve(
+            3,
+            &[at(0.0, 0.0), at(0.0, 0.0), at(1.0 / 3.0, 0.0), at(1.0, 1.0)],
+            &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        );
+        let s = zero_speed_radius_stretch(&c, 0, tol).unwrap().unwrap();
+        assert!((s - tol * 0.75).abs() <= 1e-6 * s, "{s}");
+    }
+
     /// [`zero_speed_end_curve`] run backwards, of dimension `dim`: its zero-speed end
     /// is the curve's end (`t = 1`).
     fn zero_speed_at_end_curve(dim: u64) -> BSplineCurve {
@@ -3775,5 +3878,77 @@ mod tests {
                 assert!(r.tol3d > 0.0, "{r:?}");
             }
         }
+    }
+
+    /// A UV trim's corner is a kink only where its image on the surface turns. The
+    /// surface is a plane patch that is only `C0` in u across `u = 1`: the point
+    /// `(x(u) + v / 2, v, 0)` with `x = u` up to `u = 1` and `x = 1 + 3 (u - 1)` past it.
+    /// The straight line `(1.6 + 0.05 t, 0.2 + 0.5 t, 0)` crosses that knot line at
+    /// `t = 2.5`, and its exact trim is two straight pieces from `(7/6, 0.2)` through
+    /// `(1, 1.45)` to `(0.9, 1.7)`: a corner of 14 degrees in (u, v), on a straight line.
+    /// It was refused by test 7. The same corner moved off the knot line (the trim shifted
+    /// 0.3 in u) is a corner of the image too, and is still reported.
+    #[test]
+    fn a_trims_corner_on_its_surfaces_c0_knot_line_is_a_kink_only_if_its_image_turns() {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        let k = Kernel::default();
+        let net: Vec<Vec<CPoint>> = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0, 2.0, 3.0, 4.0]
+            .iter()
+            .map(|&x| {
+                vec![
+                    CPoint::new(x, 0.0, 0.0, NOW),
+                    CPoint::new(x + 1.0, 2.0, 0.0, NOW),
+                ]
+            })
+            .collect();
+        let u = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0];
+        let v = [0.0, 0.0, 2.0, 2.0];
+        let surface =
+            Surface::from(BSplineSurface::from_data(6, 1, 3, 1, 10, 3, &net, &u, &v).unwrap());
+        let trim = |shift: f64| {
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 2,
+                degree: 1,
+                control_points: &[
+                    Vec3::new(7.0 / 6.0 + shift, 0.2, 0.0),
+                    Vec3::new(1.0 + shift, 1.45, 0.0),
+                    Vec3::new(0.9 + shift, 1.7, 0.0),
+                ],
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[2, 1, 2],
+                knots: &[0.0, 2.5, 3.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap()
+        };
+
+        // the corner on the knot line: the image is the straight line
+        let on_line = trim(0.0);
+        for t in [0.0, 1.0, 2.5, 2.75, 3.0] {
+            let uv = on_line.evaluate_point(t).unwrap();
+            let image = surface.evaluate_point(&k, Point2::new(uv.x, uv.y)).unwrap();
+            let line = Vec3::new(1.6 + 0.05 * t, 0.2 + 0.5 * t, 0.0);
+            assert!((image - line).length() < 1e-12, "{t}: {image:?}");
+        }
+        assert_eq!(
+            failed_tests(&k, &on_line, Some(&surface)),
+            Vec::<u64>::new()
+        );
+        // read without its surface it is a corner
+        assert_eq!(failed_tests(&k, &on_line, None), vec![7]);
+
+        // the same corner off the knot line: the image turns with it
+        assert_eq!(failed_tests(&k, &trim(0.3), Some(&surface)), vec![7]);
+
+        // a surface whose image of the corner is not finite decides nothing: the corner
+        // is reported as it reads in the parameters
+        let mut broken = net;
+        broken[3][0] = CPoint::new(f64::NAN, 0.0, 0.0, NOW);
+        let broken =
+            Surface::from(BSplineSurface::from_data(6, 1, 3, 1, 10, 3, &broken, &u, &v).unwrap());
+        assert!(failed_tests(&k, &on_line, Some(&broken)).contains(&7));
     }
 }

@@ -1,0 +1,15 @@
+[package]
+name = "solidcraft-panel-layout"
+description = "Panel placement core for any host of the UI kit: panels registered by id, their dock, floating and window placement, stacking, allocation into rects, and the saved layout as a value"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+schemars = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
