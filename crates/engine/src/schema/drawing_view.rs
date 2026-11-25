@@ -831,6 +831,12 @@ pub struct InspectResult {
     pub dimensions: Vec<String>,
     /// Its balloons' ids, in id order.
     pub balloons: Vec<String>,
+    /// Its manual centre marks, in id order; absent when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub centre_marks: Vec<String>,
+    /// Its manual centre lines, in id order; absent when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub centre_lines: Vec<String>,
     /// Its label, when it has one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<LabelResult>,
@@ -1436,11 +1442,11 @@ pub enum LineSourceResult {
     Silhouette { face: usize },
 }
 
-impl From<solidcraft_geom::hlr::Source> for LineSourceResult {
-    fn from(source: solidcraft_geom::hlr::Source) -> Self {
+impl From<solidcraft_kernel::hlr::Source> for LineSourceResult {
+    fn from(source: solidcraft_kernel::hlr::Source) -> Self {
         match source {
-            solidcraft_geom::hlr::Source::Edge { edge, tangent } => LineSourceResult::Edge { edge, tangent },
-            solidcraft_geom::hlr::Source::Silhouette { face } => LineSourceResult::Silhouette { face },
+            solidcraft_kernel::hlr::Source::Edge { edge, tangent } => LineSourceResult::Edge { edge, tangent },
+            solidcraft_kernel::hlr::Source::Silhouette { face } => LineSourceResult::Silhouette { face },
         }
     }
 }

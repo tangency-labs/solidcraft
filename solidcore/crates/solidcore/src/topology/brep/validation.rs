@@ -33,7 +33,7 @@ pub use assert_valid::{
 };
 pub(crate) use pointers::validate_geometry;
 pub(crate) use pointers::GROWTH_PAST_RATIO;
-pub use pointers::{edge_tube_reaches, validate_pointers, vertex_ball_reaches};
+pub use pointers::{edge_tube_reaches, validate_pointers, vertex_ball_reaches, PointerCheck};
 pub(crate) use pointers::{validate_pointers_excluding, validate_pointers_traced};
 pub(crate) use soundness::lost_manifold;
 pub use soundness::{soundness, standing, volume_sign, Soundness, Standing};
@@ -46,8 +46,6 @@ use crate::topology::{Brep, BrepId, EdgeuseId, FaceId};
 
 const OP: &str = "topology::brep::validation";
 const BREP_TYPE: i64 = 16011;
-use crate::error::SM_ERR as ERROR;
-use crate::error::SM_SUCCESS as SUCCESS;
 
 fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
@@ -133,6 +131,15 @@ impl Reports<'_> {
         value: f64,
     ) -> Result<bool> {
         self.record(b, index, passed, owner.into(), tol, value)
+    }
+
+    /// Not upstream (#21105): a warning of list 1 ([`crate::geom::assert_array::labels::WARNINGS`]),
+    /// reported (`!m_bOK`) without failing the pass.
+    fn warning(&mut self, b: &Brep, index: u64, owner: impl Into<Object>) -> Result<()> {
+        let failed = self.failed;
+        self.record(b, index, false, owner.into(), UNDEF_DOUBLE, UNDEF_DOUBLE)?;
+        self.failed = failed;
+        Ok(())
     }
 
     /// A report of list 1 (`SmBrep`'s pointer tests), which names no other object.

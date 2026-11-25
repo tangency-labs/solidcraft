@@ -157,6 +157,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PROPERTIES_CONTRACT)
         .output(output_schema_for::<PropertiesResult>)
         .params("component?: id or name (default active); descendants?: bool (default true); about?: [x, y, z] (mm). Measures the first placement, or all placements for root, including pending moves; material-aware mass and center of mass in world coordinates; volume, density, mass, center of mass and inertia_g_mm2 (the inertia tensor about the body's center of mass, world axes, from its tessellation) only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals; total.first_moment_g_mm (mass × center of mass), inertia_g_mm2 about the total center of mass, principal_moments_g_mm2 (smallest first) and principal_axes (unit, right-handed); with about, total.inertia_about {point, inertia_g_mm2}. A placement inside it that counts as a reference (its occurrence's bom_type, else its component's) adds nothing, nor does anything inside that; the placement measured counts whatever its type"),
+    CommandSpec::new("body.collision", "Collision Shape", crate::checked!("body.collision", properties::body_collision))
+        .icon("body")
+        .contract(&properties::BODY_COLLISION_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::component::BodyCollisionResult>)
+        .params("body: its name, or component: id or name for all its bodies; shape: auto|mesh|box|cylinder|sphere|none: what it looks like to a simulator (URDF export; box, cylinder and sphere are set in the body's bounding box)"),
+    CommandSpec::new("component.physical_override", "Mass Override", crate::checked!("component.physical_override", properties::physical_override))
+        .icon("measure")
+        .contract(&properties::PHYSICAL_OVERRIDE_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::component::PhysicalOverrideResult>)
+        .params("component; mass?: kg; com?: [x, y, z] mm; inertia?: [xx, yy, zz, xy, xz, yz] kg m² (omit all to clear): what robot exports use for the component's own bodies"),
     CommandSpec::new("occurrence.properties", "Occurrence Physical Properties", crate::checked!("occurrence.properties", properties::occurrence))
         .icon("measure").noundo()
         .contract(&OCCURRENCE_PROPERTIES_CONTRACT)
@@ -682,12 +692,48 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "the design itself can't be deleted"));
     }
     let imported = imported_bodies_within(s, id);
+    let body_owners: Vec<(String, u64, u64)> =
+        s.model.state().bodies.iter().map(|b| (b.name.clone(), b.feature, s.doc.model_body_component(b))).collect();
+    let prev_links: Vec<(u64, Vec<String>)> =
+        s.doc.links.iter().map(|(&c, l)| (c, l.inherited.iter().map(|p| p.material.clone()).collect())).collect();
     let removed = s.doc_mut().remove_component_tree(id).map_err(|e| match e {
         solidcraft_doc::DocError::Invalid(msg) => bad(cmd, msg),
         e => e.into(),
     })?;
     let d = s.doc_mut();
+    let mut prune_candidates: std::collections::HashSet<String> = prev_links
+        .into_iter()
+        .filter(|(comp, _)| removed.components.contains(comp))
+        .flat_map(|(_, mats)| mats)
+        .map(|m| m.to_ascii_lowercase())
+        .collect();
+    for (body, feat, _) in &body_owners {
+        if removed.features.contains(feat) {
+            d.materials.remove(body);
+        }
+    }
     for (feature, made, skipped) in imported {
+        // A body an outside Import keeps building only drops its material when it is one of the
+        // skipped (deleted) parts; a surviving feature's body keeps what it was assigned.
+        if let Some(f) = d.feature(feature) {
+            let slots = f.body_name_slots(made.len());
+            for (slot, name) in slots.iter().zip(&made) {
+                if skipped.contains(&(*slot as u64)) {
+                    d.materials.remove(name);
+                }
+            }
+        }
+        for link in d.links.values_mut().filter(|l| l.feature == feature) {
+            for &slot in &skipped {
+                if let Some(snap) = link.inherited.get_mut(slot as usize) {
+                    if !snap.material.is_empty() {
+                        prune_candidates.insert(snap.material.to_ascii_lowercase());
+                        snap.material.clear();
+                    }
+                    snap.material_fingerprint = None;
+                }
+            }
+        }
         let Some(f) = d.feature_mut(feature) else { continue };
         // The bodies left keep the names they have now, though a skipped one had a name first.
         f.pin_body_names(&made, &[]);
@@ -697,6 +743,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
             skip.dedup();
         }
     }
+    super::component_link::prune_unused_linked_materials(d, &prune_candidates);
     let gone = removed.components;
     if gone.contains(&s.active_component) {
         s.active_component = 0;

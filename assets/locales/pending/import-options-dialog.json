@@ -22,7 +22,7 @@
     "import_options.body_names": "أسماء الأجسام",
     "import_options.names_solid": "اسم الجسم الصلب نفسه",
     "import_options.names_product": "الجزء الذي يحتويه",
-    "import_options.names_instance": "الظهور في التجميع",
+    "import_options.names_instance": "النسخة في التجميع",
     "import_options.freecad_history": "سجل FreeCAD",
     "import_options.history_features": "إعادة بناء رسوماته وميزاته",
     "import_options.history_solids": "الأجسام الصلبة فقط",
