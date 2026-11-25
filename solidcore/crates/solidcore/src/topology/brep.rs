@@ -233,7 +233,7 @@ pub fn valid_and_outward_failure(
 ) -> crate::Result<Option<SolidTest>> {
     let c = validation::check_brep(k, b, validation::CheckLevel::Level0)?;
     // `AssertValid` does not run (`None`) where a pointer report failed
-    if c.pointers_status != crate::error::SM_SUCCESS || c.assert_valid.is_none() {
+    if !c.pointers.is_passed() || c.assert_valid.is_none() {
         return Ok(Some(SolidTest::PointersInvalid));
     }
     if c.assert_valid != Some(true) {

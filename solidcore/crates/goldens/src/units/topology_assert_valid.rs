@@ -426,7 +426,7 @@ fn output(protocol: &[f64], capi: bool) -> Result<Output, HarnessError> {
         let mut lines = Vec::new();
         let pointer_failures = pointers.iter().any(|r| r.ints.get(4) == Some(&0));
         if status != 1000 && pointers.is_empty() {
-            lines.push(format!("SmBrep::ValidatePointers failed with status {status}"));
+            lines.push("SmBrep::ValidatePointers failed without a report".to_string());
         }
         lines.extend(pointers.iter().filter(|r| failed(r)).map(line));
         if pointer_failures {
@@ -537,7 +537,7 @@ fn update_rust(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> Result<Output, Harne
         Ok(c) => c,
         Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
     };
-    out.push(f64::from(check.pointers_status));
+    out.push(f64::from(crate::output::pointer_check_status(check.pointers)));
     put_reports(&mut out, &check.pointer_reports);
     out.push(match check.assert_valid {
         None => -1.0,
@@ -625,7 +625,7 @@ fn capi_output(check: solidcore::Result<validation::BrepCheck>) -> Result<Output
         Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
     };
     let mut out = vec![0.0];
-    out.push(f64::from(check.pointers_status));
+    out.push(f64::from(crate::output::pointer_check_status(check.pointers)));
     put_reports(&mut out, &check.pointer_reports);
     out.push(match check.assert_valid {
         None => -1.0,

@@ -113,6 +113,10 @@ pub struct SurfaceRevolveParams {
     /// surface's own normal, as surface revolves saved before it keep.
     #[serde(default)]
     pub faced: Option<bool>,
+    /// A full turn that closes the walls stays a closed surface body, which Stitch makes a solid.
+    /// Default: true. False makes a solid of it, as surface revolves saved before it keep.
+    #[serde(default)]
+    pub stays_surface: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

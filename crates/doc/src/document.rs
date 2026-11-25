@@ -1834,6 +1834,12 @@ pub enum FeatureKind {
         base: PointExpr,
         #[serde(default = "z_axis")]
         axis: Dir,
+        /// A picked axis, using the same persistent references as Revolve.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis_ref: Option<AxisRef>,
+        /// Grow against the axis direction, keeping the coil's hand (`clockwise`).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reversed: bool,
         /// The sketch whose plane and profile the coil sweeps. Its absence means the primitive
         /// circular or square section below.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1861,7 +1867,7 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Start angle")]
         start_angle: Option<Expr>,
-        /// Turn the other way (left-handed).
+        /// Reverse rotation about the reference axis without changing axial propagation.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         clockwise: bool,
         /// Where the wire ends; axial when absent.
@@ -2371,7 +2377,8 @@ pub enum FeatureKind {
         in_place: bool,
     },
     /// A surface body turned about an axis from open curve chains and the boundaries of
-    /// profiles: walls only, no caps (a solid where a full turn closes them).
+    /// profiles: walls only, no caps; a full turn that closes them is a closed surface body
+    /// (`stays_surface`), or a solid in designs saved before it.
     SurfaceRevolve {
         sketch: SketchId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2394,6 +2401,10 @@ pub enum FeatureKind {
         /// save it; designs saved before it keep each face along its surface's own normal.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         faced: bool,
+        /// A full turn that closes the walls stays a surface body (#21969). New surface revolves
+        /// save it; designs saved before it make a solid of a closed full turn, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// A surface body swept along a chain of sketch curves from open curve chains and the
     /// boundaries of profiles: walls only, no caps.
@@ -2435,6 +2446,10 @@ pub enum FeatureKind {
         /// new or redefined sweep, which follows the spline itself.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         spline_as_samples: bool,
+        /// A result whose shells close stays a surface body (#21969). New features save it;
+        /// designs saved before it make a solid of a result that closes, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// A surface body lofted through sections in order, each one open or closed chain of
     /// sketch curves: walls only, no caps.
@@ -2456,6 +2471,10 @@ pub enum FeatureKind {
         /// lofts save it; designs saved before it keep each wall along its skinned surface's normal.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         faced: bool,
+        /// A result whose shells close stays a surface body (#21969). New features save it;
+        /// designs saved before it make a solid of a result that closes, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// The faces at `faces` copied out at a signed `distance` along their normals as a new
     /// surface body (0 copies them); `chain` takes each pick's whole smooth chain of faces;
@@ -2471,6 +2490,10 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Tolerance")]
         tolerance: Option<Expr>,
+        /// A result whose shells close stays a surface body (#21969). New features save it;
+        /// designs saved before it make a solid of a result that closes, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// A strip of ruled surface `distance` wide hanging off the chain of `body`'s edges through
     /// `edges`, as a new surface body: along `mode` (`angle` from `direction`, or from the
@@ -2498,6 +2521,10 @@ pub enum FeatureKind {
         face: Option<FacePick>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         far: Vec<Option<Vec<Position>>>,
+        /// A result whose shells close stays a surface body (#21969). New features save it;
+        /// designs saved before it make a solid of a result that closes, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// A surface body's boundary edges through `edges` extended outward: by `distance`, or up
     /// to `up_to`; the surface continued (`mode` natural) or a run-off face along each edge
@@ -2514,6 +2541,10 @@ pub enum FeatureKind {
         up_to: Option<ExtendTo>,
         #[serde(default = "yes", skip_serializing_if = "is_yes")]
         neighbours: bool,
+        /// A result whose shells close stays a surface body (#21969). New features save it;
+        /// designs saved before it make a solid of a result that closes, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// A blend surface bridging two picked edge chains of two bodies (`surface.blend`): each end
     /// repeats the surface it leaves up to its requested continuity, with the fullness `bulge`.
@@ -2604,9 +2635,10 @@ pub enum FeatureKind {
         #[walk(length = "Tolerance")]
         tolerance: Expr,
     },
-    /// A surface body trimmed by a plane, by a face of a body (`tool`, its surface extended) or
-    /// by sketch curves swept onto it (`curves`), keeping the side of `keep`; with `keep_more`,
-    /// the regions (pieces that hang together once cut) `keep` and those points pick instead.
+    /// A surface body trimmed by a plane, a complete bounded sheet (`tool_body`), a face of a
+    /// body (`tool`, its surface extended), or sketch curves swept onto it (`curves`). A sheet
+    /// keeps the connected region of `keep`; a plane or face keeps its side. With `keep_more`,
+    /// it keeps the regions (pieces that hang together once cut) those points pick instead.
     /// With `with`, a mutual trim: `body` and `with` (one face each) cut each other, `with`
     /// keeping the side of its one `keep_with` point or the regions of several; `extend`
     /// extends one that stops short of the other to meet it, and `stitch` sews the two kept
@@ -2616,6 +2648,9 @@ pub enum FeatureKind {
         plane: PlaneRef,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool: Option<FaceAt>,
+        /// The complete bounded cutting sheet. Older designs use `tool` for one extended face.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_body: Option<BodyName>,
         keep: Position,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         keep_more: Vec<Position>,
@@ -4456,6 +4491,10 @@ pub struct Document {
     /// Named views: saved cameras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
+    /// Construction planes dragged to a size of their own, by feature id: `[x0, y0, x1, y1]` in the
+    /// plane's own coordinates, mm. Others are drawn at their automatic size. Display only.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub plane_extents: std::collections::BTreeMap<u64, [f64; 4]>,
     /// Notes: text anchored to points in model space, drawn as screen-facing callouts (#1631).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<crate::notes::Note>,
@@ -4518,6 +4557,37 @@ pub struct Visibility {
     /// once the folder is shown.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hidden_folders: Vec<String>,
+    /// What Isolate changed, as it was before the first Isolate, for Unisolate. Never saved with
+    /// the design: it lives in the session and its undo steps only.
+    #[serde(skip)]
+    pub before_isolate: Option<BeforeIsolate>,
+}
+
+/// The parts of [`Visibility`] an Isolate changes, kept so that Unisolate can put them back and
+/// leave everything changed since (locks, sketches, dimensions) as it is.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BeforeIsolate {
+    pub hidden_bodies: Vec<String>,
+    pub hidden_occurrences: Vec<Vec<u64>>,
+    pub hidden_folders: Vec<String>,
+    /// The bodies on screen when the first Isolate began (world names). Those hidden now are
+    /// what Isolate hid, which the view may show see-through or as edges.
+    pub shown_bodies: std::collections::BTreeSet<String>,
+}
+
+impl Visibility {
+    /// Keeps what an Isolate is about to change, unless an earlier Isolate is still in effect:
+    /// Unisolate goes back to before the first one.
+    pub fn remember_before_isolate(&mut self) {
+        if self.before_isolate.is_none() {
+            self.before_isolate = Some(BeforeIsolate {
+                hidden_bodies: self.hidden_bodies.clone(),
+                hidden_occurrences: self.hidden_occurrences.clone(),
+                hidden_folders: self.hidden_folders.clone(),
+                shown_bodies: Default::default(),
+            });
+        }
+    }
 }
 
 impl Visibility {
@@ -4777,6 +4847,7 @@ impl Document {
             timeline_groups: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
+            plane_extents: std::collections::BTreeMap::new(),
             notes: Vec::new(),
             visibility: Visibility::default(),
             drawings: Vec::new(),
@@ -5629,6 +5700,8 @@ impl Document {
         for group in &mut self.timeline_groups {
             group.features.retain(|feature| !gone.contains(feature));
         }
+        // A deleted plane's size goes with it: a plane added later under its id is not drawn at it.
+        self.plane_extents.retain(|id, _| !gone.contains(id));
         // Configuration columns of deleted features go with them.
         let keep: Vec<bool> = self
             .configs

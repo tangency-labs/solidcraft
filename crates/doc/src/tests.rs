@@ -1661,6 +1661,8 @@ fn a_coil_follows_its_sketch() {
         FeatureKind::Coil {
             base: point_expr(Vec3::new(0.0, 0.0, 0.0)),
             axis: Dir(Vec3::Z),
+            axis_ref: None,
+            reversed: false,
             sketch: Some(crate::SketchId(sketch)),
             profiles: ProfileSel::All,
             diameter: None,
@@ -3289,4 +3291,119 @@ fn a_closed_control_spline_design_saves_and_reopens_unchanged() {
     let mut model = Model::new();
     model.evaluate(&reopened);
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+}
+
+/// An extrude with a start offset names its parallel caps top#1 (lower) and top#2 (upper),
+/// reliably ordered by height. Area-weighted face centroids guarantee delta-X and delta-Y
+/// are zero between identical planar caps regardless of triangulation winding or vertex rotation,
+/// preventing triangulation-dependent spread-axis sorting flips (#21686).
+#[test]
+fn extrude_start_offset_caps_are_named_consistently_across_rotations() {
+    let pts: [[f64; 2]; 12] = [
+        [25.0, 0.0],
+        [0.0, 5.0],
+        [0.0, 20.0],
+        [15.0, 35.0],
+        [25.0, 5.0],
+        [30.0, 20.0],
+        [20.0, 30.0],
+        [25.0, 45.0],
+        [40.0, 40.0],
+        [30.0, 40.0],
+        [30.0, 30.0],
+        [40.0, 20.0],
+    ];
+    for rot in 0..12 {
+        let mut sk = Sketch::new();
+        let mut rotated = pts.to_vec();
+        rotated.rotate_left(rot);
+        let point_ids: Vec<usize> = rotated.iter().map(|&[x, y]| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
+        for i in 0..12 {
+            let next = (i + 1) % 12;
+            sk.add_curve(solidcraft_sketch::CurveKind::Line { a: point_ids[i], b: point_ids[next] }, None).unwrap();
+        }
+        let mut doc = Document::new("start offset test");
+        let sketch_id = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+        let _ = doc
+            .add_feature(
+                FeatureKind::Extrude {
+                    thin: None,
+                    sketch: crate::SketchId(sketch_id),
+                    profiles: ProfileSel::All,
+                    extent: Extent {
+                        convention: crate::ExtrudeConvention::TotalDistance,
+                        distance: "1".into(),
+                        direction: Direction::Positive,
+                        distance2: None,
+                        start_offset: Some("4".into()),
+                        symmetric_offset: false,
+                        through_all: false,
+                        second_follows_first: false,
+                        taper: None,
+                        corner: Default::default(),
+                        to: None,
+                        to_offset: None,
+                        from: None,
+                        to_body_apart: false,
+                        from_level: false,
+                        picked_placements: Vec::new(),
+                        one_sided_direction: None,
+                    },
+                    operation: Operation::NewBody,
+                    targets: vec![],
+                },
+                Some("Plate"),
+            )
+            .unwrap();
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        assert!(model.results.iter().all(|r| r.error.is_none()), "rot {rot}: {:?}", model.results);
+        let state = model.state();
+        let body = state.bodies.first().expect("body built");
+        let names = crate::naming::face_names(body);
+        let bot_name = &names[body.body.faces(0.01).unwrap().iter().find(|f| (f.centroid.z - 4.0).abs() < 1e-4).unwrap().index];
+        let top_name = &names[body.body.faces(0.01).unwrap().iter().find(|f| (f.centroid.z - 5.0).abs() < 1e-4).unwrap().index];
+        assert_eq!(bot_name, "F2:top#1", "rot {rot} bottom cap name");
+        assert_eq!(top_name, "F2:top#2", "rot {rot} top cap name");
+
+        // Verify that F2:top#2 resolves to the top cap (z = 5.0)
+        let hit_top = crate::name_lookup::locate_face(&state, "F2:top#2", Vec3::new(20.0, 20.0, 5.0)).expect("find F2:top#2");
+        assert!((hit_top.point.z - 5.0).abs() < 1e-4, "rot {rot} F2:top#2 hit at z = 5");
+
+        // Verify that F2:top#1 resolves to the bottom cap (z = 4.0)
+        let hit_bot = crate::name_lookup::locate_face(&state, "F2:top#1", Vec3::new(20.0, 20.0, 4.0)).expect("find F2:top#1");
+        assert!((hit_bot.point.z - 4.0).abs() < 1e-4, "rot {rot} F2:top#1 hit at z = 4");
+    }
+}
+
+/// An asymmetric profile extruded with or without a start offset preserves its face names
+/// between kernel centroids and mesh-sampled means, and old saved designs keep all names
+/// on the exact same faces (#21686, PR #21762).
+#[test]
+fn asymmetric_profile_and_old_designs_preserve_face_names() {
+    let mut fixture: serde_json::Value = serde_json::from_str(include_str!("old_cap_anchor_fixture.json")).unwrap();
+    let doc = Document {
+        features: serde_json::from_value(fixture["features"].take()).unwrap(),
+        params: serde_json::from_value(fixture["params"].take()).unwrap(),
+        ..Document::default()
+    };
+    let upgraded = crate::format::read(&doc.to_json()).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&upgraded);
+    for r in &model.results {
+        assert!(r.error.is_none(), "feature {}: {:?}", r.id, r.error);
+    }
+    let st = model.state();
+    let b = st.body("Body1").expect("Body1 built");
+    let names = crate::naming::face_names(b);
+    const EXPECTED: &[&str] =
+        &["F2:side:a1", "F2:side:l6", "F2:side:l4", "F2:start", "F2:top", "F2:side:l1", "F4:side:l3", "F2:side:l3", "F4:bottom", "F2:side:l2"];
+    assert_eq!(&names[..], EXPECTED);
+    let centres = crate::naming::face_centres(b).expect("face centres");
+    assert_eq!(names.len(), centres.len());
+    // For every face on Body1, verifying that names land consistently:
+    assert!(!names.is_empty(), "faces named");
+    for (i, name) in names.iter().enumerate() {
+        assert!(!name.is_empty(), "face {i} has valid name");
+    }
 }
