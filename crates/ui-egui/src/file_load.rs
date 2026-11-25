@@ -249,6 +249,7 @@ struct Made {
 }
 /// Keep a plugin's deliberate refusal alongside the worker's localised error text until it
 /// reaches the window. All other failures retain their existing status-line behaviour.
+#[derive(Debug)]
 struct LoadFailure {
     text: String,
     refusal: Option<Box<solidcraft_engine::plugin::PluginFailure>>,
