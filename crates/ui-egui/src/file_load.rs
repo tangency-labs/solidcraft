@@ -109,6 +109,9 @@ pub struct Request {
     pub tab: Option<u64>,
     /// How many times it ran again because the design changed while it ran.
     pub tries: u8,
+    /// An open into a new design tab at this place among the tabs (files dropped on the tab bar,
+    /// `doc.open`'s `tab`), never in place of the design shown, blank or not.
+    pub new_tab_at: Option<usize>,
     /// The Verify preference added `verify` to the options; unlike a caller's own option it must
     /// not stop an already-open design from being reused. Its check then runs separately.
     pub(crate) auto_verify: bool,
@@ -145,6 +148,7 @@ impl Request {
             serial: crate::operations::serial(),
             tab: None,
             tries: 0,
+            new_tab_at: None,
             auto_verify: false,
             plugin_import: false,
             from_home: false,
@@ -860,6 +864,17 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         options.remove("path");
         options.retain(|_, v| !v.is_null());
     }
+    // The tab to open in is the window's business, not the command's.
+    let new_tab_at = match options.remove("tab").filter(|_| kind == Kind::Open) {
+        None => None,
+        Some(v) => match open_tab_param(&v) {
+            Ok(at) => Some(at),
+            Err(e) => {
+                let _ = req.reply.send(json!({"ok": false, "error": e}));
+                return None;
+            }
+        },
+    };
     // `new_tab` is for where the design lands: the engine, which has no tabs, never sees it.
     // A value that is no boolean stays in the options, for the engine's own check of them.
     let new_tab =
@@ -880,6 +895,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         serial: crate::operations::serial(),
         tab: None,
         tries: 0,
+        new_tab_at,
         auto_verify: false,
         plugin_import: id == "file.import",
         from_home: false,
@@ -889,6 +905,11 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
     };
     let _ = begin_request(app, request);
     None
+}
+
+/// `doc.open`'s `tab`: a place among the design tabs (0 is the first; past the last is the end).
+fn open_tab_param(v: &Value) -> Result<usize, String> {
+    v.as_u64().map(|at| usize::try_from(at).unwrap_or(usize::MAX)).ok_or_else(|| "doc.open: `tab` must be a whole number, 0 or more".to_string())
 }
 
 /// What to say once a linked design is inserted: whether its file carries a signature, without
@@ -960,6 +981,14 @@ fn start(app: &mut SolveApp) {
     if request.design.as_deref().is_some_and(|d| !app.session.path.as_deref().is_some_and(|p| crate::documents::same_path(p, d))) {
         crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed("the design it was for is no longer shown".into()));
         request.answer(Err("the design it was for is no longer shown".into()));
+        return;
+    }
+    if request.new_tab_at.is_some()
+        && let Err(e) = crate::documents::tab_room(app)
+    {
+        crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed(e.clone()));
+        app.set_status(e.clone(), true);
+        request.answer(Err(e));
         return;
     }
     if matches!(request.kind, Kind::Open | Kind::Recover { .. })
@@ -1779,7 +1808,11 @@ fn behind(app: &mut SolveApp, mut running: Running) {
     let request = &running.request;
     let key = format!("file:{}", request.serial);
     let uid = made.session.uid;
-    match crate::documents::open_tab_behind(app, made.session) {
+    let opened = match request.new_tab_at {
+        Some(at) => crate::documents::open_tab_behind_at(app, made.session, at),
+        None => crate::documents::open_tab_behind(app, made.session),
+    };
+    match opened {
         Ok(()) => {
             crate::operations::ended(app, &key, Outcome::Done);
             if request.kind == Kind::Open {
@@ -1917,18 +1950,17 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     }
                     app.big_operation = true;
                 } else {
-                    // No tab left for it: `adopt` said why, and nothing else of the open happens.
+                    // A tab of its own at the place asked for, or the blank design's place.
                     // Opened by a program, not the user: nothing is asked about its links.
                     app.docs.quiet_open = request.reply.is_some() || request.chat_turn.is_some();
-                    let adopted = crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| {
-                        if request.new_tab {
-                            crate::documents::adopt_in_new_tab(app, made.session)
-                        } else {
-                            crate::documents::adopt(app, made.session)
-                        }
+                    let shown = crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| match request.new_tab_at {
+                        Some(at) => crate::documents::open_tab_at(app, made.session, at).map_err(|e| app.set_status(e, true)).is_ok(),
+                        None if request.new_tab => crate::documents::adopt_in_new_tab(app, made.session),
+                        None => crate::documents::adopt(app, made.session),
                     });
                     app.docs.quiet_open = false;
-                    if !adopted {
+                    // No tab left for it: the status said why, and nothing else of the open happens.
+                    if !shown {
                         app.open_meshing_next = false;
                         // A design to recover stays offered, as when its read fails.
                         if let Kind::Recover { id, dir } = &request.kind {

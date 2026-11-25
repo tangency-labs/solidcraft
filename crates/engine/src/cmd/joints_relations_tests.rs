@@ -258,6 +258,8 @@ fn a_panel_full_of_parts_placed_by_relations_stays_solved() {
                 exprs: Default::default(),
                 offset_xy: [0.0; 2],
                 captured: None,
+                base_values: None,
+                base_exprs: Vec::new(),
                 constraint: None,
                 dynamics: Vec::new(),
             };

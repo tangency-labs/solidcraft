@@ -114,6 +114,77 @@ const MEASURED: &[Row] = &[
     (0x256f, 0xc633, 176, Short, Some(Action::Space)),
 ];
 
+/// What is printed on a measured key: its text (`T`, `Esc`, `V1`), or a symbol, which the interface
+/// names in the user's language.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Printed {
+    Text(&'static str),
+    /// The roll arrow (rolls the view by 90°).
+    Roll,
+    /// The padlock (the key that switches the rotation lock).
+    Lock,
+}
+
+use Printed::Text;
+
+/// What is printed on each measured key, to name it in the interface instead of its number. Same
+/// measurements as [`MEASURED`].
+const PRINTED: &[(u16, u16, u8, Printed)] = &[
+    // SpaceMouse Pro (046d:c62b)
+    (0x046d, 0xc62b, 1, Text("Menu")),
+    (0x046d, 0xc62b, 2, Text("Fit")),
+    (0x046d, 0xc62b, 3, Text("T")),
+    (0x046d, 0xc62b, 5, Text("R")),
+    (0x046d, 0xc62b, 6, Text("F")),
+    (0x046d, 0xc62b, 9, Printed::Roll),
+    (0x046d, 0xc62b, 13, Text("1")),
+    (0x046d, 0xc62b, 14, Text("2")),
+    (0x046d, 0xc62b, 15, Text("3")),
+    (0x046d, 0xc62b, 16, Text("4")),
+    (0x046d, 0xc62b, 23, Text("Esc")),
+    (0x046d, 0xc62b, 24, Text("Alt")),
+    (0x046d, 0xc62b, 25, Text("Shift")),
+    (0x046d, 0xc62b, 26, Text("Ctrl")),
+    (0x046d, 0xc62b, 27, Printed::Lock),
+    // SpaceMouse Enterprise (256f:c633)
+    (0x256f, 0xc633, 1, Text("Menu")),
+    (0x256f, 0xc633, 2, Text("Fit")),
+    (0x256f, 0xc633, 3, Text("T")),
+    (0x256f, 0xc633, 5, Text("R")),
+    (0x256f, 0xc633, 6, Text("F")),
+    (0x256f, 0xc633, 9, Printed::Roll),
+    (0x256f, 0xc633, 11, Text("ISO")),
+    (0x256f, 0xc633, 13, Text("1")),
+    (0x256f, 0xc633, 14, Text("2")),
+    (0x256f, 0xc633, 15, Text("3")),
+    (0x256f, 0xc633, 16, Text("4")),
+    (0x256f, 0xc633, 17, Text("5")),
+    (0x256f, 0xc633, 18, Text("6")),
+    (0x256f, 0xc633, 19, Text("7")),
+    (0x256f, 0xc633, 20, Text("8")),
+    (0x256f, 0xc633, 21, Text("9")),
+    (0x256f, 0xc633, 22, Text("10")),
+    (0x256f, 0xc633, 23, Text("Esc")),
+    (0x256f, 0xc633, 24, Text("Alt")),
+    (0x256f, 0xc633, 25, Text("Shift")),
+    (0x256f, 0xc633, 26, Text("Ctrl")),
+    (0x256f, 0xc633, 27, Printed::Lock),
+    (0x256f, 0xc633, 36, Text("Enter")),
+    (0x256f, 0xc633, 37, Text("Delete")),
+    (0x256f, 0xc633, 77, Text("11")),
+    (0x256f, 0xc633, 78, Text("12")),
+    (0x256f, 0xc633, 103, Text("V1")),
+    (0x256f, 0xc633, 104, Text("V2")),
+    (0x256f, 0xc633, 105, Text("V3")),
+    (0x256f, 0xc633, 175, Text("Tab")),
+    (0x256f, 0xc633, 176, Text("Space")),
+];
+
+/// What is printed on button `number` of this device, or `None` for a key we have not measured.
+pub fn printed(vendor: u16, product: u16, number: u8) -> Option<Printed> {
+    PRINTED.iter().find(|row| (row.0, row.1, row.2) == (vendor, product, number)).map(|row| row.3)
+}
+
 /// The highest button number a row may have.
 const MAX_NUMBER: usize = u8::MAX as usize;
 
@@ -210,6 +281,26 @@ mod tests {
         assert_eq!(from_rows(rows, 1, 2, Long).map(|t| t.len()), Some(1));
         assert!(from_rows(rows, 1, 3, Short).is_none());
         assert!(from_rows(rows, 1, 4, Short).is_none());
+    }
+
+    /// Every measured key of the Enterprise has its printed name, and only measured keys have one.
+    #[test]
+    fn printed_names_cover_the_measured_keys() {
+        assert_eq!(printed(0x256f, 0xc633, 3), Some(Text("T")));
+        assert_eq!(printed(0x256f, 0xc633, 13), Some(Text("1")));
+        assert_eq!(printed(0x256f, 0xc633, 78), Some(Text("12")));
+        assert_eq!(printed(0x256f, 0xc633, 176), Some(Text("Space")));
+        assert_eq!(printed(0x256f, 0xc633, 9), Some(Printed::Roll));
+        assert_eq!(printed(0x046d, 0xc62b, 27), Some(Printed::Lock));
+        assert_eq!(printed(0x256f, 0xc633, 4), None);
+        assert_eq!(printed(0, 0, 1), None);
+        for &(vendor, product, number, _, _) in MEASURED {
+            let number = u8::try_from(number).unwrap();
+            assert!(printed(vendor, product, number).is_some(), "button {number} of {vendor:04x}:{product:04x} has no name");
+        }
+        for &(vendor, product, number, _) in PRINTED {
+            assert!(MEASURED.iter().any(|row| (row.0, row.1, row.2) == (vendor, product, usize::from(number))), "{number} is not measured");
+        }
     }
 
     #[test]

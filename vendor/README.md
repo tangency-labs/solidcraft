@@ -273,6 +273,15 @@ SolidCraft changes:
 - `src/platform_impl/windows/window.rs` (`set_fullscreen`): going full screen on such a monitor
   would have sized the window 0x0, so it fills the monitor the window is on instead, and never
   applies a zero-area size (#20645).
+- `src/platform_impl/windows/drop_handler.rs`, `src/platform_impl/linux/x11/event_processor.rs`:
+  while files are dragged over a window, send `WindowEvent::CursorMoved` with where the drag is
+  (Windows: `IDropTarget`'s `DragEnter`, `DragOver` and `Drop`, screen to client coordinates;
+  X11: each `XdndPosition`, root to window coordinates). winit 0.30 gives `HoveredFile` and
+  `DroppedFile` no position, and neither platform sends the window pointer motion while a drag
+  runs, so the app could not tell where files were dropped (the design tabs open files dropped
+  on them at that place). macOS and Wayland are unchanged.
+- `src/platform_impl/windows/definitions.rs`: `IDropTarget`'s `pt` is a `POINTL` passed by value,
+  as COM declares it; winit 0.30 declared a pointer, harmless only while nothing read it.
 - `src/platform_impl/windows/event_loop.rs` (`WM_NCCALCSIZE`), `window_state.rs`
   (`WindowFlags::adjust_rect`): a resizable undecorated window with the undecorated shadow keeps
   the system frame on the left, right and bottom (its invisible resize borders and drop shadow)
