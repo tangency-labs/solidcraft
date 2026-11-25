@@ -1274,12 +1274,10 @@ impl FootBlend {
         // the strips over the whole joint, once the stations' toes hold
         if prove && off.is_none() {
             for (i, side) in self.sides.iter().enumerate() {
-                let (Some(face), Some(&target), Some(&z)) =
-                    (side.face, targets.get(i), legs.get(i))
-                else {
+                let (Some(face), Some(&target)) = (side.face, targets.get(i)) else {
                     continue;
                 };
-                match self.strip_off_face(k, i, target, face, z)? {
+                match self.strip_off_face(k, i, target, face, legs)? {
                     Strip::Held => {}
                     Strip::Off(at) => {
                         off = Some((i, at));
@@ -1324,7 +1322,13 @@ impl FootBlend {
                 near = Some(s);
             }
             match targets.get(i) {
-                Some(&target) if prove => match self.strip_off_face(k, i, target, face, leg)? {
+                Some(&target) if prove => match self.strip_off_face(k, i, target, face, {
+                    let mut at = legs;
+                    if let Some(l) = at.get_mut(i) {
+                        *l = leg;
+                    }
+                    at
+                })? {
                     Strip::Held => Ok(true),
                     Strip::Off(_) => Ok(false),
                     Strip::Unproved(at) => Err(self.strip_not_proved(i, at)),
@@ -1431,6 +1435,16 @@ enum StripPair {
     Split,
 }
 
+/// The strip of a support over the whole joint, enclosed: boxes of space, each with the piece
+/// of the leader it holds the strip's points over (`[t0, t1]`), from the chains from the root
+/// to the toe ([`FootBlend::prove_chain`]); together they hold every point of the strip at
+/// every station, from the root (the points nearer it than the chain's first box, in a ball
+/// about the joint) to the toe.
+#[derive(Debug, Default)]
+struct StripCover {
+    boxes: Vec<([f64; 2], crate::blend::fillet_section::series::V3<Ivl>)>,
+}
+
 /// What [`FootBlend::strip_off_face`] proved of a support's strip.
 enum Strip {
     /// On the face over the whole joint.
@@ -1470,12 +1484,15 @@ impl FootBlend {
     ///   piece's middle, `w = c(τ) − e(t*(τ))` with `w′ = c′ − e′ (c′·e′)/(|e′|² − w·e″)`, the
     ///   point is nearer the root than `η`, farther than `z − η`, or (a plane support, whose
     ///   strip is the ray along the side) on the side away from the face's, `w·s (n × e′) <
-    ///   0`; or `t*` is in an end's margin.
+    ///   0`, or (a curved support) outside every box of the strip's enclosure over the
+    ///   stations `t*` reaches ([`FootBlend::strip_cover`]: the chains' boxes, every point of
+    ///   the strip from the root to the toe in one of them); or `t*` is in an end's margin.
     ///
     /// The band's points on the strip are one connected piece (one point at each `t` and
     /// distance, [`FootBlend::prove_chain`]), on the face's surface: with no boundary in it and
-    /// one point on the face, all of it is on the face. An edge of the face in the band but on
-    /// another sheet of a curved support is refused too (a pair not cleared): conservative.
+    /// one point on the face, all of it is on the face. On a curved support whose strip is not
+    /// enclosed (a piece's chain not proved), an edge of the face in the band but off the strip
+    /// is refused too (a pair not cleared): conservative.
     ///
     /// # Errors
     ///
@@ -1487,13 +1504,14 @@ impl FootBlend {
         i: usize,
         target: &Brep,
         face: FaceId,
-        z: f64,
+        legs: [f64; 2],
     ) -> Result<Strip> {
         use crate::blend::fillet_section::certificate::{
             curve_derivs_over, curve_derivs_over_about, NurbsCurve,
         };
         use crate::blend::fillet_section::series::{v_add, v_scale, v_sub, V3};
         use crate::surface::surface::SurfaceKind;
+        let z = legs.get(i).copied().unwrap_or(0.0);
         let Some(side) = self.sides.get(i) else {
             return Err(defect(
                 "a strip was asked of a support the foot blend does not have",
@@ -1556,6 +1574,23 @@ impl FootBlend {
                 }
             }
         }
+        // a curved support's strip enclosed over the whole joint, made the first time a pair
+        // needs it ([`FootBlend::strip_cover`])
+        let cover: std::cell::RefCell<Option<Option<StripCover>>> = std::cell::RefCell::new(None);
+        let outside_strip = |p: V3<Ivl>, ts: Ivl| -> Result<bool> {
+            let mut slot = cover.borrow_mut();
+            if slot.is_none() {
+                *slot = Some(self.strip_cover(k, i, legs)?);
+            }
+            let Some(Some(c)) = slot.as_ref() else {
+                return Ok(false);
+            };
+            let apart = |a: Ivl, b: Ivl| a.hi < b.lo || b.hi < a.lo;
+            Ok(c.boxes
+                .iter()
+                .filter(|([t0, t1], _)| *t0 <= ts.hi && ts.lo <= *t1)
+                .all(|(_, b)| apart(b.x, p.x) || apart(b.y, p.y) || apart(b.z, p.z)))
+        };
         let mut pairs = 0_usize;
         for (e, uses) in edges {
             // a seam: the face on both sides of it
@@ -1600,6 +1635,9 @@ impl FootBlend {
                 let width = tb - ta;
                 let wide = [(ta - 0.5 * width).max(lo), (tb + 0.5 * width).min(hi)];
                 let mut found = None;
+                // the roots in the piece where the image did not fit inside it (all of them
+                // in it, unproved one per point)
+                let mut roots = None;
                 for [sa, sb] in [jp, wide] {
                     let over_t = curve_derivs_over_about(&joint, Ivl::new(sa, sb), 2, None, about)?;
                     let (Some(&js), Some(&ds), Some(&dds)) =
@@ -1622,13 +1660,29 @@ impl FootBlend {
                     if ts.lo > ts.hi || ts.lo.is_nan() || ts.hi.is_nan() || in_margin(ts) {
                         return Ok(StripPair::Clear);
                     }
+                    roots = Some(ts);
                     // a root for every τ of the piece, the only one: the image inside it
                     if n.lo > sa && n.hi < sb {
                         found = Some((sm, gt, jm, dm, ts));
                         break;
                     }
                 }
+                // the edge's points as they are, the strip's enclosure's frame
+                let [ax, ay, az] = about;
+                let at = V3 {
+                    x: Ivl::from(ax),
+                    y: Ivl::from(ay),
+                    z: Ivl::from(az),
+                };
                 let Some((tm, gt, jm, dm, ts)) = found else {
+                    // where the roots are not proved one per point (a root at the piece's end,
+                    // as at a closed joint's seam), the edge's points may still lie outside the
+                    // strip's enclosure over every station they can have
+                    if let (true, Some(ts)) = (across.is_none(), roots) {
+                        if outside_strip(v_add(c, at), ts)? {
+                            return Ok(StripPair::Clear);
+                        }
+                    }
                     return Ok(StripPair::Split);
                 };
                 // at the roots: w about the edge's piece's middle, its rate along the edge
@@ -1670,6 +1724,11 @@ impl FootBlend {
                 }
                 let sigma = across.map(|n| idot(wc, icross(n, ds)));
                 if sigma.is_some_and(|s| s.hi < 0.0) {
+                    return Ok(StripPair::Clear);
+                }
+                // a curved support: the edge's points outside the strip's enclosure at their
+                // stations are not on it (on the other side of the root, or another sheet)
+                if across.is_none() && outside_strip(v_add(c, at), ts)? {
                     return Ok(StripPair::Clear);
                 }
                 let inside = margin <= 0.0 || (ts.lo > lo + margin && ts.hi < hi - margin);
@@ -1736,6 +1795,89 @@ impl FootBlend {
             }
         }
         Ok(Strip::Held)
+    }
+
+    /// Support `i`'s strip at the legs `legs` over the whole joint, enclosed ([`StripCover`]):
+    /// the stations over the joint ([`FootBlend::check_stations`]), each span cut and halved
+    /// as [`FootBlend::prove_feet`] cuts it, and over each piece the foot proved
+    /// ([`FootBlend::prove_piece`]) and the chain from the root to it
+    /// ([`FootBlend::prove_chain`]), its boxes kept. `None` where the support has no NURBS
+    /// form, a station is not made, or a piece stays unproved: the strip is then not enclosed
+    /// (and no point is cleared by it).
+    ///
+    /// # Errors
+    ///
+    /// Those of the stations, the evaluations and the enclosures.
+    fn strip_cover(&self, k: &Kernel, i: usize, legs: [f64; 2]) -> Result<Option<StripCover>> {
+        use crate::blend::fillet_section::certificate::NurbsCurve;
+        let (Some(side), Some(&z)) = (self.sides.get(i), legs.get(i)) else {
+            return Ok(None);
+        };
+        let Some(support) = ProofSupport::of(k, &side.surface)? else {
+            return Ok(None);
+        };
+        let leader = NurbsCurve::of(&self.leader)?;
+        let mut solved: Vec<FootStation> = Vec::new();
+        for t in self.check_stations(&[])? {
+            match self.try_station(k, t, legs, solved.last())? {
+                Ok(s) => solved.push(s),
+                Err(_) => return Ok(None),
+            }
+        }
+        let reach = z * PIECE_OF_LEG;
+        let mut work: Vec<(FootStation, FootStation, usize)> = Vec::new();
+        for w in solved.windows(2) {
+            let &[a, b] = w else { continue };
+            let count = (a.root.distance(b.root) / reach)
+                .ceil()
+                .clamp(1.0, MAX_PIECES) as usize;
+            let mut from = a;
+            for j in 1..=count {
+                let to = if j == count {
+                    b
+                } else {
+                    let t = a.t + (b.t - a.t) * j as f64 / count as f64;
+                    match self.try_station(k, t, legs, Some(&from))? {
+                        Ok(s) => s,
+                        Err(_) => return Ok(None),
+                    }
+                };
+                work.push((from, to, 0));
+                from = to;
+            }
+        }
+        work.reverse();
+        let mut cover = StripCover::default();
+        let mut guess: Option<Point2> = None;
+        while let Some((a, b, depth)) = work.pop() {
+            let (Some(&fa), Some(&fb)) = (a.feet.get(i), b.feet.get(i)) else {
+                return Ok(None);
+            };
+            if depth > 0 {
+                guess = None;
+            }
+            let path = Self::prove_piece(k, &support, &leader, a.t, b.t, z, fa, fb, &mut guess)?
+                .map(|(.., path)| path);
+            let chained = match path {
+                Some(path) => self
+                    .prove_chain(k, &support, &leader, i, &a, &b, z, path, Some(&mut cover))?
+                    .is_some(),
+                None => false,
+            };
+            if chained {
+                continue;
+            }
+            if depth >= PROOF_HALVINGS {
+                return Ok(None);
+            }
+            let m = 0.5 * (a.t + b.t);
+            let Ok(mid) = self.try_station(k, m, legs, Some(&a))? else {
+                return Ok(None);
+            };
+            work.push((mid, b, depth + 1));
+            work.push((a, mid, depth + 1));
+        }
+        Ok(Some(cover))
     }
 
     /// The refusal of support `i`'s strip as not proved at `at`
@@ -3541,7 +3683,8 @@ impl FootBlend {
                     proved = false;
                     break;
                 };
-                let Some(n) = self.prove_chain(k, support, &leader, i, &a, &b, z, path)? else {
+                let Some(n) = self.prove_chain(k, support, &leader, i, &a, &b, z, path, None)?
+                else {
                     proved = false;
                     break;
                 };
@@ -3761,7 +3904,10 @@ impl FootBlend {
     /// the piece.
     ///
     /// `Some(n)`, the form's normal `S_u × S_v` over the root's path (its own sense, for
-    /// [`FootBlend::prove_feet`]'s rise); `None` where any of it is not proved.
+    /// [`FootBlend::prove_feet`]'s rise); `None` where any of it is not proved. With `cover`,
+    /// each box's points of the branch are enclosed and added to it (the form over the box's
+    /// region of the parameters, at the box's `t` and `ρ`), with how near the root the first
+    /// reaches ([`StripCover`]).
     ///
     /// # Errors
     ///
@@ -3777,6 +3923,7 @@ impl FootBlend {
         b: &FootStation,
         z: f64,
         foot: PiecePath,
+        mut cover: Option<&mut StripCover>,
     ) -> Result<Option<crate::blend::fillet_section::series::V3<Ivl>>> {
         use crate::blend::fillet_section::certificate::curve_derivs_over;
         use crate::blend::fillet_section::series::{v_add, v_scale, v_sub, V3};
@@ -3952,6 +4099,29 @@ impl FootBlend {
         if into.lo <= 0.0 {
             return Ok(None);
         }
+        // the strip's points below the first step, `x = r(t) + ρ y` with `ρ` from `start` to
+        // the first step and `y` in Krawczyk's box: their enclosure; and those nearer the root
+        // than `start`, in the ball of that radius about the joint's piece
+        if let Some(c) = cover.as_deref_mut() {
+            let [ky0, ky1] = ky;
+            let Some(q) = support.partials([p0 + reach * ky0, p1 + reach * ky1], 0)? else {
+                return Ok(None);
+            };
+            c.boxes.push(([lo, hi], q.at(0, 0)));
+            // nearer the root than `start`, the strip's points are within `start` of `e(t)`
+            let Some(&e) = over.first() else {
+                return Ok(None);
+            };
+            let ball = Ivl::new(-start, start);
+            c.boxes.push((
+                [lo, hi],
+                V3 {
+                    x: e.x + ball,
+                    y: e.y + ball,
+                    z: e.z + ball,
+                },
+            ));
+        }
         // the point at (t̃, ρ₁) in its region: y = (x − r(t̃))/ρ₁
         let inside = |e: Ivl, r: Ivl| e.lo > r.lo && e.hi < r.hi;
         let Some(&[p0u, p0v]) = held.first() else {
@@ -3983,7 +4153,7 @@ impl FootBlend {
                 [rs0 + (fs0 - rs0) * r1 / z, rs1 + (fs1 - rs1) * r1 / z]
             };
             let out = [(u1 - u0) / (r1 - r0), (v1 - v0) / (r1 - r0)];
-            let Some((_, yq)) = Self::prove_box(
+            let Some((kq, yq)) = Self::prove_box(
                 support,
                 leader,
                 [lo, hi],
@@ -3997,6 +4167,22 @@ impl FootBlend {
             else {
                 return Ok(None);
             };
+            // the strip's points over the step: `x = mid + along (t − t̃) + out (ρ − r1) + δ`,
+            // `δ` in Krawczyk's box, and their enclosure
+            if let Some(c) = cover.as_deref_mut() {
+                let [o0, o1] = out;
+                let [l0, l1] = along;
+                let [d0, d1] = kq;
+                let back = Ivl::new(r0, r1) - Ivl::from(r1);
+                let x = [
+                    Ivl::from(u1) + Ivl::from(l0) * dt + Ivl::from(o0) * back + d0,
+                    Ivl::from(v1) + Ivl::from(l1) * dt + Ivl::from(o1) * back + d1,
+                ];
+                let Some(q) = support.partials(x, 0)? else {
+                    return Ok(None);
+                };
+                c.boxes.push(([lo, hi], q.at(0, 0)));
+            }
             // the points at (t̃, r0) and (t̃, r1) in this box's region there
             let [y0, y1] = yq;
             let [o0, o1] = out;

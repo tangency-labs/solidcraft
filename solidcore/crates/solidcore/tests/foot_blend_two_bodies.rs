@@ -7,11 +7,12 @@
 //! one on a cavity's floor (a face whose outer side is a void inside the body), each two
 //! bodies, 6 mm legs: the flat bead's volume is the closed form, its edges lie in the joint's
 //! corner, and both bodies are the same after, in their file bytes and in memory. Small legs
-//! on the tee are proved too. A toe in a notch of the base, and a hole in the base between
-//! the stations, are refused with the leg that fits; two plates butted flush, and a face that
-//! leaves the joint away from the corner, meet in no corner; a joint off one of the faces, or
-//! over a hole in it, the same face twice, and a face on a region the kernel is unsure of are
-//! refused.
+//! on the tee are proved too, and so is a rod sunk into the plate, whose face's edge past the
+//! root is in the leg's reach but off the strip. A toe in a notch of the base, a hole in the
+//! base between the stations, and a web too low for the leg (a station with no toe) are
+//! refused with the leg that fits; two plates butted flush, and a face that leaves the joint
+//! away from the corner, meet in no corner; a joint off one of the faces, or over a hole in
+//! it, the same face twice, and a face on a region the kernel is unsure of are refused.
 //!
 //! The tolerances: a bead's edges lie within [`WELD_FIT_TOLERANCE`] of the exact toes and
 //! root (its section face is fitted to it); the plates' beads are planes, on which the
@@ -531,4 +532,47 @@ fn a_face_on_a_region_the_kernel_is_unsure_of_is_refused() {
         matches!(&got, Err(SolidError::UnsureRegion { .. })),
         "{got:?}"
     );
+}
+
+/// A web only 3 high on the base, legs 6: up the web's face the foot runs off its surface at
+/// every station, so no toe is found there. Refused as the build refuses it (`toes_on_bodies`
+/// takes `body`'s refusal for a station with no toe), with the largest leg whose foot is
+/// found, 3 (the web's top), less the halving's bracket.
+#[test]
+fn a_station_with_no_toe_is_refused_with_the_leg_that_fits() {
+    let mut k = kernel();
+    let base = block(&mut k, [0.0; 3], [100.0, 100.0, 10.0]);
+    let web = block(&mut k, [45.0, 0.0, 10.0], [10.0, 100.0, 3.0]);
+    let side = face_at(&k, &web, [45.0, 50.0, 10.0], [45.0, 0.0, 11.5]);
+    let top = face_at(&k, &base, [50.0, 0.0, 10.0], [0.0, 50.0, 10.0]);
+    let joint = line([45.0, 0.0, 10.0], [45.0, 100.0, 10.0]);
+    let blend = FootBlend::of_faces(&k, &web, side, &base, top, &joint).unwrap();
+    let err = blend
+        .toes_on_bodies(&k, [&web, &base], [LEG, LEG], &[])
+        .unwrap_err();
+    let fit = err.fit().unwrap_or_else(|| panic!("no fit: {err:?}"));
+    assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
+    assert!(
+        fit.size >= 3.0 - bracket(3.0) && fit.size <= 3.0 + ZONE,
+        "{}",
+        fit.size
+    );
+}
+
+/// A rod sunk 2 into the plate (its foot at z = 8, below the plate's top): the rod's face goes
+/// on past the joint on the side away from the bead, and its bottom edge lies 2 below the root,
+/// inside the leg's reach but not on the strip. On a curved support that edge is told off the
+/// strip by the strip's enclosure (`FootBlend::strip_cover`), not refused.
+#[test]
+fn an_edge_of_a_curved_face_beyond_the_root_is_not_on_the_strip() {
+    let mut k = kernel();
+    let plate = block(&mut k, [0.0; 3], [100.0, 100.0, 10.0]);
+    let rod = create_cylinder(&mut k, Point3::new(50.0, 50.0, 8.0), 15.0, 52.0).unwrap();
+    let side = face_at(&k, &rod, [65.0, 50.0, 8.0], [65.0, 50.0, 60.0]);
+    let top = face_at(&k, &plate, [50.0, 0.0, 10.0], [0.0, 50.0, 10.0]);
+    let joint = Curve::from(create_circle(Point3::new(50.0, 50.0, 10.0), 15.0).unwrap());
+    let blend = FootBlend::of_faces(&k, &rod, side, &plate, top, &joint).unwrap();
+    blend
+        .toes_on_bodies(&k, [&rod, &plate], [LEG, LEG], &[])
+        .unwrap();
 }
