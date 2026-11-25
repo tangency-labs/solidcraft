@@ -859,11 +859,7 @@ fn classify_points_honours_tolerance_trim_and_face_selection() {
 #[test]
 fn classify_points_handles_hollow_tube_boundary_grid_and_tolerance_band() {
     let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
-    run(
-        &mut s,
-        "solid.box",
-        json!({"corner": [1000.0, 360.0, 0.0], "length": 60.0, "width": 25.0, "height": 238.0, "body_name": "Tube"}),
-    );
+    run(&mut s, "solid.box", json!({"corner": [1000.0, 360.0, 0.0], "length": 60.0, "width": 25.0, "height": 238.0, "body_name": "Tube"}));
     run(
         &mut s,
         "solid.box",
@@ -898,9 +894,7 @@ fn classify_points_handles_hollow_tube_boundary_grid_and_tolerance_band() {
         [1000.0 - tol * 0.7, 360.0 - tol * 0.7, -tol * 0.7],
         [1002.5 + tol * 0.7, 362.5 + tol * 0.7, -tol * 0.7],
     ];
-    let expected_classes = [
-        "inside", "outside", "outside", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on",
-    ];
+    let expected_classes = ["inside", "outside", "outside", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on"];
     let r = run(&mut s, id, json!({"body": "Tube", "points": points}));
     matches::<ClassifyPointsResult>(id, &r, false);
     assert_eq!(r["results"].as_array().unwrap().len(), expected_classes.len());
