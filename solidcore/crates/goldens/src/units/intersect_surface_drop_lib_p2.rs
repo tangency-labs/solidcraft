@@ -519,7 +519,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             let mut p = pt_in(pt)?;
             let mut off = DropOffset::new(*offset, *singularities);
             let r = p.set_properties(k, &s, &mut off, *singularities, *tol, &ext(*domain), *adjust);
-            match st(r)? {
+            match st(r.map(crate::output::point_outcome_status))? {
                 Ok(c) => o.push(code(c)),
                 Err(c) => o.push(c),
             }
@@ -577,7 +577,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                 *end_t,
                 &mut end,
             );
-            match st(r)? {
+            match st(r.map(crate::output::point_outcome_status))? {
                 Ok(c) => o.push(code(c)),
                 Err(c) => o.push(c),
             }

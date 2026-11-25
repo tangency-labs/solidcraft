@@ -67,6 +67,38 @@ fn the_drawings_fields() {
     assert_eq!(shown(&d, 0, None, number()), "");
 }
 
+/// The drawing's language is a field for the ISO 7200 language cell (#20121): its code in capitals,
+/// whatever case or region it was saved with.
+#[test]
+fn the_drawings_language_reads_as_its_code_in_capitals() {
+    let mut d = drawing();
+    let language = || vec![field(Source::Drawing, "language")];
+    assert!(has_key(Source::Drawing, "language") && !has_key(Source::Sheet, "language"));
+    assert_eq!(shown(&d, 0, None, language()), "EN");
+    d.language = "pt-br".into();
+    assert_eq!(shown(&d, 0, None, language()), "PT-BR");
+    assert!(Values { drawing: &d, sheet: 0, component: Documented::Nothing }.empty_fields(&Content(language())).is_empty());
+}
+
+/// The built-in block's new cells read what the drawing knows: the sheet's scale, the drawing's
+/// language, the newest revision row's revision; the shop's own three read nothing.
+#[test]
+fn the_built_in_blocks_iso_7200_cells_follow_the_drawing() {
+    let d = drawing();
+    let block = d.sheets[0].title_block.clone().unwrap();
+    let read = |name: &str| {
+        let cell = block.cells.iter().find(|c| c.name == name).unwrap();
+        let CellKind::Text(text) = &cell.kind else { panic!("{name} is text") };
+        shown(&d, 0, None, text.content.0.clone())
+    };
+    assert_eq!(read("language"), "EN");
+    for own in ["document_type", "document_status", "department"] {
+        assert_eq!(read(own), "", "{own}");
+    }
+    // No base view and no revision row yet: nothing to show, and no row to blame.
+    assert_eq!((read("scale").as_str(), read("revision").as_str()), ("", ""));
+}
+
 /// Sheets are numbered among the counted ones: the second of three is "2/3". A sheet left out of
 /// the count shows neither, and the sheets after it close up.
 #[test]
@@ -300,7 +332,16 @@ fn a_sheets_scale_is_the_one_its_base_views_share() {
     let (first, second) = (d.sheets[0].id, d.sheets[1].id);
     let view = |id, sheet, kind, scale: &str| {
         let settings = ViewOverrides { scale: Some(scale.parse().unwrap()), ..ViewOverrides::default() };
-        Arc::new(View { id, sheet, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_shown_percent: 0.0, label: None })
+        Arc::new(View {
+            id,
+            sheet,
+            kind,
+            place: ViewPlace::At([150.0, 150.0]),
+            settings,
+            reference_shown_percent: 0.0,
+            centre_marks: None,
+            label: None,
+        })
     };
     let base = |named| ViewKind::Base { source, view: ViewDirection::Named(named) };
     d.add_views([
@@ -329,6 +370,7 @@ fn a_sheets_scale_is_the_one_its_base_views_share() {
             place: ViewPlace::At([150.0, 150.0]),
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
+            centre_marks: None,
             label: None,
         })
     };

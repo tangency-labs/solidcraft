@@ -2,12 +2,12 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 // The WIT package declaration is the sole source of the API identifier.
 include!(concat!(env!("OUT_DIR"), "/api.rs"));
@@ -28,6 +28,12 @@ pub const MAX_EXPORT_FILE_BYTES: usize = 256 * 1024 * 1024;
 /// A command entry finishes within 30 s; an importer converting a large assembly may take minutes.
 pub const MAX_COMMAND_DEADLINE_MS: u64 = 30_000;
 pub const MAX_IMPORTER_DEADLINE_MS: u64 = 600_000;
+/// A long job (an entry with `"job": true`) runs for at most ten minutes. The limit is fixed: a
+/// plugin that needs longer asks for it through its own limits, not an app-wide setting.
+pub const JOB_DEADLINE_SECONDS: u64 = 600;
+/// The most host calls a long job makes (its progress reports among them); an ordinary command
+/// makes at most 256.
+pub const MAX_JOB_CALLS: usize = 1 << 20;
 /// The most extensions one import or export slot claims.
 pub const MAX_EXTENSIONS: usize = 32;
 /// Memory32 has at most 65536 pages of 64 KiB.
@@ -35,6 +41,9 @@ pub const MAX_MEMORY_MIB: usize = 4096;
 /// Hard ceiling for fuel approved at install: ten trillion fuel units (10^13).
 /// The user's Max plugin fuel remains the default for packages without an approval.
 pub const MAX_APPROVED_FUEL: u64 = 10_000_000_000_000;
+
+pub mod shader;
+pub mod theme;
 
 pub type Result<T> = std::result::Result<T, HostError>;
 
@@ -70,17 +79,22 @@ impl std::fmt::Display for DesignToken {
 
 pub mod conditions;
 pub mod dialog;
+pub mod images;
 mod input;
+mod schema_order;
 mod schema_refs;
 pub mod swatches;
 pub mod ui;
+pub use input::FONT_KEY;
 pub use input::check_input;
+pub use input::check_input_field;
+pub use input::font_field;
 pub use input::prepare_input;
 pub use input::strict_input_schema;
 
 /// The host imports that change something outside the design. A `read` entry is refused every
 /// one of them, whatever folders its plugin was granted, as it is refused edit commands.
-pub const WRITING_IMPORTS: &[&str] = &["write-file"];
+pub const WRITING_IMPORTS: &[&str] = &["user-storage.remove", "user-storage.set", "write-file"];
 
 /// The refusal of a writing host import to a `read` entry: it names the import.
 pub fn read_entry_refusal(import: &str) -> HostError {
@@ -88,6 +102,32 @@ pub fn read_entry_refusal(import: &str) -> HostError {
 }
 /// How [`read_entry_refusal`]'s permission starts; the import's name follows it.
 pub const READ_ENTRY_IMPORT: &str = "read entry may not use the host import ";
+
+/// Per-plugin settings budgets: the entire compact JSON object, including keys and punctuation.
+pub const MAX_USER_STORAGE_BYTES: usize = 64 * 1024;
+pub const MAX_USER_STORAGE_KEYS: usize = 128;
+pub const MAX_USER_STORAGE_KEY_BYTES: usize = 128;
+
+pub fn check_user_storage_key(key: &str) -> Result<()> {
+    if key.is_empty() || key.len() > MAX_USER_STORAGE_KEY_BYTES || key.chars().any(char::is_control) {
+        return Err(HostError::InvalidInput { field: "user-storage.key".into(), reason: "requires 1..128 bytes without control characters".into() });
+    }
+    Ok(())
+}
+
+pub fn check_user_storage(data: &BTreeMap<String, Value>) -> Result<()> {
+    if data.len() > MAX_USER_STORAGE_KEYS {
+        return Err(HostError::LimitExceeded { limit: "user-storage keys (128)".into() });
+    }
+    for key in data.keys() {
+        check_user_storage_key(key)?;
+    }
+    let bytes = serde_json::to_vec(data).map_err(|e| HostError::InvalidInput { field: "user-storage".into(), reason: e.to_string() })?;
+    if bytes.len() > MAX_USER_STORAGE_BYTES {
+        return Err(HostError::LimitExceeded { limit: "user-storage total bytes (65536)".into() });
+    }
+    Ok(())
+}
 
 /// Failures are actionable data at the app boundary, including failures before instantiation.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema, thiserror::Error)]
@@ -106,6 +146,10 @@ pub enum HostError {
     InvalidManifest { field: String, reason: String },
     #[error("invalid input {field}: {reason}")]
     InvalidInput { field: String, reason: String },
+    /// Another run changed this plugin's user settings or is committing them. Retry the run
+    /// from freshly loaded settings; the refused transaction published nothing.
+    #[error("user settings for {plugin} changed or are being written; retry the plugin run")]
+    UserStorageConflict { plugin: String },
     #[error("plugin trap: {reason}")]
     Trap { reason: String },
     #[error("plugin cancelled")]
@@ -166,14 +210,19 @@ pub const CAPABILITIES: &[(&str, (u32, u32))] = &[
     ("design", (0, 1)),
     ("dialog", (0, 1)),
     ("evaluate", (0, 2)),
+    ("folders", (0, 1)),
     ("formats", (0, 2)),
     ("forms", (0, 1)),
+    ("host", (0, 1)),
+    ("shaders", (0, 2)),
     ("storage", (0, 1)),
+    ("themes", (0, 1)),
     ("ui", (0, 1)),
+    ("user-storage", (0, 1)),
 ];
 /// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
 /// `craft:plugin@0.1.0` ([`WIT_0_1`]) run unchanged.
-pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
+pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1)), ("shaders", (0, 1))];
 /// The WIT versions a host runs, newest first: [`API`]'s and the frozen 0.1 one.
 pub const WIT_VERSIONS: &[&str] = &["0.2.0", "0.1.0"];
 /// `craft:plugin@0.1.0`, unchanged, for plugins built before 0.2.
@@ -197,18 +246,9 @@ pub fn capability_version(text: &str) -> Option<(u32, u32)> {
 /// Checks a manifest's `capabilities` against [`CAPABILITIES`]. `app` names the host in the
 /// refusal ("update SolidCraft or the plugin").
 pub fn check_capabilities(requested: &[String], app: &str) -> Result<()> {
-    if requested.len() > 16 {
-        return Err(invalid("capabilities", "at most 16 capabilities"));
-    }
-    let mut names = BTreeSet::new();
+    check_capability_declarations(requested, &[])?;
     for capability in requested {
-        let parsed = capability.split_once('@').and_then(|(name, version)| Some((name, capability_version(version)?)));
-        let Some((name, (major, minor))) = parsed.filter(|(name, _)| valid_id(name)) else {
-            return Err(invalid("capabilities", format!("`{capability}` is not name@major.minor, e.g. \"commands@0.1\"")));
-        };
-        if !names.insert(name) {
-            return Err(invalid("capabilities", format!("`{name}` is listed twice")));
-        }
+        let (name, (major, minor)) = parse_capability(capability, "capabilities")?;
         let unsupported = |reason: String| HostError::UnsupportedCapability { capability: capability.clone(), reason };
         let Some((_, (have_major, have_minor))) = CAPABILITIES.iter().find(|(known, _)| *known == name) else {
             return Err(unsupported(format!("needs {name} {major}.{minor}, which this version of {app} does not have; update {app} or the plugin")));
@@ -224,6 +264,30 @@ pub fn check_capabilities(requested: &[String], app: &str) -> Result<()> {
             return Err(unsupported(format!(
                 "was built for {name} {major}.{minor}, and this version of {app} runs {name} {have_major}.{have_minor}; update the plugin"
             )));
+        }
+    }
+    Ok(())
+}
+
+fn parse_capability<'a>(capability: &'a str, field: &str) -> Result<(&'a str, (u32, u32))> {
+    capability
+        .split_once('@')
+        .and_then(|(name, version)| Some((name, capability_version(version)?)))
+        .filter(|(name, _)| valid_id(name))
+        .ok_or_else(|| invalid(field, format!("`{capability}` is not name@major.minor, e.g. \"commands@0.1\"")))
+}
+
+fn check_capability_declarations(required: &[String], optional: &[String]) -> Result<()> {
+    let mut names = BTreeSet::new();
+    for (field, capabilities) in [("capabilities", required), ("optional_capabilities", optional)] {
+        if capabilities.len() > 16 {
+            return Err(invalid(field, "at most 16 capabilities"));
+        }
+        for capability in capabilities {
+            let (name, _) = parse_capability(capability, field)?;
+            if !names.insert(name) {
+                return Err(invalid(field, format!("`{name}` is listed twice")));
+            }
         }
     }
     Ok(())
@@ -298,10 +362,25 @@ impl FileGrant {
 /// Granted file writes are staged until the guest succeeds and the app commits; rollback
 /// removes staged files without replacing their targets. Publication errors after app
 /// commit can leave a subset of files applied and must be reported to the caller.
+/// An importer with user storage leaves its transaction pending after conversion; the app
+/// commits only when it accepts the validated design, or discards it on failure.
 pub trait PluginHost {
     /// Request a populated form. Programs refuse; interactive hosts defer opening until success.
     fn open_form(&mut self, entry: &str, _params: &Value) -> Result<()> {
         Err(HostError::InteractiveRequired { entry: entry.into() })
+    }
+    /// Only the host-authenticated plugin's per-user JSON settings. Optional for existing hosts.
+    fn user_storage_get(&mut self, _key: &str) -> Result<Option<Value>> {
+        Err(HostError::PermissionDenied { permission: "user-storage is unavailable".into() })
+    }
+    fn user_storage_set(&mut self, _key: &str, _value: &Value) -> Result<()> {
+        Err(HostError::PermissionDenied { permission: "user-storage is unavailable".into() })
+    }
+    fn user_storage_remove(&mut self, _key: &str) -> Result<bool> {
+        Err(HostError::PermissionDenied { permission: "user-storage is unavailable".into() })
+    }
+    fn user_storage_list(&mut self) -> Result<Vec<String>> {
+        Err(HostError::PermissionDenied { permission: "user-storage is unavailable".into() })
     }
     /// The active document's identity and committed revision (`design@0.1`), or none when closed.
     /// Existing hosts need not implement this additive read-only capability.
@@ -312,8 +391,27 @@ pub trait PluginHost {
     fn run_command(&mut self, name: &str, args: &Value) -> Result<Value>;
     fn begin_transaction(&mut self) -> Result<()>;
     fn commit_transaction(&mut self) -> Result<()>;
+    /// Called after the approved file writes are in place; anything that must not outlive a failed
+    /// publication (per-user settings) is made permanent here. Nothing to do by default.
+    fn publish_committed(&mut self) -> Result<()> {
+        Ok(())
+    }
+    /// Called instead of [`PluginHost::publish_committed`] when the approved file writes could not
+    /// be published after a commit: drop what was staged for publication. The transaction has
+    /// already committed, so it is not rolled back. Nothing to do by default.
+    fn discard_committed(&mut self) {}
     fn rollback_transaction(&mut self) -> Result<()>;
     fn granted_folders(&self) -> Vec<FileGrant>;
+    /// Read-only roots for annotated entry fields, already authorised by the app for this call.
+    /// Names are property keys, not install-time permission names. No grants by default.
+    fn granted_input_folders(&self) -> Vec<FileGrant> {
+        Vec::new()
+    }
+    /// Apply the caller's scope to a file beneath an input folder. Separate from the legacy
+    /// files interface so an input grant cannot widen any other host operation.
+    fn authorize_input_file_path(&self, path: &Path) -> Result<()> {
+        self.authorize_file_path(path, false)
+    }
     /// The sensitive command groups the user granted. A guest may call a grouped command only
     /// when its manifest requests the group too. None by default.
     fn granted_command_groups(&self) -> BTreeSet<String> {
@@ -542,13 +640,25 @@ pub struct Entry {
     /// §5). Accepted now; the data is passed once per-design plugin data lands.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub needs_plugin_data: bool,
+    /// Importers only: File > Open, a drop and the importer's menu entry choose the file first and
+    /// then show the options, so they can match it. Absent or false shows the options first.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub file_first: bool,
     pub effect: Effect,
     /// The entry's options, as an object schema. A format slot's options are drawn as a form
     /// before the import or export.
     pub input_schema: Value,
+    /// Property names in declaration order, keyed by the object schema's JSON Pointer (the
+    /// empty string for the root). Host metadata keeps that order across entry round trips;
+    /// ordinary JSON maps remain sorted. Missing keys use the dialog's usual field order.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub input_property_order: BTreeMap<String, Vec<String>>,
     /// Opt in to the read-only dialog-provider export (dialog@0.1).
     pub dialog_hook: bool,
     pub slots: Vec<UiSlot>,
+    /// A long job: it runs for up to [`JOB_DEADLINE_SECONDS`] instead of the runtime's `deadline_ms`,
+    /// and shows its progress in the app's operations.
+    pub job: bool,
 }
 
 impl Entry {
@@ -584,17 +694,25 @@ struct DeclaredEntry {
     label: String,
     #[serde(default)]
     needs_plugin_data: bool,
+    #[serde(default)]
+    file_first: bool,
     /// A command's effect is `edit` unless it says `read`; an exporter's is `read`; an importer's is
     /// `open`. An importer that says `edit` (the only effect it could state before `open` existed)
     /// still opens a new design.
     #[serde(default)]
     effect: Option<Effect>,
-    #[serde(default = "empty_input_schema")]
-    input_schema: Value,
+    #[serde(default)]
+    #[schemars(with = "Value")]
+    input_schema: schema_order::InputSchema,
+    // Present in a host's serialized Entry; plugin authors only declare schema properties.
+    #[serde(default)]
+    input_property_order: Option<BTreeMap<String, Vec<String>>>,
     #[serde(default)]
     dialog_hook: bool,
     #[serde(default)]
     slots: Vec<UiSlot>,
+    #[serde(default)]
+    job: bool,
 }
 impl From<EntryDeclaration> for Entry {
     fn from(value: EntryDeclaration) -> Self {
@@ -605,10 +723,13 @@ impl From<EntryDeclaration> for Entry {
                 extensions: Vec::new(),
                 label: String::new(),
                 needs_plugin_data: false,
+                file_first: false,
                 effect: Effect::Edit,
                 input_schema: empty_input_schema(),
+                input_property_order: BTreeMap::new(),
                 dialog_hook: false,
                 slots: Vec::new(),
+                job: false,
             },
             EntryDeclaration::Declared(value) => Self {
                 name: value.name,
@@ -616,15 +737,25 @@ impl From<EntryDeclaration> for Entry {
                 extensions: value.extensions,
                 label: value.label.trim().to_string(),
                 needs_plugin_data: value.needs_plugin_data,
+                file_first: value.file_first,
                 effect: match (value.kind, value.effect) {
                     (EntryKind::Importer, None | Some(Effect::Edit)) => Effect::Open,
                     (_, Some(effect)) => effect,
                     (EntryKind::Exporter, None) => Effect::Read,
                     (EntryKind::Command, None) => Effect::Edit,
                 },
-                input_schema: value.input_schema,
+                input_schema: value.input_schema.value,
+                // An object with no properties has no order to keep: an entry that declared no schema
+                // serializes without one and must read back the same.
+                input_property_order: value
+                    .input_property_order
+                    .unwrap_or(value.input_schema.property_order)
+                    .into_iter()
+                    .filter(|(_, names)| !names.is_empty())
+                    .collect(),
                 dialog_hook: value.dialog_hook,
                 slots: value.slots,
+                job: value.job,
             },
         }
     }
@@ -637,14 +768,65 @@ pub struct Manifest {
     pub id: String,
     pub name: String,
     pub version: String,
+    /// The oldest supported host version, as a complete semantic version (`1.2.3`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_host_version: Option<String>,
     #[serde(default)]
     pub description: String,
     /// The host capabilities the plugin needs, as `name@major.minor` (`commands@0.1`). A runtime
     /// needs `commands`. The host refuses a capability it does not serve, before any code runs.
     #[serde(default)]
     pub capabilities: Vec<String>,
+    /// Capabilities the host grants when supported; the plugin must provide a fallback.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub optional_capabilities: Vec<String>,
+    /// Inert metadata reserved for future optional fields. Unknown keys are deliberately accepted.
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    #[schemars(with = "std::collections::BTreeMap<String, Value>")]
+    pub extensions: Map<String, Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RuntimeManifest>,
+    /// View backgrounds and tints (`shaders@0.2`); a plugin may ship shaders and no runtime.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shaders: Vec<shader::Shader>,
+    /// Colour themes for the theme picker (`themes@0.1`); a plugin may ship themes and no runtime.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub themes: Vec<theme::ThemeDecl>,
+    /// Where newer versions are published. SolidCraft before 0.49 refuses the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updates: Option<Updates>,
+}
+
+/// The plugin's GitHub repository, `owner/repo`: its latest release is the update.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Updates {
+    pub github: String,
+}
+
+/// A GitHub `owner/repo`: an owner of 1..39 letters, digits and hyphens, and a repository of
+/// 1..100 letters, digits, `-`, `_` and `.`, other than `.` and `..`.
+pub fn valid_github_repo(text: &str) -> bool {
+    let Some((owner, repo)) = text.split_once('/') else { return false };
+    (1..=39).contains(&owner.len())
+        && owner.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
+        && !owner.starts_with('-')
+        && (1..=100).contains(&repo.len())
+        && repo.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.'))
+        && repo != "."
+        && repo != ".."
+}
+
+impl Manifest {
+    /// Required capabilities followed by the optional capabilities this host supports, retaining
+    /// their declared strings and order. This describes API availability, not user permissions.
+    pub fn granted_capabilities(&self) -> Vec<String> {
+        self.capabilities
+            .iter()
+            .chain(self.optional_capabilities.iter().filter(|capability| check_capabilities(std::slice::from_ref(*capability), "the app").is_ok()))
+            .cloned()
+            .collect()
+    }
 }
 
 /// A read-only entry called after a coalesced design or linked-file invalidation. Listeners refresh
@@ -682,8 +864,8 @@ pub struct RuntimeManifest {
     pub ui: Option<ui::Declarations>,
 }
 impl RuntimeManifest {
-    /// Whether this runtime is an importer (world `importer-plugin`). A runtime's entries are all
-    /// commands, all importers or all exporters.
+    /// Whether this runtime is an importer (world `importer-plugin`, optionally with storage).
+    /// A runtime's entries are all commands, all importers or all exporters.
     pub fn is_importer(&self) -> bool {
         self.entries.first().is_some_and(|e| e.kind == EntryKind::Importer)
     }
@@ -704,19 +886,40 @@ impl RuntimeManifest {
             return Err(invalid("runtime.module", "must be one lowercase .wasm file name"));
         }
         if self.entries.is_empty() || self.entries.len() > 32 {
-            return Err(invalid("runtime.entries", "requires 1..32 distinct ids"));
+            return Err(invalid("runtime.entries", format!("declares {} entries; a plugin has 1 to 32", self.entries.len())));
         }
         let mut names = BTreeSet::new();
         for entry in &self.entries {
-            if !valid_id(&entry.name) || !names.insert(&entry.name) {
-                return Err(invalid("runtime.entries", "requires 1..32 distinct ids"));
+            // The name as written, quoted and cut short: it comes from an untrusted manifest. A cut
+            // name says so and gives its length, as its first 64 characters may be valid alone.
+            let length = entry.name.chars().count();
+            let shown = match length {
+                0..=64 => format!("{:?}", entry.name),
+                _ => format!("{:?}… ({length} characters)", entry.name.chars().take(64).collect::<String>()),
+            };
+            if !valid_id(&entry.name) {
+                return Err(invalid(
+                    "runtime.entries",
+                    format!(
+                        "entry {shown} is not a valid name: use 1 to 64 lowercase letters, digits and dashes, not starting or ending with a dash (no underscores or capitals)"
+                    ),
+                ));
+            }
+            if !names.insert(&entry.name) {
+                return Err(invalid("runtime.entries", format!("entry {shown} is declared more than once")));
             }
             validate_kind(self, entry)?;
             let field = format!("runtime.entries.{}.input_schema", entry.name);
             if !entry.input_schema.is_object() || entry.input_schema.get("type").and_then(Value::as_str) != Some("object") {
                 return Err(invalid(&field, "entry inputs must be an object schema"));
             }
+            if let Some(order) = entry.input_schema.get("x-solidcraft-field-order")
+                && order.as_str() != Some("declared")
+            {
+                return Err(invalid(format!("{field}.x-solidcraft-field-order"), "must be \"declared\" when present"));
+            }
             validate_list_inputs(&entry.input_schema, &field)?;
+            directory_read_fields(&entry.input_schema)?;
             conditions::validate_conditions(&entry.input_schema)?;
             if entry.slots.len() > 16
                 || entry.slots.iter().any(|slot| match slot {
@@ -801,12 +1004,18 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
     if entry.needs_plugin_data && entry.kind != EntryKind::Exporter {
         return Err(invalid(format!("{field}.needs_plugin_data"), "only an export slot reads the design's plugin data"));
     }
+    if entry.file_first && entry.kind != EntryKind::Importer {
+        return Err(invalid(format!("{field}.file_first"), "only an importer chooses its file first"));
+    }
     match entry.kind {
         EntryKind::Command if !entry.extensions.is_empty() || !entry.label.is_empty() => {
             Err(invalid(format!("{field}.extensions"), "only an import or export slot claims file extensions and has a label"))
         }
         EntryKind::Command if entry.effect == Effect::Open => {
             Err(invalid(format!("{field}.effect"), "only an importer opens a file as a new design; a command's effect is read or edit"))
+        }
+        EntryKind::Importer if entry.job => {
+            Err(invalid(format!("{field}.job"), "an import already runs as a long job; only a command is declared one"))
         }
         EntryKind::Command => Ok(()),
         EntryKind::Importer | EntryKind::Exporter => {
@@ -889,6 +1098,103 @@ impl LossReport {
     }
 }
 
+/// Top-level directory properties that request read access for the entry's current run.
+/// Other placements and access modes are refused rather than silently ignored.
+pub fn directory_read_fields(schema: &Value) -> Result<BTreeSet<String>> {
+    // Keep discovery and placement validation in step across schema drafts.
+    const SCHEMA_MAPS: &[&str] = &["$defs", "definitions", "dependencies", "dependentSchemas", "patternProperties", "properties"];
+    const SCHEMAS: &[&str] = &[
+        "additionalItems",
+        "additionalProperties",
+        "allOf",
+        "anyOf",
+        "contains",
+        "contentSchema",
+        "else",
+        "if",
+        "items",
+        "not",
+        "oneOf",
+        "prefixItems",
+        "propertyNames",
+        "then",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+    ];
+    // Existing schemas with no annotation keep their previous loading limits.
+    let mut pending = vec![schema];
+    let mut annotated = false;
+    while let Some(node) = pending.pop() {
+        if node.get("x-solidcraft-grant").is_some() {
+            annotated = true;
+            break;
+        }
+        match node {
+            Value::Object(object) => {
+                for &key in SCHEMA_MAPS {
+                    if let Some(children) = object.get(key).and_then(Value::as_object) {
+                        pending.extend(children.values());
+                    }
+                }
+                for &key in SCHEMAS {
+                    pending.extend(object.get(key));
+                }
+            }
+            Value::Array(array) => pending.extend(array),
+            _ => {}
+        }
+    }
+    if !annotated {
+        return Ok(BTreeSet::new());
+    }
+    fn visit(schema: &Value, field: &str, allowed: bool, depth: usize, steps: &mut usize) -> Result<()> {
+        *steps += 1;
+        if depth > 32 || *steps > 16384 {
+            return Err(invalid(field, "folder annotations are nested too deeply or too numerous"));
+        }
+        if let Some(grant) = schema.get("x-solidcraft-grant")
+            && (!allowed
+                || grant.as_str() != Some("read")
+                || schema.get("type").and_then(Value::as_str) != Some("string")
+                || schema.get("format").and_then(Value::as_str) != Some("directory"))
+        {
+            return Err(invalid(field, "x-solidcraft-grant must be read on a top-level string property with format directory"));
+        }
+        for &key in SCHEMA_MAPS {
+            if let Some(properties) = schema.get(key).and_then(Value::as_object) {
+                for (name, property) in properties {
+                    visit(property, &format!("{field}.{key}.{name}"), depth == 0 && key == "properties", depth + 1, steps)?;
+                }
+            }
+        }
+        for &key in SCHEMAS {
+            if let Some(child) = schema.get(key) {
+                if let Some(children) = child.as_array() {
+                    for child in children {
+                        visit(child, &format!("{field}.{key}"), false, depth + 1, steps)?;
+                    }
+                } else {
+                    visit(child, &format!("{field}.{key}"), false, depth + 1, steps)?;
+                }
+            }
+        }
+        Ok(())
+    }
+    visit(schema, "input_schema", false, 0, &mut 0)?;
+    let fields: BTreeSet<_> = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(_, property)| property.get("x-solidcraft-grant").is_some())
+        .map(|(key, _)| key.clone())
+        .collect();
+    if fields.len() > 32 || fields.iter().any(|key| !plain(key, 128)) {
+        return Err(invalid("input_schema", "at most 32 folder grants, with printable property names of at most 128 characters"));
+    }
+    Ok(fields)
+}
+
 fn validate_list_inputs(schema: &Value, field: &str) -> Result<()> {
     if let Some(properties) = schema.get("properties") {
         let properties = properties.as_object().ok_or_else(|| invalid(format!("{field}.properties"), "must be an object"))?;
@@ -899,6 +1205,7 @@ fn validate_list_inputs(schema: &Value, field: &str) -> Result<()> {
             {
                 return Err(invalid(&field, "selection and target inputs must be lists"));
             }
+            font_field(property).map_err(|_| invalid(format!("{field}.{FONT_KEY}"), "must be true on a string property"))?;
             validate_list_inputs(property, &field)?;
         }
     }
@@ -922,7 +1229,11 @@ fn plain(value: &str, max: usize) -> bool {
 /// A plugin that keeps data in designs asks for `storage@0.1` and says its data's format number;
 /// only a command plugin does: an importer makes a new design and an exporter only reads it.
 fn check_storage(manifest: &Manifest) -> Result<()> {
-    let storage = manifest.capabilities.iter().any(|capability| capability.starts_with("storage@"));
+    if manifest.granted_capabilities().iter().any(|capability| capability.starts_with("user-storage@")) && manifest.runtime.is_none() {
+        return Err(invalid("capabilities", "user-storage requires a command or importer plugin runtime"));
+    }
+
+    let storage = manifest.granted_capabilities().iter().any(|capability| capability.starts_with("storage@"));
     let runtime = manifest.runtime.as_ref();
     let format = runtime.and_then(|runtime| runtime.data_format);
     if !storage {
@@ -952,12 +1263,33 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
 
 /// [`parse_manifest`], naming the host `app` in a capability refusal.
 pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manifest> {
+    parse_manifest_for_version(text, folder, app, env!("CARGO_PKG_VERSION"))
+}
+
+/// [`parse_manifest_for`], using an explicit host semantic version. The minimum host version is
+/// checked before unknown fields, legacy API declarations or capability support.
+pub fn parse_manifest_for_version(text: &[u8], folder: &str, app: &str, host_version: &str) -> Result<Manifest> {
     if text.len() > MAX_MANIFEST_BYTES {
         return Err(HostError::LimitExceeded { limit: "manifest size exceeds 64 KiB".into() });
     }
     // A plugin from before capabilities names its API in `runtime.api`: say so plainly.
-    let mut parsed = serde_json::from_slice::<Value>(text).ok();
+    // Read with each schema's declared property order stored beside it: expansion below works on
+    // a sorted JSON value, and a schema's order would be alphabetical by then.
+    let mut parsed = serde_json::from_slice::<schema_order::MarkedManifest>(text).ok().map(|marked| marked.0);
     if let Some(value) = &parsed {
+        if let Some(minimum) = value.get("min_host_version") {
+            let minimum = minimum.as_str().ok_or_else(|| invalid("min_host_version", "must be a semantic version string, e.g. \"1.2.3\""))?;
+            let required =
+                semver::Version::parse(minimum).map_err(|_| invalid("min_host_version", "must be a complete semantic version, e.g. \"1.2.3\""))?;
+            let current = semver::Version::parse(host_version)
+                .map_err(|_| invalid("min_host_version", format!("{app} has an invalid host version `{host_version}`")))?;
+            if current.cmp_precedence(&required).is_lt() {
+                return Err(invalid(
+                    "min_host_version",
+                    format!("needs {app} {minimum} or newer; this version of {app} is {host_version}; update {app}"),
+                ));
+            }
+        }
         if let Some(api) = value.get("runtime").and_then(|runtime| runtime.get("api")) {
             let api = api.as_str().map(|api| api.chars().take(64).collect::<String>()).unwrap_or_else(|| "an older plugin API".into());
             return Err(HostError::UnsupportedCapability {
@@ -980,7 +1312,10 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         _ => None,
     };
     let mut manifest: Manifest = match expanded {
-        Some(value) => serde_json::from_value(value),
+        Some(mut value) => {
+            schema_order::take_orders(&mut value);
+            serde_json::from_value(value)
+        }
         None => serde_json::from_slice(text),
     }
     .map_err(|error| invalid("manifest", error.to_string()))?;
@@ -1008,7 +1343,14 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
     if manifest.description.chars().count() > 240 || manifest.description.chars().any(char::is_control) {
         return Err(invalid("description", "requires at most 240 printable characters"));
     }
+    check_capability_declarations(&manifest.capabilities, &manifest.optional_capabilities)?;
     check_capabilities(&manifest.capabilities, app)?;
+    let granted = manifest.granted_capabilities();
+    if let Some(updates) = &manifest.updates
+        && !valid_github_repo(&updates.github)
+    {
+        return Err(invalid("updates.github", "must be a GitHub repository, owner/repo"));
+    }
     if let Some(runtime) = &manifest.runtime {
         if runtime.entries.iter().any(|entry| entry.dialog_hook) && !manifest.capabilities.iter().any(|c| c.starts_with("dialog@")) {
             return Err(invalid("capabilities", "a dialog hook needs the dialog capability: dialog@0.1"));
@@ -1020,7 +1362,7 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
             if runtime.is_exporter() && manifest.capabilities.iter().any(|capability| capability.starts_with("evaluate@")) {
                 return Err(invalid("capabilities", "evaluate checks an importer's result: only an importer asks for it"));
             }
-        } else if manifest.capabilities.iter().any(|capability| capability.starts_with("evaluate@")) {
+        } else if granted.iter().any(|capability| capability.starts_with("evaluate@")) {
             return Err(invalid("capabilities", "evaluate checks an importer's result: only an importer (formats) asks for it"));
         } else if !manifest.capabilities.iter().any(|capability| capability.starts_with("commands@")) {
             return Err(invalid("capabilities", "a plugin with a runtime needs the commands capability: \"capabilities\": [\"commands@0.1\"]"));
@@ -1028,7 +1370,7 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         runtime.validate()?;
     }
     if manifest.runtime.as_ref().is_some_and(|runtime| !runtime.listeners.is_empty())
-        && !manifest.capabilities.iter().any(|capability| capability.starts_with("design@"))
+        && !granted.iter().any(|capability| capability.starts_with("design@"))
     {
         return Err(invalid("runtime.listeners", "design listeners require capability design@0.1"));
     }
@@ -1042,6 +1384,34 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
     }
     if manifest.runtime.as_ref().and_then(|runtime| runtime.ui.as_ref()).is_some() && !has_ui {
         return Err(invalid("runtime.ui", "panel declarations require ui@0.1"));
+    }
+    if !manifest.shaders.is_empty() {
+        if !manifest.capabilities.iter().any(|capability| capability.starts_with("shaders@")) {
+            return Err(invalid(
+                "capabilities",
+                "a plugin with shaders needs the shaders capability: \"capabilities\": [\"shaders@0.2\"] (backgrounds alone may say \"shaders@0.1\")",
+            ));
+        }
+        // Tints, settings and chosen pictures came with 0.2: a 0.1 plugin keeps exactly what 0.1 offered.
+        let newer = manifest.shaders.iter().any(|s| {
+            s.kind != shader::ShaderKind::Background || !s.settings.is_empty() || s.textures.iter().any(|t| t.choose.is_some()) || s.state.is_some()
+        });
+        if newer && !manifest.capabilities.iter().any(|capability| capability == "shaders@0.2") {
+            return Err(invalid(
+                "capabilities",
+                "tints, shader settings, chosen pictures and state grids need \"shaders@0.2\"; update SolidCraft or the plugin",
+            ));
+        }
+        shader::validate(&manifest.shaders)?;
+    }
+    let themed = manifest.capabilities.iter().any(|capability| capability.starts_with("themes@"));
+    if !manifest.themes.is_empty() {
+        if !themed {
+            return Err(invalid("capabilities", "a plugin with themes needs the themes capability: \"capabilities\": [\"themes@0.1\"]"));
+        }
+        theme::validate(&manifest.themes)?;
+    } else if themed {
+        return Err(invalid("themes", "the themes capability needs at least one theme"));
     }
     Ok(manifest)
 }

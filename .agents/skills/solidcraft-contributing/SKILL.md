@@ -21,6 +21,7 @@ The PR workflow in detail: `.agents/skills/solidcraft-file-pr/SKILL.md` (writing
   feature under another number, and PRs that change the files you will change
   (`gh pr list ... --json number,title,files`). If someone has it, comment on their PR or issue
   instead of opening a second one: two PRs for one change cannot both land.
+- **Search before you start.** Scan ALL issues and PRs, open and closed, for similar work (`gh issue list` and `gh pr list --state all --search`). New features are discussed on Discord, then get an issue. Kernel functionality goes in `solidcore/`, and features call its API (CONTRIBUTING.md, "Kernel work goes in solidcore/"); work begun before 0.40 is ported onto today's code first.
 - **Claim with a draft PR.** `gh pr list -R tangency-labs/solidcraft --state open --search "#N"`; if none,
   branch from the latest `origin/main`, `git commit --allow-empty -m "claim: #N"`, push, and open a
   draft PR titled `<summary> (#N)`. The lowest-numbered open PR for an issue wins; close yours if it
@@ -52,8 +53,8 @@ The PR workflow in detail: `.agents/skills/solidcraft-file-pr/SKILL.md` (writing
   helper), say so on the issue instead of building around it in the caller. A workaround that makes
   a limitation part of the design is held until the cause is fixed.
 - **One topic and one issue per PR.** Never commit `plan/`, build directories (`target*/`) or generated
-  reference data; check `git ls-files` before pushing. Run `cargo xtask fast` before every commit;
-  CI runs the full gate (`cargo xtask ci`) on the pull request.
+  reference data; check `git ls-files` before pushing. Run `cargo xtask ci` before pushing: it runs what
+  your change needs.
   Commit after every feature arc that builds.
 - **Merge flow.** The heavy CI jobs start when a maintainer adds `approved-for-ci`. Contributors don't
   queue or merge their own PRs: a maintainer or steward adds `ready to merge` (and `approved-for-ci` for
@@ -240,13 +241,10 @@ Use the affected crate and test module in commands such as:
 cargo test --profile ci -p solidcraft-engine --lib -- tests::feature_inputs_are_parameters
 cargo clippy -p solidcraft-engine --all-targets -- -D warnings
 cargo xtask fmt --check
-cargo xtask fast
+cargo xtask ci
 ```
 
-Run `cargo xtask fast` before each implementation commit: it checks what the change
-touches (for a kernel change, pass `--units <id,...>` from the PR's `Units:` line to run
-their goldens). CI and the merge queue run the full suite; run `cargo xtask ci` locally only to reproduce a CI
-failure. Report exactly what passed and what could not run; do not claim the full
+Run `cargo xtask ci` before pushing: it runs what your change needs. Report exactly what passed and what could not run; do not claim the full
 suite passed. Follow
 [testing guidance](../../../docs/book/src/dev/testing.md) for applicable checks.
 Review the diff, keep one topic, and commit the finished change. Before an approved

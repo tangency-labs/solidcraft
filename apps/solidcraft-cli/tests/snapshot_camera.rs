@@ -3,6 +3,9 @@
 //! when asked (the grid lies on Z 0 and cuts through a part that straddles it). Pictures are drawn
 //! on the GPU and compared with a tolerance; without a GPU adapter the tests that draw are skipped
 //! with the reason printed (`SOLIDCRAFT_REQUIRE_GPU=1` makes that a failure).
+// Test helpers outside #[test] functions print what they skip or measure; clippy.toml
+// `allow-print-in-tests` covers only #[test] functions and #[cfg(test)] code.
+#![allow(clippy::print_stderr)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -390,8 +393,8 @@ fn a_transparent_snapshot_clears_the_background_and_keeps_the_model_opaque() {
     s.execute("view.apply", &json!({"camera": side_camera()})).unwrap();
     let cam = s.camera.unwrap();
     let guides = solidcraft_engine::view::Guides { grid: false, axes: false };
-    let mut scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides).unwrap();
-    let canvas = solidcraft_viewport::render_transparent(&mut scene, &cam, SIZE.0 as usize, SIZE.1 as usize);
+    let scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides).unwrap();
+    let canvas = solidcraft_viewport::render_transparent(&scene, &cam, SIZE.0 as usize, SIZE.1 as usize);
     let expected = solidcraft_viewport::png(canvas.w, canvas.h, canvas.rgba).unwrap();
     assert_eq!(std::fs::read(dir.0.join("cpu-clear.png")).unwrap(), expected);
 }

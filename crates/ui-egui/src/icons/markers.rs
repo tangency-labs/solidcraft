@@ -82,6 +82,8 @@ pub(crate) fn snap_hint(painter: &egui::Painter, c: Pos2, kind: SnapKind, col: C
 pub(crate) fn glyph_icon(name: &str) -> Option<&'static str> {
     Some(match name {
         "Coincident" => "c_coincident",
+        "Horizontal" => "c_horizontal",
+        "Vertical" => "c_vertical",
         "Parallel" => "c_parallel",
         "Perpendicular" => "c_perpendicular",
         "Collinear" => "c_collinear",
@@ -92,15 +94,24 @@ pub(crate) fn glyph_icon(name: &str) -> Option<&'static str> {
         "MidPoint" | "PointAlong" => "c_midpoint",
         "Symmetry" => "c_symmetry",
         "Fix" => "c_fix",
+        "Pierce" => "c_pierce",
         _ => return None,
     })
 }
-pub(crate) fn glyph_letter(name: &str) -> &'static str {
-    match name {
-        "Horizontal" => "-",
-        "Vertical" => "|",
-        _ => "?",
-    }
+
+/// Constraint icon id for an automatic snap / inference label when one exists.
+pub(crate) fn snap_icon(label: &str) -> Option<&'static str> {
+    Some(match label {
+        "//" => "c_parallel",
+        "\u{22a5}" => "c_perpendicular",
+        "T" => "c_tangent",
+        "Mid" => "c_midpoint",
+        "H" => "c_horizontal",
+        "V" => "c_vertical",
+        "H+V" => "c_hv",
+        "On" | "End" | "Pt" => "c_coincident",
+        _ => return None,
+    })
 }
 /// A dimension arrow with a rim of `rim` around it, so it reads on a bright face (#17575).
 pub(crate) fn dimension_arrow_rimmed(painter: &egui::Painter, t: Pos2, back: Pos2, col: Color32, rim: Color32) {

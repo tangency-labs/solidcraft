@@ -95,6 +95,15 @@ fn case(name: &str) -> Case {
             Some(9000.0),
             None,
         ),
+        // Fifteen 10 mm cubes in a row, each overlapping its neighbour by 5 mm along x
+        // (SolidCraft issue #16552's join of fifteen tools): the level-by-level union or the
+        // one-by-one retry builds them all into one 80 x 10 x 10 cuboid, 8000 mm3 (each of the
+        // 14 adjacent overlaps is 5 x 10 x 10 = 500).
+        "union_all_fifteen_chain" => plain(
+            Op::UnionAll((0..15).map(|i| Shape::Box([f64::from(i) * 5.0, 0.0, 0.0], [10.0; 3])).collect()),
+            Some(15.0 * 1000.0 - 14.0 * 500.0),
+            None,
+        ),
         "intersect_disjoint" => plain(Op::Boolean(A, Shape::Box([20.0; 3], [10.0; 3]), BooleanOp::Intersect), None, None),
         // A 10 mm sphere less a cap of height h = 5: 4/3 πr³ - πh²(3r - h)/3.
         // (solidcore#1431, brep_volume of a whole sphere failing at 1e-8, does not touch the cut
@@ -207,6 +216,7 @@ cases!(
     subtract_inside_void,
     subtract_cylinder_hole,
     union_all_grid,
+    union_all_fifteen_chain,
     intersect_disjoint,
     sphere_minus_box,
     imprint_top_face,
@@ -234,6 +244,20 @@ fn boolean2d_combines_overlapping_squares() {
     }
     let (a, far) = (rectangle(0.0, 0.0, 10.0, 10.0), rectangle(20.0, 0.0, 10.0, 10.0));
     assert!(boolean2d(&a, &far, BooleanOp::Intersect).unwrap().is_none(), "disjoint squares intersected");
+}
+
+/// The classification refusal keeps its type through smlib's error mapping, so the `union_all`
+/// retry fires on it and on nothing else. No input is known that reaches it through a boolean
+/// (see the review of #16552: 300 random pairs, symmetric and tiny-feature joins all build
+/// level by level), so the plumbing is checked by its mappings, not by a join that fails
+/// without the retry; the kernel-to-ops mapping has its own test in solidcore-ops.
+#[test]
+fn not_one_foot_travels_by_its_type() {
+    let typed = super::call::error("smlib_boolean_union_all", solidcore_ops::Error::NotOneFoot { found: 3 }, None);
+    assert_eq!(typed, Error::NotOneFoot { found: 3 });
+    // a deliberate refusal of its own kind is not the classification's, and is not retried
+    let other = super::call::error("smlib_boolean_union_all", solidcore_ops::Error::Exception, None);
+    assert_ne!(other, Error::NotOneFoot { found: 3 }, "a deliberate refusal is not the classification's");
 }
 
 /// Two 10 mm cubes touching along one edge, joined: a closed body whose two solids meet along
@@ -290,29 +314,31 @@ fn operands_stay_as_they_were() {
 #[test]
 fn a_failed_closest_point_counts_as_off_the_piece() {
     use solidcore::query::api_queries::edge_closest_point;
-    use solidcore::topology::edge;
     let body = A.core();
+    let order = body.own_order();
+    let adjacency = body.adjacency(&order).unwrap();
+    let [s, f] = adjacency.edge_vertices[0].expect("an edge with no ends");
+    let (s, f) = (adjacency.vertex_points[s], adjacency.vertex_points[f]);
+    let at = [s, f, [0.5 * (s[0] + f[0]), 0.5 * (s[1] + f[1]), 0.5 * (s[2] + f[2])]];
+    let tol = body.tolerance().unwrap();
+    assert!(!super::history::moved(&body, &order, &adjacency, &[(0, &at)], tol), "still where it lay");
     super::with_body("moved", &body, |k, b| {
         let e = b.edge_list()[0];
-        let (Some(s), Some(f)) = edge::start_end_vertices(b, e)? else { panic!("an edge with no ends") };
-        let (s, f) = (b.vertex(s)?.point, b.vertex(f)?.point);
-        let at = [s, f, s + (f - s) * 0.5];
-        let tol = b.tolerance();
-        assert!(!super::history::moved(k, b, &[(e, &at)], tol)?, "still where it lay");
         b.edge_mut(e)?.curve = None;
-        assert!(edge_closest_point(k, b, e, at[2]).is_err_and(|e| e.sm_status().is_none()), "fails with no status");
-        assert!(super::history::moved(k, b, &[(e, &at)], tol)?, "off the piece");
+        let q = solidcore::geom::vector3d::Point3::new(at[2][0], at[2][1], at[2][2]);
+        assert!(edge_closest_point(k, b, e, q).is_err_and(|e| e.sm_status().is_none()), "fails with no status");
         Ok(())
     })
     .unwrap();
+    assert!(super::history::moved(&body, &order, &adjacency, &[(0, &at)], tol), "off the piece");
 }
 
 /// Rig case booleans/2928, reduced (fork c2e3d9d): a ring, r 3..5 about (0, 10), z 0..2, unioned
 /// with a half annulus prism, r 4..5 about (e, 10), z 2..20, whose cap sits on the ring's top. Two
 /// equal circles a little apart cross; they do not coincide over a tiny edge. The stack's volume
 /// is 113 pi whatever e is.
-/// This path passes with `simple_coincidence_crossing_is_point` off too, so the test holds the
-/// result here and does not single out that flag (solidcore's own test does).
+/// The crossing is decided on the merged range (WR-647); solidcore's own test is
+/// `issue_1979_ring_lip_crossing_not_coincidence`.
 #[test]
 fn a_ring_and_a_lip_with_walls_nearly_together() {
     use super::sweep::extrude;
