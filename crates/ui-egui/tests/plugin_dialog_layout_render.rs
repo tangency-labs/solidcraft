@@ -1,5 +1,7 @@
 //! A plugin dialog with section headings, a folding section, units that follow a choice and a help
 //! link, rasterised from the actual egui meshes without a GPU (images in target/plugin-dialog-layout).
+// The shared helper also has a fixed-size `paint` this test does not use.
+#[allow(dead_code)]
 #[path = "support/raster.rs"]
 mod raster;
 
