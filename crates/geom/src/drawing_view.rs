@@ -47,8 +47,9 @@ pub(crate) fn require(condition: bool, message: &'static str) -> Result<()> {
     if condition { Ok(()) } else { Err(Invalid(message)) }
 }
 
-/// Two directions closer to parallel than this (the sine of their angle) give no view.
-pub(crate) const PARALLEL: f64 = 1e-9;
+/// Two directions closer to parallel than this (the sine of their angle) give no view. Drawing
+/// measurement (`solidcraft_doc::drawing::measure`) tests a line against the view's plane by it too.
+pub const PARALLEL: f64 = 1e-9;
 
 /// A view with a name: the six principal views and the isometric views from the four upper
 /// corners. Each looks at the model from where its name says; `iso` reads as the front-right one.
@@ -368,7 +369,7 @@ impl ViewFrame {
 
     /// A curve's accuracy on paper: its deviation scaled as the curve is.
     pub fn accuracy_on_paper(&self, accuracy: CurveAccuracy) -> CurveAccuracy {
-        accuracy.scaled(self.map.scale())
+        solidcore_ops::hlr::scaled(accuracy, self.map.scale())
     }
 }
 

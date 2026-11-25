@@ -70,6 +70,9 @@ macro_rules! graphics_preferences {
             render_legacy_memory_admission: bool = false, PAGE_GRAPHICS => check_id("prefs.render_legacy_memory_admission");
             /// Restore the previous platform-specific fixed Render preview geometry budget.
             render_previous_geometry_budget: bool = false, PAGE_GRAPHICS => check_id("prefs.render_previous_geometry_budget");
+            /// A scale bar in the view's bottom left corner: a round length in the design's units, at the
+            /// centre of the view in perspective (#375). Off by default.
+            scale_bar: bool = false, PAGE_GRAPHICS;
             /// A section hatches each cut body its own way (the default), or every one alike, in the cap
             /// colour at 45 degrees, as before.
             section_hatch: SectionHatch = SectionHatch::ByPart, PAGE_GRAPHICS;

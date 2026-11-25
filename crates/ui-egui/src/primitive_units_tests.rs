@@ -442,14 +442,14 @@ fn operation_length_defaults_follow_every_design_unit() {
         ("solid.web", &["2", ""]),
         ("solid.emboss", &["1"]),
         ("solid.offset_face", &["2"]),
-        ("solid.pattern.rectangular", &["20", "20"]),
+        ("solid.pattern.rectangular", &["20", "20", "100", "100"]),
         ("solid.pattern.path", &["20", ""]),
         ("solid.pipe", &["5", ""]),
         ("solid.bounding_solid", &["2"]),
         ("solid.move", &["0", "0", "0"]),
         ("construct.plane.offset", &["0"]),
         ("inspect.section", &["0"]),
-        ("surface.extrude", &["10"]),
+        ("surface.extrude", &["10", ""]),
         ("surface.offset", &["2"]),
         ("surface.ruled", &["10"]),
         ("surface.thicken", &["2"]),
@@ -1156,4 +1156,16 @@ fn combine_offset_of_a_parameter_at_zero_is_kept() {
     for kept in ["gap", "gap * 0", "0.1 mm", "", "1 - 1"] {
         assert!(!crate::dialogs::literal_zero(kept), "{kept}");
     }
+}
+
+#[test]
+fn coil_start_angle_steps_by_ten_degrees() {
+    let mut h = design("mm");
+    h.app.start("solid.coil");
+    h.frames(3);
+    let extra = |h: &Harness| h.app.dialog.as_ref().unwrap().extra["start_angle"].clone();
+    h.step(&json!({"click":{"handle":"dialog:Start angle up"}})).unwrap();
+    assert_eq!(extra(&h), json!("10 deg"));
+    h.step(&json!({"click":{"handle":"dialog:Start angle down"}})).unwrap();
+    assert_eq!(extra(&h), json!("0 deg"));
 }

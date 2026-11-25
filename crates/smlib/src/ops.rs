@@ -58,9 +58,9 @@ impl Blend {
     }
 }
 
-/// How two constant rounds of one radius turn round a sharp, straight, convex side edge square to
-/// both on a plane (the rounds along a boss's base, at its upright edges): the turn of
-/// [`Brep::blend_dropping`]'s rounds ([`Blend::Round`] only).
+/// How two rounds turn where they meet at a sharp side edge on a face they share (the rounds along
+/// a boss's base, at its upright edges): the turn of [`Brep::blend_dropping`]'s rounds.
+/// [`Turn::Swept`] is for [`Blend::Round`] only.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Turn {
     /// The rounds run on to where they cross and meet in a mitre, the plane section of the two.
@@ -70,6 +70,10 @@ pub enum Turn {
     /// revolved about the side edge, an exact torus tangent to both rounds. A corner where this
     /// is not built is [`Error::TurnRefused`].
     Swept,
+    /// Each turn [`Turn::Swept`] where it is built and [`Turn::Mitre`] where it is not, decided
+    /// per corner before anything is built: never refused where a mitre is made. Chamfers are
+    /// mitred.
+    Auto,
 }
 
 impl Turn {
@@ -78,6 +82,7 @@ impl Turn {
         match self {
             Turn::Mitre => "mitre",
             Turn::Swept => "swept",
+            Turn::Auto => "auto",
         }
     }
 }
@@ -124,6 +129,15 @@ impl Brep {
         r
     }
 
+    /// [`Brep::boolean`] of `self` tagged as operand 0 and `other` as operand 1
+    /// ([`Brep::tagged`]), the result's [`Brep::history`] naming them: the same result as
+    /// `self.tagged(0)?.boolean(&other.tagged(1)?, op)`, with one copy of each operand fewer.
+    pub fn boolean_tagged(&self, other: &Brep, op: BooleanOp) -> Result<Option<Brep>> {
+        let r = core::boolean::boolean_tagged(self.core(), other.core(), op).map(|r| r.map(Brep::made_core));
+        trace::maybe("boolean_tagged", &[self, other], &r, || json!({"op": op.word()}));
+        r
+    }
+
     /// The union of `breps` in one call: they are unioned pairwise, level by level, so none takes
     /// part in more than about log2(n) unions. The result is as [`Brep::boolean`]'s; operands
     /// tagged each with its own number ([`Brep::tagged`]) give a result whose [`Brep::history`]
@@ -135,6 +149,19 @@ impl Brep {
         let bodies: Vec<&core::Body> = breps.iter().map(|b| b.core()).collect();
         let r = core::boolean::union_all(&bodies).map(Brep::made_core);
         trace::made("union_all", breps, &r, || json!({}));
+        r
+    }
+
+    /// [`Brep::union_all`] of `breps` each tagged as its own operand, in order ([`Brep::tagged`]):
+    /// the same result as the union of `breps[i].tagged(i)`, with one copy of each operand fewer.
+    /// At least one body and at most [`MAX_UNION_BREPS`].
+    pub fn union_all_tagged(breps: &[&Brep]) -> Result<Brep> {
+        if breps.is_empty() || breps.len() > MAX_UNION_BREPS {
+            return Err(Error::Argument);
+        }
+        let bodies: Vec<&core::Body> = breps.iter().map(|b| b.core()).collect();
+        let r = core::boolean::union_all_tagged(&bodies).map(Brep::made_core);
+        trace::made("union_all_tagged", breps, &r, || json!({}));
         r
     }
 
@@ -375,11 +402,12 @@ impl Brep {
         r
     }
 
-    /// The flat faces nearest to `faces` (each within `tolerance`) tilted by `angle` radians
-    /// (0 < |angle| < 89.94 degrees) about the line where each meets the neutral plane through
-    /// `neutral_origin` with normal `neutral_normal`, a positive angle leaning them in going along
-    /// `pull`; the faces around them extended or trimmed to meet them. A face that isn't flat, or
-    /// isn't parallel to `pull`, is [`Error::Unsupported`].
+    /// The faces nearest to `faces` (each within `tolerance`) tilted by `angle` radians
+    /// (0 < |angle| < 89.94 degrees) about the line or circle where each meets the neutral plane
+    /// through `neutral_origin` with normal `neutral_normal`, a positive angle leaning them in going
+    /// along `pull`; the faces around them extended or trimmed to meet them. A face that is neither
+    /// a plane parallel to `pull` nor a cone or cylinder about it is refused with the reason
+    /// ([`Error::Refused`]).
     pub fn draft(
         &self,
         faces: &[[f64; 3]],

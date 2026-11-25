@@ -130,15 +130,37 @@ pub fn recorded(
     made: Made<'_>,
     op: impl FnOnce() -> Result<()>,
 ) -> Result<History> {
+    with_tags(body, order, || {
+        op()?;
+        result_history(body, made)
+    })
+}
+
+/// Record history only when the edit changed the body. An unmatched edit has no
+/// result to export, even if the input has trims the exporter cannot represent.
+pub(crate) fn recorded_if_changed(
+    body: &Body,
+    order: &Order,
+    made: Made<'_>,
+    op: impl FnOnce() -> Result<bool>,
+) -> Result<Option<History>> {
+    with_tags(body, order, || {
+        op()?.then(|| result_history(body, made)).transpose()
+    })
+}
+
+fn result_history(body: &Body, made: Made<'_>) -> Result<History> {
+    let (_, out) = body.to_record()?;
+    read(&body.lock(), &out, made)
+}
+
+fn with_tags<T>(body: &Body, order: &Order, op: impl FnOnce() -> Result<T>) -> Result<T> {
     tag(body, order)?;
-    let done = op().and_then(|()| {
-        let (_, out) = body.to_record()?;
-        read(&body.lock(), &out, made)
-    });
+    let done = op();
     let cleared = clear(&mut body.lock());
-    let history = done?;
+    let result = done?;
     cleared?;
-    Ok(history)
+    Ok(result)
 }
 
 /// `op`, a call that makes a new body from `body` (and leaves `body` as it was, such as
