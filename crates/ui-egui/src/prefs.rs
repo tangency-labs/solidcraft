@@ -3038,11 +3038,11 @@ fn space_mouse_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         }
         for number in numbers {
-            let mut name = solidcraft_ui_text::format("ui.3d_mouse_button", &[("number", &number.to_string())]);
+            let mut name = crate::space_mouse::button_name(&device, number, false);
             if app.space_mouse.buttons.contains(number) || app.space_mouse.long_buttons.contains(number) {
                 name.push_str("  ●");
             }
-            let long_name = solidcraft_ui_text::format("ui.3d_mouse_button_long", &[("number", &number.to_string())]);
+            let long_name = crate::space_mouse::button_name(&device, number, true);
             let current = jobs.get(&number).cloned();
             let current_long = long_jobs.get(&number).cloned();
             // Shift, Ctrl and Alt are held for as long as their button is down: a held job would let
@@ -6134,11 +6134,12 @@ mod tests {
         let sections = ["space_mouse_device", "space_mouse_orbit", "space_mouse_axes", "space_mouse_buttons", "space_mouse_advanced"];
         let bodies = sections.map(|key| crate::scenario::rect_of(&format!("prefs:section:{key}:body")).unwrap());
         assert!(bodies.windows(2).all(|pair| pair[0].bottom() <= pair[1].top()));
-        assert!(crate::scenario::rect_of("dialog:row:Button 1").is_some());
+        // The Pro's button 1 is named as printed on it.
+        assert!(crate::scenario::rect_of("dialog:row:Menu").is_some());
         assert!(crate::scenario::rect_of("dialog:row:Driver").is_some());
         scroll_to_and_click(&mut h, "dialog:section:Advanced");
         assert!(crate::scenario::rect_of("dialog:row:Driver").is_none());
-        assert!(crate::scenario::rect_of("dialog:row:Button 1").is_some());
+        assert!(crate::scenario::rect_of("dialog:row:Menu").is_some());
         assert!(crate::scenario::rect_of("prefs:space_mouse_reset_axes").is_some());
     }
 
@@ -6412,12 +6413,13 @@ mod tests {
             h.call("ui.resize", json!({"width": 1600, "height": 4000}));
             crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
             h.frames(10);
-            for number in [3, 5, 6] {
-                let row = format!("Button {number}, held");
+            // Held rows are named by the key printed on the Enterprise: T, R and F.
+            for key in ["T", "R", "F"] {
+                let row = format!("{key}, held");
                 assert!(h.widget(&row).is_some(), "{row} is drawn");
             }
             // Through smed every button has a held picker, one without a long job too.
-            assert!(h.widget("Button 23, held").is_some(), "a held picker for a button without a long job");
+            assert!(h.widget("Esc, held").is_some(), "a held picker for a button without a long job");
             if lock.is_none() {
                 assert!(h.widget("Rotation lock").is_none(), "no lock to show");
                 continue;
@@ -6485,18 +6487,17 @@ mod tests {
     #[test]
     fn smed_held_picker_of_a_modifier_is_greyed_until_a_long_job_is_saved() {
         use crate::space_mouse::ButtonJob;
-        // The Enterprise's Alt, Shift and Ctrl are buttons 24, 25 and 26; 23 is Esc.
         let mut h = space_mouse_buttons_page("smed 256f:c633", None);
-        for number in [24, 25, 26] {
-            let name = format!("Button {number}, held");
+        for key in ["Alt", "Shift", "Ctrl"] {
+            let name = format!("{key}, held");
             assert_eq!(space_mouse_control_disabled(&h, &name), Some(true), "{name} is greyed");
         }
-        assert_eq!(space_mouse_control_disabled(&h, "Button 23, held"), Some(false), "Esc's held picker can be used");
+        assert_eq!(space_mouse_control_disabled(&h, "Esc, held"), Some(false), "Esc's held picker can be used");
         // Hovered, the greyed picker says why (the click first brings it into the page's view).
-        h.step(&json!({"widget": "Button 25, held"})).expect("Shift's held picker");
+        h.step(&json!({"widget": "Shift, held"})).expect("Shift's held picker");
         h.frames(3);
         assert!(!h.app.preferences.space_mouse_long_buttons.contains_key("smed 256f:c633"), "the click picks nothing");
-        let [x, y] = h.widget("Button 25, held").expect("Shift's held picker");
+        let [x, y] = h.widget("Shift, held").expect("Shift's held picker");
         h.call("ui.move", json!({"x": x, "y": y}));
         h.frames(90);
         let output = egui::FullOutput { shapes: h.shapes.clone(), ..Default::default() };
@@ -6504,8 +6505,8 @@ mod tests {
         let why = "A held Shift, Ctrl or Alt stays held: it has no job of its own when held.";
         assert!(texts.contains(&why), "the greyed picker's tooltip: {texts:?}");
         let h = space_mouse_buttons_page("smed 256f:c633", Some(&[(25, ButtonJob::View("top".into()))]));
-        assert_eq!(space_mouse_control_disabled(&h, "Button 25, held"), Some(false), "a saved long job on Shift can be changed");
-        assert_eq!(space_mouse_control_disabled(&h, "Button 24, held"), Some(true), "Alt without one stays greyed");
+        assert_eq!(space_mouse_control_disabled(&h, "Shift, held"), Some(false), "a saved long job on Shift can be changed");
+        assert_eq!(space_mouse_control_disabled(&h, "Alt, held"), Some(true), "Alt without one stays greyed");
     }
 
     /// The Press and Held columns are there only where a button has a held picker: through smed for
@@ -6520,13 +6521,35 @@ mod tests {
         assert!(heading(&h, "Press") && heading(&h, "Held"), "smed: both column headings");
         // The SpaceMouse Pro read directly reports no long presses.
         let h = space_mouse_buttons_page("hid 046d:c62b", None);
-        assert!(h.widget("Button 1").is_some(), "the Pro's buttons are listed");
+        assert!(h.widget("Menu").is_some(), "the Pro's buttons are listed");
         assert!(!heading(&h, "Held") && !heading(&h, "Press"), "no column headings without a held job");
-        assert!(h.widget("Button 1, held").is_none(), "no held picker without a held job");
+        assert!(h.widget("Menu, held").is_none(), "no held picker without a held job");
         let h = space_mouse_buttons_page("hid 046d:c62b", Some(&[(1, ButtonJob::View("top".into()))]));
         assert!(heading(&h, "Press") && heading(&h, "Held"), "a saved long job brings the columns");
-        assert!(h.widget("Button 1, held").is_some(), "and its held picker");
-        assert!(h.widget("Button 2, held").is_none(), "only for the button that has one");
+        assert!(h.widget("Menu, held").is_some(), "and its held picker");
+        assert!(h.widget("Fit, held").is_none(), "only for the button that has one");
+    }
+
+    /// The keys that carry a symbol get their own row names, so the padlock key's row ("Lock key") is
+    /// not a second "Rotation lock" beside the checkbox it switches: a click on that name still hits
+    /// the checkbox.
+    #[test]
+    fn the_symbol_keys_rows_keep_clear_of_the_rotation_lock_checkbox() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"language": "en"}));
+        h.app.space_mouse.device = Some("smed 256f:c633".into());
+        h.app.space_mouse.lock = Some(false);
+        h.app.space_mouse.seen.insert(9);
+        h.app.space_mouse.seen.insert(27);
+        h.call("ui.resize", json!({"width": 1600, "height": 4000}));
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
+        h.frames(10);
+        assert!(!h.widgets("Lock key").is_empty(), "the padlock key's row");
+        assert!(!h.widgets("Roll").is_empty(), "the roll key's row");
+        h.step(&json!({"widget": "Rotation lock"})).expect("the rotation lock checkbox");
+        h.frames(2);
+        assert_eq!(h.app.space_mouse.lock_request, Some(true), "the click switches the lock");
     }
 
     /// A button's row is marked while the button is down, held past the long-press threshold too,
@@ -6534,16 +6557,17 @@ mod tests {
     #[test]
     fn a_buttons_row_is_marked_while_it_is_down_or_held() {
         use crate::space_mouse::ButtonSet;
-        let marked = |h: &crate::scenario::Harness, number: u8| space_mouse_control_disabled(h, &format!("Button {number}  ●")).is_some();
+        let marked = |h: &crate::scenario::Harness, key: &str| space_mouse_control_disabled(h, &format!("{key}  ●")).is_some();
+        // The Enterprise's Esc and Alt are buttons 23 and 24.
         let mut h = space_mouse_buttons_page("smed 256f:c633", None);
-        assert!(!marked(&h, 23) && !marked(&h, 24), "no row marked while no button is down");
+        assert!(!marked(&h, "Esc") && !marked(&h, "Alt"), "no row marked while no button is down");
         h.app.space_mouse.buttons = ButtonSet::of(23);
         h.frames(2);
-        assert!(marked(&h, 23) && !marked(&h, 24), "the row of the button that is down");
+        assert!(marked(&h, "Esc") && !marked(&h, "Alt"), "the row of the button that is down");
         h.app.space_mouse.buttons = ButtonSet::EMPTY;
         h.app.space_mouse.long_buttons = ButtonSet::of(24);
         h.frames(2);
-        assert!(marked(&h, 24) && !marked(&h, 23), "the row of the button held past the threshold");
+        assert!(marked(&h, "Alt") && !marked(&h, "Esc"), "the row of the button held past the threshold");
     }
 
     /// The driver choice under Advanced: smed is offered where it runs and picked like the others, is

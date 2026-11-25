@@ -513,6 +513,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             FrameTrim(crate::dialogs_frame::Trim),
             Gusset(crate::dialogs_gusset::Gusset),
             FramePlate(crate::dialogs_frame_plate::Plate),
+            /// Capture Position (`dialogs_capture`).
+            CapturePosition(crate::dialogs_capture::CapturePosition),
             /// Appearance (`dialogs_appearance`).
             Appearance(crate::dialogs_appearance::Ap),
             /// Contact sets, motion studies, exploded views, configurations (`dialogs_motion`).
@@ -761,9 +763,14 @@ impl DialogComputation {
     }
 }
 
-fn adopt_dialog(app: &mut SolveApp, prepared: solidcraft_engine::ComputedCommands, d: &Dialog) -> Result<(), String> {
+fn adopt_dialog(app: &mut SolveApp, mut prepared: solidcraft_engine::ComputedCommands, d: &Dialog) -> Result<(), String> {
     if app.file_load_holds() || app.file_picker_busy() {
         return Err("a file operation is in progress".into());
+    }
+    // Move/Copy with Capture All Positions runs `occurrence.move(..., capture: false)` followed by
+    // `component.capture_position`: coalesce into one Undo step so one Undo restores the pre-move state.
+    if matches!(d.kind, Kind::Move { .. }) {
+        prepared.coalesce_undo("Move/Copy");
     }
     let replies = app.session.accept_commands(prepared).map_err(|e| e.to_string())?;
     app.big_operation = true;
@@ -3221,6 +3228,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::FrameTrim(_) => "TRIM/EXTEND",
         Kind::Gusset(_) => "ui.gusset_title",
         Kind::FramePlate(_) => "ui.mounting_plate_title",
+        Kind::CapturePosition(_) => "ui.capture_position_title",
         Kind::Appearance(_) => "APPEARANCE",
         Kind::Motion(k) => k.title(),
         Kind::Part(_) => "INSERT PART",
@@ -7917,6 +7925,24 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     p.remove("section_size");
                 }
             }
+            if *cmd == "solid.coil" {
+                // Sized by height: the command gets the height and the one other of the pair (#20674).
+                let by = d.extra.get("size_by").and_then(Value::as_str);
+                match by {
+                    Some("height_pitch") => {
+                        p.remove("revolutions");
+                    }
+                    Some("height_revolutions") => {
+                        p.remove("pitch");
+                    }
+                    _ => {}
+                }
+                if by.is_some()
+                    && let Some(height) = d.extra.get("coil_height").and_then(Value::as_str)
+                {
+                    p.insert("height".into(), json!(height));
+                }
+            }
             if let Some((point, normal)) = *at {
                 match *cmd {
                     "solid.box" => {
@@ -8057,6 +8083,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::FrameTrim(k) => return crate::dialogs_frame::trim_commands(app, k, &d.inputs, &d.extra),
         Kind::Gusset(k) => return crate::dialogs_gusset::commands(app, k, &d.inputs, &d.extra),
         Kind::FramePlate(k) => return crate::dialogs_frame_plate::commands(app, k, &d.inputs, &d.extra),
+        Kind::CapturePosition(k) => return crate::dialogs_capture::commands(app, k),
         Kind::Appearance(k) => return Ok(crate::dialogs_appearance::commands(k, &d.inputs)),
         Kind::Motion(k) => return crate::dialogs_motion::commands(app, k, &d.inputs),
         Kind::Part(k) => return crate::dialogs_parts::commands(app, k, &d.inputs),
@@ -8072,6 +8099,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
         let coil_profile = cmd == "solid.coil" && m.contains_key("sketch");
         for (k, v) in &d.extra {
+            // The coil's size choice and height are put in the parameters by the command's own rows.
+            if k == "size_by" || k == "coil_height" {
+                continue;
+            }
             // Saved selection mode is editor state, not a command parameter.
             if matches!(d.kind, Kind::Split { .. }) && k == "split_tool_mode" {
                 continue;
@@ -10378,6 +10409,12 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 })
                 .unwrap_or_else(|| feature_frame(s, f.component));
             crate::dialogs_move::for_feature(&s.doc, &mut d, kind, &frame);
+            d
+        }
+        FeatureKind::CapturePosition { moves, joints } => {
+            let (kind, inputs, extra) = crate::dialogs_capture::for_feature(&s.doc, moves, joints)?;
+            let mut d = Dialog::new(kind, inputs);
+            d.extra = extra;
             d
         }
         other => {

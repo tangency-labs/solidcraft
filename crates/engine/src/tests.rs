@@ -8843,6 +8843,187 @@ fn cheap_commands_on_thousands_of_bodies_evaluate_nothing() {
     assert_eq!(meshes(&s), shown, "every body keeps its mesh");
 }
 
+/// #611: renaming a parameter changes no value, so it recomputes no feature, and nor do its
+/// undo and redo: the design is the one evaluating the renamed design gives, with the same
+/// bodies and volume. A parameter another parameter is worked out from is renamed the same way.
+/// A rename that also changes a value is evaluated.
+#[test]
+fn renaming_a_parameter_recomputes_nothing() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "40", "unit": "mm"}));
+    run(&mut s, "parameters.add", json!({"name": "hole", "expression": "w / 10"}));
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": "w", "width": 20, "height": 5, "body_name": "Plate"}));
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"diameter": "hole", "height": 7, "base": [4, 4, -1], "operation": "cut", "targets": ["Plate"], "name": "Hole"}),
+    );
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Hole"], "dir1": [1, 0, 0], "count1": 4, "spacing1": "w / 4", "name": "Holes"}));
+    let fresh = |s: &Session| {
+        let mut f = Session::new((*s.doc).clone());
+        (volume(&mut f), f.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>())
+    };
+    let bodies = |s: &Session| s.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+    let shown = (volume(&mut s), bodies(&s));
+    let length = |s: &Session| {
+        let f = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Box { .. })).unwrap();
+        serde_json::to_value(&f.kind).unwrap()["length"].clone()
+    };
+    for (command, params) in [
+        ("parameters.rename", json!({"name": "w", "new_name": "plate_w"})),
+        ("parameters.rename", json!({"name": "hole", "new_name": "hole_d"})),
+        ("edit.undo", json!({})),
+        ("edit.undo", json!({})),
+        ("edit.redo", json!({})),
+    ] {
+        s.evaluations = 0;
+        run(&mut s, command, params);
+        assert_eq!(s.model.last_recomputed, 0, "{command} recomputed a feature");
+        assert_eq!(s.evaluations, 0, "{command} evaluated the design");
+        assert_eq!((volume(&mut s), bodies(&s)), shown, "{command} kept the design");
+        assert_eq!(fresh(&s), shown, "{command}: evaluating the design gives the same");
+    }
+    assert_eq!(length(&s), json!("plate_w"));
+    assert_eq!(s.doc.param("hole").map(|p| p.expr.as_str()), Some("plate_w / 10"));
+
+    // A rename that also changes a value builds the design again.
+    let before = s.doc.clone();
+    let mut changed = (*before).clone();
+    changed.rename_param("plate_w", "w").unwrap();
+    changed.set_param("w", "60 mm", None, None).unwrap();
+    s.doc = std::sync::Arc::new(changed);
+    s.refresh_from(&before, false);
+    assert!(s.model.last_recomputed > 0, "a changed value is evaluated");
+    let moved = (volume(&mut s), bodies(&s));
+    assert_eq!(fresh(&s), moved);
+    assert!(rel(moved.0, shown.0) > 0.1, "{} vs {}", moved.0, shown.0);
+}
+
+/// #611: a rename that reaches a sketch (the parameter a dimension or a point reads, a
+/// dimension's own parameter) keeps every result too: the solved sketches the model keeps take
+/// the new name as evaluating the renamed design solves them, and the next value change builds
+/// what evaluating it builds.
+#[test]
+fn renaming_a_parameter_a_sketch_reads_recomputes_nothing() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "40", "unit": "mm"}));
+    run(&mut s, "parameters.add", json!({"name": "hole", "expression": "w / 10"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    let out = run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command": "sketch.rectangle.center", "params": {"center": [0, 0], "corner": [20, 10]}, "dimensions": {"width": "w", "height": 20}}),
+    );
+    let width = out["dimensions"]["width"]["param"].as_str().unwrap_or_default().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "distance": 5, "name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Slot"}));
+    run(&mut s, "sketch.line", json!({"points": [[-2, -2], ["hole", -2], ["hole", 2], [-2, 2]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Slot", "distance": 10, "operation": "cut", "name": "Cut"}));
+    let sketches = |s: &Session| {
+        let drawn = s.doc.features.iter().filter_map(|f| match &f.kind {
+            solidcraft_doc::FeatureKind::Sketch { sketch, .. } => Some(serde_json::to_string(sketch).unwrap()),
+            _ => None,
+        });
+        drawn.collect::<Vec<_>>()
+    };
+    // What each result keeps that evaluating the design again gives, to the bit: its outcome, and
+    // the bodies, solved sketches and construction geometry after it.
+    let model = |m: &solidcraft_doc::Model| {
+        let result = |r: &solidcraft_doc::FeatureResult| {
+            let st = &r.state;
+            let bodies = st.bodies.iter().map(|b| (&b.name, b.feature, b.component)).collect::<Vec<_>>();
+            let outcome = format!("{} {} {:?} {:?} {}", r.id, r.name, r.error, r.warning, r.skipped);
+            format!("{outcome} {bodies:?} {:?} {:?} {:?}", st.sketches, st.sketch_copies, st.construct)
+        };
+        m.results.iter().map(result).collect::<Vec<_>>()
+    };
+    let fresh = |s: &Session| {
+        let mut f = Session::new((*s.doc).clone());
+        (volume(&mut f), model(&f.model))
+    };
+    // Where the model a design file keeps differs from a fresh session's, less the times and the
+    // bodies' cache keys (a key digests the definition that made the body, names included).
+    let saved_differences = |s: &Session| {
+        fn walk(a: &Value, b: &Value, at: String, out: &mut Vec<String>) {
+            match (a, b) {
+                (Value::Object(x), Value::Object(y)) => {
+                    let keys = x.keys().chain(y.keys()).filter(|k| !matches!(k.as_str(), "ms" | "key"));
+                    for k in keys.collect::<std::collections::BTreeSet<_>>() {
+                        walk(x.get(k).unwrap_or(&Value::Null), y.get(k).unwrap_or(&Value::Null), format!("{at}.{k}"), out);
+                    }
+                }
+                (Value::Array(x), Value::Array(y)) if x.len() == y.len() => {
+                    for (i, (p, q)) in x.iter().zip(y).enumerate() {
+                        walk(p, q, format!("{at}[{i}]"), out);
+                    }
+                }
+                _ if a != b => out.push(format!("{at}: {a} vs {b}")),
+                _ => {}
+            }
+        }
+        let records = |s: &Session| s.model.saved(&s.doc).map(|m| m.records).unwrap_or(Value::Null);
+        let mut out = Vec::new();
+        walk(&records(s), &records(&Session::new((*s.doc).clone())), String::new(), &mut out);
+        out
+    };
+    // A design built command by command already keeps a little apart from a fresh evaluation of
+    // it (which body names are reserved): a rename adds no difference.
+    let apart = saved_differences(&s);
+    for (command, params, sketch_renamed) in [
+        ("parameters.rename", json!({"name": "w", "new_name": "plate_w"}), false),
+        ("parameters.rename", json!({"name": "hole", "new_name": "hole_d"}), true),
+        ("parameters.rename", json!({"name": width, "new_name": "base_w"}), true),
+        ("edit.undo", json!({}), true),
+        ("edit.undo", json!({}), true),
+        ("edit.redo", json!({}), true),
+        ("edit.redo", json!({}), true),
+    ] {
+        let drawn = sketches(&s);
+        s.evaluations = 0;
+        run(&mut s, command, params);
+        assert_eq!(drawn != sketches(&s), sketch_renamed, "{command} renamed in a sketch");
+        assert_eq!(s.model.last_recomputed, 0, "{command} recomputed a feature");
+        assert_eq!(s.evaluations, 0, "{command} evaluated the design");
+        assert_eq!((volume(&mut s), model(&s.model)), fresh(&s), "{command}: the model is the renamed design's");
+        assert_eq!(saved_differences(&s), apart, "{command}: the saved model is the renamed design's");
+        // Evaluating the design again reuses every result: each fingerprint is the renamed design's.
+        s.refresh();
+        assert_eq!(s.model.last_recomputed, 0, "{command}: a result kept an old fingerprint");
+    }
+    assert_eq!(s.doc.param("hole_d").map(|p| p.expr.as_str()), Some("plate_w / 10"));
+    assert_eq!(s.doc.param("base_w").map(|p| p.expr.as_str()), Some("plate_w"));
+
+    // The next value change builds what evaluating the design builds, from the renamed sketches.
+    let shown = volume(&mut s);
+    let r = run(&mut s, "parameters.change", json!({"name": "plate_w", "expression": "60 mm"}));
+    assert!(r["recomputed"].as_u64().is_some_and(|n| n > 0), "a changed value is evaluated: {r}");
+    let moved = (volume(&mut s), model(&s.model));
+    assert_eq!(moved, fresh(&s));
+    assert!(rel(moved.0, shown) > 0.1, "{} vs {shown}", moved.0);
+}
+
+/// #611: an equation curve's variable hides a parameter of its name, so renaming the parameter a
+/// formula reads to the variable's name changes what the formula reads (`y = a * t` becomes
+/// `y = t * t`): the curve is placed where evaluating the renamed design places it.
+#[test]
+fn renaming_a_parameter_to_an_equation_curves_variable_places_the_curve_again() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "a", "expression": "2"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "t", "y": "a * t", "start": 0, "end": 4}));
+    let curve = r["curve"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let solved = |s: &Session| format!("{:?}", s.model.state().sketches);
+    let shown = solved(&s);
+    run(&mut s, "parameters.rename", json!({"name": "a", "new_name": "t"}));
+    let f = s.doc.find_feature("S").unwrap().id;
+    assert_eq!(s.doc.sketch(f).unwrap().equation_of(&curve).unwrap().y, "t * t");
+    assert_eq!(solved(&s), solved(&Session::new((*s.doc).clone())), "the curve is the renamed design's");
+    assert_ne!(solved(&s), shown, "y = t * t is not y = 2 * t");
+}
+
 /// #3397: a new, empty component changes nothing a feature reads, so creating one recomputes
 /// nothing, the first component of a design included: not a targeted cut, a Combine, a To
 /// Object extrude or a sketch on a face without a construction certificate (a legacy face

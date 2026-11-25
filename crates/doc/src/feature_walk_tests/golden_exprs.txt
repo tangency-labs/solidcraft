@@ -545,6 +545,13 @@ move
     Z distance = move.z (Length)
     Angle = move.angle (Angle)
   expressions: move.x, move.y, move.z, move.angle
+capture_position
+  inputs:
+    X distance = capture.x (Length)
+    Y distance = capture.y (Length)
+    Z distance = capture.z (Length)
+    Angle = capture.angle (Angle)
+  expressions: capture.x, capture.y, capture.z, capture.angle, capture.ox, capture.oy, capture.oz
 import
 mesh_convert
   inputs:

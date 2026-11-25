@@ -56,6 +56,7 @@ mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
+pub mod dialogs_capture;
 pub mod dialogs_constrain;
 pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
@@ -3533,6 +3534,7 @@ impl SolveApp {
                         FeatureKind::BodyTransfer { .. } => language.text("ui.feature_kind.body_transfer"),
                         FeatureKind::ConstructionAxis { .. } => language.text("ui.feature_kind.construction_axis"),
                         FeatureKind::ConstructionPoint { .. } => language.text("ui.feature_kind.construction_point"),
+                        FeatureKind::CapturePosition { .. } => language.text("cmd.component_capture_position"),
                         _ => f.kind.base_name(),
                     };
                     self.set_status(language.format("ui.feature_nothing_to_edit", &[("kind", kind)]), false);
@@ -4671,6 +4673,9 @@ impl SolveApp {
             prefs::take_theme_drops(self, ctx);
             // Files dropped on the agent chat attach to its next message instead.
             agent_chat::take_drops(self, ctx);
+            // Files dropped on the tab bar open in tabs of their own there.
+            #[cfg(not(target_arch = "wasm32"))]
+            documents::take_file_drops(self, ctx);
             for f in ctx.input(|i| i.raw.dropped_files.clone()) {
                 let p = f.path().to_string_lossy().to_string();
                 if !p.is_empty() {
