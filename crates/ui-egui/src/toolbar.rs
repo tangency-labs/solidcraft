@@ -3066,7 +3066,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 || crate::drawing_sheet_page::clear_view_selection(app)
             {
                 app.esc_handled = true;
-            } else if !app.session.selection.is_empty() {
+            } else if app.session.has_selection() {
                 app.esc_handled = true;
                 let _ = app.run("select.clear", json!({}));
             }
@@ -3224,7 +3224,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::dialogs::cancel(app);
                 } else if crate::viewport_status::enabled(app) && crate::viewport_status::escape(app, repeat) {
                     app.last_escape = None;
-                } else if !app.session.selection.is_empty() || app.session.active_sketch.is_none() {
+                } else if app.session.has_selection() || app.session.active_sketch.is_none() {
                     crate::edit_clipboard::drop_cut(app);
                     app.tree.picked_joints.clear();
                     let _ = app.run("select.clear", json!({}));
