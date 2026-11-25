@@ -36,6 +36,7 @@
 //! | `straight_bspline` (private)  | none (#16639)                         |
 //! | `lines_and_arcs`              | `sm_DraftLinesAndArcs`                |
 //! | `curvature_keeping_walls`     | `sm_CreateCurvatureKeepingWalls`      |
+//! | `circle_closing_at_apex`      | none (#22149)                         |
 //!
 //! The method (from the fork): each profile curve's wall is the surface its draft
 //! sweeps, a line's plane or an arc's cone, ruled from the curve to its offset at the
@@ -64,9 +65,10 @@
 //! every loop is bounded by the profile's curve count or a fixed sample count (the arc span
 //! count is at most the arc's angle over a quarter turn). Walls whose sections all shrink to
 //! one point close the whole section there, a pyramid's apex or a ridge's far end, where the
-//! fork refused the draft (#17265). A B-spline input that is a straight line is a line (the
-//! fork takes only its lines, and drafts a square of B-spline segments by the offset method,
-//! #16639).
+//! fork refused the draft (#17265). A profile that is one circle drafted inward past its
+//! centre is its cone to the apex, where the fork's offset ran past the centre (#22149). A
+//! B-spline input that is a straight line is a line (the fork takes only its lines, and
+//! drafts a square of B-spline segments by the offset method, #16639).
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-safe tests
 
@@ -2231,6 +2233,89 @@ pub(super) fn curvature_keeping_walls(
     }
     lean_offsets(&mut walls, n, d);
     walls_closing_at_apexes(a, kernel_brep, target, input, walls, n, h)
+}
+
+/// The wall of a profile that is one circle, drafted inward so far that it closes before the
+/// far end (#22149, a drill point; not in the fork, which ran the circle's offset past its
+/// centre and built no closed solid). Its section at a fraction `f` of the height is the
+/// circle of radius `r - f shrink` (as [`read_walls`] reads an arc's wall), gone at
+/// `f = r / shrink`, the apex on the axis; nothing of the profile is left above it, so the
+/// wall is the cone from the circle to the apex ([`draft_cone`] to that height, its far
+/// radius 0), built into `target`, and there is no far end to cap. A circle whose far radius
+/// is within `tol` of 0 closes at the far end: the same cone, to the full height. `false`,
+/// nothing built, for any other profile or draft: a profile not one segment that is a
+/// circle among the inputs, a height not along the circle's axis (a draft leaning off the
+/// profile's plane), or a circle still open at the far end.
+pub(super) fn circle_closing_at_apex(
+    a: &mut impl PrimitiveCreationAccess,
+    kernel_brep: BrepId,
+    target: BrepId,
+    input: &WallsInput<'_>,
+) -> Result<bool> {
+    let k = a.kernel(kernel_brep)?;
+    let canon = input.composite.canonical();
+    let (Some(pc), Some(&sense), 1) = (
+        canon.curves.first(),
+        canon.senses.first(),
+        canon.curves.len(),
+    ) else {
+        return Ok(false);
+    };
+    let tol = input.tol;
+    let Some(found) = draft_input(k, pc, input.inputs, tol)? else {
+        return Ok(false);
+    };
+    let CurveKind::Ellipse(circle) = found.kind() else {
+        return Ok(false);
+    };
+    if !found.is_kind_of(CIRCLE_TYPE) {
+        return Ok(false);
+    }
+    let side = if input.side == OffsetDirection::LeftHandSide {
+        1.0
+    } else {
+        -1.0
+    };
+    // the wall as `read_walls` reads an arc's: counterclockwise about its axis, over the
+    // whole turn from `x`
+    let ivl = pc.natural_interval();
+    let start = pc.evaluate_point(k, if sense { ivl.min() } else { ivl.max() })?;
+    let v = pc.evaluate(k, if sense { ivl.min() } else { ivl.max() }, 1, true, true)?;
+    let v1 = at(&v, 1)?;
+    let t = if sense { v1 } else { -v1 };
+    let frame = circle.position();
+    let mut w = Wall {
+        arc: true,
+        center: frame.origin(),
+        radius: circle.radius(),
+        x: frame.x_axis().unitize()?,
+        ..Wall::default()
+    };
+    let kk = w.x.cross(frame.y_axis()).unitize()?;
+    w.axis = if kk.cross(start - w.center).dot(t) >= 0.0 {
+        kk
+    } else {
+        -kk
+    };
+    w.y = w.axis.cross(w.x);
+    w.shrink = side * input.normal.dot(w.axis) * input.offset;
+    // still open at the far end (or not shrinking): the ordinary draft
+    if !(w.radius > tol && w.radius - w.shrink <= tol) {
+        return Ok(false);
+    }
+    // the apex: where the radius reaches 0, at the far end at most
+    let f = (w.radius / w.shrink).min(1.0);
+    let h = f * input.height * input.normal;
+    w.shrink = w.radius;
+    (w.lo, w.hi) = (0.0, 2.0 * PI);
+    let Some(cone) = draft_cone(k, &w, h)? else {
+        return Ok(false);
+    };
+    let surface = Surface::from(cone);
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let mut face = None;
+    a.surface_face(target, surface, domain, &mut face)?;
+    Ok(true)
 }
 
 #[cfg(test)]

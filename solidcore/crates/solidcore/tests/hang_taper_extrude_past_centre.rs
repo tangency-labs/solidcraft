@@ -451,10 +451,24 @@ fn assert_drill_point(height: f64, z0: f64, corner: sweeps::OffsetCornerType) {
     assert!(is_manifold_solid(&b).unwrap());
     let want_z = drill_apex();
     let cone = create_cone(&mut k, Point3::ZERO, DRILL_R, 0.0, want_z).unwrap();
-    assert_eq!(cone.faces().len(), 2, "the kernel's cone: its side and its base");
     assert_eq!(
-        (b.faces().len(), b.edges().len(), b.vertices().len(), b.shells().len()),
-        (2, cone.edges().len(), cone.vertices().len(), cone.shells().len())
+        cone.faces().len(),
+        2,
+        "the kernel's cone: its side and its base"
+    );
+    assert_eq!(
+        (
+            b.faces().len(),
+            b.edges().len(),
+            b.vertices().len(),
+            b.shells().len()
+        ),
+        (
+            2,
+            cone.edges().len(),
+            cone.vertices().len(),
+            cone.shells().len()
+        )
     );
     let points: Vec<Point3> = b
         .vertices()
@@ -489,7 +503,10 @@ fn assert_drill_point(height: f64, z0: f64, corner: sweeps::OffsetCornerType) {
     };
     let v = brep_volume(&k, &mut b, 1e-10, &attributes).unwrap();
     let want = std::f64::consts::PI * DRILL_R * DRILL_R * want_z / 3.0;
-    assert!((v - want).abs() <= 2e-9 * want, "volume {v}, expected {want}");
+    assert!(
+        (v - want).abs() <= 2e-9 * want,
+        "volume {v}, expected {want}"
+    );
 }
 
 /// #22149's blind cut: 3 mm down from the block's top face at z 5, the apex 0.6928 mm in;
