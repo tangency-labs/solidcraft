@@ -947,28 +947,28 @@ pub struct OpenParams {
     #[serde(default)]
     pub max_points: Option<MaxPoints>,
     /// For a KiCad board only (ignored for other files): its thickness in mm. Default: the board's.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "kicad_thickness_schema")]
     pub thickness: Option<f64>,
     /// For a KiCad board only (ignored for other files): the components' 3D models. Default: true.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "kicad_components_schema")]
     pub components: Option<bool>,
     /// For a KiCad board only (ignored for other files): the copper, `overlay`, `none` or `mesh`.
     /// Default: overlay.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "kicad_copper_schema")]
     pub copper: Option<Value>,
     /// For a KiCad board only (ignored for other files): the silkscreen. Default: true.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "kicad_silkscreen_schema")]
     pub silkscreen: Option<bool>,
     /// For a KiCad board only (ignored for other files): the substrate colour.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "kicad_color_schema")]
     pub color: Option<Value>,
     /// For a KiCad board only (ignored for other files): `mesh`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "kicad_representation_schema")]
     pub representation: Option<String>,
 }
