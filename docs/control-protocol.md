@@ -1263,6 +1263,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `navigator_fit` (default false: a view chosen on a view navigator also looks at the middle of the model from the one distance that fits its bounding sphere in the free part of the view, at `home_fit_size`; Home and an opened design use the same zoom and centre while it is on, so views chosen after them only turn; #10091)
 - `navigator_home` (default true: the custom view navigator has a Home button beside it; also `view.navigator {home}`)
 - `navigator_style` (`axes` (default), `custom`: the body chosen with `view.navigator`, the signed axes until one is chosen; a value this version doesn't know loads as `axes`)
+- `navigator_turn_around` (default true: show the axes navigator's Turn Around button; false restores the previous layout)
 - `navigator_texture` (`themed` (default): the custom view navigator in the theme's navigator colours; `modeled`: in its body's own appearance and edge colour)
 - `offer_stand_up`
 - `orbit_around` (`view_centre` (default: what Pan moves and Fit frames), `origin` (the world origin stays still on screen), `cursor` (the model point under the pointer when the drag began); the older `orbit_cursor` boolean still sets `cursor` when true)
@@ -1300,6 +1301,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `show_frame_rate` (default false: frames per second in the view's bottom-right corner, counting the frames the view draws anyway; it reads 0 FPS once the view is idle)
 - `sign_saved_designs` (default false: every save from the app adds a GnuPG OpenPGP signature to the design's provenance; `file.save`'s `sign` is accepted only from the app's own Save, because a script or agent must not make GnuPG sign with the user's keyring; the key may be on a smartcard, where GnuPG uses it and asks for its PIN; [signing](formats/cose-provenance.md))
 - `signing_key` (string, default empty: the GnuPG key a signed save uses, a fingerprint or user id; empty asks GnuPG for its default signing key)
+- `sketch_arc_tangent_snap` (default false; a mode of the 3-Point Arc tool, set in the Sketch Palette while it runs, not on a Preferences page: the third point snaps on the curve and the tool shows only the pointer's coordinates, as it always has. True: the third point has Radius and Sweep boxes and a cross marks the arc's centre; when the arc starts or ends on a line or arc, the third point snaps to the arc tangent to it, labelled T, and the click adds the Tangent constraints; #20719)
 - `sketch_auto_dimensions` (default false: each shape drawn in a sketch gets all its dimensions at the sizes drawn, as `sketch.draw.dimensioned` with `as_drawn`; typed values win)
 - `sketch_auto_locate` (default false; with `sketch_auto_dimensions`, new shapes are also placed from the sketch origin until fully constrained, as `sketch.draw.dimensioned` with `locate`)
 - `sketch_conflict_colour` (default true: while the open sketch's constraints conflict, the curves and points a failing constraint holds are drawn in the theme's `sketch_conflict` colour too, not only its glyph or dimension; false: only the glyphs and dimensions are red, in `error`, as before, #7244)
@@ -1500,7 +1502,11 @@ animation speed.
 
 `view.navigate` runs through the command engine. Programmatic callers pass `camera`
 and either `direction: [x,y,z]` in the camera's up-axis frame or `action` (`left`, `right`, `up`,
-`down`, `clockwise`, `counterclockwise`, `home`, `fit`). `fit: true` with a `direction` or a
+`down`, `clockwise`, `counterclockwise`, `turn_around`, `home`, `fit`). `turn_around` turns
+180° about the screen's vertical axis, keeping screen up, the camera target, zoom and projection.
+The axes navigator exposes this action beside Home. Preferences › Navigation can hide its
+Turn Around button (`navigator_turn_around`, enabled by default).
+`fit: true` with a `direction` or a
 turn asks for the whole model to be framed from the new direction as well, as `home` does. The
 result contains `camera` and `fit`; UI callers apply the camera with their animation
 preference, without editing the design. The Navigation preference `navigator_fit` (off by

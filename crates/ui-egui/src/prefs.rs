@@ -1379,6 +1379,7 @@ pub struct PrefsWindow {
     /// that a decision was written while it ran, even one that leaves the value as it was.
     pub(crate) grants_revision: u64,
     pub(crate) plugin_remove: Option<(String, String)>,
+    pub(crate) plugin_remove_user_data: bool,
     panel_restore_details: bool,
     panel_restore_retry: bool,
     panel_popup_reset: bool,
@@ -3250,8 +3251,8 @@ fn button_jobs_that_read<'de, D: serde::Deserializer<'de>>(
         .collect())
 }
 
-/// Every theme the Theme list offers, as (id, name): the modes, the built-in theme files, then
-/// the imported ones.
+/// Every theme the Theme list offers, as (id, name): Light and Dark first, then the built-in
+/// and imported theme files together by name, ignoring case (#8637).
 fn theme_choices(app: &SolveApp) -> Vec<(String, String)> {
     let modes =
         THEMES.iter().filter(|(id, _)| *id != "system").map(|(id, label)| ((*id).to_string(), solidcraft_ui_text::tr_label(label).to_string()));
@@ -3260,10 +3261,14 @@ fn theme_choices(app: &SolveApp) -> Vec<(String, String)> {
     let custom = app.preferences.custom_themes.iter().map(|t| (t.id.clone(), t.name.clone()));
     let plugins = crate::theme_files::plugin_theme_choices().into_iter();
     let mut choices: Vec<_> = modes.chain(builtins).chain(custom).chain(plugins).collect();
-    choices.sort_by_key(|(id, _)| match id.as_str() {
-        "light" => 0,
-        "dark" => 1,
-        _ => 2,
+    choices.sort_by_cached_key(|(id, name)| {
+        let rank = match id.as_str() {
+            "light" => 0,
+            "dark" => 1,
+            _ => 2,
+        };
+        let name = if rank < 2 { String::new() } else { name.to_lowercase() };
+        (rank, name, id.clone())
     });
     choices
 }
@@ -4051,6 +4056,11 @@ fn prepare_preferences(
     {
         return Err("`dimension_input` must be view or window".into());
     }
+    if let Some(v) = p.get("isolate_others")
+        && !matches!(v.as_str(), Some("hidden" | "transparent" | "wireframe"))
+    {
+        return Err("`isolate_others` must be hidden, transparent or wireframe".into());
+    }
     if let Some(value) = p.get("graphics_backend")
         && !value.as_str().is_some_and(|id| GRAPHICS_BACKENDS.contains(&id) || id == app.preferences.graphics_backend)
     {
@@ -4528,6 +4538,27 @@ mod tests {
         assert!(!state.night && state.tone == Some(false));
     }
 
+    /// #8637: Light and Dark stay first; the theme files follow by name, ignoring case, built in
+    /// and imported together, whatever the built-in `order` says.
+    #[test]
+    fn theme_choices_keep_the_modes_first_and_sort_the_files_by_name() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        for name in ["Zz last", "aardvark"] {
+            let file = crate::theme_files::from_value(&json!({"format":"solidcraft-theme/1", "name":name, "base":"dark"})).unwrap();
+            crate::theme_files::add(&mut app.preferences.custom_themes, file).unwrap();
+        }
+        let choices = theme_choices(&app);
+        let ids: Vec<&str> = choices.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids[..2], ["light", "dark"], "{ids:?}");
+        let names: Vec<String> = choices[2..].iter().map(|(_, name)| name.to_lowercase()).collect();
+        assert!(names.windows(2).all(|w| w[0] <= w[1]), "{names:?}");
+        // Built-in names starting with a digit (1-bit) come before it.
+        let first_letter = names.iter().find(|n| n.starts_with(|c: char| c.is_alphabetic()));
+        assert_eq!(first_letter.map(String::as_str), Some("aardvark"), "imported files sort with the built-in ones");
+        assert_eq!(names.last().map(String::as_str), Some("zz last"));
+        assert_eq!(choices.len(), crate::theme_files::builtin().len() + 4);
+    }
+
     #[test]
     fn theme_filter_counts_ignore_only_their_own_group() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
@@ -4616,6 +4647,22 @@ mod tests {
             assert_eq!(super::lenient(&saved).length_decimals, 4, "{removed}");
             assert!(serde_json::to_value(&p).unwrap().get(removed).is_none(), "{removed} is not written back");
         }
+    }
+
+    #[test]
+    fn navigator_turn_around_defaults_on_persists_and_resets() {
+        assert!(Prefs::default().navigator_turn_around);
+        assert!(serde_json::from_value::<Prefs>(json!({})).unwrap().navigator_turn_around);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert!(app.preferences.navigator_turn_around);
+        let reply = control(&mut app, &json!({"navigator_turn_around":false})).unwrap();
+        assert_eq!(reply["navigator_turn_around"], false);
+        assert_eq!(serde_json::to_value(&app.preferences).unwrap()["navigator_turn_around"], false);
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(!restored.preferences.navigator_turn_around);
+        super::reset_preferences(&mut app.preferences, super::PAGE_NAVIGATION);
+        assert!(app.preferences.navigator_turn_around);
     }
 
     /// #10254: the invert toggle is off by default, persists, and the Navigation page's
@@ -10827,6 +10874,59 @@ mod tests {
         assert_eq!(h.app.session.doc.to_json(), design);
     }
 
+    #[test]
+    fn custom_navigator_explains_the_missing_body_and_hides_the_hint_once_assigned() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        h.app.run("solid.box", json!({"length": 30, "width": 20, "height": 10})).unwrap();
+        h.app.session.mark_saved();
+        let design = h.app.session.doc.to_json();
+        let revision = h.app.session.revision;
+        let history = h.app.session.undo.len();
+        let camera = h.app.cam;
+        let nav = h.app.preferences.nav.clone();
+        let hint = "Close Preferences, right-click the navigator and choose Custom. Pick a body in the view to use it as the navigator.";
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
+        h.call("ui.prefs", json!({"open": "Navigation"}));
+        super::reveal_preference(&mut h, "prefs:navigator");
+        assert!(h.widget(hint).is_none(), "Axes needs no custom body");
+        let custom = crate::scenario::rect_of("prefs:navigator:Custom").unwrap().center();
+        h.call("ui.click", json!({"x": custom.x, "y": custom.y}));
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Custom);
+        assert!(h.widget(hint).is_some(), "Custom explains why it still shows axes without a body");
+
+        h.app.run("view.navigator", json!({"body": "Body1"})).unwrap();
+        h.frames(3);
+        assert!(h.app.view_gizmo.shape.is_some());
+        assert!(h.widget(hint).is_none(), "the assigned body's snapshot needs no missing-body hint");
+        h.app.run("view.navigator", json!({"body": null})).unwrap();
+        h.frames(3);
+        assert!(h.widget(hint).is_some(), "clearing the body restores the hint");
+        assert_eq!(h.app.preferences.nav, nav);
+        assert_eq!(h.app.cam, camera);
+        assert_eq!(h.app.session.doc.to_json(), design);
+        assert_eq!(h.app.session.revision, revision);
+        assert_eq!(h.app.session.undo.len(), history);
+        assert!(!h.app.session.is_dirty());
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
+
+        // The hinted route remains reachable while Custom has no body and shows axes.
+        h.call("ui.prefs", json!({"open": "Navigation", "navigator_style": "custom"}));
+        h.call("ui.prefs", json!({"button": "ok"}));
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Custom);
+        assert!(h.app.view_gizmo.shape.is_none());
+        assert_eq!(crate::view_gizmo::style(&h.app), NavigatorStyle::Axes);
+        let fallback = crate::scenario::rect_of("axis_view:outer").unwrap().center();
+        h.call("ui.click", json!({"x": fallback.x, "y": fallback.y, "button": "right"}));
+        assert_eq!(h.call("ui.menuPick", json!({"item": "Custom"}))["ok"], true);
+        h.frames(2);
+        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::ViewNavigator(_))));
+        h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
+        assert!(h.app.view_gizmo.shape.is_none(), "opening and cancelling the picker assigns no body");
+    }
+
     /// The texts one frame paints.
     fn painted_texts(h: &mut crate::scenario::Harness) -> Vec<String> {
         // Use the harness clock and consume its texture updates like every other frame.
@@ -14079,6 +14179,7 @@ mod settings_search_tests {
                 ("Origin", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:Origin"),
                 ("View navigator", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
                 ("Axes", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
+                ("Turn Around button", crate::prefs::PAGE_NAVIGATION, "prefs:navigator_turn_around"),
                 ("Turntable", crate::prefs::PAGE_NAVIGATION, "prefs:turntable"),
                 ("Wheel zoom speed", crate::prefs::PAGE_NAVIGATION, "prefs:wheel_zoom_speed"),
                 ("Zoom with two-finger scroll while holding", crate::prefs::PAGE_NAVIGATION, "prefs:trackpad_zoom_modifier"),
@@ -14091,8 +14192,20 @@ mod settings_search_tests {
                 h.frames(5);
                 let (_, _, hits) = nav(&h.ctx);
                 let matching: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == page).collect();
-                assert_eq!(matching.len(), 1, "{theme}: {query} has one indexed setting");
-                set_cursor(&h.ctx, matching[0].0);
+                // Axes matches both the navigator's choice and the Turn Around checkbox's label.
+                let expected = if query == "Axes" { 2 } else { 1 };
+                assert_eq!(matching.len(), expected, "{theme}: {query} has the expected indexed settings");
+                let cursor = if query == "Axes" {
+                    assert!(matching.iter().any(|(_, hit)| hit.label == h.app.tr("prefs.navigator_turn_around")));
+                    matching
+                        .iter()
+                        .find(|(_, hit)| hit.label == h.app.tr("prefs.navigation.axes_signed"))
+                        .expect("the signed-axes choice matches Axes")
+                        .0
+                } else {
+                    matching[0].0
+                };
+                set_cursor(&h.ctx, cursor);
                 h.frames(2);
                 h.step(&serde_json::json!({"key":"Enter"})).unwrap();
                 h.frames(20);
