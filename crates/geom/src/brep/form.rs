@@ -280,15 +280,8 @@ pub fn aligned_to_frame(s: &Surface, reference: &Frame, tol: f64) -> Option<Surf
         Surface::Cylinder { frame, .. } | Surface::Cone { frame, .. } | Surface::Sphere { frame, .. } | Surface::Torus { frame, .. } => frame,
         _ => return None,
     };
-    let (o, x, y, z) = axes(own)?;
-    let (ro, rx, _, rz) = axes(reference)?;
-    let d = o - ro;
-    if !((d - rz * d.dot(rz)).len() <= tol && (z.dot(rz).abs() - 1.0).abs() <= 1e-9) {
-        return None;
-    }
-    let nx = (rx - z * rx.dot(z)).normalized()?;
-    let angle = nx.dot(y).atan2(nx.dot(x));
-    turned(s, angle)
+    let (_, [shift, _]) = on_frame(&Curve::Circle { frame: own.clone(), radius: 1.0 }, [0.0, 1.0], reference, tol)?;
+    turned(s, -shift)
 }
 
 /// How many quarters a torus face over `[u, v]` (its box on the label, as for

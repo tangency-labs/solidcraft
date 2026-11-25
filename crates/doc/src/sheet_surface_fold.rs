@@ -160,6 +160,15 @@ fn solid_of(
         let cell = cells.iter_mut().find(|c| mine(c)).ok_or_else(|| DocError::Invalid("a bead lies on no panel of its sheet".into()))?;
         cell.open.push(form.open.clone());
     }
+    for c in &mut cells {
+        c.outer = f.split_wide_roll_segs(c.piece, &c.outer);
+        for h in &mut c.holes {
+            *h = f.split_wide_roll_segs(c.piece, h);
+        }
+        for o in &mut c.open {
+            *o = f.split_wide_roll_segs(c.piece, o);
+        }
+    }
     let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
     // Shared with a neighbor: the same flat line the other way, landing in the same place
     // (flat neighbors from two pieces laid side by side do not).
@@ -182,7 +191,7 @@ fn solid_of(
     let mut names = Vec::new();
     for (ci, c) in cells.iter().enumerate() {
         // Each run at both depths, once.
-        let runs: Vec<Vec<Run>> = c.loops().map(|l| runs(&f.split_wide_roll_segs(c.piece, l))).collect();
+        let runs: Vec<Vec<Run>> = c.loops().map(|l| runs(l)).collect();
         let edges: Vec<Vec<[EdgeSpec; 2]>> =
             runs.iter().map(|l| l.iter().map(|r| f.edges(c.piece, r)).collect::<Result<_>>()).collect::<Result<_>>()?;
         let samples: Vec<Vec2> = c.loops().flatten().flat_map(|e| (0..SAMPLES).map(|k| e.point_at(k as f64 / SAMPLES as f64))).collect();
