@@ -295,7 +295,7 @@ impl Drawing {
                 let point = |id| solved.sketch.point(id).ok_or_else(|| fail("arc references an unknown point"));
                 let (center, start, end) = (point(c)?, point(a)?, point(b)?);
                 if start != end {
-                    let sweep = solidcore_ops::prism::counterclockwise_sweep(center, start, end)
+                    let sweep = solidcraft_kernel::services::prism::counterclockwise_sweep(center, start, end)
                         .ok_or_else(|| fail("arc has no finite nonzero radial directions"))?;
                     if sweep <= 1e-12 {
                         return Err(fail("noncoincident arc sweep at or below 1e-12 radians cannot be converted exactly"));

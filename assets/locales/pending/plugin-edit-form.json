@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "ui.plugin_edit_unset": "إلغاء التعيين"
+  },
+  "de": {
+    "ui.plugin_edit_unset": "Nicht angeben"
+  },
+  "en": {
+    "ui.plugin_edit_unset": "Unset"
+  },
+  "he": {
+    "ui.plugin_edit_unset": "ביטול ערך"
+  },
+  "ja": {
+    "ui.plugin_edit_unset": "未指定にする"
+  },
+  "ko": {
+    "ui.plugin_edit_unset": "값 해제"
+  },
+  "vi": {
+    "ui.plugin_edit_unset": "Bỏ đặt"
+  },
+  "zh": {
+    "ui.plugin_edit_unset": "取消设置"
+  }
+}

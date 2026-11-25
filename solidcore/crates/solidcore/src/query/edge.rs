@@ -707,9 +707,69 @@ pub fn radial_sector_classify_between(
     edge: EdgeId,
     normalized_param: f64,
     sector_eu: EdgeuseId,
-    mut other_brep: Option<&mut Brep>,
+    other_brep: Option<&mut Brep>,
     classify_eu: EdgeuseId,
 ) -> Result<RadialSectorClass> {
+    sector_classify(
+        k,
+        brep,
+        edge,
+        normalized_param,
+        sector_eu,
+        other_brep,
+        classify_eu,
+        true,
+    )?
+    .ok_or(SolidError::port_invariant(
+        OP_RADIAL,
+        "the sector classification steps off the edge and so always classifies",
+    ))
+}
+
+/// [`radial_sector_classify_between`] where the binormals at the edge decide (not
+/// upstream): the class when the three faces leave the edge at least 10 degrees apart from
+/// each other, `None` where they leave it closer and the faces would be stepped off the
+/// edge. A point of an edge where the faces meet at a clear angle decides there; one where
+/// they are near tangent is read from where they part off the edge, which a stretch of face
+/// within the tolerance of the other can mislead ([`crate::topology::edge::find_radial_sector_between`]).
+///
+/// # Errors
+///
+/// As [`radial_sector_classify_between`].
+pub fn radial_sector_classify_at_edge(
+    k: &Kernel,
+    brep: &mut Brep,
+    edge: EdgeId,
+    normalized_param: f64,
+    sector_eu: EdgeuseId,
+    other_brep: Option<&mut Brep>,
+    classify_eu: EdgeuseId,
+) -> Result<Option<RadialSectorClass>> {
+    sector_classify(
+        k,
+        brep,
+        edge,
+        normalized_param,
+        sector_eu,
+        other_brep,
+        classify_eu,
+        false,
+    )
+}
+
+/// The body of [`radial_sector_classify_between`] (`step` set) and
+/// [`radial_sector_classify_at_edge`] (`step` clear: `None` instead of the first step).
+#[allow(clippy::too_many_arguments)] // upstream's arguments and the step choice
+fn sector_classify(
+    k: &Kernel,
+    brep: &mut Brep,
+    edge: EdgeId,
+    normalized_param: f64,
+    sector_eu: EdgeuseId,
+    mut other_brep: Option<&mut Brep>,
+    classify_eu: EdgeuseId,
+    step: bool,
+) -> Result<Option<RadialSectorClass>> {
     // locals
     let eu_radial =
         eu1::radial(brep, sector_eu)?.ok_or_else(|| null(OP_RADIAL, "edge use without radial"))?;
@@ -926,7 +986,7 @@ pub fn radial_sector_classify_between(
 
             // the sector's faces stayed together as far as the faces reach
             if let Some(class) = zero_sector {
-                return Ok(class);
+                return Ok(Some(class));
             }
 
             // (the angle values are from the previous iteration)
@@ -936,32 +996,32 @@ pub fn radial_sector_classify_between(
             // against the radial partner's normal, which for ang2 is another face at the
             // sector angle: past 90 degrees the coincident pair is taken for opposite sides.
             if ang2 <= ang3 + EFF_ZERO && ang2 < 0.5 * PI / 180.0 {
-                return Ok(if norm1.dot(norm3) >= 0.0 {
+                return Ok(Some(if norm1.dot(norm3) >= 0.0 {
                     RadialSectorClass::CoincidentSector
                 } else {
                     RadialSectorClass::CoincidentSectorMate
-                });
+                }));
             } else if ang3 <= ang2 + EFF_ZERO && ang3 < 0.5 * PI / 180.0 {
-                return Ok(if norm2.dot(s3.tangent.cross(bin3)) >= 0.0 {
+                return Ok(Some(if norm2.dot(s3.tangent.cross(bin3)) >= 0.0 {
                     RadialSectorClass::CoincidentRadial
                 } else {
                     RadialSectorClass::CoincidentRadialMate
-                });
+                }));
             } else if ang1 < 0.5 * PI / 180.0 {
                 // Zero sector.
-                return Ok(if bin3.dot(norm1) > 0.0 {
+                return Ok(Some(if bin3.dot(norm1) > 0.0 {
                     RadialSectorClass::ZeroSector
                 } else {
                     RadialSectorClass::ZeroSectorMate
-                });
+                }));
             }
 
             // Just take the best answer that we could find.
-            return Ok(if inside {
+            return Ok(Some(if inside {
                 RadialSectorClass::Inside
             } else {
                 RadialSectorClass::Outside
-            });
+            }));
         }
 
         // classify the binormal vector set
@@ -982,14 +1042,14 @@ pub fn radial_sector_classify_between(
         if count > 2 && min_dist > tolerance {
             // and working with a lamina edge
             if lamina_edge {
-                return Ok(if ang2 > EFF_ZERO_SQRT {
+                return Ok(Some(if ang2 > EFF_ZERO_SQRT {
                     // face is inside
                     RadialSectorClass::Inside
                 } else if norm1.dot(norm3) > 0.0 {
                     RadialSectorClass::CoincidentSector
                 } else {
                     RadialSectorClass::CoincidentSectorMate
-                });
+                }));
             }
 
             // If sector angle is zero (faces of EU and its radial partner are
@@ -1036,7 +1096,11 @@ pub fn radial_sector_classify_between(
         // surfaces at an increased step off distance from the edge
         if ang1 < 10.0 * PI / 180.0 || ang2 < 10.0 * PI / 180.0 || ang3 < 10.0 * PI / 180.0 {
             if lamina_edge && ang2 > 10.0 * PI / 180.0 {
-                return Ok(RadialSectorClass::Inside);
+                return Ok(Some(RadialSectorClass::Inside));
+            }
+            // the binormals at the edge do not decide: the faces would be stepped off it
+            if !step {
+                return Ok(None);
             }
             count += 1;
 
@@ -1150,11 +1214,11 @@ pub fn radial_sector_classify_between(
                         diff2,
                     ))
             {
-                return Ok(if norm1.dot(norm3) < 0.0 {
+                return Ok(Some(if norm1.dot(norm3) < 0.0 {
                     RadialSectorClass::CoincidentSectorMate
                 } else {
                     RadialSectorClass::CoincidentSector
-                });
+                }));
             } else if on_radial
                 && (done
                     || !holds_coincidence(
@@ -1171,11 +1235,11 @@ pub fn radial_sector_classify_between(
             {
                 let norm4 = s2.tangent.cross(s2.binormal);
                 let norm5 = s3.tangent.cross(bin3);
-                return Ok(if norm4.dot(norm5) < 0.0 {
+                return Ok(Some(if norm4.dot(norm5) < 0.0 {
                     RadialSectorClass::CoincidentRadialMate
                 } else {
                     RadialSectorClass::CoincidentRadial
-                });
+                }));
             }
             if on_sector || on_radial {
                 held = true;
@@ -1192,16 +1256,16 @@ pub fn radial_sector_classify_between(
 
     // the sector's faces stayed together through every step
     if let Some(class) = zero_sector {
-        return Ok(class);
+        return Ok(Some(class));
     }
     if lamina_edge {
-        return Ok(RadialSectorClass::Inside);
+        return Ok(Some(RadialSectorClass::Inside));
     }
-    Ok(if inside {
+    Ok(Some(if inside {
         RadialSectorClass::Inside
     } else {
         RadialSectorClass::Outside
-    })
+    }))
 }
 
 /// `SmEdge::RadialSectorOfCurveClassify`: where `curve` (over `interval`, starting at

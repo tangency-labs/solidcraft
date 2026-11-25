@@ -671,7 +671,7 @@ a menu (neither describes the open one).
 | `engine.commands` | — | every command: id, label, tab, panel, icon, shortcut (the user's current first key, or null when cleared), params doc, enabled |
 | `document.revision` | — | `{document_id, revision}`: the active design's id and a number that moves whenever the design changes, for programs that follow it ([Following the design](#following-the-design)) |
 | `document.selection` | — | `{selection}`: what the user has selected, as the block of text the chat's Attach selection sends (faces and edges with the names and indices the tools take, features and bodies by name, at most 64 items with the rest counted); `null` when nothing is selected. The MCP server adds it to every tool reply |
-| `control.subscribe` | — | `{document_id, revision}`, as `document.revision`; the connection is then sent a `design.changed` line whenever they change ([Following the design](#following-the-design)) |
+| `control.subscribe` | — | `{document_id, revision}`, as `document.revision`; the connection is then sent a `design.changed` line whenever they change, and `design.opened`, `design.closed` and `design.saved` events when a design opens, closes or is saved ([Following the design](#following-the-design)) |
 | `document.inspect` | `measure?`: bool, `sketch_counts?`: bool (default false), `timeline?`: `true` (default), `"summary"` (each feature as `id`, `name`, `type`, with `error`, `warning`, `suppressed` and `rolled_back` only when set) or `false` (left out), `bodies?`: `true` (default), `"names"` (only the body names, nothing measured) or `false` (left out) | parameters, timeline (errors, timings), bodies, sketches, selection (assembly joints: `engine.execute` `joint.inspect {joint?}`, which reads only: each joint's two origins with the occurrence, the snap as saved, the feature, face, edge or sketch curve its names refer to, and whether it resolves or why not; kind, offset, angle, flip, values, limits, expressions and motion links); with `sketch_counts` each sketch also gives its `plane` and its number of `points` and `constraints` |
 | `mcp.options` | — | `{"compact": bool}`: the output the MCP server bridged to this app should give its agents (Preferences › AI › Agents through MCP, `ui.prefs` `mcp_compact`, default false; [MCP](mcp.md#compact-output)) |
 | `document.export` | — | `{name, revision, dirty, format, text}`: the active design as its file holds it, for a host that keeps the files itself ([browser command API](browser-api.md)). `text` is the design's JSON, what a `.json` design file holds; `format` is `"json"`; `revision` is the one `document.revision` answers for this state. Only reads |
@@ -881,13 +881,15 @@ application preference/session setting, never saved design-format data. Policy c
 the view revision only when visible effects or their declarations change.
 
 A client need not ask again and again: after `control.subscribe` on its connection, the app
-sends it a line whenever the active design changes (#6985):
+sends it a line whenever the active design changes (#6985), and an event when a design opens,
+closes or is saved (#21184):
 
 ```text
 {"id":1,"method":"control.subscribe","token":"…"}
 → {"id":1,"ok":true,"result":{"document_id":"18f3a0c2d4e5b6a7-1","revision":3}}
-{"event":"design.changed","params":{"document_id":"18f3a0c2d4e5b6a7-1","revision":4}}
-{"event":"design.changed","params":{"document_id":"18f3a0c2d4e5b6a7-2","revision":5}}
+{"event":"design.opened","params":{"document_id":"18f3a0c2d4e5b6a7-2","path":"/work/Bracket.solidcraft","read_only":false}}
+{"event":"design.saved","params":{"document_id":"18f3a0c2d4e5b6a7-2","path":"/work/Bracket.solidcraft","previous_path":null,"disk":{"len":5120,"modified_ns":"1763900000000000000"}}}
+{"event":"design.changed","params":{"document_id":"18f3a0c2d4e5b6a7-2","revision":4}}
 ```
 
 - The reply is what `document.revision` answers then (and, like it, does not wait behind design
@@ -905,6 +907,34 @@ sends it a line whenever the active design changes (#6985):
   second `control.subscribe` on a subscribed connection is refused with `already subscribed`;
   ask `document.revision` for the design now. A `control.subscribe` that timed out or failed did
   not subscribe the connection: send it again.
+- `design.opened` has `{document_id, path, read_only}`. It is sent when a design's id joins the
+  open tabs: a second tab, a recovered design, a design started in place of a blank. `path` is
+  null for a design with no file yet. `design.closed` has `{document_id, path}`, sent when an id
+  leaves the open tabs, with the path it last had. A design swapped in place reports a close for
+  the old id and an open for the new one. Opening a file that is already open only switches tabs,
+  so nothing is sent.
+- `design.saved` has `{document_id, path, previous_path, disk}`. It is sent when a save of the
+  design file finishes successfully: Save, Save As, Save a Copy (the tab moves to the copy), and
+  `file.save` or `file.save_as` from any caller. `previous_path` is the file the design had before
+  the save when the path changed, and null otherwise (a first save of an untitled design, or a save
+  to the same file). `disk` is `{len, modified_ns}`, with `modified_ns` as a decimal string, and
+  null when there is no file stamp.
+- These events are one-off, in order, and never combined: each is a line of its own. The opened,
+  closed and saved events from a moment come before the `design.changed` line for it. Only
+  `design.changed` is coalesced.
+- A client can get an event for a state it has already read, but it never misses one, except as
+  the next point says. So it subscribes first, then reads `ui.documents` for its starting point.
+  No event comes before the subscribe reply.
+- The open designs are compared after each request, before each save is reported, and at the end
+  of each frame, so a design's `design.opened` always comes before its `design.saved`. A design
+  that the steps of one `engine.script` or `engine.batch` open and close again without saving it
+  gives no event. A rolled-back batch that saved nothing sends none. One that saved a file reports
+  the saved design as opened, saved and closed, since the file was written, and a design it
+  replaced as closed and opened again.
+- A connection more than 256 events behind is sent `{"event":"events.dropped","params":{"count":N}}`
+  before the events it still gets. The client then reads `ui.documents` again to catch up.
+- Nothing sends these events for autosave or recovery files, exports, `document.saved` (which
+  writes no file), or quitting the app, which closes the connection instead.
 
 ### Example: driving a hinge and reading its angle (#17909)
 
@@ -1156,6 +1186,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `assembly_move_handles` (default true): explicit Assembly Move uses the permitted joint-motion handles; false keeps the previous Move panel.
 - `auto_operation` (default true: feature windows choose Join, New Body or Cut from what their material touches until one is picked; false: each keeps the operation it opens with, Extrude its own Join or Cut)
 - `background_image` (string, default empty: a picture's file, shown behind the model and covering the window from its centre; a photo stored turned by its EXIF orientation is shown upright, #19138).
+- `background_shader` (string, default empty: none; `plugin-id/shader-id` draws that installed plugin's background effect behind the model, `shaders@0.1`).
 - `browser_arrow_keys` (default true: while the Browser has the keyboard, which a click on one of its rows gives it and a click elsewhere takes back, Up/Down move the selection through its rows, Left/Right fold or unfold the row, Enter opens it and F2 renames it, and the plain arrows do not turn the view; false: the arrows always turn the view, as before #17931; the Browser also lets them go while its name editor is open)
 - `browser_bodies_folders` (`several` (default): a component with one body and no groups lists it straight under the component in the browser, without a Bodies folder; `always`; `never`: components list their bodies and groups straight under them, and the folder's menu items are on the component's menu; the design's own Bodies folder, and one hidden with its eye, always show; #4217)
 - `browser_components_open` (default false: each component placement in the browser starts closed until it is opened, by its fold arrow, Expand All or Find in Browser; true: every placement starts open, as before #9274)
@@ -1181,7 +1212,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `dimension_step_mm` (default 1, 0.001…1000: what the window's arrows, Up/Down and the wheel over its field add to a length, in millimetres, written in the unit the value is written in)
 - `dimension_text_scale` (default 1, 0.5…2.5: how far a sketch dimension's text is scaled; it applies in the open sketch and to Show Dimensions, #14121)
 - `escape_twice_finishes_sketch` (default true: in a sketch, two quick presses of Esc (0.4 s apart or less) with no tool or dialog left to cancel finish it, as before; false: Esc only cancels the tool, dialog or selection and the sketch stays open until Finish Sketch, #12069)
-- `export_name` (string, default empty: each export offers the design's name, or a mesh its body's; otherwise the name File › Export and Save As Mesh offer, with `{design}`, `{body}` (the exported body's name) and the design properties (`{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}`) replaced; [export file names](book/src/guide/files.md#export-file-names))
+- `export_name` (string, default empty: each export offers the design's name, or a mesh its body's; otherwise the name File › Export and Save As Mesh offer, with `{design}`, `{body}` (the exported body's name), `{source}` (the name of the file it was imported from) and the design properties (`{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}`) replaced; [export file names](book/src/guide/files.md#export-file-names))
 - `exports_folder` (string, default empty: export dialogs open in the folder last used; otherwise the folder File › Export, Save As Mesh and other saved files open in, until another folder is chosen in one of them. Desktop app only; [default folders](book/src/guide/files.md#default-folders), #5522)
 - `extrude_arrow_face_stops` (default true: dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it, takes their exact distance and outlines them, #2398; false: the drag moves in round steps only, as before)
 - `extrude_auto_to_object` (default true: in the Extrude dialog, with a profile picked, a face, vertex or parallel plane picked off its plane switches the extent to To Object, unless the Profiles box was clicked into; it applies to Extrude dialogs opened afterwards)
@@ -1258,6 +1289,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `right_drag_orbits` (default true; false: a right drag the mouse preset would orbit leaves the camera alone, #6492)
 - `nav_button_map` (default `{}`: every button follows the mouse mapping): what dragging a button does, by `left`, `middle`, `right`, `extra1` (side back), `extra2` (side forward) or `button6` to `button16` (the further buttons of a mouse with many), as `orbit`, `pan`, `zoom` or `none`, after any keys held (`shift+`, `ctrl+`, `alt+`), e.g. `{"extra1": "orbit", "extra2": "shift+pan"}`. A mapped button replaces the preset's bindings for it; a plain click on a side button still goes Back
 - `save_prompt_one_at_a_time` (default false: closing several tabs or quitting with more than one unsaved design asks once, in one "Save changes to N designs?" list; true restores one "Save changes?" prompt per design, #11680)
+- `scale_bar` (default false: a bar in the view's bottom left corner and the length it stands for, a round number in the design's units that changes with the zoom; in a perspective view the label says the length holds at the view's centre; the rect `view:scale_bar`; #375). Not in Preferences: the navigation bar's View menu turns it on and off (its row's handle `view:scale_bar_toggle`), and `view.scale_bar {enabled: bool}` sets the same preference.
 - `select_hidden_edges` (default false: v0.30.1 visible-only edge picking; true allows ordinary edge picks through faces in any visual style, including Fillet and Chamfer inputs; hidden bodies and section-clipped edges stay excluded)
 - `select_other_hidden` (default true: Select Other includes hidden geometry near the pointer; false restores the original visible-only list under the pointer)
 - `show_design_view_switcher` (default false: a design tab shows no view switcher until the design has a second view the user opened, and editing a sketch or opening Render stays in the view shown; true: every design tab shows its view switcher (handle `tab:switcher`), even with one view, and Render opens a view of its own as in 0.43.0; `design_views_as_tabs` true overrides it)
@@ -1273,8 +1305,8 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `sketch_move_classic` (default false: Move/Copy Sketch Entities shows its X/Y/Z triad, and a drawn 3D point drags freely; true: only its X Distance arrow, and a clicked drawn 3D point gets its own arrows, as before)
 - `sketch_open_look_at` (default true: creating or editing a sketch turns the view to face it; false leaves the view as it is, and Look At faces the sketch when asked)
 - `sketch_recent_snap` (default false: while drawing, the cursor snaps where the horizontal guide of one recent circle or arc centre or straight-edge midpoint meets the vertical guide of another; a free coordinate, with no constraint and no construction geometry. Off: those guides stay visual and the cursor does not move. The references come from `sketch_tracking_guides`, #8694)
-- `sketch_square_rectangles` (default false: Shift held while drawing a Two-Point or Center Rectangle prefers a line midpoint, as it always has. True: it makes the rectangle a square instead, the second corner going to the larger of the two distances from the first, and adds an Equal constraint between two sides so one dimension defines it, unless both a width and a height are typed, which then win; #18114)
 - `sketch_snap_to_visible_grid` (default true: a point in a sketch snaps to the crossings of the lines the grid draws when the pointer means one, and to the finer lattice between them otherwise; false: the point snaps to the finer lattice only, as before, #7114)
+- `sketch_square_rectangles` (default false: Shift held while drawing a Two-Point or Center Rectangle prefers a line midpoint, as it always has. True: it makes the rectangle a square instead, the second corner going to the larger of the two distances from the first, and adds an Equal constraint between two sides so one dimension defines it, unless both a width and a height are typed, which then win; #18114)
 - `sketch_state_icons` (default true: a sketch's icon in History and the browser takes the colour of its solve state, `sketch` under constrained, `sketch_fixed` fully constrained, `error` while its constraints conflict, and its tooltip names the state; false: every sketch row's icon and tooltip as before, #7245)
 - `sketch_tab_always` (default false: the SKETCH tab stays in the ribbon right after MODEL while no sketch is open; a tool in its CREATE or REFERENCE section then opens Create Sketch, on the selected plane or planar face or else on the plane picked next, and starts in the new sketch, #7904)
 - `smooth_wheel_zoom` (default true)
