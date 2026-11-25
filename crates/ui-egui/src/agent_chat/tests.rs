@@ -552,7 +552,7 @@ fn show_in_model_highlights_only_the_assistants_features() {
     assert!(!app.highlighted().contains(&Sel::Feature { id: plate }), "the earlier human edit is outside the card");
 
     app.run("select.set", json!({"items": []})).unwrap();
-    assert_eq!(app.highlighted(), [target.clone()], "changing selection keeps the separate model highlight");
+    assert_eq!(app.highlighted().as_slice(), std::slice::from_ref(&target), "changing selection keeps the separate model highlight");
     app.home.open = true;
     assert!(!app.highlighted().contains(&target), "Home does not show the model");
     let _ = crate::fonts::test_context().run_ui(egui::RawInput::default(), |ui| app.ui(ui));
@@ -583,8 +583,16 @@ fn showing_model_changes_does_not_resume_after_the_design_revision_changes() {
     frame(&mut app);
     assert_eq!(reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
     end_turn(&mut app);
-    let index = app.agent_chat.items.iter().position(|item| matches!(item, Item::Changes { .. })).unwrap();
-    let Item::Changes { features, .. } = &app.agent_chat.items[index] else { unreachable!() };
+    let (index, features) = app
+        .agent_chat
+        .items
+        .iter()
+        .enumerate()
+        .find_map(|(index, item)| match item {
+            Item::Changes { features, .. } => Some((index, features)),
+            _ => None,
+        })
+        .unwrap();
     assert_eq!(features.as_slice(), [feature]);
     app.agent_chat.open = true;
     app.home.open = false;
