@@ -875,10 +875,10 @@ pub(crate) fn run_new_component(app: &mut SolveApp, k: &Asm, inputs: &[SelInput]
             }
         };
         let features = moved.get("features").and_then(Value::as_array).cloned().unwrap_or_default();
-        if features.len() > 1 {
-            if let Err(error) = app.run("timeline.group", json!({ "name": made["name"], "features": features })) {
-                app.set_status(error, true);
-            }
+        if features.len() > 1
+            && let Err(error) = app.run("timeline.group", json!({ "name": made["name"], "features": features }))
+        {
+            app.set_status(error, true);
         }
         app.session.undo = history;
         Ok(())
