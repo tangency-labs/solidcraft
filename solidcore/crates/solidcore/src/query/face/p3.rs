@@ -134,7 +134,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::blend::fillet_section::interval::{round_down, round_up, Ivl};
+use crate::blend::fillet_section::interval::{round_up, Ivl};
 use crate::blend::fillet_section::series::V3;
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::{euclidian_step_off, CurveKind, StepOff};
@@ -1433,8 +1433,6 @@ fn cell_outside_face(
 struct NetCell {
     /// No point of the cell exceeds it.
     top: f64,
-    /// No point of the cell is below it.
-    least: f64,
     /// `S . dir` is monotone over the cell along u or along v: its partial that way keeps
     /// one sign.
     monotone: bool,
@@ -1459,16 +1457,11 @@ fn net_cell(net: &NetSurface, cell: &Extent2d, dir: Vec3) -> Result<Option<NetCe
         |q: V3<Ivl>| Ivl::from(dir.x) * q.x + Ivl::from(dir.y) * q.y + Ivl::from(dir.z) * q.z;
     // (the slack bounds how far the continued net, past its end by rounding, is from the
     // surface: a bound on the point, none on the partials)
-    let value = along(partials.at(0, 0));
-    let (top, least) = (round_up(value.hi + slack), round_down(value.lo - slack));
+    let top = round_up(along(partials.at(0, 0)).hi + slack);
     let one_sign = |i: Ivl| i.lo > 0.0 || i.hi < 0.0;
     let monotone =
         slack == 0.0 && (one_sign(along(partials.at(1, 0))) || one_sign(along(partials.at(0, 1))));
-    Ok((top.is_finite() && least.is_finite()).then_some(NetCell {
-        top,
-        least,
-        monotone,
-    }))
+    Ok(top.is_finite().then_some(NetCell { top, monotone }))
 }
 
 /// The greatest `S . dir` over the trimmed region of the face's surface, raised to `best`,
@@ -1505,10 +1498,12 @@ fn net_cell(net: &NetSurface, cell: &Extent2d, dir: Vec3) -> Result<Option<NetCe
 /// Not the fork's (#21660): on a surface open both ways the cells start from the box of
 /// the face's trims ([`trims_domain`]), and a cell those trims do not meet whose middle is
 /// outside the face is set aside ([`cell_outside_face`]). A surface without a subpatch (an
-/// offset) is decided on the enclosure of its definition over the cell ([`net_cell`]) as a
-/// B-spline's cell on its subpatch: 1. and 3. on the enclosure's bounds, a solve's value in
-/// the face only raising `best`, 4. on its first partials, and its bound counted at the
-/// limits.
+/// offset) is bounded over a cell by the enclosure of its definition ([`net_cell`]): 1. on
+/// that bound before solving, 4. on its first partials, a cell without a solution divided
+/// as a subpatch's, and the bound counted at the limits. Its solved cells keep the fork's
+/// rules: the enclosure is first order in the cell's size (over the whole trim box of a
+/// quarter cylinder of radius 1.5 it allows x up to 2.84), so cells decided on it alone
+/// would be divided to the limits around every greatest value inside the face.
 fn face_directed_max(
     k: &Kernel,
     lb: &mut LazyBrep<'_>,
@@ -1710,17 +1705,6 @@ fn face_directed_max_with<'b>(
             {
                 continue;
             }
-        } else if let Some(c) = enclosed {
-            // (#21660) as a subpatch's: a value at a point in the face only raises `best`,
-            // 1. is asked again of the enclosure, and 3. takes its least, above `best` and
-            // the zone tolerance, with every solution classified outside.
-            best = best.max(top.face_top);
-            if c.top <= best + EFF_ZERO_SQRT {
-                continue;
-            }
-            if top.outside && c.least > best + zone_tol {
-                continue;
-            }
         } else if top.found {
             if top.top <= best + EFF_ZERO_SQRT {
                 continue;
@@ -1733,7 +1717,7 @@ fn face_directed_max_with<'b>(
             if least.found && -least.top > best {
                 continue;
             }
-        } else if patch.is_none() {
+        } else if patch.is_none() && enclosed.is_none() {
             // No solution to decide by: the surface's loose box over the cell holds it.
             best = best.max(loose_top(k, lb, f, surface, &cell, dir)?);
             continue;
@@ -3927,12 +3911,16 @@ mod tests {
             &mut short,
         )
         .unwrap();
-        let trims = crate::query::contact::trim_boxes(&k, &b, f).unwrap().unwrap();
+        let trims = crate::query::contact::trim_boxes(&k, &b, f)
+            .unwrap()
+            .unwrap();
         let probe = Point2::new(
             0.5 * (domain.min().x + domain.max().x),
             0.5 * (domain.min().y + domain.max().y),
         );
-        let net = NetSurface::of_exact(&k, &surface, &[probe]).unwrap().unwrap();
+        let net = NetSurface::of_exact(&k, &surface, &[probe])
+            .unwrap()
+            .unwrap();
         let bound = net_cell(&net, &trims_domain(&trims, &domain), dir)
             .unwrap()
             .unwrap()
@@ -3940,33 +3928,43 @@ mod tests {
         assert!(got == bound && got >= 1.5, "got {got}, bound {bound}");
     }
 
-    /// #21660: the enclosure of the offset cylinder's definition over the face's trim box
-    /// holds the face's values in closed form, and its first partials decide monotony: x
-    /// (`1.5 cos a`) falls with the angle and z rises with v, both monotone; `(x + y) / sqrt
-    /// 2` peaks at 45 degrees inside the cell, not monotone. z is `v` exactly, so its bounds
-    /// are the trim's 0.25 and 0.75 to rounding.
+    /// #21660: the enclosure of the offset cylinder's definition holds the surface over a
+    /// cell, and its first partials decide monotony. Over an eighth of the face's trim box in
+    /// u, x (`1.5 cos a`) falls with the angle and z (`v`) rises: both monotone, z bounded by
+    /// the cell's own v to rounding. Over the whole box `(x + y) / sqrt 2` peaks at 45
+    /// degrees, inside it: not monotone, and bounded by at least 1.5.
     #[test]
     fn the_offsets_enclosure_bounds_a_cell_and_decides_its_monotony() {
         let (k, b, f) = offset_cylinder_face();
         let face = b.face(f).unwrap();
         let surface = face.surface.clone().unwrap();
         let domain = face.uv_domain;
-        let trims = crate::query::contact::trim_boxes(&k, &b, f).unwrap().unwrap();
-        let cell = trims_domain(&trims, &domain);
+        let trims = crate::query::contact::trim_boxes(&k, &b, f)
+            .unwrap()
+            .unwrap();
+        let whole = trims_domain(&trims, &domain);
+        let (u0, u1) = (whole.min().x, whole.max().x);
+        let (um, du) = (0.5 * (u0 + u1), (u1 - u0) / 16.0);
+        let cell = Extent2d::from_bounds(um - du, 0.25, um + du, 0.75);
         let probe = Point2::new(
             0.5 * (domain.min().x + domain.max().x),
             0.5 * (domain.min().y + domain.max().y),
         );
-        let net = NetSurface::of_exact(&k, &surface, &[probe]).unwrap().unwrap();
-        let on = |dir: Vec3| net_cell(&net, &cell, dir).unwrap().unwrap();
-        let (a0, a1) = (20.0_f64.to_radians(), 70.0_f64.to_radians());
-        let x = on(Vec3::new(1.0, 0.0, 0.0));
-        assert!(x.monotone, "{x:?}");
-        assert!(x.top >= 1.5 * a0.cos() - 1e-9 && x.least <= 1.5 * a1.cos() + 1e-9, "{x:?}");
-        let z = on(Vec3::new(0.0, 0.0, 1.0));
-        assert!(z.monotone, "{z:?}");
-        assert!((z.top - 0.75).abs() <= 1e-9 && (z.least - 0.25).abs() <= 1e-9, "{z:?}");
-        let diagonal = on(Vec3::new(1.0, 1.0, 0.0) * std::f64::consts::FRAC_1_SQRT_2);
+        let net = NetSurface::of_exact(&k, &surface, &[probe])
+            .unwrap()
+            .unwrap();
+        let on = |cell: &Extent2d, dir: Vec3| net_cell(&net, cell, dir).unwrap().unwrap();
+        let corner = surface
+            .evaluate_point(&k, Point2::new(um - du, 0.25))
+            .unwrap();
+        let x = on(&cell, Vec3::new(1.0, 0.0, 0.0));
+        assert!(x.monotone && x.top >= corner.x, "{x:?} {corner:?}");
+        let z = on(&cell, Vec3::new(0.0, 0.0, 1.0));
+        assert!(z.monotone && (z.top - 0.75).abs() <= 1e-9, "{z:?}");
+        let diagonal = on(
+            &whole,
+            Vec3::new(1.0, 1.0, 0.0) * std::f64::consts::FRAC_1_SQRT_2,
+        );
         assert!(!diagonal.monotone && diagonal.top >= 1.5, "{diagonal:?}");
     }
 
