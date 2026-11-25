@@ -193,6 +193,7 @@ fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
         offset_xy: [0.0; 2],
         captured: None,
         constraint: None,
+        dynamics: Vec::new(),
     });
     // One body supplies both old nearest-face snaps and persistent named-face snaps.
     // A scratch model shares its measurements, even though each sample changes the pose.
@@ -601,7 +602,7 @@ fn a_frame_without_turns_keeps_its_fingerprint() {
         let steps = super::ImportDigests::default();
         let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, None);
         // And the key its result is cached under, which leaves the chain out.
-        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, &ModelState::default(), &steps, 0).whole)
+        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, 0, &ModelState::default(), &steps, 0).whole)
     };
     let before = key(&doc);
     let turn = doc
@@ -875,6 +876,7 @@ fn a_cams_profile_is_meshed_once() {
         b: origin(occurrence),
         values: Vec::new(),
         limits: Vec::new(),
+        dynamics: Vec::new(),
         flip: false,
         offset: 0.0,
         angle: 0.0,
@@ -3360,6 +3362,56 @@ fn a_hole_classifies_its_bottom_in_the_bodies_there_only() {
     assert!((plate - through).abs() < 1e-6 * through, "{plate}");
     assert!((under.unwrap() - 50_000.0).abs() < 1e-6 * 50_000.0, "the slab is not drilled: {under:?}");
     assert_eq!(work.hole_points, 4, "{work:?}");
+}
+
+#[test]
+fn targeted_holes_and_their_copies_classify_only_the_plate() {
+    let mut doc = Document::new("plate and reference");
+    let reference = MeshData {
+        name: "Reference".into(),
+        // A tetrahedron whose box contains both holes. At the plate's bottom (z = 0)
+        // the mesh ends at x + y = 45, and the plate starts at x + y = 48.
+        positions: [0., 0., -5., 60., 0., -5., 0., 60., -5., 0., 0., 15.].into(),
+        triangles: [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3].into(),
+        color: None,
+        corner_normals: Default::default(),
+    };
+    doc.add_feature(FeatureKind::MeshImport { file: "reference.stl".into(), meshes: vec![reference] }, Some("Reference")).unwrap();
+    let plate = doc
+        .add_feature(
+            serde_json::from_value(serde_json::json!({"type": "box", "corner": [24, 24, 0], "length": "10", "width": "10", "height": "10"})).unwrap(),
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(plate).unwrap().body_names = vec!["Plate".into()];
+    let hole = doc
+        .add_feature(
+            serde_json::from_value(serde_json::json!({
+                "type": "hole", "position": [27, 27, 10], "direction": [0, 0, -1], "diameter": "3", "depth": "5",
+            }))
+            .unwrap(),
+            Some("Hole"),
+        )
+        .unwrap();
+    doc.feature_mut(hole).unwrap().participants = vec!["Plate".into()];
+    doc.add_feature(
+        serde_json::from_value(serde_json::json!({
+            "type": "pattern", "features": [hole],
+            "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "2", "spacing1": "4"},
+        }))
+        .unwrap(),
+        Some("Copy"),
+    )
+    .unwrap();
+
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    // Two samples either side of the depth of each of the two holes.
+    assert_eq!(work.hole_points, 4, "{work:?}");
+    let volume = kernel::measure(&model.state().body("Plate").unwrap().body).unwrap().volume;
+    let expected = 1000.0 - 2.0 * std::f64::consts::PI * 1.5 * 1.5 * 5.0;
+    assert!((volume - expected).abs() < 1e-6 * expected, "{volume} against {expected}");
 }
 
 /// A pattern of a hole builds its tools once when every copy is drilled the same way, and for

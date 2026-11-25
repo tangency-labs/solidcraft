@@ -206,6 +206,73 @@ fn interval_at<'a>(ivls: &'a mut ExtentNd, i: usize, op: &'static str) -> Result
         .ok_or_else(|| SolidError::invalid_input(op, "rIntervals index out of range"))
 }
 
+/// The variable radius solver's stations on a closed edge (its curve ends where it starts),
+/// their t (`user_doubles[0]`) unwrapped along the loop; `None` where the edge is open or no t
+/// moves. Each station's t is its foot on the edge's curve, and the station that closes the
+/// loop, at the point where the curve both starts and ends, takes the curve's first parameter
+/// rather than its last: sorted by t, the loop's last station came first, the round's
+/// stations stopped short of its end, and `Build` seeded its stations from feet a loop apart
+/// (a variable round of a cylinder's rim failed, #18542). In the trace's order (the stations'
+/// curve parameter) each t is moved by whole loops to within half a loop of the one before,
+/// and all of them then by whole loops to put their middle within the curve's interval.
+fn closed_loop_ts(
+    leader: &BSplineCurve,
+    points: &[TsectPnt],
+    tol: f64,
+) -> Result<Option<Vec<TsectPnt>>> {
+    let whole = leader.natural_interval();
+    let period = whole.length();
+    if !(period > 0.0 && period.is_finite()) || points.len() < 2 {
+        return Ok(None);
+    }
+    let start = leader.evaluate_point(whole.min())?;
+    let end = leader.evaluate_point(whole.max())?;
+    if start.distance(end) > tol {
+        return Ok(None);
+    }
+    let mut order: Vec<usize> = (0..points.len()).collect();
+    order.sort_by(|&i, &j| {
+        let cp = |i: usize| points.get(i).map_or(f64::NAN, |p| p.curve_parameter);
+        cp(i).total_cmp(&cp(j))
+    });
+    let mut out = points.to_vec();
+    let mut prev: Option<f64> = None;
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for &i in &order {
+        let Some(slot) = out.get_mut(i).and_then(|p| p.user_doubles.first_mut()) else {
+            continue;
+        };
+        if !slot.is_finite() {
+            continue;
+        }
+        if let Some(p) = prev {
+            *slot += ((p - *slot) / period).round() * period;
+        }
+        prev = Some(*slot);
+        lo = lo.min(*slot);
+        hi = hi.max(*slot);
+    }
+    // (the stations' middle within the curve's interval: a whole loop's stations then start
+    // at its first parameter, one piece's lie on its own part of the loop)
+    let shift = if lo.is_finite() && hi.is_finite() {
+        let mid = 0.5 * (lo + hi);
+        let within = 0.5 * (whole.min() + whole.max());
+        ((within - mid) / period).round() * period
+    } else {
+        0.0
+    };
+    let mut moved = false;
+    for (p, q) in out.iter_mut().zip(points) {
+        if let (Some(t), Some(&t0)) = (p.user_doubles.first_mut(), q.user_doubles.first()) {
+            if t.is_finite() {
+                *t += shift;
+                moved |= *t != t0;
+            }
+        }
+    }
+    Ok(moved.then_some(out))
+}
+
 /// Upstream `if (status != SM_SUCCESS) return SM_ERR;` after loading the equations: any
 /// failure becomes `SM_ERR`, as [`SolverFailure::JacobianNotLoaded`] caused by the
 /// failure; [`SolidError::Unported`] and [`SolidError::InvalidInput`] (an input upstream
@@ -2857,6 +2924,17 @@ impl CircularCrossSectionFsg {
         };
         let [center_line, rail1, rail2] = curves;
         let [uv1, uv2] = &inputs.uv;
+        // (the whole loop's stations unwrapped before they are shared out, so that each
+        // piece's lie on its own part of a closed edge)
+        let unwrapped = match inputs.ball.law.as_ref() {
+            Some(LawBall {
+                has_edgeuse: true,
+                edge: Some(edge),
+                ..
+            }) => closed_loop_ts(edge, inputs.points, approx_tol_3d)?,
+            _ => None,
+        };
+        let all_points = unwrapped.as_deref().unwrap_or(inputs.points);
         for span in ends.windows(2) {
             let [from, to] = *span else {
                 continue;
@@ -2872,8 +2950,7 @@ impl CircularCrossSectionFsg {
                 let mut interval = Extent1d::from_min_max(from, to);
                 curve.trim(k, &mut interval, TrimMode::Notify)?;
             }
-            let points: Vec<TsectPnt> = inputs
-                .points
+            let points: Vec<TsectPnt> = all_points
                 .iter()
                 .filter(|p| from <= p.curve_parameter && p.curve_parameter <= to)
                 .cloned()
@@ -3204,6 +3281,10 @@ impl CircularCrossSectionFsg {
                     return Ok(None);
                 }
                 let mut leader = edge.copy();
+                // (on a closed edge the station that closes the loop is dropped on its start:
+                // its t unwrapped to the loop's end)
+                let unwrapped = closed_loop_ts(&leader, points, approx_tol_3d)?;
+                let points = unwrapped.as_deref().unwrap_or(points);
                 // The edge's curve cut to where the stations are: an unbounded line is held as a
                 // NURB a million times the part's size, whose control points round at about
                 // 1e-9 mm, and every move of the round's frame (its recertificate is taken in its
@@ -3430,8 +3511,9 @@ impl super::p1::LinearCrossSectionFsg {
     /// rail of no length (the offsets meet on an axis: a cylinder's rim chamfered by its
     /// radius is a cone to its apex, whose centre line and rail on the top are one point,
     /// and a section has no length to run along), a
-    /// constant-distance solver on a face that is not a plane (its offsets vary along
-    /// the edge), a solver of another kind, or rails that are not those feet.
+    /// fixed chord on a curved face, a solver of another kind, or rails that are
+    /// not those feet. An equal-setback solver gets its offsets from the wedge
+    /// between the supports at the two feet.
     ///
     /// # Errors
     ///
@@ -3541,6 +3623,17 @@ impl super::p1::LinearCrossSectionFsg {
             // a chord's offsets are constant only where the wedge is: between planes
             (FilletSolverType::ConstDist, _, Some(l)) if planes => {
                 let sizes = ChamferDefinition::new(ChamferSize::Chord(l), wedge)?;
+                (sizes.offsets()?, sizes)
+            }
+            (FilletSolverType::ConstDist, _, None) => {
+                let Some(c) = ball.chamfer else {
+                    return Ok(None);
+                };
+                let sizes = if planes {
+                    ChamferDefinition::new(c.size, wedge)?
+                } else {
+                    c.at_every_station()?
+                };
                 (sizes.offsets()?, sizes)
             }
             _ => return Ok(None),

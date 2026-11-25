@@ -887,6 +887,15 @@ impl Extent2d {
     }
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for Extent2d {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self { min, max } = self;
+        min.content(d)?;
+        max.content(d)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
