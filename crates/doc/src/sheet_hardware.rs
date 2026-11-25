@@ -8,6 +8,7 @@
 //! starts, for a bend (docs/hardware-catalogue.md, "Near a bend").
 
 use solidcore_record::{Loop2, Region2, Vec2, Vec3};
+use solidcraft_develop::prelude::*;
 use solidcraft_kernel::services::prism::{loop_circle, loop_holds, same_circle, segment_distance};
 
 use crate::hardware_catalog::{HardwareSize, hardware_size};
