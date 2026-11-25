@@ -1094,6 +1094,36 @@ fn dimension_tool_dimensions_a_holes_diameter() {
     assert_eq!(read["text"], "Ø12.00", "{read}");
 }
 
+/// #21034: the curve where two corner fillets meet is neither a line nor a face-on circle, and the
+/// engine measures neither a length nor a size for it. The tool says so and picks nothing, rather
+/// than sending a length the engine refuses. A 30×20×10 box, 1:1 front view centred at (140, 180):
+/// the curve's point (0.586, 0.586, 9.414) is on paper at (125.586, 184.414).
+#[test]
+fn dimension_tool_refuses_a_curve_it_cannot_dimension_with_a_reason() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 1400, "height": 900}));
+    h.app.run("solid.box", json!({"length": 30, "width": 20, "height": 10, "body_name": "Block"})).unwrap();
+    h.app.run("solid.fillet", json!({"edges": [[15, 0, 10], [0, 10, 10]], "radius": 2, "tangent_chain": false})).unwrap();
+    h.app.run("drawing.create", json!({})).unwrap();
+    h.app.run("drawing.view.base", json!({"sheet": "Sheet 1", "view": "front", "scale": "1:1", "position_mm": [140, 180]})).unwrap();
+    crate::drawing_workspace::enter(&mut h.app, true).unwrap();
+    settle(&mut h);
+    let sheet = solidcraft_engine::doc::ids::encode(h.app.session.drawing("drawing.inspect").unwrap().sheets[0].id);
+    let line = h.app.run("drawing.scene.line", json!({"sheet": sheet, "point_mm": [125.586, 184.414], "band_mm": 0.3})).unwrap();
+    assert_eq!(line["line"]["source"]["kind"], "edge", "{line}");
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
+    h.frames(4);
+    let before = h.app.session.drawing("drawing.inspect").unwrap().dimensions.len();
+    click_paper(&mut h, 125.586, 184.414);
+    use crate::drawing_workspace::dimension::picked_shapes;
+    assert!(picked_shapes(&h.app).is_empty(), "{:?}", picked_shapes(&h.app));
+    let status = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+    assert!(status.contains("can't be dimensioned"), "{status}");
+    click_paper(&mut h, 100.0, 180.0);
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before, "nothing is placed");
+}
+
 /// A Ø12 rod 100 long along X, seen side on in a 1:2 front view centred at (140, 180) on A3: on paper
 /// its two outline lines (silhouettes, not edges) run from x = 115 to 165 at y = 177 and 183, and its
 /// ends, circles seen edge on, are the edges x = 115 and x = 165. The Dimension tool is on.
