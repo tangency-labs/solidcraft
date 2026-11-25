@@ -141,8 +141,6 @@ macro_rules! layout_preferences {
             show_design_view_switcher: bool = false, PAGE_LAYOUT;
             /// Show the optional document browser beside the design.
             show_document_browser: bool = false, PAGE_LAYOUT;
-            /// Group sketch chamfer modes into a submenu in Modify.
-            sketch_chamfer_submenu: bool = true, PAGE_LAYOUT => check_id("prefs.sketch_chamfer_submenu");
             /// Keep the SKETCH tab in the ribbon, right after MODEL, while no sketch is open; its drawing
             /// tools then start a sketch first (#7904).
             sketch_tab_always: bool = false, PAGE_LAYOUT;

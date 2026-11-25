@@ -2202,7 +2202,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                 ribbon::section_footer(ui, solidcraft_ui_text::tr("ui.ribbon_pin_footer"));
                                 return;
                             }
-                            let chamfer_menu = tab == "SKETCH" && *panel == "MODIFY" && app.preferences.sketch_chamfer_submenu;
+                            let chamfer_menu = tab == "SKETCH" && *panel == "MODIFY";
                             let grouped = if *panel == "CONSTRUCT" && !app.preferences.construct_menu_groups {
                                 cmds.iter().map(|c| (None, *c)).collect()
                             } else {
@@ -4670,7 +4670,7 @@ mod dropdown_tests {
     }
 
     #[test]
-    fn sketch_chamfer_submenu_opens_each_mode_and_can_restore_separate_rows() {
+    fn sketch_chamfer_submenu_opens_each_mode() {
         for grid in [false, true] {
             for id in SKETCH_CHAMFERS {
                 let mut h = crate::scenario::Harness::new();
@@ -4687,15 +4687,6 @@ mod dropdown_tests {
                 });
                 assert_eq!(command, Some(*id));
             }
-        }
-        let mut h = crate::scenario::Harness::new();
-        h.app.home.open = false;
-        h.app.preferences.sketch_chamfer_submenu = false;
-        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-        h.frames(4);
-        h.step(&json!({"click":{"handle":"panel:SKETCH:MODIFY"}})).unwrap();
-        for id in SKETCH_CHAMFERS {
-            assert!(crate::scenario::handle_at(&format!("dropdown:{id}")).is_some());
         }
     }
 
