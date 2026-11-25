@@ -448,6 +448,30 @@ fn a_strict_policy_never_falls_to_the_cpu() {
     assert_eq!((cpu["lands_on"].clone(), cpu["renderer"].clone()), (json!("cpu"), json!("cpu")), "{cpu}");
 }
 
+/// Linux machines without a Vulkan ICD still find llvmpipe over OpenGL under the software policy (#22109).
+#[test]
+fn linux_software_policy_finds_opengl_llvmpipe_without_vulkan_icd() {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    let o = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"))
+        .args(["gpu", "--policy", "software"])
+        .env("VK_DRIVER_FILES", "/nonexistent")
+        .env("LIBGL_ALWAYS_SOFTWARE", "1")
+        .output()
+        .unwrap();
+    if o.status.success() {
+        let reply: Value = serde_json::from_slice(&o.stdout).unwrap();
+        assert_eq!(reply["policy"], "software");
+        assert_eq!(reply["renderer"], "gpu-software");
+        assert_eq!(reply["lands_on"], "software");
+        let backends = reply["backends"].as_str().unwrap();
+        assert!(backends.contains("GL"), "{backends}");
+        let adapters = reply["adapters"].as_array().unwrap();
+        assert!(adapters.iter().any(|a| a["backend"] == "Gl" && a["tier"] == "software"), "{adapters:?}");
+    }
+}
+
 #[test]
 fn a_view_or_a_camera_that_cannot_be_used_is_an_error_and_writes_nothing() {
     let dir = Scratch::new();

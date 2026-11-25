@@ -132,6 +132,43 @@ pub fn native_backends() -> wgpu::Backends {
     }
 }
 
+/// The backends this platform supports for headless devices: Metal on macOS, Vulkan and D3D12
+/// on Windows, Vulkan and GL elsewhere; `WGPU_BACKEND` narrows them further.
+pub fn supported_backends() -> wgpu::Backends {
+    let supported = if cfg!(target_os = "macos") {
+        wgpu::Backends::METAL
+    } else if cfg!(target_os = "windows") {
+        wgpu::Backends::DX12 | wgpu::Backends::VULKAN
+    } else {
+        wgpu::Backends::VULKAN | wgpu::Backends::GL
+    };
+    match wgpu::Backends::from_env() {
+        Some(env) if !(env & supported).is_empty() => env & supported,
+        _ => supported,
+    }
+}
+
+/// The backends a headless device looks at for `policy`: hardware uses [`native_backends`],
+/// while software on Linux includes OpenGL so Mesa llvmpipe is available when no Vulkan
+/// software adapter exists (#22109); `auto` adds OpenGL if no Vulkan adapter qualifies.
+pub fn backends_for(policy: Policy) -> wgpu::Backends {
+    let native = if cfg!(target_os = "macos") {
+        wgpu::Backends::METAL
+    } else if cfg!(target_os = "windows") {
+        wgpu::Backends::DX12 | wgpu::Backends::VULKAN
+    } else {
+        match policy {
+            Policy::Software => wgpu::Backends::VULKAN | wgpu::Backends::GL,
+            _ => wgpu::Backends::VULKAN,
+        }
+    };
+    let supported = supported_backends();
+    match wgpu::Backends::from_env() {
+        Some(env) if !(env & supported).is_empty() => env & supported,
+        _ => native,
+    }
+}
+
 pub fn tier_of(t: wgpu::DeviceType) -> Tier {
     match t {
         wgpu::DeviceType::Cpu => Tier::Software,
@@ -172,10 +209,16 @@ pub fn start_instance(desc: wgpu::InstanceDescriptor) -> wgpu::Instance {
     wgpu::Instance::new(desc)
 }
 
-fn instance() -> wgpu::Instance {
+fn instance_for(backends: wgpu::Backends) -> wgpu::Instance {
     let mut desc = crate::instance_descriptor_from_env();
-    desc.backends = native_backends();
-    start_instance(desc)
+    desc.backends = backends;
+    let instance = start_instance(desc);
+    if backends.contains(wgpu::Backends::GL) && cfg!(not(any(target_os = "windows", target_os = "macos"))) {
+        // Never drop an instance that holds an OpenGL context on Linux: NVIDIA's driver deadlocks
+        // when one thread drops that context while another destroys a Vulkan device (#10232).
+        std::mem::forget(instance.clone());
+    }
+    instance
 }
 
 // Some Windows Vulkan drivers crash or hang while unloading their DLL during FLS cleanup.
@@ -189,14 +232,41 @@ fn retain_vulkan_instance(instance: &wgpu::Instance, found: &[wgpu::Adapter]) {
     }
 }
 
-/// Every adapter the native backends offer, best first.
-#[cfg(not(target_arch = "wasm32"))]
-fn adapters(instance: &wgpu::Instance) -> Vec<wgpu::Adapter> {
-    let mut all = pollster::block_on(instance.enumerate_adapters(native_backends()));
+fn adapters_on(backends: wgpu::Backends) -> Vec<wgpu::Adapter> {
+    if backends.is_empty() {
+        return Vec::new();
+    }
+    let instance = instance_for(backends);
+    let mut all = pollster::block_on(instance.enumerate_adapters(backends));
     #[cfg(target_os = "windows")]
-    retain_vulkan_instance(instance, &all);
+    retain_vulkan_instance(&instance, &all);
     all.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
     all
+}
+
+/// The adapters available under `policy` and the backends that were queried.
+#[cfg(not(target_arch = "wasm32"))]
+fn candidates_for(policy: Policy) -> (wgpu::Backends, Vec<wgpu::Adapter>) {
+    let backends = backends_for(policy);
+    let mut list = adapters_on(backends);
+    if policy == Policy::Auto && list.is_empty() && cfg!(not(any(target_os = "windows", target_os = "macos"))) {
+        // Under auto on Linux, if no Vulkan adapter qualifies, keep GL in the backend set
+        // for Mesa llvmpipe fallback (#22109).
+        let gl_backends = match wgpu::Backends::from_env() {
+            Some(env) if env.contains(wgpu::Backends::GL) => wgpu::Backends::GL,
+            None => wgpu::Backends::GL,
+            _ => wgpu::Backends::empty(),
+        };
+        if !gl_backends.is_empty() {
+            let gl_adapters = adapters_on(gl_backends);
+            if !gl_adapters.is_empty() {
+                list.extend(gl_adapters);
+                list.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
+                return (backends | gl_backends, list);
+            }
+        }
+    }
+    (backends, list)
 }
 
 /// What a survey found, which adapter the policy picks (`chosen` indexes `adapters`) and where
@@ -212,10 +282,11 @@ pub struct Survey {
 /// Every adapter the native backends offer, best first, and which one `policy` picks.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn survey(policy: Policy) -> Survey {
-    let found: Vec<AdapterReport> = adapters(&instance()).iter().map(|a| report(&a.get_info())).collect();
+    let (backends, candidates) = candidates_for(policy);
+    let found: Vec<AdapterReport> = candidates.iter().map(|a| report(&a.get_info())).collect();
     let chosen = found.iter().position(|r| policy.admits(r.tier));
     let lands_on = policy.lands_on(chosen.and_then(|i| found.get(i)).map(|r| r.tier));
-    Survey { backends: format!("{:?}", native_backends()), adapters: found, chosen, lands_on }
+    Survey { backends: format!("{backends:?}"), adapters: found, chosen, lands_on }
 }
 
 /// The backends the GPU path tracer may use among the native ones: Vulkan, and Metal on macOS
@@ -252,7 +323,8 @@ pub fn pick_path(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) -> O
 /// The adapter `policy` picks, with its report; `None` when no adapter qualifies.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn pick(policy: Policy) -> Option<(wgpu::Adapter, AdapterReport)> {
-    pick_among(adapters(&instance()), policy)
+    let (_, candidates) = candidates_for(policy);
+    pick_among(candidates, policy)
 }
 
 /// The adapter `policy` picks among `found`, as [`pick`] picks among the native backends' (best
@@ -313,5 +385,34 @@ mod tests {
         assert_eq!(native_backends() & !wgpu::Backends::METAL, wgpu::Backends::empty());
         let s = survey(Policy::Auto);
         assert!(s.adapters.iter().all(|a| a.backend == "Metal"), "{s:?}");
+    }
+
+    #[test]
+    fn backends_for_software_tier_includes_opengl_on_linux() {
+        let hw = backends_for(Policy::Hardware);
+        let sw = backends_for(Policy::Software);
+        let auto = backends_for(Policy::Auto);
+        let native = native_backends();
+        let supported = supported_backends();
+
+        if cfg!(target_os = "macos") {
+            assert_eq!(hw, wgpu::Backends::METAL);
+            assert_eq!(sw, wgpu::Backends::METAL);
+            assert_eq!(auto, wgpu::Backends::METAL);
+            assert_eq!(native, wgpu::Backends::METAL);
+            assert_eq!(supported, wgpu::Backends::METAL);
+        } else if cfg!(target_os = "windows") {
+            assert_eq!(hw, wgpu::Backends::DX12 | wgpu::Backends::VULKAN);
+            assert_eq!(sw, wgpu::Backends::DX12 | wgpu::Backends::VULKAN);
+            assert_eq!(auto, wgpu::Backends::DX12 | wgpu::Backends::VULKAN);
+            assert_eq!(native, wgpu::Backends::DX12 | wgpu::Backends::VULKAN);
+            assert_eq!(supported, wgpu::Backends::DX12 | wgpu::Backends::VULKAN);
+        } else {
+            assert_eq!(hw, wgpu::Backends::VULKAN, "hardware uses Vulkan alone");
+            assert_eq!(native, wgpu::Backends::VULKAN, "native backends remain Vulkan alone");
+            assert_eq!(auto, wgpu::Backends::VULKAN, "auto starts on Vulkan");
+            assert_eq!(sw, wgpu::Backends::VULKAN | wgpu::Backends::GL, "software tier includes OpenGL (#22109)");
+            assert_eq!(supported, wgpu::Backends::VULKAN | wgpu::Backends::GL);
+        }
     }
 }
