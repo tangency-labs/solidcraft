@@ -115,12 +115,12 @@ impl StraightPreview {
         };
         let color = scene.color(color);
         let cut_edge = scene.color(cut_edge);
-        let triangle = |scene: &mut GpuScene, points: [Vec3; 3], normal: Vec3| {
+        let triangle = |scene: &mut GpuScene, points: [Vec3; 3], normals: [Vec3; 3]| {
             // Removed material the preference leaves fully transparent: only the cut's outline.
             if operation == "cut" && !colors.cut_tint {
                 return;
             }
-            for point in points {
+            for (point, normal) in points.into_iter().zip(normals) {
                 if matches!(operation, "cut" | "intersect") {
                     scene.xray_tri(point.to_f32(), normal.to_f32(), color);
                 } else {
@@ -132,8 +132,8 @@ impl StraightPreview {
             let shift = surface.normal * distance;
             let (low, high) = if distance > 0. { (Vec3::ZERO, shift) } else { (shift, Vec3::ZERO) };
             for &[a, b, c] in &surface.triangles {
-                triangle(&mut scene, [a + low, c + low, b + low], -surface.normal);
-                triangle(&mut scene, [a + high, b + high, c + high], surface.normal);
+                triangle(&mut scene, [a + low, c + low, b + low], [-surface.normal; 3]);
+                triangle(&mut scene, [a + high, b + high, c + high], [surface.normal; 3]);
                 for point in [a + low, b + low, c + low, a + high, b + high, c + high] {
                     bounds.add(point);
                 }
@@ -141,13 +141,7 @@ impl StraightPreview {
             let edge_color = if operation == "cut" { cut_edge } else { scene.color(colors.edge) };
             for (&[a, b], &(corner, [na, nb])) in surface.edges.iter().zip(&surface.sides) {
                 for (points, normals) in [([a + low, b + low, b + high], [na, nb, nb]), ([a + low, b + high, a + high], [na, nb, na])] {
-                    for (point, normal) in points.into_iter().zip(normals) {
-                        if matches!(operation, "cut" | "intersect") {
-                            scene.xray_tri(point.to_f32(), normal.to_f32(), color);
-                        } else {
-                            scene.tri(point.to_f32(), normal.to_f32(), color);
-                        }
-                    }
+                    triangle(&mut scene, points, normals);
                 }
                 let up = corner.then_some((a + low, a + high));
                 for (a, b) in [(a + low, b + low), (a + high, b + high)].into_iter().chain(up) {
@@ -503,6 +497,38 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Graphics' Show removed material in red, off: a cut's feedback fills neither its ends nor
+    /// its walls, only its outline. An intersect is not removed material in red.
+    #[test]
+    fn a_cut_left_fully_transparent_fills_no_wall_either() {
+        let mut harness = Harness::new();
+        harness.app.run("solid.box", json!({"length": 4, "width": 3, "height": 5, "body_name": "Stock"})).unwrap();
+        let state = harness.app.session.world_state().unwrap();
+        let faces = state.body("Stock").unwrap().body.faces(0.001).unwrap();
+        let face = faces.into_iter().find(|face| face.plane_normal.is_some_and(|normal| normal.z > 0.99)).unwrap();
+        harness.app.session.selection = vec![Sel::Face { body: "Stock".into(), index: face.index, point: face.centroid }];
+        harness.app.start("solid.extrude");
+        let shown = Colors::from_tokens(&solidcraft_theme::Tokens::get());
+        let quiet = Colors { cut_tint: false, ..shown };
+        let mut scene = |op: &str, colors: Colors| {
+            if let Kind::Extrude { distance, operation, auto_op, .. } = &mut harness.app.dialog.as_mut().unwrap().kind {
+                *distance = "-2".into();
+                *operation = crate::dialogs::OPS.iter().position(|o| *o == op).unwrap();
+                *auto_op = false;
+            }
+            let commands = crate::dialogs::apply_commands(&harness.app, harness.app.dialog.as_ref().unwrap()).unwrap();
+            StraightPreview::default().compute(&harness.app, &commands, colors).unwrap().unwrap().scene
+        };
+        let triangles = |scene: &GpuScene| scene.xray.len() / (3 * crate::gpu::TRI_SIZE);
+        // Two triangles on each end and on each of the four walls.
+        assert_eq!(triangles(&scene("cut", shown)), 12);
+        let cut = scene("cut", quiet);
+        assert_eq!(triangles(&cut), 0, "no red on the ends or the walls");
+        assert!(cut.tris.is_empty() && cut.ghost.is_empty());
+        assert!(!cut.overlay.is_empty(), "the outline still shows where the cut goes");
+        assert_eq!(triangles(&scene("intersect", quiet)), 12);
     }
 
     #[test]

@@ -59,8 +59,9 @@ pub struct Colors {
     pub tint_new: bool,
     /// Whether removed material is filled in the cut colour (Graphics' Show removed material in
     /// red): the see-through cut and the ghost of the shape a feature replaces. Off: those fills
-    /// are left out altogether, so they are fully transparent and only outlines are drawn. A
-    /// combine's ghosts always show.
+    /// are left out altogether, so they are fully transparent, and a cut shows the bodies as it
+    /// leaves them ([`compute_cut`]). A combine's ghosts, and the tool of a solid that cuts
+    /// ([`PRIMITIVES`]), always show.
     pub cut_tint: bool,
     /// Whether the old shape of a body the preview replaces is drawn as a ghost, and a body that
     /// lost volume shows its new faces in the cut colour. Off (Scale): only the new body shows,
@@ -821,9 +822,18 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
             app.preview.moving = moving;
         }
         if let Some(job) = job {
-            app.preview.apply(key, job);
-            app.preview.busy = false;
-            return;
+            // A cut shown as the bodies it leaves is computed off the window thread, as a value
+            // moves the last one staying up; its outline shows until the first is ready.
+            let cut = job.as_ref().is_ok_and(|b| b.error.is_none()) && as_new_body(&cmds).is_some_and(|(_, op)| shows_cut(&op, colors));
+            if !cut {
+                app.preview.apply(key, job);
+                app.preview.busy = false;
+                return;
+            }
+            if !app.preview.active {
+                app.preview.apply(key, job);
+                app.preview.shown_key = None;
+            }
         }
         let mut scratch = app.session.scratch();
         if let Some((_, id, _)) = &plugin {
@@ -966,6 +976,11 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
 /// error. Other features: their whole preview ([`compute`]).
 fn compute_tool(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
     let Some((alt, op)) = as_new_body(cmds) else { return compute(s, cmds, colors) };
+    let colors = if op == "cut" && makes_primitive(cmds) { Colors { cut_tint: true, ..colors } } else { colors };
+    let cut = shows_cut(&op, colors).then(|| compute_cut(s, cmds, colors));
+    if let Some(Ok(Some(built))) = cut {
+        return Ok(built);
+    }
     // Where the view shows it: in a component placed away from its own frame (an imported
     // part stood upright) the model's frame would draw the tool at right angles to the face.
     let tool = match s.preview_world(&alt) {
@@ -975,7 +990,40 @@ fn compute_tool(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
     let mut b = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build_tool(&tool.before, &tool.after, colors, &op)))
         .map_err(|_| "the preview failed".to_string())?;
     b.bounds = state_bounds(&tool.after);
+    // A cut that fails: its tool's outline, with the error.
+    b.error = cut.and_then(Result::err);
     Ok(b)
+}
+
+/// The solids made whole, from no sketch or face. One that cuts shows its tool in red whatever
+/// Graphics' Show removed material in red says, as a combine's tools are: the solid is all there
+/// is to place and size, and one that cuts away the whole of a body (a second box made where the
+/// first is) would otherwise leave nothing to see.
+const PRIMITIVES: [&str; 6] = ["solid.box", "solid.coil", "solid.cone", "solid.cylinder", "solid.sphere", "solid.torus"];
+
+/// Whether the commands make or redefine one of [`PRIMITIVES`].
+fn makes_primitive(cmds: &[(String, Value)]) -> bool {
+    cmds.iter().any(|(command, p)| PRIMITIVES.contains(&p.get("command").and_then(Value::as_str).unwrap_or(command)))
+}
+
+/// Whether a feature with this operation previews as the bodies it leaves, not as its tool: a
+/// cut whose tool Graphics' Show removed material in red leaves transparent, which would show
+/// nothing but an outline on the whole body. Not on the web, where the boolean would hold the
+/// window (no threads).
+fn shows_cut(op: &str, colors: Colors) -> bool {
+    op == "cut" && !colors.cut_tint && cfg!(not(target_arch = "wasm32"))
+}
+
+/// The bodies a cut leaves, in place of the ones it cuts: the removed material is not drawn, so
+/// the view sees into the cut. `None` when the cut changes no body shown.
+fn compute_cut(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Result<Option<Built>, String> {
+    let preview = s.preview_visible_world(cmds).map_err(|e| e.to_string())?;
+    // A piece the cut splits off a body is still that body's material, not a New Body.
+    let colors = Colors { new_body: colors.body, ..colors };
+    let mut b = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build(&preview.before, &preview.after, colors)))
+        .map_err(|_| "the preview failed".to_string())?;
+    b.bounds = state_bounds(&preview.after);
+    Ok((!b.replaced.is_empty()).then_some(b))
 }
 
 fn extrusion_params<'a>(id: &str, params: &'a Value) -> Option<&'a Value> {
@@ -1263,6 +1311,9 @@ fn same(a: &Mesh, b: &Mesh) -> bool {
 /// version of changed or removed bodies.
 pub(crate) fn build_motion(before: &ModelState, after: &ModelState, mut colors: Colors) -> Built {
     colors.tint_new = false;
+    // A moved part's old place is ghosted in the cut colour, so only where the preference asks
+    // for that colour; nothing is cut, so nothing else is drawn in it.
+    colors.ghost &= colors.cut_tint;
     colors.cut_tint = false;
     build_scene(before, after, colors, None, true)
 }
@@ -2584,6 +2635,165 @@ mod tests {
         assert!(!b.scene.overlay.is_empty(), "the tool's outline still shows where the cut goes");
     }
 
+    /// Vertices of any triangle drawn in the cut colour, whichever layer draws it.
+    fn red_fill(scene: &GpuScene, c: Colors) -> usize {
+        [&scene.tris, &scene.trans, &scene.glass, &scene.xray, &scene.ghost]
+            .into_iter()
+            .map(|layer| count(scene, layer, crate::gpu::TRI_SIZE, c.removed))
+            .sum()
+    }
+
+    /// Graphics' Show removed material in red, off: a cut previews as the bodies it leaves, so the
+    /// view sees into it. A cut that removes nothing, or fails, shows its tool's outline alone.
+    #[test]
+    fn a_cut_without_its_red_shows_the_bodies_it_leaves() {
+        let shown = colors();
+        let quiet = Colors { cut_tint: false, tint_new: false, ..shown };
+        // A block, when there is one, and a rectangle sketched under it to cut up from.
+        let design = |block: bool, p0: [i32; 2], p1: [i32; 2]| {
+            let mut s = Session::default();
+            if block {
+                s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20, "body_name": "Block"})).unwrap();
+            }
+            s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+            s.execute("sketch.rectangle.two_point", &json!({"p0": p0, "p1": p1})).unwrap();
+            s.execute("sketch.finish", &json!({})).unwrap();
+            s
+        };
+        let cut = |distance: i32| vec![("solid.extrude".to_string(), json!({"distance": distance, "operation": "cut"}))];
+
+        let s = design(true, [15, 10], [25, 20]);
+        // Red on: the tool, over the body as it is.
+        let b = compute_tool(&s, &cut(10), shown).unwrap();
+        assert!(b.replaced.is_empty() && red_fill(&b.scene, shown) > 0);
+        // Red off: the pocketed body stands in for it.
+        let b = compute_tool(&s, &cut(10), quiet).unwrap();
+        assert_eq!((b.replaced.as_slice(), b.error.as_deref()), (["Block".to_string()].as_slice(), None));
+        assert_eq!(red_fill(&b.scene, quiet), 0);
+        let body = s.preview(&cut(10)).unwrap().after.body("Block").unwrap().mesh();
+        assert_eq!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, quiet.body), 3 * body.triangles.len(), "the cut body, whole");
+
+        // Both pieces of a body cut in two are its own material, not a New Body.
+        let s = design(true, [15, -5], [25, 35]);
+        assert_eq!(s.preview(&cut(30)).unwrap().after.bodies.len(), 2);
+        let b = compute_tool(&s, &cut(30), quiet).unwrap();
+        assert_eq!(b.replaced, ["Block"]);
+        assert_eq!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, quiet.new_body), 0);
+        assert_eq!(red_fill(&b.scene, quiet), 0);
+
+        // Nothing to show the cut by: its outline, and the body as it is.
+        for block in [true, false] {
+            let b = compute_tool(&design(block, [100, 0], [110, 10]), &cut(10), quiet).unwrap();
+            assert!(b.replaced.is_empty() && !b.scene.overlay.is_empty());
+            assert_eq!(red_fill(&b.scene, quiet), 0);
+            if !block {
+                assert!(b.error.is_some(), "a cut of no body says so");
+            }
+        }
+    }
+
+    /// A solid that cuts (Create menu) shows its tool in red whatever the preference, as a combine
+    /// does: a second box made where the first is, neither moved nor resized, cuts it away whole.
+    #[test]
+    fn a_solid_that_cuts_is_red_whatever_the_preference() {
+        let quiet = Colors { cut_tint: false, ..colors() };
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20, "body_name": "Block"})).unwrap();
+        for (command, size) in [
+            ("solid.box", json!({"length": 20, "width": 20, "height": 20})),
+            ("solid.cylinder", json!({"radius": 5, "height": 20})),
+            ("solid.cone", json!({"diameter": 10, "top_diameter": 4, "height": 20})),
+            ("solid.sphere", json!({"radius": 5})),
+            ("solid.torus", json!({"major": 8, "minor": 2})),
+            ("solid.coil", json!({"diameter": 40, "revolutions": 2, "pitch": 8, "section_size": 3})),
+        ] {
+            assert!(PRIMITIVES.contains(&command));
+            for (op, red) in [("cut", true), ("join", false), ("intersect", false), ("new", false)] {
+                let mut p = size.clone();
+                p["operation"] = json!(op);
+                let b = compute_tool(&s, &[(command.to_string(), p)], quiet).unwrap_or_else(|e| panic!("{command} {op}: {e}"));
+                assert_eq!(red_fill(&b.scene, quiet) > 0, red, "{command} {op}");
+                assert!(b.replaced.is_empty(), "{command} {op}: the body is left as it is");
+            }
+        }
+        // Through the dialog, with the preference itself off.
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.cut_preview_tint = false;
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Block"})).unwrap();
+        h.app.session.selection.clear();
+        h.app.start("solid.box");
+        let crate::dialogs::Kind::Primitive { operation, .. } = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("Box is open") };
+        *operation = crate::dialogs::OPS.iter().position(|o| *o == "cut").unwrap();
+        let fills = preview_red(&mut h);
+        assert!(!fills.is_empty() && fills.iter().all(|n| *n > 0), "{fills:?}");
+    }
+
+    /// The open dialog's preview, run until it settles: the red vertices of each scene it shows.
+    fn preview_red(h: &mut crate::scenario::Harness) -> Vec<usize> {
+        let ctx = egui::Context::default();
+        let began = std::time::Instant::now();
+        let mut fills = Vec::new();
+        loop {
+            update(&mut h.app, &ctx);
+            if let Some(scene) = h.app.preview.slot.lock().unwrap().take() {
+                fills.push(red_fill(&scene, super::colors(&h.app)));
+            }
+            if !h.app.preview.busy {
+                break;
+            }
+            assert!(began.elapsed() < std::time::Duration::from_secs(60), "the preview never settled");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(h.app.preview.error, None);
+        fills
+    }
+
+    /// The same through Extrude's dialog and the preference itself, for a picked face and for a
+    /// sketch profile (both have a quick preview of their own, `extrude_preview`): no triangle the
+    /// preview hands the renderer is red, from its first scene to its last.
+    #[test]
+    fn extrude_cut_draws_no_red_while_the_preference_is_off() {
+        use crate::dialogs::Kind;
+        use solidcraft_engine::Sel;
+        for profile in [false, true] {
+            for red in [true, false] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.preferences.cut_preview_tint = red;
+                h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Stock"})).unwrap();
+                h.app.session.selection = if profile {
+                    for (id, params) in [
+                        ("sketch.create", json!({"plane": "XY"})),
+                        ("sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [15, 15]})),
+                        ("sketch.finish", json!({})),
+                    ] {
+                        h.app.run(id, params).unwrap();
+                    }
+                    let sketch = h.app.session.model.state().sketches[0].feature;
+                    vec![Sel::Profile { sketch, index: 0 }]
+                } else {
+                    let state = h.app.session.world_state().unwrap();
+                    let faces = state.body("Stock").unwrap().body.faces(0.001).unwrap();
+                    let top = faces.into_iter().find(|f| f.plane_normal.is_some_and(|n| n.z > 0.99)).unwrap();
+                    vec![Sel::Face { body: "Stock".into(), index: top.index, point: top.centroid }]
+                };
+                h.app.start("solid.extrude");
+                let Kind::Extrude { distance, operation, auto_op, .. } = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("Extrude is open") };
+                *distance = if profile { "5" } else { "-5" }.into();
+                *operation = crate::dialogs::OPS.iter().position(|o| *o == "cut").unwrap();
+                *auto_op = false;
+                let fills = preview_red(&mut h);
+                assert!(!fills.is_empty(), "profile {profile}, red {red}: a scene was shown");
+                if red {
+                    assert!(fills.iter().all(|n| *n > 0), "profile {profile}: the tool is red while the preference is on: {fills:?}");
+                    assert!(h.app.preview.replaced.is_empty());
+                } else {
+                    assert!(fills.iter().all(|n| *n == 0), "profile {profile}: {fills:?}");
+                    assert_eq!(h.app.preview.replaced, ["Stock"], "profile {profile}: the body is shown cut");
+                }
+            }
+        }
+    }
+
     #[test]
     fn assembly_motion_keeps_the_real_part_solid_and_only_the_original_pose_red() {
         let mut a = Session::default();
@@ -2601,6 +2811,11 @@ mod tests {
         assert!(count(&motion.scene, &motion.scene.tris, crate::gpu::TRI_SIZE, c.body) > 0);
         assert!(count(&motion.scene, &motion.scene.ghost, 28, c.removed) > 0);
         assert_eq!(motion.replaced, ["Body1"]);
+        // Graphics' Show removed material in red, off: no red ghost of the old place either.
+        let quiet = build_motion(&before, &after, Colors { cut_tint: false, ..c });
+        assert_eq!(count(&quiet.scene, &quiet.scene.ghost, 28, c.removed), 0, "no red ghost of the old place");
+        assert!(count(&quiet.scene, &quiet.scene.tris, crate::gpu::TRI_SIZE, c.body) > 0, "the moved part is still drawn");
+        assert_eq!(quiet.replaced, ["Body1"]);
     }
 
     fn plate() -> Session {

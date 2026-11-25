@@ -13,8 +13,10 @@ macro_rules! graphics_preferences {
             /// Optional schematic markings on threaded cylindrical walls; off for new and older preferences.
             cosmetic_threads: bool = false, PAGE_GRAPHICS;
             /// A preview that removes material shows the removed shape as a red see-through ghost. Off:
-            /// the ghost is fully transparent and only its outline is drawn (`preview::Colors::cut_tint`).
-            /// A Combine's preview always shows its ghosts.
+            /// the ghost is fully transparent, and a cut shows the bodies as it leaves them
+            /// (`preview::Colors::cut_tint`).
+            /// A Combine's preview always shows its ghosts, and a solid that cuts (a box, a cylinder)
+            /// its tool.
             cut_preview_tint: bool = true, PAGE_GRAPHICS => check_id("prefs.cut_preview_tint");
             /// Shade the viewport in linear light with a sky fill, so dark parts keep their shape
             /// (#7974). Off by default: the viewport shades as it always has.
