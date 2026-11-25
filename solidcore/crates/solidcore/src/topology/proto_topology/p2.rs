@@ -1044,13 +1044,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// while vertex definitions were being imprinted (the split point of an edge definition,
     /// [`ProtoTopologyManager::edge_definition_split`]) joins its proto vertex after that
     /// combining, so it is never weighed against the definitions there: when one of them is
-    /// the same point (the two would be combined there, with the same distance allowance)
-    /// and is already imprinted, imprinting `vd` as well would put a second vertex
+    /// the same point (the two would be combined there, with the same distance allowance),
+    /// is already imprinted, and its final vertices lie on the topology `vd` is on, imprinting `vd` as well would put a second vertex
     /// beside that one's. `vd` instead takes that definition's final vertices in both B-reps
     /// (the nearest such definition when several qualify) and its classifications stay as
     /// they are; upstream would keep one of the two by the dimension of their topology, and
-    /// here the imprinted one is kept. Answers whether `vd` was combined (and so needs no
-    /// imprint).
+    /// here the imprinted one is kept. The edges ending there are fitted to the proto
+    /// vertex's position, not to `vd`'s, so no tolerance is grown for the gap between
+    /// them. Answers whether `vd` was combined (and so needs no imprint).
     ///
     /// # Errors
     ///
@@ -1067,6 +1068,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             return Ok(false);
         }
         let position = v.position();
+        let on = [v.src_topo(1), v.src_topo(2)];
         let pv = self.pv_live(v.proto_vertex())?;
         let siblings = self
             .proto_vertex(pv)
@@ -1086,7 +1088,15 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 continue;
             }
             let factor = self.vertex_combine_factor(brep, vd, other)?;
-            if self.can_combine_vertex_definitions_within(k, brep, vd, other, factor)? != 0 {
+            if self.can_combine_vertex_definitions_within(k, brep, vd, other, factor)? == 0 {
+                continue;
+            }
+            // the edge definitions split at `vd` find their end vertex among the proto
+            // vertex's final vertices by its connection to their own topology
+            // (`proto_vertex_final_vertex`), so the vertices taken over must lie on the
+            // topology `vd` is on; otherwise `vd` is imprinted
+            let [on1, on2] = on;
+            if are_connected(brep, on1, Some(v1))? && are_connected(brep, on2, Some(v2))? {
                 nearest = Some((dist, [v1, v2]));
             }
         }

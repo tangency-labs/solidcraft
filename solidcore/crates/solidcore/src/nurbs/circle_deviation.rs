@@ -88,7 +88,8 @@
 //! one of whose products underflows has no error bound (no bound for the curves);
 //! `D_z`, `ℓ` and `D_ρ`'s sum are raised to [`FLOOR`] when positive and below it, so that
 //! their squares are normal. The frame map's bound carries an absolute `16 · 2^-1074` for
-//! the at most six operations of a coordinate that may round in the subnormal range.
+//! the at most eleven operations of a coordinate that may round in the subnormal range
+//! (each losing at most `2^-1075` there).
 //!
 //! Deviations: none (no upstream counterpart). 3D curves of positive weights (or
 //! non-rational), degree 1 to [`MAX_DEGREE`], knots clamped; arcs of less than a half turn
@@ -935,8 +936,8 @@ mod tests {
     }
 
     /// The arc raised by `10^-200` against the arc in the circle's plane: their Hausdorff
-    /// distance is `10^-200` (closed form), whose square underflows; the bound is still at
-    /// least that, as its `D_z` is raised to [`FLOOR`].
+    /// distance is `10^-200` (closed form), whose square underflows. The bound is still
+    /// given, at least that distance and at most the rounding scale of a unit arc.
     #[test]
     fn an_offset_whose_square_underflows_is_still_bounded() {
         let c = circle(1.0, 0.0, 0.0, 0.0);
