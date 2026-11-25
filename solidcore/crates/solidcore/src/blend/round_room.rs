@@ -9,7 +9,8 @@
 use std::collections::BTreeSet;
 
 use crate::curve::curve::p8::CurveIntersectOptions;
-use crate::error::{SolidError, SM_ERR};
+use crate::error::blend::BlendFailure;
+use crate::error::{EntityRef, SolidError, SM_ERR};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::math::Point3;
@@ -95,8 +96,9 @@ impl SolutionObject for CurveHandle {
 /// The points where the boundary of the planar face `f` meets itself other than at a vertex
 /// its two edges share: every pair of the face's edges (of all its loops) intersected by the
 /// kernel's curve intersector (`GlobalCurveIntersect`, analytic for lines and conics) within
-/// the larger of their tolerances, a meeting within that tolerance of a vertex both edges end
-/// at being their joint. A face that is not planar gives none (its boundary is not judged).
+/// the larger of their tolerances, a meeting within that tolerance, or the vertex's own, of a
+/// vertex both edges end at being their joint. A face that is not planar gives none (its
+/// boundary is not judged).
 ///
 /// # Errors
 /// Those of the topology reads, the intersections and the evaluations.
@@ -118,7 +120,12 @@ pub fn boundary_crossings(k: &Kernel, b: &Brep, f: FaceId) -> Result<Vec<Point3>
         for &e2 in edges.iter().skip(i + 1) {
             let (a, c) = (b.edge(e1)?, b.edge(e2)?);
             let (Some(c1), Some(c2)) = (a.curve.as_ref(), c.curve.as_ref()) else {
-                return Err(SolidError::blend_missing(OP, "an edge's curve"));
+                let bare = if a.curve.is_none() { e1 } else { e2 };
+                return Err(SolidError::blend_at(
+                    OP,
+                    BlendFailure::EdgeWithoutCurve,
+                    EntityRef::Edge(bare),
+                ));
             };
             let tol = a.tolerance.max(c.tolerance);
             let found = c1.global_curve_intersect::<CurveHandle>(
@@ -141,9 +148,12 @@ pub fn boundary_crossings(k: &Kernel, b: &Brep, f: FaceId) -> Result<Vec<Point3>
                     continue;
                 };
                 let p = c1.evaluate_point(k, t)?;
+                // the meeting is their joint within the vertex's tolerance too: the zone
+                // in which the topology has its edges meet (an edge may end that far from it)
                 let mut joint = false;
                 for &v in &shared {
-                    joint |= (b.vertex(v)?.point - p).length() <= tol;
+                    let vertex = b.vertex(v)?;
+                    joint |= (vertex.point - p).length() <= tol.max(vertex.tolerance);
                 }
                 if !joint {
                     out.push(p);

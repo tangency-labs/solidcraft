@@ -1,5 +1,6 @@
 //! Contracts and result types for the selection commands in `cmd/edit.rs`: `select.set`,
-//! `select.filter`, `select.clear` and `select.same_look`.
+//! `select.filter`, `select.clear`, `select.same_look` and
+//! `select.sharp_edges`.
 //!
 //! `select.set` reads `items` and `add` from the raw JSON. Each item reads as the handler reads
 //! it ([`read_item`] is the handler's own first step, so a call the handler takes is a call the
@@ -152,13 +153,42 @@ pub struct SameLookParams {
     pub face: Option<usize>,
 }
 
-/// `select.all` takes no parameters. In an open sketch it selects every curve of that sketch,
-/// construction curves too, and every point of it that is on no curve; projected geometry and the
-/// sketch's origin are left out. Outside a sketch it selects every shown body. It replaces the
-/// selection; refused when that would be more than 10,000 items. Not an undo step. Ctrl+A (Cmd+A).
+/// Select the sharp edges of solid bodies: every edge between two faces whose outward normals
+/// turn by more than `angle_deg` across it somewhere along it (0 for faces that continue each
+/// other, 90 at a box's corner). The angle is measured on the faces' exact surfaces, never on the
+/// display mesh, and tangent edges (within a degree) are never selected. `body` names one body;
+/// without it every shown solid body is searched. Mesh bodies are left out. What it selects is
+/// `select.set`'s own reply. Not an undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct SharpEdgesParams {
+    /// The name of a solid body in the design. Default: every shown solid body.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// The threshold in degrees, 1 to 179: an edge is selected where its faces' normals turn by
+    /// more than this. Default: 30.
+    #[serde(default)]
+    #[schemars(range(min = 1.0, max = 179.0))]
+    pub angle_deg: Option<f64>,
+    /// Add to the current selection instead of replacing it. Default: false.
+    #[serde(default)]
+    pub add: Option<bool>,
+}
+
+/// `select.all`: in an open sketch it selects every curve of that sketch, construction curves
+/// too, and every point of it that is on no curve; projected geometry and the sketch's origin are
+/// left out. With a drawing open and the model not focused it selects the views, dimensions,
+/// balloons and notes on one of its sheets. Otherwise it selects every shown body. It replaces the selection; refused when that
+/// would be more than 10,000 items. Not an undo step. Ctrl+A (Cmd+A).
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
-pub struct SelectAllParams {}
+pub struct SelectAllParams {
+    /// With a drawing open and the model not focused: the sheet, by its id or its one name.
+    /// Default: the drawing's first sheet. Refused otherwise.
+    #[serde(default)]
+    pub sheet: Option<String>,
+}
 
 /// `select.clear` takes no parameters: it deselects everything. Not an undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -174,6 +204,16 @@ pub struct SelectClearResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
+
+/// `select.invert` takes no parameters. It selects, in place of the selected faces, the other
+/// faces of their bodies; in place of the selected edges, the other edges of their bodies; and in
+/// place of the selected bodies, the other bodies that are shown. A body selected together with
+/// faces or edges of it is not swapped for the other bodies: the invert stays inside it. Other
+/// selected items, such as features or sketch curves, stay selected. Refused when nothing of
+/// those three kinds is selected, or when the result would exceed 10,000 items. Not an undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SelectInvertParams {}
 
 /// How fine the window lets a click pick: the three words `select.filter` takes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]

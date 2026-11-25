@@ -1,0 +1,1 @@
+decides whether bodies meet by mesh triangles

@@ -661,22 +661,49 @@ fn a_pole_past_the_range_is_a_pole_within_the_reach() {
 }
 
 #[test]
-fn a_rational_net_past_the_range_is_refused() {
-    let mut rows = vec![
+fn a_rational_net_a_little_past_one_range_is_answered_and_past_both_or_far_past_refused() {
+    let rows = vec![
         vec![([0.0, 0.0, 0.0], 1.0), ([0.0, 1.0, 0.0], 1.0)],
         vec![([1.0, 0.0, 0.0], 1.0), ([1.0, 1.0, 0.0], 2.0)],
     ];
-    let s = spline([1, 1], &rows);
-    assert!(matches!(
-        collapse_near(&s, [1.1, 0.5], 1.0),
-        Err(EvalError::OffRange(_))
-    ));
-    rows[1][1].1 = 1.0;
     let s = spline([1, 1], &rows);
     assert_eq!(
         collapse_near(&s, [1.0 + 1e-3, 0.5], 1.0).unwrap(),
         Collapse::Neither
     );
+    // A hair past, as a file's trims end on a rational patch: a shift of its order.
+    let (near, delta) = onto_range(&s, [0.5, 1.0 + 1e-7]).unwrap().unwrap();
+    assert_eq!(near, [0.5, 1.0]);
+    assert!(delta > 0.0 && delta < 1e-5, "{delta}");
+    // Past both ranges the strip across is off its range too.
+    assert!(matches!(
+        collapse_near(&s, [1.0 + 1e-3, 1.0 + 1e-3], 1.0),
+        Err(EvalError::OffRange(_))
+    ));
+    // Far past, the shift is not under the reach.
+    assert!(collapse_near(&s, [3.0, 0.5], 1.0).is_err());
+}
+
+#[test]
+fn a_rational_overrun_shift_covers_a_circles_speed() {
+    // A quarter of the cylinder of radius 3 about z, height 2, as a rational quadratic: its
+    // speed along u at the end is 2 w 3 ≈ 4.24 (the end control leg times the degree and the
+    // weights' ratio).
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let s = spline(
+        [2, 1],
+        &[
+            vec![([3.0, 0.0, 0.0], 1.0), ([3.0, 0.0, 2.0], 1.0)],
+            vec![([3.0, 3.0, 0.0], w), ([3.0, 3.0, 2.0], w)],
+            vec![([0.0, 3.0, 0.0], 1.0), ([0.0, 3.0, 2.0], 1.0)],
+        ],
+    );
+    let o = 1e-4;
+    let (near, delta) = onto_range(&s, [1.0 + o, 0.5]).unwrap().unwrap();
+    assert_eq!(near, [1.0, 0.5]);
+    // At least twice the overrun times the circle's speed at its end, and not loose by much.
+    assert!(delta >= 2.0 * o * 2.0 * w * 3.0, "{delta}");
+    assert!(delta < 2.0 * o * 20.0, "{delta}");
 }
 
 #[test]
@@ -779,4 +806,617 @@ fn a_partial_bound_of_a_net_whose_points_overflow_is_refused() {
         partial_bound(&s, 0, [0.0, 1.0], 0.0, 0.0),
         Err(EvalError::Unevaluable(m)) if m.contains("not finite")
     ));
+}
+
+// ---- A pcurve past a rational net (`pcurve_onto_knots`) ----
+
+/// A rounded corner of a STEP part (#15999): a rational patch of degree 3 along u (knots
+/// `u[0]` ×4, `u[1]`, `u[2]` ×4) and 2 along v (one span on [0, 1], a quadratic arc), its
+/// five rows `rows[i]` in metres as the file writes them, here in mm, `weights[i]` along v.
+struct Corner {
+    u: [f64; 3],
+    rows: [[[f64; 3]; 3]; 5],
+    weights: [[f64; 3]; 5],
+}
+
+impl Corner {
+    fn surface(&self) -> EvalSurface {
+        let [a, b, c] = self.u;
+        let mut ctrl = Vec::new();
+        for j in 0..3 {
+            for (row, w) in self.rows.iter().zip(&self.weights) {
+                let p = row[j].map(|x| 1000.0 * x);
+                ctrl.push([w[j] * p[0], w[j] * p[1], w[j] * p[2], w[j]]);
+            }
+        }
+        EvalSurface::nurbs(
+            [3, 2],
+            [
+                vec![a, a, a, a, b, c, c, c, c],
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            ],
+            [5, 3],
+            ctrl,
+        )
+    }
+
+    /// The point at `(u, v)`, `u` on the range and `v` anywhere: the patch's one span along v
+    /// continued past it (its Bernstein form), by de Boor along u on each column.
+    fn continued(&self, u: f64, v: f64) -> Vec3 {
+        let [a, b, c] = self.u;
+        let knots = [a, a, a, a, b, c, c, c, c];
+        let k = if u < b { 3 } else { 4 };
+        let mut h = [0.0f64; 4];
+        let bern = [(1.0 - v) * (1.0 - v), 2.0 * v * (1.0 - v), v * v];
+        for (j, bj) in bern.iter().enumerate() {
+            let mut d: Vec<[f64; 4]> = (k - 3..=k)
+                .map(|i| {
+                    let (p, w) = (self.rows[i][j].map(|x| 1000.0 * x), self.weights[i][j]);
+                    [w * p[0], w * p[1], w * p[2], w]
+                })
+                .collect();
+            for r in 1..=3 {
+                for jj in (r..=3).rev() {
+                    let i = k - 3 + jj;
+                    let t = (u - knots[i]) / (knots[i + 4 - r] - knots[i]);
+                    let prev = d[jj - 1];
+                    for (x, y) in d[jj].iter_mut().zip(prev) {
+                        *x = (1.0 - t) * y + t * *x;
+                    }
+                }
+            }
+            for (x, y) in h.iter_mut().zip(d[3]) {
+                *x += bj * y;
+            }
+        }
+        Vec3::new(h[0], h[1], h[2]) * (1.0 / h[3])
+    }
+}
+
+/// Faces #1492 and #1527 of the part in #15999 (`Part Studio 1 - U-Basis rechts.step`).
+fn corners() -> [Corner; 2] {
+    [
+        Corner {
+            u: [
+                4.11996825544492e-18,
+                0.00251056122308457,
+                0.00502112244616914,
+            ],
+            rows: [
+                [
+                    [0.0095184968375232, -0.00986179878491862, 0.0134614064833007],
+                    [0.00984547792923133, -0.0105042605347972, 0.0134871606368189],
+                    [0.00993553687231624, -0.0105705161938981, 0.0127745340970221],
+                ],
+                [
+                    [0.00897867388977568, -0.0102463642058592, 0.0134188881743844],
+                    [0.00936996294472618, -0.0107379916504237, 0.0133681247951212],
+                    [0.00927460906300522, -0.0109053022311392, 0.0127460470296204],
+                ],
+                [
+                    [0.0080222599860908, -0.0112868486692588, 0.0137696671002265],
+                    [0.00825309201170418, -0.0114502503599108, 0.0134946237875554],
+                    [0.00809036813975832, -0.0117513433342993, 0.0132894503045143],
+                ],
+                [
+                    [0.00721215723437218, -0.0125213092646158, 0.0144252957625912],
+                    [0.00721049190656136, -0.0125934604247244, 0.0143424012975383],
+                    [0.00720882656029216, -0.0126656116150791, 0.0142595068556948],
+                ],
+                [
+                    [0.00683262629400762, -0.0131389917691748, 0.0147602487171921],
+                    [0.00683262629400761, -0.0131389917691748, 0.0147602487171921],
+                    [0.00683262629400761, -0.0131389917691748, 0.0147602487171921],
+                ],
+            ],
+            weights: [
+                [1.0, 0.742673477355744, 1.0],
+                [1.0, 0.792863107677938, 1.0],
+                [1.0, 0.940123873307597, 1.0],
+                [1.0, 0.999999999980117, 1.0],
+                [1.0, 1.0, 1.0],
+            ],
+        },
+        Corner {
+            u: [0.0260020748241999, 0.0289898331189168, 0.0319775914136337],
+            rows: [
+                [
+                    [0.00964600585684235, 0.0141999999999938, 0.0134707936396788],
+                    [0.00934382669159065, 0.0133434884416167, 0.01345010055111],
+                    [0.00925313175592443, 0.0132615384615327, 0.0143503289281726],
+                ],
+                [
+                    [0.0105235219186991, 0.0138640752829399, 0.0135308855311016],
+                    [0.0101604417047262, 0.0130699498274284, 0.0135269754561354],
+                    [0.0101348711266899, 0.0129514541077582, 0.0143912141505575],
+                ],
+                [
+                    [0.0122359098322075, 0.0129963238459051, 0.0134577370854064],
+                    [0.011783139391092, 0.0123590672770896, 0.0135169243785278],
+                    [0.0118605844965322, 0.0121504527806829, 0.0142672032412564],
+                ],
+                [
+                    [0.0137210539020434, 0.0118849769714294, 0.013100487137082],
+                    [0.0133258875385779, 0.0113457831363959, 0.0132066760081018],
+                    [0.0133651304708384, 0.0111245941273494, 0.013845191154838],
+                ],
+                [
+                    [0.0144232612793709, 0.0112683970776079, 0.0128683621841344],
+                    [0.0140589970531455, 0.0107713989527169, 0.0129887750694204],
+                    [0.014078199200318, 0.0105554434562535, 0.0135780028069607],
+                ],
+            ],
+            weights: [
+                [1.0, 0.740161731980124, 1.0],
+                [1.0, 0.754618828405926, 1.0],
+                [1.0, 0.790554928957286, 1.0],
+                [1.0, 0.828478792294795, 1.0],
+                [1.0, 0.846911961456441, 1.0],
+            ],
+        },
+    ]
+}
+
+/// The trims SMLib makes for these corners start 0.0079 and 0.0066 past v = 0 (about 9 µm
+/// on the part, inside the file's 0.02 mm). Each is put on the patch with a certified bound
+/// on the surface's move: no smaller than the move measured along the trim, and within twice
+/// it (the bound adds what moving along v does to the rows' weights across).
+#[test]
+fn a_pcurve_past_a_rational_net_is_put_on_it_within_the_tolerance() {
+    for (corner, past) in corners()
+        .iter()
+        .zip([0.007903823091784556, 0.006605362236920265])
+    {
+        let s = corner.surface();
+        let [a, _, c] = corner.u;
+        let pc = Curve2::Spline {
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![[a, -past], [c, 0.0]],
+        };
+        let onto = pcurve_onto_knots(&s, &pc, 0.02).unwrap().unwrap();
+        assert_eq!(
+            onto.pcurve,
+            Curve2::Spline {
+                knots: vec![0.0, 0.0, 1.0, 1.0],
+                points: vec![[a, 0.0], [c, 0.0]],
+            }
+        );
+        let moved = (0..=200)
+            .map(|k| {
+                let t = f64::from(k) / 200.0;
+                let (u, v) = (a + t * (c - a), -past * (1.0 - t));
+                (corner.continued(u, v) - corner.continued(u, 0.0)).len()
+            })
+            .fold(0.0, f64::max);
+        assert!(moved > 0.008, "{moved}");
+        assert!(
+            moved <= onto.displacement && onto.displacement <= 2.0 * moved,
+            "measured {moved}, bound {}",
+            onto.displacement
+        );
+        assert!(onto.displacement <= 0.02);
+    }
+}
+
+/// A trim along a corner's rounded edge (u at its start) from v = 1 to past v = 0 moves points
+/// all along v: the bound over the whole range is too wide in one piece (above 0.02 mm), and
+/// tight enough once the piece is cut into parts.
+#[test]
+fn a_pcurve_along_a_rational_net_past_its_range_is_bounded_in_parts() {
+    for (corner, past) in corners()
+        .iter()
+        .zip([0.007903823091784556, 0.006605362236920265])
+    {
+        let s = corner.surface();
+        let a = corner.u[0];
+        let (one, _) = rational_partial_bound(&s, 1, [-past, 1.0], [a, a], f64::INFINITY).unwrap();
+        let (parts, _) = rational_partial_bound(&s, 1, [-past, 1.0], [a, a], 0.0).unwrap();
+        assert!(past * one > 0.02 && parts < one, "{one} {parts}");
+        let pc = Curve2::Spline {
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![[a, 1.0], [a, -past]],
+        };
+        let onto = pcurve_onto_knots(&s, &pc, 0.02).unwrap().unwrap();
+        let moved = (0..=400)
+            .map(|k| {
+                let t = f64::from(k) / 400.0;
+                let (v, w) = (1.0 - t * (1.0 + past), 1.0 - t);
+                (corner.continued(a, v) - corner.continued(a, w)).len()
+            })
+            .fold(0.0, f64::max);
+        assert!(
+            moved <= onto.displacement && onto.displacement <= 0.02,
+            "measured {moved}, bound {}",
+            onto.displacement
+        );
+    }
+}
+
+/// A pcurve past both of a rational net's ranges is refused: the move across is not bounded
+/// there.
+#[test]
+fn a_pcurve_past_both_ranges_of_a_rational_net_is_refused() {
+    let corner = &corners()[0];
+    let s = corner.surface();
+    let [a, _, c] = corner.u;
+    let pc = Curve2::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[a - 1e-6, -1e-3], [c, 0.5]],
+    };
+    assert!(matches!(
+        pcurve_onto_knots(&s, &pc, 0.02),
+        Err(EvalError::Unevaluable(_))
+    ));
+}
+
+/// The rational spline of degree `deg` on `knots` whose net is `rows[i][j]` (i along u,
+/// Euclidean points with weights), at `uv`, each direction's end spans continued past its
+/// range: de Boor on the span the parameter is in, or the end span.
+fn continued_at(
+    deg: [usize; 2],
+    knots: &[Vec<f64>; 2],
+    rows: &[Vec<([f64; 3], f64)>],
+    uv: [f64; 2],
+) -> Vec3 {
+    let curve = |p: usize, k: &[f64], pts: &[[f64; 4]], t: f64| -> [f64; 4] {
+        let n = pts.len();
+        let mut s = p;
+        while s + 1 < n && k[s + 1] <= t {
+            s += 1;
+        }
+        let mut d = pts[s - p..=s].to_vec();
+        for r in 1..=p {
+            for j in (r..=p).rev() {
+                let i = s - p + j;
+                let a = (t - k[i]) / (k[i + p + 1 - r] - k[i]);
+                let prev = d[j - 1];
+                for (x, y) in d[j].iter_mut().zip(prev) {
+                    *x = (1.0 - a) * y + a * *x;
+                }
+            }
+        }
+        d[p]
+    };
+    let columns: Vec<[f64; 4]> = (0..rows[0].len())
+        .map(|j| {
+            let pts: Vec<[f64; 4]> = rows
+                .iter()
+                .map(|r| {
+                    let ([x, y, z], w) = r[j];
+                    [w * x, w * y, w * z, w]
+                })
+                .collect();
+            curve(deg[0], &knots[0], &pts, uv[0])
+        })
+        .collect();
+    let h = curve(deg[1], &knots[1], &columns, uv[1]);
+    Vec3::new(h[0], h[1], h[2]) * (1.0 / h[3])
+}
+
+/// The spline of `deg` on `knots` whose net is `rows[i][j]` (i along u).
+fn net(deg: [usize; 2], knots: &[Vec<f64>; 2], rows: &[Vec<([f64; 3], f64)>]) -> EvalSurface {
+    let (nu, nv) = (rows.len(), rows[0].len());
+    let mut ctrl = Vec::new();
+    for j in 0..nv {
+        for row in rows {
+            let ([x, y, z], w) = row[j];
+            ctrl.push([w * x, w * y, w * z, w]);
+        }
+    }
+    EvalSurface::nurbs(deg, knots.clone(), [nu, nv], ctrl)
+}
+
+/// The bound against `|∂S/∂x_d|` sampled on a grid over the whole strip, along u and along v,
+/// on a net of two spans along `d` with weights from 0.2 to 4.5 that the strip runs past at
+/// both ends: at the first level and at the finest, never below what is sampled.
+#[test]
+fn a_rational_partial_bound_holds_over_its_strip() {
+    let pts = [[0.0, 0.0], [1.0, 2.0], [3.0, 2.5], [4.0, 0.0]];
+    let weights = [1.0, 0.2, 3.0, 1.0];
+    let rows: Vec<Vec<([f64; 3], f64)>> = (0..4)
+        .map(|i| {
+            let [x, y] = pts[i];
+            (0..2)
+                .map(|j| {
+                    let j = f64::from(j);
+                    (
+                        [x, y + 0.3 * j, 2.0 * j + 0.5 * x],
+                        weights[i] * (1.0 + 0.5 * j),
+                    )
+                })
+                .collect()
+        })
+        .collect();
+    let two = vec![0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0];
+    let one = vec![0.0, 0.0, 1.0, 1.0];
+    let along = [-0.04, 1.04];
+    let across = [0.1, 0.9];
+    let transposed: Vec<Vec<([f64; 3], f64)>> = (0..2)
+        .map(|j| rows.iter().map(|r| r[j]).collect())
+        .collect();
+    for d in 0..2 {
+        let (deg, knots, net_rows) = if d == 0 {
+            ([2, 1], [two.clone(), one.clone()], &rows)
+        } else {
+            ([1, 2], [one.clone(), two.clone()], &transposed)
+        };
+        let s = net(deg, &knots, net_rows);
+        let at = |x: f64, y: f64| {
+            let uv = if d == 0 { [x, y] } else { [y, x] };
+            continued_at(deg, &knots, net_rows, uv)
+        };
+        let h = 1e-6;
+        let mut sampled = 0.0f64;
+        for a in 0..=400 {
+            let x = along[0] + (along[1] - along[0]) * f64::from(a) / 400.0;
+            for b in 0..=40 {
+                let y = across[0] + (across[1] - across[0]) * f64::from(b) / 40.0;
+                sampled = sampled.max((at(x + h, y) - at(x - h, y)).len() / (2.0 * h));
+            }
+        }
+        for target in [f64::INFINITY, 0.0] {
+            let (bound, eps) = rational_partial_bound(&s, d, along, across, target).unwrap();
+            assert!(
+                bound >= sampled * (1.0 - 1e-6),
+                "d {d}: {bound} < {sampled}"
+            );
+            assert!(eps < 1e-12, "{eps}");
+        }
+    }
+}
+
+/// A rational pcurve past a rational patch is put on it as a polynomial one is, its weights
+/// kept: the moved trim's points within the bound of where they were.
+#[test]
+fn a_rational_pcurve_past_a_rational_net_is_put_on_it() {
+    let corner = &corners()[0];
+    let s = corner.surface();
+    let [a, _, c] = corner.u;
+    let past = 0.007903823091784556;
+    let (m, w) = (0.5 * (a + c), 0.5);
+    let before = vec![[a, -past, 1.0], [m * w, 0.0, w], [c, 0.0, 1.0]];
+    let pc = Curve2::RationalSpline {
+        knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        homogeneous: before.clone(),
+    };
+    let onto = pcurve_onto_knots(&s, &pc, 0.02).unwrap().unwrap();
+    let Curve2::RationalSpline { homogeneous, .. } = &onto.pcurve else {
+        panic!("{:?}", onto.pcurve);
+    };
+    assert_eq!(
+        homogeneous,
+        &vec![[a, 0.0, 1.0], [m * w, 0.0, w], [c, 0.0, 1.0]]
+    );
+    let point = |h: &[[f64; 3]], t: f64| {
+        let b = [(1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t];
+        let mut q = [0.0; 3];
+        for (bk, hk) in b.iter().zip(h) {
+            for (x, y) in q.iter_mut().zip(hk) {
+                *x += bk * y;
+            }
+        }
+        [q[0] / q[2], q[1] / q[2]]
+    };
+    let moved = (0..=200)
+        .map(|k| {
+            let t = f64::from(k) / 200.0;
+            let ([u0, v0], [u1, v1]) = (point(&before, t), point(homogeneous, t));
+            (corner.continued(u0, v0) - corner.continued(u1, v1)).len()
+        })
+        .fold(0.0, f64::max);
+    assert!(
+        moved > 0.008 && moved <= onto.displacement && onto.displacement <= 0.02,
+        "{moved} {}",
+        onto.displacement
+    );
+}
+
+/// The corner moved 1e5 mm from the origin is put on its patch as at home: the bound's rounding
+/// follows the net's size, not its distance from the origin.
+#[test]
+fn a_pcurve_past_a_rational_net_far_from_the_origin_is_put_on_it() {
+    let [mut corner, _] = corners();
+    for row in &mut corner.rows {
+        for p in row.iter_mut() {
+            p[0] += 100.0;
+        }
+    }
+    let [a, _, c] = corner.u;
+    let pc = Curve2::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[a, -0.007903823091784556], [c, 0.0]],
+    };
+    let far = pcurve_onto_knots(&corner.surface(), &pc, 0.02)
+        .unwrap()
+        .unwrap();
+    let home = pcurve_onto_knots(&corners()[0].surface(), &pc, 0.02)
+        .unwrap()
+        .unwrap();
+    assert!(far.displacement <= 0.02);
+    assert!(
+        (far.displacement - home.displacement).abs() < 1e-6 * home.displacement,
+        "{} {}",
+        far.displacement,
+        home.displacement
+    );
+}
+
+/// The pcurve from u = −0.1 to 0.9 at v = 0.5, moved 0.1 along u onto [0, 1].
+fn past_u() -> Curve2 {
+    Curve2::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[-0.1, 0.5], [0.9, 0.5]],
+    }
+}
+
+/// A degree-(1, 1) rational patch is bounded; the same surface with every homogeneous
+/// coordinate times 1e-200, 1e-160 or 1e200 is refused, its weight products underflowing to
+/// zero, below the normal range (where their rounding is no longer relative) or overflowing to
+/// infinity, never accepted with a bound that leaves them out.
+#[test]
+fn a_rational_net_whose_weight_products_underflow_or_overflow_is_refused() {
+    let linear = vec![0.0, 0.0, 1.0, 1.0];
+    let patch = |scale: f64| {
+        let row = |u: f64, w: f64| vec![([u, 0.0, u], w * scale), ([u, 1.0, 2.0 * u], w * scale)];
+        net(
+            [1, 1],
+            &[linear.clone(), linear.clone()],
+            &[row(0.0, 1.0), row(1.0, 2.0)],
+        )
+    };
+    let home = pcurve_onto_knots(&patch(1.0), &past_u(), 1.0)
+        .unwrap()
+        .unwrap();
+    assert!(home.displacement > 0.1, "{}", home.displacement);
+    for (scale, why) in [
+        (1e-200, "products underflow"),
+        (1e-160, "products underflow"),
+        (1e200, "not finite"),
+    ] {
+        let scaled = pcurve_onto_knots(&patch(scale), &past_u(), 1.0);
+        assert!(
+            matches!(&scaled, Err(EvalError::Unevaluable(m)) if m.contains(why)),
+            "{scale:e}: {scaled:?}"
+        );
+    }
+}
+
+/// A patch whose points do not change along u, so it moves along u only through its weights:
+/// at v = 0.5, x = 1e-20 / (2 + u), and the move from u = −0.1 to 0 is 2.6e-22. With weights
+/// near 2e-154 the weights' part of the bound is below the normal range once it is times the
+/// patch's extent; it is never dropped, so the bound still covers the move.
+#[test]
+fn a_rational_net_moved_only_by_its_tiny_weights_is_bounded_over_its_move() {
+    let linear = vec![0.0, 0.0, 1.0, 1.0];
+    let patch = |scale: f64| {
+        let row = |w: f64| vec![([0.0, 0.0, 0.0], w * scale), ([1e-20, 0.0, 0.0], scale)];
+        net(
+            [1, 1],
+            &[linear.clone(), linear.clone()],
+            &[row(1.0), row(2.0)],
+        )
+    };
+    let moved = 1e-20 * (1.0 / 1.9 - 1.0 / 2.0);
+    for scale in [1.0, 2e-154] {
+        let onto = pcurve_onto_knots(&patch(scale), &past_u(), 1e-18);
+        assert!(
+            matches!(&onto, Ok(Some(o)) if o.displacement >= moved),
+            "{scale:e}: {onto:?}"
+        );
+    }
+}
+
+/// The #15999 patch along knots 0 to 1e300 with weights 1e10 and 2e10: the piece's length
+/// times its least weight overflows, and the bound is never taken as zero for it.
+#[test]
+fn a_rational_net_whose_span_times_its_weight_overflows_is_not_bounded_by_zero() {
+    let (l, w) = (1e300, 1e10);
+    let row = |u: f64, k: f64| vec![([u, 0.0, u], k * w), ([u, 1.0, 2.0 * u], k * w)];
+    let s = net(
+        [1, 1],
+        &[vec![0.0, 0.0, l, l], vec![0.0, 0.0, 1.0, 1.0]],
+        &[row(0.0, 1.0), row(1.0, 2.0)],
+    );
+    let pc = Curve2::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[-0.1 * l, 0.5], [0.9 * l, 0.5]],
+    };
+    let onto = pcurve_onto_knots(&s, &pc, 1.0);
+    assert!(
+        !matches!(&onto, Ok(Some(o)) if o.displacement < 0.1),
+        "{onto:?}"
+    );
+}
+
+/// Knots 0, 0, 0.5, 0.5, 1, 1 along u at degree 1: x is 0 below u = 0.5 and 100 above it, each
+/// piece flat along u, and the move from u = 0.48 to 0.522 at t = 0.58 crosses the jump. The
+/// knot's multiplicity is above the degree, so the knots do not fit and the move is refused.
+#[test]
+fn a_rational_net_that_jumps_at_a_knot_is_refused() {
+    let jump = |x: f64, w: f64| vec![([x, 0.0, 0.0], w), ([x, 1.0, 0.0], w)];
+    let s = net(
+        [1, 1],
+        &[vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]],
+        &[
+            jump(0.0, 1.0),
+            jump(0.0, 2.0),
+            jump(100.0, 1.0),
+            jump(100.0, 2.0),
+        ],
+    );
+    let onto = pcurve_onto_knots(&s, &past_u(), 1.0);
+    assert!(
+        matches!(&onto, Err(EvalError::Invalid(m)) if m.contains("multiplicity")),
+        "{onto:?}"
+    );
+}
+
+/// What a rational net cannot be bounded on is refused: a weight that turns negative past the
+/// range, a move past the tolerance, and a pcurve whose knots do not fit its points.
+#[test]
+fn what_a_rational_net_cannot_bound_is_refused() {
+    // Weights 1, 10, 1 along v: continued 0.1 past v = 0 the weight is about −0.98.
+    let at = |u: f64, v: f64, w: f64| ([u, v, u * v], w);
+    let s = net(
+        [1, 2],
+        &[vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]],
+        &[
+            vec![at(0.0, 0.0, 1.0), at(0.0, 0.5, 10.0), at(0.0, 1.0, 1.0)],
+            vec![at(1.0, 0.0, 1.0), at(1.0, 0.5, 10.0), at(1.0, 1.0, 1.0)],
+        ],
+    );
+    let pc = Curve2::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[0.5, -0.1], [0.5, 0.5]],
+    };
+    assert!(matches!(
+        pcurve_onto_knots(&s, &pc, 1.0),
+        Err(EvalError::Unevaluable(m)) if m.contains("certified positive")
+    ));
+    let corner = &corners()[0];
+    let s = corner.surface();
+    let [a, _, c] = corner.u;
+    let pc = Curve2::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[a, -0.007903823091784556], [c, 0.0]],
+    };
+    assert!(matches!(
+        pcurve_onto_knots(&s, &pc, 1e-4),
+        Err(EvalError::Unevaluable(m)) if m.contains("past the tolerance")
+    ));
+    let pc = Curve2::Spline {
+        knots: vec![0.0, 1.0],
+        points: vec![[a, -0.007903823091784556], [c, 0.0]],
+    };
+    assert!(matches!(
+        pcurve_onto_knots(&s, &pc, 0.02),
+        Err(EvalError::Invalid(_))
+    ));
+}
+
+/// A move along a direction within a strip is bounded by the surface's speed over the strip: at
+/// least the overrun times that speed, not loose by much, on a polynomial patch (speed 2) and on
+/// a rational quarter cylinder of radius 3 (speed about 4.24 at its end); a strip a rational net
+/// does not bound (across off its range) and a move that is not finite are refused.
+#[test]
+fn a_strip_shift_bound_covers_the_speed_over_the_strip() {
+    let o = 1e-3;
+    let s = flat((0.0, 1.0), (0.0, 1.0), 2.0);
+    let b = strip_shift_bound(&s, 0, [1.0, 1.0 + o], [0.2, 0.8], o).unwrap();
+    assert!(b >= 2.0 * o && b < 2.5 * o, "{b}");
+    let b = strip_shift_bound(&s, 1, [-o, 0.0], [0.0, 1.0], o).unwrap();
+    assert!(b >= 2.0 * o && b < 2.5 * o, "{b}");
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let s = spline(
+        [2, 1],
+        &[
+            vec![([3.0, 0.0, 0.0], 1.0), ([3.0, 0.0, 2.0], 1.0)],
+            vec![([3.0, 3.0, 0.0], w), ([3.0, 3.0, 2.0], w)],
+            vec![([0.0, 3.0, 0.0], 1.0), ([0.0, 3.0, 2.0], 1.0)],
+        ],
+    );
+    let b = strip_shift_bound(&s, 0, [1.0 - o, 1.0], [0.0, 1.0], o).unwrap();
+    assert!(b >= o * 2.0 * w * 3.0 && b < o * 20.0, "{b}");
+    assert!(strip_shift_bound(&s, 0, [1.0 - o, 1.0], [0.0, 1.5], o).is_err());
+    assert!(strip_shift_bound(&s, 0, [1.0 - o, 1.0], [0.0, 1.0], f64::NAN).is_err());
 }

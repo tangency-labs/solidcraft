@@ -23,11 +23,16 @@ const MAX_BODY: usize = 24_000;
 const MAX_REPORT: usize = 3 * 4 * MAX_ANSWER + MAX_BODY + 1000;
 const MAX_IMAGE_PIXELS: usize = 16_000_000;
 const ISSUE_URL: &str = "https://github.com/tangency-labs/solidcraft/issues/new";
-/// GitHub answers a longer link with `414 URI Too Long` (from about 8,200 characters).
-const MAX_URL: usize = 6000;
-/// Someone who isn't signed in is sent to sign in with the link to return to, encoded once more;
-/// past about 7,600 characters GitHub drops it and the form comes back empty after signing in.
-const MAX_SIGN_IN_URL: usize = 7000;
+/// GitHub turns away a request whose link and headers together pass about 7,000 bytes: someone
+/// who isn't signed in gets "Whoops, something went wrong!" instead of the form (#20510).
+const GITHUB_REQUEST: usize = 7000;
+/// What a browser sends besides the link: its own headers and GitHub's cookies. An estimate, with
+/// room to spare: a signed-out visit sends about 1,000 bytes, and signed-in cookies are larger.
+const HEADER_ROOM: usize = 3000;
+const SIGN_IN_URL: &str = "https://github.com/login?return_to=";
+const MAX_URL: usize = GITHUB_REQUEST - HEADER_ROOM;
+/// Someone who isn't signed in is sent to sign in with the link to return to, encoded once more.
+const MAX_SIGN_IN_URL: usize = GITHUB_REQUEST - HEADER_ROOM - SIGN_IN_URL.len();
 
 /// Draw CAD behind a report or native picker without delivering input or focus to editors.
 /// Fresh focus history also prevents inline editors from committing on report focus loss.
@@ -100,6 +105,8 @@ impl Drop for CadInput {
 #[derive(Default)]
 pub struct ReportState {
     pub draft: Option<Draft>,
+    /// Only typed answers, kept in memory until restored, discarded or the app exits.
+    earlier: Option<Answers>,
     pending: Option<Pending>,
     /// A screenshot waiting for the preview being computed (#7171).
     waiting: Option<Waiting>,
@@ -108,6 +115,8 @@ pub struct ReportState {
     /// The report's field that had focus when a capture hid it.
     refocus: Option<egui::Id>,
     cad_focus: Option<egui::Id>,
+    /// The commands run this session, for a report's recent steps (`ticket::record_step`).
+    pub(crate) steps: std::collections::VecDeque<serde_json::Value>,
 }
 
 /// How long a screenshot waits for a preview being computed before it shows it unfinished.
@@ -130,6 +139,8 @@ pub struct Draft {
     pub(crate) description: String,
     steps: String,
     expected: String,
+    opened_with: Answers,
+    restore_allowed: bool,
     image: Option<Arc<ColorImage>>,
     texture: Option<TextureHandle>,
     /// What the technical details are built from, to rebuild them on Retake (#7350).
@@ -164,6 +175,8 @@ pub struct Draft {
 impl Draft {
     fn new(title: String, body: String, source_signature: u64) -> Self {
         Self {
+            opened_with: Answers { title: title.clone(), ..Default::default() },
+            restore_allowed: false,
             title,
             title_prefix: String::new(),
             body,
@@ -187,6 +200,10 @@ impl Draft {
             github: false,
             agent: None,
         }
+    }
+
+    fn can_restore_answers(&self) -> bool {
+        self.restore_allowed && [&self.title, &self.description, &self.steps, &self.expected].iter().all(|s| s.trim().is_empty())
     }
 
     fn report_title(&self) -> String {
@@ -215,6 +232,40 @@ impl Draft {
             report.push_str(marker);
         }
         report
+    }
+}
+
+#[derive(Default)]
+struct Answers {
+    title: String,
+    description: String,
+    steps: String,
+    expected: String,
+}
+
+impl Answers {
+    fn edited(draft: &Draft) -> Option<Self> {
+        let keep = |text: &str, initial: &str, max| {
+            if text.trim().is_empty() || text == initial { String::new() } else { limited_chars(text, max) }
+        };
+        let initial = &draft.opened_with;
+        let answers = Self {
+            title: keep(&draft.title, &initial.title, 160),
+            description: keep(&draft.description, &initial.description, MAX_ANSWER),
+            steps: keep(&draft.steps, &initial.steps, MAX_ANSWER),
+            expected: keep(&draft.expected, &initial.expected, MAX_ANSWER),
+        };
+        [&answers.title, &answers.description, &answers.steps, &answers.expected].iter().any(|s| !s.is_empty()).then_some(answers)
+    }
+
+    fn restore(self, draft: &mut Draft) {
+        draft.title = self.title;
+        draft.description = self.description;
+        draft.steps = self.steps;
+        draft.expected = self.expected;
+        draft.focus_requested = false;
+        draft.missing_description = false;
+        draft.opened_github = false;
     }
 }
 
@@ -353,7 +404,7 @@ fn context_signature(app: &SolveApp, dialog: Option<&dialogs::Dialog>) -> u64 {
     if let Some(d) = dialog {
         let _ = write!(&mut h, "{:?}{:?}{:?}", d.kind, d.inputs, d.extra);
     }
-    let _ = write!(&mut h, "{:?}", app.session.selection);
+    let _ = write!(&mut h, "{:?}{}", app.session.selection, app.session.all_bodies_selected());
     h.0.finish()
 }
 
@@ -480,6 +531,10 @@ pub fn draft_for(app: &SolveApp, dialog: Option<&dialogs::Dialog>, error: Option
             }
         }
     }
+    if app.session.all_bodies_selected() {
+        let count = app.session.selected_count().unwrap_or(0);
+        let _ = writeln!(&mut context, "\nSelect All: every shown body ({count}) is selected.");
+    }
     context.push_str("\nSelected items (including occurrence paths):\n");
     context.push_str(&block(&debug(&app.session.selection.iter().take(32).collect::<Vec<_>>(), 3000)));
     for item in app.session.selection.iter().take(8) {
@@ -524,6 +579,7 @@ pub fn draft_for(app: &SolveApp, dialog: Option<&dialogs::Dialog>, error: Option
     let mut title = if error.is_some() { format!("{label}: operation failed") } else { String::new() };
     truncate(&mut title, 160);
     let mut draft = Draft::new(title, body, source_signature(app, dialog));
+    draft.restore_allowed = dialog.is_none() && error.is_none();
     draft.title_prefix = format!("{label}: ");
     // More than the details show of it, so a rebuild shows the same.
     draft.origin = Origin::View { error: error.map(|e| limited(e, 8000)) };
@@ -602,17 +658,20 @@ pub fn crash_draft(report: &serde_json::Value) -> Draft {
         truncate(&mut body, MAX_BODY - 32);
         body.push_str("\n[report context truncated]\n");
     }
-    let mut title = format!("Crash: {}", s("message").lines().next().unwrap_or_default());
-    truncate(&mut title, 160);
+    let title = ticket::readable(&format!("Crash: {}", s("message").lines().next().unwrap_or_default()), 160);
     let mut draft = Draft::new(title, body, 0);
     draft.origin = Origin::Crash;
     draft.description =
         limited(&format!("{what}{}.", command.map(|c| format!(" while running `{}`", limited(c, 160))).unwrap_or_default()), MAX_ANSWER);
+    draft.opened_with.description.clone_from(&draft.description);
     draft
 }
 
 /// Open a reviewed draft for a crash report (no screenshot: the view shows nothing of it).
 pub fn begin_crash(app: &mut SolveApp, ctx: &egui::Context, report: &serde_json::Value) {
+    if keep_open_draft(app, true) {
+        return;
+    }
     if app.issue_report.draft.is_none() {
         app.issue_report.cad_focus = ctx.memory(|m| m.focused());
     }
@@ -665,12 +724,25 @@ pub fn draft_url(title: &str, body: &str) -> (String, bool) {
 }
 
 pub fn begin(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::Dialog>, error: Option<&str>) {
+    if keep_open_draft(app, dialog.is_some() || error.is_some()) {
+        return;
+    }
     if app.issue_report.draft.is_none() {
         app.issue_report.cad_focus = ctx.memory(|m| m.focused());
     }
     cancel_capture(app);
     app.issue_report.draft = Some(window_draft(app, ctx, dialog, error));
     capture(app, ctx, dialog);
+}
+
+/// Reopening must not replace the reviewed context or the typing waiting for its screenshot.
+fn keep_open_draft(app: &mut SolveApp, new_context: bool) -> bool {
+    let state = &mut app.issue_report;
+    let Some(draft) = state.draft.as_mut() else { return false };
+    if new_context {
+        draft.note = solidcraft_ui_text::tr("ui.report_finish_current").to_string();
+    }
+    true
 }
 
 /// [`draft_for`] and the window it is shown in.
@@ -971,6 +1043,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             self::retake(app, ctx, dialog.as_ref());
         }
     } else {
+        if let Some(answers) = Answers::edited(&draft) {
+            app.issue_report.earlier = Some(answers);
+        }
         cancel_capture(app);
         // Pointer release may have happened during review; never finalize it against
         // the report's last cursor position when CAD interaction resumes.
@@ -1033,6 +1108,163 @@ mod tests {
         let pos = crate::scenario::handle_at("dialog:ok");
         assert!(pos.is_some(), "the report primary action is drawn");
         pos.map_or_else(Vec::new, |pos| click_commands_at(h, [f64::from(pos.x), f64::from(pos.y)]))
+    }
+
+    #[test]
+    fn issue_report_reopening_keeps_unfinished_answers_and_reviewed_context() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let mut draft = draft_for(&h.app, None, None);
+        draft.title = "Edited summary".into();
+        draft.description = "The report loses my notes".into();
+        draft.steps = "Open the report twice".into();
+        draft.expected = "Keep the notes".into();
+        draft.body = "Reviewed and redacted diagnostics".into();
+        let image = Arc::new(ColorImage::filled([8, 8], egui::Color32::GREEN));
+        draft.image = Some(image.clone());
+        let before = (draft.report_title(), draft.report_body());
+        h.app.issue_report.draft = Some(draft);
+        h.frames(4);
+        let ctx = h.ctx.clone();
+        begin(&mut h.app, &ctx, None, None);
+        let draft = h.app.issue_report.draft.as_ref().unwrap();
+        assert_eq!((draft.report_title(), draft.report_body()), before);
+        assert!(Arc::ptr_eq(draft.image.as_ref().unwrap(), &image));
+        assert!(!pending(&h.app), "reopening must not replace the reviewed screenshot");
+    }
+
+    #[test]
+    fn issue_report_both_close_controls_offer_to_restore_answers() {
+        for (close, [width, height]) in [("dialog:cancel", [1280, 720]), ("dialog:close", [640, 480])] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":width,"height":height}));
+            h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+            let draft = h.app.issue_report.draft.as_mut().unwrap();
+            draft.title = "Saved summary".into();
+            draft.steps = "Open, close and reopen the report".into();
+            draft.expected = "Offer my answers again".into();
+            draft.body = "Old diagnostics".into();
+            draft.image = Some(Arc::new(ColorImage::filled([8, 8], egui::Color32::GREEN)));
+            h.frames(8);
+            h.step(&json!({"text":"Keep this description after closing"})).unwrap();
+            h.step(&json!({"click":{"handle":close}})).unwrap();
+            assert!(h.app.issue_report.draft.is_none(), "closing releases CAD input");
+            let ctx = h.ctx.clone();
+            begin(&mut h.app, &ctx, None, None);
+            cancel_capture(&mut h.app);
+            let fresh_body = h.app.issue_report.draft.as_ref().unwrap().body.clone();
+            h.frames(8);
+            assert!(h.widget("Restore answers").is_some(), "{close}: closed answers must remain available");
+            let [x, y] = h.widget("Restore answers").unwrap();
+            assert!((0.0..f64::from(width)).contains(&x) && (0.0..f64::from(height)).contains(&y), "the recovery offer is visible");
+            h.step(&json!({"widget":"Restore answers"})).unwrap();
+            let draft = h.app.issue_report.draft.as_ref().unwrap();
+            assert_eq!(draft.description, "Keep this description after closing");
+            assert_eq!(draft.title, "Saved summary");
+            assert_eq!(draft.steps, "Open, close and reopen the report");
+            assert_eq!(draft.expected, "Offer my answers again");
+            assert_eq!(draft.body, fresh_body, "restoring answers keeps the new diagnostics");
+            assert!(draft.image.is_none(), "the old screenshot does not belong to the new report");
+            assert!(h.app.issue_report.earlier.is_none(), "restoring consumes the saved answers");
+        }
+    }
+
+    #[test]
+    fn issue_report_reopening_preserves_capture_and_held_typing() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+        h.frames(8);
+        let ctx = h.ctx.clone();
+        retake(&mut h.app, &ctx, None);
+        let token = h.app.issue_report.pending.as_ref().unwrap().token;
+        let body = h.app.issue_report.draft.as_ref().unwrap().body.clone();
+        let mut input = egui::RawInput { events: vec![egui::Event::Text("Typed during capture".into())], ..Default::default() };
+        hold_input(&mut h.app, &mut input);
+        begin(&mut h.app, &ctx, None, None);
+        begin(&mut h.app, &ctx, None, Some("A different error"));
+        begin_crash(&mut h.app, &ctx, &json!({"message":"A different crash"}));
+        assert_eq!(h.app.issue_report.pending.as_ref().unwrap().token, token);
+        assert_eq!(h.app.issue_report.held.len(), 1);
+        assert_eq!(h.app.issue_report.draft.as_ref().unwrap().body, body);
+        cancel_capture(&mut h.app);
+        h.frames(8);
+        assert_eq!(h.app.issue_report.draft.as_ref().unwrap().description, "Typed during capture");
+    }
+
+    #[test]
+    fn issue_report_recovery_never_overwrites_new_or_contextual_answers_and_can_be_discarded() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        combine(&mut h.app);
+        let mut started = draft_for(&h.app, None, None);
+        started.description = "A different report".into();
+        for draft in [
+            started,
+            draft_for(&h.app, None, Some("New error")),
+            draft_for(&h.app, h.app.dialog.as_ref(), None),
+            crash_draft(&json!({"message":"New crash"})),
+        ] {
+            h.app.issue_report.earlier = Some(Answers { description: "Saved answer".into(), ..Default::default() });
+            let before = draft.report_body();
+            h.app.issue_report.draft = Some(draft);
+            h.frames(8);
+            assert!(h.widget("Restore answers").is_none());
+            assert_eq!(h.app.issue_report.draft.as_ref().unwrap().report_body(), before);
+            assert_eq!(h.app.issue_report.earlier.as_ref().unwrap().description, "Saved answer");
+        }
+        h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+        h.frames(8);
+        h.step(&json!({"widget":"Discard answers"})).unwrap();
+        assert!(h.app.issue_report.earlier.is_none());
+        assert!(h.widget("Restore answers").is_none());
+        assert!(h.app.issue_report.draft.as_ref().unwrap().description.is_empty());
+    }
+
+    #[test]
+    fn issue_report_closing_empty_or_prefilled_drafts_keeps_earlier_answers() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.issue_report.earlier = Some(Answers { description: "Saved answer".into(), ..Default::default() });
+        for draft in [
+            draft_for(&h.app, None, None),
+            draft_for(&h.app, None, Some("Generated error summary")),
+            crash_draft(&json!({"message":"Generated crash summary"})),
+        ] {
+            h.app.issue_report.draft = Some(draft);
+            h.frames(8);
+            h.step(&json!({"click":{"handle":"dialog:close"}})).unwrap();
+            assert!(h.app.issue_report.draft.is_none());
+            assert_eq!(h.app.issue_report.earlier.as_ref().unwrap().description, "Saved answer");
+        }
+        let mut crash = crash_draft(&json!({"message":"Generated crash summary"}));
+        crash.steps = "My typed reproduction".into();
+        let answers = Answers::edited(&crash).unwrap();
+        assert_eq!(answers.steps, "My typed reproduction");
+        assert!(answers.title.is_empty() && answers.description.is_empty());
+    }
+
+    #[test]
+    fn issue_report_browser_handoff_does_not_prove_submission_or_discard_answers() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+        h.frames(8);
+        h.step(&json!({"text":"First report"})).unwrap();
+        open_commands(&mut h);
+        let ctx = h.ctx.clone();
+        begin(&mut h.app, &ctx, None, None);
+        assert_eq!(h.app.issue_report.draft.as_ref().unwrap().description, "First report");
+        assert!(!pending(&h.app));
+        h.step(&json!({"click":{"handle":"dialog:close"}})).unwrap();
+        assert_eq!(h.app.issue_report.earlier.as_ref().unwrap().description, "First report");
+        begin(&mut h.app, &ctx, None, None);
+        cancel_capture(&mut h.app);
+        h.frames(8);
+        h.step(&json!({"widget":"Restore answers"})).unwrap();
+        assert_eq!(h.app.issue_report.draft.as_ref().unwrap().description, "First report");
+        assert!(!h.app.issue_report.draft.as_ref().unwrap().opened_github);
     }
 
     #[test]
@@ -1427,7 +1659,7 @@ mod tests {
         let error = app.session.model.result(fillet.id).and_then(|r| r.error.clone()).unwrap();
         let latest = app.session.doc.features.iter().rev().find(|f| reportable(f)).unwrap();
         assert_ne!(latest.id, fillet.id, "Fillet1 must not be the latest operation");
-        assert!(app.session.selection.is_empty());
+        assert!(!app.session.has_selection());
         let at = crate::now_ms() - 125_000.0;
         for i in 0..12 {
             app.messages.push(&format!("message number {i:02}"), i % 2 == 0, at);
@@ -1513,9 +1745,9 @@ mod tests {
         assert_eq!(query(&url), [("title".to_string(), draft.report_title()), ("body".to_string(), body)]);
     }
 
-    /// GitHub refuses a link longer than about 8,200 characters, and drops one its sign-in page
-    /// encodes to more than about 7,600 (the form then comes back empty after signing in). A
-    /// report too long for that goes through the clipboard, never cut.
+    /// GitHub refuses a request whose link and headers pass about 7,000 bytes, and someone who
+    /// isn't signed in first goes to sign in with the link encoded once more (#20510). A report too
+    /// long for that goes through the clipboard, never cut.
     #[test]
     fn issue_report_link_stays_within_what_github_keeps() {
         for chunk in ["word ", "x", "ünïcødé ", "a&b=c#d+e%f\"g'\n"] {
@@ -1528,6 +1760,8 @@ mod tests {
                     refused = true;
                 } else {
                     assert!(url.len() <= MAX_URL && sign_in_length(&url) <= MAX_SIGN_IN_URL, "{chunk:?} × {n}");
+                    // A sign-in link of 6,940 characters got "Whoops" with a browser's headers.
+                    assert!(SIGN_IN_URL.len() + sign_in_length(&url) <= 4000, "{chunk:?} × {n}");
                     assert_eq!(query(&url), [("title".to_string(), "Fillet fails".to_string()), ("body".to_string(), body)]);
                     fitted = true;
                 }
@@ -1627,7 +1861,7 @@ mod tests {
         assert!(h.widget("Opens your browser and copies the report text for you to paste into GitHub.").is_some());
         assert!(h.widget("Reports are public. A GitHub account is required.").is_some());
         let commands = open_commands(&mut h);
-        assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &reviewed)), "commands: {commands:?}");
+        assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text.starts_with(&reviewed) && text.contains("drag the PNG file") && text.contains(".png"))), "commands: {commands:?}");
         assert!(
             commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if url.url.starts_with(ISSUE_URL) && !url.url.contains("&body=")))
         );
@@ -1750,6 +1984,81 @@ mod tests {
                 let why = std::fs::write(&path, b"").unwrap_err();
                 assert_eq!(note, format!("Could not save screenshot: {why}"));
             }
+        }
+    }
+
+    #[test]
+    fn issue_report_short_screenshot_handoff_copies_the_image_and_explains_pasting() {
+        for (os, shortcut) in [(egui::os::OperatingSystem::Nix, "Ctrl+V"), (egui::os::OperatingSystem::Mac, "Cmd+V")] {
+            let mut h = crate::scenario::Harness::new();
+            h.ctx.set_os(os);
+            h.app.home.open = false;
+            let mut draft = draft_for(&h.app, None, None);
+            draft.description = "The preview disappeared.".into();
+            let image = Arc::new(ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12]));
+            draft.image = Some(image.clone());
+            let reviewed = draft.report_body();
+            h.app.issue_report.draft = Some(draft);
+            h.frames(16);
+            let commands = open_commands(&mut h);
+            assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyImage(copied) if copied == image.as_ref())));
+            assert!(!commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(_))));
+            let url = commands
+                .iter()
+                .find_map(|c| match c {
+                    egui::OutputCommand::OpenUrl(url) => Some(&url.url),
+                    _ => None,
+                })
+                .unwrap();
+            let body = query(url).into_iter().find(|(key, _)| key == "body").unwrap().1;
+            assert!(body.contains("## Visual context\nThe screenshot is NOT attached yet. Click in this box and press"));
+            assert!(body.contains(shortcut));
+            assert!(!body.contains("Attach the reviewed screenshot"));
+            let draft = h.app.issue_report.draft.as_ref().unwrap();
+            assert_eq!(draft.report_body(), reviewed, "reviewed diagnostics remain editable and unchanged");
+            assert!(draft.note.contains("NOT attached yet") && draft.note.contains(shortcut));
+            assert!(draft.opened_github);
+        }
+    }
+
+    #[test]
+    fn issue_report_long_screenshot_handoff_saves_png_and_preserves_text_on_save_failure() {
+        let h = crate::scenario::Harness::new();
+        for (path, saved) in [(h.dir.join("report.png"), true), (h.dir.join("missing/report.png"), false)] {
+            let mut draft = draft_for(&h.app, None, None);
+            draft.description = "The preview disappeared.".into();
+            draft.steps = "Select a face and start Extrude.".into();
+            draft.body.push_str(&"Reviewed diagnostic context. ".repeat(300));
+            draft.image = Some(Arc::new(ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12])));
+            let reviewed = draft.report_body();
+            assert!(draft_url(&draft.report_title(), &reviewed).1);
+            let path = path.to_str().unwrap();
+            let output = h.ctx.run_ui(Default::default(), |_| form::open_github(&mut draft, &h.ctx, path));
+            assert!(!output.platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyImage(_))));
+            let text = output
+                .platform_output
+                .commands
+                .iter()
+                .find_map(|c| match c {
+                    egui::OutputCommand::CopyText(text) => Some(text),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(output.platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if !url.url.contains("&body="))));
+            if saved {
+                let png = image::load_from_memory_with_format(&std::fs::read(path).unwrap(), image::ImageFormat::Png).unwrap();
+                assert_eq!(png.into_rgba8().dimensions(), (4, 3));
+                assert!(text.contains("report.png") && text.contains("drag the PNG file"));
+                assert!(!text.contains(h.dir.to_str().unwrap()), "the public issue text never names the folder");
+                assert!(text.contains("NOT attached yet"));
+                assert!(draft.note.contains(path) && draft.note.contains("drag"));
+            } else {
+                assert_eq!(text, &reviewed);
+                assert!(text.contains("Attach the reviewed screenshot or a short example showing the problem."));
+                assert!(draft.note.starts_with("Could not save screenshot:"));
+            }
+            assert_eq!(draft.report_body(), reviewed);
+            assert!(draft.opened_github);
         }
     }
 
@@ -2045,6 +2354,7 @@ mod tests {
         assert!(draft.image.is_some(), "{}", draft.note);
         assert!(!draft.body.contains("still being computed"));
         // A selection changed while it waits: the report's context no longer matches the view.
+        app.issue_report = ReportState::default();
         app.preview.busy = true;
         begin(&mut app, &ctx, None, None);
         app.session.selection = vec![Sel::Feature { id: 1 }];
@@ -2265,6 +2575,7 @@ mod tests {
         assert!(!pending(&app));
         assert_eq!(app.issue_report.draft.as_ref().unwrap().image.as_ref().unwrap().size, [4, 3]);
         assert_eq!(app.shots.pending.len(), 1, "report cannot consume the control request");
+        app.issue_report = ReportState::default();
         begin(&mut app, &ctx, None, None);
         let token = app.issue_report.pending.as_ref().unwrap().token;
         app.cam.distance *= 2.0;
@@ -2280,7 +2591,7 @@ mod tests {
         let mut app = app();
         let ctx = crate::fonts::test_context();
         begin(&mut app, &ctx, None, None);
-        // As the app's window device has it (vendor/egui-wgpu asks for at least 8192).
+        // As the app's window device has it (the vendored egui-wgpu asks for at least 8192).
         app.issue_report.pending.as_mut().unwrap().max_side = 8192;
         let token = app.issue_report.pending.as_ref().unwrap().token;
         let [w, h] = [6016, 3384];
@@ -2352,11 +2663,13 @@ mod tests {
         tick(&mut app, &ctx);
         assert!(!pending(&app));
         assert!(app.issue_report.draft.as_ref().unwrap().note.contains("changed"));
+        app.issue_report = ReportState::default();
         let dialog = app.dialog.clone();
         begin(&mut app, &ctx, dialog.as_ref(), None);
         app.issue_report.pending.as_mut().unwrap().deadline = -1.0;
         tick(&mut app, &ctx);
         assert!(app.issue_report.draft.as_ref().unwrap().note.contains("No app frame"));
+        app.issue_report = ReportState::default();
         let dialog = app.dialog.clone();
         begin(&mut app, &ctx, dialog.as_ref(), None);
         let token = app.issue_report.pending.as_ref().unwrap().token;
@@ -2467,11 +2780,13 @@ mod tests {
                 error: "radius too large".into(),
                 origin: None,
                 code: None,
+                failure_code: None,
             }),
             log: vec!["[error] radius too large".into()],
             screenshot: Some(vec![1, 2, 3]),
             design: Some(("SecretBracket.sc".into(), b"SECRET-DESIGN-BYTES".to_vec())),
             crash: None,
+            ..Default::default()
         }
     }
 
@@ -2539,6 +2854,50 @@ mod tests {
         let out = payload::build(&form(), payload::Ticks::default(), &evidence, "t");
         assert!(!out.ticket.to_string().contains("PrivateWidget"));
         assert!(out.files.iter().all(|f| f.kind != "design"));
+    }
+
+    /// A failed importer reads a separate file; the report must never suggest the unrelated
+    /// design that happens to be open. Keep the filename and explicit importer, but never
+    /// expose option values or full local paths in recent steps (#18760).
+    #[test]
+    fn failed_plugin_import_report_omits_unrelated_design_and_keeps_safe_context() {
+        let mut app = app();
+        app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"PrivateWidget"})).unwrap();
+        let params = json!({
+            "path":"/Users/testuser/private/part.xyz",
+            "format":"example.import",
+            "options":{"scale":10,"api_key":"private-secret-123"}
+        });
+        ticket::record_step(&mut app, "file.import", &Err("importer refused the file".into()));
+        ticket::step_params(&mut app, "file.import", &params);
+        let ev = ticket::evidence(&app, None, None, None);
+        assert!(ev.design.is_none(), "an unrelated design cannot replay a failed importer");
+        assert_eq!(ev.design_from, Some("report.design_unrelated_import"));
+        assert_eq!(ev.session["session_start"], "new", "an unrelated design did not come from recovery");
+        assert!(ev.session.get("design_sha256").is_none(), "do not hash an unrelated design");
+        let step = ev.steps.last().unwrap();
+        assert_eq!(step["command"], "file.import");
+        assert_eq!(step["file"], "part.xyz");
+        assert_eq!(step["importer"], "example.import");
+        assert_eq!(step["option_keys"], json!(["api_key", "scale"]));
+        let text = step.to_string();
+        assert!(!text.contains("private-secret-123") && !text.contains("/Users/testuser/") && !text.contains("PrivateWidget"), "{text}");
+        let out = payload::build(&form(), payload::Ticks { design: true, repro: true, ..Default::default() }, &ev, "test");
+        assert!(out.files.iter().all(|file| file.kind != "design"), "even ticking Design cannot send an unrelated file");
+
+        // A failed modeling command still offers its design. A successful import step
+        // also does not suppress design attachments to a later report.
+        let failed = payload::Failing {
+            command: Some("solid.fillet".into()),
+            params: None,
+            error: "too large".into(),
+            origin: None,
+            code: None,
+            failure_code: None,
+        };
+        assert!(ticket::evidence(&app, None, Some(failed), None).design.is_some());
+        app.issue_report.steps.back_mut().unwrap()["ok"] = json!(true);
+        assert!(ticket::evidence(&app, None, None, None).design.is_some());
     }
 
     /// Frames until `done` says stop, collecting the addresses opened in the browser.
@@ -2610,7 +2969,7 @@ mod tests {
         frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
         // The step that went unanswered is named (#17932), after one more try.
         assert!(
-            matches!(&app.tickets.outcome, Some(tickets::Outcome::Queued(why)) if why.contains("network unreachable") && why.contains("at POST /api/drafts")),
+            matches!(&app.tickets.outcome, Some(tickets::Outcome::Queued(why)) if why.contains("network unreachable") && why.contains("at create report draft (POST /api/drafts)")),
             "{:?}",
             app.tickets.outcome
         );
@@ -2660,7 +3019,7 @@ mod tests {
         assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Opened(draft_page())));
         assert!(tickets::queue::list(&dir).is_empty(), "nothing kept");
         assert!(
-            app.session.log.iter().any(|l| l.contains("no answer to PUT /api/uploads/") && l.contains("timeout: global")),
+            app.session.log.iter().any(|l| l.contains("no answer to upload part 1 of log.txt (PUT /api/uploads/") && l.contains("timeout: global")),
             "{:?}",
             app.session.log
         );
@@ -2772,6 +3131,57 @@ mod tests {
         cancel_capture(&mut app);
         let _ = ctx.run_ui(Default::default(), |ui| show(&mut app, ui.ctx()));
         assert!(app.issue_report.draft.as_ref().unwrap().ticket.is_none(), "the GitHub draft, as before");
+    }
+
+    /// #17926: a report of a fillet the kernel refuses carries, as `repro.failing.code`, the
+    /// stable code of the kernel call the failure came from: the same code the failed command's
+    /// error has, and the same for a fillet of the timeline that fails so. A failure made from no
+    /// kernel call sends none.
+    #[test]
+    fn a_failed_fillets_report_carries_its_kernel_code() {
+        let wall = || {
+            let mut s = Session::default();
+            for (c, p) in [
+                ("parameters.change", json!({"name":"top_radius", "expression":"0.5 mm"})),
+                ("sketch.create", json!({"plane":"XY", "name":"Wall"})),
+                ("sketch.rectangle.two_point", json!({"p0":[0,0], "p1":[30,2]})),
+                ("sketch.finish", json!({})),
+                ("solid.extrude", json!({"distance":"10 mm", "body_name":"Wall"})),
+            ] {
+                s.execute(c, &p).unwrap();
+            }
+            s
+        };
+        let edges = json!([[15, 0, 10], [15, 2, 10]]);
+        let sent = |app: &mut SolveApp, error: &str| {
+            let draft = draft_for(app, None, Some(error));
+            let t = ticket::new_ticket(app, &draft, None);
+            let all = payload::Ticks { system: true, repro: true, log: true, screenshot: true, design: true, crash: true };
+            payload::build(&t.form, all, &t.evidence, "solidcraft test").ticket["repro"]["failing"].clone()
+        };
+        let as_json = |c: &solidcraft_engine::kernel::ErrorCode| json!({"call": c.call, "kind": c.kind, "operation": c.operation});
+
+        // a new fillet the kernel refuses: its command's error
+        let mut s = wall();
+        let e = s.execute("solid.fillet", &json!({"edges": edges, "radius": "1.5 mm"})).unwrap_err();
+        let code = e.error_code().cloned().expect("a kernel code");
+        let mut app = SolveApp::new(s, Default::default());
+        let failing = sent(&mut app, &e.to_string());
+        assert_eq!(failing["code"], as_json(&code), "{failing}");
+
+        // a fillet of the timeline that fails so after a parameter change: its result's
+        let mut s = wall();
+        s.execute("solid.fillet", &json!({"edges": edges, "radius": "top_radius"})).unwrap();
+        let _ = s.execute("parameters.change", &json!({"name":"top_radius", "expression":"1.8 mm"}));
+        let r = s.model.results.iter().find(|r| r.error.is_some()).cloned().unwrap();
+        assert_eq!(r.error_code.as_ref(), Some(&code), "one failure, one code");
+        let mut app = SolveApp::new(s, Default::default());
+        let failing = sent(&mut app, r.error.as_deref().unwrap());
+        assert_eq!(failing["code"], as_json(&code), "{failing}");
+
+        // a failure no kernel call made
+        let failing = sent(&mut app, "Synthetic command error");
+        assert!(failing.get("code").is_none(), "{failing}");
     }
 
     #[test]
@@ -2906,5 +3316,223 @@ mod tests {
         assert!(matches!(app.tickets.outcome, Some(tickets::Outcome::Failed(_))));
         assert!(std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0) == 0, "no report or file left behind");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #17911: a report made from a crash report attaches the crashed session's design (the
+    /// crash report's copy), not the empty design open now; with no copy, none, and it says so.
+    #[test]
+    fn ticket_report_from_a_crash_attaches_the_crashed_sessions_design_or_says_there_is_none() {
+        let ctx = crate::fonts::test_context();
+        let (mut app, _, _, _) = ticket_app(true, None);
+        let dir = temp_dir("crash-design");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut crashed = Session::default();
+        crashed.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let bytes = solidcraft_engine::io::write_design(&crashed.doc).unwrap();
+        let design = dir.join("design.sc");
+        std::fs::write(&design, &bytes).unwrap();
+        let report = json!({
+            "id": "c1", "kind": "unclean_exit", "message": "ended without a clean exit",
+            "command": {"command": "solid.pattern.rectangular", "params": {"count1": 5}},
+            "base": {"file": "/somewhere/Vent Panel.sc"},
+            "design_path": design.to_string_lossy(),
+            "recent_commands": [
+                {"command": "doc.open", "params": {"path": "/somewhere/Vent Panel.sc"}, "ok": true},
+                {"command": "select.set", "params": {"items": [{"type": "body", "name": "Body1"}]}, "ok": true},
+                {"command": "solid.fillet", "params": {"radius": 9}, "ok": false, "error": "radius too large"},
+            ],
+        });
+        begin_crash(&mut app, &ctx, &report);
+        let draft = app.issue_report.draft.take().unwrap();
+        let t = ticket::new_ticket(&mut app, &draft, None);
+        let ev = &t.evidence;
+        assert_eq!(ev.design.as_ref().map(|(n, b)| (n.as_str(), b.as_slice())), Some(("Vent Panel.sc", bytes.as_slice())));
+        assert_ne!(ev.design.as_ref().unwrap().1, solidcraft_engine::io::write_design(&app.session.doc).unwrap(), "not the design open now");
+        assert_eq!(ev.design_from, Some("report.design_from_crash"));
+        assert_eq!(ev.session["session_start"], "crashed");
+        assert_eq!(ev.session["design_sha256"], json!(tickets::api::sha256_hex(&bytes)));
+        // The crashed session's steps, opens included; a file's path is reduced to its name.
+        let steps: Vec<&str> = ev.steps.iter().filter_map(|s| s["command"].as_str()).collect();
+        assert_eq!(steps, ["doc.open", "select.set", "solid.fillet"]);
+        assert_eq!((ev.steps[0]["file"].as_str(), ev.steps[0].get("params")), (Some("Vent Panel.sc"), None));
+        assert_eq!(ev.steps[2]["error"], "radius too large");
+        let sent = payload::build(&form(), payload::Ticks { design: true, ..Default::default() }, ev, "t");
+        assert_eq!(sent.ticket["repro"]["steps"].as_array().map(Vec::len), Some(3));
+        assert!(sent.files.iter().any(|f| f.kind == "design" && f.name == "Vent Panel.sc" && f.bytes == bytes));
+
+        // No copy of the design: nothing attached, and the report and the dialog say why.
+        let mut report = report;
+        report.as_object_mut().unwrap().remove("design_path");
+        begin_crash(&mut app, &ctx, &report);
+        let draft = app.issue_report.draft.take().unwrap();
+        let t = ticket::new_ticket(&mut app, &draft, None);
+        assert!(t.evidence.design.is_none(), "never the empty design open now");
+        assert_eq!(t.evidence.design_from, Some("report.design_none_crash"));
+        assert!(t.evidence.session["design"].as_str().is_some_and(|d| d.starts_with("none")));
+        assert!(t.evidence.session.get("design_sha256").is_none());
+        let sent = payload::build(&form(), payload::Ticks { design: true, ..Default::default() }, &t.evidence, "t");
+        assert!(!sent.files.iter().any(|f| f.kind == "design"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A report made in a new, empty design while a design from a run that ended (a lost
+    /// graphics device) waits for recovery attaches that design (#17911).
+    #[test]
+    fn ticket_report_in_an_empty_design_attaches_the_design_left_for_recovery() {
+        let (mut app, _, _, _) = ticket_app(true, None);
+        let dir = temp_dir("recovery");
+        let mut left = Session::default();
+        left.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        std::sync::Arc::make_mut(&mut left.doc).name = "Light Switch".into();
+        let mut saver = solidcraft_engine::recovery::Autosaver::new(&dir, std::time::Duration::from_secs(1)).unwrap();
+        assert!(saver.save(&left).unwrap());
+        drop(saver);
+        crate::recovery_ui::start(&mut app, &dir, std::time::Duration::from_secs(600));
+        assert_eq!(app.recoverable.len(), 1);
+        let draft = draft_for(&app, None, None);
+        let t = ticket::new_ticket(&mut app, &draft, None);
+        let (name, bytes) = t.evidence.design.clone().unwrap();
+        assert_eq!(name, "Light Switch.sc");
+        assert_eq!(solidcraft_engine::io::read_design(&bytes).unwrap().features.len(), left.doc.features.len());
+        assert_eq!((t.evidence.design_from, &t.evidence.session["session_start"]), (Some("report.design_from_recovery"), &json!("recovered")));
+
+        // A design with something in it is the one the report is about.
+        app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        let draft = draft_for(&app, None, None);
+        let t = ticket::new_ticket(&mut app, &draft, None);
+        assert_eq!(t.evidence.design_from, None);
+        let attached = solidcraft_engine::io::read_design(&t.evidence.design.unwrap().1).unwrap();
+        assert_eq!(attached.features, app.session.doc.features);
+        if let Some(a) = app.autosave.take() {
+            drop(a);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// "Recent steps" were empty: the report sent no steps at all. Every command the session
+    /// ran goes, with its parameters, opens and selections included; a gesture's frames do not.
+    #[test]
+    fn ticket_report_recent_steps_are_the_commands_the_session_ran() {
+        let (mut app, _, _, _) = ticket_app(true, None);
+        app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        app.run("select.set", json!({"items": [{"type": "body", "name": "Body1"}]})).unwrap();
+        assert!(app.run("solid.fillet", json!({"edges": [], "radius": -1})).is_err());
+        // An open finishes on a worker: it is recorded without its folders.
+        app.finish_command("doc.open", &Ok(json!({"path": "/home/someone/clients/Bracket.sc"})));
+        ticket::step_params(&mut app, "doc.open", &json!({"path": "/home/someone/clients/Bracket.sc"}));
+        app.finish_command("view.navigate", &Ok(json!({"continuous": true})));
+        let draft = draft_for(&app, None, None);
+        let t = ticket::new_ticket(&mut app, &draft, None);
+        let steps = &t.evidence.steps;
+        let ids: Vec<&str> = steps.iter().filter_map(|s| s["command"].as_str()).collect();
+        assert_eq!(ids, ["solid.box", "select.set", "solid.fillet", "doc.open"]);
+        assert_eq!(steps[0]["params"]["length"], 10);
+        assert_eq!(steps[1]["params"]["items"][0]["name"], "Body1");
+        assert!(steps[2]["ok"] == false && steps[2]["error"].as_str().is_some_and(|e| !e.is_empty()));
+        assert!(steps[3].get("params").is_none() && steps[3]["file"] == "Bracket.sc");
+        // The parameters (names in the design) go only with the design, which holds them anyway.
+        let with_design = payload::build(&form(), payload::Ticks { design: true, ..Default::default() }, &t.evidence, "t");
+        assert_eq!(with_design.ticket["repro"]["steps"], json!(steps));
+        let without = payload::build(&form(), payload::Ticks::default(), &t.evidence, "t");
+        let bare: Vec<serde_json::Value> = steps
+            .iter()
+            .map(|s| {
+                let mut s = s.clone();
+                let o = s.as_object_mut().unwrap();
+                o.remove("params");
+                o.remove("file");
+                s
+            })
+            .collect();
+        assert_eq!(without.ticket["repro"]["steps"], json!(bare));
+        assert!(!without.ticket.to_string().contains("Body1") && !without.ticket.to_string().contains("Bracket"));
+        assert!(payload::repro_text(&t.evidence, false).contains("\"steps\""), "the dialog shows what goes");
+        assert!(!payload::repro_text(&t.evidence, false).contains("Body1") && payload::repro_text(&t.evidence, true).contains("Body1"));
+        // Bounded: the last MAX_STEPS.
+        for _ in 0..ticket::MAX_STEPS + 5 {
+            let _ = app.run("select.clear", json!({}));
+        }
+        assert_eq!(app.issue_report.steps.len(), ticket::MAX_STEPS);
+    }
+
+    /// The log a report attaches is the end of the log file on disk, the run before's end first
+    /// when this run has little, bounded in lines and bytes; not two lines of UI notices.
+    #[test]
+    fn ticket_report_log_is_the_end_of_the_log_file() {
+        let dir = temp_dir("log");
+        std::fs::create_dir_all(&dir).unwrap();
+        let previous: String = (0..1000).map(|i| format!("before {i}\n")).collect();
+        std::fs::write(dir.join(crate::log_file::PREVIOUS), previous).unwrap();
+        std::fs::write(dir.join(crate::log_file::FILE), "now 1\nnow 2\n").unwrap();
+        let lines = crate::log_file::tail_in(&dir, ticket::LOG_LINES, ticket::LOG_BYTES);
+        assert_eq!(lines.len(), ticket::LOG_LINES);
+        assert_eq!(lines[lines.len() - 3..], ["--- the run before ---", "now 1", "now 2"]);
+        assert_eq!(lines[lines.len() - 4], "before 999");
+        // Bytes bound it too, and a line cut by the bound is left out whole.
+        let long: String = (0..400).map(|i| format!("{i:04} {}\n", "x".repeat(1000))).collect();
+        std::fs::write(dir.join(crate::log_file::FILE), long).unwrap();
+        let lines = crate::log_file::tail_in(&dir, ticket::LOG_LINES, ticket::LOG_BYTES);
+        let bytes: usize = lines.iter().map(|l| l.len() + 1).sum();
+        assert!(bytes as u64 <= ticket::LOG_BYTES && lines.len() > 100, "{} lines, {bytes} bytes", lines.len());
+        let now = lines.iter().position(|l| l == crate::log_file::RUN_MARK).map_or(0, |i| i + 1);
+        assert!(lines[now..].iter().all(|l| l.len() == 1005) && lines.last().unwrap().starts_with("0399"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The error in a report's title and description is cut at a word, with "…", never mid-word
+    /// ("…Surface Natur"); the whole error stays in the failed operation's details.
+    #[test]
+    fn ticket_report_error_is_cut_at_a_word_and_kept_whole_in_the_details() {
+        let error = format!("SMLib boolean: SMLib's check refuses the result: {}Surface Natural Boundary", "Face has Coincident Edges; ".repeat(60));
+        let failing = payload::Failing { command: Some("solid.extrude".into()), error: error.clone(), ..Default::default() };
+        let mut app = failing_sample();
+        let mut draft = draft_for(&app, None, Some(&error));
+        draft.title_prefix = "EXTRUDE: ".into();
+        let t = ticket::new_ticket(&mut app, &draft, None);
+        for text in [t.form.title.as_str(), t.form.description.lines().find(|l| l.starts_with("**Error:**")).unwrap()] {
+            assert!(text.ends_with('…'), "{text}");
+            let kept = text.trim_end_matches('…').trim_start_matches("**Error:** ");
+            assert!(error.starts_with(kept.trim_start_matches("EXTRUDE: ")) || t.form.title == text, "{text}");
+            let next = error.get(kept.trim_start_matches("EXTRUDE: ").len()..).unwrap_or_default();
+            assert!(next.is_empty() || next.starts_with(char::is_whitespace) || next.starts_with(';'), "cut mid-word: {text}");
+        }
+        assert!(t.form.title.chars().count() <= payload::MAX_TITLE);
+        assert_eq!(t.evidence.failing.as_ref().map(|f| f.error.as_str()), Some(error.as_str()));
+        assert_eq!(payload::failing_json(&failing)["error"], json!(error));
+        assert_eq!(ticket::readable("short", 10), "short");
+        assert_eq!(ticket::readable("one two three four", 12), "one two…");
+        assert_eq!(ticket::readable("first line\nsecond line goes on", 20), "first line…");
+        assert_eq!(ticket::readable("Überlänge", 5), "Über…", "one long word is cut at a character");
+    }
+
+    /// A description left as the template, with "What were you trying to do?" unanswered, goes
+    /// without the bare question; an answer keeps it.
+    #[test]
+    fn ticket_report_drops_the_unanswered_question() {
+        crate::i18n::install();
+        let q = solidcraft_ui_text::tr("report.trying_to_do");
+        let template = format!("**Failed:** Fillet (`solid.fillet`)\n**Error:** radius too large\n\n{q}\n");
+        assert_eq!(ticket::without_unanswered(&template), "**Failed:** Fillet (`solid.fillet`)\n**Error:** radius too large\n");
+        assert_eq!(ticket::without_unanswered(&format!("{template}  \n\n")), "**Failed:** Fillet (`solid.fillet`)\n**Error:** radius too large\n");
+        let answered = format!("{template}Rounding the top edge\n");
+        assert_eq!(ticket::without_unanswered(&answered), answered);
+        let same_line = template.replace(q, &format!("{q} Rounding the top edge"));
+        assert_eq!(ticket::without_unanswered(&same_line), same_line);
+        assert_eq!(ticket::without_unanswered(q), "");
+
+        // Sent: the ticket's body has no bare question, and the title is not made from it.
+        let (mut app, _, _, _) = ticket_app(true, None);
+        // Read again: making the app loads the message catalogs, which a test run alone in its
+        // own process has not loaded before.
+        let q = solidcraft_ui_text::tr("report.trying_to_do");
+        let mut draft = draft_for(&app, None, Some("radius too large"));
+        draft.title_prefix = "Fillet: ".into();
+        let mut t = ticket::new_ticket(&mut app, &draft, None);
+        assert!(t.form.description.contains(q), "{}", t.form.description);
+        t.form.title.clear();
+        ticket::ready_to_send(&mut t.form);
+        let report = ticket::outgoing(&draft, &t);
+        assert!(!report.ticket["body"].as_str().unwrap().contains(q), "{}", report.ticket["body"]);
+        assert_ne!(report.ticket["title"].as_str(), Some(q));
     }
 }

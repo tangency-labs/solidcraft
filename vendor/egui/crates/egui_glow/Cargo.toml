@@ -1,0 +1,75 @@
+[package]
+name = "egui_glow"
+version.workspace = true
+authors = ["Emil Ernerfeldt <emil.ernerfeldt@gmail.com>"]
+description = "Bindings for using egui natively using the glow library"
+edition.workspace = true
+rust-version.workspace = true
+homepage = "https://github.com/emilk/egui/tree/main/crates/egui_glow"
+license.workspace = true
+readme = "README.md"
+repository = "https://github.com/emilk/egui/tree/main/crates/egui_glow"
+categories = ["gui", "game-development"]
+keywords = ["glow", "egui", "gui", "gamedev"]
+include = [
+  "../../LICENSE-APACHE",
+  "../../LICENSE-MIT",
+  "**/*.rs",
+  "Cargo.toml",
+  "src/shader/*.glsl",
+]
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--generate-link-to-definition"]
+
+[features]
+default = []
+
+## For the `winit` integration:
+## enable cut/copy/paste to os clipboard.
+##
+## if disabled a clipboard will be simulated so you can still copy/paste within the egui app.
+clipboard = ["egui-winit?/clipboard"]
+
+## For the `winit` integration:
+## enable opening links in a browser when an egui hyperlink is clicked.
+links = ["egui-winit?/links"]
+
+## Enable [`winit`](https://docs.rs/winit) integration. On Linux, requires either `wayland` or `x11`
+winit = ["egui-winit", "dep:winit"]
+
+## Enables Wayland support for winit.
+wayland = ["winit?/wayland"]
+
+## Enables x11 support for winit.
+x11 = ["winit?/x11"]
+
+
+[dependencies]
+egui = { workspace = true, default-features = false, features = ["bytemuck"] }
+egui-winit = { workspace = true, optional = true, default-features = false }
+
+bytemuck.workspace = true
+glow.workspace = true
+log.workspace = true
+profiling.workspace = true
+
+#! ### Optional dependencies
+## Enable this when generating docs.
+document-features = { workspace = true, optional = true }
+
+# Native:
+winit = { workspace = true, optional = true, default-features = false, features = ["rwh_06"] }
+
+
+[dev-dependencies]
+glutin = { workspace = true, default-features = true } # examples/pure_glow
+glutin-winit = { workspace = true, default-features = true }
+
+[[example]]
+name = "pure_glow"
+required-features = ["winit", "egui/default_fonts"]

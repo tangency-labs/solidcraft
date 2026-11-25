@@ -15,9 +15,12 @@ view.
 - **Title bar.** On Windows and Linux the application bar is the window's title bar. On the left:
   the File menu (New, Open, Save, Save As, Export…), undo and redo, the Home tab (the start page)
   and one tab per open design (each with its own undo history, selection and camera; a dot marks
-  unsaved changes). Double-click a design's tab to rename the design: type the name, then press
-  Enter or click elsewhere to keep it, or Esc to leave the old one (Preferences › Interface turns
-  this off, for a double-click that maximizes the window instead). On the right: Report a bug,
+  unsaved changes). Double-click a design's tab, or right-click it and choose **Rename**, to rename
+  the design: type the name, then press Enter or click elsewhere to keep it, or Esc to leave the old
+  one (Preferences › Interface turns the double-click off, for a double-click that maximizes the
+  window instead; **Rename** stays in the menu). **Save** and **Save As…** in a design tab's
+  right-click menu save that tab's design (it is shown first), as the File menu's do. On the right:
+  Report a bug,
   Help (?), Preferences (which hold the theme) and the window's buttons. On Linux, to have your
   desktop's own title bar and window buttons instead, set
   `SOLIDCRAFT_TITLEBAR=system` or put `"titlebar": "system"` in `graphics.json` in the settings
@@ -83,6 +86,11 @@ view.
   off: scroll zooms like the wheel); mouse wheels zoom and the thumb wheel pans sideways.
   On Linux, pinch needs the native Wayland window system
   (see [Troubleshooting](troubleshooting.md)).
+  In the web app, turn on **Pencil mode** in **Preferences › Sketch** to work with a pen such as
+  Apple Pencil and your fingers. A pen tap adds an item to the selection or removes it. A pen
+  double-tap selects the item's whole body, or its whole sketch. A pen tap on empty space clears
+  the selection. Fingers in the view only move the view, and a finger double-tap on a flat face
+  starts a sketch on it. Buttons and panels take finger taps as usual.
   To zoom with vertical two-finger scroll while holding a key, choose the key in Navigation › Zoom with two-finger scroll while holding (Cmd on macOS or Ctrl on Windows/Linux, Alt, or Control). It is off until you choose one.
   With the **Fusion** preset and two-finger pan enabled, hold **Shift** while scrolling with
   two fingers to orbit freely instead of panning. No click is needed. Releasing Shift returns
@@ -189,6 +197,11 @@ view.
   different folders, the sketch keeps a row of its own. The timeline along the bottom always lists
   features in creation order.
   Feature Folders can contain joints as well as features; closing a folder hides both behind one tile.
+  Click the view button in the History's header, with History placed at the **Bottom**, for a multi-track
+  component matrix view that maps features across their owning components, visualizes cross-component actions
+  with vertical connectors, highlights topological dependency corridors `[ ... ]` for safe reordering,
+  and supports folder grouping and cascading suppression (the 2D Timeline applies only to bottom placement;
+  placing History at the left or in the browser activates the 1D view). See [2D Timeline](timeline-2d.md).
 - **Status bar** (off by default: Preferences › Interface › **Status bar**). A thin bar along
   the window's bottom edge, below the timeline. From the right: the design's units (click them
   to change the design's units, one undo step), the open sketch's state in its colour (under
@@ -260,6 +273,11 @@ shortcut and help; the arrow keys move across and between rows. Rest the pointer
 two seconds and a pin in its corner can be clicked to pin it to the ribbon or remove it (a
 quicker click anywhere on the icon starts the command). Right-clicking the icon, or dragging it
 onto the ribbon, also pins it; a pinned command always shows its pin.
+
+To change the order of a section's menu, drag a command to another place in it (list or large
+icons): a line shows where it will go. A command stays within its group (Edges, Faces, …). The
+order is kept with the toolbar, and **Reset Toolbar** restores it. Two menus keep their built-in
+order and can't be rearranged: Sketch › **Create** and the **»** overflow menu.
 
 Interface › **Leave pinned commands out of the drop-down menus** (off by default) lists in a
 section's menu only the commands that are not already buttons on the ribbon. When the window is

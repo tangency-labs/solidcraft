@@ -94,6 +94,7 @@
 //!   [`Brep::refresh_cached_topology`]; nothing else changes.
 
 use crate::boolean::merge::MergeOptions;
+use crate::error::boolean::BooleanStage;
 use crate::error::{Result, SolidError};
 use crate::geom::a_object::BooleanOperation;
 use crate::kernel::Kernel;
@@ -312,11 +313,11 @@ fn copy_pairs(
 ///   (the triangle inequality), so at most the larger end distance at every `s`: both
 ///   segments lie within it of each other. The pairing with the smaller bound is taken; each
 ///   end's coordinate error `e` moves it by at most `sqrt(3) e < 2 e`.
-/// - Two B-splines (no other kind: their evaluation is their NURB's) on the same interval,
-///   inside both NURBs' domains: at every parameter of the NURBs' common domain the two are
-///   within [`certified_distance`](crate::nurbs::crv_deviation::certified_distance) of each
-///   other, so each edge's point at `t` is within it of the other's point at the same `t`.
-///   Rational and 2D NURBs, and NURBs on different domains, have no bound.
+/// - Two B-splines (no other kind: their evaluation is their NURB's), each interval inside its
+///   NURB's domain: [`certified_hausdorff`](crate::nurbs::crv_deviation::certified_hausdorff)
+///   of the NURBs over the two intervals, which need not be equal (two edges computed apart
+///   end at parameters that differ in the last bits, #11652). Rational and 2D NURBs, and
+///   intervals that share no more than a point, have no bound.
 /// - Every other pair: no bound.
 pub(crate) fn coincidence_bound(
     a: &crate::curve::curve::p2::Curve,
@@ -325,7 +326,7 @@ pub(crate) fn coincidence_bound(
     ib: &crate::geom::extent1d::Extent1d,
 ) -> Option<f64> {
     use crate::curve::curve::p2::CurveKind;
-    use crate::nurbs::crv_deviation::{certified_distance, norm_up};
+    use crate::nurbs::crv_deviation::{certified_hausdorff, norm_up};
     use crate::nurbs::math::gamma;
 
     match (a.kind(), b.kind()) {
@@ -341,20 +342,8 @@ pub(crate) fn coincidence_bound(
             bound.is_finite().then_some(bound)
         }
         (CurveKind::BSpline(ca), CurveKind::BSpline(cb)) => {
-            if ia != ib {
-                return None;
-            }
             let (na, nb) = (ca.nurb_ref().ok()?, cb.nurb_ref().ok()?);
-            let inside = |n: &crate::nurbs::crv_basic::Curve| {
-                matches!(
-                    (n.knots().first(), n.knots().last()),
-                    (Some(&lo), Some(&hi)) if lo <= ia.min() && ia.max() <= hi
-                )
-            };
-            if !(inside(na) && inside(nb)) {
-                return None;
-            }
-            certified_distance(na, nb).ok()
+            certified_hausdorff(na, [ia.min(), ia.max()], nb, [ib.min(), ib.max()]).ok()
         }
         _ => None,
     }
@@ -388,7 +377,7 @@ pub(crate) fn coincidence_bound(
 /// id, an unported call, cancellation).
 ///
 /// **A gluing that fails leaves the operand as given.** The glue is all or nothing
-/// ([`glue_all_or_none`]): the operand, `k.rng` and `k.upstream_ub_passed` are saved before
+/// ([`glue_all_or_none`]): the operand and `k.upstream_ub_passed` are saved before
 /// the first pair, and any other failure of `GlueEdgesGeneral` restores them exactly, so the
 /// merge then runs as main does (0 is returned). `GlueEdgesGeneral` can fail on a valid operand, both before its
 /// first change to the topology (`b.remove_from_edge_list(del)`) and after it:
@@ -400,9 +389,8 @@ pub(crate) fn coincidence_bound(
 ///   `edge_remove` of the pair, the sector's mate and loop tests, `set_orientation`,
 ///   `add_oriented_eu_pair`, a surviving wire's `edge_remove` and vertex-use unlinking, the
 ///   surviving edge's `set_tolerance` and `destroy` of the deleted edge; then `merge_shells`,
-///   `test_closure_split_region_attempt` (whose status is ignored, as upstream, and which
-///   may draw from `k.rng`), `is_spine` and
-///   `test_closure_split_region_edge`.
+///   `test_closure_split_region_attempt` (whose status is ignored, as upstream), `is_spine`
+///   and `test_closure_split_region_edge`.
 ///
 /// A failure at an "after" site would leave the operand half glued, so a check up front
 /// cannot replace the snapshot. A snapshot the B-rep cannot take (a cleared surface owner,
@@ -511,8 +499,8 @@ type GluePair = (
 );
 
 /// Runs `glue` on every pair, all or nothing ([`glue_self_touching_edges`]'s errors): the
-/// operand, `k.rng` and `k.upstream_ub_passed` are saved first, and when a pair fails they
-/// are all put back exactly, so the merge then runs as on main. An ordinary failure
+/// operand and `k.upstream_ub_passed` are saved first, and when a pair fails they
+/// are put back exactly, so the merge then runs as on main. An ordinary failure
 /// ([`crate::error::native_failure`]) returns 0; a port defect or a cancellation is returned.
 /// No snapshot ([`Brep::snapshot`]) means nothing is glued. Returns the number of pairs
 /// glued.
@@ -540,7 +528,7 @@ fn glue_all_or_none(
     let Ok(saved) = b.snapshot() else {
         return Ok(0);
     };
-    let (rng, ub) = (k.rng.clone(), k.upstream_ub_passed.clone());
+    let ub = k.upstream_ub_passed.clone();
     let mut state = ArenaNotifyState::with_attributes_of(b);
     let mut failure = None;
     for pair in pairs {
@@ -553,7 +541,6 @@ fn glue_all_or_none(
         // the snapshot holds the attributes too: the store moved out is dropped
         drop(state);
         b.restore(saved);
-        k.rng = rng;
         k.upstream_ub_passed = ub;
         // a port defect or a cancellation goes on; an ordinary failure merges as given
         crate::error::native_failure::<()>(Err(e))?;
@@ -631,7 +618,12 @@ fn merge_boolean_by(
         )?
     };
     let mut result = result.ok_or_else(|| {
-        SolidError::entity_missing(OP_BOOLEAN, "the Boolean made no result B-rep")
+        SolidError::boolean_null_defect(
+            OP_BOOLEAN,
+            BooleanStage::Merge,
+            "the Boolean returned no result B-rep, though it leaves the result unset only \
+             for an extraction, which the operand checks refused before it ran",
+        )
     })?;
     // (not upstream: the port's cached topology fields, true again for the caller)
     result.refresh_cached_topology();
@@ -841,9 +833,11 @@ pub fn piecewise_merge(
     let result_id = merged?;
     if result_id != PrimitiveModel::MAIN {
         // PiecewiseMerge's result is its first operand
-        return Err(SolidError::stage_failed(
+        return Err(SolidError::boolean_defect(
             OP_PIECEWISE,
-            "the piecewise merge did not return its first operand",
+            BooleanStage::Tree,
+            "the piecewise merge returned another B-rep than its first operand, though it \
+             always merges into its first operand and returns it",
         ));
     }
     let mut other = model.take_brep(other_id)?;
@@ -1027,12 +1021,12 @@ mod tests {
             .unwrap()
     }
 
-    /// A gluing whose second pair fails after the first changed the operand and drew from
-    /// the kernel's rng: the operand, the rng and the upstream-UB list are put back exactly.
+    /// A gluing whose second pair fails after the first changed the operand and noted an
+    /// upstream UB: the operand and the upstream-UB list are put back exactly.
     /// An ordinary failure (`InvalidInput`) then lets the merge go on (0 glued); a failure
     /// that stands for no upstream status (`NotFound`, a stale id) is returned.
     #[test]
-    fn a_failed_gluing_restores_the_operand_and_the_rng() {
+    fn a_failed_gluing_restores_the_operand_and_the_ub_list() {
         use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
         let stale = SolidError::NotFound {
             operation: "test",
@@ -1044,7 +1038,7 @@ mod tests {
         ] {
             let mut k = Kernel::default();
             let mut b = unit_box(&mut k);
-            let (before, rng, ub) = (fingerprint(&b), k.rng.clone(), k.upstream_ub_passed.clone());
+            let (before, ub) = (fingerprint(&b), k.upstream_ub_passed.clone());
             let e = b.edge_list()[0];
             let pairs = [(e, e, OrientType::Same), (e, e, OrientType::Same)];
             let mut failure = Some(failure);
@@ -1053,7 +1047,6 @@ mod tests {
                 if first {
                     first = false;
                     b.edge_mut(e)?.tolerance = 7.0;
-                    let _ = k.rng.next_u64();
                     k.note_upstream_ub("test");
                     return Ok(());
                 }
@@ -1064,7 +1057,6 @@ mod tests {
                 assert_eq!(r.unwrap(), 0);
             }
             assert_eq!(fingerprint(&b), before);
-            assert_eq!(k.rng, rng);
             assert_eq!(k.upstream_ub_passed, ub);
         }
     }
@@ -1238,11 +1230,112 @@ mod tests {
         let d = coincidence_bound(&a, &ivl, &copy, &ivl).unwrap();
         // the hull bound charges the rounding of its refinement and elevation
         assert!(d <= 1e-11, "{d}");
-        // on different intervals, or a line against a cubic, there is no bound
+        // over half its interval the copy ends 5 short of the straight cubic's end (x = 10 t);
+        // a line against a cubic has no bound
         let half = crate::geom::extent1d::Extent1d::from_min_max(0.0, 0.5);
-        assert!(coincidence_bound(&a, &ivl, &copy, &half).is_none());
+        let d = coincidence_bound(&a, &ivl, &copy, &half).unwrap();
+        assert!(d >= 5.0, "{d}");
         let line = segment([0.0; 3], [10.0, 0.0, 0.0]);
         assert!(coincidence_bound(&a, &ivl, &line, &ivl).is_none());
+    }
+
+    /// #11652: two edges at one place in the boolean of an imported body with the half-space box
+    /// of Split Body (the report's `RhinoPlakat.sc`, plane XY), as the kernel held them: cubics
+    /// through the same 22 control points to about 1e-15, between the same two vertices, each
+    /// with two faces. Computed apart, their knots, and so their intervals, differ in the last
+    /// bits (`0.00012764260588014642` against `…645`, `126.8710252329722` against `…217`).
+    /// They are proved within far less than their tolerances (8.86e-5 each), so #16991's pinch
+    /// exception (`edges_coincide`) relates the other operand's edge to only one of them.
+    #[test]
+    fn two_edges_whose_ends_differ_by_rounding_are_proved_coincident() {
+        #[rustfmt::skip] // one control point per line
+        let a_points = [
+            [156.0578566425621, 99.86439419188874, 7.49400541496626e-16],
+            [150.5818825877453, 100.1386840106007, 7.493897724062234e-16],
+            [145.10590793006884, 100.41296179401826, 5.551115123125783e-17],
+            [139.6299326177337, 100.68722650624295, 5.551115123125783e-17],
+            [134.1539148106672, 100.96149334682005, 5.551115123125783e-17],
+            [128.677896359317, 101.2357473237368, 4.961309141293668e-16],
+            [123.20187747919184, 101.50999273876144, 4.961309141293668e-16],
+            [110.88083499507144, 102.12704492275914, 4.961309141293668e-16],
+            [98.5597904443212, 102.74405584050828, 2.1467203015212988e-16],
+            [86.23874741728524, 103.3610971836975, 2.1467203015212988e-16],
+            [80.76272828778677, 103.63533778098956, 2.1467203015212988e-16],
+            [75.28670944763674, 103.90958415606923, 4.4994390158148434e-17],
+            [69.81069097348343, 104.18383783893943, 4.4994390158148434e-17],
+            [64.3346724995315, 104.45809152179953, 4.4994390158148434e-17],
+            [58.85865439969237, 104.7323526745608, -4.794545294638242e-16],
+            [53.382636427839834, 105.00661638264718, -4.794545294638242e-16],
+            [47.90661845949938, 105.28088009055766, -4.794545294638242e-16],
+            [42.430600626725905, 105.55514650533922, -4.0015318735950843e-16],
+            [36.95458224280134, 105.82940191546724, -4.0015318735950843e-16],
+            [34.41831277492078, 105.9564258906151, -4.0015318735950843e-16],
+            [31.882043182242988, 106.0834473740443, 4.571367831276203e-16],
+            [29.345773356827202, 106.21046421013982, 5.708602497135071e-16],
+        ];
+        let a_knots = [
+            (0.00012764260588014642, 4),
+            (16.448645532770932, 3),
+            (32.89729106692796, 3),
+            (69.90674353031204, 3),
+            (86.35538908873193, 3),
+            (102.80403464654692, 3),
+            (119.25268019381248, 3),
+            (126.8710252329722, 4),
+        ];
+        #[rustfmt::skip] // one control point per line
+        let b_points = [
+            [156.0578566425621, 99.86439419188874, 4.163336341579674e-16],
+            [150.5818825877453, 100.1386840106007, 4.163270650128218e-16],
+            [145.10590793006884, 100.41296179401824, -6.938893903907228e-18],
+            [139.6299326177337, 100.68722650624294, -6.938893903907228e-18],
+            [134.1539148106672, 100.96149334682003, -6.938893903907228e-18],
+            [128.677896359317, 101.23574732373677, -3.2959746043559335e-16],
+            [123.20187747919182, 101.50999273876141, -3.2959746043559335e-16],
+            [110.88083499507142, 102.12704492275911, -3.2959746043559335e-16],
+            [98.55979044432118, 102.7440558405083, -5.2909066017292616e-17],
+            [86.23874741728523, 103.36109718369751, -5.2909066017292616e-17],
+            [80.76272828778676, 103.63533778098957, -5.2909066017292616e-17],
+            [75.28670944763674, 103.90958415606923, 3.08455518072126e-17],
+            [69.81069097348343, 104.18383783893943, 3.08455518072126e-17],
+            [64.33467249953148, 104.45809152179955, 3.08455518072126e-17],
+            [58.858654399692355, 104.7323526745608, 6.305719835175694e-16],
+            [53.38263642783981, 105.00661638264718, 6.305719835175694e-16],
+            [47.90661845949936, 105.28088009055766, 6.305719835175694e-16],
+            [42.430600626725884, 105.55514650533921, 4.279037601867926e-16],
+            [36.95458224280132, 105.82940191546723, 4.279037601867926e-16],
+            [34.41831277492077, 105.95642589061507, 4.279037601867926e-16],
+            [31.882043182242978, 106.08344737404431, 3.6067510972517887e-16],
+            [29.345773356827205, 106.21046421013982, 3.5175691932567927e-16],
+        ];
+        let b_knots = [
+            (0.00012764260588014645, 4),
+            (16.448645532770932, 3),
+            (32.89729106692798, 3),
+            (69.90674353031204, 3),
+            (86.35538908873191, 3),
+            (102.80403464654694, 3),
+            (119.25268019381248, 3),
+            (126.87102523297217, 4),
+        ];
+        let expand = |runs: &[(f64, usize)]| -> Vec<f64> {
+            runs.iter()
+                .flat_map(|&(k, m)| std::iter::repeat_n(k, m))
+                .collect()
+        };
+        let (a, b) = (
+            cubic(&a_points, expand(&a_knots)),
+            cubic(&b_points, expand(&b_knots)),
+        );
+        // each edge's interval is its knots' domain
+        let domain = |runs: &[(f64, usize)]| {
+            crate::geom::extent1d::Extent1d::from_min_max(runs[0].0, runs[runs.len() - 1].0)
+        };
+        let (ia, ib) = (domain(&a_knots), domain(&b_knots));
+        for (x, ix, y, iy) in [(&a, &ia, &b, &ib), (&b, &ib, &a, &ia)] {
+            let d = coincidence_bound(x, ix, y, iy).unwrap();
+            assert!(d <= 1e-9, "{d}");
+        }
     }
 
     /// `TestSmTessellateBoundaries` (`tests/SM_API_test/src/TestSmBrep.cpp:1328`): a

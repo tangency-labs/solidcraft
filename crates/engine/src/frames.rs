@@ -11,7 +11,7 @@
 
 use serde_json::{Map, Value};
 use solidcore_record::Vec3;
-use solidcraft_doc::{Mat, apply_point, apply_vector, is_identity, map_point_expr, map_vector_expr, mat_inverse};
+use solidcraft_doc::{Mat, apply_point, apply_vector, is_identity, map_dir_expr, map_point_expr, map_vector_expr, mat_inverse};
 use solidcraft_geom::prelude::*;
 
 use crate::Session;
@@ -23,10 +23,17 @@ enum K {
     Pick,
     /// A list of picks: `[[x,y,z]…]` or `[{point|face|edge: [x,y,z], body?}…]`.
     Picks,
+    /// A list of picks on the body `tool.body` names, not `body`: Split Body's other tool faces
+    /// lie on its tool, and `body` is what it cuts (#9305).
+    ToolPicks,
     /// A point that places new geometry: into the active component's frame.
     Make,
     /// A direction: turned with the command's frame.
     Dir,
+    /// A primitive's axis: a direction as `Dir`, or `[x, y, z]` / `{x, y, z}` with unitless
+    /// expressions (#18822), turned with the command's frame and kept as expressions. X, Y or Z
+    /// by name passes through: it names the component's own axis.
+    PrimitiveAxis,
     /// A displacement with length expressions: turned without the frame's translation.
     Delta,
     /// A point the command's bodies move about: into the frame of those bodies (the command's
@@ -64,16 +71,21 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
             &[("face", Pick), ("faces", Picks), ("face_body", Body), ("from", Make), ("to", Make), ("targets", Body), ("participants", Body)]
         }
         "solid.revolve" => &[("face", Pick), ("axis", Axis), ("to", Make), ("targets", Body), ("participants", Body)],
+        // A sweep profile given as a body face: the face point, in the frame of the body under it.
+        // The sweep's own geometry (its path on a body's edges, the direction its profile follows)
+        // stays in the world, and goes into the active component's frame
+        // (`to_active_frame_geometry`).
+        "solid.sweep" => &[("face", Pick), ("face_body", Body)],
         // Edit Feature of a surface revolve (`map_local`): its `{origin, dir}` axis. A new surface
         // revolve has no entry, so it is taken into the active frame whole (`to_active_frame`),
         // picked edge and face axes too.
         SURFACE_REVOLVE_EDIT => &[("axis", Axis)],
         "solid.box" | "solid.sphere" => &[("corner", Make), ("center", Make)],
-        "solid.cylinder" | "solid.coil" | "solid.torus" | "solid.cone" => &[("base", Make), ("center", Make), ("axis", Dir)],
+        "solid.cylinder" | "solid.coil" | "solid.torus" | "solid.cone" => &[("base", Make), ("center", Make), ("axis", PrimitiveAxis)],
         "solid.fillet" | "solid.chamfer" => &[("edges", Picks), ("body", Body)],
-        "solid.hole" => &[("position", Pick), ("direction", Dir), ("body", Body)],
+        "solid.hole" => &[("position", Pick), ("references", Picks), ("direction", Dir), ("body", Body)],
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
-        "solid.offset_face" | "solid.shell" => &[("faces", Picks), ("body", Body)],
+        "solid.offset_face" | "solid.shell" | "face.delete" => &[("faces", Picks), ("body", Body)],
         "solid.thread" => &[("face", Pick), ("faces", Picks), ("from", Pick), ("up_to", Plane)],
         "solid.emboss" => &[("face", Make)],
         "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
@@ -86,16 +98,18 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         // A mirror keeps the placement its bodies were picked at (`cmd::features::placed_bodies`);
         // its plane is in the active component, where the copies go.
         "solid.mirror" => &[("plane", HerePlane)],
-        "solid.split_body" => &[("plane", Plane), ("tool", Picks), ("bodies", Body), ("body", Body)],
+        "solid.split_body" => &[("plane", Plane), ("tool", Picks), ("tool_faces", ToolPicks), ("bodies", Body), ("body", Body)],
         "plastic.boss" | "plastic.snap_fit" | "plastic.rest" => {
             &[("position", Pick), ("direction", Dir), ("hook", Dir), ("along", Dir), ("body", Body)]
         }
         "plastic.lip" => &[("face", Pick), ("body", Body)],
-        "sheet.convert" => &[("face", Pick), ("bends", Picks), ("body", Body)],
+        "sheet.convert" => &[("face", Pick), ("faces", Picks), ("skip", Picks), ("engrave", Picks), ("bends", Picks), ("body", Body)],
+        "sheet.recognize" => &[("face", Pick), ("skip", Picks), ("bends", Picks), ("body", Body)],
+        "sheet.measure_body" => &[("face", Pick), ("body", Body)],
         "sheet.flange" | "sheet.hem" => &[("edges", Picks), ("body", Body)],
         "sheet.fold" => &[("points", Picks), ("fixed", Pick), ("body", Body)],
         "sheet.path_flange" => &[("edge", Pick), ("body", Body)],
-        "sheet.perforate" => &[("body", Body)],
+        "sheet.perforate" | "sheet.tab" | "sheet.bead" => &[("body", Body)],
         "solid.cell_grid" => &[("anchor", Make), ("targets", Body), ("participants", Body)],
         "sketch.create" | "sketch.redefine" => &[("plane", HerePlane)],
         "canvas.decal" => &[("face", Here)],
@@ -109,7 +123,9 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "parts.insert" | "parts.fastener" => &[("point", Make), ("direction", Dir)],
         "appearance.assign" => &[("faces", Picks), ("bodies", Body), ("body", Body)],
         "solid.move" => &[("bodies", Body), ("translate", Delta), ("axis", Dir), ("origin", Moved)],
-        "solid.combine" => &[("target", Body), ("tools", Body)],
+        // A combine's tools keep the names of further placements (`Drill (Hinge:2)`): each cuts
+        // where its own occurrence puts it, not at the component's first placement (#20040).
+        "solid.combine" => &[("target", Body)],
         "solid.remove" | "solid.bounding_solid" | "material.assign" => &[("bodies", Body)],
         _ => &[],
     }
@@ -940,15 +956,28 @@ fn map_local_with_input(
     for pass in [true, false] {
         for (k, kind) in keys {
             let Some(v) = obj.get(*k) else { continue };
-            let is_pick = matches!(kind, Pick | Picks | Plane | Here | HerePlane);
+            let is_pick = matches!(kind, Pick | Picks | ToolPicks | Plane | Here | HerePlane);
             if is_pick != pass {
                 continue;
             }
             let new = match kind {
                 Pick => m.pick(v, body.as_deref()),
                 Picks => m.picks(v, body.as_deref()),
+                ToolPicks => m.picks(v, obj.get("tool").and_then(|t| t.get("body")).and_then(Value::as_str)),
                 Make => m.make(v),
                 Dir => m.dir(v),
+                // An axis holding expressions (#18822), as `[x, y, z]` or `{x, y, z}`, turns with
+                // the frame and stays expressions; a component's axis named X, Y or Z stays its
+                // own. One that comes out as numbers is written as numbers, as `Dir` writes them.
+                PrimitiveAxis if v.is_string() => None,
+                PrimitiveAxis => m.dir(v).or_else(|| {
+                    let frame = m.first.unwrap_or(m.f.active);
+                    let d = crate::cmd::axis_expr_form(v).ok()?;
+                    let turned = m.map_expr(&frame, &serde_json::json!(d.map(|e| e.to_string())), map_dir_expr)?;
+                    let nums: Option<Vec<f64>> =
+                        turned.as_array()?.iter().map(|c| c.as_str().and_then(|t| t.trim().parse::<f64>().ok()).filter(|x| x.is_finite())).collect();
+                    Some(nums.map_or(turned, |n| serde_json::json!(n)))
+                }),
                 Delta => m.dir(v).or_else(|| {
                     let frame = m.first.unwrap_or(m.f.active);
                     m.map_expr(&frame, v, map_vector_expr)
@@ -1029,9 +1058,8 @@ fn primitive_placement(kind: &solidcraft_doc::FeatureKind, cmd: &str) -> Vec<(&'
     match (kind, cmd) {
         (Feature::Box { corner, centred, .. }, "solid.box") => vec![(if *centred { "center" } else { "corner" }, point(corner))],
         (Feature::Sphere { center, .. }, "solid.sphere") | (Feature::Torus { center, .. }, "solid.torus") => vec![("center", point(center))],
-        (Feature::Cylinder { base, axis, .. }, "solid.cylinder") | (Feature::Coil { base, axis, .. }, "solid.coil") => {
-            vec![("base", point(base)), ("axis", pt(axis.0))]
-        }
+        (Feature::Cylinder { base, axis, .. }, "solid.cylinder") => vec![("base", point(base)), ("axis", point(axis))],
+        (Feature::Coil { base, axis, .. }, "solid.coil") => vec![("base", point(base)), ("axis", pt(axis.0))],
         _ => Vec::new(),
     }
 }

@@ -1,0 +1,1 @@
+finds a named edge on the display mesh

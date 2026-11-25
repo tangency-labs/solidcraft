@@ -1,4 +1,6 @@
 //! Sketch and selection preferences with shared figures and the live modifier legend.
+use solidcraft_engine::PickMode;
+
 use super::*;
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -73,6 +75,7 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some("prefs.sketch_snap_to_visible_grid_note"),
                     &mut app.preferences.sketch_snap_to_visible_grid,
                 );
+                setting::sketch_square_rectangles(app, ui);
             });
         });
         let label_width = ui_kit::ContentWidth::label(ui, app.tr("prefs.hold_stop_snapping"));
@@ -105,6 +108,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.sketch_construction_lines",
             "prefs.construction_line_classic",
             "prefs.sketch_mirror_auto_line",
+            "prefs.region_pick_takes_holes",
             "prefs.sketch.ellipse_axes",
             "prefs.sketch.auto_dimensions",
             "prefs.sketch.auto_locate",
@@ -170,6 +174,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.construction_line_classic,
                 );
                 check(ui, "sketch_mirror_auto_line", "prefs.sketch_mirror_auto_line", None, &mut app.preferences.sketch_mirror_auto_line);
+                check(
+                    ui,
+                    "region_pick_takes_holes",
+                    "prefs.region_pick_takes_holes",
+                    Some("prefs.region_pick_takes_holes_note"),
+                    &mut app.preferences.region_pick_takes_holes,
+                );
                 check(ui, "ellipse_axes", "prefs.sketch.ellipse_axes", Some("prefs.sketch.ellipse_axes_note"), &mut app.preferences.ellipse_axes);
                 check(
                     ui,
@@ -243,6 +254,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "prefs.sketch.project_options",
                     Some("prefs.project_options_dialog_note"),
                     &mut app.preferences.project_options_dialog,
+                );
+                check(
+                    ui,
+                    "sketch_move_classic",
+                    "prefs.sketch_move_classic",
+                    Some("prefs.sketch_move_classic_note"),
+                    &mut app.preferences.sketch_move_classic,
                 );
                 check(
                     ui,
@@ -450,16 +468,17 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
             let cards = ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(t.space_10, t.space_10);
                 let width = (t.space_24 * 6.0 + t.space_6).min(ui.max_rect().width());
-                for (bodies, key, label, figure) in [
-                    (false, "faces_edges", "prefs.sketch.faces_edges", ui_kit::paint_select_faces_edges as fn(&egui::Painter, egui::Rect)),
-                    (true, "bodies", "prefs.sketch.whole_bodies", ui_kit::paint_select_bodies),
+                // The selection mode's two plainest choices; the navigation bar's menu has them all (#4255).
+                for (mode, key, label, figure) in [
+                    (PickMode::Faces, "faces_edges", "prefs.sketch.faces_edges", ui_kit::paint_select_faces_edges as fn(&egui::Painter, egui::Rect)),
+                    (PickMode::Bodies, "bodies", "prefs.sketch.whole_bodies", ui_kit::paint_select_bodies),
                 ] {
                     let response = ui_kit::picture_card(
                         ui,
                         &ui_kit::Card {
                             label: app.tr(label),
                             sub: None,
-                            selected: app.ui.pick_bodies == bodies,
+                            selected: app.ui.pick_mode == mode,
                             enabled: true,
                             options: None,
                             check: false,
@@ -469,7 +488,7 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
                         width,
                     );
                     crate::scenario::publish_target(&format!("prefs:pick_bodies:{key}"), response.rect);
-                    if bodies {
+                    if mode == PickMode::Bodies {
                         crate::scenario::publish_target("prefs:pick_bodies", response.rect);
                         crate::scenario::publish_target("dialog:Click selects whole bodies", response.rect);
                     }
@@ -480,7 +499,7 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     crate::ui_kit::settings_search::follow(ui, option, response.rect);
                     if response.clicked() {
-                        app.ui.pick_bodies = bodies;
+                        crate::selection_mode::set(app, mode);
                     }
                 }
             });
@@ -508,6 +527,8 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (&[ctrl, click], toggle),
             ],
         );
+        #[cfg(target_arch = "wasm32")]
+        check(ui, "pencil_mode", "prefs.pencil_mode", Some("prefs.pencil_mode_tip"), &mut app.preferences.pencil_mode);
         check(ui, "prefer_free_sketch_points", "prefs.sketch.prefer_free_points", None, &mut app.preferences.prefer_free_sketch_points);
         check(
             ui,
@@ -714,5 +735,6 @@ fn dimension_appearance(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32)
             });
             ui.data_mut(|data| data.insert_temp(key, (app.preferences.dimension_colour, hex)));
         });
+        setting::dimension_rim(app, ui);
     });
 }

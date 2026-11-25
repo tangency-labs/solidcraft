@@ -76,7 +76,7 @@ fn every_axis_is_drawn_in_one_set_of_colours() {
     let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
     let cam = solidcraft_viewport::Camera::default();
     let proj = crate::viewport::Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect, bounds: None };
-    let triad = crate::gizmo::Triad { center: Vec3::ZERO, translate: true, rotate: true };
+    let triad = crate::gizmo::Triad::world(Vec3::ZERO, true, true);
     for (dark, mode) in [false, true].into_iter().flat_map(|d| ColorVision::ALL.map(|m| (d, m))) {
         set_dark(dark);
         set_vision(mode);
@@ -146,7 +146,10 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 /// hold none at all.
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("gpu.rs", 1, "the white tint that shows the background picture as it is"),
+    ("plugin_shaders.rs", 1, "the white tint that shows a plugin's background as its shader drew it"),
+    ("plugin_tint.rs", 1, "the white tint that shows a plugin's panel tint as its shader answered it"),
     ("navigation.rs", 1, "the navigator's face shading, made from a token"),
+    ("drawing_sheet_page.rs", 2, "the drawing sheet moves toward white, else black, to stand off the backdrop"),
     ("canvas.rs", 3, "white rings around manipulator handles"),
     (
         "body_gizmo.rs",
@@ -172,9 +175,10 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
         5,
         "the link pills' brand fills (Ko-fi coral, Discord blurple: the services' own colours, the same in every theme), their white ink and the hover veil on the x",
     ),
+    ("view_tiles.rs", 2, "the black shadows under a view card and the name pill: a shadow is black at an opacity in every theme"),
     ("workspace.rs", 1, "the view kinds' icon strokes, drawn on the Tabs board: a fixed palette per kind in each theme"),
     ("links.rs", 1, "the link pills' white ink on the brand fills"),
-    ("ui_kit/icons/mod.rs", 1, "the white tint that carries an icon image's opacity"),
+    ("ui_kit/icons/mod.rs", 3, "the white tint carrying an icon's opacity, greyscale, and a pixel's brightness for a plugin tint"),
     ("ui_kit/icons/svg.rs", 1, "an icon colour role's value: the installed set's own palette data"),
     ("ui_kit/menu.rs", 1, "a menu entry's swatch: the colour is document data"),
 ];

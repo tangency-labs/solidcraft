@@ -23,6 +23,8 @@ use solidcore_record::{Loop2, MAX_BEZIER_DEGREE, Seg2, Vec2};
 use crate::{IoError, Result};
 
 mod export_compatibility;
+mod export_profile;
+pub use export_profile::{DXF_PROFILE_FORMAT, DXF_PROFILE_VERSION, DxfExportProfile, DxfRole, DxfRoleStyle, MAX_DXF_PROFILE_BYTES};
 mod file_model;
 pub use file_model::{
     DxfFile, DxfGeometryBounds, DxfSourceBlock, DxfTextRecordKind, DxfTextSource, Entity as DxfFileEntity, EntityWeight as DxfEntityWeight,
@@ -30,7 +32,9 @@ pub use file_model::{
 };
 mod length_decimal;
 mod path;
+mod text_encode;
 use length_decimal::length_decimal;
+use text_encode::{EncodedText, encode_text};
 
 pub use path::{DxfPath, DxfPathStyle, DxfVertex, admit_path, path_shapes};
 
@@ -130,6 +134,26 @@ impl DxfTextVerticalAlignment {
     }
 }
 
+/// MTEXT's attachment point 71: rows top, middle and bottom (1-3, 4-6, 7-9), each left, centre,
+/// right. MTEXT has no baseline, so its bottom row stands for TEXT's baseline both ways.
+fn mtext_attachment(horizontal: DxfTextHorizontalAlignment, vertical: DxfTextVerticalAlignment) -> i16 {
+    let row = match vertical {
+        DxfTextVerticalAlignment::Top => 0,
+        DxfTextVerticalAlignment::Middle => 1,
+        DxfTextVerticalAlignment::Baseline => 2,
+    };
+    row * 3 + horizontal.group72() + 1
+}
+
+/// The alignment an MTEXT attachment point stands for, or `None` outside 1-9.
+pub(crate) fn alignment_from_mtext_attachment(code: f64) -> Option<(DxfTextHorizontalAlignment, DxfTextVerticalAlignment)> {
+    use {DxfTextHorizontalAlignment as H, DxfTextVerticalAlignment as V};
+    let index = (1..=9_u8).position(|n| f64::from(n) == code)?;
+    let vertical = [V::Top, V::Middle, V::Baseline].get(index / 3).copied()?;
+    let horizontal = [H::Left, H::Centre, H::Right].get(index % 3).copied()?;
+    Some((horizontal, vertical))
+}
+
 /// The geometry of one entity (millimetres).
 #[derive(Clone, Debug, PartialEq)]
 pub enum DxfShape {
@@ -224,10 +248,10 @@ pub enum DxfShape {
         ctrl: Vec<Vec2>,
         weights: Option<Vec<f64>>,
     },
-    /// One line of text, centred on `at` (its baseline) and turned `angle_deg` counter-clockwise.
-    /// `%%d`, `%%p` and `%%c` are AutoCAD's degree, plus-minus and diameter signs; other letters
-    /// outside ASCII through U+FFFF are written as `\U+XXXX`. Characters beyond U+FFFF
-    /// are refused by [`write_dxf_file`], never substituted with `?`.
+    /// Text as a person typed it, centred on `at` (its baseline) and turned `angle_deg`
+    /// counter-clockwise. One line of at most 256 characters is written as TEXT; a longer text,
+    /// or one with line breaks, as MTEXT. `%` and `\` are literal; `°` is the degree sign.
+    /// Characters beyond U+FFFF are refused by [`write_dxf_file`], never substituted with `?`.
     Text {
         at: Vec2,
         height: f64,
@@ -358,11 +382,15 @@ impl DxfShape {
             }
             // A spline lies within the hull of its control points.
             DxfShape::Spline { ctrl, .. } => out.extend(ctrl.iter().copied()),
-            // Where a viewer puts the letters depends on its font: 0.8 heights for each.
+            // Where a viewer puts the letters depends on its font: 0.8 heights for each, along the
+            // longest line, and MTEXT's default spacing of 5/3 heights for each line below the first.
             DxfShape::Text { at, height, angle_deg, text } => {
                 let (along, up) = (Vec2::from_angle(angle_deg.to_radians()), Vec2::from_angle(angle_deg.to_radians()).perp());
-                let half = 0.4 * height * text.chars().count() as f64;
-                out.extend([-half, half].map(|s| *at + along * s));
+                let lines = text.lines().count().max(1);
+                let longest = text.lines().map(|line| line.chars().count()).max().unwrap_or(0);
+                let half = 0.4 * height * longest as f64;
+                let below = up * (-5.0 / 3.0 * height * (lines - 1) as f64);
+                out.extend([-half, half].map(|s| *at + along * s + below));
                 out.extend([-half, half].map(|s| *at + along * s + up * *height));
             }
         }
@@ -398,7 +426,11 @@ pub(super) fn admit_bulged(vertices: &[DxfVertex], closed: bool) -> Result<()> {
     }
     let check = |from: DxfVertex, to: Vec2| -> Result<()> {
         if from.bulge != 0.0
-            && solidcore_ops::path_export::bulge_arc(solidcore_ops::path_export::Vertex { at: from.at, bulge: from.bulge }, to).is_none()
+            && solidcraft_kernel::services::path_export::bulge_arc(
+                solidcraft_kernel::services::path_export::Vertex { at: from.at, bulge: from.bulge },
+                to,
+            )
+            .is_none()
         {
             return Err(IoError::Invalid("bulged polyline arc has collapsed or non-finite geometry".into()));
         }
@@ -437,8 +469,11 @@ fn sample_bulged(vertices: &[DxfVertex], closed: bool, out: &mut Vec<Vec2>) -> R
 }
 
 fn sample_bulged_edge(from: DxfVertex, to: Vec2, out: &mut Vec<Vec2>) -> Result<()> {
-    let points = solidcore_ops::path_export::bulged_edge_points(solidcore_ops::path_export::Vertex { at: from.at, bulge: from.bulge }, to)
-        .map_err(|error| IoError::Invalid(error.reason))?;
+    let points = solidcraft_kernel::services::path_export::bulged_edge_points(
+        solidcraft_kernel::services::path_export::Vertex { at: from.at, bulge: from.bulge },
+        to,
+    )
+    .map_err(|error| IoError::Invalid(error.reason))?;
     out.try_reserve(points.len()).map_err(|_| IoError::Invalid("cannot allocate bulged polyline bounds".into()))?;
     out.extend(points);
     Ok(())
@@ -685,28 +720,6 @@ struct LayoutObject<'a> {
     paper: bool,
 }
 
-/// A text on one line, as a TEXT entity holds it: at most 250 characters, control characters as
-/// spaces, letters outside ASCII through U+FFFF as `\U+XXXX`. Refuse characters beyond
-/// U+FFFF anywhere in the source, including past the existing 250-character output limit.
-/// AC1015 uses CIF escapes, not UTF-8; surrogate-pair escapes are not portable across readers.
-fn text_value(s: &str) -> Result<String> {
-    if let Some((i, c)) = s.chars().enumerate().find(|(_, c)| u32::from(*c) > 0xffff) {
-        return Err(IoError::Invalid(format!(
-            "character {c:?} (U+{:04X}) at position {} cannot be written as DXF AC1015 text; only characters through U+FFFF are supported",
-            u32::from(c),
-            i + 1
-        )));
-    }
-    Ok(s.chars()
-        .take(250)
-        .map(|c| match c {
-            c if c.is_ascii_control() => " ".to_string(),
-            c if c.is_ascii() => c.to_string(),
-            c => format!("\\U+{:04X}", u32::from(c)),
-        })
-        .collect())
-}
-
 /// A DXF drawing (AutoCAD 2000, millimetres) of `entities`. `layers` are the layers they are on
 /// (layer `0` is always there). A TEXT character beyond U+FFFF returns an error naming the
 /// character, its position, the entity and its layer; no drawing is returned on failure.
@@ -822,9 +835,20 @@ struct EntityView<'a> {
 /// Extents remain the existing sampled/control-polygon approximation.
 pub fn write_dxf_file(file: &DxfFile<DxfShape>) -> Result<String> {
     if let Some(budget) = file.compatibility {
-        return export_compatibility::write(file, budget);
+        return export_compatibility::write(file, budget, None);
     }
     write_dxf_file_limited(file, crate::MAX_DRAWING_BYTES, MAX_DXF_FILE_VALUES)
+}
+
+/// Write a flat pattern's file as a DXF profile says: each role on the profile's layer, in its
+/// colour and linetype, and the roles it turns off left out. The file is checked under the
+/// flat-pattern contract first, as [`write_dxf_file`] checks it; the neutral profile writes the
+/// same bytes. Any other file is refused.
+pub fn write_dxf_file_as(file: &DxfFile<DxfShape>, profile: &DxfExportProfile) -> Result<String> {
+    let Some(budget) = file.compatibility else {
+        return Err(IoError::Invalid("a DXF profile styles the flat pattern's roles only".into()));
+    };
+    export_compatibility::write(file, budget, Some(profile))
 }
 
 /// Write owned geometry including explicit TEXT alignments. For AlignedText,
@@ -837,7 +861,7 @@ where
     F: FnMut(&DxfShape) -> Result<DxfGeometryBounds>,
 {
     if let Some(budget) = file.compatibility {
-        return export_compatibility::write(file, budget);
+        return export_compatibility::write(file, budget, None);
     }
     write_dxf_file_limited_with_text_bounds(file, crate::MAX_DRAWING_BYTES, MAX_DXF_FILE_VALUES, text_bounds)
 }
@@ -923,16 +947,18 @@ fn shape_preflight(shape: &DxfShape) -> Result<()> {
         DxfShape::Line(a, b) => a.is_finite() && b.is_finite(),
         DxfShape::Polyline { points } => points.len() >= 2 && points.len() <= MAX_DXF_FILE_VALUES && points.iter().all(|p| p.is_finite()),
         DxfShape::Circle { c, r } => c.is_finite() && r.is_finite() && *r > 0.0,
-        DxfShape::Arc { c, r, a0, a1 } => c.is_finite() && r.is_finite() && *r > 0.0 && solidcore_ops::export_geometry::arc_fields_finite(*a0, *a1),
+        DxfShape::Arc { c, r, a0, a1 } => {
+            c.is_finite() && r.is_finite() && *r > 0.0 && solidcraft_kernel::services::export_geometry::arc_fields_finite(*a0, *a1)
+        }
         DxfShape::Ellipse { c, major, ratio, t0, t1 } => {
             c.is_finite()
-                && solidcore_ops::export_geometry::axis_nonzero(*major)
+                && solidcraft_kernel::services::export_geometry::axis_nonzero(*major)
                 && ratio.is_finite()
                 && *ratio > 0.0
                 && *ratio <= 1.0
                 && t0.is_finite()
                 && t1.is_finite()
-                && solidcore_ops::export_geometry::finite_span(*t0, *t1)
+                && solidcraft_kernel::services::export_geometry::finite_span(*t0, *t1)
         }
         DxfShape::Spline { degree, knots, ctrl, weights } => {
             let degree = usize::from(*degree);
@@ -957,10 +983,8 @@ fn shape_preflight(shape: &DxfShape) -> Result<()> {
                 && weights.as_ref().is_none_or(|w| w.iter().all(|v| v.is_finite() && *v > 0.0))
         }
         DxfShape::Text { at, height, angle_deg, text } | DxfShape::AlignedText { at, height, angle_deg, text, .. } => {
-            if text.len() > 1_000 || text.chars().count() > 250 || text.chars().any(|c| u32::from(c) > 0xffff) {
-                return Err(IoError::Invalid("DXF owned TEXT supports at most 250 BMP characters; no text was truncated".into()));
-            }
-            at.is_finite() && height.is_finite() && *height > 0.0 && solidcore_ops::export_geometry::finite_degrees(*angle_deg)
+            text_encode::writable(text)?;
+            at.is_finite() && height.is_finite() && *height > 0.0 && solidcraft_kernel::services::export_geometry::finite_degrees(*angle_deg)
         }
     };
     if !finite {
@@ -1106,7 +1130,7 @@ fn shape_emission_preflight(shape: &DxfShape) -> Result<()> {
         DxfShape::Circle { r, .. } => positive(emitted_length(*r)?)?,
         DxfShape::Arc { r, a0, a1, .. } => {
             positive(emitted_length(*r)?)?;
-            if !solidcore_ops::export_geometry::distinct_degrees(emitted_number(*a0)?, emitted_number(*a1)?) {
+            if !solidcraft_kernel::services::export_geometry::distinct_degrees(emitted_number(*a0)?, emitted_number(*a1)?) {
                 return Err(collapse());
             }
         }
@@ -1149,19 +1173,66 @@ fn shape_emission_preflight(shape: &DxfShape) -> Result<()> {
 
 fn extend_extents(extents: Option<(Vec2, Vec2)>, point: Vec2) -> (Vec2, Vec2) {
     extents.map_or((point, point), |(lo, hi)| {
-        let b = solidcore_ops::export_geometry::union_bounds(lo, hi, point, point);
+        let b = solidcraft_kernel::services::export_geometry::union_bounds(lo, hi, point, point);
         (b.min, b.max)
     })
 }
 
+/// TEXT's first insertion point: an imported TEXT keeps its own; anything else has one anchor.
 fn first_text_anchor(source: Option<&DxfTextSource>, at: Vec2) -> Result<Vec2> {
     match source {
-        None => Ok(at),
         Some(source) if source.kind() == DxfTextRecordKind::Text => {
             source.first_anchor_mm().ok_or_else(|| IoError::Invalid("not supported yet: source TEXT has no first insertion anchor".into()))
         }
-        Some(_) => Err(IoError::Invalid("not supported yet: MTEXT source requires its own record emission".into())),
+        _ => Ok(at),
     }
+}
+
+/// Where and how a text entity sits, as its groups say it.
+struct TextPlacement<'a> {
+    source: Option<&'a DxfTextSource>,
+    at: Vec2,
+    height: f64,
+    angle_deg: f64,
+    horizontal: DxfTextHorizontalAlignment,
+    vertical: DxfTextVerticalAlignment,
+}
+
+/// A text entity's groups after the common header: TEXT with its two anchors and alignment, or
+/// MTEXT with its insertion point, attachment point, chunks and direction vector.
+fn text_groups(o: &mut Out, encoded: Option<&EncodedText>, place: TextPlacement) -> Result<()> {
+    let TextPlacement { source, at, height, angle_deg, horizontal, vertical } = place;
+    match encoded {
+        Some(EncodedText::Text(value)) => {
+            o.code(100, "AcDbText");
+            o.point(10, first_text_anchor(source, at)?);
+            o.len(40, height);
+            o.code(1, value);
+            o.num(50, angle_deg);
+            o.code(72, horizontal.group72());
+            o.point(11, at);
+            o.code(100, "AcDbText");
+            o.code(73, vertical.group73());
+        }
+        Some(EncodedText::MText(groups)) => {
+            o.code(100, "AcDbMText");
+            o.point(10, at);
+            o.len(40, height);
+            // No wrapping width; left to right.
+            o.num(41, 0.0);
+            o.code(71, mtext_attachment(horizontal, vertical));
+            o.code(72, 1);
+            for (code, value) in groups {
+                o.code(*code, value);
+            }
+            let direction = Vec2::from_angle(angle_deg.to_radians());
+            o.num(11, direction.x);
+            o.num(21, direction.y);
+            o.num(31, 0.0);
+        }
+        None => return Err(IoError::Invalid("DXF text entity was not encoded".into())),
+    }
+    Ok(())
 }
 
 fn write_drawing_views<'a, L, E>(layers: L, entities: E, limit: Option<usize>, extents: (Vec2, Vec2), insunits: i32) -> Result<String>
@@ -1327,6 +1398,13 @@ where
     o.code(2, "ENTITIES");
     for (index, e) in entities.enumerate() {
         let e = e?;
+        let encoded = match e.shape {
+            DxfShape::Text { text, .. } | DxfShape::AlignedText { text, .. } => Some(
+                encode_text(text, crate::MAX_DRAWING_BYTES)
+                    .map_err(|error| IoError::Invalid(format!("DXF TEXT entity {} on layer {:?}: {error}", index + 1, e.layer)))?,
+            ),
+            _ => None,
+        };
         let kind = match e.shape {
             DxfShape::Insert { .. }
             | DxfShape::SourceSpline { .. }
@@ -1342,7 +1420,10 @@ where
             DxfShape::Arc { .. } => "ARC",
             DxfShape::Ellipse { .. } => "ELLIPSE",
             DxfShape::Spline { .. } => "SPLINE",
-            DxfShape::Text { .. } | DxfShape::AlignedText { .. } => "TEXT",
+            DxfShape::Text { .. } | DxfShape::AlignedText { .. } => match encoded {
+                Some(EncodedText::MText(_)) => "MTEXT",
+                _ => "TEXT",
+            },
         };
         let h = o.handle();
         o.code(0, kind);
@@ -1382,21 +1463,18 @@ where
                     o.num(42, vertex.bulge);
                 }
             }
-            DxfShape::AlignedText { at, height, angle_deg, text, horizontal, vertical } => {
-                // The owned route validates payload/geometry and receives real
-                // bounds before reaching Out. The legacy route refuses this
-                // variant in sample(), before writing any final drawing.
-                o.code(100, "AcDbText");
-                o.point(10, first_text_anchor(e.source_text, *at)?);
-                o.len(40, *height);
-                let value =
-                    text_value(text).map_err(|error| IoError::Invalid(format!("DXF TEXT entity {} on layer {:?}: {error}", index + 1, e.layer)))?;
-                o.code(1, value);
-                o.num(50, *angle_deg);
-                o.code(72, horizontal.group72());
-                o.point(11, *at);
-                o.code(100, "AcDbText");
-                o.code(73, vertical.group73());
+            // The owned route validates payload/geometry and receives real bounds before reaching
+            // Out. The legacy route refuses AlignedText in sample(), before writing any drawing.
+            DxfShape::AlignedText { at, height, angle_deg, horizontal, vertical, .. } => {
+                let place = TextPlacement {
+                    source: e.source_text,
+                    at: *at,
+                    height: *height,
+                    angle_deg: *angle_deg,
+                    horizontal: *horizontal,
+                    vertical: *vertical,
+                };
+                text_groups(&mut o, encoded.as_ref(), place)?;
             }
             DxfShape::Point(point) => {
                 // POINT uses WCS10/20/30, not an OCS displacement. The planar
@@ -1467,20 +1545,18 @@ where
                     o.point(10, *p);
                 }
             }
-            DxfShape::Text { at, height, angle_deg, text } => {
-                o.code(100, "AcDbText");
-                o.point(10, first_text_anchor(e.source_text, *at)?);
-                o.len(40, *height);
-                let value =
-                    text_value(text).map_err(|error| IoError::Invalid(format!("DXF TEXT entity {} on layer {:?}: {error}", index + 1, e.layer)))?;
-                o.code(1, value);
-                o.num(50, *angle_deg);
-                // Generated centred text uses coincident anchors. Imported text
-                // keeps its real first source anchor and effective second anchor.
-                o.code(72, 1);
-                o.point(11, *at);
-                o.code(100, "AcDbText");
-                o.code(73, 0);
+            // Generated centred text uses coincident anchors. Imported text
+            // keeps its real first source anchor and effective second anchor.
+            DxfShape::Text { at, height, angle_deg, .. } => {
+                let place = TextPlacement {
+                    source: e.source_text,
+                    at: *at,
+                    height: *height,
+                    angle_deg: *angle_deg,
+                    horizontal: DxfTextHorizontalAlignment::Centre,
+                    vertical: DxfTextVerticalAlignment::Baseline,
+                };
+                text_groups(&mut o, encoded.as_ref(), place)?;
             }
         }
         o.check().map_err(|error| IoError::Invalid(format!("DXF {kind} entity {} on layer {:?}: {error}", index + 1, e.layer)))?;
@@ -1965,7 +2041,6 @@ mod tests {
             (Vec2::ZERO, f64::INFINITY, 0.0, "A".into()),
             (Vec2::ZERO, 1.0, f64::NAN, "A".into()),
             (Vec2::ZERO, 1e-20, 0.0, "A".into()),
-            (Vec2::ZERO, 1.0, 0.0, "A".repeat(251)),
             (Vec2::ZERO, 1.0, 0.0, "𠀋".into()),
         ] {
             let mut file = DxfFile::new().unwrap();
@@ -2012,7 +2087,9 @@ mod tests {
         .unwrap();
         let metrics = |_: &DxfShape| DxfGeometryBounds::new(Vec2::ZERO, Vec2::new(8.0, 1.0));
         let output = write_dxf_file_limited_with_text_bounds(&file, crate::MAX_DRAWING_BYTES, 2, metrics).unwrap();
-        assert_eq!(field(&entities(&output)[0].1, 1), "A%%d B\\U+00B0\\{}");
+        // Two lines: MTEXT, its `%`, `\\`, braces and degree sign escaped as typed.
+        let [(kind, groups)] = &entities(&output)[..] else { panic!("{output}") };
+        assert_eq!((kind.as_str(), field(groups, 1)), ("MTEXT", "A\\U+0025\\U+0025d\\PB\\U+00B0\\\\\\{\\}"));
         assert!(write_dxf_file_limited_with_text_bounds(&file, output.len(), 2, metrics).is_ok());
         assert!(write_dxf_file_limited_with_text_bounds(&file, output.len() - 1, 2, metrics).is_err());
         assert!(
@@ -2315,13 +2392,13 @@ mod tests {
     #[test]
     fn text_is_centred_on_its_point_and_the_reader_gets_it_back() {
         let at = Vec2::new(30.0, 12.0);
-        let note = DxfShape::Text { at, height: 3.0, angle_deg: 90.0, text: "AB%%d\nC\u{b0}".into() };
+        let note = DxfShape::Text { at, height: 3.0, angle_deg: 90.0, text: "AB%%d\tC\u{b0}".into() };
         let dxf = write_dxf_drawing_units(&[DxfLayer::new("NOTES", 8)], &[DxfEntity { layer: "NOTES".into(), shape: note }], 4).unwrap();
         let file = entities(&dxf);
         let [text] = file.as_slice() else { panic!("{file:?}") };
         assert_eq!(text.0, "TEXT");
-        // One line (the newline is a space), the sign outside ASCII a code of its own, `%%d` AutoCAD's degree sign.
-        assert_eq!(text.1.iter().find(|(c, _)| *c == 1).map(|(_, v)| v.as_str()), Some("AB%%d C\\U+00B0"));
+        // One line (the tab is a space), each typed `%` as `%%%`, and `%%d` the degree sign.
+        assert_eq!(text.1.iter().find(|(c, _)| *c == 1).map(|(_, v)| v.as_str()), Some("AB%%%%%%d C%%d"));
         // Centred (72 = 1) on the second alignment point, which is the first as well; 3 mm high, turned 90°.
         assert!(
             near(&values(text, 11), &[30.0])
@@ -2342,6 +2419,26 @@ mod tests {
             matches!(&back[..], [Geom2::Text { at: found, height, angle, .. }] if found.dist(at) < 1e-9 && (height - 3.0).abs() < 1e-9 && (angle - FRAC_PI_2).abs() < 1e-9),
             "{back:?}"
         );
+    }
+
+    #[test]
+    fn two_lines_are_mtext_at_the_same_point_and_the_strict_reader_gets_them_back_as_typed() {
+        let at = Vec2::new(30.0, 12.0);
+        let typed = "AB%%d\n50% C\u{b0} {x}\\";
+        let note = DxfShape::Text { at, height: 3.0, angle_deg: 90.0, text: typed.into() };
+        let dxf = write_dxf_drawing_units(&[DxfLayer::new("NOTES", 8)], &[DxfEntity { layer: "NOTES".into(), shape: note.clone() }], 4).unwrap();
+        let [entity] = &entities(&dxf)[..] else { panic!("{dxf}") };
+        let groups = &entity.1;
+        assert_eq!(entity.0, "MTEXT");
+        assert_eq!(field(groups, 1), "AB\\U+0025\\U+0025d\\P50\\U+0025 C\\U+00B0 \\{x\\}\\\\");
+        // Its insertion point is the point; bottom centre (71 = 8); no wrapping; turned 90° by its direction.
+        assert!(near(&values(entity, 10), &[30.0]) && near(&values(entity, 20), &[12.0]) && near(&values(entity, 40), &[3.0]));
+        assert!(near(&values(entity, 71), &[8.0]) && near(&values(entity, 41), &[0.0]) && near(&values(entity, 72), &[1.0]));
+        assert!(near(&values(entity, 11), &[0.0]) && near(&values(entity, 21), &[1.0]) && values(entity, 50).is_empty());
+        let back = crate::read_dxf_file(&dxf).unwrap();
+        let DxfShape::Text { at: found, height, angle_deg, text } = back.entities()[0].geometry() else { panic!("{back:?}") };
+        assert!(found.dist(at) < 1e-9 && *height == 3.0 && (angle_deg - 90.0).abs() < 1e-9, "{back:?}");
+        assert_eq!(text, typed);
     }
 
     #[test]
@@ -2371,10 +2468,10 @@ mod tests {
     }
 
     #[test]
-    fn bmp_text_keeps_its_existing_encoding_through_ffff() {
+    fn bmp_text_is_written_as_typed_through_ffff() {
         for (text, expected) in [
-            ("ASCII %%d %%p %%c ° 中 \u{ffff}\n".into(), "ASCII %%d %%p %%c \\U+00B0 \\U+4E2D \\U+FFFF".into()),
-            ("\u{ffff}".repeat(250), "\\U+FFFF".repeat(250)),
+            ("ASCII %%d %%p %%c ° 中\t\u{ffff}".into(), "ASCII %%%%%%d %%%%%%p %%%%%%c %%d \\U+4E2D \\U+FFFF".into()),
+            ("\u{ffff}".repeat(256), "\\U+FFFF".repeat(256)),
         ] {
             let shape = DxfShape::Text { at: Vec2::ZERO, height: 3.0, angle_deg: 0.0, text };
             let dxf = write_dxf_drawing_units(&[], &[DxfEntity { layer: "0".into(), shape }], 4).unwrap();
@@ -2734,21 +2831,24 @@ mod tests {
     }
 
     #[test]
-    fn owned_text_accepts_250_bmp_characters_and_refuses_truncation() {
-        for text in ["中".repeat(250), "A\tB\n%%d °".into()] {
+    fn owned_text_is_never_cut_and_only_characters_beyond_ffff_refuse() {
+        for text in ["中".repeat(250), "A\tB\n%%d °".into(), "A".repeat(257), "中".repeat(2_000)] {
             let shape = DxfShape::Text { at: Vec2::ZERO, height: 1.0, angle_deg: 0.0, text };
             let mut file = DxfFile::new().unwrap();
             file.push(file.default_layer(), shape.clone(), None).unwrap();
             assert_eq!(write_dxf_file(&file).unwrap(), write_dxf_drawing_units(&[], &[DxfEntity { layer: "0".into(), shape }], 4).unwrap());
         }
-        for text in ["A".repeat(251), "中".repeat(251), "😀".into(), format!("{}😀", "A".repeat(250))] {
+        for text in ["😀".to_string(), format!("{}😀", "A".repeat(250))] {
             let mut file = DxfFile::new().unwrap();
             file.push(file.default_layer(), DxfShape::Text { at: Vec2::ZERO, height: 1.0, angle_deg: 0.0, text }, None).unwrap();
-            assert!(write_dxf_file(&file).unwrap_err().to_string().contains("250 BMP characters"));
+            let error = write_dxf_file(&file).unwrap_err().to_string();
+            assert!(error.contains("U+1F600") && error.contains("U+FFFF"), "{error}");
         }
-        let shape = DxfShape::Text { at: Vec2::ZERO, height: 1.0, angle_deg: 0.0, text: "A".repeat(251) };
+        // 257 characters are MTEXT: one 250-byte chunk, then the tail.
+        let shape = DxfShape::Text { at: Vec2::ZERO, height: 1.0, angle_deg: 0.0, text: "A".repeat(257) };
         let legacy = write_dxf_drawing_units(&[], &[DxfEntity { layer: "0".into(), shape }], 4).unwrap();
-        assert_eq!(field(&entities(&legacy)[0].1, 1), "A".repeat(250));
+        let [(kind, groups)] = &entities(&legacy)[..] else { panic!("{legacy}") };
+        assert_eq!((kind.as_str(), field(groups, 3), field(groups, 1)), ("MTEXT", "A".repeat(250).as_str(), "AAAAAAA"));
     }
 
     #[test]
@@ -3118,12 +3218,243 @@ mod tests {
         assert!(write_dxf_file(&wrong).unwrap_err().to_string().contains("declared producer"));
     }
 
+    // A rolled flat's ROLL layer holds the roll's lines only, green and continuous, and a flat with
+    // every named role and a pocket under each contour fits the plan's layer count.
+    #[test]
+    fn flat_profile_admits_roll_lines_on_their_own_layer() {
+        let mut file = DxfFile::for_flat_pattern_export(1, 1, 0).unwrap();
+        let roll = file.declare_layer("ROLL", 3, DxfLinetype::Continuous, None).unwrap();
+        file.push(roll, DxfShape::Line(Vec2::ZERO, Vec2::X), None).unwrap();
+        let written = write_dxf_file(&file).unwrap();
+        assert_eq!(entities(&written).iter().map(|e| field(&e.1, 8)).collect::<Vec<_>>(), ["ROLL"]);
+
+        let mut circle = DxfFile::for_flat_pattern_export(1, 1, 0).unwrap();
+        let roll = circle.declare_layer("ROLL", 3, DxfLinetype::Continuous, None).unwrap();
+        circle.push(roll, DxfShape::Circle { c: Vec2::ZERO, r: 1.0 }, None).unwrap();
+        assert!(write_dxf_file(&circle).unwrap_err().to_string().contains("declared producer"));
+        let mut dashed = DxfFile::for_flat_pattern_export(1, 1, 0).unwrap();
+        let declared = dashed.declare_layer("ROLL", 3, DxfLinetype::Dashed, None);
+        assert!(declared.unwrap_err().to_string().contains("declared producer"));
+
+        let mut every = DxfFile::for_flat_pattern_export(1, 1, 1).unwrap();
+        for (name, color, linetype) in [
+            ("OUTLINE", 7, DxfLinetype::Continuous),
+            ("CUT", 4, DxfLinetype::Continuous),
+            ("TEXT", 2, DxfLinetype::Continuous),
+            ("ETCH", 6, DxfLinetype::Continuous),
+            ("BEND_UP", 1, DxfLinetype::Dashed),
+            ("BEND_DOWN", 5, DxfLinetype::Dashed),
+            ("BEND_NOTES", 8, DxfLinetype::Continuous),
+            ("PERFORATION", 3, DxfLinetype::Continuous),
+            ("ROLL", 3, DxfLinetype::Continuous),
+            ("FORM_UP", 1, DxfLinetype::Dashed),
+            ("FORM_DOWN", 5, DxfLinetype::Dashed),
+            ("POCKET_TOP_Z0.000000_TO_1.000000_MM", 3, DxfLinetype::Continuous),
+        ] {
+            every.declare_layer(name, color, linetype, None).unwrap();
+        }
+        assert_eq!(every.layers().len(), 13);
+        write_dxf_file(&every).unwrap();
+    }
+
+    /// A flat pattern's file with every role's standard layer and one entity of its kind on each,
+    /// in the order of `DxfRole::ALL`.
+    fn flat_with_every_role() -> DxfFile<DxfShape> {
+        let neutral = DxfExportProfile::neutral();
+        let mut file = DxfFile::for_flat_pattern_export(4, 4, 1).unwrap();
+        for &role in DxfRole::ALL {
+            let style = neutral.role(role).unwrap();
+            let name = if role == DxfRole::Pockets { format!("{}_TOP_Z0.000000_TO_1.000000_MM", style.layer) } else { style.layer.clone() };
+            // The neutral profile holds what the producer's contract admits, or this is refused.
+            let layer = file.declare_layer(&name, style.color, style.linetype, None).unwrap();
+            let shape = match role {
+                DxfRole::BendNotes => DxfShape::Text { at: Vec2::ZERO, height: 3.0, angle_deg: 0.0, text: "B1 UP 90° R1".into() },
+                DxfRole::Perforation => DxfShape::Circle { c: Vec2::ZERO, r: 1.0 },
+                _ => DxfShape::Line(Vec2::ZERO, Vec2::new(10.0, 0.0)),
+            };
+            file.push(layer, shape, None).unwrap();
+        }
+        file
+    }
+
+    /// The LAYER table as (name, colour, linetype), in the file's order.
+    fn layer_rows(dxf: &str) -> Vec<(String, String, String)> {
+        table_records(&pairs(dxf), "LAYER").iter().map(|r| (field(r, 2).to_string(), field(r, 62).to_string(), field(r, 6).to_string())).collect()
+    }
+
+    fn profile(roles: serde_json::Value) -> Result<DxfExportProfile> {
+        DxfExportProfile::from_json(&serde_json::json!({"format": "solidcraft-dxf-profile", "version": 1, "roles": roles}))
+    }
+
+    #[test]
+    fn the_neutral_dxf_profile_writes_the_bytes_of_no_profile() {
+        let file = flat_with_every_role();
+        let plain = write_dxf_file(&file).unwrap();
+        assert_eq!(write_dxf_file_as(&file, &DxfExportProfile::neutral()).unwrap(), plain);
+        // A profile that names no role, and the neutral profile read back from its own file, are
+        // the neutral profile.
+        assert_eq!(write_dxf_file_as(&file, &profile(serde_json::json!({})).unwrap()).unwrap(), plain);
+        let neutral = DxfExportProfile::neutral();
+        assert_eq!(DxfExportProfile::read(neutral.to_json().to_string().as_bytes()).unwrap(), neutral);
+        // The format page prints the neutral profile in full: its first JSON block is that profile.
+        let page = include_str!("../../../docs/formats/dxf-profiles.md");
+        let example = page.split("```json").nth(1).and_then(|rest| rest.split("```").next()).unwrap();
+        assert_eq!(DxfExportProfile::read(example.as_bytes()).unwrap(), neutral);
+        // The page's second block is a shop's profile, and reads.
+        let shop = page.split("```json").nth(2).and_then(|rest| rest.split("```").next()).unwrap();
+        assert_ne!(DxfExportProfile::read(shop.as_bytes()).unwrap(), neutral);
+    }
+
+    #[test]
+    fn a_dxf_profile_renames_restyles_shares_and_leaves_out_layers() {
+        let file = flat_with_every_role();
+        let shop = profile(serde_json::json!({
+            "outline": {"layer": "CUT", "color": 7},
+            "cut": {"color": 7},
+            "cut_text": {"layer": "#LETTERS"},
+            "bend_up": {"layer": "FOLD", "color": 3, "linetype": "Hidden"},
+            "bend_down": {"layer": "fold", "color": 3, "linetype": "hidden"},
+            "bend_notes": {"on": false},
+            "pockets": {"layer": "MILL", "color": 6, "linetype": "dashed"},
+            "roll": {"on": false, "layer": "UNUSED", "color": 200}
+        }))
+        .unwrap();
+        let dxf = write_dxf_file_as(&file, &shop).unwrap();
+        // 0 first, then by name; outline and cut share CUT, both bend directions share FOLD (layer
+        // names ignore case), the notes and the roll have no layer, and what the profile leaves
+        // alone (ETCH, PERFORATION, the bead layers, the letters' colour) is as it was.
+        let row = |name: &str, color: &str, linetype: &str| (name.to_string(), color.to_string(), linetype.to_string());
+        assert_eq!(
+            layer_rows(&dxf),
+            [
+                row("0", "7", "Continuous"),
+                row("#LETTERS", "2", "Continuous"),
+                row("CUT", "7", "Continuous"),
+                row("ETCH", "6", "Continuous"),
+                row("FOLD", "3", "HIDDEN"),
+                row("FORM_DOWN", "5", "DASHED"),
+                row("FORM_UP", "1", "DASHED"),
+                row("MILL_TOP_Z0.000000_TO_1.000000_MM", "6", "DASHED"),
+                row("PERFORATION", "3", "Continuous"),
+            ]
+        );
+        // The entities, in the file's order, each on its role's layer; the note and the roll's line
+        // are not written.
+        let written = entities(&dxf);
+        assert_eq!(
+            written.iter().map(|e| (e.0.as_str(), field(&e.1, 8))).collect::<Vec<_>>(),
+            [
+                ("LINE", "CUT"),
+                ("LINE", "CUT"),
+                ("LINE", "#LETTERS"),
+                ("LINE", "ETCH"),
+                ("LINE", "FOLD"),
+                ("LINE", "fold"),
+                ("LINE", "MILL_TOP_Z0.000000_TO_1.000000_MM"),
+                ("CIRCLE", "PERFORATION"),
+                ("LINE", "FORM_UP"),
+                ("LINE", "FORM_DOWN"),
+            ]
+        );
+        // The linetypes the layers name are defined in the file.
+        let types = table_records(&pairs(&dxf), "LTYPE");
+        let types: Vec<&str> = types.iter().map(|r| field(r, 2)).collect();
+        assert!(types.contains(&"HIDDEN") && types.contains(&"DASHED"), "{types:?}");
+        assert_eq!(crate::read_dxf_file(&dxf).unwrap().entities().len(), 10);
+
+        // Every role off: a file with layer 0 only.
+        let off: serde_json::Map<String, serde_json::Value> =
+            DxfRole::ALL.iter().map(|r| (r.key().to_string(), serde_json::json!({"on": false}))).collect();
+        let empty = write_dxf_file_as(&file, &profile(off.into()).unwrap()).unwrap();
+        assert_eq!(layer_rows(&empty), [row("0", "7", "Continuous")]);
+        assert!(entities(&empty).is_empty());
+    }
+
+    #[test]
+    fn a_dxf_profile_still_checks_the_flat_pattern_and_styles_nothing_else() {
+        // A shape that is not its role's is refused before the profile is looked at, even when
+        // the profile leaves that role out.
+        let mut wrong = DxfFile::for_flat_pattern_export(0, 1, 0).unwrap();
+        let layer = wrong.declare_layer("BEND_UP", 1, DxfLinetype::Dashed, None).unwrap();
+        wrong.push(layer, DxfShape::Circle { c: Vec2::ZERO, r: 1.0 }, None).unwrap();
+        let off = profile(serde_json::json!({"bend_up": {"on": false}})).unwrap();
+        assert!(write_dxf_file_as(&wrong, &off).unwrap_err().to_string().contains("declared producer"));
+        // The current view's file and an ordinary file have no roles.
+        let neutral = DxfExportProfile::neutral();
+        for file in [DxfFile::for_current_view_export(0, 0, 0).unwrap(), DxfFile::new().unwrap()] {
+            assert!(write_dxf_file_as(&file, &neutral).unwrap_err().to_string().contains("flat pattern"));
+        }
+        // A pocket layer and a plain role's layer that come to one name must agree on its style.
+        let file = flat_with_every_role();
+        let clash = profile(serde_json::json!({"pockets": {"layer": "M"}, "cut": {"layer": "M_TOP_Z0.000000_TO_1.000000_MM"}})).unwrap();
+        assert!(write_dxf_file_as(&file, &clash).unwrap_err().to_string().contains("share a layer"));
+    }
+
+    #[test]
+    fn a_dxf_profile_that_cannot_be_used_is_refused_and_says_why() {
+        use serde_json::json;
+        for (given, why) in [
+            (json!([]), "a profile is a JSON object"),
+            (json!({}), "`format` must be \"solidcraft-dxf-profile\""),
+            (json!({"format": "solidcraft-sheet-rules"}), "`format` must be"),
+            (json!({"format": "solidcraft-dxf-profile", "version": 2}), "the profile is version 2; this SolidCraft reads version 1"),
+            (json!({"format": "solidcraft-dxf-profile", "version": "1"}), "`version` must be 1"),
+            (json!({"format": "solidcraft-dxf-profile", "units": "inch"}), "`units` is not known"),
+            (json!({"format": "solidcraft-dxf-profile", "name": "a\nb"}), "`name` must be text of at most 128 characters on one line"),
+            (json!({"format": "solidcraft-dxf-profile", "roles": []}), "`roles` must be an object"),
+        ] {
+            let error = DxfExportProfile::from_json(&given).unwrap_err().to_string();
+            assert!(error.starts_with("DXF profile: ") && error.contains(why), "{given}: {error}");
+        }
+        for (roles, why) in [
+            (
+                json!({"bend_sideways": {}}),
+                "role `bend_sideways` is not known; the roles are outline, cut, cut_text, etch, bend_up, bend_down, bend_notes, pockets, perforation, roll",
+            ),
+            (json!({"OUTLINE": {}}), "role `OUTLINE` is not known"),
+            (json!({"cut": true}), "role `cut` must be an object"),
+            (json!({"cut": {"lineweight": 0.25}}), "role `cut`: `lineweight` is not known; a role has on, layer, color and linetype"),
+            (json!({"cut": {"on": "no"}}), "role `cut`: `on` must be true or false"),
+            (json!({"cut": {"color": 0}}), "role `cut`: `color` must be an AutoCAD colour index, a whole number from 1 to 255, not 0"),
+            (json!({"cut": {"color": 256}}), "not 256"),
+            (json!({"cut": {"color": 1.5}}), "not 1.5"),
+            (json!({"cut": {"color": "red"}}), "not \"red\""),
+            (json!({"cut": {"color": [255, 0, 0]}}), "role `cut`: `color` must be"),
+            (json!({"bend_up": {"linetype": "center"}}), "role `bend_up`: `linetype` must be continuous, dashed or hidden, not \"center\""),
+            (json!({"bend_up": {"linetype": 2}}), "role `bend_up`: `linetype` must be"),
+            (json!({"etch": {"layer": ""}}), "role `etch`: `layer` must be 1 to 200 characters"),
+            (json!({"etch": {"layer": "M".repeat(201)}}), "role `etch`: `layer` must be 1 to 200 characters"),
+            (json!({"etch": {"layer": 7}}), "role `etch`: `layer` must be text"),
+            (json!({"etch": {"layer": "0"}}), "role `etch`: `layer` cannot be 0"),
+            (json!({"etch": {"layer": "MARK/ETCH"}}), "role `etch`: layer \"MARK/ETCH\" cannot be a DXF layer name"),
+            (json!({"etch": {"layer": " MARK"}}), "cannot be a DXF layer name"),
+            (json!({"etch": {"layer": "GRAVÉ"}}), "cannot be a DXF layer name"),
+            (json!({"etch": {"layer": "A\nB"}}), "cannot be a DXF layer name"),
+            (
+                json!({"bend_up": {"layer": "FOLD"}, "bend_down": {"layer": "Fold"}}),
+                "roles `bend_up` and `bend_down` share layer \"FOLD\" but give it different colours or linetypes",
+            ),
+        ] {
+            let error = profile(roles.clone()).unwrap_err().to_string();
+            assert!(error.starts_with("DXF profile: ") && error.contains(why), "{roles}: {error}");
+        }
+        // A role that is off may name a layer another role styles differently: it has no layer.
+        profile(json!({"bend_up": {"layer": "FOLD"}, "bend_down": {"layer": "FOLD", "on": false}})).unwrap();
+        // A file: UTF-8 JSON (a byte order mark is passed over), at most 1 MiB.
+        let neutral = DxfExportProfile::neutral();
+        let text = format!("\u{feff}{}", neutral.to_json());
+        assert_eq!(DxfExportProfile::read(text.as_bytes()).unwrap(), neutral);
+        assert!(DxfExportProfile::read(&[0xff, 0xfe]).unwrap_err().to_string().contains("not UTF-8"));
+        assert!(DxfExportProfile::read(b"{format").unwrap_err().to_string().contains("not valid JSON"));
+        assert!(DxfExportProfile::read(&vec![b' '; MAX_DXF_PROFILE_BYTES + 1]).unwrap_err().to_string().contains("at most 1048576 bytes"));
+    }
+
     #[test]
     fn legacy_baseline_text_feature_preserves_cap_and_far_unicode_error_with_bounded_work() {
         let layers = [DxfLayer::new("NOTES", 8)];
         let note = |text| DxfEntity { layer: "NOTES".into(), shape: DxfShape::Text { at: Vec2::ZERO, height: 3.0, angle_deg: 0.0, text } };
         let output = legacy_dxf_baseline(&layers, &[note("\u{ffff}".repeat(251))]).unwrap();
-        assert_eq!(field(&entities(&output)[0].1, 1), "\\U+FFFF".repeat(250));
+        assert_eq!(field(&entities(&output)[0].1, 1), "\\U+FFFF".repeat(251), "nothing is cut");
         let error = legacy_dxf_baseline(&layers, &[note(format!("{}\u{2000b}", "中".repeat(10_000)))]).unwrap_err().to_string();
         assert!(error.contains("U+2000B"));
         assert!(error.contains("at position 10001"), "{error}");

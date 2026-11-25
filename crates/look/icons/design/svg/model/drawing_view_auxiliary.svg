@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Auxiliary view</title>
+  <path d="M6 40L29 17L42 30L19 53Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M38 20L49 9M42 9L49 9L49 16M45 27L54 18L59 23L50 32" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

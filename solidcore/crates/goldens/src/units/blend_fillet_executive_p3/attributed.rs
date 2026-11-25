@@ -314,7 +314,7 @@ fn generator(code: u32) -> SolidResult<FilletSurfaceGeneratorType> {
 pub(super) fn rust(input: &AttributedFillet) -> Result<Output, HarnessError> {
     let wire = input.wire();
     contract::validate_attributed(&wire).map_err(|e| HarnessError::new(e.to_string()))?;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut run = || -> SolidResult<Vec<f64>> {
         let behavior = Behavior::from_code(i32::from(input.behavior))?;
         let mut body = build(&mut k, &input.body)?;
@@ -377,10 +377,8 @@ pub(super) fn rust(input: &AttributedFillet) -> Result<Output, HarnessError> {
         put_attributes(k, &mut values, &mut body)?;
         Ok(values)
     };
-    let result = run();
-    let step = super::rust_point_step(&k);
-    match result {
-        Ok(values) => Ok(super::with_point_step(output(&values)?, step)),
+    match run() {
+        Ok(values) => output(&values),
         Err(error) => {
             Output::unported(&error).ok_or_else(|| HarnessError::new(error.to_string()))
         }

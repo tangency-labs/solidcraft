@@ -170,9 +170,23 @@ pub fn instance_descriptor_from_env() -> wgpu::InstanceDescriptor {
 
 /// An adapter and device without a window (native only): the adapter [`select::pick`] chooses
 /// under `policy`, which the host passes. wgpu's environment may narrow the backends and pick the
-/// D3D12 shader compiler (`WGPU_BACKEND`, `WGPU_DX12_COMPILER`).
+/// D3D12 shader compiler (`WGPU_BACKEND`, `WGPU_DX12_COMPILER`). Every call opens a device of its
+/// own, except in this crate's own tests, which share one (`test_env::shared_headless`).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn open_headless(policy: select::Policy) -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+    #[cfg(test)]
+    {
+        test_env::shared_headless(test_env::Sharers::Tests, policy)
+    }
+    #[cfg(not(test))]
+    {
+        open_own_headless(policy)
+    }
+}
+
+/// [`open_headless`]'s adapter and device, opened anew at every call.
+#[cfg(not(target_arch = "wasm32"))]
+fn open_own_headless(policy: select::Policy) -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
     let (adapter, _) = select::pick(policy).ok_or(GpuError::NoAdapter(policy.name()))?;
     let (device, queue) = open_device(&adapter)?;
     Ok((adapter, device, queue))
@@ -587,6 +601,26 @@ impl PackedPlans {
     }
 }
 
+/// Check that the GPU evaluator supports every face without packing the plan's vertices.
+/// Hosts call this before choosing GPU tessellation, so unsupported plans keep their CPU mesh.
+pub fn validate_plan(plan: &TessPlan) -> Result<()> {
+    for face in &plan.faces {
+        face_surface(plan, face)?;
+    }
+    Ok(())
+}
+
+fn face_surface(plan: &TessPlan, face: &solidcore_tess::FacePlan) -> Result<u32> {
+    if !face.poles.is_empty() {
+        return Err(GpuError::PoleNodes { face: face.face });
+    }
+    let surface = face.surface.ok_or_else(|| GpuError::Unsupported("a face without an evaluable surface".into()))?;
+    if surface as usize >= plan.surfaces.len() {
+        return Err(GpuError::Failed("surface index out of range".into()));
+    }
+    Ok(surface)
+}
+
 fn word(x: usize) -> Result<u32> {
     u32::try_from(x).map_err(|_| GpuError::Failed("plan too large".into()))
 }
@@ -659,16 +693,7 @@ fn pack(plans: &[&TessPlan]) -> Result<PackedPlans> {
     let mut base = 0u32;
     for plan in plans {
         for f in &plan.faces {
-            if !f.poles.is_empty() {
-                return Err(GpuError::PoleNodes { face: f.face });
-            }
-            let Some(surface) = f.surface else {
-                return Err(GpuError::Unsupported("a face without an evaluable surface".into()));
-            };
-            if surface as usize >= plan.surfaces.len() {
-                return Err(GpuError::Failed("surface index out of range".into()));
-            }
-            let surface = base + surface;
+            let surface = base + face_surface(plan, f)?;
             for (k, uv) in f.uv.iter().enumerate() {
                 let pinned = f.fixed.get(k).copied();
                 let flags = u32::from(f.flip) | if pinned.is_some() { 2 } else { 0 };

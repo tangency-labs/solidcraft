@@ -739,13 +739,28 @@ impl TabAccent {
     pub fn number_focus(ui: &egui::Ui, response: &egui::Response) {
         let active = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tool_accent"))).unwrap_or(false);
         let t = Tokens::get();
-        let focus = ui.ctx().data(|d| d.get_temp::<Option<AccentRamp>>(egui::Id::unique("sc_focus_ramp"))).flatten();
-        let color = match focus {
-            Some(ramp) => Self::for_ramp(&t, ramp).color,
-            None => Self::current(ui.ctx()).color,
-        };
+        let color = Self::number_accent_color(ui);
         if active && response.has_focus() && color != t.accent {
             ui.painter().rect_stroke(response.rect, t.radius_sm, Stroke::new(1.0, color), egui::StrokeKind::Inside);
+        }
+    }
+
+    /// The numeric field focus ink, for controls that own their entire border.
+    pub fn number_focus_color(ui: &egui::Ui) -> Color32 {
+        let active = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tool_accent"))).unwrap_or(false);
+        if !active {
+            return ui.visuals().selection.stroke.color;
+        }
+        let color = Self::number_accent_color(ui);
+        if color == Tokens::get().accent { ui.visuals().selection.stroke.color } else { color }
+    }
+
+    fn number_accent_color(ui: &egui::Ui) -> Color32 {
+        let t = Tokens::get();
+        let focus = ui.ctx().data(|d| d.get_temp::<Option<AccentRamp>>(egui::Id::unique("sc_focus_ramp"))).flatten();
+        match focus {
+            Some(ramp) => Self::for_ramp(&t, ramp).color,
+            None => Self::current(ui.ctx()).color,
         }
     }
 }
@@ -1244,6 +1259,15 @@ pub struct Tokens {
     /// Sheet metal flat pattern: bend up, bend down.
     pub bend_up: Color32,
     pub bend_down: Color32,
+    /// Screen paper and ink for the four drawing sheet appearances.
+    pub paper_white: Color32,
+    pub paper_ink: Color32,
+    pub paper_blueprint: Color32,
+    pub paper_blueprint_ink: Color32,
+    pub paper_prussian_blue: Color32,
+    pub paper_prussian_blue_ink: Color32,
+    pub paper_dark: Color32,
+    pub paper_dark_ink: Color32,
     /// Interference: the clash fill, before its shading.
     pub interference: Color32,
     /// Curvature Comb: the envelope through the teeth tips (purple) and the teeth, the scaled
@@ -1262,6 +1286,12 @@ pub struct Tokens {
 }
 
 impl Tokens {
+    /// Neutral light over glass, shared by table cards in built-in and custom themes.
+    /// Keep this translucent so the window beneath the card remains visible.
+    pub fn table_fill(&self) -> Color32 {
+        Color32::from_white_alpha(if is_dark() { 14 } else { 153 })
+    }
+
     /// An expanded outline follows its fill, including a theme's deliberately square corners.
     pub fn outset_radius(radius: f32, outset: f32) -> f32 {
         if radius > 0.0 { radius + outset } else { 0.0 }
@@ -1307,7 +1337,7 @@ impl Tokens {
 
     fn base_in(mode: ColorVision) -> Tokens {
         let window = Tokens::themed(is_dark(), mode);
-        let tokens = if viewport_dark() == is_dark() { window } else { window.with_viewport(Tokens::themed(viewport_dark(), mode)) };
+        let tokens = Tokens::viewport_own(mode).map_or(window, |view| window.with_viewport(view));
         tokens.with_background(viewport_background())
     }
 
@@ -1318,7 +1348,7 @@ impl Tokens {
         if let Some(published) = PUBLISHED.get().filter(|p| p.environment == Environment::current()) {
             return published.view;
         }
-        Tokens::themed(viewport_dark(), vision()).with_background(viewport_background())
+        Tokens::viewport_own(vision()).unwrap_or_else(|| Tokens::themed(is_dark(), vision())).with_background(viewport_background())
     }
 
     pub fn protect_tab_panel(&mut self) {
@@ -1504,6 +1534,17 @@ impl Tokens {
             analysis: view.analysis,
             ..self
         }
+    }
+
+    /// The colours of the 3D view's own Light or Dark when Preferences give it one ([`set_viewport_dark`], #4146):
+    /// the built-in Light or Dark theme's whatever theme the window uses, so Dark on a dark theme file still shows
+    /// the built-in Dark view. `None`: the view is drawn with the window's own tokens.
+    pub fn viewport_own(mode: ColorVision) -> Option<Tokens> {
+        VIEWPORT_DARK.get().map(|dark| {
+            let t = if dark { Tokens::dark() } else { Tokens::light() };
+            let t = if LOGO_ACCENT.get() { t.with_accent_logo() } else { t };
+            t.with_vision(dark, mode)
+        })
     }
 
     /// The tokens of a theme and colour vision mode: a theme file's palette when one is on for

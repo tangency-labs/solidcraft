@@ -11,7 +11,7 @@
 
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI, TAU};
 
-use super::extrude::extrude_region;
+use super::extrude::{extrude_region, symmetric_offset_intervals, symmetric_offset_probe_points};
 use super::measure::{equivalent, section};
 use super::placement::LoopPlacement;
 use super::profile::rational_curve;
@@ -19,7 +19,9 @@ use super::profile::{
     check_regions, curve_on_frame, largest_arc_sweep, smallest_arc_sweep, tapered_flange_ends,
     Loop2, ProfileRefusal, Region2, Seg2,
 };
-use super::read::{planar_curves, planar_pieces, PlanarPiece, Run};
+use super::read::{
+    arc_before_line, circular_boundary, planar_curves, planar_pieces, PlanarPiece, Run,
+};
 use super::sheet::{region_loops, sheet_regions};
 use crate::boolean::api_brep::{boolean_2d, Boolean2dOutcome};
 use crate::curve::curve::{Curve, CurveKind};
@@ -44,6 +46,45 @@ fn xy() -> Frame {
 
 fn p(x: f64, y: f64) -> Point2 {
     Vec2::new(x, y)
+}
+
+#[test]
+fn chord_coordinates_preserve_aspect_ratio_and_refuse_unrepresentable_inputs() {
+    use super::import_geometry::chord_coordinates;
+
+    // c = 1.5 - 0.25 = 1.25; 0.625/c = 0.5, 0.15625/c = 0.125.
+    assert_eq!(
+        chord_coordinates(p(0.875, 0.15625), 0.25, 1.5).unwrap(),
+        p(0.5, 0.125)
+    );
+    assert_eq!(
+        chord_coordinates(p(0.25, 0.0), 0.25, 1.5).unwrap(),
+        Vec2::ZERO
+    );
+    assert_eq!(
+        chord_coordinates(p(1.5, 0.0), 0.25, 1.5).unwrap(),
+        p(1.0, 0.0)
+    );
+    assert_eq!(
+        chord_coordinates(p(0.5, -0.125), 0.0, 1.0).unwrap(),
+        p(0.5, -0.125)
+    );
+    for (point, leading, trailing) in [
+        (p(0.0, 0.0), 0.0, 0.0),
+        (p(0.0, 0.0), 1.0, 0.0),
+        (p(f64::NAN, 0.0), 0.0, 1.0),
+        (p(0.0, f64::INFINITY), 0.0, 1.0),
+        (p(0.0, 0.0), f64::NEG_INFINITY, 1.0),
+        (p(0.0, 0.0), 0.0, f64::INFINITY),
+        (p(0.0, 0.0), -f64::MAX, f64::MAX),
+        (p(f64::MAX, 0.0), -f64::MAX, 0.0),
+        (p(0.0, 1.0), 0.0, f64::from_bits(1)),
+    ] {
+        assert!(
+            chord_coordinates(point, leading, trailing).is_err(),
+            "{point:?}, {leading}, {trailing}"
+        );
+    }
 }
 
 fn polygon(pts: &[Point2]) -> Loop2 {
@@ -942,6 +983,47 @@ fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
         let r = read(&k, &line, iv, true, &xy(), tol).unwrap();
         assert!(matches!(r[..], [Seg2::Line { .. }]), "{off}: {r:?}");
     }
+    // 80 of a circle of radius 4e7 is rational though its middle weight is 1 - 5e-13: its middle
+    // control point lies 4e-5 off the chord, the arc 2e-5 (over the zone tolerance); the same
+    // control points with equal weights (a polynomial) are not
+    let (radius, h) = (4e7, 1e-6_f64);
+    let (w, y) = (h.cos(), radius * h.cos() - radius);
+    let (x, top) = (radius * h.sin(), radius / w - radius);
+    let piece = |w: f64, v: f64| {
+        vec![vec![
+            [-x * v, y * v, v],
+            [0.0, top * w, w],
+            [x * v, y * v, v],
+        ]]
+    };
+    assert!(arc_before_line(&piece(w, 1.0), 1e-5));
+    assert!(!arc_before_line(&piece(w, 1.0), 5e-5));
+    assert!(!arc_before_line(&piece(1.0, 1.0), 1e-5));
+    assert!(!arc_before_line(&piece(0.5, 0.5), 1e-5));
+    // a piece of a circle of radius 1e8 (half-angle 6.3e-7, middle weight 1 - 2e-13, bending
+    // 2e-5 off its chord) raised to degree 32: neighbouring weights differ by at most 1.3e-14,
+    // under their rounding, the span's by 1e-13; it is rational
+    let (radius, h) = (1e8, 4e-13_f64.sqrt());
+    let (w, y) = (h.cos(), radius * h.cos() - radius);
+    let x = radius * h.sin();
+    let mut span = vec![
+        [-x, y, 1.0],
+        [0.0, (radius / w - radius) * w, w],
+        [x, y, 1.0],
+    ];
+    for n in 2..32 {
+        let mut up = vec![span[0]];
+        for i in 1..=n {
+            let a = i as f64 / (n + 1) as f64;
+            up.push(std::array::from_fn(|k| {
+                a * span[i - 1][k] + (1.0 - a) * span[i][k]
+            }));
+        }
+        up.push(span[n]);
+        span = up;
+    }
+    assert_eq!(span.len(), 33);
+    assert!(arc_before_line(&[span], 1e-5));
 }
 
 /// Samples do not certify: a C0 quadratic spline on the x axis at every knot k/16 and bowing 1
@@ -1006,6 +1088,39 @@ fn a_curve_near_a_circle_is_not_an_arc_ending_off_it() {
             "{tol}: {segs:?}"
         );
     }
+}
+
+/// A circular reading keeps the arc only when each end it returns lies within the tolerance of its
+/// vertex: a vertex just inside is read, one just outside is refused (the edge stays a spline),
+/// and one exactly on the circle is read.
+#[test]
+fn a_circular_reading_ends_within_tolerance_of_its_vertices() {
+    let k = Kernel::default();
+    let w = FRAC_1_SQRT_2;
+    // the quarter of the unit circle from (1, 0) to (0, 1)
+    let (c, iv) = spline(
+        &k,
+        vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        vec![[1.0, 0.0, 0.0, 1.0], [w, w, 0.0, w], [0.0, 1.0, 0.0, 1.0]],
+    );
+    let tol = 1e-6;
+    let read_at = |first_x: f64, last_y: f64| {
+        let run = Run {
+            curve: &c,
+            interval: iv,
+            forward: true,
+            ends: [
+                crate::geom::vector3d::Vec3::new(first_x, 0.0, 0.0),
+                crate::geom::vector3d::Vec3::new(0.0, last_y, 0.0),
+            ],
+        };
+        circular_boundary(&k, &run, &xy(), p(0.0, 0.0), 1.0, tol, &mut 2_000_000)
+    };
+    assert!(read_at(1.0, 1.0).is_some());
+    assert!(read_at(1.0 + 0.9 * tol, 1.0).is_some());
+    assert!(read_at(1.0, 1.0 - 0.9 * tol).is_some());
+    assert!(read_at(1.0 + 1.1 * tol, 1.0).is_none());
+    assert!(read_at(1.0, 1.0 + 1.1 * tol).is_none());
 }
 
 /// A spline of several spans reads as the one B-spline it is for a sketch, run back, its ends
@@ -1266,6 +1381,28 @@ fn a_tapered_flange_changes_by_half_its_length_times_the_slope_tangent() {
     assert!(((toe + root) / 2.0 - 14.2).abs() < 1e-12);
     // A non-finite input gives a non-finite answer, never a panic.
     assert!(tapered_flange_ends(f64::NAN, 1.0, 5.0).0.is_nan());
+}
+
+#[test]
+fn directed_planar_sweep_keeps_quadrants_and_tiny_seam_angles() {
+    let sweep = super::profile::counterclockwise_sweep;
+    let center = Point2::new(0.0, 0.0);
+    let x = Point2::new(1.0, 0.0);
+    let y = Point2::new(0.0, 1.0);
+    assert_eq!(sweep(center, x, y), Some(FRAC_PI_2));
+    assert_eq!(sweep(center, y, x), Some(3.0 * FRAC_PI_2));
+    assert_eq!(sweep(center, x, x), Some(0.0));
+    for delta in [0.5e-12_f64, 1e-12, 2e-12] {
+        let end = Point2::new(delta.cos(), delta.sin());
+        assert_eq!(sweep(center, x, end), Some(delta));
+        let start = Point2::new(-1.0, delta / 2.0);
+        let end = Point2::new(-1.0, -delta / 2.0);
+        let expected = (end.y.atan2(end.x) - start.y.atan2(start.x)).rem_euclid(TAU);
+        assert_eq!(sweep(center, start, end), Some(expected));
+        assert!(expected > 0.0 && expected < 3e-12);
+    }
+    assert_eq!(sweep(center, center, x), None);
+    assert_eq!(sweep(center, x, Point2::new(f64::NAN, 0.0)), None);
 }
 
 mod recognition {
@@ -2843,4 +2980,470 @@ mod path_export_regressions {
         assert!(!pts.contains(&Vec2::new(0.0, -1.0)));
         assert_eq!(pts.len(), 5);
     }
+}
+
+#[test]
+fn symmetric_offset_intervals_and_probes_are_symmetric_about_sketch_plane() {
+    assert_eq!(
+        symmetric_offset_intervals(3.0, 5.0),
+        [(3.0, 8.0), (-8.0, -3.0)]
+    );
+    assert_eq!(
+        symmetric_offset_intervals(-3.0, 5.0),
+        [(3.0, 8.0), (-8.0, -3.0)]
+    );
+
+    // `base` in auto-operation is already shifted by `start` along `n`.
+    let n = [0.0, 0.0, 1.0];
+    let pos_start_probes = symmetric_offset_probe_points([0.0, 0.0, 3.0], n, 3.0, 10.0, 0.5);
+    assert_eq!(
+        pos_start_probes,
+        [
+            [0.0, 0.0, 3.5],
+            [0.0, 0.0, 5.5],
+            [0.0, 0.0, -3.5],
+            [0.0, 0.0, -5.5],
+        ]
+    );
+    let neg_start_probes = symmetric_offset_probe_points([0.0, 0.0, -3.0], n, -3.0, 10.0, 0.5);
+    assert_eq!(neg_start_probes, pos_start_probes);
+}
+
+/// Straight members (`member`): closed forms for the middle line, the extrusion range, trims to
+/// planes and butt joints, and the refusals.
+mod member {
+    use std::f64::consts::FRAC_1_SQRT_2;
+
+    use crate::eval::Frame;
+    use crate::geom::vector3d::{Point3, Vec3};
+    use crate::math::Vec2;
+    use crate::prism::member::{axis, butt, extent, to_plane, End, Member, Refusal, Side};
+
+    fn frame(o: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Frame {
+        Frame {
+            origin: o,
+            x_axis: x,
+            y_axis: y,
+        }
+    }
+
+    /// The plane through `o` with unit normal `n`: its x the unit vector square to `n` in the
+    /// plane of `n` and world y, or world x when `n` is along y; y = n × x.
+    fn plane(o: [f64; 3], n: [f64; 3]) -> Frame {
+        let n = Vec3::new(n[0], n[1], n[2]);
+        let up = if n.y.abs() > 0.9 {
+            Vec3::new(1.0, 0.0, 0.0)
+        } else {
+            Vec3::new(0.0, 1.0, 0.0)
+        };
+        let x = (up - n * up.dot(n)).unitize().unwrap();
+        let y = n.cross(x);
+        frame(o, [x.x, x.y, x.z], [y.x, y.y, y.z])
+    }
+
+    fn near(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-9
+    }
+
+    /// A `w` × `w` bar centred on the line from `a` to `b` along +x, its section in y and z.
+    fn bar_along_x(a: f64, b: f64, w: f64) -> Member {
+        let h = w / 2.0;
+        Member::along(
+            frame([a, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+            Point3::new(a, 0.0, 0.0),
+            Point3::new(b, 0.0, 0.0),
+            Vec2::new(-h, -h),
+            Vec2::new(h, h),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_line_without_length_or_a_section_without_area_is_degenerate() {
+        let f = frame([0.0; 3], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+        let p = Point3::new(0.0, 0.0, 0.0);
+        let r = Member::along(f.clone(), p, p, Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0));
+        assert_eq!(r.unwrap_err(), Refusal::Degenerate);
+        let r = Member::along(
+            f,
+            p,
+            Point3::new(1.0, 0.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(-1.0, -1.0),
+        );
+        assert_eq!(r.unwrap_err(), Refusal::Degenerate);
+    }
+
+    /// The plane x + z = 150 cuts a 10 × 10 bar along x: its middle line at 150, its corners at
+    /// 145 and 155, so the section runs past 155 by the slant and 1 more before the cut.
+    #[test]
+    fn a_slanted_end_crosses_the_middle_line_where_the_plane_does() {
+        let m = bar_along_x(0.0, 100.0, 10.0);
+        let ends = [
+            None,
+            Some(plane(
+                [150.0, 0.0, 0.0],
+                [FRAC_1_SQRT_2, 0.0, FRAC_1_SQRT_2],
+            )),
+        ];
+        let a = axis(&m, &ends).unwrap();
+        assert!(
+            near(a.t0, 0.0) && near(a.t1, 150.0) && near(a.length, 150.0),
+            "{a:?}"
+        );
+        let e = extent(&m, &ends).unwrap();
+        assert!(
+            near(e.from, 0.0) && near(e.to, 155.0 + 10.0 + 1.0) && e.cut == [false, true],
+            "{e:?}"
+        );
+        // Square ends: the line's own ends, nothing cut.
+        let e = extent(&m, &[None, None]).unwrap();
+        assert!(
+            near(e.from, 0.0) && near(e.to, 100.0) && e.cut == [false, false],
+            "{e:?}"
+        );
+    }
+
+    /// Ends x + y = 0 and x + y = 30 are parallel: every line through the 45 × 45 section keeps
+    /// 30 between them, though their extents along the line overlap. Ends x + y = 0 and
+    /// x − y = 30 cross inside the section.
+    #[test]
+    fn parallel_slanted_ends_leave_a_short_member_and_crossing_ends_are_refused() {
+        let m = bar_along_x(0.0, 30.0, 45.0);
+        let start = Some(plane([0.0; 3], [-FRAC_1_SQRT_2, -FRAC_1_SQRT_2, 0.0]));
+        let parallel = [
+            start.clone(),
+            Some(plane([30.0, 0.0, 0.0], [FRAC_1_SQRT_2, FRAC_1_SQRT_2, 0.0])),
+        ];
+        let e = extent(&m, &parallel).unwrap();
+        assert!(e.cut == [true, true], "{e:?}");
+        assert!(near(axis(&m, &parallel).unwrap().length, 30.0));
+        let crossing = [
+            start,
+            Some(plane(
+                [30.0, 0.0, 0.0],
+                [FRAC_1_SQRT_2, -FRAC_1_SQRT_2, 0.0],
+            )),
+        ];
+        assert_eq!(extent(&m, &crossing).unwrap_err(), Refusal::EndsCross);
+    }
+
+    #[test]
+    fn end_planes_facing_into_the_member_running_along_it_or_too_far_are_refused() {
+        let m = bar_along_x(0.0, 100.0, 10.0);
+        let into = [None, Some(plane([90.0, 0.0, 0.0], [-1.0, 0.0, 0.0]))];
+        assert_eq!(extent(&m, &into).unwrap_err(), Refusal::WrongWay);
+        let along = [None, Some(plane([0.0, 50.0, 0.0], [0.0, 1.0, 0.0]))];
+        assert_eq!(extent(&m, &along).unwrap_err(), Refusal::WrongWay);
+        assert_eq!(axis(&m, &along).unwrap_err(), Refusal::RunsAlong);
+        let far = [None, Some(plane([2e6, 0.0, 0.0], [1.0, 0.0, 0.0]))];
+        assert_eq!(extent(&m, &far).unwrap_err(), Refusal::TooFar);
+    }
+
+    /// A bar from 0 to 100 trimmed to x = 150 with a gap of 2: its end moves, to the plane
+    /// x = 148 facing on along the line. The start, asked for, moves there instead.
+    #[test]
+    fn a_trim_to_a_plane_moves_the_nearer_end_short_of_it_by_the_gap() {
+        let m = bar_along_x(0.0, 100.0, 10.0);
+        let a = axis(&m, &[None, None]).unwrap();
+        let target = plane([150.0, 0.0, 0.0], [-1.0, 0.0, 0.0]);
+        let (which, cut) = to_plane(&m, &a, End::Nearer, &target, 2.0).unwrap();
+        assert_eq!(which, 1);
+        assert!(
+            near(cut.origin.x, 148.0) && near(cut.normal.dot(Vec3::new(1.0, 0.0, 0.0)), 1.0),
+            "{cut:?}"
+        );
+        let (which, cut) = to_plane(&m, &a, End::Start, &target, 0.0).unwrap();
+        assert_eq!(which, 0);
+        assert!(
+            near(cut.origin.x, 150.0) && near(cut.normal.dot(Vec3::new(-1.0, 0.0, 0.0)), 1.0),
+            "{cut:?}"
+        );
+        // A plane along the bar doesn't trim it.
+        assert!(to_plane(
+            &m,
+            &a,
+            End::Nearer,
+            &plane([0.0, 30.0, 0.0], [0.0, 1.0, 0.0]),
+            0.0
+        )
+        .is_none());
+    }
+
+    /// A 45 × 45 post along +y at x = 0 (its section's x is world −x, y up) and a rail along +x
+    /// from 100: the rail's start butts against the post's side facing it, x = 22.5, which is
+    /// the post's left (−x of its section). Its right faces away; a parallel rail misses.
+    #[test]
+    fn a_butt_joint_cuts_the_nearer_end_on_the_targets_side_facing_it() {
+        let post = Member::along(
+            frame([0.0, -100.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+            Point3::new(0.0, -100.0, 0.0),
+            Point3::new(0.0, 100.0, 0.0),
+            Vec2::new(-22.5, -22.5),
+            Vec2::new(22.5, 22.5),
+        )
+        .unwrap();
+        let post_axis = axis(&post, &[None, None]).unwrap();
+        let rail = bar_along_x(100.0, 300.0, 45.0);
+        let rail_axis = axis(&rail, &[None, None]).unwrap();
+        let (which, cut) = butt(&rail, &rail_axis, End::Nearer, &post, &post_axis, None, 0.0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(which, 0);
+        assert!(
+            near(cut.origin.x, 22.5) && near(cut.normal.dot(Vec3::new(-1.0, 0.0, 0.0)), 1.0),
+            "{cut:?}"
+        );
+        let left = butt(
+            &rail,
+            &rail_axis,
+            End::Nearer,
+            &post,
+            &post_axis,
+            Some(Side::Left),
+            0.0,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(left, (which, cut));
+        let away = butt(
+            &rail,
+            &rail_axis,
+            End::Nearer,
+            &post,
+            &post_axis,
+            Some(Side::Right),
+            0.0,
+        );
+        assert_eq!(away.unwrap_err(), Refusal::FacesAway);
+        let beside = Member::along(
+            frame([100.0, 200.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+            Point3::new(100.0, 200.0, 0.0),
+            Point3::new(300.0, 200.0, 0.0),
+            Vec2::new(-22.5, -22.5),
+            Vec2::new(22.5, 22.5),
+        )
+        .unwrap();
+        let beside_axis = axis(&beside, &[None, None]).unwrap();
+        assert!(butt(
+            &beside,
+            &beside_axis,
+            End::Nearer,
+            &post,
+            &post_axis,
+            None,
+            0.0
+        )
+        .unwrap()
+        .is_none());
+        assert!(butt(
+            &rail,
+            &rail_axis,
+            End::Nearer,
+            &beside,
+            &beside_axis,
+            None,
+            0.0
+        )
+        .unwrap()
+        .is_none());
+    }
+}
+
+#[test]
+/// Curved face boundaries contribute their actual area and projected extent to contact checks.
+fn gusset_face_boundaries_are_measured_on_their_exact_curves() {
+    use super::gusset::{
+        conic_share, counter_clockwise, loop_signed_area, scalar_extent, seg_extent,
+    };
+    use super::profile::{Loop2, Seg2};
+    use crate::math::Vec2 as V;
+    use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
+    // A clockwise circle is turned counter-clockwise and encloses exactly pi.
+    let circle = Loop2 {
+        segs: vec![Seg2::Arc {
+            center: V::new(2., 0.),
+            radius: 1.,
+            start: 0.,
+            sweep: -TAU,
+        }],
+    };
+    assert!((loop_signed_area(&circle).unwrap() + PI).abs() < 1e-12);
+    assert!((loop_signed_area(&counter_clockwise(circle).unwrap()).unwrap() - PI).abs() < 1e-12);
+    // A quarter arc reaches its extreme between its ends, not at them.
+    let quarter = Seg2::Arc {
+        center: V::new(0., 0.),
+        radius: 1.,
+        start: -0.25 * PI,
+        sweep: 0.5 * PI,
+    };
+    let (lo, hi) = seg_extent(&quarter, V::new(1., 0.)).unwrap();
+    assert!(
+        (hi - 1.).abs() < 1e-12 && (lo - FRAC_1_SQRT_2).abs() < 1e-12,
+        "{lo} {hi}"
+    );
+    // A cubic's bulge counts: (0,0)-(0,1)-(1,1)-(1,0) peaks at y = 3/4 and encloses 3/5 with its chord.
+    let cubic = Seg2::Cubic {
+        p0: V::new(0., 0.),
+        p1: V::new(0., 1.),
+        p2: V::new(1., 1.),
+        p3: V::new(1., 0.),
+    };
+    let (_, top) = seg_extent(&cubic, V::new(0., 1.)).unwrap();
+    assert!((top - 0.75).abs() < 1e-9, "{top}");
+    let closed = Loop2 {
+        segs: vec![
+            cubic,
+            Seg2::Line {
+                a: V::new(1., 0.),
+                b: V::new(0., 0.),
+            },
+        ],
+    };
+    assert!((loop_signed_area(&closed).unwrap().abs() - 0.6).abs() < 1e-12);
+    // An extent that can't be resolved in the halvings allowed is an error, never the hull.
+    assert!(scalar_extent(vec![(0., 1.), (1., 1.), (1., 1.), (0., 1.)], 0).is_err());
+
+    // Conics: a quarter circle as a rational quadratic (w = cos 45°) closed through the centre
+    // encloses pi/4 exactly, and reaches 1 along the diagonal.
+    let arc = Seg2::Conic {
+        a: V::new(1., 0.),
+        apex: V::new(1., 1.),
+        b: V::new(0., 1.),
+        w: FRAC_1_SQRT_2,
+    };
+    let sector = Loop2 {
+        segs: vec![
+            arc,
+            Seg2::Line {
+                a: V::new(0., 1.),
+                b: V::new(0., 0.),
+            },
+            Seg2::Line {
+                a: V::new(0., 0.),
+                b: V::new(1., 0.),
+            },
+        ],
+    };
+    assert!((loop_signed_area(&sector).unwrap() - PI / 4.).abs() < 1e-12);
+    let (_, far) = seg_extent(&arc, V::new(FRAC_1_SQRT_2, FRAC_1_SQRT_2)).unwrap();
+    assert!((far - 1.).abs() < 1e-9, "{far}");
+    // A parabola (w = 1) takes 2/3 of its control triangle; a hyperbola (w = cosh 1) takes
+    // cosh 1 (sinh 1 cosh 1 - 1) / sinh³ 1; across w = 1 the share is continuous.
+    assert!((conic_share(1.).unwrap() - 2. / 3.).abs() < 1e-15);
+    let (c, sh) = (1f64.cosh(), 1f64.sinh());
+    assert!((conic_share(c).unwrap() - c * (sh * c - 1.) / (sh * sh * sh)).abs() < 1e-12);
+    for w in [1. - 1.1e-4, 1. - 0.9e-4, 1. + 0.9e-4, 1. + 1.1e-4] {
+        assert!(
+            (conic_share(w).unwrap() - (2. / 3. - 4. / 15. * (1. - w))).abs() < 1e-8,
+            "{w}"
+        );
+    }
+    let parabola = Seg2::Conic {
+        a: V::new(-1., 0.),
+        apex: V::new(0., 2.),
+        b: V::new(1., 0.),
+        w: 1.,
+    };
+    let cap = Loop2 {
+        segs: vec![
+            parabola,
+            Seg2::Line {
+                a: V::new(1., 0.),
+                b: V::new(-1., 0.),
+            },
+        ],
+    };
+    assert!((loop_signed_area(&cap).unwrap().abs() - 4. / 3.).abs() < 1e-12);
+    // A weight that isn't positive is refused, not measured.
+    for w in [0., -0.5, f64::NAN] {
+        let bad = Seg2::Conic {
+            a: V::new(1., 0.),
+            apex: V::new(1., 1.),
+            b: V::new(0., 1.),
+            w,
+        };
+        assert!(
+            seg_extent(&bad, V::new(1., 0.)).is_err() && conic_share(w).is_err(),
+            "{w}"
+        );
+    }
+}
+
+#[test]
+fn gusset_plan_keeps_the_joint_offset_contacts_and_fabrication_cuts() {
+    use super::gusset::{self, Dimensions, Face, Placement};
+    use super::profile::Region2;
+    use crate::eval::Frame;
+    use crate::math::Transform;
+
+    let rectangle = |x0, x1, y0, y1| Region2 {
+        outer: polygon(&[
+            Vec2::new(x0, y0),
+            Vec2::new(x1, y0),
+            Vec2::new(x1, y1),
+            Vec2::new(x0, y1),
+        ]),
+        holes: Vec::new(),
+    };
+    let support = |plane: Frame, region| Face {
+        source: plane.clone(),
+        plane,
+        regions: vec![region],
+        to_source: Transform::IDENTITY,
+        to_author: Transform::IDENTITY,
+        tolerance: 1e-7,
+    };
+    // x = 0 faces +X; z = 0 faces +Z. Their joint runs along -Y.
+    let a = support(
+        Frame {
+            origin: [0.0; 3],
+            x_axis: [0.0, 1.0, 0.0],
+            y_axis: [0.0, 0.0, 1.0],
+        },
+        rectangle(-20.0, 20.0, 0.0, 200.0),
+    );
+    let b = support(
+        Frame {
+            origin: [0.0; 3],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        },
+        rectangle(0.0, 200.0, -20.0, 20.0),
+    );
+    let dimensions = Dimensions {
+        leg1: 100.0,
+        leg2: 100.0,
+        thickness: 6.0,
+        relief: 0.0,
+        clip: 0.0,
+        offset: 5.0,
+    };
+    let plan = gusset::plan([&a, &b], dimensions, Placement::Center).unwrap();
+    assert_eq!(plan.plane.origin, [0.0, -5.0, 0.0]);
+    assert_eq!((plan.start, plan.end), (-3.0, 3.0));
+    // A right triangle of legs 100 has area 5000; each contact is 100 x 6.
+    assert!((plan.profile.signed_area().unwrap().value - 5000.0).abs() < 1e-9);
+    for contact in &plan.contacts {
+        assert!((contact.region.signed_area().unwrap().value - 600.0).abs() < 1e-9);
+    }
+    let cut = gusset::plan(
+        [&a, &b],
+        Dimensions {
+            relief: 10.0,
+            clip: 10.0,
+            ..dimensions
+        },
+        Placement::Positive,
+    )
+    .unwrap();
+    assert_eq!((cut.start, cut.end), (0.0, 6.0));
+    // Relief removes 10*10/2. Each tip removes 10*10/(2*sqrt(2)).
+    let expected_area = 5000.0 - 50.0 - 100.0 / 2.0_f64.sqrt();
+    assert!((cut.profile.signed_area().unwrap().value - expected_area).abs() < 1e-9);
+    for contact in &cut.contacts {
+        assert!((contact.region.signed_area().unwrap().value - 480.0).abs() < 1e-9);
+    }
+    let negative = gusset::plan([&a, &b], dimensions, Placement::Negative).unwrap();
+    assert_eq!((negative.start, negative.end), (-6.0, 0.0));
 }

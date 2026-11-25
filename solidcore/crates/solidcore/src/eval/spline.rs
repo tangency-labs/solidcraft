@@ -224,6 +224,103 @@ impl EvalCurve {
         let t = onto_knots(&self.knots, self.degree, self.ctrl.len(), t)?;
         self.derivs_from(t, order, Side::Left)
     }
+
+    /// The homogeneous Bézier control points of the curve's piece over `[ta, tb]`, which lies
+    /// within one of its knot spans (the parameters are taken onto its knot interval), each with
+    /// a bound on each of its coordinates' rounding: point `i` of a degree-`d` piece is the
+    /// curve's blossom at `ta` taken `d - i` times and `tb` `i` times (de Boor's steps with those
+    /// parameters), so the piece lies in the convex hull of the exact points where their weights
+    /// are positive. The span is the one the piece starts in (at the knot interval's end, the
+    /// last span that is not empty), so a piece just short of a knot is not taken from the span
+    /// past it, whose polynomial is not the curve there; the caller cuts its pieces at the knots,
+    /// and a piece that runs past its span's end is `None`. `None` too for knots that do not fit
+    /// the points, or numbers not finite.
+    ///
+    /// Each of de Boor's steps is `β x + α y`, `α = (u - a) / (b - a)` and `β = (b - u) / (b - a)`
+    /// both in `[0, 1]` (the parameters lie in the span, inside each step's pair of knots) and
+    /// each within 3 ulps of its value. A step's result is then within about 6 ulps of
+    /// `β |x| + α |y|` of its exact value, plus its inputs' errors, weighted `β` and `α` (so not
+    /// grown). The same steps on the control points' magnitudes give `M`, which bounds each
+    /// step's `β |x| + α |y|`; after `d` steps a coordinate is within `6 d ε M` (to first order)
+    /// of the exact blossom, and the bound returned is `16 (d + 1) ε M`. `M` is the piece's own:
+    /// a curve whose weights span many orders of magnitude is not charged its largest control
+    /// point's rounding where that point hardly counts (which a bound by the span's largest, as
+    /// `crate::curve::length_bound`'s, is). Underflow is counted apart, absolutely: each bound
+    /// has `4 (d + 1)` least normal numbers added, so a coordinate rounded to zero below the
+    /// normal range is still enclosed. A knot span whose width overflows is `None`.
+    #[must_use]
+    pub fn bezier(&self, ta: f64, tb: f64) -> Option<Vec<([f64; 4], [f64; 4])>> {
+        let (knots, count, degree) = (&self.knots, self.ctrl.len(), self.degree);
+        if self.nl.is_none() || degree >= count {
+            return None;
+        }
+        let (lo, hi) = (*knots.get(degree)?, *knots.get(count)?);
+        if !(lo < hi) || !(ta <= tb) || !ta.is_finite() || !tb.is_finite() {
+            return None;
+        }
+        // `lo < hi` and both ends finite (checked above); max/min, not clamp, cannot panic.
+        let (ta, tb) = (ta.max(lo).min(hi), tb.max(lo).min(hi));
+        // The span `ta` lies in: from its start up to, not including, its end. Not the span
+        // of the piece's middle: that rounds onto the next knot for a piece ending at it whose
+        // start is the float below.
+        let mut span = degree;
+        while span + 1 < count && *knots.get(span + 1)? <= ta {
+            span += 1;
+        }
+        // `ta` at the interval's end (`tb` is then too): the last span with any width.
+        while span > degree && *knots.get(span)? >= *knots.get(span + 1)? {
+            span -= 1;
+        }
+        if tb > *knots.get(span + 1)? {
+            return None;
+        }
+        let poles = (0..=degree)
+            .map(|j| self.ctrl.get(j + span - degree).copied())
+            .collect::<Option<Vec<_>>>()?;
+        let ulps = 16.0 * (degree + 1) as f64 * f64::EPSILON;
+        // Underflow: a quotient, product or sum below the normal range is off by up to half the
+        // least subnormal, absolutely, whatever its relative error; each of the `d` steps makes
+        // a few, so `4 (d + 1)` least normals bounds them all, with room.
+        let tiny = 4.0 * (degree + 1) as f64 * f64::MIN_POSITIVE;
+        (0..=degree)
+            .map(|i| {
+                // The blossom, and alongside it the same steps on the coordinates' magnitudes.
+                let mut d = poles.clone();
+                let mut m: Vec<[f64; 4]> = poles.iter().map(|p| p.map(f64::abs)).collect();
+                for r in 1..=degree {
+                    let u = if r <= degree - i { ta } else { tb };
+                    for j in (r..=degree).rev() {
+                        let k = j + span - degree;
+                        let (a, b) = (*knots.get(k)?, *knots.get(k + 1 + degree - r)?);
+                        // Each weight its own quotient, so each is within 3 ulps of its own value
+                        // (and an absolute underflow, counted below). A width that overflows has
+                        // no such quotient: no piece.
+                        if !(b - a).is_finite() {
+                            return None;
+                        }
+                        let (alpha, beta) = if b > a {
+                            ((u - a) / (b - a), (b - u) / (b - a))
+                        } else {
+                            (0.0, 1.0)
+                        };
+                        let (x, y) = (*d.get(j - 1)?, *d.get(j)?);
+                        let (mx, my) = (*m.get(j - 1)?, *m.get(j)?);
+                        let (mut z, mut mz) = ([0.0; 4], [0.0; 4]);
+                        for ((z, x), y) in z.iter_mut().zip(x).zip(y) {
+                            *z = beta * x + alpha * y;
+                        }
+                        for ((mz, mx), my) in mz.iter_mut().zip(mx).zip(my) {
+                            *mz = beta.abs() * mx + alpha.abs() * my;
+                        }
+                        *d.get_mut(j)? = z;
+                        *m.get_mut(j)? = mz;
+                    }
+                }
+                let (p, e) = (*d.get(degree)?, m.get(degree)?.map(|x| ulps * x + tiny));
+                p.iter().chain(&e).all(|x| x.is_finite()).then_some((p, e))
+            })
+            .collect()
+    }
 }
 
 /// A rational tensor B-spline: control point `(i, j)` is `ctrl[j·count[0] + i]`.

@@ -57,6 +57,27 @@ pub fn offset_partials_over_piece(
     vb: f64,
     lk: usize,
 ) -> Result<Partials<Ivl>> {
+    offset_and_base_partials_over_piece(net, d, ku, kv, ua, ub, va, vb, lk).map(|(q, _)| q)
+}
+
+/// [`offset_partials_over_piece`] with the base surface's partials it is built from: those
+/// of `S` up to order `lk + 1` (up to `lk` for an offset of exactly zero, `Q = S`).
+///
+/// # Errors
+///
+/// Those of [`offset_partials_over_piece`].
+#[allow(clippy::too_many_arguments)]
+pub fn offset_and_base_partials_over_piece(
+    net: &Nurbs,
+    d: Ivl,
+    ku: usize,
+    kv: usize,
+    ua: f64,
+    ub: f64,
+    va: f64,
+    vb: f64,
+    lk: usize,
+) -> Result<(Partials<Ivl>, Partials<Ivl>)> {
     if lk > 2 {
         return Err(SolidError::port_invariant(
             OP,
@@ -65,7 +86,8 @@ pub fn offset_partials_over_piece(
     }
     // Exact-zero offset identity (Q = S), not a tolerance.
     if d.lo == 0.0 && d.hi == 0.0 {
-        return nurbs_partials_over_piece(net, ku, kv, ua, ub, va, vb, lk);
+        let s = nurbs_partials_over_piece(net, ku, kv, ua, ub, va, vb, lk)?;
+        return Ok((s.clone(), s));
     }
     let b = nurbs_partials_over_piece(net, ku, kv, ua, ub, va, vb, lk + 1)?;
     let s = b.at(0, 0);
@@ -79,7 +101,7 @@ pub fn offset_partials_over_piece(
     let mut out = Partials::default();
     out.set(0, 0, v_add(s, v_scale(n, d)));
     if lk == 0 {
-        return Ok(out);
+        return Ok((out, b));
     }
 
     let b20 = b.at(2, 0);
@@ -96,7 +118,7 @@ pub fn offset_partials_over_piece(
     let nv = v_scale(v_sub(cv, v_scale(n, mv)), inv_len);
     out.set(0, 1, v_add(bv, v_scale(nv, d)));
     if lk == 1 {
-        return Ok(out);
+        return Ok((out, b));
     }
 
     let two = Ivl::from(2.0);
@@ -138,7 +160,7 @@ pub fn offset_partials_over_piece(
     );
     out.set(0, 2, v_add(b02, v_scale(nvv, d)));
 
-    Ok(out)
+    Ok((out, b))
 }
 
 /// The offset surface's partials to total order `lk` (`lk <= 2`) over every part of the box

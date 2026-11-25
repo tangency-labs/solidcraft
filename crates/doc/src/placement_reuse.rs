@@ -19,20 +19,23 @@ impl Model {
     /// kinds, stale/primed results and `no_cache` continue through the ordinary evaluator.
     pub fn evaluate_shared(&mut self, doc: &Arc<Document>) -> bool {
         let reusable = !self.no_cache
-            && self.primed.is_none()
+            && self.primed.is_empty()
             && self.placement_inputs.as_ref().is_some_and(|inputs| {
                 inputs.state.upgrade().is_some_and(|state| Arc::ptr_eq(&state, &self.state()))
                     && !self.is_stale()
                     && (Arc::ptr_eq(doc, &inputs.document) || same_geometry_inputs(doc, &inputs.document))
             });
-        if reusable {
+        // Or the checks of the last evaluation still run ([`Model::set_background_checks`]) and
+        // `doc` is what it evaluated: evaluating again would keep every result, after waiting
+        // for the checks.
+        if reusable || (!self.no_cache && self.checking_features() && self.is_current(doc)) {
             self.last_recomputed = 0;
             self.last_restored = 0;
             return false;
         }
         self.evaluate(doc);
         self.mark_fingerprinted(doc);
-        if !self.no_cache && self.primed.is_none() && self.placement_local {
+        if !self.no_cache && self.primed.is_empty() && self.placement_local {
             self.placement_inputs = Some(Inputs { document: doc.clone(), state: Arc::downgrade(&self.state()) });
         }
         true
@@ -44,7 +47,7 @@ impl Model {
     /// before the pins, or 0.
     pub fn refingerprint_shared(&mut self, doc: &Arc<Document>, keep: usize) {
         let proven = !self.no_cache
-            && self.primed.is_none()
+            && self.primed.is_empty()
             && self.placement_inputs.as_ref().is_some_and(|inputs| inputs.state.upgrade().is_some_and(|state| Arc::ptr_eq(&state, &self.state())))
             && !self.is_stale();
         self.refingerprint_from(doc, keep);
@@ -95,7 +98,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
         | FeatureKind::Cylinder { base: _, axis: _, radius: _, height: _, operation: Operation::NewBody, references: _ }
         | FeatureKind::Sphere { center: _, radius: _, operation: Operation::NewBody }
         | FeatureKind::Torus { center: _, major: _, minor: _, operation: Operation::NewBody }
-        | FeatureKind::Import { file: _, step: _, components: _, skip: _ }
+        | FeatureKind::Import { file: _, step: _, components: _, skip: _, records: _ }
         | FeatureKind::MeshImport { file: _, meshes: _ } => true,
         FeatureKind::Sketch { plane, sketch } => sketch.links.is_empty() && sketch.wires.is_empty() && local_plane(plane, 0),
         FeatureKind::Extrude { sketch, profiles: _, extent, operation: Operation::NewBody, targets: _, thin: _ } => {
@@ -105,6 +108,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 direction: _,
                 distance2: _,
                 start_offset: _,
+                symmetric_offset: _,
                 through_all,
                 second_follows_first: _,
                 taper: _,
@@ -115,6 +119,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 to_body_apart: _,
                 from_level: _,
                 picked_placements: _,
+                one_sided_direction: _,
             } = extent;
             to.is_none() && from.is_none() && !through_all && components.get(&sketch.0) == Some(&f.component)
         }
@@ -141,10 +146,14 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         components,
         occurrences: _,
         assembly: _,
+        // Drawings draw the model; they feed none of it.
+        drawings: _,
         sheet,
         plastic,
         parts,
         links,
+        // What a file keeps of its links; a design in memory holds their bodies either way.
+        linked_bodies_left_out: _,
         configs,
         favorites,
         canvases,
@@ -153,6 +162,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         next_component_color_index,
         materials,
         print_faces,
+        // Read only by robot exports: no feature's geometry depends on it.
+        collision_shapes: _,
         user_materials,
         appearances,
         body_components,
@@ -225,6 +236,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         inserted,
         link_faces,
         link_threads,
+        profile_frame,
         kind,
     } = a;
     *id == b.id
@@ -238,6 +250,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         && *face_names == b.face_names
         && *participants == b.participants
         && *touching == b.touching
+        && *profile_frame == b.profile_frame
         && *shell_piece_order == b.shell_piece_order
         && *kernel_piece_order == b.kernel_piece_order
         && *pattern_names_in_order == b.pattern_names_in_order
@@ -258,9 +271,16 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
                     })
             }
             (
-                FeatureKind::Import { file: a, step, components, skip },
-                FeatureKind::Import { file: b, step: other, components: other_components, skip: other_skip },
-            ) => a == b && Arc::ptr_eq(step, other) && components == other_components && skip == other_skip,
+                FeatureKind::Import { file: a, step, components, skip, records },
+                FeatureKind::Import { file: b, step: other, components: other_components, skip: other_skip, records: other_records },
+            ) => {
+                let same_records = match (records, other_records) {
+                    (Some(r), Some(o)) => Arc::ptr_eq(r, o),
+                    (None, None) => true,
+                    _ => false,
+                };
+                a == b && Arc::ptr_eq(step, other) && components == other_components && skip == other_skip && same_records
+            }
             (a, b) => a == b,
         }
 }

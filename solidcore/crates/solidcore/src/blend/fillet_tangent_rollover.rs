@@ -15,12 +15,14 @@
 //! ("Unimplemented Tangent Rollover Case", [`FilletSolver::process_full_roll_over`]). Here the
 //! full tangent rollover is decided before the trace, in the round's section, where it is exact
 //! ([`tangent_rollover_supports`]), and the solver rolls the ball on the face beyond from the
-//! start, as [`crate::blend::fillet_outline`] gives the solver its rim supports. The same
+//! start. The same
 //! section decides a lone round along a straight edge between faces each a plane or a circular
 //! cylinder parallel to the edge (#15767: two joined cylinders, the ball rolling over one's
-//! seam), whose section is the same all along the edge (`cylinder_rollover_supports`). A round
-//! that is not a lone one (one of a chain, #15767) is decided from its ball's sections along its
-//! edge (the session's `roll_over_tangent_edges`).
+//! seam), whose section is the same all along the edge (`cylinder_rollover_supports`). It decides
+//! a round of several the same way where no other round's edge meets the round's edge or a face
+//! it may roll off or onto (#18411: both rims of a pocket). Any other round (one of a chain,
+//! #15767) is decided from its ball's sections along its edge (the session's
+//! `roll_over_tangent_edges`).
 //!
 //! | Rust | Upstream |
 //! |------|----------|
@@ -35,10 +37,11 @@
 //! [`FilletSolver::process_full_roll_over`]: crate::blend::fillet_solver::p1::FilletSolver::process_full_roll_over
 
 use crate::blend::fillet_solver::p1::{test_manifold_tangent_rollover, FilletSolver};
-use crate::error::{Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR};
 use crate::geom::global_solver::SolverOperation;
 use crate::kernel::Kernel;
-use crate::math::{Point3, Vec3, BIG_DOUBLE};
+use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::knots::Side as KnotSide;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
@@ -46,6 +49,15 @@ use crate::topology::face::p4 as face_p4;
 use crate::topology::{edge, Brep, EdgeId, FaceId};
 
 const OP: &str = "blend::fillet_tangent_rollover";
+
+/// A face of the caller's body the roll-over reads without a surface
+/// ([`BlendFailure::FaceHasNoSurface`] at the face, with the fork's status `SM_ERR`).
+fn face_without_surface(face: FaceId) -> SolidError {
+    Failure::new(OP, BlendFailure::FaceHasNoSurface)
+        .with_status(SM_ERR)
+        .at(EntityRef::Face(face))
+        .into_error()
+}
 
 /// The tolerance the edges' curves are recognised as lines within.
 const CURVE_TOL: f64 = 1.0e-8;
@@ -63,6 +75,11 @@ pub struct Rollover {
     /// Whether that face's surface normal is opposite the rolled-off face's across the edge
     /// (`sm_TestManifoldTangentRollover`'s second answer): the offset changes sign.
     pub opposite_normals: bool,
+    /// Whether the face beyond is a plane or a circular cylinder parallel to the filleted
+    /// straight edge, so that the closed form's one section ([`tangent_rollover_supports`])
+    /// is the round's section all along the edge on it too (#18411). `false` for a rollover
+    /// proposed from the ball's sections.
+    pub prismatic_beyond: bool,
 }
 
 /// The faces a constant round's ball rolls onto across a smooth far edge of the face on each
@@ -78,8 +95,9 @@ pub struct Rollover {
 /// `tangency_tol_rad`) and the contact lies past it, by more than the body's tolerance. A
 /// straight edge where a face is a circular cylinder whose axis is parallel to the edge (the
 /// other a plane or such a cylinder) is decided in the same section by
-/// `cylinder_rollover_supports`. Any other round, and a round with no such side, gives
-/// `[None, None]`.
+/// `cylinder_rollover_supports`. A round with no such side gives `[None, None]`; any other
+/// round, outside these sections, `None` (#18411: the session tells a round the closed form
+/// decides from one it does not).
 ///
 /// # Errors
 ///
@@ -93,7 +111,7 @@ pub fn tangent_rollover_supports(
     faces: [FaceId; 2],
     offsets: [f64; 2],
     tangency_tol_rad: f64,
-) -> Result<[Option<Rollover>; 2]> {
+) -> Result<Option<[Option<Rollover>; 2]>> {
     let none = [None, None];
     let tol = target.tolerance();
     let Some(PlanarSection {
@@ -168,15 +186,19 @@ pub fn tangent_rollover_supports(
             if offset_folds(k, target, beyond, far_point, d, offset_beyond)? {
                 continue;
             }
+            let frame = [d, x, y];
+            let prismatic_beyond =
+                prismatic_profile(k, target, beyond, far_point, m, frame, tol)?.is_some();
             *slot = Some(Rollover {
                 edge: e,
                 face: beyond,
                 opposite_normals,
+                prismatic_beyond,
             });
             break;
         }
     }
-    Ok(out)
+    Ok(Some(out))
 }
 
 /// A constant round's section across the middle of a straight edge between two planes, in
@@ -246,7 +268,7 @@ pub(crate) fn planar_section(
     let mut normals = [Vec3::UNDEF; 2];
     for (normal, &face) in normals.iter_mut().zip(&faces) {
         let surface = crate::topology::face::p2::surface(target, face)?
-            .ok_or_else(|| SolidError::blend_failed(OP, "a face of the edge has no surface"))?
+            .ok_or_else(|| face_without_surface(face))?
             .clone_for_evaluation()?;
         if !surface.is_planar(k, tol)?.is_planar {
             return Ok(None);
@@ -497,7 +519,8 @@ fn offset_meet(profiles: [Profile; 2], offsets: [f64; 2], tol: f64) -> Option<((
 
 /// The profile of `face` in the section through `m` square to the unit `d`, with axes `x` and
 /// `y` ([`Profile`]), read at the point of its surface nearest `at`: its surface a circular
-/// cylinder (a cone of the kernel's cylinder kind, read as its quadric) whose axis is parallel
+/// cylinder (the cylinder kind, or a surface of extrusion certified on a cylinder by its
+/// implicit equation) whose axis is parallel
 /// to `d` within [`DIR_TOL`], or planar within `tol` with its normal square to `d` within
 /// [`DIR_TOL`]. `None` for any other surface, a face without one, or where `at` does not drop on it.
 ///
@@ -520,17 +543,47 @@ fn prismatic_profile(
         return Ok(None);
     };
     let surface = surface.clone_for_evaluation()?;
-    // the kind first: no other surface is dropped on
-    let cylinder = if let SurfaceKind::Cone(cone) = surface.kind() {
-        if !cone.is_cylinder() {
-            return Ok(None);
+    // Classify by definition before the drop. An arc's extrusion is not necessarily of
+    // the cylinder kind; its exact form must prove that cylinder over every Bezier patch.
+    let cylinder = match surface.kind() {
+        SurfaceKind::Cone(cone) => {
+            if !cone.is_cylinder() {
+                return Ok(None);
+            }
+            Some(surface.clone_for_evaluation()?)
         }
-        true
-    } else {
-        if !surface.is_planar(k, tol)?.is_planar {
-            return Ok(None);
+        SurfaceKind::SurfOfExtrusion(extrusion) => {
+            if surface.is_planar(k, tol)?.is_planar {
+                None
+            } else {
+                use crate::surface::cone::Cone;
+                use crate::surface::implicit::{lies_on, AnalyticSupport};
+                let form = extrusion.base_with_nurb(k)?;
+                // The recogniser only proposes a cylinder. Its scale derives from the face's
+                // tolerance; acceptance is the coefficient identity below, at rounding only.
+                let scale = tol / EFF_ZERO;
+                if !scale.is_finite() || scale <= 0.0 {
+                    return Ok(None);
+                }
+                let Some(cylinder) = Cone::is_nurb_surface_cylinder(k, &form, scale)? else {
+                    return Ok(None);
+                };
+                let candidate = crate::surface::surface::Surface::from(cylinder);
+                let Some(analytic) = AnalyticSupport::of(&candidate) else {
+                    return Ok(None);
+                };
+                if !lies_on(&form, &analytic.implicit())? {
+                    return Ok(None);
+                }
+                Some(candidate)
+            }
         }
-        false
+        _ => {
+            if !surface.is_planar(k, tol)?.is_planar {
+                return Ok(None);
+            }
+            None
+        }
     };
     let domain = surface.natural_uv_domain_with_nurb(k)?;
     let dropped = surface.drop_point::<NoObject>(k, at, &domain, &DropPointOptions::default())?;
@@ -538,8 +591,12 @@ fn prismatic_profile(
         return Ok(None);
     }
     let to2 = |v: Vec3| (v.dot(x), v.dot(y));
-    if cylinder {
-        let q = match BlendQuadric::from_surface(k, &surface, dropped.result_uv, tol) {
+    if let Some(cylinder) = cylinder {
+        // The candidate has its own parametrisation. Read its geometry there, then orient
+        // its radial normal by the original surface's normal at the original foot. Sharing
+        // an implicit cylinder does not identify either surface's UVs or its orientation.
+        let cylinder_uv = cylinder.natural_uv_domain_with_nurb(k)?.mid();
+        let mut q = match BlendQuadric::from_surface(k, &cylinder, cylinder_uv, tol) {
             Ok(q) => q,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(None),
@@ -553,6 +610,15 @@ fn prismatic_profile(
         {
             return Ok(None);
         }
+        let point = surface.evaluate_point(k, dropped.result_uv)?;
+        let normal =
+            surface.evaluate_normal(k, dropped.result_uv, KnotSide::Left, KnotSide::Left)?;
+        q.side = 1.0;
+        let alignment = q.normal(point).dot(normal);
+        if !alignment.is_finite() || alignment == 0.0 {
+            return Ok(None);
+        }
+        q.side = alignment.signum();
         return Ok(Some(Profile::Circle {
             c: to2(q.point - m),
             radius: q.radius,
@@ -679,7 +745,8 @@ fn cylinder_section(
 /// the contact lies past it by more than the body's tolerance, and the face beyond is a plane
 /// or a circular cylinder parallel to the edge too whose offset by the ball (signed by the
 /// normals across the edge) does not fold across the edge there, which then holds all along
-/// it. Any other round, and a round with no such side, gives `[None, None]`.
+/// it. A round with no such side gives `[None, None]`; a round outside the section
+/// ([`cylinder_section`]), `None`.
 ///
 /// # Errors
 ///
@@ -692,7 +759,7 @@ fn cylinder_rollover_supports(
     faces: [FaceId; 2],
     offsets: [f64; 2],
     tangency_tol_rad: f64,
-) -> Result<[Option<Rollover>; 2]> {
+) -> Result<Option<[Option<Rollover>; 2]>> {
     let none = [None, None];
     let tol = target.tolerance();
     let Some(CylinderSection {
@@ -705,10 +772,10 @@ fn cylinder_rollover_supports(
         profiles,
     }) = cylinder_section(k, target, filleted, faces, tol)?
     else {
-        return Ok(none);
+        return Ok(None);
     };
     let Some((centre, sine)) = offset_meet(profiles, offsets, tol) else {
-        return Ok(none);
+        return Ok(Some(none));
     };
     let to2 = |p: Point3| {
         let v = p - m;
@@ -795,9 +862,10 @@ fn cylinder_rollover_supports(
             edge: e,
             face: beyond,
             opposite_normals,
+            prismatic_beyond: true,
         });
     }
-    Ok(out)
+    Ok(Some(out))
 }
 
 /// The unit binormal of `face`'s edge use of `filleted` at the edge's parameter `t` (the face
@@ -1024,7 +1092,7 @@ fn offset_folds(
     offset: f64,
 ) -> Result<bool> {
     let surface = crate::topology::face::p2::surface(target, face)?
-        .ok_or_else(|| SolidError::blend_failed(OP, "the face has no surface"))?
+        .ok_or_else(|| face_without_surface(face))?
         .clone_for_evaluation()?;
     let domain = surface.natural_uv_domain_with_nurb(k)?;
     let dropped = surface.drop_point::<NoObject>(k, at, &domain, &DropPointOptions::default())?;
@@ -1057,14 +1125,105 @@ fn offset_folds(
 
 #[cfg(test)]
 mod tests {
-    use super::{seam_side_hint, section_seeds, Profile, SectionSeed};
+    use super::{prismatic_profile, seam_side_hint, section_seeds, Profile, SectionSeed};
     use crate::blend::fillet_solver::p1::FilletSolver;
     use crate::curve::curve::Curve;
     use crate::kernel::Kernel;
     use crate::math::{Point3, Vec3};
-    use crate::primitive::api_curves::create_line_segment;
+    use crate::primitive::api_curves::{create_arc, create_ellipse, create_line_segment};
     use crate::sweep::api_brep::create_linear_sweep;
     use crate::topology::{edge, Brep, EdgeId, FaceId};
+
+    /// The R3 arc's extrusion is the same exact cylinder as a cylinder-kind support,
+    /// although arc sweeps keep their extrusion kind by default. An ellipse's extrusion
+    /// and an oblique extrusion of the arc cannot supply that exact cylinder profile.
+    #[test]
+    fn a_circular_extrusion_has_a_certified_cylinder_profile_only_along_its_axis() {
+        let mut k = Kernel::default();
+        let centre = Point3::new(2.0, 5.0, 0.0);
+        let arc = Curve::from(create_arc(centre, 3.0, -135.0, 45.0).unwrap());
+        let ellipse = Curve::from(create_ellipse(&k, centre, 3.0, 4.0).unwrap());
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        for (curve, direction, circular) in [
+            (&arc, z, true),
+            (&arc, -z, true),
+            (&ellipse, z, false),
+            (&arc, Vec3::new(0.1, 0.0, 1.0), false),
+        ] {
+            let b = create_linear_sweep(&mut k, &[Some(curve)], direction, 10.0, false).unwrap();
+            let face = b.faces().ids().next().unwrap();
+            assert!(matches!(
+                crate::topology::face::p2::surface(&b, face)
+                    .unwrap()
+                    .unwrap()
+                    .kind(),
+                crate::surface::surface::SurfaceKind::SurfOfExtrusion(_)
+            ));
+            let middle = centre + direction.unitize().unwrap() * 5.0;
+            let at = middle + Vec3::new(3.0, 0.0, 0.0);
+            let profile = prismatic_profile(
+                &k,
+                &b,
+                face,
+                at,
+                middle,
+                [z, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)],
+                b.tolerance(),
+            )
+            .unwrap();
+            if circular {
+                let Some(Profile::Circle { c, radius, side }) = profile else {
+                    panic!("a parallel circular extrusion has no cylinder profile");
+                };
+                assert!((radius - 3.0).abs() <= 1e-12, "radius {radius}");
+                assert!(c.0.abs() <= 1e-12 && c.1.abs() <= 1e-12, "centre {c:?}");
+                assert_eq!(side, direction.z.signum(), "the extrusion's own normal");
+            } else {
+                assert!(profile.is_none(), "a noncylindrical extrusion: {profile:?}");
+            }
+        }
+    }
+
+    /// A line swept obliquely to itself keeps the extrusion kind but defines a plane.
+    /// Its section is the same line as before circular extrusions were classified.
+    #[test]
+    fn a_planar_extrusion_keeps_its_line_profile() {
+        let mut k = Kernel::default();
+        let line = Curve::from(
+            create_line_segment(Point3::new(0.0, 0.0, 0.0), Point3::new(3.0, 0.0, 0.0)).unwrap(),
+        );
+        let b = create_linear_sweep(
+            &mut k,
+            &[Some(&line)],
+            Vec3::new(0.1, 0.0, 1.0),
+            10.0,
+            false,
+        )
+        .unwrap();
+        let face = b.faces().ids().next().unwrap();
+        assert!(matches!(
+            crate::topology::face::p2::surface(&b, face)
+                .unwrap()
+                .unwrap()
+                .kind(),
+            crate::surface::surface::SurfaceKind::SurfOfExtrusion(_)
+        ));
+        let profile = prismatic_profile(
+            &k,
+            &b,
+            face,
+            Point3::new(2.0, 0.0, 5.0),
+            Point3::new(0.0, 0.0, 5.0),
+            [
+                Vec3::new(0.0, 0.0, 1.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+            b.tolerance(),
+        )
+        .unwrap();
+        assert!(matches!(profile, Some(Profile::Line { .. })), "{profile:?}");
+    }
 
     /// The one edge of `b` from `p` to `q` (either way round).
     fn edge_from_to(b: &Brep, p: Point3, q: Point3) -> EdgeId {

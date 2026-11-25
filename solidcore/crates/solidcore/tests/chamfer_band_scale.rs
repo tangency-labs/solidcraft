@@ -18,6 +18,8 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
+use solidcore::nurbs::b_spline_curve::BSplineCurve;
+use solidcore::nurbs::math::CPoint;
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::{edge_closest_point, face_bounding_box};
@@ -25,14 +27,12 @@ use solidcore::surface::procedural_blend::chamfer::ChamferSize;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::{edge, Brep, EdgeId};
 
-/// Every fix on but `geometric_g2_continuity`, as ops runs.
+/// Every fix on, as ops runs.
 fn kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -171,6 +171,180 @@ fn unequal_chamfers_the_other_way_name_a_scale() {
     run([3.0 * lambda, 1.5 * lambda]).result.unwrap();
 }
 
+/// Parallel opposing rims have interior closest witnesses even when all endpoint
+/// corners move. Their top widths meet at (2 - 1000 tol) / (2 d).
+#[test]
+fn unequal_chamfers_with_selected_endpoint_corners_name_the_interior_contact() {
+    let run_top = |distance: f64| {
+        let mut k = kernel();
+        let mut b = create_box(&mut k, Point3::ZERO, 30.0, 2.0, 10.0).unwrap();
+        let edges: Vec<_> = [
+            [15.0, 0.0, 10.0],
+            [15.0, 2.0, 10.0],
+            [0.0, 1.0, 10.0],
+            [30.0, 1.0, 10.0],
+        ]
+        .into_iter()
+        .map(|p| pick(&k, &b, p))
+        .collect();
+        let top = edge::faces(&b, edges[0], None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| edge::faces(&b, edges[1], None).unwrap().contains(&f))
+            .unwrap();
+        let tol = edges
+            .iter()
+            .map(|&e| edge::tolerance(&b, e).unwrap())
+            .fold(0.0_f64, f64::max);
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_chamfers_along(
+            &k,
+            &edges,
+            &[ChamferSize::DistanceAngle {
+                distance,
+                angle: 80.0_f64.to_radians(),
+            }],
+            &[top; 4],
+        )
+        .unwrap();
+        s.create_corners(&k, None).unwrap();
+        for corner in s.fillet_corners().unwrap() {
+            s.set_corner_bevel(corner, true).unwrap();
+        }
+        let result = s.do_filleting(&mut k, None);
+        (result, s.fit_size(), tol)
+    };
+    let (result, fit, tol) = run_top(1.5);
+    assert!(result.is_err());
+    let fit = fit.unwrap();
+    assert_eq!(fit.kind, FitKind::Scale);
+    let want = (2.0 - 1000.0 * tol) / 3.0;
+    assert!((fit.size - want).abs() < 1e-9, "{} vs {want}", fit.size);
+    run_top(1.5 * fit.size).0.unwrap();
+}
+
+/// The end strip reaches x = 16 at the long rims' closed scale 2/3, covering
+/// their midpoint x = 15. The minimizing interval still has retained points in
+/// (16, 30), or (0, 14) when the selected end is mirrored. Two selected end
+/// strips also leave (16, 18), or a gap (2/3) (21 - f64(20.999999999)),
+/// approximately 6.7e-10. Wall factors of two keep the top widths unchanged and
+/// exercise the band event; equal setbacks on all four rims instead meet the
+/// existing polygon-inradius event first. Neither depends on station spacing.
+#[test]
+fn parallel_chamfers_name_a_fit_beyond_a_selected_corner_strip() {
+    for (end_widths, wall_factor) in [
+        ([24.0, 0.0], 1.0),
+        ([0.0, 24.0], 1.0),
+        ([24.0, 18.0], 1.0),
+        ([24.0, 20.999_999_999], 1.0),
+        ([24.0, 18.0], 2.0),
+        ([24.0, 20.999_999_999], 2.0),
+    ] {
+        let run_three = |scale: f64| {
+            let mut k = kernel();
+            let mut b = create_box(&mut k, Point3::ZERO, 30.0, 2.0, 100.0).unwrap();
+            let mut edges = vec![
+                pick(&k, &b, [15.0, 0.0, 100.0]),
+                pick(&k, &b, [15.0, 2.0, 100.0]),
+            ];
+            let mut sizes =
+                vec![ChamferSize::Distances([1.5 * scale, 1.5 * scale * wall_factor]); 2];
+            for (end_x, width) in [0.0, 30.0].into_iter().zip(end_widths) {
+                if width > 0.0 {
+                    edges.push(pick(&k, &b, [end_x, 1.0, 100.0]));
+                    sizes.push(ChamferSize::Distances([
+                        width * scale,
+                        width * scale * wall_factor,
+                    ]));
+                }
+            }
+            let tol = edges
+                .iter()
+                .map(|&e| edge::tolerance(&b, e).unwrap())
+                .fold(0.0_f64, f64::max);
+            let top = edge::faces(&b, edges[0], None)
+                .unwrap()
+                .into_iter()
+                .find(|&f| edge::faces(&b, edges[1], None).unwrap().contains(&f))
+                .unwrap();
+            let references = vec![top; edges.len()];
+            let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+            s.prepare_chamfers_along(&k, &edges, &sizes, &references)
+                .unwrap();
+            s.create_corners(&k, None).unwrap();
+            for corner in s.fillet_corners().unwrap() {
+                s.set_corner_bevel(corner, true).unwrap();
+            }
+            let result = s.do_filleting(&mut k, None);
+            (result, s.fit_size(), tol)
+        };
+        let (result, fit, tol) = run_three(1.0);
+        assert!(result.is_err());
+        let fit = fit.expect("the long rims retain a contact beyond the end strip");
+        let scaled = if wall_factor == 1.0 && end_widths.iter().all(|&width| width > 0.0) {
+            // With all four equal-distance rims selected, the existing polygon
+            // event precedes band contact: its inradius is 2/2=1, open by 1000 tol.
+            assert_eq!(
+                fit.kind,
+                FitKind::Radius,
+                "{end_widths:?}, factor {wall_factor}"
+            );
+            let want = 1.0 - 1000.0 * tol;
+            assert!((fit.size - want).abs() < 1e-9, "{} vs {want}", fit.size);
+            fit.size / 1.5
+        } else {
+            assert_eq!(
+                fit.kind,
+                FitKind::Scale,
+                "{end_widths:?}, factor {wall_factor}"
+            );
+            let want = (2.0 - 1000.0 * tol) / 3.0;
+            assert!((fit.size - want).abs() < 1e-9, "{} vs {want}", fit.size);
+            fit.size
+        };
+        run_three(scaled).0.unwrap();
+    }
+}
+
+/// Equal chamfers on a narrow top still need an open scale when another selected
+/// edge has unequal setbacks. A closed radius converted afterward would leave no top.
+#[test]
+fn an_equal_pair_in_an_unequal_chamfer_call_keeps_the_scale_margin() {
+    let run_three = |scale: f64| {
+        let mut k = kernel();
+        let mut b = create_box(&mut k, Point3::ZERO, 30.0, 2.0, 10.0).unwrap();
+        let edges = [
+            pick(&k, &b, [15.0, 0.0, 10.0]),
+            pick(&k, &b, [15.0, 2.0, 10.0]),
+            pick(&k, &b, [15.0, 0.0, 0.0]),
+        ];
+        let tol = edges
+            .iter()
+            .map(|&e| edge::tolerance(&b, e).unwrap())
+            .fold(0.0_f64, f64::max);
+        let sizes = [
+            ChamferSize::Distances([1.5 * scale, 1.5 * scale]),
+            ChamferSize::Distances([1.5 * scale, 1.5 * scale]),
+            ChamferSize::Distances([1.5 * scale, 3.0 * scale]),
+        ];
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_chamfers_along(&k, &edges, &sizes, &[]).unwrap();
+        s.create_corners(&k, None).unwrap();
+        for corner in s.fillet_corners().unwrap() {
+            s.set_corner_bevel(corner, true).unwrap();
+        }
+        let result = s.do_filleting(&mut k, None);
+        (result, s.fit_size(), tol)
+    };
+    let (result, fit, tol) = run_three(1.0);
+    assert!(result.is_err());
+    let fit = fit.unwrap();
+    assert_eq!(fit.kind, FitKind::Scale);
+    let want = (2.0 - 1000.0 * tol) / 3.0;
+    assert!((fit.size - want).abs() < 1e-9, "{} vs {want}", fit.size);
+    run_three(fit.size).0.unwrap();
+}
+
 /// One equal chamfer of one size, (1.5, 1.5) on both: its offsets are one radius, and the
 /// fork's `BandsMeetAt` names that radius where the bands meet (1, to its bisection), which
 /// `chamfer_fit` reads as the distance; the scale is not asked for.
@@ -183,6 +357,193 @@ fn an_equal_chamfer_too_large_names_its_radius() {
     };
     assert!((radius - 1.0).abs() <= 1e-9, "{radius}");
     assert!((r.named.unwrap() - 1.0).abs() <= 1e-9, "{:?}", r.named);
+}
+
+/// Chamfering the two top long edges of a 30 x `width` x 10 block whose side is at `y0` by
+/// `d` on both sides: the result, the fit named, and (built) the body's volume and the
+/// width of what is left of its top face (0 when the chamfers use it up).
+fn chamfer_block_top(
+    y0: f64,
+    width: f64,
+    d: f64,
+) -> (Result<(), SolidError>, Option<f64>, f64, f64) {
+    let mut k = kernel();
+    let mut b = create_box(&mut k, Point3::new(0.0, y0, 0.0), 30.0, width, 10.0).unwrap();
+    let edges = [
+        pick(&k, &b, [15.0, y0, 10.0]),
+        pick(&k, &b, [15.0, y0 + width, 10.0]),
+    ];
+    let (result, fit) = {
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_chamfers_along(&k, &edges, &[ChamferSize::Distances([d, d]); 2], &[])
+            .unwrap();
+        s.create_corners(&k, None).unwrap();
+        for corner in s.fillet_corners().unwrap() {
+            s.set_corner_bevel(corner, true).unwrap();
+        }
+        let result = s.do_filleting(&mut k, None);
+        (result, s.fit_size().map(|f| f.size))
+    };
+    if result.is_err() {
+        return (result, fit, 0.0, 0.0);
+    }
+    let store = AttributeStore::new();
+    let key_of = |_| ObjectKey(0);
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &key_of,
+    };
+    let volume = brep_volume(&k, &mut b, 1e-9, &attrs).unwrap();
+    let top = b
+        .faces()
+        .ids()
+        .filter_map(|f| face_bounding_box(&k, &b, f, true).ok())
+        .find(|bx| (bx.min().z - 10.0).abs() < 1e-9 && (bx.max().z - 10.0).abs() < 1e-9)
+        .map_or(0.0, |bx| bx.max().y - bx.min().y);
+    (result, fit, volume, top)
+}
+
+/// #20450: two 1 mm chamfers on a face 2 wide meet exactly in its middle and build. So they
+/// do where that width is 2 only to the rounding of the model's own coordinates: a block
+/// from y = 6.000000000000001 to 8, as a cut leaves an edge, is 1.9999999999999991 wide
+/// there, and the two bands, compared exactly, read as overlapping by 9e-16. That is no
+/// overlap: the block builds with the volume of the exact one, 30 * 2 * 10 less two right
+/// triangles of legs 1 along 30, 570, and its top face is used up. A face narrower than the
+/// two chamfers by more than rounding (1e-9) is still refused, naming the size that fits.
+#[test]
+fn equal_chamfers_that_exactly_use_up_a_face_build_whatever_its_rounding() {
+    for (y0, width) in [
+        (0.0, 2.0_f64),
+        (6.000_000_000_000_001, 1.999_999_999_999_999_1),
+    ] {
+        assert!(
+            (2.0 - width).abs() < 1e-15,
+            "{width}: 2 wide to its rounding"
+        );
+        let (result, _, volume, top) = chamfer_block_top(y0, width, 1.0);
+        assert!(result.is_ok(), "{y0} {width}: {result:?}");
+        assert!((volume - 570.0).abs() <= 1e-9 * 570.0, "{y0}: {volume}");
+        assert!(top <= 1e-9, "{y0}: the top face is {top} wide");
+    }
+    let (result, fit, _, _) = chamfer_block_top(0.0, 2.0 - 1e-9, 1.0);
+    assert!(result.is_err(), "built on a face 1e-9 too narrow");
+    let fit = fit.expect("the refusal names a size");
+    assert!(fit < 1.0 && fit > 0.99, "{fit}");
+}
+
+/// A quadratic-ended outline whose two selected rims approach across a 0.6 mm
+/// terminal strip. The short terminal rim stays sharp, as in #19108.
+fn narrow_curved_tip(distance: f64, angle: f64) -> Run {
+    let mut k = kernel();
+    let p = |x, y| Point3::new(x, y, 0.0);
+    let line = |a, b| Curve::from(create_line_segment(a, b).unwrap());
+    let curved = BSplineCurve::from_data(
+        3,
+        2,
+        5,
+        2,
+        &[
+            CPoint::new(10.0, 0.6, 0.0, 1.0),
+            CPoint::new(5.0, 0.6, 0.0, 1.0),
+            CPoint::new(0.0, 5.0, 0.0, 1.0),
+        ],
+        &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    )
+    .unwrap();
+    let curves = [
+        line(p(0.0, 0.0), p(10.0, 0.0)),
+        line(p(10.0, 0.0), p(10.0, 0.6)),
+        Curve::from(curved),
+        line(p(0.0, 5.0), p(0.0, 0.0)),
+    ];
+    let refs: Vec<_> = curves.iter().map(Some).collect();
+    let mut b = create_linear_sweep(&mut k, &refs, Vec3::new(0.0, 0.0, 1.0), 10.0, true).unwrap();
+    let edges: Vec<_> = [[5.0, 0.0, 10.0], [5.0, 1.7, 10.0]]
+        .into_iter()
+        .map(|p| pick(&k, &b, p))
+        .collect();
+    let top = edge::faces(&b, edges[0], None)
+        .unwrap()
+        .into_iter()
+        .find(|&f| edge::faces(&b, edges[1], None).unwrap().contains(&f))
+        .unwrap();
+    let tol = edges
+        .iter()
+        .map(|&e| edge::tolerance(&b, e).unwrap())
+        .fold(0.0_f64, f64::max);
+    let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+    s.prepare_chamfers_along(
+        &k,
+        &edges,
+        &[ChamferSize::DistanceAngle { distance, angle }],
+        &[top; 2],
+    )
+    .unwrap();
+    s.create_corners(&k, None).unwrap();
+    for corner in s.fillet_corners().unwrap() {
+        s.set_corner_bevel(corner, true).unwrap();
+    }
+    let result = s.do_filleting(&mut k, None);
+    let fit = s.fit_size();
+    let named = fit.and_then(|f| s.chamfer_fit(f));
+    let comment = s.error_info().comment.clone();
+    if fit.is_some() {
+        assert_eq!(
+            s.error_site().face.map(solidcore::error::TargetFace::id),
+            Some(top),
+            "limiting top face"
+        );
+    }
+    Run {
+        result,
+        fit: fit.map(|f| (f.size, f.kind)),
+        named,
+        tol,
+        top_width: None,
+        comment,
+    }
+}
+
+/// The two inward top offsets first touch across the terminal strip at 0.6 / 2.
+/// For unequal chamfers the open fit leaves 1000 edge tolerances between their rails.
+#[test]
+fn a_distance_angle_chamfer_past_a_narrow_curved_tip_names_its_fit() {
+    let angle = 80.0_f64.to_radians();
+    for distance in [1.0, 0.5] {
+        let refused = narrow_curved_tip(distance, angle);
+        assert!(refused.result.is_err());
+        let Some((scale, FitKind::Scale)) = refused.fit else {
+            panic!("no scale: {}: {:?}", refused.comment, refused.result);
+        };
+        // The reference face may swap the canonical supports. Scale the caller's
+        // first distance, rather than reading the canonical first support's setback.
+        let named = distance * scale;
+        let want = (0.6 - 1000.0 * refused.tol) / 2.0;
+        assert!((named - want).abs() < 1e-9, "{named} vs {want}");
+        assert!(
+            narrow_curved_tip(named, angle).result.is_ok(),
+            "the named distance builds"
+        );
+    }
+    assert!(narrow_curved_tip(0.2, angle).result.is_ok());
+}
+
+/// The same terminal event on equal offsets is a closed radius of exactly 0.3,
+/// including the endpoint that the old station search excluded.
+#[test]
+fn an_equal_chamfer_names_the_endpoint_contact_of_a_curved_tip() {
+    let refused = narrow_curved_tip(1.0, std::f64::consts::FRAC_PI_4);
+    assert!(refused.result.is_err());
+    let (size, kind) = refused.fit.unwrap();
+    assert_eq!(kind, FitKind::Radius);
+    assert!((size - 0.3).abs() <= 1e-12, "{size}");
+    assert!((refused.named.unwrap() - 0.3).abs() <= 1e-12);
+    assert!(
+        narrow_curved_tip(size, std::f64::consts::FRAC_PI_4)
+            .result
+            .is_ok(),
+        "the named equal distance builds"
+    );
 }
 
 /// The polygon through `corners` swept `h` along z, and the midpoints of its top edges.
@@ -294,4 +655,211 @@ fn chamfering_two_edges_of_a_plate_past_its_width_is_refused() {
     let plate = [(0.0, 0.0), (100.0, 0.0), (100.0, 4.0), (0.0, 4.0)];
     let (_, result) = chamfer_top(&plate, 10.0, 3.0, Some(&[0, 2]));
     assert!(result.is_err(), "built");
+}
+
+/// #21417: opposing straight chamfers on a slightly skewed or tapered planar face meet along
+/// their weighted bisector continuously down to arbitrarily small angles, naming both equal
+/// radii (`FitKind::Radius`) and unequal setback scales (`FitKind::Scale`), including when a
+/// selected end chamfer trims the narrow end of the top face.
+#[test]
+fn opposing_chamfers_on_a_skewed_or_tapered_face_name_their_fit() {
+    for skew in [1e-14_f64, 1e-6, 1e-3, 0.5] {
+        let corners = [(0.0, 0.0), (30.0, 0.0), (30.0, 2.0 + skew), (0.0, 2.0)];
+        let cos_theta = 30.0 / (900.0 + skew * skew).sqrt();
+        // Equal setbacks [1.5, 1.5] meet on the x = 0 cap at d = 2 cos(theta) / (1 + cos(theta)).
+        let want_radius = 2.0 * cos_theta / (1.0 + cos_theta);
+        let run_pair = |size: ChamferSize| {
+            let mut k = kernel();
+            let (mut b, mids) = prism(&mut k, &corners, 10.0);
+            let edges = [pick(&k, &b, mids[0]), pick(&k, &b, mids[2])];
+            let top = edge::faces(&b, edges[0], None)
+                .unwrap()
+                .into_iter()
+                .find(|&f| edge::faces(&b, edges[1], None).unwrap().contains(&f))
+                .unwrap();
+            let tol = edge::tolerance(&b, edges[0])
+                .unwrap()
+                .max(edge::tolerance(&b, edges[1]).unwrap());
+            let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+            s.prepare_chamfers_along(&k, &edges, &[size, size], &[top, top])
+                .unwrap();
+            s.create_corners(&k, None).unwrap();
+            for corner in s.fillet_corners().unwrap() {
+                s.set_corner_bevel(corner, true).unwrap();
+            }
+            let result = s.do_filleting(&mut k, None);
+            let fit = s.fit_size();
+            drop(s);
+            let valid = result.is_ok().then(|| {
+                let store = AttributeStore::new();
+                let key_of = |_| ObjectKey(0);
+                let attrs = PropertyAttributes {
+                    store: &store,
+                    key_of: &key_of,
+                };
+                brep_volume(&k, &mut b, 1e-9, &attrs).is_ok()
+            });
+            (result, fit, tol, valid)
+        };
+        let (result, fit, _, _) = run_pair(ChamferSize::Distances([1.5, 1.5]));
+        assert!(result.is_err(), "skew {skew:e}: equal 1.5 built");
+        let fit = fit.expect("equal skewed refusal names a fit");
+        assert_eq!(fit.kind, FitKind::Radius, "skew {skew:e}");
+        assert!(
+            (fit.size - want_radius).abs() <= 1e-9,
+            "skew {skew:e}: {} vs {want_radius}",
+            fit.size
+        );
+        // Slightly below the closed bound builds cleanly.
+        let (below, _, _, below_valid) = run_pair(ChamferSize::Distances([
+            want_radius - 0.01,
+            want_radius - 0.01,
+        ]));
+        assert!(below.is_ok(), "skew {skew:e}: control below fit failed");
+        assert_eq!(below_valid, Some(true), "skew {skew:e}: below fit invalid");
+        // Replaying the reported closed fit builds a valid closed solid.
+        let (at_fit, _, _, at_fit_valid) = run_pair(ChamferSize::Distances([fit.size, fit.size]));
+        assert!(
+            at_fit.is_ok(),
+            "skew {skew:e}: reported closed fit {} failed: {at_fit:?}",
+            fit.size
+        );
+        assert_eq!(
+            at_fit_valid,
+            Some(true),
+            "skew {skew:e}: reported closed fit invalid"
+        );
+
+        // Distance-angle (80 deg) chamfers name an open common scale that builds cleanly.
+        let angle = 80.0_f64.to_radians();
+        let (result, fit, tol, _) = run_pair(ChamferSize::DistanceAngle {
+            distance: 1.5,
+            angle,
+        });
+        assert!(result.is_err(), "skew {skew:e}: 80 deg 1.5 built");
+        let fit = fit.expect("distance-angle skewed refusal names a fit");
+        assert_eq!(fit.kind, FitKind::Scale, "skew {skew:e}");
+        let want_scale = (2.0 * want_radius - 1000.0 * tol) / 3.0;
+        assert!(
+            (fit.size - want_scale).abs() <= 1e-8,
+            "skew {skew:e}: scale {} vs {want_scale}",
+            fit.size
+        );
+        assert!(
+            run_pair(ChamferSize::DistanceAngle {
+                distance: 1.5 * fit.size,
+                angle,
+            })
+            .0
+            .is_ok(),
+            "skew {skew:e}: named distance-angle fit failed to build"
+        );
+    }
+
+    // Selected end strip covering x in [0, 16] on a slightly skewed 30 x 2 top leaves (16, 30),
+    // naming the open scale past the corner strip, which builds cleanly.
+    let corners = [(0.0, 0.0), (30.0, 0.0), (30.0, 2.0 + 1e-6), (0.0, 2.0)];
+    let run_three = |scale: f64| {
+        let mut k = kernel();
+        let (mut b, mids) = prism(&mut k, &corners, 100.0);
+        let edges = [
+            pick(&k, &b, mids[0]),
+            pick(&k, &b, mids[2]),
+            pick(&k, &b, mids[3]),
+        ];
+        let top = edge::faces(&b, edges[0], None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| edge::faces(&b, edges[1], None).unwrap().contains(&f))
+            .unwrap();
+        let tol = edges
+            .iter()
+            .map(|&e| edge::tolerance(&b, e).unwrap())
+            .fold(0.0_f64, f64::max);
+        let sizes = [
+            ChamferSize::Distances([1.5 * scale, 3.0 * scale]),
+            ChamferSize::Distances([1.5 * scale, 3.0 * scale]),
+            ChamferSize::Distances([24.0 * scale, 48.0 * scale]),
+        ];
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_chamfers_along(&k, &edges, &sizes, &[top; 3])
+            .unwrap();
+        s.create_corners(&k, None).unwrap();
+        for corner in s.fillet_corners().unwrap() {
+            s.set_corner_bevel(corner, true).unwrap();
+        }
+        let result = s.do_filleting(&mut k, None);
+        (result, s.fit_size(), tol)
+    };
+    let (result, fit, tol) = run_three(1.0);
+    assert!(result.is_err(), "skewed three-edge built");
+    let fit = fit.expect("skewed three-edge refusal names a fit");
+    assert_eq!(fit.kind, FitKind::Scale);
+    let want = (2.0 + (16.0 / 30.0) * 1e-6 - 1000.0 * tol) / 3.0;
+    assert!((fit.size - want).abs() <= 1e-7, "{} vs {want}", fit.size);
+    run_three(fit.size).0.unwrap();
+
+    // #20450 rounding gate holds for a 9e-16-skewed 2 mm face too: two 1 mm chamfers still build.
+    let almost_two = [
+        (0.0, 0.0),
+        (30.0, 0.0),
+        (30.0, 1.999_999_999_999_999_1),
+        (0.0, 2.0),
+    ];
+    let (mut b, result) = chamfer_top(&almost_two, 10.0, 1.0, Some(&[0, 2]));
+    assert!(result.is_ok(), "almost-2 skewed face refused: {result:?}");
+    let k = kernel();
+    let store = AttributeStore::new();
+    let key_of = |_| ObjectKey(0);
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &key_of,
+    };
+    let volume = brep_volume(&k, &mut b, 1e-9, &attrs).unwrap();
+    assert!((volume - 570.0).abs() <= 1e-9 * 570.0, "volume {volume}");
+
+    // Open lower bound (selected end chamfer at x = 0) on a 10-long tapered face
+    // (`skew = 0.05`, slope `0.005`): an overlap of `1e-10` per side right past the
+    // open corner-strip boundary must still be refused using the exact one-sided
+    // affine minimum rather than an interior probe stepped into the interval.
+    let tapered = [(0.0, 0.0), (10.0, 0.0), (10.0, 2.05), (0.0, 2.0)];
+    let run_open = |d: f64| {
+        let mut k = kernel();
+        let (mut b, mids) = prism(&mut k, &tapered, 20.0);
+        let edges = [
+            pick(&k, &b, mids[0]),
+            pick(&k, &b, mids[2]),
+            pick(&k, &b, mids[3]),
+        ];
+        let top = edge::faces(&b, edges[0], None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| edge::faces(&b, edges[1], None).unwrap().contains(&f))
+            .unwrap();
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_chamfers_along(&k, &edges, &[ChamferSize::Distances([d, d]); 3], &[top; 3])
+            .unwrap();
+        s.create_corners(&k, None).unwrap();
+        for corner in s.fillet_corners().unwrap() {
+            s.set_corner_bevel(corner, true).unwrap();
+        }
+        let result = s.do_filleting(&mut k, None);
+        (result, s.fit_size())
+    };
+    let (refused_big, fit_big) = run_open(1.5);
+    assert!(refused_big.is_err());
+    let open_limit = fit_big
+        .expect("open-bound tapered refusal names a fit")
+        .size;
+    let (refused_tiny, fit_tiny) = run_open(open_limit + 1e-10);
+    assert!(
+        refused_tiny.is_err(),
+        "overlap 1e-10 past open lower bound at {open_limit} was missed"
+    );
+    let fit_tiny = fit_tiny.expect("tiny open-bound refusal names a fit");
+    assert!(
+        (fit_tiny.size - open_limit).abs() <= 1e-11,
+        "{} vs {open_limit}",
+        fit_tiny.size
+    );
 }

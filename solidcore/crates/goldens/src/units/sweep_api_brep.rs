@@ -637,6 +637,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 Swept::Brep(b) => b,
                 Swept::CurveSweep(c) => &mut c.brep,
             };
+            #[cfg(test)]
+            crate::certify::written(body);
             let nv = solidcore::topology::brep::p1::vertices(body, None)
                 .map_err(|e| harness(e.to_string()))?
                 .len();
@@ -1559,6 +1561,149 @@ mod tests {
         );
         for key in ["linear_vertices", "linear_edge_samples", "linear_volume"] {
             assert_ne!(observations[0].values[key], observations[1].values[key]);
+        }
+    }
+}
+
+/// #14246 G1 (WR-662 retired): the sweeps whose success became a refusal (status 1001,
+/// pinned by the golden rows), each for a closed-form reason the requested solid does
+/// not exist. Main returned success with an empty body for the empty profile, two
+/// coincident discs and one edge for the zero-distance circle sweeps (a solid of no
+/// height), and one face for the 90-degree draft.
+#[cfg(test)]
+mod moved_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::*;
+
+    #[test]
+    fn each_moved_sweep_row_is_refused_for_its_reason() {
+        for name in [
+            "review_linear_empty",
+            "review_linear_circle_zero",
+            "review_linear_circle_neg_zero",
+            "review_draft_square_a90",
+        ] {
+            let i: Inputs = crate::case::regression_case(&Runner, name).parse().unwrap();
+            match &i {
+                // a capped sweep of no profile: there is nothing to sweep or cap
+                Inputs::Linear { curves, cap, .. } if name == "review_linear_empty" => {
+                    assert!(curves.is_empty() && *cap, "{name}");
+                }
+                // a sweep through distance zero (either sign): the caps coincide and the
+                // side face has no area
+                Inputs::Linear { dist, .. } => assert_eq!(*dist, 0.0, "{name}"),
+                // a 90-degree draft turns each side face into the profile's plane, so the
+                // swept body has no height
+                Inputs::Draft { angle_deg, .. } => assert_eq!(*angle_deg, 90.0, "{name}"),
+                _ => panic!("{name}"),
+            }
+            let output = rust(&i).unwrap();
+            assert_eq!(output.values["status"], [1001.0], "{name}");
+        }
+    }
+}
+
+/// tangency-labs/solidcraft#14425 (WR-448's `revolve_analytic_profile_faces` retired): the
+/// two WR-471 whole-sphere rows it moved. A half circle of radius 5 centred `d` off the
+/// axis (0 or `3e-7`), its ends `(d, +-5, 0)`, turned a whole turn about Y sweeps the
+/// sphere centred on the axis through those ends (WR-471: the corners the profile's
+/// neighbours share stay on the face), of radius `R = sqrt(d^2 + 25)`. Upstream's one-curve
+/// special case built that sphere with its poles off the turn axis; now the sphere's poles
+/// are on the axis and its seam is the profile (as tangency-labs/solidcore#1491). The moved
+/// values are checked against that closed form.
+#[cfg(test)]
+mod revolve_analytic_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+    use super::*;
+    use crate::interval::Iv;
+    use solidcore::topology::{brep::p1, edge, vertex};
+
+    /// The record is the swept body's (its vertices and seam samples bitwise the body's),
+    /// and against the closed form, each enclosed in interval arithmetic from the exact
+    /// inputs: each vertex is a pole `(0, +-R, 0)` within its own tolerance, each seam
+    /// sample lies on the sphere and in the profile's half-plane (`z = 0`, `x >= 0`) within
+    /// the seam edge's tolerance, and each volume is `4 pi R^3 / 3` within the accuracy it
+    /// was asked at (`brep_volume`'s relative accuracy: `1e-6`, and `1e-8` for the
+    /// rotational row's second volume). The tolerances and accuracies are the body's and
+    /// the query's own, not allowances chosen here.
+    #[test]
+    fn the_whole_sphere_rows_are_the_sphere_through_the_profile_ends() {
+        let data: Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/sweep.api_brep/wr471-rotational-whole-sphere-volume.json"
+        ))
+        .unwrap();
+        let cases = data["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 2);
+        let k = Kernel::default();
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let d = case["inputs"]["curves"][0]["center"][0].as_f64().unwrap();
+            let r = Iv::exact(d).mul(Iv::exact(d)).add(Iv::exact(25.0)).sqrt();
+            let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
+            crate::certify::watch_written();
+            let out = rust(&i).unwrap();
+            let mut bodies = crate::certify::take_written();
+            assert_eq!(bodies.len(), 1, "{name}: one swept body");
+            let b = bodies.pop().unwrap();
+            assert_eq!(out.values["status"], [0.0], "{name}");
+            assert_eq!(out.values["counts"], [1.0, 1.0, 2.0], "{name}");
+            // the one face is the analytic sphere, not a surface of revolution
+            let faces = b.face_list();
+            assert_eq!(faces.len(), 1, "{name}: one face");
+            let surface = b.face(faces[0]).unwrap().surface.as_ref().unwrap();
+            assert!(
+                matches!(surface.kind(), solidcore::surface::surface::SurfaceKind::Sphere(_)),
+                "{name}: the face is a sphere"
+            );
+
+            let vertices = p1::vertices(&b, None).unwrap();
+            let recorded = out.values["linear_vertices"].as_chunks::<3>().0.to_vec();
+            assert_eq!(recorded.len(), 2, "{name}");
+            assert_eq!(vertices.len(), 2, "{name}");
+            let mut poles = [false; 2];
+            for (&v, q) in vertices.iter().zip(&recorded) {
+                let p = vertex::point(&b, v).unwrap();
+                assert_eq!([p.x, p.y, p.z], *q, "{name}: the body's vertex");
+                let tol = vertex::tolerance(&b, v).unwrap();
+                let pole = [1.0, -1.0].into_iter().position(|sign: f64| {
+                    let y = Iv::exact(p.y).sub(r.mul(Iv::exact(sign)));
+                    let [x, z] = [p.x, p.z].map(Iv::exact);
+                    let off = x.mul(x).add(y.mul(y)).add(z.mul(z)).sqrt();
+                    off.hi <= tol
+                });
+                let pole = pole.unwrap_or_else(|| panic!("{name}: vertex {q:?} on no pole"));
+                assert!(!poles[pole], "{name}: both vertices on one pole");
+                poles[pole] = true;
+            }
+
+            let edges = p1::edges(&b, None).unwrap();
+            assert_eq!(edges.len(), 1, "{name}: the seam");
+            let seam = edges[0];
+            let tol = edge::tolerance(&b, seam).unwrap();
+            let e = b.edge(seam).unwrap();
+            let curve = e.curve.as_ref().unwrap();
+            let samples = out.values["linear_edge_samples"].as_chunks::<3>().0.to_vec();
+            assert_eq!(samples.len(), 3, "{name}");
+            for (fraction, q) in [0.17, 0.37, 0.83].into_iter().zip(&samples) {
+                let p = curve.evaluate_point(&k, e.interval.evaluate(fraction)).unwrap();
+                assert_eq!([p.x, p.y, p.z], *q, "{name}: the body's seam sample");
+                let [x, y, z] = q.map(Iv::exact);
+                let off = x.mul(x).add(y.mul(y)).add(z.mul(z)).sqrt().sub(r);
+                assert!(off.mag() <= tol, "{name}: {q:?} {} off the sphere", off.mag());
+                assert!(q[2].abs() <= tol && q[0] >= -tol, "{name}: {q:?} off the profile");
+            }
+
+            let pi = Iv { lo: std::f64::consts::PI.next_down(), hi: std::f64::consts::PI.next_up() };
+            let want = Iv::exact(4.0).mul(pi).mul(r.mul(r).mul(r)).div(Iv::exact(3.0));
+            for (key, accuracy) in [("linear_volume", 1e-6), ("rotational_volume_1e8", 1e-8)] {
+                assert_eq!(out.ints[&format!("{key}_status")], [0], "{name}: {key}");
+                let got = out.values[key][0];
+                let off = Iv::exact(got).sub(want).mag();
+                assert!(
+                    off <= accuracy * want.lo,
+                    "{name}: {key} {got} off {want:?} by {off}"
+                );
+            }
         }
     }
 }

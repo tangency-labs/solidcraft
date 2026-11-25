@@ -12,6 +12,7 @@ use solidcraft_doc::BrowserEntry;
 use super::canvas::CanvasPlane;
 use super::check::{located, whole};
 use super::types::{FeatureCommon, LengthExpr, feature_common, present};
+use crate::browser_find::{Kind, MAX_PATTERN_CHARS, Pattern, Search};
 
 /// Repair a part the modelling kernel refuses, or an open part that should be a solid: faces
 /// SMLib refuses on their own are rebuilt on their own surfaces (geometry unchanged), free edges
@@ -92,6 +93,14 @@ pub struct RepairDone {
     pub modelling: bool,
     /// Its volume, mm³, when it is a closed solid.
     pub volume: Option<f64>,
+    /// The tolerance-scale defects SMLib's check fails that were healed first (edges shorter
+    /// than their tolerance, sliver faces between coincident edges, curve pieces of no length),
+    /// in a line; face indices in the rest of the report are the healed part's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub healed: Option<String>,
+    /// That heal failed inside the kernel, and why: the repair went on from the part as it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heal_failed: Option<String>,
 }
 
 /// What `body.repair` returns.
@@ -114,6 +123,60 @@ pub struct RepairResult {
     /// How long the feature took to evaluate, in milliseconds.
     pub ms: Option<f64>,
     pub repair: RepairDone,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Remove a body's history (#18698): the features that built only this body go, and a base
+/// feature holds its B-rep as it is. Features that also build other bodies stay. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct RemoveHistoryParams {
+    /// The body (its name).
+    pub body: String,
+}
+
+/// A feature that worked before Remove History and fails after it, with why.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RemoveHistoryBroken {
+    /// The feature's name.
+    pub feature: String,
+    /// Why it fails now.
+    pub error: String,
+}
+
+/// What `body.remove_history` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RemoveHistoryResult {
+    /// The base feature's id.
+    pub feature: u64,
+    /// The base feature's name.
+    pub name: String,
+    /// The features that went: those that built only this body, and the sketches only they used.
+    pub removed: Vec<String>,
+    /// Features that built this body and stay, because they also build or change other bodies.
+    pub kept: Vec<String>,
+    /// The Remove feature added before the base when kept features still build the body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remove: Option<String>,
+    /// The body's faces after (the same as before).
+    pub faces: usize,
+    /// The body's edges after (the same as before).
+    pub edges: usize,
+    /// The body's vertices after (the same as before).
+    pub vertices: usize,
+    /// The body's volume before, in mm³.
+    pub volume_before: f64,
+    /// The body's volume after, in mm³ (the same as before, within the kernel's accuracy).
+    pub volume_after: f64,
+    /// Features that worked before and now fail: a reference the base feature's faces do not keep.
+    pub broken: Vec<RemoveHistoryBroken>,
+    /// References to the body's faces (sketch attachments, face appearances, print faces) that
+    /// could not move to the base feature's faces, each with why.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -954,6 +1017,11 @@ fn some_visible<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Visible>, D::E
     Visible::deserialize(d).map(Some)
 }
 
+/// `browser.toggle_planes` and `browser.toggle_reference` take no parameters: an empty object.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BrowserToggleParams {}
+
 /// Show or hide what is in the Browser: name one kind of target (`items`, `joints`, `features`,
 /// `folder`, `tree_folders` or `paths`). Saved with the design and undone like any other
 /// change; the camera is not. With `isolate`, everything else is hidden.
@@ -1275,7 +1343,9 @@ impl JsonSchema for ViewCamera {
                 "yaw": {"description": "Turn about the up axis; 0 looks along +Y, from the front.", "type": "number"},
                 "pitch": {"description": "Elevation of the eye above the ground plane.", "type": "number"},
                 "distance": {"description": "From the target to the eye, in mm.", "type": "number", "exclusiveMinimum": 0},
-                "fov": {"description": "Vertical field of view; 0 is orthographic. Default: 0.", "type": "number", "default": 0.0}
+                "fov": {"description": "Vertical field of view; 0 is orthographic. Default: 0.", "type": "number", "default": 0.0},
+                "roll": {"description": "Rotation about the view direction, in radians. Default: 0.", "type": "number", "default": 0.0},
+                "up": {"description": "The world axis pointing up. Default: z.", "type": "string", "enum": ["z", "y"], "default": "z"}
             },
             "required": ["target", "yaw", "pitch", "distance"]
         })
@@ -1289,8 +1359,8 @@ impl JsonSchema for ViewCamera {
 pub struct ViewSaveParams {
     // Optional in the type and required in the schema (`camera_required`): left out, the handler
     // refuses it with its own message.
-    /// The camera to keep: `{target: [x, y, z], yaw, pitch, distance, fov?}`, finite, with a
-    /// distance above 0.
+    /// The camera to keep: `{target: [x, y, z], yaw, pitch, distance, fov?, roll?, up?}`,
+    /// finite, with a distance above 0. Up is "z" or "y".
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ViewCamera")]
     pub camera: Option<ViewCamera>,
@@ -1379,6 +1449,11 @@ pub struct ViewEntry {
     pub distance: f64,
     /// Vertical field of view in radians; 0 is orthographic.
     pub fov: f64,
+    /// Rotation about the view direction in radians.
+    pub roll: f64,
+    /// World axis pointing up, serialized as "z" or "y".
+    #[schemars(with = "String")]
+    pub up: solidcraft_viewport::UpAxis,
 }
 
 /// What `view.list` returns.
@@ -1594,16 +1669,36 @@ pub struct RedefineSketchParams {
     /// component's own coordinates. Default: world. A named plane or a face takes none.
     #[serde(default)]
     pub frame: Option<PlaneFrame>,
+    /// Not on a face: `true`, `"x"` or `"y"` turns the new plane half way about that in-plane axis
+    /// (as `sketch.create`'s `flip`), `false` keeps the new plane's own side. Default: when the new
+    /// plane faces the other way, it is turned so the sketch keeps facing the way it did and stays
+    /// upright (the reply's `flip` says about which axis).
+    #[serde(default)]
+    pub flip: Option<SketchFlip>,
+}
+
+/// A sketch plane's half turn: `true` or either in-plane axis.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SketchFlip {
+    Flag(bool),
+    Axis(FlipAxis),
+}
+
+/// The in-plane axis a half turn is about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FlipAxis {
+    X,
+    Y,
 }
 
 /// How a redefined sketch is attached to its plane: `exact_face` (to a face of a body, which it
-/// follows), `sheet_face` (to a face of a sheet part) or `fixed` (where it is: an origin,
-/// construction or explicit plane).
+/// follows) or `fixed` (where it is: an origin, construction or explicit plane).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RedefineAttachment {
     ExactFace,
-    SheetFace,
     Fixed,
 }
 
@@ -1614,6 +1709,9 @@ pub struct RedefineSketchResult {
     pub sketch: u64,
     /// How it is attached now.
     pub attachment: Option<RedefineAttachment>,
+    /// When the new plane was turned half way: the in-plane axis it was turned about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flip: Option<FlipAxis>,
     /// For an explicit plane: the coordinates it was read in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame: Option<PlaneFrame>,
@@ -1637,6 +1735,76 @@ pub struct RenamedBody {
     pub body: String,
     /// Its name now.
     pub name: String,
+}
+
+/// Search the Browser by name, as its search field does. Give `text`, `kinds` or both. Read-only.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct FindParams {
+    /// What the names hold. Default: every name of the `kinds` given.
+    #[serde(default)]
+    pub text: Option<FindText>,
+    /// The kinds of thing to list. Default: every kind.
+    #[serde(default)]
+    pub kinds: Option<FindKinds>,
+}
+
+/// `text`, read by the handler's own reader: `None` when blank.
+#[derive(Debug)]
+pub struct FindText(pub Option<Pattern>);
+
+impl<'de> Deserialize<'de> for FindText {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::find_text(Some(&Value::deserialize(d)?)).map(FindText).map_err(|e| D::Error::custom(whole(e)))
+    }
+}
+
+impl JsonSchema for FindText {
+    fn schema_name() -> Cow<'static, str> {
+        "FindText".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Text anywhere in the name, ignoring case. With `*` (any text) or `?` (any one character) it must match the whole name instead: `*:1` is every name that ends in `:1`. Spaces around it don't count, and blank text counts as none.",
+            "type": "string",
+            "maxLength": MAX_PATTERN_CHARS
+        })
+    }
+}
+
+/// `kinds`, read by the handler's own reader.
+#[derive(Debug)]
+pub struct FindKinds(pub Vec<Kind>);
+
+impl<'de> Deserialize<'de> for FindKinds {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::find_kinds(Some(&Value::deserialize(d)?)).map(FindKinds).map_err(|e| D::Error::custom(whole(e)))
+    }
+}
+
+impl JsonSchema for FindKinds {
+    fn schema_name() -> Cow<'static, str> {
+        "FindKinds".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let ids: Vec<&str> = Kind::ALL.iter().map(|k| k.id()).collect();
+        json_schema!({
+            "description": "A list of kinds: a placement of a component, a body, a sketch, a construction plane, axis or point, a joint. An empty list means every kind.",
+            "type": "array",
+            "items": {"enum": ids},
+            "maxItems": Kind::ALL.len()
+        })
+    }
+}
+
+/// What `browser.find` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FindResult {
+    #[serde(flatten)]
+    pub search: Search,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 #[cfg(test)]
