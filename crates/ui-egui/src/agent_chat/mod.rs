@@ -42,6 +42,7 @@ pub mod settings;
 pub mod summary;
 mod times;
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -319,6 +320,7 @@ pub enum Item {
     /// `history`: the undo history right after it ([`UndoMark::revision`]).
     Changes {
         steps: usize,
+        features: Vec<u64>,
         revision: Revision,
         history: Revision,
         undone: bool,
@@ -387,6 +389,8 @@ struct Turn {
     /// The design and the undo history ([`UndoMark::revision`]) before it.
     start: Revision,
     start_undo: Revision,
+    /// The latest feature definitions written by admitted tools on the named design.
+    feature_changes: (String, HashMap<u64, solidcraft_engine::doc::Feature>),
     /// Requests that ran commands, and requests of any kind.
     changes: u32,
     requests: u32,
@@ -517,6 +521,8 @@ pub struct AgentChat {
     selected_count: Option<(Vec<solidcraft_engine::Sel>, usize, usize)>,
     /// What the chip under the pointer stands for, lit up in the model while the pointer is on it.
     pub hover: Vec<solidcraft_engine::Sel>,
+    /// The completion card whose changes are shown, and the design revision at the click.
+    model_changes_shown: Option<(usize, solidcraft_engine::plugin::DesignToken)>,
     /// The pill or chip the pointer is on, as the panel saw it while drawing; the host lights what
     /// it stands for after the draw ([`light_hovered`]).
     pub hovered: Option<panel::Hovered>,
@@ -732,6 +738,8 @@ impl AgentChat {
         self.keyboard_owned = false;
         self.all_selected = false;
         self.drop_rect = None;
+        self.model_changes_shown = None;
+        other.model_changes_shown = None;
     }
 
     pub(crate) fn disconnect_document(&mut self, session: &mut solidcraft_engine::Session, wait: bool) {
@@ -741,6 +749,10 @@ impl AgentChat {
         if self.state.is_some() {
             self.state = Some(State::Off);
         }
+    }
+
+    pub(crate) fn clear_model_changes(&mut self) {
+        self.model_changes_shown = None;
     }
 
     pub(crate) fn disconnect_endpoint(&mut self, session: &mut solidcraft_engine::Session, id: &str) {
@@ -1464,17 +1476,31 @@ pub(crate) fn with_tool_request<T>(
     });
     // A batch may replace the design and then roll back to its checkpoint. Keep the turn's
     // original undo boundary when that happens, including edits made before the batch.
-    let before = app.agent_chat.turn.as_ref().filter(|_| own).map(|t| (Revision::of(&app.session.doc), t.start.clone(), t.start_undo.clone()));
+    let before = app
+        .agent_chat
+        .turn
+        .as_ref()
+        .filter(|_| own)
+        .map(|t| (app.session.doc.clone(), app.session.document_id.clone(), t.start.clone(), t.start_undo.clone()));
     let previous = std::mem::replace(&mut app.agent_chat.following_document, own);
     let result = run(app);
     app.agent_chat.following_document = previous;
-    if let Some((doc, start, start_undo)) = before
-        && doc.is(&app.session.doc)
+    if let Some((doc, document, start, start_undo)) = before
         && let Some(turn) = app.agent_chat.turn.as_mut()
         && active.is_some_and(|active| Arc::ptr_eq(active, &turn.active))
     {
-        turn.start = start;
-        turn.start_undo = start_undo;
+        if Arc::ptr_eq(&doc, &app.session.doc) {
+            turn.start = start;
+            turn.start_undo = start_undo;
+        } else if document == app.session.document_id {
+            record_feature_changes(turn, &document, &doc, &app.session.doc);
+        } else if !turn.start.same(&start)
+            && let Some(new_start) = turn.start.get::<solidcraft_engine::doc::Document>()
+        {
+            // A batch can start a new design and make edits in it. The new design's
+            // initial features came from the file, so compare only the steps since it opened.
+            record_feature_changes(turn, &app.session.document_id, &new_start, &app.session.doc);
+        }
     }
     result
 }
@@ -1482,6 +1508,7 @@ pub(crate) fn with_tool_request<T>(
 /// The agent's replacement succeeded. Keep its backend, transcript, queue, limits and validity
 /// flag; subsequent edits undo in this design and picked geometry belongs to the old one.
 pub(crate) fn continue_in_document(app: &mut SolveApp) {
+    app.agent_chat.model_changes_shown = None;
     if let Some(turn) = app.agent_chat.turn.as_mut() {
         turn.start = Revision::of(&app.session.doc);
         turn.start_undo = UndoMark::revision(&app.session.undo);
@@ -1507,12 +1534,8 @@ pub(crate) fn merge_active_turn_for_switch(app: &mut SolveApp) {
     if let Some(turn) = app.agent_chat.turn.as_ref() {
         let steps = merge_turn(&mut app.session.undo, turn);
         if steps > 0 {
-            app.agent_chat.push(Item::Changes {
-                steps,
-                revision: Revision::of(&app.session.doc),
-                history: UndoMark::revision(&app.session.undo),
-                undone: false,
-            });
+            let item = change_item(&app.session, turn, steps);
+            app.agent_chat.push(item);
         }
     }
 }
@@ -1578,7 +1601,6 @@ const CHANGED_ITEMS: usize = 12;
 /// positions and picks from before.
 fn changed_note(seen: &solidcraft_engine::doc::Document, now: &solidcraft_engine::doc::Document) -> Option<String> {
     use solidcraft_engine::doc::Feature;
-    use std::collections::HashMap;
     if seen == now {
         return None;
     }
@@ -1974,6 +1996,7 @@ pub fn new_chat(app: &mut SolveApp) {
     let chat = &mut app.agent_chat;
     chat.confirm_new = false;
     chat.items.clear();
+    chat.model_changes_shown = None;
     chat.all_selected = false;
     chat.times.clear();
     chat.turn_warning = None;
@@ -2092,6 +2115,7 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
         active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         start: Revision::of(&app.session.doc),
         start_undo: UndoMark::revision(&app.session.undo),
+        feature_changes: (app.session.document_id.clone(), HashMap::new()),
         changes: 0,
         requests: 0,
         limit_told: false,
@@ -2369,7 +2393,7 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
         chat.notice(warning, false);
     }
     if steps > 0 {
-        chat.push(Item::Changes { steps, revision: Revision::of(&session.doc), history: UndoMark::revision(&session.undo), undone: false });
+        chat.push(change_item(session, &turn, steps));
     }
     // How long the answer took, under its last item ("Answered in 23 min").
     let answered = chat.ended.as_deref().is_some_and(|r| !matches!(r, "cancelled" | "error" | "auth")) && !chat.stopped;
@@ -2379,6 +2403,49 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
     {
         stamp.took = Some((took, answered));
     }
+}
+
+/// Collect only the features written by this request. Human edits that happened while the
+/// command computed are already part of `before`, taken on the window thread at commit time.
+fn record_feature_changes(turn: &mut Turn, document: &str, before: &solidcraft_engine::doc::Document, after: &solidcraft_engine::doc::Document) {
+    let (recorded_document, features) = &mut turn.feature_changes;
+    if recorded_document != document {
+        recorded_document.clear();
+        recorded_document.push_str(document);
+        features.clear();
+    }
+    let before: HashMap<_, _> = before.features.iter().map(|feature| (feature.id, feature)).collect();
+    let present: HashSet<_> = after.features.iter().map(|feature| feature.id).collect();
+    features.retain(|id, _| present.contains(id));
+    for feature in &after.features {
+        if before.get(&feature.id).is_none_or(|old| *old != feature) {
+            features.insert(feature.id, feature.clone());
+        }
+    }
+}
+
+/// The card's model targets are still present and evaluated at the end of the message.
+fn change_item(session: &solidcraft_engine::Session, turn: &Turn, steps: usize) -> Item {
+    let (document, changed) = &turn.feature_changes;
+    let mut features = Vec::new();
+    if document == &session.document_id && !changed.is_empty() {
+        let start = turn.start.get::<solidcraft_engine::doc::Document>();
+        let before: HashMap<_, _> = start.iter().flat_map(|doc| &doc.features).map(|feature| (feature.id, feature)).collect();
+        let evaluated: HashSet<_> = session
+            .model
+            .results
+            .iter()
+            .filter(|result| !result.skipped && !result.stale && result.error.is_none())
+            .map(|result| result.id)
+            .collect();
+        features.extend(session.doc.features.iter().filter_map(|feature| {
+            (changed.get(&feature.id) == Some(feature)
+                && evaluated.contains(&feature.id)
+                && before.get(&feature.id).is_none_or(|old| *old != feature))
+            .then_some(feature.id)
+        }));
+    }
+    Item::Changes { steps, features, revision: Revision::of(&session.doc), history: UndoMark::revision(&session.undo), undone: false }
 }
 
 /// [`merge_undo`] of `turn`'s steps: the design and history it began on come back from its
@@ -2439,7 +2506,47 @@ pub fn undo_changes(app: &mut SolveApp, index: usize) {
         && let Some(Item::Changes { undone, .. }) = app.agent_chat.items.get_mut(index)
     {
         *undone = true;
+        app.agent_chat.model_changes_shown = None;
     }
+}
+
+fn model_changes_view_visible(app: &SolveApp) -> bool {
+    !app.home.open
+        && app.docs.views.active().kind == solidcraft_views::ViewKind::Model
+        && !crate::drawing_workspace::active(app)
+        && !crate::render_workspace::active(app)
+}
+
+fn current_model_changes(app: &SolveApp, index: usize) -> Option<&[u64]> {
+    if !model_changes_view_visible(app) {
+        return None;
+    }
+    let Item::Changes { features, revision, history, undone: false, .. } = app.agent_chat.items.get(index)? else { return None };
+    (!features.is_empty() && revision.is(&app.session.doc) && UndoMark::reached(history, &app.session.undo)).then_some(features)
+}
+
+fn active_model_changes(app: &SolveApp) -> Option<(usize, &[u64])> {
+    let (index, revision) = app.agent_chat.model_changes_shown.as_ref()?;
+    if shown(app) && app.agent_chat.open && *revision == app.session.design_token() {
+        return Some((*index, current_model_changes(app, *index)?));
+    }
+    None
+}
+
+pub(crate) fn model_changes_index(app: &SolveApp) -> Option<usize> {
+    active_model_changes(app).map(|(index, _)| index)
+}
+
+pub(crate) fn model_changes_targets(app: &SolveApp) -> impl Iterator<Item = solidcraft_engine::Sel> + '_ {
+    active_model_changes(app).map(|(_, features)| features).into_iter().flatten().map(|&id| solidcraft_engine::Sel::Feature { id })
+}
+
+fn toggle_model_changes(app: &mut SolveApp, index: usize) {
+    app.agent_chat.model_changes_shown = if model_changes_index(app) != Some(index) && current_model_changes(app, index).is_some() {
+        Some((index, app.session.design_token()))
+    } else {
+        None
+    };
 }
 
 /// The requests the agent's tools sent through the chat's endpoint: each one passes the gate.
@@ -2973,6 +3080,9 @@ fn set_config_option_checked(app: &mut SolveApp, id: &str, value: &str, listed_o
 pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Value, String> {
     if let Some(e) = p.get("features").and_then(Value::as_bool) {
         app.preferences.ai_features = e;
+        if !e {
+            app.agent_chat.clear_model_changes();
+        }
     }
     if let Some(b) = p.get("toolbar_button").and_then(Value::as_bool) {
         app.preferences.ai_toolbar_button = b;
@@ -3086,6 +3196,9 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
     }
     if let Some(o) = p.get("open").and_then(Value::as_bool) {
         app.agent_chat.open = o;
+        if !o {
+            app.agent_chat.clear_model_changes();
+        }
     }
     if p.get("toggle").and_then(Value::as_bool) == Some(true) {
         toggle(app);
@@ -3192,7 +3305,7 @@ pub fn status(app: &SolveApp) -> Value {
                 json!({"permission": title, "options": options.iter().map(|o| json!({"id": o.id, "name": o.name, "kind": o.kind})).collect::<Vec<_>>(), "answer": answer})
             }
             Item::Approval { title, answer, .. } => json!({"approval": title, "answer": answer}),
-            Item::Changes { steps, undone, .. } => json!({"changes": steps, "undone": undone}),
+            Item::Changes { steps, features, undone, .. } => json!({"changes": steps, "features": features.len(), "undone": undone}),
             Item::Notice { text, error } => json!({"notice": text, "error": error}),
         })
         .collect();

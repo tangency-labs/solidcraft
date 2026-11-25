@@ -509,6 +509,116 @@ fn a_messages_changes_undo_as_one_step() {
     assert!(matches!(app.agent_chat.items[n], Item::Changes { undone: true, .. }));
 }
 
+#[test]
+fn show_in_model_highlights_only_the_assistants_features() {
+    use solidcraft_engine::Sel;
+
+    let (mut app, tx) = app_in_a_turn();
+    let plate = app.run("solid.box", json!({"length": 60, "width": 40, "height": 8, "corner": [0, 0, 0], "body_name": "Plate"})).unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let hole = ask(&tx, "engine.execute", json!({"command": "solid.hole", "params": {"position": [15, 12, 8], "diameter": 6, "targets": ["Plate"]}}));
+    frame(&mut app);
+    let reply = hole.recv_timeout(std::time::Duration::from_secs(30)).unwrap();
+    let hole = reply["result"]["feature"].as_u64().unwrap();
+    let human_box = app.run("solid.box", boxed(90.0)["params"].clone()).unwrap()["feature"].as_u64().unwrap();
+    end_turn(&mut app);
+    let (index, features) = app
+        .agent_chat
+        .items
+        .iter()
+        .enumerate()
+        .find_map(|(index, item)| match item {
+            Item::Changes { features, .. } => Some((index, features)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(features.as_slice(), [hole]);
+
+    app.agent_chat.open = true;
+    app.home.open = false;
+    let selection = vec![Sel::Feature { id: human_box }];
+    app.session.selection = selection.clone();
+    let cam = app.cam;
+    let target = Sel::Feature { id: hole };
+    let show = |app: &mut SolveApp| panel::run(app, &crate::fonts::test_context(), panel::PanelAction::ShowModelChanges(index));
+    show(&mut app);
+    assert_eq!(app.highlighted(), [selection[0].clone(), target.clone()]);
+    assert_eq!(app.session.selection, selection);
+    assert_eq!(app.cam, cam);
+    let faces = crate::viewport::displayed_selection(&app, &target);
+    assert!(!faces.is_empty());
+    assert!(faces.iter().all(|face| matches!(face, Sel::Face { body, .. } if body == "Plate")), "{faces:?}");
+    assert!(!app.highlighted().contains(&Sel::Feature { id: plate }), "the earlier human edit is outside the card");
+
+    app.run("select.set", json!({"items": []})).unwrap();
+    assert_eq!(app.highlighted(), [target.clone()], "changing selection keeps the separate model highlight");
+    app.home.open = true;
+    assert!(!app.highlighted().contains(&target), "Home does not show the model");
+    show(&mut app);
+    app.home.open = false;
+    assert!(!app.highlighted().contains(&target), "the control does not arm from Home");
+    show(&mut app);
+    assert!(app.highlighted().contains(&target));
+    show(&mut app);
+    assert!(app.highlighted().is_empty());
+    show(&mut app);
+    undo_changes(&mut app, index);
+    assert_eq!(model_changes_index(&app), None);
+    assert!(!app.highlighted().contains(&target));
+}
+
+#[test]
+fn showing_model_changes_does_not_resume_after_the_design_revision_changes() {
+    let (mut app, tx) = app_in_a_turn();
+    let feature = app.run("solid.box", boxed(0.0)["params"].clone()).unwrap()["feature"].as_u64().unwrap();
+    app.agent_chat.turn = None;
+    start_turn(&mut app, "change the height".into(), false, None, Vec::new());
+    let reply = ask(&tx, "engine.execute", json!({"command": "timeline.edit", "params": {"feature": feature, "set": {"height": "12"}}}));
+    frame(&mut app);
+    assert_eq!(reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    end_turn(&mut app);
+    let index = app.agent_chat.items.iter().position(|item| matches!(item, Item::Changes { .. })).unwrap();
+    let Item::Changes { features, .. } = &app.agent_chat.items[index] else { unreachable!() };
+    assert_eq!(features.as_slice(), [feature]);
+    app.agent_chat.open = true;
+    app.home.open = false;
+    toggle_model_changes(&mut app, index);
+    assert_eq!(model_changes_index(&app), Some(index));
+
+    app.run("solid.box", boxed(20.0)["params"].clone()).unwrap();
+    assert_eq!(model_changes_index(&app), None);
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(model_changes_index(&app), None);
+
+    toggle_model_changes(&mut app, index);
+    assert_eq!(model_changes_index(&app), Some(index), "the unchanged completion can be shown again on request");
+    app.agent_chat.swap_document(&mut AgentChat::default());
+    assert!(app.agent_chat.model_changes_shown.is_none());
+}
+
+#[test]
+fn show_in_model_omits_a_feature_the_user_overwrites_before_completion() {
+    let (mut app, tx) = app_in_a_turn();
+    let feature = app.run("solid.box", boxed(0.0)["params"].clone()).unwrap()["feature"].as_u64().unwrap();
+    app.agent_chat.turn = None;
+    start_turn(&mut app, "change the height and add another box".into(), false, None, Vec::new());
+    let reply = ask(&tx, "engine.execute", json!({"command": "timeline.edit", "params": {"feature": feature, "set": {"height": "12"}}}));
+    frame(&mut app);
+    assert_eq!(reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    app.run("timeline.edit", json!({"feature": feature, "set": {"height": "14"}})).unwrap();
+
+    let reply = ask(&tx, "engine.execute", boxed(25.0));
+    frame(&mut app);
+    let made = reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["result"]["feature"].as_u64().unwrap();
+    end_turn(&mut app);
+    let features = app.agent_chat.items.iter().find_map(|item| match item {
+        Item::Changes { features, .. } => Some(features.as_slice()),
+        _ => None,
+    });
+    assert_eq!(features, Some([made].as_slice()), "only the feature whose current definition the assistant wrote is offered");
+}
+
 /// The conversation knows a design by its revision: the very design the host gave it, never an
 /// equal copy, and only the host's own type gets the design back (#13438).
 #[test]

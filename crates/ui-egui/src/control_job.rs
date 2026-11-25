@@ -925,7 +925,8 @@ impl SolveApp {
                         let before = self.session.doc.clone();
                         // Move the redo stack instead of cloning the whole history on the window thread.
                         let redo = std::mem::take(&mut self.session.redo);
-                        let replies = self.session.accept_commands(prepared);
+                        let chat_turn = job.req.chat_turn.as_ref();
+                        let replies = crate::agent_chat::with_tool_request(self, chat_turn, |app| app.session.accept_commands(prepared));
                         // A read or a failed run leaves this design's document as it was, so the
                         // Start page stays up. An edit that landed shows this design, as clicking
                         // its tab does (`documents::switch`). The dialog only runs on the session
