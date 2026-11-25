@@ -237,14 +237,14 @@ fn finite3(p: Vec3) -> bool {
 /// How far apart two section points are (mm), as the kernel measures it; none for a coordinate
 /// that is not finite or a distance that overflows.
 fn apart(a: Vec2, b: Vec2) -> Option<f64> {
-    solidcore_ops::point_distance([a.x, a.y, 0.0], [b.x, b.y, 0.0]).ok().map(|d| d.value)
+    solidcraft_kernel::services::point_distance([a.x, a.y, 0.0], [b.x, b.y, 0.0]).ok().map(|d| d.value)
 }
 
 /// How far apart two screen points are (pixels), as the kernel measures it; infinite where it
 /// refuses them, so such a point is never the nearest nor within reach.
 fn px_apart(a: Pos2, b: Pos2) -> f64 {
     let lift = |p: Pos2| [f64::from(p.x), f64::from(p.y), 0.0];
-    solidcore_ops::point_distance(lift(a), lift(b)).map_or(f64::INFINITY, |d| d.value)
+    solidcraft_kernel::services::point_distance(lift(a), lift(b)).map_or(f64::INFINITY, |d| d.value)
 }
 
 /// The angle (radians, in (−π, π], counter-clockwise from the section's x axis) of section
@@ -252,7 +252,7 @@ fn px_apart(a: Pos2, b: Pos2) -> f64 {
 /// None where `p` is on `at` or not finite.
 fn angle_about(at: Vec2, p: Vec2) -> Option<f64> {
     let (dx, dy) = (p.x - at.x, p.y - at.y);
-    let turn = solidcore_ops::joint_turn::joint_turn([1.0, 0.0], [dx, dy]).ok()?;
+    let turn = solidcraft_kernel::services::joint_turn::joint_turn([1.0, 0.0], [dx, dy]).ok()?;
     Some(if dy < 0.0 { -turn } else { turn })
 }
 
@@ -262,7 +262,8 @@ fn angle_about(at: Vec2, p: Vec2) -> Option<f64> {
 /// of its uses ([`on_plane`] and the edge-on test) take either sign alike. None for a line with no
 /// length.
 fn plane_normal(view: &SectionView) -> Option<Vec3> {
-    let len = solidcore_ops::point_distance([view.start.x, view.start.y, view.start.z], [view.end.x, view.end.y, view.end.z]).ok()?.value;
+    let len =
+        solidcraft_kernel::services::point_distance([view.start.x, view.start.y, view.start.z], [view.end.x, view.end.y, view.end.z]).ok()?.value;
     (len.is_finite() && len > 0.0).then(|| (view.end - view.start) * (1.0 / len)).filter(|n| finite3(*n))
 }
 
@@ -534,7 +535,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let at_rest = on_screen(&sh, proj, Moved::NONE);
     // Seen edge-on, a pointer on the section's plane is centimetres a pixel: nothing takes a press.
     let ray = proj.ray(start).1;
-    let live = solidcore_ops::affine::distance_along([0.0; 3], [n.x, n.y, n.z], [ray.x, ray.y, ray.z]).abs() >= 0.05;
+    let live = solidcraft_kernel::services::affine::distance_along([0.0; 3], [n.x, n.y, n.z], [ray.x, ray.y, ray.z]).abs() >= 0.05;
     // Too small on screen, the dots, arrows and arc would sit on one another: none of them.
     let handles = live && at_rest.across >= MIN_ACROSS;
     let dots: Vec<(Dot, Pos2)> = if handles { at_rest.dots.clone() } else { Vec::new() };
