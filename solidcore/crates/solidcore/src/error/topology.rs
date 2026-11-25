@@ -759,10 +759,11 @@ pub enum TopologyFailure {
     /// The plane through a radial sweep's rims is not a plane. Class `failed`, status
     /// `SM_ERR`.
     RadialCapWithoutPlane,
-    /// The face being drafted has no surface. [`ErrorKind::Missing`], status
-    /// `SM_ERR_NULL_POINTER`.
+    /// The face being drafted has no surface. [`ErrorKind::InvalidInput`], as
+    /// [`TopologyFailure::FaceWithoutSurface`]; status `SM_ERR_NULL_POINTER`.
     RadialFaceWithoutSurface,
-    /// A rim edge use has no edge. [`ErrorKind::Missing`], status `SM_ERR_NULL_POINTER`.
+    /// A rim edge use has no edge. [`ErrorKind::InvalidInput`], as
+    /// [`TopologyFailure::EdgeuseWithoutEdge`]; status `SM_ERR_NULL_POINTER`.
     RadialRimWithoutEdge,
     /// The two rims of a radial sweep's cap are not concentric circles in one stored plane
     /// with the outer one the larger, so they bound no annulus. Class `failed`, status
@@ -854,7 +855,8 @@ pub enum TopologyFailure {
     /// A surface of revolution or extrusion has no generator curve, which its record
     /// needs (only the `empty()` constructors leave it out). [`ErrorKind::InvalidInput`].
     SurfaceWithoutGenerator,
-    /// A surface has no NURBS form. [`ErrorKind::Unsupported`].
+    /// A surface has no NURBS form. [`ErrorKind::InvalidInput`], as
+    /// [`crate::error::surface::SurfaceFailure::NoNurb`].
     SurfaceWithoutNurbs {
         /// The face the surface belongs to, where it has one.
         entity: Option<EntityRef>,
@@ -915,7 +917,8 @@ pub enum TopologyFailure {
     /// [`ErrorKind::InvalidInput`].
     UvDomainOutsideSurface,
     /// The edge use has no UV trim curve and making one failed; the error of the fetch that tried
-    /// is kept as the cause.
+    /// is kept as the cause. Class `failed`, as [`TopologyFailure::UvTrimCurvesNotMade`]:
+    /// whether it is a defect or a refusal is its cause's.
     UvTrimCurveNotMade,
     /// The UV trim curves of a face could not be made; the error that stopped them, where
     /// there is one, is the cause. Class `failed`; whether it is a defect or a refusal is
@@ -1323,6 +1326,7 @@ impl TopologyFailure {
             | Self::SurfaceCacheNotMade
             | Self::TestVectorZero
             | Self::TrimBoundaryNotBuilt
+            | Self::UvTrimCurveNotMade
             | Self::UvTrimCurvesNotMade
             | Self::ZeroSurfaceTangent => ErrorKind::Failed,
             Self::AttributeSlotEmpty
@@ -1407,12 +1411,15 @@ impl TopologyFailure {
             | Self::PartNotEmpty
             | Self::ProtoEdgeWithoutDefinitions
             | Self::ProtoVertexNotAnEnd
+            | Self::RadialFaceWithoutSurface
+            | Self::RadialRimWithoutEdge
             | Self::RecipientIsVertexShell
             | Self::RecordTypeUnknown { .. }
             | Self::ShellHasNoFaceUses
             | Self::SolveViewWithoutCache
             | Self::SourceIsVertexShell
             | Self::SurfaceWithoutGenerator
+            | Self::SurfaceWithoutNurbs { .. }
             | Self::SurfaceWithoutOwningFace
             | Self::TooFewEdgeuses { .. }
             | Self::TooFewSurfaces { .. }
@@ -1445,7 +1452,6 @@ impl TopologyFailure {
             | Self::RadialSweepNeedsCones
             | Self::SurfaceDiscontinuous
             | Self::SurfaceNotTransformable { .. }
-            | Self::SurfaceWithoutNurbs { .. }
             | Self::UnorientedLoopsOnNonG1Surface
             | Self::VertexLoopInSharedFace
             | Self::WireEndSqueezed => ErrorKind::Unsupported,
@@ -1459,10 +1465,7 @@ impl TopologyFailure {
             Self::FaceNotMade { class }
             | Self::MatrixNotDecomposed { class }
             | Self::NoPlaneThroughCurves { class } => *class,
-            Self::Missing(_)
-            | Self::RadialFaceWithoutSurface
-            | Self::RadialRimWithoutEdge
-            | Self::UvTrimCurveNotMade => ErrorKind::Missing,
+            Self::Missing(_) => ErrorKind::Missing,
         }
     }
 }
@@ -2013,9 +2016,9 @@ mod tests {
             (TopologyFailure::RadialCapWithoutPlane, ErrorKind::Failed),
             (
                 TopologyFailure::RadialFaceWithoutSurface,
-                ErrorKind::Missing,
+                ErrorKind::InvalidInput,
             ),
-            (TopologyFailure::RadialRimWithoutEdge, ErrorKind::Missing),
+            (TopologyFailure::RadialRimWithoutEdge, ErrorKind::InvalidInput),
             (TopologyFailure::RadialRimsNotAnnulus, ErrorKind::Failed),
             (TopologyFailure::RadialRimsNotEllipses, ErrorKind::Failed),
             (TopologyFailure::RadialRimsOffEndPlane, ErrorKind::Failed),
@@ -2029,7 +2032,7 @@ mod tests {
             (TopologyFailure::SteppedOutsideUvDomain, ErrorKind::Failed),
             (TopologyFailure::TestVectorZero, ErrorKind::Failed),
             (TopologyFailure::TrimBoundaryNotBuilt, ErrorKind::Failed),
-            (TopologyFailure::UvTrimCurveNotMade, ErrorKind::Missing),
+            (TopologyFailure::UvTrimCurveNotMade, ErrorKind::Failed),
             (TopologyFailure::UvTrimCurvesNotMade, ErrorKind::Failed),
             (TopologyFailure::ZeroSurfaceTangent, ErrorKind::Failed),
         ]);
@@ -2222,7 +2225,7 @@ mod tests {
             (
                 TopologyFailure::SurfaceWithoutNurbs { entity: None },
                 SM_ERR_NULL_POINTER,
-                K::Unsupported,
+                K::InvalidInput,
             ),
             (TopologyFailure::FaceWithoutEdges, SM_ERR, K::Unsupported),
             (TopologyFailure::WireEndSqueezed, SM_ERR, K::Unsupported),
@@ -2279,12 +2282,12 @@ mod tests {
             (
                 TopologyFailure::RadialFaceWithoutSurface,
                 SM_ERR_NULL_POINTER,
-                K::Missing,
+                K::InvalidInput,
             ),
             (
                 TopologyFailure::RadialRimWithoutEdge,
                 SM_ERR_NULL_POINTER,
-                K::Missing,
+                K::InvalidInput,
             ),
             (
                 TopologyFailure::RadialSweepNeedsCones,
@@ -2880,7 +2883,7 @@ mod tests {
             (
                 TopologyFailure::UvTrimCurveNotMade,
                 SM_ERR_NULL_POINTER,
-                ErrorKind::Missing,
+                ErrorKind::Failed,
             ),
         ];
         for (failure, status, kind) in cases {

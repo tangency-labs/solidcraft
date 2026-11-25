@@ -387,7 +387,8 @@ pub enum SurfaceFailure {
     NoParameterDirection,
     /// The surface of revolution has no polar converter circle (its NURB form was never
     /// made or read, or both sweep iso curves were degenerate when it was, which the make
-    /// does not report). Class `failed`.
+    /// does not report). [`ErrorKind::Unsupported`], as
+    /// [`SurfaceFailure::PolarConversionImpossible`].
     NoPolarConverter,
     /// Neither the control-net guess nor the grid guess gave a starting point; the
     /// failure, where there was one, is the cause ([`ErrorKind::NotFound`], `SM_ERR`).
@@ -442,7 +443,8 @@ pub enum SurfaceFailure {
     /// offset surface: offsets nest one deep at most. [`ErrorKind::InvalidInput`].
     OffsetNestedTooDeep,
     /// The solve operation asked for is not one the routine takes (a plane's fast drop
-    /// takes minimize, normalize and intersect). [`ErrorKind::InvalidInput`].
+    /// takes minimize, normalize and intersect). [`ErrorKind::Unsupported`], as
+    /// [`SurfaceFailure::UnsupportedSolverOperation`].
     OperationNotTaken,
     /// A parameter or domain lies outside the surface's domain, as the phrase says (for
     /// example "the point is outside the sweep of the surface of revolution").
@@ -887,7 +889,6 @@ impl SurfaceFailure {
             | Self::NodeHasNoSurface
             | Self::NodeNotSurfaceNode
             | Self::OffsetNestedTooDeep
-            | Self::OperationNotTaken
             | Self::ParameterOutsideInterval { .. }
             | Self::RadiusNotPositive
             | Self::RecordDoesNotRebuild
@@ -911,8 +912,10 @@ impl SurfaceFailure {
             | Self::GeneratorNotPlanar
             | Self::IsoCurveKindNotLiftable
             | Self::NoBSplineForm
+            | Self::NoPolarConverter
             | Self::NotACylinder
             | Self::NurbNotAnalytic { .. }
+            | Self::OperationNotTaken
             | Self::PlainVolume
             | Self::PolarConversionImpossible
             | Self::SolverSurfaceNotBSpline
@@ -955,7 +958,6 @@ impl SurfaceFailure {
             | Self::NoControlPoints
             | Self::NoNonsingularStepoff
             | Self::NoParameterDirection
-            | Self::NoPolarConverter
             | Self::NoTangentTowardDirection
             | Self::NoVolumeInverse
             | Self::NothingLifted
@@ -1955,7 +1957,7 @@ mod tests {
             (
                 SurfaceFailure::OperationNotTaken,
                 SM_ERR,
-                ErrorKind::InvalidInput,
+                ErrorKind::Unsupported,
             ),
             (
                 SurfaceFailure::LineCrossingSingular,
@@ -2021,7 +2023,7 @@ mod tests {
             (
                 SurfaceFailure::NoPolarConverter,
                 SM_ERR_NULL_POINTER,
-                ErrorKind::Failed,
+                ErrorKind::Unsupported,
             ),
             (SurfaceFailure::NotACylinder, SM_ERR, ErrorKind::Unsupported),
             (

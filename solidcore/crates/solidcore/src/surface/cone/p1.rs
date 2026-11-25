@@ -2509,7 +2509,7 @@ mod tests {
         assert_eq!(e.operation(), OP_TO_STEP);
         // the degenerate sweep iso curve left no polar converter after a successful make
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::NoPolarConverter));
-        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported);
     }
 
     #[test]
