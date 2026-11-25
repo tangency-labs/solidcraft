@@ -155,6 +155,10 @@ pub enum ObjectKind {
     Dimension,
     /// A note's text, with its leader when it points at the model.
     Note,
+    /// A centre mark attached to a circular feature.
+    CentreMark,
+    /// A centre line joining two named model points.
+    CentreLine,
     /// A view's label: its letter, name and scale, above the view unless moved (#13044).
     ViewLabel,
     /// A balloon's circle and number, with its leader to the part it numbers.
@@ -181,6 +185,8 @@ impl ObjectKind {
             ObjectKind::View => "VIEW",
             ObjectKind::Dimension => "DIMENSION",
             ObjectKind::Note => "NOTE",
+            ObjectKind::CentreMark => "CENTRE_MARK",
+            ObjectKind::CentreLine => "CENTRE_LINE",
             ObjectKind::ViewLabel => "VIEW_LABEL",
             ObjectKind::Balloon => "BALLOON",
             ObjectKind::RevisionTag => "REVISION_TAG",
@@ -199,7 +205,7 @@ impl ObjectKind {
             ObjectKind::SheetBorder | ObjectKind::DrawingBorder => 0,
             ObjectKind::SheetImage => 1,
             ObjectKind::View => 2,
-            ObjectKind::Dimension | ObjectKind::ViewLabel | ObjectKind::Balloon => 3,
+            ObjectKind::Dimension | ObjectKind::CentreMark | ObjectKind::CentreLine | ObjectKind::ViewLabel | ObjectKind::Balloon => 3,
             ObjectKind::Note => match of {
                 DrawnFor::View => 3,
                 DrawnFor::Sheet => 5,

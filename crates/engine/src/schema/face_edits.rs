@@ -46,7 +46,7 @@ pub struct OffsetFaceParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "FaceRefs")]
     pub faces: Option<FaceRefs>,
-    /// How far, along each face's outward normal; negative: inwards.
+    /// How far, along each face's outward normal; negative: inwards; 0 leaves the faces where they are.
     pub distance: LengthExpr,
     /// The body the faces are on, by name. Default: the body at each point.
     #[serde(default)]

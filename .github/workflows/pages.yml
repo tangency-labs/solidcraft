@@ -64,6 +64,8 @@ jobs:
       - name: Build the UI kit's component gallery
         working-directory: apps/ui-kit-gallery
         run: trunk build --release --public-url ./
+      - name: Test the browser command API (headless Chrome)
+        run: cargo xtask web-api-test --site dist/web
       - name: Test the web app offline and across an update (headless Chrome)
         run: cargo xtask web-offline-test --site dist/web
       - name: Assemble the site

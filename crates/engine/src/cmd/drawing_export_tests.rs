@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
+use solidcraft_geom::Vec2Geom;
 use solidcraft_geom::paper::NoPictures;
 use solidcraft_io::paper::{PngColour, paper_png};
 
@@ -1042,5 +1043,78 @@ fn print_is_the_whole_drawings_pdf() {
     for (p, why) in [(json!({"path": folder.path("Drawing.svg")}), "path must be a .pdf file"), (json!({"sheet": "Sheet 1"}), "sheet")] {
         let message = s.execute("drawing.print", &p).unwrap_err().to_string();
         assert!(message.contains(why), "{p}: {message}");
+    }
+}
+
+/// A plate 10 mm thick with an `nx` x `nz` grid of Ø4 through holes on 6 mm centres, 7 mm in from its
+/// edges (4 x 3 holes: 32 x 26 mm, #212), drawn from the front at 1:1 on A3 with no title block: the
+/// session and its sheet.
+fn plate_with_a_grid_of_holes(nx: usize, nz: usize) -> (Session, u64) {
+    let mut s = Session::default();
+    let (pitch, start) = (6.0, 7.0);
+    let length = start * 2.0 + pitch * (nx as f64 - 1.0);
+    let height = start * 2.0 + pitch * (nz as f64 - 1.0);
+    run(&mut s, "solid.box", json!({"length": length, "width": 10, "height": height, "body_name": "Block"}));
+    for i in 0..nx {
+        for j in 0..nz {
+            let (x, z) = (start + pitch * i as f64, start + pitch * j as f64);
+            let cut = json!({"radius": 2.0, "height": 12, "base": [x, -1, z], "axis": "Y", "operation": "cut", "targets": ["Block"]});
+            run(&mut s, "solid.cylinder", cut);
+        }
+    }
+    run(&mut s, "drawing.create", json!({"omit_first_sheet_title_block": true}));
+    run(&mut s, "drawing.view.base", json!({"sheet": "Sheet 1", "scale": "1:1"}));
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    (s, sheet)
+}
+
+/// A grid of round holes exports to DXF (#212): each hole's outline is one turn, however the rounding
+/// of its pieces' sweeps adds up, so it is written as a CIRCLE, and the DXF reads back, by both
+/// readers, with every arc in it less than a turn.
+#[test]
+fn a_plate_with_a_grid_of_holes_exports_as_dxf() {
+    for (nx, nz) in [(4, 3), (1, 1), (2, 2), (3, 3)] {
+        let (mut s, sheet) = plate_with_a_grid_of_holes(nx, nz);
+        let reply = s.execute(CMD, &json!({"sheet": ids::encode(sheet), "format": "dxf"}));
+        let reply = reply.unwrap_or_else(|e| panic!("{nx} x {nz} holes: {e}"));
+        let text = reply["dxf"].as_str().unwrap();
+        let file = solidcraft_io::read_dxf_file(text).unwrap_or_else(|e| panic!("{nx} x {nz} holes: {e}"));
+        // Every arc as written: an ARC's ends apart, a bulge at most a half turn (|bulge| <= 1); each
+        // hole, a whole turn, a CIRCLE.
+        let (mut round, mut circles) = (0, 0);
+        for e in file.entities() {
+            match e.geometry() {
+                solidcraft_io::DxfShape::Circle { r, .. } => {
+                    assert!((r - 2.0).abs() < 1e-9, "{nx} x {nz} holes: circle of {r}");
+                    circles += 1;
+                }
+                solidcraft_io::DxfShape::Arc { a0, a1, .. } => {
+                    let sweep = (a1 - a0).rem_euclid(360.0);
+                    assert!(sweep.is_finite() && sweep > 0.0 && sweep < 360.0, "{nx} x {nz} holes: arc {a0}..{a1}");
+                    round += 1;
+                }
+                solidcraft_io::DxfShape::BulgedPolyline { vertices, .. } => {
+                    for v in vertices {
+                        assert!(v.bulge.is_finite() && v.bulge.abs() <= 1.0, "{nx} x {nz} holes: bulge {}", v.bulge);
+                        round += usize::from(v.bulge != 0.0);
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert_eq!((circles, round), (nx * nz, 0), "{nx} x {nz} holes: circles and other round pieces");
+        // The sketch reader's view of the same file: every arc's ends on its circle and apart.
+        let read = solidcraft_io::read_dxf(text).unwrap_or_else(|e| panic!("{nx} x {nz} holes: {e}"));
+        let mut holes = 0;
+        for g in &read {
+            match g {
+                solidcraft_io::Geom2::Circle(_, r) => holes += usize::from((r - 2.0).abs() < 1e-6),
+                solidcraft_io::Geom2::Arc { c, a, b } => {
+                    assert!(a.dist(*b) > 1e-9 && (a.dist(*c) - b.dist(*c)).abs() < 1e-6, "{nx} x {nz} holes: {g:?}");
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(holes, nx * nz, "{nx} x {nz} holes: {read:?}");
     }
 }
