@@ -149,6 +149,14 @@ pub fn tangent(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference>
     keep(best)
 }
 
+/// The two end points of line `c`, `None` for any other curve.
+fn line_ends(sk: &Sketch, c: usize) -> Option<(Vec2, Vec2)> {
+    match sk.curves.get(c)?.kind {
+        CurveKind::Line { a, b } => Some((sk.point(a)?, sk.point(b)?)),
+        _ => None,
+    }
+}
+
 /// The directions the sketch's lines and arcs leave the point `p` in, when it is one of their
 /// ends: (curve id, unit direction along the curve there). Construction curves are left out.
 fn leaving(sk: &Sketch, p: Vec2) -> Vec<(String, Vec2)> {
