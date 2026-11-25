@@ -1164,6 +1164,10 @@ fn ui_inspect(app: &SolveApp) -> Outcome {
 
 /// `ui.file {path, insert?, units?}`: open or insert a file through the file loader.
 fn ui_file(app: &mut SolveApp, q: params::File) -> Outcome {
+    // ui.file is an interactive UI action; engine doc.open remains programmatic.
+    if !q.insert && crate::plugin_menu::offer_import(app, &q.path) {
+        return ok(json!({"busy": app.file_load.busy()}));
+    }
     // A control call never meets the unit dialog an STL or OBJ file asks a person: it names
     // `units` itself, or the file is in millimetres.
     let kind = if q.insert { crate::file_load::Kind::Insert } else { crate::file_load::Kind::Open };

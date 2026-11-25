@@ -25,7 +25,7 @@ Work: ROADMAP.md, CONTRIBUTING.md ("Where help is wanted most"), `help wanted`, 
 - Changed UX defaults (not kernel results): preserve old designs via a format legacy value; runtime choices in tool options; fill `Changes a default:`.
 - Regression tests in existing area files, never per-bug files (#3226).
 - Check open PRs, claim by draft (lowest number wins), one topic, English, newcomer-readable title, own screenshots for visible UI/model changes: `.agents/skills/solidcraft-contributing/SKILL.md`.
-- Before each commit: `cargo xtask fast`; CI runs full gate. `cargo xtask skills` checks router and both skill folders.
+- Before pushing: `cargo xtask ci`, which runs what your change needs. `cargo xtask skills` checks router and both skill folders.
 
 ## Skills: read the one for your task
 Dev: `.agents/skills/` (`.claude/skills` symlink; Windows: Developer Mode, `git config core.symlinks true`). MCP: `skills/`.
