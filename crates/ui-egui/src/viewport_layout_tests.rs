@@ -963,7 +963,8 @@ fn turn_around_is_only_offered_to_the_focused_tiled_view() {
 
 #[test]
 fn screen_up_policy_leaves_other_view_animations_unchanged() {
-    use solidcraft_viewport::ease_in_out;
+    use crate::SolveApp;
+    use solidcraft_viewport::{CameraAnim, ease_in_out};
     let from = Camera { roll: 0.4, ..Default::default() };
     let mut to = from;
     to.rotate_in_view(Vec3::new(0.0, 0.8, 0.0));
