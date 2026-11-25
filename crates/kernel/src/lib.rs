@@ -427,6 +427,7 @@ pub use sew::SurfSpec;
 pub use sew::sew;
 pub use sew::sew_touching;
 pub use sew::sew_touching_traced;
+pub use solidcore_ops::affine::direction_cosine;
 pub use solidcore_ops::member_turn::ParallelTurnError;
 pub use solidcore_ops::member_turn::parallel_turn;
 pub use solidcraft_smlib::hold_a_kernel;

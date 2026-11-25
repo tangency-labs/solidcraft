@@ -1657,6 +1657,23 @@ mod caller_circle_compatibility {
         }
     }
     #[test]
+    fn summary_outline_uses_lines_and_arcs_for_a_free_form_contour() {
+        let lp = Loop2 {
+            segs: vec![
+                Seg2::Conic { a: Vec2::new(15.0, 0.0), apex: Vec2::new(15.0, 8.0), b: Vec2::new(0.0, 8.0), w: std::f64::consts::FRAC_1_SQRT_2 },
+                Seg2::Line { a: Vec2::new(0.0, 8.0), b: Vec2::new(0.0, 0.0) },
+                Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(15.0, 0.0) },
+            ],
+        };
+        let summary = serde_json::to_value(super::super::summary_outline_shape(&lp).unwrap()).unwrap();
+        let segments = summary["segments"].as_array().unwrap();
+        assert!(segments.iter().all(|s| s.get("line").is_some() || s.get("arc").is_some()), "{summary}");
+        assert!(segments.iter().any(|s| s.get("arc").is_some()), "{summary}");
+        let full = serde_json::to_value(super::super::loop_shape(&lp)).unwrap();
+        assert!(full["segments"][0].get("polyline").is_some());
+    }
+
+    #[test]
     fn trimmed_cap_support_witness_is_one_flat_circle_but_not_a_generic_circle() {
         // Captured source supports from the existing original regression, not new expected output.
         let center = Vec2::new(25.0, 25.0);

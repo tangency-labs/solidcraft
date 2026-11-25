@@ -1109,17 +1109,16 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
             let mut result = json!({"body": a.get("body")});
             if let Some(filter) = normal_filter {
                 let normal = xyz(filter).ok_or("face_normal must have three finite coordinates")?;
-                let length = dot(normal, normal).sqrt();
-                if !length.is_finite() || length <= 1e-9 {
+                let cosine = solidcraft_engine::kernel::direction_cosine;
+                if cosine(normal, normal).is_none() {
                     return Err("normal must be a nonzero vector".into());
                 }
-                let n = normal.map(|x| x / length);
                 let faces = exec(b, "model.faces", p.clone())?;
                 result["faces"] = faces["faces"]
                     .as_array()
                     .into_iter()
                     .flatten()
-                    .filter(|f| xyz(&f["plane_normal"]).is_some_and(|v| dot(v, n) >= 1.0 - 1e-6))
+                    .filter(|f| xyz(&f["plane_normal"]).and_then(|v| cosine(v, normal)).is_some_and(|d| d >= 1.0 - 1e-6))
                     .cloned()
                     .collect::<Vec<Value>>()
                     .into();

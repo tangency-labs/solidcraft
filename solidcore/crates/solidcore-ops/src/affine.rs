@@ -296,6 +296,17 @@ pub fn pivot_displacement(matrix: &Matrix, pivot: [f64; 3]) -> Result<[f64; 3]> 
     Ok(d)
 }
 
+/// Cosine of the angle between two directions, computed by the kernel.
+pub fn direction_cosine(a: [f64; 3], b: [f64; 3]) -> Option<f64> {
+    let (la, a) = vec3(a).length_and_unit()?;
+    let (lb, b) = vec3(b).length_and_unit()?;
+    if !la.is_finite() || !lb.is_finite() || la <= 1e-9 || lb <= 1e-9 {
+        return None;
+    }
+    let cosine = a.dot(b);
+    cosine.is_finite().then_some(cosine)
+}
+
 /// `direction`, reversed when it points more than a right angle away from `like`, through
 /// [`Vec3::with_sense_of`]: a line's direction given the sense of another (a turn about an edge
 /// found again keeps the sense it was picked with). `None` when either has no length or a
@@ -308,6 +319,14 @@ pub fn same_sense(direction: [f64; 3], like: [f64; 3]) -> Option<[f64; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn direction_cosine_uses_unit_directions() {
+        assert_eq!(direction_cosine([0.0, 0.0, 2.0], [0.0, 0.0, 3.0]), Some(1.0));
+        assert_eq!(direction_cosine([0.0, 0.0, 2.0], [0.0, 0.0, -1.0]), Some(-1.0));
+        assert_eq!(direction_cosine([0.0; 3], [1.0, 0.0, 0.0]), None);
+        assert_eq!(direction_cosine([f64::NAN, 0.0, 0.0], [1.0, 0.0, 0.0]), None);
+    }
 
     /// A face's plane tilted by rounding comes back square to the axes; one tilted for real
     /// keeps its axes; parallel axes give `None`.

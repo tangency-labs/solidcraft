@@ -1225,7 +1225,7 @@ fn surfaces_named(s: &Session, body: Option<&str>, cmd: &str) -> Result<solidcra
 }
 
 /// A pocket of a flat as `sheet.flat_pattern` reports it, on a sheet `t` thick.
-fn pocket_json(p: &solidcraft_doc::sheet::SheetPocket, t: f64, summary: bool) -> Value {
+fn pocket_json(p: &solidcraft_doc::sheet::SheetPocket, t: f64, summary: bool) -> Result<Value> {
     let pt = |v: &Vec2| json!([v.x, v.y]);
     let side = if p.z0 == 0.0 {
         "bottom"
@@ -1239,21 +1239,21 @@ fn pocket_json(p: &solidcraft_doc::sheet::SheetPocket, t: f64, summary: bool) ->
         "side": side, "depth_mm": p.z1-p.z0, "z0_mm": p.z0, "z1_mm": p.z1
     });
     if summary {
-        out["outline_shape"] = json!(loop_shape(&p.region.outer));
+        out["outline_shape"] = json!(summary_outline_shape(&p.region.outer)?);
     } else {
         out["outline"] = json!(p.region.outer.polyline(1e-3).iter().map(pt).collect::<Vec<_>>());
         out["cutouts"] = json!(p.region.holes.iter().map(|h| h.polyline(1e-3).iter().map(pt).collect::<Vec<_>>()).collect::<Vec<_>>());
     }
-    out
+    Ok(out)
 }
 
 /// A converted body's flat as `sheet.flat_pattern` reports a sheet's, with how many of its panels are rolls
 /// and the largest stretch any panel's flat leaves.
-fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
+fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Result<Value> {
     surface_flat_json_with_summary(sk, false)
 }
 
-fn surface_flat_json_with_summary(sk: &solidcraft_doc::SurfaceSheet, summary: bool) -> Value {
+fn surface_flat_json_with_summary(sk: &solidcraft_doc::SurfaceSheet, summary: bool) -> Result<Value> {
     let sk = &sk.shown();
     let loops: Vec<Ring<Vec2>> = sk.regions.iter().map(|r| r.outer.polyline(1e-3)).collect();
     let size = loops.iter().fold(Aabb2::EMPTY, |b, l| b.union(&l.bounds())).size();
@@ -1275,7 +1275,7 @@ fn surface_flat_json_with_summary(sk: &solidcraft_doc::SurfaceSheet, summary: bo
             json!([z.min.x, z.max.x, z.min.y, z.max.y])
         })
         .collect();
-    let pockets: Vec<Value> = sk.pockets.iter().map(|p| pocket_json(p, sk.thickness, summary)).collect();
+    let pockets: Vec<Value> = sk.pockets.iter().map(|p| pocket_json(p, sk.thickness, summary)).collect::<Result<_>>()?;
     let roll_lines: Vec<Value> =
         sk.roll_lines.iter().map(|l| json!({"panel": l.panel, "line": l.kind.name(), "start": pt(&l.start), "end": pt(&l.end)})).collect();
     // Holes drilled along a panel into its rim (in the panel's frame): drilled after cutting.
@@ -1303,7 +1303,7 @@ fn surface_flat_json_with_summary(sk: &solidcraft_doc::SurfaceSheet, summary: bo
         "cutout_shapes": hole_shapes, "pockets": pockets, "bends": bends, "roll_lines": roll_lines, "roll_table": roll_table, "unfolded": sk.unfolded,
         "perforations": perforations, "bend_zones": bend_zones, "rolls": sk.rolls});
     if summary {
-        out["outline_shapes"] = json!(sk.regions.iter().map(|r| loop_shape(&r.outer)).collect::<Vec<_>>());
+        out["outline_shapes"] = json!(sk.regions.iter().map(|r| summary_outline_shape(&r.outer)).collect::<Result<Vec<_>>>()?);
     } else {
         out["outline"] = Value::Array(loops.iter().map(|l| Value::Array(l.iter().map(pt).collect())).collect());
         out["cutouts"] =
@@ -1317,7 +1317,7 @@ fn surface_flat_json_with_summary(sk: &solidcraft_doc::SurfaceSheet, summary: bo
     if !sk.slits.is_empty() {
         out["slits"] = Value::Array(sk.slits.iter().map(|[a, b]| json!([pt(a), pt(b)])).collect());
     }
-    out
+    Ok(out)
 }
 
 /// The flat-pattern caller's historical whole-circle compatibility bound.
@@ -1369,6 +1369,19 @@ fn loop_shape(lp: &solidcore_record::Loop2) -> FlatShape {
     FlatShape::Segments { segments }
 }
 
+/// Summary outlines use the same bounded line/arc fitter as DXF export, but
+/// retain the original traversal direction of the fitted segments.
+fn summary_outline_shape(lp: &solidcore_record::Loop2) -> Result<FlatShape> {
+    if lp.is_line_arc() {
+        return Ok(loop_shape(lp));
+    }
+    let fitted = lp
+        .fit_arcs(solidcraft_kernel::PLANAR_FIT_TOL)
+        .filter(|p| !p.segs.is_empty() && p.is_line_arc())
+        .ok_or_else(|| bad("sheet.flat_pattern", "outline could not be fitted to lines and arcs within tolerance"))?;
+    Ok(loop_shape(&fitted))
+}
+
 fn flat_pattern(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sheet.flat_pattern";
     let summary = match p.get("summary") {
@@ -1378,7 +1391,7 @@ fn flat_pattern(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let sk = surfaces_named(s, str_(p, "body"), cmd)?;
     sk.flat_matches_body()?;
-    Ok(surface_flat_json_with_summary(&sk, summary))
+    surface_flat_json_with_summary(&sk, summary)
 }
 
 /// `sheet.flat_pattern`'s reply for the sheet metal body `body` (else the last one): what the
@@ -1386,7 +1399,7 @@ fn flat_pattern(s: &mut Session, p: &Value) -> Result<Value> {
 pub(crate) fn flat_reply(s: &Session, body: Option<&str>, cmd: &str) -> Result<Value> {
     let sk = surfaces_named(s, body, cmd)?;
     sk.flat_matches_body()?;
-    Ok(surface_flat_json(&sk))
+    surface_flat_json(&sk)
 }
 
 /// How the flat DXF writes the curves that are neither lines nor circular arcs.
@@ -1819,7 +1832,7 @@ fn export_bend_table(s: &mut Session, p: &Value) -> Result<Value> {
     sk.flat_matches_body()?;
     let bends = sk.shown().bend_infos();
     let text = if format == BendTableFormat::Json {
-        serde_json::to_string_pretty(&surface_flat_json(&sk)).map_err(|e| EngineError::Other(e.to_string()))?
+        serde_json::to_string_pretty(&surface_flat_json(&sk)?).map_err(|e| EngineError::Other(e.to_string()))?
     } else {
         // Always quote text fields: body/rule names may include commas, quotes or newlines, or start
         // as a spreadsheet formula does.

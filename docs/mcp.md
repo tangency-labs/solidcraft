@@ -660,4 +660,4 @@ Parameters dialog. `record_ui.sh` records it and draws the pointer and the capti
 The tests in `crates/mcp/src/tests.rs` run sessions like this (box → fillet → hole, parameters,
 batch rollback, hostile arguments) and check the results only through MCP.
 
-For a compact sheet-metal flat pattern, call `execute {command: "sheet.flat_pattern", params: {summary: true}}`. The result keeps the size, bends and `cutout_shapes`, returns `outline_shapes` (circles, lines, arcs, or polylines for other curves), and omits the duplicate outline and cut-out point lists. Pockets keep their depth and shape data. The default reply is unchanged.
+For a compact sheet-metal flat pattern, call `execute {command: "sheet.flat_pattern", params: {summary: true}}`. The result keeps the size, bends and `cutout_shapes`, returns `outline_shapes` (circles, lines and arcs (free-form outlines fitted within 0.001 mm)), and omits the duplicate outline and cut-out point lists. Pockets keep their depth and shape data. The default reply is unchanged.
