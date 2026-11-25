@@ -32,6 +32,7 @@
 //! | [`Axis2Placement::transform_axis2_placement`] | `TransformAxis2Placement`                             |
 //! | [`Axis2Placement::invert`]                    | `Invert`                                              |
 //! | [`Axis2Placement::approx_eq`]                 | `operator==`                                          |
+//! | `axes_are_orthonormal`                        | none (analytic curve and surface definitions)          |
 //! | [`Axis2Placement::is_identity`]               | `IsIdentity`                                          |
 //! | [`Axis2Placement::are_coaxial`]               | `AreCoaxial`                                          |
 //!
@@ -63,6 +64,15 @@ use crate::geom::geom_utility::p1::line_point_distance;
 use crate::geom::tol::are_same;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::math::EFF_ZERO;
+
+/// Whether the stored axes of an analytic frame have unit length and are perpendicular.
+/// Each length error and the absolute dot product may be at most eight machine epsilons.
+#[must_use]
+pub(crate) fn axes_are_orthonormal(x: Vec3, y: Vec3) -> bool {
+    const FRAME_ROUNDOFF: f64 = 8.0 * f64::EPSILON;
+    let unit = |axis: Vec3| (axis.length() - 1.0).abs() <= FRAME_ROUNDOFF;
+    unit(x) && unit(y) && x.dot(y).abs() <= FRAME_ROUNDOFF
+}
 
 /// A right-handed coordinate system: an origin and unit, perpendicular X and Y axes
 /// (Z is X × Y). As a transformation it maps local coordinates `[u v w]` to
@@ -503,6 +513,20 @@ impl Axis2Placement {
             || far(this_pt, this_vec, othr_pt - size_scale * othr_vec)
             || far(othr_pt, othr_vec, this_pt + size_scale * this_vec)
             || far(othr_pt, othr_vec, this_pt - size_scale * this_vec))
+    }
+}
+
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for Axis2Placement {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            origin,
+            x_axis,
+            y_axis,
+        } = self;
+        origin.content(d)?;
+        x_axis.content(d)?;
+        y_axis.content(d)
     }
 }
 

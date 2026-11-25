@@ -29,6 +29,9 @@ Everything about it is on one page: **Preferences → AI**.
   as nothing was asked in that empty design's chat.
 - **Open the Assistant panel when SolidCraft starts** (off by default): the panel (or its own
   window) is shown at each launch.
+- **Keep one chat across design tabs** (off by default, under **Preferences → AI → Panel**): keep the same
+  Assistant conversation and connection when switching tabs, opening linked sub-assemblies, or editing in
+  place; tools always act on the active tab in front.
 
 Neither applies when SolidCraft is started with `--control` for automation.
 
@@ -338,7 +341,7 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   Mammouth AI `https://api.mammouth.ai/v1`,
   OpenCode Go `https://opencode.ai/zen/go/v1`, DeepSeek `https://api.deepseek.com`,
   Qwen `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, Cheaper Inference
-  `https://api.cheaperinference.com/v1`, OpenRouter
+  `https://api.cheaperinference.com/v1`, AI/ML API `https://api.aimlapi.com/v1`, OpenRouter
   `https://openrouter.ai/api/v1`) or a custom URL, the model name, and an optional key.
   For OpenAI models that need function tools with reasoning, turn on **Use OpenAI Responses API**
   in the agent's settings. This routes requests to `/responses` and lets the model continue
@@ -358,7 +361,9 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   providers that offer an Anthropic-compatible endpoint, such as DeepSeek and Qwen.
 - The **Model** picker lists the endpoint's models, without a key where the endpoint allows that
   (OpenRouter does), once you leave the address and key fields; opening it asks again after a
-  failure. You can also type a model.
+  failure. You can also type a model. When an endpoint names the API of each listed model in
+  `type` (AI/ML API does), only chat models are listed, and a model listed more than once
+  appears once.
 - An endpoint's card under Preferences → AI → **Agents** has the same **Model** picker. While the
   agent isn't running, opening the picker lists the models (just viewing the page asks nothing),
   and a pick becomes the model for its next connection. While it runs, a pick changes the chat's
@@ -561,7 +566,8 @@ saves, opens or inserts. A sweep's or pattern's `path` (curve ids) and an occurr
 - **Files wait for you** unless you chose **Allow everything**. **Cancel** or **Stop** declines
   everything that's waiting, and a question nobody answers is declined after four minutes. The
   [MCP server's folder limits](mcp.md) still apply after you allow: the design's folder, the
-  recovery folder and the server's own scratch folder.
+  recovery folder, the server's own scratch folder, and any extra folders you add under
+  **Preferences → Assistant → Allowed folders** (passed as `--allow-path` to the bridged server).
 - **An optional limit per message.** There's none by default. Untick **Unlimited** on the AI
   page to cap the changes the agent may make per message (it starts at 24). Reading the design
   doesn't count. At the limit, it's told to stop and report what's left; send another message to

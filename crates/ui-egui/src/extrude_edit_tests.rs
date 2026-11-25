@@ -1206,6 +1206,72 @@ fn surface_extrude_dialog_has_the_drag_arrow_on_every_side() {
     }
 }
 
+#[test]
+fn taper_angle_steps_by_one_degree() {
+    let mut h = make(json!({}));
+    open(&mut h);
+    h.step(&json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
+    let taper = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        crate::dialogs::Kind::Extrude { taper, .. } => taper.clone(),
+        other => panic!("extrude: {other:?}"),
+    };
+    h.step(&json!({"click":{"handle":"dialog:Taper Angle up"}})).unwrap();
+    assert_eq!(taper(&h), "1 deg");
+    h.step(&json!({"click":{"handle":"dialog:Taper Angle down"}})).unwrap();
+    assert_eq!(taper(&h), "0 deg");
+}
+
+/// Surface Extrude's Extent Type takes To Object (#16537): the window adds Extrude's To Object
+/// input, OK makes the surface end at the face picked there, and editing it again shows the
+/// same extent and pick.
+#[test]
+fn surface_extrude_dialog_ends_at_a_picked_face() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"corner":[-5,-5,10],"length":10,"width":10,"height":5,"body_name":"Lid"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[-3,0],[3,0]],"ids":["l1"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("surface.extrude", json!({"sketch":"Base","curves":["l1"],"distance":"4 mm","name":"Wall","body_name":"Sheet"})).unwrap();
+    h.frames(4);
+    let surf = |h: &Harness| match &h.app.dialog {
+        Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Surface(k @ crate::dialogs_surface::Surf::Extrude { .. }), .. }) => k.clone(),
+        _ => panic!("surface extrude dialog"),
+    };
+    let extent = |h: &Harness| match h.app.session.doc.features.iter().find(|f| f.name == "Wall").map(|f| &f.kind) {
+        Some(solidcraft_engine::doc::FeatureKind::SurfaceExtrude { extent, .. }) => extent.clone(),
+        _ => panic!("the surface extrude"),
+    };
+    let top = |h: &Harness| solidcraft_engine::kernel::measure(&h.app.session.world_state().unwrap().body("Sheet").unwrap().body).unwrap().bbox.max.z;
+
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
+    h.frames(2);
+    assert!(matches!(surf(&h), crate::dialogs_surface::Surf::Extrude { to_object: true, .. }));
+    let lid = crate::dialogs::face_sel(&h.app.session, solidcore_record::Vec3::new(0.0, 0.0, 10.0)).expect("the lid's bottom face");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        assert_eq!(d.active_input().unwrap().label, "To Object", "the To Object input takes the next pick");
+        let active = d.active;
+        d.inputs[active].items = vec![lid];
+    }
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(extent(&h).to.map(|p| p.0), Some(solidcore_record::Vec3::new(0.0, 0.0, 10.0)));
+    assert!((top(&h) - 10.0).abs() < 1e-6, "the surface ends at the lid: {}", top(&h));
+
+    // Editing it again shows To Object with the face, and OK keeps it.
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    assert!(matches!(surf(&h), crate::dialogs_surface::Surf::Extrude { to_object: true, .. }));
+    let picked = h.app.dialog.as_ref().unwrap().inputs.iter().find(|i| i.label == "To Object").map(|i| i.items.len());
+    assert_eq!(picked, Some(1));
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(extent(&h).to.map(|p| p.0), Some(solidcore_record::Vec3::new(0.0, 0.0, 10.0)));
+}
+
 /// Double-clicking the distance arrow in the view reverses the direction, as Reverse Direction
 /// does, and keeps the distance (#17402); Symmetric has no direction to reverse.
 #[test]

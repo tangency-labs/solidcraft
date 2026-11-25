@@ -116,14 +116,16 @@ pub struct AdapterReport {
 }
 
 /// The backends a headless device looks at on this platform: Metal on macOS, Vulkan and D3D12
-/// on Windows, Vulkan and GL elsewhere; `WGPU_BACKEND` narrows them further.
+/// on Windows, Vulkan elsewhere; `WGPU_BACKEND` narrows them further. One rule on every machine,
+/// whatever its driver. Where Vulkan offers no adapter at all, Linux and the BSDs also look at
+/// OpenGL ([`gl_when_vulkan_has_none`]).
 pub fn native_backends() -> wgpu::Backends {
     let native = if cfg!(target_os = "macos") {
         wgpu::Backends::METAL
     } else if cfg!(target_os = "windows") {
         wgpu::Backends::DX12 | wgpu::Backends::VULKAN
     } else {
-        wgpu::Backends::VULKAN | wgpu::Backends::GL
+        wgpu::Backends::VULKAN
     };
     match wgpu::Backends::from_env() {
         Some(env) if !(env & native).is_empty() => env & native,
@@ -180,12 +182,7 @@ fn instance() -> wgpu::Instance {
 // Some Windows Vulkan drivers crash or hang while unloading their DLL during FLS cleanup.
 // Retain one successful instance for the process, while every call still creates its own
 // descriptor and devices. Retaining no device also leaves device loss and limits per caller.
-//
-// On Linux only `pick_on_vulkan_alone` retains its instance. The loader unloads the drivers with
-// a process's last Vulkan instance, and NVIDIA's driver loads only a few times in one process:
-// then glibc answers "cannot allocate memory in static TLS block" and every later instance is
-// without the GPU. An instance that also holds OpenGL is not retained there (#10232).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_os = "windows")]
 fn retain_vulkan_instance(instance: &wgpu::Instance, found: &[wgpu::Adapter]) {
     if found.iter().any(|adapter| adapter.get_info().backend == wgpu::Backend::Vulkan) {
         static INSTANCE: std::sync::OnceLock<wgpu::Instance> = std::sync::OnceLock::new();
@@ -193,21 +190,37 @@ fn retain_vulkan_instance(instance: &wgpu::Instance, found: &[wgpu::Adapter]) {
     }
 }
 
-/// Whether NVIDIA's own driver runs a GPU of this Linux machine: its kernel module lists itself
-/// under `/proc/driver/nvidia`. `false` on other systems and with other drivers.
+/// Whether a headless device also looks at OpenGL: only on Linux and the BSDs, only when the
+/// native backends (Vulkan) offered no adapter at all (`vulkan_found`), and only when
+/// `WGPU_BACKEND` (`env`) is unset or names OpenGL. That is a machine with no Vulkan driver, not
+/// even lavapipe, where Mesa's llvmpipe or a GL-only driver still draws: through 0.48 it drew
+/// headless pictures there (#22109). A machine with any Vulkan adapter never starts OpenGL, so
+/// the EGL context that deadlocked against a Vulkan device (#10232) is never made next to one.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn nvidia_linux_driver() -> bool {
-    cfg!(target_os = "linux") && std::path::Path::new("/proc/driver/nvidia/version").exists()
+fn gl_when_vulkan_has_none(vulkan_found: usize, env: Option<wgpu::Backends>) -> bool {
+    !cfg!(any(target_os = "macos", target_os = "windows")) && vulkan_found == 0 && env.is_none_or(|e| e.contains(wgpu::Backends::GL))
 }
 
-/// Every adapter the native backends offer, best first.
+/// Every adapter the native backends offer, best first, and the backends that were searched:
+/// the native ones, plus OpenGL where [`gl_when_vulkan_has_none`].
 #[cfg(not(target_arch = "wasm32"))]
-fn adapters(instance: &wgpu::Instance) -> Vec<wgpu::Adapter> {
-    let mut all = pollster::block_on(instance.enumerate_adapters(native_backends()));
+fn adapters(instance: &wgpu::Instance) -> (Vec<wgpu::Adapter>, wgpu::Backends) {
+    let mut searched = native_backends();
+    let mut all = pollster::block_on(instance.enumerate_adapters(searched));
     #[cfg(target_os = "windows")]
     retain_vulkan_instance(instance, &all);
+    // This crate's own tests keep the Vulkan-only set: they check the headless device's
+    // multisampling and compositing on Vulkan, Metal or D3D12, and OpenGL has tests of its own on
+    // an OpenGL instance (`opengl_window_device`). A test runner without Vulkan skips them as
+    // before instead of running them on llvmpipe.
+    if !cfg!(test) && gl_when_vulkan_has_none(all.len(), wgpu::Backends::from_env()) {
+        let mut desc = crate::instance_descriptor_from_env();
+        desc.backends = wgpu::Backends::GL;
+        all = pollster::block_on(start_instance(desc).enumerate_adapters(wgpu::Backends::GL));
+        searched |= wgpu::Backends::GL;
+    }
     all.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
-    all
+    (all, searched)
 }
 
 /// What a survey found, which adapter the policy picks (`chosen` indexes `adapters`) and where
@@ -223,10 +236,11 @@ pub struct Survey {
 /// Every adapter the native backends offer, best first, and which one `policy` picks.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn survey(policy: Policy) -> Survey {
-    let found: Vec<AdapterReport> = adapters(&instance()).iter().map(|a| report(&a.get_info())).collect();
+    let (all, searched) = adapters(&instance());
+    let found: Vec<AdapterReport> = all.iter().map(|a| report(&a.get_info())).collect();
     let chosen = found.iter().position(|r| policy.admits(r.tier));
     let lands_on = policy.lands_on(chosen.and_then(|i| found.get(i)).map(|r| r.tier));
-    Survey { backends: format!("{:?}", native_backends()), adapters: found, chosen, lands_on }
+    Survey { backends: format!("{searched:?}"), adapters: found, chosen, lands_on }
 }
 
 /// The backends the GPU path tracer may use among the native ones: Vulkan, and Metal on macOS
@@ -263,37 +277,7 @@ pub fn pick_path(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) -> O
 /// The adapter `policy` picks, with its report; `None` when no adapter qualifies.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn pick(policy: Policy) -> Option<(wgpu::Adapter, AdapterReport)> {
-    if let Some(found) = pick_on_vulkan_alone(policy) {
-        return Some(found);
-    }
-    pick_among(adapters(&instance()), policy)
-}
-
-/// On Linux with NVIDIA's own driver, where the native backends are Vulkan and OpenGL: the adapter
-/// [`pick`] would choose, from an instance that starts Vulkan alone, when that is certain without
-/// asking OpenGL. It is certain for a discrete GPU, which no adapter outranks, and for a software
-/// adapter under [`Policy::Software`]; Vulkan's adapters come before OpenGL's among equals. `None`
-/// otherwise and on every other machine, and [`pick`] asks both backends as before.
-///
-/// An instance with OpenGL beside Vulkan holds an EGL context that a Vulkan device never uses.
-/// NVIDIA's driver deadlocks when one thread drops that context while another destroys a Vulkan
-/// device (#10232), which parallel tests did at the end of every test.
-#[cfg(not(target_arch = "wasm32"))]
-fn pick_on_vulkan_alone(policy: Policy) -> Option<(wgpu::Adapter, AdapterReport)> {
-    if !nvidia_linux_driver() || !native_backends().contains(wgpu::Backends::VULKAN | wgpu::Backends::GL) {
-        return None;
-    }
-    let mut desc = crate::instance_descriptor_from_env();
-    desc.backends = wgpu::Backends::VULKAN;
-    let instance = start_instance(desc);
-    let found = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::VULKAN));
-    retain_vulkan_instance(&instance, &found);
-    let (adapter, report) = pick_among(found, policy)?;
-    let certain = match policy {
-        Policy::Software => report.tier == Tier::Software,
-        _ => adapter.get_info().device_type == wgpu::DeviceType::DiscreteGpu,
-    };
-    certain.then_some((adapter, report))
+    pick_among(adapters(&instance()).0, policy)
 }
 
 /// The adapter `policy` picks among `found`, as [`pick`] picks among the native backends' (best
@@ -346,6 +330,23 @@ mod tests {
         assert_eq!(tier_of(wgpu::DeviceType::Cpu), Tier::Software);
         assert!(rank(wgpu::DeviceType::IntegratedGpu) > rank(wgpu::DeviceType::Cpu));
         assert!(rank(wgpu::DeviceType::DiscreteGpu) > rank(wgpu::DeviceType::IntegratedGpu));
+    }
+
+    /// OpenGL is searched only where Vulkan found nothing, on Linux and the BSDs, unless
+    /// `WGPU_BACKEND` leaves it out (#22109).
+    #[test]
+    fn opengl_only_where_vulkan_has_no_adapter() {
+        use wgpu::Backends as B;
+        let unix = !cfg!(any(target_os = "macos", target_os = "windows"));
+        assert_eq!(gl_when_vulkan_has_none(0, None), unix);
+        assert_eq!(gl_when_vulkan_has_none(0, Some(B::GL)), unix);
+        assert_eq!(gl_when_vulkan_has_none(0, Some(B::VULKAN | B::GL)), unix);
+        assert!(!gl_when_vulkan_has_none(0, Some(B::VULKAN)), "WGPU_BACKEND=vulkan keeps OpenGL out");
+        for found in [1, 2] {
+            for env in [None, Some(B::GL), Some(B::VULKAN)] {
+                assert!(!gl_when_vulkan_has_none(found, env), "a Vulkan adapter keeps the Vulkan-only path");
+            }
+        }
     }
 
     #[cfg(target_os = "macos")]

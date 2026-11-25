@@ -201,7 +201,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{BrowserEntry, Document, FeatureKind};
 
-use crate::context_menu::Target;
+use crate::context_menu::{Target, isolate_bodies_item};
 use crate::ui_kit::Item;
 use solidcraft_theme::Tokens;
 
@@ -612,7 +612,7 @@ pub fn group_items(app: &SolveApp, id: u64, scope: &str) -> Vec<Item> {
         Item::action("ui.folderVisible", "Show/Hide", "eye").key("V").with(json!({ "key": format!("{scope}/g{id}") })),
     ]);
     if g.folder == "bodies" {
-        v.push(Item::action("ui.isolate", "Isolate", "body").with(json!({ "bodies": group_bodies(app, id) })));
+        v.push(isolate_bodies_item(app, &group_bodies(app, id)));
     }
     v
 }
@@ -1265,6 +1265,11 @@ pub(crate) struct Actions {
 }
 
 impl Actions {
+    /// The menu a row asked for, taken so it is opened once.
+    pub(crate) fn take_menu(&mut self) -> Option<(Pos2, Target)> {
+        self.menu.take()
+    }
+
     fn drop_from(&mut self, source: crate::semantic_content::ContentSource, action: DropAction) {
         self.drop = Some((source, action));
     }
@@ -1344,9 +1349,10 @@ impl Lit {
                     continue;
                 }
                 Sel::Feature { id } => Thing::Sketch(*id),
-                Sel::Profile { sketch, .. } | Sel::ExternalSketchCurve { sketch, .. } | Sel::ExternalSketchPoint { sketch, .. } => {
-                    Thing::Sketch(*sketch)
-                }
+                Sel::Profile { sketch, .. }
+                | Sel::ExternalSketchCurve { sketch, .. }
+                | Sel::ExternalSketchPoint { sketch, .. }
+                | Sel::PlacedSketchPoint { sketch, .. } => Thing::Sketch(*sketch),
                 Sel::SketchCurve { .. } | Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } => {
                     match app.session.active_sketch {
                         Some(id) => Thing::Sketch(id),
@@ -1364,6 +1370,7 @@ impl Lit {
             Some(Hit::Face { body, .. } | Hit::Edge { body, .. } | Hit::Vertex { body, .. }) => Some(Thing::Body(body.clone())),
             Some(
                 Hit::SketchPoint { sketch, .. }
+                | Hit::PlacedSketchPoint { sketch, .. }
                 | Hit::SketchPoint3d { sketch, .. }
                 | Hit::SketchMidpoint { sketch, .. }
                 | Hit::SketchCurve { sketch, .. }
@@ -2715,6 +2722,7 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::action("ui.straightenCanvas", "Straighten", "canvas").with(json!({ "canvas": id })).off_because(placed.clone()),
         Item::action("canvas.frame_sketch", "Frame Sketch", "canvas").with(json!({ "canvas": id })).off_because(placed),
         Item::action("canvas.to_sketch", "Canvas to Sketch", "canvas").with(json!({ "canvas": id })),
+        Item::action("ui.traceCanvasRegion", "Trace Region...", "canvas").with(json!({ "canvas": id })),
         Item::sep(),
         Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })).off_because(why),
         Item::action("ui.rename", "Rename", "rename").key("F2").with(json!({ "canvas": id })),
@@ -2727,12 +2735,16 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
 /// Editing a canvas (position, size, angle, opacity, flip), calibrating it (two points on
 /// the image and their true distance) or straightening it (two points along an edge of the
 /// image and the direction that edge should have, #11989). Live edits of one opening are one
-/// undo step.
+/// undo step. Tracing a region (#20798) takes one click on the image and a colour tolerance.
 #[derive(Clone, Debug)]
 pub struct CanvasPanel {
     pub canvas: u64,
     pub calibrate: bool,
     pub straighten: bool,
+    /// Trace Region: the click on the image sets `a`, then Trace runs `canvas.to_sketch` there.
+    pub trace: bool,
+    /// Trace Region: how far a colour may differ from the clicked one (percent, 0 to 100).
+    pub tolerance: f64,
     /// Undo depth when the panel opened.
     pub(crate) depth: usize,
     pub a: [f64; 2],
@@ -2764,6 +2776,8 @@ impl CanvasPanel {
             canvas,
             calibrate,
             straighten: false,
+            trace: false,
+            tolerance: 20.0,
             depth: app.session.undo.len(),
             a,
             b,
@@ -2778,6 +2792,11 @@ impl CanvasPanel {
     /// The Straighten card: pick two points along an edge of the image, then the direction.
     pub fn straighten(app: &SolveApp, canvas: u64) -> Self {
         CanvasPanel { straighten: true, ..CanvasPanel::new(app, canvas, false) }
+    }
+
+    /// The Trace Region card: click the shape to trace, set the tolerance, then Trace.
+    pub fn trace(app: &SolveApp, canvas: u64) -> Self {
+        CanvasPanel { trace: true, ..CanvasPanel::new(app, canvas, false) }
     }
 
     /// Does a click on the image set Point A or B (Calibrate and Straighten)?
@@ -2931,7 +2950,9 @@ impl Entry {
             key: f.id.to_string(),
             row_key: format!("s:{}", f.id),
             thing: Thing::Sketch(f.id),
-            patterns: crate::sketch_pattern_tree::has_patterns(app, f.id).then(|| format!("s:{}/patterns", f.id)),
+            // A sketch's patterns and projections fold under it.
+            patterns: (crate::sketch_pattern_tree::has_patterns(app, f.id) || crate::sketch_link_tree::has_links(app, f.id))
+                .then(|| format!("s:{}/patterns", f.id)),
             label: if lost {
                 solidcraft_ui_text::format("browser.sketch_attachment_lost", &[("name", &crate::i18n::tr_name(&f.name))])
             } else if active {
@@ -3669,7 +3690,9 @@ fn entry_row(
         acts.menu = Some((p, t));
     }
     if patterns_open && let Some(Sel::Feature { id }) = &e.sel {
-        crate::sketch_pattern_tree::browser_rows(app, rows, *id, depth + 1, path.map(|path| (comp, path)), !visible || parent_hidden);
+        let dim = !visible || parent_hidden;
+        crate::sketch_pattern_tree::browser_rows(app, rows, *id, depth + 1, path.map(|path| (comp, path)), dim);
+        crate::sketch_link_tree::browser_rows(app, rows, *id, depth + 1, dim);
     }
     if built_open && built_key.is_some() {
         features::body_rows(app, rows, acts, comp, path.unwrap_or_default(), &e.row_key, &built, depth + 1);
