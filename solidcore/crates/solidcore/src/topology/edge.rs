@@ -2252,15 +2252,23 @@ fn is_topological_with(
             approx_tol = gain.plane(half_min);
         }
 
-        // See if this surface can 'cover' the part of the other surface that its face uses
-        let (dist, keep, merged) =
-            match cover_other_coincident_face(k, b, face1, face2_, approx_tol, false) {
-                Ok(r) => r,
-                Err(err) => {
-                    failed(err)?;
-                    return Ok(out);
-                }
-            };
+        // See if this surface can 'cover' the part of the other surface that its face uses.
+        // Not upstream (tangency-labs/solidcore#3399): a test that grows no tolerance fits the
+        // trims it builds for the faces' domains tightly where a loose fit would raise an edge
+        // (`Caches::refit_raising_trims`).
+        let refit = k
+            .caches
+            .refit_raising_trims
+            .replace(matches!(gain, CoverTolerance::NoGrowth));
+        let covered = cover_other_coincident_face(k, b, face1, face2_, approx_tol, false);
+        k.caches.refit_raising_trims.set(refit);
+        let (dist, keep, merged) = match covered {
+            Ok(r) => r,
+            Err(err) => {
+                failed(err)?;
+                return Ok(out);
+            }
+        };
         out.dist_between = dist;
         out.surf_to_keep = keep;
         if keep.is_none() {

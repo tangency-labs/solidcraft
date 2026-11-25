@@ -132,11 +132,12 @@ mod imp {
 mod imp {
     use std::cell::RefCell;
     use std::collections::BTreeMap;
+    use std::rc::Rc;
 
     use super::*;
 
     thread_local! {
-        static FILES: RefCell<BTreeMap<String, Vec<u8>>> = const { RefCell::new(BTreeMap::new()) };
+        static FILES: RefCell<BTreeMap<String, Rc<Vec<u8>>>> = const { RefCell::new(BTreeMap::new()) };
         static WRITES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     }
 
@@ -150,10 +151,10 @@ mod imp {
         if bytes.len() > max {
             return Err(Error::new(ErrorKind::InvalidData, "file too large"));
         }
-        Ok(bytes)
+        Ok(bytes.as_ref().clone())
     }
     pub fn write(path: &str, bytes: &[u8]) -> Result<()> {
-        FILES.with(|f| f.borrow_mut().insert(path.to_string(), bytes.to_vec()));
+        insert(path, bytes.to_vec());
         WRITES.with(|w| {
             let mut w = w.borrow_mut();
             w.retain(|p| p != path);
@@ -187,11 +188,32 @@ mod imp {
         Ok(())
     }
     pub fn insert(path: &str, bytes: Vec<u8>) {
-        FILES.with(|f| f.borrow_mut().insert(path.to_string(), bytes));
+        FILES.with(|f| f.borrow_mut().insert(path.to_string(), Rc::new(bytes)));
+    }
+    /// The cached version visible when a host write was queued. Holding it keeps its identity
+    /// distinct from later writes without copying the file.
+    pub struct Snapshot(Option<Rc<Vec<u8>>>);
+
+    pub fn snapshot(path: &str) -> Snapshot {
+        Snapshot(FILES.with(|f| f.borrow().get(path).cloned()))
+    }
+    /// A host acknowledgment may publish its bytes if no later operation replaced the cache.
+    pub fn insert_if_unchanged(path: &str, snapshot: Snapshot, bytes: Vec<u8>) {
+        FILES.with(|f| {
+            let mut files = f.borrow_mut();
+            let unchanged = match (files.get(path), snapshot.0.as_ref()) {
+                (None, None) => true,
+                (Some(current), Some(previous)) => Rc::ptr_eq(current, previous),
+                _ => false,
+            };
+            if unchanged {
+                files.insert(path.to_string(), Rc::new(bytes));
+            }
+        });
     }
     pub fn take_writes() -> Vec<(String, Vec<u8>)> {
         let paths = WRITES.with(|w| std::mem::take(&mut *w.borrow_mut()));
-        paths.into_iter().filter_map(|p| FILES.with(|f| f.borrow().get(&p).cloned()).map(|b| (p, b))).collect()
+        paths.into_iter().filter_map(|p| FILES.with(|f| f.borrow().get(&p).map(|b| (p, b.as_ref().clone())))).collect()
     }
     /// The files directly in a folder, sorted; at most `max` of them.
     pub fn files_in(dir: &str, max: usize) -> Result<Vec<String>> {

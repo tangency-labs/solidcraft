@@ -33,6 +33,8 @@ mod blend_overflow_first;
 mod blend_room;
 #[path = "../blend_surface.rs"]
 mod blend_surface;
+#[path = "../check_cost.rs"]
+mod check_cost;
 #[path = "../classify_point_grazing_ray.rs"]
 mod classify_point_grazing_ray;
 #[path = "../coincidence_gate_definitions.rs"]

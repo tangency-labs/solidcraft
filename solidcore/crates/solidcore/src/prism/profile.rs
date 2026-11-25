@@ -18,6 +18,8 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests, kept as written
 
+pub mod line_family;
+
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use crate::curve::curve::Curve;
