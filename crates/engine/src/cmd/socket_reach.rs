@@ -7,6 +7,7 @@
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::services::affine;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, string_list};
@@ -51,10 +52,10 @@ pub(crate) fn space(s: &Session, pick: Vec3, diameter: f64, length: f64, flip: b
     let Some((_, origin, axis)) = super::construct::model_axis_param(s, Some(&json!({ "edge": [pick.x, pick.y, pick.z] })), cmd)? else {
         return Err(bad(cmd, "`edge` must be a point on a circular edge"));
     };
-    let axis = axis.normalized().ok_or_else(|| bad(cmd, "the edge gives no axis"))?;
+    let axis = solidcraft_doc::unit_direction(axis).ok_or_else(|| bad(cmd, "the edge gives no axis"))?;
     let st = s.world_state()?;
     // A straight edge has an axis too, along itself, but no centre for a socket to turn about.
-    let radial = (pick - origin) - axis * (pick - origin).dot(axis);
+    let radial = (pick - origin) - axis * affine::distance_along(origin.into(), axis.into(), pick.into());
     if radial.len() < 1e-6 {
         return Err(bad(cmd, "`edge` must be a point on a circular edge: a straight edge gives no centre"));
     }
@@ -62,7 +63,7 @@ pub(crate) fn space(s: &Session, pick: Vec3, diameter: f64, length: f64, flip: b
     // circle (a hole's rim has it outside, a bolt head's top edge inside), a little along each
     // way. The socket comes from the other side.
     let step = (0.05 * radial.len()).clamp(0.01, 0.5);
-    let outward = radial.normalized().unwrap_or(Vec3::ZERO);
+    let outward = solidcraft_doc::unit_direction(radial).unwrap_or(Vec3::ZERO);
     let inside = |q: Vec3| {
         st.bodies
             .iter()
@@ -133,14 +134,8 @@ fn socket_reach(s: &mut Session, p: &Value) -> Result<Value> {
             continue;
         }
         let (lo, hi) = (m.bbox.min, m.bbox.max);
-        let from = (0..8)
-            .map(|k: usize| {
-                let corner =
-                    Vec3::new(if k & 1 == 0 { lo.x } else { hi.x }, if k & 2 == 0 { lo.y } else { hi.y }, if k & 4 == 0 { lo.z } else { hi.z });
-                (corner - origin).dot(direction)
-            })
-            .fold(f64::INFINITY, f64::min)
-            .clamp(0.0, length);
+        // The nearest corner of the overlap's box along the axis, from the edge's plane.
+        let from = affine::span_along(lo.into(), hi.into(), origin.into(), direction.into()).map_or(0.0, |[near, _]| near).clamp(0.0, length);
         blocked.push(Blocker { body: b.name.clone(), volume_mm3: m.volume, from_mm: from, bbox: [[lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]] });
     }
     blocked.sort_by(|a, b| b.volume_mm3.total_cmp(&a.volume_mm3));

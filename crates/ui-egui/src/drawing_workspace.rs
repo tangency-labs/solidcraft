@@ -302,6 +302,7 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
     app.drawing_workspace.placement = None;
     app.drawing_workspace.note = None;
     app.drawing_workspace.view_edit = None;
+    app.drawing_workspace.detail = None;
     app.drawing_workspace.export = None;
     app.drawing_workspace.dimension = None;
     app.drawing_workspace.dimension_hover = None;

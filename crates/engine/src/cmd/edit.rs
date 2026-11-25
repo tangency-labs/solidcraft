@@ -875,6 +875,10 @@ impl Session {
 
 fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.group";
+    // A design file holds at most this many folders: one more would save and not open again.
+    if s.doc.timeline_groups.len() >= solidcraft_doc::MAX_FEATURES {
+        return Err(bad(cmd, format!("a design holds at most {} timeline folders", solidcraft_doc::MAX_FEATURES)));
+    }
     let features = group_features(s, p, false, cmd)?;
     let joints = group_joints(s, p, cmd)?;
     let groups = group_ids(s, p, false, cmd)?;
@@ -2853,6 +2857,16 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
             solidcraft_doc::ExtrudeConvention::TotalDistance
         };
         parameters.entry("convention").or_insert_with(|| json!(convention));
+    }
+    // The Surface Extrude window has no start offset to show or send, so an edit that names
+    // none keeps the stored one instead of moving the walls back to the sketch plane. An edit
+    // that names one still replaces it.
+    if let FeatureKind::SurfaceExtrude { extent, .. } = &old.kind
+        && cid == "surface.extrude"
+        && let Some(start) = &extent.start_offset
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("start_offset").or_insert_with(|| json!(start));
     }
     if let FeatureKind::Revolve { convention, .. } = &old.kind
         && cid == "solid.revolve"
