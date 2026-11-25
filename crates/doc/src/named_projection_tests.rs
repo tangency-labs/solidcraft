@@ -250,6 +250,7 @@ fn a_lost_projection_is_labelled_by_its_kind_and_its_curves_or_points() {
         curves: curves.iter().map(|c| c.to_string()).collect(),
         points: points.iter().map(|p| p.to_string()).collect(),
         name: "shared:top".into(),
+        from: Vec::new(),
     };
     assert_eq!(lost(&["l1", "l2", "l3", "l4", "a1", "a2"], &["p1"]).label(), "projected face of Source (curves l1, l2, l3, l4, …)");
     assert_eq!(lost(&["l1", "l2", "l3", "l4"], &[]).label(), "projected face of Source (curves l1, l2, l3, l4)");
@@ -278,6 +279,51 @@ fn a_lost_projection_is_labelled_by_its_kind_and_its_curves_or_points() {
         let text = error.in_feature("Outline").to_string();
         assert_eq!(crate::lost_projection_parts(&text).map(|t| (t.feature, t.count)), Some(("Outline", 1)), "{text}");
     }
+}
+
+/// A lost projection names the features that made its face, edge or vertex, in timeline order and
+/// each once, so the user knows which edit to look at (#5048); a feature no longer in the design
+/// is left out, and the message still reads back.
+#[test]
+fn a_lost_projection_names_the_features_that_made_it() {
+    let lost = |curves: &[&str], points: &[&str], from: &[&str]| crate::LostProjection {
+        link: "j1".into(),
+        what: "projected vertex of Body1".into(),
+        curves: curves.iter().map(|c| c.to_string()).collect(),
+        points: points.iter().map(|p| p.to_string()).collect(),
+        name: String::new(),
+        from: from.iter().map(|f| f.to_string()).collect(),
+    };
+    let made = ["Extrude5", "Mirror2", "Revolve2"];
+    assert_eq!(lost(&[], &["p1"], &made).label(), "projected vertex of Body1 (point p1; made by Extrude5, Mirror2, Revolve2)");
+    assert_eq!(lost(&["l1", "l2"], &[], &made[..1]).label(), "projected vertex of Body1 (curves l1, l2; made by Extrude5)");
+    assert_eq!(lost(&[], &[], &made[..1]).label(), "projected vertex of Body1 (made by Extrude5)");
+
+    let mut doc = Document::default();
+    let ids: Vec<u64> = made
+        .iter()
+        .map(|name| {
+            doc.add_feature(crate::FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::default() }, Some(name))
+                .unwrap()
+        })
+        .collect();
+    let [a, b, c] = ids[..] else { panic!("{ids:?}") };
+    let mut initial = ModelState::default();
+    initial.bodies.push(named_box("Source", 20., 10.));
+    let plane = Plane::XY.offset(20.);
+    let source = LinkSource::Face { body: "Source".into(), at: Vec3::new(1., 1., 10.) };
+    let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &initial, &plane, LinkKind::Project, &source).unwrap();
+    let mut sketch = Sketch::default();
+    sketch.add_link(LinkKind::Project, source, &resolved.geom).unwrap();
+    // Text order b, c, a, a again and a feature that is gone: timeline order, each once.
+    sketch.links[0].face_name = Some(format!("F{b}:blend(F{c}:side:l1|F{a}:top)@F{a}.2#[F999:top]"));
+    let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &ModelState::default(), &plane, &mut sketch).unwrap_err();
+    let crate::DocError::LostProjections { links, .. } = &error else { panic!("{error}") };
+    assert_eq!(links[0].from, made);
+    let text = error.in_feature("Outline").to_string();
+    let listed = "projected face of Source (curves l1, l2, l3, l4; made by Extrude5, Mirror2, Revolve2)";
+    assert_eq!(text, format!("Outline: {listed} is lost; delete the projection or project it again"));
+    assert_eq!(crate::lost_projection_parts(&text), Some(crate::LostProjectionsText { feature: "Outline", count: 1, listed, more: 0 }));
 }
 
 #[test]
@@ -733,6 +779,72 @@ fn an_edge_saved_with_faces_named_by_index_in_its_qualifiers_is_found_at_its_pic
     assert_eq!(crate::naming::face_names(after), crate::naming::face_names(today));
 }
 
+#[test]
+fn a_face_saved_with_a_neighbour_since_named_by_index_is_found_at_its_pick() {
+    // #20027: a sweep along a plate's top edges round a rounded corner. History names the faces
+    // past the bend by index (#18481); 0.44 named them from geometry, and the bend's top as the
+    // piece of the sweep's top between its two sides. A hole saved there by 0.44 keeps that name.
+    const SAVED: &str = "F4:side:l3#[F4:side:l2,F4:side:l4]";
+    let pick = Vec3::new(99.1, 58.75, 14.);
+    let design = |hole: bool| {
+        let mut features = serde_json::json!([
+            {"id": 1, "name": "plate", "type": "box", "body_names": ["plate"], "corner": [0, 0, 0], "length": "100", "width": "60", "height": "10", "operation": "new_body"},
+            {
+                "id": 2, "name": "corner", "type": "fillet", "radius": "3", "tangent_chain": false, "edges": [[100., 60., 5.]],
+                "edge_names": ["F1:+x|F1:+y"], "edge_refs": [{"dir": [0., 0., 1.], "min": [0., 0., 0.], "max": [100., 60., 10.]}]
+            },
+            {
+                "id": 3, "name": "profile", "type": "sketch", "plane": {"name": "YZ", "type": "origin"},
+                "sketch": {
+                    "points": [
+                        {"fixed": true, "id": "origin", "pos": [0., 0.]},
+                        {"fixed": false, "id": "p1", "pos": [58., 10.]},
+                        {"fixed": false, "id": "p2", "pos": [60., 10.]},
+                        {"fixed": false, "id": "p3", "pos": [60., 14.]},
+                        {"fixed": false, "id": "p4", "pos": [58., 14.]}
+                    ],
+                    "curves": [
+                        {"a": 1, "b": 2, "construction": false, "id": "l1", "type": "line"},
+                        {"a": 2, "b": 3, "construction": false, "id": "l2", "type": "line"},
+                        {"a": 3, "b": 4, "construction": false, "id": "l3", "type": "line"},
+                        {"a": 4, "b": 1, "construction": false, "id": "l4", "type": "line"}
+                    ],
+                    "constraints": [],
+                    "counters": {"l": 4}
+                }
+            },
+            {
+                "id": 4, "name": "sweep", "type": "sweep", "body_names": ["swept"], "operation": "new_body", "sketch": 3, "profiles": {"type": "all"},
+                "path": [], "path_sketch": 0, "path_body": "plate", "path_edges": [[50., 60., 10.], [99.12132, 59.12132, 10.], [100., 30., 10.]]
+            }
+        ]);
+        if let Some(list) = features.as_array_mut().filter(|_| hole) {
+            list.push(serde_json::json!({
+                "id": 5, "name": "pin-hole", "type": "hole", "depth": "1", "diameter": "0.5", "direction": [0., 0., -1.],
+                "face_names": [SAVED], "hole": {"type": "simple"}, "position": [pick.x, pick.y, pick.z]
+            }));
+        }
+        let doc = Document { features: serde_json::from_value(features).unwrap(), ..Document::default() };
+        let doc = crate::format::read(&doc.to_json()).unwrap();
+        let mut model = crate::Model::new();
+        model.evaluate(&doc);
+        model
+    };
+    let swept = design(false);
+    assert!(swept.result(4).unwrap().error.is_none(), "{:?}", swept.result(4));
+    let state = swept.state();
+    let body = state.body("swept").unwrap();
+    let names = crate::naming::names(body);
+    let hit = crate::name_lookup::locate_face(&state, SAVED, pick).unwrap_or_else(|| panic!("{SAVED}: {:?}", names.faces));
+    assert!(hit.on_point, "the face under the saved pick");
+    assert_eq!(names.faces.get(hit.face).map(String::as_str), Some("F4:side:l3"), "{:?}", names.faces);
+    // The same name at a point on another piece of the sweep's top (the first leg's) finds nothing.
+    assert!(crate::name_lookup::locate_face(&state, SAVED, Vec3::new(50., 59., 14.)).is_none(), "{:?}", names.faces);
+
+    let saved = design(true);
+    assert!(saved.result(5).unwrap().error.is_none(), "{:?}", saved.result(5));
+}
+
 /// #18459: an edge picked on the start cap of a one-sided extrude is still found once an edit
 /// makes the extrude symmetric, on the cap at the end where the start cap lay, facing the same
 /// way: the low cap of an extrude that went along the sketch normal, the high cap of one that went
@@ -1178,3 +1290,72 @@ fn a_projected_plane_of_another_component_lands_where_the_two_planes_meet() {
 
 /// Where the part of the test above stands: turned half about X and lifted 100 mm.
 const PART_FRAME: crate::Mat = [[1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 100.0, 0.0, 1.0]];
+
+#[test]
+fn a_pick_named_by_position_past_the_depth_limit_survives_deleting_unrelated_features() {
+    // #20956: 400 unrelated boxes put the naming depth past its limit, so the box made after them
+    // names its faces by position (`Cleat:face:k`) and a chamfer picked on it stores that name.
+    // Deleting the first boxes brings the depth back under the limit: the box is named from its
+    // history again, and the stored name must still find the edge picked.
+    let pick = Vec3::new(25., 100., 20.);
+    let design = |first: usize, chamfer: Option<&str>| {
+        let mut features: Vec<serde_json::Value> = (first..400)
+            .map(|i| {
+                serde_json::json!({
+                    "id": i + 1, "name": format!("B{i}"), "type": "box", "body_names": [format!("B{i}")], "corner": [20 * i, 0, 0],
+                    "length": "10", "width": "10", "height": "10", "operation": "new_body"
+                })
+            })
+            .collect();
+        features.push(serde_json::json!({
+            "id": 401, "name": "Cleat", "type": "box", "body_names": ["Cleat"], "corner": [0, 100, 0],
+            "length": "50", "width": "20", "height": "20", "operation": "new_body"
+        }));
+        if let Some(name) = chamfer {
+            features.push(serde_json::json!({
+                "id": 402, "name": "Bevel", "type": "chamfer", "distance": "5", "body": "Cleat", "edges": [[pick.x, pick.y, pick.z]],
+                "edge_names": [name], "edge_refs": [{"dir": [1., 0., 0.], "min": [0., 100., 0.], "max": [50., 120., 20.]}]
+            }));
+        }
+        let doc = Document { features: serde_json::from_value(serde_json::Value::Array(features)).unwrap(), ..Document::default() };
+        let mut model = crate::Model::new();
+        model.evaluate(&doc);
+        model
+    };
+    let past = design(0, None);
+    let state = past.state();
+    let cleat = state.body("Cleat").unwrap();
+    let edge = crate::naming::edge_names(cleat)
+        .into_iter()
+        .enumerate()
+        .find(|(i, _)| solidcraft_kernel::edge_distance(&cleat.body, *i, pick).ok().flatten().is_some_and(|d| d < 1e-6))
+        .map(|(_, n)| n)
+        .unwrap();
+    assert!(edge.starts_with("Cleat:face:"), "past the limit the box is named by position: {edge}");
+    // Its top face, saved by position too.
+    let top = Vec3::new(25., 110., 20.);
+    let face = crate::naming::face_names(cleat)
+        .iter()
+        .find(|n| crate::name_lookup::locate_face(&state, n, top).is_some_and(|hit| hit.on_point))
+        .cloned()
+        .unwrap();
+    assert!(face.starts_with("Cleat:face:"), "{face}");
+
+    let under = design(10, None);
+    let state = under.state();
+    let cleat = state.body("Cleat").unwrap();
+    assert!(crate::naming::face_names(cleat).iter().all(|n| n.starts_with("F401:")), "{:?}", crate::naming::face_names(cleat));
+
+    // The chamfer saved past the limit builds under it, on the edge picked.
+    let model = design(10, Some(&edge));
+    let result = model.result(402).unwrap();
+    assert!(result.error.is_none(), "{:?}", result.error);
+    assert_eq!(model.state().body("Cleat").unwrap().body.face_count(), 7, "one chamfer face added");
+    // The same name at a point on no edge between those faces still finds nothing.
+    assert!(crate::name_lookup::locate_projected_edge(cleat, &edge, Vec3::new(25., 110., 20.)).is_err());
+    // A face saved by position is found by its number where the saved point lies on it.
+    let hit = crate::name_lookup::locate_face(&state, &face, top).unwrap();
+    assert_eq!(state.bodies[hit.body].name, "Cleat");
+    assert_eq!(crate::naming::face_names(cleat)[hit.face], "F401:+z");
+    assert!(crate::name_lookup::locate_face(&state, &face, Vec3::new(25., 100., 10.)).is_none(), "a point on another face finds nothing");
+}

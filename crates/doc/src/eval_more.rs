@@ -37,19 +37,30 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     crate::apply_vector(&sketch_transform, ss.plane.y),
                 )
                 .ok_or_else(|| DocError::Invalid("invalid cylinder sketch frame".into()))?;
-                let mut at = crate::apply_point(&crate::mat_mul(&inverse, &author_frame), face.at.0);
+                let at = crate::apply_point(&crate::mat_mul(&inverse, &author_frame), face.at.0);
                 let name = f
                     .face_names
                     .first()
                     .filter(|name| !name.is_empty())
-                    .ok_or_else(|| DocError::Invalid("selected cylinder face has no persistent identity".into()))?;
-                {
+                    .ok_or_else(|| DocError::Invalid("selected emboss face has no persistent identity".into()))?;
+                let hit = {
                     let mut scoped = ModelState::default();
                     scoped.bodies.push(mb.clone());
-                    let hit = crate::name_lookup::locate_face(&scoped, name, at).ok_or_else(|| DocError::reselect(name.as_str()))?;
-                    at = kernel::cylinder_emboss_anchor(&mb.body, hit.face, hit.point)?;
-                }
-                let result = kernel::emboss_cylinder_at(&mb.body, at, &plane, &regions, if *deboss { -d } else { d })?;
+                    crate::name_lookup::locate_face(&scoped, name, at).ok_or_else(|| DocError::reselect(name.as_str()))?
+                };
+                let signed = if *deboss { -d } else { d };
+                // A sketch tangent to a cylinder wall, outside or a bore, takes the wrap (whose
+                // refusals stand): a complete wall, or any other wall face bounded by two arcs and
+                // two lines (#12029); a sketch off the wall and every other face are projected.
+                let result = match kernel::cylinder_emboss_anchor(&mb.body, hit.face, hit.point) {
+                    Ok(at) if kernel::infer_cylinder_emboss(&mb.body, &plane, &regions, signed)?.is_some() => {
+                        kernel::emboss_cylinder_at(&mb.body, at, &plane, &regions, signed)?
+                    }
+                    _ => {
+                        let at = kernel::emboss_anchor(&mb.body, hit.face, hit.point)?;
+                        kernel::emboss_project_face(&mb.body, hit.face, at, &plane, &regions, signed)?
+                    }
+                };
                 if let Some(slot) = st.bodies.get_mut(i) {
                     *slot = ModelBody::new(mb.name, result, mb.feature);
                 }
@@ -190,7 +201,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
                 if let Some(mb) = st.bodies.get_mut(i) {
                     let nb = kernel::transform_matrix(&mb.body, m)?;
-                    *mb = ModelBody::new(mb.name.clone(), nb, mb.feature);
+                    // A rigid alignment keeps each face's identity. Carry the transform's
+                    // exact history, as Move does, instead of naming the result by overlap
+                    // with the body still at its old position (#20288).
+                    *mb = mb.remade(Traced::step(nb, &[&mb.traced()]));
                 }
             }
             Ok(())
@@ -249,22 +263,70 @@ pub(super) fn rib_tools(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Fea
 /// Unit outward normal of the planar face through `p`: of the planar faces whose plane runs
 /// through it, the one nearest it. A face elsewhere in such a plane (the wall of a notch, the end
 /// of a rib, in line with a rim) is no pick of `p`, though its plane runs through it as exactly.
-fn planar_normal_at(b: &Body, p: Vec3) -> Option<Vec3> {
+pub(super) fn planar_normal_at(b: &Body, p: Vec3) -> Option<Vec3> {
+    if b.is_mesh() {
+        return None;
+    }
     let tol = (b.size() * 2e-3).max(1e-3);
-    let faces = b.faces(tol).ok()?;
-    let mesh = b.mesh(&solidcraft_kernel::MeshTolerance::chord(tol)).ok()?;
-    let mut near = vec![f64::INFINITY; faces.len()];
-    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
-        if let (Some([u, v, w]), Some(d)) = (mesh.tri(t), near.get_mut(*f as usize)) {
-            *d = d.min(crate::appearance::closest_on_triangle(p, u, v, w).dist(p));
+    let rec = b.record();
+    let mut best: Option<(f64, f64, Vec3)> = None;
+
+    for (i, face) in rec.faces.iter().enumerate() {
+        let Some(plane) = b.planar_face(i) else { continue };
+        let h = plane.height(p).abs();
+        if h > tol * 5.0 {
+            continue;
+        }
+        let local_p = plane.to_local(p);
+        let mut loops: Vec<Ring<Vec2>> = Vec::new();
+        let mut min_edge_dist = f64::INFINITY;
+
+        for lp in &face.loops {
+            let solidcore_record::brep::Loop::Edges { edges } = lp else { continue };
+            let mut pts = Vec::new();
+            for u in edges {
+                let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+                let Ok(eval) = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()) else { continue };
+                let [t0, t1] = edge.interval;
+                let n_samples = match &eval {
+                    solidcraft_geom::brep::eval::CurveEval::Line { .. } => 1,
+                    _ => 8,
+                };
+                for k in 0..n_samples {
+                    let frac0 = k as f64 / n_samples as f64;
+                    let frac1 = (k + 1) as f64 / n_samples as f64;
+                    let t_a = if u.forward { t0 + (t1 - t0) * frac0 } else { t1 - (t1 - t0) * frac0 };
+                    let t_b = if u.forward { t0 + (t1 - t0) * frac1 } else { t1 - (t1 - t0) * frac1 };
+                    if let (Some(a), Some(b)) = (eval.point(t_a), eval.point(t_b)) {
+                        let seg_dist = p.dist_to_segment(a, b);
+                        min_edge_dist = min_edge_dist.min(seg_dist);
+                        if pts.is_empty() || pts.last().is_some_and(|last: &Vec2| last.dist(plane.to_local(a)) > 1e-9) {
+                            pts.push(plane.to_local(a));
+                        }
+                    }
+                }
+            }
+            if pts.len() >= 3 {
+                loops.push(Ring::new(pts));
+            }
+        }
+
+        let is_inside = if let Some(outer) = loops.iter().max_by(|a, b| a.signed_area().abs().total_cmp(&b.signed_area().abs())) {
+            let inside_outer = outer.contains(local_p);
+            let inside_hole = loops.iter().filter(|lp| !std::ptr::eq(*lp, outer)).any(|hole| hole.contains(local_p));
+            inside_outer && !inside_hole
+        } else {
+            false
+        };
+
+        let face_dist = if is_inside { 0.0 } else { min_edge_dist };
+        let candidate = (face_dist, h, plane.normal());
+        if best.as_ref().is_none_or(|(bd, bh, _)| face_dist < *bd || ((face_dist - *bd).abs() < 1e-6 && h < *bh)) {
+            best = Some(candidate);
         }
     }
-    faces
-        .iter()
-        .filter_map(|f| f.plane_normal.map(|n| (n, ((p - f.centroid).dot(n)).abs(), near.get(f.index).copied().unwrap_or(f64::INFINITY))))
-        .filter(|(_, d, _)| *d < tol * 5.0)
-        .min_by(|a, b| a.2.total_cmp(&b.2).then(a.1.total_cmp(&b.1)))
-        .map(|(n, _, _)| n)
+
+    best.filter(|(d, ..)| *d < tol * 5.0).map(|(_, _, n)| n)
 }
 
 /// The curves of a chain as one polyline in sketch coordinates, in order.
@@ -714,10 +776,21 @@ fn surface_edge_pick(st: &ModelState, sk: &crate::SurfaceSheet, name: Option<&St
 
 /// The free edge of sheet `sk` along the edge of its body (as `st` has it) that the model's edge
 /// name `name` finds nearest `near`. None where the name finds no edge of the body, or none of
-/// the sheet's free edges lies there.
+/// the sheet's free edges lies there. The free edge is read at the named edge's middle, on its
+/// exact curve, then at the point the name found: a pick at an end of the edge (a corner of the
+/// panel) is as near the edge beside it, and read there it could take that one, whatever the name
+/// said. The middle is read only where the body's edge of that index passes through the point the
+/// name found (the mesh's edges are the B-rep's, in its order).
 fn named_free_edge(st: &ModelState, sk: &crate::SurfaceSheet, name: &str, near: Vec3) -> Option<crate::sheet_surface_features::FreeEdge> {
-    let hit = crate::naming::locate_edge(st.body(&sk.body)?, name, near).ok()?;
-    sk.free_edge_at(hit.point).ok().flatten()
+    let body = st.body(&sk.body)?;
+    let hit = crate::naming::locate_edge(body, name, near).ok()?;
+    let reach = crate::name_lookup::pick_reach(body);
+    let on_it = solidcraft_kernel::edge_distance(&body.body, hit.edge, hit.point).ok().flatten().is_some_and(|d| d <= reach);
+    on_it
+        .then(|| solidcraft_kernel::edge_middle(&body.body, hit.edge).ok().flatten())
+        .flatten()
+        .and_then(|mid| sk.free_edge_at(mid).ok().flatten())
+        .or_else(|| sk.free_edge_at(hit.point).ok().flatten())
 }
 
 /// Rebuild a sheet body's solid from its model.
@@ -986,32 +1059,53 @@ fn no_free_edge(st: &ModelState, body: &Option<crate::BodyName>, pick: Option<Ve
     }
 }
 
-/// The sheet made from surfaces a fold is on, and its line's ends where they are now: the sketch
-/// line's, or the points given. The named body's sheet, or the first whose flat panel the line
-/// lies on.
+fn relative_transform(doc: &Document, from: u64, to: u64) -> Option<crate::Mat> {
+    if from == to {
+        return Some(crate::IDENTITY);
+    }
+    let m_from = doc.component_transform(from);
+    let m_to = doc.component_transform(to);
+    let inv_to = crate::mat_inverse(&m_to)?;
+    Some(crate::mat_mul(&inv_to, &m_from))
+}
+
+/// The sheet made from surfaces a fold is on, and its line's ends in that sheet's component frame.
+/// The named body's sheet, or the first whose flat panel the line lies on.
 fn surface_fold_sheet(
+    doc: &Document,
     st: &ModelState,
     body: &Option<crate::BodyName>,
     sketch: &Option<crate::SketchId>,
     curve: &Option<String>,
     a: &crate::Position,
     b: &crate::Position,
+    author_comp: u64,
 ) -> Option<(usize, Vec3, Vec3)> {
-    let (a, b) = match (sketch, curve) {
+    let (source_a, source_b, source_comp) = match (sketch, curve) {
         (Some(sk), Some(c)) => {
             let ss = st.sketch(sk.0)?;
             let ci = ss.sketch.curve_index(c)?;
+            let comp = doc.feature(sk.0).map(|f| f.component).unwrap_or(author_comp);
             match ss.sketch.segs(ci).as_slice() {
-                [Seg2::Line { a, b }] => (ss.plane.to_world(*a), ss.plane.to_world(*b)),
+                [Seg2::Line { a, b }] => (ss.plane.to_world(*a), ss.plane.to_world(*b), comp),
                 _ => return None,
             }
         }
-        _ => (a.0, b.0),
+        _ => (a.0, b.0, author_comp),
     };
     if let Some(n) = body {
-        return st.surface_sheets.iter().position(|s| &s.body == n).map(|i| (i, a, b));
+        let i = st.surface_sheets.iter().position(|s| &s.body == n)?;
+        let s = &st.surface_sheets[i];
+        let sheet_comp = st.body(&s.body).map(|b| doc.model_body_component(b)).unwrap_or(author_comp);
+        let m = relative_transform(doc, source_comp, sheet_comp).unwrap_or(crate::IDENTITY);
+        return Some((i, apply_point(&m, source_a), apply_point(&m, source_b)));
     }
-    st.surface_sheets.iter().position(|s| s.fold_panel_at(a, b)).map(|i| (i, a, b))
+    st.surface_sheets.iter().enumerate().find_map(|(i, s)| {
+        let sheet_comp = st.body(&s.body).map(|b| doc.model_body_component(b)).unwrap_or(author_comp);
+        let m = relative_transform(doc, source_comp, sheet_comp).unwrap_or(crate::IDENTITY);
+        let (sheet_a, sheet_b) = (apply_point(&m, source_a), apply_point(&m, source_b));
+        if s.fold_panel_at(sheet_a, sheet_b) { Some((i, sheet_a, sheet_b)) } else { None }
+    })
 }
 
 impl Document {
@@ -1019,9 +1113,9 @@ impl Document {
     /// sheet as `st` has it before the fold: by its `fixed` point, else as the sheet joins on
     /// either side ([`crate::SurfaceSheet::fold_side`]). None for a feature that is no fold on a
     /// sheet made from surfaces.
-    pub fn fold_side_at(&self, st: &ModelState, kind: &FeatureKind) -> Result<Option<crate::FoldSide>> {
+    pub fn fold_side_at(&self, st: &ModelState, kind: &FeatureKind, component: u64) -> Result<Option<crate::FoldSide>> {
         let FeatureKind::SheetFold { sketch, curve, a, b, angle, radius, position, flip, fixed, body, .. } = kind else { return Ok(None) };
-        let Some((i, a, b)) = surface_fold_sheet(st, body, sketch, curve, a, b) else { return Ok(None) };
+        let Some((i, a, b)) = surface_fold_sheet(self, st, body, sketch, curve, a, b, component) else { return Ok(None) };
         let Some(sk) = st.surface_sheets.get(i).filter(|sk| !sk.unfolded) else { return Ok(None) };
         let vals = self.evaluation_values();
         let ang = val(&vals, angle, Kind::Angle)?;
@@ -1029,18 +1123,24 @@ impl Document {
             Some(e) => val(&vals, e, Kind::Length)?,
             None => self.rule_values_at(&vals, &self.sheet_rule(Some(&sk.rule)), Some(sk.thickness))?.bend_radius,
         };
-        sk.fold_side(a, b, ang, rr, position, *flip, fixed.map(Vec3::from)).map(Some)
+        let sheet_comp = st.body(&sk.body).map(|b| self.model_body_component(b)).unwrap_or(component);
+        let m = relative_transform(self, component, sheet_comp).unwrap_or(crate::IDENTITY);
+        let fixed_sheet = fixed.map(|p| apply_point(&m, p.0));
+        sk.fold_side(a, b, ang, rr, position, *flip, fixed_sheet).map(Some)
     }
 
     /// Whether a fold's `fixed` point touches no material of the sheet made from surfaces the
     /// fold is on, as `st` has it before the fold (see `SurfaceSheet::touches`): such a
     /// point picks no side, and the `sheet.fold` command refuses it (#263). False for a fold with
     /// no fixed point, or one on no folded sheet (which fails as it is evaluated).
-    pub fn fold_fixed_off_sheet(&self, st: &ModelState, kind: &FeatureKind) -> bool {
+    pub fn fold_fixed_off_sheet(&self, st: &ModelState, kind: &FeatureKind, component: u64) -> bool {
         let FeatureKind::SheetFold { sketch, curve, a, b, fixed: Some(p), body, .. } = kind else { return false };
-        let Some((i, _, _)) = surface_fold_sheet(st, body, sketch, curve, a, b) else { return false };
+        let Some((i, _, _)) = surface_fold_sheet(self, st, body, sketch, curve, a, b, component) else { return false };
         let Some(sk) = st.surface_sheets.get(i).filter(|sk| !sk.unfolded) else { return false };
-        !sk.touches(p.0, (sk.thickness * 1e-3).max(1e-6))
+        let sheet_comp = st.body(&sk.body).map(|b| self.model_body_component(b)).unwrap_or(component);
+        let m = relative_transform(self, component, sheet_comp).unwrap_or(crate::IDENTITY);
+        let p_sheet = apply_point(&m, p.0);
+        !sk.touches(p_sheet, (sk.thickness * 1e-3).max(1e-6))
     }
 
     /// This design with each fold that keeps no side that stays (a design saved before folds
@@ -1051,7 +1151,7 @@ impl Document {
         let mut out: Option<Document> = None;
         for f in &self.features {
             let FeatureKind::SheetFold { stays: None, .. } = &f.kind else { continue };
-            let Ok(Some(side)) = self.fold_side_at(&model.state_before(f.id), &f.kind) else { continue };
+            let Ok(Some(side)) = self.fold_side_at(&model.state_before(f.id), &f.kind, f.component) else { continue };
             let doc = out.get_or_insert_with(|| self.clone());
             if let Some(FeatureKind::SheetFold { stays, .. }) = doc.feature_mut(f.id).map(|x| &mut x.kind) {
                 *stays = Some(side);
@@ -1273,9 +1373,11 @@ pub(super) fn sheet_eval(
             // the later one's is cut.
             let order = doc.feature_index(f.id).unwrap_or(usize::MAX);
             let mut made = Vec::with_capacity(picks.len());
+            let mut square = Vec::with_capacity(picks.len());
             for (k, (edge, runs)) in picks.into_iter().enumerate() {
                 // One bend for each run: a split edge's butt where its runs meet.
-                let joints = sk.flanges_on(edge, &runs, rr, position, from).map_err(named(k))?;
+                let (joints, sides) = sk.flanges_on(edge, &runs, rr, position, from).map_err(named(k))?;
+                square.push(sides);
                 if let Some((relief, size)) = own {
                     for &joint in &joints {
                         sk.corner_reliefs.push((joint, relief, size, order));
@@ -1283,8 +1385,19 @@ pub(super) fn sheet_eval(
                 }
                 made.push(joints);
             }
+            let mut open = Vec::new();
             for (k, joints) in made.iter().enumerate() {
-                sk.close_flange_corners(joints).map_err(named(k))?;
+                open.extend(sk.close_flange_corners(joints).map_err(named(k))?);
+            }
+            // A side laid on square no other bend met carries on the edge beside it again, now
+            // that every corner of the feature is closed (#19833).
+            for (k, sides) in square.iter().enumerate() {
+                sk.slant_open_sides(sides).map_err(named(k))?;
+            }
+            // The corners on the outside of a bend that stay open (#20720): each pair of bends is
+            // met once, so each corner once.
+            for at in open {
+                append_warning(warning, format!("the flanges at ({:.3}, {:.3}, {:.3}) {}", at.x, at.y, at.z, crate::OUTSIDE_BEND_OPEN));
             }
             let made: Vec<usize> = made.into_iter().flatten().collect();
             sk.clear_of_neighbours(&made)?;
@@ -1393,7 +1506,7 @@ pub(super) fn sheet_eval(
             let before = sk.clone();
             let mut found = Vec::with_capacity(edges.len());
             for (k, p) in edges.iter().enumerate() {
-                found.push(surface_edge_pick(st, &before, f.edge_names.get(k), p.0)?);
+                found.push(before.edge_left_by_cuts(surface_edge_pick(st, &before, f.edge_names.get(k), p.0)?, p.0)?);
             }
             let n0 = sk.sheet.panels.len();
             for edge in found {
@@ -1407,9 +1520,9 @@ pub(super) fn sheet_eval(
         }
         FeatureKind::SheetHem { edges, body, .. } => Err(no_free_edge(st, body, edges.first().map(|p| p.0))),
         FeatureKind::SheetFold { sketch, curve, a, b, angle, radius, position, flip, fixed, stays, body }
-            if surface_fold_sheet(st, body, sketch, curve, a, b).is_some() =>
+            if surface_fold_sheet(doc, st, body, sketch, curve, a, b, f.component).is_some() =>
         {
-            let (i, a, b) = surface_fold_sheet(st, body, sketch, curve, a, b).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+            let (i, a, b) = surface_fold_sheet(doc, st, body, sketch, curve, a, b, f.component).ok_or_else(|| DocError::Invalid("sheet".into()))?;
             let sk = st.surface_sheets.get(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
             if sk.unfolded {
                 return Err(DocError::Invalid("refold the sheet before folding it".into()));
@@ -1424,7 +1537,12 @@ pub(super) fn sheet_eval(
             // fixed point where it has one, wherever that point lies now.
             let stays = match stays {
                 Some(side) => *side,
-                None => sk.fold_side(a, b, ang, rr, position, *flip, fixed.map(Vec3::from))?,
+                None => {
+                    let sheet_comp = st.body(&sk.body).map(|b| doc.model_body_component(b)).unwrap_or(f.component);
+                    let m = relative_transform(doc, f.component, sheet_comp).unwrap_or(crate::IDENTITY);
+                    let fixed_sheet = fixed.map(|p| apply_point(&m, p.0));
+                    sk.fold_side(a, b, ang, rr, position, *flip, fixed_sheet)?
+                }
             };
             if let Some(sk) = st.surface_sheets.get_mut(i) {
                 let before = sk.clone();
@@ -1449,12 +1567,52 @@ pub(super) fn sheet_eval(
                 _ => no_sheet(body),
             })
         }
-        FeatureKind::SheetUnfold { body, refold } => {
+        FeatureKind::SheetTab { sketch, profiles, body } => {
+            let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
+            let regions = solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
+            // The named sheet, else the one sheet with a face that takes the profile: which is never
+            // a matter of the sheets' order, so a tab two sheets would take is refused.
+            let candidates: Vec<usize> = match body {
+                Some(n) => vec![
+                    st.surface_sheets
+                        .iter()
+                        .position(|s| &s.body == n)
+                        .ok_or_else(|| DocError::Invalid(format!("`{n}` is not a sheet metal body")))?,
+                ],
+                None => (0..st.surface_sheets.len()).collect(),
+            };
+            let mut first_error = None;
+            let mut took = Vec::new();
+            for i in candidates {
+                let Some(mut sk) = st.surface_sheets.get(i).cloned() else { continue };
+                match sk.add_tab(&ss.plane, &regions) {
+                    Ok(_) => took.push((i, sk)),
+                    Err(e) => {
+                        first_error.get_or_insert(e);
+                    }
+                }
+            }
+            match <[(usize, crate::SurfaceSheet); 1]>::try_from(took) {
+                Ok([(i, sk)]) => {
+                    if let Some(slot) = st.surface_sheets.get_mut(i) {
+                        *slot = sk;
+                    }
+                    rebuild_surface_sheet(st, i)
+                }
+                Err(took) if !took.is_empty() => Err(DocError::Invalid(sheet::TAB_SEVERAL.into())),
+                Err(_) => Err(first_error.unwrap_or_else(|| DocError::Invalid(sheet::TAB_OFF_SHEET.into()))),
+            }
+        }
+        FeatureKind::SheetUnfold { body, refold, fixed } => {
             let i = surface_sheet_for(st, body, |s| s.unfolded == *refold).ok_or_else(|| match body {
                 Some(_) => no_sheet(body),
                 None => DocError::Invalid(if *refold { "no unfolded sheet to refold".into() } else { "no sheet metal body to unfold".into() }),
             })?;
             if let Some(sk) = st.surface_sheets.get_mut(i) {
+                // The panel at `fixed` stays where it is: the flat lies in its plane from now on.
+                if let (Some(at), false) = (fixed, *refold) {
+                    sk.flat = sk.flat_at(at.0).ok_or_else(|| DocError::Invalid("the fixed point lies on no flat panel of the sheet".into()))?;
+                }
                 sk.unfolded = !*refold;
             }
             rebuild_surface_sheet(st, i)
@@ -2311,6 +2469,20 @@ pub(super) fn tools_inside(mb: &ModelBody, reach: &[Option<Aabb3>]) -> bool {
     }
     let b = b.inflated(2.0 * mb.body.record().tolerance + 1e-6);
     reach.iter().flatten().all(|tool| b.contains(tool.min) && b.contains(tool.max))
+}
+
+/// Whether some tool of `reach` meets the box of `mb`'s vertices, grown as [`exact_box`] grows
+/// the exact box. Every vertex lies in the body's exact box, so such a tool meets the exact box
+/// too and the exact box cannot show it apart of the body: it need not be measured. A tool cut
+/// through a wall of a rounded spline body reaches out of its mesh box ([`tools_inside`]), and
+/// measuring that body's exact box took the kernel over a minute for each of its holes.
+pub(super) fn tools_meet_vertices(mb: &ModelBody, reach: &[Option<Aabb3>]) -> bool {
+    let b: Aabb3 = mb.body.record().vertices.iter().map(|v| Vec3::new(v.point[0], v.point[1], v.point[2])).collect();
+    if b.is_empty() || !b.min.is_finite() || !b.max.is_finite() {
+        return false;
+    }
+    let b = b.inflated(2.0 * mb.body.record().tolerance + 1e-6);
+    reach.iter().flatten().any(|tool| b.meets(tool))
 }
 
 /// Whether the line through `at` along `dir` is known to pass farther than `reach` from the

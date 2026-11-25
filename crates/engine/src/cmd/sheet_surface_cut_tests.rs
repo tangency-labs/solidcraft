@@ -138,6 +138,25 @@ fn a_corner_rounded_through_the_sheet_is_an_arc_of_its_outline() {
     assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", exact_volume(&s));
 }
 
+#[test]
+fn a_large_base_flange_keeps_a_small_corner_round_in_the_body_and_flat() {
+    let mut s = Session::default();
+    let (t, r) = (0.7, 3.0);
+    rule(&mut s, "Test", t, 0.44, t, t);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [860, 2160]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Plate"}));
+    let before = exact_volume(&s);
+    run(&mut s, "solid.fillet", json!({"edges": [[0, 0, t / 2.0]], "radius": r, "tangent_chain": false}));
+
+    // The corner loses the part of an r × r square outside the quarter circle, through the sheet.
+    let removed = before - exact_volume(&s);
+    let want = t * r * r * (1.0 - PI / 4.0);
+    assert!((removed - want).abs() < 1e-6, "removed {removed} mm³, expected {want}");
+    assert_eq!(dxf_entities(&mut s), (4, 1, 0));
+}
+
 /// What a sheet can't keep is refused, and the sheet stays as it was: a countersink and a
 /// chamfered face edge (walls not square to the sheet), a notch through a bend from the edge.
 #[test]
@@ -172,6 +191,43 @@ fn a_hole_at_a_slant_is_cut_from_the_flat_as_its_shadow() {
     let want = (100.0 * 60.0 - hole) * T;
     // The outline is a curve through exact points, within the model's tolerance of them.
     assert!((exact_volume(&s) - want).abs() < 1e-5 * hole * T, "{} vs {want}", exact_volume(&s));
+}
+
+/// The same slanted hole in a plate 1500 long: the shadow reads the walls in steps of a hundredth
+/// of the body's size, at most 1 mm but never under ten times the sag its edges are read within,
+/// and past a metre that sag (a ten-thousandth of the size) puts the floor above the cap. The
+/// step was clamped between the two and the cut panicked ("min > max"); the floor now wins.
+#[test]
+fn a_hole_at_a_slant_in_a_plate_over_a_metre_long_is_cut_as_its_shadow() {
+    let mut s = session();
+    rule(&mut s, "Test", T, 0.44, 2.0, 0.5);
+    run(&mut s, "solid.box", json!({"length": 1500, "width": 60, "height": T, "body_name": "Plate"}));
+    run(&mut s, "sheet.convert", json!({"body": "Plate", "face": [750, 30, T]}));
+    let (r, tilt) = (4.0, 30f64.to_radians());
+    let axis = [tilt.sin(), 0.0, tilt.cos()];
+    let base = [750.0 - 10.0 * axis[0], 30.0, 1.0 - 10.0 * axis[2]];
+    run(&mut s, "solid.cylinder", json!({"radius": r, "height": 20, "base": base, "axis": axis, "operation": "cut"}));
+    let hole = PI * r * r / tilt.cos() + 2.0 * r * T * tilt.tan();
+    let want = (1500.0 * 60.0 - hole) * T;
+    assert!((exact_volume(&s) - want).abs() < 1e-3 * hole * T, "{} vs {want}", exact_volume(&s));
+}
+
+/// A notch 0.48 square and 0.5 deep cut into the long edge of a base flange 1000 x 200 x 1, from
+/// its top face (#20769): a pocket open at the edge, 0.48 x 0.24 of it on the plate, and the
+/// sheet loses 0.48 · 0.24 · 0.5 = 0.0576 mm³, as a plain plate does.
+#[test]
+fn a_small_notch_cut_into_a_large_base_flanges_edge_is_a_pocket() {
+    let mut s = session();
+    rule(&mut s, "Stock", 1.0, 0.44, 1.0, 0.5);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-500, -100], "p1": [500, 100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Plate"}));
+    let notch = json!({"length": 0.48, "width": 0.48, "height": 0.5, "corner": [-0.24, 99.76, 0.5], "operation": "cut", "targets": ["Plate"]});
+    run(&mut s, "solid.box", notch);
+    let want = 1000.0 * 200.0 * 1.0 - 0.48 * 0.24 * 0.5;
+    assert!((exact_volume(&s) - want).abs() < 1e-9 * want, "{} vs {want}", exact_volume(&s));
+    assert_eq!(pockets(&mut s).len(), 1, "{:?}", pockets(&mut s));
 }
 
 /// A 100 x 60 base flange on XY of the default rule (T 2.5), its metal z 0 to 2.5:
@@ -751,6 +807,34 @@ fn a_notch_cut_across_a_bend_from_the_flats_edge_folds_with_the_sheet() {
     run(&mut s, "solid.box", json!({"corner": [lo.x, lo.y, -10], "length": hi.x - lo.x, "width": hi.y - lo.y, "height": 20, "operation": "cut"}));
     run(&mut s, "sheet.refold", json!({}));
     assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", exact_volume(&s));
+}
+
+/// A fold beside a flange whose bend a notch took away, cut while the sheet was unfolded, is
+/// made: its line, run on, meets the bend's line only where the notch took the bend (#17543).
+/// The sheet weighs what it does with the same notch drawn on its flat.
+#[test]
+fn a_fold_whose_line_meets_a_bend_only_where_a_notch_took_it_is_made() {
+    let base = |outline: Value| {
+        let mut s = session();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Flat"}));
+        run(&mut s, "sketch.line", json!({"points": outline, "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"type": "base", "sketch": "Flat"}));
+        run(&mut s, "sheet.fold", json!({"points": [[0, 20, 2.5], [100, 20, 2.5]], "angle": "90 deg", "fixed": [40, 70, 2.5]}));
+        s
+    };
+    // The second fold, along x = 85: its line, run on, meets the first bend at (85, 20).
+    let fold = json!({"points": [[85, 40, 2.5], [85, 100, 2.5]], "angle": "90 deg", "fixed": [40, 70, 2.5]});
+    let mut drawn = base(json!([[0, 0], [70, 0], [70, 30], [100, 30], [100, 100], [0, 100]]));
+    run(&mut drawn, "sheet.fold", fold.clone());
+    let want = volume(&mut drawn);
+    let mut cut = base(json!([[0, 0], [100, 0], [100, 100], [0, 100]]));
+    run(&mut cut, "sheet.unfold", json!({}));
+    run(&mut cut, "solid.box", json!({"corner": [70, -1, -1], "length": 31, "width": 31, "height": 6, "operation": "cut"}));
+    run(&mut cut, "sheet.refold", json!({}));
+    run(&mut cut, "sheet.fold", fold);
+    let v = volume(&mut cut);
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want} with the notch drawn");
 }
 
 /// What such a cut from the flat's edge can't be is refused, and the sheet stays as it was: a

@@ -189,7 +189,10 @@ fn boundaries(curves: &[LCurve], pts: &[Vec2]) -> Option<Vec<Boundary>> {
         shapes.push(shape);
         ends.push(ep);
     }
-    if incidence.iter().any(|v| !v.is_empty() && v.len() != 2) {
+    // Two loops that meet at one vertex share that point: four curves end there. That is a
+    // valid solid's face (two joined features touching at a corner), so an even count is read
+    // as loops touching, not as an ambiguous boundary. Crossings still refuse in `clear`.
+    if incidence.iter().any(|v| !v.is_empty() && (v.len() != 2 && v.len() != 4)) {
         return None;
     }
     let mut visited = vec![false; curves.len()];
@@ -282,6 +285,22 @@ fn boundaries(curves: &[LCurve], pts: &[Vec2]) -> Option<Vec<Boundary>> {
         out.get_mut(i)?.depth = depth;
     }
     Some(out)
+}
+
+/// Whether more than two curves end at one point of the layout: loops of the boundary touch
+/// there (two inner outlines of a face that meet at a corner, #20619).
+pub(super) fn meets_at_corner(curves: &[LCurve], points: usize) -> bool {
+    let mut ends = vec![0usize; points];
+    for curve in curves {
+        if let LCurve::Line(a, b) | LCurve::Arc(_, a, b) = *curve {
+            for p in [a, b] {
+                if let Some(n) = ends.get_mut(p) {
+                    *n += 1;
+                }
+            }
+        }
+    }
+    ends.iter().any(|n| *n > 2)
 }
 
 pub(super) fn valid(curves: &[LCurve], points: &[Vec2]) -> bool {

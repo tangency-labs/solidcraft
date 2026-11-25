@@ -1,8 +1,8 @@
 //! Shell, offset faces, draft and thicken through SMLib: the body goes to SMLib as its schema 4
 //! record, tagged as operand 0, SMLib runs the operation, and the result comes back with SMLib's own
 //! history, renumbered into the body's and the result's face and edge order (as
-//! `crate::smlib_boolean` does for booleans). A result SMLib's own check refuses is an
-//! error, never a body, unless the evaluation's validation mode skips the check
+//! `crate::smlib_boolean` does for booleans). Where the evaluation's validation mode checks
+//! each step, a result SMLib's own check refuses is an error, never a body
 //! (`crate::validation`).
 //!
 //! SMLib's tags travel through the copies its offset makes, so a shell's inner wall and a
@@ -41,14 +41,33 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
                  use a thinner or thicker wall, or move the feature"
             ))
         }
+        // A pad's or hole's corner on the edge of its face (#18568).
+        SmError::OutlineTouches { at: [x, y, z], .. } => KernelError::Invalid(format!(
+            "{op}: a corner of a pad or hole touches the edge of its face at ({x:.4}, {y:.4}, {z:.4}), so the walls offset from them would meet at a point, \
+             which the {op} does not build; move the feature clear of the edge"
+        )),
         // solidcore's one construction: a face curves tighter than the wall is thick.
         SmError::WallFolds { largest } => {
             let largest = largest.map(|w| format!("; the largest wall that works is {} mm", crate::blend::trimmed_mm(w))).unwrap_or_default();
             KernelError::Invalid(format!("{op}: the wall is thicker than a face curves, so the face's offset would fold{largest}"))
         }
+        // A face the drafted face runs into without meeting it, a hole's wall near the side
+        // (#19686): the draft trims only the faces around the drafted one.
+        SmError::DraftCutsThrough { at: [x, y, z], depth } => KernelError::Invalid(format!(
+            "{op}: the drafted face would cut through the face at ({}, {}, {}), which reaches at least {} mm past it \
+             without meeting it (a hole's or pocket's wall near the side); a draft only extends or trims the faces around \
+             the drafted face: use a smaller draft angle, or move that face farther from the drafted one",
+            crate::blend::trimmed_mm(x),
+            crate::blend::trimmed_mm(y),
+            crate::blend::trimmed_mm(z),
+            crate::blend::trimmed_mm(depth)
+        )),
         SmError::NoMatch { point } => KernelError::Invalid(format!("{op}: no face at selection point {}", point + 1)),
         SmError::Ambiguous { point } => KernelError::Invalid(format!("{op}: selection point {} is as near to two faces", point + 1)),
         SmError::Unsupported => KernelError::Failed(format!("not supported yet: SMLib {op} for this geometry")),
+        // A face the operation cannot handle, named for what it is (a draft's face that is neither
+        // a plane nor a cone or cylinder, #18541).
+        SmError::Refused(solidcore_ops::Error::Unsupported(why)) => KernelError::Failed(format!("not supported yet: {op}: {why}")),
         // A tangent blend that cannot follow the moved faces, in solidcore's words (#18575).
         SmError::BlendsNotFollowed { exact: false, why } => KernelError::Failed(format!("not supported yet: SMLib {op}: {why}")),
         SmError::BlendsNotFollowed { exact: true, why } => {
@@ -70,9 +89,9 @@ fn points(p: &[Vec3]) -> Vec<[f64; 3]> {
 
 /// Runs `op` on `b` in SMLib, tagged as operand 0, and brings the result back with SMLib's
 /// history over `[b]` (none where an order cannot be matched). `wall`: the operation's wall
-/// thickness, for its refusals. SMLib's check of the result runs here unless the evaluation's
-/// validation mode leaves it to the feature's end or skips it (`crate::validation`), as for
-/// booleans, blends and sweeps (#17601).
+/// thickness, for its refusals. SMLib's check of the result runs here when the evaluation's
+/// validation mode checks each step, and is left to the feature's end when it checks each
+/// feature (`crate::validation`), as for booleans, blends and sweeps (#17601).
 pub(crate) fn run(
     name: &str,
     b: &Body,
@@ -118,9 +137,72 @@ pub(crate) fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
     let opened = crate::offset::with_same_surface(b, &picked);
     let tol = pick_tolerance(b);
     let pts = points(&face_points(b, &opened)?);
-    let (r, h) = run("shell", b, Some(thickness), |s| s.shell(&pts, tol, -thickness))?;
+    let seen = std::cell::RefCell::new(None);
+    let attempt = |t: f64| {
+        run("shell", b, Some(t), |s| {
+            s.shell(&pts, tol, -t).inspect_err(|e| {
+                *seen.borrow_mut() = Some(e.clone());
+            })
+        })
+    };
+    let (r, h) = match attempt(thickness) {
+        Ok(done) => done,
+        Err(first) => {
+            let failure = seen.borrow().clone();
+            return Err(match failure {
+                Some(f) if shell_may_be_thinner(&f) => thinner_shell_hint(thickness, &f, first, |t| attempt(t).is_ok()),
+                _ => first,
+            });
+        }
+    };
     let h = h.and_then(|h| with_offsets(&r, b, h, thickness));
     Ok(r.with_checked_history(h, &record::counts(&[b])))
+}
+
+/// A refusal a thinner wall can cure: a fold, or a result that is not a solid.
+fn shell_may_be_thinner(e: &SmError) -> bool {
+    matches!(e, SmError::WallFolds { .. } | SmError::NotSolid | SmError::Refused(_) | SmError::RefusedWithDiagnostic { .. } | SmError::Status(_))
+}
+
+/// The walls tried under a refused one of `thickness`: from just under the wall the kernel
+/// names as the largest (when it names one) down to half of it, else half and a quarter of the wall.
+/// Three tries at most: each is a whole shell, and the dialog previews every edit.
+pub(crate) fn thinner_walls(thickness: f64, largest: Option<f64>) -> Vec<f64> {
+    let (base, steps): (f64, &[f64]) = match largest.filter(|l| l.is_finite() && *l > 0.0 && *l < thickness) {
+        Some(l) => (l, &[0.95, 0.75, 0.5]),
+        None => (thickness, &[0.5, 0.25]),
+    };
+    // Rounded to the micrometre first, so the wall tried is the wall the message names.
+    steps.iter().map(|k| (base * k * 1e6).round() / 1e6).filter(|w| *w > 1e-6 && *w < thickness).collect()
+}
+
+/// The refusal of a shell of `thickness` with a hint that has been tried: the first of the
+/// thinner walls that `builds` is the one named, so the wall the message offers does work. Where
+/// none builds, the message says the wall is not the obstacle. `first` is the refusal itself.
+pub(crate) fn thinner_shell_hint(thickness: f64, failure: &SmError, first: KernelError, mut builds: impl FnMut(f64) -> bool) -> KernelError {
+    let largest = match failure {
+        SmError::WallFolds { largest } => *largest,
+        _ => None,
+    };
+    let walls = thinner_walls(thickness, largest);
+    let t = crate::blend::trimmed_mm(thickness);
+    if let Some(w) = walls.into_iter().find(|w| builds(*w)) {
+        let w = crate::blend::trimmed_mm(w);
+        let why = if matches!(failure, SmError::WallFolds { .. }) {
+            "a face curves tighter than the wall is thick, so its offset would fold"
+        } else {
+            "the walls offset from this body do not close into a solid"
+        };
+        return KernelError::Invalid(format!("shell: a wall of {t} mm does not fit: {why}; a wall of {w} mm builds"));
+    }
+    match first {
+        KernelError::Invalid(_) | KernelError::Failed(_) => KernelError::Invalid(format!(
+            "shell: a wall of {t} mm does not fit, and no thinner wall builds either, so the wall is not the obstacle: \
+             a face of the body curves too tightly to offset inwards, or the body has faces too small or too many to offset into a solid \
+             (a curve cut as many tiny flat pieces, for example); round the tight bend or rebuild the body with smoother faces"
+        )),
+        other => other,
+    }
 }
 
 /// [`crate::offset_faces`] through SMLib: the faces `chosen` (indices in `b`'s face order)
@@ -158,7 +240,8 @@ pub(crate) fn thicken(b: &Body, thickness: f64, symmetric: bool) -> Result<Body>
 /// [`crate::draft`] through SMLib: the faces under the points `at` (flat, parallel to `pull`)
 /// tilted by `angle` about their lines on `neutral`, leaning in going along `pull`; the faces
 /// around them extended or trimmed to meet them. A tilted face is the face itself (Modified).
-/// A face SMLib can't draft (not flat, or not parallel to the pull) is "not supported yet".
+/// A face SMLib can't draft (neither flat nor a cone or cylinder about the pull, or a plane not
+/// parallel to it) is "not supported yet", naming which.
 pub(crate) fn draft(b: &Body, at: &[Vec3], neutral: &solidcore_record::Plane, pull: Vec3, angle: f64) -> Result<Body> {
     if !angle.is_finite() || angle.abs() >= std::f64::consts::FRAC_PI_2 - 1e-3 {
         return Err(KernelError::Invalid("draft angle must be between −90° and 90°".into()));
@@ -202,7 +285,7 @@ fn faces_under(b: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
                     out.push(f);
                 }
             }
-            _ => return Err(KernelError::Invalid(format!("no face at {:?}", [p.x, p.y, p.z]))),
+            _ => return Err(KernelError::Invalid(format!("no face at {p}"))),
         }
     }
     Ok(out)
