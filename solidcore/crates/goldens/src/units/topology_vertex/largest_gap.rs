@@ -1,18 +1,17 @@
-//! The convex hull certificate of `topology.vertex` `surf_sphere150_rebuild_v3_gaps`
-//! (`max_up_dim_gap_3d` with its list), on this branch and as main built it (the refit
-//! seam), carried over from #17856's WR-57 replay (since retired), which had stopped replaying
-//! this row: the retirement changes the surface its calls are made on.
+//! The largest gap of `topology.vertex` `surf_sphere150_rebuild_v3_gaps`
+//! (`max_up_dim_gap_3d` with its list).
 //!
-//! Both rows report the true largest gap to the rounding, PROVEN by the convex hull of the
+//! The row reports the true largest gap to the rounding, PROVEN by the convex hull of the
 //! net. The pole is not one point to the bit: rows 1 and 3 of the pole column are
 //! `-5 + 2.8e-16` and `-5 - 1.4e-16` in `x`. Every face gap at the vertex has its `face_uv`
 //! on a clamped boundary of the net (`v = 0`), where the surface is a convex combination of
 //! the boundary's Cartesian control points (positive weights), so its true distance from
 //! the vertex is at most their bound `delta` ([`hull_bound`], the rounding of computing it
-//! charged); every edge gap is at its curve's clamped end, its end control point. On both
-//! sides `delta <= 4e-16`, and every listed gap and the largest lie in `[0, delta]`: main's
-//! largest (a face gap held by vertex use 1) and this branch's (an edge gap held by vertex
-//! use 2) are both the true largest gap, 0, to the rounding.
+//! charged); every edge gap is at its curve's clamped end, its end control point.
+//! `delta <= 4e-16`, and every listed gap and the largest lie in `[0, delta]`: the
+//! reported largest is the true largest gap, 0, to the rounding.
+
+use std::collections::BTreeMap;
 
 use solidcore::curve::curve::p2::CurveKind;
 use solidcore::heal::gap::Gap;
@@ -22,11 +21,30 @@ use solidcore::topology::vertex::{self as vx, HeldGap, VertexGap};
 use solidcore::topology::Brep;
 use solidcore::Kernel;
 
-use super::super::state::{self, Refit};
-use super::{cases, unit};
+use crate::case::{repo_root, Case, CaseContext};
+use crate::UnitDiff;
 
 /// The vertex row's case.
 const CASE: &str = "surf_sphere150_rebuild_v3_gaps";
+
+/// The `topology.vertex` unit and its cases, by name.
+fn unit_cases() -> (Box<dyn UnitDiff>, BTreeMap<String, Case>) {
+    let u = crate::registry()
+        .into_iter()
+        .find(|u| u.id() == "topology.vertex")
+        .expect("the topology.vertex unit");
+    let ctx = CaseContext {
+        root: repo_root(),
+        seeds: 16,
+    };
+    let cases = u
+        .cases(&ctx)
+        .expect("the cases")
+        .into_iter()
+        .map(|c| (c.name.clone(), c))
+        .collect();
+    (u, cases)
+}
 
 /// A bound on `|X_j - V|` over the Cartesian points `X_j = x_j / w_j` of `points`
 /// (homogeneous `x_j`, weight `w_j`): per coordinate the FMA `x_jc - V_c w_j` is the
@@ -129,63 +147,52 @@ fn true_gap_bound(k: &Kernel, b: &Brep, v: Point3, held: &HeldGap) -> f64 {
 }
 
 /// Every listed gap and the reported largest of the vertex row lie within `delta <= 4e-16`
-/// of 0, the bound on every true gap there, on this branch and as main built it.
+/// of 0, the bound on every true gap there.
 #[test]
-fn the_vertex_rows_largest_gap_is_the_true_largest_on_both_nurbs() {
-    let u = unit("topology.vertex");
-    let all = cases(u.as_ref());
-    let case = &all[CASE];
-    let mut holders = Vec::new();
-    for refit in [false, true] {
-        let run = ["this branch", "main"][usize::from(refit)];
-        if refit {
-            state::set(Some(Refit::default()));
-        }
-        let (b, v, max, list) = crate::units::topology_vertex::wr57_gaps(case);
-        if refit {
-            let r = state::take().expect("refit lost");
-            assert!(r.replaced > 0 && r.failures.is_empty(), "{run}: {r:?}");
-        }
-        let k = Kernel::default();
-        let at = vx::point(&b, v).expect("the vertex");
-        let max = max.expect("a largest gap");
-        // (a gap the cache holds unmeasured, `-SM_UNDEF_DOUBLE`, has no point to bound)
-        let unmeasured = |g: &HeldGap| g.gap.length() == -solidcore::math::UNDEF_DOUBLE;
-        let list: Vec<HeldGap> = list.into_iter().filter(|g| !unmeasured(g)).collect();
-        assert!(!list.is_empty(), "{run}: no measured gap");
-        assert!(
-            !unmeasured(&max),
-            "{run}: the largest gap {max:?} is not measured"
-        );
-        let mut delta = 0.0_f64;
-        for g in &list {
-            let bound = true_gap_bound(&k, &b, at, g);
-            eprintln!(
-                "{run}: {g:?}: reported {:e}, true gap in [0, {bound:e}]",
-                g.gap.length()
-            );
-            delta = delta.max(bound);
-        }
-        eprintln!("{run}: vertex {at:?}, largest {max:?}, delta {delta:e}");
-        assert!(delta <= 4e-16, "{run}: delta {delta:e}");
-        for g in list.iter().chain([&max]) {
-            let r = g.gap.length();
-            assert!(
-                (0.0..=delta).contains(&r),
-                "{run}: the reported gap {r:e} of {g:?} is not in [0, {delta:e}]"
-            );
-        }
-        holders.push(max);
+fn the_vertex_rows_largest_gap_is_the_true_largest() {
+    let (_, all) = unit_cases();
+    let (b, v, max, list) = super::wr57_gaps(&all[CASE]);
+    let k = Kernel::default();
+    let at = vx::point(&b, v).expect("the vertex");
+    let max = max.expect("a largest gap");
+    // (a gap the cache holds unmeasured, `-SM_UNDEF_DOUBLE`, has no point to bound)
+    let unmeasured = |g: &HeldGap| g.gap.length() == -solidcore::math::UNDEF_DOUBLE;
+    let list: Vec<HeldGap> = list.into_iter().filter(|g| !unmeasured(g)).collect();
+    assert!(!list.is_empty(), "no measured gap");
+    assert!(!unmeasured(&max), "the largest gap {max:?} is not measured");
+    let mut delta = 0.0_f64;
+    for g in &list {
+        let bound = true_gap_bound(&k, &b, at, g);
+        eprintln!("{g:?}: reported {:e}, true gap in [0, {bound:e}]", g.gap.length());
+        delta = delta.max(bound);
     }
-    // main's largest is a face gap, this branch's an edge gap: the tie the row moves on
-    assert!(
-        matches!(holders[0].gap, VertexGap::Edge(_)),
-        "{:?}",
-        holders[0]
-    );
-    assert!(
-        matches!(holders[1].gap, VertexGap::Face(_)),
-        "{:?}",
-        holders[1]
-    );
+    eprintln!("vertex {at:?}, largest {max:?}, delta {delta:e}");
+    assert!(delta <= 4e-16, "delta {delta:e}");
+    for g in list.iter().chain([&max]) {
+        let r = g.gap.length();
+        assert!(
+            (0.0..=delta).contains(&r),
+            "the reported gap {r:e} of {g:?} is not in [0, {delta:e}]"
+        );
+    }
+}
+
+/// The row's record: the reported largest gap (an edge gap held by vertex use 2, every
+/// listed gap of length 0) is one the list holds and no listed gap is longer, so the
+/// row's answer is a maximum by construction.
+#[test]
+fn surf_sphere150_rebuild_v3_gaps_reports_a_largest_listed_gap() {
+    let (u, all) = unit_cases();
+    let out = u.run_rust(&all[CASE]).expect("the run");
+    let s = &out.values["state"];
+    // [status, max kind, max holder, max length, list length, (kind, holder, length)...]
+    assert_eq!(s[0], 0.0);
+    let max = (s[1], s[2], s[3]);
+    let n = s[4] as usize;
+    let list: Vec<(f64, f64, f64)> = (0..n)
+        .map(|g| (s[5 + 3 * g], s[6 + 3 * g], s[7 + 3 * g]))
+        .collect();
+    assert_eq!(max, (0.0, 2.0, 0.0), "{s:?}");
+    assert!(list.contains(&max), "{max:?} not in {list:?}");
+    assert!(list.iter().all(|g| g.2 <= max.2), "{list:?}");
 }
