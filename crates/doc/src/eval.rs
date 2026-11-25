@@ -6980,6 +6980,10 @@ fn named_pieces_of(
         piece.component = mb.component;
         if k > 0 {
             piece.split_from = Some(mb.name.clone());
+            // A piece stays with the body, in its component and its frame, as Split Body's pieces
+            // do: its feature may be another component's, a root cut into a placed part (#21156).
+            piece.transferred = true;
+            piece.source_transform = mb.source_transform;
         }
         out.push(piece);
     }

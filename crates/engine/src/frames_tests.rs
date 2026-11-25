@@ -1407,3 +1407,35 @@ fn a_mirror_or_pattern_of_a_root_cut_lands_where_shown_in_a_placed_component() {
     assert!((body_volume(&s, "BoxA") - 15400.0).abs() < 1e-6, "{}", body_volume(&s, "BoxA"));
     assert!((body_volume(&s, "BoxB") - 15700.0).abs() < 1e-6, "{}", body_volume(&s, "BoxB"));
 }
+
+/// #21156: a root cut naming a body of a placed part, that splits it in two, leaves both pieces
+/// where the part is shown. The piece past the first took the cut's own component, the root, so
+/// it was drawn at the part's unplaced place. Part lifted 20 mm; Base 40 × 40 × 10 at x −10..30;
+/// a 4 mm slot at x 8..12 through it leaves two 7,200 mm³ pieces, x −10..8 and x 12..30, z 20..30.
+#[test]
+fn a_root_cut_splitting_a_placed_parts_body_leaves_both_pieces_where_the_part_is() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-10, -20, 0], "body_name": "Base"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let lift = json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "0 deg", "origin": [0, 0, 0], "translate": [0, 0, 20]});
+    run(&mut s, "occurrence.move", lift);
+    run(&mut s, "component.capture_position", json!({}));
+    let slot = json!({"length": 4, "width": 60, "height": 20, "corner": [8, -30, 15], "operation": "cut", "targets": ["Base"], "name": "Slot"});
+    run(&mut s, "solid.box", slot);
+    let part = s.doc.components.iter().find(|c| c.name == "Part").map(|c| c.id).expect("Part");
+    let state = s.model.state();
+    let pieces: Vec<_> = state.bodies.iter().filter(|b| b.name.starts_with("Base")).map(|b| b.name.clone()).collect();
+    assert_eq!(pieces.len(), 2, "{pieces:?}");
+    let mut xs = Vec::new();
+    for name in &pieces {
+        let v = body_volume(&s, name);
+        assert!((v - 7200.0).abs() < 1e-6, "{name}: {v} mm³");
+        assert_eq!(s.doc.model_body_component(state.body(name).unwrap()), part, "{name} belongs to Part");
+        let (min, max) = world_bbox(&s, name);
+        assert!((min.z - 20.0).abs() < 1e-6 && (max.z - 30.0).abs() < 1e-6, "{name} is at z {}..{}, not where Part is", min.z, max.z);
+        xs.push((min.x.round(), max.x.round()));
+    }
+    xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    assert_eq!(xs, [(-10.0, 8.0), (12.0, 30.0)]);
+}

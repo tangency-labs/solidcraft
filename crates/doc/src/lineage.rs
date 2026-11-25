@@ -1264,9 +1264,11 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         // A name moves with the feature it belongs to: in a cut's family the first name is the
         // cut body's own feature's and the rest are the cut's, and `body.rename` stores a name in
         // the `body_names` of the feature a body says made it (#10438). So does the body a name
-        // past the first was split off, which gives that piece its material and look.
-        let names: Vec<(String, u64, Option<String>)> =
-            members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature, b.split_from.clone()))).collect();
+        // past the first was split off, which gives that piece its material and look, and whether
+        // the name's owner is the body's component rather than its feature's (a root cut's piece
+        // of a placed part's body, #21156).
+        let names: Vec<(String, u64, Option<String>, bool)> =
+            members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature, b.split_from.clone(), b.transferred))).collect();
         // The pieces take the family's places in that order too, so the state lists them as
         // their names run. The session pins a feature's body names in state order, and the next
         // evaluation hands them out in this order: listed in the kernel's order, the pieces
@@ -1275,10 +1277,11 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         if moved.len() != members.len() || names.len() != members.len() {
             continue;
         }
-        for ((mut b, (name, feature, split_from)), place) in moved.into_iter().zip(names).zip(&members) {
+        for ((mut b, (name, feature, split_from, transferred)), place) in moved.into_iter().zip(names).zip(&members) {
             b.name = name;
             b.feature = feature;
             b.split_from = split_from;
+            b.transferred = transferred;
             if let Some(slot) = bodies.get_mut(*place) {
                 *slot = b;
             }
