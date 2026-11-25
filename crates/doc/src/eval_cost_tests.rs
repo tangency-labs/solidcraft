@@ -5061,14 +5061,23 @@ fn multi_target_join_batches_same_target_apart_tools_and_keeps_sheet_identity() 
 /// Snapshot of a model's evaluated state for verifying cached incremental replay matches a cold
 /// `no_cache` evaluation identically (bodies, geometry, face names, cosmetic threads, body
 /// counter, and resolved named face points).
-fn full_eval_snapshot(model: &Model) -> (Vec<(String, u64, i64, usize, Vec<String>)>, Vec<ThreadInfo>, usize, Vec<(u64, Vec<[u64; 3]>)>) {
+fn full_eval_snapshot(model: &Model) -> (Vec<(String, u64, i64, [i64; 6], usize, Vec<String>)>, Vec<ThreadInfo>, usize, Vec<(u64, Vec<[u64; 3]>)>) {
     let st = model.state();
     let bodies = st
         .bodies
         .iter()
         .map(|b| {
-            let vol = (kernel::measure(&b.body).unwrap().volume * 1e6).round() as i64;
-            (b.name.clone(), b.component, vol, b.body.face_count(), (*crate::naming::face_names(b)).clone())
+            let m = kernel::measure(&b.body).unwrap();
+            let vol = (m.volume * 1e6).round() as i64;
+            let bb = [
+                (m.bbox.min.x * 1e6).round() as i64,
+                (m.bbox.min.y * 1e6).round() as i64,
+                (m.bbox.min.z * 1e6).round() as i64,
+                (m.bbox.max.x * 1e6).round() as i64,
+                (m.bbox.max.y * 1e6).round() as i64,
+                (m.bbox.max.z * 1e6).round() as i64,
+            ];
+            (b.name.clone(), b.component, vol, bb, b.body.face_count(), (*crate::naming::face_names(b)).clone())
         })
         .collect();
     let named_faces =

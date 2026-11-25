@@ -1422,7 +1422,7 @@ pub(crate) fn face_resolved_on_body(st: &ModelState, body_index: usize, name: &s
     let Some(b) = st.bodies.get(body_index).filter(|b| !b.body.is_mesh()) else {
         return false;
     };
-    locate_in(std::iter::once((body_index, b)), name, p).is_ok()
+    locate_in(std::iter::once((body_index, b)), name, Some(p)).is_ok()
 }
 
 fn locate_face_on_body_with(st: &ModelState, body: Option<&str>, name: &str, p: Vec3, round: bool) -> Option<FaceHit> {

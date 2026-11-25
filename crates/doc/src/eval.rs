@@ -3350,6 +3350,12 @@ impl Feature {
                             let targets = if targets.is_empty() { src.participants.clone() } else { targets };
                             read.bodies.extend(operated((op, targets))?);
                             read.sketches.push(s.0);
+                            if let crate::AxisRef::SketchLine { sketch: Some(axis_sk), .. } = axis {
+                                if !doc.feature(*axis_sk).is_some_and(|x| x.component == self.component) {
+                                    return None;
+                                }
+                                read.sketches.push(*axis_sk);
+                            }
                         }
                         FeatureKind::Thread { modeled: false, target_bodies, up_to: None, .. }
                             if src.component == self.component
@@ -3462,7 +3468,18 @@ impl Feature {
             }
             // About an edge or round face of the model: that geometry is read too.
             FeatureKind::Revolve { axis: crate::AxisRef::Model { .. }, .. } => None,
-            FeatureKind::Revolve { sketch: s, to: None, .. } => Some(Reads { bodies: operated(feature_op(self))?, ..sketch(s)? }),
+            FeatureKind::Revolve { sketch: s, axis, to: None, .. } => {
+                let mut read = Reads { bodies: operated(feature_op(self))?, ..sketch(s)? };
+                if let crate::AxisRef::SketchLine { sketch: Some(axis_sk), .. } = axis {
+                    if !doc.feature(*axis_sk).is_some_and(|x| x.component == self.component) {
+                        return None;
+                    }
+                    read.sketches.push(*axis_sk);
+                    read.sketches.sort_unstable();
+                    read.sketches.dedup();
+                }
+                Some(read)
+            }
             FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } => match body {
                 Some(n) => bodies(named(std::slice::from_ref(&n.0))?),
                 None => bodies(blend_candidates(st, &crate::plain(edges))?),
