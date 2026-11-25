@@ -994,7 +994,9 @@ fn actual_host_document_switch_and_lost_pointer_cancel_pending_drag() {
         } else {
             h.frame_with(vec![egui::Event::PointerGone]);
         }
-        panel_host_pointer(&mut h, drop, false);
+        // Let go outside the window: with float_panel_on_empty_drop, empty canvas inside
+        // it would float the panel.
+        panel_host_pointer(&mut h, egui::pos2(-20.0, -20.0), false);
         h.frames(2);
         assert!(h.app.universal_panel_frame().unwrap().preview.is_none());
         assert_eq!(h.app.panel_runtime().unwrap().layout().layout(), &before);

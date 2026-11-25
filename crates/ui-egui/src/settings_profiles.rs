@@ -59,6 +59,7 @@ const PROFILE_KEYS: &[&str] = &[
     "dialog_buttons",
     "direct_interaction",
     "escape_twice_finishes_sketch",
+    "float_panel_on_empty_drop",
     "free_orbit",
     "free_orbit_key",
     "free_orbit_upright",

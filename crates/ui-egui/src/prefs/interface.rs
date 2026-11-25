@@ -521,6 +521,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             );
             layout_check(
                 ui,
+                app.tr("prefs.float_panel_on_empty_drop"),
+                app.tr("prefs.float_panel_on_empty_drop_help"),
+                &mut app.preferences.float_panel_on_empty_drop,
+                "float_panel_on_empty_drop",
+            );
+            layout_check(
+                ui,
                 app.tr("prefs.history_in_browser"),
                 app.tr("prefs.history_in_browser_note"),
                 &mut app.preferences.history_in_browser,
