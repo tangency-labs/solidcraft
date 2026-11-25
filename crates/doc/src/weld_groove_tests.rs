@@ -161,13 +161,14 @@ fn joint(parts: &[(Body, Order); 2], faces: [&[usize]; 2]) -> Result<Plane> {
 /// L-shaped plate's far corner is about 270 mm from its toe; the 40 by 120 plates' about 75 mm).
 const REACH: f64 = 300.0;
 
-/// How far a frame's unit axis may be off what the test expects, as a vector length: half the
-/// zone tolerance over [`REACH`]. With an origin within [`points`], a point of the parts read in
-/// the frame is off by at most `|Δaxis| L + |Δorigin| <= zone / 2 + zone / 2`, the zone tolerance
-/// ([`sweep::zone_tolerance`], the kernel's own bound for two points being the same), for every
-/// point within `L <= REACH` of the origin (brett19 on #22033).
+/// How far each of a frame's unit axes may be off what the test expects, as a vector length: half
+/// the zone tolerance over `√3 REACH`. A point `o + a x + b y + c n` with `|(a, b, c)| <= L` moves
+/// with the axes by at most `L sqrt(|Δx|² + |Δy|² + |Δn|²) <= √3 L axes()`, `zone / 2` for
+/// `L <= REACH`, and with the origin by at most [`points`], the other half: so every point within
+/// [`REACH`] of the origin is within the zone tolerance ([`sweep::zone_tolerance`], the kernel's
+/// own bound for two points being the same), whatever the axes' errors (brett19 on #22033).
 fn axes() -> f64 {
-    sweep::zone_tolerance().unwrap() / (2.0 * REACH)
+    sweep::zone_tolerance().unwrap() / (2.0 * 3.0_f64.sqrt() * REACH)
 }
 
 /// How far the frame's origin may be off, as a vector length: half the zone tolerance (the other

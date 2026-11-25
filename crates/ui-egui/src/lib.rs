@@ -270,6 +270,7 @@ pub mod pencil;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
+mod plane_resize;
 mod plugin_events;
 mod plugin_images;
 pub mod plugin_install;
