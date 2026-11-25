@@ -24,6 +24,7 @@ fn requested(manifest: &Manifest) -> Grants {
         fuel: Some(rt.limits.fuel),
         memory_mib: Some(rt.limits.memory_mib),
         input_folder: rt.permissions.input_folder,
+        net: !rt.permissions.connect.is_empty(),
     })
 }
 pub fn validate_grants(manifest: &Manifest, grants: &Grants) -> Result<()> {
@@ -32,7 +33,7 @@ pub fn validate_grants(manifest: &Manifest, grants: &Grants) -> Result<()> {
     if grants.command_groups.len() > 4 || grants.folders.len() > 32 || !grants.command_groups.is_subset(&asked.command_groups) {
         return Err(deny().into());
     }
-    if grants.input_folder && !asked.input_folder {
+    if (grants.input_folder && !asked.input_folder) || (grants.net && !asked.net) {
         return Err(deny().into());
     }
     // Fuel, like memory, approves exactly the manifest request within a fixed host ceiling.

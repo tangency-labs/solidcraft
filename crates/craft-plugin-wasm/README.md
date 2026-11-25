@@ -43,7 +43,7 @@ browser `wasm32`, functions return the supplied host and `HostError::Trap` expla
 execution is unsupported. There is no browser execution backend.
 
 The [WIT](../craft-plugin/wit/plugin.wit) imports app commands, logging, progress,
-cancellation, named files and a clock. No WASI is linked. Commands are intersected with
+cancellation, named files, a clock and connections (`net`). No WASI is linked. Commands are intersected with
 the host catalog; read entries cannot invoke commands marked edit, and a command in a
 sensitive group needs that group requested by the manifest and granted by the host. A
 component importing another version of the `craft:plugin` interfaces is refused before
@@ -52,7 +52,10 @@ matching approved grants and `PluginHost::authorize_file_path` approval for each
 path. A symbolic link (or Windows junction) anywhere in a requested path inside a granted
 folder is refused, not followed. There is no ambient filesystem access. Wall time requires
 clock permission.
-Requests for `net` and reserved socket, HTTP and fetch imports are refused.
+The reserved `net` boolean and WASI socket, HTTP and fetch imports are refused. Connections
+go through the `net` interface to [`craft-plugin-net`](../craft-plugin-net/README.md), only for
+an edit entry outside dialog hooks, with `net@0.1` in the manifest and
+`PluginHost::granted_net`; otherwise `net.open` is refused.
 
 Fuel, epoch interruption and store limits bound guest execution. Defaults are
 10,000,000 fuel, 64 MiB memory and 5000 ms. One linear memory is allowed; memory64 is

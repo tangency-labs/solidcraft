@@ -84,6 +84,10 @@ fn empty_params() -> Value {
 pub struct RunResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub forms: Vec<FormRequest>,
+    /// Designs the plugin opened in new tabs (`doc.open` with `new_tab`), files in its granted
+    /// folders: the window opens them after an interactive run; a program opens them itself.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub opens: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub form_validation: Option<FormValidation>,
     pub result: Value,
@@ -422,6 +426,9 @@ pub struct StoredGrant {
     /// Whether an importer may read the files beside the one it opens.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub input_folder: bool,
+    /// Whether the plugin may connect to the endpoints its manifest names (`net@0.1`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub net: bool,
 }
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct GrantsResult {
@@ -464,6 +471,10 @@ pub struct InstallApproval {
     /// manifest asks for `input_folder`.
     #[serde(default)]
     pub input_folder: bool,
+    /// Let the plugin connect to the endpoints its manifest's `permissions.connect` names
+    /// (`net@0.1`); only when it names some.
+    #[serde(default)]
+    pub net: bool,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -487,6 +498,7 @@ impl From<InstallApproval> for crate::plugin::Grants {
             fuel: approve.fuel,
             memory_mib: approve.memory_mib,
             input_folder: approve.input_folder,
+            net: approve.net,
         }
     }
 }

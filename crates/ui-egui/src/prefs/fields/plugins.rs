@@ -15,6 +15,9 @@ macro_rules! plugins_preferences {
             background_shader_pictures: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new(), PAGE_PLUGINS;
             /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
             disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
+            /// The servers plugins may connect to, on top of each plugin's approval (`net@0.1`).
+            /// Empty: no limit beyond those approvals.
+            plugin_allowed_hosts: Vec<solidcraft_engine::plugin::AllowedHost> = Vec::new(), PAGE_PLUGINS;
             /// A plugin's shader for see-through panels' backgrounds, `plugin-id/shader-id` (`shaders@0.2`);
             /// empty for none.
             panel_shader: String = String::new(), PAGE_PLUGINS;

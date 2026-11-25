@@ -3,7 +3,7 @@ use crate::{ImportRequest, Imported, RuntimeOptions};
 use cap_std::fs::OpenOptionsExt;
 use cap_std::fs::{Dir, OpenOptions};
 use craft_plugin::{
-    CommandSchema, Effect, HostError, Limits, LossReport, MAX_EXPORT_FILE_BYTES, MAX_IMPORT_CHUNK_BYTES, MAX_IMPORT_DESIGN_BYTES,
+    CommandSchema, Effect, HostError, Limits, LossReport, MAX_EXPORT_FILE_BYTES, MAX_FILE_BYTES, MAX_IMPORT_CHUNK_BYTES, MAX_IMPORT_DESIGN_BYTES,
     MAX_IMPORT_INPUT_BYTES, MAX_JOB_CALLS, MAX_JSON_BYTES, Manifest, PluginHost, Result,
 };
 use serde_json::Value;
@@ -136,6 +136,9 @@ struct State<H> {
     /// The file an importer reads and the design it writes; `None` for a command.
     import: Option<ImportState>,
     panels: Option<craft_plugin::ui::Declarations>,
+    /// The call's connections (`net@0.1`): only for an edit entry of a plugin that declares the
+    /// capability and that the user allowed to connect; `None` otherwise.
+    net: Option<craft_plugin_net::Connections>,
 }
 struct ImportState {
     /// The folder of the file being imported, opened by the app's authority.
@@ -314,6 +317,81 @@ impl<H: PluginHost> forms::Host for State<H> {
     }
 }
 
+impl<H: PluginHost> State<H> {
+    /// The call's connections, or why it has none. A read entry makes no connection: whatever it
+    /// sends would leave the app.
+    fn connections(&mut self, import: &str) -> std::result::Result<(), PluginError> {
+        self.check()?;
+        if self.effect == Effect::Read {
+            return Err(self.fail(craft_plugin::read_entry_refusal(import)));
+        }
+        if self.net.is_none() {
+            return Err(self.fail(HostError::PermissionDenied {
+                permission: "net: this plugin may not connect here; it needs net@0.1, an edit entry, and the user's approval at install".into(),
+            }));
+        }
+        Ok(())
+    }
+
+    /// Runs `call` on the call's connections, waiting for the network in slices that stop for
+    /// Cancel and the deadline. A connection that fails is an error the plugin can handle (an
+    /// offline server, say); a refusal, Cancel or the deadline end the call.
+    fn on_net<T>(
+        &mut self,
+        import: &str,
+        call: impl FnOnce(&mut craft_plugin_net::Connections, craft_plugin_net::Wait) -> Result<T>,
+    ) -> std::result::Result<T, PluginError> {
+        self.connections(import)?;
+        let deadline_at = self.deadline;
+        let host = &self.host;
+        let mut wait = || {
+            if host.is_cancelled() {
+                Err(HostError::Cancelled)
+            } else if Instant::now() >= deadline_at {
+                Err(deadline())
+            } else {
+                Ok(())
+            }
+        };
+        let Some(connections) = self.net.as_mut() else {
+            return Err(wit_error(HostError::PermissionDenied { permission: "net".into() }));
+        };
+        match call(connections, &mut wait) {
+            Ok(value) => Ok(value),
+            Err(error @ (HostError::PermissionDenied { .. } | HostError::Cancelled | HostError::Exhausted { .. })) => Err(self.fail(error)),
+            Err(error) => Err(wit_error(error)),
+        }
+    }
+}
+impl<H: PluginHost> net::Host for State<H> {
+    fn open(&mut self, host: String, port: u16, transport: net::Transport) -> std::result::Result<u32, PluginError> {
+        let request = match transport {
+            net::Transport::Tcp => craft_plugin_net::Request::Tcp,
+            net::Transport::Tls => craft_plugin_net::Request::Tls,
+            net::Transport::Ssh(net::SshCommand { user, command }) => craft_plugin_net::Request::Ssh { user, command },
+        };
+        self.on_net("net.open", |connections, wait| connections.open(&host, port, request, wait))
+    }
+
+    fn read(&mut self, connection: u32, max: u32) -> std::result::Result<Vec<u8>, PluginError> {
+        self.on_net("net.read", |connections, wait| connections.read(connection, max as usize, wait))
+    }
+
+    fn write(&mut self, connection: u32, data: Vec<u8>) -> std::result::Result<(), PluginError> {
+        self.on_net("net.write", |connections, wait| connections.write(connection, &data, wait))
+    }
+
+    fn finish(&mut self, connection: u32) -> std::result::Result<(), PluginError> {
+        self.on_net("net.finish", |connections, wait| connections.finish(connection, wait))
+    }
+
+    fn close(&mut self, connection: u32) {
+        if let Some(connections) = self.net.as_mut() {
+            connections.close(connection);
+        }
+    }
+}
+
 impl<H: PluginHost> clock::Host for State<H> {
     fn now(&mut self) -> u64 {
         if !self.clock || self.check().is_err() {
@@ -361,6 +439,21 @@ impl<H: PluginHost> State<H> {
     }
 }
 impl<H: PluginHost> files::Host for State<H> {
+    fn locate(&mut self, grant: String, path: String) -> std::result::Result<String, PluginError> {
+        let write = self.folders.get(&grant).is_some_and(|folder| folder.write);
+        self.file_path(&grant, &path, write)?;
+        let Some(folder) = self.folders.get(&grant).map(|folder| folder.path.clone()) else {
+            return Err(self.fail(HostError::PermissionDenied { permission: format!("files.locate:{grant}") }));
+        };
+        // A folder the user chose stays unknown to the plugin; the one the app keeps for it is not
+        // the user's to hide.
+        if !self.host.names_folder(&folder) {
+            return Err(self.fail(HostError::PermissionDenied {
+                permission: format!("files.locate:{grant}: only a folder the app keeps for the plugin (x-solidcraft-app-data-folders) is named"),
+            }));
+        }
+        Ok(folder.join(&path).to_string_lossy().into_owned())
+    }
     fn read_file(&mut self, grant: String, path: String) -> std::result::Result<Vec<u8>, PluginError> {
         self.file_path(&grant, &path, false)?;
         // `None`: the path is allowed and nothing is there (and no write of this call is staged for it).
@@ -375,7 +468,7 @@ impl<H: PluginHost> files::Host for State<H> {
                 return Err(std::io::Error::other("only regular files are supported"));
             }
             let mut bytes = Vec::new();
-            file.take(MAX_JSON_BYTES as u64 + 1).read_to_end(&mut bytes)?;
+            file.take(MAX_FILE_BYTES as u64 + 1).read_to_end(&mut bytes)?;
             Ok(Some(bytes))
         })();
         let bytes = read.map_err(|e| self.fail(HostError::PermissionDenied { permission: format!("files.read:{grant}: {e}") }))?;
@@ -384,8 +477,8 @@ impl<H: PluginHost> files::Host for State<H> {
         let Some(bytes) = bytes else {
             return Err(wit_error(HostError::InvalidInput { field: "path".into(), reason: "no such file".into() }));
         };
-        if bytes.len() > MAX_JSON_BYTES {
-            return Err(self.fail(limit("file read size")));
+        if bytes.len() > MAX_FILE_BYTES {
+            return Err(self.fail(limit("file read size (64 MiB)")));
         }
         Ok(bytes)
     }
@@ -397,8 +490,8 @@ impl<H: PluginHost> files::Host for State<H> {
         }
         self.file_path(&grant, &path, true)?;
         let path: PathBuf = Path::new(&path).components().collect();
-        if data.len() > MAX_JSON_BYTES {
-            return Err(self.fail(limit("file write size")));
+        if data.len() > MAX_FILE_BYTES {
+            return Err(self.fail(limit("file write size (64 MiB)")));
         }
         let mut created = Vec::new();
         let write = (|| -> std::io::Result<PathBuf> {
@@ -929,6 +1022,10 @@ fn run_mode<H: PluginHost + 'static>(
             .capabilities
             .iter()
             .any(|c| c.split_once('@').is_some_and(|(name, version)| name == "forms" && craft_plugin::capability_version(version) == Some((0, 1)))),
+        manifest
+            .capabilities
+            .iter()
+            .any(|c| c.split_once('@').is_some_and(|(name, version)| name == "net" && craft_plugin::capability_version(version) == Some((0, 1)))),
         dialog,
     );
     let result = (|| match outcome {
@@ -960,9 +1057,15 @@ fn execute<H: PluginHost + 'static>(
     folders: BTreeMap<String, Folder>,
     options: RuntimeOptions,
     forms: bool,
+    net: bool,
     dialog: bool,
 ) -> (State<H>, Result<Value>) {
     let limits = &runtime.limits;
+    // Connections only for an edit entry the user's grant covers; never for a dialog hook.
+    let net = (net && !dialog && entry.effect == Effect::Edit && host.granted_net()).then(|| {
+        let options = craft_plugin_net::Options { allowed_hosts: host.net_allowed_hosts(), ..craft_plugin_net::Options::user() };
+        craft_plugin_net::Connections::new(runtime.permissions.connect.clone(), options)
+    });
     // A long job runs for its fixed deadline, and reports its progress as often as it likes.
     let (deadline_ms, max_calls) = if entry.job { (options.job_deadline_ms, MAX_JOB_CALLS) } else { (limits.deadline_ms, MAX_CALLS) };
     let state = State {
@@ -984,6 +1087,7 @@ fn execute<H: PluginHost + 'static>(
         limits: store_limits(limits, 10_000),
         import: None,
         panels: runtime.ui.clone(),
+        net,
     };
     let mut store = Store::new(&engine, state);
     let outcome = (|| {
@@ -1640,6 +1744,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         limits: store_limits(limits, 1_000_000),
         import: Some(import),
         panels: None,
+        net: None,
     };
     let mut store = Store::new(&engine, state);
     let outcome = (|| {
@@ -1756,6 +1861,7 @@ pub(super) fn run_export<H: PluginHost + 'static>(
         limits: store_limits(limits, 1_000_000),
         import: None,
         panels: None,
+        net: None,
     };
     let mut store = Store::new(&engine, state);
     let outcome = (|| {

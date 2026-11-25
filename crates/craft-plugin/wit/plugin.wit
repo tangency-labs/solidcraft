@@ -15,6 +15,8 @@ package craft:plugin@0.2.0;
 // - `ui@0.1`: ui and ui-provider (world `panel-plugin`).
 // - `forms@0.1`: with `commands`, forms.open, to request a populated command form;
 //   programs receive an interactive-required refusal instead of a window.
+// - `net@0.1`: with `commands`, net, for TCP, TLS and SSH connections to the endpoints the
+//   manifest's `permissions.connect` names and the user allowed at install.
 // Later capabilities (viewport) arrive as their own interfaces. While the version is
 // 0.x, a minor version may break the one before it. 0.2 added `plugin-error.unsupported`. A host
 // still runs plugins built against 0.1 (`../wit-0.1/plugin.wit`): it reads the version from the
@@ -86,11 +88,46 @@ interface control {
 }
 interface files {
     use types.{plugin-error};
+    // A file in a granted folder, up to 64 MiB.
     read-file: func(grant: string, path: string) -> result<list<u8>, plugin-error>;
     write-file: func(grant: string, path: string, data: list<u8>) -> result<_, plugin-error>;
+    // The full path of `path` in `grant`, for an app command that takes one (`file.save_as`,
+    // `doc.open`). Only for a folder the app keeps for the plugin (`x-solidcraft-app-data-folders`):
+    // where a folder the user chose is stays unknown to the plugin.
+    locate: func(grant: string, path: string) -> result<string, plugin-error>;
 }
 interface clock {
     now: func() -> u64;
+}
+// Connections to servers (capability `net@0.1`): only to the endpoints the manifest's
+// `permissions.connect` names, and only once the user allowed it at install. The app makes the
+// connection and the plugin reads and writes its bytes. `tls`: the app encrypts it and checks
+// the server's certificate against the system's trusted roots. `ssh`: the app opens an SSH
+// session, checks the server's key against the user's known hosts, signs in with the user's SSH
+// agent or keys, and runs `command` on the server; the connection carries its input and output.
+// A connection lasts until it is closed or the run ends. A read entry, a preview and a dialog
+// hook make none.
+interface net {
+    use types.{plugin-error};
+    record ssh-command {
+        user: string,
+        command: string,
+    }
+    variant transport {
+        tcp,
+        tls,
+        ssh(ssh-command),
+    }
+    // Opens a connection to `host` (a name or an address) and returns its handle.
+    open: func(host: string, port: u16, transport: transport) -> result<u32, plugin-error>;
+    // Up to `max` bytes (at most 1 MiB), as soon as some arrive; empty once the other side has
+    // finished. An SSH command that failed is an error carrying what it printed.
+    read: func(connection: u32, max: u32) -> result<list<u8>, plugin-error>;
+    write: func(connection: u32, data: list<u8>) -> result<_, plugin-error>;
+    // This side has finished writing (TCP half-close, TLS close-notify, the end of an SSH
+    // command's input); reading goes on.
+    finish: func(connection: u32) -> result<_, plugin-error>;
+    close: func(connection: u32);
 }
 // A plugin's own files in the open design (capability `storage@0.1`), as bytes: never as text.
 // Files are named by a plain relative path; a cache file is one the plugin can make again, which
@@ -175,6 +212,7 @@ world command-plugin {
     import files;
     import clock;
     import storage;
+    import net;
     export entry;
 }
 world importer-plugin {

@@ -337,6 +337,7 @@ pub(crate) fn describe<H: PluginHost + 'static>(
         deadline: Instant::now() + Duration::from_millis(limits.deadline_ms),
         import: None,
         panels: None,
+        net: None,
     };
     let mut store = Store::new(&engine, state);
     let outcome = (|| {

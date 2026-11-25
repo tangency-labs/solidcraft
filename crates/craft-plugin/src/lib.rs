@@ -15,6 +15,9 @@ pub const WIT: &str = include_str!("../wit/plugin.wit");
 pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 pub const MAX_COMPONENT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_JSON_BYTES: usize = 1024 * 1024;
+/// The largest file `files.read-file` reads and `files.write-file` writes, within the plugin's
+/// memory limit.
+pub const MAX_FILE_BYTES: usize = 64 * 1024 * 1024;
 /// An importer's component may be larger: a real converter measured 28 to 42 MB (RFC 0002).
 pub const MAX_IMPORTER_COMPONENT_BYTES: usize = 64 * 1024 * 1024;
 /// The most one `source.read` or `design.write` call moves.
@@ -179,6 +182,7 @@ pub const CAPABILITIES: &[(&str, (u32, u32))] = &[
     ("evaluate", (0, 2)),
     ("formats", (0, 2)),
     ("forms", (0, 1)),
+    ("net", (0, 1)),
     ("shaders", (0, 2)),
     ("storage", (0, 1)),
     ("themes", (0, 1)),
@@ -332,6 +336,23 @@ pub trait PluginHost {
     fn granted_command_groups(&self) -> BTreeSet<String> {
         BTreeSet::new()
     }
+    /// Whether the user allowed this exact package's connections (`net@0.1`): then the guest may
+    /// open connections to the endpoints its manifest's `permissions.connect` names. No by default.
+    fn granted_net(&self) -> bool {
+        false
+    }
+    /// The user's allowlist of servers (`HostLimits::allowed_hosts`): a connection must be on it
+    /// too, when it names any. Empty by default: no limit beyond the plugin's approval.
+    fn net_allowed_hosts(&self) -> Vec<AllowedHost> {
+        Vec::new()
+    }
+    /// Whether a plugin may learn the full path of a file in granted `folder` (`files.locate`), to
+    /// give it to a command: only for a folder the app keeps for the plugin, never one the user
+    /// chose. No by default.
+    fn names_folder(&self, folder: &Path) -> bool {
+        let _ = folder;
+        false
+    }
     /// Apply the caller's scope to every complete file path, in addition to folder grants.
     /// Approved folder roots may have hidden ancestors. Hidden child names require
     /// a more specific folder grant or a host override applying explicit scope.
@@ -396,15 +417,20 @@ pub trait PluginHost {
 }
 
 /// User-owned ceilings, separate from the package's exact content-approved request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct HostLimits {
     pub max_fuel: u64,
     pub max_memory_mib: usize,
+    /// The servers plugins may connect to (`net@0.1`): a plugin reaches a server only when it is
+    /// both on this list and among the endpoints the plugin was allowed at install. Empty: only
+    /// the latter decide.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub allowed_hosts: Vec<AllowedHost>,
 }
 impl Default for HostLimits {
     fn default() -> Self {
-        Self { max_fuel: 100_000_000_000, max_memory_mib: 128 }
+        Self { max_fuel: 100_000_000_000, max_memory_mib: 128, allowed_hosts: Vec::new() }
     }
 }
 impl HostLimits {
@@ -412,7 +438,14 @@ impl HostLimits {
         if self.max_fuel == 0 || !(1..=MAX_MEMORY_MIB).contains(&self.max_memory_mib) {
             return Err(invalid("host_limits", "requires positive max_fuel and max_memory_mib 1..4096 (Wasm32)"));
         }
+        if self.allowed_hosts.len() > MAX_ALLOWED_HOSTS {
+            return Err(invalid("host_limits.allowed_hosts", format!("at most {MAX_ALLOWED_HOSTS} servers")));
+        }
         Ok(())
+    }
+    /// Whether the user's allowlist lets a plugin reach `host:port` (always, without one).
+    pub fn allows_host(&self, host: &str, port: u16) -> bool {
+        self.allowed_hosts.is_empty() || self.allowed_hosts.iter().any(|allowed| allowed.allows(host, port))
     }
     pub fn check(&self, requested: &Limits) -> Result<()> {
         self.validate()?;
@@ -475,13 +508,23 @@ pub struct Permissions {
     /// An importer may read the other files in the folder of the file it imports (an assembly's
     /// parts), through `source`. Nothing outside that folder, and only during that one import.
     pub input_folder: bool,
-    /// Reserved: refused in this API regardless of app grants.
+    /// Reserved: refused in this API regardless of app grants. Connections are asked for with
+    /// [`Permissions::connect`] and the `net@0.1` capability instead.
     pub net: bool,
+    /// The endpoints the plugin may connect to (capability `net@0.1`), shown at install and allowed
+    /// or not as a whole.
+    pub connect: Vec<ConnectPermission>,
 }
 impl Permissions {
     pub fn validate(&self) -> Result<()> {
         if self.net {
             return Err(HostError::PermissionDenied { permission: "net".into() });
+        }
+        if self.connect.len() > MAX_CONNECT_ENDPOINTS {
+            return Err(invalid("runtime.permissions.connect", format!("at most {MAX_CONNECT_ENDPOINTS} endpoints")));
+        }
+        for endpoint in &self.connect {
+            endpoint.validate()?;
         }
         if self.command_groups.len() > 16 || self.command_groups.iter().any(|group| !valid_id(group)) {
             return Err(invalid("runtime.permissions.command_groups", "at most 16 lowercase group names"));
@@ -496,6 +539,166 @@ impl Permissions {
             }
         }
         Ok(())
+    }
+}
+
+/// The most endpoints `permissions.connect` may name.
+pub const MAX_CONNECT_ENDPOINTS: usize = 32;
+
+/// How the app carries a connection (`net@0.1`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Transport {
+    /// Plain TCP: the bytes travel as they are.
+    Tcp,
+    /// TCP encrypted by the app, the server's certificate checked against the system's roots.
+    Tls,
+    /// An SSH session the app opens and signs in to, running one command on the server.
+    Ssh,
+}
+
+impl Transport {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Tcp => "tcp",
+            Self::Tls => "tls",
+            Self::Ssh => "ssh",
+        }
+    }
+}
+
+/// One endpoint a plugin may connect to: a host pattern, a port (any when left out) and how.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ConnectPermission {
+    /// A host name or address (`github.com`, `192.168.1.20`), `*.example.com` for the names under
+    /// a domain, or `*` for any host.
+    pub host: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    pub transport: Transport,
+}
+
+/// A host pattern: a lowercase host name, an address, `*.domain` for the names under a domain, or
+/// `*` for any host.
+fn valid_host_pattern(pattern: &str) -> bool {
+    let name = pattern.strip_prefix("*.").unwrap_or(pattern);
+    let host_name = (1..=253).contains(&name.len())
+        && name.split('.').all(|label| {
+            (1..=63).contains(&label.len())
+                && label.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+        });
+    let address = name.parse::<std::net::IpAddr>().is_ok() && !pattern.starts_with('*');
+    pattern == "*" || address || host_name
+}
+
+/// Whether `host` is one `pattern` names; names compare without case or a trailing dot.
+fn host_matches(pattern: &str, host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    match pattern.strip_prefix("*.") {
+        _ if pattern == "*" => true,
+        Some(domain) => host.strip_suffix(domain).is_some_and(|rest| rest.len() > 1 && rest.ends_with('.')),
+        // An address compares by value: `::1` and `0:0:0:0:0:0:0:1` are one address.
+        None => match (pattern.parse::<std::net::IpAddr>(), host.parse::<std::net::IpAddr>()) {
+            (Ok(allowed), Ok(asked)) => allowed == asked,
+            _ => host == pattern,
+        },
+    }
+}
+
+/// The most servers the user's allowlist may name.
+pub const MAX_ALLOWED_HOSTS: usize = 64;
+
+/// A server on the user's allowlist for plugin connections, written `github.com`,
+/// `github.com:443`, `*.example.com:22`, `localhost`, `192.168.1.20` or `[::1]:22`.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(try_from = "String", into = "String")]
+#[schemars(with = "String")]
+pub struct AllowedHost {
+    pub host: String,
+    pub port: Option<u16>,
+}
+
+impl AllowedHost {
+    pub fn allows(&self, host: &str, port: u16) -> bool {
+        host_matches(&self.host, host) && self.port.is_none_or(|allowed| allowed == port)
+    }
+}
+
+impl TryFrom<String> for AllowedHost {
+    type Error = String;
+    fn try_from(text: String) -> std::result::Result<Self, String> {
+        let text = text.trim().to_ascii_lowercase();
+        let (host, port) = if let Some(rest) = text.strip_prefix('[') {
+            // `[::1]` or `[::1]:22`.
+            let (host, after) = rest.split_once(']').ok_or_else(|| format!("`{text}`: an address in brackets needs its `]`"))?;
+            let port = match after {
+                "" => None,
+                _ => Some(after.strip_prefix(':').ok_or_else(|| format!("`{text}`: after `]` comes nothing or `:port`"))?.to_string()),
+            };
+            (host.to_string(), port)
+        } else {
+            match text.rsplit_once(':') {
+                Some((host, port)) if !host.contains(':') => (host.to_string(), Some(port.to_string())),
+                _ => (text.clone(), None),
+            }
+        };
+        let port = match port {
+            Some(port) => Some(port.parse::<u16>().ok().filter(|port| *port > 0).ok_or_else(|| format!("`{text}`: a port is 1 to 65535"))?),
+            None => None,
+        };
+        if !valid_host_pattern(&host) {
+            return Err(format!("`{text}` is not a host name, an address, *.domain or *"));
+        }
+        Ok(Self { host, port })
+    }
+}
+
+impl From<AllowedHost> for String {
+    fn from(allowed: AllowedHost) -> Self {
+        let host = if allowed.host.contains(':') { format!("[{}]", allowed.host) } else { allowed.host };
+        match allowed.port {
+            Some(port) => format!("{host}:{port}"),
+            None => host,
+        }
+    }
+}
+
+impl ConnectPermission {
+    pub fn validate(&self) -> Result<()> {
+        let pattern = self.host.as_str();
+        if !valid_host_pattern(pattern) {
+            return Err(invalid(
+                "runtime.permissions.connect.host",
+                format!("`{pattern}` is not a lowercase host name, an address, `*.domain` or `*`"),
+            ));
+        }
+        if self.port == Some(0) {
+            return Err(invalid("runtime.permissions.connect.port", "a port is 1 to 65535, or left out for any port"));
+        }
+        Ok(())
+    }
+
+    /// Whether this endpoint lets a plugin connect to `host:port` over `transport`.
+    pub fn allows(&self, host: &str, port: u16, transport: Transport) -> bool {
+        host_matches(&self.host, host) && self.port.is_none_or(|allowed| allowed == port) && self.transport == transport
+    }
+
+    /// The endpoint as people read it: `github.com:443 over TLS`, `any host over SSH`.
+    pub fn describe(&self) -> String {
+        let host = match self.host.as_str() {
+            "*" => "any host".to_string(),
+            host => host.to_string(),
+        };
+        let port = self.port.map(|port| format!(":{port}")).unwrap_or_default();
+        let how = match self.transport {
+            Transport::Tcp => "plain TCP (unencrypted)",
+            Transport::Tls => "TLS",
+            Transport::Ssh => "SSH",
+        };
+        format!("{host}{port} over {how}")
     }
 }
 
@@ -1029,6 +1232,25 @@ fn check_storage(manifest: &Manifest) -> Result<()> {
     Ok(())
 }
 
+/// A plugin that connects to servers asks for `net@0.1` and names the endpoints in
+/// `permissions.connect`; only a command plugin does.
+fn check_net(manifest: &Manifest) -> Result<()> {
+    let net = manifest.capabilities.iter().any(|capability| capability.starts_with("net@"));
+    let runtime = manifest.runtime.as_ref();
+    let endpoints = runtime.map_or(0, |runtime| runtime.permissions.connect.len());
+    match (net, endpoints) {
+        (false, 0) => Ok(()),
+        (false, _) => Err(invalid("runtime.permissions.connect", "connections need the net capability: add \"net@0.1\" to capabilities")),
+        (true, 0) => {
+            Err(invalid("runtime.permissions.connect", "name the endpoints the plugin connects to, e.g. {\"host\": \"*\", \"transport\": \"tls\"}"))
+        }
+        (true, _) if runtime.is_some_and(|runtime| runtime.is_importer() || runtime.is_exporter()) => {
+            Err(invalid("capabilities", "net is for command plugins; an importer or exporter makes no connections"))
+        }
+        (true, _) => Ok(()),
+    }
+}
+
 pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
     parse_manifest_for(text, folder, "the app")
 }
@@ -1126,6 +1348,7 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         return Err(invalid("runtime.listeners", "design listeners require capability design@0.1"));
     }
     check_storage(&manifest)?;
+    check_net(&manifest)?;
     let has_ui = manifest.capabilities.iter().any(|cap| cap.starts_with("ui@"));
     if has_ui && manifest.runtime.as_ref().is_none_or(RuntimeManifest::is_importer) {
         return Err(invalid("capabilities", "ui requires a command plugin runtime"));

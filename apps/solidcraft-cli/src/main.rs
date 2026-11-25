@@ -24,11 +24,11 @@
 //!                                                             MCP server on stdio (docs/mcp.md)
 //! solidcraft-cli mcp setup [--dry-run] [--client NAME] [--live] (alias: mcp install) add it to OpenCode, Claude Desktop, Claude Code, Cursor
 //! solidcraft-cli plugin check <folder|plugin.zip> [--json]    what Install and a call would refuse, with fixes
-//! solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] [--require-cases]  run the plugin's tests/*.json on the real host
+//! solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] [--require-cases] [--allow-net]  run the plugin's tests/*.json on the real host
 //! solidcraft-cli licences                                     SolidCraft's licence and the third-party licences
 //! solidcraft-cli icon --out F.png|F.ico [--size N]             the app icon (packaging; drawn, not a file)
 //!
-//! --plugin-limits FILE.json (local sessions only)              user fuel/memory ceilings; connected desktops use their own preferences
+//! --plugin-limits FILE.json (local sessions only)              user fuel/memory ceilings and allowed servers; connected desktops use their own preferences
 //! --plugins-dir DIR (local sessions only)                     installed plugins (default: the app's own)
 //! --keep-plugin-approvals (local sessions only)               keep plugin approvals between runs, in the plugins folder's grant store
 //! --debug (with any command)                                  SolidCraft's debug log on stderr (or RUST_LOG=LEVEL)
@@ -121,7 +121,7 @@ macro_rules! define_plugin_usage {
 }
 define_plugin_usage!(
     "  solidcraft-cli plugin check <folder|plugin.zip> [--json]    what Install and a call would refuse, with fixes\n      (check: what Install and a call would refuse, without running the plugin: the manifest and its size, permissions\n       (net is refused), limits, the component's WIT world and version; each problem with how to fix it; exits non-zero on an error;\n       a folder is checked without its tests folder and hidden files; plugin.inspect and plugin.run need the folder named after\n       the plugin's id, as Install names it)\n",
-    "  solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] [--require-cases]  run the plugin's tests/*.json on the real host\n      (test: installs the package in a scratch folder and runs its test cases, tests/*.json, on the real host and limits;\n       an entry with no case runs once with its defaults when it can; --json prints pass or fail per case; --out DIR keeps\n       each case's resulting design and log; exits non-zero when a case fails; --require-cases also fails an entry no case\n       covers, instead of skipping it; see the plugin guide in the docs)\n"
+    "  solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] [--require-cases] [--allow-net]  run the plugin's tests/*.json on the real host\n      (test: installs the package in a scratch folder and runs its test cases, tests/*.json, on the real host and limits;\n       an entry with no case runs once with its defaults when it can; --json prints pass or fail per case; --out DIR keeps\n       each case's resulting design and log; exits non-zero when a case fails; --require-cases also fails an entry no case\n       covers, instead of skipping it; --allow-net lets cases connect to the servers the manifest names (off by default);\n       see the plugin guide in the docs)\n"
 );
 
 /// `crashes`'s lines in the usage.
@@ -141,7 +141,7 @@ const USAGE_SAVE_STRESS: &str = "  solidcraft-cli save-stress <path> <rounds>\n"
 /// The flags every command takes, at the end of the top-level usage.
 const USAGE_DEBUG: &str = "  --debug, with any command: what SolidCraft logs (why a body has no display plan, why a save left its\n      model cache out), on stderr; RUST_LOG=error|warn|info|debug|trace sets one level for every crate\n  --max-file-size SIZE, with any command: read STEP and import files and design files up to SIZE for this run\n      (for example 2GB or 1500MB; at most 16GB; the defaults are 512 MB and 256 MB, and a smaller SIZE keeps them)\n";
 
-const USAGE_PLUGIN_LIMITS: &str = "  --plugin-limits FILE.json, with local commands: user ceilings {max_fuel, max_memory_mib}; defaults 100000000000 / 128, invocation defaults remain 10000000 / 64 MiB. With mcp use --headless; connected desktops keep their own preferences.\n";
+const USAGE_PLUGIN_LIMITS: &str = "  --plugin-limits FILE.json, with local commands: user ceilings {max_fuel, max_memory_mib, allowed_hosts}; defaults 100000000000 / 128 / no server list, invocation defaults remain 10000000 / 64 MiB. With mcp use --headless; connected desktops keep their own preferences.\n";
 
 const USAGE_PLUGINS_DIR: &str = "  --plugins-dir DIR, with local commands: the folder plugin.install installs to and importers are found in;\n      default: the desktop app's plugins folder.\n  --keep-plugin-approvals, with local commands: keep plugin approvals between runs, in the plugins folder's grant\n      store (DIR/.grants), shared with the desktop app, so a plugin installed and approved there or in an earlier run\n      is used here; list them with plugin.grants and take one back with plugin.revoke. Without it, approvals last for\n      the run.\n";
 

@@ -161,8 +161,15 @@ fn fix_for(field: &str) -> String {
         }
         "runtime.permissions.input_folder" => "Remove \"input_folder\": only an importer reads the folder of the file it opens.",
         "runtime.permissions.net" => {
-            "Remove \"net\": SolidCraft gives plugins no network access. Read and write files through named folder grants instead."
+            "Remove \"net\": to connect, add \"net@0.1\" to capabilities and name each endpoint in \"connect\", such as [{\"host\": \"*\", \"transport\": \"tls\"}]."
         }
+        "runtime.permissions.connect" => {
+            "Name each endpoint the plugin connects to, {\"host\": \"github.com\", \"port\": 443, \"transport\": \"tls\"} (host \"*\" or \"*.domain\", port optional, transport tcp, tls or ssh), with \"net@0.1\" in capabilities."
+        }
+        "runtime.permissions.connect.host" => {
+            "Use a lowercase host name or address, \"*.domain\" for the names under a domain, or \"*\" for any host."
+        }
+        "runtime.permissions.connect.port" => "Give a port from 1 to 65535, or leave it out for any port.",
         "runtime.limits.fuel" => {
             "Set \"fuel\" to a positive number up to 10000000000000. Above Max plugin fuel, Install asks the user to approve it."
         }
@@ -180,7 +187,7 @@ fn fix_for(field: &str) -> String {
     };
     if field == "capabilities" {
         return format!(
-            "List the capabilities the plugin uses: \"commands@0.2\" for a command plugin, \"formats@0.2\" for an importer (with \"evaluate@0.2\" to check its result) or an exporter. This SolidCraft serves {}, and still runs plugins built for 0.1.",
+            "List the capabilities the plugin uses: \"commands@0.2\" for a command plugin (with \"net@0.1\" to connect to servers), \"formats@0.2\" for an importer (with \"evaluate@0.2\" to check its result) or an exporter. This SolidCraft serves {}, and still runs plugins built for 0.1.",
             served()
         );
     }
@@ -223,7 +230,7 @@ fn host_problem(e: &HostError) -> CheckProblem {
         HostError::PermissionDenied { permission } if permission.starts_with("network import") => error_problem(
             "component",
             permission.clone(),
-            "Remove the network import: SolidCraft gives plugins no network access, so build without HTTP or socket crates.",
+            "Remove the network import: a plugin connects only through the app's net interface (capability net@0.1), so build without WASI, HTTP or socket crates.",
         ),
         HostError::LimitExceeded { limit } if limit.contains("manifest") => {
             error_problem("plugin.json", limit.clone(), "Keep plugin.json under 16 KiB: move long text into a README in the package.")
@@ -349,7 +356,7 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
         .into(),
     );
     result.entries = runtime.entries.clone();
-    let ceilings = session.plugin_limits;
+    let ceilings = &session.plugin_limits;
     if runtime.limits.fuel > ceilings.max_fuel {
         result.problems.push(problem(
             Severity::Warning,

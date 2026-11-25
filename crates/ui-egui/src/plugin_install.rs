@@ -27,6 +27,8 @@ pub(crate) struct Ask {
     pub(crate) grants: solidcraft_engine::plugin::Grants,
     /// A downloaded update of an installed plugin (`plugin_updates`).
     pub(crate) update: bool,
+    /// Folder grants the app places itself (`x-solidcraft-app-data-folders`): shown, never asked.
+    pub(crate) managed: std::collections::BTreeSet<String>,
 }
 
 /// Whether this build installs plugins: the browser has no plugins folder.
@@ -57,6 +59,32 @@ pub(crate) fn review(app: &mut SolveApp, path: String) {
 
 /// A checked package; updates reuse named folders only for the same or lower access.
 pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
+    described_in_data(app, path, plugin, solidcraft_engine::recovery::data_dir());
+}
+
+/// A plain folder name the app may make inside its data folder.
+fn data_component(value: &str) -> bool {
+    !matches!(value, "" | "." | "..")
+        && value.len() <= 128
+        && value.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || b"._-".contains(&c))
+}
+
+/// [`described`], with the app's data folder given. An entry's input schema may name folder grants
+/// in `x-solidcraft-app-data-folders`: those are the app's `plugin-data/<plugin id>/<grant>` in its
+/// data folder, the same on every computer, so the review shows where they are and asks nothing.
+fn described_in_data(app: &mut SolveApp, path: String, plugin: Value, data: Option<std::path::PathBuf>) {
+    let plugin_id = text(&plugin, "id");
+    let managed: std::collections::BTreeSet<String> = plugin
+        .get("entry_points")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.pointer("/input_schema/x-solidcraft-app-data-folders").and_then(Value::as_array))
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|name| data_component(&plugin_id) && data_component(name))
+        .map(str::to_owned)
+        .collect();
     let permissions = plugin.get("permissions");
     let stored = plugin
         .get("replaces")
@@ -78,7 +106,13 @@ pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
                     read: folder.get("read").and_then(Value::as_bool).unwrap_or(false),
                     write: folder.get("write").and_then(Value::as_bool).unwrap_or(false),
                 };
-                if let Some(previous) = stored
+                if managed.contains(&grant.name) {
+                    grant.folder = data
+                        .as_ref()
+                        .filter(|root| root.is_absolute())
+                        .map(|root| root.join("plugin-data").join(&plugin_id).join(&grant.name))
+                        .unwrap_or_default();
+                } else if let Some(previous) = stored
                     .and_then(|grants| grants.folders.iter().find(|previous| previous.name == grant.name))
                     .filter(|previous| grant.access() <= previous.access())
                 {
@@ -90,6 +124,8 @@ pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
         fuel: fuel_request(&plugin, app.preferences.plugin_max_fuel),
         memory_mib: memory_request(&plugin, app.preferences.plugin_max_memory_mib),
         input_folder: permissions.and_then(|p| p.get("input_folder")).and_then(Value::as_bool).unwrap_or(false),
+        // Connections are shown endpoint by endpoint above, and Install allows them as a whole.
+        net: permissions.and_then(|p| p.get("connect")).and_then(Value::as_array).is_some_and(|endpoints| !endpoints.is_empty()),
     };
     let update = match crate::plugin_updates::prepare(app, &path, &plugin) {
         None => false,
@@ -103,7 +139,7 @@ pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
     // These are editable starting values, not grants for the new package. Install validates
     // every folder on its worker, including a stored folder that has since disappeared.
     app.plugin_install.generation = app.plugin_install.generation.wrapping_add(1);
-    app.plugin_install.ask = Some(Ask { path, plugin, grants, update });
+    app.plugin_install.ask = Some(Ask { path, plugin, grants, update, managed });
 }
 
 fn browse_folder(app: &mut SolveApp, name: String) {
@@ -112,6 +148,7 @@ fn browse_folder(app: &mut SolveApp, name: String) {
         if app.plugin_install.generation == generation
             && let Some(path) = path
             && let Some(ask) = app.plugin_install.ask.as_mut()
+            && !ask.managed.contains(&name)
             && let Some(grant) = ask.grants.folders.iter_mut().find(|grant| grant.name == name)
         {
             grant.folder = path.into();
@@ -172,6 +209,21 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
     }
     if permissions.and_then(|p| p.get("input_folder")).and_then(Value::as_bool).unwrap_or(false) {
         lines.push(tr("plugin_install.input_folder").to_string());
+    }
+    for endpoint in permissions.and_then(|p| p.get("connect")).and_then(Value::as_array).into_iter().flatten() {
+        let port = endpoint.get("port").and_then(Value::as_u64);
+        let host = match (endpoint.get("host").and_then(Value::as_str).unwrap_or_default(), port) {
+            ("*", None) => tr("plugin_install.connect_any").to_string(),
+            ("*", Some(port)) => format("plugin_install.connect_any_port", &[("port", &port.to_string())]),
+            (host, None) => host.to_string(),
+            (host, Some(port)) => std::format!("{host}:{port}"),
+        };
+        let key = match endpoint.get("transport").and_then(Value::as_str) {
+            Some("tls") => "plugin_install.connect_tls",
+            Some("ssh") => "plugin_install.connect_ssh",
+            _ => "plugin_install.connect_tcp",
+        };
+        lines.push(format(key, &[("host", &host)]));
     }
     if permissions.and_then(|p| p.get("clock")).and_then(Value::as_bool).unwrap_or(false) {
         lines.push(tr("plugin_install.clock").to_string());
@@ -259,6 +311,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::status_line(ui, &warning, ui_kit::StatusTone::Warning);
                 }
                 for grant in &mut ask.grants.folders {
+                    if ask.managed.contains(&grant.name) {
+                        let fixed = std::format!("{}: {}", grant.name, grant.folder.display());
+                        ui.push_id(&grant.name, |ui| ui_kit::text(ui, &fixed, ui_kit::Text::Hint("plugin_managed_folder")));
+                        continue;
+                    }
                     let access = tr(match (grant.read, grant.write) {
                         (true, true) => "prefs.plugin_folder_read_write",
                         (false, true) => "prefs.plugin_folder_write",
@@ -278,7 +335,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     });
                     grant.folder = path.into();
                 }
-                if !ask.grants.folders.is_empty() {
+                if ask.grants.folders.iter().any(|grant| !ask.managed.contains(&grant.name)) {
                     ui_kit::text(ui, tr("prefs.plugin_folder_note"), ui_kit::Text::Hint("plugin_folder"));
                 }
                 let entries: Vec<solidcraft_engine::plugin::Entry> =
@@ -335,6 +392,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Installs the reviewed `.zip` with only the permissions and host folders shown in the question.
 pub(crate) fn install_now(app: &mut SolveApp, ask: &Ask) {
+    // A managed folder exists from Install on: the review made nothing before approval.
+    for grant in ask.grants.folders.iter().filter(|grant| ask.managed.contains(&grant.name)) {
+        if let Err(error) = std::fs::create_dir_all(&grant.folder) {
+            app.set_status(format("plugin_install.failed", &[("error", &error.to_string())]), true);
+            return;
+        }
+    }
     let replace = ask.plugin.get("replaces").is_some_and(Value::is_string);
     let folders: Vec<Value> = ask
         .grants
@@ -349,7 +413,7 @@ pub(crate) fn install_now(app: &mut SolveApp, ask: &Ask) {
     if let Err(error) = crate::plugins::start_package(
         app,
         "plugin.install",
-        json!({"path": ask.path, "approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders,"fuel":ask.grants.fuel,"memory_mib":ask.grants.memory_mib,"input_folder":ask.grants.input_folder}}),
+        json!({"path": ask.path, "approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders,"fuel":ask.grants.fuel,"memory_mib":ask.grants.memory_mib,"input_folder":ask.grants.input_folder,"net":ask.grants.net}}),
         crate::plugins::PackageAction::Install,
     ) {
         app.set_status(format("plugin_install.failed", &[("error", &error)]), true);
@@ -442,6 +506,84 @@ mod tests {
                 "Refresh after design changes (refresh); cannot edit, write files or start jobs"
             ]
         );
+    }
+
+    #[test]
+    fn plugin_install_lists_each_connection_and_install_allows_them() {
+        crate::i18n::install();
+        let connect = json!([
+            {"host": "*", "transport": "tls"},
+            {"host": "*", "port": 22, "transport": "ssh"},
+            {"host": "git.example.com", "port": 3000, "transport": "tcp"}
+        ]);
+        let plugin = json!({"permissions": {"connect": connect}});
+        assert_eq!(
+            permission_lines(&plugin),
+            [
+                "Connecting to any server over TLS (encrypted; the server's certificate is checked)",
+                "Connecting to any server on port 22 over SSH, signing in with your SSH agent or keys",
+                "Connecting to git.example.com:3000 over plain TCP (not encrypted)",
+            ]
+        );
+        let mut h = crate::scenario::Harness::new();
+        described(&mut h.app, "git.zip".into(), json!({"name": "Git", "version": "1", "permissions": {"connect": connect}}));
+        assert!(h.app.plugin_install.ask.as_ref().unwrap().grants.net, "Install allows the connections the review lists");
+        described(&mut h.app, "plain.zip".into(), json!({"name": "Plain", "version": "1", "permissions": {}}));
+        assert!(!h.app.plugin_install.ask.as_ref().unwrap().grants.net);
+        assert!(h.app.session.plugin_state.grants.is_empty(), "the review itself allows nothing");
+    }
+
+    #[test]
+    fn managed_app_data_folders_need_no_path_input_and_are_made_only_on_install() {
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        let data = h.dir.join("data");
+        let plugin = json!({"id": "git-cloud", "name": "Git Cloud", "version": "1",
+            "permissions": {"files": [{"name": "exchange", "read": true, "write": true}]},
+            "entry_points": [{"name": "save", "input_schema": {"type": "object", "x-solidcraft-app-data-folders": ["exchange"], "properties": {}}}]});
+        // A folder chosen for an earlier install is not reused for a managed one.
+        h.app.preferences.plugin_grants.insert(
+            "git-cloud".into(),
+            solidcraft_engine::plugin::Grants {
+                folders: vec![solidcraft_engine::plugin::FileGrant {
+                    name: "exchange".into(),
+                    folder: h.dir.join("custom"),
+                    read: true,
+                    write: true,
+                }],
+                ..Default::default()
+            },
+        );
+        described_in_data(&mut h.app, "git.zip".into(), plugin, Some(data.clone()));
+        let folder = data.join("plugin-data/git-cloud/exchange");
+        let ask = h.app.plugin_install.ask.as_ref().unwrap();
+        assert_eq!(ask.grants.folders[0].folder, folder);
+        assert!(crate::plugins::valid_grants(&ask.grants), "nothing to fill in before Install");
+        assert!(!folder.exists(), "the review makes nothing before approval");
+        h.frames(2);
+        assert!(h.widgets("Browse…").is_empty() && h.widgets(h.app.tr("prefs.plugin_folder_note")).is_empty());
+        assert!(!h.widgets(&std::format!("exchange: {}", folder.display())).is_empty(), "the review shows where the folder is");
+        let install = h.app.tr("plugin_install.install").to_owned();
+        h.step(&json!({"widget": install})).unwrap();
+        assert!(folder.is_dir(), "Install makes the folder");
+    }
+
+    #[test]
+    fn managed_app_data_folders_stay_inside_the_plugins_own_folder() {
+        let mut h = crate::scenario::Harness::new();
+        let data = h.dir.join("data");
+        let plugin = |id: &str| {
+            json!({"id": id, "permissions": {"files": [{"name": "exchange", "read": true}]},
+                "entry_points": [{"input_schema": {"x-solidcraft-app-data-folders": ["exchange", "../escape", "unknown"]}}]})
+        };
+        described_in_data(&mut h.app, "a.zip".into(), plugin("first"), Some(data.clone()));
+        assert_eq!(h.app.plugin_install.ask.as_ref().unwrap().grants.folders[0].folder, data.join("plugin-data/first/exchange"));
+        assert_eq!(h.app.plugin_install.ask.as_ref().unwrap().grants.folders.len(), 1, "a name the plugin does not ask for grants nothing");
+        described_in_data(&mut h.app, "bad.zip".into(), plugin("../escape"), Some(data.clone()));
+        assert!(h.app.plugin_install.ask.as_ref().unwrap().managed.is_empty());
+        described_in_data(&mut h.app, "a.zip".into(), plugin("first"), Some("relative".into()));
+        assert!(!crate::plugins::valid_grants(&h.app.plugin_install.ask.as_ref().unwrap().grants));
+        assert!(!data.exists());
     }
 
     #[test]

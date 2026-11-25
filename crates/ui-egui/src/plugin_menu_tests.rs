@@ -313,6 +313,26 @@ fn requested_forms_keep_the_dispatch_revision_across_edits_and_deferred_replies(
 }
 
 #[test]
+fn a_run_that_asks_for_a_form_and_opens_a_design_keeps_the_form_on_its_own_design() {
+    let mut h = box_and_pick_plugin();
+    open_form(&mut h.app, "inserts", "seats", &json!({"depth":2})).unwrap();
+    let session = h.app.session.uid;
+    let path = h.dir.join("other.sc");
+    let mut made = solidcraft_engine::Session::default();
+    made.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).unwrap();
+    made.execute("file.save_as", &json!({"path": path})).unwrap();
+    let forms = json!([{"plugin":"inserts","entry":"seats","params":{"depth":7}}]);
+    deliver_form_reply(&mut h.app, json!({"ok":true,"result":{"result":{},"opens":[path.to_string_lossy()],"forms":forms}}));
+    poll(&mut h.app);
+    h.settle();
+    // Opened in a tab of its own (shown or not), while the form stays where the run started.
+    let opened = |s: &solidcraft_engine::Session| s.path.as_deref() == Some(path.to_string_lossy().as_ref());
+    let tabs = || std::iter::once(&h.app.session).chain(h.app.docs.background());
+    assert!(tabs().any(opened), "the design opened in a tab of its own: {:?}", h.app.status);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().session, session, "the form stays on the design the run started on");
+}
+
+#[test]
 fn corrected_raw_selection_preserves_picker_field_identity() {
     let mut h = box_and_pick_plugin();
     h.app.plugin_menu.listed[0].entries[0].input_schema["properties"]["edges"]["minItems"] = json!(0);
@@ -2353,6 +2373,27 @@ mod native {
             "commands":["solid.box"]}});
         std::fs::write(dir.join("plugin.json"), manifest.to_string()).unwrap();
         root
+    }
+
+    #[test]
+    fn a_panel_action_opens_the_designs_its_run_asked_for_in_tabs_of_their_own() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let path = h.dir.join("bracket.sc");
+        let mut made = solidcraft_engine::Session::default();
+        made.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        made.execute("file.save_as", &json!({"path": path})).unwrap();
+        let before = h.app.session.document_id.clone();
+        // A panel action's accepted run, as the worker answers it (`doc.open` with `new_tab`).
+        let (reply, answer) = std::sync::mpsc::channel();
+        reply.send(json!({"ok": true, "result": {"opens": [path.to_string_lossy()]}})).unwrap();
+        h.app.plugin_menu.panel_runs.push(answer);
+        super::poll(&mut h.app);
+        // It loads on the file loader, as File › Open's designs do.
+        h.settle();
+        assert_ne!(h.app.session.document_id, before, "the design opened in a tab of its own");
+        assert_eq!(h.app.session.path.as_deref(), Some(path.to_string_lossy().as_ref()));
+        assert_eq!(h.app.session.doc.features.len(), 1);
     }
 
     /// Write the "sample" plugin, whose panel "jobs" lists rows that run its `make` entry, to `folder`.

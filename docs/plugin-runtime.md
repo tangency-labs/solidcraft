@@ -35,8 +35,9 @@ supplies an owned scratch session and adopts its edits only after a successful c
    hash was checked are the bytes compiled and executed. Changing the files afterward cannot
    substitute different code for that invocation.
 4. The host creates a fresh Wasmtime engine/store, with fuel, epoch interruption and a resource
-   limiter, and links only the published component interfaces. No WASI is linked. Reserved
-   sockets, HTTP and fetch imports are refused even if unused. Instantiation and the entry
+   limiter, and links only the published component interfaces. No WASI is linked. WASI sockets,
+   HTTP and fetch imports are refused even if unused; a plugin connects only through the `net`
+   interface (`net@0.1`, below). Instantiation and the entry
    share the same execution budget, including component start functions.
 5. `commands.run` reaches `PluginHost::run_command`, which SolidCraft implements with
    `Session::execute` on a scratch session, under an empty file scope (a granted `file` or
@@ -94,7 +95,13 @@ Declaring a slot never supplies UI code. `plugin.list` and `engine.describe`
 expose the entry declarations. A read entry can call only commands marked read in the app catalog.
 
 `files.read-file` and `files.write-file` resolve paths only within matching app-approved folder
-grants with the requested access. The caller's file scope is checked against each complete
+grants with the requested access, up to 64 MiB a file (`MAX_FILE_BYTES`), within the plugin's
+memory limit. `files.locate` gives the full path of a file in a granted folder, for a command that
+takes one (`file.save_as`, `doc.open`), only when `PluginHost::names_folder` says the folder is the
+app's own for the plugin: SolidCraft names `plugin-data/<id>/<grant>` beside its plugins folder
+(`x-solidcraft-app-data-folders`) and never a folder the user chose. A plugin's `file.save_as` into
+one of its write folders makes the missing sub-folders there first, by plain names and never
+through a link. The caller's file scope is checked against each complete
 path on every read and write; hidden paths require explicit authorization. Declaring a folder
 name does not itself grant access. Reading a file that does not exist returns `invalid-input`
 (field `path`, reason "no such file") without failing the run, so an entry can create its file
@@ -107,7 +114,20 @@ transaction commit. A trap, refusal, cancellation or failed app commit removes s
 without replacing targets. If publication fails after app commit, the error reports that files
 may have changed; publication of several files is not atomic. `clock.now`
 returns a fixed epoch without the clock permission. Log, progress and cancellation checks are
-always available. There are no socket, HTTP, fetch or WASI imports.
+always available. There are no WASI, socket, HTTP or fetch imports.
+
+`net` (capability `net@0.1`, command plugins) opens connections to the endpoints the manifest's
+`permissions.connect` names, once the user allowed them at install (`net` in the stored grant).
+`crates/craft-plugin-net` owns the sockets: TCP; TLS with rustls and the system's trusted roots
+(the update check's verifier); SSH with russh, checking the server against `~/.ssh/known_hosts`
+and signing in with the user's agent or `~/.ssh/id_ed25519` / `id_ecdsa`. Only an `edit` entry's
+call gets connections: a `read` entry, a preview (a dry run clears `net`) and a dialog hook are
+refused. A call holds at most 16 connections, a read or write moves at most 1 MiB, and every wait
+for the network returns every 200 ms to check cancellation and the deadline. A connection error the
+plugin can handle (a refused connection, a failed SSH command) does not poison the transaction; a
+refused permission, cancellation or exhausted budget does. When the user's **Allowed servers**
+(`HostLimits::allowed_hosts`) names any server, a connection must match it too. The browser build
+returns `unsupported`.
 
 The component must be a WebAssembly **component**, not an ordinary core `.wasm` module, DLL,
 executable or script. Unsupported imports fail instantiation; the host never falls back to starting
@@ -250,7 +270,8 @@ solidcraft-cli --plugin-limits plugin-limits.json mcp --headless --allow-path /p
 ```
 
 This UTF-8 JSON file is at most 16 KiB; a UTF-8 BOM is accepted for Windows editors. Its keys are
-`max_fuel` and `max_memory_mib`; missing keys use the original host defaults, while unknown keys,
+`max_fuel`, `max_memory_mib` and `allowed_hosts` (the servers plugins may connect to, such as
+`["localhost", "github.com:443"]`); missing keys use the original host defaults, while unknown keys,
 zero, fractional and out-of-range values are refused. The CLI reads it once before creating
 local sessions. Omit the flag to use the original ceilings. `--connect` and non-headless `mcp`
 refuse this flag because the connected desktop owns its preferences. GUI preferences and CLI
@@ -317,7 +338,7 @@ entry's format and settings, not its machine code, so whoever can write that fol
 a plugin call runs: it is the user's own folder, as trusted as the app's files.
 
 There is no unsafe deserialization in SolidCraft's code, no WASI filesystem/clock/socket/process API,
-network integration, persistent guest store, signed index or plugin-supplied icons.
+persistent guest store, signed index or plugin-supplied icons; connections go only through `net`.
 The optional `ui@0.1` capability provides host-drawn panels, with declarations in `runtime.ui`
 and the matching `ui-provider.describe` export. Panel updates use the command transaction and
 are merged by the window once per frame; see [Docked panels](plugins.md#docked-panels).

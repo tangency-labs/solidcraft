@@ -353,14 +353,32 @@ pub(crate) struct LimitInputs {
     applied: solidcraft_engine::plugin::HostLimits,
     fuel: String,
     memory: String,
+    /// The allowed servers, as written: separated by commas, spaces or lines.
+    hosts: String,
 }
 impl From<solidcraft_engine::plugin::HostLimits> for LimitInputs {
     fn from(applied: solidcraft_engine::plugin::HostLimits) -> Self {
-        Self { fuel: applied.max_fuel.to_string(), memory: applied.max_memory_mib.to_string(), applied }
+        Self { fuel: applied.max_fuel.to_string(), memory: applied.max_memory_mib.to_string(), hosts: hosts_text(&applied), applied }
     }
 }
+/// The allowed servers as the field shows them.
+fn hosts_text(limits: &solidcraft_engine::plugin::HostLimits) -> String {
+    limits.allowed_hosts.iter().cloned().map(String::from).collect::<Vec<_>>().join(", ")
+}
+/// The allowed servers a field holds, or nothing when one of them is not a server: a typo never
+/// becomes "no limit".
+fn parsed_hosts(text: &str) -> Option<Vec<solidcraft_engine::plugin::AllowedHost>> {
+    text.split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| solidcraft_engine::plugin::AllowedHost::try_from(entry.to_string()).ok())
+        .collect()
+}
 pub(crate) fn host_limits(p: &crate::prefs::Prefs) -> solidcraft_engine::plugin::HostLimits {
-    solidcraft_engine::plugin::HostLimits { max_fuel: p.plugin_max_fuel, max_memory_mib: p.plugin_max_memory_mib }
+    solidcraft_engine::plugin::HostLimits {
+        max_fuel: p.plugin_max_fuel,
+        max_memory_mib: p.plugin_max_memory_mib,
+        allowed_hosts: p.plugin_allowed_hosts.clone(),
+    }
 }
 pub(crate) fn sync_policy(app: &mut SolveApp) {
     // A failed write is retried by the next sync; the command that changed the grants reports it.
@@ -742,15 +760,30 @@ fn remove_confirmation(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 fn parsed_limits(input: &LimitInputs) -> Option<solidcraft_engine::plugin::HostLimits> {
-    let limits =
-        solidcraft_engine::plugin::HostLimits { max_fuel: input.fuel.trim().parse().ok()?, max_memory_mib: input.memory.trim().parse().ok()? };
+    let limits = solidcraft_engine::plugin::HostLimits {
+        max_fuel: input.fuel.trim().parse().ok()?,
+        max_memory_mib: input.memory.trim().parse().ok()?,
+        allowed_hosts: parsed_hosts(&input.hosts)?,
+    };
     limits.validate().ok()?;
     Some(limits)
+}
+/// The message for limits that do not parse: the servers' own when only they are wrong.
+fn limits_error(input: &LimitInputs) -> &'static str {
+    let hosts = parsed_hosts(&input.hosts);
+    if hosts.is_none_or(|hosts| hosts.len() > solidcraft_engine::plugin::MAX_ALLOWED_HOSTS) {
+        "prefs.plugin_allowed_hosts_invalid"
+    } else {
+        "prefs.plugin_limits_invalid"
+    }
 }
 pub(crate) fn resource_pending(app: &SolveApp) -> bool {
     let current = host_limits(&app.preferences);
     app.prefs_window.plugin_limit_inputs.as_ref().is_some_and(|input| {
-        input.applied == current && (input.fuel != current.max_fuel.to_string() || input.memory != current.max_memory_mib.to_string())
+        input.applied == current
+            && (input.fuel != current.max_fuel.to_string()
+                || input.memory != current.max_memory_mib.to_string()
+                || input.hosts != hosts_text(&current))
     })
 }
 /// Enter, Apply and OK commit both exact integers together. An incomplete edit cannot save a prefix.
@@ -761,11 +794,13 @@ pub(crate) fn commit_resource_inputs(app: &mut SolveApp) -> Result<(), String> {
         return Ok(());
     }
     let Some(limits) = parsed_limits(&input) else {
+        let error = app.tr(limits_error(&input)).to_string();
         app.prefs_window.plugin_limit_inputs = Some(input);
-        return Err(app.tr("prefs.plugin_limits_invalid").to_string());
+        return Err(error);
     };
     app.preferences.plugin_max_fuel = limits.max_fuel;
     app.preferences.plugin_max_memory_mib = limits.max_memory_mib;
+    app.preferences.plugin_allowed_hosts.clone_from(&limits.allowed_hosts);
     app.prefs_window.plugin_limit_inputs = Some(limits.into());
     sync_policy(app);
     Ok(())
@@ -775,12 +810,14 @@ fn resource_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut input = app.prefs_window.plugin_limit_inputs.take().filter(|v| v.applied == current).unwrap_or_else(|| current.into());
     let (fuel_enter, _) = crate::ui_kit::text_row(ui, app.tr("prefs.plugin_max_fuel"), &mut input.fuel, "");
     let (memory_enter, _) = crate::ui_kit::text_row(ui, app.tr("prefs.plugin_max_memory"), &mut input.memory, "");
+    let (hosts_enter, _) = crate::ui_kit::text_row(ui, app.tr("prefs.plugin_allowed_hosts"), &mut input.hosts, "localhost, github.com");
     if parsed_limits(&input).is_none() {
-        crate::ui_kit::text(ui, app.tr("prefs.plugin_limits_invalid"), crate::ui_kit::Text::Error("plugin_limits"));
+        crate::ui_kit::text(ui, app.tr(limits_error(&input)), crate::ui_kit::Text::Error("plugin_limits"));
     }
     crate::ui_kit::text(ui, app.tr("prefs.plugin_limits_note"), crate::ui_kit::Text::Hint("plugin_limits"));
+    crate::ui_kit::text(ui, app.tr("prefs.plugin_allowed_hosts_note"), crate::ui_kit::Text::Hint("plugin_allowed_hosts"));
     app.prefs_window.plugin_limit_inputs = Some(input);
-    if (fuel_enter || memory_enter)
+    if (fuel_enter || memory_enter || hosts_enter)
         && let Err(error) = commit_resource_inputs(app)
     {
         app.set_status(error, true);
@@ -964,6 +1001,9 @@ pub(crate) fn approved_text(app: &SolveApp, plugin: &Plugin) -> String {
     }
     if let Some(memory) = grants.memory_mib {
         parts.push(format("prefs.plugin_approved_memory", &[("memory", &memory.to_string())]));
+    }
+    if grants.net {
+        parts.push(tr("prefs.plugin_approved_net").to_string());
     }
     if parts.is_empty() {
         return tr("prefs.plugin_approved_nothing").to_string();
@@ -2256,16 +2296,18 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"open":"Plugins"}));
         let initial = host_limits(&h.app.preferences);
-        h.app.prefs_window.plugin_limit_inputs = Some(LimitInputs { applied: initial, fuel: u64::MAX.to_string(), memory: "512".into() });
+        h.app.prefs_window.plugin_limit_inputs =
+            Some(LimitInputs { applied: initial.clone(), fuel: u64::MAX.to_string(), memory: "512".into(), hosts: String::new() });
         assert!(resource_pending(&h.app));
         assert_eq!(h.app.session.plugin_limits, initial, "typing alone does not authorize a higher ceiling");
         assert_eq!(h.call("ui.prefs", json!({}))["result"]["apply_enabled"], true);
         assert_eq!(h.call("ui.prefs", json!({"button":"apply"}))["ok"], true);
         assert_eq!(h.app.session.plugin_limits.max_fuel, u64::MAX);
         assert_eq!(h.app.session.plugin_limits.max_memory_mib, 512);
-        let applied = h.app.session.plugin_limits;
+        let applied = h.app.session.plugin_limits.clone();
         for text in ["", "0", "18446744073709551616", "1.5"] {
-            h.app.prefs_window.plugin_limit_inputs = Some(LimitInputs { applied, fuel: text.into(), memory: "1024".into() });
+            h.app.prefs_window.plugin_limit_inputs =
+                Some(LimitInputs { applied: applied.clone(), fuel: text.into(), memory: "1024".into(), hosts: String::new() });
             assert_eq!(h.call("ui.prefs", json!({"button":"ok"}))["ok"], false);
             assert!(h.app.prefs_window.shell.open);
             assert_eq!(h.app.session.plugin_limits, applied);
@@ -2284,13 +2326,59 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"open":"Plugins"}));
         let initial = host_limits(&h.app.preferences);
-        h.app.prefs_window.plugin_limit_inputs = Some(LimitInputs { applied: initial, fuel: "90000000".into(), memory: "512".into() });
+        h.app.prefs_window.plugin_limit_inputs =
+            Some(LimitInputs { applied: initial, fuel: "90000000".into(), memory: "512".into(), hosts: String::new() });
         assert_eq!(h.call("ui.prefs", json!({"open":"General"}))["ok"], true);
         let draft = h.app.prefs_window.plugin_limit_inputs.as_ref().unwrap();
         assert_eq!((&draft.fuel, &draft.memory), (&"90000000".to_string(), &"512".to_string()));
         assert_eq!(h.call("ui.prefs", json!({"button":"apply"}))["ok"], true);
         assert_eq!(h.app.session.plugin_limits.max_fuel, 90000000);
         assert_eq!(h.app.session.plugin_limits.max_memory_mib, 512);
+    }
+    #[test]
+    fn preferences_lists_a_plugins_approved_connections() {
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        let dir = package(&h, "workshop");
+        let (plugin, _) = read_plugin(&dir, "workshop").unwrap();
+        let grants = |net| solidcraft_engine::plugin::Grants { package_hash: Some(plugin.approval.clone()), net, ..Default::default() };
+        h.app.session.plugin_state.grants.insert("workshop".into(), grants(true));
+        assert_eq!(approved_text(&h.app, &plugin), "Approved: connections to the servers it named");
+        h.app.session.plugin_state.grants.insert("workshop".into(), grants(false));
+        assert_eq!(approved_text(&h.app, &plugin), "Approved for nothing yet");
+    }
+
+    #[test]
+    fn the_allowed_servers_apply_together_and_a_typo_never_lifts_the_limit() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Plugins"}));
+        let initial = host_limits(&h.app.preferences);
+        assert!(initial.allowed_hosts.is_empty(), "no list by default: each plugin's approval decides");
+        let fuel = initial.max_fuel.to_string();
+        let memory = initial.max_memory_mib.to_string();
+        let typed = |hosts: &str| LimitInputs { applied: initial.clone(), fuel: fuel.clone(), memory: memory.clone(), hosts: hosts.into() };
+        h.app.prefs_window.plugin_limit_inputs = Some(typed("localhost, github.com:443\n*.gitlab.com:22"));
+        assert!(resource_pending(&h.app));
+        assert_eq!(h.call("ui.prefs", json!({"button":"apply"}))["ok"], true);
+        let listed: Vec<String> = h.app.session.plugin_limits.allowed_hosts.iter().cloned().map(String::from).collect();
+        assert_eq!(listed, ["localhost", "github.com:443", "*.gitlab.com:22"]);
+        assert_eq!(h.app.preferences.plugin_allowed_hosts, h.app.session.plugin_limits.allowed_hosts);
+        assert!(h.app.session.plugin_limits.allows_host("git.gitlab.com", 22) && !h.app.session.plugin_limits.allows_host("example.org", 443));
+        // A typo keeps the dialog open and the applied list as it was.
+        let applied = h.app.session.plugin_limits.clone();
+        h.app.prefs_window.plugin_limit_inputs = Some(LimitInputs { applied: applied.clone(), ..typed("githb com:99999") });
+        assert_eq!(h.call("ui.prefs", json!({"button":"ok"}))["ok"], false);
+        assert_eq!(h.app.session.plugin_limits, applied);
+        assert_eq!(
+            limits_error(&typed("githb com:99999")),
+            "prefs.plugin_allowed_hosts_invalid",
+            "the message names the servers, not fuel or memory"
+        );
+        // The control channel sets the same list, checked the same way.
+        assert_eq!(h.call("ui.prefs", json!({"plugin_allowed_hosts":["[::1]:3000"]}))["ok"], true);
+        assert!(h.app.session.plugin_limits.allows_host("::1", 3000));
+        assert_eq!(h.call("ui.prefs", json!({"plugin_allowed_hosts":["not a host"]}))["ok"], false);
     }
 
     #[test]

@@ -696,6 +696,83 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
     std::fs::remove_dir_all(&root).unwrap();
 }
 #[test]
+fn a_plugins_save_as_makes_its_folders_inside_its_grant_and_only_its_own_folders_are_named() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-folders-{}", std::process::id()));
+    let granted = root.join("plugin-data/git-cloud/designs");
+    std::fs::create_dir_all(&granted).unwrap();
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::from(["file".to_string()]),
+        file_folders: vec![granted.clone()],
+        file_read_folders: Vec::new(),
+        evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
+    };
+    host.session.plugin_state.plugins_dir = Some(root.join("plugins"));
+    host.begin_transaction().unwrap();
+    s_box(&mut host);
+    let nested = granted.join("github.com/me/designs/Robot/lid.sc");
+    host.run_command("file.save_as", &json!({"path": nested})).unwrap();
+    assert!(nested.is_file(), "the folders above the design were made");
+    let outside = root.join("elsewhere/new/lid.sc");
+    assert!(host.run_command("file.save_as", &json!({"path": outside})).is_err());
+    assert!(!root.join("elsewhere").exists(), "nothing is made outside the grant");
+    // `files.locate` names the app's own folders for a plugin, never one the user chose.
+    assert!(host.names_folder(&granted));
+    assert!(!host.names_folder(&root.join("plugin-data")));
+    assert!(!host.names_folder(&root.join("Documents")));
+    assert!(!host.names_folder(&root.join("plugin-data/../Documents")));
+    std::fs::remove_dir_all(&root).unwrap();
+}
+#[test]
+fn a_design_a_plugin_opens_in_a_new_tab_waits_for_the_accepted_run_and_its_folders() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-opens-{}", std::process::id()));
+    let granted = root.join("granted");
+    std::fs::create_dir_all(&granted).unwrap();
+    let design = granted.join("bracket.sc");
+    let mut made = Session::default();
+    made.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).unwrap();
+    made.execute("file.save_as", &json!({"path": design})).unwrap();
+    let outside = root.join("outside.sc");
+    std::fs::copy(&design, &outside).unwrap();
+    let host = || SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::from(["doc".to_string()]),
+        file_folders: vec![granted.clone()],
+        file_read_folders: Vec::new(),
+        evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
+    };
+    let open = |host: &mut SolidCraftHost, params: Value| host.run_command("doc.open", &params);
+    let mut opening = host();
+    opening.begin_transaction().unwrap();
+    let reply = open(&mut opening, json!({"path": design, "new_tab": true})).unwrap();
+    assert_eq!(reply["opening"], true);
+    assert!(opening.session.plugin_state.opens.is_empty(), "nothing opens before the run is accepted");
+    let refused = open(&mut opening, json!({"path": outside, "new_tab": true})).unwrap_err();
+    assert!(matches!(&refused, HostError::PermissionDenied { .. }), "{refused}");
+    let extra = open(&mut opening, json!({"path": design, "new_tab": true, "names": "all"})).unwrap_err();
+    assert!(matches!(&extra, HostError::InvalidInput { .. }), "{extra}");
+    assert_eq!(opening.session.doc.features.len(), 0, "the plugin's own design is untouched");
+    opening.commit_transaction().unwrap();
+    assert_eq!(opening.session.plugin_state.opens, [design.to_string_lossy().to_string()]);
+
+    let mut failing = host();
+    failing.begin_transaction().unwrap();
+    open(&mut failing, json!({"path": design, "new_tab": true})).unwrap();
+    failing.rollback_transaction().unwrap();
+    assert!(failing.session.plugin_state.opens.is_empty(), "a failed run opens nothing");
+    std::fs::remove_dir_all(&root).unwrap();
+}
+#[test]
 fn nested_plugin_edits_save_their_current_token_without_retagging_at_acceptance() {
     let folder = crate::tests::Folder::new("nested-plugin-save-token");
     let path = folder.path("edited.sc");
@@ -1112,7 +1189,7 @@ mod native {
         assert_eq!(error.host_error(), Some(&HostError::OverCeiling { limit: "fuel".into(), requested: 200_000_000_000, allowed: 100_000_000_000 }));
         assert_eq!(s.doc.to_json(), before);
         assert!(s.undo.is_empty());
-        s.plugin_limits = HostLimits { max_fuel: 200_000_000_000, max_memory_mib: 256 };
+        s.plugin_limits = HostLimits { max_fuel: 200_000_000_000, max_memory_mib: 256, allowed_hosts: Vec::new() };
         let approved = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
         assert_eq!(approved["within_host_limits"], true);
         assert_eq!(approved["approval"], inspection["approval"], "approval pins the exact request; a ceiling change never changes its budget");
@@ -2154,6 +2231,7 @@ mod native {
                         fuel: None,
                         memory_mib: None,
                         input_folder: false,
+                        net: false,
                     },
                 );
                 let scope = solidcraft_io::vfs::PathScope::default().with_design_folder(&f.0);
@@ -2212,6 +2290,7 @@ mod native {
                     fuel: None,
                     memory_mib: None,
                     input_folder: false,
+                    net: false,
                 },
             );
             let saved = outbox.join("part.sc");
@@ -2992,17 +3071,19 @@ fn host_resource_policy_is_exact_user_state_and_never_design_data() {
     let request = Limits::default();
     assert_eq!((request.fuel, request.memory_mib, request.deadline_ms), (10_000_000, 64, 5000));
     assert!(defaults.check(&request).is_ok());
-    for limits in
-        [HostLimits { max_fuel: 0, ..defaults }, HostLimits { max_memory_mib: 0, ..defaults }, HostLimits { max_memory_mib: 4097, ..defaults }]
-    {
+    for limits in [
+        HostLimits { max_fuel: 0, ..defaults.clone() },
+        HostLimits { max_memory_mib: 0, ..defaults.clone() },
+        HostLimits { max_memory_mib: 4097, ..defaults.clone() },
+    ] {
         assert!(limits.validate().is_err());
     }
     let mut m = manifest();
     m["runtime"]["limits"] = json!({"fuel":u64::MAX,"memory_mib":4096,"deadline_ms":30000});
     assert!(parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").is_ok());
-    let policy = HostLimits { max_fuel: u64::MAX, max_memory_mib: 4096 };
+    let policy = HostLimits { max_fuel: u64::MAX, max_memory_mib: 4096, allowed_hosts: Vec::new() };
     assert_eq!(serde_json::from_str::<HostLimits>(&serde_json::to_string(&policy).unwrap()).unwrap(), policy);
-    let mut s = Session { plugin_limits: policy, ..Default::default() };
+    let mut s = Session { plugin_limits: policy.clone(), ..Default::default() };
     assert_eq!(s.scratch().plugin_limits, policy);
     s.execute("file.new", &json!({})).unwrap();
     assert_eq!(s.plugin_limits, policy);
@@ -4419,7 +4500,8 @@ mod stored_grants {
         let record = |grants: Value| serde_json::to_vec(&grants).unwrap();
         for (name, bytes) in [
             ("broken.json", b"{".to_vec()),
-            ("unknown.json", record(json!({"command_groups":["file"],"net":true}))),
+            // An unknown field. (`net` is a real one now, approved per package like the rest.)
+            ("unknown.json", record(json!({"command_groups":["file"],"network":true}))),
             ("group.json", record(json!({"command_groups":["everything"]}))),
             ("memory.json", record(json!({"memory_mib":1_000_000}))),
             ("fuel.json", record(json!({"fuel":10_000_000_000_001_u64}))),

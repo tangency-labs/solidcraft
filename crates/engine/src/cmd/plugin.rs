@@ -28,13 +28,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("plugin, entry, params: open the normal form through ui.start; scripts and MCP receive interactive_required; call the entry with params instead"),
     CommandSpec::new("plugin.grants", "Plugin Approvals", checked!("plugin.grants", grants)).icon("inspect").noundo().doc_only()
         .contract(&TypedContract::<GrantsParams>::new()).output(output_schema_for::<GrantsResult>)
-        .params("What the user approved for each plugin (command groups, folders, memory, input_folder), the package each approval is bound to and its status: current, changed (install and approve again), not_installed or unreadable; runs no plugin code"),
+        .params("What the user approved for each plugin (command groups, folders, memory, input_folder, net), the package each approval is bound to and its status: current, changed (install and approve again), not_installed or unreadable; runs no plugin code"),
     CommandSpec::new("plugin.inspect", "Inspect Plugin", checked!("plugin.inspect", inspect)).icon("inspect").noundo().doc_only()
         .contract(&TypedContract::<InspectParams>::new()).output(output_schema_for::<InspectResult>)
         .params("path: plugin package folder; returns inert manifest and approval hash covering manifest and component; runs no plugin code"),
     CommandSpec::new("plugin.install", "Install Plugin", checked!("plugin.install", install)).icon("import").noundo().doc_only()
         .contract(&TypedContract::<InstallParams>::new()).output(output_schema_for::<InstallResult>)
-        .params("path: plugin .zip, approval?: exact hash from a reviewed dry run (mismatch refuses installation), archive?: exact .zip hash from that dry run (any changed file refuses installation), replace?: bool (required to replace an installed plugin of the same id), dry_run?: bool, approve?: {command_groups, folders: [{name, path, read, write}], fuel?: exactly the manifest's limits.fuel, at most 10000000000000, memory_mib?: exactly the manifest's limits.memory_mib, allowed above the user's ceiling for this package, input_folder?: bool, only for an importer that asks for it}; validates requested approvals and checks the .zip (one plugin, safe paths, size caps, manifest) and unpacks it into the plugins folder; runs no plugin code"),
+        .params("path: plugin .zip, approval?: exact hash from a reviewed dry run (mismatch refuses installation), archive?: exact .zip hash from that dry run (any changed file refuses installation), replace?: bool (required to replace an installed plugin of the same id), dry_run?: bool, approve?: {command_groups, folders: [{name, path, read, write}], fuel?: exactly the manifest's limits.fuel, at most 10000000000000, memory_mib?: exactly the manifest's limits.memory_mib, allowed above the user's ceiling for this package, input_folder?: bool, only for an importer that asks for it, net?: bool, only for a plugin whose permissions.connect names endpoints}; validates requested approvals and checks the .zip (one plugin, safe paths, size caps, manifest) and unpacks it into the plugins folder; runs no plugin code"),
     CommandSpec::new("plugin.list", "List Plugins", checked!("plugin.list", list)).icon("inspect").noundo().doc_only()
         .contract(&TypedContract::<ListParams>::new()).output(output_schema_for::<ListResult>)
         .params("List inspected and installed plugin manifests, namespaced entries, declared effects and input schemas; no plugin code runs"),
@@ -156,7 +156,7 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         capabilities: manifest.capabilities.clone(),
         permissions: runtime.map(|r| r.permissions.clone()).unwrap_or_default(),
         limits: runtime.map(|r| r.limits.clone()),
-        host_limits: s.plugin_limits,
+        host_limits: s.plugin_limits.clone(),
         commands: runtime.map(|r| r.commands.iter().cloned().collect()).unwrap_or_default(),
         entries: runtime.map(|r| r.entries.iter().map(|e| format!("{}.{}", manifest.id, e.name)).collect()).unwrap_or_default(),
         entry_points: runtime.map(|r| r.entries.clone()).unwrap_or_default(),
@@ -216,6 +216,7 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
             return serde_json::to_value(RunResult {
                 result: Value::Null,
                 forms: vec![],
+                opens: vec![],
                 form_validation: Some(FormValidation { revision, changed, errors }),
                 sketch_exits: vec![],
                 view: None,
@@ -384,6 +385,7 @@ fn grants(s: &mut Session, _p: &Value) -> Result<Value> {
                 fuel: grants.fuel,
                 memory_mib: grants.memory_mib,
                 input_folder: grants.input_folder,
+                net: grants.net,
             }
         })
         .collect();

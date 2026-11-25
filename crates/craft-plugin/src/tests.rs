@@ -593,7 +593,7 @@ fn host_limits_have_typed_failures() {
     assert_eq!(fuel, HostError::OverCeiling { limit: "fuel".into(), requested: limits.max_fuel + 1, allowed: limits.max_fuel });
     assert!(fuel.to_string().contains("allow its fuel request when you install it"));
     // Approved per-package fuel reaches HostLimits::check just as approved memory does.
-    let approved = HostLimits { max_fuel: MAX_APPROVED_FUEL, ..limits };
+    let approved = HostLimits { max_fuel: MAX_APPROVED_FUEL, ..limits.clone() };
     assert!(approved.check(&Limits { fuel: MAX_APPROVED_FUEL, ..Limits::default() }).is_ok());
     let hard = HostError::OverCeiling { limit: "fuel".into(), requested: MAX_APPROVED_FUEL + 1, allowed: MAX_APPROVED_FUEL };
     assert!(hard.to_string().contains("hard host ceiling of 10000000000000"));
@@ -1011,6 +1011,79 @@ fn a_command_may_be_a_long_job_and_an_importer_may_not() {
     let mut importing = importer();
     importing["runtime"]["entries"][0]["job"] = json!(true);
     assert!(matches!(parse(&importing), Err(HostError::InvalidManifest { field, .. }) if field.ends_with(".job")));
+}
+
+#[test]
+fn a_plugin_that_connects_names_net_and_its_endpoints() {
+    let mut connects = manifest();
+    connects["capabilities"] = json!(["commands@0.2", "net@0.1"]);
+    connects["runtime"]["permissions"] = json!({"connect": [
+        {"host": "*", "transport": "tls"},
+        {"host": "*.example.com", "port": 22, "transport": "ssh"},
+        {"host": "127.0.0.1", "port": 3000, "transport": "tcp"},
+    ]});
+    let endpoints = parse(&connects).unwrap().runtime.unwrap().permissions.connect;
+    assert_eq!(endpoints.len(), 3);
+    assert!(endpoints[0].allows("GitHub.com.", 443, Transport::Tls));
+    assert!(!endpoints[0].allows("github.com", 443, Transport::Tcp));
+    assert!(endpoints[1].allows("git.example.com", 22, Transport::Ssh));
+    assert!(!endpoints[1].allows("example.com", 22, Transport::Ssh), "a domain pattern names the hosts under it");
+    assert!(!endpoints[1].allows("badexample.com", 22, Transport::Ssh));
+    assert!(!endpoints[1].allows("git.example.com", 2222, Transport::Ssh));
+    assert!(endpoints[2].allows("127.0.0.1", 3000, Transport::Tcp));
+    assert_eq!(endpoints[1].describe(), "*.example.com:22 over SSH");
+    assert_eq!(endpoints[0].describe(), "any host over TLS");
+
+    let refused = |change: &dyn Fn(&mut Value), field: &str| {
+        let mut value = connects.clone();
+        change(&mut value);
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field: f, .. }) if f == field), "{field}");
+    };
+    refused(&|v| v["capabilities"] = json!(["commands@0.2"]), "runtime.permissions.connect");
+    refused(&|v| v["runtime"]["permissions"]["connect"] = json!([]), "runtime.permissions.connect");
+    for host in ["Example.com", "*example.com", "a.*.com", "", "exa mple.com", "*.", "-a.com"] {
+        refused(&|v| v["runtime"]["permissions"]["connect"][0]["host"] = json!(host), "runtime.permissions.connect.host");
+    }
+    refused(&|v| v["runtime"]["permissions"]["connect"][0]["port"] = json!(0), "runtime.permissions.connect.port");
+    let too_many = vec![json!({"host": "*", "transport": "tls"}); MAX_CONNECT_ENDPOINTS + 1];
+    refused(&|v| v["runtime"]["permissions"]["connect"] = json!(too_many), "runtime.permissions.connect");
+    // The old reserved flag is still refused, so an older manifest can't ask for the network by it.
+    let mut reserved = connects.clone();
+    reserved["runtime"]["permissions"]["net"] = json!(true);
+    assert!(matches!(parse(&reserved), Err(HostError::PermissionDenied { .. })));
+    // Importers and exporters make no connections.
+    let mut importing = importer();
+    importing["capabilities"] = json!(["formats@0.2", "net@0.1"]);
+    importing["runtime"]["permissions"] = json!({"connect": [{"host": "*", "transport": "tls"}]});
+    assert!(matches!(parse(&importing), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+}
+
+#[test]
+fn the_users_allowlist_names_servers_with_or_without_a_port() {
+    let parse = |text: &str| AllowedHost::try_from(text.to_string());
+    let github = parse(" GitHub.com ").unwrap();
+    assert_eq!((github.host.as_str(), github.port), ("github.com", None));
+    assert!(github.allows("github.com", 443) && github.allows("github.com", 22) && !github.allows("api.github.com", 443));
+    let ssh = parse("*.example.com:22").unwrap();
+    assert!(ssh.allows("git.example.com", 22) && !ssh.allows("git.example.com", 443));
+    let local = parse("[::1]:3000").unwrap();
+    assert_eq!((local.host.as_str(), local.port), ("::1", Some(3000)));
+    assert_eq!(String::from(local.clone()), "[::1]:3000");
+    assert!(local.allows("::1", 3000));
+    assert!(local.allows("0:0:0:0:0:0:0:1", 3000), "an address compares by value, not spelling");
+    assert_eq!(parse("::1").unwrap().port, None);
+    assert_eq!(parse("[::1]").unwrap().port, None);
+    assert_eq!(String::from(parse("localhost:8080").unwrap()), "localhost:8080");
+    for bad in ["", "host:0", "host:99999", "a b", "*example.com", "[::1:22", "[::1]443", "[::1]x:22"] {
+        assert!(parse(bad).is_err(), "{bad:?}");
+    }
+    // As the CLI's --plugin-limits file and Preferences write it: a list of strings.
+    let limits: HostLimits = serde_json::from_value(json!({"allowed_hosts": ["localhost", "github.com:443"]})).unwrap();
+    assert!(limits.allows_host("localhost", 3000) && limits.allows_host("github.com", 443));
+    assert!(!limits.allows_host("github.com", 22) && !limits.allows_host("example.org", 443));
+    assert!(HostLimits::default().allows_host("example.org", 443), "no list, no limit beyond each plugin's approval");
+    assert!(serde_json::from_value::<HostLimits>(json!({"allowed_hosts": ["not a host"]})).is_err());
+    assert_eq!(serde_json::to_value(&limits).unwrap()["allowed_hosts"], json!(["localhost", "github.com:443"]));
 }
 
 #[test]

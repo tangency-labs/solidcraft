@@ -1,0 +1,26 @@
+[package]
+name = "craft-plugin-net"
+description = "App-independent TCP, TLS and SSH connections for Craft plugins (capability net@0.1)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+craft-plugin = { path = "../craft-plugin" }
+
+# Plugins run only in native desktop and command-line apps; the browser build has no plugin runtime.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+directories = "6"
+# The same TLS stack as the app's update check: rustls with ring, the system's trusted roots.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-platform-verifier = "0.7"
+# SSH without RSA: RSA private-key operations would need the `rsa` crate's advisory waived anew.
+russh = { version = "0.65", default-features = false, features = ["ring", "flate2"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "io-util"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
+tempfile = "3"

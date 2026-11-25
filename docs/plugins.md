@@ -6,7 +6,9 @@ Phase 1 splits the host into two app-agnostic crates:
 - `crates/craft-plugin` owns the generic WIT contract, manifest, permissions,
   entry input schemas and typed host errors. It has no wasmtime dependency.
 - `crates/craft-plugin-wasm` runs WebAssembly components against that contract
-  with fuel, memory and stack limits. Its linker exposes no network imports.
+  with fuel, memory and stack limits. Its linker exposes no WASI, socket or HTTP imports.
+- `crates/craft-plugin-net` opens the connections a plugin with `net@0.1` asks for (TCP, TLS and
+  SSH) to the endpoints it was allowed; see [Connections](#connections).
 
 An app implements `PluginHost`: it supplies command schemas, each command's
 `read` or `edit` effect, command execution, transaction begin/commit/rollback,
@@ -15,7 +17,7 @@ one undo step; a failed guest call rolls back the transaction. Granted file writ
 are staged and published only after the guest succeeds and the app commits. A rollback
 deletes staged files without replacing their targets. A filesystem failure during publication
 after app commit is reported and may leave some files changed. App commands remain
-JSON data rather than app-specific WIT types. Both crates are Shared crates;
+JSON data rather than app-specific WIT types. All three are Shared crates;
 `cargo xtask layers` forbids direct and indirect SolidCraft dependencies.
 
 SolidCraft's adapter lives in `crates/engine` and uses the same command surface
@@ -190,7 +192,14 @@ the folder error; choose a folder again. The plugin gets only the folders displa
 When the plugin asks for more memory than the ceiling in **Preferences > Plugins** (128 MiB unless
 changed), or more fuel than **Max plugin fuel** (100,000,000,000 unless changed), the screen says
 how much it asks for and what the default limit is.
-**Install** approves the displayed command groups, folders, fuel and memory, publishes the package and stores the
+A folder an entry names in `x-solidcraft-app-data-folders` (an array of folder names on its input
+schema) is the plugin's own: the screen shows where it is, under the app's data folder
+(`plugin-data/<id>/<name>`), and asks for no path. **Install** makes it. The plugin may learn
+where it is with `files.locate(grant, path)`, to save or open a design there with `file.save_as`
+or `doc.open` (which then makes any missing sub-folders); a folder the user chose stays unknown to
+the plugin. A plugin that connects to
+servers lists each endpoint in plain words (see [Connections](#connections)).
+**Install** approves the displayed command groups, folders, connections, fuel and memory, publishes the package and stores the
 approvals; **Cancel** changes nothing. Installation never runs plugin code. Approved fuel and memory apply to
 that exact package only: a replaced or changed request asks again, since the approval hash covers the
 manifest and component. Other plugins keep the user's default limits.
@@ -208,17 +217,19 @@ Programs use the same `plugin.install` command without opening dialogs:
     "command_groups": ["file"],
     "folders": [{"name": "exports", "path": "/home/user/exports", "read": false, "write": true}],
     "fuel": 10000000000000,
-    "memory_mib": 1024
+    "memory_mib": 1024,
+    "net": false
   }
 }
 ```
 
 Approvals may only narrow the manifest's requests. An unrequested group, folder name or access mode
 returns a typed refusal. `memory_mib` is either omitted (the plugin runs under the app's ceiling) or
-exactly the manifest's `runtime.limits.memory_mib`. Likewise, `fuel` is omitted (Max plugin fuel
+exactly the manifest's `runtime.limits.memory_mib`. `net` allows the manifest's `connect` endpoints;
+it is refused for a plugin that names none. Likewise, `fuel` is omitted (Max plugin fuel
 applies) or exactly `runtime.limits.fuel`, up to the hard host ceiling. Headless callers submit the
 same `approve` object to `plugin.install`; stored grants include the approved fuel.
-Omitting `approve` grants no groups, folders, fuel or memory, including when replacing a plugin.
+Omitting `approve` grants no groups, folders, connections, fuel or memory, including when replacing a plugin.
 Providing `approve` replaces that plugin id's stored approvals; grants the new manifest no longer requests
 cannot survive replacement. `plugin.run` checks stored grants against the current manifest on every call.
 A package copied into the plugin directory by hand also starts with no grants.
@@ -835,7 +846,8 @@ reports progress and cancellation, reads named files and a clock, and exports th
 an unknown or newer capability when it reads the manifest, with a plain message such as "needs
 commands 0.3; update SolidCraft or the plugin". `formats@0.2` adds file-format slots: importers and
 exporters; `evaluate@0.2` lets an importer check its result, `storage@0.1` keeps data in a design
-(below), and `ui@0.1` adds host-drawn docked panels. `viewport` arrives later as its own versioned
+(below), `ui@0.1` adds host-drawn docked panels, and `net@0.1` lets a command plugin connect to
+servers ([Connections](#connections)). `viewport` arrives later as its own versioned
 interface. While a version is 0.x, a minor version may break the one before it.
 
 `themes@0.1` lets a plugin add colour themes to Preferences > Appearance > Theme from
@@ -926,8 +938,8 @@ Lists and tables scroll virtually.
 A plugin can call every command in the MCP catalog that its manifest lists. Commands that reach
 past the open design are grouped (`file`, `doc`, `app`, `plugin`) and refused unless the
 manifest asks for the group in `permissions.command_groups` and the user grants it.
-File access requires approved folder grants. The reserved `net` permission is
-refused with a typed error. Traps, missing permissions, failed commands, limits
+File access requires approved folder grants. Connections need `net@0.1` and the endpoints in
+`connect` (below); the old reserved `"net": true` is refused with a typed error. Traps, missing permissions, failed commands, limits
 and invalid manifest fields return structured errors (see Errors below). Phase 2 adds importers
 and exporters (below) and the author tools (`plugin check` and `plugin test`, below); browser
 execution follows.
@@ -939,6 +951,51 @@ saved), `read_only`, `unsaved`, `disk` (`{len, modified_ns}`, `modified_ns` a de
 `document_id`. These describe the user's design when the call started, before the plugin's own
 changes. The run still works on a copy with no file: `document.inspect` gives no `path` there, and
 `file.save` without a `path` is refused.
+
+An `edit` entry that calls `doc.open` with `{"path": …, "new_tab": true}` (the `doc` group, a
+file inside a granted folder) opens that design in a tab of its own once the run is accepted, up to
+8 per run; the reply is `{"path": …, "new_tab": true, "opening": true}`. The run's result lists them
+in `opens`, so a program running the plugin can open them too.
+
+## Connections
+
+A command plugin with the `net@0.1` capability connects to servers through the `net` interface:
+the app makes the connection and the plugin reads and writes its bytes. A panel plugin
+(`ui@0.1`) may connect too. It is for plugins that sync
+with a server, such as Git hosting or a library server. The manifest names every endpoint:
+
+```json
+"capabilities": ["commands@0.2", "net@0.1"],
+"runtime": {"permissions": {"connect": [
+  {"host": "*", "transport": "tls"},
+  {"host": "*.example.com", "port": 22, "transport": "ssh"},
+  {"host": "localhost", "port": 3000, "transport": "tcp"}
+]}}
+```
+
+- `host`: a lowercase host name or address, `*.domain` for the names under a domain, or `*` for
+  any host. Up to 32 endpoints.
+- `port`: 1 to 65535; left out, any port.
+- `transport`:
+  - `tls`: the app encrypts the connection and checks the server's certificate against the
+    system's trusted roots, as the update check does.
+  - `ssh`: the app checks the server's key against `~/.ssh/known_hosts` (an unknown or changed key
+    is refused), signs in with the user's SSH agent, then `~/.ssh/id_ed25519` or `~/.ssh/id_ecdsa`,
+    and runs one command the plugin names (`user` and `command`, such as
+    `git-upload-pack '/me/designs.git'`). The connection carries the command's input and output; a
+    command that fails is an error carrying what it printed.
+  - `tcp`: plain bytes, not encrypted.
+
+The install screen lists each endpoint, and **Install** allows them. Only an `edit` entry connects:
+a call from a `read` entry, the live preview or a dialog hook is refused, so a preview never
+reaches a server. A run holds up to 16 connections at once; a read returns and a write takes at
+most 1 MiB. While a connection waits for the network, the app checks every 200 ms whether the run
+was cancelled or ran out of time. Connections close when the run ends.
+
+**Allowed servers** in **Preferences > Plugins** narrows every plugin further: when it names any
+server (up to 64, such as `localhost, github.com, *.gitlab.com:22`, each with an optional port), a
+plugin reaches a server only when it is on that list too. `solidcraft-cli --plugin-limits` reads the
+same list as `allowed_hosts`. The browser build makes no connections: `open` returns `unsupported`.
 
 ## Plugins as tools for agents
 
@@ -998,17 +1055,19 @@ plugin and importer.
   running it, through the code Install and a call use: the installer's reader and limits, the
   manifest, the permissions (`net` is refused), the limits against the app's ceilings, and the
   component against its world (`command-plugin`, `importer-plugin` or `exporter-plugin`) and this app's WIT version,
-  with no WASI or network import. Each problem has a severity, the field, what is wrong and how to
+  with no WASI, socket or HTTP import. Each problem has a severity, the field, what is wrong and how to
   fix it. In a folder, `tests/` and hidden files are left out. It runs no plugin code, installs
   nothing and never opens a dialog.
-- `solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] [--require-cases]` checks
+- `solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] [--require-cases] [--allow-net]` checks
   the package, installs it into a scratch plugins folder with the app's installer, and runs its
   test cases, `tests/*.json`, through `plugin.run`, `file.import` and `file.export` with the
   app's limits. An exporter writes into the scratch folder. A folder's cases are in its `tests/`
   folder; a `.zip`'s are the `tests/` folder it holds, so a
   `.zip` made without one has none. A case names the entry, its parameters or file, the grants
   (default: everything the manifest asks for, stored in the scratch folder's grant store as an
-  install stores them, see [Headless use](#headless-use)), and what to expect: an error kind,
+  install stores them, see [Headless use](#headless-use); connections only with `--allow-net`, so a
+  package's own cases never grant it the network, and a case asking for `"net": true` without it
+  fails), and what to expect: an error kind,
   values in the reply, values `inspect.measure` gives, files written. An entry with no case runs
   once with its defaults when it needs nothing else, and is reported as skipped otherwise. It exits with an
   error when a case fails, and with `--require-cases` also when an entry is skipped, in a folder

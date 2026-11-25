@@ -156,7 +156,7 @@ fn visible_resource_fields_confirm_exact_integers_and_refuse_invalid_ok() {
     assert!(scenario::rect_of("dialog:control:Max plugin fuel").is_none());
     click(&mut h, &mut textures, "prefs:plugins:advanced_limits");
     raster::paint(&mut h, &mut textures, vec![]);
-    let original = h.app.session.plugin_limits;
+    let original = h.app.session.plugin_limits.clone();
     let fuel = "dialog:control:Max plugin fuel";
     let memory = "dialog:control:Max plugin memory (MiB)";
     for target in [fuel, memory] {
@@ -192,7 +192,7 @@ fn visible_resource_fields_confirm_exact_integers_and_refuse_invalid_ok() {
     .to_image()
     .save(dir.join("resource-ceilings-en.png"))
     .unwrap();
-    let applied = h.app.session.plugin_limits;
+    let applied = h.app.session.plugin_limits.clone();
     replace(&mut h, &mut textures, fuel, "0");
     click(&mut h, &mut textures, "prefs:ok");
     assert_eq!(h.app.session.plugin_limits, applied);
