@@ -479,13 +479,22 @@ fn a_cylinder_wall_on_the_mesh_path_is_shaped() {
 /// rims are real boundaries and the cylinder has finite volume.
 #[test]
 fn a_short_cylinder_keeps_both_rims_when_its_vertices_have_a_larger_tolerance() {
-    let mut body = record(&make_cylinder([0.0; 3], 0.65, 0.00044).expect("cylinder"));
+    let height = 0.00044;
+    let mut body = record(&make_cylinder([0.0; 3], 0.65, height).expect("cylinder"));
     for vertex in &mut body.vertices {
         vertex.tolerance = 0.0018;
     }
     let (plan, _) = meshed(&body, &MeshSpec::chord(0.01), 2.0, None);
     let (mesh, refused) = plan.welded().expect("welded cylinder");
     assert!(refused.is_empty(), "{refused:?}");
+    assert!(!mesh.triangles.is_empty(), "a solid cylinder needs triangles");
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for &i in mesh.triangles.iter().flatten() {
+        let z = mesh.positions[i as usize].z;
+        lo = lo.min(z);
+        hi = hi.max(z);
+    }
+    assert!(lo.abs() < height * 1e-9 && (hi - height).abs() < height * 1e-9, "triangle heights {lo}..{hi}, expected 0..{height}");
     assert_closed(&mesh, "short cylinder");
 }
 

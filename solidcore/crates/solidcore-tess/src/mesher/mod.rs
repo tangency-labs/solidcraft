@@ -418,6 +418,7 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
                     again.push(fi);
                 }
                 Err(e) => {
+                    lost.push(fi);
                     if let Some(slot) = slots.get_mut(fi) {
                         *slot = Some(Err(e));
                     }
