@@ -1615,42 +1615,40 @@ fn round_jets(
     Ok(RoundJets { h, q: lq })
 }
 
-/// Compare the complete G1 boundary data of the analytic planar model and a built round.
-/// Both are already in standard form across and use arc length along the round.
-pub(crate) fn same_round_end(
+/// Whether the built round runs across its end opposite to the model.
+/// Returns no orientation if the boundary jets do not agree to working roundoff.
+pub(crate) fn model_end_reversal(
     kernel: &Kernel,
     model: &Round<'_>,
     actual: &Round<'_>,
     origin: Point3,
-) -> core::result::Result<bool, Refusal> {
+) -> core::result::Result<Option<bool>, Refusal> {
     let model_jets = round_jets(kernel, model, 1)?;
     let actual_jets = round_jets(kernel, actual, 1)?;
     if model_jets.q != actual_jets.q {
-        return Ok(false);
+        return Ok(None);
     }
+    let at_origin = |h: &Hom| {
+        [
+            h[0] - origin.x * h[3],
+            h[1] - origin.y * h[3],
+            h[2] - origin.z * h[3],
+            h[3],
+        ]
+    };
     let same = |a: &Hom, b: &Hom, direction: f64| {
-        let a = [
-            a[0] - origin.x * a[3],
-            a[1] - origin.y * a[3],
-            a[2] - origin.z * a[3],
-            a[3],
-        ];
-        let b = [
-            b[0] - origin.x * b[3],
-            b[1] - origin.y * b[3],
-            b[2] - origin.z * b[3],
-            b[3],
-        ];
-        a.into_iter()
-            .zip(b)
-            .all(|(x, y)| (x - direction * y).abs() <= EFF_ZERO * (1.0 + x.abs().max(y.abs())))
+        at_origin(a).into_iter().zip(at_origin(b)).all(|(x, y)| {
+            x.is_finite()
+                && y.is_finite()
+                && (x - direction * y).abs() <= EFF_ZERO * (1.0 + x.abs().max(y.abs()))
+        })
     };
     let direction = if model.corner_above == actual.corner_above {
         1.0
     } else {
         -1.0
     };
-    Ok([false, true].into_iter().any(|reverse| {
+    Ok([false, true].into_iter().find(|&reverse| {
         model_jets
             .h
             .iter()

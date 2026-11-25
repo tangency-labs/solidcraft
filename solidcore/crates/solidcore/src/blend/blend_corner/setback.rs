@@ -90,7 +90,7 @@ use crate::blend::blend_corner::{BlendCorner, BlendCornerEvent};
 use crate::blend::blend_refusal::{BlendRefusal, SetbackTooLongWhy, SetbackTooShortWhy};
 use crate::blend::blend_setback::{
     bisect_thousandths, certified_scale, containment_kept, distances, fill_hole_counted,
-    fill_hole_probe, model_rounds, same_round_end, spring_curve, unequal_radii, Edge, Face,
+    fill_hole_probe, model_end_reversal, model_rounds, spring_curve, unequal_radii, Edge, Face,
     FaceKind, FacePlane, Fill, FillStats, Probe, Round, SpringCurve,
 };
 use crate::blend::fillet_corner::p1::{face_by_two_edgeuses, test_g1_continuity};
@@ -1977,12 +1977,60 @@ fn rounds_of<'s>(surfaces: &'s [Surface], sides: &[(SurfParamType, f64, bool)]) 
         .collect()
 }
 
+/// Use the model's geometric order and section directions for the built rounds.
+fn order_round_ends(
+    k: &Kernel,
+    target: &Brep,
+    vertex: VertexId,
+    planes: &CornerPlanes,
+    setbacks: &[f64],
+    ends: Ends,
+) -> Result<Ends> {
+    let models =
+        model_rounds(&planes.planes, &planes.edges, setbacks).map_err(|refusal| refusal.error)?;
+    let actual = rounds_of(&ends.0, &ends.1);
+    if models.len() != actual.len() {
+        return Ok(ends);
+    }
+    let origin = vertex::point(target, vertex)?;
+    let mut surfaces = Vec::with_capacity(actual.len());
+    let mut sides = Vec::with_capacity(actual.len());
+    for model in &models {
+        let Some(real) = actual.get(model.index) else {
+            return Ok(ends);
+        };
+        let Some(reverse) =
+            model_end_reversal(k, &model.round(), real, origin).map_err(|refusal| refusal.error)?
+        else {
+            return Ok(ends);
+        };
+        let surface = if reverse {
+            let mut surface = crate::topology::brep::p3::with_nurb(k, real.surface)?
+                .ok_or_else(|| defect(OP_FILL, WHY_CHECKED))?
+                .into_owned();
+            let across = if real.along == SurfParamType::U {
+                SurfParamType::V
+            } else {
+                SurfParamType::U
+            };
+            surface.reverse(across)?;
+            Surface::from(surface)
+        } else {
+            real.surface.clone()
+        };
+        surfaces.push(surface);
+        sides.push((real.along, real.end, real.corner_above));
+    }
+    Ok((surfaces, sides))
+}
+
 /// What the growth of a Setback's setbacks beside curved faces works on.
 struct Growth<'a> {
     k: &'a Kernel,
     target: &'a Brep,
     planes: &'a CornerPlanes,
     tol: f64,
+    ordered_planar_g1: bool,
     /// The setbacks it grows from (the rule's, or the one asked for).
     base: Vec<f64>,
     /// The most each may grow to: its room less the rule's quarter radius (unbounded where
@@ -2030,6 +2078,24 @@ impl Growth<'_> {
             &self.planes.faces,
             self.tol,
         )? {
+            Gathered::Ends(surfaces, sides) if self.ordered_planar_g1 => {
+                let vertex = corner
+                    .vertex
+                    .ok_or_else(|| bad_setup(OP_FILL, FilletSetUp::CornerVertex, None))?;
+                let sb = corner
+                    .setback
+                    .as_ref()
+                    .ok_or_else(|| defect(OP_FILL, WHY_CHECKED))?;
+                order_round_ends(
+                    self.k,
+                    self.target,
+                    vertex,
+                    self.planes,
+                    &sb.setbacks,
+                    (surfaces, sides),
+                )
+                .map(Some)
+            }
             Gathered::Ends(surfaces, sides) => Ok(Some((surfaces, sides))),
             Gathered::Refused(_) | Gathered::Unplaced | Gathered::PastRails { .. } => Ok(None),
         }
@@ -2717,6 +2783,7 @@ fn springs_refusal<S: SetbackSolvers>(
         tol,
         most: vec![BIG_DOUBLE; base.len()],
         base,
+        ordered_planar_g1: false,
     };
     let fit = largest_clear_scale(&growth, least_scale, |scale| {
         Ok(match growth.place(pseudo, corner, solvers, scale)? {
@@ -2843,7 +2910,7 @@ pub fn build_setback_fill<S: SetbackSolvers>(
     };
 
     // each blend at its end section
-    let (mut surfaces, mut sides) =
+    let (surfaces, sides) =
         match gather_ends(k, target, pseudo, corner, &*solvers, &planes.faces, tol)? {
             Gathered::Ends(surfaces, sides) => (surfaces, sides),
             Gathered::Refused(why) => return Ok(Err(SetbackRefusal::not_built(why))),
@@ -2874,38 +2941,12 @@ pub fn build_setback_fill<S: SetbackSolvers>(
             return Ok(Err(refusal));
         }
     }
-    // The mixed-radius planar corner was sized on analytic cylinders. Use the same
-    // boundary rows when the actual sections and tangent fields agree with them.
-    let actual = rounds_of(&surfaces, &sides);
-    let models = if order == 1 && !curved && unequal_radii(&planes.edges) {
-        let setbacks = &corner
-            .setback
-            .as_ref()
-            .ok_or_else(missing_setback)?
-            .setbacks;
-        Some(
-            model_rounds(&planes.planes, &planes.edges, setbacks)
-                .map_err(|refusal| refusal.error)?,
-        )
+    let mixed_planar_g1 = order == 1 && !curved && unequal_radii(&planes.edges);
+    let (mut surfaces, mut sides) = if mixed_planar_g1 {
+        let sb = corner.setback.as_ref().ok_or_else(missing_setback)?;
+        order_round_ends(k, target, vtx, &planes, &sb.setbacks, (surfaces, sides))?
     } else {
-        None
-    };
-    let model_ends = if let Some(models) = &models {
-        let origin = vertex::point(target, vtx)?;
-        let mut matching = models.len() == actual.len();
-        let mut ends = Vec::with_capacity(models.len());
-        for model in models {
-            let Some(real) = actual.get(model.index) else {
-                matching = false;
-                break;
-            };
-            let round = model.round();
-            matching &= same_round_end(k, &round, real, origin).map_err(|refusal| refusal.error)?;
-            ends.push(round);
-        }
-        matching.then_some(ends)
-    } else {
-        None
+        (surfaces, sides)
     };
     let mut stats = FillStats::default();
     // a corner left open derives its face curves from the fill without building it, and
@@ -2913,7 +2954,7 @@ pub fn build_setback_fill<S: SetbackSolvers>(
     let first = fill_hole_counted(
         k,
         &planes.planes,
-        model_ends.as_deref().unwrap_or(&actual),
+        &rounds_of(&surfaces, &sides),
         order,
         tol,
         !open,
@@ -2930,7 +2971,7 @@ pub fn build_setback_fill<S: SetbackSolvers>(
         // real rounds: beside a curved face (its ruling (a) certificate) and for the G2
         // planar corner (its convexity certificate, #13775); the G1 planar corner's
         // setbacks were grown before the fill (certified_scale)
-        Err(refusal) if !stats.uncertified || (!curved && order == 1) => {
+        Err(refusal) if !stats.uncertified || (!curved && order == 1 && !mixed_planar_g1) => {
             return Ok(Err(SetbackRefusal::not_built(refusal.reason.unwrap_or(
                 "Fillet Error: the setback corner's hole cannot be filled",
             ))))
@@ -2989,10 +3030,15 @@ pub fn build_setback_fill<S: SetbackSolvers>(
                 target,
                 planes: &planes,
                 tol,
+                ordered_planar_g1: mixed_planar_g1,
                 base,
                 most,
             };
-            let hi_scale = if curved { 2.0 } else { room_scale };
+            let hi_scale = if curved || mixed_planar_g1 {
+                2.0
+            } else {
+                room_scale
+            };
             match grow_curved(&growth, pseudo, corner, solvers, asked, curved, hi_scale)? {
                 // the fill where the grown setbacks put the blends' ends, made as a corner
                 // asked for those setbacks would make it
@@ -3024,7 +3070,6 @@ pub fn build_setback_fill<S: SetbackSolvers>(
         }
     };
     let actual_rounds = rounds_of(&surfaces, &sides);
-    let rounds = model_ends.as_deref().unwrap_or(&actual_rounds);
 
     if fill.patches.len() != 2 * n || fill.face.len() != n {
         return Err(defect(OP_FILL, WHY_FILL_SHAPE));
@@ -3145,7 +3190,7 @@ pub fn build_setback_fill<S: SetbackSolvers>(
         Some(worst) => Some(keep_definition(
             k,
             &planes.planes,
-            rounds,
+            &actual_rounds,
             order,
             tol,
             convex,
