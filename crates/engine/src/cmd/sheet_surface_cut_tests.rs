@@ -1645,7 +1645,9 @@ fn a_clean_plate_passes_the_generic_shop_check() {
     let checked: Vec<&str> = reply["checked"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
     assert!(checked.contains(&"hole.min_diameter") && checked.contains(&"hole.to_edge") && checked.contains(&"file.one_body"), "{checked:?}");
     let not_checked: Vec<&str> = reply["not_checked"].as_array().unwrap().iter().filter_map(|n| n["rule"].as_str()).collect();
-    assert!(not_checked.contains(&"flange.min") && not_checked.contains(&"stock.thickness"), "{not_checked:?}");
+    // A plate with no bend has no flange: the rule is looked at, with nothing to find.
+    assert!(checked.contains(&"flange.min") && !not_checked.contains(&"flange.min"), "{checked:?} {not_checked:?}");
+    assert!(not_checked.contains(&"stock.thickness"), "{not_checked:?}");
 }
 
 /// A 0.6 mm hole in 2 mm sheet is under the generic laser minimum of max(0.5 * 2, 1) = 1 mm.
@@ -1707,6 +1709,38 @@ fn a_hole_near_a_bend_is_a_shop_finding_with_the_zone_distance() {
             assert!((found["value"].as_f64().unwrap_or(f64::NAN) - d).abs() < 1e-6, "{found}");
         }
     }
+}
+
+/// A flange's reach is measured in the flat, square to the bend, from where the bend starts: the
+/// plate's two sides of the bend reach as far as the flat's outline goes either side of the bend's
+/// zone (by hand, from the outline's extent and the zone's edges). A rule with a minimum between the
+/// two is broken by the shorter side alone, at the bend's middle; the built-in 4 T (8 mm) is met.
+#[test]
+fn a_short_flange_is_a_shop_finding_with_the_reach_from_the_bend() {
+    let mut s = plate();
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
+    let flat = run(&mut s, "sheet.flat_pattern", json!({}));
+    let ys: Vec<f64> = flat["outline"].as_array().unwrap().iter().flat_map(|l| l.as_array().unwrap().iter().filter_map(|p| p[1].as_f64())).collect();
+    let (lo, hi) = (ys.iter().copied().fold(f64::INFINITY, f64::min), ys.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+    let zone = &flat["bend_zones"][0];
+    let [y0, y1] = [zone[2].as_f64().unwrap_or(f64::NAN), zone[3].as_f64().unwrap_or(f64::NAN)];
+    let (below, above) = (y0 - lo, hi - y1);
+    assert!((below - above).abs() > 1.0, "the two sides differ: {below} and {above}");
+    let limit = (below + above) / 2.0;
+    let rule = json!({"id": "flange.min", "limits": [{"value": limit, "sources": [{"url": "https://example.com/acme", "read": "2026-11-25", "says": "a made-up minimum"}]}]});
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": {"name": "Acme", "rules": [rule]}}));
+    let f = shop_findings(&reply, "flange.min");
+    assert_eq!(f.len(), 1, "{reply}");
+    assert!((f[0]["value"].as_f64().unwrap_or(f64::NAN) - below.min(above)).abs() < 1e-6, "{} against {below} and {above}", f[0]);
+    assert!((f[0]["limit"].as_f64().unwrap_or(f64::NAN) - limit).abs() < 1e-9, "{}", f[0]);
+    let bend = &flat["bends"][0];
+    for axis in 0..2 {
+        let mid = (bend["start"][axis].as_f64().unwrap_or(f64::NAN) + bend["end"][axis].as_f64().unwrap_or(f64::NAN)) / 2.0;
+        assert!((f[0]["at"][axis].as_f64().unwrap_or(f64::NAN) - mid).abs() < 1e-6, "{}", f[0]);
+    }
+    // PCBWay's 4 T = 8 mm: a finding only for a side under 8 mm.
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "pcbway"}));
+    assert_eq!(shop_findings(&reply, "flange.min").len(), [below, above].iter().filter(|r| **r + 1e-9 < 8.0).count(), "{reply}");
 }
 
 /// A profile as an object, a built-in id in any case, and what is refused.

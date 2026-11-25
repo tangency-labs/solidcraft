@@ -57,6 +57,24 @@ pub struct HardwareHole {
     pub at: [f64; 2],
 }
 
+/// One side of a bend: the panel there and how far it reaches from the bend (#20113).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Flange {
+    /// The bend's number in the bend table, from 1.
+    pub number: usize,
+    /// The side of the bend, as its centre line runs from its start to its end in the flat as it
+    /// is read: `left` or `right`.
+    pub side: &'static str,
+    /// The bend's inside radius (mm).
+    pub radius: f64,
+    /// The least reach square to the bend, from where the bend starts (mm).
+    pub from_start: f64,
+    /// ... and from the bend's centre line (mm).
+    pub from_line: f64,
+    /// The bend's middle, in the flat as it is read.
+    pub at: [f64; 2],
+}
+
 /// What the rules ask about a part.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Part {
@@ -78,6 +96,10 @@ pub struct Part {
     pub free_form: bool,
     pub threads: Vec<ThreadFact>,
     pub hardware: Vec<HardwareHole>,
+    /// Both sides of every bend.
+    pub flanges: Vec<Flange>,
+    /// Why some flanges were not measured, when they were not.
+    pub flange_gaps: Vec<String>,
 }
 
 /// Reads `sheet` of `doc` for the rules: `bodies` are all the design's bodies and `flat_size` the
@@ -116,6 +138,7 @@ pub fn part_of(doc: &Document, sheet: &SurfaceSheet, bodies: Vec<String>, flat_s
         .into_iter()
         .map(|h| HardwareHole { feature: h.feature, label: format!("{} {}", h.thread, h.kind.label()), at: [h.center.x, h.center.y] })
         .collect();
+    flanges_of(&sk, &mut part);
     let live = doc.marker.unwrap_or(doc.features.len());
     for f in doc.features.iter().take(live).filter(|f| !f.suppressed) {
         let modelled = match &f.kind {
@@ -126,6 +149,42 @@ pub fn part_of(doc: &Document, sheet: &SurfaceSheet, bodies: Vec<String>, flat_s
         part.threads.push(ThreadFact { feature: f.id, name: f.name.clone(), modelled });
     }
     part
+}
+
+/// The tolerance the flat is cut at the bends' zones with (mm).
+const ZONE_CUT_TOLERANCE: f64 = 1e-9;
+
+/// How far each flange reaches from its bend: the flat cut at every bend's zone leaves its panels,
+/// and the kernel measures the least reach square to the bend across the panel on each side
+/// (`prism::flange_reach`). The reach is over the bend's length less one thickness at each end, so
+/// a rounded or chamfered corner of the flange does not decide it.
+fn flanges_of(sk: &SurfaceSheet, part: &mut Part) {
+    if sk.bends.is_empty() {
+        return;
+    }
+    let zones: Vec<_> = sk.bends.iter().map(|b| b.zone.clone()).collect();
+    let cut = solidcraft_kernel::planar_regions_boolean(&sk.regions, &zones, solidcraft_kernel::BoolOp::Cut, ZONE_CUT_TOLERANCE);
+    let panels = match cut {
+        Ok(p) => p,
+        Err(e) => {
+            part.flange_gaps.push(format!("the flat could not be cut at the bends' zones, so no flange was measured ({e})"));
+            return;
+        }
+    };
+    let mut unmeasured = 0usize;
+    for (i, b) in sk.bends.iter().enumerate() {
+        let at = [(b.start.x + b.end.x) / 2.0, (b.start.y + b.end.y) / 2.0];
+        for (left, side) in [(true, "left"), (false, "right")] {
+            match solidcraft_kernel::services::prism::flange_reach(&panels, &b.zone, b.start, b.end, left, sk.thickness) {
+                Some(r) => part.flanges.push(Flange { number: i + 1, side, radius: b.radius, from_start: r.from_edge, from_line: r.from_line, at }),
+                None => unmeasured += 1,
+            }
+        }
+    }
+    if unmeasured > 0 {
+        part.flange_gaps
+            .push(format!("{unmeasured} flange(s) were not measured: a free-form edge, or no panel standing against the bend's zone on that side"));
+    }
 }
 
 /// How serious a finding is.
@@ -244,11 +303,6 @@ pub fn check(profile: &Profile, part: &Part) -> Report {
             not_checked(&mut r, id, format!("{}'s pages give no value for it", profile.name));
             continue;
         };
-        if id == RuleId::FlangeMin {
-            let why = "the shortest flange needs a measurement from a bend to the far edge that solidcore does not offer yet, so the value is in the profile and not applied";
-            not_checked(&mut r, id, why.to_string());
-            continue;
-        }
         r.checked.push(id.as_str().to_string());
         let severity = if rule.disagreement { Severity::Warning } else { Severity::Error };
         let ctx = Ctx { shop: &profile.name, part, rule, severity };
@@ -262,7 +316,7 @@ pub fn check(profile: &Profile, part: &Part) -> Report {
             RuleId::HoleToBend => to_bend(&ctx, &mut r),
             RuleId::ThreadModelling => threads(&ctx, &mut r),
             RuleId::HardwareModelling => hardware(&ctx, &mut r),
-            RuleId::FlangeMin => {}
+            RuleId::FlangeMin => flange_min(&ctx, &mut r),
         }
     }
     r
@@ -483,6 +537,47 @@ fn to_bend(ctx: &Ctx<'_>, r: &mut Report) {
     cutouts_note(ctx, r);
     if ctx.part.free_form {
         not_checked(r, ctx.rule.id, "a free-form edge was not measured".to_string());
+    }
+}
+
+fn flange_min(ctx: &Ctx<'_>, r: &mut Report) {
+    let (limits, matched) = applicable(&ctx.rule.limits, &ctx.part.material);
+    if !matched {
+        unmatched(r, ctx);
+    }
+    let t = ctx.part.thickness;
+    for fl in &ctx.part.flanges {
+        // The limit the flange falls shortest of: (shortfall, need, reach, how it is measured).
+        let mut worst: Option<(f64, f64, f64, Measured)> = None;
+        for l in &limits {
+            let Some(need) = l.needed(t, fl.radius) else { continue };
+            let from = l.measured_from();
+            let d = if from == Measured::BendLine { fl.from_line } else { fl.from_start };
+            let short = need - d;
+            if d + 1e-9 < need && worst.as_ref().is_none_or(|w| short > w.0) {
+                worst = Some((short, need, d, from));
+            }
+        }
+        let Some((_, need, d, from)) = worst else { continue };
+        let to = if from == Measured::BendLine { "the bend line" } else { "where the bend starts" };
+        let message = format!(
+            "the flange on the {} of bend {} at {} reaches only {} mm (from {to}); {} needs flanges at least {} mm long{}",
+            fl.side,
+            fl.number,
+            at_text(fl.at),
+            mm(d),
+            ctx.who(),
+            mm(need),
+            ctx.note()
+        );
+        let mut f = ctx.finding(message);
+        f.at = Some(fl.at);
+        f.value = Some(d);
+        f.limit = Some(need);
+        r.findings.push(f);
+    }
+    for why in &ctx.part.flange_gaps {
+        not_checked(r, ctx.rule.id, why.clone());
     }
 }
 

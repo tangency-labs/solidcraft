@@ -1,5 +1,5 @@
 use super::*;
-use crate::shop_rules::profile;
+use crate::shop_rules::{Profile, profile};
 
 /// A 2 mm bracket: one round hole 30 mm from every edge and 20 mm from a bend of radius 2 mm.
 fn bracket() -> Part {
@@ -33,8 +33,8 @@ fn a_clean_bracket_passes_generic() {
     let r = run("generic", &bracket());
     assert!(r.findings.is_empty(), "{:?}", r.findings);
     assert!(r.checked.contains(&"hole.to_bend".to_string()));
-    let flange = r.not_checked.iter().find(|n| n.rule == "flange.min").map(|n| n.why.as_str()).unwrap_or("");
-    assert!(flange.contains("solidcore"), "{flange}");
+    // No bend, no flange: the rule is looked at and nothing is found.
+    assert!(r.checked.contains(&"flange.min".to_string()) && !r.not_checked.iter().any(|n| n.rule == "flange.min"));
     let stock = r.not_checked.iter().find(|n| n.rule == "stock.thickness").map(|n| n.why.as_str()).unwrap_or("");
     assert!(stock.contains("Generic's pages give no value"), "{stock}");
 }
@@ -178,4 +178,57 @@ fn the_report_is_the_same_every_time() {
     let mut part = bracket();
     part.holes.push(hole([12.0, 8.0], 0.6, 3.0, 1.0));
     assert_eq!(run("pcbway", &part), run("pcbway", &part));
+}
+
+fn flange(number: usize, side: &'static str, from_start: f64) -> Flange {
+    Flange { number, side, radius: 2.0, from_start, from_line: from_start + 2.0, at: [50.0, 10.0 * number as f64] }
+}
+
+/// A 20 mm flange passes a 4 T rule on 2 mm sheet (8 mm); a 6 mm one does not, and the finding says
+/// 6 against 8, at the bend's middle.
+#[test]
+fn a_short_flange_is_a_finding_with_the_shops_limit() {
+    let mut part = bracket();
+    part.flanges = vec![flange(1, "left", 20.0), flange(1, "right", 30.0)];
+    assert!(rule(&run("pcbway", &part), "flange.min").is_empty());
+    part.flanges = vec![flange(1, "left", 6.0), flange(2, "left", 20.0)];
+    // PCBWay's pages give 4 T and 2.5 T: the strictest, 8 mm, as a warning.
+    let f = rule(&run("pcbway", &part), "flange.min").into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!(f.len(), 1);
+    assert_eq!((f[0].value, f[0].limit, f[0].severity, f[0].at), (Some(6.0), Some(8.0), Severity::Warning, Some([50.0, 10.0])));
+    assert!(
+        f[0].message.starts_with("the flange on the left of bend 1 at (50, 10) reaches only 6 mm (from where the bend starts); PCBWay"),
+        "{}",
+        f[0].message
+    );
+    assert!(f[0].message.contains("at least 8 mm long") && f[0].message.contains("which differ"), "{}", f[0].message);
+    // JLCCNC's one value, 3 T = 6 mm, is met by 6 mm, and is an error when not.
+    assert!(rule(&run("jlccnc", &part), "flange.min").is_empty());
+    part.flanges = vec![flange(1, "right", 5.0)];
+    let f = rule(&run("jlccnc", &part), "flange.min").into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!((f.len(), f[0].limit, f[0].severity), (1, Some(6.0), Severity::Error));
+}
+
+/// A rule that says `bend_line` is held to the reach from the bend's centre line, and what could
+/// not be measured is said.
+#[test]
+fn a_flange_rule_can_be_measured_from_the_bend_line() {
+    let custom = Profile::from_value(&serde_json::json!({
+        "name": "Acme",
+        "rules": [{"id": "flange.min", "limits": [{
+            "value": 4.0, "relative_to": "thickness", "from": "bend_line",
+            "sources": [{"url": "https://example.com/rules", "read": "2026-11-25", "says": "four thicknesses from the bend line"}]
+        }]}]
+    }))
+    .unwrap();
+    let mut part = bracket();
+    // 5 mm from where the bend starts is 7 from the line: under 8. 7 from the start is 9 from the
+    // line, which passes.
+    part.flanges = vec![flange(1, "left", 5.0), flange(1, "right", 7.0)];
+    part.flange_gaps = vec!["1 flange(s) were not measured".into()];
+    let r = check(&custom, &part);
+    let f = rule(&r, "flange.min");
+    assert_eq!((f.len(), f[0].value, f[0].limit), (1, Some(7.0), Some(8.0)));
+    assert!(f[0].message.contains("(from the bend line)"), "{}", f[0].message);
+    assert!(r.not_checked.iter().any(|n| n.rule == "flange.min" && n.why.contains("not measured")));
 }

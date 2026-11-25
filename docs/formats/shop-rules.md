@@ -42,7 +42,7 @@ what the numbers are for (`laser cutting`) in the messages. The ids are a closed
 | `hole.min_diameter` | the smallest round hole (and perforation hole) | `limits` |
 | `hole.to_edge` | a hole's least distance to an edge, cut-out or other hole | `limits` |
 | `hole.to_bend` | a hole's least distance to a bend | `limits` |
-| `flange.min` | the shortest flange | `limits` (kept; not applied yet) |
+| `flange.min` | the shortest flange: the reach of each side of every bend | `limits` |
 | `thread.modelling` | `wanted`: `plain` (a plain hole, the thread on the order) or `modelled` | `wanted`, `sources` |
 | `hardware.modelling` | `wanted`: `plain` (named on the order) or `modelled` | `wanted`, `sources` |
 
@@ -58,8 +58,8 @@ A **limit** is `{"value" or "steps", "relative_to"?, "plus_radius"?, "short_valu
 - `steps` is a list of `{"up_to_mm", "value"}`, in order of `up_to_mm`, for a value that goes by
   thickness (a die width): the first step the sheet fits; a thicker sheet takes the last.
 - `short_value` (`size.max_flat` only): the most the shorter side may be; `value` is the longer's.
-- `from` (`hole.to_bend` only): `bend_start` (default: where the flat sheet ends and the bend
-  begins, the most generous reading, so a finding is a real one) or `bend_line`.
+- `from` (`hole.to_bend` and `flange.min`): `bend_start` (default: where the flat sheet ends and
+  the bend begins, the most generous reading, so a finding is a real one) or `bend_line`.
 - `materials`: parts of the sheet rule's material (ignoring case) the value is for. A limit
   without any is for every material. When none matches the sheet's material, every limit is used
   and the report says so.
@@ -67,6 +67,13 @@ A **limit** is `{"value" or "steps", "relative_to"?, "plus_radius"?, "short_valu
 Several limits in a rule all hold, and the strictest governs (the smallest sheet for
 `size.max_flat`). A rule marked `"disagreement": true` is one whose pages differ: the strictest
 value is used, and its findings are warnings instead of errors.
+
+`flange.min` is held against the reach of each panel on each side of each bend: in the flat, the
+least distance, square to the bend, from the edge of the bend's zone (or its centre line) across
+the panel to the panel's far boundary, taken over the bend's length less one thickness at each end
+(so a rounded or chamfered corner does not decide it). A hole inside the panel does not shorten it;
+a cut-out through to the panel's edge does. A boundary of free-form curves is not measured and is
+listed as not checked. A finding is at the bend's middle.
 
 A **stock** entry is `{"materials"?, "thicknesses_mm" or "min_mm"/"max_mm", "sources"}`: a sheet is
 stock when within 0.01 mm of a listed thickness, or in the range.

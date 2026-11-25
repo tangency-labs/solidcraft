@@ -183,7 +183,7 @@ pub struct Limit {
     /// A multiple of the nearest bend's inside radius added to the value (`hole.to_bend`: `2 T + R`).
     #[serde(default)]
     pub plus_radius: Option<f64>,
-    /// `hole.to_bend` only: where the distance is measured from.
+    /// `hole.to_bend` and `flange.min`: where the distance is measured from.
     #[serde(default)]
     pub from: Option<Measured>,
     /// Material names (parts of the sheet rule's material, ignoring case) the value is for;
@@ -487,8 +487,8 @@ impl Limit {
         if let Some(v) = self.plus_radius {
             factor(name, "plus_radius", v)?;
         }
-        if self.from.is_some() && id != RuleId::HoleToBend {
-            return refuse(format!("{name}: `from` belongs to hole.to_bend"));
+        if self.from.is_some() && !matches!(id, RuleId::HoleToBend | RuleId::FlangeMin) {
+            return refuse(format!("{name}: `from` belongs to hole.to_bend and flange.min"));
         }
         if id == RuleId::MaxFlat && (self.relative_to.is_some() || self.plus_radius.is_some() || !self.steps.is_empty()) {
             return refuse(format!("{name}: a size is a plain number of mm"));
