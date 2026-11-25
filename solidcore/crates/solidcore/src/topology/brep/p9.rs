@@ -78,9 +78,6 @@ use crate::topology::{
 };
 use crate::EntityRef;
 
-#[cfg(feature = "wr469-replay")]
-pub mod replay;
-
 const OP: &str = "topology::brep::p9";
 
 /// A topology failure of p9 ([`SolidError::topology`]).
@@ -1817,7 +1814,10 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
             .unwrap_or(end);
         }
         edge::insert_manifold_edge_end(b, edge_id, Some(end), false)?;
-        let mut reparameterised = false;
+        // (test-only seam of the goldens' WR-450 replay, feature `wr57-replay`)
+        #[cfg(feature = "wr57-replay")]
+        let mut drop_trims = false;
+        let mut off_domain = None;
         let (new_face, new_fu1, new_fu2) = if new_loop_without_new_face {
             let fu1 = required(fp2::upward_faceuse(b, face)?, "face without upward use")?;
             let fu2 = required(b.faceuse(fu1)?.mate, "faceuse without mate")?;
@@ -1834,13 +1834,31 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
             let new_face = b.add_face_record(crate::topology::Face::new(shell))?;
             let old_surface =
                 required(b.face(face)?.surface.as_ref(), "split face without surface")?;
+            // (WR-450: the copy keeps the old surface's parameterisation, so the trims of
+            // the edge uses that move onto the new face stay on their edges)
             let mut surface = old_surface.copy_and_add_analytics(k)?;
-            // Not upstream (WR-361): without WR-450's fix, a B-spline recognised as an
-            // analytic is copied in the analytic's own parameterisation, so the trims of
-            // the edge uses that move onto the new face no longer lie on their edges
-            reparameterised = !k.fixes.analytic_copy_keeps_parameterization
-                && std::mem::discriminant(old_surface.kind())
-                    != std::mem::discriminant(surface.kind());
+            // (a copy of another kind is checked against the old surface on its natural
+            // domain only: trims that leave it are dropped below)
+            if std::mem::discriminant(old_surface.kind()) != std::mem::discriminant(surface.kind())
+            {
+                off_domain = Some(old_surface.natural_uv_domain_with_nurb(k)?);
+            }
+            // (test-only seam of the goldens' WR-450 replay, feature `wr57-replay`: main
+            // before the retirement dropped the new face's trims where the copy is of
+            // another kind)
+            #[cfg(feature = "wr57-replay")]
+            {
+                drop_trims = crate::surface::surface::replay::choose(
+                    k,
+                    old_surface,
+                    crate::surface::surface::replay::Seam::SplitTrims,
+                    &[u64::from(
+                        std::mem::discriminant(old_surface.kind())
+                            != std::mem::discriminant(surface.kind()),
+                    )],
+                    false,
+                )?;
+            }
             let new_face_owner = (env.key_of)(EntityRef::Face(new_face));
             surface.set_owner(Some(new_face_owner));
             b.face_mut(new_face)?.surface = Some(surface);
@@ -1948,16 +1966,22 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
                     }
                 }
             }
-            // The loops new_face has now (after the separating cut's swap) carry trims in
-            // the old parameterisation: drop them before redistribute_inner_loops
-            // classifies the old face's inner loops against new_face, and again after,
-            // for the inner loops it moves over from the old face
-            if reparameterised {
-                drop_face_trims(b, new_face)?;
+            // (the loops new_face has now, after the separating cut's swap, and again
+            // after redistribute_inner_loops for the inner loops it moves over)
+            if let Some(domain) = &off_domain {
+                drop_trims_off_domain(k, b, new_face, domain)?;
+            }
+            #[cfg(feature = "wr57-replay")]
+            if drop_trims {
+                replay_drop_face_trims(b, new_face)?;
             }
             redistribute_inner_loops(k, b, face, new_face, start_loop, new_loop, env)?;
-            if reparameterised {
-                drop_face_trims(b, new_face)?;
+            if let Some(domain) = &off_domain {
+                drop_trims_off_domain(k, b, new_face, domain)?;
+            }
+            #[cfg(feature = "wr57-replay")]
+            if drop_trims {
+                replay_drop_face_trims(b, new_face)?;
             }
         } else {
             // Both boundary cycles belong to this face. Put one seam side first;
@@ -2058,31 +2082,8 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
         let end_gap = curve_end
             .distance(vertex::point(b, end_vertex)?)
             .max(farthest_end_gap(k, b, end_vertex)?);
-        let start_tol = 2.0 * start_gap;
-        // (test-only seam of the WR-469 substitution replay, feature `wr469-replay`)
-        #[cfg(feature = "wr469-replay")]
-        let start_tol = replay::step(
-            k,
-            replay::VertexStep {
-                vertex: start_vertex,
-                before: vertex::tolerance(b, start_vertex)?,
-                gap: start_gap,
-                own: start_tol,
-            },
-        );
-        vertex::set_tolerance(b, start_vertex, start_tol, true, true)?;
-        let end_tol = 2.0 * end_gap;
-        #[cfg(feature = "wr469-replay")]
-        let end_tol = replay::step(
-            k,
-            replay::VertexStep {
-                vertex: end_vertex,
-                before: vertex::tolerance(b, end_vertex)?,
-                gap: end_gap,
-                own: end_tol,
-            },
-        );
-        vertex::set_tolerance(b, end_vertex, end_tol, true, true)?;
+        vertex::set_tolerance(b, start_vertex, 2.0 * start_gap, true, true)?;
+        vertex::set_tolerance(b, end_vertex, 2.0 * end_gap, true, true)?;
     }
     // These skeleton caches are derived from the authoritative use lists.
     sync_face_cache(b, face)?;
@@ -2181,10 +2182,65 @@ fn remove_old_loop_vertices(b: &mut Brep, vu: VertexuseId) -> Result<()> {
     crate::topology::brep::p1::rm_and_del_old_loop_vertices(b, vu)
 }
 
-/// Not upstream (WR-361): drops the UV trim curves of every edge use of `face`'s loops
-/// (the lazy caches of their edges' curves on the face, rebuilt when next asked for),
-/// for a face whose surface is no longer in the parameterisation they were made in.
-fn drop_face_trims(b: &mut Brep, face: FaceId) -> Result<()> {
+/// Not upstream (WR-450, #18923): drops the UV trim of every edge use of `face`'s loops
+/// whose certified box over its edge's interval ([`crate::curve::curve::Curve::certified_bounding_box`],
+/// which holds every point of the trim there) leaves `domain`, the natural domain of the surface
+/// `face`'s surface was copied from as an analytic of another kind. The copy keeps that
+/// surface's parameterisation on `domain` only (the copy check's grid); outside it the
+/// two differ (a cone clamps where a B-spline extrapolates), so such a trim is no longer
+/// on its edge. A dropped trim is the lazy cache of the edge's curve on the face, made
+/// again when next asked for; a trim with no certified box is dropped as well.
+///
+/// # Errors
+///
+/// Those of the topology walk and of dropping a trim.
+fn drop_trims_off_domain(
+    k: &Kernel,
+    b: &mut Brep,
+    face: FaceId,
+    domain: &crate::geom::extent2d::Extent2d,
+) -> Result<()> {
+    let Some(fu) = crate::topology::face::p2::upward_faceuse(b, face)? else {
+        return Ok(());
+    };
+    let mate = b.faceuse(fu)?.mate;
+    for fu in std::iter::once(fu).chain(mate) {
+        for eu in crate::topology::edgeuse::p1::faceuse_edgeuses(b, fu, false, None)? {
+            let record = b.edgeuse(eu)?;
+            let (Some(trim), Some(edge)) = (record.uv_trim_curve.as_ref(), record.edge) else {
+                continue;
+            };
+            let interval = b.edge(edge)?.interval;
+            let inside = crate::error::ignored(trim.certified_bounding_box(k, &interval))?
+                .flatten()
+                .is_some_and(|uv| {
+                    uv.is_defined()
+                        && uv.min_at(0) >= domain.min().x
+                        && uv.max_at(0) <= domain.max().x
+                        && uv.min_at(1) >= domain.min().y
+                        && uv.max_at(1) <= domain.max().y
+                });
+            if !inside {
+                crate::topology::edgeuse::p1::set_uv_trim_curve(
+                    b,
+                    eu,
+                    crate::topology::edgeuse::p1::UvTrimCurveArg::Null,
+                    0.0,
+                    true,
+                    None,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Test only (feature `wr57-replay`, the goldens' WR-450 replay): main's WR-361 restaging
+/// before the retirement, which dropped the UV trim curves of every edge use of `face`'s
+/// loops (the lazy caches of their edges' curves on the face, rebuilt when next asked
+/// for).
+#[cfg(feature = "wr57-replay")]
+fn replay_drop_face_trims(b: &mut Brep, face: FaceId) -> Result<()> {
     let Some(fu) = crate::topology::face::p2::upward_faceuse(b, face)? else {
         return Ok(());
     };

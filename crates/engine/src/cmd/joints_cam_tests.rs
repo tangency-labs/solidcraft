@@ -473,3 +473,15 @@ fn an_edited_cam_keeps_the_definition_it_is_not_given() {
     run(&mut s, "joint.drive", json!({"joint": "Cam", "value": 60}));
     assert!(close(shown(&mut s, "Tappet"), rides_this_side, 1e-3), "{} vs {rides_this_side}", shown(&mut s, "Tappet"));
 }
+
+#[test]
+fn a_cam_writes_no_mimic_in_urdf_and_warns_naming_it() {
+    let mut s = cam_on_base();
+    let tip = knife(0.0, 0.0, R);
+    tappet(&mut s, 0.0, tip);
+    run(&mut s, "joint.cam", json!({"a": "Cam", "b": "Tappet", "profile": {"sketch": "CamSketch"}}));
+    let options = solidcraft_io::UrdfOptions { mimic: true, ..Default::default() };
+    let p = solidcraft_io::urdf(&s.doc, &s.doc.painted(&s.model.state()), "t", &options).unwrap_or_else(|e| panic!("{e}"));
+    assert!(!p.xml.contains("<mimic"), "{}", p.xml);
+    assert!(p.warnings.iter().any(|w| w.contains("cam") && w.contains("Tappet")), "{:?}", p.warnings);
+}

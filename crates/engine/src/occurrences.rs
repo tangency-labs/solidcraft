@@ -241,7 +241,11 @@ impl PlacementIndex {
     fn new(doc: &std::sync::Arc<solidcraft_doc::Document>, state: &std::sync::Arc<solidcraft_doc::ModelState>) -> PlacementIndex {
         let mut by_parent_id = std::collections::HashMap::with_capacity(doc.occurrences.len());
         let mut children: std::collections::HashMap<u64, Vec<u64>> = std::collections::HashMap::new();
+        let inactive = doc.inactive_pattern_occurrences();
         for (i, o) in doc.occurrences.iter().enumerate() {
+            if inactive.contains(&o.id) {
+                continue;
+            }
             by_parent_id.insert((o.parent, o.id), i);
             children.entry(o.parent).or_default().push(o.id);
         }
@@ -611,6 +615,7 @@ impl Session {
         let mut world = IDENTITY;
         let mut parent_world = IDENTITY;
         let mut seen = std::collections::BTreeSet::new();
+        let inactive = self.doc.inactive_pattern_occurrences();
         for id in path {
             if !seen.insert(*id) {
                 return Err(invalid("occurrence path repeats an id"));
@@ -619,7 +624,7 @@ impl Session {
                 .doc
                 .occurrences
                 .iter()
-                .find(|o| o.id == *id && o.parent == component)
+                .find(|o| o.id == *id && o.parent == component && !inactive.contains(id))
                 .ok_or_else(|| invalid("occurrence path has a missing or mismatched parent"))?;
             if !self.doc.components.iter().any(|c| c.id == o.component) {
                 return Err(invalid("occurrence path has a missing component"));
@@ -671,8 +676,7 @@ impl Session {
     pub fn occurrence_children(&self, path: &[u64]) -> Result<Vec<OccurrencePlacement>> {
         let component = if path.is_empty() { 0 } else { self.occurrence_placement(path)?.component };
         self.doc
-            .occurrences
-            .iter()
+            .active_occurrences()
             .filter(|o| o.parent == component)
             .map(|o| {
                 let mut child = path.to_vec();
@@ -957,7 +961,7 @@ impl Session {
 
     /// The placement a sketch or construction feature is drawn at: the active one while its
     /// component is being edited, else the component's first (empty for the design's own).
-    fn feature_path(&self, component: u64) -> Vec<u64> {
+    pub fn feature_path(&self, component: u64) -> Vec<u64> {
         match &self.active_occurrence_path {
             _ if component == 0 => Vec::new(),
             Some(p) if self.active_component == component => p.clone(),
@@ -981,7 +985,17 @@ impl Session {
             return false;
         }
         let component = self.doc.feature(id).map_or(0, |f| f.component);
-        self.item_folder_hidden(&Self::folder_scope(&self.feature_path(component)), component, folder, &id.to_string())
+        self.feature_folder_hidden_at(id, &self.feature_path(component), folder)
+    }
+
+    /// [`Self::feature_folder_hidden`] at the placement `path` of the feature's component: a
+    /// part placed more than once has a folder of its own under each copy.
+    pub fn feature_folder_hidden_at(&self, id: u64, path: &[u64], folder: &str) -> bool {
+        if self.visibility.hidden_folders.is_empty() {
+            return false;
+        }
+        let component = self.doc.feature(id).map_or(0, |f| f.component);
+        self.item_folder_hidden(&Self::folder_scope(path), component, folder, &id.to_string())
     }
 
     /// Is construction geometry or an origin item (by name) shown: not hidden itself, nor by
@@ -1170,11 +1184,23 @@ impl Session {
             });
         }
         let hidden = std::mem::take(&mut self.visibility.hidden_occurrences);
-        self.visibility.hidden_occurrences = hidden.into_iter().filter(|p| self.occurrence_placement(p).is_ok()).collect();
-        // A shown Origin folder whose placement is gone cannot be cleared by hand - browser.visibility
-        // refuses a path that no longer resolves, whichever eye it sets - so it prunes like
-        // hidden_occurrences does; undo restores the snapshot with the placement (#7313).
+        // Keep the view flags for a live occurrence that a pattern has temporarily taken out
+        // of the model, while still pruning paths that were actually deleted.
         let shown = std::mem::take(&mut self.visibility.shown_component_origins);
-        self.visibility.shown_component_origins = shown.into_iter().filter(|p| self.occurrence_placement(p).is_ok()).collect();
+        if hidden.is_empty() && shown.is_empty() {
+            return;
+        }
+        let inactive = self.doc.inactive_pattern_occurrences();
+        let kept = |path: &Vec<u64>| {
+            if path.iter().any(|id| inactive.contains(id)) {
+                path.len() <= solidcraft_doc::MAX_PLACEMENT_DEPTH && self.doc.stored_path_placement(path).is_some()
+            } else {
+                self.occurrence_placement(path).is_ok()
+            }
+        };
+        let hidden = hidden.into_iter().filter(kept).collect();
+        let shown = shown.into_iter().filter(kept).collect();
+        self.visibility.hidden_occurrences = hidden;
+        self.visibility.shown_component_origins = shown;
     }
 }
