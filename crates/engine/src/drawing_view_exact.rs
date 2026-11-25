@@ -557,7 +557,7 @@ fn on_paper(geometry: &[Seg2], accuracy: CurveAccuracy, frame: &ViewFrame, chord
             }
         }
     }
-    let accuracy = match (frame.accuracy_on_paper(accuracy), flattened, proven) {
+    let accuracy = match (hlr::accuracy_on_paper(frame, accuracy), flattened, proven) {
         (on_paper, false, _) => on_paper,
         (CurveAccuracy::Analytic, true, true) => CurveAccuracy::Bounded { max_deviation_mm: chord },
         (CurveAccuracy::Bounded { max_deviation_mm }, true, true) => CurveAccuracy::Bounded { max_deviation_mm: max_deviation_mm + chord },

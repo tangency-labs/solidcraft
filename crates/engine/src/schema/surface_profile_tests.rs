@@ -46,6 +46,7 @@ fn schemas_and_the_key_check_agree() {
             "participants",
             "profiles",
             "sketch",
+            "stays_surface",
             "symmetric",
         ],
     );

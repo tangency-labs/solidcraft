@@ -274,7 +274,7 @@ fn meshed(
     let join = 2.0 * drawing.eps;
     let runs: Vec<(Owner, Vec<(bool, Vec<Vec2>)>)> = by_owner.into_iter().map(|(owner, stretches)| (owner, chain(&stretches, join))).collect();
     let arcs = exact_arcs(shown, &scene, &frame.basis(), &runs);
-    let sampled = frame.accuracy_on_paper(CurveAccuracy::Sampled { max_sample_deviation_mm: 0.0 });
+    let sampled = hlr::accuracy_on_paper(frame, CurveAccuracy::Sampled { max_sample_deviation_mm: 0.0 });
     let near = |radius: f64| near(model_chord_mm, radius);
     let mut out = Vec::with_capacity(runs.len());
     for (owner, runs) in runs {

@@ -1303,3 +1303,31 @@ fn edge_center_rectangle_typed_length_and_width_become_dimensions() {
     let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert_eq!(sketch.sketch.constraints.iter().filter(|c| c.kind.is_dimension()).count(), 2);
 }
+
+/// #20719: the third point of a typed sweep keeps its height off the chord for a tiny sweep, where
+/// `1 - cos` would round to zero and leave the three points on one line.
+#[test]
+fn a_tiny_typed_sweep_keeps_the_third_point_off_the_chord() {
+    use solidcore_record::Vec2;
+    let (s, e, h) = (Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0), Vec2::new(0.5, 1.0));
+    let ordinary = super::arc_through(s, e, h, None, Some(std::f64::consts::FRAC_PI_2)).unwrap();
+    assert!((ordinary.x - 0.5).abs() < 1e-12 && (ordinary.y - (0.5f64.sqrt() * (1.0 - 0.5f64.sqrt()))).abs() < 1e-12, "{ordinary:?}");
+    // R = 1e8, height = R (1 - cos 5e-9) = 1.25e-9.
+    let tiny = super::arc_through(s, e, h, None, Some(1e-8)).unwrap();
+    assert!((tiny.y - 1.25e-9).abs() < 1e-14, "{tiny:?}");
+}
+
+/// #20719: the dotted guides of a 3-Point Arc go from its centre to each end it is level or plumb
+/// with, and only those.
+#[test]
+fn the_arc_centre_guides_join_the_ends_it_lines_up_with() {
+    use solidcore_record::Vec2;
+    let at = Vec2::new;
+    // The corner of an L: level with one end and plumb with the other.
+    let l = super::centre_guides(at(0.0, 0.0), [at(0.0, 50.0), at(50.0, 0.0)], 0.1);
+    assert_eq!(l, vec![(at(0.0, 0.0), at(0.0, 50.0)), (at(0.0, 0.0), at(50.0, 0.0))]);
+    // Level with the start only.
+    assert_eq!(super::centre_guides(at(10.0, 5.0), [at(-20.0, 5.05), at(30.0, 40.0)], 0.1), vec![(at(10.0, 5.0), at(-20.0, 5.05))]);
+    // Lined up with neither, or too far off the line.
+    assert!(super::centre_guides(at(10.0, 5.0), [at(0.0, 9.0), at(30.0, 40.0)], 0.1).is_empty());
+}

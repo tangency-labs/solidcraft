@@ -25,8 +25,6 @@ pub mod cell_grid;
 // each type says what it is, and its fields are the names it says.
 #[allow(missing_docs)]
 pub mod develop;
-#[allow(missing_docs)]
-pub mod hatch;
 pub mod native;
 pub mod plane;
 // Profiles are SolidCraft's sketch wire format, carried over as it is: each variant says what it
