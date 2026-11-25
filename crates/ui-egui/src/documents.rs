@@ -3969,6 +3969,11 @@ pub(crate) fn close_save_result(app: &mut SolveApp, result: Result<(), String>) 
     drive_group(app);
 }
 
+/// Whether a tab is waiting for its save before closing.
+pub(crate) fn saving_to_close(app: &SolveApp) -> bool {
+    app.docs.saving
+}
+
 /// Resume Close/Quit only after Save As has answered and the write succeeded.
 pub(crate) fn saved_for_close(app: &mut SolveApp) {
     // Save asks the Capture Position question first while a move isn't captured (#9736): the

@@ -905,6 +905,12 @@ pub(crate) fn provenance_params(app: &SolveApp) -> Value {
 }
 
 pub fn save(app: &mut SolveApp) {
+    if crate::save_job::host_pending(app, app.session.uid) {
+        if !crate::documents::saving_to_close(app) {
+            app.set_status(app.tr("ui.browser_save_in_progress"), true);
+        }
+        return;
+    }
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
         app.tree.capture_prompt = Some(crate::browser::SAVE.into());
         return;
@@ -942,6 +948,10 @@ fn save_as_with_extension(app: &mut SolveApp, extension: &str) {
 }
 
 pub(crate) fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
+    if crate::save_job::host_pending(app, app.session.uid) {
+        app.set_status(app.tr("ui.browser_save_in_progress"), true);
+        return;
+    }
     // The Capture Position question first, as Save asks it: the file can't hold a move not
     // captured yet (#9736).
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
