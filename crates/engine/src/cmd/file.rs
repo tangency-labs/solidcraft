@@ -2164,6 +2164,8 @@ fn missing_save_cache(s: &Session, cache: bool, checking: bool, reader: Option<&
         "there are no evaluated bodies to cache".into()
     } else if checking {
         "an imported file's parts were still being checked (a save once the check ends keeps it)".into()
+    } else if let Some(refusal) = solidcraft_io::take_last_cache_refusal() {
+        refusal
     } else {
         "the cache could not fit or be encoded within the design file budget".into()
     };
@@ -3382,12 +3384,12 @@ struct CadmpegChoices<'a> {
 fn usd_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, warnings: &mut Vec<String>) -> Vec<solidcraft_io::DecalPlan> {
     let mut decals = Vec::new();
     for d in shown_decals(doc, st, warnings) {
-        let Ok(to_component) = solidcore_ops::affine::inverse(&doc.component_transform(d.component)) else {
+        let Ok(to_component) = solidcraft_kernel::services::affine::inverse(&doc.component_transform(d.component)) else {
             warnings.push(format!("decal `{}`: its component's placement is degenerate: left out", d.name));
             continue;
         };
         let world = d.corners.map(|p| [p.x, p.y, p.z]);
-        let local = world.map(|p| solidcore_ops::affine::apply_point(&to_component, p));
+        let local = world.map(|p| solidcraft_kernel::services::affine::apply_point(&to_component, p));
         let sha256 = solidcraft_doc::render_resources::HdrId::of(&d.image).to_string();
         let image = solidcraft_io::SurfaceMap { sha256, bytes: std::sync::Arc::from(d.image) };
         decals.push(solidcraft_io::DecalPlan { name: d.name, component: d.component, local, world, image });
@@ -3399,12 +3401,12 @@ fn usd_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, w
 fn urdf_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, warnings: &mut Vec<String>) -> Vec<solidcraft_io::urdf::UrdfDecal> {
     let mut decals = Vec::new();
     for d in shown_decals(doc, st, warnings) {
-        let Ok(to_component) = solidcore_ops::affine::inverse(&doc.component_transform(d.component)) else {
+        let Ok(to_component) = solidcraft_kernel::services::affine::inverse(&doc.component_transform(d.component)) else {
             warnings.push(format!("decal `{}`: its component's placement is degenerate: left out", d.name));
             continue;
         };
         let corners = d.corners.map(|p| {
-            let [x, y, z] = solidcore_ops::affine::apply_point(&to_component, [p.x, p.y, p.z]);
+            let [x, y, z] = solidcraft_kernel::services::affine::apply_point(&to_component, [p.x, p.y, p.z]);
             solidcore_record::Vec3::new(x, y, z)
         });
         decals.push(solidcraft_io::urdf::UrdfDecal { name: d.name, component: d.component, corners, image: d.image });
@@ -5159,6 +5161,51 @@ mod tests {
         );
         let on_disk = save_limit_warning(limit + 1, false).unwrap();
         assert!(on_disk.contains("Largest file to open") && on_disk.contains(solidcraft_io::limits::how_to_raise()), "{on_disk}");
+    }
+
+    /// When the model cache could not be saved due to an exact body round-trip failure or size refusal,
+    /// missing_save_cache surfaces the specific refusal reason instead of falsely claiming file size budget (#21610).
+    #[test]
+    fn missing_save_cache_reports_specific_refusal_when_available() -> Result<()> {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":10,"width":20,"height":5}))?;
+        let omitted = s.design_container(solidcraft_io::DesignCompression::Fast, false, false)?;
+        let omitted_reader = DesignContainerReader::new(Cursor::new(omitted.as_slice()))?;
+
+        // Without an explicit refusal, it falls back to the default design file budget message.
+        assert!(solidcraft_io::take_last_cache_refusal().is_none());
+        let default_notice =
+            missing_save_cache(&s, true, false, Some(&omitted_reader)).ok_or_else(|| EngineError::Other("expected default notice".into()))?;
+        assert!(default_notice.contains("the cache could not fit or be encoded within the design file budget"), "{default_notice}");
+
+        // Now test that when an unencodable body refusal is recorded, missing_save_cache reports it:
+        let broken = solidcraft_kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(10., 10., 10.))?.with_paint(Some(
+            solidcraft_kernel::Paint {
+                opacity: 1.0,
+                faces: vec![solidcraft_kernel::FacePaint { face: usize::MAX, color: [1.0, 0.0, 0.0], opacity: 1.0, name: None }],
+                name: None,
+            },
+        ));
+        let model = solidcraft_doc::SavedModel {
+            records: json!({
+                "features": [{"id": 1, "fingerprint": "0000000000000000", "ms": 0.0, "skipped": false, "state": 0}],
+                "states": [json!({"bodies": [[0, 1]], "sketches": [], "body_counter": 1, "sheets": [], "construct": [], "threads": [], "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {}, "named_faces": []})],
+                "model_bodies": [json!({"name": "GraphicsCore", "feature": 1, "component": 0, "key": "0000000000000001", "names": 0, "body": 0})],
+                "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [], "threads": [], "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}], "named_faces": [],
+            }),
+            bodies: vec![broken],
+        };
+        let mut doc = (*s.doc).clone();
+        doc.features[0].id = 1;
+        doc.features[0].name = "PCIe Board Import".into();
+        let bytes = solidcraft_io::write_design_container_with_cache(&doc, solidcraft_io::DesignCompression::Fast, None, Some(&model))?;
+        let reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes.as_slice()))?;
+        assert!(!reader.has_model_cache());
+
+        let notice = missing_save_cache(&s, true, false, Some(&reader)).ok_or_else(|| EngineError::Other("expected notice".into()))?;
+        assert!(notice.contains("body 'GraphicsCore' in feature 'PCIe Board Import' could not be stored exactly"), "{notice}");
+        assert!(!notice.contains("design file budget"), "must not mention budget: {notice}");
+        Ok(())
     }
 
     #[test]

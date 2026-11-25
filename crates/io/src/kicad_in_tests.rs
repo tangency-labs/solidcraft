@@ -998,7 +998,7 @@ fn a_fill_outline_that_touches_itself_keeps_its_area() {
     let points = [a[0], a[1], a[2], b[1], b[2], b[3], b[0], a[3]];
     let region = Region2 { outer: Loop2::polygon(&points), holes: Vec::new() };
     let loops = region_loops(&region).unwrap();
-    let (points, triangles) = solidcore_tess::triangulate_planar(&loops).unwrap();
+    let (points, triangles) = solidcraft_kernel::services::tess::triangulate_planar(&loops).unwrap();
     let area: f64 = triangles
         .iter()
         .map(|[a, b, c]| {

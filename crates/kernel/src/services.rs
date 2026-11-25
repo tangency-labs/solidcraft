@@ -37,6 +37,7 @@ pub use solidcore_ops::import_geometry;
 pub use solidcore_ops::outline;
 pub use solidcore_ops::path_export;
 pub use solidcore_ops::pcurve;
+pub use solidcore_ops::pick;
 pub use solidcore_ops::point_displacement;
 pub use solidcore_ops::point_distance;
 pub use solidcore_ops::point_identity;
