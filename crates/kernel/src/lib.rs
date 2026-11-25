@@ -13,6 +13,7 @@
 #![forbid(unsafe_code)]
 
 mod assemble;
+mod backend;
 mod blend;
 mod blend_corner;
 mod blend_smlib;
@@ -36,7 +37,9 @@ mod curvature_comb;
 mod delete_face;
 mod distance;
 mod draft_corners;
+pub mod drawing_centre_mark;
 mod emboss;
+mod face_flux;
 #[cfg(test)]
 mod face_source_tests;
 pub mod failure;
@@ -50,6 +53,7 @@ pub mod fuzz;
 mod heal;
 mod helix;
 pub mod history;
+pub mod hlr;
 mod iges_in;
 mod iges_out;
 mod intersection;
@@ -96,6 +100,7 @@ mod meshbody;
 #[cfg(test)]
 mod modify_history_tests;
 mod native;
+pub mod network;
 mod numbered;
 mod offset;
 mod offset_backend;
@@ -114,6 +119,7 @@ pub use par::map_with_local_pools;
 mod display_plan_tests;
 #[cfg(test)]
 mod pinch_tests;
+mod placement;
 #[cfg(test)]
 mod planar_faces_tests;
 mod plane_fit;
@@ -126,9 +132,13 @@ mod prism_measure;
 pub mod profile;
 pub mod provenance;
 mod record;
+#[cfg(test)]
+mod record_eval_tests;
 mod repair;
+mod route;
 #[cfg(test)]
 mod seam_faces_tests;
+pub mod services;
 mod sew;
 mod smlib_boolean;
 mod smlib_sweeps;
@@ -169,20 +179,18 @@ mod validation;
 mod validity;
 pub mod watch;
 
+pub use backend::Solidcore;
 pub use blend::ChamferSide;
 pub use blend::FilletTurn;
 pub use blend::FitSearch;
 pub use blend::SETBACK_AT_LEAST;
 pub use blend::blend_edge_middles;
 pub use blend::blend_edges;
-pub use blend::chamfer;
 pub use blend::chamfer_carrying_face;
 pub use blend::chamfer_max;
 pub use blend::chamfer_max_why;
-pub use blend::chamfer_sides;
 pub use blend::chamfer_sides_carrying_face;
 pub use blend::chamfer_sides_max_why;
-pub use blend::fillet;
 pub use blend::fillet_each;
 pub use blend::fillet_g2;
 pub use blend::fillet_g2_corners;
@@ -218,6 +226,7 @@ pub use body::CapSignature;
 pub use body::DISPLAY_ANGLE;
 pub use body::DisplayShare;
 pub use body::EdgeInfo;
+pub use body::EdgeLines;
 pub use body::FaceInfo;
 pub use body::FacePaint;
 pub use body::FaceSource;
@@ -252,10 +261,7 @@ pub use bridge::frames;
 pub use bridge::frames_across;
 pub use bridge::sample_grid;
 pub use build::PathSeg;
-pub use build::box_solid;
 pub use build::canonical_revolve_axis;
-pub use build::cylinder;
-pub use build::extrude;
 pub use build::extrude_tapered;
 pub use build::extrude_tapered_between;
 pub use build::extrude_whole_sides;
@@ -265,14 +271,10 @@ pub use build::loft_with_rails;
 pub use build::offset_loop;
 pub use build::path_polyline;
 pub use build::planar_face_record;
-pub use build::revolve;
-pub use build::revolve_whole;
-pub use build::sphere;
 pub use build::sweep;
 pub use build::sweep_with;
 pub use build::symmetric_offset_intervals;
 pub use build::symmetric_offset_probe_points;
-pub use build::torus;
 pub use continuity::ContinuityReport;
 pub use continuity::ContinuityTolerances;
 pub use continuity::DEFAULT_SAMPLES;
@@ -363,6 +365,7 @@ pub use matchsurf::match_surface;
 pub use matchsurf::seam_continuity;
 pub use measure::BodyMeasure;
 pub use measure::MassMeasure;
+pub use measure::levels_along;
 pub use measure::measure;
 pub use measure::measure_mass;
 pub use mesh_convert::convert_prismatic_mesh;
@@ -379,7 +382,6 @@ pub use native::smlib_body;
 pub use offset::with_same_surface;
 pub use ops::BoolOp;
 pub use ops::apart;
-pub use ops::boolean;
 pub use ops::half_space;
 pub use ops::join_apart;
 pub use ops::place_matrix;
@@ -402,8 +404,6 @@ pub use polybool::faceted_boolean;
 pub use polyhedron::HalfSpace;
 pub use polyhedron::convex_polyhedron;
 pub use polyhedron::draft;
-pub use polyhedron::offset_faces;
-pub use polyhedron::shell;
 pub use prism::PLANAR_FIT_TOL;
 pub use prism::extrude_planar_regions;
 pub use prism::planar_regions_boolean;
@@ -420,6 +420,22 @@ pub use repair::RepairRefusal;
 pub use repair::RepairReport;
 pub use repair::SewnGap;
 pub use repair::repair;
+pub use route::Which;
+pub use route::boolean;
+pub use route::box_solid;
+pub use route::chamfer;
+pub use route::chamfer_sides;
+pub use route::cylinder;
+pub use route::extrude;
+pub use route::fillet;
+pub use route::offset_faces;
+pub use route::revolve;
+pub use route::revolve_whole;
+pub use route::shell;
+pub use route::sphere;
+pub use route::thicken;
+pub use route::torus;
+pub use route::which;
 pub use sew::EdgeSpec;
 pub use sew::FaceSpec;
 pub use sew::MAX_CHAIN_POINTS;
@@ -429,9 +445,15 @@ pub use sew::sew_touching;
 pub use sew::sew_touching_traced;
 pub use solidcore_ops::member_turn::ParallelTurnError;
 pub use solidcore_ops::member_turn::parallel_turn;
+/// SolidCraft's kernel interface: the trait each kernel's adapter implements, its operations,
+/// inputs and errors.
+pub use solidcraft_kernel_api as api;
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
+/// The cancel token over this thread's work ([`Stop::within`]), for work outside the kernel that
+/// stops with it (a sketch solve).
+pub use solidcraft_smlib::stop::token as stop_token;
 pub use solidcraft_smlib::trace as smlib_trace;
 pub use splitface::SplitTool;
 pub use splitface::face_split_if_on_face;
@@ -509,6 +531,7 @@ pub use surface_trim::mutual_trim;
 pub use surface_trim::trim;
 pub use surface_trim::trim_dropped_keep;
 pub use surface_trim::trim_keep;
+pub use surface_trim::trim_sheet_keep;
 pub use surface_untrim::UntrimHoles;
 pub use surface_untrim::untrim;
 pub use surfaces::copy_faces;
@@ -516,18 +539,19 @@ pub use surfaces::extend;
 pub use surfaces::extrude_sheet;
 pub use surfaces::loft_sheet;
 pub use surfaces::loft_sheet_with_rails;
+pub use surfaces::loft_sheet_with_rails_legacy_sides;
 pub use surfaces::patch_edges;
 pub use surfaces::patch_region;
 pub use surfaces::remove_faces;
 pub use surfaces::reverse_faces;
 pub use surfaces::revolve_sheet;
+pub use surfaces::revolve_sheet_legacy_sides;
 pub use surfaces::stitch;
 pub use surfaces::sweep_sheet;
 pub use surfaces::sweep_sheet_point_path_with;
 pub use surfaces::sweep_sheet_points;
 pub use surfaces::sweep_sheet_points_with;
 pub use surfaces::sweep_sheet_with;
-pub use surfaces::thicken;
 pub use surfaces::unstitch;
 pub use sweep_path::RailFit;
 pub use sweep_path::SweepControl;
@@ -629,6 +653,7 @@ impl Cause for solidcraft_smlib::CheckReport {}
 impl Cause for solidcraft_smlib::export::ExportError {}
 impl Cause for solidcore_record::brep::history::Failed {}
 impl Cause for solidcore_ops::pcurve::Error {}
+impl Cause for solidcraft_geom::brep::eval::Error {}
 impl<T: Cause + ?Sized> Cause for &T {
     fn panic(&self) -> Option<&str> {
         (**self).panic()
@@ -656,10 +681,10 @@ thread_local! {
     static GUARDED: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
-/// Is this thread inside [`guard`]? (A panic now will be caught and turned into an error; the
-/// engine's crash reports mark it recovered.)
+/// Is this thread inside [`guard`], an SMLib call or the mesher's own guard? (A panic now will be
+/// caught and turned into an error; the engine's crash reports mark it recovered.)
 pub fn guarded() -> bool {
-    GUARDED.with(std::cell::Cell::get) > 0 || solidcraft_smlib::in_call()
+    GUARDED.with(std::cell::Cell::get) > 0 || solidcraft_smlib::in_call() || solidcore_tess::guarded()
 }
 
 /// A panic inside a solidcore call, caught there and reported as the kernel's internal error

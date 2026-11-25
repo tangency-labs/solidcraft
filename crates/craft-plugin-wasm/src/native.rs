@@ -52,6 +52,8 @@ const O_NONBLOCK: i32 = 0o4000;
 const O_NONBLOCK: i32 = 0x4;
 const MAX_LOG_BYTES: usize = 64 * 1024;
 const EPOCH_POLL: Duration = Duration::from_millis(10);
+/// The most components a path inside a granted or input folder may have.
+const MAX_PATH_COMPONENTS: usize = 64;
 static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 
 fn limit(name: &str) -> HostError {
@@ -176,6 +178,13 @@ impl<H: PluginHost> State<H> {
         let granted = self.folders.get(grant).is_some_and(|f| if write { f.write } else { f.read });
         if !valid || !granted {
             return Err(self.fail(HostError::PermissionDenied { permission: format!("files.{}:{grant}", if write { "write" } else { "read" }) }));
+        }
+        // The same limit `folders.read` puts on a path inside a folder.
+        if path.len() > 4096 || Path::new(path).components().count() > MAX_PATH_COMPONENTS {
+            return Err(self.fail(HostError::InvalidInput {
+                field: "path".into(),
+                reason: format!("files.{}:{grant}: a path may have at most {MAX_PATH_COMPONENTS} components", if write { "write" } else { "read" }),
+            }));
         }
         if let Some(folder) = self.folders.get(grant) {
             if let Err(error) = refuse_links(&folder.dir, Path::new(path)) {
@@ -460,7 +469,7 @@ impl<H: PluginHost> State<H> {
         let relative: PathBuf = Path::new(path).components().collect();
         let plain = path.len() <= 4096
             && !relative.as_os_str().is_empty()
-            && relative.components().count() <= 64
+            && relative.components().count() <= MAX_PATH_COMPONENTS
             && relative.components().all(|c| matches!(c, PathComponent::Normal(name) if !name.to_string_lossy().starts_with('.')));
         if !plain {
             return Err(self.fail(HostError::PermissionDenied { permission: format!("input_folder: {path} is not a plain path inside the folder") }));
@@ -974,7 +983,7 @@ fn execute<H: PluginHost + 'static>(
         deadline: Instant::now() + Duration::from_millis(deadline_ms),
         limits: store_limits(limits, 10_000),
         import: None,
-        panels: None,
+        panels: runtime.ui.clone(),
     };
     let mut store = Store::new(&engine, state);
     let outcome = (|| {
@@ -1276,10 +1285,23 @@ static CACHE: Cache = Cache::new();
 fn cache() -> &'static Cache {
     #[cfg(test)]
     {
-        thread_local! {
-            static OWN: &'static Cache = Box::leak(Box::new(Cache::new()));
+        /// Waits out the test's background Cranelift compile when the test's thread ends. Each test
+        /// runs in a process of its own under CI, so a compile still running would otherwise race
+        /// the process's exit: libgcc's exit-time teardown of its unwind-frame table then meets
+        /// Wasmtime registering or releasing that compile's frames, and the process aborts after
+        /// the test has passed.
+        struct Own(&'static Cache);
+        impl Drop for Own {
+            fn drop(&mut self) {
+                while self.0.optimizing.load(Ordering::Acquire) {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+            }
         }
-        OWN.with(|cache| *cache)
+        thread_local! {
+            static OWN: Own = Own(Box::leak(Box::new(Cache::new())));
+        }
+        OWN.with(|own| own.0)
     }
     #[cfg(not(test))]
     {

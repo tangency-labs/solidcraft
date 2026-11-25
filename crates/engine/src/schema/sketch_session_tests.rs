@@ -49,8 +49,8 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<CreateParams>(),
         &["activate_part", "face", "flip", "frame", "name", "offset", "origin", "plane", "project_edges", "view", "x_dir", "y_dir"],
     );
-    assert_keys(input_schema_for::<ConstructionParams>(), &["curves", "sketch", "value"]);
-    assert_keys(input_schema_for::<DeleteParams>(), &["entities", "sketch"]);
+    assert_keys(input_schema_for::<ConstructionParams>(), &["curves", "points", "sketch", "value"]);
+    assert_keys(input_schema_for::<DeleteParams>(), &["entities", "preserve_projection_link", "sketch"]);
     assert_keys(input_schema_for::<MovePointParams>(), &["point", "sketch", "to"]);
     assert_keys(input_schema_for::<MovePointsParams>(), &["moves", "sketch", "tolerance"]);
     assert_keys(input_schema_for::<DragParams>(), &["entity", "from", "live", "sketch", "to", "with"]);
@@ -365,8 +365,11 @@ fn the_schemas_take_what_the_handlers_read() {
         &[
             (json!({"curves": ["l1", "l2"]}), true),
             (json!({"curves": "l1", "value": false, "sketch": "S"}), true),
+            (json!({"points": ["p1"]}), true),
+            (json!({"curves": ["l1"], "points": "p2"}), true),
             (json!({}), false),
             (json!({"curves": []}), false),
+            (json!({"points": []}), false),
             (json!({"curves": [1]}), false),
         ],
     );

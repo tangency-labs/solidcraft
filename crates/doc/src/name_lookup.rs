@@ -1012,30 +1012,15 @@ impl FaceHit {
 
 impl FaceHit {
     /// Where the line through `p` along `dir` meets the face found (the hit nearest `p`, on
-    /// either side of it), `None` when the line misses the face or runs along it. A place on
-    /// a face follows the face this way, along its own axis, instead of sliding sideways to
-    /// [`point`](Self::point), the face's nearest point.
-    pub fn along(&self, st: &ModelState, p: Vec3, dir: Vec3) -> Option<Vec3> {
-        let b = st.bodies.get(self.body)?;
-        let d = dir.normalized()?;
-        let m = b.mesh();
-        let slack = (b.body.size() * 1e-9).max(1e-9);
-        let mut best: Option<f64> = None;
-        for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-            if *f as usize != self.face {
-                continue;
-            }
-            let Some([a, bb, c]) = m.tri(t) else { continue };
-            // A hair's width around each triangle, so a place on the seam of two is on the face.
-            let centre = (a + bb + c) * (1.0 / 3.0);
-            let grow = |v: Vec3| v + (v - centre).normalized().unwrap_or(Vec3::ZERO) * slack;
-            if let Some(hit) = naming::ray_hit(p, d, grow(a), grow(bb), grow(c))
-                && best.is_none_or(|old| hit.abs() < old.abs())
-            {
-                best = Some(hit);
-            }
-        }
-        best.map(|t| p + d * t)
+    /// either side of it), `None` when the line misses the face or runs along it, or the body
+    /// is gone; `Err` when the kernel fails to meet them. A place on a face follows the face
+    /// this way, along its own axis, instead of sliding sideways to [`point`](Self::point), the
+    /// face's nearest point. Decided on the face's exact surface and trim
+    /// ([`solidcraft_kernel::Body::face_line_hit`]), never its display mesh: from a facet of a
+    /// curved face a hole would start inside the surface (#20741).
+    pub fn along(&self, st: &ModelState, p: Vec3, dir: Vec3) -> solidcraft_kernel::Result<Option<Vec3>> {
+        let Some(b) = st.bodies.get(self.body) else { return Ok(None) };
+        b.body.face_line_hit(self.face, p, dir)
     }
 
     /// A point that picks the face found again by itself: [`point`](Self::point) when the
