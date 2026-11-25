@@ -2270,6 +2270,10 @@ pub enum FeatureKind {
     /// tools and outside the rest), each picked by a point inside it.
     BoundaryFill {
         tools: Vec<BodyName>,
+        /// Planes (origin or construction planes) that also bound the cells, each cutting space
+        /// like an infinite plane: a cell lies on the side of it its point is on.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        planes: Vec<PlaneRef>,
         cells: Vec<Position>,
         #[serde(default)]
         operation: Operation,
