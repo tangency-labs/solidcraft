@@ -2934,6 +2934,13 @@ impl PlacementReads {
                 None => {}
             },
             G::Snap { of, .. } => self.geo(doc, comp, of),
+            // An edge on one occurrence reads that placement (and the one it was authored in).
+            G::PlacedEdge { path, author_path, .. } => {
+                self.paths.push(path.clone());
+                if !author_path.is_empty() {
+                    self.paths.push(author_path.clone());
+                }
+            }
             G::Vertex { .. } | G::Edge { .. } | G::Face { .. } => {
                 self.all = true;
                 if comp == 0 {

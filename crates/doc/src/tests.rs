@@ -4246,7 +4246,9 @@ fn capture_position_hardening_joint_values_and_clipboard_remap() {
     let mut cloned = doc.feature(cap_id).unwrap().clone();
     let mut occ_map = std::collections::BTreeMap::new();
     occ_map.insert(occ, 777);
-    cloned.remap_clone(&Default::default(), &Default::default(), &Default::default(), &Default::default(), &occ_map, &doc).unwrap();
+    let source_roots = std::collections::BTreeSet::new();
+    let placements = crate::ClonePlacements { occurrences: &occ_map, source_roots: &source_roots, root_path: &[], doc: &doc, same_document: true };
+    cloned.remap_clone(&Default::default(), &Default::default(), &Default::default(), &Default::default(), Some(&placements)).unwrap();
     if let FeatureKind::CapturePosition { moves, .. } = &cloned.kind {
         assert_eq!(moves[0].occurrence, 777);
         assert_eq!(moves[0].path.as_deref(), Some([777].as_slice()));
