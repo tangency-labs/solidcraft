@@ -1118,7 +1118,9 @@ fn cell_grid_mode_cut_by_default_and_raised_adds_the_cells() {
     if let Kind::CellGrid(c) = &mut d.kind {
         (c.mode, c.through_all, c.direction) = (1, true, 1);
     }
-    let [(id, p)] = apply_commands(&h.app, &d).unwrap().try_into().unwrap() else { panic!() };
+    let commands = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(commands.len(), 1, "one command");
+    let (id, p) = commands[0].clone();
     assert_eq!((p.get("mode"), p.get("through_all")), (Some(&json!("raised")), None), "{p}");
     h.app.run(&id, p).unwrap();
     assert!(volume(&mut h) > plate, "raised cells add material");
