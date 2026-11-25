@@ -104,6 +104,7 @@ pub use native_cad::is_freecad_path;
 pub use native_cad::is_native_cad_path;
 pub use native_cad::is_usd_path;
 pub use native_cad::native_cad_design;
+pub use native_cad::native_cad_sketches;
 pub use native_cad::native_cad_records;
 pub use native_cad::native_cad_to_step;
 pub use native_cad::read_usd;

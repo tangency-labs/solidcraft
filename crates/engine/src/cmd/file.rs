@@ -115,7 +115,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "name? (the feature's and the component's); ",
             "up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); ",
             "names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); ",
-            "history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); ",
+            "history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt; with features, the file's sketches then come in beside the solids as editable sketches → features_added, history: \"sketches\"); ",
             "reader?: solidcraft|cadmpeg for a .step/.stp, .igs/.iges, FreeCAD or Rhino file (default solidcraft: SolidCraft's own STEP or IGES reader, which keeps the STEP text (an IGES file restated as STEP), a FreeCAD or Rhino file's solids restated as STEP by cadmpeg's STEP writer first; cadmpeg: cadmpeg's model read straight into B-rep records, with no STEP text in between, a STEP or IGES file decoded by cadmpeg's STEP or IGES decoder, to compare the two; `flatten` works with either); ",
             "matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); ",
             "tolerance? (see occurrence.move; envelope?: \"box\" (also add the import's envelope, a hidden box around every body it placed, in its component, as solid.bounding_solid with `component` makes it → envelope: the body; inspect.clearance and inspect.interference check it instead of the parts with `envelopes: true`)",
@@ -665,8 +665,42 @@ fn add_step_bytes(
     }
     let mut sf = solidcraft_io::step_import_feature_read(bytes, path, options.names, options.reader)
         .map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let freecad_history = not_rebuilt.is_some();
     sf.warnings.splice(0..0, not_rebuilt);
-    add_read_step(s, path, name, options, sf, bytes, profiled)
+    let mut reply = add_read_step(s, path, name, options, sf, bytes, profiled)?;
+    if freecad_history {
+        add_freecad_sketches(s, path, bytes, &mut reply);
+    }
+    Ok(reply)
+}
+
+/// A FreeCAD file whose history was not rebuilt: its sketches come in beside its solids, in the
+/// import's component, as the rebuild makes them (editable, on their planes, with the
+/// constraints that keep their geometry) → `history: "sketches"` and their ids in
+/// `features_added`. What cannot come in is a warning; if adding them fails, the design keeps
+/// the solids alone.
+fn add_freecad_sketches(s: &mut Session, path: &str, bytes: &[u8], reply: &mut Value) {
+    let Some(component) = reply["component"].as_u64() else { return };
+    let warnings = match solidcraft_io::native_cad_sketches(bytes, path) {
+        Err(why) => vec![format!("the file's sketches were not imported: {why}")],
+        Ok(design) => {
+            let before = DesignSnapshot::of(s);
+            match import::add_design_in(s, &design, component) {
+                Ok(ids) => {
+                    reply["history"] = json!("sketches");
+                    reply["features_added"] = json!(ids);
+                    design.warnings
+                }
+                Err(e) => {
+                    before.restore(s);
+                    vec![format!("the file's sketches were not imported: {e}")]
+                }
+            }
+        }
+    };
+    if let Some(list) = reply["warnings"].as_array_mut() {
+        list.extend(warnings.into_iter().map(Value::from));
+    }
 }
 
 fn add_read_step(
