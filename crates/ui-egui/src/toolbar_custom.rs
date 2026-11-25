@@ -449,13 +449,16 @@ pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
     } else {
         Item::action("ui.toolbarPin", "Pin to Toolbar", "plus").with(json!({ "command": id }))
     });
-    v.push(Item::action("ui.shortcutPin", if fav { "Unpin from Shortcuts" } else { "Pin to Shortcuts" }, "star").with(json!({ "command": id })));
+    v.push(
+        Item::action("ui.shortcutPin", if fav { "Unpin from Shortcuts" } else { "Pin to Shortcuts" }, "status_pin").with(json!({ "command": id })),
+    );
     // The application bar's quick-access buttons (#10223).
     v.push(if app.toolbar_custom.quick_access.iter().any(|q| q == id) {
         Item::action("ui.quickAccessRemove", "Remove from Quick Access", "close").with(json!({ "command": id }))
     } else {
         Item::action("ui.quickAccessAdd", "Add to Quick Access", "plus").with(json!({ "command": id }))
     });
+    v.push(Item::action("ui.shortcutKey", "Change Keyboard Shortcut…", "settings").with(json!({ "command": id })));
     v.push(Item::sep());
     v.push(Item::action("ui.toolbarCustomize", "Customize Toolbar…", "settings"));
     v.push(Item::action("ui.toolbarReset", "Reset Toolbar", "restore").with(json!({ "tab": tab })));
@@ -513,6 +516,7 @@ pub fn run(app: &mut SolveApp, action: &str, p: &Value) {
         }
         "ui.quickAccessRemove" => quick_remove(app, id),
         "ui.appBarReset" => app.toolbar_custom.reset_app_bar(),
+        "ui.shortcutKey" => crate::keymap::open_for(app, id),
         _ => {}
     }
 }
