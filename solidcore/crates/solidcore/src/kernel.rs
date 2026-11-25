@@ -226,6 +226,7 @@ pub struct WorkCounters {
     trim_deviation_bounds: Cell<u64>,
     split_face_classifications: Cell<u64>,
     face_intersections: Cell<u64>,
+    same_parameter_bisections: Cell<u64>,
     band_face_solves: Cell<u64>,
     band_edge_solves: Cell<u64>,
 }
@@ -485,6 +486,15 @@ impl WorkCounters {
         self.face_intersections.get()
     }
 
+    /// Same-parameter bounds on a carried trim's distance from its edge
+    /// (`query::curve_surface_gap::trim_same_parameter_gap_bound_within`, which gates a
+    /// boolean's carried trims) that the trim's structure did not answer at once, so that its
+    /// bisection ran: the costly ones. Not the fork's (#22034).
+    #[must_use]
+    pub fn same_parameter_bisections(&self) -> u64 {
+        self.same_parameter_bisections.get()
+    }
+
     /// Intersections of a convex blend's section with a face of the part, run to learn whether
     /// the blend cuts the part or breaks through it
     /// (`blend::fillet_executive::session::band_cuts`). Not the fork's (#21434).
@@ -531,6 +541,7 @@ impl WorkCounters {
         self.trim_deviation_bounds.set(0);
         self.split_face_classifications.set(0);
         self.face_intersections.set(0);
+        self.same_parameter_bisections.set(0);
         self.band_face_solves.set(0);
         self.band_edge_solves.set(0);
     }
@@ -569,6 +580,12 @@ impl WorkCounters {
     pub(crate) fn add_face_intersection(&self) {
         self.face_intersections
             .set(self.face_intersections.get().saturating_add(1));
+    }
+
+    /// Counts one same-parameter bound that runs its bisection.
+    pub(crate) fn add_same_parameter_bisection(&self) {
+        self.same_parameter_bisections
+            .set(self.same_parameter_bisections.get().saturating_add(1));
     }
 
     /// Counts one edge or vertex asked whether it is a seam or a pole of a face.
