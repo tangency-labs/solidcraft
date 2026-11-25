@@ -306,6 +306,14 @@ fn insert_design_reads_the_saved_design_while_the_window_draws() {
         h.step(&json!({"choose_file": "plate.solidcraft"})).unwrap();
         h.app.start("component.insert_design");
         h.frames(2);
+        // The plate's parameters are read first, beside the window (it has none, so no dialog
+        // asks); the insert itself starts once that read is in, however long its thread takes.
+        let began = std::time::Instant::now();
+        while h.app.link_parameters_reading.is_some() {
+            assert!(began.elapsed() < std::time::Duration::from_secs(120), "the plate's parameters were never read");
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
     };
 
     // Held before the plate's third feature: the window draws, saying what it reads.
