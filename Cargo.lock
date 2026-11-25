@@ -6215,8 +6215,8 @@ dependencies = [
 name = "solidcraft-develop"
 version = "0.48.0"
 dependencies = [
- "solidcore-ops",
  "solidcore-record",
+ "solidcraft-kernel",
  "thiserror 2.0.21",
 ]
 
@@ -6530,9 +6530,9 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "solidcore-ops",
  "solidcore-record",
  "solidcraft-geom",
+ "solidcraft-kernel",
  "thiserror 2.0.21",
  "ttf-parser",
  "unicode-bidi",
