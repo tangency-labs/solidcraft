@@ -89,9 +89,9 @@ fn a_cancelled_preview_import_leaves_no_failure_in_the_shared_cache() {
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "first"})).unwrap();
     s.execute("file.insert_step", &json!({"path": path})).unwrap();
     let import = s.doc.features.iter().position(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
-    // A new length for the box: the import after it is evaluated again on new inputs.
-    let redefine =
-        json!({"feature": s.doc.features[0].id, "command": "solid.box", "params": {"length": 20, "width": 10, "height": 10, "body_name": "first"}});
+    // Changing document units changes the shared evaluation context, forcing the import to
+    // evaluate again on new inputs.
+    let change_units = json!({"units": "in"});
     let mut scratch = s.scratch();
     let progress = Arc::new(Progress::default());
     let canceller = {
@@ -103,11 +103,11 @@ fn a_cancelled_preview_import_leaves_no_failure_in_the_shared_cache() {
             progress.cancel();
         })
     };
-    let _ = solidcraft_doc::progress::watch(progress.clone(), || scratch.execute("timeline.redefine", &redefine));
+    let _ = solidcraft_doc::progress::watch(progress.clone(), || scratch.execute("document.units", &change_units));
     canceller.join().unwrap();
     let (_, done, total) = progress.work().unwrap();
     assert!(done < total, "the preview's import stopped part way ({done} of {total})");
-    s.execute("timeline.redefine", &redefine).unwrap();
+    s.execute("document.units", &change_units).unwrap();
     let result = &s.model.results[import];
     assert!(result.error.is_none() && !result.skipped, "the design imports in full: {:?}", result.error);
     let _ = std::fs::remove_file(path);
@@ -189,4 +189,33 @@ fn raised_file_limits_let_larger_step_and_design_files_be_read() {
     let _ = limits::set_preferred(FileLimits::DEFAULT);
     assert_eq!(solidcraft_kernel::step_max_bytes(), 512 << 20, "the defaults put the parser's cap back");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #15588: a STEP file that may need more memory than the machine can spare opens all the same,
+/// with a warning naming that memory; a valid file is never refused. Later rebuilds read its text
+/// again without asking.
+#[test]
+fn a_step_file_too_large_for_the_memory_opens_with_a_warning() {
+    let path = step_file("memory", 4);
+    let size = std::fs::metadata(&path).unwrap().len() as usize;
+    solidcraft_kernel::step_with_memory_to_spare(size, || {
+        // `doc.open` without the import cache, so the file itself is read.
+        for (cmd, params) in [("doc.open", json!({"path": path, "reuse_import": false})), ("file.insert_step", json!({"path": path}))] {
+            let mut s = Session::default();
+            let reply = s.execute(cmd, &params).unwrap();
+            let warning = reply["warnings"][0].as_str().unwrap_or_default();
+            assert!(warning.contains("STEP file needs about") && warning.contains("opening it anyway"), "{cmd}: {reply}");
+            assert_eq!(s.model.state().bodies.len(), 4, "{cmd}");
+            // A rebuild reads the Import feature's text again, and is not refused.
+            assert!(solidcraft_kernel::step_import(&step_text(&s)).is_ok(), "{cmd}");
+        }
+    });
+    // With the memory there, no warning.
+    let mut s = Session::default();
+    let reply = s.execute("file.insert_step", &json!({"path": path})).unwrap();
+    assert!(
+        !reply["warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains("STEP file needs about")))),
+        "{reply}"
+    );
+    let _ = std::fs::remove_file(path);
 }

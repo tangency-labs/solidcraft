@@ -70,6 +70,9 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
         // By side: the side from the first click to the second (#11271).
         ("sketch.polygon.edge", 1) => vec![b("Length", Length), b("Sides", Unitless)],
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 1) => vec![b("Length", Length)],
+        // The whole first edge, then the width across from it (#4798).
+        ("sketch.rectangle.edge_center", 1) => vec![b("Length", Length)],
+        ("sketch.rectangle.edge_center", 2) => vec![b("Width", Length)],
         ("sketch.conic", 2) => vec![b("Rho", Unitless)],
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 2)
         | ("sketch.slot.arc_center" | "sketch.slot.arc_three_point", 3) => vec![b("Width", Length)],
@@ -119,12 +122,7 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
     let lk = |l: &str| locked(app, t, l);
     match (t.cmd, t.pts.len()) {
         ("sketch.construction_line.angle", 1) => a + Vec2::from_angle(lk("Angle").unwrap_or_else(|| (h - a).angle())) * (h - a).len().max(1.0),
-        ("sketch.line", _) | ("sketch.slot.center_to_center" | "sketch.slot.overall", 1) => {
-            let v = h - a;
-            let len = lk("Length").unwrap_or(v.len());
-            let ang = lk("Angle").unwrap_or_else(|| snap_axis(v.angle()));
-            a + Vec2::from_angle(ang) * len
-        }
+        ("sketch.line", _) | ("sketch.slot.center_to_center" | "sketch.slot.overall", 1) => line_end(app, a, h, lk("Length"), lk("Angle")),
         // A midpoint line runs from the end's mirror image through the midpoint to the end, so
         // the midpoint is the middle of the line: a typed length is half of it on each side.
         ("sketch.line.midpoint", 1) => {
@@ -141,6 +139,20 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
             let d = h - a;
             Vec2::new(a.x + lk("Width").map_or(d.x, |w| w * 0.5 * sign(d.x)), a.y + lk("Height").map_or(d.y, |hh| hh * 0.5 * sign(d.y)))
         }
+        // The edge's end: its box is the whole edge, centred on the first point.
+        ("sketch.rectangle.edge_center", 1) => {
+            let v = h - a;
+            let ang = if t.hover.as_ref().is_some_and(|x| x.1.is_some()) { v.angle() } else { snap_axis(v.angle()) };
+            a + Vec2::from_angle(ang) * lk("Length").map_or(v.len(), |l| l * 0.5)
+        }
+        ("sketch.rectangle.edge_center", 2) => match lk("Width") {
+            Some(w) => {
+                let c0 = t.pts.first().map(|p| p.0).unwrap_or(a);
+                let n = dir_or_x(a - c0).perp();
+                c0 + n * (w * sign(n.dot(h - c0)))
+            }
+            None => h,
+        },
         ("sketch.circle.center", 1) => a + dir_or_x(h - a) * lk("Diameter").map_or((h - a).len(), |d| d * 0.5),
         ("sketch.circle.two_point", 1) => a + dir_or_x(h - a) * lk("Diameter").unwrap_or((h - a).len()),
         ("sketch.slot.center_point", 1) => a + dir_or_x(h - a) * lk("Length").map_or((h - a).len(), |l| l * 0.5),
@@ -261,6 +273,34 @@ pub fn snap_axis(ang: f64) -> f64 {
     if (ang - k * q).abs() < 2.5f64.to_radians() { k * q } else { ang }
 }
 
+/// Where the end of a line from `a` goes for the cursor at `h`: on the horizontal or the vertical
+/// when the line is near it, but only while the end stays within the pointer's reach, the reach
+/// every other snap uses (#16994). A typed length or a typed angle wins over the cursor.
+fn line_end(app: &SolveApp, a: Vec2, h: Vec2, length: Option<f64>, angle: Option<f64>) -> Vec2 {
+    let v = h - a;
+    let len = length.unwrap_or(v.len());
+    if let Some(ang) = angle {
+        return a + Vec2::from_angle(ang) * len;
+    }
+    let at = a + Vec2::from_angle(snap_axis(v.angle())) * len;
+    // A typed length says how long the line is: the end goes there, on the axis or not.
+    if length.is_some() || (at - h).len() <= reach_mm(app) { at } else { h }
+}
+
+/// How far (screen points) a snap may move the point it places from the pointer: the reach the
+/// other snaps use (#16994).
+const SNAP_REACH: f64 = 7.0;
+
+/// The pointer's reach in the sketch's own millimetres: how far a snap may move the point it
+/// places, in the view's scale.
+fn reach_mm(app: &SolveApp) -> f64 {
+    let Some(rect) = app.viewport.rect else { return f64::INFINITY };
+    let fov = app.view_fov();
+    let half = if fov > 0.0 { app.cam.distance * (fov * 0.5).tan() } else { app.cam.distance * 0.4 };
+    let per_point = 2.0 * half / f64::from(rect.height().max(1.0));
+    if per_point.is_finite() && per_point > 0.0 { SNAP_REACH * per_point } else { f64::INFINITY }
+}
+
 /// Is the segment exactly horizontal or vertical (an inferred constraint)?
 pub fn axis_aligned(a: Vec2, b: Vec2) -> Option<bool> {
     let d = b - a;
@@ -360,6 +400,15 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
             let d = e - a;
             let (sx, sy) = (sign(d.x), sign(d.y));
             vec![(2.0 * d.x.abs(), Vec2::new(a.x, a.y - d.y - sy * off)), (2.0 * d.y.abs(), Vec2::new(a.x + d.x + sx * 2.0 * off, a.y))]
+        }
+        ("sketch.rectangle.edge_center", 1) => {
+            let n = dir_or_x(e - a).perp();
+            vec![(2.0 * (e - a).len(), (a + e) * 0.5 + n * off)]
+        }
+        ("sketch.rectangle.edge_center", 2) => {
+            let n = dir_or_x(a - first).perp();
+            let w = n.dot(e - first);
+            vec![(w.abs(), e + n * (sign(w) * 2.5 * off))]
         }
         ("sketch.circle.center", 1) => vec![(2.0 * (e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
         ("sketch.circle.two_point", 1) => vec![((e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
@@ -528,6 +577,7 @@ pub fn sync(t: &mut Tool) {
                 t.cmd,
                 "sketch.arc.center_point"
                     | "sketch.ellipse"
+                    | "sketch.rectangle.edge_center"
                     | "sketch.slot.center_to_center"
                     | "sketch.slot.overall"
                     | "sketch.slot.center_point"
@@ -894,6 +944,19 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
         let mut text = b.value.clone();
         if construction && b.label == "Length" && text.is_empty() {
             text = INFINITE.to_owned();
+        }
+        // A key that moves the caret (Left, Right, Home, End) in a box that follows the cursor
+        // keeps its value where it is, so the caret can move into it and the user can add to
+        // it (`50.00` then `-5`); otherwise the next frame selects the whole text again and
+        // typing replaces it (#20607).
+        if has_focus
+            && !b.locked
+            && !b.value.is_empty()
+            && ui.input(|input| {
+                [egui::Key::ArrowLeft, egui::Key::ArrowRight, egui::Key::Home, egui::Key::End].into_iter().any(|key| input.key_pressed(key))
+            })
+        {
+            b.locked = true;
         }
         // While a box follows the cursor its whole text is selected, so typing replaces it.
         if (has_focus || (focus && i == 0)) && !b.locked {

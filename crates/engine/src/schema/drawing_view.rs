@@ -178,10 +178,11 @@ impl JsonSchema for ScaleParam {
         "DrawingScale".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let ws = super::types::whitespace_class();
         json_schema!({
-            "description": "The scale as paper:model text, such as \"1:2\" or \"5:1\", from 1:100000 to 1000:1. When not given, the largest ISO 5455 scale at which the view fits the sheet's drawing area.",
+            "description": "The scale as paper:model text, such as \"1:2\" or \"5:1\", from 1:100000 to 1000:1; spaces round each number are ignored. When not given, the largest ISO 5455 scale at which the view fits the sheet's drawing area.",
             "type": "string",
-            "pattern": "^[0-9]+(\\.[0-9]+)?:[0-9]+(\\.[0-9]+)?$"
+            "pattern": format!("^[{ws}]*[0-9]+(\\.[0-9]+)?[{ws}]*:[{ws}]*[0-9]+(\\.[0-9]+)?[{ws}]*$")
         })
     }
 }
@@ -809,6 +810,12 @@ pub struct InspectResult {
     pub dimensions: Vec<String>,
     /// Its balloons' ids, in id order.
     pub balloons: Vec<String>,
+    /// Its manual centre marks, in id order; absent when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub centre_marks: Vec<String>,
+    /// Its manual centre lines, in id order; absent when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub centre_lines: Vec<String>,
     /// Its label, when it has one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<LabelResult>,
@@ -1410,11 +1417,11 @@ pub enum LineSourceResult {
     Silhouette { face: usize },
 }
 
-impl From<solidcraft_geom::hlr::Source> for LineSourceResult {
-    fn from(source: solidcraft_geom::hlr::Source) -> Self {
+impl From<solidcraft_kernel::hlr::Source> for LineSourceResult {
+    fn from(source: solidcraft_kernel::hlr::Source) -> Self {
         match source {
-            solidcraft_geom::hlr::Source::Edge { edge, tangent } => LineSourceResult::Edge { edge, tangent },
-            solidcraft_geom::hlr::Source::Silhouette { face } => LineSourceResult::Silhouette { face },
+            solidcraft_kernel::hlr::Source::Edge { edge, tangent } => LineSourceResult::Edge { edge, tangent },
+            solidcraft_kernel::hlr::Source::Silhouette { face } => LineSourceResult::Silhouette { face },
         }
     }
 }

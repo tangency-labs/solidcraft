@@ -315,7 +315,7 @@ fn measure(
     if spots.is_empty() || spots.len() > MAX_HOLES {
         return Err(DocError::Invalid(format!("a hole needs 1…{MAX_HOLES} points")));
     }
-    let at = *spots.get(index).ok_or_else(|| DocError::Invalid("the hole's point is not drilled".into()))?;
+    let at = spots.get(index).map(|spot| spot.at).ok_or_else(|| DocError::Invalid("the hole's point is not drilled".into()))?;
     if !(at.is_finite() && dir.is_finite()) {
         return Err(DocError::Invalid("the hole's place is out of range".into()));
     }
@@ -387,7 +387,7 @@ fn measure(
     let m = motion(&made.body)?;
     let (start, direction) = (crate::apply_point(&m, at), crate::apply_vector(&m, dir));
     let Some(now) = bore_floor(after, f.id, start, direction, r, depth) else {
-        let holes: Vec<Vec3> = spots.iter().map(|p| crate::apply_point(&m, *p)).collect();
+        let holes: Vec<Vec3> = spots.iter().map(|p| crate::apply_point(&m, p.at)).collect();
         let reason = if stray_bore(after, f.id, &holes, direction, r) {
             "a later feature removed or moved the hole (only a Move of its body is followed)"
         } else {

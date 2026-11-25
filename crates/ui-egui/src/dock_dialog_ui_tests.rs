@@ -72,7 +72,7 @@ fn dragging_a_docked_dialog_blocks_viewport_hover() {
         h.call("ui.resize", json!({"width": 2400, "height": 900}));
         h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
         h.call("ui.view", json!({"view": "fit"}));
-        h.app.ui.pick_bodies = true;
+        h.app.ui.pick_mode = solidcraft_engine::PickMode::Bodies;
         let viewport = h.app.viewport.rect.unwrap();
         let p = crate::viewport::projection(&h.app, viewport).to_screen(solidcore_record::Vec3::new(20.0, 15.0, 10.0)).unwrap();
         h.call("ui.move", json!({"x": p.x, "y": p.y}));

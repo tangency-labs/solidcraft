@@ -1,5 +1,5 @@
 //! The view compass as a component: the six signed world axes drawn as the camera's view axes
-//! pose them, a Home chip, and a drag anywhere on it to orbit. It takes plain inputs
+//! pose them, Home and optional Turn Around chips, and a drag anywhere on it to orbit. It takes plain inputs
 //! ([`Compass`], [`ViewAxes`]) and returns the [`ViewAction`] chosen, and [`orbit`] returns a drag's
 //! [`OrbitStep`]; the app turns the camera.
 //! Every tip publishes its handle (`axis_view:<axis>`) to the widget registry while it is drawn.
@@ -49,13 +49,15 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 /// and depth along the camera's back.
 pub type Tip = (&'static str, [f64; 3], Pos2, f64);
 
-/// What the user chose on the compass: a tip or Home.
+/// What the user chose on the compass.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ViewAction {
     /// Look along an axis: a tip was clicked (`direction`: the tip's world direction).
     Snap { axis: &'static str, direction: [f64; 3] },
     /// The Home chip was clicked.
     Home,
+    /// Turn the view half a turn about its screen's vertical axis.
+    TurnAround,
 }
 
 /// One frame's step of a drag on a view navigator: `(dx, dy)` screen points (`snap`: Shift was
@@ -82,6 +84,8 @@ pub struct Compass {
     /// The tip's hover text mentions holding Shift to snap.
     pub snap_hint: bool,
     pub home_label: String,
+    /// Show a Turn Around chip when the host supplies its translated hover text.
+    pub turn_around_label: Option<String>,
 }
 
 /// Where a tip is drawn from the centre, for a direction posed on screen as `[right, down]`
@@ -162,6 +166,22 @@ pub fn show(ui: &mut egui::Ui, compass: &Compass) -> Option<ViewAction> {
     }
     if hr.backing_on_hover_text(&compass.home_label).clicked() {
         action = Some(ViewAction::Home);
+    }
+    if let Some(label) = &compass.turn_around_label {
+        let turn = Rect::from_center_size(pos2(c.x + 37.0, c.y - 37.0), vec2(18.0, 18.0));
+        solidcraft_ui_registry::publish_target("axis_view:turn_around", turn);
+        let may_act = hover.is_some() && !compass.orbiting;
+        // Register the click target before movement and press can arrive together next frame.
+        let response = ui.interact(turn, ui.scope_id().with("axis_view_turn_around"), Sense::click());
+        let hovered = may_act && response.hovered();
+        painter.circle(turn.center(), 12.0, t.overlay.gamma_multiply(if hovered { 0.9 } else { 0.5 }), Stroke::new(1.0, t.border));
+        crate::icons::paint_icon(&painter, turn, "turn_around", f32::from(t.icon.a()) / 255.0);
+        if hovered {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if may_act && response.backing_on_hover_text(label).clicked() {
+            action = Some(ViewAction::TurnAround);
+        }
     }
     action
 }
@@ -249,6 +269,10 @@ mod tests {
     const FRONT: ViewAxes = ViewAxes { right: [1.0, 0.0, 0.0], up: [0.0, 0.0, 1.0], back: [0.0, -1.0, 0.0] };
 
     fn run(ctx: &egui::Context, events: Vec<Event>, hover: Option<Pos2>, drag: &mut Drag) -> (Option<ViewAction>, Orbit) {
+        run_with_button(ctx, events, hover, drag, true)
+    }
+
+    fn run_with_button(ctx: &egui::Context, events: Vec<Event>, hover: Option<Pos2>, drag: &mut Drag, shown: bool) -> (Option<ViewAction>, Orbit) {
         let mut out = (None, Orbit::default());
         crate::test_support::raw_frame(
             ctx,
@@ -263,6 +287,7 @@ mod tests {
                     orbiting: orbit.orbiting,
                     snap_hint: true,
                     home_label: "Home".into(),
+                    turn_around_label: shown.then(|| "Turn around".into()),
                 };
                 out = (show(ui, &compass), orbit);
             },
@@ -287,7 +312,21 @@ mod tests {
         let z = tips.iter().find(|t| t.0 == "z").map(|t| t.2).unwrap();
         assert_eq!(click(&ctx, z), Some(ViewAction::Snap { axis: "z", direction: [0.0, 0.0, 1.0] }));
         assert_eq!(click(&ctx, pos2(163.0, 163.0)), Some(ViewAction::Home));
+        assert_eq!(click(&ctx, pos2(237.0, 163.0)), Some(ViewAction::TurnAround));
         assert_eq!(click(&ctx, pos2(20.0, 20.0)), None, "outside the compass");
+    }
+
+    #[test]
+    fn turn_around_is_inactive_when_hidden_or_covered() {
+        for (shown, hover) in [(false, Some(pos2(237.0, 163.0))), (true, None)] {
+            let ctx = crate::test_support::context();
+            let mut drag = Drag::default();
+            let at = pos2(237.0, 163.0);
+            run_with_button(&ctx, vec![Event::PointerMoved(at)], hover, &mut drag, shown);
+            for pressed in [true, false] {
+                assert_eq!(run_with_button(&ctx, crate::test_support::pointer(at, pressed), hover, &mut drag, shown).0, None);
+            }
+        }
     }
 
     #[test]
