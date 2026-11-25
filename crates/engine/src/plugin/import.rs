@@ -348,7 +348,7 @@ fn convert(
     options: &Value,
     consent: Option<&folders::DialogFolders>,
 ) -> Result<ImportedDesign> {
-    let (imported, _, fresh) = run_importer(session, importer, path, options, consent, |session, imported| {
+    let (imported, _, fresh) = run_importer(session, importer, path, options, consent, |session, imported| -> Result<Session> {
         #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
         {
             let mut doc = solidcraft_io::read_design(&imported.design)
