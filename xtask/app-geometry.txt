@@ -153,7 +153,6 @@ crates/doc/src/eval_frame.rs:cut_members dot
 crates/doc/src/eval_frame.rs:ordered dot
 crates/doc/src/eval_frame.rs:plane_up cross,dot,normalized
 crates/doc/src/eval_frame.rs:section_view normalized
-crates/doc/src/eval_frame.rs:straight dot,normalized
 crates/doc/src/eval_frame.rs:untrimmed_member_section dot,normalized
 crates/doc/src/eval_more.rs:FaceSlice::outline dot,triangles
 crates/doc/src/eval_more.rs:chain_loops cross
@@ -186,7 +185,6 @@ crates/doc/src/face_anchor.rs:Document::resolve_face_anchor_noted cross,dot
 crates/doc/src/face_anchor.rs:FaceAnchor::validate hypot
 crates/doc/src/face_anchor.rs:validate_face_anchor_json hypot
 crates/doc/src/frame.rs:group_axes cross,dot,normalized
-crates/doc/src/frame.rs:member_axes cross,dot,normalized
 crates/doc/src/frame.rs:rounded_polygon atan2,cross,dot,normalized
 crates/doc/src/frame_corners.rs:away normalized
 crates/doc/src/frame_corners.rs:corner_cuts dot,normalized
@@ -842,7 +840,6 @@ crates/io/src/kicad_in.rs:glyph_polyline atan2
 crates/io/src/kicad_in.rs:kicad_board_mesh_noted triangles
 crates/io/src/kicad_in.rs:model_body_meshes triangles
 crates/io/src/kicad_in.rs:pad_drill_points atan2
-crates/io/src/kicad_in.rs:parse_kicad_board_with atan2
 crates/io/src/kicad_in.rs:read_kicad triangles
 crates/io/src/kicad_in.rs:region_loops hypot
 crates/io/src/kicad_in.rs:split_pinches hypot

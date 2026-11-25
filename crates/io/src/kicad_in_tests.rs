@@ -2150,6 +2150,22 @@ fn each_holes_choice_keeps_its_own_holes() {
     }
 }
 
+/// A 4 × 0.5 slot 1 mm from the board's edge: lying along the edge it keeps 0.75 mm clear and is
+/// left out with the other holes; standing across the edge it cuts the board and stays.
+#[test]
+fn a_slot_is_kept_for_the_edge_only_when_its_own_shape_reaches_it() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 30 10) (layer "Edge.Cuts"))
+      (footprint "Connector:Along" (layer "F.Cu") (at 10 9)
+        (pad "1" thru_hole oval (at 0 0) (size 4.5 1) (drill oval 4 0.5) (layers "*.Cu" "*.Mask")))
+      (footprint "Connector:Across" (layer "F.Cu") (at 20 9)
+        (pad "1" thru_hole oval (at 0 0) (size 1 4.5) (drill oval 0.5 4) (layers "*.Cu" "*.Mask"))))"#;
+    let mut board = parse_kicad_board(source.as_bytes(), "slots.kicad_pcb").unwrap();
+    keep_holes(&mut board, KicadHoles::None);
+    let centres: Vec<[f64; 2]> = board.drills.iter().map(|d| d.center).collect();
+    assert_eq!(centres, vec![[20.0, -9.0]]);
+}
+
 #[test]
 fn holes_default_to_mounting_holes_only() {
     assert_eq!(KicadOptions::default().holes, KicadHoles::Mounting);

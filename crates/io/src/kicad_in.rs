@@ -926,7 +926,7 @@ fn pad_drill(transform: &Mat, pad: &KicadPad) -> Option<KicadDrill> {
     // The pad's own X axis, turned by its rotation in the footprint frame, on the board.
     let [ux, uy] = pad_axis(pad);
     let ahead = apply2(transform, pad.at[0] + ux, pad.at[1] + uy);
-    let angle = (ahead[1] - center[1]).atan2(ahead[0] - center[0]);
+    let angle = solidcraft_kernel::services::board_drill::direction_angle(center, ahead);
     Some(KicadDrill { center, size: [drill[0].abs(), drill[1].abs()], angle })
 }
 
@@ -969,21 +969,10 @@ fn keep_holes(board: &mut KicadBoard, holes: KicadHoles) {
     board.drills = board_drills(board);
 }
 
-/// Does a drill reach an outline, the board's edge or a cutout's? Measured to the drill's widest
-/// extent, so a slot that comes near an edge counts too.
+/// Does a drill reach an outline, the board's edge or a cutout's? Measured to the drill's own
+/// shape, so a slot counts when its end comes to an edge and not when it only lies beside one.
 fn reaches_an_outline(outlines: &[Vec<[f64; 2]>], drill: &KicadDrill) -> bool {
-    let reach = drill.size[0].max(drill.size[1]) * 0.5;
-    let c = drill.center;
-    outlines.iter().any(|outline| {
-        (0..outline.len()).any(|i| {
-            let (a, b) = (outline[i], outline[(i + 1) % outline.len()]);
-            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-            let length = dx * dx + dy * dy;
-            let t = if length > 0.0 { (((c[0] - a[0]) * dx + (c[1] - a[1]) * dy) / length).clamp(0.0, 1.0) } else { 0.0 };
-            let (px, py) = (a[0] + dx * t - c[0], a[1] + dy * t - c[1]);
-            (px * px + py * py).sqrt() <= reach
-        })
-    })
+    solidcraft_kernel::services::board_drill::hole_reaches_loops(drill.center, drill.size, drill.angle, outlines)
 }
 
 /// The matrix that maps a board point (KiCad's Y down) to SolidCraft's Y up.
