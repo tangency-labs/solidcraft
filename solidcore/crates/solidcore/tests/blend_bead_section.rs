@@ -2838,9 +2838,9 @@ fn leg_fits(k: &mut Kernel, b: &mut Brep, at: [f64; 3], legs: [f64; 2]) -> Vec<f
 
 /// A leg far past a narrow face is refused with the leg that fits: on a face 0.05 wide a leg
 /// of 1e6 is refused with 0.05 (the search stops at a ten-millionth of the leg found, not of
-/// the leg asked, which would leave 0): no more than the face's width, and below it by no more
-/// than the search's stop, `1e-7 (1 + 0.05)`, and the millionth of the face's width within
-/// which a foot counts as on its rim (2e-7 in all). At the leg named the bead builds.
+/// the leg asked, which would leave 0): no more than the face's width, where the face's plane
+/// ends and no foot is found, and below it by no more than the search's stop,
+/// `1e-7 (1 + 0.05)`. At the leg named the bead builds.
 #[test]
 fn a_leg_far_past_a_narrow_face_is_refused_with_the_leg_that_fits() {
     use solidcore::error::FitMeasure;
@@ -2864,7 +2864,7 @@ fn a_leg_far_past_a_narrow_face_is_refused_with_the_leg_that_fits() {
         }
     }
     let (face, fit) = narrow.expect("the narrow face refuses the leg");
-    assert!((0.05 - 2e-7..=0.05).contains(&fit), "{fit}");
+    assert!((0.05 - 1.1e-7..=0.05).contains(&fit), "{fit}");
     let size = ChamferSize::Distances([fit, 0.02]);
     let along = [Some(face)];
     if let Err(refused) =
