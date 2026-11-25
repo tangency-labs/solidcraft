@@ -10,15 +10,420 @@ use crate::BackingTooltipExt as _;
 use egui::{Align2, FontId, Painter, Pos2, Rect, Sense, Stroke, pos2, vec2};
 use solidcraft_theme::Tokens;
 
+/// Cubic ease-out from an origin to its target, with elapsed time `dt`. Invalid timing snaps;
+/// invalid positions produce a finite fallback. Double precision keeps hostile deltas finite.
+pub fn animated_step(from: f32, to: f32, dt: f32, duration: f32) -> f32 {
+    if !to.is_finite() {
+        return if from.is_finite() { from } else { 0.0 };
+    }
+    if !from.is_finite() || !dt.is_finite() || !duration.is_finite() || duration <= 0.0 {
+        return to;
+    }
+    let progress = (f64::from(dt) / f64::from(duration)).clamp(0.0, 1.0);
+    let value = (f64::from(from) + (f64::from(to) - f64::from(from)) * (1.0 - (1.0 - progress).powi(3))) as f32;
+    if (f64::from(to) - f64::from(value)).abs() <= 0.5 { to } else { value }
+}
+
+#[derive(Clone)]
+struct ItemMotion {
+    from: Pos2,
+    target: Pos2,
+    drawn: Pos2,
+    from_width: f32,
+    target_width: f32,
+    drawn_width: f32,
+    seen: u64,
+    appeared: u64,
+    active: bool,
+}
+
+#[derive(Clone, Default)]
+struct BarMotion {
+    initialized: bool,
+    frame: u64,
+    width: f32,
+    resized: bool,
+    items: std::collections::BTreeMap<String, ItemMotion>,
+}
+
+fn motion_key(ctx: &egui::Context) -> egui::Id {
+    egui::Id::unique(("sc_appbar_motion", ctx.viewport_id()))
+}
+
+/// Start a paint pass. Resizing cancels displacement, and absent items lose their history.
+pub fn begin_motion(ctx: &egui::Context, width: f32) {
+    let (key, frame) = (motion_key(ctx), ctx.cumulative_frame_nr());
+    ctx.data_mut(|data| {
+        let state = data.get_temp_mut_or_default::<BarMotion>(key);
+        if !state.initialized || state.frame != frame {
+            state.resized = !width.is_finite() || !state.initialized || (state.width - width).abs() > 0.01;
+            state.frame = frame;
+            state.initialized = true;
+            state.items.retain(|_, item| item.seen.saturating_add(1) >= frame);
+        } else if (state.width - width).abs() > 0.01 {
+            state.resized = true;
+        }
+        state.width = width;
+        if state.resized {
+            state.items.clear();
+        }
+    });
+}
+
+fn motion_offset(ctx: &egui::Context, id: &str, rect: Rect) -> egui::Vec2 {
+    if id.len() > 256 || !rect.is_finite() || !rect.is_positive() || rect.min.x.abs() > 1e6 || rect.min.y.abs() > 1e6 {
+        return egui::Vec2::ZERO;
+    }
+    let (key, frame) = (motion_key(ctx), ctx.cumulative_frame_nr());
+    let instant = ctx.global_style().animation_time <= 0.0;
+    let selection = ctx.data_mut(|data| {
+        let state = data.get_temp_mut_or_default::<BarMotion>(key);
+        if !state.initialized || state.frame != frame || (state.items.len() >= 128 && !state.items.contains_key(id)) {
+            return None;
+        }
+        let previous = state.items.get(id).cloned();
+        let appeared = previous.as_ref().is_none_or(|item| item.seen.saturating_add(1) < frame);
+        // Only separators change width as part of customization; other controls retain
+        // the existing position-only motion and appearance/resize rules.
+        let width = if id.starts_with("separator:") { rect.width() } else { 0.0 };
+        let mut item = previous.unwrap_or(ItemMotion {
+            from: rect.min,
+            target: rect.min,
+            drawn: rect.min,
+            from_width: width,
+            target_width: width,
+            drawn_width: width,
+            seen: frame,
+            appeared: frame,
+            active: false,
+        });
+        let snap = instant || state.resized || appeared || item.appeared == frame;
+        let retarget = item.target != rect.min || item.target_width != width;
+        let reused = item.seen == frame && !snap && !retarget;
+        if snap {
+            item.from = rect.min;
+            item.target = rect.min;
+            item.drawn = rect.min;
+            item.from_width = width;
+            item.target_width = width;
+            item.drawn_width = width;
+            item.active = false;
+            if appeared {
+                item.appeared = frame;
+            }
+        } else if retarget {
+            item.from = item.drawn;
+            item.target = rect.min;
+            item.from_width = item.drawn_width;
+            item.target_width = width;
+            item.active = item.from.distance(item.target) > 0.5 || (item.from_width - width).abs() > 0.5;
+        }
+        item.seen = frame;
+        Some((item, snap, retarget, reused))
+    });
+    let Some((mut item, snap, retarget, reused)) = selection else { return egui::Vec2::ZERO };
+    if reused {
+        return item.drawn - item.target;
+    }
+    let animation = egui::Id::unique(("sc_appbar_motion_progress", ctx.viewport_id(), id));
+    if snap || !item.active {
+        item.drawn = item.target;
+        item.drawn_width = item.target_width;
+        ctx.animate_value_with_time(animation, 1.0, 0.0);
+    } else {
+        if retarget {
+            ctx.animate_value_with_time(animation, 0.0, 0.0);
+        }
+        let progress = ctx.animate_value_with_time(animation, 1.0, 0.15);
+        item.drawn = pos2(animated_step(item.from.x, item.target.x, progress, 1.0), animated_step(item.from.y, item.target.y, progress, 1.0));
+        item.drawn_width = animated_step(item.from_width, item.target_width, progress, 1.0);
+        if item.drawn.distance(item.target) <= 0.5 && (item.drawn_width - item.target_width).abs() <= 0.5 {
+            item.drawn = item.target;
+            item.drawn_width = item.target_width;
+            item.active = false;
+            ctx.animate_value_with_time(animation, 1.0, 0.0);
+        }
+    }
+    let offset = item.drawn - item.target;
+    ctx.data_mut(|data| {
+        data.get_temp_mut_or_default::<BarMotion>(key).items.insert(id.to_owned(), item);
+    });
+    offset
+}
+
+/// Read the painted position for decoration only. Interaction always uses the original rect.
+pub fn drawn_rect(ctx: &egui::Context, id: &str, rect: Rect) -> Rect {
+    let (key, frame) = (motion_key(ctx), ctx.cumulative_frame_nr());
+    ctx.data(|data| {
+        data.get_temp::<BarMotion>(key).and_then(|state| {
+            state.items.get(id).filter(|item| item.seen == frame).map(|item| {
+                Rect::from_min_size(
+                    rect.min + (item.drawn - item.target),
+                    vec2(if id.starts_with("separator:") { item.drawn_width } else { rect.width() }, rect.height()),
+                )
+            })
+        })
+    })
+    .unwrap_or(rect)
+}
+
+fn translate_paint(ctx: &egui::Context, layer: egui::LayerId, start: egui::layers::ShapeIdx, offset: egui::Vec2) {
+    if offset == egui::Vec2::ZERO {
+        return;
+    }
+    let screen = ctx.content_rect();
+    ctx.graphics_mut(|graphics| {
+        let list = graphics.entry(layer);
+        let end = list.next_idx();
+        if start.0 < end.0 {
+            list.transform_after_rounding_range(start, end, egui::emath::TSTransform::from_translation(offset));
+            for index in start.0..end.0 {
+                list.mutate_shape(egui::layers::ShapeIdx(index), |shape| shape.clip_rect = shape.clip_rect.intersect(screen));
+            }
+        }
+    });
+}
+
+/// Offset only the newly emitted paint, after pixel snapping. Widget rectangles stay final.
+pub fn paint_motion<R>(ui: &mut egui::Ui, id: &str, rect: Rect, paint: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let (ctx, layer) = (ui.ctx().clone(), ui.layer_id());
+    let start = ctx.graphics_mut(|graphics| graphics.entry(layer).next_idx());
+    let offset = motion_offset(&ctx, id, rect);
+    let result = paint(ui);
+    translate_paint(&ctx, layer, start, offset);
+    result
+}
+
+/// The same paint-only displacement for an app-owned control with its own area layer.
+pub fn paint_layers_motion<R>(ctx: &egui::Context, id: &str, rect: Rect, layers: &[egui::LayerId], paint: impl FnOnce() -> R) -> R {
+    let starts: Vec<_> = layers.iter().take(16).map(|&layer| (layer, ctx.graphics_mut(|graphics| graphics.entry(layer).next_idx()))).collect();
+    let offset = motion_offset(ctx, id, rect);
+    let result = paint();
+    for (layer, start) in starts {
+        translate_paint(ctx, layer, start, offset);
+    }
+    result
+}
+
+/// Retain a native control's input, focus and tooltip while the shared bar painter owns its
+/// shape. Unlike zero opacity, discarding only its paint keeps the input widget visible.
+pub fn interaction_only<R>(ui: &mut egui::Ui, interact: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let (ctx, layer) = (ui.ctx().clone(), ui.layer_id());
+    let start = ctx.graphics_mut(|g| g.entry(layer).next_idx());
+    let result = interact(ui);
+    ctx.graphics_mut(|g| {
+        let list = g.entry(layer);
+        let end = list.next_idx();
+        for i in start.0..end.0 {
+            list.mutate_shape(egui::layers::ShapeIdx(i), |s| s.shape = egui::Shape::Noop);
+        }
+    });
+    result
+}
+
+pub fn paint_decoration(ui: &egui::Ui, id: &str, paint: impl FnOnce(&Painter)) {
+    let (ctx, layer) = (ui.ctx(), ui.layer_id());
+    let start = ctx.graphics_mut(|graphics| graphics.entry(layer).next_idx());
+    paint(ui.painter());
+    let offset = drawn_rect(ctx, id, Rect::from_min_size(Pos2::ZERO, vec2(1.0, 1.0))).min.to_vec2();
+    translate_paint(ctx, layer, start, offset);
+}
+
+/// Shared real control painter, with displacement applied only to its paint commands.
+pub fn paint_item(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, response: &egui::Response, opacity: f32, id: &str) {
+    if opacity <= 0.0 {
+        paint_control(ui, rect, control, response, opacity);
+    } else {
+        paint_motion(ui, id, rect, |ui| {
+            let movable = editing_active(ui.ctx()) && !matches!(id, "overflow" | "more");
+            let hovered = movable && !is_dragging(ui.ctx()) && ui.rect_contains_pointer(rect);
+            let rect = if matches!(control, Control::Separator) {
+                Rect::from_min_size(rect.min, vec2(drawn_rect(ui.ctx(), id, rect).width(), rect.height()))
+            } else {
+                rect
+            };
+            paint_hover(ui, id, item_rect(rect, control), control_radius(control), hovered, |ui| {
+                if movable {
+                    ui.painter().rect_filled(
+                        item_rect(rect, control),
+                        control_radius(control),
+                        edit_item_background(Tokens::get(), control, hovered),
+                    );
+                }
+                paint_control(ui, rect, control, response, opacity);
+            });
+        });
+    }
+}
+
+pub const ITEM_HEIGHT: f32 = crate::app_bar_layout::application::ICON_WIDTH;
+pub const PILL_HEIGHT: f32 = crate::app_bar_layout::application::PILL_HEIGHT;
+pub const ITEM_ICON_SIZE: f32 = crate::app_bar_layout::application::SQUARE_ICON;
+pub const PILL_ICON_SIZE: f32 = crate::app_bar_layout::application::PILL_ICON;
+pub const ITEM_RADIUS: u8 = 5;
+pub const ITEM_PILL_RADIUS: u8 = (PILL_HEIGHT / 2.0) as u8;
+const HOVER_TIME: f32 = 0.12;
+
+pub fn control_height(control: Control<'_>) -> f32 {
+    if matches!(control, Control::Pill { .. } | Control::Report { .. }) { PILL_HEIGHT } else { ITEM_HEIGHT }
+}
+
+pub fn item_rect(rect: Rect, control: Control<'_>) -> Rect {
+    let width = if icon_control(control) { ITEM_HEIGHT } else { rect.width() };
+    Rect::from_center_size(rect.center(), vec2(width, control_height(control)))
+}
+
+pub fn icon_control(control: Control<'_>) -> bool {
+    matches!(control, Control::Icon { .. } | Control::Command { .. } | Control::Documents | Control::Assistant { .. })
+}
+
+/// One mapping for movable bar controls, tray tiles and draggable document/view tabs.
+pub fn drag_cursor(dragging: bool) -> egui::CursorIcon {
+    if dragging {
+        egui::CursorIcon::Grabbing
+    } else if cfg!(target_os = "windows") {
+        egui::CursorIcon::PointingHand
+    } else {
+        egui::CursorIcon::Grab
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct EditPalette {
+    pub card: egui::Color32,
+    pub item: egui::Color32,
+    pub hover: egui::Color32,
+}
+
+/// Three opaque levels derived from the bar's own foreground/background tokens. Bound
+/// the brightest level by text contrast; the panel around the cells retains its shared alpha.
+pub fn edit_palette(t: Tokens) -> EditPalette {
+    let card = t.app_bar.to_opaque();
+    let foreground = t.app_bar_text.to_opaque();
+    let mut amount = 0.32;
+    for _ in 0..8 {
+        if solidcraft_theme::contrast_ratio(card.lerp_to_gamma(foreground, amount), foreground) >= 4.5 {
+            break;
+        }
+        amount *= 0.9;
+    }
+    EditPalette { card, item: card.lerp_to_gamma(foreground, amount / 2.0), hover: card.lerp_to_gamma(foreground, amount) }
+}
+
+pub fn control_radius(control: Control<'_>) -> u8 {
+    if matches!(control, Control::Pill { .. } | Control::Report { .. }) { ITEM_PILL_RADIUS } else { ITEM_RADIUS }
+}
+
+/// Layout objects stay grab-able without competing with command buttons.
+pub fn edit_item_background(t: Tokens, control: Control<'_>, hovered: bool) -> egui::Color32 {
+    let palette = edit_palette(t);
+    let fill = if hovered { palette.hover } else { palette.item };
+    fill.gamma_multiply(if matches!(control, Control::Separator | Control::Space) { 0.4 } else { 1.0 })
+}
+
+/// Focus hugs the actual background. No widget-rect expansion or alternate corners.
+pub fn focus_ring_geometry(rect: Rect, radius: u8) -> (Rect, u8) {
+    (rect, radius)
+}
+
+pub fn paint_outline(painter: &Painter, rect: Rect, radius: u8, width: f32) {
+    let (rect, radius) = focus_ring_geometry(rect, radius);
+    if rect.is_finite() && rect.is_positive() {
+        painter.rect_stroke(rect, radius, Stroke::new(width, Tokens::get().accent), egui::StrokeKind::Middle);
+    }
+}
+
+pub fn paint_focus(painter: &Painter, rect: Rect, radius: u8) {
+    paint_outline(painter, rect, radius, 1.5);
+}
+
+/// App-owned edit responses share the native item's paint offsets, including hover lift.
+pub fn paint_item_outline(ui: &egui::Ui, id: &str, rect: Rect, radius: u8, width: f32) {
+    // The id outside `data`: a context lock taken inside another can freeze the window (#21091).
+    let lift_id = egui::Id::unique(("appbar_hover_lift", ui.ctx().viewport_id(), id));
+    let lift = ui.ctx().data(|d| d.get_temp::<HoverLift>(lift_id)).map_or(0.0, |s| s.drawn);
+    paint_outline(ui.painter(), drawn_rect(ui.ctx(), id, rect).translate(vec2(0.0, lift)), radius, width);
+}
+
+pub fn paint_item_focus(ui: &egui::Ui, id: &str, rect: Rect, radius: u8) {
+    paint_item_outline(ui, id, rect, radius, 1.5);
+}
+
+pub fn dragging(ctx: &egui::Context, active: bool) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("appbar_drag_active"), active));
+}
+
+pub fn is_dragging(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("appbar_drag_active"))).unwrap_or(false)
+}
+
+#[derive(Clone, Default)]
+struct HoverLift {
+    from: f32,
+    to: f32,
+    drawn: f32,
+    started: f64,
+}
+
+/// Hover uses the same finite, snapping ease-out as layout displacement, with a shorter time.
+pub fn hover_step(from: f32, to: f32, elapsed: f32) -> f32 {
+    animated_step(from, to, elapsed, HOVER_TIME)
+}
+
+/// Only paint moves; callers retain their resting hit rectangle, preventing hover flicker.
+pub fn paint_hover<R>(ui: &mut egui::Ui, id: &str, rect: Rect, radius: u8, hovered: bool, paint: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let ctx = ui.ctx().clone();
+    let blocked = !editing_active(&ctx) || is_dragging(&ctx);
+    let now = ctx.input(|i| i.time);
+    let key = egui::Id::unique(("appbar_hover_lift", ctx.viewport_id(), id));
+    let (lift, moving) = ctx.data_mut(|d| {
+        let state = d.get_temp_mut_or_default::<HoverLift>(key);
+        let target = if hovered && !blocked { -2.0 } else { 0.0 };
+        if blocked {
+            *state = HoverLift::default();
+            return (0.0, false);
+        }
+        if state.to != target {
+            state.from = state.drawn;
+            state.to = target;
+            state.started = now;
+        }
+        state.drawn = hover_step(state.from, target, (now - state.started) as f32);
+        (state.drawn, state.drawn != target)
+    });
+    if moving {
+        ctx.request_repaint();
+    }
+    let layer = ui.layer_id();
+    let start = ctx.graphics_mut(|g| g.entry(layer).next_idx());
+    if lift != 0.0 {
+        let shadow =
+            egui::Shadow { offset: [0, 2], blur: 4, spread: 0, color: Tokens::get().figure_shadow.gamma_multiply(0.15 * (lift.abs() / 2.0)) };
+        ui.painter().add(shadow.as_shape(rect, egui::CornerRadius::same(radius)));
+    }
+    let result = paint(ui);
+    translate_paint(&ctx, layer, start, vec2(0.0, lift));
+    result
+}
+
+/// The same primary component used by tool-panel confirm/apply actions.
+pub fn tray_done(ui: &mut egui::Ui, rect: Rect, label: &str) -> egui::Response {
+    crate::button_at(ui, "tray_done", rect, label, crate::Button::Primary)
+}
+
+/// The strong primary accent used by File chrome remains distinct from muted workspace
+/// accents (for example Onyx). The requested white foreground uses the base theme's token.
+pub fn tray_accent() -> (egui::Color32, egui::Color32) {
+    (Tokens::get().file_primary_border, Tokens::dark().on_accent)
+}
+
 /// The bar's height: the window's title bar on desktop builds.
 pub const HEIGHT: f32 = 34.0;
-/// Room for the version between Report a bug and the caption buttons, at the least.
-pub const RIGHT_GROUP: f32 = 60.0;
-/// The right-hand cluster's buttons (Assistant, Settings, Help) before Report a bug.
-pub const CLUSTER_BUTTONS: f32 = 108.0;
-/// The least room the document tabs keep when a long version takes its extra width: one tab and
-/// its + button.
-const TABS_KEPT: f32 = 124.0;
+
+/// Cards only paint into the existing gaps; editing never resizes the bar.
+pub fn height(_editing: bool) -> f32 {
+    HEIGHT
+}
 /// The least width of a document tab before the tabs scroll behind the » list.
 const MIN_TAB: f32 = 90.0;
 /// The expanded design tab (option A): its height and corner radius.
@@ -39,7 +444,7 @@ const VIEW_LABEL_MAX: f32 = 180.0;
 /// The least width a view's label takes while its name is typed.
 const RENAME_MIN: f32 = 90.0;
 /// Where the Report a bug text starts, from the button's left edge.
-pub const REPORT_TEXT_X: f32 = 29.0;
+pub const REPORT_TEXT_X: f32 = crate::app_bar_layout::application::CONTENT_PADDING + PILL_ICON_SIZE + crate::app_bar_layout::application::GAP;
 /// The fills of the bar's pills. They are the services' own colours (Ko-fi coral, Discord
 /// blurple), the same in every theme; both take white ink.
 pub mod brand {
@@ -48,15 +453,9 @@ pub mod brand {
     pub const DISCORD: Color32 = Color32::from_rgb(0x58, 0x65, 0xF2);
 }
 /// The pills' height, and the least width at which the bar gives the first pill its label.
-pub const PILL_HEIGHT: f32 = 24.0;
-pub const PILL_LABEL_MIN: f32 = 1100.0;
 /// The × inside a pill.
-const PILL_X: f32 = 16.0;
+const PILL_X: f32 = PILL_ICON_SIZE;
 
-/// Space between the search field and Settings.
-pub const SEARCH_GAP: f32 = 4.0;
-/// A bar narrower than this shows no product name, no Undo and Redo, and narrower file actions.
-const COMPACT: f32 = 640.0;
 /// Space the File menu keeps below its rows for its frame and a gap above the window's bottom.
 const FILE_MENU_BOTTOM_GAP: f32 = 24.0;
 /// The least height the File menu's rows get, about three rows, however short the window.
@@ -133,6 +532,270 @@ pub struct Version<'a> {
     pub url: &'a str,
 }
 
+/// One bar control's drawing, shared by its live widget, tray tile and lifted preview.
+#[derive(Clone, Copy)]
+pub enum Control<'a> {
+    Separator,
+    Space,
+    Documents,
+    Icon { icon: &'a str, size: f32, enabled: bool },
+    Command { icon: &'a str, enabled: bool },
+    File { label: &'a str, enabled: bool, open: bool },
+    Pill { data: Pill<'a>, lift: f32, veil: f32, focused: bool },
+    Report { label: &'a str, labelled: bool },
+    Version(&'a str),
+    Assistant { state: crate::AssistantEntryState, open: bool },
+}
+
+pub fn editing(ctx: &egui::Context, active: bool, lifted: Option<String>) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("appbar_edit_paint"), (active, lifted)));
+}
+
+fn editing_active(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<(bool, Option<String>)>(egui::Id::unique("appbar_edit_paint"))).is_some_and(|s| s.0)
+}
+
+/// Tray badges use the same check path as checkboxes and menus.
+pub fn tray_badge(ui: &egui::Ui, cell: Rect) -> Rect {
+    let t = Tokens::get();
+    let radius = t.space_8;
+    let badge = Rect::from_center_size(cell.right_top() + vec2(-t.space_2, t.space_2), vec2(radius * 2.0, radius * 2.0));
+    ui.painter().circle_filled(badge.center(), radius, tray_accent().0);
+    crate::checks::paint_check_glyph(ui.painter(), badge.shrink(t.space_2), false, tray_accent().1);
+    badge
+}
+
+/// A link-style tray action with the shared typography, focus outline and accent token.
+pub fn tray_link(ui: &mut egui::Ui, rect: Rect, label: &str) -> egui::Response {
+    let t = Tokens::get();
+    let response = ui.interact(rect, ui.scope_id().with("tray_link"), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
+    let text = ui.painter().layout_no_wrap(label.to_owned(), FontId::proportional(t.font_small), t.accent);
+    let at = pos2(rect.left(), rect.center().y - text.size().y / 2.0);
+    ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())).galley(at, text.clone(), t.accent);
+    if response.hovered() || response.has_focus() {
+        ui.painter().hline(rect.left()..=rect.left() + text.size().x.min(rect.width()), at.y + text.size().y, Stroke::new(1.0, t.accent));
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(rect, t.radius_sm, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+    }
+    response
+}
+
+pub fn item_opacity(ctx: &egui::Context, id: &str) -> f32 {
+    let state = ctx.data(|d| d.get_temp::<(bool, Option<String>)>(egui::Id::unique("appbar_edit_paint")));
+    match state {
+        Some((true, Some(lifted))) if lifted == id => 0.0,
+        _ => 1.0,
+    }
+}
+
+/// No feature-owned lookalikes: all bar/tray painting goes through this function.
+pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, response: &egui::Response, opacity: f32) {
+    let rect = item_rect(rect, control);
+    {
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+        let ui = &mut child;
+        let editing = editing_active(ui.ctx());
+        if editing {
+            ui.set_opacity(opacity);
+        } else {
+            ui.multiply_opacity(opacity);
+        }
+        let t = Tokens::get();
+        let p = ui.painter();
+        let hot = response.hovered() || response.has_focus();
+        match control {
+            Control::Space => {}
+            Control::Separator => {
+                p.vline(
+                    rect.center().x,
+                    rect.center().y - 8.0..=rect.center().y + 8.0,
+                    Stroke::new(1.0, if editing { t.app_bar_text } else { t.app_bar.lerp_to_gamma(t.app_bar_separator, 0.4) }),
+                );
+            }
+            Control::Documents => {
+                if hot {
+                    p.rect_filled(rect, ITEM_RADIUS, t.app_bar_hover);
+                }
+                crate::icons::paint_app_bar(p, Rect::from_center_size(rect.center(), vec2(ITEM_ICON_SIZE, ITEM_ICON_SIZE)), "document_browser", 1.0);
+            }
+            Control::Icon { icon, size: _, enabled } => {
+                let enabled = enabled || editing;
+                if enabled && hot {
+                    p.rect_filled(rect, ITEM_RADIUS, t.app_bar_hover_button);
+                }
+                crate::icons::paint_app_bar(
+                    p,
+                    Rect::from_center_size(rect.center(), vec2(ITEM_ICON_SIZE, ITEM_ICON_SIZE)),
+                    icon,
+                    if enabled { 1.0 } else { 0.35 },
+                );
+            }
+            Control::Command { icon, enabled } => {
+                if enabled && hot {
+                    p.rect_filled(rect, ITEM_RADIUS, t.app_bar_hover_button);
+                }
+                crate::icons::paint_on(
+                    p,
+                    Rect::from_center_size(rect.center(), vec2(ITEM_ICON_SIZE, ITEM_ICON_SIZE)),
+                    icon,
+                    Some(true),
+                    if enabled { 1.0 } else { 0.35 },
+                );
+            }
+            Control::File { label, enabled, open } => {
+                if enabled && (hot || open) {
+                    p.rect_filled(rect, ITEM_RADIUS, t.app_bar_hover);
+                }
+                let galley = p.layout_no_wrap(label.to_string(), FontId::proportional(t.font_button), t.app_bar_text);
+                p.galley(
+                    pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0),
+                    galley,
+                    if enabled { t.app_bar_text } else { t.app_bar_text.gamma_multiply(0.35) },
+                );
+            }
+            Control::Pill { data, lift, veil, .. } => {
+                paint_link_pill(ui, Rect::from_center_size(rect.center(), vec2(rect.width(), PILL_HEIGHT)), &data, lift, veil)
+            }
+            Control::Report { label, labelled } => {
+                let capsule_rect =
+                    Rect::from_center_size(rect.center(), vec2(rect.width().min(if labelled { f32::MAX } else { PILL_HEIGHT }), PILL_HEIGHT));
+                let ink = t.app_bar_text;
+                capsule(ui, capsule_rect, t.app_bar.lerp_to_gamma(ink, 0.12), hot);
+                if labelled {
+                    crate::icons::paint_ink(
+                        p,
+                        Rect::from_center_size(
+                            pos2(
+                                capsule_rect.left() + crate::app_bar_layout::application::CONTENT_PADDING + PILL_ICON_SIZE / 2.0,
+                                capsule_rect.center().y,
+                            ),
+                            vec2(PILL_ICON_SIZE, PILL_ICON_SIZE),
+                        ),
+                        "bug_report",
+                        ink,
+                    );
+                    let text = Rect::from_min_max(
+                        pos2(capsule_rect.left() + REPORT_TEXT_X, capsule_rect.top()),
+                        pos2(capsule_rect.right() - crate::app_bar_layout::application::CONTENT_PADDING, capsule_rect.bottom()),
+                    );
+                    crate::paint_text(ui, text, label, FontId::proportional(t.font_button), ink, false);
+                } else {
+                    crate::icons::paint_ink(
+                        p,
+                        Rect::from_center_size(capsule_rect.center(), vec2(PILL_ICON_SIZE, PILL_ICON_SIZE)),
+                        "bug_report",
+                        ink,
+                    );
+                }
+            }
+            Control::Version(text) => {
+                if hot {
+                    p.rect_filled(rect, ITEM_RADIUS, t.app_bar_hover);
+                }
+                let text_rect = rect.shrink2(vec2(crate::app_bar_layout::application::VERSION_PADDING, 0.0));
+                crate::paint_text(ui, text_rect, text, FontId::proportional(t.font_small), t.app_bar_text, false);
+            }
+            Control::Assistant { state, open } => {
+                if hot || open {
+                    p.rect_filled(rect, ITEM_RADIUS, if open { t.app_bar_hover_strong } else { t.app_bar_hover_button });
+                }
+                // Retain the shared icon and live status mark while the bar owns its uniform
+                // background. A passive response suppresses the entry's smaller hover frame.
+                let mut passive = ui.new_child(egui::UiBuilder::new().max_rect(rect).disabled());
+                // Disabling suppresses native interaction/hover chrome, but must not fade
+                // the real icon or status badge relative to the other bar controls.
+                passive.set_opacity(ui.opacity());
+                // assistant_entry's icon has a seven-point inset; this passive paint target
+                // produces the shared icon without changing the square item slot.
+                let entry = Rect::from_center_size(rect.center(), egui::Vec2::splat(ITEM_ICON_SIZE + 2.0 * (t.space_6 + 1.0)));
+                let quiet = passive.interact(entry, passive.scope_id().with("assistant_mark"), Sense::hover());
+                crate::assistant_entry(&passive, &quiet, state, false, ui.ctx().global_style().animation_time > 0.0);
+            }
+        }
+        if response.has_focus() || matches!(control, Control::Pill { focused: true, .. }) {
+            paint_focus(ui.painter(), rect, control_radius(control));
+        }
+    }
+}
+
+pub fn control_size(ctx: &egui::Context, control: Control<'_>) -> egui::Vec2 {
+    let t = Tokens::get();
+    let text = |s: &str, size| ctx.fonts_mut(|f| f.layout_no_wrap(s.into(), FontId::proportional(size), t.app_bar_text)).size().x;
+    let width = match control {
+        Control::Separator => crate::app_bar_layout::application::SEPARATOR_WIDTH,
+        Control::Space => crate::app_bar_layout::application::SPACE_WIDTH,
+        Control::Documents => ITEM_HEIGHT,
+        Control::File { label, .. } => text(label, t.font_button) + 16.0,
+        Control::Pill { data, .. } => pill_width(ctx, &data),
+        Control::Report { label, labelled: true } => REPORT_TEXT_X + text(label, t.font_button) + crate::app_bar_layout::application::CONTENT_PADDING,
+        Control::Version(label) => text(label, t.font_small) + crate::app_bar_layout::application::VERSION_PADDING * 2.0,
+        _ => ITEM_HEIGHT,
+    };
+    vec2(width.max(1.0), control_height(control))
+}
+
+/// Render the very same widget into a fitted cell. Lifted controls are tessellated and rotated
+/// together with their tokenised card/shadow; no alternate drawing or bitmap asset is involved.
+pub fn preview_control(ui: &mut egui::Ui, cell: Rect, control: Control<'_>, opacity: f32, lifted: bool, warning: bool) {
+    // This scratch layer is tessellated into the owning cell below. Even disabled hover
+    // widgets on a tooltip layer occlude clicks, so keep its widgets outside the viewport.
+    let size = control_size(ui.ctx(), control);
+    // Adapt the same widget to the tile width; elide its label rather than shrinking the
+    // 26/20-point body or its 18/14-point icon. A lifted chip keeps its natural width.
+    let size = if lifted { size } else { vec2(size.x.min(cell.width()).max(1.0), size.y) };
+    let native = Rect::from_min_size(ui.ctx().content_rect().right_bottom() + vec2(100.0, 100.0), size);
+    let layer = egui::LayerId::new(egui::Order::Tooltip, ui.scope_id().with("control_preview_paint"));
+    let mut child = ui.new_child(egui::UiBuilder::new().layer_id(layer).max_rect(native).layout(egui::Layout::top_down(egui::Align::Min)).disabled());
+    child.set_opacity(1.0);
+    child.set_clip_rect(Rect::EVERYTHING);
+    if lifted {
+        let t = Tokens::get();
+        let host = crate::Container::new(ui.ctx(), crate::Surface::Window);
+        let mut frame = host.frame(ui.ctx(), t.app_bar, crate::frame::Side::Left).corner_radius(control_radius(control));
+        frame.stroke = Stroke::new(1.0, if warning { t.warning } else { t.form_primary });
+        host.paint_background(child.painter(), frame, native.expand(t.space_3));
+    }
+    let response = child.interact(native, child.scope_id().with("preview"), Sense::hover());
+    paint_control(&mut child, native, control, &response, opacity);
+    let shapes = ui.ctx().graphics_mut(|g| std::mem::take(g.entry(layer))).all_entries().cloned().collect();
+    let scale = (cell.width() / native.width()).min(cell.height() / native.height()).min(1.0);
+    let rotation = egui::emath::Rot2::from_angle(if lifted { -3.0_f32.to_radians() } else { 0.0 });
+    for clipped in ui.ctx().tessellate(shapes, ui.ctx().pixels_per_point()) {
+        if let egui::epaint::Primitive::Mesh(mut mesh) = clipped.primitive {
+            for v in &mut mesh.vertices {
+                v.pos = cell.center() + rotation * ((v.pos - native.center()) * scale);
+            }
+            ui.painter().add(egui::Shape::mesh(mesh));
+        }
+    }
+}
+
+fn paint_link_pill(ui: &egui::Ui, rect: Rect, p: &Pill<'_>, lift: f32, veil: f32) {
+    let t = Tokens::get();
+    let ink = t.app_bar_text;
+    let x_rect = pill_close(rect);
+    let fill = p.fill.lerp_to_gamma(ink, 0.08 * lift);
+    ui.painter().rect_filled(rect, ITEM_PILL_RADIUS, fill);
+    let icon = Rect::from_center_size(
+        pos2(rect.left() + crate::app_bar_layout::application::CONTENT_PADDING + PILL_ICON_SIZE / 2.0, rect.center().y),
+        vec2(PILL_ICON_SIZE, PILL_ICON_SIZE),
+    );
+    crate::icons::paint_ink(ui.painter(), icon, p.icon, ink);
+    if p.labelled && !p.label.is_empty() {
+        let label = Rect::from_min_max(
+            pos2(icon.right() + crate::app_bar_layout::application::GAP, rect.top()),
+            pos2(x_rect.left() - crate::app_bar_layout::application::GAP, rect.bottom()),
+        );
+        crate::paint_text(ui, label, p.label, crate::type_face::semibold(t.font_label), ink, false);
+    }
+    if veil > 0.0 {
+        ui.painter().circle_filled(x_rect.center(), PILL_X / 2.0, t.figure_shadow.to_opaque().gamma_multiply(0.38 * veil));
+    }
+    crate::icons::paint_ink(ui.painter(), x_rect, "close", ink);
+}
 /// The bar as the app describes it this frame.
 pub struct AppBar<'a> {
     /// Saved movable items; None uses today's default arrangement.
@@ -172,15 +835,9 @@ pub struct AppBar<'a> {
 /// was clicked while `idle`. Drawn held while its menu is `open`.
 /// It shows `label`; `name` is its accessible name.
 fn text_button(ui: &mut egui::Ui, rect: Rect, (label, name): (&str, &str), open: bool, idle: bool, salt: &str) -> (Rect, bool) {
-    let t = Tokens::get();
-    let galley = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(t.font_button), t.app_bar_text);
     let resp = ui.interact(rect, ui.scope_id().with(("ab", salt)), if idle { Sense::click() } else { Sense::hover() });
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, name));
-    if idle && (resp.hovered() || resp.has_focus() || open) {
-        ui.painter().rect_filled(rect, t.radius_sm, t.app_bar_hover);
-    }
-    let ink = if idle { t.app_bar_text } else { t.app_bar_text.gamma_multiply(0.35) };
-    ui.painter().galley(pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0), galley, ink);
+    paint_item(ui, rect, Control::File { label, enabled: idle, open }, &resp, item_opacity(ui.ctx(), "file"), "file");
     (rect, idle && resp.clicked())
 }
 
@@ -219,6 +876,10 @@ pub enum BarAction {
 /// The bar drawn: what was chosen, and the places it leaves to the app.
 #[derive(Debug)]
 pub struct BarOut {
+    /// Paint-only edit cards clamped into existing gaps, in Start/End order.
+    pub cards: [Option<Rect>; 2],
+    /// Actual control hit regions, in screen coordinates, for editing the saved item list.
+    pub edit_items: Vec<crate::app_bar_items::DropItem>,
     /// Each quick button's source-list index and centre x, including reordered/cross-zone ones.
     pub quick_slots: Vec<(usize, f32)>,
     /// Space reserved for the app-owned control before Home.
@@ -253,64 +914,26 @@ fn handle(prefix: &str, key: &str) -> String {
     format!("{prefix}{key}")
 }
 
-/// The room right of Report a bug for the version (`version_width`, measured), or None where the
-/// bar shows none. The version sits 12 points from the caption buttons with a gap before the
-/// button, so a longer one moves the button left instead of covering it. Its width over
-/// [`RIGHT_GROUP`] comes only from the document tabs' spare room: where it would leave them less
-/// than [`TABS_KEPT`], the version is hidden, as it is on a narrow bar.
-pub fn version_room(bar: Rect, captions: f32, tabs_start: f32, version_width: f32) -> Option<f32> {
-    if bar.width() < COMPACT {
-        return None;
-    }
-    let need = 12.0 + version_width + 8.0;
-    let room = RIGHT_GROUP.max(need);
-    // The tabs end 8 points before the cluster, with Report a bug as an icon at the least.
-    let tabs = bar.right() - captions - room - 28.0 - CLUSTER_BUTTONS - 8.0 - tabs_start;
-    (need <= RIGHT_GROUP || tabs >= TABS_KEPT).then_some(room)
-}
-
-/// The centre of Help, between Settings and Report a bug.
-pub fn help_x(report: Rect) -> f32 {
-    report.left() - 18.0
-}
-
-/// The Report a bug button: labelled unless `icon_only`, when there is room for its text
-/// (`label_width`, measured), otherwise just the icon. An icon-only button is a square the size of
-/// Settings and Help. `version_width`: the measured version, when the bar shows it.
-pub fn report_rect(bar: Rect, captions: f32, tabs_start: f32, label_width: f32, version_width: Option<f32>, icon_only: bool) -> (Rect, bool) {
-    let room = version_width.and_then(|width| version_room(bar, captions, tabs_start, width));
-    let right = bar.right() - captions - room.unwrap_or(8.0);
-    if icon_only {
-        return (Rect::from_min_size(pos2(right - 32.0, bar.center().y - 16.0), vec2(32.0, 32.0)), false);
-    }
-    // Icon, text and a margin that mirrors the icon side.
-    let full = REPORT_TEXT_X + label_width + 11.0;
-    let labeled = right - CLUSTER_BUTTONS - tabs_start >= 216.0 + full;
-    let width = if labeled { full } else { 28.0 };
-    (Rect::from_min_size(pos2(right - width, bar.center().y - 13.0), vec2(width, 26.0)), labeled)
-}
-
-/// The closed search field in the bar, ending `right`: whole when the document tabs keep the room
-/// Report a bug's label leaves them (`tabs_room`: theirs without the field), else just its
-/// magnifier.
-pub fn search_rect(ctx: &egui::Context, shortcut: Option<&str>, bar: Rect, right: f32, tabs_room: f32) -> Rect {
-    let height = 26.0;
-    let full = crate::CommandSearch::closed_width(ctx, shortcut);
-    let whole = bar.width() >= COMPACT && tabs_room - full - SEARCH_GAP >= 216.0;
-    let width = if whole { full } else { crate::CommandSearch::compact_width(height) };
-    Rect::from_min_size(pos2(right - width, bar.center().y - height / 2.0), vec2(width, height))
-}
-
-/// A pill's width: pad, mark, label, ×.
-fn pill_width(ui: &egui::Ui, p: &Pill) -> f32 {
+/// Width of the same content painted by paint_link_pill; padding is inside the pill.
+fn pill_width(ctx: &egui::Context, p: &Pill) -> f32 {
     let label = if p.labelled && !p.label.is_empty() {
-        5.0 + ui.painter().layout_no_wrap(p.label.to_string(), crate::type_face::semibold(Tokens::get().font_label), p.ink).size().x
+        crate::app_bar_layout::application::GAP
+            + ctx
+                .fonts_mut(|f| f.layout_no_wrap(p.label.to_owned(), crate::type_face::semibold(Tokens::get().font_label), Tokens::get().app_bar_text))
+                .size()
+                .x
     } else {
         0.0
     };
-    8.0 + 14.0 + label + 4.0 + PILL_X + 3.0
+    crate::app_bar_layout::application::PILL_MIN + label
 }
 
+fn pill_close(rect: Rect) -> Rect {
+    Rect::from_center_size(
+        pos2(rect.right() - crate::app_bar_layout::application::CONTENT_PADDING - PILL_X / 2.0, rect.center().y),
+        vec2(PILL_X, PILL_X),
+    )
+}
 /// A flat capsule `PILL_HEIGHT` tall in `fill`, a touch lighter while `hot`.
 fn capsule(ui: &egui::Ui, rect: Rect, fill: egui::Color32, hot: bool) {
     let fill = if hot { fill.lerp_to_gamma(egui::Color32::WHITE, 0.12) } else { fill };
@@ -322,41 +945,20 @@ fn capsule(ui: &egui::Ui, rect: Rect, fill: egui::Color32, hot: bool) {
 /// round translucent dark background (black at 38 %) that fades in while it is hovered. Edges are
 /// snapped to whole pixels so they stay crisp at any scale.
 fn pill(ui: &mut egui::Ui, bar: Rect, rect: Rect, p: &Pill, h: &Handles, actions: &mut Vec<BarAction>) {
-    let t = Tokens::get();
     let ppp = ui.ctx().pixels_per_point();
     let snap = |v: f32| (v * ppp).round() / ppp;
     let rect = Rect::from_min_size(pos2(rect.left(), snap(bar.center().y - PILL_HEIGHT / 2.0)), vec2(rect.width(), PILL_HEIGHT));
-    let x_rect = Rect::from_center_size(pos2(snap(rect.right() - 4.0 - PILL_X / 2.0), rect.center().y), vec2(PILL_X, PILL_X));
+    let x_rect = pill_close(rect);
     let main = Rect::from_min_max(rect.min, pos2(x_rect.left(), rect.bottom()));
-    let main_resp = ui.interact(main, ui.scope_id().with(("sc_pill", p.id)), Sense::click());
+    let main_resp = ui.interact(main, ui.scope_id().with(("sc_pill", p.id)), Sense::click_and_drag());
     let x_resp = ui.interact(x_rect, ui.scope_id().with(("sc_pill_hide", p.id)), Sense::click());
     main_resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, p.name));
     x_resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, p.hide_name));
     let (hot, hot_x) = (main_resp.hovered() || main_resp.has_focus() || x_resp.hovered(), x_resp.hovered() || x_resp.has_focus());
     let lift = ui.ctx().animate_bool_with_time(ui.scope_id().with(("sc_pill_lift", p.id)), hot, 0.1);
     let veil = ui.ctx().animate_bool_with_time(ui.scope_id().with(("sc_pill_veil", p.id)), hot_x, 0.1);
-    let fill = p.fill.lerp_to_gamma(egui::Color32::WHITE, 0.08 * lift);
-    ui.painter().rect_filled(rect, egui::CornerRadius::same((PILL_HEIGHT / 2.0) as u8), fill);
-    if main_resp.has_focus() || x_resp.has_focus() {
-        ui.painter().rect_stroke(
-            rect.expand(1.5),
-            egui::CornerRadius::same((PILL_HEIGHT / 2.0 + 1.5) as u8),
-            Stroke::new(1.5, t.app_bar_text),
-            egui::StrokeKind::Outside,
-        );
-    }
-    let icon = Rect::from_center_size(pos2(rect.left() + 8.0 + 7.0, rect.center().y), vec2(14.0, 14.0));
-    crate::icons::paint_ink(ui.painter(), icon, p.icon, p.ink);
-    if p.labelled && !p.label.is_empty() {
-        // Centred on the capitals' height, not the line box, so the name sits level with the mark.
-        let galley = ui.painter().layout_no_wrap(p.label.to_string(), crate::type_face::semibold(Tokens::get().font_label), p.ink);
-        let top = rect.center().y - galley.size().y / 2.0 + 0.5;
-        ui.painter().galley(pos2(snap(icon.right() + 5.0), snap(top)), galley, p.ink);
-    }
-    if veil > 0.0 {
-        ui.painter().circle_filled(x_rect.center(), PILL_X / 2.0, egui::Color32::from_black_alpha((97.0 * veil) as u8));
-    }
-    crate::icons::paint_ink(ui.painter(), Rect::from_center_size(x_rect.center(), vec2(8.0, 8.0)), "close", p.ink);
+    let id = if p.id == "kofi" { "donate" } else { p.id };
+    paint_item(ui, rect, Control::Pill { data: *p, lift, veil, focused: x_resp.has_focus() }, &main_resp, item_opacity(ui.ctx(), id), id);
     solidcraft_ui_registry::publish_target(&handle(h.pill, p.id), main);
     solidcraft_ui_registry::publish_target(&format!("{}{}:hide", h.pill, p.id), x_rect);
     if main_resp.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(p.tip).clicked() {
@@ -367,29 +969,24 @@ fn pill(ui: &mut egui::Ui, bar: Rect, rect: Rect, p: &Pill, h: &Handles, actions
     }
 }
 
-/// A short divider between the bar's groups.
-pub fn separator(ui: &egui::Ui, bar: Rect, x: f32, group: &str, handles: &Handles) {
-    let t = Tokens::get();
-    let rect = Rect::from_center_size(pos2(x, bar.center().y), vec2(1.0, 20.0));
-    ui.painter().line_segment([rect.center_top(), rect.center_bottom()], Stroke::new(1.0, t.app_bar.lerp_to_gamma(t.app_bar_separator, 0.4)));
-    solidcraft_ui_registry::publish_rect(&handle(handles.separator, group), rect);
-}
-
 /// An icon button of the bar, dimmed and deaf to clicks when disabled (its tip still shows).
 /// Returns whether it was clicked.
-fn icon_button(ui: &mut egui::Ui, bar: Rect, at: f32, b: &BarButton, compact: bool, handles: &Handles) -> bool {
-    let t = Tokens::get();
-    let width = if compact && b.narrow { 22.0 } else { 32.0 };
-    let br = Rect::from_center_size(pos2(at, bar.center().y), vec2(width, 32.0));
-    let resp = ui.interact(br, ui.scope_id().with(("ab", b.id)), if b.enabled { Sense::click() } else { Sense::hover() });
+fn icon_button(ui: &mut egui::Ui, bar: Rect, at: f32, b: &BarButton, _compact: bool, handles: &Handles) -> bool {
+    let width = ITEM_HEIGHT;
+    let br = Rect::from_center_size(pos2(at, bar.center().y), vec2(width, ITEM_HEIGHT));
+    let resp = ui.interact(br, ui.scope_id().with(("ab", b.id)), if b.id == "overflow" { Sense::click() } else { Sense::click_and_drag() });
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, b.enabled, b.tip));
     for prefix in handles.button {
         solidcraft_ui_registry::publish_target(&handle(prefix, b.id), br);
     }
-    if b.enabled && (resp.hovered() || resp.has_focus()) {
-        ui.painter().rect_filled(br.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
-    }
-    crate::icons::paint_app_bar(ui.painter(), Rect::from_center_size(br.center(), vec2(18.0, 18.0)), b.icon, if b.enabled { 1.0 } else { 0.35 });
+    paint_item(
+        ui,
+        br,
+        Control::Icon { icon: b.icon, size: 18.0, enabled: b.enabled },
+        &resp,
+        item_opacity(ui.ctx(), b.id),
+        if b.id == "overflow" { "more" } else { b.id },
+    );
     let clicked = resp.backing_on_hover_text(b.tip).clicked();
     b.enabled && clicked
 }
@@ -400,10 +997,12 @@ pub fn paint_brand(painter: &Painter, content: Rect, mark: &dyn Fn(&Painter, Pos
     let left = content.left();
     let y = content.center().y;
     mark(painter, pos2(left + 20.0, y));
-    name.map_or(left + 32.0, |name| {
-        let t = Tokens::get();
-        painter.text(pos2(left + 36.0, y), Align2::LEFT_CENTER, name, crate::type_face::semibold(t.font_heading), t.app_bar_text).right()
-    })
+    name.map_or(left + 32.0, |name| paint_brand_name(painter, pos2(left + 36.0, y), name))
+}
+
+fn paint_brand_name(painter: &Painter, at: Pos2, name: &str) -> f32 {
+    let t = Tokens::get();
+    painter.text(at, Align2::LEFT_CENTER, name, crate::type_face::semibold(t.font_heading), t.app_bar_text).right()
 }
 
 /// Draws the bar in `bar`, its controls within `content` (the title bar's room between the
@@ -438,8 +1037,8 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         quick: data.quick,
         report: label_width,
         report_icon_only: data.report.icon_only,
-        pills: data.pills.iter().map(|p| pill_width(ui, p)).collect(),
-        search: data.search.then(|| (crate::CommandSearch::closed_width(ui.ctx(), data.search_shortcut), crate::CommandSearch::compact_width(26.0))),
+        pills: data.pills.iter().map(|p| pill_width(ui.ctx(), p)).collect(),
+        search: data.search.then(|| (crate::CommandSearch::closed_width(ui.ctx(), data.search_shortcut), ITEM_HEIGHT)),
         assistant: data.assistant,
         version: version.as_ref().map(|(_, galley)| galley.size().x),
         offered: offers.update,
@@ -447,7 +1046,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         pixels_per_point: ui.ctx().pixels_per_point(),
     };
     let dimensions = (r.width(), content.left() - r.left(), r.right() - content.right());
-    let spec = if let Some(items) = data.items {
+    let mut spec = if let Some(items) = data.items {
         application::spec_with_items(
             dimensions,
             measured,
@@ -460,8 +1059,10 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     } else {
         application::spec(dimensions.0, dimensions.1, dimensions.2, measured)
     };
+    application::set_editing(&mut spec, editing_active(ui.ctx()));
     let placed = layout(&spec);
     let geometry = placed.application.clone().unwrap_or_default();
+    begin_motion(ui.ctx(), content.width());
     let visible = |id: &str| geometry.visible.iter().any(|s| s == id);
     let compact = geometry.compact;
     let rect = |span: application::Span, height| {
@@ -469,15 +1070,22 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     };
     let mut actions = Vec::new();
     if visible("logo") {
-        let brand = Rect::from_min_max(pos2(r.left() + geometry.mark - 20.0, r.top()), r.right_bottom());
-        paint_brand(ui.painter(), brand, data.mark, geometry.name_visible.then_some(data.name));
+        let mut painter = ui.painter().clone();
+        if editing_active(ui.ctx()) {
+            painter.set_opacity(0.55);
+        }
+        // Paint at the measured logo/name positions, rather than legacy brand offsets.
+        (data.mark)(&painter, pos2(r.left() + geometry.mark, r.center().y));
+        if geometry.name_visible {
+            paint_brand_name(&painter, pos2(r.left() + geometry.name, r.center().y), data.name);
+        }
     }
-    let leading = geometry.leading.zip(data.leading).map(|(span, size)| rect(span, size.y));
+    let leading = geometry.leading.map(|span| rect(span, ITEM_HEIGHT));
     // Home.
-    let home = rect(geometry.home, 32.0);
+    let home = rect(geometry.home, ITEM_HEIGHT);
     let idle = data.home.enabled;
     if visible("home") {
-        let home_response = ui.interact(home, ui.scope_id().with("appbar_home"), if idle { Sense::click() } else { Sense::hover() });
+        let home_response = ui.interact(home, ui.scope_id().with("appbar_home"), Sense::click_and_drag());
         home_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, data.home.tip));
         for name in h.home {
             solidcraft_ui_registry::publish_handle(name, home.center());
@@ -485,19 +1093,20 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         for name in h.home_rect {
             solidcraft_ui_registry::publish_rect(name, home);
         }
-        if idle && (home_response.hovered() || home_response.has_focus()) {
-            ui.painter().rect_filled(home.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
-        }
-        crate::icons::paint_app_bar(ui.painter(), home.shrink(7.0), data.home.icon, if idle { 1.0 } else { 0.35 });
+        paint_item(
+            ui,
+            home,
+            Control::Icon { icon: data.home.icon, size: 18.0, enabled: idle },
+            &home_response,
+            item_opacity(ui.ctx(), "home"),
+            "home",
+        );
         if home_response.backing_on_hover_text(data.home.tip).clicked() && idle {
             actions.push(BarAction::Home);
         }
     }
-    if visible("brand") && geometry.brand_separator < geometry.file.left {
-        separator(ui, r, r.left() + geometry.brand_separator, "brand", h);
-    }
     // The File menu's text button.
-    let file = rect(geometry.file, 26.0);
+    let file = rect(geometry.file, ITEM_HEIGHT);
     let clicked = visible("file") && text_button(ui, file, (data.file, data.file), data.file_open, idle, "file").1;
     for name in h.file {
         solidcraft_ui_registry::publish_handle(name, file.center());
@@ -516,18 +1125,12 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
             actions.push(BarAction::Button { id: b.id.to_string() });
         }
     }
-    if let Some(at) = geometry.quick_separator {
-        separator(ui, r, r.left() + at, "quick_access", h);
-    }
     let quick = geometry.quick.map(|(at, step)| (r.left() + at, step));
     // The document tabs follow the file actions.
-    if visible("documents") {
-        separator(ui, r, r.left() + geometry.documents_separator, "documents", h);
-    }
     let tabs_start = r.left() + geometry.tabs_start;
-    let report = rect(geometry.report, if data.report.icon_only { 32.0 } else { 26.0 });
+    let report = rect(geometry.report, PILL_HEIGHT);
     let report_label = geometry.report_labeled;
-    let search = geometry.search.map(|span| rect(span, 26.0));
+    let search = geometry.search.map(|span| rect(span, ITEM_HEIGHT));
     if let Some(search) = search {
         solidcraft_ui_registry::publish_target(h.search, search);
     }
@@ -542,29 +1145,23 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     let offer_labeled = geometry.offer_labeled;
     // Report a bug.
     if visible("report") {
-        let response = ui.interact(report, ui.scope_id().with("sc_report_button"), Sense::click());
+        let response = ui.interact(report, ui.scope_id().with("sc_report_button"), Sense::click_and_drag());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), data.report.label));
         solidcraft_ui_registry::publish_target(h.report, report);
-        let hot = response.hovered() || response.has_focus();
-        // A neutral pill shaped like the link pills: the bug mark, and the label where there is room.
-        let capsule_rect = Rect::from_center_size(report.center(), vec2(report.width().min(if report_label { f32::MAX } else { 28.0 }), PILL_HEIGHT));
-        // Neutral: a raised control in the theme's own colours, the same shape as the link pills.
-        let (neutral, ink) = (t.app_bar.lerp_to_gamma(t.app_bar_text, 0.12), t.app_bar_text);
-        capsule(ui, capsule_rect, neutral, hot);
+        paint_item(
+            ui,
+            report,
+            Control::Report { label: data.report.label, labelled: report_label },
+            &response,
+            item_opacity(ui.ctx(), "report"),
+            "report",
+        );
         let tip = if report_label {
-            let icon = Rect::from_center_size(pos2(capsule_rect.left() + 14.0, capsule_rect.center().y), vec2(16.0, 16.0));
-            crate::icons::paint_ink(ui.painter(), icon, "bug_report", ink);
-            ui.painter().text(
-                pos2(capsule_rect.left() + REPORT_TEXT_X, capsule_rect.center().y),
-                Align2::LEFT_CENTER,
-                data.report.label,
-                report_font,
-                ink,
-            );
             data.report.tip
+        } else if data.report.icon_only {
+            data.report.label
         } else {
-            crate::icons::paint_ink(ui.painter(), Rect::from_center_size(capsule_rect.center(), vec2(16.0, 16.0)), "bug_report", ink);
-            if data.report.icon_only { data.report.label } else { data.report.tip }
+            data.report.tip
         };
         if response.backing_on_hover_text(tip).clicked() {
             actions.push(BarAction::Report);
@@ -573,45 +1170,44 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     // The link pills, left of the assistant.
     for (p, span) in data.pills.iter().zip(&geometry.pills).rev() {
         if span.right > span.left {
-            let p = Pill { labelled: p.labelled && span.right - span.left > 45.0, ..*p };
+            let p = Pill { labelled: p.labelled && span.right - span.left >= pill_width(ui.ctx(), p) - 0.01, ..*p };
             pill(ui, r, rect(*span, PILL_HEIGHT), &p, h, &mut actions);
         }
     }
     // Settings sits immediately left of Help.
-    let gear = rect(geometry.settings, 32.0);
+    let gear = rect(geometry.settings, ITEM_HEIGHT);
     if visible("settings") {
-        let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click());
-        if gresp.hovered() || gresp.has_focus() {
-            ui.painter().rect_filled(gear.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
-        }
-        crate::icons::paint_app_bar(ui.painter(), gear.shrink(7.0), data.settings.icon, 1.0);
+        let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click_and_drag());
+        paint_item(
+            ui,
+            gear,
+            Control::Icon { icon: data.settings.icon, size: 18.0, enabled: true },
+            &gresp,
+            item_opacity(ui.ctx(), "settings"),
+            "settings",
+        );
         solidcraft_ui_registry::publish_rect(h.settings, gear);
         solidcraft_ui_registry::publish_handle(h.settings, gear.center());
         if gresp.backing_on_hover_text(data.settings.tip).clicked() {
             actions.push(BarAction::Button { id: data.settings.id.to_string() });
         }
     }
-    let assistant = geometry.assistant.map(|span| rect(span, 32.0));
-    if let Some((v, galley)) = version
+    let assistant = geometry.assistant.map(|span| rect(span, ITEM_HEIGHT));
+    if let Some((v, _)) = version
         && let Some(span) = geometry.version
     {
-        let vrect = rect(span, galley.size().y);
-        let vresp = ui.interact(
-            vrect.expand2(vec2(2.0, 4.0)).intersect(Rect::everything_right_of(report.right())),
-            ui.scope_id().with("sc_version_link"),
-            Sense::click(),
-        );
+        let vrect = rect(span, ITEM_HEIGHT);
+        let vresp = ui.interact(vrect, ui.scope_id().with("sc_version_link"), Sense::click_and_drag());
         let vresp = vresp.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(v.url);
-        if vresp.hovered() || vresp.has_focus() {
-            ui.painter().hline(vrect.x_range(), vrect.bottom(), Stroke::new(1.0, t.app_bar_text));
-        }
-        ui.painter().galley(vrect.min, galley, t.app_bar_text);
+        paint_item(ui, vrect, Control::Version(v.text), &vresp, item_opacity(ui.ctx(), "version"), "version");
         solidcraft_ui_registry::publish_handle(h.version, vrect.center());
+        solidcraft_ui_registry::publish_rect(h.version, vrect);
         if vresp.clicked() {
             actions.push(BarAction::Version);
         }
     }
-    let overflow_button = placed.overflow_button.map(|(x, w)| Rect::from_center_size(pos2(r.left() + x + w / 2.0, r.center().y), vec2(w, 32.0)));
+    let overflow_button =
+        placed.overflow_button.map(|(x, w)| Rect::from_center_size(pos2(r.left() + x + w / 2.0, r.center().y), vec2(w, ITEM_HEIGHT)));
     if let Some(button) = overflow_button {
         let more = solidcraft_ui_text::tr("ui.app_bar_more");
         let b = BarButton { id: "overflow", icon: "chevron", tip: more, enabled: true, narrow: false, wide_only: false };
@@ -630,7 +1226,98 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         }
     }
     let overflow_items = overflow_items(data, &placed.overflow, overflow_button.map_or(r.left(), |b| b.left()));
+    let mut separators = Vec::new();
+    for (item, p) in spec.items.iter().zip(&placed.placements) {
+        if (item.id.starts_with("separator:") || item.id.starts_with("space:"))
+            && let Some(p) = p
+        {
+            separators
+                .push((item.id.clone(), Rect::from_center_size(pos2(r.left() + p.x + p.width / 2.0, r.center().y), vec2(p.width, ITEM_HEIGHT))));
+        }
+    }
+    for (id, br) in &separators {
+        let response = ui.interact(*br, ui.scope_id().with(id), Sense::hover());
+        paint_item(ui, *br, if id.starts_with("space:") { Control::Space } else { Control::Separator }, &response, item_opacity(ui.ctx(), id), id);
+        let group = match id.as_str() {
+            "separator:1" => Some("brand"),
+            "separator:2" => Some("documents"),
+
+            _ => None,
+        };
+        if let Some(group) = group {
+            solidcraft_ui_registry::publish_rect(&handle(h.separator, group), Rect::from_center_size(br.center(), vec2(1.0, 16.0)));
+        }
+    }
+    let mut edit_items = Vec::new();
+    let mut edit_item = |id: String, br: Rect, locked: bool| {
+        if br.is_positive() {
+            let zone = data.items.and_then(|l| l.items.iter().find(|p| p.id == id)).map_or(crate::app_bar_items::Zone::Start, |p| p.zone);
+            edit_items.push(crate::app_bar_items::DropItem { id, zone, left: br.left(), right: br.right(), locked });
+        }
+    };
+    for (id, br) in [
+        ("home", home),
+        ("settings", gear),
+        ("report", report),
+        ("help", Rect::from_center_size(pos2(help, r.center().y), vec2(ITEM_HEIGHT, ITEM_HEIGHT))),
+    ] {
+        if visible(id) {
+            edit_item(id.into(), br, false);
+        }
+    }
+    for (b, at) in data.actions.iter().zip(&geometry.actions) {
+        if let Some(at) = at {
+            let width = ITEM_HEIGHT;
+            edit_item(b.id.into(), Rect::from_center_size(pos2(r.left() + at, r.center().y), vec2(width, ITEM_HEIGHT)), false);
+        }
+    }
+    for &(i, at) in &geometry.quick_slots {
+        if let Some(id) = data.quick_ids.get(i) {
+            edit_item(format!("quick:{id}"), Rect::from_center_size(pos2(r.left() + at, r.center().y), vec2(ITEM_HEIGHT, ITEM_HEIGHT)), false);
+        }
+    }
+    for (p, span) in data.pills.iter().zip(&geometry.pills) {
+        edit_item(if p.id == "kofi" { "donate" } else { p.id }.into(), rect(*span, PILL_HEIGHT), false);
+    }
+    for (id, br) in [("search", search), ("assistant", assistant), ("version", geometry.version.map(|s| rect(s, ITEM_HEIGHT)))] {
+        if let Some(br) = br {
+            edit_item(id.into(), br, false);
+        }
+    }
+    edit_item("file".into(), file, false);
+    edit_item("tabs".into(), Rect::from_min_max(pos2(tabs_start, r.top()), pos2(r.left() + geometry.tabs_end, r.bottom())), true);
+    if let Some(br) = leading {
+        edit_item("documents".into(), br, false);
+    }
+    if let Some(br) = overflow_button {
+        edit_item("more".into(), br, true);
+    }
+    for (id, br) in separators {
+        edit_item(id, br, false);
+    }
+    for (item, p) in spec.items.iter().zip(&placed.placements) {
+        if matches!(item.id.as_str(), "logo" | "managed" | "offered")
+            && let Some(p) = p
+        {
+            edit_item(item.id.clone(), Rect::from_min_max(pos2(r.left() + p.x, r.top()), pos2(r.left() + p.right(), r.bottom())), true);
+        }
+    }
     BarOut {
+        cards: [(geometry.cards[0], crate::app_bar_layout::Zone::Start), (geometry.cards[1], crate::app_bar_layout::Zone::End)].map(
+            |(span, zone)| {
+                span.map(|span| {
+                    let body = spec
+                        .items
+                        .iter()
+                        .zip(&placed.placements)
+                        .filter(|(i, p)| i.zone == zone && !i.locked && p.is_some() && !matches!(i.id.as_str(), "managed" | "offered"))
+                        .map(|(i, _)| if i.id == "report" || i.id.starts_with("pill:") { PILL_HEIGHT } else { ITEM_HEIGHT })
+                        .fold(0.0_f32, f32::max);
+                    rect(span, (body + 2.0 * application::CARD_PADDING).min(r.height()))
+                })
+            },
+        ),
+        edit_items,
         quick_slots: geometry.quick_slots.iter().map(|&(i, x)| (i, r.left() + x)).collect(),
         leading,
         actions,
@@ -647,7 +1334,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         overflow_button,
         quick_count: geometry.quick_count,
         tabs_end: r.left() + geometry.tabs_end,
-        managed: geometry.managed.map(|s| rect(s, 26.0)),
+        managed: geometry.managed.map(|s| rect(s, ITEM_HEIGHT)),
         managed_labeled: geometry.managed_labeled,
         reserved_offers: geometry.reserved_offers,
     }
@@ -703,7 +1390,7 @@ pub enum ViewState {
     Normal,
     /// The design a sheet draws from changed: a hollow dot.
     SourceChanged,
-    /// The sheet was deleted (Undo restores it): a dashed outline.
+    /// The sheet was deleted (Undo restores it): a subdued outline.
     Deleted,
 }
 
@@ -711,13 +1398,16 @@ pub enum ViewState {
 /// each its icon and colours.
 #[derive(Clone, Copy, Debug)]
 pub struct ViewTab<'a> {
+    pub compass: Option<bool>,
     pub name: &'a str,
-    /// What its icon draws: `model`, `sketch`, `sheet`, `render` or `animation` ([`paint_view_glyph`]).
+    /// What its icon draws: `model`, `sheet`, `render` or `animation` ([`paint_view_glyph`]).
     pub icon: &'a str,
     /// The icon's stroke colour.
     pub accent: egui::Color32,
     /// The colour of the shown view's underline.
     pub underline: egui::Color32,
+    /// Preserve the sketch accent underline in every visibility state.
+    pub sketch_mode: bool,
     pub state: ViewState,
     /// The design shows this view.
     pub active: bool,
@@ -727,7 +1417,7 @@ pub struct ViewTab<'a> {
     pub window_number: Option<u32>,
     /// A view listed here that belongs to another window.
     pub to_window: Option<u32>,
-    /// Its hover text ("Sketch 2 · Design workspace · Ctrl+2").
+    /// Its hover text ("Model 2 · Design workspace · Ctrl+2").
     pub tip: &'a str,
 }
 
@@ -779,6 +1469,8 @@ pub struct TabMenuRow<'a> {
     pub needs_others: bool,
     /// This action belongs to the window that holds the view.
     pub needs_local_view: bool,
+    /// Disabled for a view already in this window.
+    pub needs_remote_view: bool,
     /// A view glyph drawn before the label ([`paint_view_glyph`]); empty for none.
     pub icon: &'a str,
     /// The glyph's colour; none draws it in the menu's dim ink.
@@ -802,6 +1494,7 @@ impl<'a> TabMenuRow<'a> {
             key_on_selected,
             needs_others: false,
             needs_local_view: false,
+            needs_remote_view: false,
             icon: "",
             accent: None,
             heading: false,
@@ -826,6 +1519,11 @@ impl<'a> TabMenuRow<'a> {
     /// Keep this action in the window that owns the view.
     pub const fn for_local_view(mut self) -> Self {
         self.needs_local_view = true;
+        self
+    }
+
+    pub const fn needing_remote_view(mut self) -> Self {
+        self.needs_remote_view = true;
         self
     }
 
@@ -866,8 +1564,8 @@ pub struct TabStrip<'a> {
     pub shown_selected: Option<usize>,
     /// Only this design's view controls appear in a pop-out's strip.
     pub pop_out: bool,
-    /// The tabs are part of the window's title bar: dragging the only tab, or one mostly up or
-    /// down, moves the window, and a double click maximizes it (unless it renames).
+    /// The tabs are part of the window's title bar: a double click maximizes it (unless it
+    /// renames). Dragging a tab never moves the window; only empty bar space does.
     pub title_bar: bool,
     /// A double click on the selected tab renames it.
     pub double_click_renames: bool,
@@ -903,6 +1601,8 @@ pub struct TabStrip<'a> {
     /// The layouts the Layout button offers, each drawn as a miniature (its id ends in the layout's
     /// key: `single`, `side_by_side`, `stacked`, `large_and_two`, `grid`); empty: no button.
     pub layout_menu: &'a [TabMenuRow<'a>],
+    /// The full per-window menu, when the clear view tabs are enabled.
+    pub view_layout: Option<&'a crate::view_layout_menu::LayoutMenu>,
     /// The id of the layout shown now, outlined in the menu; empty for none.
     pub layout_current: &'a str,
     pub layout_tip: &'a str,
@@ -920,6 +1620,11 @@ pub struct TabStrip<'a> {
 /// open.
 pub fn tab_list_open(ctx: &egui::Context, id: egui::Id) -> bool {
     ctx.data(|d| d.get_temp::<bool>(id.with("more")).unwrap_or(false))
+}
+
+/// Whether a drop-down from this tab strip is holding its bar open.
+pub fn tab_popup_open(ctx: &egui::Context, id: egui::Id) -> bool {
+    tab_list_open(ctx, id) || ctx.data(|d| d.get_temp::<PopupState>(id.with("view_popup"))).flatten().is_some()
 }
 
 /// What the user chose on the tab strip this frame.
@@ -1108,6 +1813,19 @@ pub fn tab_tip(name: &str, place: &str, cut: bool) -> String {
     if cut { format!("{name}\n{place}") } else { place.to_string() }
 }
 
+/// Native design/view menus own their context click, including repeated layout passes.
+/// Outer application-bar menus must not replace it with the bar editor's menu.
+pub fn tab_context_click_claimed(ctx: &egui::Context) -> bool {
+    let key = egui::Id::unique(("sc_tab_context_click", ctx.viewport_id()));
+    ctx.data(|d| d.get_temp::<u64>(key)) == Some(ctx.cumulative_frame_nr())
+}
+
+fn claim_tab_context_click(ctx: &egui::Context) {
+    let key = egui::Id::unique(("sc_tab_context_click", ctx.viewport_id()));
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|d| d.insert_temp(key, frame));
+}
+
 /// Tabs are rounded chips on the bar; the selected one has the stronger fill.
 pub fn tab_shape(painter: &Painter, t: &Tokens, r: Rect, active: bool, hovered: bool) {
     let fill = if active {
@@ -1230,8 +1948,16 @@ const LAYOUT_BUTTON: f32 = 28.0;
 
 /// What a pill takes after its views: the + (and the Layout button), the separator and the close.
 fn pill_after(strip: &TabStrip) -> f32 {
-    PILL_AFTER - if strip.pop_out || strip.clear_view_tabs { DESIGN_CLOSE_WIDTH } else { 0.0 }
-        + if strip.layout_menu.is_empty() { 0.0 } else { LAYOUT_BUTTON }
+    let layout = if strip.layout_menu.is_empty() { 0.0 } else { LAYOUT_BUTTON };
+    PILL_AFTER - if strip.pop_out || strip.clear_view_tabs { DESIGN_CLOSE_WIDTH } else { 0.0 } + layout
+}
+
+fn clear_layout_data<'a>(strip: &'a TabStrip<'_>) -> Option<&'a crate::view_layout_menu::LayoutMenu> {
+    strip.view_layout.filter(|_| strip.clear_view_tabs && !strip.layout_menu.is_empty())
+}
+
+pub(crate) fn layout_name<'a>(strip: &'a TabStrip<'_>) -> &'a str {
+    strip.layout_menu.iter().find(|row| row.id == strip.layout_current).map_or("", |row| solidcraft_ui_text::tr_label(row.label))
 }
 
 /// What a pill takes before its views: border, padding, the unsaved dot, the name and its separator.
@@ -1243,10 +1969,10 @@ fn more_label(strip: &TabStrip, hidden: usize) -> String {
     strip.view_text.more.replace("{n}", &hidden.to_string())
 }
 
-/// Whether tab `i` is the shown, selected design with a single view while views are sub-tabs: its
-/// tab carries a small + after its name. With a switcher the tab stays as it was before views.
+/// Whether tab `i` is the shown, selected design with a single view: its plain tab carries a
+/// small + after its name, regardless of the preference for sub-tabs or a view switcher.
 fn small_plus(strip: &TabStrip, i: usize) -> bool {
-    strip.views_as_tabs && i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1)
+    i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1)
 }
 
 fn line_colour(t: &Tokens) -> egui::Color32 {
@@ -1261,39 +1987,36 @@ fn outline(r: Rect) -> [Pos2; 5] {
 #[repr(usize)]
 enum CollapseStage {
     Full,
-    LayoutGlyph,
     WindowNumber,
     Icons,
     Overflow,
 }
 
-fn collapse_stage(widths: [f32; 5], available: f32) -> CollapseStage {
-    [CollapseStage::Full, CollapseStage::LayoutGlyph, CollapseStage::WindowNumber, CollapseStage::Icons, CollapseStage::Overflow]
+fn collapse_stage(widths: [f32; 4], available: f32) -> CollapseStage {
+    [CollapseStage::Full, CollapseStage::WindowNumber, CollapseStage::Icons, CollapseStage::Overflow]
         .into_iter()
         .find(|stage| widths[*stage as usize] <= available)
         .unwrap_or(CollapseStage::Overflow)
 }
 
-fn window_badge<'a>(view: &ViewTab<'a>, stage: CollapseStage) -> std::borrow::Cow<'a, str> {
-    if stage >= CollapseStage::WindowNumber
-        && let Some(number) = view.window_number
-    {
-        return number.to_string().into();
-    }
-    view.window_name.unwrap_or(solidcraft_ui_text::tr("multi_window.window_mark")).into()
+fn window_badge(view: &ViewTab<'_>) -> String {
+    view.window_number.map_or_else(|| solidcraft_ui_text::tr("multi_window.window_mark").to_owned(), |number| number.to_string())
+}
+
+fn remote_name_hidden(view: &ViewTab<'_>, stage: CollapseStage) -> bool {
+    view.to_window.is_some() && stage >= CollapseStage::WindowNumber
 }
 
 fn clear_view_width(ui: &egui::Ui, view: &ViewTab, label: f32, stage: CollapseStage, editing: bool) -> f32 {
     if stage >= CollapseStage::Icons && !view.active && view.to_window.is_none() && !editing {
         return 28.0;
     }
-    let badge = if view.to_window.is_some() {
-        21.0 + text_width(ui, &window_badge(view, stage), crate::type_face::semibold(Tokens::get().font_small))
-    } else {
-        0.0
-    };
-    let dot = if view.state == ViewState::SourceChanged { 12.0 } else { 0.0 };
-    (28.0 + label.min(VIEW_LABEL_MAX) + dot + badge + 20.0).max(72.0)
+    let badge =
+        if view.to_window.is_some() { 21.0 + text_width(ui, &window_badge(view), crate::type_face::semibold(Tokens::get().font_small)) } else { 0.0 };
+    let hide_name = remote_name_hidden(view, stage);
+    let dot = if view.state == ViewState::SourceChanged && !hide_name { 12.0 } else { 0.0 };
+    let label = if hide_name { 0.0 } else { label.min(VIEW_LABEL_MAX) };
+    if view.to_window.is_some() { 23.0 + label + dot + badge } else { (28.0 + label + dot + 20.0).max(72.0) }
 }
 
 /// Lays out the selected design's tab for its views, `room` points of the bar being free for it.
@@ -1337,9 +2060,8 @@ fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed
         let fixed = pill_before(dot, 0.0) + chip_action + after + TAB_MARGIN;
         name_w = name_w.min((room - fixed - overflow).max(0.0));
         let common = fixed + name_w;
-        let expanded = all(CollapseStage::Full);
         let stages =
-            [common + expanded, common + expanded, common + all(CollapseStage::WindowNumber), common + all(CollapseStage::Icons), common + overflow];
+            [common + all(CollapseStage::Full), common + all(CollapseStage::WindowNumber), common + all(CollapseStage::Icons), common + overflow];
         let chosen = collapse_stage(stages, room);
         stage = Some(chosen);
         view_ws = (0..n).map(|k| width_at(k, chosen)).collect();
@@ -1357,6 +2079,17 @@ fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed
         (name_w, switch_w)
     };
     Geom { kind, index: strip.selected, width, dot, name_w, view_ws, more_w, switch_w, stage }
+}
+
+/// The selected design group's width before any view labels or the design name collapse.
+/// A window bar reserves this space before adding its optional window name.
+pub fn preferred_pill_width(ui: &egui::Ui, strip: &TabStrip) -> f32 {
+    let Some(tab) = strip.tabs.get(strip.selected) else {
+        return 0.0;
+    };
+    let name = strip.rename.as_ref().map_or(tab.name, |rename| rename.text.as_str());
+    let view_typed = strip.view_rename.as_ref().map(|(index, rename)| (*index, rename.text.as_str()));
+    measure(ui, strip, tab, name, view_typed, f32::MAX).width
 }
 
 /// Opens the menu `which` at `at`, or closes it when it is the one open.
@@ -1385,7 +2118,6 @@ fn glyph_lines(icon: &str) -> &'static [&'static [(f32, f32)]] {
             &[(4.0, 7.0), (12.0, 11.0), (20.0, 7.0)],
             &[(12.0, 11.0), (12.0, 21.0)],
         ],
-        "sketch" => &[&[(4.0, 20.0), (5.0, 16.0), (16.0, 5.0), (19.0, 8.0), (8.0, 19.0), (4.0, 20.0)], &[(14.0, 7.0), (17.0, 10.0)]],
         "sheet" => &[
             &[(6.0, 3.0), (15.0, 3.0), (19.0, 7.0), (19.0, 21.0), (6.0, 21.0), (6.0, 3.0)],
             &[(15.0, 3.0), (15.0, 7.0), (19.0, 7.0)],
@@ -1395,11 +2127,6 @@ fn glyph_lines(icon: &str) -> &'static [&'static [(f32, f32)]] {
         "render" => &[&[(8.0, 9.0), (8.9, 7.9), (9.9, 7.2), (11.0, 7.0)]],
         "animation" => &[&[(5.0, 5.0), (19.0, 5.0), (19.0, 19.0), (5.0, 19.0), (5.0, 5.0)], &[(10.0, 9.0), (15.0, 12.0), (10.0, 15.0), (10.0, 9.0)]],
         "rename" => &[&[(4.0, 20.0), (5.0, 16.0), (16.0, 5.0), (19.0, 8.0), (8.0, 19.0), (4.0, 20.0)]],
-        "window" => &[
-            &[(14.0, 4.0), (20.0, 4.0), (20.0, 10.0)],
-            &[(20.0, 4.0), (11.0, 13.0)],
-            &[(18.0, 14.0), (18.0, 20.0), (4.0, 20.0), (4.0, 6.0), (10.0, 6.0)],
-        ],
         "close" => &[&[(6.0, 6.0), (18.0, 18.0)], &[(18.0, 6.0), (6.0, 18.0)]],
         "duplicate" => &[&[(8.0, 8.0), (19.0, 8.0), (19.0, 19.0), (8.0, 19.0), (8.0, 8.0)], &[(5.0, 15.0), (5.0, 5.0), (15.0, 5.0)]],
         "tiles" => &[&[(4.0, 4.0), (20.0, 4.0), (20.0, 20.0), (4.0, 20.0), (4.0, 4.0)], &[(12.0, 4.0), (12.0, 20.0)], &[(4.0, 12.0), (20.0, 12.0)]],
@@ -1411,9 +2138,13 @@ fn glyph_lines(icon: &str) -> &'static [&'static [(f32, f32)]] {
     }
 }
 
-/// Draws a view's icon (`model`, `sketch`, `sheet`, `render` or `animation`, or the menu glyphs
+/// Draws a view's icon (`model`, `sheet`, `render` or `animation`, or the menu glyphs
 /// `rename`, `window`, `close`, `duplicate`, `tiles` and `reopen`; another name draws nothing) as strokes of `ink` in `r`.
 pub fn paint_view_glyph(p: &Painter, r: Rect, icon: &str, ink: egui::Color32) {
+    if matches!(icon, "window_here" | "window_other") {
+        crate::icons::paint_ink(p, r, icon, ink);
+        return;
+    }
     let s = r.width() / 24.0;
     let stroke = Stroke::new(2.0 * s, ink);
     let at = |(x, y): (f32, f32)| r.min + vec2(x * s, y * s);
@@ -1425,11 +2156,90 @@ pub fn paint_view_glyph(p: &Painter, r: Rect, icon: &str, ink: egui::Color32) {
     }
 }
 
+/// Draw the common sketch-mode title, original pencil glyph and Editing chip.
+/// The caller supplies a rectangle excluding its menu and window controls.
+pub fn paint_sketch_header(painter: &Painter, rect: Rect, name: &str, editing: &str) {
+    if !rect.is_finite() || !rect.is_positive() {
+        return;
+    }
+    let t = Tokens::get();
+    let painter = painter.with_clip_rect(rect);
+    painter.rect_filled(rect, 0, t.sketch_soft);
+    let chip = painter.layout_no_wrap(editing.to_owned(), crate::type_face::semibold(t.font_small), t.text);
+    let chip_width = (chip.size().x + 16.0).min(rect.width());
+    let leading = (rect.width() - chip_width - 6.0).max(0.0);
+    let glyph_width = if leading >= 23.0 { 23.0 } else { 0.0 };
+    if glyph_width > 0.0 {
+        paint_view_glyph(&painter, Rect::from_center_size(pos2(rect.left() + 7.5, rect.center().y), vec2(15.0, 15.0)), "rename", t.sketch_accent);
+    }
+    let name_x = rect.left() + glyph_width;
+    let name_width = (leading - glyph_width).max(0.0);
+    let mut after = name_x;
+    if name_width > 0.0 {
+        let mut job = egui::text::LayoutJob::simple_singleline(name.to_owned(), crate::type_face::semibold(t.font_body), t.sketch_ink);
+        job.wrap = egui::text::TextWrapping { max_width: name_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+        let name = painter.layout_job(job);
+        after += name.size().x.min(name_width);
+        painter.galley(pos2(name_x, rect.center().y - name.size().y / 2.0), name, t.sketch_ink);
+    }
+    let chip_x = (after + 6.0).min(rect.right() - chip_width);
+    let chip_rect = Rect::from_min_size(pos2(chip_x, rect.center().y - 9.0), vec2(chip_width, 18.0));
+    painter.rect_filled(chip_rect, 9, t.chip);
+    let padding = 8.0_f32.min(chip_width / 2.0);
+    let text_width = (chip_width - 2.0 * padding).max(0.0);
+    if text_width > 0.0 {
+        let mut job = egui::text::LayoutJob::simple_singleline(editing.to_owned(), crate::type_face::semibold(t.font_small), t.text);
+        job.wrap = egui::text::TextWrapping { max_width: text_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+        let chip = painter.layout_job(job);
+        painter.with_clip_rect(chip_rect).galley(chip_rect.left_center() + vec2(padding, -chip.size().y / 2.0), chip, t.text);
+    }
+}
+
+/// The same sketch header with a separate, translated sheet/drawing-view owner chip.
+pub fn paint_sketch_header_owner(painter: &Painter, rect: Rect, name: &str, editing: &str, owner: Option<&str>) {
+    let Some(owner) = owner else {
+        paint_sketch_header(painter, rect, name, editing);
+        return;
+    };
+    if !rect.is_finite() || !rect.is_positive() {
+        return;
+    }
+    let t = Tokens::get();
+    let text = painter.layout_no_wrap(owner.to_owned(), crate::type_face::semibold(t.font_small), t.text);
+    let width = (text.size().x + 16.0).min(rect.width() * 0.45);
+    let left = Rect::from_min_max(rect.min, pos2((rect.right() - width - 6.0).max(rect.left()), rect.bottom()));
+    paint_sketch_header(painter, left, name, editing);
+    let chip = Rect::from_min_size(pos2(rect.right() - width, rect.center().y - 9.0), vec2(width, 18.0));
+    painter.with_clip_rect(rect).rect_filled(chip, 9, t.chip);
+    painter.with_clip_rect(chip.shrink2(vec2(8.0, 0.0))).galley(chip.left_center() + vec2(8.0, -text.size().y / 2.0), text, t.text);
+}
+
+/// Quiet, right-aligned metadata chips in a view header. Returns the width they occupy.
+pub fn paint_view_chips(painter: &Painter, rect: Rect, labels: &[&str]) -> f32 {
+    if !rect.is_finite() || !rect.is_positive() {
+        return 0.0;
+    }
+    let t = Tokens::get();
+    let mut right = rect.right();
+    for label in labels.iter().rev() {
+        let galley = painter.layout_no_wrap((*label).to_owned(), crate::type_face::semibold(t.font_small), t.text);
+        let width = galley.size().x + t.space_12;
+        if right - width < rect.left() {
+            break;
+        }
+        let chip = Rect::from_center_size(pos2(right - width * 0.5, rect.center().y), vec2(width, 18.0));
+        painter.rect_filled(chip, t.radius_sm, t.chip);
+        painter.with_clip_rect(chip).galley(chip.center() - galley.size() * 0.5, galley, t.text);
+        right -= width + t.space_6;
+    }
+    rect.right() - right
+}
+
 /// The rows of a menu: the id of the one chosen. Keys show with `keys`, rows that need others are
 /// off without `others`, and the row `off` is off; each row's centre is published under `prefix` and its id.
 fn menu_rows<'a>(
     ui: &mut egui::Ui,
-    rows: &'a [TabMenuRow<'a>],
+    rows: &[TabMenuRow<'a>],
     keys: bool,
     others: bool,
     off: &str,
@@ -1448,15 +2258,21 @@ fn menu_rows<'a>(
         }
         let mut item = crate::Item::action(row.id, row.label, "");
         if !row.icon.is_empty() {
-            let (icon, ink) = (row.icon.to_string(), row.accent.unwrap_or(Tokens::get().form_dim));
+            let (icon, ink) = (
+                row.icon.to_string(),
+                row.accent.unwrap_or_else(|| {
+                    let t = Tokens::get();
+                    if matches!(row.icon, "window_here" | "window_other") { t.text_dim } else { t.form_dim }
+                }),
+            );
             item.icon = crate::ItemIcon::paint(move |p, r, opacity| paint_view_glyph(p, r, &icon, ink.gamma_multiply(opacity)));
         }
         if keys && !row.key_on_selected.is_empty() {
             item = item.key(row.key_on_selected);
         }
-        item.enabled = (!row.needs_others || others) && row.id != off && row.disabled_tip.is_none();
+        item.enabled = (!row.needs_others || others) && (!row.needs_remote_view || !local_view) && row.id != off && row.disabled_tip.is_none();
         let mut control = crate::MenuItem::from_item(&item, flyout.as_ref().is_some_and(|f| f.open == Some(i)));
-        control.checked = row.checked.then_some(true);
+        control.checked = if row.id == "view.compass" { Some(row.checked) } else { row.checked.then_some(true) };
         control.submenu = !row.children.is_empty();
         let response = control.show(ui);
         if let Some(tip) = row.disabled_tip {
@@ -1501,7 +2317,7 @@ struct TabFlyout<'a> {
 }
 
 /// Every view as a menu row (a check mark on the shown one, a hollow dot on one whose source
-/// changed, a dashed outline on a deleted one): the place of the one chosen. Rows are published
+/// changed, a subdued outline on a deleted one): the place of the one chosen. Rows are published
 /// under `prefix` and their place.
 fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str, modern: bool, menu: &mut Option<(usize, Rect)>) -> Option<usize> {
     let t = Tokens::get();
@@ -1529,7 +2345,7 @@ fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str, modern: bool, m
         solidcraft_ui_registry::publish_target(&id, resp.rect);
         if !modern && view.to_window.is_some() {
             let mark = Rect::from_center_size(pos2(resp.rect.right() - t.space_16, resp.rect.center().y), vec2(13.0, 13.0));
-            paint_view_glyph(ui.painter(), mark, "window", t.form_ink.gamma_multiply(DETACHED_VIEW_OPACITY));
+            paint_view_glyph(ui.painter(), mark, crate::icons::window_icon(false), t.app_bar_text.gamma_multiply(DETACHED_VIEW_OPACITY));
             solidcraft_ui_registry::publish_target(&format!("{id}:window"), mark);
         }
         match view.state {
@@ -1538,12 +2354,17 @@ fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str, modern: bool, m
                 ui.painter().circle_stroke(pos2(resp.rect.right() - 32.0, resp.rect.center().y), 3.25, Stroke::new(1.5, t.warning));
             }
             ViewState::Deleted => {
-                let dash = Stroke::new(1.0, t.app_bar_separator.gamma_multiply(0.7));
-                ui.painter().extend(crate::dashed_line(&outline(resp.rect.shrink(1.0)), resp.rect, dash, 3.0, 2.0));
+                ui.painter().rect_stroke(
+                    resp.rect.shrink(1.0),
+                    7,
+                    Stroke::new(1.0, t.app_bar_separator.gamma_multiply(0.7)),
+                    egui::StrokeKind::Inside,
+                );
             }
             ViewState::Normal => {}
         }
         if resp.secondary_clicked() {
+            claim_tab_context_click(ui.ctx());
             *menu = Some((k, resp.rect));
         } else if resp.clicked() {
             chosen = Some(k);
@@ -1555,6 +2376,9 @@ fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str, modern: bool, m
 /// The + that opens another view, in `rect` with a glyph `icon` points wide: a click opens the +
 /// menu (or asks for a new view where the app gave no menu), a right click opens the menu.
 fn plus_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, icon: f32, pen: &mut Pen) {
+    if editing_active(ui.ctx()) {
+        return;
+    }
     let t = Tokens::get();
     let resp = ui.interact(rect, ui.scope_id().with("view_plus"), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, strip.view_text.new_view));
@@ -1567,6 +2391,7 @@ fn plus_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, icon: f32, pen: 
     let resp = resp.backing_on_hover_text(strip.view_text.new_view);
     let at = pos2(rect.left(), pen.below);
     if resp.secondary_clicked() {
+        claim_tab_context_click(ui.ctx());
         pen.popup = Some((Popup::Plus, at, rect, ui.ctx().cumulative_frame_nr()));
     } else if resp.clicked() {
         if strip.plus_menu.is_empty() {
@@ -1652,9 +2477,17 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
     let painter = ui.painter().clone();
     let detached = view.to_window.is_some();
     let close = view.active || detached;
-    let opacity = if detached { DETACHED_VIEW_OPACITY } else { 1.0 };
+    let hovered = ui.rect_contains_pointer(vr);
+    if hovered {
+        ui.ctx().data_mut(|data| data.insert_temp(strip.id.with("view_hover"), k));
+    }
+    let linked = !detached && ui.ctx().data(|data| data.get_temp::<usize>(strip.id.with("linked_view_hover"))) == Some(k);
+    let opacity = if detached && !hovered { DETACHED_VIEW_OPACITY } else { 1.0 };
     let main = if close { Rect::from_min_max(vr.min, pos2(vr.right() - 20.0, vr.bottom())) } else { vr };
     let resp = ui.interact(main, ui.scope_id().with(("doc_view", k)), Sense::click_and_drag());
+    if !detached && pen.rename.as_ref().is_none_or(|(i, _)| *i != k) && resp.hovered() {
+        ui.ctx().set_cursor_icon(drag_cursor(resp.is_pointer_button_down_on()));
+    }
     solidcraft_ui_registry::publish_target(&format!("{}{k}", h.view), vr);
     resp.widget_info(|| {
         let name = if detached {
@@ -1662,6 +2495,7 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
         } else {
             std::borrow::Cow::Borrowed(view.name)
         };
+        let name = if view.sketch_mode { solidcraft_ui_text::format("sketch_mode.announcement", &[("view", &name)]).into() } else { name };
         egui::WidgetInfo::selected(egui::Role::Tab, true, view.active, name)
     });
     if !detached && pen.drag.is_none() && !pen.rename.as_ref().is_some_and(|(index, _)| *index == k) {
@@ -1677,12 +2511,11 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
     let deleted = view.state == ViewState::Deleted;
     if view.active {
         painter.rect_filled(vr, VIEW_RADIUS, t.app_bar_hover_strong);
-    } else if resp.hovered() {
+    } else if resp.hovered() || linked {
         painter.rect_filled(vr, VIEW_RADIUS, t.app_bar_hover);
     }
     if deleted {
-        let dash = Stroke::new(1.0, t.app_bar_separator.gamma_multiply(0.7));
-        painter.extend(crate::dashed_line(&outline(vr.shrink(0.5)), vr.expand(2.0), dash, 3.0, 2.0));
+        painter.rect_stroke(vr.shrink(0.5), VIEW_RADIUS, Stroke::new(1.0, t.app_bar_separator.gamma_multiply(0.7)), egui::StrokeKind::Inside);
     }
     if resp.has_focus() {
         painter.rect_stroke(vr, VIEW_RADIUS, Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
@@ -1724,10 +2557,10 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
     if detached {
         let dot_width = if view.state == ViewState::SourceChanged { 14.0 } else { 0.0 };
         let rect = Rect::from_center_size(pos2(label_x + label_w + dot_width + 10.0, vr.center().y), vec2(13.0, 13.0));
-        paint_view_glyph(&painter, rect, "window", ink);
+        paint_view_glyph(&painter, rect, crate::icons::window_icon(false), ink);
         solidcraft_ui_registry::publish_target(&format!("{}{k}:window", h.view), rect);
     }
-    if view.active {
+    if view.active || view.sketch_mode {
         let underline = Rect::from_min_max(pos2(vr.left() + 7.0, vr.bottom() - 2.0), pos2(vr.right() - 7.0, vr.bottom()));
         painter.rect_filled(underline, 2u8, view.underline);
     }
@@ -1755,7 +2588,8 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
         pen.actions.push(TabAction::LiftView { view: k, origin: vr });
     } else if resp.middle_clicked() {
         pen.actions.push(TabAction::CloseView(k));
-    } else if resp.secondary_clicked() {
+    } else if resp.secondary_clicked() || (resp.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10))) {
+        claim_tab_context_click(ui.ctx());
         pen.popup = Some((Popup::View(k), pos2(vr.left(), pen.below), vr, ui.ctx().cumulative_frame_nr()));
     } else if resp.clicked() && !dragged {
         resp.request_focus();
@@ -1763,7 +2597,6 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
     }
 }
 
-const CLEAR_VIEW_HEIGHT: f32 = 26.0;
 const CLEAR_VIEW_RADIUS: u8 = 6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1822,7 +2655,8 @@ fn paint_clear_view(painter: &Painter, rect: Rect, look: ViewLook, hovered: bool
         let fill = if look == ViewLook::Ground { t.app_bar_hover_strong } else { t.app_bar_hover };
         painter.rect_filled(rect, CLEAR_VIEW_RADIUS, fill);
     }
-    let stroke = Stroke::new(1.0, t.app_bar_text.gamma_multiply(0.45));
+    let intensity = if look == ViewLook::Elsewhere && !hovered && !focused { 0.25 } else { 0.45 };
+    let stroke = Stroke::new(1.0, t.app_bar_text.gamma_multiply(intensity));
     match look {
         ViewLook::Card => {
             painter.rect_stroke(rect, CLEAR_VIEW_RADIUS, stroke, egui::StrokeKind::Inside);
@@ -1876,6 +2710,9 @@ fn draw_clear_view(
     let button_id = ui.scope_id().with(("doc_view_close", k));
     let focused = ui.memory(|memory| memory.has_focus(view_id) || memory.has_focus(button_id));
     let show_action = look == ViewLook::Ground || focused || inside;
+    if inside {
+        ui.ctx().data_mut(|data| data.insert_temp(strip.id.with("view_hover"), k));
+    }
     let action = if compact {
         Rect::from_center_size(pos2(rect.right() - 6.0, rect.top() + 6.0), vec2(12.0, 12.0))
     } else {
@@ -1888,6 +2725,7 @@ fn draw_clear_view(
     } else {
         format!("{}, {}", view.name, view_status(view))
     };
+    let title = if view.sketch_mode { solidcraft_ui_text::format("sketch_mode.announcement", &[("view", &title)]) } else { title };
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, view.active, title.as_str()));
     solidcraft_ui_registry::publish_target(&format!("{}{k}", strip.handles.view), rect);
     if let Some(window) = view.to_window {
@@ -1899,17 +2737,28 @@ fn draw_clear_view(
     if !remote && !editing && pen.drag.is_none() {
         pen.drag = start_view_drag(ui, &response, rect, k);
     }
-    if pen.drag.is_some_and(|drag| drag.from == k && !drag.cancelled) {
+    let unanchored = ui.ctx().data(|data| data.get_temp::<usize>(strip.id.with("unanchored_view"))) == Some(k);
+    if unanchored || pen.drag.is_some_and(|drag| drag.from == k && !drag.cancelled) {
         let dash = Stroke::new(1.0, t.accent);
         ui.painter().extend(crate::dashed_line(&rounded_view_outline(rect.shrink(0.5)), rect, dash, 3.0, 2.0));
         return;
     }
-    let response = response.backing_on_hover_text(title);
+    let response = response.backing_on_hover_text(if remote { view.tip.to_owned() } else { title });
     let painter = ui.painter().clone();
-    paint_clear_view(&painter, rect, look, inside || response.hovered(), response.has_focus());
-    let opacity = if remote { 0.92 } else { 1.0 };
+    let linked = !remote && ui.ctx().data(|data| data.get_temp::<usize>(strip.id.with("linked_view_hover"))) == Some(k);
+    paint_clear_view(&painter, rect, look, inside || response.hovered() || linked, response.has_focus());
+    if linked {
+        painter.rect_stroke(rect, CLEAR_VIEW_RADIUS, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+    }
+    let opacity = if remote && !inside && !focused { 0.58 } else { 1.0 };
     let ink = t.app_bar_text.gamma_multiply(opacity);
-    let icon_x = if compact { rect.center().x } else { rect.left() + 15.0 };
+    let icon_x = if compact {
+        rect.center().x
+    } else if remote {
+        rect.left() + 11.0
+    } else {
+        rect.left() + 15.0
+    };
     paint_view_glyph(
         &painter,
         Rect::from_center_size(pos2(icon_x, rect.center().y), vec2(14.0, 14.0)),
@@ -1926,28 +2775,31 @@ fn draw_clear_view(
     }
     if !compact {
         let label = painter.layout_no_wrap(view.name.to_owned(), view_font(view.active), ink);
-        let at = pos2(rect.left() + 28.0, rect.center().y - label.size().y * 0.5);
-        let label_width = label.size().x.min(VIEW_LABEL_MAX);
+        let at = pos2(rect.left() + if remote { 21.0 } else { 28.0 }, rect.center().y - label.size().y * 0.5);
+        let hide_name = remote_name_hidden(view, stage);
+        let label_width = if hide_name { 0.0 } else { label.size().x.min(VIEW_LABEL_MAX) };
         let label_rect = Rect::from_min_size(pos2(at.x, rect.top()), vec2(label_width, rect.height())).intersect(rect);
-        painter.with_clip_rect(label_rect).galley(at, label, ink);
-        if view.state == ViewState::Deleted {
+        if !hide_name {
+            painter.with_clip_rect(label_rect).galley(at, label, ink);
+        }
+        if !hide_name && view.state == ViewState::Deleted {
             painter.hline(egui::Rangef::new(at.x, label_rect.right()), rect.center().y, Stroke::new(1.0, t.text_dim));
         }
         let mut after = at.x + label_width + 4.0;
-        if view.state == ViewState::SourceChanged {
+        if !hide_name && view.state == ViewState::SourceChanged {
             painter.circle_stroke(pos2(after + 4.0, rect.center().y), 3.0, Stroke::new(1.0, t.warning));
             after += 12.0;
         }
-        if remote {
-            let badge = window_badge(view, stage);
+        if remote && !show_action {
+            let badge = window_badge(view);
             let mark = Rect::from_min_size(pos2(after, rect.center().y - 5.5), vec2(11.0, 11.0));
-            let badge_ink = t.app_bar_text.gamma_multiply(0.70);
-            paint_view_glyph(&painter, mark, "window", badge_ink);
+            let badge_ink = t.app_bar_text.gamma_multiply(opacity);
+            paint_view_glyph(&painter, mark, crate::icons::window_icon(false), badge_ink);
             solidcraft_ui_registry::publish_target(&format!("{}{k}:window", strip.handles.view), mark);
             painter.text(pos2(mark.right() + 4.0, rect.center().y), Align2::LEFT_CENTER, badge, crate::type_face::semibold(t.font_small), badge_ink);
         }
     }
-    if look == ViewLook::Ground {
+    if look == ViewLook::Ground || view.sketch_mode {
         let underline = Rect::from_min_max(pos2(rect.left() + 8.0, rect.bottom() - 2.0), pos2(rect.right() - 8.0, rect.bottom()));
         painter.rect_filled(underline, 1, view.underline);
     }
@@ -1984,6 +2836,7 @@ fn draw_clear_view(
     } else if response.secondary_clicked()
         || (response.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10)))
     {
+        claim_tab_context_click(ui.ctx());
         pen.popup = Some((Popup::View(k), pos2(rect.left(), pen.below), rect, ui.ctx().cumulative_frame_nr()));
     } else if response.clicked() || key(egui::Key::Enter) {
         response.request_focus();
@@ -2005,12 +2858,14 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     let t = Tokens::get();
     let painter = ui.painter().clone();
     let modern = g.stage.is_some();
-    let line = Stroke::new(1.0, if modern { t.app_bar_hover_strong } else { line_colour(&t) });
-    let height = if modern { CLEAR_VIEW_HEIGHT } else { VIEW_HEIGHT };
+    let line = Stroke::new(1.0, if modern { t.app_bar_hover_subtle } else { line_colour(&t) });
+    let height = VIEW_HEIGHT;
     let cy = pr.center().y;
-    let backing = if modern { pr } else { group_backing(pr) };
-    painter.rect_filled(backing, PILL_RADIUS, if modern { t.app_bar_hover } else { t.app_bar_tab_active });
-    painter.rect_stroke(backing, PILL_RADIUS, line, egui::StrokeKind::Inside);
+    let backing = group_backing(pr);
+    painter.rect_filled(backing, PILL_RADIUS, if modern { t.app_bar_hover_subtle } else { t.app_bar_tab_active });
+    if !modern {
+        painter.rect_stroke(backing, PILL_RADIUS, line, egui::StrokeKind::Inside);
+    }
     let divider_height = if modern { 8.0 } else { 9.0 };
     let separator = |x: f32| painter.line_segment([pos2(x, cy - divider_height), pos2(x, cy + divider_height)], line);
     let name_end = pr.left() + 13.0 + g.dot + g.name_w + 10.0;
@@ -2023,7 +2878,8 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     let has_layout = !strip.layout_menu.is_empty();
     let layout_x = close.left() - 20.0 + if strip.pop_out || modern { DESIGN_CLOSE_WIDTH } else { 0.0 };
     let layout = Rect::from_center_size(pos2(layout_x, cy), vec2(24.0, if modern { 26.0 } else { 24.0 }));
-    let plus = if has_layout { layout.translate(vec2(-LAYOUT_BUTTON, 0.0)) } else { layout };
+    let plus_x = if has_layout { layout.left() - 16.0 } else { layout_x };
+    let plus = Rect::from_center_size(pos2(plus_x, cy), vec2(24.0, if modern { 26.0 } else { 24.0 }));
     if modern && has_layout {
         separator(layout.left() - 2.0);
     }
@@ -2071,7 +2927,8 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     let mut local = tab.views.iter().take(first).filter(|view| view.to_window.is_none()).count();
     for (k, view) in tab.views.iter().enumerate().skip(first).take(count) {
         let w = g.view_ws.get(k).copied().unwrap_or(0.0);
-        let rect = Rect::from_min_size(pos2(x, cy - height / 2.0), vec2(w, height));
+        let tab_height = if modern && view.to_window.is_some() { height - 2.0 } else { height };
+        let rect = Rect::from_min_size(pos2(x, cy - tab_height / 2.0), vec2(w, tab_height));
         let opening_after = gap.is_some_and(|(index, _)| local >= index);
         let open = gap.filter(|_| opening_after).map_or(0.0, |(_, rect)| rect.width() + VIEW_GAP);
         let close = source.filter(|drag| slot.is_some() && k > drag.from).map_or(0.0, |drag| drag.origin.width() + VIEW_GAP);
@@ -2126,7 +2983,11 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     }
     plus_button(ui, strip, plus, 14.0, pen);
     if has_layout {
-        layout_button(ui, strip, layout, pen);
+        if clear_layout_data(strip).is_some() {
+            clear_layout_button(ui, strip, layout, pen);
+        } else {
+            layout_button(ui, strip, layout, pen);
+        }
     }
     if !strip.pop_out {
         if !modern {
@@ -2166,16 +3027,32 @@ fn layout_key(id: &str) -> &str {
     id.rsplit('.').next().unwrap_or(id)
 }
 
-/// Paints the miniature of the layout `key` in `rect`: the focused view is the tinted cell and
-/// the others are framed.
-fn paint_layout(p: &Painter, rect: Rect, key: &str) {
+fn clear_layout_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, pen: &mut Pen) {
     let t = Tokens::get();
-    let inner = rect.shrink(6.0);
-    let gap = 3.0;
+    let response = ui.interact(rect, ui.scope_id().with("view_layout"), Sense::click());
+    let open = pen.popup.is_some_and(|(which, ..)| which == Popup::Layout);
+    let name = layout_name(strip);
+    let args = [("layout", name)];
+    let label = solidcraft_ui_text::format("view_layout.button_a11y", &args);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(open));
+    solidcraft_ui_registry::publish_target("view:layout", rect);
+    let painter = ui.painter();
+    if response.has_focus() || response.hovered() || open {
+        painter.rect_filled(rect, CLEAR_VIEW_RADIUS, if open { t.app_bar_hover_strong } else { t.app_bar_hover_button });
+    }
+    let glyph = Rect::from_center_size(rect.center(), vec2(16.0, 16.0));
+    paint_layout_glyph(painter, glyph, "layout.grid", t.app_bar_text);
+    if response.backing_on_hover_text(solidcraft_ui_text::format("view_layout.button", &args)).clicked() {
+        toggle(ui.ctx(), &mut pen.popup, Popup::Layout, pos2(rect.right(), pen.below), rect);
+    }
+}
+
+fn layout_cells(inner: Rect, gap: f32, key: &str) -> Vec<Rect> {
     let (w, h) = (inner.width(), inner.height());
     let half = |len: f32| (len - gap) / 2.0;
     let cell = |x: f32, y: f32, cw: f32, ch: f32| Rect::from_min_size(inner.min + vec2(x, y), vec2(cw, ch));
-    let cells: Vec<Rect> = match key {
+    match key {
         "side_by_side" => vec![cell(0.0, 0.0, half(w), h), cell(half(w) + gap, 0.0, half(w), h)],
         "stacked" => vec![cell(0.0, 0.0, w, half(h)), cell(0.0, half(h) + gap, w, half(h))],
         "large_and_two" => {
@@ -2189,13 +3066,31 @@ fn paint_layout(p: &Painter, rect: Rect, key: &str) {
             cell(half(w) + gap, half(h) + gap, half(w), half(h)),
         ],
         _ => vec![cell(0.0, 0.0, w, h)],
-    };
-    for (i, c) in cells.into_iter().enumerate() {
+    }
+}
+
+/// Paints the miniature of the layout key in rect: the focused view is tinted and the others are framed.
+fn paint_layout(p: &Painter, rect: Rect, key: &str) {
+    let t = Tokens::get();
+    for (i, c) in layout_cells(rect.shrink(6.0), 3.0, key).into_iter().enumerate() {
         if i == 0 {
             p.rect_filled(c, 3u8, t.accent_soft);
         } else {
             p.rect_filled(c, 3u8, t.panel_header);
             p.rect_stroke(c, 3u8, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+        }
+    }
+}
+
+/// The glyph shared by the compact app bar button and the layout choices.
+pub(crate) fn paint_layout_glyph(p: &Painter, rect: Rect, layout: &str, ink: egui::Color32) {
+    let unit = rect.width().min(rect.height()) / 16.0;
+    let inside = rect.shrink(unit);
+    for (index, cell) in layout_cells(inside, unit, layout_key(layout)).into_iter().enumerate() {
+        if index == 0 {
+            p.rect_filled(cell, 2, ink);
+        } else {
+            p.rect(cell, 2, ink.gamma_multiply(0.22), Stroke::new(unit, ink.gamma_multiply(0.7)), egui::StrokeKind::Inside);
         }
     }
 }
@@ -2316,6 +3211,17 @@ fn draw_switcher(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g:
     close_design_button(ui, strip, tab, g, Rect::from_center_size(pos2(pr.right() - 15.0, cy), vec2(22.0, 22.0)), 12.0, pen);
 }
 
+/// Opens the shared view menu at a card's header control.
+pub fn open_card_view_menu(ctx: &egui::Context, strip: egui::Id, view: usize, anchor: &egui::Response) {
+    let opened = ctx.cumulative_frame_nr();
+    let popup: PopupState = Some((Popup::View(view), anchor.rect.left_bottom(), anchor.rect, opened));
+    ctx.data_mut(|data| {
+        data.insert_temp(strip.with("view_popup"), popup);
+        data.insert_temp(strip.with("view_menu_focus"), (opened, anchor.id));
+    });
+    ctx.request_repaint();
+}
+
 /// The open menu of the selected design's views (a view's, the +'s, the switcher's, the "N more"
 /// list): draws it and returns what was chosen through `pen`. It closes when a row is chosen, on
 /// Escape and on a press elsewhere.
@@ -2323,6 +3229,12 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
     let Some((which, at, opener, opened)) = pen.popup else {
         return;
     };
+    if which == Popup::Layout
+        && let Some(data) = clear_layout_data(strip)
+    {
+        clear_layout_popup(ui, strip, data, opener, opened, pen);
+        return;
+    }
     let views = strip.tabs.get(strip.selected).map_or(&[][..], |tab| tab.views);
     if matches!(which, Popup::View(k) if k >= views.len()) {
         pen.popup = None;
@@ -2336,7 +3248,17 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
         Popup::View(index) => views.get(index).is_none_or(|view| view.to_window.is_none()),
         _ => true,
     };
-    let mut flyout = TabFlyout { open: open.map(|state| state.2), target: None, focus_first: false, local_view };
+    let frame = ui.ctx().cumulative_frame_nr();
+    let view_focus = strip.id.with("view_menu_focus");
+    let from_card = ui.ctx().data(|data| data.get_temp::<(u64, egui::Id)>(view_focus)).filter(|(at, _)| *at == opened);
+    let fresh = matches!(which, Popup::View(_)) && (frame == opened || (from_card.is_some() && frame == opened.saturating_add(1)));
+    if fresh
+        && from_card.is_none()
+        && let Some(focus) = ui.memory(|memory| memory.focused())
+    {
+        ui.ctx().data_mut(|data| data.insert_temp(view_focus, (opened, focus)));
+    }
+    let mut flyout = TabFlyout { open: open.map(|state| state.2), target: None, focus_first: fresh, local_view };
     let resp = crate::Container::new(ui.ctx(), crate::Surface::Popup)
         .area(strip.id.with("view_popup_area"))
         .fixed_pos(at)
@@ -2346,9 +3268,15 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
                 Popup::View(k) => {
                     let locals = views.iter().filter(|view| view.to_window.is_none()).count();
                     let off = if views.iter().skip(k + 1).any(|view| view.to_window.is_none()) { "" } else { strip.view_right_row };
-                    menu_rows(ui, strip.view_menu, true, locals > 1, off, h.menu_row, Some(&mut flyout)).map(|id| TabAction::ViewMenu { view: k, id })
+                    let compass = views.get(k).and_then(|view| view.compass);
+                    let rows: Vec<_> = strip
+                        .view_menu
+                        .iter()
+                        .filter_map(|row| if row.id == "view.compass" { compass.map(|checked| TabMenuRow { checked, ..*row }) } else { Some(*row) })
+                        .collect();
+                    menu_rows(ui, &rows, true, locals > 1, off, h.menu_row, Some(&mut flyout)).map(|id| TabAction::ViewMenu { view: k, id })
                 }
-                Popup::Plus => menu_rows(ui, strip.plus_menu, true, true, "", h.menu_row, None).map(|id| TabAction::PlusMenu { id }),
+                Popup::Plus => menu_rows(ui, strip.plus_menu, true, true, "", h.menu_row, Some(&mut flyout)).map(|id| TabAction::PlusMenu { id }),
                 Popup::Layout => layout_grid(ui, strip).map(|id| TabAction::LayoutMenu { id }),
                 Popup::More => {
                     if strip.clear_view_tabs
@@ -2379,6 +3307,7 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
         let id = sub?.inner?;
         match which {
             Popup::View(view) => Some(TabAction::ViewMenu { view, id }),
+            Popup::Plus => Some(TabAction::PlusMenu { id }),
             Popup::Switcher => Some(TabAction::SwitcherMenu { id }),
             _ => None,
         }
@@ -2389,8 +3318,15 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
         && !resp.response.contains_pointer()
         && !in_submenu
         && !on_opener;
-    if selected.is_some() || pressed_outside || ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+    let escape = ui.ctx().input(|i| i.key_pressed(egui::Key::Escape));
+    if selected.is_some() || pressed_outside || escape {
         pen.popup = None;
+        if matches!(which, Popup::View(_)) {
+            if escape && let Some((_, focus)) = ui.ctx().data(|data| data.get_temp::<(u64, egui::Id)>(view_focus)).filter(|(at, _)| *at == opened) {
+                ui.memory_mut(|memory| memory.request_focus(focus));
+            }
+            ui.ctx().data_mut(|data| data.remove::<(u64, egui::Id)>(view_focus));
+        }
     }
     if let Some((view, row)) = next_menu {
         pen.popup = Some((Popup::View(view), row.right_top(), row, ui.ctx().cumulative_frame_nr()));
@@ -2413,6 +3349,45 @@ pub fn clear_view_popup(ctx: &egui::Context, strip: egui::Id) {
         data.remove::<PopupState>(strip.with("view_popup"));
         data.remove::<ViewDrag>(strip.with("view_drag"));
     });
+}
+
+fn clear_layout_popup(ui: &egui::Ui, strip: &TabStrip, data: &crate::view_layout_menu::LayoutMenu, opener: Rect, opened: u64, pen: &mut Pen) {
+    use crate::view_layout_menu;
+    let screen = ui.ctx().content_rect();
+    let width = view_layout_menu::WIDTH.min(screen.width());
+    let id = strip.id.with("clear_view_layout_popup");
+    let height = ui.ctx().memory(|memory| memory.area_rect(id)).map_or(0.0, |rect| rect.height());
+    let left = (opener.right() - width).clamp(screen.left(), (screen.right() - width).max(screen.left()));
+    let above = opener.top() - height;
+    let top = if opener.bottom() + height > screen.bottom() && above >= screen.top() { above } else { opener.bottom() };
+    let available_height = (screen.bottom() - top).max(0.0);
+    let response = crate::Container::new(ui.ctx(), crate::Surface::Popup).area(id).fixed_pos(pos2(left, top)).order(egui::Order::Foreground).show(
+        ui.ctx(),
+        |ui| {
+            // egui remembers the earlier popup size. The one-window menu must be able to grow
+            // when another window appears.
+            ui.set_max_height(available_height);
+            crate::menu::Menu::show(ui, width, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("layout_controls")
+                    .max_height((available_height - 14.0).max(0.0))
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| view_layout_menu::show(ui, strip, data, opened))
+                    .inner
+            })
+        },
+    );
+    let inside = ui.ctx().pointer_latest_pos().is_some_and(|pos| {
+        opener.contains(pos) || response.response.rect.contains(pos) || response.inner.submenu.is_some_and(|rect| rect.contains(pos))
+    });
+    let outside = opened != ui.ctx().cumulative_frame_nr() && !inside && ui.input(|input| input.pointer.any_pressed());
+    let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
+    let chose_final = response.inner.action.as_deref().is_some_and(|id| !view_layout_menu::keep_open(id));
+    if outside || escape || chose_final {
+        pen.popup = None;
+        ui.memory_mut(|memory| memory.request_focus(ui.scope_id().with("view_layout")));
+    }
+    pen.actions.extend(response.inner.action.map(|id| TabAction::LayoutMenu { id }));
 }
 
 /// The selected design strip can receive a view from another window.
@@ -2466,6 +3441,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
 
 /// Draw the strip and report the current drop geometry in window coordinates.
 pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) -> (Vec<TabAction>, Vec<ViewDropZone>) {
+    ui.ctx().data_mut(|data| data.remove::<usize>(strip.id.with("view_hover")));
     let t = Tokens::get();
     let h = strip.handles;
     let n = strip.tabs.len();
@@ -2583,7 +3559,6 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         let plain = kind == SelectedLayout::Plain;
         let height = match kind {
             SelectedLayout::Plain => r.height() - 8.0,
-            SelectedLayout::Pill if strip.clear_view_tabs => 36.0_f32.min(r.height() - 2.0),
             SelectedLayout::Pill => DESIGN_PILL_HEIGHT.min(r.height() - 4.0),
             SelectedLayout::Switcher => 30.0_f32.min(r.height() - 4.0),
         };
@@ -2593,18 +3568,19 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         let hit = if plain { tr } else { Rect::from_min_size(tr.min, vec2((13.0 + dot + name_w + 10.0).min(tr.width()), tr.height())) };
         let active = strip.shown_selected == Some(i);
         let resp = ui.interact(hit, ui.scope_id().with(("doc_tab", i)), Sense::click_and_drag());
+        if n > 1 && !(active && strip.rename.is_some()) && resp.hovered() {
+            ui.ctx().set_cursor_icon(drag_cursor(resp.is_pointer_button_down_on()));
+        }
         solidcraft_ui_registry::publish_target(&format!("{}{i}", h.tab), hit);
-        // Dragging a tab along the strip moves it. The tabs are also part of the title bar:
-        // dragging the only tab, or one mostly up or down, moves the window. A double click
-        // renames the tab (the first click selected it), or maximizes the window as the bar's
-        // empty space does.
+        // Dragging a tab along the strip moves it. A double click renames the tab (the first
+        // click selected it), or maximizes the window as the bar's empty space does.
         if resp.drag_started_by(egui::PointerButton::Primary) {
             let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(tr.center());
             let moved = pointer.unwrap_or(origin) - origin;
+            // A drag that starts on a tab never moves the window (only empty bar space does,
+            // `window_chrome::drag_area`), whatever its direction and however many tabs there are.
             if n > 1 && (!strip.title_bar || moved.x.abs() >= moved.y.abs()) {
                 drag = Some(TabDrag { from: i, grab: origin.x - tr.left() });
-            } else if strip.title_bar {
-                crate::window_chrome::hand_press_to_os(ui.ctx(), egui::ViewportCommand::StartDrag);
             }
         } else if resp.double_clicked() {
             if strip.double_click_renames {
@@ -2673,6 +3649,7 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
             crate::icons::paint_ink(ui.painter(), br, "shield", badge.ink(&t));
         }
         if !strip.pop_out && resp.secondary_clicked() {
+            claim_tab_context_click(ui.ctx());
             menu = Some((i, ui.ctx().pointer_interact_pos().unwrap_or(tr.left_bottom())));
         }
         // A middle click closes the tab, as in a web browser.
@@ -2707,6 +3684,9 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         } else if (if held.is_some() { resp } else { resp.backing_on_hover_text(tip) }).clicked() {
             pick = Some(i);
         }
+    }
+    if drag.is_some() || pen.drag.is_some() {
+        ui.ctx().set_cursor_icon(drag_cursor(true));
     }
     ui.ctx().data_mut(|d| match drag {
         Some(v) => {
@@ -2878,7 +3858,7 @@ fn file_rows(ui: &mut egui::Ui, rows: &[FileRow], chosen: &mut Option<String>, i
                 crate::Menu::button(ui, label, |ui| file_rows(ui, rows, chosen, true));
             }
             FileRow::Separator => {
-                ui.separator();
+                crate::Menu::separator(ui);
             }
         }
     }
@@ -2993,7 +3973,12 @@ pub fn overflow_menu(ctx: &egui::Context, rows: &[OverflowItem], button: Option<
     }
     let menu_rows: Vec<FileRow> = rows
         .iter()
+        // A Space has no visual or action when it yields to real controls.
+        .filter(|row| !row.id.starts_with("space:"))
         .map(|row| {
+            if row.id.starts_with("separator:") {
+                return FileRow::Separator;
+            }
             FileRow::Item(FileItem {
                 id: format!("appbar:overflow:{}", row.id),
                 label: row.label.clone(),

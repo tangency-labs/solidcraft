@@ -419,7 +419,11 @@ impl<'a> Tree<'a> {
     /// The structure of `doc` with the bodies of `state`, its evaluated model.
     pub fn new(doc: &'a Document, state: &'a ModelState) -> Tree<'a> {
         let mut children: HashMap<u64, Vec<Placed>> = HashMap::new();
+        let inactive = doc.inactive_pattern_occurrences();
         for (o, bom_type) in doc.occurrences.iter().zip(doc.occurrence_bom_types()) {
+            if inactive.contains(&o.id) {
+                continue;
+            }
             children.entry(o.parent).or_default().push(Placed { occurrence: o.id, member: Member { component: o.component, bom_type } });
         }
         let mut components: HashMap<u64, &Component> = HashMap::new();

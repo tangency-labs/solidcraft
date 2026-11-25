@@ -87,8 +87,11 @@ fn wire_frame_pending_moves_other_owner_and_legacy_world_do_not_join() {
     run(&mut s, "component.activate", json!({"component":0}));
     let root = run(&mut s, "sketch.create", json!({"plane":"XY","name":"Root path"}))["sketch"].as_u64().unwrap();
     run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    // Starting another component ends the open sketch; the person reopens it.
+    run(&mut s, "sketch.finish", json!({}));
     let unrelated = run(&mut s, "component.create", json!({"name":"Unrelated"}))["occurrence"].as_u64().unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence":unrelated,"translate":[100,200,300]}));
+    run(&mut s, "sketch.edit", json!({"sketch":root}));
     run(&mut s, "sketch.point3d", json!({"sketch":root,"point":[9,8,7]}));
     near(s.doc.sketch(root).unwrap().wires[0].fit[0], Vec3::new(9.0, 8.0, 7.0));
 }
@@ -167,12 +170,14 @@ fn wire_frame_include_other_component_refresh_break_lost_and_reopen() {
 fn wire_frame_pipe_component_and_world_paths_have_analytic_volume_and_position() {
     for space in [WireSpace::Component, WireSpace::World] {
         let (mut s, _, first, second) = second_frame();
+        let sketch = s.active_sketch.unwrap();
         if space == WireSpace::World {
             // A single placed owner lets an immutable world path stay physically fixed;
             // replicated solids still follow their occurrence placements by design.
             run(&mut s, "selection.delete", json!({"items":[{"type":"occurrence","path":[first]}]}));
+            // Deleting a body or occurrence ends the open sketch; reopen it.
+            run(&mut s, "sketch.edit", json!({"sketch":sketch}));
         }
-        let sketch = s.active_sketch.unwrap();
         let wire = if space == WireSpace::Component {
             run(&mut s, "sketch.line3d", json!({"points":[[17,32,45],[17,32,55]]}))["curves"][0].as_str().unwrap().to_string()
         } else {
@@ -1394,6 +1399,24 @@ fn move_with_z_lifts_picked_points_too() {
     near(w.fit[1], Vec3::new(5.0, 14.0, 4.0));
 }
 
+#[test]
+fn moving_a_line_and_a_lone_point_off_the_plane_keeps_the_other_lines() {
+    let (mut s, sketch) = plane_3d_sketch();
+    let l1 = run(&mut s, "sketch.line", json!({"points":[[20,0],[30,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let p = run(&mut s, "sketch.point", json!({"point":[25,5]}))["created"]["points"][0].as_str().unwrap().to_string();
+    let l2 = run(&mut s, "sketch.line", json!({"points":[[20,10],[30,10]]}))["curves"][0].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.move", json!({"entities":[l1, p.clone()], "translate":[0,0], "z": 5}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.curve_index(&l2).is_some(), "the other line stays: {r}");
+    let at = |end: &str, x: f64, y: f64| {
+        sk.resolve_point(&format!("{l2}.{end}")).is_some_and(|i| (sk.points[i].pos.x - x).abs() < 1e-9 && (sk.points[i].pos.y - y).abs() < 1e-9)
+    };
+    assert!(at("start", 20.0, 10.0) && at("end", 30.0, 10.0), "the other line is where it was");
+    assert!(sk.point_index(&p).is_none(), "the plane point went");
+    let fits: Vec<Vec3> = sk.wires.iter().flat_map(|w| w.fit.clone()).collect();
+    assert!(fits.iter().any(|q| q.dist(Vec3::new(25.0, 5.0, 5.0)) < 1e-9), "{fits:?}");
+}
+
 /// What can't leave the plane says so and changes nothing: `z` on a circle is refused, the
 /// doc is the same afterwards.
 #[test]
@@ -1851,4 +1874,280 @@ fn move_z_mixed_plane_and_drawn_picks_lift_together() {
     let a = plane.origin + y * 2.0 + n * 3.0;
     near(lifted[0], a);
     near(lifted[1], a + x * 10.0);
+}
+
+const CONTROL: &str = "sketch.spline3d.control_point";
+
+/// A 3D sketch on the XY plane being edited, and its id.
+fn sketch_3d() -> (Session, u64) {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    (s, sketch)
+}
+
+/// The drawn 3D curve `wire` of `sketch`, as stored.
+fn stored_wire(s: &Session, sketch: u64, wire: &str) -> solidcraft_sketch::Wire {
+    let sk = s.doc.sketch(sketch).unwrap();
+    sk.wires[sk.wire_index(wire).unwrap()].clone()
+}
+
+/// The volume of the body made last.
+fn last_volume(s: &Session) -> f64 {
+    let world = s.world_state().unwrap();
+    solidcraft_kernel::measure(&world.bodies.last().unwrap().body).unwrap().volume
+}
+
+/// Length of the cubic Bézier over `p`, by Simpson's rule on the speed
+/// |B'(t)| = 3 |(1-t)² (P1-P0) + 2t(1-t) (P2-P1) + t² (P3-P2)| (2000 steps: far below the
+/// tolerances here).
+fn cubic_length(p: [Vec3; 4]) -> f64 {
+    let speed = |t: f64| ((p[1] - p[0]) * ((1.0 - t) * (1.0 - t)) + (p[2] - p[1]) * (2.0 * t * (1.0 - t)) + (p[3] - p[2]) * (t * t)).len() * 3.0;
+    let n = 2000;
+    let h = 1.0 / n as f64;
+    (0..=n)
+        .map(|i| {
+            speed(i as f64 * h)
+                * if i == 0 || i == n {
+                    1.0
+                } else if i % 2 == 1 {
+                    4.0
+                } else {
+                    2.0
+                }
+        })
+        .sum::<f64>()
+        * h
+        / 3.0
+}
+
+/// Three control points of the parabola z = x²/20 over x in -20…20, in the XZ plane: the
+/// quadratic Bézier from (-20, 0, 20) to (20, 0, 20) whose tangents meet at (0, 0, -20). Its
+/// length is 10 (2√5 + asinh 2), and it bends no tighter than radius 10 (at its vertex).
+const PARABOLA: [[f64; 3]; 3] = [[-20.0, 0.0, 20.0], [0.0, 0.0, -20.0], [20.0, 0.0, 20.0]];
+
+fn parabola_length() -> f64 {
+    10.0 * (2.0 * 5.0_f64.sqrt() + 2.0_f64.asinh())
+}
+
+#[test]
+fn a_3d_control_point_spline_is_drawn_over_its_control_points_in_one_undo_step() {
+    let (mut s, sketch) = sketch_3d();
+    let ctrl =
+        [Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 20.0), Vec3::new(20.0, 0.0, 40.0), Vec3::new(40.0, 20.0, 40.0), Vec3::new(60.0, 30.0, 60.0)];
+    let before = s.doc.to_json();
+    let undo = s.undo.len();
+    let r = run(&mut s, CONTROL, json!({"points": ctrl}));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    let id = r["curves"][0].as_str().unwrap().to_string();
+    let w = stored_wire(&s, sketch, &id);
+    assert_eq!(w.fit, ctrl.to_vec());
+    assert_eq!(w.control, Some(solidcraft_sketch::WireControl { degree: 3 }));
+    assert!(w.arc.is_none() && w.link.is_none());
+    // The curve starts and ends on its end control points and passes the others by: the two
+    // spans of five control points join at (P1 + 2 P2 + P3) / 4, by inserting the knot ½.
+    assert_eq!((w.pts.first(), w.pts.last()), (ctrl.first(), ctrl.last()));
+    near(w.pts[(w.pts.len() - 1) / 2], (ctrl[1] + ctrl[2] * 2.0 + ctrl[3]) * 0.25);
+    assert!(w.pts.iter().all(|p| ctrl[1..4].iter().all(|c| p.dist(*c) > 1.0)));
+    let insp = run(&mut s, "sketch.inspect", json!({}));
+    let entry = insp["wires"].as_array().unwrap().iter().find(|e| e["id"] == json!(id)).unwrap();
+    assert_eq!(entry["control"], json!({"degree": 3, "points": ctrl}));
+    // A spline through fit points says nothing of control points.
+    let fit = run(&mut s, "sketch.spline3d", json!({"points": [[0, 50, 0], [10, 60, 10], [20, 50, 20]]}))["curves"][0].as_str().unwrap().to_string();
+    let insp = run(&mut s, "sketch.inspect", json!({}));
+    assert!(insp["wires"].as_array().unwrap().iter().find(|e| e["id"] == json!(fit)).unwrap().get("control").is_none());
+    run(&mut s, "edit.undo", json!({}));
+    // Undo takes the curve away whole; redo draws the same curve again.
+    let drawn = s.doc.to_json();
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.to_json(), drawn);
+    assert_eq!(stored_wire(&s, sketch, &id), w);
+}
+
+#[test]
+fn a_3d_control_point_moves_its_curve_through_undo_redo_and_reopening() {
+    let (mut s, sketch) = sketch_3d();
+    let id = run(&mut s, CONTROL, json!({"points": [[0, 0, 0], [0, 0, 20], [20, 0, 40], [40, 20, 40]]}))["curves"][0].as_str().unwrap().to_string();
+    let drawn = stored_wire(&s, sketch, &id);
+    let undo = s.undo.len();
+    let r = run(&mut s, "sketch.move3d", json!({"wire": id, "index": 2, "to": [20, 10, 30]}));
+    assert_eq!(r["moved"], json!(1));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    let moved = stored_wire(&s, sketch, &id);
+    let ctrl = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 20.0), Vec3::new(20.0, 10.0, 30.0), Vec3::new(40.0, 20.0, 40.0)];
+    assert_eq!(moved.fit, ctrl.to_vec());
+    assert_eq!(moved.control, drawn.control);
+    // Four control points are one cubic Bézier: its middle is (P0 + 3 P1 + 3 P2 + P3) / 8, off
+    // the control point that moved.
+    near(moved.pts[(moved.pts.len() - 1) / 2], (ctrl[0] + ctrl[1] * 3.0 + ctrl[2] * 3.0 + ctrl[3]) * 0.125);
+    // A move by an offset, on an end: the curve still ends on its last control point.
+    run(&mut s, "sketch.move3d", json!({"wire": id, "index": 3, "by": [0, 0, 5]}));
+    let ended = stored_wire(&s, sketch, &id);
+    assert_eq!(ended.pts.last(), Some(&Vec3::new(40.0, 20.0, 45.0)));
+    // Saved and read back, the curve is the same control point spline.
+    let saved = s.doc.to_json();
+    let file: Value = serde_json::from_str(&saved).unwrap();
+    let wires: Vec<&Value> = file["features"].as_array().unwrap().iter().filter_map(|f| f["sketch"]["wires"].as_array()).flatten().collect();
+    assert_eq!(wires.len(), 1);
+    assert_eq!(wires[0]["control"], json!({"degree": 3}), "the design saves the curve's control form");
+    let restored = solidcraft_doc::format::read(&saved).unwrap();
+    assert_eq!(restored.sketch(sketch).unwrap().wires, s.doc.sketch(sketch).unwrap().wires);
+    assert_eq!(restored.to_json(), saved);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(stored_wire(&s, sketch, &id), moved);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(stored_wire(&s, sketch, &id), drawn);
+    run(&mut s, "edit.redo", json!({}));
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(stored_wire(&s, sketch, &id), ended);
+    // There is no fifth control point, and a control point cannot land on its neighbour.
+    let before = s.doc.to_json();
+    assert!(s.execute("sketch.move3d", &json!({"wire": id, "index": 4, "to": [1, 2, 3]})).is_err());
+    assert!(s.execute("sketch.move3d", &json!({"wire": id, "index": 1, "to": [0, 0, 0]})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn a_3d_control_point_spline_refuses_hostile_input_and_needs_a_3d_sketch() {
+    let mut s = Session::default();
+    assert!(!crate::cmd::find_command(CONTROL).unwrap().info(&s).enabled, "offered with no sketch being edited");
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    assert!(!crate::cmd::find_command(CONTROL).unwrap().info(&s).enabled, "offered in a plain 2D sketch");
+    let good = json!({"points": [[0, 0, 0], [0, 0, 20], [20, 0, 40]]});
+    let off = s.execute(CONTROL, &good).unwrap_err().to_string();
+    assert!(off.contains("3D Sketch"), "{off}");
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    assert!(crate::cmd::find_command(CONTROL).unwrap().info(&s).enabled);
+    let doc = s.doc.to_json();
+    let history = (s.undo.len(), s.redo.len());
+    let many: Vec<Value> = (0..501).map(|i| json!([i, 0, 0])).collect();
+    for p in [
+        json!({}),
+        json!({"points": [[0, 0, 0], [0, 0, 20]]}),             // two control points are a line
+        json!({"points": [[0, 0, 0], [0, 0, 0], [20, 0, 40]]}), // neighbours at one place
+        json!({"points": [[0, 0, 0], [f64::NAN, 0, 20], [20, 0, 40]]}),
+        json!({"points": [[0, 0, 0], [1e100, 0, 20], [20, 0, 40]]}),
+        json!({"points": [[0, 0, 0], ["nope", 0, 20], [20, 0, 40]]}),
+        json!({"points": [[0, 0, 0], [0, 20], [20, 0, 40]]}),
+        json!({"points": many}),
+        json!({"points": "x"}),
+    ] {
+        assert!(s.execute(CONTROL, &p).is_err(), "{p}");
+        assert_eq!(s.doc.to_json(), doc);
+        assert_eq!((s.undo.len(), s.redo.len()), history);
+    }
+    let two = s.execute(CONTROL, &json!({"points": [[0, 0, 0], [0, 0, 20]]})).unwrap_err().to_string();
+    assert!(two.contains("`points` needs 3 to 500 points"), "{two}");
+    run(&mut s, CONTROL, good);
+}
+
+#[test]
+fn a_pipe_follows_a_3d_control_point_spline_and_its_moved_control_point() {
+    let (mut s, sketch) = sketch_3d();
+    let wire = run(&mut s, CONTROL, json!({"points": PARABOLA}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.pipe", json!({"path_sketch":sketch,"path":[wire],"diameter":4}));
+    // A round tube along a curve that bends wider than the tube holds its section's area times
+    // the curve's length (Pappus): 4π mm² along the parabola, not along the longer way
+    // through the control point at the bottom.
+    let area = 4.0 * std::f64::consts::PI;
+    let along_parabola = area * parabola_length();
+    assert!((last_volume(&s) - along_parabola).abs() < 0.5, "{} is not {along_parabola}", last_volume(&s));
+    // Reopened, the pipe is built along the same curve.
+    let saved = s.doc.to_json();
+    let mut reopened = Session { doc: solidcraft_doc::format::read(&saved).unwrap().into(), ..Default::default() };
+    reopened.refresh();
+    assert!((last_volume(&reopened) - along_parabola).abs() < 0.5, "{}", last_volume(&reopened));
+    // The middle control point lifted between the ends: the curve is the straight 40 mm between
+    // them, and the pipe follows it; undo puts the parabola back.
+    run(&mut s, "sketch.edit", json!({"sketch":sketch,"restore_marker":false}));
+    run(&mut s, "sketch.move3d", json!({"wire":wire,"index":1,"to":[0,0,20]}));
+    assert!((last_volume(&s) - area * 40.0).abs() < 0.05, "{} is not {}", last_volume(&s), area * 40.0);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), saved);
+    assert!((last_volume(&s) - along_parabola).abs() < 0.5, "{}", last_volume(&s));
+}
+
+#[test]
+fn a_sweep_follows_the_spans_of_a_3d_control_point_spline() {
+    let (mut s, path_sketch) = sketch_3d();
+    // Five control points leaving the origin straight up, then turning out of the XZ plane.
+    let c =
+        [Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 20.0), Vec3::new(20.0, 0.0, 40.0), Vec3::new(40.0, 20.0, 40.0), Vec3::new(60.0, 40.0, 40.0)];
+    let wire = run(&mut s, CONTROL, json!({"points": c}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let profile = run(&mut s, "sketch.create", json!({"plane":"XY","name":"Profile"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":2}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.sweep", json!({"sketch":profile,"path_sketch":path_sketch,"path":[wire],"operation":"new"}));
+    // Knots 0 0 0 0 ½ 1 1 1 1: inserting ½ until it is there three times leaves two cubic
+    // Béziers, P0 P1 (P1+P2)/2 J and J (P2+P3)/2 P3 P4, joined at J = (P1 + 2 P2 + P3) / 4.
+    let joint = (c[1] + c[2] * 2.0 + c[3]) * 0.25;
+    let length = cubic_length([c[0], c[1], (c[1] + c[2]) * 0.5, joint]) + cubic_length([joint, (c[2] + c[3]) * 0.5, c[3], c[4]]);
+    let swept = 4.0 * std::f64::consts::PI * length;
+    assert!((last_volume(&s) - swept).abs() < 0.5, "{} is not {swept}", last_volume(&s));
+    // A spline through the same five points is a longer curve: the sweep did not take that one.
+    let through: f64 = c.windows(2).map(|w| w[0].dist(w[1])).sum();
+    assert!(length < through - 5.0, "{length} against the polygon's {through}");
+}
+
+#[test]
+fn a_3d_control_point_spline_follows_its_owner_takes_constraints_and_copies() {
+    let (mut s, _, _, second) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    // World points; the owner's placement is (x, y, z) -> (20 - y, 30 + x, 40 + z).
+    let id =
+        run(&mut s, CONTROL, json!({"points": [[20, 30, 40], [20, 30, 60], [10, 50, 60], [0, 50, 80]]}))["curves"][0].as_str().unwrap().to_string();
+    let local = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 20.0), Vec3::new(20.0, 10.0, 20.0), Vec3::new(20.0, 20.0, 40.0)];
+    let w = stored_wire(&s, sketch, &id);
+    for (p, q) in w.fit.iter().zip(local) {
+        near(*p, q);
+    }
+    assert_eq!(w.space, WireSpace::Component);
+    let shown = |s: &Session, id: &str| {
+        let world = s.world_state().unwrap();
+        let sk = &world.sketch(sketch).unwrap().sketch;
+        sk.wires[sk.wire_index(id).unwrap()].clone()
+    };
+    let placed = shown(&s, &id);
+    assert_eq!(placed.control, w.control);
+    near(placed.fit[2], Vec3::new(10.0, 50.0, 60.0));
+    near(placed.pts[(placed.pts.len() - 1) / 2], (placed.fit[0] + placed.fit[1] * 3.0 + placed.fit[2] * 3.0 + placed.fit[3]) * 0.125);
+    run(&mut s, "occurrence.move", json!({"occurrence":second,"translate":[5,0,0]}));
+    near(shown(&s, &id).fit[2], Vec3::new(15.0, 50.0, 60.0));
+    // Moving the occurrence ended the sketch; open it again.
+    run(&mut s, "sketch.edit", json!({"sketch":sketch}));
+    // A line drawn from its end is joined to it; a control point takes On Plane and Fix.
+    let line = run(&mut s, "sketch.line3d", json!({"points": [[5, 50, 80], [5, 50, 100]]}));
+    assert_eq!(line["constraints"].as_array().map(Vec::len), Some(1), "joined to the spline's end: {line}");
+    run(&mut s, "sketch.constraint.on_plane", json!({"point": format!("{id}.1"), "plane": "yz"}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities": [format!("{id}.2")]}));
+    let held = s.execute("sketch.move3d", &json!({"wire": id, "index": 2, "by": [0, 0, 1]})).unwrap_err().to_string();
+    assert!(held.contains("fixed"), "{held}");
+    // World -X is the owner's +Y: a slide within the owner's YZ plane.
+    run(&mut s, "sketch.move3d", json!({"wire": id, "index": 1, "by": [-3, 0, 0]}));
+    let slid = stored_wire(&s, sketch, &id);
+    near(slid.fit[1], Vec3::new(0.0, 3.0, 20.0));
+    assert_eq!(slid.pts, solidcraft_sketch::control_polyline(&slid.fit, 3));
+    // A distance between two control points drives them, and the curve follows.
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [format!("{id}.start"), format!("{id}.1")], "value": 25}));
+    assert_eq!(d["type"], "distance", "{d}");
+    let slid = stored_wire(&s, sketch, &id);
+    assert!((slid.fit[0].dist(slid.fit[1]) - 25.0).abs() < 1e-6, "{:?}", slid.fit);
+    assert!(slid.fit[1].x.abs() < 1e-6, "still on the YZ plane: {:?}", slid.fit[1]);
+    assert_eq!(slid.pts, solidcraft_sketch::control_polyline(&slid.fit, 3));
+    // A copy is a control point spline too, over the copied control points.
+    let out = run(&mut s, "sketch.move", json!({"entities":[id],"copy":true,"translate":[0,0],"z":7}));
+    let copy = out["curves"][0].as_str().unwrap().to_string();
+    let copied = stored_wire(&s, sketch, &copy);
+    assert_eq!(copied.control, slid.control);
+    for (p, q) in copied.fit.iter().zip(&slid.fit) {
+        near(*p, *q + Vec3::new(0.0, 0.0, 7.0));
+    }
+    assert_eq!(copied.pts, solidcraft_sketch::control_polyline(&copied.fit, 3));
+    let restored = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    assert_eq!(restored.sketch(sketch).unwrap().wires, s.doc.sketch(sketch).unwrap().wires);
 }

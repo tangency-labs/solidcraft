@@ -1438,11 +1438,27 @@ impl SectionIndex {
 /// shown only when shown on their own. The user's own hide wins over the marker (#12125): the
 /// browser shows the eye off, and hiding the sketch again must take it away.
 pub fn sketch_shown(s: &Session, id: u64) -> bool {
+    sketch_shown_in(s, id, None)
+}
+
+/// Is a component sketch drawn at another placement of its component ([`solidcraft_doc::SketchCopy`])?
+/// As [`sketch_shown`] says for the placement it is drawn at, with that placement's own eye and
+/// Sketches folder in place of those of the drawn one.
+pub fn sketch_shown_at(s: &Session, id: u64, path: &[u64]) -> bool {
+    sketch_shown_in(s, id, Some(path))
+}
+
+fn sketch_shown_in(s: &Session, id: u64, path: Option<&[u64]>) -> bool {
     let v = &s.visibility;
+    let placement_hidden = match path {
+        None => !s.feature_placement_visible(id) || s.feature_folder_hidden(id, "sketches"),
+        Some(path) => !s.occurrence_visible(path) || s.feature_folder_hidden_at(id, path, "sketches"),
+    };
     if s.active_sketch == Some(id) || s.feature_edit_sketch == Some(id) {
-        return true;
+        // The open sketch is drawn where it is edited, its copies where their parts are shown.
+        return path.is_none() || !placement_hidden;
     }
-    if !s.feature_placement_visible(id) || s.feature_folder_hidden(id, "sketches") || v.hidden_sketches.contains(&id) {
+    if placement_hidden || v.hidden_sketches.contains(&id) {
         return false;
     }
     if s.doc
@@ -1492,6 +1508,8 @@ fn consumed_sketches(doc: &solidcraft_doc::Document) -> impl Iterator<Item = u64
         | FeatureKind::CellGrid { sketch, .. }
         | FeatureKind::SheetBase { sketch, .. }
         | FeatureKind::SheetContour { sketch, .. }
+        | FeatureKind::SheetTab { sketch, .. }
+        | FeatureKind::SheetBead { sketch, .. }
         | FeatureKind::Hole { points: Some(SketchPoints { sketch, single: false, .. }), .. }
         | FeatureKind::SheetPerforate { sketch: Some(sketch), .. } => Some(sketch.0),
         _ => None,
@@ -1616,7 +1634,8 @@ fn constructs(s: &Session) -> Vec<(u64, String, solidcraft_doc::construct::Const
         .iter()
         .filter_map(|c| {
             let f = s.doc.feature(c.feature).filter(|f| !f.suppressed)?;
-            let m = s.doc.component_transform(f.component);
+            // With a joint drag's shown frame, so it follows its part while that is dragged.
+            let m = s.shown_component_transform(f.component);
             if solidcraft_doc::is_identity(&m) {
                 return Some((c.feature, c.name.clone(), c.geom.clone()));
             }

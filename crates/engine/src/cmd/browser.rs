@@ -62,6 +62,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("body: its name, or bodies: several body names (each in turn gets the first of name, name (2), name (3)… that no other body has), name: the new name (features that use the bodies follow)"),
     // The import and failed operations offer it for a part the modelling kernel refuses.
     CommandSpec::new("body.repair", "Repair Part", crate::checked!("body.repair", repair_body))
+        .begins_edit()
         .icon("body")
         .contract(&REPAIR_CONTRACT)
         .output(output_schema_for::<RepairResult>)
@@ -1548,6 +1549,7 @@ fn repair_body(s: &mut Session, p: &Value) -> Result<Value> {
 /// The longest body name `body.rename` gives.
 const MAX_BODY_NAME: usize = 128;
 
+/// Rename a body and update the later references that identify it, including exact gusset faces.
 fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "body.rename";
     fn new_name<'a>(cmd: &str, p: &'a Value) -> Result<&'a str> {
@@ -1767,9 +1769,38 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
                 }
             }
         }
+        if let FeatureKind::FramePlate { plane, .. } = &mut f.kind
+            && let Some(anchor) = super::sketch::face::anchor_mut(plane)
+            && anchor.target.body == old
+        {
+            let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+            let bodies = std::collections::BTreeMap::from([(old.clone(), name.to_string())]);
+            anchor.remap_target(&ids, &bodies)?;
+        }
         if let FeatureKind::FrameEndCap { ends, .. } = &mut f.kind {
             for end in ends {
                 if let Some(anchor) = super::sketch::face::anchor_mut(&mut end.plane)
+                    && anchor.target.body == old
+                {
+                    let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+                    anchor.remap_target(&ids, &std::collections::BTreeMap::from([(old.clone(), name.to_string())]))?;
+                }
+            }
+        }
+        if let FeatureKind::FrameTrim { to, .. } = &mut f.kind {
+            for target in to {
+                if let solidcraft_doc::frame::TrimTarget::Plane { plane } = target
+                    && let Some(anchor) = super::sketch::face::anchor_mut(plane)
+                    && anchor.target.body == old
+                {
+                    let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+                    anchor.remap_target(&ids, &std::collections::BTreeMap::from([(old.clone(), name.to_string())]))?;
+                }
+            }
+        }
+        if let FeatureKind::FrameGusset { supports, .. } = &mut f.kind {
+            for support in supports {
+                if let Some(anchor) = super::sketch::face::anchor_mut(&mut support.plane)
                     && anchor.target.body == old
                 {
                     let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
@@ -1850,7 +1881,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         })
         .cloned();
-    let mut plane = super::sketch::plane_ref_numbers(&trial, p, cmd)?;
+    let mut plane = super::sketch::plane_ref_numbers_with(&trial, p, cmd, super::sketch::face::IndexMode::MayBeStale)?;
     if super::sketch::face::is_face(p) {
         super::sketch::face::capture_positions(&mut trial, &plane)?;
     }
@@ -2060,6 +2091,36 @@ mod tests {
         let err = s.execute("body.repair", &json!({"body": "Bloco"})).unwrap_err().to_string();
         assert!(err.contains("SMLib's check fails the part") && !err.contains("nothing to repair"), "{err}");
         assert_eq!(s.doc.features.len(), n);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// In a window, a feature's result shows before SMLib's check of it ends
+    /// ([`Session::set_background_checks`]). The join on the block (refused by the check, as in
+    /// the test above) can show at once; a command that reads the model next reads it checked: the
+    /// join failed with the check's error, and no check left running, also for the evaluation the
+    /// refusal needed before it.
+    #[test]
+    fn a_command_that_reads_the_model_reads_it_checked_in_a_window() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-bg-checks-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("block.step");
+        std::fs::write(&path, include_str!("../../../../tests/step-regressions/block_edge_off_its_face.step")).unwrap();
+        let mut s = Session::default();
+        let r = run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy()}));
+        let id = r["feature"].as_u64().unwrap_or_else(|| panic!("{r}"));
+        s.model.result(id).and_then(|f| f.import_report.clone()).expect("the import's check").settled().expect("the check ends");
+        s.set_background_checks(true);
+        let joined =
+            s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [18, 28, 8], "operation": "join", "targets": ["Bloco"]}));
+        let measured = s.execute("inspect.measure", &json!({}));
+        assert!(measured.is_ok(), "{measured:?}");
+        assert!(!s.model.checking_features(), "the command read the model with no check left running");
+        // Refused at once (the check ended in time) or once settled: the same error either way.
+        let error = match joined {
+            Err(e) => e.to_string(),
+            Ok(_) => s.model.results.last().and_then(|r| r.error.clone()).expect("the join fails once its check is settled"),
+        };
+        assert!(error.contains("SMLib's check refuses the result"), "{error}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2291,7 +2352,7 @@ mod tests {
         run(&mut computed, "body.rename", json!({"body": "Peg", "name": "Stud"}));
         // The user hides the body while the rename is being evaluated.
         run(&mut s, "browser.visibility", json!({"items": ["Peg"], "visible": false}));
-        s.accept_computed(computed);
+        s.accept_computed(computed).unwrap();
         assert!(!s.body_visible("Stud"));
         assert_eq!(s.visibility.hidden_bodies, ["Stud"]);
         run(&mut s, "edit.undo", json!({}));
@@ -2321,7 +2382,7 @@ mod tests {
                 if computed {
                     let mut scratch = s.scratch();
                     run(&mut scratch, "body.rename", json!({"body": "B", "name": "A"}));
-                    s.accept_computed(scratch);
+                    s.accept_computed(scratch).unwrap();
                 } else {
                     run(&mut s, "body.rename", json!({"body": "B", "name": "A"}));
                 }

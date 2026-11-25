@@ -17,7 +17,7 @@
 //!   same value;
 //! - **drawing:** `name`, `number` (its `part_number` property: the drawing's identification
 //!   number; without one, the name of the component the sheet documents), `organization`, `author`,
-//!   `project`, and `properties.<key>` (any of its properties);
+//!   `language` (its language code in capitals, `EN`), `project`, and `properties.<key>` (any of its properties);
 //! - **sheet:** `name`, `number`, `count`: sheets left out of the count are neither counted nor
 //!   numbered, and such a sheet shows neither; `scale`: the scale its base views share (neither a
 //!   drawing nor a sheet sets a scale of its own), written `1:2`; a sheet with no base view, such as
@@ -39,7 +39,7 @@ const COMPONENT: [&str; 7] = ["name", "part_number", "description", "revision", 
 pub const SHEET_METAL: [&str; 6] = ["bend_radius", "flat_length", "flat_width", "k_factor", "sheet_rule", "thickness"];
 /// The decimals a sheet metal length is shown with: a new dimension's.
 const SHEET_DECIMALS: u8 = 2;
-const DRAWING: [&str; 5] = ["name", "number", "organization", "author", "project"];
+const DRAWING: [&str; 6] = ["name", "number", "organization", "author", "project", "language"];
 const SHEET: [&str; 4] = ["name", "number", "count", "scale"];
 /// Before a property's name: the field reads that property.
 const PROPERTIES: &str = "properties.";
@@ -289,6 +289,7 @@ impl Values<'_> {
                 "name" => Some(d.name.clone()),
                 "number" => d.properties.part_number().or(self.component.component().map(|c| c.name)).map(str::to_string),
                 "organization" | "author" | "project" => d.properties.text(key).map(str::to_string),
+                "language" => Some(d.language.to_uppercase()),
                 _ => property(&d.properties),
             },
             Source::Sheet => {
