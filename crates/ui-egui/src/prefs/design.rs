@@ -152,18 +152,27 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         titles.insert(0, solidcraft_ui_text::format("ui.template_file_entry", &[("name", &shown)]));
                     }
                     let titles: Vec<&str> = titles.iter().map(String::as_str).collect();
+                    // Choose File… at the right, as the folder rows' Browse; the dropdown fills the rest.
                     ui_kit::row(ui, solidcraft_ui_text::tr(label), |ui| {
-                        let mut selected = names.iter().position(|name| name == chosen).unwrap_or(0);
-                        let response = ui_kit::dropdown(ui, id, &mut selected, &titles);
-                        if let Some(file) = &file {
-                            response.on_hover_text(file.as_str());
-                        }
-                        if let Some(name) = names.get(selected) {
-                            chosen.clone_from(name);
-                        }
-                        if can_browse && ui_kit::button(ui, solidcraft_ui_text::tr("ui.template_file_choose"), ui_kit::Button::Small).clicked() {
-                            browse = Some(assembly);
-                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if can_browse {
+                                let response = ui_kit::button(ui, solidcraft_ui_text::tr("ui.template_file_choose"), ui_kit::Button::Normal);
+                                crate::scenario::publish_target(&format!("prefs:{id}:choose_file"), response.rect);
+                                if response.clicked() {
+                                    browse = Some(assembly);
+                                }
+                            }
+                            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                let mut selected = names.iter().position(|name| name == chosen).unwrap_or(0);
+                                let response = ui_kit::dropdown(ui, id, &mut selected, &titles);
+                                if let Some(file) = &file {
+                                    response.on_hover_text(file.as_str());
+                                }
+                                if let Some(name) = names.get(selected) {
+                                    chosen.clone_from(name);
+                                }
+                            });
+                        });
                     });
                 }
                 if let Some(assembly) = browse {
