@@ -48,6 +48,121 @@ fn top_front(b: &Body) -> usize {
     edge_at(b, [15.0, 0.0, 10.0])
 }
 
+#[test]
+fn unequal_upright_and_bottom_rounds_close_all_four_corners() {
+    use solidcore_ops::continuity::ContinuityTolerances;
+    use solidcore_ops::PointClass::{Inside, Outside};
+    use solidcore_record::brep::Surface;
+
+    all_fixes();
+    let picks = [
+        ([25.0, 0.0, 0.0], 0.5),
+        ([50.0, 25.0, 0.0], 0.5),
+        ([25.0, 50.0, 0.0], 0.5),
+        ([0.0, 25.0, 0.0], 0.5),
+        ([0.0, 0.0, 7.5], 2.0),
+        ([0.0, 50.0, 7.5], 2.0),
+        ([50.0, 0.0, 7.5], 2.0),
+        ([50.0, 50.0, 7.5], 2.0),
+    ];
+    let round = |picks: &[([f64; 3], f64)]| {
+        let body = make_box([0.0; 3], [50.0, 50.0, 15.0]).unwrap();
+        let (edges, radii): (Vec<_>, Vec<_>) = picks
+            .iter()
+            .map(|&(point, radius)| (edge_at(&body, point), radius))
+            .unzip();
+        blend(&body, Blend::Round, &edges, &radii, &[], Corners::Filled).unwrap();
+        body.check_solid().unwrap();
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+        // The diagonal of an R2 upright crosses at 2 - sqrt(2) from both walls.
+        let upright = 2.0 - 2.0_f64.sqrt();
+        for (x, y) in [(0.0, 0.0), (0.0, 50.0), (50.0, 0.0), (50.0, 50.0)] {
+            let inward = |d: f64| [(x - d).abs(), (y - d).abs(), 7.5];
+            assert_eq!(
+                body.classify_point(inward(upright - 0.001)).unwrap(),
+                Outside
+            );
+            assert_eq!(
+                body.classify_point(inward(upright + 0.001)).unwrap(),
+                Inside
+            );
+        }
+        // Away from the corner, the R0.5 rim crosses at 0.5 - 0.5 / sqrt(2).
+        let rim = 0.5 - 0.5 / 2.0_f64.sqrt();
+        for (d, side) in [(rim - 0.001, Outside), (rim + 0.001, Inside)] {
+            for point in [
+                [25.0, d, d],
+                [25.0, 50.0 - d, d],
+                [d, 25.0, d],
+                [50.0 - d, 25.0, d],
+            ] {
+                assert_eq!(body.classify_point(point).unwrap(), side);
+            }
+        }
+        let (record, order) = body.to_record().unwrap();
+        let patches: Vec<_> = record
+            .faces
+            .iter()
+            .map(|face| {
+                matches!(
+                    face.surface,
+                    Surface::Spline { .. } | Surface::RationalSpline { .. }
+                )
+            })
+            .collect();
+        // Each of four three-round corners has three outer and three inner fill patches.
+        assert_eq!(patches.iter().filter(|&&is_patch| is_patch).count(), 4 * 6);
+        let seams: Vec<_> = record
+            .edges
+            .iter()
+            .enumerate()
+            .filter_map(|(index, edge)| {
+                edge.uses
+                    .iter()
+                    .any(|u| patches[u.face as usize])
+                    .then_some(index)
+            })
+            .collect();
+        // Nine seams are between patches. Nine meet the rounds or the three support planes.
+        assert_eq!(seams.len(), 4 * 18);
+        let vertices: std::collections::BTreeSet<_> = seams
+            .iter()
+            .flat_map(|&edge| record.edges[edge].vertices)
+            .collect();
+        // Each set of six patches is a disk, so V = E - F + 1.
+        assert_eq!(vertices.len(), 4 * (18 - 6 + 1));
+        let report = body
+            .continuity_report(
+                &order,
+                &seams,
+                9,
+                ContinuityTolerances {
+                    gap_mm: 1e-3,
+                    angle_rad: 1.0_f64.to_radians(),
+                    curvature_per_mm: 0.0,
+                    curvature_change_per_mm2: 0.0,
+                    curvature_change_rate_per_mm3: 0.0,
+                },
+            )
+            .unwrap();
+        assert!(report.unmeasured.is_empty(), "{:?}", report.unmeasured);
+        assert_eq!(report.seams.len(), seams.len());
+        for seam in report.seams {
+            assert_eq!(seam.stations.len(), 9, "edge {}", seam.edge);
+            assert!(
+                seam.order_at_stations.is_some_and(|order| order >= 1),
+                "{seam:?}"
+            );
+        }
+        body.volume(1e-10).unwrap()
+    };
+    let forward = round(&picks);
+    let mut reversed = picks;
+    reversed.reverse();
+    let backward = round(&reversed);
+    assert!(rel(forward, backward) < 1e-9, "{forward} vs {backward}");
+}
+
 /// Closed forms recorded in
 /// `plan/findings/blend.fillet_solver_p5--neighbouring-chamfers-closed-forms.md`.
 /// The overlap of the two removed triangular prisms is integrated over depth w.
