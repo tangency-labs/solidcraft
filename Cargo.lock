@@ -6418,6 +6418,7 @@ dependencies = [
 name = "solidcraft-kernel"
 version = "0.49.1"
 dependencies = [
+ "cadmpeg-ir",
  "log",
  "proptest",
  "rayon",
@@ -6442,6 +6443,7 @@ dependencies = [
 name = "solidcraft-kernel-api"
 version = "0.49.1"
 dependencies = [
+ "cadmpeg-ir",
  "serde",
  "serde_json",
  "solidcore-record",
