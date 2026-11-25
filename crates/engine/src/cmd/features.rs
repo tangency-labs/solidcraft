@@ -289,18 +289,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("hole")
         .key("H")
         .params(concat!(
-            "position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); ",
+            "position: [x,y,z] on a face (numbers, or length expressions the hole follows; a position off the surface moves along `direction` to the nearest face it meets of the bodies the hole drills, and one inside a body back to where the drill enters: the hole starts there, its depths are measured from there, and material above that face (a body over it, a taller wall beside it) is left standing) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); ",
             "flip?: bool (sketch points: drill to the other side); ",
             "single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); ",
             "direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); ",
             "diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); ",
             "head?: \"ISO 4762\" (socket head) | \"ISO 7380-1\" (button head) | \"ISO 10642\" (countersunk head) (with clearance: the recess the screw's head sits in. A cap screw's: a counterbore, so type defaults to counterbore; its diameter is the head's dk plus head_gap each side, its depth the head's k plus head_gap; a cb_diameter or cb_depth given keeps its value. A countersunk head's: a countersink, so type defaults to countersink; 90° unless cs_angle is given, its diameter the head's dk plus head_gap each side, so the head sits head_gap below the face; a cs_diameter given keeps its value); ",
             "head_gap?: length (default 0.5 mm; an expression with parameters is kept, so the recess follows them); ",
-            "depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); ",
+            "depth? (default through all; from where the hole starts, the face it enters, not from `position`) | to?: [x,y,z] (To Object: drill to that face or point); ",
             "references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); ",
             "type?: simple|drilled|counterbore|countersink; ",
             "tip_angle?; ",
-            "cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); ",
+            "cb_diameter?, cb_depth? (from the face the hole enters, as depth), bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); ",
             "cs_diameter?, cs_angle?; ",
             "thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); ",
             "hand?: right|left (the tapped thread's hand; default right; needs thread); ",
