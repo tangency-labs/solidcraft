@@ -22,6 +22,13 @@ pub const MIN_LENGTH: f64 = 1e-6;
 /// Maximum lean of a vertical stock member before its section follows world up.
 pub const VERTICAL_TOLERANCE: f64 = 1e-6;
 
+/// How far a piece's given unit vectors (its tangents, an arc's axis) may lie from the ones its
+/// constructor makes, for [`Piece::from_parts`]. Making them again from the piece's own ends
+/// moves them by a few rounding units (about 1e-16); within 1e-13 of a unit vector, two such
+/// tangents that run on exactly from each other still pass [`orient`]'s tangency test, whose
+/// cosine margin is `1 - cos(1e-6)`, about 5e-13.
+pub const PARTS_TOLERANCE: f64 = 1e-13;
+
 /// Why an exact stock path or its section cannot be used.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Refusal {
@@ -214,13 +221,14 @@ impl Piece {
 
     /// A piece from its fields as given (an application's copy of a piece's data), checked as
     /// the constructors check them: `segment` must be a line [`Piece::line`] accepts from `a` to
-    /// `b`, or an arc from `a` that [`Piece::arc`] accepts ending at `b`, and `t0` and `t1` the
-    /// unit tangents that constructor gives, to its unit tolerance (1e-9). The fields are kept
-    /// exactly as given, so every piece's own fields make that piece again, reversed or not.
+    /// `b`, or an arc from `a` that [`Piece::arc`] accepts ending at `b` whose axis is the unit
+    /// axis that constructor stores, and `t0` and `t1` the unit tangents it gives, each to
+    /// [`PARTS_TOLERANCE`]. The fields are kept exactly as given, so every piece's own fields
+    /// make that piece again, reversed or not.
     ///
     /// # Errors
     /// [`Refusal::Line`] for a line, or [`Refusal::Arc`] for an arc, that the constructor
-    /// refuses or whose ends or tangents disagree with it.
+    /// refuses or whose ends, axis or tangents disagree with it.
     pub fn from_parts(
         a: Point3,
         b: Point3,
@@ -238,9 +246,13 @@ impl Piece {
             } => (Self::arc(start, b, centre, axis, angle), Refusal::Arc),
         };
         let made = made?;
-        // NaN compares false, so a non-finite tangent is refused here.
-        let near = |u: Vec3, v: Vec3| (u - v).length() <= 1e-9;
-        if made.a != a || made.b != b || !near(made.t0, t0) || !near(made.t1, t1) {
+        // NaN compares false, so a non-finite tangent or axis is refused here.
+        let near = |u: Vec3, v: Vec3| (u - v).length() <= PARTS_TOLERANCE;
+        let axis_kept = match (segment, made.segment) {
+            (Segment::Arc { axis, .. }, Segment::Arc { axis: unit, .. }) => near(axis, unit),
+            _ => true,
+        };
+        if made.a != a || made.b != b || !axis_kept || !near(made.t0, t0) || !near(made.t1, t1) {
             return Err(refusal);
         }
         Ok(Self {
@@ -596,6 +608,21 @@ mod tests {
             Piece::from_parts(arc.a, arc.b, arc.t1, arc.t1, arc.segment),
             Err(Refusal::Arc)
         );
+        // an arc's axis is the unit axis the constructor keeps: twice it is refused
+        let doubled = Segment::Arc {
+            start,
+            centre,
+            axis: axis * 2.0,
+            angle: FRAC_PI_2,
+        };
+        assert_eq!(
+            Piece::from_parts(arc.a, arc.b, arc.t0, arc.t1, doubled),
+            Err(Refusal::Arc)
+        );
+        // a tangent off its unit length by more than the tolerance is refused, so a piece taken
+        // back always passes orient's tangency test
+        let short = line.t1 * (1.0 - 5e-10);
+        assert_eq!(parts(line.a, line.b, line.t0, short), Err(Refusal::Line));
     }
 
     #[test]
