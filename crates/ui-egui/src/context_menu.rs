@@ -1018,6 +1018,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             v.push(cmd(app, "solid.press_pull", "Press Pull"));
         }
         v.push(cmd(app, "solid.shell", "Shell"));
+        v.push(cmd(app, "solid.dome", "Dome"));
         if crate::joint_handles::selected_occurrence(app).is_some() {
             v.push(cmd(app, "occurrence.move", "Move"));
         }

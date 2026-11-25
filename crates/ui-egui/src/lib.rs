@@ -4956,14 +4956,12 @@ impl SolveApp {
             dim_view::set_model_drawn(Vec::new());
             let id = self.docs.views.active().id;
             drawing_sheet_page::show_view(self, ui, id);
-            view_tiles::single_sketch_chrome(self, ui);
         } else if drawing_workspace::active(self) {
             if dialogs_sheet::flat_active(self) {
                 viewport::show(self, ui);
             } else {
                 dim_view::set_model_drawn(Vec::new());
                 drawing_workspace::show(self, ui);
-                view_tiles::single_sketch_chrome(self, ui);
             }
         } else if view_window_drag::unanchored(self, ui.ctx(), self.docs.views.active().id) {
             self.viewport.rect = Some(ui.max_rect());

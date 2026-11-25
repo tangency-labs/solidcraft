@@ -541,6 +541,24 @@ impl RailFit {
     }
 }
 
+/// A dome's meridian (#19532): a quarter ellipse (on a circle, a half ellipsoid of revolution), or
+/// the sphere through the rim and the apex (on a circle, a spherical cap).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DomeShape {
+    /// The quarter-ellipse meridian.
+    #[default]
+    Elliptical,
+    /// The sphere through the rim and the apex, on a circle.
+    Spherical,
+}
+
+impl DomeShape {
+    pub fn is_elliptical(&self) -> bool {
+        *self == DomeShape::Elliptical
+    }
+}
+
 /// Where a thin wall lies against its curves. A closed loop's inside is the area it encloses;
 /// an open chain's is the side it bends toward (a straight one's, the left of its first
 /// curve as drawn).
@@ -1336,6 +1354,20 @@ pub enum FeatureKind {
         /// Open the faces smoothly joined to the picked ones too.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         tangent_chain: bool,
+    },
+    /// Raise a planar face of a body into a dome: a cap `height` high along the face's outward
+    /// normal, its outline the face's own (#19532).
+    Dome {
+        face: FacePick,
+        #[walk(length = "Height")]
+        height: Expr,
+        #[serde(default, skip_serializing_if = "DomeShape::is_elliptical")]
+        shape: DomeShape,
+        /// Cut the dome into the body instead (not built yet: refused).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
     },
     /// Tilt faces (at the given points) about a neutral plane, leaning toward `pull`.
     Draft {
@@ -3676,6 +3708,7 @@ impl FeatureKind {
             FeatureKind::Loft { .. } => "LoftFeature",
             FeatureKind::Sweep { .. } => "SweepFeature",
             FeatureKind::Shell { .. } => "ShellFeature",
+            FeatureKind::Dome { .. } => "DomeFeature",
             FeatureKind::Draft { .. } => "DraftFeature",
             FeatureKind::Split { .. } => "SplitBodyFeature",
             FeatureKind::SplitFace { .. } => "SplitFaceFeature",
@@ -3770,6 +3803,7 @@ impl FeatureKind {
             FeatureKind::Loft { .. } => "loft",
             FeatureKind::Sweep { .. } => "sweep",
             FeatureKind::Shell { .. } => "shell",
+            FeatureKind::Dome { .. } => "dome",
             FeatureKind::Draft { .. } => "draft",
             FeatureKind::ConstructionPlane { .. } => "construction_plane",
             FeatureKind::Split { .. } => "split",
@@ -3864,6 +3898,7 @@ impl FeatureKind {
             "LoftFeature" => "loft",
             "SweepFeature" => "sweep",
             "ShellFeature" => "shell",
+            "DomeFeature" => "dome",
             "DraftFeature" => "draft",
             "SplitBodyFeature" => "split",
             "SplitFaceFeature" => "split_face",
@@ -3958,6 +3993,7 @@ impl FeatureKind {
             FeatureKind::Loft { .. } => "Loft",
             FeatureKind::Sweep { .. } => "Sweep",
             FeatureKind::Shell { .. } => "Shell",
+            FeatureKind::Dome { .. } => "Dome",
             FeatureKind::Draft { .. } => "Draft",
             FeatureKind::Split { .. } => "Split",
             FeatureKind::SplitFace { .. } => "SplitFace",
