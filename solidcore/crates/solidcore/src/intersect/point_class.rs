@@ -250,6 +250,8 @@ impl<'a, 'env, O> From<BrepMerge<'a, 'env, O>> for BrepMergeWithIdentity<'a, 'en
 /// The arena [`PointClassification::combine_in_brep`] writes a propagated surf/surf/surf
 /// point to.
 pub struct CombineBrep<'a, 'env, O> {
+    /// Kernel reference for geometric checks and curve evaluations.
+    pub k: &'a Kernel,
     /// Arena graph containing the classified object.
     pub brep: &'a mut Brep,
     /// Resolved target in that graph (a vertex for an `SM_PC_VERTEX` classification).
@@ -1241,12 +1243,14 @@ impl<O: ClassObject> PointClassification<O> {
         context: CombineBrep<'_, '_, O>,
     ) -> Result<Precedence> {
         let CombineBrep {
+            k,
             brep,
             target,
             handle,
             notifications,
         } = context;
-        self.combine_with(
+        let mut moved_vertex = None;
+        let precedence = self.combine_with(
             other,
             Some(&mut |object: Option<O>, point: Point3| {
                 if object.is_some_and(|object| handle(target) != object) {
@@ -1272,9 +1276,16 @@ impl<O: ClassObject> PointClassification<O> {
                     notifications.context.as_deref_mut(),
                     this,
                     &|vu| key_of(EntityRef::Vertexuse(vu)),
-                )
+                )?;
+                moved_vertex = Some(v);
+                Ok(())
             }),
-        )
+        )?;
+        if let Some(v) = moved_vertex {
+            vertex::carry_far_edge_ends(k, brep, v, notifications)?;
+            vertex::cover_merged_ends(k, brep, v)?;
+        }
+        Ok(precedence)
     }
 
     /// `Combine(other)` with the caller's `SmVertex::SetPoint`: a surf/surf/surf point
