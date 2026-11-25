@@ -1652,7 +1652,7 @@ pub fn pick_planar_face(st: &ModelState, body: Option<&str>, at: Vec3) -> std::r
     let mut found: Vec<(String, usize, Plane, &crate::ModelBody)> = Vec::new();
     for b in st.bodies.iter().filter(|b| body.is_none_or(|n| b.name == n) && !b.body.is_mesh()) {
         let tol = (b.body.size() * 1e-9).max(1e-6);
-        let query = solidcore_ops::query::Query::new(b.body.record());
+        let query = solidcraft_kernel::services::query::Query::new(b.body.record());
         for (_, i) in query.faces_at(at, tol) {
             if let Some(p) = b.body.planar_face(i) {
                 found.push((b.name.clone(), i, p, b));
@@ -1662,7 +1662,7 @@ pub fn pick_planar_face(st: &ModelState, body: Option<&str>, at: Vec3) -> std::r
     let Some((name, index, plane, b)) = found.first() else {
         return Err("no planar face of the model passes through that point".into());
     };
-    if !found.iter().all(|(_, _, p, _)| solidcore_ops::constraint::same_plane(p, plane)) {
+    if !found.iter().all(|(_, _, p, _)| solidcraft_kernel::services::constraint::same_plane(p, plane)) {
         return Err("that point lies where faces on different planes meet: pick a point inside one planar face".into());
     }
     let face = crate::naming::face_names(b).get(*index).cloned().ok_or_else(|| "that face has no name to keep it by".to_string())?;
