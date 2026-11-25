@@ -106,6 +106,9 @@ pub(crate) const SPLIT_SHEETS: [&str; 3] = ["ui.split_body.cut_with.extended", "
 const SPLIT_SHEET_PARAMS: [&str; 3] = ["extended", "faces", "body"];
 /// Split Body's input for the tool body's other faces, shown when the picked faces cut.
 pub(crate) const SPLIT_TOOL_FACES: &str = "ui.split_body.tool_faces";
+/// Split Body's input for more surface bodies that cut with the tool's, shown when the whole
+/// surface body cuts (#13303).
+pub(crate) const SPLIT_TOOL_BODIES: &str = "ui.split_body.tool_bodies";
 /// What an extrude's first input picks: profiles or planar faces, or curves too when thin.
 const EXTRUDE_ACCEPT: Accept = PROFILES | PLANAR_FACES;
 const THIN_ACCEPT: Accept = PROFILES | CURVES;
@@ -7449,6 +7452,24 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                         }
                         p["tool_faces"] = json!(points);
                     }
+                    // More surface bodies, each whole (#13303): a body, or a face picked on one.
+                    if *sheet == 2 {
+                        let others = d.inputs.iter().find(|inp| inp.label == SPLIT_TOOL_BODIES).map(|inp| inp.items.as_slice()).unwrap_or_default();
+                        let mut names: Vec<&str> = Vec::new();
+                        for sel in others {
+                            let name = match sel {
+                                Sel::Body { name } => name.as_str(),
+                                Sel::Face { body: o, .. } => o.as_str(),
+                                _ => return Err("pick the other surface bodies".into()),
+                            };
+                            if name != b.as_str() && !names.contains(&name) {
+                                names.push(name);
+                            }
+                        }
+                        if !names.is_empty() {
+                            p["tool_bodies"] = json!(names);
+                        }
+                    }
                     p
                 }
                 Some(Sel::Face { body: b, index, point }) => {
@@ -10041,7 +10062,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Split { body, plane, tool, tool_plane, tool_sheet, tool_faces, sketch, line } => {
+        FeatureKind::Split { body, plane, tool, tool_plane, tool_sheet, tool_faces, tool_bodies, sketch, line } => {
             let mut d = start("solid.split_body")?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = vec![Sel::Body { name: body.to_string() }];
@@ -10102,6 +10123,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                             None => face_sel_on(s, Some(t.body.as_ref()), p.0),
                         })
                         .collect();
+                    d.inputs.push(more);
+                }
+                if sheet == 2 && !tool_bodies.is_empty() {
+                    let mut more = SelInput::new(SPLIT_TOOL_BODIES, BODIES, true);
+                    more.items = tool_bodies.iter().map(|b| Sel::Body { name: b.to_string() }).collect();
                     d.inputs.push(more);
                 }
             }

@@ -476,6 +476,7 @@ pub use splitface::has_cap_at;
 pub use splitface::split_at_facing_side;
 pub use splitface::split_body;
 pub use splitface::split_body_by_faces;
+pub use splitface::split_body_by_sheet_where_it_cuts;
 pub use splitface::split_faces;
 pub use splitface::split_faces_with_map;
 pub use splitface::{FieldKind, PieceSides, split_piece_sides};

@@ -1453,6 +1453,10 @@ pub enum FeatureKind {
         #[walk(picks_faces)]
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tool_faces: Vec<Position>,
+        /// With `tool_sheet` `body`: more surface bodies that cut, each whole and as it is, after
+        /// the tool's body (#13303). Each cuts the pieces it crosses.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tool_bodies: Vec<BodyName>,
         /// A straight line of this sketch as the tool (#1552): the plane through it along the
         /// sketch's normal, which follows the sketch.
         #[serde(default, skip_serializing_if = "Option::is_none")]

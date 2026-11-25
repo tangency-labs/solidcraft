@@ -1180,6 +1180,12 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             if let Some(inp) = d.inputs.iter_mut().find(|inp| inp.label == SPLIT_TOOL_FACES) {
                 inp.multi = true;
             }
+            // The whole surface body cuts with more surface bodies, picked several at once (#13303).
+            let bodies = face_tool && *sheet == 2;
+            set_object_accepting(&mut d.inputs, &mut d.active, SPLIT_TOOL_BODIES, BODIES, bodies);
+            if let Some(inp) = d.inputs.iter_mut().find(|inp| inp.label == SPLIT_TOOL_BODIES) {
+                inp.multi = true;
+            }
         }
         // The angle turns the plane from its reference, so it shows once one is picked.
         Kind::TangentPlane { angle } => {
