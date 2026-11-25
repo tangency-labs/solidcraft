@@ -1020,7 +1020,7 @@ pub struct Kernel {
     pub upstream_ub_passed: Vec<&'static str>,
     /// Not upstream: whether `make_curve_cache` keeps a memo of each curve cache in the
     /// curve value, and `CoincidenceCheck` a memo of each surface's boundary curves in
-    /// the surface value (`true` unless the `curve-memo-off` feature is on), and whether
+    /// the surface value (`true` by default; a caller sets it), and whether
     /// the check's other result-invariant shortcuts are taken (the B-spline curve
     /// analyses' bounds and memo, #2568; face test 37's winding hulls). The memos and
     /// shortcuts never change a result, only the time; `false` builds and runs
@@ -1120,12 +1120,6 @@ pub struct Kernel {
     /// the kernel copies an operation makes.
     #[cfg(test)]
     pub(crate) strip_probe: Arc<std::sync::Mutex<StripProbe>>,
-    /// Not upstream, test only (feature `wr57-replay`): the seam of the goldens' WR-450
-    /// and WR-587 replays and target bound tests ([`crate::surface::surface::replay`]).
-    /// No hook by default, and then it changes nothing. Shared with the kernel copies an operation makes for its
-    /// caches, which call through the same seam.
-    #[cfg(feature = "wr57-replay")]
-    pub replay: crate::surface::surface::replay::ReplaySeam,
 }
 
 /// Test-only seam of `boolean::topology_intersector::curved_strip`
@@ -1175,7 +1169,7 @@ impl Kernel {
             caches: Caches::default(),
             context: Context::default(),
             upstream_ub_passed: Vec::new(),
-            memoize_curve_caches: !cfg!(feature = "curve-memo-off"),
+            memoize_curve_caches: true,
             fixes: UpstreamFixes::default(),
             cancel: None,
             notify_records: crate::topology::topology::NotifyRecords::new(),
@@ -1199,8 +1193,6 @@ impl Kernel {
             profiler: crate::profile::Profiler::default(),
             #[cfg(test)]
             strip_probe: Arc::default(),
-            #[cfg(feature = "wr57-replay")]
-            replay: crate::surface::surface::replay::ReplaySeam::default(),
         }
     }
 
