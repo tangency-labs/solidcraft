@@ -1847,6 +1847,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "sketch.dimension", "Sketch Dimension"));
         v.push(Item::sep());
         v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste_sketch(app)));
+        v.push(act("ui.pasteInPlace", "Paste in Place", "paste").key("Ctrl+Shift+V").on(crate::edit_clipboard::can_paste_sketch(app)));
         return v;
     }
     let ents: Vec<String> = curves.iter().chain(points.iter()).cloned().collect();
@@ -1983,6 +1984,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     v.push(act("ui.cut", "Cut", "cut").key("Ctrl+X"));
     v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C"));
     v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste_sketch(app)));
+    v.push(act("ui.pasteInPlace", "Paste in Place", "paste").key("Ctrl+Shift+V").on(crate::edit_clipboard::can_paste_sketch(app)));
     v.push(act("ui.delete", "Delete", "delete").key("Del"));
     let mut dimension = json!({ "entities": ents });
     crate::dim_view::ellipse_as_before(app.preferences.ellipse_axes, &mut dimension);
@@ -2206,6 +2208,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.copy" => drop(crate::edit_clipboard::copy(app)),
         "ui.copyDesign" => drop(crate::edit_clipboard::copy_design(app)),
         "ui.cut" => drop(crate::edit_clipboard::cut(app)),
+        "ui.pasteInPlace" => drop(crate::edit_clipboard::paste_sketch(app, None, crate::edit_clipboard::SketchPaste::InPlace)),
         "ui.paste" | "ui.pasteNew" => {
             // A component's menu pastes into it (that placement); the others into the active one.
             let into = id_of(&p, "component").map(|c| {
