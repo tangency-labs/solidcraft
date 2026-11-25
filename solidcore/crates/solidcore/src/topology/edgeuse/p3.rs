@@ -184,6 +184,10 @@ fn vec_status<T>(r: Result<T>) -> Result<T> {
 
 // ---- unported callees -------------------------------------------------------------------
 
+/// Not upstream (tangency-labs/solidcore#3399): the share of its fit tolerance a trim that
+/// would raise its edge's tolerance is fitted again at ([`get_or_create_uv_trim_curve`]).
+const REFIT_SHARE: f64 = 1e-3;
+
 /// What `SmSurface::DropCurve` produced.
 #[derive(Debug)]
 struct DropCurveOut {
@@ -489,13 +493,26 @@ pub(crate) fn fit_tolerance(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> 
 /// upstream dereferences null; `SM_ERR` when every attempt fails (no sample point
 /// drops); the cascading errors of the evaluators; [`SolidError::Unported`] (module
 /// docs).
-#[allow(clippy::too_many_lines)]
 pub fn create_uv_trim_curve(
     k: &Kernel,
     b: &mut Brep,
     eu: EdgeuseId,
     want_deviation: bool,
     opt_drop_curve_fail: Option<&mut DropCurveFail<ObjectHandle>>,
+) -> Result<CreatedUvTrimCurve> {
+    create_uv_trim_curve_fitted(k, b, eu, want_deviation, opt_drop_curve_fail, None)
+}
+
+/// [`create_uv_trim_curve`] with its drops fitted at `fit` where given, in place of the edge's
+/// fit tolerance ([`fit_tolerance`]).
+#[allow(clippy::too_many_lines)]
+fn create_uv_trim_curve_fitted(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    want_deviation: bool,
+    opt_drop_curve_fail: Option<&mut DropCurveFail<ObjectHandle>>,
+    fit: Option<f64>,
 ) -> Result<CreatedUvTrimCurve> {
     k.work_counters.add_uv_trim_build();
     // always collect DropCurveData
@@ -516,7 +533,10 @@ pub fn create_uv_trim_curve(
         .ok_or_else(|| SolidError::topology(OP, TopologyFailure::EdgeUseNotOnFace))?;
     let f = faceuse_face(b, fu)?.ok_or_else(|| null("CreateUVTrimCurve: face use without face"))?;
     // not upstream: the fit tolerance, the edge tolerance unless that only covers a gap
-    let fit_tol = fit_tolerance(k, b, e)?;
+    let fit_tol = match fit {
+        Some(fit) => fit,
+        None => fit_tolerance(k, b, e)?,
+    };
     let face_rec = b.face(f)?;
     let face_surface = face_rec
         .surface
@@ -1738,7 +1758,7 @@ pub fn get_or_create_uv_trim_curve(
 
     // arrive here to build UVTrimCurve: create a new UVTrimCurve: err return value =
     // CreateUVTrimCurve err return value
-    let created = match create_uv_trim_curve(k, b, eu, want_deviation, None) {
+    let mut created = match create_uv_trim_curve(k, b, eu, want_deviation, None) {
         Ok(c) => c,
         Err(
             e @ (SolidError::Unported { .. }
@@ -1753,6 +1773,31 @@ pub fn get_or_create_uv_trim_curve(
             return Ok(out);
         }
     };
+    // Not upstream (tangency-labs/solidcore#3399): a trim far enough from its edge to raise the
+    // edge's tolerance is fitted again, tighter, and the closer of the two is kept. The drop's
+    // fit error (up to the fit tolerance, the edge's own) is part of that distance, and the
+    // edge is raised to cover the trim, not the curve it was fitted from: a line dropped onto a
+    // cylinder at 4e-5 gave a trim 2.7e-5 from the line where the line is 2.5e-5 from the
+    // cylinder, and raised the edge and its two vertices to 5.4e-5 instead of 5.0e-5.
+    // (a validate-only pass raises nothing, so it fits once)
+    let raising = !(k.caches.hold_trim_raise || b.validate_only());
+    if let Some(e) = edge(b, eu)?.filter(|_| raising) {
+        if b.edge(e)?.tolerance < 2.0 * created.max_dist_to_surf {
+            let fit = zone_tol3d(k, REFIT_SHARE * fit_tolerance(k, b, e)?);
+            if let Some(tight) = ignored(create_uv_trim_curve_fitted(
+                k,
+                b,
+                eu,
+                want_deviation,
+                None,
+                Some(fit),
+            ))? {
+                if tight.max_dist_to_surf < created.max_dist_to_surf {
+                    created = tight;
+                }
+            }
+        }
+    }
 
     // Save max edge to projected TrimCurve distances. If one is Null and the other is
     // non-Null, return the whole distance in the non-Null one. (If pdOptDistToSurf is
