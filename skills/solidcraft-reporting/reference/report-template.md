@@ -11,7 +11,7 @@ Fill in every section and delete the hints in angle brackets. Keep it short: the
 2. <…>
 3. <the step that fails>
 
-Minimal script (`solidcraft-cli run repro.json`):
+Minimal script, pasted here as text so nothing needs attaching (`solidcraft-cli run repro.json`):
 
 ```json
 {"commands":[
@@ -32,7 +32,7 @@ Minimal script (`solidcraft-cli run repro.json`):
 <how often: every time / 3 of 5 runs; the boundary if you found one>
 
 ### Attachments
-<screenshot of the failure; the crash report id if there is one; no private designs unless the user agreed>
+<screenshot of the failure; the crash report id if there is one; the script above is already in the body; no private designs unless the user agreed>
 ````
 
 ## Example

@@ -193,6 +193,43 @@ fn a_hole_at_a_slant_is_cut_from_the_flat_as_its_shadow() {
     assert!((exact_volume(&s) - want).abs() < 1e-5 * hole * T, "{} vs {want}", exact_volume(&s));
 }
 
+/// The same slanted hole in a plate 1500 long: the shadow reads the walls in steps of a hundredth
+/// of the body's size, at most 1 mm but never under ten times the sag its edges are read within,
+/// and past a metre that sag (a ten-thousandth of the size) puts the floor above the cap. The
+/// step was clamped between the two and the cut panicked ("min > max"); the floor now wins.
+#[test]
+fn a_hole_at_a_slant_in_a_plate_over_a_metre_long_is_cut_as_its_shadow() {
+    let mut s = session();
+    rule(&mut s, "Test", T, 0.44, 2.0, 0.5);
+    run(&mut s, "solid.box", json!({"length": 1500, "width": 60, "height": T, "body_name": "Plate"}));
+    run(&mut s, "sheet.convert", json!({"body": "Plate", "face": [750, 30, T]}));
+    let (r, tilt) = (4.0, 30f64.to_radians());
+    let axis = [tilt.sin(), 0.0, tilt.cos()];
+    let base = [750.0 - 10.0 * axis[0], 30.0, 1.0 - 10.0 * axis[2]];
+    run(&mut s, "solid.cylinder", json!({"radius": r, "height": 20, "base": base, "axis": axis, "operation": "cut"}));
+    let hole = PI * r * r / tilt.cos() + 2.0 * r * T * tilt.tan();
+    let want = (1500.0 * 60.0 - hole) * T;
+    assert!((exact_volume(&s) - want).abs() < 1e-3 * hole * T, "{} vs {want}", exact_volume(&s));
+}
+
+/// A notch 0.48 square and 0.5 deep cut into the long edge of a base flange 1000 x 200 x 1, from
+/// its top face (#20769): a pocket open at the edge, 0.48 x 0.24 of it on the plate, and the
+/// sheet loses 0.48 · 0.24 · 0.5 = 0.0576 mm³, as a plain plate does.
+#[test]
+fn a_small_notch_cut_into_a_large_base_flanges_edge_is_a_pocket() {
+    let mut s = session();
+    rule(&mut s, "Stock", 1.0, 0.44, 1.0, 0.5);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-500, -100], "p1": [500, 100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Plate"}));
+    let notch = json!({"length": 0.48, "width": 0.48, "height": 0.5, "corner": [-0.24, 99.76, 0.5], "operation": "cut", "targets": ["Plate"]});
+    run(&mut s, "solid.box", notch);
+    let want = 1000.0 * 200.0 * 1.0 - 0.48 * 0.24 * 0.5;
+    assert!((exact_volume(&s) - want).abs() < 1e-9 * want, "{} vs {want}", exact_volume(&s));
+    assert_eq!(pockets(&mut s).len(), 1, "{:?}", pockets(&mut s));
+}
+
 /// A 100 x 60 base flange on XY of the default rule (T 2.5), its metal z 0 to 2.5:
 /// 100 · 60 · 2.5 = 15000 mm³.
 fn default_plate() -> Session {
@@ -1104,6 +1141,40 @@ fn a_round_hole_just_short_of_a_walls_end_at_a_closed_corner_is_a_hole_of_the_wa
     assert_eq!((after.3, after.4), (before.3, before.4 + 1), "a hole of the wall, not a cut of the sheet's");
     assert!((before.1 - after.1).abs() < 1e-9 * before.1, "the outline changed by {}", before.1 - after.1);
     assert_eq!(after.2, before.2 + 1, "one more cut-out");
+}
+
+/// A U channel of 3 mm steel bent R5.25 from a contour run 440 along z, with four
+/// blade holes D4.5 drilled through its top web where the web runs into its bend: each hole
+/// crosses the line where the flat web turns tangent into the round. The crossing points sit on
+/// two faces that touch along that line, and moving them to the three faces' common point
+/// slid them 3e-6 along it, so the holes' rims no longer met and the cut was refused ("a loop
+/// not closed"). Through the flat web a hole takes π r² T; where it reaches over the bend its
+/// path from the outer round to the inner one is longer than T, never longer than the 5 mm
+/// drill: in all, more than 4 π r² · 3 and less than 4 π r² · 5.
+#[test]
+fn blade_holes_across_a_webs_tangent_line_into_its_bend_go_through() {
+    let mut s = session();
+    rule(&mut s, "SM", 3.0, 0.4, 5.25, 3.0);
+    let section = json!({"origin": [0, 0, 220], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]});
+    run(&mut s, "sketch.create", json!({"plane": section, "name": "Section"}));
+    let u = [[3660.0, 1180.0], [3660.0, 1230.25], [3690.0, 1230.25], [3690.0, 1200.0]];
+    run(&mut s, "sketch.line", json!({"points": u, "ids": ["l1", "l2", "l3"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let contour = json!({"type": "contour", "sketch": "Section", "curves": ["l1", "l2", "l3"], "distance": 440, "reverse": true, "body_name": "SM1"});
+    run(&mut s, "sheet.flange", contour);
+    let volume =
+        |s: &Session| s.model.state().bodies.first().map_or(f64::NAN, |b| solidcraft_kernel::measure_mass(&b.body).map_or(f64::NAN, |m| m.volume));
+    let v0 = volume(&s);
+    let across = json!({"origin": [0, 0, 0], "x_dir": [0, 0, 1], "y_dir": [1, 0, 0]});
+    run(&mut s, "sketch.create", json!({"plane": across, "name": "Blades"}));
+    for z in [-200.0, -100.0, 100.0, 200.0] {
+        run(&mut s, "sketch.circle.center", json!({"center": [z, 3682.0], "radius": 2.25}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Blades", "start_offset": 1226.25, "distance": 5, "direction": "positive", "operation": "cut"}));
+    assert_eq!(s.model.state().bodies.len(), 1);
+    let (taken, disc) = (v0 - volume(&s), PI * 2.25 * 2.25);
+    assert!(taken > 4.0 * disc * 3.0 && taken < 4.0 * disc * 5.0, "{v0} took {taken}");
 }
 
 /// #1095: a 100 x 60 base flange on XY (T 2, R 2, K 0.5) with a 20 high flange on its edge

@@ -305,6 +305,8 @@ fn orient(o: OrientType) -> i64 {
 /// The records of the Rust B-rep, with the layout of the shim's. `pre` are the record
 /// counts before the operation.
 fn rust_records(b: &Brep, pre: [usize; 10]) -> Model {
+    #[cfg(test)]
+    crate::certify::written(b);
     let lb = Labels { pre };
     let (mut regions, mut shells, mut faceuses, mut faces) =
         (Vec::new(), Vec::new(), Vec::new(), Vec::new());
@@ -375,7 +377,7 @@ fn rust_records(b: &Brep, pre: [usize; 10]) -> Model {
             // (runner helper without a kernel in scope)
             let d = s.natural_uv_domain_if_built();
             let c = Point2::new((d.min().x + d.max().x) * 0.5, (d.min().y + d.max().y) * 0.5);
-            s.evaluate_point(&Kernel::default(), c).ok()
+            s.evaluate_point(&crate::runner_kernel(), c).ok()
         });
         rec.i(i64::from(point.is_some()));
         let [px, py, pz] = point.map_or([0.0; 3], |p| [p.x, p.y, p.z]);
@@ -701,7 +703,7 @@ impl UnitDiff for Runner {
         if !contract::brep_block(&path, &blk) {
             return Err(err("invalid argument: B-rep block outside the input contract"));
         }
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         // the B-rep built (or read) by the Rust kernel; a read keeps the face surfaces'
         // cache states the Rust read left (the renumbered copy keeps their slots)
         let mut b = match own_brep(&mut k, &i.brep)? {
@@ -836,7 +838,7 @@ fn try_generate(rng: &mut Rng) -> Option<Value> {
     if !contract::brep_block(&path, &blk) {
         return None;
     }
-    let b = own_brep(&mut Kernel::default(), &brep).ok()?.ok()?;
+    let b = own_brep(&mut crate::runner_kernel(), &brep).ok()?.ok()?;
     let c = record_counts(&b);
     let n = match op {
         OpIn::DeleteEdge => c[7],

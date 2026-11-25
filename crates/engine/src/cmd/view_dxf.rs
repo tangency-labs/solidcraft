@@ -75,7 +75,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let started = web_time::Instant::now();
     Stage::new("dxf_meshes", 1).check().map_err(|e| bad(CMD, refused(e)))?;
-    let meshes = mesh_lines::prepare(s, CMD, tolerance, mesh_lines::Ask::default(), |b| s.body_visible(&b.name), refused)?;
+    let meshes = mesh_lines::prepare(s, &*s.world_state()?, CMD, tolerance, mesh_lines::Ask::default(), |b| s.body_visible(&b.name), refused)?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
     // The sketch runs (up to 4,000,000 points) go once the lines are made, not through writing.
     let view = View::from_camera(&cam);
@@ -83,6 +83,10 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         let sketch = sketch::parts(s, tolerance).map_err(|e| bad(CMD, refused(e)))?;
         mesh_lines::drawing(&meshes, &sketch, &view).map_err(|e| bad(CMD, refused(e)))?
     };
+    // A sketch under a body's outline is drawn once, as the body's line (#19507). Both curves are
+    // sampled at `tolerance`, so they can lie that far apart from each other twice over.
+    let reach = 2. * tolerance + drawing.eps;
+    drawing.sketch = mesh_lines::sketch_off_lines(std::mem::take(&mut drawing.sketch), &drawing.lines, reach);
     if at_origin {
         // The drawing is centred on the camera target; move it so the model origin is 0,0.
         let zero = view.world_origin().map_err(|e| bad(CMD, refused(e)))?;
@@ -176,7 +180,9 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
 fn refused(e: Refused) -> String {
     match e {
         Refused::Cancelled => "DXF export cancelled".into(),
-        Refused::Work | Refused::Memory => format!("{e}: hide bodies or sketches, or increase tolerance"),
+        Refused::Work | Refused::MeshBuffers(_) | Refused::MeshTriangles(_) | Refused::ViewNodes(_) | Refused::SketchPoints(_) => {
+            format!("{e}: hide bodies or sketches, or increase tolerance")
+        }
         Refused::EyePlane => format!("{e}: zoom out before exporting"),
         Refused::Invalid(_) => e.to_string(),
     }

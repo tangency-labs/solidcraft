@@ -8,6 +8,7 @@ use solidcraft_geom::drawing_view::NamedView;
 
 use super::*;
 use crate::drawing_dimension_paper::tests::measured;
+use crate::drawing_scene::tests::{in_the_model, milestone_plate_script, reopened};
 use crate::schema::tests::conforms;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -37,7 +38,16 @@ fn drawn_from_the_front(mut s: Session) -> (Session, u64) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), ..ViewOverrides::default() };
-    d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At([200.0, 150.0]), settings, reference_shown_percent: 0.0, label: None })]);
+    d.add_views([Arc::new(View {
+        id,
+        sheet,
+        kind,
+        place: ViewPlace::At([200.0, 150.0]),
+        settings,
+        reference_shown_percent: 0.0,
+        centre_marks: None,
+        label: None,
+    })]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
     (s, id)
@@ -466,6 +476,33 @@ fn a_point_on_a_curved_edge_finds_it_between_its_chords() {
     reads(&add(&mut s, view, json!({"length": {"edge": [74.99, 0, 30]}})), 75.0, "75.00");
 }
 
+/// A round edge the view sees edge-on is drawn as a line, and its length is that line's (#19950):
+/// a Ø10 boss's end circle on the box's right side spans 10 up the sheet; a half Ø10 rod along the
+/// box's top shows its end half circle 5 high, its top between its two ends; and a 4 mm fillet's
+/// quarter arc on the front top edge shows 4 high. Each is read from the circle the edge lies on,
+/// not from its mesh. A hole's rim the view sees round is no line, and stays refused.
+#[test]
+fn a_round_edge_seen_edge_on_reads_the_length_of_its_line() {
+    let (mut s, view) = front_view();
+    let drawing = s.drawing("test").unwrap().id;
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "base": [80, 20, 15], "axis": "X", "operation": "join", "targets": ["Box"]}));
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 80, "base": [0, 20, 30], "axis": "X", "operation": "join", "targets": ["Box"]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 0, 30]], "radius": 4, "body": "Box"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 42, "base": [20, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"]}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let (sin, cos) = 45f64.to_radians().sin_cos();
+    let boss_end = json!({"body": "Box", "index": round_index(&s, [100.0, 20.0, 15.0], 5.0)});
+    reads(&add(&mut s, view, json!({"length": {"edge": boss_end}})), 10.0, "10.00");
+    reads(&add(&mut s, view, json!({"length": {"edge": boss_end, "direction": "vertical"}})), 10.0, "10.00");
+    reads(&add(&mut s, view, json!({"length": {"edge": [100.0, 20.0 - 5.0 * cos, 15.0 + 5.0 * sin]}})), 10.0, "10.00");
+    reads(&add(&mut s, view, json!({"length": {"edge": [0.0, 20.0 + 5.0 * cos, 30.0 + 5.0 * sin]}})), 5.0, "5.00");
+    reads(&add(&mut s, view, json!({"length": {"edge": [80.0, 4.0 - 4.0 * cos, 26.0 + 4.0 * sin]}})), 4.0, "4.00");
+    let rim = json!({"view": ids::encode(view), "kind": {"length": {"edge": [20.0 + 3.0 * cos, 0.0, 15.0 + 3.0 * sin]}}});
+    let e = refused(&mut s, rim);
+    assert!(e.contains("isn't straight"), "{e}");
+}
+
 /// A linear dimension measures from the centre of a hole or an arc, each named by its edge: the
 /// hole through the box about (40, 15) on the front, and the fillet's quarter arc about (75, 25).
 /// A straight edge has no centre, and a centre's edge has no path of its own.
@@ -562,6 +599,254 @@ fn a_chain_reads_holes_at_10_30_and_60_as_10_20_and_30() {
         assert!(e.contains(why), "{p}: {e}");
     }
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+}
+
+/// A baseline set from the box's bottom front corner to the centres of holes at x = 10, 30 and 60
+/// (z = 15), and a fourth at x = 30 (z = 5), read horizontally: 30, 10, 60 and 30 again, in target
+/// order, its value the farthest, 60. Two targets at one distance are two members, not refused. It
+/// shows its members' numbers, not one of its own, and keeps its rules: 2 to 64 targets (counted
+/// before any is looked up), no text instead, and no target before its origin or in line with it.
+#[test]
+fn a_baseline_set_reads_each_hole_from_its_origin() {
+    let (mut s, view) = front_view();
+    let drawing = s.drawing("test").unwrap().id;
+    run(&mut s, "drawing.close", json!({}));
+    for (x, z) in [(10, 15), (30, 15), (60, 15), (30, 5)] {
+        let cut = json!({"radius": 3, "height": 42, "base": [x, -1, z], "axis": "Y", "operation": "cut", "targets": ["Box"]});
+        run(&mut s, "solid.cylinder", cut);
+    }
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let hole = |x: f64, z: f64| json!({"centre": {"body": "Box", "index": round_index(&s, [x, 0.0, z], 3.0)}});
+    let (h10, h30, h60, low) = (hole(10.0, 15.0), hole(30.0, 15.0), hole(60.0, 15.0), hole(30.0, 5.0));
+    let steps = s.undo.len();
+    let set = add(&mut s, view, json!({"baseline": {"origin": [0, 0, 0], "targets": [h30, h10, h60, low], "direction": "horizontal"}}));
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+    assert_eq!((set["status"].as_str(), set.get("text")), (Some("ok"), None), "{set}");
+    assert!((set["value"].as_f64().unwrap() - 60.0).abs() < 1e-9, "{set}");
+    // From the bottom corner, below the box: away from its middle, as a chain's.
+    assert_eq!(set["record"]["offset_mm"], json!(-10.0), "{set}");
+    let members = |reply: &Value| {
+        let listed = reply["members"].as_array().cloned().unwrap_or_default();
+        listed.iter().map(|m| (m["value"].as_f64().unwrap_or(f64::NAN), m["text"].as_str().unwrap_or("").to_string())).collect::<Vec<_>>()
+    };
+    let read = members(&set);
+    assert_eq!(read.iter().map(|(_, text)| text.as_str()).collect::<Vec<_>>(), ["30.00", "10.00", "60.00", "30.00"]);
+    assert!(read.iter().zip([30.0, 10.0, 60.0, 30.0]).all(|((value, _), x)| (value - x).abs() < 1e-9), "{read:?}");
+    let saved = &set["record"]["kind"]["baseline"];
+    assert_eq!((saved["origin"].is_object(), saved["targets"].as_array().map(Vec::len)), (true, Some(4)), "{saved}");
+    let id = set["dimension"].clone();
+    assert_eq!(members(&run(&mut s, INSPECT, json!({"dimension": id}))), read);
+
+    // Targets out and in: the same dimension, one undo step, the numbers as the list is now.
+    let steps = s.undo.len();
+    let changed = edit(&mut s, &id, json!({"targets": {"remove": [3, 0], "add": [h30]}}));
+    assert_eq!((changed["changed"].clone(), changed["dimension"].clone()), (json!(["targets"]), id.clone()), "{changed}");
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+    let texts = |s: &mut Session| members(&run(s, INSPECT, json!({"dimension": id}))).into_iter().map(|(_, t)| t).collect::<Vec<_>>();
+    assert_eq!(texts(&mut s), ["10.00", "60.00", "30.00"]);
+    assert_eq!(s.drawing("test").unwrap().dimensions.len(), 1, "one object");
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let nowhere = json!([1e6, 1e6, 1e6]);
+    for (set, why) in [
+        (json!({"reading": "true"}), "a set has only `direction` and `targets`"),
+        (json!({"other_side": true}), "a set has only `direction` and `targets`"),
+        (json!({"diameter": true}), "`diameter` is a radial dimension's"),
+        (json!({"override_text": "60"}), "a set shows each target's number, never a text instead"),
+        (json!({"targets": {"remove": [1, 1]}}), "`targets.remove` names each target once"),
+        (json!({"targets": {"remove": [3]}}), "`targets.remove` numbers this set's targets, 0 to 2"),
+        (json!({"targets": {"remove": [0, 1]}}), "a baseline set has 2 to 64 targets"),
+        (json!({"targets": {"add": [nowhere]}}), "no corner at"),
+        (json!({"targets": {"add": Value::Array(vec![nowhere.clone(); 65])}}), "a baseline set has 2 to 64 targets"),
+        // The box's top corner over the origin: no distance from it, horizontally.
+        (json!({"targets": {"add": [[0, 0, 30]]}}), "a target in line with its origin has no distance to dimension"),
+    ] {
+        let p = json!({"dimension": id, "set": set});
+        let e = s.execute(EDIT, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {p}"));
+        assert!(e.contains(why), "{p}: {e}");
+    }
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+    // `targets` is a set's alone.
+    let length = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}))["dimension"].clone();
+    let p = json!({"dimension": length, "set": {"targets": {"add": [h10]}}});
+    assert!(s.execute(EDIT, &p).err().is_some_and(|e| e.to_string().contains("`targets` is a set's")), "{p}");
+    run(&mut s, "edit.undo", json!({}));
+
+    let v = ids::encode(view);
+    let based = |origin: &Value, targets: Value| json!({"baseline": {"origin": origin, "targets": targets, "direction": "horizontal"}});
+    let corner = json!([0, 0, 0]);
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let cases = [
+        (based(&corner, json!([h10])), "a baseline set has 2 to 64 targets"),
+        (based(&corner, Value::Array(vec![nowhere.clone(); 65])), "a baseline set has 2 to 64 targets"),
+        (based(&corner, json!([h10, nowhere])), "no corner at"),
+        (based(&h30, json!([h10, h60])), "a target lies before its origin along the line"),
+        (based(&h30, json!([low, h60])), "a target in line with its origin has no distance to dimension"),
+        (json!({"baseline": {"origin": corner, "targets": [h10, h30], "reading": "true"}}), "unknown field `reading`"),
+    ];
+    for (kind, why) in cases {
+        let e = refused(&mut s, json!({"view": v, "kind": kind}));
+        assert!(e.contains(why), "{kind}: {e}");
+    }
+    let e = refused(&mut s, json!({"view": v, "kind": based(&corner, json!([h10, h30])), "override_text": "60"}));
+    assert!(e.contains("never a text instead"), "{e}");
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+    // 64 targets are kept: the 65 above are refused by their count alone.
+    let most = add(&mut s, view, based(&corner, Value::Array(vec![h10.clone(); 64])));
+    assert_eq!(members(&most).len(), 64, "{most}");
+}
+
+/// An edit of a set's targets is checked by its numbers and its count before any target is looked
+/// up: one more target on a set at its limit, a number past its end or given twice, or targets on a
+/// dimension that isn't a set are refused for that, even when what it adds names nothing.
+#[test]
+fn a_set_edit_is_counted_before_any_target_is_looked_up() {
+    let (mut s, view) = front_view();
+    let full = json!({"baseline": {"origin": [0, 0, 0], "targets": vec![json!([80, 0, 0]); 64], "direction": "horizontal"}});
+    let full = add(&mut s, view, full)["dimension"].clone();
+    let length = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}))["dimension"].clone();
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let nowhere = json!([1e6, 1e6, 1e6]);
+    let cases = [
+        (&full, json!({"add": [nowhere]}), "a baseline set has 2 to 64 targets"),
+        (&full, json!({"remove": [64], "add": [nowhere]}), "`targets.remove` numbers this set's targets, 0 to 63"),
+        (&full, json!({"remove": [0, 0], "add": [nowhere]}), "`targets.remove` names each target once"),
+        (&length, json!({"add": [nowhere]}), "`targets` is a set's"),
+    ];
+    // Every case is tried, so a failure lists each wrong answer.
+    let wrong: Vec<String> = cases
+        .into_iter()
+        .filter_map(|(dimension, targets, why)| {
+            let p = json!({"dimension": dimension, "set": {"targets": targets}});
+            let e = s.execute(EDIT, &p).err().map_or_else(|| "accepted".to_string(), |e| e.to_string());
+            (!e.contains(why) || e.contains("no corner")).then(|| format!("{why}: {e}"))
+        })
+        .collect();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+}
+
+/// An ordinate set from the box's bottom front corner to the box's top corner over it and holes at
+/// x = 10, 30 and 60 (z = 15), read horizontally: 0, 10, 30 and 60, in target order, its value the
+/// farthest, below the box as a chain from the origin to its last target would be. A target in line with its origin reads 0, as the origin shows. It follows a model
+/// edit: the hole at 30 moved to 40 reads 40. It keeps a set's rules, with 1 to 64 targets, so its
+/// last target can't be taken out.
+#[test]
+fn an_ordinate_set_reads_each_hole_and_follows_a_model_edit() {
+    let (mut s, view) = front_view();
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    run(&mut s, "drawing.close", json!({}));
+    for x in [10, 30, 60] {
+        let cut =
+            json!({"radius": 3, "height": 42, "base": [x, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"], "name": format!("H{x}")});
+        run(&mut s, "solid.cylinder", cut);
+    }
+    run(&mut s, "drawing.open", drawing.clone());
+    let hole = |x: f64| json!({"centre": {"body": "Box", "index": round_index(&s, [x, 0.0, 15.0], 3.0)}});
+    let (h10, h30, h60) = (hole(10.0), hole(30.0), hole(60.0));
+    let steps = s.undo.len();
+    let set = add(&mut s, view, json!({"ordinate": {"origin": [0, 0, 0], "targets": [[0, 0, 30], h10, h30, h60], "direction": "horizontal"}}));
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+    assert_eq!((set["status"].as_str(), set.get("text")), (Some("ok"), None), "{set}");
+    assert!((set["value"].as_f64().unwrap() - 60.0).abs() < 1e-9, "{set}");
+    assert!(set["record"]["kind"]["ordinate"]["targets"].as_array().is_some_and(|t| t.len() == 4), "{set}");
+    let read = |reply: &Value| {
+        let listed = reply["members"].as_array().cloned().unwrap_or_default();
+        listed.iter().map(|m| m["text"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>()
+    };
+    assert_eq!(read(&set), ["0.00", "10.00", "30.00", "60.00"]);
+    assert_eq!(set["record"]["offset_mm"], json!(-10.0), "{set}");
+    let id = set["dimension"].clone();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "timeline.edit", json!({"feature": "H30", "set": {"base": [40, -1, 15]}}));
+    run(&mut s, "drawing.open", drawing);
+    // Picked again: the edit may number the edges anew.
+    let at = |s: &Session, x: f64| json!({"centre": {"body": "Box", "index": round_index(s, [x, 0.0, 15.0], 3.0)}});
+    let (h10, h40, far) = (at(&s, 10.0), at(&s, 40.0), at(&s, 60.0));
+    let moved = run(&mut s, INSPECT, json!({"dimension": id}));
+    assert_eq!((moved["status"].as_str(), read(&moved)), (Some("ok"), vec!["0.00".to_string(), "10.00".into(), "40.00".into(), "60.00".into()]));
+
+    assert_eq!(edit(&mut s, &id, json!({"targets": {"remove": [3, 0]}}))["changed"], json!(["targets"]));
+    assert_eq!(read(&run(&mut s, INSPECT, json!({"dimension": id}))), ["10.00", "40.00"]);
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    for (set, why) in [
+        (json!({"targets": {"remove": [0, 1]}}), "an ordinate set has 1 to 64 targets"),
+        (json!({"reading": "true"}), "a set has only `direction` and `targets`"),
+        (json!({"override_text": "60"}), "a set shows each target's number, never a text instead"),
+    ] {
+        let p = json!({"dimension": id, "set": set});
+        let e = s.execute(EDIT, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {p}"));
+        assert!(e.contains(why), "{p}: {e}");
+    }
+    let v = ids::encode(view);
+    let ordinate =
+        |origin: &Value, targets: Value| json!({"view": v, "kind": {"ordinate": {"origin": origin, "targets": targets, "direction": "horizontal"}}});
+    let (corner, nowhere) = (json!([0, 0, 0]), json!([1e6, 1e6, 1e6]));
+    for (p, why) in [
+        (ordinate(&corner, json!([])), "an ordinate set has 1 to 64 targets"),
+        (ordinate(&corner, Value::Array(vec![nowhere.clone(); 65])), "an ordinate set has 1 to 64 targets"),
+        // The line runs toward the target farthest from the origin, so a set with targets on both sides of
+        // its origin has one before it, whatever their order.
+        (ordinate(&h40, json!([h10, far])), "a target lies before its origin along the line"),
+    ] {
+        let e = refused(&mut s, p.clone());
+        assert!(e.contains(why), "{p}: {e}");
+    }
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+    // One target is a set: beside its origin's 0.
+    assert_eq!(read(&run(&mut s, ADD, ordinate(&corner, json!([h10])))), ["10.00"]);
+    // Its line runs towards that target, whichever side of the origin it is on.
+    assert_eq!(read(&run(&mut s, ADD, ordinate(&far, json!([h10])))), ["50.00"]);
+}
+
+/// A model edit that moves a target before its origin, or into line with it, leaves the set in the
+/// drawing, unmeasurable and saying why, never a panic, and Check Drawing lists it with the same
+/// why; moved on, it reads again.
+#[test]
+fn a_model_edit_can_make_a_baseline_set_unmeasurable() {
+    let (mut s, view) = front_view();
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    run(&mut s, "drawing.close", json!({}));
+    for (name, x, z) in [("Origin", 10, 15), ("Far", 60, 15), ("Moved", 30, 5)] {
+        let cut = json!({"radius": 3, "height": 42, "base": [x, -1, z], "axis": "Y", "operation": "cut", "targets": ["Box"], "name": name});
+        run(&mut s, "solid.cylinder", cut);
+    }
+    run(&mut s, "drawing.open", drawing.clone());
+    let hole = |x: f64, z: f64| json!({"centre": {"body": "Box", "index": round_index(&s, [x, 0.0, z], 3.0)}});
+    let kind = json!({"baseline": {"origin": hole(10.0, 15.0), "targets": [hole(30.0, 5.0), hole(60.0, 15.0)], "direction": "horizontal"}});
+    let id = add(&mut s, view, kind)["dimension"].clone();
+    let moved_to = |s: &mut Session, x: i32| {
+        run(s, "drawing.close", json!({}));
+        run(s, "timeline.edit", json!({"feature": "Moved", "set": {"base": [x, -1, 5]}}));
+        run(s, "drawing.open", drawing.clone());
+        run(s, INSPECT, json!({"dimension": id}))
+    };
+    for (x, why) in [(5, "a target lies before its origin along the line"), (10, "a target in line with its origin has no distance to dimension")] {
+        let read = moved_to(&mut s, x);
+        assert_eq!((read["status"].as_str(), read["why"].as_str()), (Some("unmeasurable"), Some(why)), "x = {x}: {read}");
+        s.doc.drawings.iter().for_each(|d| d.validate().unwrap());
+        // Check Drawing lists it, with the same why.
+        let check = run(&mut s, "drawing.check", json!({}));
+        let findings = check["findings"].as_array().cloned().unwrap_or_default();
+        let listed = findings.iter().find(|f| f["object"]["id"] == id).unwrap_or_else(|| panic!("x = {x}: {check}"));
+        let seen = (listed["kind"].as_str(), listed["object"]["kind"].as_str(), listed["why"].as_str());
+        assert_eq!(seen, (Some("unmeasurable"), Some("dimension"), Some(why)), "x = {x}: {check}");
+    }
+    let read = moved_to(&mut s, 40);
+    let values = read["members"].as_array().unwrap().iter().map(|m| m["value"].as_f64().unwrap()).collect::<Vec<_>>();
+    assert_eq!(read["status"].as_str(), Some("ok"), "{read}");
+    assert!(values.iter().zip([30.0, 50.0]).all(|(v, x)| (v - x).abs() < 1e-9) && values.len() == 2, "{values:?}");
+
+    // Its origin's hole deleted, then a target's: each lost, and each repaired by its slot.
+    let values = |reply: &Value| reply["members"].as_array().unwrap().iter().map(|m| m["value"].as_f64().unwrap()).collect::<Vec<_>>();
+    for (feature, slot, corner, read) in [("Origin", json!("origin"), [0, 0, 0], [40.0, 60.0]), ("Far", json!(1), [80, 0, 0], [40.0, 80.0])] {
+        run(&mut s, "drawing.close", json!({}));
+        run(&mut s, "timeline.delete", json!({"feature": feature}));
+        run(&mut s, "drawing.open", drawing.clone());
+        assert_eq!(run(&mut s, INSPECT, json!({"dimension": id}))["status"], "lost", "{feature}");
+        let repaired = run(&mut s, REPAIR, json!({"dimension": id, "slot": slot, "pick": {"corner": corner}}));
+        assert_eq!(repaired["status"], "ok", "{repaired}");
+        assert!(values(&repaired).iter().zip(read).all(|(v, x)| (v - x).abs() < 1e-9), "{feature}: {repaired}");
+    }
 }
 
 /// A cylinder's diameter is read between its silhouettes: a boss of radius 5 along X on the box's
@@ -844,6 +1129,64 @@ fn two_flat_faces_read_the_distance_between_them() {
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
 }
 
+/// The material surface and the pocket floor already name real faces. Their depth can be placed
+/// on a full section. It keeps its paper position through save, reopen, a change to the depth and undo.
+#[test]
+fn a_pocket_depth_can_be_placed_on_a_full_section() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "parameters.change", json!({"name": "depth", "expression": "3 mm", "unit": "mm"}));
+    run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": 10, "corner": [55, 20, "10 mm - depth"], "operation": "cut"}));
+    run(&mut s, "drawing.create", json!({"template": "iso-a3-part"}));
+    let (drawing, sheet) = {
+        let d = s.drawing("test").unwrap();
+        (d.id, ids::encode(d.sheets[0].id))
+    };
+    let top = run(&mut s, "drawing.view.base", json!({"sheet": sheet, "view": "top", "scale": "1:1", "position_mm": [90, 220]}));
+    let section = run(
+        &mut s,
+        "drawing.view.section",
+        json!({"parent": top["view"], "line": {"kind": "full", "points": [[-10, 30], [110, 30]], "arrows": "left"}, "place": {"at": [270, 220]}}),
+    );
+    let position = [330.0, 221.0];
+    let added = run(
+        &mut s,
+        ADD,
+        json!({
+            "view": section["view"],
+            "kind": {"faces": {"a": [70, 30, 7], "b": [45, 30, 10], "direction": "vertical"}},
+            "text_to_mm": position,
+        }),
+    );
+    let dimension = &added["dimension"];
+    let mut opened = reopened(&mut s, drawing, "section-depth.sc");
+    let check = |session: &mut Session, value, text| {
+        let read = run(session, INSPECT, json!({"dimension": dimension}));
+        reads(&read, value, text);
+        assert!(read["exact"] == true && read["foreshortened"] == false, "{read}");
+        assert!(box_centre(&read).dist(Vec2::from(position)) < 1e-9, "{read}");
+        assert_eq!(read["record"]["kind"], added["record"]["kind"], "{read}");
+    };
+    check(&mut s, 3.0, "3.00");
+    check(&mut opened, 3.0, "3.00");
+    for (command, params, value, text) in
+        [("parameters.change", json!({"name": "depth", "expression": "4 mm"}), 4.0, "4.00"), ("edit.undo", json!({}), 3.0, "3.00")]
+    {
+        run(&mut opened, "drawing.close", json!({}));
+        run(&mut opened, command, params);
+        run(&mut opened, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+        check(&mut opened, value, text);
+    }
+    let folder = crate::tests::Folder::new("section-depth-pdf");
+    let path = folder.path("section-depth.pdf");
+    let exported = run(&mut opened, "drawing.export", json!({"sheet": sheet, "format": "pdf", "path": path}));
+    assert!(
+        exported["dimensions"].as_array().unwrap().iter().any(|d| d["dimension"] == *dimension && d["view"] == section["view"] && d["drawn"] == true),
+        "{exported}"
+    );
+    assert!(std::fs::read(path).unwrap().starts_with(b"%PDF-"));
+}
+
 /// A dimension says its feature failed, with why, and that it is suppressed: the words a script reads.
 #[test]
 fn a_dimension_says_its_feature_failed_or_is_suppressed() {
@@ -944,8 +1287,8 @@ fn places(v: &Value, at: String, out: &mut Vec<String>) {
 }
 
 /// A hostile value in each place of each command's parameters, at every depth (picks, paths,
-/// corners' edges, a chain's points, the edit's settings and drags, the first add's `dry_run`): never a
-/// panic, and the drawing keeps its rules.
+/// corners' edges, a chain's points, a set's origin and targets, the edit's settings and drags and a
+/// set's targets edit, the first add's `dry_run`): never a panic, and the drawing keeps its rules.
 #[test]
 fn hostile_dimension_params_never_panic() {
     let (mut s, view) = front_view();
@@ -963,6 +1306,9 @@ fn hostile_dimension_params_never_panic() {
     let lost = add(&mut s, view, json!({"radial": {"edge": hole}}))["dimension"].clone();
     let through = json!({"chain": {"points": [[0, 0, 0], {"centre": hole}, [80, 0, 0]], "direction": "horizontal"}});
     let lost_chain = add(&mut s, view, through)["dimension"].clone();
+    let around = json!({"baseline": {"origin": [0, 0, 0], "targets": [{"centre": hole}, [80, 0, 0]], "direction": "horizontal"}});
+    let lost_set = add(&mut s, view, around)["dimension"].clone();
+    let set = add(&mut s, view, json!({"baseline": {"origin": [0, 0, 0], "targets": [[80, 0, 0], [80, 0, 30]]}}))["dimension"].clone();
     run(&mut s, "drawing.close", json!({}));
     run(&mut s, "timeline.delete", json!({"feature": "Hole"}));
     run(&mut s, "drawing.open", drawing);
@@ -986,6 +1332,13 @@ fn hostile_dimension_params_never_panic() {
             "direction": "horizontal"}}}),
         ),
         (EDIT, json!({"dimension": chain, "set": {"direction": {"along": [1, 1]}, "decimals": 3}})),
+        (
+            ADD,
+            json!({"view": v, "kind": {"baseline": {"origin": corner, "targets": [{"centre": {"body": "Box", "index": 0}, "path": [1]}, [80, 0, 0]],
+            "direction": "horizontal"}}}),
+        ),
+        (EDIT, json!({"dimension": set, "set": {"direction": "vertical", "targets": {"remove": [0], "add": [[0, 0, 30], corner]}}})),
+        (ADD, json!({"view": v, "kind": {"ordinate": {"origin": [80, 0, 0], "targets": [corner, [0, 0, 0]], "direction": {"along": [-1, 0]}}}})),
         (ADD, json!({"view": v, "kind": {"cylinder": {"face": {"body": "Box", "index": 0, "path": [1]}}}})),
         (
             ADD,
@@ -1002,6 +1355,8 @@ fn hostile_dimension_params_never_panic() {
         (INSPECT, json!({"dimension": id})),
         (REPAIR, json!({"dimension": lost, "slot": "edge", "pick": {"edge": {"body": "Box", "index": 0}}})),
         (REPAIR, json!({"dimension": lost_chain, "slot": 1, "pick": {"corner": {"edges": [{"body": "Box", "index": 0}, {"point": [0, 0, 15]}]}}})),
+        (REPAIR, json!({"dimension": lost_set, "slot": "origin", "pick": {"corner": [0, 0, 0]}})),
+        (REPAIR, json!({"dimension": lost_set, "slot": 0, "pick": {"corner": [80, 0, 30]}})),
     ];
     let many = |v: Value| Value::Array(vec![v; 1000]);
     let mut values = crate::tests::hostile_values();
@@ -1056,9 +1411,9 @@ fn a_dimension_can_measure_a_reference_parts_edge() {
 }
 
 /// A dimension attaches only to parts its view draws. One with a corner on a part the view's hide
-/// leaves out is refused, and so is a chain whose last point is there, with the drawing left as it
-/// was. With the part drawn again it is added; a later hide keeps it, and inspect warns until the
-/// edit is undone.
+/// leaves out is refused, and so is a chain whose last point is there, a set whose origin is there
+/// and a set's edit that adds a target there, with the drawing left as it was. With the part drawn
+/// again it is added; a later hide keeps it, and inspect warns until the edit is undone.
 #[test]
 fn a_dimension_is_refused_on_a_part_its_view_leaves_out() {
     let mut s = Session::default();
@@ -1071,13 +1426,19 @@ fn a_dimension_is_refused_on_a_part_its_view_leaves_out() {
     let on_block = |p: [f64; 3]| json!({"point": p, "path": [block]});
     let linear = json!({"view": v, "kind": {"linear": {"a": [100, 0, 0], "b": on_block([20.0, 0.0, 0.0])}}});
     let chain = json!({"view": v, "kind": {"chain": {"points": [[100, 0, 0], [110, 0, 0], on_block([20.0, 0.0, 10.0])]}}});
+    let set = json!({"view": v, "kind": {"baseline": {"origin": on_block([20.0, 0.0, 0.0]), "targets": [[100, 0, 0], [110, 0, 0]]}}});
+    let up = json!({"baseline": {"origin": [100, 0, 0], "targets": [[110, 0, 10], [100, 0, 10]], "direction": "vertical"}});
+    let on_base = run(&mut s, ADD, json!({"view": v, "kind": up}))["dimension"].clone();
     run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide": [[block]]}}));
     let words = format!("its hide leaves out occurrence path [{block}]");
     let before = s.drawing("test").unwrap().to_json().unwrap();
-    for p in [linear.clone(), chain] {
+    for p in [linear.clone(), chain, set] {
         let e = refused(&mut s, p.clone());
         assert!(e.contains(&format!("view {v} doesn't draw that part: {words}")), "{p}: {e}");
     }
+    let p = json!({"dimension": on_base, "set": {"targets": {"add": [on_block([20.0, 0.0, 10.0])]}}});
+    let e = s.execute(EDIT, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {p}"));
+    assert!(e.contains(&format!("view {v} doesn't draw that part: {words}")), "{p}: {e}");
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
     run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide": null}}));
     let added = run(&mut s, ADD, linear);
@@ -1102,19 +1463,6 @@ fn read_once() -> (Session, u64, u64) {
 /// Fillets away the edge the [`read_once`] dimension measures.
 fn lose_the_edge(s: &mut Session) {
     run(s, "solid.fillet", json!({"body": "Box", "radius": 5, "edges": [[40, 0, 30]]}));
-}
-
-/// `s` saved to a file called `name` and opened from it in a new session, with `drawing` open.
-fn reopened(s: &mut Session, drawing: u64, name: &str) -> Session {
-    let dir = std::env::temp_dir().join(format!("solidcraft-last-good-{}-{name}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join(name);
-    run(s, "file.save_as", json!({"path": path}));
-    let mut fresh = Session::default();
-    run(&mut fresh, "doc.open", json!({"path": path}));
-    run(&mut fresh, "drawing.open", json!({"drawing": ids::encode(drawing)}));
-    let _ = std::fs::remove_dir_all(&dir);
-    fresh
 }
 
 fn inspect_of(s: &mut Session, dimension: u64) -> Value {
@@ -1291,7 +1639,7 @@ fn each_slot_reaches_its_own_reference() {
     let point =
         |name: &str| ModelPoint { body: "Box".into(), origin_feature: 1, edges: vec![format!("corner {name}")], centre: false, path: Vec::new() };
     let face = |name: &str| ModelFace { body: "Box".into(), origin_feature: 1, name: format!("face {name}"), path: Vec::new() };
-    let side = |name: &str| Silhouette { face: face(name), side: solidcraft_geom::drawing_measure::SilhouetteSide::Far };
+    let side = |name: &str| Silhouette { face: face(name), side: solidcraft_doc::drawing::measure::SilhouetteSide::Far };
     let (direction, reading) = (LinearDirection::Aligned, Reading::Projected);
     let (a, b) = (SlotParam::A, SlotParam::B);
     let mut kinds = [
@@ -1446,10 +1794,8 @@ fn workshop_plate_round_index(s: &Session, body: &str, centre: [f64; 3], radius:
 
 /// One command-script plate with two independently authored, positioned bore dimensions.
 fn workshop_plate_dimensions() -> (Session, u64, Value, Value) {
-    let mut s = Session::default();
-    let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/drawing_m2.json")).unwrap();
-    let made = s.run_script(&script).unwrap();
-    let top = made.last().unwrap()["view"].clone();
+    let (mut s, top) = milestone_plate_script();
+    let top = top["view"].clone();
     let drawing = s.drawing("test").unwrap().id;
     let bore1 = json!({"body": "Plate", "index": workshop_plate_round_index(&s, "Plate", [20.0, 20.0, 20.0], 5.0)});
     let bore2 = json!({"body": "Plate", "index": workshop_plate_round_index(&s, "Plate", [60.0, 50.0, 20.0], 5.0)});
@@ -1617,10 +1963,8 @@ fn reopening_a_plate_keeps_dimensions_and_a_lost_bores_last_value() {
 /// same dimension reads 100 when it is opened again, and 80 after the change is undone.
 #[test]
 fn the_plates_width_between_its_side_faces_follows_a_width_change() {
-    let mut s = Session::default();
-    let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/drawing_m2.json")).unwrap();
-    let made = s.run_script(&script).unwrap();
-    let top = made.last().unwrap()["view"].clone();
+    let (mut s, top) = milestone_plate_script();
+    let top = top["view"].clone();
     let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
     let width = run(&mut s, ADD, json!({"view": top, "kind": {"faces": {"a": [50, 0, 10], "b": [50, 80, 10]}}}));
     reads(&width, 80.0, "80.00");
@@ -1666,10 +2010,10 @@ const PLATE: [f64; 5] = [10.0, 10.0, 80.0, 100.0, 50.0];
 
 /// The workshop plate's top view with five dimensions: Bore1 Ø10, Bore2 Ø10, the width between the
 /// side faces (80), the length between the ends (100) and Bore1's centre to Bore2's, aligned (50;
-/// they are 40 across and 30 up), each centre named by its bore's rim (#9249). The session,
-/// `{drawing}` to open it again, the view's id and the five as added, in that order.
-fn plate_with_five() -> (Session, Value, u64, [Value; 5]) {
-    let (mut s, drawing, first, second) = workshop_plate_dimensions();
+/// they are 40 across and 30 up), each centre named by its bore's rim (#9249). The session, the
+/// view's id and the five as added, in that order.
+fn plate_with_five() -> (Session, u64, [Value; 5]) {
+    let (mut s, _, first, second) = workshop_plate_dimensions();
     let view = first["view"].clone();
     let rim = |s: &Session, at: [f64; 3]| json!({"centre": {"body": "Plate", "index": workshop_plate_round_index(s, "Plate", at, 5.0)}});
     let (one, two) = (rim(&s, [20.0, 20.0, 20.0]), rim(&s, [60.0, 50.0, 20.0]));
@@ -1680,7 +2024,7 @@ fn plate_with_five() -> (Session, Value, u64, [Value; 5]) {
     let five = [first, second, width, length, centres];
     read_as(&mut s, &five, PLATE);
     let view = ids::decode(view.as_str().unwrap()).unwrap();
-    (s, json!({"drawing": ids::encode(drawing)}), view, five)
+    (s, view, five)
 }
 
 /// Each of `five` read now, by the reference it was added with: `ok` with `values` in order, the
@@ -1694,42 +2038,35 @@ fn read_as(s: &mut Session, five: &[Value; 5], values: [f64; 5]) {
     }
 }
 
-/// `id` with `p` made on the model, the drawing closed as a model edit has it, then opened again.
-fn closed_edit(s: &mut Session, drawing: &Value, id: &str, p: Value) {
-    run(s, "drawing.close", json!({}));
-    run(s, id, p);
-    run(s, "drawing.open", drawing.clone());
-}
-
 /// Each of the plate's parameters changed with the drawing closed moves only what it drives: Bore1's
 /// diameter to 12, Bore2's to 8, the width to 100 and the length to 120, each read and undone back to
 /// the plate with the authored drawing unchanged; then all four at once, undone one by one to the
 /// plate and redone to all four. The bores' centres stay 50 apart throughout.
 #[test]
 fn the_plates_five_dimensions_follow_each_parameter_and_its_undo() {
-    let (mut s, drawing, _, five) = plate_with_five();
+    let (mut s, _, five) = plate_with_five();
     let authored = s.drawing("test").unwrap().to_json().unwrap();
     let changes = [("bore1_d", "12 mm", 0, 12.0), ("bore2_d", "8 mm", 1, 8.0), ("width", "100 mm", 2, 100.0), ("length", "120 mm", 3, 120.0)];
     for (name, expression, at, value) in changes {
-        closed_edit(&mut s, &drawing, "parameters.change", json!({"name": name, "expression": expression}));
+        in_the_model(&mut s, "parameters.change", json!({"name": name, "expression": expression}));
         let mut values = PLATE;
         values[at] = value;
         read_as(&mut s, &five, values);
-        closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+        in_the_model(&mut s, "edit.undo", json!({}));
         read_as(&mut s, &five, PLATE);
         assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), authored, "{name}: the model's undo changed the authored drawing");
     }
     let all = [12.0, 8.0, 100.0, 120.0, 50.0];
     for (name, expression, _, _) in changes {
-        closed_edit(&mut s, &drawing, "parameters.change", json!({"name": name, "expression": expression}));
+        in_the_model(&mut s, "parameters.change", json!({"name": name, "expression": expression}));
     }
     read_as(&mut s, &five, all);
     for _ in changes {
-        closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+        in_the_model(&mut s, "edit.undo", json!({}));
     }
     read_as(&mut s, &five, PLATE);
     for _ in changes {
-        closed_edit(&mut s, &drawing, "edit.redo", json!({}));
+        in_the_model(&mut s, "edit.redo", json!({}));
     }
     read_as(&mut s, &five, all);
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), authored, "the model's redo changed the authored drawing");
@@ -1741,7 +2078,7 @@ fn the_plates_five_dimensions_follow_each_parameter_and_its_undo() {
 /// again; deleted again, they keep their last values through save and reopen.
 #[test]
 fn the_bores_centres_stay_put_and_a_lost_bore_takes_its_centre_dimensions() {
-    let (mut s, drawing, view, five) = plate_with_five();
+    let (mut s, view, five) = plate_with_five();
     let id = s.drawing("test").unwrap().id;
     let rim = |s: &Session, at: [f64; 3]| json!({"centre": {"body": "Plate", "index": workshop_plate_round_index(s, "Plate", at, 5.0)}});
     let (one, two) = (rim(&s, [20.0, 20.0, 20.0]), rim(&s, [60.0, 50.0, 20.0]));
@@ -1772,19 +2109,19 @@ fn the_bores_centres_stay_put_and_a_lost_bore_takes_its_centre_dimensions() {
         }
     };
     all_ok(read(&mut s));
-    closed_edit(&mut s, &drawing, "parameters.change", json!({"name": "bore1_d", "expression": "12 mm"}));
+    in_the_model(&mut s, "parameters.change", json!({"name": "bore1_d", "expression": "12 mm"}));
     all_ok(read(&mut s));
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
-    closed_edit(&mut s, &drawing, "timeline.suppress", json!({"feature": "Bore1", "suppressed": true}));
+    in_the_model(&mut s, "edit.undo", json!({}));
+    in_the_model(&mut s, "timeline.suppress", json!({"feature": "Bore1", "suppressed": true}));
     assert!(read(&mut s).iter().all(|r| r["status"] == "suppressed" && r.get("value").is_none()), "{:?}", read(&mut s));
-    closed_edit(&mut s, &drawing, "timeline.suppress", json!({"feature": "Bore1", "suppressed": false}));
+    in_the_model(&mut s, "timeline.suppress", json!({"feature": "Bore1", "suppressed": false}));
     all_ok(read(&mut s));
-    closed_edit(&mut s, &drawing, "timeline.delete", json!({"feature": "Bore1"}));
+    in_the_model(&mut s, "timeline.delete", json!({"feature": "Bore1"}));
     all_lost(read(&mut s));
     reads(&run(&mut s, INSPECT, json!({"dimension": five[1]["dimension"]})), 10.0, "Ø10.00");
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     all_ok(read(&mut s));
-    closed_edit(&mut s, &drawing, "edit.redo", json!({}));
+    in_the_model(&mut s, "edit.redo", json!({}));
     all_lost(read(&mut s));
     let mut opened = reopened(&mut s, id, "w23a-centres.solidcraft");
     all_lost(read(&mut opened));
@@ -1873,7 +2210,7 @@ fn same_box(a: [[f64; 2]; 2], b: [[f64; 2]; 2]) -> bool {
 /// arrowheads to 60, and a save and reopen draws the same sheet.
 #[test]
 fn the_plates_sheet_draws_what_the_model_has_and_the_same_after_undo() {
-    let (mut s, drawing, view, five) = plate_with_five();
+    let (mut s, view, five) = plate_with_five();
     let id = s.drawing("test").unwrap().id;
     let svg = |s: &mut Session| run(s, "drawing.export", json!({"sheet": "Sheet 1"}))["svg"].as_str().unwrap().to_string();
     let view_lines =
@@ -1894,17 +2231,17 @@ fn the_plates_sheet_draws_what_the_model_has_and_the_same_after_undo() {
         assert!((tips_apart(&base, &five[at]) - apart).abs() < 1e-6, "dimension {at}: {}", tips_apart(&base, &five[at]));
     }
 
-    closed_edit(&mut s, &drawing, "parameters.change", json!({"name": "bore1_d", "expression": "12 mm"}));
+    in_the_model(&mut s, "parameters.change", json!({"name": "bore1_d", "expression": "12 mm"}));
     let wider = sheet_now(&s);
     assert!(!same_lines(&lines_of(&wider, &five[0]), &lines_of(&base, &five[0])), "Bore1's dimension is drawn at Ø12");
     assert!(!same_lines(&view_lines(&wider), &view_lines(&base)), "the view draws Bore1 at Ø12");
     for added in &five[1..] {
         assert!(same_lines(&lines_of(&wider, added), &lines_of(&base, added)), "only Bore1's dimension changes: {}", added["dimension"]);
     }
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     as_it_was(&mut s, "Bore1 at 12 undone");
 
-    closed_edit(&mut s, &drawing, "timeline.delete", json!({"feature": "Bore1"}));
+    in_the_model(&mut s, "timeline.delete", json!({"feature": "Bore1"}));
     let lost = sheet_now(&s);
     for added in [&five[0], &five[4]] {
         let state = state_of(&lost, added);
@@ -1922,10 +2259,10 @@ fn the_plates_sheet_draws_what_the_model_has_and_the_same_after_undo() {
     let words: Vec<Option<Value>> = five.iter().map(word).collect();
     assert_eq!(words, ["lost", "ok", "ok", "ok", "lost"].map(|w| Some(json!(w))).to_vec(), "{status}");
     assert_ne!(svg(&mut s), base_svg, "the sheet with Bore1 lost still exports, without it");
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     as_it_was(&mut s, "Bore1's delete undone");
 
-    closed_edit(&mut s, &drawing, "parameters.change", json!({"name": "length", "expression": "120 mm"}));
+    in_the_model(&mut s, "parameters.change", json!({"name": "length", "expression": "120 mm"}));
     let longer = sheet_now(&s);
     assert!(same_box(view_box(&longer, view), [[120.0, 160.0], [180.0, 200.0]]), "{:?}", view_box(&longer, view));
     for (at, apart) in [(2, 40.0), (3, 60.0), (4, 25.0)] {
@@ -1943,11 +2280,11 @@ fn the_plates_sheet_draws_what_the_model_has_and_the_same_after_undo() {
 /// fillet undone, the same.
 #[test]
 fn fillets_on_the_plates_corners_leave_its_five_dimensions_read() {
-    let (mut s, drawing, _, five) = plate_with_five();
+    let (mut s, _, five) = plate_with_five();
     for (edge, radius) in [([0, 0, 10], 5), ([50, 0, 20], 2)] {
-        closed_edit(&mut s, &drawing, "solid.fillet", json!({"body": "Plate", "radius": radius, "edges": [edge]}));
+        in_the_model(&mut s, "solid.fillet", json!({"body": "Plate", "radius": radius, "edges": [edge]}));
         read_as(&mut s, &five, PLATE);
-        closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+        in_the_model(&mut s, "edit.undo", json!({}));
         read_as(&mut s, &five, PLATE);
     }
 }
@@ -1959,10 +2296,9 @@ fn fillets_on_the_plates_corners_leave_its_five_dimensions_read() {
 /// still read Ø10. Every model edit is made with the drawing closed.
 #[test]
 fn a_new_hole_never_takes_the_dimension_of_an_undone_one() {
-    let (mut s, drawing, first, second) = workshop_plate_dimensions();
-    let drawing = json!({"drawing": ids::encode(drawing)});
+    let (mut s, _, first, second) = workshop_plate_dimensions();
     let hole = |name: &str, at: [f64; 3], diameter: f64| json!({"position": at, "direction": [0, 0, -1], "diameter": diameter, "name": name, "type": "simple"});
-    closed_edit(&mut s, &drawing, "solid.hole", hole("Bore3", [80.0, 20.0, 20.0], 6.0));
+    in_the_model(&mut s, "solid.hole", hole("Bore3", [80.0, 20.0, 20.0], 6.0));
     let rim = json!({"body": "Plate", "index": workshop_plate_round_index(&s, "Plate", [80.0, 20.0, 20.0], 3.0)});
     let on_bore3 = run(&mut s, ADD, json!({"view": first["view"], "kind": {"radial": {"edge": rim}}}));
     reads(&on_bore3, 6.0, "Ø6.00");
@@ -1972,9 +2308,9 @@ fn a_new_hole_never_takes_the_dimension_of_an_undone_one() {
         assert!(read.get("value").is_none() && read.get("text").is_none(), "a lost dimension reads nothing: {read}");
         assert!(read["last_good"].as_f64().is_some_and(|last| (last - 6.0).abs() < 1e-9), "its last value is 6: {read}");
     };
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     lost_as_bore3(&run(&mut s, INSPECT, json!({"dimension": on_bore3["dimension"]})));
-    closed_edit(&mut s, &drawing, "solid.hole", hole("Bore4", [80.0, 60.0, 20.0], 8.0));
+    in_the_model(&mut s, "solid.hole", hole("Bore4", [80.0, 60.0, 20.0], 8.0));
     lost_as_bore3(&run(&mut s, INSPECT, json!({"dimension": on_bore3["dimension"]})));
     for bore in [&first, &second] {
         reads(&run(&mut s, INSPECT, json!({"dimension": bore["dimension"]})), 10.0, "Ø10.00");
@@ -2005,8 +2341,7 @@ fn rim_name(record: &Value) -> &Value {
 #[test]
 fn a_rounded_bore_rim_is_lost_and_a_repair_reads_it_again() {
     let (mut s, id, first, second) = workshop_plate_dimensions();
-    let drawing = json!({"drawing": ids::encode(id)});
-    closed_edit(&mut s, &drawing, "solid.fillet", json!({"body": "Plate", "radius": 1, "edges": [[25, 20, 20]]}));
+    in_the_model(&mut s, "solid.fillet", json!({"body": "Plate", "radius": 1, "edges": [[25, 20, 20]]}));
     let lost = lost_again(&mut s, &first, &first["record"]);
     reads(&run(&mut s, INSPECT, json!({"dimension": second["dimension"]})), 10.0, "Ø10.00");
     let leads = lost["candidates"].as_array().cloned().unwrap_or_default();
@@ -2043,17 +2378,17 @@ fn a_rounded_bore_rim_is_lost_and_a_repair_reads_it_again() {
     assert!(last_good.as_ref().and_then(Value::as_f64).is_some_and(|v| (v - 10.0).abs() < 1e-9), "{read}");
     assert_eq!(saved, repaired["record"], "the repair is saved");
 
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     let unrounded = run(&mut s, INSPECT, json!({"dimension": first["dimension"]}));
     assert_eq!(unrounded["status"], "lost", "the repaired edge is the round's: {unrounded}");
     assert_eq!(unrounded["record"], repaired["record"], "and the repair stays as it was put");
     reads(&run(&mut s, INSPECT, json!({"dimension": second["dimension"]})), 10.0, "Ø10.00");
-    closed_edit(&mut s, &drawing, "edit.redo", json!({}));
+    in_the_model(&mut s, "edit.redo", json!({}));
     reads(&run(&mut s, INSPECT, json!({"dimension": first["dimension"]})), 10.0, "Ø10.00");
 
     run(&mut s, "edit.undo", json!({}));
     lost_again(&mut s, &first, &first["record"]);
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     let back = run(&mut s, INSPECT, json!({"dimension": first["dimension"]}));
     reads(&back, 10.0, "Ø10.00");
     assert_eq!(back["record"], first["record"], "the first record reads again");
@@ -2066,9 +2401,8 @@ fn a_rounded_bore_rim_is_lost_and_a_repair_reads_it_again() {
 /// reads Bore1 by its first record again.
 #[test]
 fn a_deleted_bores_dimension_reads_bore2_only_when_repaired_to_it() {
-    let (mut s, id, first, second) = workshop_plate_dimensions();
-    let drawing = json!({"drawing": ids::encode(id)});
-    closed_edit(&mut s, &drawing, "timeline.delete", json!({"feature": "Bore1"}));
+    let (mut s, _, first, second) = workshop_plate_dimensions();
+    in_the_model(&mut s, "timeline.delete", json!({"feature": "Bore1"}));
     let lost = lost_again(&mut s, &first, &first["record"]);
     let rim = json!({"edge": {"body": "Plate", "index": workshop_plate_round_index(&s, "Plate", [60.0, 50.0, 20.0], 5.0)}});
     let leads = lost["candidates"].as_array().cloned().unwrap_or_default();
@@ -2081,7 +2415,7 @@ fn a_deleted_bores_dimension_reads_bore2_only_when_repaired_to_it() {
     assert_eq!((&repaired["dimension"], &repaired["record"]["text"]), (&first["dimension"], &json!({"at": [12.0, 24.0]})));
     reads(&run(&mut s, INSPECT, json!({"dimension": second["dimension"]})), 10.0, "Ø10.00");
 
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     let kept = run(&mut s, INSPECT, json!({"dimension": first["dimension"]}));
     reads(&kept, 10.0, "Ø10.00");
     assert_eq!(kept["record"], repaired["record"], "a repair stays where it was put");
@@ -2096,13 +2430,13 @@ fn a_deleted_bores_dimension_reads_bore2_only_when_repaired_to_it() {
 /// reference names its body, so a rename loses all five.
 #[test]
 fn renaming_the_plate_keeps_its_five_dimensions() {
-    let (mut s, drawing, _, five) = plate_with_five();
-    closed_edit(&mut s, &drawing, "body.rename", json!({"body": "Plate", "name": "Base"}));
+    let (mut s, _, five) = plate_with_five();
+    in_the_model(&mut s, "body.rename", json!({"body": "Plate", "name": "Base"}));
     for (i, (added, value)) in five.iter().zip(PLATE).enumerate() {
         let text = if i < 2 { format!("Ø{value:.2}") } else { format!("{value:.2}") };
         reads(&run(&mut s, INSPECT, json!({"dimension": added["dimension"]})), value, &text);
     }
-    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     read_as(&mut s, &five, PLATE);
 }
 
@@ -2212,7 +2546,7 @@ fn inspect_says_where_a_dimension_sits_on_its_sheet() {
 /// moves by (12, -7) (within a rounding: the centre is added to the point once, not in two steps).
 #[test]
 fn the_layout_is_where_the_sheet_draws_it() {
-    let (mut s, _, view, five) = plate_with_five();
+    let (mut s, view, five) = plate_with_five();
     let read = |s: &mut Session| five.iter().map(|added| run(s, INSPECT, json!({"dimension": added["dimension"]}))).collect::<Vec<_>>();
     let before = read(&mut s);
     let sheet = sheet_now(&s);
@@ -2363,12 +2697,12 @@ fn a_layout_follows_the_drawings_units() {
 /// and drawn, the sheet's arrowheads are where the layout's tips are.
 #[test]
 fn a_layout_reads_the_model_as_it_is_now_in_a_deferred_drawing() {
-    let (mut s, drawing, _, five) = plate_with_five();
+    let (mut s, _, five) = plate_with_five();
     let length = &five[3];
     run(&mut s, "drawing.set", json!({"updates": "deferred"}));
     run(&mut s, "drawing.update", json!({}));
     assert!((tips_apart(&shown_now(&mut s), length) - 50.0).abs() < 1e-6);
-    closed_edit(&mut s, &drawing, "parameters.change", json!({"name": "length", "expression": "120 mm"}));
+    in_the_model(&mut s, "parameters.change", json!({"name": "length", "expression": "120 mm"}));
     let read = run(&mut s, INSPECT, json!({"dimension": length["dimension"]}));
     reads(&read, 120.0, "120.00");
     let tips: Vec<Vec2> = layout_arrows(&read).into_iter().map(|(tip, _)| tip).collect();
@@ -2676,6 +3010,8 @@ fn a_drag_that_cant_place_is_refused_and_changes_nothing() {
     let length = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}))["dimension"].clone();
     let chain = add(&mut s, view, json!({"chain": {"points": [[0, 0, 0], [80, 0, 0], [80, 0, 30]]}}))["dimension"].clone();
     let faces = add(&mut s, view, json!({"faces": {"a": [0, 20, 15], "b": [80, 20, 15]}}))["dimension"].clone();
+    let baseline = json!({"baseline": {"origin": [0, 0, 0], "targets": [[80, 0, 0], [80, 0, 30]], "direction": "horizontal"}});
+    let set = add(&mut s, view, baseline)["dimension"].clone();
     fn refuses(s: &mut Session, cases: &[(&Value, Value, &str)]) {
         let (before, steps) = (s.drawing("test").unwrap().to_json().unwrap(), s.undo.len());
         for (id, set, why) in cases {
@@ -2690,6 +3026,8 @@ fn a_drag_that_cant_place_is_refused_and_changes_nothing() {
         &[
             (&chain, json!({"text_to_mm": [200, 190]}), "a chain's texts sit on its members"),
             (&faces, json!({"line_through_mm": [200, 150]}), "runs beyond their ends"),
+            (&set, json!({"line_through_mm": [200, 120]}), "not supported yet: dragging a baseline or ordinate set"),
+            (&set, json!({"text_to_mm": [200, 120]}), "not supported yet: dragging a baseline or ordinate set"),
             (&length, json!({"text_to_mm": [200, 190], "text": "centred"}), "a drag sets `offset_mm` and `text` itself"),
             (&length, json!({"line_through_mm": [200, 190], "offset_mm": 5}), "a drag sets `offset_mm` and `text` itself"),
             (&length, json!({"text_to_mm": [200, 190], "line_through_mm": [200, 190]}), "a drag each"),
@@ -2697,6 +3035,9 @@ fn a_drag_that_cant_place_is_refused_and_changes_nothing() {
             (&length, json!({"line_through_mm": [0, 1e8]}), "on paper"),
         ],
     );
+    let ordinate = json!({"ordinate": {"origin": [0, 0, 0], "targets": [[80, 0, 0]], "direction": "horizontal"}});
+    let why = refused(&mut s, json!({"view": ids::encode(view), "kind": ordinate, "line_through_mm": [200, 120]}));
+    assert!(why.contains("not supported yet: dragging a baseline or ordinate set"), "{why}");
     crate::drawing_scene::tests::not_drawable_yet(&mut s, view);
     refuses(&mut s, &[(&length, json!({"line_through_mm": [200, 190]}), "its view isn't drawn")]);
 
@@ -2705,4 +3046,26 @@ fn a_drag_that_cant_place_is_refused_and_changes_nothing() {
     run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
     let lost = json!(ids::encode(dimension));
     refuses(&mut s, &[(&lost, json!({"line_through_mm": [200, 190]}), "what it measures has no place to draw on its view")]);
+}
+
+/// An edit of a set's targets is read where its view draws its parts, as add reads the set
+/// (#13048), with its picks in the design's frame, as add's are. From the nut's bottom (z 20, not
+/// moved), the bolt's bottom corner (z 20 as the design places it) is in line with the origin on
+/// the assembled view, so it is refused there; the exploded view draws it 50 higher, so there it is
+/// added and reads 50.
+#[test]
+fn a_set_targets_edit_reads_where_its_view_draws_its_parts() {
+    let (mut s, views, bolt) = bolt_apart();
+    let nut = s.doc.occurrences.iter().find(|o| o.name.starts_with("Nut")).map(|o| o.id).unwrap();
+    let on = |x: f64, z: f64, path: u64| json!({"point": [x, 0.0, z], "path": [path]});
+    let set = json!({"baseline": {"origin": on(30.0, 20.0, nut), "targets": [on(30.0, 30.0, nut), on(0.0, 30.0, bolt)], "direction": "vertical"}});
+    let [assembled, exploded] = views.map(|view| add(&mut s, view, set.clone())["dimension"].clone());
+    let bottom = json!({"targets": {"add": [on(0.0, 20.0, bolt)]}});
+    let p = json!({"dimension": assembled, "set": bottom});
+    let e = s.execute(EDIT, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {p}"));
+    assert!(e.contains("a target in line with its origin has no distance to dimension"), "{e}");
+    assert_eq!(edit(&mut s, &exploded, bottom)["changed"], json!(["targets"]));
+    let read = run(&mut s, INSPECT, json!({"dimension": exploded}));
+    let values: Vec<f64> = read["members"].as_array().unwrap().iter().map(|m| m["value"].as_f64().unwrap()).collect();
+    assert!(values.len() == 3 && values.iter().zip([10.0, 60.0, 50.0]).all(|(v, want)| (v - want).abs() < 1e-6), "{read}");
 }

@@ -27,6 +27,12 @@ mod linked;
 mod mouse_buttons;
 #[cfg(any(target_arch = "wasm32", test))]
 mod space_mouse;
+#[cfg(target_arch = "wasm32")]
+mod tickets;
+#[cfg(all(target_arch = "wasm32", feature = "usage-stats"))]
+mod usage;
+#[cfg(target_arch = "wasm32")]
+mod wheel_samples;
 
 /// The folder the page serves its fonts from: index.html copies each there, and a drawing's text
 /// fetches its fonts from it (#4890).
@@ -373,7 +379,7 @@ mod web {
         files: Rc<Files>,
         /// When the last autosave was (seconds), and the revision it holds (none stored: `None`).
         autosaved_at: f64,
-        autosaved: Option<u64>,
+        autosaved: Option<(u64, u64)>,
         /// A stored design being renamed: (its name, the new name).
         renaming: Option<(String, String)>,
         /// The rename field takes the keyboard when it appears.
@@ -400,6 +406,8 @@ mod web {
         drawing_fonts_done: DrawingFontsDone,
         space_mouse: SpaceMouse,
         wheel_gestures: solidcraft_ui_egui::WebWheelGestures,
+        /// What the browser said about each wheel event since the last frame (`wheel_samples`).
+        wheel_samples: Rc<std::cell::RefCell<Vec<solidcraft_ui_egui::wheel_hint::WheelSample>>>,
         /// The mouse buttons the browser holds, which egui's are kept to (`mouse_buttons`).
         mouse_buttons: Rc<std::cell::RefCell<crate::mouse_buttons::Tracker>>,
         /// The settings this tab wrote or loaded last, and those another tab wrote since (#8644).
@@ -555,12 +563,19 @@ mod web {
             }
             // Unsaved work is kept (at most every AUTOSAVE_S); saved work needs no autosave.
             if self.files.ready.get() && self.files.recovery.borrow().is_none() && !self.app.preferences.keep_unsaved_in_browser {
-                let s = &self.app.session;
-                let changed = s.is_dirty() && self.autosaved != Some(s.revision);
+                // A clean tab must not remove the previous tab's recovery copy while its
+                // design is still unsaved. A different dirty tab still gets its regular turn.
+                let owner = self
+                    .autosaved
+                    .filter(|_| !self.app.session.is_dirty())
+                    .and_then(|(uid, _)| solidcraft_ui_egui::documents::open_sessions(&self.app).into_iter().find(|s| s.uid == uid && s.is_dirty()));
+                let s = owner.unwrap_or(&self.app.session);
+                let key = (s.uid, s.revision);
+                let changed = s.is_dirty() && self.autosaved != Some(key);
                 let wait = AUTOSAVE_S - (now - self.autosaved_at);
                 if changed && wait <= 0.0 {
                     files::autosave(&self.files, Some((&s.design(), s.path.as_deref())));
-                    self.autosaved = Some(s.revision);
+                    self.autosaved = Some(key);
                     self.autosaved_at = now;
                 } else if changed {
                     // Come back for it even when nothing else happens.
@@ -621,7 +636,13 @@ mod web {
                     if now || keep::due(time, first, t.last_change) {
                         match solidcraft_engine::io::write_design_container(&s.design()) {
                             Ok(bytes) => {
-                                let entry = keep::Entry { id, name: s.doc.name.clone(), path: s.path.clone(), changed_at: t.last_change };
+                                let entry = keep::Entry {
+                                    id,
+                                    name: s.doc.name.clone(),
+                                    path: s.path.clone(),
+                                    changed_at: t.last_change,
+                                    preserve_from_save: solidcraft_ui_egui::save_job::protects_host_recovery(app, s),
+                                };
                                 files::write_kept(files, &entry, bytes, s.revision);
                                 t.first_unwritten = None;
                             }
@@ -925,6 +946,16 @@ mod web {
             }
             let Some((what, name)) = act else { return };
             let path = format!("{}{name}", files::OPFS);
+            if matches!(what, "delete" | "rename")
+                && (solidcraft_ui_egui::save_job::host_path_pending(&self.app, &path)
+                    || self
+                        .renaming
+                        .as_ref()
+                        .is_some_and(|(from, _)| solidcraft_ui_egui::save_job::host_path_pending(&self.app, &format!("{}{from}", files::OPFS))))
+            {
+                self.app.set_status("a save to this file is in progress", true);
+                return;
+            }
             match what {
                 "open" => {
                     self.app.open_path_async(&path);
@@ -1195,6 +1226,10 @@ mod web {
 
     impl eframe::App for Shell {
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+            // First: what the browser did with the last right-click (#20011, #21229). A browser may
+            // take a right-click for itself and open its own menu; the app then closes or skips
+            // its own menu once.
+            self.app.menu.browser_menu = self.mouse_buttons.borrow_mut().take_menu();
             // First: a language another tab chose fetches its font this frame.
             self.load_other_tabs_prefs();
             self.tick_font(ctx);
@@ -1209,11 +1244,14 @@ mod web {
         fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
             // First, so everything after sees the buttons the browser holds.
             let taps = crate::mouse_buttons::reconcile(&self.mouse_buttons, ctx, raw);
-            solidcraft_ui_egui::window_chrome::release_stale_input(ctx, raw);
+            // The browser's buttons are already right: a focus move inside the page lets go of none.
+            solidcraft_ui_egui::window_chrome::release_stale_input_with_tracked_buttons(ctx, raw);
             let now = raw.time.unwrap_or_else(|| ctx.input(|i| i.time));
-            if let Some(delay) = self.wheel_gestures.update(raw, now) {
+            if let Some(delay) = self.wheel_gestures.update(raw, now, self.app.preferences.browser_scroll_wheel) {
                 ctx.request_repaint_after(delay);
             }
+            let samples = std::mem::take(&mut *self.wheel_samples.borrow_mut());
+            solidcraft_ui_egui::wheel_hint::feed(&mut self.app, ctx, &samples);
             if self.launch.persists() {
                 let theme = solidcraft_ui_egui::prefs::theme_drop_target(&self.app, ctx);
                 files::take_drops(&self.files, raw, theme);
@@ -1262,6 +1300,8 @@ mod web {
             }
             let Some(prefs) = self.persisted_prefs(|| Ok(storage.get_string(&crate::prefs_key()))) else { return };
             storage.set_string(&crate::prefs_key(), prefs);
+            #[cfg(feature = "usage-stats")]
+            storage.set_string(&crate::channel::key(solidcraft_ui_egui::usage_stats::STORAGE_KEY), self.app.usage_stats_for_storage());
         }
     }
 
@@ -1372,7 +1412,7 @@ mod web {
                             files::start(&files);
                         }
                         let (panel, opener, saver, shown) = (files.clone(), files.clone(), files.clone(), files.clone());
-                        let (restorable, restorer) = (files.clone(), files.clone());
+                        let (restorable, restorer, writer) = (files.clone(), files.clone(), files.clone());
                         let services = if !launch.persists() { Services::default() } else { Services {
                             // Open shows the browser's open dialog for a design where it has one
                             // (the file keeps its handle, so Save writes back to it), else the
@@ -1394,12 +1434,13 @@ mod web {
                                 match disk::save_target(disk::supported(), design) {
                                     SaveTarget::Disk => Box::pin(disk::pick_save(&saver, name)),
                                     SaveTarget::Browser => {
-                                        saver.say("This browser can't save to a folder: the design is kept in this browser. File > Download design saves a file.", false);
+                                        saver.say("This browser saves designs in browser storage. File > Download design makes a copy on your computer.", false);
                                         Box::pin(std::future::ready(Some(format!("{}{name}", files::OPFS))))
                                     }
                                     SaveTarget::Download => Box::pin(std::future::ready(Some(format!("{}{name}", files::DOWNLOADS)))),
                                 }
                             })),
+                            persist_design: Some(Box::new(move |path, bytes| files::persist_design(&writer, path, bytes))),
                             // A recent design on the disk, from an earlier session, opens by asking
                             // the browser for its remembered file.
                             can_restore: Some(Box::new(move |path: &str| {
@@ -1409,8 +1450,12 @@ mod web {
                             download_design: Some(Box::new(files::download)),
                             open_bytes: Some(Box::new(files::open_in_tab)),
                             easyprint_upload: Some(std::sync::Arc::new(crate::easyprint::upload)),
+                            tickets_http: Some(std::sync::Arc::new(crate::tickets::http)),
+                            ticket_secrets: Some(std::sync::Arc::new(crate::tickets::BrowserSecrets)),
                             browser_files: Some(Box::new(move || shown.panel.set(true))),
                             install_app: Some(crate::install::service(&cc.egui_ctx)),
+                            #[cfg(feature = "usage-stats")]
+                            usage_http: Some(std::sync::Arc::new(crate::usage::post)),
                             ..Default::default()
                         }};
                         // Thumbnails of saves and start-page cards.
@@ -1427,6 +1472,11 @@ mod web {
                         }
                         if launch.persists() && let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(&crate::channel::key(k)))) {
                             app.load_prefs(&p);
+                        }
+                        #[cfg(feature = "usage-stats")]
+                        if launch.persists() {
+                            let key = crate::channel::key(solidcraft_ui_egui::usage_stats::STORAGE_KEY);
+                            app.load_usage_stats(cc.storage.and_then(|s| s.get_string(&key)).as_deref());
                         }
                         if let Some(rs) = &cc.wgpu_render_state {
                             install_viewport(&mut app, rs);
@@ -1448,6 +1498,7 @@ mod web {
                             }
                         }
                         let mouse_buttons = crate::mouse_buttons::install(&window, &mouse_canvas, &cc.egui_ctx);
+                        let wheel_samples = crate::wheel_samples::install(&window);
                         let api = Api::install(sender, cc.egui_ctx.clone()).map_err(|e| format!("SolidCraft browser API: {e:?}"))?;
                         let font_language = app.preferences.language.clone();
                         let linked = crate::linked::Download::start(launch.open.as_deref(), &cc.egui_ctx);
@@ -1476,6 +1527,7 @@ mod web {
                             drawing_fonts_done: Default::default(),
                             space_mouse: SpaceMouse::default(),
                             wheel_gestures: solidcraft_ui_egui::WebWheelGestures::default(),
+                            wheel_samples,
                             mouse_buttons,
                             prefs_writer: crate::PrefsWriter::default(),
                             prefs_warning: None,
@@ -1514,7 +1566,7 @@ fn main() {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    eprintln!("solidcraft-web only runs in the browser: build it with `trunk build --release` in apps/solidcraft-web");
+    solidcraft_engine::note!("solidcraft-web only runs in the browser: build it with `trunk build --release` in apps/solidcraft-web");
 }
 
 #[cfg(test)]

@@ -5,6 +5,8 @@
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
+pub use solidcore_ops::prism::{symmetric_offset_intervals, symmetric_offset_probe_points};
+
 use crate::body::Body;
 use crate::draft_corners::DraftCorner;
 use crate::numbered::{self, NumberedLoop, NumberedRegion};
@@ -174,6 +176,12 @@ pub fn revolve_whole(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis
     revolved(plane, regions, axis_origin, axis_dir, angle)
 }
 
+/// How near the axis (mm) a profile corner between two lines goes onto it when revolved. A sketch
+/// leaves a corner 0.00001 mm off the axis line when no constraint holds it there. Revolved, that
+/// corner made a cone face too thin to see, which broke STEP files and booleans (#17528). One
+/// ten-thousandth of a millimetre is far below any shape someone draws on purpose.
+const AXIS_SNAP: f64 = 1e-4;
+
 /// Each region revolved through SMLib ([`crate::smlib_sweeps::revolve`]).
 fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
     let angle = finite(angle, "angle")?;
@@ -184,27 +192,25 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
     if regions.is_empty() {
         return Err(KernelError::Invalid("no profile selected".into()));
     }
-    // The profile must lie on one side of the axis.
     let o = plane.to_world(axis_origin);
     let axis = plane.dir_to_world(d);
     let mut out = Vec::new();
     for r in regions {
         region_ok(r)?;
-        let (mut neg, mut pos) = (false, false);
-        for p in r.outer.polyline(1e-3) {
-            let s = d.cross(p - axis_origin);
-            neg |= s < -1e-7;
-            pos |= s > 1e-7;
-        }
-        if neg && pos {
-            return Err(KernelError::Invalid("the profile crosses the revolve axis".into()));
-        }
-        // Points on the axis (within solver tolerance) go exactly onto it, so the sweep does not
-        // create hair-thin faces.
+        // Points on the axis go exactly onto it, so the sweep does not create hair-thin faces.
+        // An arc's end moves only within solver tolerance, since moving it would leave a gap
+        // next to the arc. A corner between two lines moves within AXIS_SNAP (#17528).
+        let curved_ends: Vec<Vec2> = std::iter::once(&r.outer)
+            .chain(&r.holes)
+            .flat_map(|l| &l.segs)
+            .filter(|s| !matches!(s, Seg2::Line { .. }))
+            .flat_map(|s| [s.start(), s.end()])
+            .collect();
         let snap = |p: Vec2| {
             let along = (p - axis_origin).dot(d);
             let q = axis_origin + d * along;
-            if p.dist(q) < 1e-7 { q } else { p }
+            let reach = if curved_ends.iter().any(|c| c.dist(p) < 1e-9) { 1e-7 } else { AXIS_SNAP };
+            if p.dist(q) < reach { q } else { p }
         };
         let snap_loop = |l: &NumberedLoop| {
             l.map_segs(|s| match *s {
@@ -223,7 +229,23 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
         // Partial turns go toward the side the sketch normal points to (as features extrude
         // toward it).
         let given = numbered_region(r)?.map_loops(|l| snap_loop(l).merged_lines(axis_run));
-        let c = plane.to_world(r.centroid());
+        // The profile must lie on one side of the axis, once its corners are on it.
+        let (mut neg, mut pos) = (false, false);
+        let mut far = (0.0, r.centroid());
+        for p in given.outer.lp.polyline(1e-3) {
+            let s = d.cross(p - axis_origin);
+            neg |= s < -1e-7;
+            pos |= s > 1e-7;
+            if s.abs() > far.0 {
+                far = (s.abs(), p);
+            }
+        }
+        if neg && pos {
+            return Err(KernelError::Invalid("the profile crosses the revolve axis".into()));
+        }
+        // The side of the axis the profile is on: its point farthest from the axis, once its
+        // corners are on it (the centroid of a sliver can lie on the other side).
+        let c = plane.to_world(far.1);
         let radial = (c - o) - axis * (c - o).dot(axis);
         let angle = if axis.cross(radial).dot(plane.normal()) < 0.0 { -angle } else { angle };
         out.push(crate::smlib_sweeps::revolve(plane, &crate::smlib_sweeps::pieces(given.oriented().loops()), o, axis, angle)?);
@@ -323,7 +345,7 @@ pub fn torus(center: Vec3, major: f64, minor: f64) -> Result<Body> {
 /// neighbours now meet at one point). Loops of arcs on one circle, and loops of lines, arcs and
 /// free curves (spline and conic pieces, such as the outlines of text) where the arcs meet their
 /// neighbours tangentially are supported.
-pub(crate) fn offset_loop(lp: &Loop2, d: f64) -> Result<Vec<Option<Seg2>>> {
+pub fn offset_loop(lp: &Loop2, d: f64) -> Result<Vec<Option<Seg2>>> {
     if d == 0.0 {
         return Ok(lp.segs.iter().copied().map(Some).collect());
     }
@@ -1005,7 +1027,7 @@ pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
     loft_with_rails(sections, &[], RailFit::Scale)
 }
 
-/// [`loft`] following one or two guide rails (polylines from the first section to the last,
+/// [`loft`] following 1…16 guide rails (polylines from the first section to the last,
 /// through every section's curve; see [`crate::loft_rails`]), `fit` saying how they reshape the
 /// sections between. Without rails, the plain loft.
 pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
@@ -1026,6 +1048,9 @@ pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: Ra
             pieces = pieces_of(&loft_numbered_loops_by(&numbered, reversed, true)?);
         }
         return crate::smlib_sweeps::loft(&pieces, first);
+    }
+    if rails.len() > 2 {
+        return crate::smlib_sweeps::loft_many_rails(&pieces, first, rails, fit);
     }
     let mut all = crate::smlib_sweeps::rail_curves(&pieces, rails, fit)?;
     if all.iter().map(Vec::len).sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES {
@@ -1275,8 +1300,12 @@ pub(crate) fn resplit_numbered_loops(ordered: &[(Plane, NumberedLoop)]) -> Resul
         })
         .collect();
     let mut out = Vec::with_capacity(ordered.len());
+    let mut before: Option<Vec3> = None;
     for (p, l) in ordered {
-        let back = p.normal().dot(normal) < 0.0;
+        let centre = p.to_world(l.lp.centroid());
+        let back =
+            before.is_some_and(|c: Vec3| solidcore_ops::sweep::loft_section_faces_back(normal.into(), c.into(), p.normal().into(), centre.into()));
+        before = Some(centre);
         let local: Vec<Vec2> = dirs.iter().map(|d| Vec2::new(d.dot(p.x), d.dot(p.y))).collect();
         // Break angles: the matched corners seen in this plane. A re-split circle runs counter-
         // clockwise in its plane; wound the other way when the plane faces back.

@@ -89,6 +89,19 @@ mod tests {
     }
 
     #[test]
+    fn mesh_reduction_uses_the_current_token() {
+        let token = CancelToken::new();
+        token.cancel();
+        within(&token, || {
+            assert!(matches!(
+                crate::reduce_mesh(&[], &[], None, 0),
+                Err(crate::Error::Cancelled)
+            ));
+        });
+        assert!(crate::reduce_mesh(&[], &[], None, 0).is_ok());
+    }
+
+    #[test]
     fn a_panic_ends_the_scope() {
         let token = CancelToken::new();
         let r = std::panic::catch_unwind(|| within(&token, || panic!("inside")));

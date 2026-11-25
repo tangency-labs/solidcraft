@@ -159,6 +159,15 @@ pub(crate) fn plane_description(doc: &solidcraft_engine::doc::Document, plane: &
     describe(doc, plane, 0)
 }
 
+/// The name of the construction plane `candidate` names when it comes after `sketch` in the
+/// timeline: Redefine then moves the sketch to just after it (#14675).
+pub(crate) fn later_plane(doc: &solidcraft_engine::doc::Document, sketch: u64, candidate: Option<&Value>) -> Option<String> {
+    let name = candidate?.as_str()?;
+    let here = doc.feature_index(sketch)?;
+    let at = doc.features.iter().position(|f| f.name == name && matches!(f.kind, FeatureKind::ConstructionPlane { .. }))?;
+    (at > here).then(|| name.to_string())
+}
+
 fn face_label(app: &SolveApp, selection: &Sel) -> String {
     let Sel::Face { body, .. } = selection else { return String::new() };
     let placed = app.session.placed_document();
@@ -216,7 +225,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
     let frame = ui_kit::Panel::feature_frame(ctx, app.ui.layout, side);
     let spec = solidcraft_engine::find_command("sketch.redefine");
-    let command = spec.as_ref().map_or("", |s| solidcraft_ui_text::tr_label(s.label));
+    let command = spec.as_ref().map_or("", |s| solidcraft_ui_text::tr_command(s.id, s.label));
     let title = solidcraft_ui_text::format("sketch_panel.redefine_title", &[("command", command), ("name", name)]);
     let panel = ui_kit::Panel::new(&title, egui::Id::unique("sc_redefine"), anchor, drag_bounds, side, frame);
     let mut painted = false;
@@ -367,6 +376,14 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::row(ui, "Preview", |ui| {
                         ui.label(solidcraft_ui_text::tr_label(&draft.label));
                     });
+                    // A construction plane made after the sketch: the sketch moves after it (#14675).
+                    if let Some(plane) = later_plane(&app.session.doc, sketch, draft.candidate.as_ref()) {
+                        ui_kit::text(
+                            ui,
+                            &solidcraft_ui_text::format("sketch_panel.redefine_moves_sketch", &[("sketch", name), ("plane", &plane)]),
+                            ui_kit::Text::Hint("moves_sketch"),
+                        );
+                    }
                 }
                 if let Some(error) = draft.error.as_ref().or(app.preview.error.as_ref()) {
                     ui.label(RichText::new(error).color(t.error));

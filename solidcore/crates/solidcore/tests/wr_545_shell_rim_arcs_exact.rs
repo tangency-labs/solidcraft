@@ -1,8 +1,8 @@
 //! Regression test for WR-545 (the fork's tangency-labs/smlib@cd85d34): a 40 x 30 x 20
 //! box with its four vertical edges rounded R6, shelled 2 inward open at the top. The
 //! inner quarter circles of the rim (R4, where the rounds' offsets meet the top face)
-//! come from marched intersections. With `shell_edges_on_analytics_exact`, every curved
-//! edge of the rim is a circle: four R6 outer arcs and four R4 inner arcs.
+//! come from marched intersections. The shell ends with `make_edges_on_analytics_exact`, so
+//! every curved edge of the rim is a circle: four R6 outer arcs and four R4 inner arcs.
 
 #![allow(
     clippy::unwrap_used,
@@ -25,7 +25,6 @@ use solidcore::Kernel;
 #[test]
 fn wr_545_shelled_rounded_box_rim_is_arcs() {
     let mut k = Kernel::default();
-    k.fixes.shell_edges_on_analytics_exact = true;
     let mut part = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
     let uprights: Vec<_> = part
         .edges()
