@@ -63,9 +63,22 @@ fn a_flat_view_callout_reads_the_record_and_ends_on_its_hole() {
     };
     for (note, feature) in [(note_id(&reply), first), (other, second)] {
         let tip = crate::drawing_hardware_callout::flat_tip(&s, &d, d.notes.by_id(note).unwrap(), "test").unwrap();
-        assert!((tip - at(feature)).len() < 1e-9, "{tip:?} {:?}", at(feature));
+        assert!(
+            {
+                let d = tip - at(feature);
+                d.x.abs() < 1e-9 && d.y.abs() < 1e-9
+            },
+            "{tip:?} {:?}",
+            at(feature)
+        );
     }
-    assert!((at(first) - at(second)).len() > 1.0, "two holes");
+    assert!(
+        {
+            let d = at(first) - at(second);
+            d.x.abs() > 1.0 || d.y.abs() > 1.0
+        },
+        "two holes"
+    );
     let sheet = d.view(view).unwrap().sheet;
     let built = crate::drawing_scene::build(&s, &d, sheet).unwrap();
     assert!(built.notes.iter().all(|n| n.drawn && n.status == solidcraft_doc::drawing::dimension::Status::Ok), "{:?}", built.notes);
