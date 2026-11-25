@@ -359,6 +359,162 @@ fn get(out: &[Vec3], idx: usize) -> Result<Vec3> {
     })
 }
 
+/// The simple evaluation of an offset at a point of a collapsed boundary of its base (a
+/// pole), as the limit from inside the domain (#13610).
+///
+/// Along a collapsed boundary `u = u0` the base's `Bv` vanishes, so the normal's numerator
+/// `N = Bu x Bv` vanishes on the whole line and `N = (u - u0) G` with
+/// `G^(i,j) = N^(i+1,j) / (i + 1)` there (Taylor in `u`; for a collapsed `v = v0` the roles
+/// swap). Inside the domain the unit normal is `sign * G / |G|` (`sign` is -1 at the upper
+/// end, where `u - u0 < 0`), which has a limit at the boundary: `G` in place of `N` in
+/// every formula of the regular path. `N`'s derivatives are those of the product
+/// (Leibniz), from the base's derivatives up to the order `hod + 2`.
+#[allow(clippy::too_many_arguments)]
+fn collapsed_boundary_limit(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    hod: usize,
+    [hu, hv]: [usize; 2],
+    [base_u_side, base_v_side]: [Side; 2],
+    only_upper_half: bool,
+    (across_u, sign): (bool, f64),
+    offset_distance: f64,
+    out: &mut [Vec3],
+) -> Result<()> {
+    const BINOMIAL: [[f64; 5]; 5] = [
+        [1.0, 0.0, 0.0, 0.0, 0.0],
+        [1.0, 1.0, 0.0, 0.0, 0.0],
+        [1.0, 2.0, 1.0, 0.0, 0.0],
+        [1.0, 3.0, 3.0, 1.0, 0.0],
+        [1.0, 4.0, 6.0, 4.0, 1.0],
+    ];
+    let order = hod + 2;
+    let m = surface.evaluate_simple(
+        k,
+        uv,
+        order,
+        order,
+        EvaluateFlags {
+            u_side: base_u_side,
+            v_side: base_v_side,
+            only_upper_half: true,
+            non_zero_tangents: false,
+        },
+    )?;
+    let d = |i: usize, j: usize| at(&m, i, j);
+    let binomial = |n: usize, r: usize| -> Result<f64> {
+        BINOMIAL
+            .get(n)
+            .and_then(|row| row.get(r))
+            .copied()
+            .ok_or_else(|| {
+                SolidError::invalid_input(OP_EVAL, "derivative order past the binomial table")
+            })
+    };
+    // N^(i,j) of N = Bu x Bv
+    let numerator = |i: usize, j: usize| -> Result<Vec3> {
+        let mut sum = Vec3::new(0.0, 0.0, 0.0);
+        for a in 0..=i {
+            for b in 0..=j {
+                let term = d(1 + a, b)?.cross(d(i - a, 1 + j - b)?);
+                sum += (binomial(i, a)? * binomial(j, b)?) * term;
+            }
+        }
+        Ok(sum)
+    };
+    // G^(i,j), oriented as the normal inside the domain
+    let g = |i: usize, j: usize| -> Result<Vec3> {
+        let (ni, nj, over) = if across_u {
+            (i + 1, j, i + 1)
+        } else {
+            (i, j + 1, j + 1)
+        };
+        let over = f64::from(u32::try_from(over).unwrap_or(u32::MAX));
+        Ok((sign / over) * numerator(ni, nj)?)
+    };
+
+    let cond_uv = (only_upper_half && hod >= 2) || (!only_upper_half && hu >= 1 && hv >= 1);
+    let cond_uuv = (only_upper_half && hod >= 3) || (!only_upper_half && hu >= 2 && hv >= 1);
+    let cond_uvv = (only_upper_half && hod >= 3) || (!only_upper_half && hu >= 1 && hv >= 2);
+
+    let c = g(0, 0)?;
+    let m_len = c.length();
+    if m_len < EFF_ZERO {
+        return Err(SolidError::surface(OP_EVAL, SurfaceFailure::NoNormal));
+    }
+    let n = c / m_len;
+    put(out, 0, d(0, 0)? + offset_distance * n)?;
+
+    let zero = Vec3::new(0.0, 0.0, 0.0);
+    let (mut cu, mut cv, mut cuu, mut cuv, mut cvv) = (zero, zero, zero, zero, zero);
+    let (mut mu, mut mv, mut muu, mut muv, mut mvv) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    let (mut nu, mut nv, mut nuu, mut nuv, mut nvv) = (zero, zero, zero, zero, zero);
+    if hod >= 1 {
+        cu = g(1, 0)?;
+        mu = n.dot(cu);
+        nu = (cu - mu * n) / m_len;
+        cv = g(0, 1)?;
+        mv = n.dot(cv);
+        nv = (cv - mv * n) / m_len;
+    }
+    if hu >= 1 {
+        put(out, hv + 1, d(1, 0)? + offset_distance * nu)?;
+    }
+    if hv >= 1 {
+        put(out, 1, d(0, 1)? + offset_distance * nv)?;
+    }
+    if hod >= 2 {
+        cuu = g(2, 0)?;
+        muu = (cu.dot(cu) + c.dot(cuu) - mu * mu) / m_len;
+        nuu = (cuu - 2.0 * mu * nu - muu * n) / m_len;
+        cuv = g(1, 1)?;
+        muv = (cu.dot(cv) + c.dot(cuv) - mu * mv) / m_len;
+        nuv = (cuv - mu * nv - mv * nu - muv * n) / m_len;
+        cvv = g(0, 2)?;
+        mvv = (cv.dot(cv) + c.dot(cvv) - mv * mv) / m_len;
+        nvv = (cvv - 2.0 * mv * nv - mvv * n) / m_len;
+    }
+    if hu >= 2 {
+        put(out, 2 * (hv + 1), d(2, 0)? + offset_distance * nuu)?;
+    }
+    if cond_uv {
+        put(out, hv + 2, d(1, 1)? + offset_distance * nuv)?;
+    }
+    if hv >= 2 {
+        put(out, 2, d(0, 2)? + offset_distance * nvv)?;
+    }
+    if hu >= 3 {
+        let cuuu = g(3, 0)?;
+        let muuu = (3.0 * cu.dot(cuu) + c.dot(cuuu) - 3.0 * mu * muu) / m_len;
+        let nuuu = (cuuu - 3.0 * mu * nuu - 3.0 * muu * nu - muuu * n) / m_len;
+        put(out, 3 * (hv + 1), d(3, 0)? + offset_distance * nuuu)?;
+    }
+    if cond_uuv {
+        let cuuv = g(2, 1)?;
+        let muuv =
+            (cuu.dot(cv) + 2.0 * cu.dot(cuv) + c.dot(cuuv) - muu * mv - 2.0 * mu * muv) / m_len;
+        let nuuv =
+            (cuuv - mv * nuu - 2.0 * muv * nu - 2.0 * mu * nuv - muu * nv - muuv * n) / m_len;
+        put(out, 2 * (hv + 1) + 1, d(2, 1)? + offset_distance * nuuv)?;
+    }
+    if cond_uvv {
+        let cuvv = g(1, 2)?;
+        let muvv =
+            (cvv.dot(cu) + 2.0 * cv.dot(cuv) + c.dot(cuvv) - mvv * mu - 2.0 * mv * muv) / m_len;
+        let nuvv =
+            (cuvv - mu * nvv - 2.0 * muv * nv - 2.0 * mv * nuv - mvv * nu - muvv * n) / m_len;
+        put(out, (hv + 1) + 2, d(1, 2)? + offset_distance * nuvv)?;
+    }
+    if hv >= 3 {
+        let cvvv = g(0, 3)?;
+        let mvvv = (3.0 * cv.dot(cvv) + c.dot(cvvv) - 3.0 * mv * mvv) / m_len;
+        let nvvv = (cvvv - 3.0 * mv * nvv - 3.0 * mvv * nv - mvvv * n) / m_len;
+        put(out, 3, d(0, 3)? + offset_distance * nvvv)?;
+    }
+    Ok(())
+}
+
 /// `lHighestOffsetDeriv`: the highest total order an evaluation asks for (`None` on
 /// overflow, which upstream wraps).
 fn highest_offset_deriv(hu: usize, hv: usize, only_upper_half: bool) -> Option<usize> {
@@ -1696,6 +1852,32 @@ impl OffsetSurface {
                 put(out, 3, extrapolate(3)?)?;
             }
             return Ok(());
+        }
+
+        // A simple evaluation on a collapsed boundary of the base (a pole): the limit from
+        // inside the domain (#13610).
+        if do_eval_simple && !use_ext && bu.cross(bv).length() < tol {
+            let across = match self.singularities & domain.point_boundaries(uv, EFF_ZERO) {
+                SS_UMIN => Some((true, 1.0)),
+                SS_UMAX => Some((true, -1.0)),
+                SS_VMIN => Some((false, 1.0)),
+                SS_VMAX => Some((false, -1.0)),
+                _ => None,
+            };
+            if let Some(across) = across {
+                return collapsed_boundary_limit(
+                    k,
+                    surface,
+                    uv,
+                    hod,
+                    [hu, hv],
+                    [base_u_side, base_v_side],
+                    only_upper_half,
+                    across,
+                    offset_distance,
+                    out,
+                );
+            }
         }
 
         // the base normal's numerator N = Bu x Bv
