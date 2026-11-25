@@ -847,7 +847,7 @@ crates/io/src/kicad_in.rs:clean_contour hypot
 crates/io/src/kicad_in.rs:clean_loop hypot
 crates/io/src/kicad_in.rs:extrude_regions triangles
 crates/io/src/kicad_in.rs:glyph_polyline atan2
-crates/io/src/kicad_in.rs:kicad_board_mesh triangles
+crates/io/src/kicad_in.rs:kicad_board_mesh_noted triangles
 crates/io/src/kicad_in.rs:model_body_meshes triangles
 crates/io/src/kicad_in.rs:pad_drill_points atan2
 crates/io/src/kicad_in.rs:parse_kicad_board_with atan2
