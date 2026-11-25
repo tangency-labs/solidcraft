@@ -356,6 +356,126 @@ impl FootBlend {
         Ok(blend)
     }
 
+    /// The foot blend between `face1` of `body1` and `face2` of `body2`, two bodies it only
+    /// reads, along `joint`: a piece of the line where the two faces meet (as
+    /// [`crate::intersect::api_intersectors::intersect_faces_read_only`] gives it), over its
+    /// own interval. The faces' surfaces are the supports, in that order. Each foot heads across
+    /// its face towards the other face's outer side: support `i`'s side is the sign of
+    /// `(n_i x e') . m_j` at the middle of the joint, `n_i` its surface's normal, `e'` the
+    /// joint's tangent and `m_j` the other face's outward normal (out of its material). The
+    /// faces meet in an inside corner all along: read at 11 stations, its ends included, each
+    /// foot heads to the other face's outer side, past the angle zero. A joint whose two ends meet is closed, as
+    /// an edge with one vertex is ([`FootBlend::of_edge`]).
+    ///
+    /// (not upstream, #15130: a bead between two separate bodies; [`FootBlend::of_edge`] reads
+    /// the sides from one edge's binormals, which two bodies do not share.)
+    ///
+    /// # Errors
+    ///
+    /// Native invalid input for a joint with no B-spline form in its own parameter, a face
+    /// with no surface or no outer side (material on both sides of it), a joint that does not
+    /// lie on both surfaces, and faces that do not meet in an inside corner all along (an
+    /// outside or a tangent stretch); those of the evaluations.
+    pub fn of_faces(
+        k: &Kernel,
+        body1: &Brep,
+        face1: FaceId,
+        body2: &Brep,
+        face2: FaceId,
+        joint: &Curve,
+    ) -> Result<Self> {
+        let leader = leader_of(joint)?;
+        let interval = joint.natural_interval();
+        let tol = body1.tolerance().max(body2.tolerance()).max(1e-9);
+        let supports = [(body1, face1), (body2, face2)];
+        let mut surfaces = Vec::new();
+        let mut outward = [1.0_f64; 2];
+        for ((body, face), out) in supports.iter().zip(outward.iter_mut()) {
+            let surface = body
+                .face(*face)?
+                .surface
+                .clone()
+                .ok_or_else(|| SolidError::invalid_input(OP, "a face with no surface"))?;
+            let fu = crate::topology::face::p2::outer_faceuse(body, *face)?.ok_or_else(|| {
+                SolidError::invalid_input(OP, "a face with no outer side (material on both sides)")
+            })?;
+            if eu1::faceuse_orientation(body, fu)?
+                != crate::nurbs::b_spline_surface_n_lib::p2::OrientType::Same
+            {
+                *out = -1.0;
+            }
+            surfaces.push(surface);
+        }
+        let [s1, s2] = <[Surface; 2]>::try_from(surfaces)
+            .map_err(|_| defect("two faces gave other than two surfaces"))?;
+        let mut blend = Self::from_parts(leader, interval, [Some(s1), Some(s2)], [1.0, 1.0])?;
+        // the leader's form runs as the joint: the same points at the same parameters
+        for t in [interval.min(), interval.evaluate(0.5), interval.max()] {
+            let p = joint.evaluate_point(k, t)?;
+            if p.distance(blend.curve.evaluate_point(k, t)?) > tol {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "a joint whose curve's B-spline form runs in another parameter",
+                ));
+            }
+        }
+        let mut domains = Vec::new();
+        for side in &blend.sides {
+            domains.push(side.surface.natural_uv_domain_with_nurb(k)?);
+        }
+        // `n_i x e'` for each support at `t`, and each face's outward normal there
+        let read = |t: f64| -> Result<[(Vec3, Vec3); 2]> {
+            let (root, tangent) = blend.root_at(k, t)?;
+            let mut out = [(Vec3::ZERO, Vec3::ZERO); 2];
+            for (i, (side, domain)) in blend.sides.iter().zip(&domains).enumerate() {
+                let uv = dropped(k, &side.surface, domain, root, None)?
+                    .filter(|&uv| {
+                        side.surface
+                            .evaluate_point(k, uv)
+                            .is_ok_and(|q| q.distance(root) <= tol)
+                    })
+                    .ok_or_else(|| {
+                        SolidError::invalid_input(OP, "a joint that does not lie on both faces")
+                    })?;
+                let n = normal_at(k, &side.surface, uv)?.ok_or_else(|| {
+                    SolidError::invalid_input(OP, "a face with no normal on the joint")
+                })?;
+                if let (Some(slot), Some(&o)) = (out.get_mut(i), outward.get(i)) {
+                    *slot = (n.cross(tangent), n * o);
+                }
+            }
+            Ok(out)
+        };
+        let [(a1, m1), (a2, m2)] = read(interval.evaluate(0.5))?;
+        let sides = [a1.dot(m2).signum(), a2.dot(m1).signum()];
+        // an inside corner all along: each foot heads to the other face's outer side, the
+        // sine of that heading read against the angle zero; an outside or tangent stretch
+        // would bury the bead in a part or close it through the joint
+        for i in 0..=10 {
+            let [(a1, m1), (a2, m2)] = read(interval.evaluate(f64::from(i) / 10.0))?;
+            let rise = |a: Vec3, m: Vec3, side: f64| -> Result<f64> {
+                Ok(side * a.unitize()?.dot(m.unitize()?))
+            };
+            let [o1, o2] = sides;
+            if rise(a1, m2, o1)? <= EFF_ZERO_RAD || rise(a2, m1, o2)? <= EFF_ZERO_RAD {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "a weld bead lies in an inside corner between the faces only, not on an outside or a tangent stretch",
+                ));
+            }
+        }
+        for ((side, o), face) in blend.sides.iter_mut().zip(sides).zip([face1, face2]) {
+            side.side = o;
+            side.face = Some(face);
+        }
+        let (start, end) = (
+            joint.evaluate_point(k, interval.min())?,
+            joint.evaluate_point(k, interval.max())?,
+        );
+        blend.closed = start.distance(end) <= tol;
+        Ok(blend)
+    }
+
     /// A foot blend from its parts, without a part: the leader, its interval, the supports'
     /// surfaces (`None` until set) and their sides. Support surfaces left `None` are planes
     /// through the origin; set them with [`FootBlend::sides`] before any station.
@@ -852,6 +972,26 @@ impl FootBlend {
         legs: [f64; 2],
         within: &[[f64; 2]],
     ) -> Result<()> {
+        self.toes_on_bodies(k, [target, target], legs, within)
+    }
+
+    /// [`FootBlend::toes_on_faces`] with each support's face on its own body: support `i`'s
+    /// face is a face of `targets[i]`, as [`FootBlend::of_faces`] makes them (two bodies, or
+    /// the same one twice). Both are only read.
+    ///
+    /// (not upstream, #15130: a bead between two separate bodies.)
+    ///
+    /// # Errors
+    ///
+    /// Those of [`FootBlend::toes_on_faces`], the smallest leg a body builds being that of the
+    /// body the toe is off.
+    pub fn toes_on_bodies(
+        &self,
+        k: &Kernel,
+        targets: [&Brep; 2],
+        legs: [f64; 2],
+        within: &[[f64; 2]],
+    ) -> Result<()> {
         check_legs(legs)?;
         // shortcut: a tapered or rounded end is checked at the span's full legs, so one whose
         // smaller legs would fit near a face's end is refused; check the end's own legs when
@@ -865,8 +1005,10 @@ impl FootBlend {
             let periods = periods_of(k, &side.surface, &domain)?;
             frames.push((domain, periods));
         }
-        let on_face = |target: &Brep, i: usize, face: FaceId, uv: Point2| -> Result<bool> {
-            let (Some((domain, periods)), Some(side)) = (frames.get(i), self.sides.get(i)) else {
+        let on_face = |i: usize, face: FaceId, uv: Point2| -> Result<bool> {
+            let (Some((domain, periods)), Some(side), Some(target)) =
+                (frames.get(i), self.sides.get(i), targets.get(i))
+            else {
                 return Ok(true);
             };
             let uv = wrapped(domain, *periods, uv);
@@ -884,7 +1026,7 @@ impl FootBlend {
                 else {
                     continue;
                 };
-                if !on_face(target, i, face, uv)? {
+                if !on_face(i, face, uv)? {
                     off = Some((i, foot));
                     break 'stations;
                 }
@@ -907,7 +1049,7 @@ impl FootBlend {
                 let Ok((p, uv, r)) = self.foot(k, i, root, tangent, leg, near.as_ref())? else {
                     return Ok(false);
                 };
-                if !on_face(target, i, face, uv)? {
+                if !on_face(i, face, uv)? {
                     return Ok(false);
                 }
                 let mut s = near.unwrap_or(FootStation {
@@ -943,7 +1085,8 @@ impl FootBlend {
         }
         // a leg below the body's resolution is refused before the toes are read, so a retry at
         // it would not build: no leg fits
-        if !is_radius_supported(lo, target.tolerance()) {
+        let tolerance = targets.get(i).map_or(0.0, |b| b.tolerance());
+        if !is_radius_supported(lo, tolerance) {
             lo = 0.0;
         }
         let edge = self.edge.map(TargetEdge::of_target);

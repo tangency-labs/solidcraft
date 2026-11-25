@@ -53,6 +53,8 @@ mod fillet_variable_radius_closes_onto_vertex;
 mod fillet_vertex_on_split_rim;
 #[path = "../fillet_wr300_320.rs"]
 mod fillet_wr300_320;
+#[path = "../foot_blend_two_bodies.rs"]
+mod foot_blend_two_bodies;
 #[path = "../fork_16bf1cb_full_turn_cover_across_seam.rs"]
 mod fork_16bf1cb_full_turn_cover_across_seam;
 #[path = "../fork_351c57c_stitch_nested_solid.rs"]
