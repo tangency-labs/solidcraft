@@ -6,7 +6,7 @@
 //! that are left run in parallel. A pair whose bodies have not changed or moved since a call
 //! with the same settings measured it is not measured again ([`PairCache`]).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -37,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.clearance", "C
      \"component\" (pairs of bodies inside one placed component, its subcomponents included) | null; envelopes?: bool (default false: component envelopes, solid.bounding_solid with `component`, are left out unless named; true: each is checked instead of the bodies inside it, and a body named inside one means it; an envelope is never paired with a body inside it); tolerance?: mm (default 1e-6: a gap \
      below it is contact, 0) → overlaps: [{a, b, volume_mm3, area_mm2, bbox, center}]; near: [{a, b, distance_mm, from, to, overlap_mm3?: \
      a contact's shared volume below min_volume, exact?: false when measured on the meshes}], nearest by body (the same for pairs that overlap: 0); \
-     nearest: {body: [{body, distance_mm}]}; unchecked: [{a, b, reason}] (pairs whose overlap could not be worked out; each mesh body, STL/3MF/OBJ import, is not measured and is listed as {a: name, b: null, reason: \"mesh body: not checked\"}, also when named in `bodies` or `against`; the result's `bodies` counts the solid bodies only); pairs_checked; \
+     nearest: {body: [{body, distance_mm}]} (omits pairs in unchecked); unchecked: [{a, b, reason}] (pairs whose overlap could not be worked out; each mesh body, STL/3MF/OBJ import, is not measured and is listed as {a: name, b: null, reason: \"mesh body: not checked\"}, also when named in `bodies` or `against`; the result's `bodies` counts the solid bodies only); pairs_checked; \
      pairs_reused (of those, measured by an earlier call: neither body changed or moved since); pairs_pruned (ruled out by their boxes); ms. Distances are measured on the exact faces and edges, the meshes only rule pairs out",
 )];
 
@@ -274,8 +274,6 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let results = results.into_iter().map(|r| r.unwrap_or_else(|| Ok(PairResult::default())));
 
-    let mut known: HashMap<(usize, usize), f64> = HashMap::new();
-    let (mut overlaps, mut near) = (Vec::new(), Vec::new());
     // The mesh bodies the call was about (every one without `bodies`, else those named in
     // `bodies` or `against`) come first, so "nothing found" is not read as "no overlap".
     let mut asked: Vec<String> = Vec::new();
@@ -287,22 +285,79 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
         .filter(|b| p.get("bodies").is_none_or(Value::is_null) || asked.contains(&b.name))
         .map(|b| Unchecked { a: b.name.clone(), b: None, reason: super::interference::MESH_NOT_CHECKED.to_string() })
         .collect();
-    let name = |i: usize| solid.get(i).map_or("", |b| b.name.as_str());
+    let names: Vec<&str> = solid.iter().map(|b| b.name.as_str()).collect();
+    let ctx = PairContext { names: &names, subjects: &subjects, boxes: &boxes, allowed: &allowed, gap, min_volume, nearest };
+    let summary = collect_pair_results(&ctx, &close, results, &mut unchecked, |pairs| {
+        solidcraft_kernel::map_with_local_pools(pairs, usize::MAX, |&(i, j)| {
+            let (Some(a), Some(b)) = (shape(i), shape(j)) else { return Ok(None) };
+            Ok(solidcraft_kernel::body_distance(a, b, f64::INFINITY)?.map(|d| if d.distance < tolerance { 0.0 } else { d.distance }))
+        })
+    });
+
+    let reply = ClearanceReply {
+        overlaps: summary.overlaps,
+        near: summary.near,
+        nearest: summary.nearest,
+        unchecked,
+        bodies: subjects.len(),
+        pairs_checked: close.len(),
+        pairs_reused: reused,
+        pairs_pruned: total.saturating_sub(close.len()),
+        truncated: truncated > 0,
+        ms: started.elapsed().as_secs_f64() * 1000.0,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
+struct PairContext<'a> {
+    names: &'a [&'a str],
+    subjects: &'a [usize],
+    boxes: &'a [Aabb3],
+    allowed: &'a dyn Fn(usize, usize) -> bool,
+    gap: f64,
+    min_volume: f64,
+    nearest: usize,
+}
+
+struct PairSummary {
+    overlaps: Vec<Overlap>,
+    near: Vec<NearPair>,
+    nearest: BTreeMap<String, Vec<Neighbour>>,
+}
+
+/// Turns measured close pairs into `overlaps`, `near`, `unchecked` and (when asked) `nearest`.
+/// Pairs whose measurement failed (`Err` or `r.unchecked`) are excluded from `nearest` so
+/// `body_distance` cannot fall back to reporting an unchecked collision as `0.0` mm contact.
+fn collect_pair_results(
+    ctx: &PairContext<'_>,
+    close: &[(usize, usize)],
+    results: impl IntoIterator<Item = solidcraft_kernel::Result<PairResult>>,
+    unchecked: &mut Vec<Unchecked>,
+    measure_distance: impl Fn(&[(usize, usize)]) -> Vec<solidcraft_kernel::Result<Option<f64>>>,
+) -> PairSummary {
+    let mut known: HashMap<(usize, usize), f64> = HashMap::new();
+    let mut unchecked_pairs: HashSet<(usize, usize)> = HashSet::new();
+    let (mut overlaps, mut near) = (Vec::new(), Vec::new());
+    let name = |i: usize| ctx.names.get(i).copied().unwrap_or("");
     let pair = |i: usize, j: usize, reason: String| Unchecked { a: name(i).to_string(), b: Some(name(j).to_string()), reason };
+    let key = |i: usize, j: usize| (i.min(j), i.max(j));
     for (&(i, j), r) in close.iter().zip(results) {
         let r = match r {
             Ok(r) => r,
             Err(e) => {
                 unchecked.push(pair(i, j, e.to_string()));
+                unchecked_pairs.insert(key(i, j));
                 continue;
             }
         };
         if let Some(reason) = r.unchecked {
             unchecked.push(pair(i, j, reason));
+            unchecked_pairs.insert(key(i, j));
             continue;
         }
         if let Some((volume, area, bbox, center)) = r.overlap
-            && volume >= min_volume
+            && volume >= ctx.min_volume
         {
             overlaps.push(Overlap {
                 a: name(i).to_string(),
@@ -312,12 +367,12 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
                 bbox: OverlapBounds { min: bbox.min.into(), max: bbox.max.into() },
                 center: center.into(),
             });
-            known.insert((i, j), 0.0);
+            known.insert(key(i, j), 0.0);
             continue;
         }
         let Some(d) = r.distance else { continue };
-        known.insert((i, j), d.distance);
-        if d.distance < gap {
+        known.insert(key(i, j), d.distance);
+        if d.distance < ctx.gap {
             near.push(NearPair {
                 a: name(i).to_string(),
                 b: name(j).to_string(),
@@ -332,33 +387,15 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
     near.sort_by(|x, y| x.distance_mm.total_cmp(&y.distance_mm));
 
     let mut nearest_out = BTreeMap::new();
-    if nearest > 0 {
-        let lists = nearest_lists(&subjects, n, nearest, &boxes, &allowed, &mut known, |pairs| {
-            solidcraft_kernel::map_with_local_pools(pairs, usize::MAX, |&(i, j)| {
-                let (Some(a), Some(b)) = (shape(i), shape(j)) else { return Ok(None) };
-                Ok(solidcraft_kernel::body_distance(a, b, f64::INFINITY)?.map(|d| if d.distance < tolerance { 0.0 } else { d.distance }))
-            })
-        });
+    if ctx.nearest > 0 {
+        let nearest_allowed = |i: usize, j: usize| (ctx.allowed)(i, j) && !unchecked_pairs.contains(&key(i, j));
+        let lists = nearest_lists(ctx.subjects, ctx.names.len(), ctx.nearest, ctx.boxes, &nearest_allowed, &mut known, measure_distance);
         for (i, list) in lists {
             let rows = list.iter().map(|&(j, d)| Neighbour { body: name(j).to_string(), distance_mm: d }).collect();
             nearest_out.insert(name(i).to_string(), rows);
         }
     }
-
-    let reply = ClearanceReply {
-        overlaps,
-        near,
-        nearest: nearest_out,
-        unchecked,
-        bodies: subjects.len(),
-        pairs_checked: close.len(),
-        pairs_reused: reused,
-        pairs_pruned: total.saturating_sub(close.len()),
-        truncated: truncated > 0,
-        ms: started.elapsed().as_secs_f64() * 1000.0,
-        param_warnings: Vec::new(),
-    };
-    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+    PairSummary { overlaps, near, nearest: nearest_out }
 }
 
 /// One pair: its overlap when the meshes meet or one holds the other, otherwise its distance
@@ -481,7 +518,7 @@ fn nearest_lists(
         c.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
         order.insert(i, (c, 0));
     }
-    let mut failed: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    let mut failed: HashSet<(usize, usize)> = HashSet::new();
     let measured = |known: &HashMap<(usize, usize), f64>, i: usize, c: &[(f64, usize)]| -> Vec<(usize, f64)> {
         let mut l: Vec<(usize, f64)> = c.iter().filter_map(|&(_, j)| known.get(&key(i, j)).map(|d| (j, *d))).collect();
         l.sort_by(|x, y| x.1.total_cmp(&y.1).then(x.0.cmp(&y.0)));

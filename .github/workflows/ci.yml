@@ -274,10 +274,13 @@ jobs:
             fi
           }
           # Opt-in for a big render change: a pull request labelled render-tests, or a merge group
-          # holding one (its pull requests are the (#N) of its squash commits), runs them whatever
-          # the paths say.
+          # holding one, runs them whatever the paths say. The group's pull requests are its
+          # first-parent commits: "Merge pull request #N from ..." merge commits, or "<title> (#N)"
+          # (squash commits, or merge commits titled from the pull request). A pull request's own
+          # commits are off the first-parent line, so an issue number in one of them is not read.
           group_has_render_label() {
-            for pr in $(git log --format=%s "$1" | grep -o '(#[0-9]*)$' | tr -d '(#)'); do
+            for pr in $(git log --first-parent --format=%s "$1" \
+              | sed -nE 's/^Merge pull request #([0-9]+) .*/\1/p; s/.*\(#([0-9]+)\)$/\1/p'); do
               if gh api "repos/$REPO/issues/$pr" --jq '.labels[].name' | grep -qx render-tests; then
                 return 0
               fi

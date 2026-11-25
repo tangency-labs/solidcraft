@@ -159,6 +159,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<MoveResult>)
         .at("SKETCH", "MODIFY")
         .icon("sketch_move")
+        .key("M")
         .enabled(in_sketch)
         .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, z?: mm along the sketch's normal (3D sketches: the moved lines and fit-point splines become drawn 3D curves that far off the plane, and drawn picks move that far along it); rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text; copy also accepts drawn 3D curves, preserving exact arcs and height above the sketch plane; a turned rectangle keeps its shape: parallel and perpendicular relations replace the horizontal and vertical ones lost; `wire@index` picks a drawn 3D point, a drawn curve's id the whole curve: they move with the rest, along the plane and by `z` along its normal; returns `released`: the constraints tying the moved geometry to what stays that the move let go, as {id, kind}, and `added`: the relations put in their place, as {id, kind}", created_doc!())),
     CommandSpec::new("sketch.mirror", "Mirror", crate::checked!("sketch.mirror", mirror))
@@ -4722,7 +4723,11 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             let mut drawn_ids = Vec::new();
             for (wire, plane) in &drawn {
                 let fit: Vec<_> = wire.fit.iter().map(|&q| plane.to_world(f(plane.to_local(q))) + plane.normal() * (plane.height(q) + z)).collect();
-                drawn_ids.push(if wire.arc.is_some() { sk.add_drawn_arc_in(&fit, wire.space)? } else { sk.add_drawn_wire_in(&fit, wire.space)? });
+                drawn_ids.push(match (wire.arc, wire.control) {
+                    (Some(_), _) => sk.add_drawn_arc_in(&fit, wire.space)?,
+                    (None, Some(control)) => sk.add_drawn_control_in(&fit, control.degree, wire.space)?,
+                    (None, None) => sk.add_drawn_wire_in(&fit, wire.space)?,
+                });
             }
             // Copied 3D curves are joined where they meet, as drawn ones are (#10608).
             if let Some(target) = target.filter(|_| !drawn_ids.is_empty()) {
