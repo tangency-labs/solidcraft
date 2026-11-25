@@ -1203,168 +1203,176 @@ fn hostile_params_never_panic() {
     let _reset = mesh_convert::MadeUp;
     *crate::slicers::TEST_DETECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Vec::new());
     let keys = [
-        "plane",
-        "offset",
-        "name",
-        "sketch",
-        "points",
+        "a",
+        "add",
+        "anchor",
+        "angle",
+        "apex",
+        "ascii",
+        "at",
+        "axis",
+        "b",
+        "base",
+        "bodies",
+        "body",
+        "body_name",
+        "center",
+        "chain",
+        "clip",
         "closed",
+        "comment",
+        "configuration",
         "construction",
+        "continuity",
+        "copy",
+        "corner",
+        "count",
+        "count2",
+        "crown",
+        "curve",
+        "curves",
+        "damping",
+        "datum",
+        "delete",
+        "density",
+        "depth",
+        "detail",
+        "diameter",
+        "dir",
+        "direction",
+        "distance",
+        "distance2",
+        "dot_grid",
+        "drills",
+        "drills_text",
+        "driven",
+        "edges",
+        "effort",
+        "end",
+        "entities",
+        "entity",
+        "expression",
+        "extend",
+        "face",
+        "faces",
+        "factor",
+        "favorite",
+        "favorites",
+        "feature",
+        "features",
+        "filter",
+        "fixed",
+        "format",
+        "friction",
+        "from",
+        "gap",
+        "head",
+        "head_gap",
+        "height",
+        "id",
         "ids",
         "infer",
+        "items",
+        "keep",
+        "keep_tools",
+        "keep_with",
+        "kind",
+        "length",
+        "line",
+        "line_group",
+        "lines",
+        "link",
+        "major",
+        "margin",
+        "measure",
+        "members",
+        "mid",
+        "minor",
+        "minor_radius",
+        "mode",
+        "name",
+        "names",
+        "near",
+        "new_name",
+        "next_pair",
+        "offset",
+        "operation",
+        "orientation",
+        "origin",
+        "outline",
+        "outline_text",
         "p0",
         "p1",
         "p2",
-        "center",
-        "corner",
-        "radius",
-        "diameter",
-        "start",
-        "end",
-        "through",
-        "sides",
-        "angle",
-        "width",
-        "point",
-        "id",
-        "entities",
-        "type",
-        "value",
-        "line",
-        "mode",
-        "a",
-        "b",
-        "entity",
-        "fixed",
-        "curves",
-        "to",
-        "distance",
-        "profiles",
-        "direction",
+        "pairs",
         "parallel_to",
-        "distance2",
-        "start_offset",
-        "operation",
-        "targets",
-        "body_name",
-        "axis",
-        "length",
-        "height",
-        "base",
-        "major",
-        "minor",
-        "top_radius",
-        "top_diameter",
-        "edges",
-        "body",
-        "target",
-        "tools",
-        "keep_tools",
-        "bodies",
-        "translate",
-        "expression",
-        "unit",
-        "comment",
-        "delete",
-        "features",
-        "feature",
-        "position",
-        "suppressed",
-        "set",
-        "items",
-        "add",
         "path",
-        "format",
-        "ascii",
-        "measure",
-        "refs",
-        "link",
-        "project_edges",
-        "mid",
-        "near",
-        "factor",
-        "copy",
-        "count",
-        "spacing",
-        "count2",
-        "spacing2",
-        "dir",
-        "side",
-        "chain",
-        "at",
-        "curve",
-        "minor_radius",
-        "apex",
-        "rho",
-        "text",
-        "lines",
-        "driven",
-        "from",
-        "datum",
-        "tolerance",
-        "face",
-        "new_name",
-        "favorite",
-        "favorites",
-        "filter",
-        "kind",
-        "detail",
+        "plane",
+        "point",
+        "points",
+        "position",
+        "position_mm",
         "prefix",
-        "orientation",
-        "seam",
-        "twist",
-        "scale",
-        "continuity",
-        "crown",
-        "faces",
-        "u",
-        "v",
-        "keep",
-        "with",
-        "keep_with",
-        "stitch",
-        "extend",
-        "view",
-        "visual_style",
-        "reference_style",
+        "profile",
+        "profiles",
+        "project_edges",
+        "radius",
         "reference_hides_model",
         "reference_shown_percent",
-        "tangent_edges",
-        "line_group",
-        "sheet",
-        "position_mm",
-        "profile",
-        "anchor",
-        "density",
-        "names",
-        "pairs",
-        "next_pair",
-        "members",
+        "reference_style",
         "references",
-        "head",
-        "head_gap",
-        "configuration",
-        "outline",
-        "outline_text",
-        "drills",
-        "drills_text",
-        "thickness",
-        "origin",
+        "refs",
+        "reverse",
+        "rho",
+        "scale",
+        "seam",
+        "set",
         "shape",
+        "sheet",
+        "side",
+        "sides",
         "size",
-        "web",
-        "clip",
-        "margin",
+        "sketch",
+        "spacing",
+        "spacing2",
+        "start",
+        "start_offset",
+        "stitch",
+        "suppressed",
+        "tangent_edges",
+        "target",
+        "targets",
+        "text",
+        "thickness",
+        "through",
         "through_all",
-        "depth",
-        "dot_grid",
+        "to",
+        "tolerance",
+        "tools",
+        "top_diameter",
+        "top_radius",
+        "translate",
         "turn",
+        "twist",
+        "type",
+        "u",
+        "unit",
+        "v",
+        "value",
+        "velocity",
+        "view",
+        "visual_style",
+        "web",
+        "width",
+        "with",
     ];
     // Commands are independent; worker threads take them one at a time (their costs vary a lot).
     let ids: Vec<&str> = command_specs()
         .iter()
         .map(|spec| spec.id)
-        .filter(|id| !matches!(*id, "doc.open" | "file.save" | "file.save_as" | "file.export" | "file.save_mesh" | "sketch.export_dxf")) // file system side effects are covered by their own tests
+        .filter(|id| {
+            !matches!(*id, "doc.open" | "file.save" | "file.save_as" | "file.export" | "file.save_mesh" | "sketch.export_dxf" | "sketch.export_svg")
+        }) // file system side effects are covered by their own tests
         .collect();
     assert!(ids.contains(&"inspect.classify_points"), "exact point inspection must receive every hostile value");
     let next = std::sync::atomic::AtomicUsize::new(0);
@@ -1402,6 +1410,7 @@ fn hostile_params_never_panic() {
                                                 | "file.export_step"
                                                 | "file.export_stl"
                                                 | "file.export_urdf"
+                                                | "file.export_urdf_options"
                                         ))
                                 {
                                     continue; // parameter, script and export files: covered by their own tests (no stray files)
@@ -4133,6 +4142,42 @@ fn split_body_of_a_body_of_two_pieces_splits_both() {
     }
 }
 
+/// A cap: a plate, a skirt round its edge and a tube through a hole in the plate.
+fn cap(s: &mut Session) {
+    run(s, "solid.cylinder", json!({"radius": 50, "height": 15, "base": [0, 0, 0], "body_name": "Cap"}));
+    run(s, "solid.cylinder", json!({"radius": 46, "height": 20, "base": [0, 0, 2], "operation": "cut", "targets": ["Cap"]}));
+    run(s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [-10, -10, 0], "operation": "join", "targets": ["Cap"]}));
+    run(s, "solid.box", json!({"length": 16, "width": 16, "height": 60, "corner": [-8, -8, -10], "operation": "cut", "targets": ["Cap"]}));
+}
+
+/// Split Body at the plate's inner face (#6762): the skirt and the tube above it do not touch, so
+/// they are two bodies, not one body of two pieces. The plate keeps the name it had, `Cap (1)`;
+/// the pieces' volumes are the analytic ones and add up to the cap's (a slab would add 3.5e-4 of
+/// it). The same with the plane the dialog sends for the picked face, tilted about 2e-15 by
+/// rounding: no slab is left under the face to join the skirt and the tube.
+#[test]
+fn split_body_makes_each_piece_that_does_not_touch_a_body() {
+    let picked = json!({"origin": [-27.14101384226774, -19.861536909343386, 1.9999999999997158], "normal": [-2.164854201260163e-15, -3.46457633831685e-16, 1]});
+    for plane in [json!({"origin": [0, 0, 2], "normal": [0, 0, 1]}), picked] {
+        let mut s = Session::default();
+        cap(&mut s);
+        let whole = solidcraft_kernel::measure(&s.world_state().unwrap().body("Cap").unwrap().body).unwrap().volume;
+        run(&mut s, "solid.split_body", json!({"body": "Cap", "plane": plane}));
+        let st = s.world_state().unwrap();
+        let volume = |n: &str| solidcraft_kernel::measure(&st.body(n).unwrap().body).unwrap().volume;
+        let names: Vec<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, ["Cap", "Cap (1)", "Cap (2)"], "{plane}");
+        assert!(st.bodies.iter().all(|b| b.body.lumps().unwrap().len() == 1), "{plane}");
+        let (plate, skirt, tube) = (PI * 2500.0 * 2.0 - 16.0 * 16.0 * 2.0, PI * (2500.0 - 2116.0) * 13.0, (400.0 - 256.0) * 38.0);
+        assert!(rel(volume("Cap (1)"), plate) < 1e-3, "{plane}: {}", volume("Cap (1)"));
+        let mut upper = [volume("Cap"), volume("Cap (2)")];
+        upper.sort_by(f64::total_cmp);
+        assert!(rel(upper[0], tube) < 1e-3 && rel(upper[1], skirt) < 1e-3, "{plane}: {upper:?}");
+        let total: f64 = names.iter().map(|n| volume(n)).sum();
+        assert!(rel(total, whole) < 1e-5, "{plane}: {total} vs {whole}");
+    }
+}
+
 /// Fillet types: chord length (radius from the face angle) and a radius varying along the
 /// edge; volumes from the removed material.
 #[test]
@@ -4737,6 +4782,53 @@ fn counterbore_for_a_cap_screw_head() {
     assert_eq!(recess(&s), ("7 mm + 2 * (gap)".to_string(), "4 mm + (gap)".to_string()));
     run(&mut s, "parameters.change", json!({"name": "gap", "expression": "1 mm"}));
     assert!(rel(v3 - volume(&mut s), removed(4.5, 9.0, 5.0)) < 1e-3);
+}
+
+/// #17728: a countersunk screw's head (ISO 10642) gets a 90° countersink as wide as its head plus
+/// `head_gap` each side, so the head sits `head_gap` below the face.
+#[test]
+fn countersink_for_a_countersunk_screw_head() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 10}));
+    let v0 = volume(&mut s);
+    let hole = cmd::clearance_diameter("M6", "normal").unwrap();
+    // A through hole with a 90° countersink `d` wide at the face: the cone's frustum, then the hole.
+    let removed = |d: f64| {
+        let h = (d - hole) / 2.0;
+        PI * h / 12.0 * (d * d + d * hole + hole * hole) + PI * hole * hole / 4.0 * (10.0 - h)
+    };
+    let recess = |s: &Session| match s.doc.features.last().map(|f| &f.kind) {
+        Some(solidcraft_doc::FeatureKind::Hole { hole: solidcraft_doc::HoleKind::Countersink { cs_diameter, cs_angle, .. }, .. }) => {
+            (cs_diameter.as_str().to_string(), cs_angle.as_str().to_string())
+        }
+        other => panic!("not a countersink: {other:?}"),
+    };
+    // ISO 10642 M6: dk 13.44, plus the 0.5 mm gap each side; the type follows the head.
+    run(&mut s, "solid.hole", json!({"position": [10, 15, 10], "clearance": "M6", "head": "ISO 10642"}));
+    let v1 = volume(&mut s);
+    assert_eq!(recess(&s), ("14.44 mm".to_string(), "90 deg".to_string()));
+    assert!(rel(v0 - v1, removed(14.44)) < 1e-3, "{} vs {}", v0 - v1, removed(14.44));
+    // The family name parts.insert takes, no gap, and the type written out: flush with the face.
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [30, 15, 10], "clearance": "M6", "head": "countersunk_socket_screw", "head_gap": 0, "type": "countersink"}),
+    );
+    let v2 = volume(&mut s);
+    assert_eq!(recess(&s).0, "13.44 mm");
+    assert!(rel(v1 - v2, removed(13.44)) < 1e-3, "{}", v1 - v2);
+    // A diameter given by hand keeps its value.
+    run(&mut s, "solid.hole", json!({"position": [50, 15, 10], "clearance": "M6", "head": "ISO 10642", "cs_diameter": 15}));
+    assert_eq!(recess(&s).0, "15");
+}
+
+#[test]
+fn head_countersink_is_the_head_plus_the_default_gap() {
+    assert_eq!(cmd::head_countersink("ISO 10642", "M6"), Some(14.44), "dk 13.44");
+    assert_eq!(cmd::head_countersink("countersunk_socket_screw", "M4x0.7"), Some(9.96), "dk 8.96, the pitch written out");
+    assert_eq!(cmd::head_countersink("ISO 10642", "M2"), None, "the table starts at M3");
+    assert_eq!(cmd::head_countersink("ISO 4762", "M6"), None, "a socket head is no countersunk head");
+    assert_eq!(cmd::head_counterbore("ISO 10642", "M6"), None, "nor a counterbore's");
 }
 
 /// In an inch design, a bare length typed into a feature means inches (stored with the unit);
@@ -6128,6 +6220,65 @@ fn boundary_fill_cells() {
     assert!(s.execute("solid.boundary_fill", &json!({"tools": ["A"], "cells": [[100, 100, 100]]})).is_err());
 }
 
+/// A cup: a cylinder of radius 10 and height 40 with a blind bore of radius 6 from height 10 up,
+/// open at the top, and a plane `Cap` across the bore at the height of the parameter `cap_z`.
+fn plane_fill_cup(s: &mut Session) {
+    run(s, "parameters.add", json!({"name": "cap_z", "expression": "30 mm"}));
+    run(s, "solid.cylinder", json!({"radius": 10, "height": 40, "base": [0, 0, 0], "body_name": "Cup"}));
+    run(s, "solid.cylinder", json!({"radius": 6, "height": 30, "base": [0, 0, 10], "operation": "cut", "targets": ["Cup"]}));
+    run(s, "construct.plane.offset", json!({"base": "XY", "offset": "cap_z", "name": "Cap"}));
+}
+
+/// Boundary Fill takes planes as tools (#20679): a plane across the open end of a cup closes the
+/// bore, so the bore is a cell that exists only with the plane. Its volume follows the plane.
+#[test]
+fn boundary_fill_plane_closes_an_open_cup() {
+    use std::f64::consts::PI;
+    let mut s = Session::default();
+    plane_fill_cup(&mut s);
+    let cup = (100.0 * 40.0 - 36.0 * 30.0) * PI;
+    assert!(rel(body_volume(&s.model.state()), cup) < 1e-6, "the cup alone");
+    // The bore is outside the cup: without the plane there is no cell there.
+    assert!(s.execute("solid.boundary_fill", &json!({"tools": ["Cup"], "cells": [[0, 0, 20]]})).is_err());
+    run(&mut s, "solid.boundary_fill", json!({"tools": ["Cup"], "planes": ["Cap"], "cells": [[0, 0, 20]]}));
+    // The bore between its floor (height 10) and the plane (height 30): pi * 6^2 * 20.
+    assert!(rel(body_volume(&s.model.state()), cup + 36.0 * 20.0 * PI) < 1e-6, "{}", body_volume(&s.model.state()));
+    // Moving the plane changes the filled volume: the saved feature follows it.
+    run(&mut s, "parameters.change", json!({"name": "cap_z", "expression": "25 mm"}));
+    assert!(rel(body_volume(&s.model.state()), cup + 36.0 * 15.0 * PI) < 1e-6, "{}", body_volume(&s.model.state()));
+}
+
+/// A plane that leaves the region open (the cup's bore, cut off below its mouth) closes no cell.
+#[test]
+fn boundary_fill_refuses_a_region_the_planes_leave_open() {
+    let mut s = Session::default();
+    plane_fill_cup(&mut s);
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "5 mm", "name": "Low"}));
+    let before = s.model.state().bodies.len();
+    // Above the low plane the bore is open at the top.
+    let error = s.execute("solid.boundary_fill", &json!({"tools": ["Cup"], "planes": ["Low"], "cells": [[0, 0, 20]]})).unwrap_err().to_string();
+    assert!(error.contains("leave open"), "{error}");
+    assert_eq!(s.model.state().bodies.len(), before);
+    // A name that is no plane is refused.
+    assert!(s.execute("solid.boundary_fill", &json!({"tools": ["Cup"], "planes": ["Nope"], "cells": [[0, 0, 20]]})).is_err());
+    // A cell point on a plane is refused.
+    assert!(s.execute("solid.boundary_fill", &json!({"tools": ["Cup"], "planes": ["Cap"], "cells": [[0, 0, 30]]})).is_err());
+}
+
+/// Bodies and planes mix: the half of a box on one side of a plane.
+#[test]
+fn boundary_fill_mixes_a_body_and_a_plane() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": "10 mm", "name": "Mid"}));
+    run(&mut s, "solid.boundary_fill", json!({"tools": ["A"], "planes": ["Mid"], "cells": [[15, 10, 10]]}));
+    assert!(rel(body_volume(&s.model.state()), 8000.0 + 10.0 * 20.0 * 20.0) < 1e-9, "{}", body_volume(&s.model.state()));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "solid.boundary_fill", json!({"tools": ["A"], "planes": ["Mid"], "cells": [[5, 10, 10], [15, 10, 10]], "remove_tools": true}));
+    assert!(rel(body_volume(&s.model.state()), 8000.0) < 1e-9, "{}", body_volume(&s.model.state()));
+    assert_eq!(s.model.state().bodies.len(), 2);
+}
+
 /// An open square tube crossing two cylinders cannot be treated as a solid operand.
 #[test]
 fn boundary_fill_refuses_open_tube_tools_without_changing_the_design() {
@@ -6852,6 +7003,32 @@ fn default_extrude_profiles_keep_even_depth_islands_and_separate_outlines() {
     run(&mut s, "solid.extrude", json!({"distance": 5}));
     assert_eq!(s.model.state().bodies.len(), 3);
     let expected = (900.0 - 400.0 + 100.0 + 100.0) * 5.0;
+    let actual = volume(&mut s);
+    assert!(rel(actual, expected) < 1e-6, "{actual} vs {expected}");
+}
+
+/// Four closed strips laid out as a # cross each other and close off a square in the middle that
+/// lies inside none of them. A cut with `profiles` left out takes the strips and keeps the middle
+/// (#19963); four separate cuts give the same block.
+#[test]
+fn default_extrude_profiles_leave_the_gap_overlapping_loops_enclose() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 3, "corner": [-5, -5, 0], "operation": "new_body", "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Strips"}));
+    for points in [
+        [[-6, 3], [6, 3], [6, 4], [-6, 4]],
+        [[-6, -4], [6, -4], [6, -3], [-6, -3]],
+        [[-4, -6], [-3, -6], [-3, 6], [-4, 6]],
+        [[3, -6], [4, -6], [4, 6], [3, 6]],
+    ] {
+        run(&mut s, "sketch.line", json!({"points": points, "closed": true}));
+    }
+    run(&mut s, "sketch.solve", json!({}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Strips", "distance": 5, "start_offset": -1, "operation": "cut", "targets": ["Block"]}));
+    // The block, 300, less the strips inside it: four 10 x 1 x 3 bars less the four 1 x 1 x 3
+    // crossings counted twice. The 6 x 6 middle, the four corners and the four edge pieces stay.
+    let expected = 300.0 - (4.0 * 30.0 - 4.0 * 3.0);
     let actual = volume(&mut s);
     assert!(rel(actual, expected) < 1e-6, "{actual} vs {expected}");
 }

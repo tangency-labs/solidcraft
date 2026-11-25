@@ -201,6 +201,8 @@ fn show_views(app: &mut SolveApp, ui: &mut egui::Ui) {
     let tiles = views.tiles().cloned().unwrap_or(Tiles::Leaf(views.active().id));
     let focus = app.docs.views.active().id;
     let headers = crate::view_windows::child_options(app).card_headers;
+    // Tile chrome (headers, the focused view's name) only tells views apart: with one view, none.
+    let several = crate::ui_kit::disambiguates(tiles.views().len());
     let render_ground = app.docs.views.active().kind == ViewKind::Render;
     let (free, _) = layout_bounds(app, area);
     let mut places: Vec<(u64, Rect)> = tiles.rects(to_tile(free), GUTTER).into_iter().map(|(id, r)| (id, from_tile(r))).collect();
@@ -287,7 +289,7 @@ fn show_views(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut chosen = None;
     for (id, body) in cards.iter().filter(|_| !clean) {
         let card = Rect::from_min_max(body.min - vec2(0.0, HEADER), body.max);
-        if let Some(action) = card_chrome(app, ui, *id, card, headers) {
+        if let Some(action) = card_chrome(app, ui, *id, card, if several { headers } else { solidcraft_views::CardHeaders::Hidden }) {
             chosen = Some((*id, action));
         }
     }
@@ -298,7 +300,7 @@ fn show_views(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     if !clean {
-        if !crate::view_window_drag::unanchored(app, ui.ctx(), focus) {
+        if several && !crate::view_window_drag::unanchored(app, ui.ctx(), focus) {
             ground_chip(app, ui, focus, ground);
         }
         if visible.is_none() {
@@ -831,21 +833,7 @@ fn card_chrome(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, cell: Rect, heade
         let top = Rect::from_min_size(cell.min, vec2(cell.width(), HEADER));
         let name = app.docs.views.get(id).map_or("", |view| view.name.as_str());
         let label = clear_of_panels(app, Rect::from_min_size(top.left_top() + vec2(10.0, 0.0), vec2(120.0, HEADER)));
-        if let Some(name) = sketch_header_name(app, id) {
-            painter.rect_filled(top, CornerRadius { nw: CARD_RADIUS, ne: CARD_RADIUS, sw: 0, se: 0 }, t.sketch_soft);
-            let mut title = Rect::from_min_max(pos2(label.left(), top.top()), pos2(button_rect(cell, 3.0).left(), top.bottom()));
-            if let Some((paper, state)) = crate::drawing_sheet_page::view_badge(app, id, ui.ctx()) {
-                let used = crate::app_bar::paint_view_chips(&painter, title, &[&paper, &state]);
-                title.max.x = (title.right() - used).max(title.left());
-            }
-            crate::app_bar::paint_sketch_header_owner(
-                &painter,
-                title,
-                &name,
-                app.tr("sketch_mode.editing"),
-                crate::sketch_view::owner_label(app, id).as_deref(),
-            );
-        } else if let Some((paper, state)) = crate::drawing_sheet_page::view_badge(app, id, ui.ctx()) {
+        if let Some((paper, state)) = crate::drawing_sheet_page::view_badge(app, id, ui.ctx()) {
             paint_card_header(&painter, top, CARD_RADIUS, "", label.left());
             let right = button_rect(cell, 3.0).left();
             let metadata = Rect::from_min_max(pos2(label.left(), top.top()), pos2(right.max(label.left()), top.bottom()));
@@ -865,13 +853,7 @@ fn card_chrome(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, cell: Rect, heade
             app.viewport.pending_tile_focus = Some(id);
         }
     }
-    let sketching = sketch_header_name(app, id).is_some();
-    painter.rect_stroke(
-        card.shrink(0.5),
-        radius,
-        Stroke::new(if sketching { 2.0 } else { 1.0 }, if sketching { t.sketch_accent } else { t.border }),
-        StrokeKind::Inside,
-    );
+    painter.rect_stroke(card.shrink(0.5), radius, Stroke::new(1.0, t.border), StrokeKind::Inside);
     if headers == solidcraft_views::CardHeaders::Hidden {
         return None;
     }
@@ -935,31 +917,12 @@ fn card_chrome(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, cell: Rect, heade
     action
 }
 
-/// The focused view has no frame and no header: it is the ground the others lie on. Its name sits
-/// in a pill with the accent in the band above its frame, clear of the ribbon and the panels.
-pub(crate) fn single_sketch_chrome(app: &mut SolveApp, ui: &egui::Ui) {
-    if app.viewport.card
-        || (crate::sketch_view::active_sketch(app).is_none() && crate::sketch_view::active_sheet_sketch(app).is_none())
-        || app.docs.views.is_tiled()
-    {
-        return;
-    }
-    let (free, _) = layout_bounds(app, ui.max_rect());
-    let id = app.docs.views.active().id;
-    ground_chip(app, ui, id, frame_of(free));
-}
-
+/// The focused view's name in a pill in the band above its frame, clear of the ribbon and the panels.
 fn ground_chip(app: &mut SolveApp, ui: &egui::Ui, id: u64, ground: Rect) {
     let t = Tokens::get();
-    let sketch_name = sketch_header_name(app, id);
-    let name = sketch_name.as_deref().unwrap_or_else(|| app.docs.views.get(id).map_or("", |view| view.name.as_str()));
+    let name = app.docs.views.get(id).map_or("", |view| view.name.as_str());
     let painter = ui.painter();
     let galley = painter.layout_no_wrap(name.to_owned(), egui::FontId::proportional(t.font_body), t.text);
-    let editing = painter.layout_no_wrap(app.tr("sketch_mode.editing").to_owned(), crate::ui_kit::type_face::semibold(t.font_small), t.text);
-    let owner = crate::sketch_view::owner_label(app, id);
-    let owner_width = owner
-        .as_ref()
-        .map_or(0.0, |owner| painter.layout_no_wrap(owner.clone(), crate::ui_kit::type_face::semibold(t.font_small), t.text).size().x + 22.0);
     let badges = crate::drawing_sheet_page::view_badge(app, id, ui.ctx());
     let badge_width = badges.as_ref().map_or(0.0, |(paper, state)| {
         [paper, state]
@@ -969,28 +932,16 @@ fn ground_chip(app: &mut SolveApp, ui: &egui::Ui, id: u64, ground: Rect) {
             })
             .sum::<f32>()
     });
-    let size = vec2(
-        (galley.size().x + if sketch_name.is_some() { editing.size().x + 56.0 + owner_width } else { 34.0 } + badge_width)
-            .min((ground.width() - 2.0 * MARGIN).max(0.0)),
-        26.0,
-    );
+    let size = vec2((galley.size().x + 34.0 + badge_width).min((ground.width() - 2.0 * MARGIN).max(0.0)), 26.0);
     let at = pos2(ground.left() + MARGIN, ground.top() - HEADER + (HEADER - size.y) / 2.0);
     let chip = clear_of_panels(app, Rect::from_min_size(at, size));
-    if sketch_name.is_some() {
-        painter.rect_stroke(ground, CARD_RADIUS, Stroke::new(2.0, t.sketch_accent), StrokeKind::Inside);
-    }
     let painter = &painter.with_clip_rect(chip);
     let radius = CornerRadius::same(13);
     painter.add(egui::Shadow { offset: [0, 2], blur: 8, spread: 0, color: egui::Color32::from_black_alpha(60) }.as_shape(chip, radius));
-    painter.rect_filled(chip, radius, if sketch_name.is_some() { t.sketch_soft } else { t.panel_header });
+    painter.rect_filled(chip, radius, t.panel_header);
     painter.rect_stroke(chip, radius, Stroke::new(1.0, t.border), StrokeKind::Inside);
-    if sketch_name.is_some() {
-        let title = Rect::from_min_max(chip.min + vec2(8.0, 0.0), pos2((chip.right() - badge_width - 8.0).max(chip.left() + 8.0), chip.bottom()));
-        crate::app_bar::paint_sketch_header_owner(painter, title, name, app.tr("sketch_mode.editing"), owner.as_deref());
-    } else {
-        painter.circle_filled(chip.left_center() + vec2(13.0, 0.0), 3.5, t.accent);
-        painter.galley(chip.left_center() + vec2(24.0, -galley.size().y / 2.0), galley, t.text);
-    }
+    painter.circle_filled(chip.left_center() + vec2(13.0, 0.0), 3.5, t.accent);
+    painter.galley(chip.left_center() + vec2(24.0, -galley.size().y / 2.0), galley, t.text);
     if let Some((paper, state)) = badges {
         crate::app_bar::paint_view_chips(
             painter,
@@ -1105,7 +1056,7 @@ mod tests {
     }
 
     #[test]
-    fn model_and_sheet_sketch_ground_outlines_are_not_clipped_to_the_owner_pill() {
+    fn model_and_sheet_sketches_draw_no_frame_or_editing_pill_over_the_view() {
         for sheet in [false, true] {
             let mut app = SolveApp::new(Default::default(), Default::default());
             if sheet {
@@ -1118,28 +1069,29 @@ mod tests {
             }
             let owner = app.session.editing_view().expect("a hosted sketch has an owning tile");
             assert_eq!(app.docs.views.active().id, owner);
-            assert!(sketch_header_name(&app, owner).is_some(), "the actual editor supplies the owner pill");
+            assert!(sketch_header_name(&app, owner).is_some(), "the view hosts the sketch");
             let ground = Rect::from_min_size(pos2(80.0, 130.0), vec2(600.0, 360.0));
             let ctx = crate::fonts::test_context();
-            let output =
+            let mut output =
                 ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 700.0))), ..Default::default() }, |ui| {
                     ground_chip(&mut app, ui, owner, ground);
                 });
-            let outline = output
-                .shapes
-                .iter()
-                .find(|clipped| {
-                    matches!(&clipped.shape, egui::Shape::Rect(rect)
-                if rect.rect == ground && rect.stroke.width == 2.0 && rect.stroke.color == Tokens::get().sketch_accent
-                    && rect.stroke_kind == StrokeKind::Inside)
-                })
-                .expect("the editor paints the full ground's green 2px outline");
-            for corner in [ground.left_top(), ground.right_top(), ground.left_bottom(), ground.right_bottom()] {
-                assert!(
-                    outline.clip_rect.contains(corner),
-                    "{sheet:?}: the ground outline clip must contain every tile corner, not just the owner pill"
-                );
-            }
+            let t = Tokens::get();
+            // Overlay removed by owner decision: no green frame round the view while it sketches.
+            assert!(
+                !output.shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Rect(rect) if rect.stroke.color == t.sketch_accent)),
+                "{sheet:?}: no green sketch frame is drawn round the view"
+            );
+            // Overlay removed by owner decision: no "Editing" pill or green sketch-name box over the view.
+            assert!(
+                !output.shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Rect(rect) if rect.fill == t.sketch_soft)),
+                "{sheet:?}: no green sketch box is drawn over the view"
+            );
+            assert!(
+                !output.shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Text(text) if text.galley.text() == "Editing" || text.galley.text().contains(" · "))),
+                "{sheet:?}: no Editing state or sketch breadcrumb is drawn over the view"
+            );
+            output.textures_delta.clear();
         }
     }
 

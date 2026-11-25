@@ -8,12 +8,14 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
-use solidcore_record::hatch::Pattern;
+use solidcore_record::profile::line_family::MAX_DASHES;
 use solidcore_record::{Region2, Vec2};
 use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::services::profile::MAX_FAMILIES;
 use solidcraft_sketch::{CurveKind, Profile, find_profiles_checked};
 
+use super::hatch::{MAX_DESCRIPTION_CHARS, MAX_NAME_BYTES, Pattern};
 use super::{Drawing, Owner, require};
 use crate::profile_refs::{WHOLE_MAX_BOUNDARY_CURVES, WHOLE_MAX_HOLES, WHOLE_MAX_ID_BYTES, WHOLE_MAX_TOTAL_CURVES};
 use crate::{DocError, Document, Result, WholeProfileBoundary, ids};
@@ -141,30 +143,39 @@ pub(super) fn check_raw(value: &Value) -> Result<()> {
             require(records.len() <= limit, || format!("sheet fill: raw `{key}` exceeds {limit} records"))?;
         }
     }
-    for snapshot in value.get("patterns").and_then(Value::as_array).into_iter().flatten() {
+    check_raw_patterns(value.get("patterns").and_then(Value::as_array).into_iter().flatten())?;
+    check_raw_fills(value.get("fills").and_then(Value::as_array).into_iter().flatten())
+}
+
+pub(super) fn check_raw_patterns<'a>(records: impl IntoIterator<Item = &'a Value>) -> Result<()> {
+    for snapshot in records {
         if let Some(pattern) = snapshot.get("pattern") {
             if let Some(name) = pattern.get("name").and_then(Value::as_str) {
-                require(name.len() <= solidcore_record::hatch::MAX_NAME_BYTES, || "sheet fill: raw pattern name exceeds 31 bytes".into())?;
+                require(name.len() <= MAX_NAME_BYTES, || "sheet fill: raw pattern name exceeds 31 bytes".into())?;
             }
             if let Some(description) = pattern.get("description").and_then(Value::as_str) {
-                let limit = solidcore_record::hatch::MAX_DESCRIPTION_CHARS;
+                let limit = MAX_DESCRIPTION_CHARS;
                 require(description.len() <= limit * 4 && description.chars().count() <= limit, || {
                     "sheet fill: raw pattern description exceeds 80 characters".into()
                 })?;
             }
             if let Some(families) = pattern.get("families").and_then(Value::as_array) {
-                require(families.len() <= solidcore_record::hatch::MAX_FAMILIES, || "sheet fill: raw pattern families exceeds 64".into())?;
+                require(families.len() <= MAX_FAMILIES, || "sheet fill: raw pattern families exceeds 64".into())?;
                 for family in families {
                     if let Some(dashes) = family.get("dashes").and_then(Value::as_array) {
-                        require(dashes.len() <= solidcore_record::hatch::MAX_DASHES, || "sheet fill: raw pattern dashes exceeds 6".into())?;
+                        require(dashes.len() <= MAX_DASHES, || "sheet fill: raw pattern dashes exceeds 6".into())?;
                     }
                 }
             }
         }
     }
+    Ok(())
+}
+
+pub(super) fn check_raw_fills<'a>(records: impl IntoIterator<Item = &'a Value>) -> Result<()> {
     let mut count = 0usize;
     let mut curve_ids = 0usize;
-    for fill in value.get("fills").and_then(Value::as_array).into_iter().flatten() {
+    for fill in records {
         if let Some(boundary) = fill.get("boundary") {
             let holes = boundary.get("holes").and_then(Value::as_array);
             require(holes.is_none_or(|holes| holes.len() <= WHOLE_MAX_HOLES), || "sheet fill: raw boundary exceeds 128 holes".into())?;
@@ -286,7 +297,7 @@ impl Drawing {
                 let point = |id| solved.sketch.point(id).ok_or_else(|| fail("arc references an unknown point"));
                 let (center, start, end) = (point(c)?, point(a)?, point(b)?);
                 if start != end {
-                    let sweep = solidcore_ops::prism::counterclockwise_sweep(center, start, end)
+                    let sweep = solidcraft_kernel::services::prism::counterclockwise_sweep(center, start, end)
                         .ok_or_else(|| fail("arc has no finite nonzero radial directions"))?;
                     if sweep <= 1e-12 {
                         return Err(fail("noncoincident arc sweep at or below 1e-12 radians cannot be converted exactly"));
@@ -407,6 +418,9 @@ impl Drawing {
             }
         }
         retained_budget(&next)?;
+        if let Some(file) = &self.newer_file {
+            file.check_fill_budget(next.iter().map(AsRef::as_ref))?;
+        }
         self.fills = next;
         Ok(())
     }

@@ -10,9 +10,10 @@
 //!   the plane's normal); each cap loop read exactly ([`super::read::planar_pieces`]), lines and
 //!   arcs, its signed area enclosed.
 //! - **Walls:** a plane label with its normal square to the direction; a cylinder label with its
-//!   axis along it; or a net ruled along it (degree one across, each pair of rows a translation
-//!   along the direction within its hull's bound). Each wall stands on cap edges at both levels
-//!   (its support read in the frame is the cap's), its other edges lines along the direction.
+//!   axis along it; an extrusion along it; or a net ruled along it (degree one across, each
+//!   pair of rows a translation along the direction within its hull's bound). Each wall stands
+//!   on cap edges at both levels (its support read in the frame is the cap's), its other edges
+//!   lines along the direction.
 //! - **The section:** the caps' loops matched one to one; a convex straight outline or a circle
 //!   with separated round holes (the profiles the separation proof covers).
 //! - **The volume:** the section's area interval, widened by the strip the corridor allows,
@@ -154,10 +155,21 @@ fn net_of(s: &Surface) -> Option<Net> {
     Some((rows, nurb.u_knots().to_vec(), nurb.v_knots().to_vec()))
 }
 
-/// A whole bound on how far the wall strays across the direction `d` over `height`: a plane's
-/// normal against `d`, a cylinder's axis against it, a ruled net's rows against it (positive
-/// weights make the hull a bound on the surface). `None` where none is proved.
-fn wall_error(surface: &Surface, d: Vec3, height: f64, work: &mut usize) -> Option<f64> {
+/// A whole bound on how far the wall strays across the direction `d` (a unit vector) over
+/// `height`: a plane's normal against `d`, a cylinder's axis against it, an extrusion's
+/// direction against it (its rulings are straight along that direction, whatever its
+/// generator), a ruled net's rows against it (positive weights make the hull a bound on the
+/// surface). With `reach`, a net's rows must also run monotonically along `d` for at least half
+/// of `height`, as a prism's wall from cap to cap does ([`section`]); without it any rows do (the
+/// face then lies within the bound of its first row's curve swept along `d`). `None` where none
+/// is proved.
+fn wall_error(
+    surface: &Surface,
+    d: Vec3,
+    height: f64,
+    work: &mut usize,
+    reach: bool,
+) -> Option<f64> {
     if let Some((_, n)) = plane_of(surface) {
         let error = 1024.0
             * f64::EPSILON
@@ -165,6 +177,11 @@ fn wall_error(surface: &Surface, d: Vec3, height: f64, work: &mut usize) -> Opti
         return Some((n.dot(d).abs() + error) * height * 2.0);
     }
     if let Some((_, a, _)) = cylinder_of(surface) {
+        return Some((a.cross(d).length() + 1024.0 * f64::EPSILON) * height * 4.0);
+    }
+    if let SurfaceKind::SurfOfExtrusion(x) = surface.kind() {
+        // made unit scaled first: a direction of any finite length, none past f64::MAX squared
+        let (_, a) = x.extrusion_vec.length_and_unit()?;
         return Some((a.cross(d).length() + 1024.0 * f64::EPSILON) * height * 4.0);
     }
     let (points, _, _) = net_of(surface)?;
@@ -233,7 +250,7 @@ fn wall_error(surface: &Surface, d: Vec3, height: f64, work: &mut usize) -> Opti
                 monotone = false;
             }
         }
-        if !monotone || axial_sign == 0.0 {
+        if reach && (!monotone || axial_sign == 0.0) {
             continue;
         }
         // rank-one weights keep the normalized convex coefficients; their error is bounded by the
@@ -697,7 +714,7 @@ fn certificate(k: &Kernel, b: &Brep, size: f64, frame: &Frame, tol: f64) -> Opti
     for &wall in &walls {
         let info = faces.get(wall)?;
         let surface = b.face(info.id).ok()?.surface.as_ref()?;
-        let variation = wall_error(surface, d, height_, &mut controls)?;
+        let variation = wall_error(surface, d, height_, &mut controls, true)?;
         if variation > tol * 8.0 {
             return None;
         }
@@ -883,6 +900,38 @@ pub struct PrismSection {
     pub tolerance: f64,
     /// An enclosure of its volume.
     pub volume: Interval,
+}
+
+/// A whole bound on how far face `f` of `b` strays across the direction `d`: the face lies
+/// within the bound of a surface swept along `d`. It is the bound [`section`] proves for each of a
+/// prism's walls (a plane by its normal against `d`, a cylinder by its axis, a ruled spline net by
+/// its rows, however far they run along `d`), taken over the face's own size: the diagonal of its
+/// tight box, curved edges included (a cylinder's cap has one seam vertex, whose vertex box omits
+/// the circle). A net kept for a procedural definition adds its certified distance from it
+/// (`DefinitionRef::bound`, 0 for a definition it matches exactly). A face whose bound is within
+/// the zone tolerance runs straight along `d`.
+///
+/// `None` where no bound is proved: a face with no surface or whose tight box is not found; a
+/// surface that is not a plane, a cylinder or a ruled spline net (an extruded surface among
+/// them); a net past the size or work budget, or whose weights are not positive; a definition
+/// whose distance is not finite; a `d` that is zero or not finite (any finite length else, scaled
+/// before it is squared).
+#[must_use]
+pub fn face_straying(k: &Kernel, b: &Brep, f: FaceId, d: Vec3) -> Option<f64> {
+    let (_, d) = d.length_and_unit()?;
+    let surface = b.face(f).ok()?.surface.as_ref()?;
+    let definition = surface
+        .procedural_definition()
+        .map_or(0.0, |def| def.bound());
+    if !(definition >= 0.0 && definition.is_finite()) {
+        return None;
+    }
+    let bounds = crate::query::api_queries::face_bounding_box(k, b, f, true).ok()?;
+    let size = (bounds.max() - bounds.min()).length();
+    if !size.is_finite() {
+        return None;
+    }
+    Some(wall_error(surface, d, size, &mut 262_144_usize, false)? + definition)
 }
 
 /// The size a body's tolerances scale with: the diagonal of its vertices' box (at least 1).
@@ -1120,5 +1169,68 @@ mod tests {
             area: Interval::enclosing(800.0, 1e-8).unwrap(),
         };
         assert!(separated_material(&[doubled], 1e-6, &mut 16_000_000).is_none());
+    }
+
+    /// An extrusion's wall (here a free-form curve swept along z) is bounded by its direction
+    /// against the prism's, whatever its generator: straight along z, and a degree off is not.
+    #[test]
+    fn an_extrusion_wall_is_bounded_by_its_direction() {
+        let mut k = Kernel::default();
+        let p = |x: f64, y: f64| Vec2::new(x, y);
+        let region = Region2 {
+            outer: Loop2 {
+                segs: vec![
+                    Seg2::Cubic {
+                        p0: p(0.0, 0.0),
+                        p1: p(4.0, -2.0),
+                        p2: p(8.0, 2.0),
+                        p3: p(12.0, 0.0),
+                    },
+                    Seg2::Line {
+                        a: p(12.0, 0.0),
+                        b: p(12.0, 6.0),
+                    },
+                    Seg2::Line {
+                        a: p(12.0, 6.0),
+                        b: p(0.0, 6.0),
+                    },
+                    Seg2::Line {
+                        a: p(0.0, 6.0),
+                        b: p(0.0, 0.0),
+                    },
+                ],
+            },
+            holes: Vec::new(),
+        };
+        let frame = Frame {
+            origin: [0.0, 0.0, 0.0],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        };
+        let b = crate::prism::extrude::extrude_region(&mut k, &frame, &region, 0.0, 120.0).unwrap();
+        let extrusions: Vec<&Surface> = b
+            .face_list()
+            .iter()
+            .filter_map(|&f| b.face(f).ok()?.surface.as_ref())
+            .filter(|s| matches!(s.kind(), SurfaceKind::SurfOfExtrusion(_)))
+            .collect();
+        assert_eq!(extrusions.len(), 1);
+        let mut work = usize::MAX;
+        let along = wall_error(
+            extrusions[0],
+            Vec3::new(0.0, 0.0, 1.0),
+            120.0,
+            &mut work,
+            true,
+        )
+        .unwrap();
+        assert!(along < 1e-9, "{along}");
+        let off = Vec3::new(0.0, 1.0_f64.to_radians().sin(), 1.0_f64.to_radians().cos());
+        let skew = wall_error(extrusions[0], off, 120.0, &mut work, true).unwrap();
+        // 4 x 120 x sin(1 degree), and the 1024 eps
+        assert!(
+            (skew - 480.0 * 1.0_f64.to_radians().sin()).abs() < 1e-9,
+            "{skew}"
+        );
     }
 }

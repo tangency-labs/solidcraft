@@ -24,13 +24,13 @@ use solidcore_record::brep::Brep;
 use solidcore_record::{Seg2, Vec2, Vec3};
 use solidcraft_doc::ModelState;
 use solidcraft_geom::drawing_view::ViewFrame;
-use solidcraft_geom::hlr::{self, HlrError, Source, Visibility};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_geom::{Aabb2, EPS, Similarity2};
+use solidcraft_kernel::hlr::{self, HlrError, Source, Visibility};
 
 use super::ShownSet;
-use super::lines::{LineRequest, Piece, ViewLine, continues, on_arc, within};
+use super::lines::{LineRequest, Piece, ViewLine, continues, joined_sweep, on_arc, within};
 use crate::mesh_lines::{self, Placed, Stage};
 
 /// The edges the view draws of a body, in its record's order, and which of them are tangent edges.
@@ -557,7 +557,7 @@ fn on_paper(geometry: &[Seg2], accuracy: CurveAccuracy, frame: &ViewFrame, chord
             }
         }
     }
-    let accuracy = match (frame.accuracy_on_paper(accuracy), flattened, proven) {
+    let accuracy = match (hlr::accuracy_on_paper(frame, accuracy), flattened, proven) {
         (on_paper, false, _) => on_paper,
         (CurveAccuracy::Analytic, true, true) => CurveAccuracy::Bounded { max_deviation_mm: chord },
         (CurveAccuracy::Bounded { max_deviation_mm }, true, true) => CurveAccuracy::Bounded { max_deviation_mm: max_deviation_mm + chord },
@@ -573,9 +573,9 @@ fn on_paper(geometry: &[Seg2], accuracy: CurveAccuracy, frame: &ViewFrame, chord
 fn joined(path: &mut Vec<Seg2>, seg: Seg2) {
     if let (Some(Seg2::Arc { center, radius, start, sweep }), Seg2::Arc { center: c, radius: r, start: s, sweep: turn }) = (path.last_mut(), seg)
         && continues((*center, *radius, *start, *sweep), (c, r, s, turn))
-        && (*sweep + turn).abs() <= std::f64::consts::TAU + 1e-9
+        && let Some(whole) = joined_sweep(*sweep, turn)
     {
-        *sweep += turn;
+        *sweep = whole;
         return;
     }
     path.push(seg);
@@ -786,5 +786,23 @@ mod tests {
         joined(&mut path, Seg2::Arc { center: c, radius: 6.0, start: FRAC_PI_2, sweep: FRAC_PI_2 });
         joined(&mut path, q(3.0));
         assert_eq!(path.len(), 3);
+    }
+
+    /// Quarters whose rounded sweeps add up to a hair either side of a whole turn, as a hole's
+    /// conics do (#212), join into one arc of exactly one turn: a circle, which a DXF writes as one.
+    #[test]
+    fn quarters_that_close_a_circle_join_into_exactly_one_turn() {
+        let c = Vec2::new(0.0, 0.0);
+        for (quarter, sense) in [(FRAC_PI_2.next_up(), 1.0), (FRAC_PI_2.next_down(), 1.0), (FRAC_PI_2.next_up(), -1.0), (FRAC_PI_2 - 1e-14, -1.0)] {
+            let sweep = quarter * sense;
+            let mut path = Vec::new();
+            let mut start = 0.6131;
+            for _ in 0..4 {
+                joined(&mut path, Seg2::Arc { center: c, radius: 2.0, start, sweep });
+                start += sweep;
+            }
+            let [Seg2::Arc { sweep: whole, .. }] = path.as_slice() else { panic!("{path:?}") };
+            assert_eq!(*whole, std::f64::consts::TAU * sense, "quarters of {sweep}");
+        }
     }
 }

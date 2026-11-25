@@ -376,34 +376,109 @@ fn touching_or_crossed_face_boundaries_refuse_without_retargeting_ids() {
     }
 }
 
-#[test]
-fn face_with_two_inner_loops_meeting_at_one_corner_projects_and_refreshes() {
-    // A plate with a block and a pad joined on it: the pad's corner meets the block's corner
-    // (#20619). Both footprints are inner loops that share one vertex.
+/// A plate with a block and a pad joined on it: the pad's corner meets the block's corner
+/// (#20619). Both footprints are inner loops that share one vertex when `pad_x` is 30, and
+/// overlap the block's edge when it is 29.
+fn corner_face(pad_x: f64) -> Vec<LinkGeom> {
     let rect = |x0: f64, y0: f64, x1: f64, y1: f64| {
         let p = [Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)];
         (0..4).map(|i| LinkGeom::Line(p[i], p[(i + 1) % 4])).collect::<Vec<_>>()
     };
-    let touching = |pad_x: f64| -> Vec<LinkGeom> {
-        let mut g = rect(0.0, 0.0, 50.0, 40.0);
-        g.extend(rect(15.0, 10.0, 30.0, 25.0));
-        g.extend(rect(pad_x, 25.0, pad_x + 6.0, 31.0));
-        g
-    };
+    let mut g = rect(0.0, 0.0, 50.0, 40.0);
+    g.extend(rect(15.0, 10.0, 30.0, 25.0));
+    g.extend(rect(pad_x, 25.0, pad_x + 6.0, 31.0));
+    g
+}
+
+/// `geom` with every line moved by `by`, so shared corners stay shared.
+fn moved(geom: Vec<LinkGeom>, by: Vec2) -> Vec<LinkGeom> {
+    geom.into_iter()
+        .map(|g| match g {
+            LinkGeom::Line(a, b) => LinkGeom::Line(a + by, b + by),
+            other => other,
+        })
+        .collect()
+}
+
+fn link_positions(sk: &Sketch, link: &str) -> Vec<Vec2> {
+    sk.link_points(link).iter().map(|p| sk.points[*p].pos).collect()
+}
+
+#[test]
+fn face_with_two_inner_loops_meeting_at_one_corner_projects_and_refreshes() {
     let mut sk = Sketch::new();
-    let link = sk.add_link(LinkKind::Project, face(), &touching(30.0)).unwrap();
+    let link = sk.add_link(LinkKind::Project, face(), &corner_face(30.0)).unwrap();
     assert_eq!(sk.link_curves(&link).len(), 12);
     // The corner is one shared point: 11 points, not 12.
     assert_eq!(sk.link_points(&link).len(), 11);
     // Re-reading the same face is not refused and keeps the link current.
-    assert!(!sk.update_link(&link, &touching(30.0)).unwrap());
+    assert!(!sk.update_link(&link, &corner_face(30.0)).unwrap());
     assert!(!sk.link(&link).unwrap().lost);
     // A pad that overlaps the block instead of touching it still refuses.
     let saved = sk.clone();
-    assert!(sk.update_link(&link, &touching(29.0)).is_err());
+    assert!(sk.update_link(&link, &corner_face(29.0)).is_err());
     assert_eq!(sk.points, saved.points);
     assert_eq!(sk.curves, saved.curves);
     assert!(sk.link(&link).unwrap().lost);
+}
+
+#[test]
+fn corner_face_with_a_hole_level_with_a_corner_refreshes_unchanged() {
+    // A hole whose centre is level with the block's bottom edge (#21213): the circle's seam
+    // point lies on that edge's line, which is no vertex of the circle and decides nothing.
+    // A square hole with corners on that line has real vertices there: the other edges decide.
+    let square = |x: f64, y: f64| {
+        let p = [Vec2::new(x, y), Vec2::new(x + 4.0, y), Vec2::new(x + 4.0, y + 4.0), Vec2::new(x, y + 4.0)];
+        (0..4).map(|i| LinkGeom::Line(p[i], p[(i + 1) % 4])).collect::<Vec<_>>()
+    };
+    let holes = [vec![LinkGeom::Circle(Vec2::new(40.0, 10.0), 2.0)], vec![LinkGeom::Circle(Vec2::new(5.0, 35.0), 2.0)], square(38.0, 10.0)];
+    for (n, hole) in holes.into_iter().enumerate() {
+        let mut with_hole = corner_face(30.0);
+        with_hole.extend(hole);
+        let mut sk = Sketch::new();
+        let link = sk.add_link(LinkKind::Project, face(), &with_hole).unwrap();
+        assert!(!sk.update_link(&link, &with_hole).unwrap(), "hole {n}");
+        assert!(!sk.link(&link).unwrap().lost, "hole {n}");
+    }
+}
+
+#[test]
+fn corner_face_reread_within_rounding_keeps_its_saved_points_and_a_real_move_follows() {
+    // The face of a sweep cut that two touching profiles made reads back a few billionths of a
+    // millimetre off what the sketch saved, and the next feature (a sweep from that sketch,
+    // #15049) is built from those coordinates: rounding is not a change there.
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &corner_face(30.0)).unwrap();
+    let saved = link_positions(&sk, &link);
+    let noise = Vec2::new(3e-9, -2e-9);
+    assert!(!sk.update_link(&link, &moved(corner_face(30.0), noise)).unwrap());
+    assert!(!sk.link(&link).unwrap().lost);
+    assert_eq!(link_positions(&sk, &link), saved, "rounding leaves the saved points where they were");
+    // A move beyond that is followed, as for any face.
+    let shift = Vec2::new(5e-7, 0.0);
+    assert!(!sk.update_link(&link, &moved(corner_face(30.0), shift)).unwrap());
+    for (now, before) in link_positions(&sk, &link).into_iter().zip(&saved) {
+        assert!(now.dist(*before + shift) < 1e-12, "{now:?} moved from {before:?}");
+    }
+    // A circle on that face still takes a new radius while its points stay as saved.
+    let mut with_hole = corner_face(30.0);
+    with_hole.push(LinkGeom::Circle(Vec2::new(5.0, 35.0), 2.0));
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &with_hole).unwrap();
+    let saved = link_positions(&sk, &link);
+    let mut resized = corner_face(30.0);
+    resized.push(LinkGeom::Circle(Vec2::new(5.0, 35.0), 2.000002));
+    assert!(!sk.update_link(&link, &resized).unwrap());
+    assert_eq!(link_positions(&sk, &link), saved);
+    assert!(sk.curves.iter().any(|c| matches!(c.kind, CurveKind::Circle { r, .. } if (r - 2.000002).abs() < 1e-12)), "the radius follows the face");
+    // A face whose loops do not touch has no such exception: it takes what it is read as.
+    let mut plain = Sketch::new();
+    let rim = plain.add_link(LinkKind::Project, face(), &ring(true, 10.0, 8.0)).unwrap();
+    let was = link_positions(&plain, &rim);
+    assert!(!plain.update_link(&rim, &moved(ring(true, 10.0, 8.0), noise)).unwrap());
+    for (now, before) in link_positions(&plain, &rim).into_iter().zip(&was) {
+        assert!(now.dist(*before + noise) < 1e-12);
+    }
 }
 
 #[test]
@@ -621,6 +696,10 @@ fn edge_on_face_saved_as_a_line_pair_keeps_the_line_an_offset_follows() {
         auto_face: false,
         lost: false,
         name_dropped: false,
+        placement: None,
+        frozen: false,
+        hidden: false,
+        omit_edges: Vec::new(),
     });
     let ids: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
     assert_eq!(ids.len(), 2, "the saved link holds the pair");
@@ -1075,6 +1154,87 @@ fn a_face_read_by_its_edge_names_keeps_its_curves_through_any_order() {
     assert_eq!(old.points, plain.points);
     assert_eq!(old.curves, plain.curves);
     assert_eq!(old.constraints, plain.constraints);
+}
+
+/// A square face with its corners cut (a chamfer added before the sketch's feature).
+fn chamfered(size: f64, cut: f64) -> Vec<LinkGeom> {
+    let (s, c) = (size, size - cut);
+    let pts = [
+        Vec2::new(-c, -s),
+        Vec2::new(c, -s),
+        Vec2::new(s, -c),
+        Vec2::new(s, c),
+        Vec2::new(c, s),
+        Vec2::new(-c, s),
+        Vec2::new(-s, c),
+        Vec2::new(-s, -c),
+    ];
+    (0..8).map(|i| LinkGeom::Line(pts[i], pts[(i + 1) % 8])).collect()
+}
+
+#[test]
+fn rebuilt_face_keeps_constraints_on_edges_that_survive_and_reports_the_rest() {
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &square(10.0)).unwrap();
+    let top = sk
+        .link_curves(&link)
+        .into_iter()
+        .find(|c| sk.curve_link_geom(*c) == Some(LinkGeom::Line(Vec2::new(10.0, 10.0), Vec2::new(-10.0, 10.0))))
+        .unwrap();
+    let top_id = sk.curves[top].id.clone();
+    let corner = sk.link_points(&link).into_iter().find(|p| sk.points[*p].pos == Vec2::new(10.0, -10.0)).unwrap();
+    let on_edge = sk.add_point(Vec2::new(3.0, 10.0), None).unwrap();
+    let at_corner = sk.add_point(Vec2::new(10.0, -10.0), None).unwrap();
+    let on_edge_id = sk.points[on_edge].id.clone();
+    let kept = sk.add_constraint(ConstraintKind::PointOnCurve { p: on_edge, c: top }, None).unwrap();
+    let lost = sk.add_constraint(ConstraintKind::Coincident { p: at_corner, q: corner }, None).unwrap();
+
+    let update = sk.update_link_detail(&link, &chamfered(10.0, 2.0)).unwrap();
+    assert!(update.rebuilt);
+    assert_eq!(update.dropped, vec![lost], "only the constraint on the cut-away corner goes");
+    let top = sk.curve_index(&top_id).expect("the shortened top edge keeps its id");
+    assert_eq!(sk.curve_link_geom(top), Some(LinkGeom::Line(Vec2::new(8.0, 10.0), Vec2::new(-8.0, 10.0))));
+    let c = sk.constraints.iter().find(|c| c.id == kept).expect("point-on-edge survives the rebuild");
+    let on_edge = sk.point_index(&on_edge_id).unwrap();
+    assert!(matches!(c.kind, ConstraintKind::PointOnCurve { p, c } if p == on_edge && c == top));
+    assert!(solve(&mut sk).ok());
+}
+
+/// A 0.5 mm chamfer cut into a corner of a 1000 mm face leaves two new points, each 0.5 mm from
+/// the old corner: neither is clearly the nearer, so neither takes its id. The constraint on the
+/// corner is reported dropped, not kept on one of the chamfer's ends. The other corners keep
+/// their ids.
+#[test]
+fn a_small_chamfer_on_a_large_face_does_not_give_the_corner_id_to_either_end() {
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &square(500.0)).unwrap();
+    let id_at =
+        |sk: &Sketch, at: Vec2| sk.link_points(&link).into_iter().find(|p| sk.points[*p].pos.dist(at) < 1e-9).map(|p| sk.points[p].id.clone());
+    let corner = Vec2::new(500.0, 500.0);
+    let corner_id = id_at(&sk, corner).unwrap();
+    let other_id = id_at(&sk, Vec2::new(-500.0, 500.0)).unwrap();
+    let free = sk.add_point(corner, None).unwrap();
+    let q = sk.point_index(&corner_id).unwrap();
+    let on_corner = sk.add_constraint(ConstraintKind::Coincident { p: free, q }, None).unwrap();
+    // The untouched corner is held too, so the rebuild carries its id over.
+    let other = sk.add_point(Vec2::new(-500.0, 500.0), None).unwrap();
+    let r = sk.point_index(&other_id).unwrap();
+    let on_other = sk.add_constraint(ConstraintKind::Coincident { p: other, q: r }, None).unwrap();
+    let (a, b) = (Vec2::new(500.0, 499.5), Vec2::new(499.5, 500.0));
+    let chamfered = [
+        LinkGeom::Line(Vec2::new(-500.0, -500.0), Vec2::new(500.0, -500.0)),
+        LinkGeom::Line(Vec2::new(500.0, -500.0), a),
+        LinkGeom::Line(a, b),
+        LinkGeom::Line(b, Vec2::new(-500.0, 500.0)),
+        LinkGeom::Line(Vec2::new(-500.0, 500.0), Vec2::new(-500.0, -500.0)),
+    ];
+    let update = sk.update_link_detail(&link, &chamfered).unwrap();
+    assert!(update.rebuilt);
+    assert_ne!(id_at(&sk, a).as_deref(), Some(corner_id.as_str()));
+    assert_ne!(id_at(&sk, b).as_deref(), Some(corner_id.as_str()));
+    assert!(update.dropped.contains(&on_corner), "{:?}", update.dropped);
+    assert_eq!(id_at(&sk, Vec2::new(-500.0, 500.0)), Some(other_id), "an untouched corner keeps its id");
+    assert!(!update.dropped.contains(&on_other) && sk.constraints.iter().any(|c| c.id == on_other));
 }
 
 /// #20280: a face's outer rim and a shelled wall's rim, concentric arcs saved on one centre point,

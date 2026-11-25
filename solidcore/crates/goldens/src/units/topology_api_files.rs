@@ -497,7 +497,7 @@ fn write_bytes(
 }
 
 fn rust(op: &Op) -> Result<Output, HarnessError> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     match op {
         Op::ReadBrep {
             file,
@@ -752,7 +752,7 @@ fn rust_write(s: &WriteSrc, ascii: bool) -> Result<Output, HarnessError> {
     if let Some(why) = write_rejection(s) {
         return Ok(Output::rejected(why));
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let made = match s {
         WriteSrc::File { file, rebuild } => {
             let bytes = read_bytes(file)?;
@@ -767,7 +767,7 @@ fn rust_write(s: &WriteSrc, ascii: bool) -> Result<Output, HarnessError> {
                     records: &mut records,
                     next_key: WRITE_GEOMETRY_KEYS,
                 };
-                crate::refit::read_from_file(
+                solidcore::topology::brep::p7::read_from_file(
                     &mut k,
                     &mut b,
                     bytes,
@@ -777,10 +777,7 @@ fn rust_write(s: &WriteSrc, ascii: bool) -> Result<Output, HarnessError> {
                 )
             };
             return Ok(match read {
-                Ok(()) => {
-                    crate::tolsub::after_read(&mut b);
-                    write_rec(&k, &b, &write_file_key, &records, &attributes, ascii)
-                }
+                Ok(()) => write_rec(&k, &b, &write_file_key, &records, &attributes, ascii),
                 Err(e) => Output::unported(&e)
                     .unwrap_or_else(|| Output::new().ints("rec", vec![write_status(&e)])),
             });
@@ -1029,7 +1026,7 @@ mod tests {
     /// `bytes` read with the Rust reader under the write cases' file identities, then
     /// written as a binary file under the same identities (binary doubles are exact).
     fn binary_after_reading(bytes: Vec<u8>, file_type: FileType) -> Vec<u8> {
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let mut records = NotifyRecords::new();
         let mut attributes = AttributeStore::default();
         let mut b = Brep::new_with_infinite_region().unwrap();
@@ -1216,7 +1213,7 @@ mod tests {
             seeds: 16,
         };
         let cases = Runner.cases(&ctx).unwrap();
-        let k = Kernel::default();
+        let k = crate::runner_kernel();
         for (name, ..) in MOVED {
             let case = cases.iter().find(|c| c.name == name).unwrap();
             let op: Op = case.parse().unwrap();

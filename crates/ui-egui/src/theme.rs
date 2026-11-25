@@ -190,8 +190,36 @@ pub struct FilePalette {
 /// through this only: `set_custom` alone would keep the previous theme's icon colours.
 pub fn set_file_palette(file: Option<FilePalette>) -> bool {
     let tokens = set_custom(file.map(|f| Custom { dark: f.dark, tokens: f.tokens }));
-    let icons = crate::icon_svg::set_theme_palette(file.and_then(|f| f.icons.map(|icons| (f.dark, icons))));
+    FILE_ICONS.set(file.and_then(|f| f.icons.map(|icons| (f.dark, icons))));
+    let icons = apply_icon_palette();
     tokens | icons
+}
+
+thread_local! {
+    /// The applied theme file's icon palette, before a chosen accent ([`set_accent`]) recolours its base ramp.
+    static FILE_ICONS: std::cell::Cell<Option<(bool, crate::icon_svg::Palette)>> = const { std::cell::Cell::new(None) };
+}
+
+pub use solidcraft_theme::parse_accent;
+
+/// Use `accent` over the theme's own (`None`: the theme's) in the tokens and the icons' base ramp; returns whether that changed anything.
+pub fn set_accent(accent: Option<Color32>) -> bool {
+    let tokens = solidcraft_theme::set_accent(accent);
+    let icons = apply_icon_palette();
+    tokens | icons
+}
+
+/// The icon palette of the theme file with the chosen accent's shades as its base ramp.
+fn accent_icon_palette(file: Option<(bool, crate::icon_svg::Palette)>, accent: Option<Color32>) -> Option<(bool, crate::icon_svg::Palette)> {
+    let Some(accent) = accent.map(Color32::to_opaque) else { return file };
+    let rgb = |c: Color32| [c.r(), c.g(), c.b()];
+    let (dark, mut palette) = file.unwrap_or((solidcraft_theme::is_dark(), Default::default()));
+    palette.accents[0] = Some([rgb(accent.lerp_to_gamma(Color32::WHITE, 0.15)), rgb(accent), rgb(accent.lerp_to_gamma(Color32::BLACK, 0.25))]);
+    Some((dark, palette))
+}
+
+fn apply_icon_palette() -> bool {
+    crate::icon_svg::set_theme_palette(accent_icon_palette(FILE_ICONS.get(), solidcraft_theme::accent()))
 }
 
 /// Isolated tests draw with a theme file's palettes, restored even when an assertion fails.
@@ -201,6 +229,7 @@ pub(crate) fn scoped_file(file: &crate::theme_files::ThemeFile) -> impl Drop {
     impl Drop for Restore {
         fn drop(&mut self) {
             set_custom(self.0);
+            FILE_ICONS.set(None);
             crate::icon_svg::set_theme_palette(self.1);
         }
     }
@@ -613,6 +642,49 @@ mod tests {
             assert_eq!(solidcraft_theme::custom(), base_custom);
             publish("SKETCH", 2.1);
             assert_eq!(ctx.global_style().visuals, before, "restoring a no-option theme must release the surface fills");
+        }
+    }
+
+    /// A Preferences accent over each theme that accepts one: its family takes it, ink on it reads (4.5:1), tab accents stay.
+    #[test]
+    fn a_chosen_accent_replaces_the_accent_family_and_stays_readable() {
+        crate::workspace::install_tabs();
+        let mut bases: Vec<(String, Tokens, bool, Option<crate::icon_svg::Palette>)> =
+            vec![("dark".into(), Tokens::dark(), true, None), ("light".into(), Tokens::light(), false, None)];
+        for f in crate::theme_files::builtin().iter().filter(|f| f.accepts_accent) {
+            let values = BTreeMap::new();
+            bases.push((f.id.clone(), crate::theme_files::resolve(f), f.base.is_dark(), crate::theme_files::resolve_icon_palette(f, &values)));
+        }
+        let mut accents: Vec<Color32> =
+            ["#3b82f6", "#22c55e", "#14b8a6", "#8b5cf6", "#ec4899", "#ef4444", "#f97316", "#eab308"].iter().filter_map(|h| parse_accent(h)).collect();
+        accents.extend([Color32::WHITE, Color32::BLACK, Color32::from_gray(118), Color32::from_rgb(255, 255, 0)]);
+        for (id, base, dark, icons) in &bases {
+            for a in &accents {
+                let t = base.with_accent(*a, *dark);
+                assert_eq!((t.accent, t.form_primary, t.sel_edge, t.file_primary_border), (*a, *a, *a, *a), "{id} {a:?}");
+                assert_eq!(t.selected_bg, t.accent_soft, "{id} {a:?}");
+                for (name, ink, ground) in [("selected_ink", t.selected_ink, t.accent_soft), ("on_accent", t.on_accent, t.accent)] {
+                    let ratio = contrast_ratio(ink, ground);
+                    assert!(ratio >= 4.5, "{id} {a:?}: {name} is {ratio:.2}:1");
+                }
+                // The primary button's label: the best of the ink candidates the button uses (see ui-kit's actions).
+                let label =
+                    [t.form_ink, t.on_accent, t.tab_on_fill_dark].into_iter().map(|ink| contrast_ratio(ink, t.form_primary_fill)).fold(0.0, f64::max);
+                assert!(label >= 4.5, "{id} {a:?}: the primary button's text is {label:.2}:1");
+                assert_eq!(t.file_primary, t.accent_soft, "{id} {a:?}: the File view's primary action follows");
+                for tab in ["SKETCH", "SURFACE", "SHEET METAL"] {
+                    assert_eq!(
+                        crate::workspace::tab_accent(&t, tab).color,
+                        crate::workspace::tab_accent(base, tab).color,
+                        "{id}: {tab} keeps its own accent"
+                    );
+                }
+                // The icons' base ramp is the accent's shades; the tabs' ramps and roles stay.
+                let own = icons.unwrap_or_default();
+                let (_, themed) = accent_icon_palette(icons.map(|p| (*dark, p)), Some(*a)).expect("an accent gives the icons a palette");
+                assert_eq!(themed.accents[0].expect("base ramp")[1], [a.r(), a.g(), a.b()], "{id} {a:?}: the icons take the accent");
+                assert_eq!((&themed.accents[1..], themed.roles), (&own.accents[1..], own.roles), "{id} {a:?}");
+            }
         }
     }
 }
