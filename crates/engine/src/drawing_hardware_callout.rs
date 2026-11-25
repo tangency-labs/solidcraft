@@ -39,19 +39,39 @@ pub(crate) fn flat_tip(s: &Session, d: &Drawing, note: &Note, cmd: &str) -> Opti
     crate::drawing_view::flat(s, &of, cmd).ok()?.hardware_at(feature, copy)
 }
 
-/// The press-in hardware holes of flat pattern view `view` of `d` that a callout can name, each as its
-/// feature, its copy number and the text a callout of it would say now, in the order the flat pattern lists
-/// them. None for a view that isn't a flat pattern view, or whose flat can't be read.
+/// The press-in hardware holes of view `view` of `d` that a callout can name, each as its feature, its copy
+/// number and the text a callout of it would say now. On a flat pattern view they are its body's, in the order
+/// the flat pattern lists them; on a view of the model, every hole whose circular edge is on a flat panel of
+/// the folded sheet, where a callout's leader can end. None for a view that can't be read.
 pub fn holes(s: &Session, d: &Drawing, view: u64) -> Vec<(u64, u32, String)> {
-    let Some(of) = d.resolve_view(view).ok().and_then(|resolved| resolved.flat) else { return Vec::new() };
-    let Ok(reply) = crate::cmd::flat_reply(s, Some(&of.body), "drawing.hardware_callout.add") else { return Vec::new() };
+    let Ok(resolved) = d.resolve_view(view) else { return Vec::new() };
     let state = s.model.state();
     let style = style(s, d);
     let mut seen: Vec<(u64, u32)> = Vec::new();
-    let all = reply.get("hardware").and_then(|h| h.as_array()).into_iter().flatten();
-    for feature in all.filter_map(|h| h.get("feature")?.as_u64()) {
-        let copy = u32::try_from(seen.iter().filter(|(f, _)| *f == feature).count()).unwrap_or(u32::MAX);
-        seen.push((feature, copy));
+    match resolved.flat {
+        Some(of) => {
+            let Ok(reply) = crate::cmd::flat_reply(s, Some(&of.body), "drawing.hardware_callout.add") else { return Vec::new() };
+            let all = reply.get("hardware").and_then(|h| h.as_array()).into_iter().flatten();
+            for feature in all.filter_map(|h| h.get("feature")?.as_u64()) {
+                let copy = u32::try_from(seen.iter().filter(|(f, _)| *f == feature).count()).unwrap_or(u32::MAX);
+                seen.push((feature, copy));
+            }
+        }
+        None => {
+            // A feature's holes are numbered in the sheet that has them first, as `hardware_callout::read` does.
+            let mut done: Vec<u64> = Vec::new();
+            for sheet in &state.surface_sheets {
+                let mut own: Vec<(u64, u32)> = Vec::new();
+                for h in sheet.hardware_holes() {
+                    let copy = u32::try_from(own.iter().filter(|(f, _)| *f == h.feature).count()).unwrap_or(u32::MAX);
+                    own.push((h.feature, copy));
+                }
+                let edges = sheet.hardware_edge_points();
+                let fresh: Vec<u64> = own.iter().map(|(f, _)| *f).filter(|f| !done.contains(f)).collect();
+                seen.extend(own.iter().zip(&edges).filter(|((f, _), e)| e.is_some() && fresh.contains(f)).map(|(h, _)| *h));
+                done.extend(fresh);
+            }
+        }
     }
     seen.into_iter()
         .filter_map(|(feature, copy)| {

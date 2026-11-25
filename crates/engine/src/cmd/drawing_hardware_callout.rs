@@ -9,6 +9,7 @@
 use std::sync::Arc;
 
 use serde_json::Value;
+use solidcraft_doc::drawing::dimension::{CornerPick, EdgePick};
 use solidcraft_doc::drawing::hardware_callout::{self, HardwareRef};
 use solidcraft_doc::drawing::note::{Anchor, Note};
 use solidcraft_geom::cell::{Content, HAlign, Part};
@@ -37,8 +38,8 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(ADD, "Add Hardware Call
         "view: a view of the part, or its flat pattern view; feature: the feature whose hole carries press-in hardware (the Hole feature, or the \
          pattern or mirror that copied it: sheet.flat_pattern lists each hardware hole's feature); copy?: which of its holes, from 0 (default 0); \
          at: [x, y] on paper in mm from the view's centre; corner?: {centre: {body, index}, path?} the centre of the hole's circular edge \
-         as drawing.dimension.add picks a centre (required on a view of the model, where the leader ends there; refused on a flat pattern view, \
-         where it ends on the hole in the flat) → what drawing.note.inspect answers for it. The note reads the hardware record: its text is \
+         as drawing.dimension.add picks a centre (on a view of the model the leader ends there, found from the hardware record when omitted; \
+         refused on a flat pattern view, where it ends on the hole in the flat) → what drawing.note.inspect answers for it. The note reads the hardware record: its text is \
          the count of that hardware on the sheet, its kind, thread and a stud's or standoff's length (\"4× FLUSH NUT M5\"), and follows the \
          record. A hole that is gone makes it lost, keeping its last text and drawing no leader; it never moves to another hole. Refused for \
          a feature with no hardware hole now or a view that doesn't show the part. One undo step; edit and delete it as a note.",
@@ -63,7 +64,16 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(ADD, format!("the view is the flat pattern of `{}`, not of `{}`, which has the hardware", of.body, read.body)));
         }
         (Some(_), Some(_)) => return Err(bad(ADD, "a flat pattern view's leader ends on the hole in the flat: give no `corner`")),
-        (None, None) => return Err(bad(ADD, "`corner`: pick the centre of the hole's circular edge, where the leader ends")),
+        (None, None) => {
+            // The hole's circular edge on the folded sheet, found from its record: a point on it per face.
+            let points = hardware_callout::edge_points(&state.surface_sheets, &hole).map_err(|why| bad(ADD, why))?;
+            let found = points.iter().find_map(|p| {
+                let pick = CornerPick::Centre(EdgePick::Point(*p));
+                let point = s.doc.corner_reference(&s.model, &pick, &[]).ok()?;
+                Some(Anchor::Corner { view, point })
+            });
+            found.ok_or_else(|| bad(ADD, "the hole's circular edge was not found on the model: give `corner`, its centre"))?
+        }
         (None, Some(corner)) => {
             let point = s.doc.corner_reference(&s.model, &corner.pick, &corner.path).map_err(|why| bad(ADD, why.to_string()))?;
             if !point.centre {

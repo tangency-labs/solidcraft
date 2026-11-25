@@ -13,6 +13,7 @@
 //!   its count form, its length formatter and its capitals, so a tapped hole and a hardware hole read alike.
 
 use serde::{Deserialize, Serialize};
+use solidcore_record::Vec3;
 
 use super::hole_callout::TextStyle;
 use crate::hardware_catalog::HardwareKind;
@@ -77,6 +78,26 @@ pub fn read(sheets: &[SurfaceSheet], hole: &HardwareRef) -> std::result::Result<
         }
     }
     Err(if any { format!("the feature has no hardware hole {copy} now") } else { "the feature has no press-in hardware hole now".into() })
+}
+
+/// A point on each circular edge (one on each face of the sheet) of the hole `hole` names, in the design's
+/// frame as the sheet is folded, found as [`read`] finds the hole: the way to name the hole's edge on a
+/// view of the model. Refused when the hole is in no flat panel (a bend).
+pub fn edge_points(sheets: &[SurfaceSheet], hole: &HardwareRef) -> std::result::Result<[Vec3; 2], String> {
+    let copy = usize::try_from(hole.copy).unwrap_or(usize::MAX);
+    for sheet in sheets {
+        let holes = sheet.hardware_holes();
+        let at = holes.iter().enumerate().filter(|(_, h)| h.feature == hole.feature).nth(copy).map(|(i, _)| i);
+        if let Some(at) = at {
+            return sheet
+                .hardware_edge_points()
+                .get(at)
+                .copied()
+                .flatten()
+                .ok_or_else(|| "the hole's edge is not on a flat panel of the folded sheet".to_string());
+        }
+    }
+    Err("the feature has no press-in hardware hole now".into())
 }
 
 /// The text of `h`, one line: the count when more than one, the kind in capitals, the thread, and a

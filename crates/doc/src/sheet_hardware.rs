@@ -7,7 +7,7 @@
 //! cut-outs for an edge, and the boundary of a bend's zone, where the flat sheet ends and the bend
 //! starts, for a bend (docs/hardware-catalogue.md, "Near a bend").
 
-use solidcore_record::{Loop2, Region2, Vec2};
+use solidcore_record::{Loop2, Region2, Vec2, Vec3};
 use solidcraft_kernel::services::prism::{loop_circle, loop_holds, same_circle, segment_distance};
 
 use crate::hardware_catalog::{HardwareSize, hardware_size};
@@ -134,6 +134,29 @@ impl SurfaceSheet {
     pub fn hardware_holes(&self) -> Vec<&SheetHardware> {
         let circles: Vec<(Vec2, f64)> = self.regions.iter().flat_map(|r| &r.holes).filter_map(loop_circle).collect();
         self.hardware.iter().filter(|h| circles.iter().any(|c| same_circle(*c, (h.center, h.radius), SAME))).collect()
+    }
+}
+
+impl SurfaceSheet {
+    /// For each hole [`Self::hardware_holes`] lists, in its order, a point on the circular edge the hole
+    /// has on each face of its panel, in the body's frame as the sheet is folded: the panel's frame
+    /// carries the hole's circle from the flat, and a hole in no flat panel (in a bend, or the sheet
+    /// can't be laid out) has none. Edges are then named from these points as any picked edge is.
+    pub fn hardware_edge_points(&self) -> Vec<Option<[Vec3; 2]>> {
+        let holes = self.hardware_holes();
+        let (Some((panels, _)), Ok(dev)) = (self.pieces_in_space(), self.develop()) else { return vec![None; holes.len()] };
+        let placements = dev.placements;
+        holes
+            .iter()
+            .map(|h| {
+                panels.iter().find_map(|(i, frame, own)| {
+                    let local = placements.get(*i).copied().flatten()?.inverse().point(h.center);
+                    let there = own.holes.iter().filter_map(loop_circle).any(|c| same_circle(c, (local, h.radius), SAME));
+                    let on = |z: f64| frame.point(Vec3::new(local.x + h.radius, local.y, z));
+                    there.then(|| [on(0.0), on(self.thickness)])
+                })
+            })
+            .collect()
     }
 }
 

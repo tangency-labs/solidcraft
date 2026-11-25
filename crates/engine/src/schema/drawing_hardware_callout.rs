@@ -24,7 +24,7 @@ pub struct AddParams {
     /// Where the callout's text sits on paper, in millimetres from the view's centre.
     pub at: [f64; 2],
     /// The centre of the hole's circular edge, picked as `drawing.dimension.add` picks a centre: where the leader ends
-    /// on a view of the model. Required there; refused on a flat pattern view, whose leader ends on the hole in the flat.
+    /// on a view of the model (found from the hardware record when omitted). Refused on a flat pattern view, whose leader ends on the hole in the flat.
     #[serde(default)]
     pub corner: Option<CornerParam>,
 }

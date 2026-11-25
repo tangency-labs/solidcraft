@@ -115,8 +115,6 @@ fn a_callout_on_a_view_of_the_model_reads_the_record() {
     let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
     let p = json!({"sheet": sheet, "view": "front", "scale": "1:1", "position_mm": [100, 100]});
     let front = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
-    let e = refused(&mut s, json!({"view": ids::encode(front), "feature": first, "at": [10, 10]}));
-    assert!(e.contains("`corner`"), "a view of the model needs the hole's centre: {e}");
     let mut d = (**s.drawing("test").unwrap()).clone();
     let id = d.allocate_id(&mut s.ids).unwrap();
     let note = Note {
@@ -133,6 +131,29 @@ fn a_callout_on_a_view_of_the_model_reads_the_record() {
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
     assert_eq!(inspect(&mut s, id)["text"], "2× FLUSH NUT M5");
+}
+
+/// On a folded front view the callout finds its hole's circular edge itself: no `corner`, it reads
+/// "2× FLUSH NUT M5", and its leader ends on the hole's centre (the nut's place on the plate), for each nut.
+#[test]
+fn a_folded_view_callout_finds_the_holes_edge_and_ends_on_its_centre() {
+    let (mut s, [first, second], _) = nuts();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let p = json!({"sheet": sheet, "view": "front", "scale": "1:1", "position_mm": [100, 100]});
+    let front = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
+    for (feature, x) in [(first, 20.0), (second, 80.0)] {
+        let reply = run(&mut s, ADD, json!({"view": ids::encode(front), "feature": feature, "at": [10, 10]}));
+        assert_eq!(reply["text"], "2× FLUSH NUT M5", "{reply}");
+        assert_eq!(reply["status"], "ok", "{reply}");
+        let at: Vec<f64> = reply["point"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+        assert!((at[0] - x).abs() < 1e-6 && (at[1] - 30.0).abs() < 1e-6, "the hole's centre: {reply}");
+        assert!(at[2] < 1e-6 || (at[2] - 2.0).abs() < 1e-6, "on a face of the 2 mm sheet: {reply}");
+    }
+    let listed = crate::drawing_hardware_callout::holes(&s, s.drawing("test").unwrap(), front);
+    assert_eq!(
+        listed.iter().map(|(f, c, t)| (*f, *c, t.as_str())).collect::<Vec<_>>(),
+        [(first, 0, "2× FLUSH NUT M5"), (second, 0, "2× FLUSH NUT M5")]
+    );
 }
 
 /// Refused: a feature with no hardware, one that isn't there, a flat view of another body, a

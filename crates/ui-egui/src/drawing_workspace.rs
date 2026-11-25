@@ -1717,6 +1717,38 @@ mod tests {
         assert!(h.app.drawing_workspace.options.is_none(), "OK closes the panel");
     }
 
+    /// A view of a folded sheet metal part lists its press-in hardware holes in its panel, as a flat pattern
+    /// view does: a click adds the callout on the hole's edge, as one undo step.
+    #[test]
+    fn a_model_views_panel_adds_a_hardware_callout() {
+        use serde_json::json;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        let rule = json!({"name": "T2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "gap": "0.5 mm", "active": true});
+        h.app.run("sheet.manage_rules", rule).unwrap();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("sheet.flange", json!({"sketch": "Base", "body_name": "Plate"})).unwrap();
+        h.app.run("sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20})).unwrap();
+        h.app.run("sheet.hardware", json!({"kind": "flush_nut", "thread": "M5", "position": [20, 30, 2]})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.frames(4);
+        h.app.run("drawing.create", json!({})).unwrap();
+        let made = h.app.run("drawing.view.base", json!({"sheet": "Sheet 1", "view": "front"})).unwrap();
+        let view = solidcraft_engine::doc::ids::decode(made["view"].as_str().unwrap()).unwrap();
+        h.frames(4);
+        edit(&mut h.app, view, egui::pos2(400.0, 300.0));
+        h.frames(4);
+        h.step(&json!({"widget": "FLUSH NUT M5"})).unwrap();
+        h.frames(2);
+        let notes = |h: &Harness| h.app.session.drawing("drawing.inspect").unwrap().notes.len();
+        assert_eq!(notes(&h), 1, "the click added the callout");
+        h.step(&json!({"key":"Z", "cmd": true})).unwrap();
+        h.settle();
+        assert_eq!(notes(&h), 0, "one undo step takes it away");
+    }
+
     /// A blank sheet's ribbon offers every tool that has a working panel: a click opens it.
     #[test]
     fn a_blank_sheets_working_tools_open_from_the_ribbon() {
