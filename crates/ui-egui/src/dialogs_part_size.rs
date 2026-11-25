@@ -85,13 +85,13 @@ pub fn selected_component(app: &SolveApp) -> Option<u64> {
 
 /// The one component the selection stands for, if `wanted` accepts it.
 pub fn selected_component_where(app: &SolveApp, wanted: impl Fn(&Document, u64) -> bool) -> Option<u64> {
-    if app.session.selection.is_empty() {
+    if !app.session.has_selection() {
         let [id] = app.tree.picked_components.as_slice() else { return None };
         return wanted(&app.session.doc, *id).then_some(*id);
     }
     let mut bodies = Vec::new();
     let mut component = None;
-    for sel in &app.session.selection {
+    for sel in &app.session.selected_items().unwrap_or_default() {
         match sel {
             Sel::Body { name } => bodies.push(name.clone()),
             Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => bodies.push(body.clone()),
@@ -183,7 +183,7 @@ pub fn open(app: &mut SolveApp, component: u64) {
         needs_a_part(app);
         return;
     }
-    app.session.selection.clear();
+    app.session.clear_selection();
     app.tree.picked_components = vec![component];
     app.start("parts.resize");
 }

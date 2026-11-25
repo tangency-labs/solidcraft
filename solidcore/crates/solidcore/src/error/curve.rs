@@ -73,6 +73,12 @@ pub enum CurveFailure {
     AuxiliaryAlongProjection,
     /// A rotation's auxiliary vector is unset or zero. [`ErrorKind::InvalidInput`].
     AuxiliaryVectorZero,
+    /// The curve kind leaves `method` to the curve base class, which does not implement it.
+    /// [`ErrorKind::Unsupported`].
+    BaseCurveMethod {
+        /// The method.
+        method: BaseCurveMethod,
+    },
     /// The curve refers to a base curve it does not own, so the routine may not `edit`
     /// it. The caller's curve as supplied: [`ErrorKind::InvalidInput`].
     BaseCurveNotOwned {
@@ -83,6 +89,12 @@ pub enum CurveFailure {
     /// the breaks were computed (a new, trimmed or reparametrised curve), or loaded a cache
     /// whose counts differ. [`ErrorKind::InvalidInput`].
     BreaksNotCurrent,
+    /// The curve cache a solve needs could not be built (the build's error is the cause).
+    /// Status `SM_ERR_NULL_POINTER`. [`ErrorKind::Failed`]; whether it is a defect or a
+    /// refusal is its cause's.
+    CacheNotBuilt,
+    /// The cache asked of a curve is not a curve cache. [`ErrorKind::InvalidInput`].
+    CacheTypeNotCurve,
     /// The cached continuity at the break `at` is undefined: the kernel never caches one,
     /// so it came with the curve the caller loaded. [`ErrorKind::InvalidInput`].
     ContinuityUndefined {
@@ -99,6 +111,18 @@ pub enum CurveFailure {
     /// line, fillet and chamfer corners only (the taper extrude continues each wall
     /// itself). [`ErrorKind::Unsupported`].
     CornerByCurveExtension,
+    /// For an angle property, a corner of the span's pseudo box projects onto the view
+    /// origin, where it has no angle: the property solve stops there (upstream's status 1,
+    /// set by its site). [`ErrorKind::Failed`].
+    CornerOnViewAxis,
+    /// A curve tree node the solver subdivides has no child: a curve cache's tree gives
+    /// every node it subdivides two, so the tree was the caller's. Status
+    /// `SM_ERR_NULL_POINTER`. [`ErrorKind::InvalidInput`].
+    CurveNodeWithoutChild,
+    /// A curve tree node of the solver's branch has no span data: a curve cache's tree
+    /// carries a span at every node it builds, so the tree was the caller's. Status
+    /// `SM_ERR_NULL_POINTER`. [`ErrorKind::InvalidInput`].
+    CurveNodeWithoutData,
     /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
     /// `why` names the step that failed and why that is the kernel's fault, not the
     /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
@@ -133,11 +157,29 @@ pub enum CurveFailure {
         /// What the fast drop lacks.
         reason: FastDropBlock,
     },
+    /// A curve's property or solve function is undefined at the curve parameter `t`, for
+    /// the reason `why` (the solver that evaluates it there decides what follows).
+    /// [`ErrorKind::Failed`], as [`CurveFailure::ZeroTangent`].
+    FunctionUndefined {
+        /// The curve parameter (of the curve the reason concerns).
+        t: f64,
+        /// Why the function is undefined there.
+        why: FunctionGap,
+    },
     /// The curve's tangent at `t` is infinite, so the closest-point function cannot be
     /// scaled down to evaluate there.
     InfiniteTangent {
         /// The curve parameter.
         t: f64,
+    },
+    /// The approximation's step `[lo, hi]` cannot be split further in floating point (its
+    /// midpoint is an end, or not finite), and its span still does not pass the tolerance.
+    /// [`ErrorKind::NotWithinTolerance`].
+    IntervalNotSplittable {
+        /// The step's start.
+        lo: f64,
+        /// The step's end.
+        hi: f64,
     },
     /// The offset curve's interval is not within its base curve's natural interval.
     /// The caller's curve: [`ErrorKind::InvalidInput`].
@@ -196,6 +238,9 @@ pub enum CurveFailure {
         /// The same-point tolerance given.
         tolerance: f64,
     },
+    /// A solver's local solve failed (its error is the cause). [`ErrorKind::Failed`];
+    /// whether it is a defect or a refusal is its cause's.
+    LocalSolveFailed,
     /// A hyperbola's arc is numerically degenerate for its rational quadratic form: the
     /// line from its middle point toward the end tangents' meeting point cuts the chord at
     /// `at` of the chord's length, within the kernel's zero of an end (exactly, it cuts it
@@ -210,6 +255,9 @@ pub enum CurveFailure {
     /// A composite curve is evaluated through its segments; it has no evaluation of its own
     /// at a parameter of the whole. [`ErrorKind::Unsupported`].
     NoEvaluationOfItsOwn,
+    /// An evaluation into the caller's slice was given an empty slice.
+    /// [`ErrorKind::InvalidInput`].
+    NoEvaluationSlots,
     /// No curve gave an offset: there were no segments, or every segment's offset was
     /// degenerate and dropped. [`ErrorKind::Degenerate`].
     NoOffsetCurve,
@@ -219,6 +267,9 @@ pub enum CurveFailure {
         /// The base curve's parameter the evaluation was asked at.
         t: f64,
     },
+    /// The property function was asked for a property it has no equation for (plane
+    /// classification is answered without one). [`ErrorKind::Unsupported`].
+    NoPropertyFunction,
     /// The curve has no span of non-zero length to build its cache or Bezier spans
     /// from (none within the cache's interval, or its NURB has none).
     /// [`ErrorKind::Degenerate`].
@@ -252,6 +303,21 @@ pub enum CurveFailure {
     /// The offset curve has no base curve: it was made empty. Status
     /// `SM_ERR_NULL_POINTER`. The caller's curve: [`ErrorKind::InvalidInput`].
     OffsetWithoutBase,
+    /// The curve/curve solve filled all `limit` of its parameter guess slots.
+    /// [`ErrorKind::Unsupported`].
+    ParameterGuessCap {
+        /// The most guesses.
+        limit: usize,
+    },
+    /// The piece added to a piecewise Bezier curve does not start where the curve ends: its
+    /// start is `knot_gap` from the last knot and `point_gap` from the last control point,
+    /// one of them past its tolerance. [`ErrorKind::InvalidInput`].
+    PieceNotContinuous {
+        /// The distance from the last knot to the piece's start parameter.
+        knot_gap: f64,
+        /// The distance from the last control point to the piece's start point.
+        point_gap: f64,
+    },
     /// A piece `[a, b]` of a length bracket lies outside the knot span
     /// `[span_start, span_end]` it is blossomed in: the bracket's rounding bound holds only
     /// for a piece within its span (a port invariant: the halving keeps every piece within).
@@ -286,11 +352,31 @@ pub enum CurveFailure {
     PolarConversionNotSetUp,
     /// A projected curve's projection vector is unset or zero. [`ErrorKind::InvalidInput`].
     ProjectionVectorZero,
+    /// A property or solve function was called without `option`, which its property or
+    /// operation reads. The caller's options: [`ErrorKind::InvalidInput`].
+    PropertyOptionMissing {
+        /// The option left out.
+        option: PropertyOption,
+    },
     /// A circle's radius given, `radius`, is not above the kernel's zero (or is not a
     /// number). [`ErrorKind::InvalidInput`].
     RadiusNotPositive {
         /// The radius given.
         radius: f64,
+    },
+    /// A range solution given to the curve/curve refinement has `variables` variables, not
+    /// the two (one per curve) it refines. The caller's solutions:
+    /// [`ErrorKind::InvalidInput`].
+    RangeSolutionVariables {
+        /// The solution's variables.
+        variables: usize,
+    },
+    /// The property function could not be evaluated at the root `t` its solve found (the
+    /// evaluation's error is the cause). [`ErrorKind::Failed`]; whether it is a defect or a
+    /// refusal is its cause's.
+    RootNotEvaluated {
+        /// The root's parameter.
+        t: f64,
     },
     /// The same-point tolerance given, `tolerance`, is not positive.
     /// [`ErrorKind::InvalidInput`].
@@ -298,11 +384,46 @@ pub enum CurveFailure {
         /// The tolerance given.
         tolerance: f64,
     },
+    /// A surface-projected curve intersection was asked of a second curve that is not a
+    /// curve on a surface. [`ErrorKind::InvalidInput`].
+    SecondCurveNotOnSurface,
     /// The only curve whose area normal is asked is a line: one line spans no plane.
     SingleLinearCurve,
+    /// Object `object` (0 or 1) of a curve/curve solution is no curve the caller's lookup
+    /// knows. Status `SM_ERR_NULL_POINTER`. The caller's solutions and lookup:
+    /// [`ErrorKind::InvalidInput`].
+    SolutionWithoutCurve {
+        /// The solution's object, 0 or 1.
+        object: usize,
+    },
     /// The span given to the span measure is not a B-spline curve.
     /// [`ErrorKind::InvalidInput`].
     SpanNotBSpline,
+    /// The split parameter `split` is at the curve's end `end`, within
+    /// `100 * SM_EFF_ZERO * (1 + |end|)` of it: one piece would be empty.
+    /// [`ErrorKind::InvalidInput`].
+    SplitAtEnd {
+        /// The split parameter given.
+        split: f64,
+        /// The end it is at (the interval's start or end).
+        end: f64,
+    },
+    /// The split parameter `split` is outside the curve's interval `[start, end]`.
+    /// [`ErrorKind::InvalidInput`].
+    SplitOutsideInterval {
+        /// The split parameter given.
+        split: f64,
+        /// The interval's start.
+        start: f64,
+        /// The interval's end.
+        end: f64,
+    },
+    /// The approximation stack holds `values` values, fewer than the 7 of one
+    /// `[t, position, tangent]` entry. [`ErrorKind::InvalidInput`].
+    StackTooShort {
+        /// The values on the stack.
+        values: usize,
+    },
     /// A stage of a curve routine failed with no reason the kernel names: a defect
     /// ([`ErrorKind::StageFailed`]). The failure holds the operation, the status the C++
     /// reports (for the goldens only), where it was built, and the error of the call it made
@@ -317,6 +438,24 @@ pub enum CurveFailure {
         gap: f64,
         /// The tolerance given.
         tolerance: f64,
+    },
+    /// The approximation subdivided its steps `limit` times, its cap, and a span still does
+    /// not pass the tolerance. [`ErrorKind::NotWithinTolerance`].
+    SubdivisionCap {
+        /// The most subdivisions.
+        limit: usize,
+    },
+    /// The deformation's target point did not drop onto the curve's surface.
+    /// [`ErrorKind::NotFound`].
+    TargetDidNotDrop,
+    /// An at-distance solve was called without its target distance. Status
+    /// `SM_ERR_NULL_POINTER`. The caller's options: [`ErrorKind::InvalidInput`].
+    TargetDistanceMissing,
+    /// The approximation was given `given` breakpoints, fewer than the two that bound the
+    /// curve's interval. [`ErrorKind::InvalidInput`].
+    TooFewBreakpoints {
+        /// The breakpoints given.
+        given: usize,
     },
     /// The curve, or the knot list given, has `knots` knots, fewer than the two a span
     /// needs: there is nothing to span, so it is degenerate, whoever gave the list (a
@@ -334,6 +473,12 @@ pub enum CurveFailure {
         /// The most the routine evaluates.
         most: usize,
     },
+    /// The curve type read, `curve_type`, is not one the reader knows: the file's data.
+    /// [`ErrorKind::InvalidInput`].
+    UnknownCurveType {
+        /// The type read.
+        curve_type: i64,
+    },
     /// A direction a curve routine needs is the zero vector, as the phrase says. No site
     /// builds it any more (the projected curve's was the last); it goes with the other phrase
     /// forms once every count is zero.
@@ -344,8 +489,9 @@ pub enum CurveFailure {
         /// The scale asked for.
         scale: f64,
     },
-    /// The curve's tangent at `t` is zero where the curve is not degenerate: a
-    /// singularity, where the closest-point function has no direction to step.
+    /// The curve's tangent at `t` is zero (within the kernel's zero there) where the curve
+    /// is not degenerate: a singularity, where the closest-point, property or solve
+    /// function has no direction to step.
     ZeroTangent {
         /// The curve parameter.
         t: f64,
@@ -393,6 +539,8 @@ impl core::fmt::Display for JoinCheck {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FastDropBlock {
+    /// The curve is neither a line nor an ellipse.
+    CurveKind,
     /// The ellipse's polar conversion is not set up.
     NoPolarConversion,
     /// The ellipse is not a circle.
@@ -404,6 +552,7 @@ pub enum FastDropBlock {
 impl core::fmt::Display for FastDropBlock {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
+            Self::CurveKind => "the curve kind has no fast point drop",
             Self::NoPolarConversion => "the ellipse's polar conversion is not set up",
             Self::NotACircle => "the ellipse is not a circle",
             Self::Operation => "the solve is neither a minimisation nor an intersection",
@@ -453,6 +602,100 @@ impl core::fmt::Display for PointSolveOption {
     }
 }
 
+/// A method of the curve interface that [`CurveFailure::BaseCurveMethod`] names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BaseCurveMethod {
+    /// `CalculateContinuities`.
+    CalculateContinuities,
+    /// `ConvertTo2D`.
+    ConvertTo2d,
+    /// `Copy`.
+    Copy,
+    /// `CreateMirrorCurve`.
+    CreateMirrorCurve,
+    /// `EditParameterization`.
+    EditParameterization,
+    /// `ReverseParameterization`.
+    ReverseParameterization,
+    /// `StepInversion`.
+    StepInversion,
+    /// `Transform`.
+    Transform,
+    /// `Trim`.
+    Trim,
+}
+
+impl core::fmt::Display for BaseCurveMethod {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::CalculateContinuities => "the continuity calculation",
+            Self::ConvertTo2d => "the conversion to 2D",
+            Self::Copy => "the copy",
+            Self::CreateMirrorCurve => "the mirror curve",
+            Self::EditParameterization => "the parameterisation edit",
+            Self::ReverseParameterization => "the parameterisation reversal",
+            Self::StepInversion => "the step inversion",
+            Self::Transform => "the transform",
+            Self::Trim => "the trim",
+        })
+    }
+}
+
+/// An option of a curve property or solve function that
+/// [`CurveFailure::PropertyOptionMissing`] names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PropertyOption {
+    /// The property value.
+    Value,
+    /// The option vectors (all of them, or the one the property reads).
+    Vectors,
+}
+
+impl core::fmt::Display for PropertyOption {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::Value => "property value",
+            Self::Vectors => "option vectors",
+        })
+    }
+}
+
+/// Why a curve's property or solve function is undefined at a parameter
+/// ([`CurveFailure::FunctionUndefined`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FunctionGap {
+    /// The curve's first and second derivatives are parallel: it has no curvature there.
+    NoCurvature,
+    /// The vector between the two curves, projected, is shorter than the tolerance.
+    ProjectedGapShort,
+    /// The tangent's component along the axis and its derivative are both zero.
+    StationaryComponent,
+    /// The tangent is perpendicular to the view direction (the vector, or the line to the
+    /// point), so the curve has no silhouette there.
+    TangentAcrossView,
+    /// The curve's second derivative is zero.
+    ZeroSecondDerivative,
+}
+
+impl core::fmt::Display for FunctionGap {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::NoCurvature => "the curve has no curvature",
+            Self::ProjectedGapShort => {
+                "the projected vector between the curves is shorter than the tolerance"
+            }
+            Self::StationaryComponent => {
+                "the tangent's component along the axis and its derivative are zero"
+            }
+            Self::TangentAcrossView => "the tangent is perpendicular to the view direction",
+            Self::ZeroSecondDerivative => "the second derivative is zero",
+        })
+    }
+}
+
 impl CurveFailure {
     /// The status the C++ reports for it (a comparison detail): `SM_ERR`, except
     /// `SM_ERR_NULL_POINTER` for [`CurveFailure::Missing`] and
@@ -463,18 +706,23 @@ impl CurveFailure {
             Self::AngleHasNoNurbParameter { .. }
             | Self::AngleOutsideArc { .. }
             | Self::AuxiliaryVectorZero
+            | Self::BaseCurveMethod { .. }
             | Self::BaseCurveNotOwned { .. }
             | Self::BreaksNotCurrent
+            | Self::CacheTypeNotCurve
             | Self::ContinuityUndefined { .. }
             | Self::ControlPolygonTooShort { .. }
             | Self::CornerByCurveExtension
+            | Self::CornerOnViewAxis
             | Self::Defect { .. }
             | Self::EllipseWithoutNurb
             | Self::EndKnotsNotClamped
             | Self::EndsApart { .. }
             | Self::Failed(_)
             | Self::FastDropUnavailable { .. }
+            | Self::FunctionUndefined { .. }
             | Self::InfiniteTangent { .. }
+            | Self::IntervalNotSplittable { .. }
             | Self::IntervalOutsideBase
             | Self::JoinMismatch { .. }
             | Self::JoinOtherKind
@@ -483,33 +731,54 @@ impl CurveFailure {
             | Self::LengthBelowFloor { .. }
             | Self::LengthPastPieceCap { .. }
             | Self::LineDistanceNotAboveTolerance { .. }
+            | Self::LocalSolveFailed
             | Self::MidTangentOffChord { .. }
             | Self::NoEvaluationOfItsOwn
+            | Self::NoEvaluationSlots
             | Self::NoOffsetCurve
             | Self::NoOffsetDirection { .. }
+            | Self::NoPropertyFunction
             | Self::NoSpans
             | Self::NonUniformScale { .. }
             | Self::NurbNotTransformed
             | Self::OffsetDirectionUnknown { .. }
             | Self::OffsetRadiusNegative { .. }
+            | Self::ParameterGuessCap { .. }
+            | Self::PieceNotContinuous { .. }
             | Self::PieceOutsideSpan { .. }
             | Self::PlacementNotSet
             | Self::PointOnCurveWhenMaximising { .. }
             | Self::ProjectionVectorZero
+            | Self::PropertyOptionMissing { .. }
             | Self::RadiusNotPositive { .. }
+            | Self::RangeSolutionVariables { .. }
+            | Self::RootNotEvaluated { .. }
             | Self::SamePointToleranceNotPositive { .. }
+            | Self::SecondCurveNotOnSurface
             | Self::SingleLinearCurve
             | Self::SpanNotBSpline
+            | Self::SplitAtEnd { .. }
+            | Self::SplitOutsideInterval { .. }
+            | Self::StackTooShort { .. }
             | Self::StageFailed
             | Self::StartsApart { .. }
+            | Self::SubdivisionCap { .. }
+            | Self::TargetDidNotDrop
+            | Self::TooFewBreakpoints { .. }
             | Self::TooFewKnots { .. }
             | Self::TooManyDerivatives { .. }
+            | Self::UnknownCurveType { .. }
             | Self::ZeroScale { .. }
             | Self::ZeroTangent { .. } => SM_ERR,
-            Self::Missing(_)
+            Self::CacheNotBuilt
+            | Self::CurveNodeWithoutChild
+            | Self::CurveNodeWithoutData
+            | Self::Missing(_)
             | Self::OffsetWithoutBase
             | Self::PointSolveOptionMissing { .. }
-            | Self::PolarConversionNotSetUp => SM_ERR_NULL_POINTER,
+            | Self::PolarConversionNotSetUp
+            | Self::SolutionWithoutCurve { .. }
+            | Self::TargetDistanceMissing => SM_ERR_NULL_POINTER,
             Self::ZeroDirection(_) | Self::AuxiliaryAlongProjection => SM_ERR_INVALID_INPUT,
         }
     }
@@ -531,35 +800,58 @@ impl CurveFailure {
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::AngleHasNoNurbParameter { .. }
+            | Self::CacheNotBuilt
+            | Self::CornerOnViewAxis
+            | Self::FunctionUndefined { .. }
+            | Self::LocalSolveFailed
             | Self::NurbNotTransformed
-            | Self::PlacementNotSet => ErrorKind::Failed,
+            | Self::PlacementNotSet
+            | Self::RootNotEvaluated { .. } => ErrorKind::Failed,
             Self::AngleOutsideArc { .. }
             | Self::AuxiliaryAlongProjection
             | Self::AuxiliaryVectorZero
             | Self::BaseCurveNotOwned { .. }
             | Self::BreaksNotCurrent
+            | Self::CacheTypeNotCurve
             | Self::ContinuityUndefined { .. }
             | Self::ControlPolygonTooShort { .. }
+            | Self::CurveNodeWithoutChild
+            | Self::CurveNodeWithoutData
             | Self::IntervalOutsideBase
             | Self::KnotPastBreaks { .. }
             | Self::LineDistanceNotAboveTolerance { .. }
+            | Self::NoEvaluationSlots
             | Self::OffsetDirectionUnknown { .. }
             | Self::OffsetRadiusNegative { .. }
             | Self::OffsetWithoutBase
+            | Self::PieceNotContinuous { .. }
             | Self::PointSolveOptionMissing { .. }
             | Self::PolarConversionNotSetUp
             | Self::ProjectionVectorZero
+            | Self::PropertyOptionMissing { .. }
             | Self::RadiusNotPositive { .. }
+            | Self::RangeSolutionVariables { .. }
             | Self::SamePointToleranceNotPositive { .. }
+            | Self::SecondCurveNotOnSurface
+            | Self::SolutionWithoutCurve { .. }
             | Self::SpanNotBSpline
+            | Self::SplitAtEnd { .. }
+            | Self::SplitOutsideInterval { .. }
+            | Self::StackTooShort { .. }
+            | Self::TargetDistanceMissing
+            | Self::TooFewBreakpoints { .. }
             | Self::TooManyDerivatives { .. }
+            | Self::UnknownCurveType { .. }
             | Self::ZeroScale { .. } => ErrorKind::InvalidInput,
-            Self::CornerByCurveExtension
+            Self::BaseCurveMethod { .. }
+            | Self::CornerByCurveExtension
             | Self::EndKnotsNotClamped
             | Self::FastDropUnavailable { .. }
             | Self::JoinOtherKind
             | Self::NoEvaluationOfItsOwn
-            | Self::NonUniformScale { .. } => ErrorKind::Unsupported,
+            | Self::NoPropertyFunction
+            | Self::NonUniformScale { .. }
+            | Self::ParameterGuessCap { .. } => ErrorKind::Unsupported,
             Self::EllipseWithoutNurb
             | Self::MidTangentOffChord { .. }
             | Self::NoOffsetCurve
@@ -567,11 +859,13 @@ impl CurveFailure {
             | Self::NoSpans
             | Self::TooFewKnots { .. } => ErrorKind::Degenerate,
             Self::EndsApart { .. }
+            | Self::IntervalNotSplittable { .. }
             | Self::JoinMismatch { .. }
             | Self::JoinOtherNotStraight { .. }
             | Self::LengthBelowFloor { .. }
             | Self::LengthPastPieceCap { .. }
-            | Self::StartsApart { .. } => ErrorKind::NotWithinTolerance,
+            | Self::StartsApart { .. }
+            | Self::SubdivisionCap { .. } => ErrorKind::NotWithinTolerance,
             Self::Failed(_)
             | Self::InfiniteTangent { .. }
             | Self::Missing(_)
@@ -581,6 +875,7 @@ impl CurveFailure {
             | Self::ZeroTangent { .. } => ErrorKind::of_status(self.comparison_status()),
             Self::PieceOutsideSpan { .. } => ErrorKind::PortInvariant,
             Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::TargetDidNotDrop => ErrorKind::NotFound,
         }
     }
 
@@ -596,48 +891,74 @@ impl CurveFailure {
             | Self::AngleOutsideArc { .. }
             | Self::AuxiliaryAlongProjection
             | Self::AuxiliaryVectorZero
+            | Self::BaseCurveMethod { .. }
             | Self::BaseCurveNotOwned { .. }
             | Self::BreaksNotCurrent
+            | Self::CacheNotBuilt
+            | Self::CacheTypeNotCurve
             | Self::ContinuityUndefined { .. }
             | Self::ControlPolygonTooShort { .. }
             | Self::CornerByCurveExtension
+            | Self::CornerOnViewAxis
+            | Self::CurveNodeWithoutChild
+            | Self::CurveNodeWithoutData
             | Self::Defect { .. }
             | Self::EllipseWithoutNurb
             | Self::EndKnotsNotClamped
             | Self::EndsApart { .. }
             | Self::Failed(_)
             | Self::FastDropUnavailable { .. }
+            | Self::FunctionUndefined { .. }
             | Self::InfiniteTangent { .. }
+            | Self::IntervalNotSplittable { .. }
             | Self::IntervalOutsideBase
             | Self::JoinMismatch { .. }
             | Self::JoinOtherKind
             | Self::JoinOtherNotStraight { .. }
             | Self::KnotPastBreaks { .. }
             | Self::LineDistanceNotAboveTolerance { .. }
+            | Self::LocalSolveFailed
             | Self::MidTangentOffChord { .. }
             | Self::Missing(_)
             | Self::NoEvaluationOfItsOwn
+            | Self::NoEvaluationSlots
             | Self::NoOffsetCurve
             | Self::NoOffsetDirection { .. }
+            | Self::NoPropertyFunction
             | Self::NoSpans
             | Self::NonUniformScale { .. }
             | Self::NurbNotTransformed
             | Self::OffsetDirectionUnknown { .. }
             | Self::OffsetRadiusNegative { .. }
             | Self::OffsetWithoutBase
+            | Self::ParameterGuessCap { .. }
+            | Self::PieceNotContinuous { .. }
             | Self::PlacementNotSet
             | Self::PointOnCurveWhenMaximising { .. }
             | Self::PointSolveOptionMissing { .. }
             | Self::PolarConversionNotSetUp
             | Self::ProjectionVectorZero
+            | Self::PropertyOptionMissing { .. }
             | Self::RadiusNotPositive { .. }
+            | Self::RangeSolutionVariables { .. }
+            | Self::RootNotEvaluated { .. }
             | Self::SamePointToleranceNotPositive { .. }
+            | Self::SecondCurveNotOnSurface
             | Self::SingleLinearCurve
+            | Self::SolutionWithoutCurve { .. }
             | Self::SpanNotBSpline
+            | Self::SplitAtEnd { .. }
+            | Self::SplitOutsideInterval { .. }
+            | Self::StackTooShort { .. }
             | Self::StageFailed
             | Self::StartsApart { .. }
+            | Self::SubdivisionCap { .. }
+            | Self::TargetDidNotDrop
+            | Self::TargetDistanceMissing
+            | Self::TooFewBreakpoints { .. }
             | Self::TooFewKnots { .. }
             | Self::TooManyDerivatives { .. }
+            | Self::UnknownCurveType { .. }
             | Self::ZeroDirection(_)
             | Self::ZeroScale { .. }
             | Self::ZeroTangent { .. } => true,
@@ -828,6 +1149,86 @@ impl core::fmt::Display for CurveFailure {
             Self::IntervalOutsideBase => {
                 f.write_str("the offset curve's interval is not within its base curve's")
             }
+            Self::RangeSolutionVariables { variables } => {
+                write!(f, "a range solution has {variables} variables, not two")
+            }
+            Self::SolutionWithoutCurve { object } => {
+                write!(f, "object {object} of a solution is no known curve")
+            }
+            Self::TooFewBreakpoints { given } => write!(
+                f,
+                "{given} breakpoints were given, fewer than the two that bound the curve's interval"
+            ),
+            Self::SubdivisionCap { limit } => write!(
+                f,
+                "the approximation reached its cap of {limit} subdivisions with a span still outside the tolerance"
+            ),
+            Self::IntervalNotSplittable { lo, hi } => write!(
+                f,
+                "the step [{lo}, {hi}] cannot be split further, and its span is still outside the tolerance"
+            ),
+            Self::CurveNodeWithoutData => {
+                f.write_str("a curve tree node of the solver's branch has no span data")
+            }
+            Self::CurveNodeWithoutChild => {
+                f.write_str("a curve tree node the solver subdivides has no child")
+            }
+            Self::CacheNotBuilt => f.write_str("the curve cache could not be built"),
+            Self::CacheTypeNotCurve => f.write_str("the cache asked for is not a curve cache"),
+            Self::TargetDistanceMissing => {
+                f.write_str("the at-distance solve was called without its target distance")
+            }
+            Self::PropertyOptionMissing { option } => {
+                write!(f, "the property function was called without its {option}")
+            }
+            Self::SecondCurveNotOnSurface => f.write_str(
+                "the surface-projected intersection's second curve is not a curve on a surface",
+            ),
+            Self::NoEvaluationSlots => f.write_str("there is no slot to evaluate into"),
+            Self::SplitOutsideInterval { split, start, end } => write!(
+                f,
+                "the split parameter {split} is outside the curve's interval [{start}, {end}]"
+            ),
+            Self::SplitAtEnd { split, end } => {
+                write!(f, "the split parameter {split} is at the curve's end {end}")
+            }
+            Self::UnknownCurveType { curve_type } => {
+                write!(f, "the curve type {curve_type} is unknown")
+            }
+            Self::StackTooShort { values } => write!(
+                f,
+                "the stack holds {values} values, fewer than the 7 of an entry"
+            ),
+            Self::PieceNotContinuous {
+                knot_gap,
+                point_gap,
+            } => write!(
+                f,
+                "the added piece starts {knot_gap:e} in parameter and {point_gap:e} in space from where the curve ends"
+            ),
+            Self::BaseCurveMethod { method } => {
+                write!(f, "the curve kind does not implement {method}")
+            }
+            Self::ParameterGuessCap { limit } => {
+                write!(f, "the solve filled all {limit} of its parameter guess slots")
+            }
+            Self::LocalSolveFailed => f.write_str("the local solve failed"),
+            Self::RootNotEvaluated { t } => write!(
+                f,
+                "the property function could not be evaluated at its root t = {t}"
+            ),
+            Self::FunctionUndefined { t, why } => {
+                write!(f, "the solve function is undefined at t = {t}: {why}")
+            }
+            Self::NoPropertyFunction => {
+                f.write_str("the property function has no equation for the property")
+            }
+            Self::TargetDidNotDrop => {
+                f.write_str("the target point did not drop onto the curve's surface")
+            }
+            Self::CornerOnViewAxis => {
+                f.write_str("a pseudo box corner projects onto the view origin")
+            }
         }
     }
 }
@@ -838,32 +1239,6 @@ impl crate::SolidError {
     #[track_caller]
     pub(crate) fn curve(operation: &'static str, failure: CurveFailure) -> Self {
         Failure::new(operation, failure).into_error()
-    }
-
-    /// [`crate::SolidError::Failed`] for a curve routine that could not continue, as the phrase
-    /// says, with status [`SM_ERR`] (upstream `return SE(SM_ERR)`).
-    #[must_use]
-    pub(crate) fn curve_failed(operation: &'static str, what: &'static str) -> Self {
-        Self::curve(operation, CurveFailure::Failed(what))
-    }
-
-    /// [`crate::SolidError::Failed`] for something a curve routine needs that is not there, as
-    /// the phrase says, with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)` on a `NULL`
-    /// pointer).
-    #[must_use]
-    pub(crate) fn curve_missing(operation: &'static str, what: &'static str) -> Self {
-        Self::curve(operation, CurveFailure::Missing(what))
-    }
-
-    /// [`crate::SolidError::Failed`] for a stage of a curve routine that failed with no
-    /// reason the kernel names ([`CurveFailure::StageFailed`], a defect), with `status`, the
-    /// one the C++ reports (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`).
-    #[must_use]
-    #[track_caller]
-    pub(crate) fn curve_stage_failed(operation: &'static str, status: i32) -> Self {
-        Failure::new(operation, CurveFailure::StageFailed)
-            .with_status(status)
-            .into_error()
     }
 
     /// The curve failure behind this error, for a [`crate::SolidError::Failed`] with a
@@ -884,6 +1259,13 @@ impl crate::SolidError {
 mod tests {
     use super::*;
     use crate::SolidError;
+
+    /// A curve stage failure with `status`, as a stage site builds one.
+    fn stage_failed(operation: &'static str, status: i32) -> SolidError {
+        Failure::new(operation, CurveFailure::StageFailed)
+            .with_status(status)
+            .into_error()
+    }
 
     #[test]
     fn curve_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {
@@ -915,11 +1297,15 @@ mod tests {
             assert_eq!(typed.curve_failure(), Some(&failure));
         }
         assert_eq!(
-            SolidError::curve_missing("curve::op", "the curve's cache").to_string(),
+            SolidError::curve("curve::op", CurveFailure::Missing("the curve's cache")).to_string(),
             "curve::op: the curve's cache is missing"
         );
         assert_eq!(
-            SolidError::curve_failed("curve::op", "the scale is not uniform").to_string(),
+            SolidError::curve(
+                "curve::op",
+                CurveFailure::Failed("the scale is not uniform")
+            )
+            .to_string(),
             "curve::op: the scale is not uniform"
         );
         assert_eq!(
@@ -935,12 +1321,12 @@ mod tests {
     #[test]
     fn a_stage_failure_is_a_defect_and_a_typed_cause_keeps_its_status() {
         super::super::tests::assert_stage_failure(
-            &SolidError::curve_stage_failed("curve::op", SM_ERR_NULL_POINTER),
+            &stage_failed("curve::op", SM_ERR_NULL_POINTER),
             "curve::op",
             SM_ERR_NULL_POINTER,
         );
         super::super::tests::assert_stage_failure(
-            &SolidError::curve_stage_failed("curve::op", SM_ERR),
+            &stage_failed("curve::op", SM_ERR),
             "curve::op",
             SM_ERR,
         );
@@ -969,7 +1355,7 @@ mod tests {
         let defect = CurveFailure::Defect { why };
         super::super::tests::assert_defect(
             &SolidError::curve("curve::op", defect),
-            &SolidError::curve_stage_failed("curve::op", SM_ERR),
+            &stage_failed("curve::op", SM_ERR),
             "curve::op",
             SM_ERR,
             &format!("curve::op: stage_failed: {why}"),
@@ -979,7 +1365,7 @@ mod tests {
             .into_error();
         super::super::tests::assert_defect(
             &missing,
-            &SolidError::curve_stage_failed("curve::op", SM_ERR_NULL_POINTER),
+            &stage_failed("curve::op", SM_ERR_NULL_POINTER),
             "curve::op",
             SM_ERR_NULL_POINTER,
             &format!("curve::op: stage_failed: {why}"),
@@ -1234,6 +1620,141 @@ mod tests {
                 SM_ERR,
                 ErrorKind::InvalidInput,
             ),
+            (
+                CurveFailure::RangeSolutionVariables { variables: 3 },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::SolutionWithoutCurve { object: 1 },
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::TooFewBreakpoints { given: 1 },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::SubdivisionCap { limit: 8192 },
+                SM_ERR,
+                ErrorKind::NotWithinTolerance,
+            ),
+            (
+                CurveFailure::IntervalNotSplittable { lo: 0.5, hi: 0.5 },
+                SM_ERR,
+                ErrorKind::NotWithinTolerance,
+            ),
+            (
+                CurveFailure::CurveNodeWithoutData,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::CurveNodeWithoutChild,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::CacheNotBuilt,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::Failed,
+            ),
+            (
+                CurveFailure::CacheTypeNotCurve,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::TargetDistanceMissing,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::PropertyOptionMissing {
+                    option: PropertyOption::Vectors,
+                },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::SecondCurveNotOnSurface,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::NoEvaluationSlots,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::SplitOutsideInterval {
+                    split: 2.0,
+                    start: 0.0,
+                    end: 1.0,
+                },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::SplitAtEnd {
+                    split: 1.0,
+                    end: 1.0,
+                },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::UnknownCurveType { curve_type: 99 },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::StackTooShort { values: 6 },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::PieceNotContinuous {
+                    knot_gap: 0.5,
+                    point_gap: 0.0,
+                },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::BaseCurveMethod {
+                    method: BaseCurveMethod::Trim,
+                },
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+            (
+                CurveFailure::ParameterGuessCap { limit: 1000 },
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+            (CurveFailure::LocalSolveFailed, SM_ERR, ErrorKind::Failed),
+            (
+                CurveFailure::RootNotEvaluated { t: 0.5 },
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                CurveFailure::FunctionUndefined {
+                    t: 0.5,
+                    why: FunctionGap::NoCurvature,
+                },
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                CurveFailure::NoPropertyFunction,
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+            (CurveFailure::TargetDidNotDrop, SM_ERR, ErrorKind::NotFound),
+            (CurveFailure::CornerOnViewAxis, SM_ERR, ErrorKind::Failed),
         ];
         for (cause, status, kind) in cases {
             let e = SolidError::curve("curve::op", cause);
@@ -1292,16 +1813,7 @@ mod tests {
             wrappers: Wrappers::Phrase,
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-        const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/curve/curve/p1.rs", 13),
-            ("solidcore/src/curve/curve/p2.rs", 9),
-            ("solidcore/src/curve/curve/p3.rs", 1),
-            ("solidcore/src/curve/curve/p4.rs", 7),
-            ("solidcore/src/curve/curve/p5.rs", 11),
-            ("solidcore/src/curve/curve/p6.rs", 2),
-            ("solidcore/src/curve/curve/p8.rs", 8),
-            ("solidcore/src/curve/curve/p9.rs", 5),
-        ];
+        const PINNED: &[(&str, usize)] = &[];
         assert_pinned("curve phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

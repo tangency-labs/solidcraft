@@ -28,8 +28,8 @@
 //!
 //! The check judges a change by what it adds, so drift on main never fails a branch or a merge
 //! group. It scans the tree at the base the change started from, [`base`]: `git merge-base HEAD
-//! origin/main`, else `HEAD~1` (a pull request's merge commit or a merge-queue group's squash
-//! commit, whose first parent is the code it lands on; CI fetches two commits for that), else,
+//! origin/main`, else `HEAD~1` (a pull request's merge commit or a merge-queue group's merge or
+//! squash commit, whose first parent is the code it lands on; CI fetches two commits for that), else,
 //! with no git history at all, the ledger itself. Then:
 //! - a site the tree has and the base does not FAILS, unless the ledger names it (a rename moves
 //!   its line);

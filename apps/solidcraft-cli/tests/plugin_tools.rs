@@ -226,6 +226,71 @@ fn test_runs_the_packages_cases_on_the_real_host() {
     assert!(!output.status.success() && text(&output.stderr).contains("does not pass plugin check"), "{}", text(&output.stderr));
 }
 
+/// The plugin guide keeps a case's design in the tests folder. A design saved there as JSON is that
+/// case's input, not a case of its own: it is not read as a case, and the case runs on it.
+#[test]
+fn a_json_design_a_case_runs_on_is_not_read_as_a_case() {
+    let scratch = Scratch::new();
+    let on_plate = json!({"entry":"make","design":"plate.json","expect":{"model":{"body_count":2,"total":{"volume_mm3":1024}}}});
+    let path = package(&scratch.0, &command_manifest(), &command_component("call $box"), &[("on-plate", on_plate)]);
+    let mut made = solidcraft_engine::Session::new(solidcraft_engine::doc::Document::new("Plate"));
+    made.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+    std::fs::write(Path::new(&path).join("tests/plate.json"), serde_json::to_vec(&*made.doc).unwrap()).unwrap();
+    let output = cli(&["plugin", "test", &path, "--json"]);
+    assert!(output.status.success(), "{}{}", text(&output.stdout), text(&output.stderr));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!((report["passed"].as_u64(), report["failed"].as_u64(), report["skipped"].as_u64()), (Some(1), Some(0), Some(0)), "{report}");
+    assert_eq!(report["cases"][0]["name"], "on-plate", "{report}");
+}
+
+#[test]
+fn test_user_settings_are_isolated_from_the_user_and_other_cases() {
+    let scratch = Scratch::new();
+    let settings = scratch.0.join("user-settings");
+    let data = settings.join("plugin-user-data");
+    std::fs::create_dir_all(&data).unwrap();
+    let saved = br#"{"hinge":17,"keep":true}"#;
+    let write = "i32.const 512 i32.const 5 i32.const 2048 i32.const 2 i32.const 128 call $set";
+    let read_empty = "i32.const 512 i32.const 5 i32.const 128 call $get
+        i32.const 128 i32.load if unreachable end
+        i32.const 132 i32.load if unreachable end";
+    for importer in [false, true] {
+        let mut manifest = if importer { importer_manifest() } else { command_manifest() };
+        manifest["capabilities"] = if importer { json!(["formats@0.2", "user-storage@0.1"]) } else { json!(["commands@0.2", "user-storage@0.1"]) };
+        manifest["runtime"]["commands"] = json!([]);
+        let id = manifest["id"].as_str().unwrap();
+        let record = data.join(format!("{id}.json"));
+        std::fs::write(&record, saved).unwrap();
+        let fixture = if importer {
+            include_str!("../../../crates/craft-plugin-wasm/src/importer_storage_fixture.wat")
+        } else {
+            include_str!("../../../crates/craft-plugin-wasm/src/user_storage_fixture.wat")
+        };
+        let case = if importer { json!({"entry":"convert", "file":"bracket.smp"}) } else { json!({"entry":"make"}) };
+        let component = wat::parse_str(fixture.replace("__CODE__", write)).unwrap();
+        let path = package(&scratch.0, &manifest, &component, &[("first", case.clone()), ("second", case)]);
+        if importer {
+            let design = solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::new("Bracket")).unwrap();
+            std::fs::write(Path::new(&path).join("tests/bracket.smp"), design).unwrap();
+        }
+        // A successful write must not replace the same plugin's saved personal settings.
+        // Requiring an empty store also proves that each case and run starts independently.
+        for code in [write.to_string(), format!("{read_empty} {write}")] {
+            let module = Path::new(&path).join(manifest["runtime"]["module"].as_str().unwrap());
+            std::fs::write(module, wat::parse_str(fixture.replace("__CODE__", &code)).unwrap()).unwrap();
+            let output = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"))
+                .args(["plugin", "test", &path, "--json"])
+                .env("SOLIDCRAFT_SETTINGS_DIR", &settings)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{}{}", text(&output.stdout), text(&output.stderr));
+            let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!((report["passed"].as_u64(), report["failed"].as_u64()), (Some(2), Some(0)), "{report}");
+            assert_eq!(std::fs::read(&record).unwrap(), saved);
+        }
+    }
+}
+
 #[test]
 fn an_exporter_without_folder_grants_runs_default_and_explicit_cases() {
     let scratch = Scratch::new();
