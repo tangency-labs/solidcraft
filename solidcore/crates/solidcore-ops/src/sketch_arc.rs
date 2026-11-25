@@ -96,7 +96,7 @@ mod tests {
             Some([0.0, 0.0])
         );
         assert_eq!(circumcentre([0.0, 0.0], [1.0, 1.0], [2.0, 2.0]), None);
-        let side = 0.707_106_781_186_547_6;
+        let side = std::f64::consts::FRAC_1_SQRT_2;
         // Quarter of the unit circle from (1, 0) to (0, 1): the third point on the far side
         // makes the long arc, on the near side the quarter.
         let (centre, r, sweep) = three_point_circle([1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]).unwrap();
