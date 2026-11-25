@@ -764,6 +764,18 @@ struct Check {
 /// columns when the widest label fits twice, one in a narrow window, every cell as wide as its
 /// column. A dim caption (a message id) names the group.
 fn check_columns(ui: &mut egui::Ui, app: &mut SolveApp, caption: Option<&'static str>, checks: &[Check]) {
+    use ui_kit::settings_search;
+
+    if settings_search::suppress_chrome(ui) {
+        // Search still visits each checkbox to learn its label. Only matches take up a row.
+        for check in checks {
+            let before = settings_search::hits(ui);
+            let mut row = settings_search::detached_child(ui, check.key, false);
+            layout_check(&mut row, app.tr(check.label), app.tr(check.help), (check.value)(&mut app.preferences), check.key);
+            settings_search::commit_search_child(ui, &row, before);
+        }
+        return;
+    }
     let t = Tokens::get();
     if let Some(caption) = caption {
         ui_kit::settings_inline_note(ui, app.tr(caption));

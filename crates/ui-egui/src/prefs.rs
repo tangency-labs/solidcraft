@@ -5169,6 +5169,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn layout_checkbox_search_results_share_a_column() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1280,"height":720}));
+        h.call("ui.prefs", json!({"language":"en","open":"General"}));
+        h.app.prefs_window.shell.filter = "search".into();
+        h.frames(5);
+
+        let first = crate::scenario::rect_of("prefs:ribbon_reveal").unwrap();
+        let second = crate::scenario::rect_of("prefs:command_search_centred").unwrap();
+        assert!((second.left() - first.left()).abs() < 0.5, "checkboxes align: {first:?}, {second:?}");
+        let gap = second.top() - first.bottom();
+        assert!((0.0..first.height()).contains(&gap), "consecutive results: {first:?}, {second:?}");
+        h.step(&json!({"click":{"handle":"prefs:command_search_centred"}})).unwrap();
+        assert!(h.app.preferences.command_search_centred);
+    }
+
     /// #16542: the Layout page's checkboxes line up in even columns, a group each for the
     /// History, the Browser and the toolbar, instead of wrapping like words: two columns in a
     /// wide window, one in a narrow one.
