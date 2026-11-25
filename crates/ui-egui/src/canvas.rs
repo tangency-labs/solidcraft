@@ -884,6 +884,10 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         }
         return;
     }
+    if matches!(d.kind, Kind::AnglePlane { .. }) {
+        draw_angle_plane(app, ui, painter, proj, d);
+        return;
+    }
     // Two sides: the second distance gets its own arrow, the other way from the first side.
     if let (Kind::Extrude { direction: crate::dialogs::TWO_SIDES | crate::dialogs::TWO_SIDES_REVERSED, distance2, .. }, Some(n)) = (&mut d.kind, dir)
     {
@@ -2500,6 +2504,128 @@ pub(crate) fn revolve_axis(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
         Some(Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?))
     };
     Some((vector("origin")?, vector("dir")?.normalized()?))
+}
+
+/// Plane at Angle: a grab handle on the preview square's edge that turns the plane about the
+/// axis (#17290); the Angle box follows and stays for typing an exact value.
+#[allow(clippy::too_many_arguments)]
+fn draw_angle_plane(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) {
+    let Kind::AnglePlane { angle: angle_text, direction_only } = &d.kind else { return };
+    let angle_text = angle_text.clone();
+    let direction_only = *direction_only;
+    // The base plane, resolved as the engine resolves it: an origin plane, a construction
+    // plane by name, or a planar face. Anything else shows no handle (the box still works).
+    let base = match d.inputs.first().and_then(|i| i.items.first()) {
+        Some(Sel::Plane { name }) => crate::dialogs::plane_by_name(&app.session, name),
+        Some(Sel::Face { body, index, .. }) => {
+            crate::dialogs::planar_face(&app.session, body, *index).and_then(|(origin, normal)| solidcore_record::Plane::from_normal(origin, normal))
+        }
+        _ => None,
+    };
+    let Some(base) = base else { return };
+    // The axis: a named axis, a straight sketch curve, or a model edge.
+    let Some((axis_origin, axis_dir)) = d.inputs.get(1).and_then(|i| i.items.first()).and_then(|sel| crate::dialogs::axis_of(app, sel)) else {
+        return;
+    };
+    // "Use axis direction only": the rotation is about an in-plane line through the pivot.
+    let (pivot, d_axis) = if direction_only {
+        let n = base.normal();
+        let Some(dir) = (axis_dir - n * n.dot(axis_dir)).normalized() else { return };
+        let screen = crate::open_meshing::session_world(&app.session);
+        let pivot = crate::dialogs::angle_pivot(d)
+            .and_then(|sel| match sel {
+                Sel::Vertex { point, .. } => Some(*point),
+                Sel::SketchPoint { id } => sketch_point_at(app, &screen, id),
+                Sel::ConstructionPoint { name } => {
+                    solidcraft_engine::view::construction_points(&app.session).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p)
+                }
+                _ => None,
+            })
+            .unwrap_or(base.origin);
+        (pivot - n * n.dot(pivot - base.origin), dir)
+    } else {
+        match axis_dir.normalized() {
+            Some(d) => (axis_origin, d),
+            None => return,
+        }
+    };
+    let d_axis = match d_axis.normalized() {
+        Some(d) => d,
+        None => return,
+    };
+    // The angle now; while the text doesn't evaluate there is just nothing to grab.
+    let ang = crate::length_input::eval(&app.session.doc, &angle_text, ValueKind::Angle).ok().filter(|v| v.is_finite()).unwrap_or(0.0);
+    let (ca, sa) = (ang.cos(), ang.sin());
+    // The preview square is half `square` along the plane's axes; a point rotating about the
+    // axis sweeps a circle normal to it, so the handle sits at the square's best edge midpoint.
+    let square = 10.0;
+    let axis_perp = |v: Vec3| v - d_axis * v.dot(d_axis);
+    let edge = if axis_perp(base.x * square).len() >= axis_perp(base.y * square).len() { base.x } else { base.y };
+    let p0 = base.origin + edge * square;
+    let v0 = p0 - pivot;
+    let along = v0.dot(d_axis);
+    let perp = v0 - d_axis * along;
+    let r = perp.len();
+    if !(r.is_finite() && r > 1e-3) {
+        return; // the whole locus collapses onto the axis itself
+    }
+    let e1 = perp / r;
+    let e2 = d_axis.cross(e1);
+    let centre = pivot + d_axis * along;
+    // Where the plane stands: the handle rides the sweep of the base handle.
+    let handle = centre + e1 * (r * ca) + e2 * (r * sa);
+    let Some(end) = proj.to_screen(handle) else { return };
+    crate::scenario::publish_handle("angle_plane", end);
+    // A faint circle through the handle's locus makes the sweep visible.
+    if let Some(first) = proj.to_screen(centre + e1 * r)
+        && first.distance(end) < 4.0 * app.cam.half_height() as f32
+    {
+        let points: Vec<Pos2> = (0..=48)
+            .filter_map(|i| {
+                let a = i as f64 * std::f64::consts::TAU / 48.0;
+                proj.to_screen(centre + e1 * (r * a.cos()) + e2 * (r * a.sin()))
+            })
+            .collect();
+        painter.add(egui::Shape::line(points, Stroke::new(1.0, Tokens::get().origin_plane_edge.linear_multiply(0.35))));
+    }
+    let response = ui.interact(egui::Rect::from_center_size(end, vec2(20.0, 20.0)), egui::Id::unique("sc_angle_plane"), egui::Sense::drag());
+    let hot = response.hovered() || response.dragged();
+    let color = if hot { Tokens::get().accent } else { Tokens::get().manipulator };
+    painter.circle(end, if hot { 7.0 } else { 5.5 }, color, Stroke::new(1.5, Color32::WHITE));
+    if hot {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+    if response.dragged()
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        let (origin, direction) = proj.ray(pointer);
+        let den = direction.dot(d_axis);
+        // Near edge-on, a plane intersection magnifies subpixel pointer error.
+        let raw = if den.abs() > 0.05 {
+            let point = origin + direction * ((centre - origin).dot(d_axis) / den) - centre;
+            Some(point.dot(e2).atan2(point.dot(e1)))
+        } else {
+            projected_rotation_angle(proj, pointer, centre, e1, e2, r, ang, (-std::f64::consts::TAU, std::f64::consts::TAU))
+        };
+        if let Some(raw) = raw {
+            let boundary_angle = (-4..=4)
+                .map(|k| raw + k as f64 * std::f64::consts::TAU)
+                .filter(|angle| *angle >= -4.0 && *angle <= 4.0)
+                .min_by(|a, b| (a - ang).abs().total_cmp(&(b - ang).abs()))
+                .unwrap_or(raw.clamp(-std::f64::consts::TAU, std::f64::consts::TAU));
+            let mut angle = boundary_angle.clamp(-std::f64::consts::TAU, std::f64::consts::TAU).to_degrees();
+            if !crate::tool_modifiers::manipulator_free() {
+                angle = (angle / 5.0).round() * 5.0;
+            }
+            if angle.abs() < 0.05 {
+                angle = 0.0;
+            }
+            let text = format!("{angle:.1}");
+            if let Kind::AnglePlane { angle: angle_value, .. } = &mut d.kind {
+                *angle_value = format!("{} deg", text.trim_end_matches('0').trim_end_matches('.'));
+            }
+        }
+    }
 }
 
 /// Draw angular extents in the same clockwise sense as the modeled solid.
