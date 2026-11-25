@@ -133,7 +133,10 @@ fn the_balloons_rules_are_kept_on_reading() {
     // A placed part's path: 1 to 64 occurrences, none of them 0. A design's own body is no part.
     let path = |p: Value| refused(&d, |v| balloon(v, &nested)["edge"]["path"] = p);
     let deep = rule(&nested, "an occurrence path is at most 64 occurrences, none of them 0");
-    let own = rule(&nested, "it points at a placed part: its edge's body is placed through an occurrence");
+    let own = rule(
+        &nested,
+        "a balloon points at a part placed as a component of an assembly: an edge with no `path` is on the design's own body, so place the part as a component and give its occurrence in the edge's `path`",
+    );
     assert_eq!(
         [path(json!([3])), path(json!(vec![3; 64])), path(json!(vec![3; 65])), path(json!([3, 0])), path(json!([]))],
         ["read".to_string(), "read".into(), deep.clone(), deep, own.clone()]

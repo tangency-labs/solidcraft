@@ -42,7 +42,10 @@ pub(super) fn show_combo<R>(
     body: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
     if !crate::blur::enabled() {
-        return combo.show_ui(ui, body);
+        return combo.show_ui(ui, |ui| {
+            ui.visuals_mut().widgets.noninteractive.bg_stroke = crate::Menu::separator_stroke(&Tokens::get());
+            body(ui)
+        });
     }
     let popup = widget.with("popup");
     let slot = egui::ComboBox::is_open(ui.ctx(), widget)
@@ -50,6 +53,7 @@ pub(super) fn show_combo<R>(
         .flatten();
     let mut host = None;
     let shown = combo.show_ui(ui, |ui| {
+        ui.visuals_mut().widgets.noninteractive.bg_stroke = crate::Menu::separator_stroke(&Tokens::get());
         // ComboBox calls us inside its ScrollArea, whose content Frame has no
         // fill and whose clip omits popup padding and any scrollbar. Its parent
         // owns the actual native popup Frame; finish using the final Area rect.
@@ -763,6 +767,16 @@ impl Container {
             Surface::Popup => Self::popup_frame(&ctx.global_style()).fill(fill),
             Surface::ApplicationBar | Surface::Canvas | Surface::Viewport | Surface::InputShield => flat,
         }
+    }
+
+    /// Compact completion notifications keep Toast's independent layout, with popup elevation
+    /// and the large (8-point) corner token. Ordinary status/progress toasts keep their shell frame.
+    pub fn completion_notice_frame(ctx: &Context) -> Frame {
+        let t = Tokens::get();
+        Self::new(ctx, Surface::Toast)
+            .frame(ctx, t.panel, Side::Left)
+            .corner_radius(t.radius_lg)
+            .shadow(Self::popup_frame(&ctx.global_style()).shadow)
     }
 
     /// Movable tool sheets round all exposed corners, joining only their right dock edge (or the

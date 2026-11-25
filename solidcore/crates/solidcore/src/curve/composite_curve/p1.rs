@@ -122,6 +122,7 @@ use crate::curve::curve::p2::{
 use crate::curve::curve::p3::compute_crvs_normal_written;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve_cache::CurveCache;
+use crate::error::curve::CurveFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::a_object;
 use crate::geom::assert_array::ObjectKey;
@@ -439,18 +440,12 @@ impl CurveEvaluate for CompositeCurve {
         _non_zero_tangents: bool,
     ) -> Result<Vec<Vec3>> {
         // SmCurve::Evaluate (not overridden)
-        Err(SolidError::curve_failed(
-            OP,
-            "a composite curve has no evaluation of its own",
-        ))
+        Err(SolidError::curve(OP, CurveFailure::NoEvaluationOfItsOwn))
     }
 
     fn evaluate_point(&self, _k: &Kernel, _t: f64) -> Result<Point3> {
         // SmCurve::EvaluatePoint (not overridden)
-        Err(SolidError::curve_failed(
-            OP,
-            "a composite curve has no point evaluation of its own",
-        ))
+        Err(SolidError::curve(OP, CurveFailure::NoEvaluationOfItsOwn))
     }
 
     fn is_closed_virtual(&self, _k: &Kernel, _interval: &Extent1d, _tol: f64) -> Result<bool> {
@@ -1194,15 +1189,20 @@ impl CompositeCurve {
     ) -> Result<BuiltComposites> {
         // check input
         if same_point_tolerance <= 0.0 {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_BUILD,
-                "the same-point tolerance is not positive",
+                CurveFailure::SamePointToleranceNotPositive {
+                    tolerance: same_point_tolerance,
+                },
             ));
         }
         if !(distance_to_create_line == 0.0 || distance_to_create_line > same_point_tolerance) {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_BUILD,
-                "the distance to create a line is neither zero nor above the same-point tolerance",
+                CurveFailure::LineDistanceNotAboveTolerance {
+                    distance: distance_to_create_line,
+                    tolerance: same_point_tolerance,
+                },
             ));
         }
 
@@ -1229,12 +1229,10 @@ impl CompositeCurve {
         // create an array of link-list curve objects
         let mut items: Vec<CurveItem> = Vec::new();
         for c in curves {
-            let mut item = CurveItem::new(c);
             // (status ignored upstream: GetEnds returns void)
-            if let Some(e) = ignored(item.curve.as_ref().map_or_else(
-                || Err(SolidError::curve_failed(OP_BUILD, "the item has no curve")),
-                |curve| curve.ends(k),
-            ))? {
+            let ends = ignored(c.ends(k))?;
+            let mut item = CurveItem::new(c);
+            if let Some(e) = ends {
                 item.start = e.start;
                 item.end = e.end;
             }
@@ -1922,10 +1920,7 @@ pub fn create_corner(
         }
         OffsetCornerType::CurveExtension => {
             // No other corner cases implemented yet
-            return Err(SolidError::curve_failed(
-                OP,
-                "an offset corner by curve extension is not implemented",
-            ));
+            return Err(SolidError::curve(OP, CurveFailure::CornerByCurveExtension));
         }
     }
     Ok(out)
@@ -2463,11 +2458,72 @@ mod tests {
             line(pts[2], pts[1]),
             line(pts[3], pts[0]),
         ];
-        let r = CompositeCurve::build_composites_from_curves(k, curves, 1e-6, 0.0).unwrap();
+        let r = CompositeCurve::build_composites_from_curves(k, curves.clone(), 1e-6, 0.0).unwrap();
         assert_eq!(r.composites.len(), 1);
         assert!(r.composites[0].is_closed());
         assert_eq!(r.composites[0].num_segments(), 4);
         assert!(r.unused.is_empty());
+        // the caller's tolerances: not positive, and a line distance not above it
+        let err =
+            CompositeCurve::build_composites_from_curves(k, curves.clone(), 0.0, 0.0).unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::SamePointToleranceNotPositive { tolerance: 0.0 })
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+        let err = CompositeCurve::build_composites_from_curves(k, curves, 1e-6, 1e-7).unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::LineDistanceNotAboveTolerance {
+                distance: 1e-7,
+                tolerance: 1e-6
+            })
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+        // a composite has no evaluation of its own
+        let square = &r.composites[0];
+        let err = CurveEvaluate::evaluate(square, k, 0.5, 0, false, false).unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::NoEvaluationOfItsOwn)
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+        assert_eq!(
+            CurveEvaluate::evaluate_point(square, k, 0.5)
+                .unwrap_err()
+                .curve_failure(),
+            Some(&CurveFailure::NoEvaluationOfItsOwn)
+        );
+        // the corner builder does not build a curve-extension corner
+        let err = create_corner(
+            k,
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.1, 0.0),
+            Vec3::X,
+            Vec3::new(1.1, 0.0, 0.0),
+            Vec3::Y,
+            OffsetCornerType::CurveExtension,
+            0.1,
+            1e-6,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::CornerByCurveExtension)
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
     }
 
     #[test]

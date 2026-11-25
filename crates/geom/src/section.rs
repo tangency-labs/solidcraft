@@ -30,7 +30,9 @@ use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 /// Aggregate input records/references, and the selected conversion's output items, at most.
 /// Input counts curves, wires, regions, contacts, curve uses and hole references together.
 pub const MAX_ITEMS: usize = 100_000;
-pub(crate) const MAX_NUMBER: f64 = 1e12;
+/// The largest coordinate or length a section, or a drawing measurement
+/// (`solidcraft_doc::drawing::measure`), takes.
+pub const MAX_NUMBER: f64 = 1e12;
 const FRAME_TOLERANCE: f64 = 1e-8;
 
 /// A section's geometric result, without source identity, freshness or persistence semantics.
@@ -56,7 +58,7 @@ pub struct SectionCurve {
 
 /// How the producer represents its source: the hidden-line drawing's accuracy, which a section
 /// shares.
-pub use solidcore_ops::hlr::CurveAccuracy;
+pub use solidcore_record::CurveAccuracy;
 
 /// An ordered connected chain. `closed` is explicit, never inferred or repaired.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

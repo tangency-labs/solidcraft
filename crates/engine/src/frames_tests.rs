@@ -502,6 +502,18 @@ fn an_object_form_axis_maps_into_a_moved_component() {
     }
 }
 
+#[test]
+fn a_coil_axis_vector_in_either_form_turns_into_the_component_frame() {
+    let mut s = moved_part();
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "90 deg", "origin": [50, 0, 0]}));
+    // The component's local X axis points along world Y after the quarter turn.
+    for axis in [json!([0, 2, 0]), json!({"x": 0, "y": 2, "z": 0})] {
+        let params = json!({"axis": axis});
+        let mapped = crate::frames::to_local(&s, "solid.coil", &params).unwrap().unwrap_or_else(|| panic!("did not map {params}"));
+        assert!(near(crate::params::vec3(&mapped["axis"]).unwrap(), Vec3::new(2.0, 0.0, 0.0)), "{params} mapped to {mapped}");
+    }
+}
+
 /// A hole whose position and direction are written `{x, y, z}` is drilled like one written
 /// `[x, y, z]`, in a turned component picked from the root: the direction turns with the body.
 #[test]
@@ -970,6 +982,27 @@ fn a_hole_picked_on_a_turned_part_drills_it_past_other_parts_frames() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// Cap is turned 180° about Z and moved 10 mm along -X: its (x, y, z) is shown at (-x - 10, -y, z).
+#[test]
+fn a_hole_by_reference_edges_on_a_turned_part_finds_its_edges() {
+    let bore = std::f64::consts::PI * 2.0 * 2.0 * 5.0;
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Base", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Base block"}));
+    run(&mut s, "component.create", json!({"name": "Cap", "parent": "root"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Cap block"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Cap:1", "axis": [0, 0, 1], "angle": "180 deg", "translate": [-10, 0, 0]}));
+    let references = json!([{"edge": [-10, -15, 10], "distance": 10}, {"edge": [-30, 0, 10], "distance": 12}]);
+    run(&mut s, "solid.hole", json!({"position": [-30, -15, 10], "diameter": 4, "depth": 5, "references": references, "name": "H"}));
+    let f = s.doc.find_feature("H").unwrap();
+    let solidcraft_doc::FeatureKind::Hole { position, .. } = &f.kind else { panic!("not a hole") };
+    assert!(near(position.0, Vec3::new(10.0, 12.0, 10.0)), "{:?}", position.0);
+    assert_eq!(body_volume(&s, "Base block"), BLOCK);
+    let cap = body_volume(&s, "Cap block");
+    assert!((cap - (BLOCK - bore)).abs() < 1e-6 * BLOCK, "{cap}");
+}
+
 /// Where the edges of two parts lie in one place in the world, a pick without `body` is refused,
 /// naming both; with `body`, or a pick's own `body`, the named part is cut.
 #[test]
@@ -1326,4 +1359,63 @@ fn a_plane_origin_given_as_expressions_maps_into_a_moved_and_turned_component() 
         let world = sketch_world_points(&mut s, "S");
         assert!(world.iter().any(|p| near(*p, expected)), "station {station}: {world:?}");
     }
+}
+
+/// A mirror or pattern in the root of a cut drawn in the root lands, in a body of a component
+/// placed turned 180° about Z and lifted 20 mm, where the copy is shown, as the cut itself does
+/// (#19451): its tools are made in the root's frame and taken into that body's frame. They were
+/// used as they were, in the body's own frame, and cut a pocket at the copy's place turned about
+/// the component's axis, through the whole body. Two 40 x 40 x 10 boxes, A unplaced and B placed so,
+/// a 6 x 5 cut down from z = 25 at x 1..7, y 5..10 through both: it takes 300 mm³ of A and the top
+/// 5 mm of B, 150 mm³.
+#[test]
+fn a_mirror_or_pattern_of_a_root_cut_lands_where_shown_in_a_placed_component() {
+    let setup = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "center": [0, 0, 5], "body_name": "BoxA"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-10, -20, 0], "body_name": "BoxB"}));
+        for (c, b) in [("A", "BoxA"), ("B", "BoxB")] {
+            run(&mut s, "component.create", json!({"name": c, "parent": "root", "activate": false}));
+            run(&mut s, "component.move_bodies", json!({"bodies": [b], "component": c}));
+        }
+        let turn = json!({"occurrence": "B:1", "axis": [0, 0, 1], "angle": "180 deg", "origin": [0, 0, 0], "translate": [0, 0, 20]});
+        run(&mut s, "occurrence.move", turn);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 25, "name": "CutSketch"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [1, 5], "p1": [7, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let cut =
+            json!({"distance": 10, "through_all": true, "direction": "negative", "operation": "cut", "targets": ["BoxA", "BoxB"], "name": "Cut"});
+        run(&mut s, "solid.extrude", cut);
+        s
+    };
+    let body_volume = |s: &Session, name: &str| {
+        let state = s.model.state();
+        solidcraft_kernel::measure(&state.body(name).unwrap_or_else(|| panic!("{name}")).body).unwrap().volume
+    };
+    let faces = |s: &Session, name: &str| s.model.state().body(name).map_or(0, |b| b.body.face_count());
+    // Mirrored across x = 5: the copy is at x 3..9, so each body loses x 1..9 (A 400, B 200 mm³),
+    // and B keeps one pocket (11 faces). The copy used in B's own frame cut a second pocket, at
+    // x -9..-3, through the whole of B (B 15550 mm³, 15 faces).
+    let mut s = setup();
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": 5, "name": "MirrorPlane"}));
+    run(&mut s, "solid.mirror", json!({"features": ["Cut"], "plane": "MirrorPlane", "name": "Mirror"}));
+    assert!((body_volume(&s, "BoxA") - 15600.0).abs() < 1e-6, "{}", body_volume(&s, "BoxA"));
+    assert!((body_volume(&s, "BoxB") - 15800.0).abs() < 1e-6, "{}", body_volume(&s, "BoxB"));
+    assert_eq!(faces(&s, "BoxB"), 11);
+    // Moving B's occurrence after the mirror gives what mirroring after the move gives, not the
+    // mirror's earlier result from the cache: 10 mm along -x takes B clear of the copy.
+    let moved = json!({"occurrence": "B:1", "axis": [0, 0, 1], "angle": "0 deg", "origin": [0, 0, 0], "translate": [-10, 0, 0]});
+    run(&mut s, "occurrence.move", moved.clone());
+    let later = body_volume(&s, "BoxB");
+    let mut first = setup();
+    run(&mut first, "occurrence.move", moved);
+    run(&mut first, "construct.plane.offset", json!({"base": "YZ", "offset": 5, "name": "MirrorPlane"}));
+    run(&mut first, "solid.mirror", json!({"features": ["Cut"], "plane": "MirrorPlane", "name": "Mirror"}));
+    let moved_first = body_volume(&first, "BoxB");
+    assert!((later - moved_first).abs() < 1e-6 && (later - 15800.0).abs() > 1.0, "moved after {later}, before {moved_first}");
+    // Patterned 10 mm along -y: the copy is at y -5..0, apart from the cut (A 600, B 300 mm³).
+    let mut s = setup();
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Cut"], "dir1": [0, -1, 0], "count1": 2, "spacing1": 10, "name": "Pat"}));
+    assert!((body_volume(&s, "BoxA") - 15400.0).abs() < 1e-6, "{}", body_volume(&s, "BoxA"));
+    assert!((body_volume(&s, "BoxB") - 15700.0).abs() < 1e-6, "{}", body_volume(&s, "BoxB"));
 }
