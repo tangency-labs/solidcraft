@@ -1547,3 +1547,77 @@ fn a_swept_circle_s_record_opens_again() {
     }
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+/// A profile's runs of arcs on one circle are found and joined as [`join_arcs`] joins them: a
+/// circle in two halves of one frame is the full circle from its frame's start; two frames
+/// close at the middle of the longer; an open run in a loop with a line is one arc and the line
+/// stays; a profile with no such run is as given.
+#[test]
+fn the_runs_of_a_profile_join_as_join_arcs_joins_them() {
+    rig_fixes();
+    let whole = solidcore_ops::sweep::join_circle_runs(&halves(), JOIN).unwrap();
+    assert_eq!(
+        whole,
+        [join_arcs(&halves(), Join::ClosedAtFrameStart, JOIN).unwrap()]
+    );
+    let framed = solidcore_ops::sweep::join_circle_runs(&two_frames(), JOIN).unwrap();
+    assert_eq!(
+        framed,
+        [join_arcs(&two_frames(), Join::ClosedAtMiddleOfLongest, JOIN).unwrap()]
+    );
+    let d = half_disc();
+    let open = solidcore_ops::sweep::join_circle_runs(&d, JOIN).unwrap();
+    assert_eq!(
+        open,
+        [join_arcs(&d[..2], Join::Open, JOIN).unwrap(), d[2].clone()]
+    );
+    let square = [
+        line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+        line([1.0, 0.0, 0.0], [1.0, 1.0, 0.0]),
+        line([1.0, 1.0, 0.0], [0.0, 1.0, 0.0]),
+        line([0.0, 1.0, 0.0], [0.0, 0.0, 0.0]),
+    ];
+    assert_eq!(
+        solidcore_ops::sweep::join_circle_runs(&square, JOIN).unwrap(),
+        square
+    );
+    assert!(solidcore_ops::sweep::join_circle_runs(&[], JOIN).is_err());
+}
+
+/// A circle in two halves lofted to a point above its centre is a cone: the base and a ruled
+/// wall on each half, volume pi r^2 h / 3; a half disc's arc gets a ruled wall and its line a
+/// triangle.
+#[test]
+fn a_curved_section_lofts_to_a_point_as_a_cone() {
+    rig_fixes();
+    let cone = loft_to_point(&halves(), [0.0, 0.0, 10.0]).unwrap();
+    assert_eq!(faces(&cone), 3, "the base and two walls");
+    assert!(rel(cone.volume(1e-8).unwrap(), 250.0 * PI / 3.0) < 1e-7);
+    let half = loft_to_point(&half_disc(), [0.0, 0.0, 10.0]).unwrap();
+    assert_eq!(faces(&half), 4, "the base, two ruled walls and a triangle");
+    assert!(rel(half.volume(1e-8).unwrap(), 125.0 * PI / 3.0) < 1e-7);
+}
+
+/// A tapered duct of squares lofts with flat sides: six faces, every one a plane (the skin would
+/// make the sides bilinear B-spline surfaces), and the frustum's volume.
+#[test]
+fn a_loft_of_two_squares_has_planar_sides() {
+    rig_fixes();
+    let b = loft(
+        &[square(0.0, 0.0, 20.0, 0.0), square(5.0, 5.0, 10.0, 10.0)],
+        1,
+        true,
+    )
+    .unwrap();
+    assert_eq!(faces(&b), 6);
+    let (record, _) = b.to_record().unwrap();
+    assert!(
+        record.faces.iter().all(|f| matches!(
+            f.surface,
+            solidcore_record::brep::Surface::Plane { .. }
+                | solidcore_record::brep::Surface::PlaneThrough { .. }
+        )),
+        "every face a plane"
+    );
+    assert!(rel(b.volume(1e-8).unwrap(), 7000.0 / 3.0) < 1e-9);
+}

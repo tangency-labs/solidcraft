@@ -40,6 +40,7 @@ const NAVIGATE_CONTRACT: TypedContract<NavigateParams> = TypedContract::new();
 const TOOL_CONTRACT: TypedContract<ToolParams> = TypedContract::new();
 const VISUAL_STYLE_CONTRACT: TypedContract<VisualStyleParams> = TypedContract::new();
 const ORIGIN_AXES_ACROSS_VIEW_CONTRACT: TypedContract<crate::schema::view_navigation::OriginAxesAcrossViewParams> = TypedContract::new();
+const SCALE_BAR_CONTRACT: TypedContract<crate::schema::view_navigation::ScaleBarParams> = TypedContract::new();
 
 // Both existing request forms share the Browser command and its published schema.
 #[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -132,6 +133,8 @@ CommandSpec::new("view.navigator", "Custom View Navigator", crate::checked!("vie
 CommandSpec::new("view.ribbon_tabs_only", "Ribbon Tabs Only", crate::checked!("view.ribbon_tabs_only", ribbon_tabs_only))
     .icon("chevron").noundo().doc_only().contract(&RIBBON_TABS_ONLY_CONTRACT).output(output_schema_for::<RibbonTabsOnly>)
     .params("on?: bool (omitted: switch) → on?; fold the ribbon to its tab row, a tab click shows its panels over the view (window setting)"),
+CommandSpec::new("view.parts_library", "Parts library", parts_library)
+    .icon("folder").noundo().doc_only().params("visible?: bool (omitted: toggle) → visible?; show the parts library card (window setting)"),
 CommandSpec::new("view.toolbar_reset_all", "Reset All Toolbar Tabs", crate::checked!("view.toolbar_reset_all", toolbar_reset_all))
     .icon("restore").noundo().doc_only().contract(&TOOLBAR_RESET_ALL_CONTRACT).output(output_schema_for::<ToolbarResetAll>)
     .params("{} → {}; put the buttons of every toolbar tab back to their defaults (window setting; hidden tabs stay hidden); never asks"),
@@ -183,6 +186,8 @@ CommandSpec::new("view.origin_axes_across_view", "Origin Axes Across the Whole V
     .icon("origin").noundo().doc_only().contract(&ORIGIN_AXES_ACROSS_VIEW_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::OriginAxesAcrossViewResult>).params("enabled: bool → enabled; extend the origin axes across the view, or keep the short axes when false; display only, never opens a dialog"),
 CommandSpec::new("view.perspective", "Perspective view", crate::checked!("view.perspective", perspective))
     .icon("perspective").noundo().doc_only().contract(&PERSPECTIVE_CONTRACT).output(output_schema_for::<PerspectiveResult>).params("enabled: bool → enabled; draw the view in perspective, or orthographic when false; a sketch being edited is always shown orthographic"),
+CommandSpec::new("view.scale_bar", "Scale Bar", crate::checked!("view.scale_bar", scale_bar))
+    .icon("measure").noundo().doc_only().contract(&SCALE_BAR_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::ScaleBarResult>).params("enabled: bool → enabled; show a bar in the view's bottom left corner and the round length it stands for in the design's units (at the view's centre in perspective), or hide it when false; display only, never opens a dialog"),
 CommandSpec::new("view.angle_readout", "View Angles", crate::checked!("view.angle_readout", angle_readout))
     .icon("camera").noundo().doc_only().contract(&ANGLE_READOUT_CONTRACT).output(crate::schema::output_schema_for::<crate::schema::view_navigation::AngleReadoutResult>).params("enabled: bool → enabled; show the view's pitch, yaw and roll (degrees, as view.apply's camera in radians) and Ortho or Persp under the orientation gizmo; display only, never opens a dialog"),
 CommandSpec::new("view.navigate", "Navigate View", crate::checked!("view.navigate", navigate))
@@ -191,7 +196,7 @@ CommandSpec::new("view.navigate", "Navigate View", crate::checked!("view.navigat
     .doc_only()
     .contract(&NAVIGATE_CONTRACT)
     .output(output_schema_for::<NavigateResult>)
-    .params("camera: Camera; direction?: [x,y,z] in the camera's up-axis frame; or action: left|right|up|down|clockwise|counterclockwise|home|fit, degrees?: 0..180 (how far left|right|up|down turn; default 90), fit?: bool (frame the whole model from the new direction as well, as home does; default false); or motion: pan|orbit|zoom, delta?: [dx,dy] (pixels, each ±10000), free_orbit?: bool (orbit through poles, default false), viewport?: [width,height] (1..1000000, required for pan or pivot), pivot?: [x,y,z], factor?: 0.05..20 (required for zoom), anchor?: [x,y,z] → camera, fit, continuous?"),
+    .params("camera: Camera; direction?: [x,y,z] in the camera's up-axis frame; or action: left|right|up|down|clockwise|counterclockwise|turn_around|home|fit, degrees?: 0..180 (how far left|right|up|down turn; default 90), fit?: bool (frame the whole model from the new direction as well, as home does; default false); or motion: pan|orbit|zoom, delta?: [dx,dy] (pixels, each ±10000), free_orbit?: bool (orbit through poles, default false), viewport?: [width,height] (1..1000000, required for pan or pivot), pivot?: [x,y,z], factor?: 0.05..20 (required for zoom), anchor?: [x,y,z] → camera, fit, continuous?"),
 CommandSpec::new("view.normal_to", "Normal to Selection", crate::checked!("view.normal_to", normal_to))
         .icon("camera")
         .noundo()
@@ -424,6 +429,9 @@ fn ground_shadow(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn navigation_bar(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.navigation_bar", "visible")
+}
+fn parts_library(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.parts_library", "visible")
 }
 
 /// `view.browser`: the Browser tree panel is a window setting, so the engine only checks the
@@ -680,6 +688,7 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
             Some("down") => cam = turn(-u, x),
             Some("clockwise") => cam.roll = (cam.roll + FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
             Some("counterclockwise") => cam.roll = (cam.roll - FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
+            Some("turn_around") => cam.rotate_in_view(solidcore_record::Vec3::new(0.0, std::f64::consts::PI, 0.0)),
             Some("home") => {
                 cam.set_view(StandardView::Iso);
                 fit = true;
@@ -798,6 +807,7 @@ mod tests {
             ("view.grid", "on"),
             ("view.ground_shadow", "on"),
             ("view.navigation_bar", "visible"),
+            ("view.parts_library", "visible"),
         ] {
             assert_eq!(s.execute(id, &json!({})).unwrap(), json!({}));
             assert_eq!(s.execute(id, &Value::Null).unwrap(), json!({}));
@@ -821,6 +831,7 @@ mod tests {
             "view.grid",
             "view.ground_shadow",
             "view.navigation_bar",
+            "view.parts_library",
         ] {
             for params in [json!(true), json!(1), json!("orbit"), json!([]), json!({"unexpected":true})] {
                 assert!(s.execute(id, &params).is_err(), "{id}: {params}");
@@ -1228,6 +1239,38 @@ mod tests {
     }
 
     #[test]
+    fn turn_around_reverses_the_view_about_screen_up_without_editing_the_design() {
+        for up in [UpAxis::Z, UpAxis::Y] {
+            for (yaw, pitch, roll) in [
+                (0.0, 0.0, 0.0),
+                (0.8, 0.6, 0.4),
+                (-0.5, -0.3, 1.7),
+                (0.7, std::f64::consts::FRAC_PI_2, 0.3),
+                (-0.4, -std::f64::consts::FRAC_PI_2, -0.8),
+            ] {
+                let mut s = Session::default();
+                let before = s.doc.to_json();
+                let cam = Camera { up, yaw, pitch, roll, target: Vec3::new(10.0, 20.0, 30.0), distance: 123.0, fov: 0.6 };
+                let (right, screen_up, back) = cam.basis();
+                for fit in [false, true] {
+                    let result = s.execute("view.navigate", &json!({"camera":cam,"action":"turn_around","fit":fit})).unwrap();
+                    assert_eq!(result["fit"], fit);
+                    let to: Camera = serde_json::from_value(result["camera"].clone()).unwrap();
+                    let (turned_right, turned_up, turned_back) = to.basis();
+                    assert!(turned_right.dist(-right) < 1e-9 && turned_back.dist(-back) < 1e-9, "{cam:?} -> {to:?}");
+                    assert!(turned_up.dist(screen_up) < 1e-9, "screen up stays fixed: {cam:?} -> {to:?}");
+                    assert_eq!((to.target, to.distance, to.fov, to.up), (cam.target, cam.distance, cam.fov, cam.up));
+                    let again = s.execute("view.navigate", &json!({"camera":to,"action":"turn_around"})).unwrap();
+                    let again: Camera = serde_json::from_value(again["camera"].clone()).unwrap();
+                    assert!(again.basis().0.dist(right) < 1e-9 && again.back().dist(back) < 1e-9);
+                }
+                assert_eq!(s.doc.to_json(), before);
+                assert!(s.undo.is_empty());
+            }
+        }
+    }
+
+    #[test]
     fn arrows_roll_and_home_are_programmatic_and_reject_hostile_input() {
         let mut s = Session::default();
         let cam = Camera::default();
@@ -1328,6 +1371,13 @@ fn origin_axes_across_view(_s: &mut Session, p: &Value) -> Result<Value> {
     typed_reply(cmd, crate::schema::view_navigation::OriginAxesAcrossViewResult { enabled, param_warnings: Vec::new() })
 }
 
+/// The scale bar in the view's bottom left corner (#375): an application preference, not a design edit.
+fn scale_bar(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.scale_bar";
+    let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad(cmd, "`enabled` must be a boolean"))?;
+    typed_reply(cmd, crate::schema::view_navigation::ScaleBarResult { enabled, param_warnings: Vec::new() })
+}
+
 fn next_tab(_s: &mut Session, _p: &Value) -> Result<Value> {
     tab_step(1)
 }
@@ -1355,6 +1405,22 @@ mod ambient_occlusion_tests {
             }
             for params in [json!({}), json!({"enabled": 1}), json!({"enabled": "true"}), json!({"enabled": null})] {
                 assert!(s.execute("view.origin_axes_across_view", &params).is_err(), "{param_check:?}: {params}");
+            }
+            assert_eq!(s.doc.to_json(), design);
+            assert!(s.undo.is_empty() && s.camera.is_none());
+        }
+    }
+
+    #[test]
+    fn scale_bar_validates_without_editing_design_history_or_camera() {
+        for param_check in crate::schema::ParamCheck::ALL {
+            let mut s = Session { param_check, ..Session::default() };
+            let design = s.doc.to_json();
+            for enabled in [true, false] {
+                assert_eq!(s.execute("view.scale_bar", &json!({"enabled": enabled})).unwrap(), json!({"enabled": enabled}));
+            }
+            for params in [json!({}), json!({"enabled": 1}), json!({"enabled": "true"}), json!({"enabled": null})] {
+                assert!(s.execute("view.scale_bar", &params).is_err(), "{param_check:?}: {params}");
             }
             assert_eq!(s.doc.to_json(), design);
             assert!(s.undo.is_empty() && s.camera.is_none());
