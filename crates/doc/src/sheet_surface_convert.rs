@@ -2928,6 +2928,32 @@ pub(crate) fn face_region(b: &Body, q: &Query, plane: &Plane, out: Vec3, f: usiz
     face_chart(b, q, &Shape::Plane { plane: *plane, out }, f, sag, tol).ok().map(|(r, _)| r)
 }
 
+/// Face `f` of `b`, a cylinder, as a region in its own chart: x along its axis, y the angle
+/// round it (unwrapped on one turn). `None` for a face that is not a cylinder or whose loops
+/// cannot be read. For the Midsurface pairing of round walls.
+pub(crate) fn cylinder_chart(b: &Body, q: &Query, f: usize, tol: f64) -> Option<Region2> {
+    let shape = Shape::of(b, q, f, false, tol).ok()?;
+    if !matches!(shape, Shape::Cylinder { .. }) {
+        return None;
+    }
+    let sag = (b.size() * 1e-4).max(1e-4);
+    face_chart(b, q, &shape, f, sag, tol).ok().map(|(r, _)| r)
+}
+
+/// Face `f` of `b`, a cylinder, as a region in the chart of cylinder face `host` (the same axis,
+/// the same angle origin and sense, `f`'s own radius): where two coaxial faces lie round the axis
+/// compared on one chart. `None` when either is not a cylinder or a loop cannot be read.
+pub(crate) fn cylinder_chart_in(b: &Body, q: &Query, f: usize, host: usize, tol: f64) -> Option<Region2> {
+    let (Shape::Cylinder { origin, axis, e1, e2, inward, .. }, Shape::Cylinder { radius, .. }) =
+        (Shape::of(b, q, host, false, tol).ok()?, Shape::of(b, q, f, false, tol).ok()?)
+    else {
+        return None;
+    };
+    let shape = Shape::Cylinder { origin, axis, e1, e2, radius, inward };
+    let sag = (b.size() * 1e-4).max(1e-4);
+    face_chart(b, q, &shape, f, sag, tol).ok().map(|(r, _)| r)
+}
+
 /// A point of face `f`: halfway along the first edge of its outer loop.
 fn face_point(q: &Query, f: usize) -> Option<Vec3> {
     let face = q.record().faces.get(f)?;

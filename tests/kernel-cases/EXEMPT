@@ -521,6 +521,8 @@ storage.get                       plugins: a plugin's own data in the design, no
 storage.list                      plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 storage.patch                     plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 storage.set                       plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
+surface.midsurface                tested in the engine: crates/engine/src/schema/surface_midsurface_tests.rs and crates/engine/src/midsurface_samples_tests.rs (the pairing and sheets in crates/doc/src/midsurface.rs tests)
+surface.midsurface_analyze        read-only analysis, no geometry made: crates/engine/src/schema/surface_midsurface_tests.rs (the analysis in crates/doc/src/midsurface.rs tests)
 tab.layout.apply                   manages an application view layout; no geometry, tested in the engine and UI
 tab.layout.list                    manages an application view layout; no geometry, tested in the engine and UI
 tab.layout.remove                  manages an application view layout; no geometry, tested in the engine and UI

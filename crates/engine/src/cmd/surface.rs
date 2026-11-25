@@ -13,13 +13,17 @@ use solidcraft_kernel::{Construction, Continuity};
 
 use super::CommandSpec;
 use super::features::{add_feature, axis_param, check_expr, extent_param, feature_sketch, operation, plane_param, profiles, sketch_id};
-use crate::params::{bad, bool_, expr, num, str_, string_list, vec3};
+use crate::params::{bad, bool_, expr, expr_problem, num, str_, string_list, vec3};
 use crate::schema::features::{FeatureResult, SurfaceSweepParams};
 use crate::schema::surface::{
     FairParams, OffsetParams, PatchParams, PatchResult, ReverseNormalParams, StitchParams, SurfaceExtendParams, SurfaceLoftParams, SurfaceTrimParams,
     ThickenParams, UnstitchParams, UntrimParams,
 };
 use crate::schema::surface_blend::BlendParams;
+use crate::schema::surface_midsurface::{
+    MidsurfaceAnalysis, MidsurfaceAnalyzeParams, MidsurfaceCluster, MidsurfaceCompleteness, MidsurfaceLeftover, MidsurfacePair, MidsurfaceParams,
+    MidsurfaceUncovered,
+};
 use crate::schema::surface_profile::{SurfaceExtrudeParams, SurfaceRevolveParams};
 use crate::schema::surface_ruled::SurfaceRuledParams;
 use crate::schema::{TypedContract, output_schema_for};
@@ -41,6 +45,8 @@ const BLEND_CONTRACT: TypedContract<BlendParams> = TypedContract::new();
 const SURFACE_RULED_CONTRACT: TypedContract<SurfaceRuledParams> = TypedContract::new();
 const SURFACE_EXTRUDE_CONTRACT: TypedContract<SurfaceExtrudeParams> = TypedContract::new();
 const SURFACE_REVOLVE_CONTRACT: TypedContract<SurfaceRevolveParams> = TypedContract::new();
+const MIDSURFACE_CONTRACT: TypedContract<MidsurfaceParams> = TypedContract::new();
+const MIDSURFACE_ANALYZE_CONTRACT: TypedContract<MidsurfaceAnalyzeParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("surface.patch", "Patch", crate::checked!("surface.patch", patch)).begins_edit()
@@ -103,6 +109,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&OFFSET_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("faces: [[x,y,z]] (points on the faces); body?; distance: expr (signed, along the faces' normals; 0 copies the faces); chain?: bool (each pick's whole smooth chain of faces); tolerance?: expr (how far a fitted face may stray, default 0.01 mm). Planes and cylinders move exactly; other faces are fitted. A new surface body; stays_surface?: bool (default true: a result whose shells close stays a surface body, which Stitch makes a solid; false: it becomes a solid, as features saved before it keep)"),
+    CommandSpec::new("surface.midsurface", "Midsurface", crate::checked!("surface.midsurface", midsurface)).begins_edit()
+        .at("SURFACE", "CREATE")
+        .icon("surface_offset")
+        .contract(&MIDSURFACE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("body; max_thickness?: expr (default: the analysis's suggestion); min_thickness?: expr (default 0); min_aspect?: number (default 5: walls whose span is less than this many times their thickness need a decision; lower flags fewer, higher more); pairs?: [[[x,y,z], [x,y,z]]] (a point on each face of each pair to build, as surface.midsurface_analyze lists them; default: the pairs it is sure of); exclude?: [[x,y,z]] (points on faces whose pairs are left out); include_review_pairs?: bool (default false); carry_holes?: bool (default true: holes through both faces stay holes); suppress_holes_below?: expr (default 0: holes no wider are filled); keep_original?: bool (default true); stitch?: bool (default true: one surface body sewn where sheets meet, edges where three meet left open, a solid where the sheets close, as surface.stitch's; false: a body per sheet, and per piece of a sheet a joint cut in pieces across a carried hole); name?, body_name?. The surface halfway between each pair of faces that face each other across material (flat and round walls), joined where walls meet. The feature stores the pairs chosen (a round pair not built yet among them); the reply's warning lists what is not covered"),
+    CommandSpec::new("surface.midsurface_analyze", "Midsurface Analysis", crate::checked!("surface.midsurface_analyze", midsurface_analyze))
+        .noundo().read_only()
+        .icon("surface_offset")
+        .contract(&MIDSURFACE_ANALYZE_CONTRACT)
+        .output(output_schema_for::<MidsurfaceAnalysis>)
+        .params("body; max_thickness?: expr (default: the suggestion from a first look); min_thickness?: expr (default 0); min_aspect?: number (default 5). Read-only: the proposed pairs (faces, points, thickness, area, coverage, aspect, confidence high|review, notes), the faces in no pair with their reasons (a rim of a wall is accounted for), the wall thicknesses found with a suggested max_thickness each, and what building the confident pairs leaves out"),
     CommandSpec::new("surface.ruled", "Ruled Surface", crate::checked!("surface.ruled", ruled)).begins_edit()
         .at("SURFACE", "CREATE")
         .icon("surface_ruled")
@@ -590,6 +608,223 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         stays_surface: stays_surface(p, cmd)?,
     };
     add_feature(s, p, kind)
+}
+
+/// An optional length or expression under `key`: `None` when absent or null; a value given that
+/// is not a number or an expression is refused rather than read as absent (and so defaulted).
+fn optional_expr(p: &Value, key: &str, cmd: &str) -> Result<Option<Expr>> {
+    match p.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        given => expr(p, key).map(Some).ok_or_else(|| bad(cmd, format!("`{key}` {}", expr_problem(given)))),
+    }
+}
+
+/// An optional true/false under `key`: `default` when absent or null; any other value (such as
+/// the string "false") is refused rather than read as absent, so it cannot flip to the default.
+fn optional_flag(p: &Value, key: &str, default: bool, cmd: &str) -> Result<bool> {
+    match p.get(key) {
+        None | Some(Value::Null) => Ok(default),
+        Some(Value::Bool(b)) => Ok(*b),
+        Some(_) => Err(bad(cmd, format!("`{key}` must be true or false"))),
+    }
+}
+
+/// Midsurface's body and limits, read and checked: the body, its name, the thickness range (the
+/// given limit or the analysis's suggestion) and the aspect limit.
+struct MidsurfaceInput {
+    body: solidcraft_kernel::Body,
+    name: String,
+    max: f64,
+    max_expr: Option<Expr>,
+    min: f64,
+    min_expr: Option<Expr>,
+    min_aspect: f64,
+}
+
+fn midsurface_input(s: &Session, p: &Value, cmd: &str) -> Result<MidsurfaceInput> {
+    use solidcraft_doc::midsurface as mid;
+    let name = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
+    let body = s.model.state().body(&name).map(|b| b.body.clone()).ok_or_else(|| bad(cmd, format!("no body `{name}`")))?;
+    if body.is_mesh() || body.is_surface() {
+        return Err(bad(cmd, format!("`{name}` is not a solid of exact faces: a mid-surface is taken of a solid (a mesh has no exact faces)")));
+    }
+    let length = |key: &str| -> Result<Option<(Expr, f64)>> {
+        match optional_expr(p, key, cmd)? {
+            None => Ok(None),
+            Some(e) => {
+                let v = s.doc.eval(&e, Kind::Length).map_err(|err| bad(cmd, format!("{key}: {err}")))?;
+                Ok(Some((e, v)))
+            }
+        }
+    };
+    let min_given = length("min_thickness")?;
+    let max_given = length("max_thickness")?;
+    let min = min_given.as_ref().map_or(0.0, |(_, v)| *v);
+    let min_aspect = match p.get("min_aspect") {
+        None | Some(Value::Null) => 5.0,
+        Some(v) => v.as_f64().filter(|a| a.is_finite() && *a >= 0.0).ok_or_else(|| bad(cmd, "`min_aspect` must be a number, 0 or more"))?,
+    };
+    let max = match &max_given {
+        Some((_, v)) => *v,
+        None => match mid::suggested_max_thickness(&body).map_err(|e| bad(cmd, e.to_string()))? {
+            Some(v) => v,
+            // Nothing confident at any shell-like thickness: look as far as a fifth of the body.
+            None => mid::probe_max_thickness(&body),
+        },
+    };
+    if !(min.is_finite() && max.is_finite() && min >= 0.0 && max > min) {
+        return Err(bad(cmd, "the thickness limits must run from 0 or more up to a larger `max_thickness`"));
+    }
+    Ok(MidsurfaceInput { body, name, max, max_expr: max_given.map(|(e, _)| e), min, min_expr: min_given.map(|(e, _)| e), min_aspect })
+}
+
+/// A list of points under `key`, or an error naming the form.
+fn point_list(p: &Value, key: &str, cmd: &str) -> Result<Vec<solidcore_record::Vec3>> {
+    match p.get(key) {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(items)) if items.len() <= 10_000 => {
+            items.iter().map(|v| vec3(v).ok_or_else(|| bad(cmd, format!("`{key}` must list points [x, y, z]")))).collect()
+        }
+        Some(_) => Err(bad(cmd, format!("`{key}` must list points [x, y, z] (10,000 at most)"))),
+    }
+}
+
+fn midsurface(s: &mut Session, p: &Value) -> Result<Value> {
+    use solidcraft_doc::midsurface as mid;
+    let cmd = "surface.midsurface";
+    // The options are read before the body is scanned: a malformed one is refused at once.
+    // `None` when no pairs were named: build the confident ones. An empty list chooses nothing.
+    let asked: Option<Vec<[[f64; 3]; 2]>> = match p.get("pairs") {
+        None | Some(Value::Null) => None,
+        Some(Value::Array(items)) if items.is_empty() => {
+            return Err(bad(cmd, "`pairs` is empty: name at least one pair, or leave it out to build the confident ones"));
+        }
+        Some(Value::Array(items)) if items.len() <= 10_000 => Some(
+            items
+                .iter()
+                // Two entries first: a malformed pair of thousands of points is not read.
+                .map(|pair| match pair.as_array().map(Vec::as_slice) {
+                    Some([a, b]) => match (vec3(a), vec3(b)) {
+                        (Some(a), Some(b)) => Ok([[a.x, a.y, a.z], [b.x, b.y, b.z]]),
+                        _ => Err(bad(cmd, "`pairs` must list pairs of points [[x, y, z], [x, y, z]], one on each face")),
+                    },
+                    _ => Err(bad(cmd, "`pairs` must list pairs of points [[x, y, z], [x, y, z]], one on each face")),
+                })
+                .collect::<Result<_>>()?,
+        ),
+        Some(_) => return Err(bad(cmd, "`pairs` must list pairs of points [[x, y, z], [x, y, z]] (10,000 at most)")),
+    };
+    let exclude = point_list(p, "exclude", cmd)?;
+    let review = optional_flag(p, "include_review_pairs", false, cmd)?;
+    let carry_holes = optional_flag(p, "carry_holes", true, cmd)?;
+    let stitch = optional_flag(p, "stitch", true, cmd)?;
+    let keep_original = optional_flag(p, "keep_original", true, cmd)?;
+    let suppress = optional_expr(p, "suppress_holes_below", cmd)?;
+    if let Some(e) = &suppress {
+        check_expr(s, e, Kind::Length, cmd, "suppress_holes_below")?;
+    }
+    let input = midsurface_input(s, p, cmd)?;
+    let opts = mid::Options { min_thickness: input.min, max_thickness: input.max, min_aspect: input.min_aspect, tolerance: 0.0 };
+    let analysis = mid::analyze(&input.body, &opts).map_err(|e| bad(cmd, e.to_string()))?;
+    // The pairs asked for, or the confident ones (and those for review, when asked).
+    let mut chosen = match &asked {
+        None => analysis.pairs.iter().filter(|x| review || x.confidence == mid::Confidence::High).cloned().collect(),
+        Some(asked) => mid::pairs_at(&input.body, &analysis, asked).map_err(|e| bad(cmd, e.to_string()))?,
+    };
+    let mut excluded = Vec::new();
+    for at in exclude {
+        let face =
+            mid::face_at(&input.body, [at.x, at.y, at.z]).ok_or_else(|| bad(cmd, format!("`exclude`: no face of `{}` at {at:?}", input.name)))?;
+        excluded.push(face);
+    }
+    chosen.retain(|x| !x.faces.iter().any(|f| excluded.contains(f)));
+    if chosen.is_empty() {
+        let review = analysis.pairs.iter().filter(|x| x.confidence == mid::Confidence::Review).count();
+        return Err(bad(
+            cmd,
+            format!(
+                "no pairs to build: {} pairs of faces between {} and {} mm apart, {review} of them needing a decision (see surface.midsurface_analyze; pass `pairs` or `include_review_pairs`)",
+                analysis.pairs.len(),
+                input.min,
+                input.max
+            ),
+        ));
+    }
+    // The limit is stored as asked, or as the suggestion's number in full: the shortest decimal
+    // that reads back as the same number, so a rebuild checks the limits this call passed.
+    let max_expr = input.max_expr.unwrap_or_else(|| Expr::from(format!("{} mm", input.max)));
+    // The aspect limit is stored when asked for, so the rebuild's warning judges pairs by it.
+    let min_aspect = p.get("min_aspect").filter(|v| !v.is_null()).map(|_| input.min_aspect);
+    let faces: Vec<FacePick> = chosen.iter().flat_map(|x| x.points).map(|[x, y, z]| FacePick(solidcore_record::Vec3::new(x, y, z))).collect();
+    let kind = FeatureKind::SurfaceMidsurface {
+        body: Some(BodyName::from(input.name.as_str())),
+        faces,
+        max_thickness: max_expr,
+        min_thickness: input.min_expr,
+        min_aspect,
+        carry_holes,
+        suppress_holes_below: suppress,
+        stitch,
+        remove_original: !keep_original,
+    };
+    add_feature(s, p, kind)
+}
+
+fn midsurface_analyze(s: &mut Session, p: &Value) -> Result<Value> {
+    use solidcraft_doc::midsurface as mid;
+    let cmd = "surface.midsurface_analyze";
+    let input = midsurface_input(s, p, cmd)?;
+    let opts = mid::Options { min_thickness: input.min, max_thickness: input.max, min_aspect: input.min_aspect, tolerance: 0.0 };
+    let a = mid::analyze(&input.body, &opts).map_err(|e| bad(cmd, e.to_string()))?;
+    let c = mid::completeness(&a, &mid::confident(&a));
+    let reply = MidsurfaceAnalysis {
+        body: input.name,
+        max_thickness: input.max,
+        min_thickness: input.min,
+        pairs: a
+            .pairs
+            .iter()
+            .map(|x| MidsurfacePair {
+                faces: x.faces,
+                points: x.points,
+                thickness: x.thickness,
+                area: x.overlap_area,
+                coverage: x.coverage,
+                aspect: x.aspect,
+                confidence: if x.confidence == mid::Confidence::High { "high" } else { "review" }.into(),
+                round: x.is_round(),
+                filled_over: x.filled_over,
+                notes: x.notes.clone(),
+            })
+            .collect(),
+        leftovers: a
+            .leftovers
+            .iter()
+            .map(|l| {
+                let (reason, gap, pairs) = match &l.reason {
+                    mid::Reason::Rim { pairs } => ("rim", None, pairs.clone()),
+                    mid::Reason::NotPlanar => ("not_plane_or_cylinder", None, Vec::new()),
+                    mid::Reason::OutOfRange { gap } => ("out_of_range", Some(*gap), Vec::new()),
+                    mid::Reason::TooThin { gap } => ("too_thin", Some(*gap), Vec::new()),
+                    mid::Reason::NoOverlap { gap } => ("no_overlap", Some(*gap), Vec::new()),
+                    mid::Reason::NoFacingFace => ("no_facing_face", None, Vec::new()),
+                };
+                MidsurfaceLeftover { face: l.face, reason: reason.into(), gap, pairs }
+            })
+            .collect(),
+        clusters: mid::thickness_clusters(&a)
+            .iter()
+            .map(|k| MidsurfaceCluster { thickness: k.thickness, up_to: k.up_to, area: k.area, pairs: k.pairs, suggested_limit: k.suggested_limit })
+            .collect(),
+        completeness: MidsurfaceCompleteness {
+            faces: c.faces,
+            paired: c.paired.len(),
+            rims: c.rims.len(),
+            uncovered: c.reported.into_iter().map(|(face, why)| MidsurfaceUncovered { face, why }).collect(),
+        },
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn ruled(s: &mut Session, p: &Value) -> Result<Value> {

@@ -325,6 +325,8 @@ pub const DOCUMENTED: &[&str] = &[
     "surface.fair",
     "surface.loft",
     "surface.match",
+    "surface.midsurface",
+    "surface.midsurface_analyze",
     "surface.offset",
     "surface.patch",
     "surface.reverse_normal",
