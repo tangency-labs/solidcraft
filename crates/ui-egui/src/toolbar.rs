@@ -268,7 +268,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 quick_ids: &quick_ids,
                 mark: &|painter, at| solidcraft_look::glyphs::brand_mark(painter, at),
                 name: "SolidCraft",
-                leading: (crate::library::available(app) && !app.home.open).then_some(vec2(app_bar::ITEM_HEIGHT, app_bar::ITEM_HEIGHT)),
+                leading: crate::parts_library::available(app).then_some(vec2(app_bar::ITEM_HEIGHT, app_bar::ITEM_HEIGHT)),
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
                 file: app.tr("ui.file"),
                 file_open,
@@ -329,10 +329,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app_bar::paint_item(ui, rect, app_bar::Control::Documents, &response, app_bar::item_opacity(ui.ctx(), "documents"), "documents");
                     crate::scenario::publish_target("library:toggle", rect);
                 } else {
-                    // Keep the browser's native interaction, tooltip and focus, while the
+                    // Keep the parts library button's own interaction, tooltip and focus, while the
                     // shared bar renderer owns the same shape in the bar and tray.
                     let id = ui.scope_id().with("document_browser_toggle");
-                    let available = app_bar::interaction_only(ui, |ui| crate::library::app_bar_toggle(app, ui, rect));
+                    let available = app_bar::interaction_only(ui, |ui| crate::parts_library::app_bar_toggle(app, ui, rect));
                     if available && let Some(response) = ui.ctx().read_response(id) {
                         app_bar::paint_item(ui, rect, app_bar::Control::Documents, &response, 1.0, "documents");
                     }
@@ -509,7 +509,7 @@ fn fill_overflow_rows(app: &SolveApp, rows: &mut [app_bar::OverflowItem], shown:
                 row.icon = "zoom".to_string();
             }
             "leading" => {
-                row.label = app.tr(if app.preferences.show_document_browser { "library.hide" } else { "library.show" }).to_string();
+                row.label = crate::parts_library::toggle_label(app).to_string();
                 row.icon = "document_browser".to_string();
             }
             _ => {
@@ -539,9 +539,7 @@ fn run_overflow_control(app: &mut SolveApp, id: &str) {
         "managed" => crate::prefs::open_at(app, 0),
         "assistant" => crate::agent_chat::toggle(app),
         "search" => app.start("ui.palette"),
-        "leading" => {
-            app.preferences.show_document_browser = !app.preferences.show_document_browser;
-        }
+        "leading" => crate::parts_library::toggle(app),
         _ => {
             if let Some(command) = id
                 .strip_prefix("quick:")
@@ -1617,7 +1615,8 @@ impl RibbonPanels {
                         size,
                         enabled: can_start(app, selected),
                         pressed: (ribbon_shows_pressed(app, selected.id) && !(persistent && app.preferences.persistent_ribbon_pressed))
-                            || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip),
+                            || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip)
+                            || (selected.id == "view.parts_library" && app.preferences.library_open),
                         // The buttons that leave the sketch or the edit never show pressed; a
                         // tool pinned into their group does.
                         exit: finish
@@ -1641,7 +1640,7 @@ impl RibbonPanels {
                         icon: info.icon,
                         size: ButtonSize { width: 0.0, min_width: 0.0 },
                         enabled: can_start(app, c),
-                        pressed: ribbon_shows_pressed(app, c.id),
+                        pressed: ribbon_shows_pressed(app, c.id) || (c.id == "view.parts_library" && app.preferences.library_open),
                         exit: false,
                         persistent: false,
                         disabled: info.disabled_reason,

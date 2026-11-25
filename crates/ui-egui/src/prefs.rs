@@ -989,6 +989,54 @@ impl ExtrudeStart {
     }
 }
 
+/// The parts library's card size; the columns follow it (three Small, two Medium, one Large
+/// across), and List shows names only. A saved value this version doesn't know (the first
+/// library's 0 to 3) reads as Medium.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LibrarySize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+    List,
+}
+
+impl<'de> Deserialize<'de> for LibrarySize {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = serde_json::Value::deserialize(d)?;
+        Ok(v.as_str().and_then(Self::from_id).unwrap_or_default())
+    }
+}
+
+impl LibrarySize {
+    pub const ALL: [Self; 4] = [Self::Small, Self::Medium, Self::Large, Self::List];
+
+    /// The size as `ui.library` and the saved preferences spell it.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Medium => "medium",
+            Self::Large => "large",
+            Self::List => "list",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.id() == id)
+    }
+
+    /// The message id of the size's label.
+    pub fn label_id(self) -> &'static str {
+        match self {
+            Self::Small => "parts_library.size_small",
+            Self::Medium => "parts_library.size_medium",
+            Self::Large => "parts_library.size_large",
+            Self::List => "parts_library.size_list",
+        }
+    }
+}
+
 /// Which program reads the 3D mouse on Linux when both spacenavd and the device itself (hidraw)
 /// are there (Preferences: "3D mouse driver"). Read by the app's reader, not by this crate.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -3993,6 +4041,11 @@ fn prepare_preferences(
     {
         return Err("`extrude_start` must be fixed, last_used or custom".into());
     }
+    if let Some(v) = p.get("library_size")
+        && v.as_str().and_then(LibrarySize::from_id).is_none()
+    {
+        return Err("`library_size` must be small, medium, large or list".into());
+    }
     if let Some(v) = p.get("dimension_input")
         && !matches!(v.as_str(), Some("view" | "window"))
     {
@@ -4673,78 +4726,39 @@ mod tests {
     }
 
     #[test]
-    fn document_browser_visibility_defaults_hidden_and_preserves_explicit_choices() {
+    fn the_old_document_browser_settings_load_and_drop_away() {
         use serde_json::json;
+        // Preferences saved by a build with the documents browser: its keys are read past, and the
+        // parts library keeps its own setting (#8206 replaced the browser).
+        let saved = json!({
+            "preferences": {"show_document_browser": true, "library_thumbnail_size": "small", "library_open": true},
+            "document_library": {"root": "/legacy/CAD", "collapsed": false},
+        });
         let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-        assert!(!app.preferences.show_document_browser);
-        for saved in [json!({}), json!({"preferences": {}}), json!({"document_library": {"root": "/legacy/CAD"}})] {
-            app.load_prefs(&saved.to_string());
-            assert!(!app.preferences.show_document_browser);
-        }
-        for collapsed in [true, false] {
-            app.load_prefs(&json!({"preferences": {}, "document_library": {"collapsed": collapsed}}).to_string());
-            assert_eq!(app.preferences.show_document_browser, !collapsed);
-            for visible in [false, true] {
-                app.load_prefs(&json!({"preferences": {"show_document_browser": visible}, "document_library": {"collapsed": collapsed}}).to_string());
-                assert_eq!(app.preferences.show_document_browser, visible, "the canonical preference wins over legacy state");
-                let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-                restored.load_prefs(&app.prefs());
-                assert_eq!(restored.preferences.show_document_browser, visible);
-            }
+        app.load_prefs(&saved.to_string());
+        assert!(app.preferences.library_open, "the parts library's own setting loads");
+        let written: serde_json::Value = serde_json::from_str(&app.prefs()).unwrap();
+        assert!(written.get("document_library").is_none(), "the browser's state is not written back");
+        for key in ["show_document_browser", "library_thumbnail_size"] {
+            assert!(written["preferences"].get(key).is_none(), "{key} is gone");
         }
         super::reset_preferences(&mut app.preferences, super::PAGE_LAYOUT);
-        assert!(!app.preferences.show_document_browser);
+        assert!(!app.preferences.library_open);
     }
 
     #[test]
-    fn document_browser_visibility_checkbox_obeys_cancel_and_ok() {
+    fn parts_library_checkbox_obeys_cancel_and_ok() {
         use serde_json::json;
         let mut h = crate::scenario::Harness::new();
         for button in ["cancel", "ok"] {
             h.call("ui.prefs", json!({"open": "Layout"}));
-            h.app.prefs_window.shell.filter = "Show documents".into();
+            h.app.prefs_window.shell.filter = "Show parts library".into();
             h.frames(3);
-            h.step(&json!({"click": {"handle": "prefs:show_document_browser"}})).unwrap();
-            assert!(h.app.preferences.show_document_browser);
+            h.step(&json!({"click": {"handle": "prefs:library_open"}})).unwrap();
+            assert!(h.app.preferences.library_open);
             h.call("ui.prefs", json!({"button": button}));
-            assert_eq!(h.app.preferences.show_document_browser, button == "ok");
+            assert_eq!(h.app.preferences.library_open, button == "ok");
         }
-    }
-
-    #[test]
-    fn library_thumbnail_size_picker_obeys_cancel_and_ok() {
-        use serde_json::json;
-        let mut h = crate::scenario::Harness::new();
-        for button in ["cancel", "ok"] {
-            h.call("ui.prefs", json!({"open": "Layout"}));
-            h.app.prefs_window.shell.filter = "Document browser".into();
-            h.frames(3);
-            h.step(&json!({"click": {"handle": "prefs:document_browser:small"}})).unwrap();
-            assert_eq!(h.app.preferences.library_thumbnail_size, crate::library::ThumbnailSize::Small);
-            h.call("ui.prefs", json!({"button": button}));
-            assert_eq!(
-                h.app.preferences.library_thumbnail_size,
-                if button == "cancel" { crate::library::ThumbnailSize::Large } else { crate::library::ThumbnailSize::Small }
-            );
-        }
-    }
-
-    #[test]
-    fn library_thumbnail_size_defaults_persists_and_resets() {
-        use crate::library::ThumbnailSize;
-        let legacy: super::Prefs = serde_json::from_value(serde_json::json!({})).unwrap();
-        assert_eq!(legacy.library_thumbnail_size, ThumbnailSize::Large);
-        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-        for (name, size) in [("small", ThumbnailSize::Small), ("medium", ThumbnailSize::Medium), ("large", ThumbnailSize::Large)] {
-            super::set(&mut app, &serde_json::json!({"library_thumbnail_size": name})).unwrap();
-            let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-            restored.load_prefs(&app.prefs());
-            assert_eq!(restored.preferences.library_thumbnail_size, size);
-        }
-        assert!(super::set(&mut app, &serde_json::json!({"library_thumbnail_size": "invalid"})).is_err());
-        app.preferences.library_thumbnail_size = ThumbnailSize::Small;
-        super::reset_preferences(&mut app.preferences, super::PAGE_LAYOUT);
-        assert_eq!(app.preferences.library_thumbnail_size, ThumbnailSize::Large);
     }
 
     #[test]

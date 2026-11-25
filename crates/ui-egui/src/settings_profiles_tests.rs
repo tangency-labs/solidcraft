@@ -38,11 +38,12 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
     // Test change: show_design_view_switcher is a portable key; 110 -> 109 because the
-    // wide_panel_grab key left Preferences, so one fewer portable key.
+    // wide_panel_grab key left Preferences, so one fewer portable key; 109 -> 107 because the
+    // documents browser's show_document_browser and library_thumbnail_size left with it (#8206).
     assert_eq!(
         keys.len(),
-        109,
-        "include document browser visibility and sizing, the repeated-shortcut preference and the browser scroll wheel preferences among the current portable settings"
+        107,
+        "include the repeated-shortcut preference and the browser scroll wheel preferences among the current portable settings"
     );
     for key in [
         "nav",
@@ -59,8 +60,6 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "nav_bridge_enabled",
         "nav_bridge_port",
         "language",
-        "library_thumbnail_size",
-        "show_document_browser",
         "suppress_sketch_snap",
         "browser_scroll_wheel",
     ] {
@@ -836,7 +835,6 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "keep_work_on_tab_switch",
         "language",
         "layout",
-        "library_thumbnail_size",
         "line_drag_draws_one",
         "line_hover_tangent_arc",
         "live_panel_drag_preview",
@@ -877,7 +875,6 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "shortcut_again_ends_tool",
         "shortcut_cycles_modes",
         "show_design_view_switcher",
-        "show_document_browser",
         "show_selected_hidden_edges",
         "sketch_align_points",
         "sketch_auto_dimensions",
@@ -924,7 +921,8 @@ fn profile_keys_cover_the_current_portable_preferences() {
     actual.sort_unstable();
     // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
     // Test change: one more portable key, nav_button_map (what each mouse button drags).
-    assert_eq!(expected.len(), 109);
+    // Test change: two fewer portable keys, show_document_browser and library_thumbnail_size, gone with the document browser.
+    assert_eq!(expected.len(), 107);
     assert_eq!(actual, expected);
 }
 
