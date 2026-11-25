@@ -1,9 +1,7 @@
 //! The replay seam a test installs on its thread: [`crate::runner_kernel`] gives each
 //! runner's kernel that seam ([`solidcore::Kernel::replay`], `solidcore`'s
 //! `surface::surface::replay`, feature `wr57-replay`, which this crate turns on for its
-//! tests only). The WR-450 replay ([`crate::wr450_rows`]), the WR-587 replay
-//! ([`crate::wr587_replay`]) and the target bound's tests
-//! (`units::intersect_curve_class_p1`) install their hooks here.
+//! tests only). The WR-450 replay ([`crate::wr450_rows`]) installs its hooks here.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;

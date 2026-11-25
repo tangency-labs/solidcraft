@@ -336,12 +336,6 @@ fn unitize_written(normal: &mut Vec3, status: impl FnOnce(SolidError) -> SolidEr
 /// area is the call's status), written into `normal` as upstream writes
 /// `crCrvsNormal`.
 fn crvs_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<()> {
-    // (test-only seam of the WR-587 retirement's replay, feature `wr57-replay`)
-    #[cfg(feature = "wr57-replay")]
-    return crate::surface::surface::replay::wrap_loop_normal(k, curves, normal, |n| {
-        area_normal_into(k, curves, n)
-    });
-    #[cfg(not(feature = "wr57-replay"))]
     area_normal_into(k, curves, normal)
 }
 

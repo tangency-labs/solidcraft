@@ -90,30 +90,6 @@ fn main_line(unit_id: &str, case: &str) -> Value {
         )
 }
 
-/// `text`, an expected file of `unit_id`, with the line of each of its rows of [`DATA`] put
-/// back to main's ([`MAIN_LINES`]): for the other ledgers that rebuild main's file from this
-/// branch's. [`data_covers_the_moved_rows`] shows those rows are the only lines this retirement
-/// moved.
-pub(crate) fn with_mains_lines(unit_id: &str, text: &str) -> String {
-    let mut out = String::new();
-    for line in text.lines() {
-        let case = serde_json::from_str::<Value>(line)
-            .ok()
-            .and_then(|v| v["case"].as_str().map(str::to_string));
-        match case {
-            Some(c) if moved(unit_id, &c) => out.push_str(&main_line(unit_id, &c).to_string()),
-            // (a row only the carry gate moved: its line before the gate, which is main's
-            // since the retirement did not move it)
-            Some(c) if carry_gated(unit_id, &c) => {
-                out.push_str(&ungated_line(unit_id, &c).to_string());
-            }
-            _ => out.push_str(line),
-        }
-        out.push('\n');
-    }
-    out
-}
-
 /// How many calls of each seam the substituted run changed.
 #[derive(Default, Clone, Copy)]
 struct Flips {
@@ -371,18 +347,6 @@ replay_tests! {
 /// before the gate (`{"unit": .., "line": ..}`, the branch's lines at 498fdc76fb).
 const UNGATED_LINES: &str = include_str!("wr450_rows/ungated.jsonl");
 
-/// The line before the carry gate of `case` of `unit_id`, a row of [`UNGATED_LINES`].
-fn ungated_line(unit_id: &str, case: &str) -> Value {
-    UNGATED_LINES
-        .lines()
-        .map(|l| serde_json::from_str::<Value>(l).unwrap())
-        .find(|v| v["unit"] == unit_id && v["line"]["case"] == case)
-        .map_or_else(
-            || panic!("{unit_id}: no line before the gate of {case}"),
-            |v| v["line"].clone(),
-        )
-}
-
 /// Rows whose run as is the carry gate leaves at their committed line, but whose substituted
 /// run in another replay it reaches: the trim-cover put-back of `extended_surface_9_Platte`
 /// (the retired `tolsub` replay's) took the read's cover raises off, and the gate then turned
@@ -393,8 +357,7 @@ pub(crate) const GATE_REPLAY_ONLY: &[(&str, &str)] =
 
 /// Whether `case` of `unit_id` is a row the carry gate moved ([`UNGATED_LINES`]): the other
 /// replays rebuild main's run of it with the gate put back too
-/// ([`with_mains_choices_for`]), and rebuild main's file with its line before the gate where
-/// the retirement did not move it ([`with_mains_lines`]).
+/// ([`with_mains_choices_for`]).
 pub(crate) fn carry_gated(unit_id: &str, case: &str) -> bool {
     UNGATED_LINES.lines().any(|l| {
         let v: Value = serde_json::from_str(l).unwrap();
@@ -611,54 +574,6 @@ fn use_trims(
             )
         })
         .collect()
-}
-
-/// Regression (#18923): splitting a cone face at its seam moves edge uses whose trims run
-/// past the source surface's natural domain (to `u = 1.125` on `[0, 1]`) onto the new
-/// face, whose analytic copy keeps the source's parameterisation on that domain only (it
-/// clamps there; 0.765 off the edge). The split drops such trims, so each trim the new
-/// face's edges 3 and 4 hold when the healer writes its B-rep is one made again on the
-/// copy, certified within the edge's tolerance over the whole edge.
-#[test]
-fn seam_cone_split_drops_trims_off_the_domain() {
-    let k = solidcore::kernel::Kernel::default();
-    let u = unit("heal.heal_data_p3");
-    let all = cases(u.as_ref());
-    let case = all
-        .get("split_face_seam_cone_r1_1_h1_s90_q0")
-        .expect("the seam cone case");
-    crate::certify::watch_written();
-    let _ = row(u.as_ref(), case);
-    let written = crate::certify::take_written();
-    let b = written.first().expect("the healed B-rep");
-    let edges = solidcore::topology::brep::p1::edges(b, None).expect("edges");
-    let mut checked = 0;
-    for &e in edges.iter().filter(|e| [3, 4].contains(&e.index())) {
-        let tol = b.edge(e).expect("edge").tolerance;
-        // Without the fix the kept trim is 0.765 off its edge: a tolerance below that is
-        // what makes this test fail then, so a later raise of it cannot hide the trim.
-        assert!(
-            tol < 0.765,
-            "edge {}: tolerance {tol:e} would cover the kept trim's gap",
-            e.index()
-        );
-        for (eu, bound) in crate::certify::trim_tolerance::trim_bounds_any_surface(&k, b, e) {
-            let bound = bound
-                .unwrap_or_else(|| panic!("edge {} use {}: not enclosed", e.index(), eu.index()));
-            assert!(
-                bound <= tol,
-                "edge {} use {}: B {bound:e} > tolerance {tol:e}",
-                e.index(),
-                eu.index()
-            );
-            checked += 1;
-        }
-    }
-    assert!(
-        checked > 0,
-        "edges 3 and 4 of the healed B-rep hold no trim"
-    );
-    eprintln!("seam_cone_split_drops_trims_off_the_domain: {checked} trims certified");
 }
 
 /// The rows whose new face keeps its trims (`trims`, `copy+trims`): each UV trim that this

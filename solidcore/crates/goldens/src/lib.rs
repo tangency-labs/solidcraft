@@ -53,8 +53,6 @@ pub(crate) mod trims_on_edges;
 pub mod util;
 #[cfg(test)]
 pub(crate) mod wr450_rows;
-#[cfg(test)]
-mod wr587_replay;
 
 pub use case::Case;
 pub use case::CaseContext;
@@ -73,8 +71,8 @@ pub use runner::UnitDiff;
 
 /// A runner's kernel: [`solidcore::Kernel::default`]. In this crate's tests it also
 /// carries the replay seam a test has installed on this thread ([`replay_seam`]: the
-/// WR-450 and WR-587 replays' and the target bound's; the seam state is the kernel's, and the
-/// runners make their own kernels, so they take it from here).
+/// WR-450 replay's; the seam state is the kernel's, and the runners make their own kernels,
+/// so they take it from here).
 pub(crate) fn runner_kernel() -> solidcore::Kernel {
     let k = solidcore::Kernel::default();
     #[cfg(test)]
