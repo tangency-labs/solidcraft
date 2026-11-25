@@ -2906,7 +2906,7 @@ impl RawPanelHost {
         let mut output = self.ctx.run_ui(input, |ui| {
             passes += 1;
             self.host.capture_metrics(&self.content.runtime, &self.content.models).unwrap();
-            self.host.capture_reservations(&self.content.runtime, &self.content.catalogue).unwrap();
+            self.host.capture_reservations(&self.content.runtime, &CatalogueLayoutStoreRef(&self.content.catalogue)).unwrap();
             self.host.prepare(&self.content.runtime, self.capacity).unwrap();
             self.root_layer = Some(ui.layer_id());
             if self.bind_fixture_scopes {
@@ -3032,7 +3032,7 @@ impl RawPanelHost {
                     &mut h.runtime,
                     &mut h.native,
                     &mut ContentServices { models: &h.models, commands: &mut h.commands, local: &mut h.local },
-                    &mut h.catalogue,
+                    &mut CatalogueLayoutStore(&mut h.catalogue),
                 )
                 .unwrap();
             if let Some(modal) = modal {
@@ -9204,7 +9204,7 @@ fn late_first_appearance_window_blocks_nested_popup_navigation() {
                             environment.document = Some(DocumentId::new("new-popup-context").unwrap());
                             h.runtime.set_environment(environment, services.local).unwrap();
                             assert_eq!(
-                                raw.host.finish(ui, &mut h.runtime, &mut h.native, &mut services, &mut h.catalogue).unwrap_err().rule,
+                                raw.host.finish(ui, &mut h.runtime, &mut h.native, &mut services, &mut CatalogueLayoutStore(&mut h.catalogue)).unwrap_err().rule,
                                 Rule::Placement
                             );
                         },
@@ -9949,7 +9949,7 @@ fn captured_incoming_workspace_cohort_is_created_measured_and_committed_exactly_
     h.tick().unwrap();
     let mut host = WorkspacePanelHost::new(HostOptions::default()).unwrap();
     host.capture_metrics(&h.runtime, &h.models).unwrap();
-    host.capture_reservations(&h.runtime, &h.catalogue).unwrap();
+    host.capture_reservations(&h.runtime, &CatalogueLayoutStoreRef(&h.catalogue)).unwrap();
     host.prepare(&h.runtime, capacity()).unwrap();
     let mut incoming = h.runtime.layout().layout().clone();
     incoming.workspace = WorkspaceId::new("review.incoming").unwrap();
@@ -9989,7 +9989,7 @@ fn proposed_unavailable_and_unbound_owners_remain_requested_open_without_false_b
     h.tick().unwrap();
     let mut host = WorkspacePanelHost::new(HostOptions::default()).unwrap();
     host.capture_metrics(&h.runtime, &h.models).unwrap();
-    host.capture_reservations(&h.runtime, &h.catalogue).unwrap();
+    host.capture_reservations(&h.runtime, &CatalogueLayoutStoreRef(&h.catalogue)).unwrap();
     host.prepare(&h.runtime, capacity()).unwrap();
     let mut incoming = h.runtime.layout().layout().clone();
     incoming.workspace = WorkspaceId::new("review.unavailable").unwrap();
@@ -10008,7 +10008,7 @@ fn proposed_unavailable_and_unbound_owners_remain_requested_open_without_false_b
     assert!(h.runtime.layout().layout().instances.iter().all(|instance| instance.requested_open));
     assert!(h.runtime.layout().layout().instances.iter().all(|instance| h.runtime.layout().availability(&instance.id) != Availability::Available));
     host.capture_metrics(&h.runtime, &h.models).unwrap();
-    host.capture_reservations(&h.runtime, &h.catalogue).unwrap();
+    host.capture_reservations(&h.runtime, &CatalogueLayoutStoreRef(&h.catalogue)).unwrap();
     host.prepare(&h.runtime, capacity()).unwrap();
     assert!(host.frame().unwrap().layout.resolved.panels.is_empty());
 }
@@ -10479,7 +10479,7 @@ fn cached_command_proposal_is_discarded_on_metric_change_without_a_second_factor
     h.tick().unwrap();
     let mut host = WorkspacePanelHost::new(HostOptions::default()).unwrap();
     host.capture_metrics(&h.runtime, &h.models).unwrap();
-    host.capture_reservations(&h.runtime, &h.catalogue).unwrap();
+    host.capture_reservations(&h.runtime, &CatalogueLayoutStoreRef(&h.catalogue)).unwrap();
     host.prepare(&h.runtime, capacity()).unwrap();
     let action = transaction(vec![Mutation::Collapse { section: section("log"), collapsed: true }]);
     let before = h.runtime.layout().inspect();
@@ -10505,7 +10505,7 @@ fn command_storage_refusal_uses_the_same_host_admission_before_any_runtime_publi
     h.tick().unwrap();
     let mut host = WorkspacePanelHost::new(HostOptions::default()).unwrap();
     host.capture_metrics(&h.runtime, &h.models).unwrap();
-    host.capture_reservations(&h.runtime, &h.catalogue).unwrap();
+    host.capture_reservations(&h.runtime, &CatalogueLayoutStoreRef(&h.catalogue)).unwrap();
     host.prepare(&h.runtime, capacity()).unwrap();
     let before = h.runtime.layout().inspect();
     let controllers = h.runtime.controller_count();
@@ -10848,7 +10848,7 @@ fn atomic_batch_growing_projections_reuse_one_private_cohort_and_measure_each_ne
     let (mut h, trace) = review_cohort_host(|_| {});
     let mut host = WorkspacePanelHost::new(HostOptions::default()).unwrap();
     host.capture_metrics(&h.runtime, &h.models).unwrap();
-    host.capture_reservations(&h.runtime, &h.catalogue).unwrap();
+    host.capture_reservations(&h.runtime, &CatalogueLayoutStoreRef(&h.catalogue)).unwrap();
     host.prepare(&h.runtime, capacity()).unwrap();
     let registry = h.runtime.layout().registry().clone();
     let mut services = ContentServices { models: &h.models, commands: &mut h.commands, local: &mut h.local };
@@ -11812,7 +11812,7 @@ fn deferred_outgoing_unavailable_actions_use_captured_retained_or_staged_owner_a
                 }
                 let mut host = WorkspacePanelHost::new(priority_host_options()).unwrap();
                 host.capture_metrics(&h.runtime, &h.models).unwrap();
-                host.capture_reservations(&h.runtime, &h.catalogue).unwrap();
+                host.capture_reservations(&h.runtime, &CatalogueLayoutStoreRef(&h.catalogue)).unwrap();
                 host.prepare(&h.runtime, capacity()).unwrap();
                 assert_ne!(h.runtime.layout().availability(&id("deferred")), Availability::Available);
                 let before = h.runtime.layout().inspect();
@@ -15122,4 +15122,72 @@ fn raw_host_drags_a_panel_out_to_a_desktop_window_keeping_its_editor() {
     assert_eq!(raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location, docked);
     let state = raw.content.probe.state(&key).unwrap();
     assert_eq!((state.draft.as_str(), state.transaction_live), ("torn-off draft", true));
+}
+
+#[test]
+fn direct_layout_store_captures_reservations_shows_and_commits_with_context_validation() {
+    let mut h = PanelMountHarness::new(false).unwrap();
+    open_editor(&mut h);
+    let key = editor_key(&h);
+    h.probe.edit(&key, |state| state.draft = "direct store draft".into()).unwrap();
+    let mut host = WorkspacePanelHost::new(HostOptions::default()).unwrap();
+    let ctx = crate::fonts::test_context();
+    let mut time = 0.0;
+    let mut run_frame = |h: &mut PanelMountHarness, host: &mut WorkspacePanelHost, events: Vec<egui::Event>| {
+        h.tick().unwrap();
+        time += 1.0 / 60.0;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui_rect(capacity())),
+                events,
+                time: Some(time),
+                focused: true,
+                ..Default::default()
+            },
+            |ui| {
+                host.capture_metrics(&h.runtime, &h.models).unwrap();
+                host.capture_reservations(&h.runtime, &DirectLayoutStore).unwrap();
+                host.prepare(&h.runtime, capacity()).unwrap();
+                let mut services = ContentServices { models: &h.models, commands: &mut h.commands, local: &mut h.local };
+                host.show(ui, &mut h.runtime, &mut h.native, &mut services, &mut DirectLayoutStore).unwrap();
+            },
+        );
+        output.textures_delta.clear();
+        host.frame().unwrap().clone()
+    };
+
+    let frame = run_frame(&mut h, &mut host, Vec::new());
+    let collapse = middle(
+        frame
+            .controls
+            .iter()
+            .find(|control| control.target == HostControlTarget::Pointer(HostPointerTarget::Collapse { instance: id("editor") }))
+            .unwrap()
+            .bounds,
+    );
+    let at = egui::pos2(collapse.x, collapse.y);
+    run_frame(&mut h, &mut host, vec![egui::Event::PointerMoved(at)]);
+    run_frame(
+        &mut h,
+        &mut host,
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
+        ],
+    );
+    let released = run_frame(
+        &mut h,
+        &mut host,
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE },
+        ],
+    );
+    assert!(
+        released.events.iter().any(|event| matches!(event, HostEvent::Committed { .. })),
+        "DirectLayoutStore must commit through RetainedCandidateSink::dispatch_in_context: {:?}",
+        released.events
+    );
+    assert!(h.runtime.layout().layout().containing(&id("editor")).unwrap().collapsed);
+    assert_eq!(h.probe.state(&key).unwrap().draft, "direct store draft");
 }
