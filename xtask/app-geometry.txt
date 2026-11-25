@@ -256,7 +256,6 @@ crates/doc/src/joints_handles.rs:motion_axes cross,dot
 crates/doc/src/joints_reach.rs:Quat::to_zyz atan2,hypot
 crates/doc/src/joints_reach.rs:ball_turn_between atan2
 crates/doc/src/lineage.rs:order_legacy_family closest_on_triangle,triangles
-crates/doc/src/name_lookup.rs:FaceHit::along normalized,triangles
 crates/doc/src/name_lookup.rs:face_triangles triangles
 crates/doc/src/name_lookup.rs:incircle cross
 crates/doc/src/name_lookup.rs:nearest_on_face triangles

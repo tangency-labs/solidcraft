@@ -268,12 +268,12 @@ pub enum CellGridMode {
 }
 
 /// The smallest cell size and web of a cell grid, in mm.
-pub const CELL_GRID_MIN_SIZE: f64 = solidcore_ops::cell_grid::MIN_SIZE;
+pub const CELL_GRID_MIN_SIZE: f64 = solidcraft_kernel::services::cell_grid::MIN_SIZE;
 
 /// The most sides of a polygon cell.
-pub const CELL_GRID_MAX_SIDES: u32 = solidcore_ops::cell_grid::MAX_SIDES;
+pub const CELL_GRID_MAX_SIDES: u32 = solidcraft_kernel::services::cell_grid::MAX_SIDES;
 /// The most lattice lines a snapped field edge may be moved in.
-pub const CELL_GRID_MAX_SNAP_INSET: u32 = solidcore_ops::cell_grid::MAX_SNAP_INSET;
+pub const CELL_GRID_MAX_SNAP_INSET: u32 = solidcraft_kernel::services::cell_grid::MAX_SNAP_INSET;
 
 fn default_cell_shape() -> solidcore_record::cell_grid::CellShape {
     solidcore_record::cell_grid::CellShape::Hexagon
@@ -1702,7 +1702,7 @@ pub enum FeatureKind {
     /// outer loop is the field, a loop inside it a keep-out), cut from the targets `depth` deep
     /// (or through all) along the sketch normal, or with `mode: raised` standing `depth` high
     /// from the sketch plane and joined to the targets. The cells are planned by solidcore
-    /// (`solidcore_ops::cell_grid`) and cut in one boolean.
+    /// (`solidcraft_kernel::services::cell_grid`) and cut in one boolean.
     CellGrid {
         /// Feature id of the sketch.
         sketch: SketchId,
