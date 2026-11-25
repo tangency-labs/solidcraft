@@ -2571,9 +2571,8 @@ fn shop_check_dialog_shows_a_too_small_hole_and_switching_shop_runs_it_again() {
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Sheet(Sm::ShopCheck { .. }))));
     assert!(!h.app.dialog.as_ref().is_some_and(|d| d.previews()), "a computed panel, nothing to preview");
     let texts = shop_check_texts(&mut h);
-    // The 0.6 mm hole, and the flat DXF's two cut layers (the outline, and the hole on CUT), which
-    // the shops that read a flat file want on one.
-    assert!(texts.iter().any(|t| t == "2 errors against Generic"), "{texts:?}");
+    // The 0.6 mm hole only: the window checks a single-layer DXF by default.
+    assert!(texts.iter().any(|t| t == "1 error against Generic"), "{texts:?}");
     assert!(texts.iter().any(|t| t.starts_with("Error: ") && t.contains("0.6 mm")), "{texts:?}");
     // The generic rule cites each shop's page, so its links are numbered.
     assert!(texts.iter().any(|t| t == "Source" || t.starts_with("Source ")), "the finding links its source: {texts:?}");
@@ -2585,6 +2584,28 @@ fn shop_check_dialog_shows_a_too_small_hole_and_switching_shop_runs_it_again() {
     let Some(Kind::Sheet(Sm::ShopCheck { data, key, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("shop dialog") };
     assert_eq!(key.as_ref().map(|k| k.2), Some(1));
     assert_ne!(data.as_ref().and_then(|d| d.as_ref().ok()).map(|v| v["shop"].clone()), generic.and_then(|d| d.ok()).map(|v| v["shop"].clone()));
+}
+
+fn shop_check_rules(h: &crate::scenario::Harness) -> Vec<String> {
+    let Some(Kind::Sheet(Sm::ShopCheck { data, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("shop dialog") };
+    let v = data.as_ref().and_then(|d| d.as_ref().ok()).expect("a result");
+    v["findings"].as_array().expect("findings").iter().filter_map(|f| f["rule"].as_str().map(str::to_string)).collect()
+}
+
+#[test]
+fn shop_check_dialog_checks_one_layer_by_default_and_a_layer_per_role_on_request() {
+    let mut h = shop_check_on(0.6);
+    let texts = shop_check_texts(&mut h);
+    assert!(texts.iter().any(|t| t == "DXF layers"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Single layer"), "{texts:?}");
+    assert_eq!(shop_check_rules(&h), ["hole.min_diameter"], "a single layer has no layer finding");
+    let Some(Kind::Sheet(Sm::ShopCheck { layers, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("shop dialog") };
+    assert_eq!(*layers, 0);
+    *layers = 1;
+    let texts = shop_check_texts(&mut h);
+    assert!(texts.iter().any(|t| t == "2 errors against Generic"), "{texts:?}");
+    let rules = shop_check_rules(&h);
+    assert!(rules.contains(&"hole.min_diameter".to_string()) && rules.contains(&"file.dxf_single_layer".to_string()), "{rules:?}");
 }
 
 #[test]

@@ -216,8 +216,10 @@ crate::dialog_descriptor::dialog_descriptors! {
             /// Read-only: OK only closes it.
             ShopCheck {
                 shop: usize,
+                /// The DXF layers the check assumes: 0 a single layer, 1 one per role.
+                layers: usize,
                 data: Option<Result<Value, String>>,
-                key: Option<(u64, Option<String>, usize)>,
+                key: Option<(u64, Option<String>, usize, usize)>,
             },
         }
     }
@@ -314,7 +316,9 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             Sm::FlatPattern { data: None, key: None, status: None, hardware_notes: false },
             vec![SelInput::new("Body (last if none)", BODIES, false)],
         ),
-        "sheet.check_shop" => (Sm::ShopCheck { shop: 0, data: None, key: None }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
+        "sheet.check_shop" => {
+            (Sm::ShopCheck { shop: 0, layers: 0, data: None, key: None }, vec![SelInput::new("Body (last if none)", BODIES, false)])
+        }
         _ => Sm::simple_start(id)?,
     };
     Some((crate::length_input::defaults(&app.session.doc, Kind::Sheet(sm)), inputs))
@@ -755,7 +759,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 }
             }
         }
-        Sm::ShopCheck { shop, data, key } => shop_check_rows(app, ui, shop, data, key, inputs),
+        Sm::ShopCheck { shop, layers, data, key } => shop_check_rows(app, ui, (shop, layers), data, key, inputs),
         Sm::FlatPattern { data, key, status, hardware_notes } => {
             let body = inputs.first().and_then(|i| i.items.first()).and_then(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None });
             let want = (app.session.revision, body.clone());
@@ -875,9 +879,9 @@ fn shop_counts(errors: usize, warnings: usize) -> String {
 fn shop_check_rows(
     app: &mut SolveApp,
     ui: &mut egui::Ui,
-    shop: &mut usize,
+    (shop, layers): (&mut usize, &mut usize),
     data: &mut Option<Result<Value, String>>,
-    key: &mut Option<(u64, Option<String>, usize)>,
+    key: &mut Option<(u64, Option<String>, usize, usize)>,
     inputs: &[SelInput],
 ) {
     use solidcraft_engine::doc::shop_rules;
@@ -887,11 +891,14 @@ fn shop_check_rows(
     *shop = (*shop).min(last);
     let names: Vec<&str> = shops.iter().map(|(_, name)| *name).collect();
     choice_row(ui, "ui.shop_check_shop", "sm_shop_check_shop", shop, &names);
+    let layer_names = [solidcraft_ui_text::tr("ui.shop_check_layers_single"), solidcraft_ui_text::tr("ui.shop_check_layers_roles")];
+    *layers = (*layers).min(1);
+    choice_row(ui, "ui.shop_check_layers", "sm_shop_check_layers", layers, &layer_names);
     let (id, name) = shops.get(*shop).copied().unwrap_or(("generic", "Generic"));
     let body = inputs.first().and_then(|i| i.items.first()).and_then(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None });
-    let want = (app.session.revision, body.clone(), *shop);
+    let want = (app.session.revision, body.clone(), *shop, *layers);
     if key.as_ref() != Some(&want) {
-        let mut p = json!({"shop": id});
+        let mut p = json!({"shop": id, "dxf": {"layers": if *layers == 0 { "single" } else { "roles" }}});
         if let Some(b) = &body {
             p["body"] = json!(b);
         }
