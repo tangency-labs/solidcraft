@@ -292,11 +292,24 @@ fn read_corpus(k: &mut Kernel, name: &str, rebuild: bool) -> Brep {
         records: &mut records,
         next_key: 1 << 62,
     };
-    if REFIT.with(std::cell::Cell::get) {
-        // `read_from_file`'s two halves, with each found sphere's file NURB replaced
-        // between them ([`with_fitted_spheres`])
+    let (refit, analytics) = (
+        REFIT.with(std::cell::Cell::get),
+        ANALYTICS.with(std::cell::Cell::get),
+    );
+    if refit || analytics {
+        // `read_from_file`'s two halves, with each found sphere's file NURB
+        // ([`with_fitted_spheres`]) and each kept exact copy's ([`with_analytic_copies`])
+        // replaced between them
         let mut data = BrepData::read_from_file(k, bytes, FileType::Ascii).unwrap();
-        assert!(fit_spheres(k, &mut data) > 0, "{name}: no sphere found");
+        if refit {
+            assert!(fit_spheres(k, &mut data) > 0, "{name}: no sphere found");
+        }
+        if analytics {
+            assert!(
+                analytic_copies(k, &mut data) > 0,
+                "{name}: no exact copy kept"
+            );
+        }
         read_from_data(k, &mut b, data, rebuild, &mut env).unwrap();
     } else {
         read_from_file(k, &mut b, bytes, FileType::Ascii, rebuild, &mut env).unwrap();
@@ -308,6 +321,49 @@ fn read_corpus(k: &mut Kernel, name: &str, rebuild: bool) -> Brep {
 thread_local! {
     /// Whether [`read_corpus`] puts back upstream's fitted sphere NURBs.
     static REFIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Whether [`read_corpus`] puts back upstream's analytic face copies.
+    static ANALYTICS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` with every [`read_corpus`] read copying each face surface whose shape
+/// `CopyAndAddAnalytics` recognises as that analytic, as upstream does, also where the
+/// analytic is not the B-spline's parameterisation: main's read before the WR-450
+/// retirement (#18923), which keeps an exact copy there (goldens' `wr450_rows`, whose
+/// replays show it is main's read bit for bit).
+fn with_analytic_copies<T>(f: impl FnOnce() -> T) -> T {
+    struct Clear;
+    impl Drop for Clear {
+        fn drop(&mut self) {
+            ANALYTICS.with(|r| r.set(false));
+        }
+    }
+    ANALYTICS.with(|r| r.set(true));
+    let _clear = Clear;
+    f()
+}
+
+/// Replaces each B-spline surface of `data` whose `CopyAndAddAnalytics` copy is kept
+/// exact although an analytic was recognised in it by that analytic, which the read then
+/// copies as is: upstream's copy. Returns how many.
+fn analytic_copies(k: &Kernel, data: &mut BrepData) -> usize {
+    use solidcore::surface::surface::SurfaceKind;
+    let mut replaced = 0;
+    for s in &mut data.surfaces {
+        let SurfaceKind::BSpline(srf) = s.object.kind() else {
+            continue;
+        };
+        let Some(analytic) = srf.recognised_analytic(k).unwrap() else {
+            continue;
+        };
+        if matches!(
+            srf.copy_and_add_analytics(k).unwrap().kind(),
+            SurfaceKind::BSpline(_)
+        ) {
+            s.object = analytic;
+            replaced += 1;
+        }
+    }
+    replaced
 }
 
 /// Runs `f` with every [`read_corpus`] read building each sphere found in a NURBS on the
@@ -334,7 +390,6 @@ fn fit_spheres(k: &Kernel, data: &mut BrepData) -> usize {
     use solidcore::surface::plane::Plane;
     use solidcore::surface::sphere::Sphere;
     use solidcore::surface::surface::{Surface, SurfaceKind};
-    assert!(!k.fixes.analytic_copy_keeps_parameterization);
     let mut replaced = 0;
     for s in &mut data.surfaces {
         let SurfaceKind::BSpline(srf) = s.object.kind() else {
@@ -1032,38 +1087,6 @@ const MAIN: [(&str, [u64; 5]); 28] = [
     ),
 ];
 
-/// The healer's gap cover changes, on the 28 files the moved goldens rows read, exactly
-/// the tolerances it means to and nothing the mass or the trims see:
-/// - 206 edges whose tolerance on main was under their edge/face gap `g` now have
-///   `zone_tol3d(gain * g)` (3 more on the rebuilding read); every other edge keeps
-///   main's tolerance bit for bit, and every edge covers its gap;
-/// - 296 vertices rise to their largest edge tolerance (1 on the rebuilding read), the
-///   healer's vertex step on the raised edges; every other vertex keeps main's;
-/// - face tolerances, edge/face gaps, edge curves, the file's UV trims (and the rebuilt
-///   ones), and every UV trim `GetOrCreateUVTrimCurve` makes after the read, are main's
-///   bit for bit: trims fit at the edge's fit tolerance (`edgeuse::p3::fit_tolerance`),
-///   not at the raised one;
-/// - `corpus.parity`'s areas are main's bit for bit, but for those WR-255's corner fix moves
-///   ([`UVTC_AREA_MAIN`]: main's with those faces' terms put back, each face enclosed;
-///   each the same with the tolerances lowered); its volumes are main's bit for bit
-///   with the moved tolerances set back to main's, and as read differ only on
-///   `Fillet/corner_box.smb`, by 1 ulp: the volume integrates about the middle of the
-///   B-rep's box, which is grown by the edge and vertex tolerances
-///   (`CalculateBoundingBox`, `bExpandByZoneTol3d`). The pair is classified against a
-///   certified enclosure `[lo, hi]` of the exact volume (`mass::enclosure::enclose_volume`,
-///   which reads no edge tolerance), asked `1e-9 * |V|` wide, the goldens' relative
-///   tolerance. It stops at its cell budget, wider than asked, holding both values:
-///   neither can be told farther. (`Fillet/test1.smb`'s as-read volume differed by 1 ulp
-///   too, before the knot-line split; with it, its as-read and set-back volumes agree.)
-///
-/// With the WR-493 retirement, the two files here with a sphere found in a NURBS
-/// (`Fillet/sphere_plane.smb`, `Solids/revolution_mold.smb`) also keep the file's NURB and
-/// trims on those faces (`wr493_class_proofs`'
-/// `found_spheres_and_tori_keep_the_file_nurb_and_trims`), so their reads differ from
-/// main's by that too (asserted). With upstream's fitted sphere NURB put back
-/// ([`with_fitted_spheres`]) all of the above holds for them against main's values as for
-/// every other file; they are asserted to be those two files only. (`sphere_plane`'s
-/// volume is NaN in [`MAIN`], main's own value, and compared by its bits.)
 /// [`corpus_reads_change_only_the_covered_tolerances`]'s moved areas: WR-255's corner fix
 /// (`sm_FixUVTrimCurves` repairs a trim's end points at a corner, not its whole span) moves
 /// `Fillet/vase3.smb`'s integrated area by 1200 ulps (1.4e-13 relative), through the trims
@@ -1099,10 +1122,49 @@ const UVTC_AREA_CLASSES: [(&str, usize, &str, EnclosureStop, bool); 2] = [
     ),
 ];
 
+/// The healer's gap cover changes, on the 28 files the moved goldens rows read, exactly
+/// the tolerances it means to and nothing the mass or the trims see:
+/// - 206 edges whose tolerance on main was under their edge/face gap `g` now have
+///   `zone_tol3d(gain * g)` (3 more on the rebuilding read); every other edge keeps
+///   main's tolerance bit for bit, and every edge covers its gap;
+/// - 296 vertices rise to their largest edge tolerance (1 on the rebuilding read), the
+///   healer's vertex step on the raised edges; every other vertex keeps main's;
+/// - face tolerances, edge/face gaps, edge curves, the file's UV trims (and the rebuilt
+///   ones), and every UV trim `GetOrCreateUVTrimCurve` makes after the read, are main's
+///   bit for bit: trims fit at the edge's fit tolerance (`edgeuse::p3::fit_tolerance`),
+///   not at the raised one;
+/// - `corpus.parity`'s areas are main's bit for bit, but for those WR-255's corner fix moves
+///   ([`UVTC_AREA_MAIN`]: main's with those faces' terms put back, each face enclosed;
+///   each the same with the tolerances lowered); its volumes are main's bit for bit
+///   with the moved tolerances set back to main's, and as read differ only on
+///   `Fillet/corner_box.smb`, by 1 ulp: the volume integrates about the middle of the
+///   B-rep's box, which is grown by the edge and vertex tolerances
+///   (`CalculateBoundingBox`, `bExpandByZoneTol3d`). The pair is classified against a
+///   certified enclosure `[lo, hi]` of the exact volume (`mass::enclosure::enclose_volume`,
+///   which reads no edge tolerance), asked `1e-9 * |V|` wide, the goldens' relative
+///   tolerance. It stops at its cell budget, wider than asked, holding both values:
+///   neither can be told farther. (`Fillet/test1.smb`'s as-read volume differed by 1 ulp
+///   too, before the knot-line split; with it, its as-read and set-back volumes agree.)
+///
+/// With the WR-493 retirement, the two files here with a sphere found in a NURBS
+/// (`Fillet/sphere_plane.smb`, `Solids/revolution_mold.smb`) also keep the file's NURB and
+/// trims on those faces (`wr493_class_proofs`'
+/// `found_spheres_and_tori_keep_the_file_nurb_and_trims`), so their reads differ from
+/// main's by that too (asserted). With upstream's fitted sphere NURB put back
+/// ([`with_fitted_spheres`]) all of the above holds for them against main's values as for
+/// every other file; they are asserted to be those two files only. (`sphere_plane`'s
+/// volume is NaN in [`MAIN`], main's own value, and compared by its bits.)
+///
+/// With the WR-450 retirement (#18923), the seven files in [`WR450_READS`] keep an exact
+/// copy of each face B-spline whose recognised analytic is not its parameterisation, so
+/// their reads differ from main's by that too (asserted). With upstream's analytic copies
+/// put back ([`with_analytic_copies`]) all of the above holds for them against main's
+/// values as for every other file; they are asserted to be those seven files only.
 #[test]
 fn corpus_reads_change_only_the_covered_tolerances() {
     let mut failures = Vec::new();
     let mut wr493 = Vec::new();
+    let mut wr450 = Vec::new();
     let mut raised = 0;
     let mut moved = 0;
     let mut moved_volumes = Vec::new();
@@ -1137,10 +1199,13 @@ fn corpus_reads_change_only_the_covered_tolerances() {
         let rebuild_edges = entries(REBUILD_RAISED_EDGES, name);
         let rebuild_vertices = entries(REBUILD_MOVED_VERTICES, name);
         let wr = WR493_READS.contains(&name);
-        if wr {
-            // the found spheres keep the file's NURB and trims, so these reads are not
-            // main's (asserted; the replays' own checks hold on them as on every file),
-            // and with upstream's fitted NURB put back they are, as every other file is
+        let wa = WR450_READS.contains(&name);
+        if wr || wa {
+            // the found spheres keep the file's NURB and trims, and the faces whose
+            // analytic is not their B-spline's parameterisation an exact copy, so these
+            // reads are not main's (asserted; the replays' own checks hold on them as on
+            // every file), and with upstream's fitted NURB and analytic copies put back
+            // they are, as every other file is
             let mut unfitted = Vec::new();
             let (read_digest, _) = replay(
                 name,
@@ -1163,14 +1228,18 @@ fn corpus_reads_change_only_the_covered_tolerances() {
             if read_digest == read_main || rebuild_digest == rebuild_main {
                 failures.push(format!("{name}: read as main's"));
             }
-            wr493.push(name);
-        }
-        let fit = |f: &mut dyn FnMut()| {
             if wr {
-                with_fitted_spheres(f);
-            } else {
-                f();
+                wr493.push(name);
             }
+            if wa {
+                wr450.push(name);
+            }
+        }
+        let fit = |f: &mut dyn FnMut()| match (wr, wa) {
+            (true, true) => with_fitted_spheres(|| with_analytic_copies(f)),
+            (true, false) => with_fitted_spheres(f),
+            (false, true) => with_analytic_copies(f),
+            (false, false) => f(),
         };
         let (mut read_digest, mut lazy_digest, mut rebuild_digest) = (0, 0, 0);
         fit(&mut || {
@@ -1303,6 +1372,7 @@ fn corpus_reads_change_only_the_covered_tolerances() {
     );
     assert_eq!(moved_volumes, ["Fillet/corner_box.smb"], "{failures:#?}");
     assert_eq!(wr493, WR493_READS);
+    assert_eq!(wr450, WR450_READS);
     let classes: Vec<_> = volume_classes.iter().map(|&(n, c, ..)| (n, c)).collect();
     assert_eq!(
         classes,
@@ -1409,6 +1479,19 @@ fn open_shell_rebuilt_trim_leaves_no_stale_gap() {
 /// retirement changes too: they are replayed against main's with upstream's fitted
 /// sphere NURB put back ([`with_fitted_spheres`]).
 const WR493_READS: [&str; 2] = ["Fillet/sphere_plane.smb", "Solids/revolution_mold.smb"];
+
+/// The files here with a face whose recognised analytic is not its B-spline's
+/// parameterisation, so the read keeps an exact copy there (WR-450, #18923), in [`MAIN`]'s
+/// order.
+const WR450_READS: [&str; 7] = [
+    "Fillet/blade_hub_1.smb",
+    "Fillet/blade_hub_2.smb",
+    "Fillet/blade_hub_3.smb",
+    "Fillet/cliff_1.smb",
+    "Fillet/cliff_2.smb",
+    "Solids/fillet_ts.smb",
+    "Solids/revolution_mold.smb",
+];
 
 /// Edges whose tolerance the read raises: per file, (edge index, main's tolerance bits).
 const RAISED_EDGES: &[(&str, &[(u32, u64)])] = &[

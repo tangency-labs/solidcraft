@@ -419,7 +419,7 @@ type Dump = Result<Vec<Item>, SolidError>;
 fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
     let path = path_of(i)?;
     let bytes = std::fs::read(&path).map_err(|e| harness(format!("{path}: {e}")))?;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut data = match BrepData::read_from_file(&k, bytes, FileType::Ascii) {
         Ok(d) => d,
         Err(e @ SolidError::Unported { .. }) => return Ok(Err(e)),
@@ -927,7 +927,7 @@ impl Out<'_> {
         self.d(ivl.max());
         for k in 0..=4 {
             let t = ivl.min() + 0.25 * f64::from(k) * (ivl.max() - ivl.min());
-            self.point(c.evaluate_point(&Kernel::default(), t));
+            self.point(c.evaluate_point(&crate::runner_kernel(), t));
         }
         let matches = c.owner().is_some_and(|actual| {
             actual == (self.key_of)(owner)
