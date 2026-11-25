@@ -515,7 +515,7 @@ theme_keys! {
         app_bar_hover_button, app_bar_hover_strong, app_bar_tab_active,
         form_ink, form_dim, form_primary, form_primary_fill, form_error, form_error_fill, form_success, form_success_fill, dialog_body, dialog_footer, dialog_rule, control_fill, control_border, dialog_label, selected_ink, selected_bg,
     ],
-    many: [continuity, logo, library_highlights, section_hatch],
+    many: [continuity, logo, library_highlights, section_hatch, paper_lines, paper_dark_lines],
     icons: [highlight, agent, marker_halo],
 }
 

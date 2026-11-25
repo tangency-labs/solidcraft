@@ -430,6 +430,14 @@ pub static FORMATS: &[FormatSpec] = &[
         export: Some(ExportSpec { command: "file.export", format: None, options: SDF_OPTIONS, scope: ExportScope::Design, lossless: false }),
     },
     FormatSpec {
+        id: "mjcf",
+        label: "MuJoCo model (MJCF)",
+        extensions: &["xml"],
+        role: Role::Artifact,
+        import: None,
+        export: Some(ExportSpec { command: "file.export", format: Some("mjcf"), options: &[], scope: ExportScope::Design, lossless: false }),
+    },
+    FormatSpec {
         id: "design-json",
         label: "Design as JSON",
         extensions: &["json"],

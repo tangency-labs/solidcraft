@@ -168,6 +168,17 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
             }
             lengths
         }
+        D::Combine { offset, radius, .. } => {
+            // An offset or radius not typed (or emptied) stays so: the command leaves it out.
+            let mut lengths = Vec::new();
+            if !offset.trim().is_empty() {
+                lengths.push(offset);
+            }
+            if !radius.trim().is_empty() {
+                lengths.push(radius);
+            }
+            lengths
+        }
         D::Shell { thickness } => vec![thickness],
         D::PatternRect { spacing, spacing2, extent, extent2, .. } => vec![spacing, spacing2, extent, extent2],
         D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],

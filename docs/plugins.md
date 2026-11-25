@@ -1446,7 +1446,14 @@ values always take precedence. Automated imports therefore do not depend on earl
 - **Failures.** A failure fails that one import, named with the plugin and the file ("Sample
   could not open bracket.smp: ...", or "Sample does not support bracket.smp: ..." for
   `unsupported`), and the next one gets a fresh instance. The compiled component stays in memory, so the next file opens
-  without compiling again.
+  without compiling again. Return `unsupported(reason)` for a
+  deliberate refusal meant for the user: File › Open and drag-and-drop open show the plugin's name
+  and its reason as plain text in a dialog with OK. Traps and other failures use the status line.
+  Rust engine callers receive a typed `Unsupported` error with the plugin's reason. Answered
+  background opens also include `plugin_error: {"kind":"unsupported","plugin":"Sample","reason":"..."}`
+  alongside `ok: false` and the readable `error` text. Scripts and MCP do not open a dialog;
+  their error responses carry the readable text, not a stable importer refusal kind. Control
+  responses use `ok` and `error`; MCP tool responses use `isError` and text content.
 - **Compiled plugins are kept.** A plugin compiles once per version: SolidCraft keeps the compiled
   code with Wasmtime's compilation cache in the `plugin-compile` folder of its per-user cache folder
   (`%LOCALAPPDATA%\SolidCraft\plugin-compile`, `~/Library/Caches/SolidCraft/plugin-compile`, or
@@ -1510,9 +1517,9 @@ are listed in `runtime.commands`:
 ## Errors
 
 Every plugin failure starts with the plugin's name, and an importer's or exporter's with the file's name too.
-Programs get the structured error (`kind` and its fields) from the engine as well as the text. The
-text comes from the message catalog (`plugin_error.*`) in the window's language; the command line
-and MCP give the English.
+Rust engine callers get the structured error (`kind` and its fields) as well as the text; script
+and MCP responses flatten importer errors to text as described above. The text comes from the
+message catalog (`plugin_error.*`) in the window's language; the command line and MCP give the English.
 
 | What happened | What the user reads |
 |---|---|
