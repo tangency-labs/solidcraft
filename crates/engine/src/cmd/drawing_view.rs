@@ -69,11 +69,11 @@ use solidcraft_geom::Aabb2;
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_sheet::{DrawingBorderProfile, Sheet};
 use solidcraft_geom::drawing_view::{Invalid, NamedView, PRESETS, ProjectedSide, Scale};
-use solidcraft_geom::hlr::Visibility;
 use solidcraft_geom::paper::{MAX_COORDINATE_MM, MAX_SIDE_MM, Picture};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_io::paper::MAX_PICTURE_DPI;
+use solidcraft_kernel::hlr::Visibility;
 use solidcraft_render::VisualStyle;
 
 use super::CommandSpec;

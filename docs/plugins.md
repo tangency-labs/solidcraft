@@ -243,6 +243,30 @@ The installer limits the archive to 256 entries, each file to 16 MiB (an importe
 refuses unknown or newer capabilities. It unpacks into a hidden `.install-…` folder beside the installed
 plugins, then renames it to `plugins/<id>/`. The entries resolve immediately, with no restart.
 
+## Updates
+
+A plugin can name the GitHub repository it is released from, and SolidCraft 0.49 and later offer its
+new versions on its card. Older versions refuse a manifest with this field.
+
+```json
+{"id": "gears", "name": "Gears", "version": "1.0.0", "updates": {"github": "maker/gears"}}
+```
+
+- At every start, and once a day while SolidCraft stays open, one background request per such
+  plugin (at most 20) asks GitHub for that repository's latest release. Nothing else is sent, and a
+  failed request (offline, rate limited) says nothing. The app's **Check at start and once a day**
+  update setting, or the organization's policy over it, turns these checks off too.
+- The release is offered when it is a stable release, its tag is a version (`v1.1.0` or `1.1.0`)
+  newer than the installed `version`, and it has an asset named `<id>.zip` or `<id>-<version>.zip`
+  under that repository's releases, for which GitHub lists a sha256 digest. Both versions must be
+  `major.minor.patch` versions.
+- **Update to 1.1.0** then shows beside the card's on/off control, also on a turned-off plugin. It downloads
+  the `.zip` into the hidden `plugins/.updates/` folder and checks it against the sha256 digest GitHub
+  lists for the asset. The same confirmation as Install follows, titled Update plugin: the package
+  must be the same id and the offered version, every install check applies, and the installed
+  version's folders are kept as for any update (above). **Update** replaces the plugin, with no restart;
+  **Cancel** or any failure leaves the installed version. The downloaded `.zip` is then deleted.
+
 ## Removing
 
 Each installed plugin card in **Preferences > Plugins** has an enable switch and **Remove** action.
@@ -364,6 +388,22 @@ The shared dialog draws the entry's input schema and supplies the package's cont
 `plugin.run`. An entry without fields receives `{}`. Slot clicks alone do not execute a plugin.
 Installing, enabling or discovering a plugin never runs an entry. Installation grants do not replace
 execution consent or the manifest-and-component identity checked by `plugin.run`.
+
+The default is unchanged: dialog fields show required fields in `required` array order, then
+optional fields alphabetically. To use the order of `input_schema.properties` in the manifest, set
+`"x-solidcraft-field-order": "declared"` on the root `input_schema` object. Any other value for
+this annotation is invalid. With this opt-in, required and optional fields follow declaration
+order. Fields hidden by `x-solidcraft-visible-when` return to their declared positions when shown
+again; the remaining fields keep their relative order. Field ordering also determines which
+visible, enabled selection field receives the current viewport picks when the dialog opens.
+
+The host records declaration order separately as `input_property_order` on loaded entries (a map
+from schema JSON Pointer paths to property-name lists, with `""` for the root). This metadata
+survives entry round trips; plugin authors only need to order their schema properties and set the
+root annotation. A property that comes from a shared `$defs` definition takes its place where the
+schema references it, and the properties inside that definition keep the order the definition lists
+them in (a `properties` written beside the `$ref` replaces them, with its own order). Fields without recorded order keep the default required-first, then alphabetical
+order, even when the annotation is present.
 
 A string with a fixed set of values becomes a dropdown. With `enum` the dropdown shows the values
 themselves; to show words instead, list the options as `oneOf`, each `{"const": value, "title": shown}`
@@ -798,6 +838,10 @@ exporters; `evaluate@0.2` lets an importer check its result, `storage@0.1` keeps
 (below), and `ui@0.1` adds host-drawn docked panels. `viewport` arrives later as its own versioned
 interface. While a version is 0.x, a minor version may break the one before it.
 
+`themes@0.1` lets a plugin add colour themes to Preferences > Appearance > Theme from
+`solidcraft-theme/1` files it ships; it needs no runtime. A plugin that does not list it is not
+affected. See [plugin themes](plugin-themes.md).
+
 0.2 added one error, `plugin-error.unsupported(string)`: the input is valid, but this plugin does
 not handle it, such as a file with no solids or a newer version of its format. Use it instead of
 `invalid-input`, which means the input is broken; SolidCraft then says "Sample does not support
@@ -812,7 +856,9 @@ wraps and limits; it needs no runtime. See [plugin shaders](plugin-shaders.md) a
 [RFC 0015, amendment 1](rfcs/0015-plugin-ui-workspaces.md#amendment-1-shaders).
 
 `shaders@0.2` adds tints, which colour the ribbon's icons, its button blocks and the panels each
-frame, and settings sliders for shaders. See [plugin shaders](plugin-shaders.md#tints).
+frame, settings sliders for shaders, a `state` grid a background keeps between frames, and background textures the person chooses under the
+plugin's card (`choose`). See [plugin shaders](plugin-shaders.md#tints) and
+[pictures the person chooses](plugin-shaders.md#pictures-the-person-chooses).
 It also adds panel shaders, which draw every see-through panel's background from what is behind
 it. See [plugin panels](plugin-panels.md).
 
