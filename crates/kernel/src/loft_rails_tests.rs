@@ -208,6 +208,25 @@ fn a_line_section_drawn_in_a_rails_plane_still_takes_the_rail() {
     }
 }
 
+/// As with fewer rails (#19489), the walls face the sections' direction crossed with their normal.
+#[test]
+fn a_sheet_loft_along_three_rails_faces_the_way_its_sections_run() {
+    for (from, to, side) in [(-10.0, 10.0, -1.0), (10.0, -10.0, 1.0)] {
+        let ridge = Vec2::new(0.0, 8.0);
+        let chain = vec![Seg2::Line { a: Vec2::new(from, 0.0), b: ridge }, Seg2::Line { a: ridge, b: Vec2::new(to, 0.0) }];
+        let up = |x: f64, y: f64| (0..=8).map(|i| Vec3::new(x, y, 5.0 * f64::from(i))).collect::<Vec<_>>();
+        let rails = [up(-10.0, 0.0), up(0.0, 8.0), up(10.0, 0.0)];
+        let b = loft_sheet_with_rails(&[(at(0.0), chain.clone()), (at(40.0), chain)], &rails, RailFit::Scale).unwrap();
+        let m = b.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap();
+        assert!(!m.triangles.is_empty());
+        for t in &m.triangles {
+            let [p, q, r] = m.tri(t).unwrap();
+            let n = (q - p).cross(r - p);
+            assert!(n.len() < 1e-12 || n.y * side > 0.0, "drawn from {from}: normal {n:?}");
+        }
+    }
+}
+
 /// Rails the loft cannot follow are refused, saying why: one that starts off the first section,
 /// one that stops short of the last, two of three rails on one point, seventeen rails, a third
 /// rail off a section, and one up the middle of a sheet loft's lines.
