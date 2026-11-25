@@ -926,6 +926,25 @@ fn turning_a_joint_between_parts_cuts_no_hole_again() {
 }
 
 #[test]
+fn a_coil_cut_recipe_requires_a_numeric_axis() {
+    let mut doc = Document::new("coil cut");
+    let kind = serde_json::from_value(serde_json::json!({
+        "type": "coil", "base": ["0", "0", "0"], "diameter": "20", "pitch": "8",
+        "turns": "2", "section_size": "1", "operation": "cut"
+    }))
+    .unwrap();
+    let coil = doc.add_feature(kind, None).unwrap();
+    let feature = doc.feature(coil).unwrap();
+    let vals = BTreeMap::new();
+    assert!(super::tool_recipe(&doc, feature, &vals).is_some());
+
+    let mut referenced = feature.clone();
+    let FeatureKind::Coil { axis_ref, .. } = &mut referenced.kind else { panic!("expected a Coil") };
+    *axis_ref = Some(AxisRef::Construction { name: "Spine".into() });
+    assert!(super::tool_recipe(&doc, &referenced, &vals).is_none());
+}
+
+#[test]
 fn a_tool_cutting_another_part_cuts_again_when_that_part_moves() {
     let mut doc = Document::new("cross part");
     let tools = doc.add_component(Some("Tools"), 0).unwrap();

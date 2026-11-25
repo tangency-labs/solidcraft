@@ -81,6 +81,7 @@ pub mod conditions;
 pub mod dialog;
 pub mod images;
 mod input;
+mod schema_order;
 mod schema_refs;
 pub mod swatches;
 pub mod ui;
@@ -645,6 +646,11 @@ pub struct Entry {
     /// The entry's options, as an object schema. A format slot's options are drawn as a form
     /// before the import or export.
     pub input_schema: Value,
+    /// Property names in declaration order, keyed by the object schema's JSON Pointer (the
+    /// empty string for the root). Host metadata keeps that order across entry round trips;
+    /// ordinary JSON maps remain sorted. Missing keys use the dialog's usual field order.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub input_property_order: BTreeMap<String, Vec<String>>,
     /// Opt in to the read-only dialog-provider export (dialog@0.1).
     pub dialog_hook: bool,
     pub slots: Vec<UiSlot>,
@@ -693,8 +699,12 @@ struct DeclaredEntry {
     /// still opens a new design.
     #[serde(default)]
     effect: Option<Effect>,
-    #[serde(default = "empty_input_schema")]
-    input_schema: Value,
+    #[serde(default)]
+    #[schemars(with = "Value")]
+    input_schema: schema_order::InputSchema,
+    // Present in a host's serialized Entry; plugin authors only declare schema properties.
+    #[serde(default)]
+    input_property_order: Option<BTreeMap<String, Vec<String>>>,
     #[serde(default)]
     dialog_hook: bool,
     #[serde(default)]
@@ -714,6 +724,7 @@ impl From<EntryDeclaration> for Entry {
                 file_first: false,
                 effect: Effect::Edit,
                 input_schema: empty_input_schema(),
+                input_property_order: BTreeMap::new(),
                 dialog_hook: false,
                 slots: Vec::new(),
                 job: false,
@@ -731,7 +742,8 @@ impl From<EntryDeclaration> for Entry {
                     (EntryKind::Exporter, None) => Effect::Read,
                     (EntryKind::Command, None) => Effect::Edit,
                 },
-                input_schema: value.input_schema,
+                input_schema: value.input_schema.value,
+                input_property_order: value.input_property_order.unwrap_or(value.input_schema.property_order),
                 dialog_hook: value.dialog_hook,
                 slots: value.slots,
                 job: value.job,
@@ -891,6 +903,11 @@ impl RuntimeManifest {
             let field = format!("runtime.entries.{}.input_schema", entry.name);
             if !entry.input_schema.is_object() || entry.input_schema.get("type").and_then(Value::as_str) != Some("object") {
                 return Err(invalid(&field, "entry inputs must be an object schema"));
+            }
+            if let Some(order) = entry.input_schema.get("x-solidcraft-field-order")
+                && order.as_str() != Some("declared")
+            {
+                return Err(invalid(format!("{field}.x-solidcraft-field-order"), "must be \"declared\" when present"));
             }
             validate_list_inputs(&entry.input_schema, &field)?;
             directory_read_fields(&entry.input_schema)?;
@@ -1245,36 +1262,39 @@ pub fn parse_manifest_for_version(text: &[u8], folder: &str, app: &str, host_ver
     if text.len() > MAX_MANIFEST_BYTES {
         return Err(HostError::LimitExceeded { limit: "manifest size exceeds 64 KiB".into() });
     }
-    let value: Value = serde_json::from_slice(text).map_err(|error| invalid("manifest", error.to_string()))?;
-    if let Some(minimum) = value.get("min_host_version") {
-        let minimum = minimum.as_str().ok_or_else(|| invalid("min_host_version", "must be a semantic version string, e.g. \"1.2.3\""))?;
-        let required =
-            semver::Version::parse(minimum).map_err(|_| invalid("min_host_version", "must be a complete semantic version, e.g. \"1.2.3\""))?;
-        let current = semver::Version::parse(host_version)
-            .map_err(|_| invalid("min_host_version", format!("{app} has an invalid host version `{host_version}`")))?;
-        if current.cmp_precedence(&required).is_lt() {
-            return Err(invalid(
-                "min_host_version",
-                format!("needs {app} {minimum} or newer; this version of {app} is {host_version}; update {app}"),
-            ));
+    // A plugin from before capabilities names its API in `runtime.api`: say so plainly.
+    // Read with each schema's declared property order stored beside it: expansion below works on
+    // a sorted JSON value, and a schema's order would be alphabetical by then.
+    let mut parsed = serde_json::from_slice::<schema_order::MarkedManifest>(text).ok().map(|marked| marked.0);
+    if let Some(value) = &parsed {
+        if let Some(minimum) = value.get("min_host_version") {
+            let minimum = minimum.as_str().ok_or_else(|| invalid("min_host_version", "must be a semantic version string, e.g. \"1.2.3\""))?;
+            let required = semver::Version::parse(minimum)
+                .map_err(|_| invalid("min_host_version", "must be a complete semantic version, e.g. \"1.2.3\""))?;
+            let current = semver::Version::parse(host_version)
+                .map_err(|_| invalid("min_host_version", format!("{app} has an invalid host version `{host_version}`")))?;
+            if current.cmp_precedence(&required).is_lt() {
+                return Err(invalid(
+                    "min_host_version",
+                    format!("needs {app} {minimum} or newer; this version of {app} is {host_version}; update {app}"),
+                ));
+            }
+        }
+        if let Some(api) = value.get("runtime").and_then(|runtime| runtime.get("api")) {
+            let api = api.as_str().map(|api| api.chars().take(64).collect::<String>()).unwrap_or_else(|| "an older plugin API".into());
+            return Err(HostError::UnsupportedCapability {
+                capability: api.clone(),
+                reason: format!("was built for {api}; this version of {app} runs {API} plugins (capabilities [\"commands@0.2\"]); update the plugin"),
+            });
+        }
+        // A newer capability may introduce new manifest keys. Report that capability first,
+        // before strict deserialization would misdiagnose it as an unknown field.
+        if let Some(capabilities) = value.get("capabilities")
+            && let Ok(requested) = serde_json::from_value::<Vec<String>>(capabilities.clone())
+        {
+            check_capabilities(&requested, app)?;
         }
     }
-    // A plugin from before capabilities names its API in `runtime.api`: say so plainly.
-    if let Some(api) = value.get("runtime").and_then(|runtime| runtime.get("api")) {
-        let api = api.as_str().map(|api| api.chars().take(64).collect::<String>()).unwrap_or_else(|| "an older plugin API".into());
-        return Err(HostError::UnsupportedCapability {
-            capability: api.clone(),
-            reason: format!("was built for {api}; this version of {app} runs {API} plugins (capabilities [\"commands@0.2\"]); update the plugin"),
-        });
-    }
-    // A newer capability may introduce new manifest keys. Report that capability first,
-    // before strict deserialization would misdiagnose it as an unknown field.
-    if let Some(capabilities) = value.get("capabilities")
-        && let Ok(requested) = serde_json::from_value::<Vec<String>>(capabilities.clone())
-    {
-        check_capabilities(&requested, app)?;
-    }
-    let mut parsed = Some(value);
     // Shared field definitions are inlined first; a manifest without them keeps its exact
     // deserialization (and error positions).
     let expanded = match parsed.as_mut().map(schema_refs::expand).transpose()? {
@@ -1282,7 +1302,10 @@ pub fn parse_manifest_for_version(text: &[u8], folder: &str, app: &str, host_ver
         _ => None,
     };
     let mut manifest: Manifest = match expanded {
-        Some(value) => serde_json::from_value(value),
+        Some(mut value) => {
+            schema_order::take_orders(&mut value);
+            serde_json::from_value(value)
+        }
         None => serde_json::from_slice(text),
     }
     .map_err(|error| invalid("manifest", error.to_string()))?;

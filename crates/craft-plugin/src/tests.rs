@@ -233,6 +233,39 @@ fn declared_inputs_effects_and_slots_are_readable() {
 }
 
 #[test]
+fn declared_property_order_survives_manifest_and_entry_round_trips() {
+    let bytes = br#"{"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{
+        "module":"plugin.wasm","commands":[],"entries":[{"name":"make","input_schema":{
+            "type":"object","x-solidcraft-field-order":"declared","required":["alpha","zeta"],"properties":{
+                "zeta":{"type":"number","default":1.5},
+                "extra":{"type":"number","default":2,"x-solidcraft-visible-when":{"field":"mode","eq":true}},
+                "mode":{"type":"boolean","default":false},
+                "alpha":{"type":"object","properties":{
+                    "z/n~":{"type":"array","items":{"type":"object","properties":{
+                        "tail":{"type":"string","default":"tail"},
+                        "head":{"type":["string","null"],"default":null}
+                    }}},
+                    "a":{"type":"boolean","default":true}
+                }}
+            },"allOf":[{"properties":{"after":{"type":"number"},"before":{"type":"number"}}}]
+        }}]
+    }}"#;
+    let manifest = parse_manifest(bytes, "sample").unwrap();
+    let mut entry = manifest.runtime.as_ref().unwrap().entries[0].clone();
+    let original: Value = serde_json::from_slice(bytes).unwrap();
+    assert_eq!(entry.input_schema, original["runtime"]["entries"][0]["input_schema"], "schema values retain ordinary JSON behaviour");
+    for _ in 0..2 {
+        assert_eq!(entry.input_property_order[""], ["zeta", "extra", "mode", "alpha"]);
+        assert_eq!(entry.input_property_order["/properties/alpha"], ["z/n~", "a"]);
+        assert_eq!(entry.input_property_order["/properties/alpha/properties/z~1n~0/items"], ["tail", "head"]);
+        assert_eq!(entry.input_property_order["/allOf/0"], ["after", "before"]);
+        entry = serde_json::from_value(serde_json::to_value(&entry).unwrap()).unwrap();
+    }
+    let round_trip = parse_manifest(&serde_json::to_vec(&manifest).unwrap(), "sample").unwrap();
+    assert_eq!(round_trip.runtime.unwrap().entries[0].input_property_order, entry.input_property_order);
+}
+
+#[test]
 fn dialog_hook_requires_its_capability_and_newer_versions_are_reported_first() {
     let mut m = manifest();
     m["runtime"]["entries"] = json!([{"name":"make","dialog_hook":true}]);
@@ -436,6 +469,23 @@ fn schema_properties_must_be_objects_even_in_nested_inputs() {
         let mut value = manifest();
         value["runtime"]["entries"] = json!([{"name":"make","input_schema":schema}]);
         assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with(".properties")));
+    }
+}
+
+#[test]
+fn field_order_annotation_only_accepts_declared() {
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object"}}]);
+    assert!(parse(&value).is_ok(), "the annotation is optional");
+    value["runtime"]["entries"][0]["input_schema"]["x-solidcraft-field-order"] = json!("declared");
+    assert!(parse(&value).is_ok(), "declared order is an explicit opt-in");
+    for order in [json!("alphabetical"), json!("Declared"), json!(""), json!(true), json!(3), Value::Null, json!(["declared"]), json!({})] {
+        value["runtime"]["entries"][0]["input_schema"]["x-solidcraft-field-order"] = order.clone();
+        assert!(
+            matches!(parse(&value), Err(HostError::InvalidManifest { field, reason })
+                if field == "runtime.entries.make.input_schema.x-solidcraft-field-order" && reason.contains("\"declared\"")),
+            "invalid field-order annotation: {order}"
+        );
     }
 }
 
@@ -1821,6 +1871,33 @@ fn an_importer_may_choose_its_file_first_and_old_manifests_keep_their_shape() {
     let mut exporting = exporter();
     exporting["runtime"]["entries"][0]["file_first"] = json!(true);
     assert!(matches!(parse(&exporting), Err(HostError::InvalidManifest { field, .. }) if field.contains("file_first")));
+}
+
+#[test]
+fn declared_property_order_follows_shared_definitions_at_the_reference() {
+    let bytes = br##"{"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],
+        "$defs":{
+            "pair":{"type":"object","properties":{"zz":{"type":"number"},"aa":{"type":"number"}}},
+            "size":{"type":"number","default":1}
+        },
+        "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"make","input_schema":{
+            "type":"object","x-solidcraft-field-order":"declared","properties":{
+                "zeta":{"$ref":"#/$defs/size"},
+                "mid":{"$ref":"#/$defs/pair"},
+                "own":{"$ref":"#/$defs/pair","properties":{"y":{"type":"number"},"b":{"type":"number"}}},
+                "alpha":{"type":"boolean","default":false}
+            }
+        }}]}}"##;
+    let manifest = parse_manifest(bytes, "sample").unwrap();
+    let entry = &manifest.runtime.as_ref().unwrap().entries[0];
+    assert_eq!(entry.input_property_order[""], ["zeta", "mid", "own", "alpha"]);
+    assert_eq!(entry.input_property_order["/properties/mid"], ["zz", "aa"]);
+    assert_eq!(entry.input_property_order["/properties/own"], ["y", "b"]);
+    assert_eq!(entry.input_schema["properties"]["mid"]["properties"]["aa"]["type"], "number");
+    assert!(!serde_json::to_string(&manifest).unwrap().contains("internal-property-order"), "the order marker never leaks");
+    // The recorded order survives the host's own round trip.
+    let round_trip = parse_manifest(&serde_json::to_vec(&manifest).unwrap(), "sample").unwrap();
+    assert_eq!(round_trip.runtime.unwrap().entries[0].input_property_order, entry.input_property_order);
 }
 
 #[test]
