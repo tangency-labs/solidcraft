@@ -839,6 +839,75 @@ fn panel_layout_tile_selection_tracks_complete_arrangements_and_manual_reversion
     assert_eq!(reverted.entries.iter().filter(|entry| entry.selected).count(), 1);
 }
 
+/// The host saves preferences on any settings change and every 30 s. Building them converts
+/// every remembered layout in the catalogue, which cost ~0.9 s on a 56,100-body design; a save
+/// whose layout and conversion inputs are unchanged reuses the last build, and a changed layout
+/// is converted again.
+#[test]
+fn a_save_with_the_same_panel_layout_reuses_the_portable_preferences() {
+    use commands::LayoutCatalogue as _;
+    let mut fixture = PanelMountHarness::new(true).unwrap();
+    fixture.command("panel.open", &panel_command_editor()).unwrap();
+    fixture.command("panel.popout", &panel_command_native_move()).unwrap();
+    fixture.command("layout.save", &serde_json::json!({"name":"Native arrangement"})).unwrap();
+    let workspace = fixture.runtime.layout().layout().workspace.clone();
+    let record = |rejected: serde_json::Value| {
+        super::preferences::PreferenceRecord {
+            version: 1,
+            selected: workspace.clone(),
+            catalogue: fixture.catalogue.state().export().unwrap(),
+            rejected: Some(rejected),
+            legacy: None,
+            unread: Vec::new(),
+        }
+        .value()
+    };
+    let mut app = crate::SolveApp::new(Default::default(), Default::default());
+    let empty = PanelMountHarness::new(false).unwrap();
+    app.enable_panel_runtime(
+        empty.runtime,
+        Box::new(AppFixtureServices {
+            models: FakeModels { editable: true },
+            commands: FakeContentCommands::default(),
+            local: FakeLocalServices::default(),
+            refreshed: 0,
+        }),
+    )
+    .unwrap();
+    let builds = |app: &crate::SolveApp| app.portable_prefs.lock().unwrap().as_ref().map_or(0, |c| c.builds);
+    // The layout the save converts: a catalogue whose remembered layout has a native window,
+    // which the conversion projects away (the costly path).
+    let held = |app: &crate::SolveApp| crate::prefs::held_panel_layout(app).unwrap_or_else(|| preferences_value(app));
+    let windowless = |app: &crate::SolveApp, saved: &str| {
+        let saved: serde_json::Value = serde_json::from_str(saved).unwrap();
+        let registry = app.panel_runtime().unwrap().layout().registry();
+        let catalogue = super::preferences::PreferenceRecord::read(&saved["panel_layout"], registry).unwrap().catalogue(registry).unwrap();
+        let mut windows = 0;
+        catalogue
+            .map_envelopes(registry, |_, envelope| {
+                windows += envelope.layout.sections.iter().filter(|section| section.location.zone() == Zone::Window).count();
+                Ok(envelope)
+            })
+            .unwrap();
+        windows == 0
+    };
+    let loaded = serde_json::json!({"panel_layout":record(serde_json::json!({"first":1}))}).to_string();
+    assert!(!windowless(&app, &loaded), "the saved layout has a native window to project");
+    app.load_prefs(&loaded);
+    assert!(held(&app).is_some(), "a panel layout to convert");
+    let first = app.try_prefs().unwrap();
+    assert!(windowless(&app, &first), "the remembered layout went through the portable conversion");
+    let again = app.try_prefs().unwrap();
+    assert_eq!(first, again, "what the first conversion made");
+    assert_eq!(builds(&app), 1, "the second save reuses the first's conversion");
+    // Another layout is converted again.
+    app.load_prefs(&serde_json::json!({"panel_layout":record(serde_json::json!({"second":2}))}).to_string());
+    let other = app.try_prefs().unwrap();
+    assert_eq!(builds(&app), 2, "a changed layout is converted again");
+    assert_ne!(other, first);
+    assert!(windowless(&app, &other));
+}
+
 #[test]
 fn panel_preference_disk_projection_removes_native_geometry_without_changing_the_live_or_recovery_state() {
     use commands::LayoutCatalogue as _;
