@@ -1691,11 +1691,16 @@ fn round_of(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<face::Ro
                 ((v - c.axis * v.dot(c.axis)).len() - c.radius).abs()
             };
             off(a).total_cmp(&off(b))
-        })
-        .ok_or_else(|| DocError::Invalid("joint origin: no cylindrical face there".into()))?;
-    let s = (pick - cyl.axis_point).dot(cyl.axis);
-    let (at, dir) = if (s - cyl.start).abs() <= (cyl.end - s).abs() { (cyl.start, -1.0) } else { (cyl.end, 1.0) };
-    Ok(face::Round { cylinder: cyl, centre: cyl.axis_point + cyl.axis * at, z: cyl.axis * dir })
+        });
+    if let Some(cyl) = cyl {
+        let s = (pick - cyl.axis_point).dot(cyl.axis);
+        let (at, dir) = if (s - cyl.start).abs() <= (cyl.end - s).abs() { (cyl.start, -1.0) } else { (cyl.end, 1.0) };
+        return Ok(face::Round { cylinder: cyl, centre: cyl.axis_point + cyl.axis * at, z: cyl.axis * dir });
+    }
+    if let Some(r) = face::cone_round_at(doc, st, comp, pick) {
+        return Ok(r);
+    }
+    Err(DocError::Invalid("joint origin: no cylindrical face there".into()))
 }
 
 /// The cylindrical face of a circle-centre snap (component coordinates).

@@ -488,6 +488,23 @@ pub fn cylinder_face(b: &Body, mesh: &Mesh, face: usize) -> Option<CylinderFace>
     (c.start.is_finite() && c.end.is_finite()).then_some(c)
 }
 
+/// Face `face` of a body as a cone: its apex (`axis_point`), unit axis into the cone (`axis`),
+/// extent along the axis (`start`, `end`), larger-end radius (`radius`), side (`internal`), and
+/// half-angle in radians. `None` when the face is not a cone, has a degenerate angle, or has no
+/// triangles.
+pub fn cone_face(b: &Body, mesh: &Mesh, face: usize) -> Option<(CylinderFace, f64)> {
+    let crate::FaceSurface::Cone { apex, axis, half_angle } = crate::face_surface(b, face)? else { return None };
+    if !(half_angle.is_finite() && half_angle > 1e-6 && half_angle < std::f64::consts::FRAC_PI_2 - 1e-6) {
+        return None;
+    }
+    let mut c = cylinder_extent(mesh, u32::try_from(face).ok()?, axis, apex, 0.0);
+    if !(c.start.is_finite() && c.end.is_finite() && c.end > 1e-9) {
+        return None;
+    }
+    c.radius = c.end * half_angle.tan();
+    (c.radius.is_finite() && c.radius > 1e-9).then_some((c, half_angle))
+}
+
 impl CylinderFace {
     /// How far `p` is from the face: off its cylinder, and past its ends along the axis.
     pub fn off(&self, p: Vec3) -> f64 {

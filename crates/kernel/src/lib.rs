@@ -566,6 +566,7 @@ pub use tolerance_heal::heals_tolerance_defects;
 pub use tolerance_heal::set_heals_tolerance_defects;
 pub use topo::CylinderFace;
 pub use topo::TopoCounts;
+pub use topo::cone_face;
 pub use topo::cylinder_between_rims;
 pub use topo::cylinder_end_at;
 pub use topo::cylinder_face;
