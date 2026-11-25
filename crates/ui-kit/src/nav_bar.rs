@@ -35,6 +35,9 @@ pub struct SlotView<'a> {
     pub alias: Option<&'a str>,
     /// A small dot at the icon's corner: something the slot holds is not at its default.
     pub dot: bool,
+    /// Rows the slot's own context menu offers above Remove: `(id, label, selected)`. Picking one
+    /// is `NavAction::Item { menu: <slot id>, item: <row id> }`.
+    pub context: Vec<(String, String, bool)>,
 }
 
 /// Labels of the bar's own controls, in the app's language.
@@ -245,7 +248,7 @@ pub fn show(ui: &mut egui::Ui, bar: &Bar<'_>, menu: impl FnOnce(&str) -> Menu) -
             if let Some(alias) = slot.alias {
                 solidcraft_ui_registry::publish_handle(alias, response.rect.center());
             }
-            context_menu(&response, (slot.index != usize::MAX).then_some(slot.index), &bar.labels, &mut action);
+            context_menu(&response, (slot.index != usize::MAX).then_some(slot.index), Some((slot.id, &slot.context)), &bar.labels, &mut action);
             if response.clicked() && slot.kind != NavigationKind::Separator {
                 if slot.kind == NavigationKind::Menu {
                     open = if open == slot.id { String::new() } else { slot.id.to_owned() };
@@ -273,13 +276,13 @@ pub fn show(ui: &mut egui::Ui, bar: &Bar<'_>, menu: impl FnOnce(&str) -> Menu) -
             );
             crate::navigation_tooltip(&response, bar.rect, bar.edge, &bar.labels.more, None);
             solidcraft_ui_registry::publish_target("nav:more", response.rect);
-            context_menu(&response, None, &bar.labels, &mut action);
+            context_menu(&response, None, None, &bar.labels, &mut action);
             if response.clicked() {
                 open = if open == "more" { String::new() } else { "more".to_owned() };
             }
         }
     });
-    context_menu(&background, None, &bar.labels, &mut action);
+    context_menu(&background, None, None, &bar.labels, &mut action);
     if !open.is_empty() && anchor.is_positive() {
         let child_popup_open = egui::Popup::is_any_open(ui.ctx());
         let ctx = ui.ctx().clone();
@@ -319,9 +322,28 @@ pub fn show(ui: &mut egui::Ui, bar: &Bar<'_>, menu: impl FnOnce(&str) -> Menu) -
 }
 
 /// The context menu of the bar (`index`: `None`) or of a slot: Customise, Hide and Reset on the
-/// bar, Remove on a slot.
-fn context_menu(response: &egui::Response, index: Option<usize>, labels: &BarLabels, action: &mut Option<NavAction>) {
+/// bar, the slot's own rows (`slot`) and Remove on a slot.
+fn context_menu(
+    response: &egui::Response,
+    index: Option<usize>,
+    slot: Option<(&str, &[(String, String, bool)])>,
+    labels: &BarLabels,
+    action: &mut Option<NavAction>,
+) {
     crate::navigation_context(response, |ui| {
+        if let Some((menu, rows)) = slot.filter(|(_, rows)| !rows.is_empty()) {
+            for (id, label, selected) in rows {
+                let mut row = crate::NavigationMenuRow::new(id, label, "");
+                row.selected = *selected;
+                let row = row.show(ui);
+                solidcraft_ui_registry::publish_target(&format!("nav:context:{menu}:{id}"), row.rect);
+                if row.clicked() {
+                    *action = Some(NavAction::Item { menu: menu.to_owned(), item: id.clone() });
+                    ui.close();
+                }
+            }
+            crate::navigation_menu_separator(ui);
+        }
         let items: Vec<(&str, &str, ContextItem)> = match index {
             None => vec![
                 ("customise", &labels.customise, ContextItem::Customise),
@@ -356,7 +378,7 @@ fn overflow_menu(ui: &mut egui::Ui, bar: &Bar<'_>, open: &mut String, action: &m
             item.selected = slot.selected;
         }
         let response = item.show(ui);
-        context_menu(&response, (slot.index != usize::MAX).then_some(slot.index), &bar.labels, action);
+        context_menu(&response, (slot.index != usize::MAX).then_some(slot.index), Some((slot.id, &slot.context)), &bar.labels, action);
         solidcraft_ui_registry::publish_target(&format!("nav:slot:{}", slot.id), response.rect);
         if let Some(alias) = slot.alias {
             solidcraft_ui_registry::publish_handle(alias, response.rect.center());

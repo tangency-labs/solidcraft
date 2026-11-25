@@ -35,6 +35,7 @@ const LAYOUT_CONTRACT: TypedContract<LayoutParams> = TypedContract::new();
 const HISTORY_LAYOUT_CONTRACT: TypedContract<HistoryLayoutParams> = TypedContract::new();
 const GRAPHICS_PRESET_CONTRACT: TypedContract<GraphicsPresetParams> = TypedContract::new();
 const AMBIENT_OCCLUSION_CONTRACT: TypedContract<AmbientOcclusionParams> = TypedContract::new();
+const ISOLATE_OTHERS_CONTRACT: TypedContract<crate::schema::view_navigation::IsolateOthersParams> = TypedContract::new();
 const PERSPECTIVE_CONTRACT: TypedContract<PerspectiveParams> = TypedContract::new();
 const NAVIGATE_CONTRACT: TypedContract<NavigateParams> = TypedContract::new();
 const TOOL_CONTRACT: TypedContract<ToolParams> = TypedContract::new();
@@ -180,6 +181,8 @@ CommandSpec::new("view.graphics_preset", "Graphics Preset", crate::checked!("vie
     .icon("settings").noundo().doc_only().contract(&GRAPHICS_PRESET_CONTRACT).output(output_schema_for::<GraphicsPresetResult>).params("preset: performance|quality → preset, enabled, display_quality, supersampling, supersampling_adaptive; Quality: AO, Fine, adaptive 2x SSAA; Performance: no AO, Normal, no SSAA"),
 CommandSpec::new("view.ambient_occlusion", "Ambient Occlusion", crate::checked!("view.ambient_occlusion", ambient_occlusion))
     .icon("settings").noundo().doc_only().contract(&AMBIENT_OCCLUSION_CONTRACT).output(output_schema_for::<AmbientOcclusionResult>).params("enabled: bool → enabled; apply soft contact shading in the GPU viewport"),
+CommandSpec::new("view.isolate_others", "Show Isolated-Away Parts", crate::checked!("view.isolate_others", isolate_others))
+    .icon("isolate").noundo().doc_only().contract(&ISOLATE_OTHERS_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::IsolateOthersResult>).params("show: hidden|transparent|wireframe → show; how the view shows the parts an Isolate hid: not at all, see-through, or as their edges; clicks go through them; display only, never opens a dialog"),
 CommandSpec::new("view.origin_axes_across_view", "Origin Axes Across the Whole View", crate::checked!("view.origin_axes_across_view", origin_axes_across_view))
     .icon("origin").noundo().doc_only().contract(&ORIGIN_AXES_ACROSS_VIEW_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::OriginAxesAcrossViewResult>).params("enabled: bool → enabled; extend the origin axes across the view, or keep the short axes when false; display only, never opens a dialog"),
 CommandSpec::new("view.perspective", "Perspective view", crate::checked!("view.perspective", perspective))
@@ -1305,6 +1308,15 @@ mod tests {
     }
 }
 
+fn isolate_others(_s: &mut Session, p: &Value) -> Result<Value> {
+    use crate::schema::view_navigation::{IsolateOthersResult, IsolateShow};
+    let show: IsolateShow = p
+        .get("show")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .ok_or_else(|| bad("view.isolate_others", "show must be hidden, transparent or wireframe"))?;
+    typed_reply("view.isolate_others", IsolateOthersResult { show, param_warnings: Vec::new() })
+}
+
 fn ambient_occlusion(_s: &mut Session, p: &Value) -> Result<Value> {
     let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad("view.ambient_occlusion", "enabled must be a boolean"))?;
     typed_reply("view.ambient_occlusion", AmbientOcclusionResult { enabled, param_warnings: Vec::new() })
@@ -1385,6 +1397,22 @@ mod ambient_occlusion_tests {
             assert_eq!(s.doc.to_json(), design);
             assert!(s.undo.is_empty() && s.camera.is_none());
         }
+    }
+
+    /// #8120: how the view shows what an Isolate hid is a display setting: it validates its
+    /// choice and changes neither the design nor its history.
+    #[test]
+    fn isolate_others_validates_display_setting_without_editing_design_or_history() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        for show in ["hidden", "transparent", "wireframe"] {
+            assert_eq!(s.execute("view.isolate_others", &json!({"show": show})).unwrap(), json!({"show": show}));
+        }
+        for p in [json!({}), json!({"show": "ghost"}), json!({"show": 1}), json!({"show": null})] {
+            assert!(s.execute("view.isolate_others", &p).is_err(), "{p}");
+        }
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
     }
 
     #[test]

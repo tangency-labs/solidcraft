@@ -3109,3 +3109,42 @@ fn the_isolation_pill_shows_off_the_bar_and_its_close_exits_isolation() {
     assert!(h.app.session.visibility.before_isolate.is_none() && h.app.session.visibility.hidden_bodies.is_empty(), "isolation exited");
     assert!(isolate(&h).is_none());
 }
+
+/// #8120: with the view showing what an Isolate hid see-through or as edges, the bodies Isolate
+/// hid are drawn (never ones the user hid before it) and picks still go through them; the pill's
+/// details choose how.
+#[test]
+fn what_an_isolate_hid_shows_see_through_or_as_edges_and_is_never_picked() {
+    use solidcraft_engine::schema::view_navigation::IsolateShow;
+    let mut h = Harness::new();
+    for (corner, name) in [([0, 0, 0], "A"), ([20, 0, 0], "B"), ([40, 0, 0], "C")] {
+        h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": corner, "body_name": name})).unwrap();
+    }
+    h.app.run("browser.visibility", json!({"items": ["C"], "visible": false})).unwrap();
+    h.app.run("browser.visibility", json!({"items": ["A"], "visible": true, "isolate": true})).unwrap();
+    h.settle();
+    assert_eq!(h.app.preferences.isolate_others, IsolateShow::Hidden, "hidden by default");
+    assert!(crate::viewport::isolate_ghost(&h.app, "B").is_none());
+    // The pill's details offer the choice, at Hidden.
+    let effect = h.app.session.status_items().into_iter().find(|e| e.id == solidcraft_engine::status_items::StatusId::Isolate).unwrap();
+    let details = crate::viewport_details::description(&h.app, &effect);
+    let choice = details.settings.iter().find(|s| s.id == "show").expect("a choice of how the rest shows");
+    assert!(matches!(&choice.value, crate::ui_kit::DetailValue::Choice { selected: 0, options } if options.len() == 3));
+    let owner = crate::viewport_status::identity(&effect);
+    for (selected, show) in [(1, IsolateShow::Transparent), (2, IsolateShow::Wireframe)] {
+        let value = crate::ui_kit::DetailValue::Choice { selected, options: Vec::new() };
+        crate::viewport_details::dispatch(&mut h.app, &h.ctx, &owner, crate::ui_kit::DetailEvent::Change("show".into(), value));
+        h.settle();
+        assert_eq!(h.app.preferences.isolate_others, show);
+        assert_eq!(crate::viewport::isolate_ghost(&h.app, "B"), Some(show), "what the Isolate hid");
+        assert!(crate::viewport::isolate_ghost(&h.app, "C").is_none(), "hidden before the Isolate: stays hidden");
+        assert!(crate::viewport::isolate_ghost(&h.app, "A").is_none(), "shown: drawn as it is");
+        assert!(!h.app.session.body_visible("B"), "still hidden, so nothing picks it");
+    }
+    h.app.run("view.isolate_others", json!({"show": "hidden"})).unwrap();
+    assert_eq!(h.app.preferences.isolate_others, IsolateShow::Hidden);
+    assert!(crate::viewport::isolate_ghost(&h.app, "B").is_none());
+    h.app.run("browser.unisolate", json!({})).unwrap();
+    h.app.run("view.isolate_others", json!({"show": "transparent"})).unwrap();
+    assert!(crate::viewport::isolate_ghost(&h.app, "B").is_none(), "nothing isolated: nothing ghosted");
+}

@@ -179,6 +179,15 @@ fn set_projection(app: &mut SolveApp, perspective: bool) {
     }
 }
 
+/// The Isolate slot's right-click rows: how the view shows what an Isolate hid, the current one
+/// marked (`view.isolate_others`).
+fn isolate_show_rows(app: &SolveApp) -> Vec<(String, String, bool)> {
+    crate::viewport::ISOLATE_SHOWS
+        .iter()
+        .map(|(show, id, label)| ((*id).to_owned(), app.tr(label).to_owned(), app.preferences.isolate_others == *show))
+        .collect()
+}
+
 fn activate(app: &mut SolveApp, slot: &Slot) {
     match slot.id {
         "look_at" => crate::viewport::look_at_selection(app),
@@ -248,6 +257,7 @@ fn slot_view(app: &SolveApp, bar: &BarLayout, slot: &'static Slot, index: usize,
         // The View menu's slot, by the name older scenarios use.
         alias: (slot.id == "display").then_some("nav:view"),
         dot: slot.id == SELECTION_MODE && editing.is_none() && crate::selection_mode::filters_off(app) > 0,
+        context: if slot.id == ISOLATE && editing.is_none() { isolate_show_rows(app) } else { Vec::new() },
     }
 }
 
@@ -364,6 +374,12 @@ fn run(app: &mut SolveApp, ctx: &egui::Context, action: NavAction) {
                 }
             },
         },
+        // The Isolate slot's right-click rows: how the view shows what an Isolate hid.
+        NavAction::Item { menu, item } if menu == ISOLATE => {
+            if let Err(error) = app.run("view.isolate_others", json!({ "show": item })) {
+                app.set_status(error, true);
+            }
+        }
         NavAction::Item { menu, item } if menu == SHEET_ZOOM => match item.as_str() {
             "actual" => crate::drawing_sheet_page::actual_size(app, ctx),
             "fit" => crate::drawing_sheet_page::fit(app),
@@ -839,6 +855,12 @@ mod tests {
         let on = view(&h);
         assert!(on.enabled && on.selected && on.icon == "unisolate" && !on.show_text, "on, Unisolate's icon alone");
         assert!(navigation_bar::strong(ISOLATE) && !navigation_bar::strong("grid"), "only Isolate takes the strong fill");
+        // Its right-click rows choose how the view shows what an Isolate hid, the current marked.
+        let rows: Vec<(&str, bool)> = on.context.iter().map(|(id, _, selected)| (id.as_str(), *selected)).collect();
+        assert_eq!(rows, [("hidden", true), ("transparent", false), ("wireframe", false)]);
+        run(&mut h.app, &h.ctx, NavAction::Item { menu: ISOLATE.into(), item: "wireframe".into() });
+        assert_eq!(h.app.preferences.isolate_others, solidcraft_engine::schema::view_navigation::IsolateShow::Wireframe);
+        assert!(view(&h).context.iter().any(|(id, _, selected)| id == "wireframe" && *selected));
         activate(&mut h.app, slot);
         h.settle();
         assert!(h.app.session.visibility.hidden_bodies.is_empty(), "every body is back");

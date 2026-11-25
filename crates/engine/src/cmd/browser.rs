@@ -653,7 +653,7 @@ fn isolate_bodies(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
     // again. Their other bodies are hidden one by one above, as the root's are.
     let shown_folders = folders_holding(s, &keep);
     // Kept only now, once nothing above can fail, for Unisolate.
-    s.visibility.remember_before_isolate();
+    remember_before_isolate(s);
     s.visibility.hidden_folders.retain(|k| !shown_folders.contains(k));
     s.visibility.hidden_occurrences = hidden;
     s.visibility.hidden_bodies = hidden_bodies;
@@ -697,6 +697,20 @@ fn folders_holding(s: &Session, world: &[String]) -> std::collections::BTreeSet<
 
 /// Unisolate: puts back what the Isolates since the last Unisolate hid, and leaves alone what was
 /// changed since (locks, sketches, dimensions). With no Isolate in effect, shows everything.
+/// Keeps what an Isolate is about to change, with the bodies on screen now, unless an earlier
+/// Isolate is still in effect (#8120).
+fn remember_before_isolate(s: &mut Session) {
+    if s.visibility.before_isolate.is_some() {
+        return;
+    }
+    let shown =
+        s.world_state().map(|world| world.bodies.iter().filter(|b| s.body_visible(&b.name)).map(|b| b.name.clone()).collect()).unwrap_or_default();
+    s.visibility.remember_before_isolate();
+    if let Some(before) = s.visibility.before_isolate.as_mut() {
+        before.shown_bodies = shown;
+    }
+}
+
 /// `browser.isolate`: Isolate on the selection, for its key (#3504): placements when components
 /// are selected, else the bodies the selection names.
 fn isolate_selection(s: &mut Session, p: &Value) -> Result<Value> {
@@ -853,7 +867,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             let mut root_bodies: Vec<String> =
                 s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == 0).map(|b| b.name.clone()).collect();
             root_bodies.extend(ancestor_bodies);
-            s.visibility.remember_before_isolate();
+            remember_before_isolate(s);
             s.visibility.hidden_occurrences = hidden;
             s.visibility.hidden_bodies = root_bodies;
             s.refresh_display();
@@ -2324,6 +2338,9 @@ mod tests {
         s.selection = vec![crate::Sel::Face { body: "B".into(), index: 0, point: Default::default() }];
         run(&mut s, "browser.isolate", json!({}));
         assert_eq!(s.visibility.hidden_bodies, ["A", "C"]);
+        // The bodies on screen when it began, for drawing what it hid see-through or as edges.
+        let shown: Vec<&str> = s.visibility.before_isolate.as_ref().unwrap().shown_bodies.iter().map(String::as_str).collect();
+        assert_eq!(shown, ["A", "B", "C"]);
         // #8120: the Isolate is a viewport status, ended by its own command, as Zebra is.
         let status = s.status_items().into_iter().find(|item| item.id == crate::status_items::StatusId::Isolate).expect("an Isolate status");
         assert_eq!(status.setting, crate::status_items::StatusSetting::Isolate { hidden: 2 });
@@ -2349,6 +2366,9 @@ mod tests {
         run(&mut s, "browser.visibility", json!({"items": ["C"], "visible": false}));
         run(&mut s, "browser.visibility", json!({"items": ["A"], "visible": true, "isolate": true}));
         run(&mut s, "body.rename", json!({"body": "C", "name": "D"}));
+        assert!(!s.visibility.before_isolate.as_ref().unwrap().shown_bodies.contains("C"), "C was hidden before the Isolate");
+        run(&mut s, "body.rename", json!({"body": "B", "name": "E"}));
+        assert!(s.visibility.before_isolate.as_ref().unwrap().shown_bodies.contains("E"), "a rename follows into what was on screen");
         run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/sketches"], "visible": false}));
         run(&mut s, "browser.unisolate", json!({}));
         assert_eq!(s.visibility.hidden_bodies, ["D"], "the renamed body stays hidden");

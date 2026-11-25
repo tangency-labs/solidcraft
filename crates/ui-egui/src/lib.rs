@@ -2140,6 +2140,11 @@ impl SolveApp {
             if id == "view.origin_axes_across_view" {
                 self.preferences.origin_axes_across_view = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
             }
+            if id == "view.isolate_others"
+                && let Some(show) = v.get("show").and_then(|s| serde_json::from_value(s.clone()).ok())
+            {
+                self.preferences.isolate_others = show;
+            }
             if id == "view.scale_bar" {
                 self.preferences.scale_bar = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
             }

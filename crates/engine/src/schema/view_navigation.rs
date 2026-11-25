@@ -654,6 +654,37 @@ pub struct AmbientOcclusionParams {
     pub enabled: Option<bool>,
 }
 
+/// How the view shows what an Isolate hid (#8120): not at all, see-through, or as its edges.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum IsolateShow {
+    /// Hidden, as Isolate always has.
+    #[default]
+    Hidden,
+    /// Drawn faded and see-through; clicks go through it.
+    Transparent,
+    /// Drawn as its edges only, faded; clicks go through it.
+    Wireframe,
+}
+
+/// `view.isolate_others`: how the view shows what an Isolate hid. A display setting the app
+/// keeps; the design is not changed.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct IsolateOthersParams {
+    pub show: IsolateShow,
+}
+
+/// What `view.isolate_others` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct IsolateOthersResult {
+    /// The setting now.
+    pub show: IsolateShow,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What `view.ambient_occlusion` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct AmbientOcclusionResult {

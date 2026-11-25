@@ -4483,6 +4483,9 @@ pub struct BeforeIsolate {
     pub hidden_bodies: Vec<String>,
     pub hidden_occurrences: Vec<Vec<u64>>,
     pub hidden_folders: Vec<String>,
+    /// The bodies on screen when the first Isolate began (world names). Those hidden now are
+    /// what Isolate hid, which the view may show see-through or as edges.
+    pub shown_bodies: std::collections::BTreeSet<String>,
 }
 
 impl Visibility {
@@ -4494,6 +4497,7 @@ impl Visibility {
                 hidden_bodies: self.hidden_bodies.clone(),
                 hidden_occurrences: self.hidden_occurrences.clone(),
                 hidden_folders: self.hidden_folders.clone(),
+                shown_bodies: Default::default(),
             });
         }
     }

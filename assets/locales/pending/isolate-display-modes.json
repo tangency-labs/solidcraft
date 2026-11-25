@@ -1,0 +1,79 @@
+{
+  "en": {
+    "cmd.view_isolate_others": "Show Isolated-Away Parts",
+    "ui.isolate_show": "The rest",
+    "ui.isolate_show_hidden": "Hidden",
+    "ui.isolate_show_transparent": "Transparent",
+    "ui.isolate_show_wireframe": "Wireframe"
+  },
+  "ar": {
+    "cmd.view_isolate_others": "إظهار الأجزاء المعزولة",
+    "ui.isolate_show": "الباقي",
+    "ui.isolate_show_hidden": "مخفي",
+    "ui.isolate_show_transparent": "شفاف",
+    "ui.isolate_show_wireframe": "إطار سلكي"
+  },
+  "de": {
+    "cmd.view_isolate_others": "Ausgeblendete Teile beim Isolieren",
+    "ui.isolate_show": "Der Rest",
+    "ui.isolate_show_hidden": "Ausgeblendet",
+    "ui.isolate_show_transparent": "Transparent",
+    "ui.isolate_show_wireframe": "Drahtmodell"
+  },
+  "es": {
+    "cmd.view_isolate_others": "Mostrar las piezas apartadas al aislar",
+    "ui.isolate_show": "El resto",
+    "ui.isolate_show_hidden": "Oculto",
+    "ui.isolate_show_transparent": "Transparente",
+    "ui.isolate_show_wireframe": "Alámbrico"
+  },
+  "fr": {
+    "cmd.view_isolate_others": "Afficher les pièces écartées par l'isolement",
+    "ui.isolate_show": "Le reste",
+    "ui.isolate_show_hidden": "Masqué",
+    "ui.isolate_show_transparent": "Transparent",
+    "ui.isolate_show_wireframe": "Filaire"
+  },
+  "he": {
+    "cmd.view_isolate_others": "הצגת החלקים שהוסתרו בבידוד",
+    "ui.isolate_show": "השאר",
+    "ui.isolate_show_hidden": "מוסתר",
+    "ui.isolate_show_transparent": "שקוף",
+    "ui.isolate_show_wireframe": "מסגרת תיל"
+  },
+  "ja": {
+    "cmd.view_isolate_others": "分離表示で隠れた部品の表示",
+    "ui.isolate_show": "その他",
+    "ui.isolate_show_hidden": "非表示",
+    "ui.isolate_show_transparent": "透明",
+    "ui.isolate_show_wireframe": "ワイヤフレーム"
+  },
+  "ko": {
+    "cmd.view_isolate_others": "분리 표시로 숨긴 부품 표시",
+    "ui.isolate_show": "나머지",
+    "ui.isolate_show_hidden": "숨김",
+    "ui.isolate_show_transparent": "투명",
+    "ui.isolate_show_wireframe": "와이어프레임"
+  },
+  "nl": {
+    "cmd.view_isolate_others": "Weggeïsoleerde onderdelen tonen",
+    "ui.isolate_show": "De rest",
+    "ui.isolate_show_hidden": "Verborgen",
+    "ui.isolate_show_transparent": "Transparant",
+    "ui.isolate_show_wireframe": "Draadmodel"
+  },
+  "vi": {
+    "cmd.view_isolate_others": "Hiển thị các phần bị cô lập",
+    "ui.isolate_show": "Phần còn lại",
+    "ui.isolate_show_hidden": "Ẩn",
+    "ui.isolate_show_transparent": "Trong suốt",
+    "ui.isolate_show_wireframe": "Khung dây"
+  },
+  "zh": {
+    "cmd.view_isolate_others": "显示隔离外的零件",
+    "ui.isolate_show": "其余部分",
+    "ui.isolate_show_hidden": "隐藏",
+    "ui.isolate_show_transparent": "透明",
+    "ui.isolate_show_wireframe": "线框"
+  }
+}

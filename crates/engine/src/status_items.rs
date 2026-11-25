@@ -100,7 +100,7 @@ impl StatusItem {
     /// Capability independent of a window's presentation preferences. `has_key` retains
     /// the existing read-only legend contract; live details also include settings/findings.
     pub fn has_details(&self) -> bool {
-        !matches!(self.setting, StatusSetting::Environment | StatusSetting::Isolate { .. })
+        !matches!(self.setting, StatusSetting::Environment)
     }
 }
 

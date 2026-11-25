@@ -388,7 +388,8 @@ impl Session {
         let selected: std::collections::BTreeSet<&str> = self.selection.iter().filter_map(|s| s.body_name()).collect();
         // The bodies Unisolate will hide again follow renames too (#8120).
         let before_isolate = self.visibility.before_isolate.as_ref().map_or(&[][..], |before| before.hidden_bodies.as_slice());
-        if self.visibility.hidden_bodies.is_empty() && before_isolate.is_empty() && selected.is_empty() {
+        let shown_before = self.visibility.before_isolate.as_ref().map(|before| &before.shown_bodies);
+        if self.visibility.hidden_bodies.is_empty() && before_isolate.is_empty() && shown_before.is_none_or(|s| s.is_empty()) && selected.is_empty() {
             return;
         }
         if rename.is_none() {
@@ -406,7 +407,8 @@ impl Session {
                 body.name = new.to_string();
             }
         }
-        let hidden: std::collections::BTreeSet<_> = self.visibility.hidden_bodies.iter().chain(before_isolate).map(String::as_str).collect();
+        let hidden: std::collections::BTreeSet<_> =
+            self.visibility.hidden_bodies.iter().chain(before_isolate).chain(shown_before.into_iter().flatten()).map(String::as_str).collect();
         let mut names = std::collections::BTreeMap::new();
         let mut destinations = std::collections::BTreeSet::new();
         let (before, after) = (solidcraft_doc::WorldNames::new(previous, state), solidcraft_doc::WorldNames::new(&self.doc, &renamed));
@@ -436,6 +438,9 @@ impl Session {
         self.visibility.hidden_bodies.retain_mut(remap);
         if let Some(before) = self.visibility.before_isolate.as_mut() {
             before.hidden_bodies.retain_mut(remap);
+            let mut shown: Vec<String> = std::mem::take(&mut before.shown_bodies).into_iter().collect();
+            shown.retain_mut(remap);
+            before.shown_bodies = shown.into_iter().collect();
         }
         for sel in &mut self.selection {
             let name = match sel {
