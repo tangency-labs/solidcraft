@@ -3071,6 +3071,13 @@ mod member {
             parts(m.dir, m.length, Vec2::new(30.0, 0.0)),
             Err(Refusal::Degenerate)
         );
+        assert_eq!(parts(m.dir, f64::INFINITY, m.lo), Err(Refusal::Degenerate));
+        let far = Vec2::new(f64::NEG_INFINITY, m.lo.y);
+        assert_eq!(parts(m.dir, m.length, far), Err(Refusal::Degenerate));
+        let mut frame = m.frame.clone();
+        frame.origin[1] = f64::NAN;
+        let r = Member::from_parts(frame, m.dir, m.length, m.lo, m.hi);
+        assert_eq!(r, Err(Refusal::Degenerate));
     }
 
     /// The plane x + z = 150 cuts a 10 × 10 bar along x: its middle line at 150, its corners at
