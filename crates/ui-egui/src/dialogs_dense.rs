@@ -1002,7 +1002,7 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, from
 
 /// An angle text field stepped by `delta` arrows of `step_deg`: a plain number moves and keeps
 /// its unit, an expression is left as typed, and `max_deg` stops the step past it.
-fn angle_step(text: &str, delta: i64, step_deg: f64, max_deg: Option<f64>) -> Option<String> {
+pub(crate) fn angle_step(text: &str, delta: i64, step_deg: f64, max_deg: Option<f64>) -> Option<String> {
     let text = if text.trim().is_empty() { "0 deg" } else { text };
     let next = crate::dim_view::window::stepped(text, delta as f64, solidcraft_engine::doc::expr::Kind::Angle, "", 0.0, step_deg)?;
     match max_deg {

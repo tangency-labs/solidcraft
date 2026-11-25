@@ -57,12 +57,16 @@ crate::dialog_descriptor::dialog_descriptors! {
         } => json!({"order": MATCH_CONTINUITY.get(*order).map_or("g2", |(_, word)| *word)});
         ; custom {
             /// `direction`: an index into [`EXTRUDE_SIDES`]; `to_object`: the extent is To Object
-            /// (the To Object input holds the pick), with `to_offset` past it (empty: none).
+            /// (the To Object input holds the pick), with `to_offset` past it (empty: none);
+            /// `taper`: the angle the walls lean by, as typed, sent while it is not zero or the
+            /// feature has one (`taper_present`: an authored zero taper is still a parameter).
             Extrude {
                 distance: String,
                 direction: usize,
                 to_object: bool,
                 to_offset: String,
+                taper: String,
+                taper_present: bool,
             },
             /// `axis`: a stored {origin, dir} axis, used while no axis is picked.
             Revolve {
@@ -228,6 +232,12 @@ const EXTRUDE_EXTENTS: [&str; 2] = ["Distance", "To Object"];
 /// The sides a surface extrude goes to (labels, and the `direction` parameter).
 const EXTRUDE_SIDES: [(&str, &str); 3] = [("One Side", "positive"), ("Symmetric", "symmetric"), ("Flipped", "negative")];
 
+/// Whether a surface extrude to the side `direction` (an index into [`EXTRUDE_SIDES`]) takes a
+/// taper: One Side and Flipped do, Symmetric does not yet.
+fn extrude_tapers(direction: usize) -> bool {
+    direction != 1
+}
+
 /// The ways a ruled surface leaves its edges (labels, and the `mode` parameter).
 const RULED_MODES: [(&str, &str); 4] = [("Normal", "normal"), ("Tangent", "tangent"), ("Angle", "angle"), ("Direction", "direction")];
 
@@ -279,9 +289,14 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
 /// The dialog for a surface command.
 pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let k = match id {
-        "surface.extrude" => {
-            Surf::Extrude { distance: crate::dialogs::length_default(&app.session, "10"), direction: 0, to_object: false, to_offset: String::new() }
-        }
+        "surface.extrude" => Surf::Extrude {
+            distance: crate::dialogs::length_default(&app.session, "10"),
+            direction: 0,
+            to_object: false,
+            to_offset: String::new(),
+            taper: "0 deg".into(),
+            taper_present: false,
+        },
         "surface.revolve" => Surf::Revolve { angle: "360 deg".into(), symmetric: false, axis: None },
         "surface.sweep" => Surf::Sweep(crate::dialogs_sweep::SweepOpts::default()),
         "surface.loft" => Surf::Loft { rail_fit: 0 },
@@ -360,7 +375,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf, inputs: &mut Vec<SelInput>, active:
             });
             ui_kit::options(ui, "ruled_options", &mut [("Flip", flip)]);
         }
-        Surf::Extrude { distance, direction, to_object, to_offset } => {
+        Surf::Extrude { distance, direction, to_object, to_offset, taper, taper_present } => {
             let mut extent = usize::from(*to_object);
             form_row(ui, "Extent Type", |ui| {
                 combo(ui, "se_ext", &EXTRUDE_EXTENTS, &mut extent);
@@ -376,6 +391,16 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf, inputs: &mut Vec<SelInput>, active:
                 form_row(ui, "Direction", |ui| {
                     ui_kit::segmented(ui, direction, &EXTRUDE_SIDES.map(|(label, _)| label), Default::default());
                 });
+                // A taper leans the walls of one side, as Extrude's does.
+                if extrude_tapers(*direction) {
+                    form_row(ui, "Taper Angle", |ui| {
+                        let before = taper.clone();
+                        enter |= ui_kit::stepped_field(ui, taper, "", "1 deg", |text, delta| crate::dialogs::angle_step(text, delta, 1.0, None));
+                        if *taper != before {
+                            *taper_present = !taper.trim().is_empty();
+                        }
+                    });
+                }
             }
         }
         Surf::Untrim { holes, outer, in_place } => {
@@ -625,7 +650,7 @@ fn chains(app: &SolveApp, picks: &[Sel]) -> Result<Vec<Chain>, String> {
 pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let need = |i: usize, what: &str| if items(inputs, i).is_empty() { Err(format!("select {what} first")) } else { Ok(()) };
     let (cmd, mut p) = match k {
-        Surf::Extrude { distance, direction, to_object, to_offset } => {
+        Surf::Extrude { distance, direction, to_object, to_offset, taper, taper_present } => {
             need(0, "profiles or curves to extrude")?;
             let mut p = sheet_picks(app, items(inputs, 0))?;
             if *to_object {
@@ -636,6 +661,12 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             } else {
                 p["distance"] = json!(distance);
                 p["direction"] = json!(EXTRUDE_SIDES.get(*direction).map_or("positive", |(_, d)| *d));
+                // As Extrude sends its taper: one the feature has, or one that is not zero (a
+                // text that is no angle goes too, so the command says so).
+                let tapered = app.session.doc.eval(taper, ValueKind::Angle).map(|v| v.abs() > 1e-12).unwrap_or(!taper.trim().is_empty());
+                if extrude_tapers(*direction) && (*taper_present || tapered) {
+                    p["taper"] = json!(taper);
+                }
             }
             ("surface.extrude", p)
         }
@@ -1157,6 +1188,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 direction,
                 to_object: extent.to.is_some(),
                 to_offset: extent.to_offset.as_deref().map(str::to_string).unwrap_or_default(),
+                taper: extent.taper.as_deref().map(str::to_string).unwrap_or_else(|| "0 deg".into()),
+                taper_present: extent.taper.is_some(),
             };
             let mut ins = inputs(&k);
             if let Some(input) = ins.first_mut() {
@@ -1174,6 +1207,10 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             let mut extra = Map::new();
             if extent.direction == Direction::Symmetric {
                 extra.insert("convention".into(), json!(extent.convention));
+            }
+            // A corner rule the taper was given (the command takes one) stays with it.
+            if let Some(corner) = extent.corner {
+                extra.insert("corner".into(), json!(corner));
             }
             return Some((Kind::Surface(k), ins, extra));
         }

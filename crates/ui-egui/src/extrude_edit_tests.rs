@@ -1252,6 +1252,58 @@ fn surface_extrude_dialog_ends_at_a_picked_face() {
     assert_eq!(extent(&h).to.map(|p| p.0), Some(solidcore_record::Vec3::new(0.0, 0.0, 10.0)));
 }
 
+/// Surface Extrude's Taper Angle (#10129): the row steps by a degree as Extrude's does, OK saves
+/// the taper with the feature and the walls lean (a 10 mm square over 10 mm at 1°: the far loop
+/// is 10 + 2 × 10 tan 1° wide), and editing shows it again. Symmetric takes no taper yet: the
+/// row is gone there and OK sends none, so the sheet is straight.
+#[test]
+fn surface_extrude_dialog_takes_a_taper_angle() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("surface.extrude", json!({"sketch":"Base","distance":"10 mm","name":"Wall","body_name":"Sheet"})).unwrap();
+    h.frames(4);
+    let taper = |h: &Harness| match &h.app.dialog {
+        Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Surface(crate::dialogs_surface::Surf::Extrude { taper, .. }), .. }) => {
+            taper.clone()
+        }
+        _ => panic!("surface extrude dialog"),
+    };
+    let saved = |h: &Harness| match h.app.session.doc.features.iter().find(|f| f.name == "Wall").map(|f| &f.kind) {
+        Some(solidcraft_engine::doc::FeatureKind::SurfaceExtrude { extent, .. }) => extent.taper.as_ref().map(|t| t.to_string()),
+        _ => panic!("the surface extrude"),
+    };
+    let width = |h: &Harness| {
+        let bb = solidcraft_engine::kernel::measure(&h.app.session.world_state().unwrap().body("Sheet").unwrap().body).unwrap().bbox;
+        bb.max.x - bb.min.x
+    };
+    assert_eq!(saved(&h), None);
+
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    assert_eq!(taper(&h), "0 deg");
+    h.step(&json!({"click":{"handle":"dialog:Taper Angle up"}})).unwrap();
+    assert_eq!(taper(&h), "1 deg");
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(saved(&h).as_deref(), Some("1 deg"));
+    let want = 10.0 + 2.0 * 10.0 * 1f64.to_radians().tan();
+    assert!((width(&h) - want).abs() < 1e-6, "{} vs {want}", width(&h));
+
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    assert_eq!(taper(&h), "1 deg");
+    h.step(&json!({"click":{"handle":"dialog:Direction"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Direction:Symmetric"}})).unwrap();
+    h.frames(2);
+    assert!(h.at(&json!({"handle":"dialog:Taper Angle up"})).is_err(), "Symmetric shows no Taper Angle");
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(saved(&h), None);
+    assert!((width(&h) - 10.0).abs() < 1e-9, "{}", width(&h));
+}
+
 /// Double-clicking the distance arrow in the view reverses the direction, as Reverse Direction
 /// does, and keeps the distance (#17402); Symmetric has no direction to reverse.
 #[test]
