@@ -390,12 +390,19 @@ and a boss overhanging a cut ball's rim by as much is dropped by the union.
 The sites move to the rule one at a time (§10, "The coincidence rule in migration"). Reading it:
 - the side test of an edge use (`is_edgeuse_side_in_surface`, `topology/edgeuse/p2.rs`; the
   check's Loop test 2): a sample of the edge, dropped onto the surface, lies on a non-periodic
-  side of the surface's domain within the coincidence tolerance of the surface with itself
-  (its zone tolerance, at least the contact tolerance), where upstream took twice the zone
-  tolerance. A notch twice the zone tolerance deep has edges, where its walls meet the
-  faces across it, that leave the side square to it; at the intersection tolerance every
-  point of them lay on it, across the side's direction, and the check refused the body
-  (`solidcore-ops` `heal.rs`, `a_block_notched_twice_the_tolerance_deep_is_valid`);
+  side of the surface's domain within the larger of the surface's zone tolerance and the
+  edge's tolerance (`zone_reach_3d`), where upstream took twice the zone tolerance. The edge
+  and its face are one body's, held to the tolerances it states, so those decide: the contact
+  tolerance, which keeps a contact between two operands' curves and their coincidence in
+  agreement, is no floor here. The edge's tolerance counts up to the contact tolerance, the
+  band this site read before, so no body that band took is refused. A notch twice the zone
+  tolerance deep has edges, where its walls meet the faces across it, that leave the side
+  square to it; at the intersection tolerance every point of them lay on it, across the
+  side's direction, and the check refused the body (`solidcore-ops` `heal.rs`,
+  `a_block_notched_twice_the_tolerance_deep_is_valid`). With the contact tolerance as a
+  floor, a face and edges held to 1e-7 with an edge 1.17e-6 inside the face's domain side,
+  running along it the other way (the floor of a U whose base is that thin), were refused
+  the same way (#17689; `a_u_whose_base_is_well_past_a_tight_tolerance_thick_is_valid`);
 - two planar faces one surface in the radial sector (`faces_on_other_surfaces`,
   `query/face/p1.rs`, above): the faces part when a point of either is proved farther than
   the coincidence tolerance from the other's plane, where the band was the two zone
@@ -989,9 +996,10 @@ A reviewer can check each of these on a change to the boolean.
 - A curve the marching intersection traces inside a lens of two circles in contact, from the
   touch to a crossing along both edges (a boss 5e-8 past a rim at a zone tolerance of 1e-7),
   is kept as a curve; the contact makes it no event (§6).
-- The coincidence rule in migration (§5, "The coincidence rule"): the side test of an edge use,
-  the proto vertices (`find_proto_vertex_within`, `DeclaredContact::overlaps`) and a seam's end
-  vertex in the seam stretch of `edge_solutions` read `coincidence_tol_3d`; the intersection
+- The coincidence rule in migration (§5, "The coincidence rule"): the side test of an edge use
+  reads `zone_reach_3d` (the body's own tolerances, no contact floor); the proto vertices
+  (`find_proto_vertex_within`, `DeclaredContact::overlaps`) and a seam's end vertex in the
+  seam stretch of `edge_solutions` read `coincidence_tol_3d`; the intersection
   curve along an edge (`edge_solutions`), a vertex on a line edge (`split_edges_at_vertices`),
   the vertex pair of a proto vertex, the exactly placed combine radius, the interval along an
   edge (`classify_edge_interval`), the
