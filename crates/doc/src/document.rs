@@ -1786,6 +1786,12 @@ pub enum FeatureKind {
         base: PointExpr,
         #[serde(default = "z_axis")]
         axis: Dir,
+        /// A picked axis, using the same persistent references as Revolve.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis_ref: Option<AxisRef>,
+        /// Grow against the axis direction, keeping the coil's hand (`clockwise`).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reversed: bool,
         /// The sketch whose plane and profile the coil sweeps. Its absence means the primitive
         /// circular or square section below.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1813,7 +1819,7 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Start angle")]
         start_angle: Option<Expr>,
-        /// Turn the other way (left-handed).
+        /// Reverse rotation about the reference axis without changing axial propagation.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         clockwise: bool,
         /// Where the wire ends; axial when absent.
@@ -2323,7 +2329,8 @@ pub enum FeatureKind {
         in_place: bool,
     },
     /// A surface body turned about an axis from open curve chains and the boundaries of
-    /// profiles: walls only, no caps (a solid where a full turn closes them).
+    /// profiles: walls only, no caps; a full turn that closes them is a closed surface body
+    /// (`stays_surface`), or a solid in designs saved before it.
     SurfaceRevolve {
         sketch: SketchId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2346,6 +2353,10 @@ pub enum FeatureKind {
         /// save it; designs saved before it keep each face along its surface's own normal.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         faced: bool,
+        /// A full turn that closes the walls stays a surface body (#21969). New surface revolves
+        /// save it; designs saved before it make a solid of a closed full turn, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// A surface body swept along a chain of sketch curves from open curve chains and the
     /// boundaries of profiles: walls only, no caps.
@@ -2556,9 +2567,10 @@ pub enum FeatureKind {
         #[walk(length = "Tolerance")]
         tolerance: Expr,
     },
-    /// A surface body trimmed by a plane, by a face of a body (`tool`, its surface extended) or
-    /// by sketch curves swept onto it (`curves`), keeping the side of `keep`; with `keep_more`,
-    /// the regions (pieces that hang together once cut) `keep` and those points pick instead.
+    /// A surface body trimmed by a plane, a complete bounded sheet (`tool_body`), a face of a
+    /// body (`tool`, its surface extended), or sketch curves swept onto it (`curves`). A sheet
+    /// keeps the connected region of `keep`; a plane or face keeps its side. With `keep_more`,
+    /// it keeps the regions (pieces that hang together once cut) those points pick instead.
     /// With `with`, a mutual trim: `body` and `with` (one face each) cut each other, `with`
     /// keeping the side of its one `keep_with` point or the regions of several; `extend`
     /// extends one that stops short of the other to meet it, and `stitch` sews the two kept
@@ -2568,6 +2580,9 @@ pub enum FeatureKind {
         plane: PlaneRef,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool: Option<FaceAt>,
+        /// The complete bounded cutting sheet. Older designs use `tool` for one extended face.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_body: Option<BodyName>,
         keep: Position,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         keep_more: Vec<Position>,
@@ -4470,6 +4485,37 @@ pub struct Visibility {
     /// once the folder is shown.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hidden_folders: Vec<String>,
+    /// What Isolate changed, as it was before the first Isolate, for Unisolate. Never saved with
+    /// the design: it lives in the session and its undo steps only.
+    #[serde(skip)]
+    pub before_isolate: Option<BeforeIsolate>,
+}
+
+/// The parts of [`Visibility`] an Isolate changes, kept so that Unisolate can put them back and
+/// leave everything changed since (locks, sketches, dimensions) as it is.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BeforeIsolate {
+    pub hidden_bodies: Vec<String>,
+    pub hidden_occurrences: Vec<Vec<u64>>,
+    pub hidden_folders: Vec<String>,
+    /// The bodies on screen when the first Isolate began (world names). Those hidden now are
+    /// what Isolate hid, which the view may show see-through or as edges.
+    pub shown_bodies: std::collections::BTreeSet<String>,
+}
+
+impl Visibility {
+    /// Keeps what an Isolate is about to change, unless an earlier Isolate is still in effect:
+    /// Unisolate goes back to before the first one.
+    pub fn remember_before_isolate(&mut self) {
+        if self.before_isolate.is_none() {
+            self.before_isolate = Some(BeforeIsolate {
+                hidden_bodies: self.hidden_bodies.clone(),
+                hidden_occurrences: self.hidden_occurrences.clone(),
+                hidden_folders: self.hidden_folders.clone(),
+                shown_bodies: Default::default(),
+            });
+        }
+    }
 }
 
 impl Visibility {
