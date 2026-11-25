@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::{Value, json};
+use solidcore_record::brep::{Loop, OrientedEdge};
 use solidcraft_doc::drawing::{self, Drawing};
 use solidcraft_doc::{Document, Feature, FeatureKind};
 
@@ -21,8 +22,8 @@ use crate::schema::edit::{
     TimelineStepParams, TimelineSuppressParams, TimelineSuppressResult, TimelineUngroupParams, TimelineUngrouped,
 };
 use crate::schema::select::{
-    PartialPick, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectInvertParams,
-    SelectItem, SelectMode, SelectSetParams, SelectSetResult, SharpEdgesParams, read_item,
+    EdgeLoopParams, EdgeLoopResult, PartialPick, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams,
+    SelectFilterResult, SelectInvertParams, SelectItem, SelectMode, SelectSetParams, SelectSetResult, SharpEdgesParams, read_item,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, PickMode, Result, Sel, Session, Snapshot};
@@ -285,6 +286,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SHARP_EDGES_CONTRACT)
         .output(output_schema_for::<SelectSetResult>)
         .params("angle_deg?: 1…179 (default 30), body?: solid body name (default: every shown solid body), add?: bool → selects the edges whose faces' normals turn by more than angle_deg, measured on the exact surfaces; tangent edges never"),
+    CommandSpec::new("select.edge_loop", "Select Edge Loop", crate::checked!("select.edge_loop", select_edge_loop))
+        .icon("select")
+        .noundo()
+        .doc_only()
+        .contract(&EDGE_LOOP_CONTRACT)
+        .output(output_schema_for::<EdgeLoopResult>)
+        .params("body?: world body name and edge?: edge index, together (default: the last selected edge), face?: which of the edge's faces, add?: bool → selects the closed loop of edges of that face that holds the edge (exact topology); without face: a flat face, then one with more than one loop, then the lowest index → selected, face, edges"),
     CommandSpec::new("select.all", "Select All", crate::checked!("select.all", select_all))
         .icon("select")
         .key("Ctrl+A")
@@ -311,6 +319,7 @@ const SELECT_ALL_CONTRACT: TypedContract<SelectAllParams> = TypedContract::new()
 const SELECT_INVERT_CONTRACT: TypedContract<SelectInvertParams> = TypedContract::new();
 const SAME_LOOK_CONTRACT: TypedContract<SameLookParams> = TypedContract::new();
 const SHARP_EDGES_CONTRACT: TypedContract<SharpEdgesParams> = TypedContract::new();
+const EDGE_LOOP_CONTRACT: TypedContract<EdgeLoopParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new();
 const RENAME_CONTRACT: TypedContract<TimelineRenameParams> = TypedContract::new();
@@ -2084,6 +2093,74 @@ fn select_sharp_edges(s: &mut Session, p: &Value) -> Result<Value> {
     select_set(s, &json!({"items": items, "add": add}))
 }
 
+/// `select.edge_loop`: the loop of edges around one of an edge's faces, from the body's exact
+/// topology (#18094). See [`EdgeLoopParams`] for which face gives the loop.
+fn select_edge_loop(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "select.edge_loop";
+    let request: EdgeLoopParams = serde_json::from_value(p.clone()).map_err(|e| bad(CMD, e.to_string()))?;
+    let (name, edge) = match (request.body, request.edge) {
+        (Some(body), Some(edge)) => (body, edge),
+        (None, None) => s
+            .selection
+            .iter()
+            .rev()
+            .find_map(|x| match x {
+                Sel::Edge { body, index, .. } => Some((body.clone(), *index)),
+                _ => None,
+            })
+            .ok_or_else(|| bad(CMD, "select an edge, or give body and edge"))?,
+        _ => return Err(bad(CMD, "give body and edge together")),
+    };
+    let state = s.world_state()?;
+    let body = state.body(&name).ok_or_else(|| bad(CMD, format!("no body `{name}`")))?;
+    let record = body.body.record();
+    if record.faces.is_empty() {
+        return Err(bad(CMD, format!("`{name}` is a mesh body: it has no edge loops")));
+    }
+    let wanted = u32::try_from(edge).ok().filter(|_| edge < record.edges.len()).ok_or_else(|| bad(CMD, format!("no edge {edge} of `{name}`")))?;
+    // Each face's loop that runs along the edge (a face holds an edge in one loop; a seam twice in it).
+    let loops: Vec<(usize, &[OrientedEdge])> = record
+        .faces
+        .iter()
+        .enumerate()
+        .filter_map(|(f, face)| {
+            face.loops.iter().find_map(|l| match l {
+                Loop::Edges { edges } if edges.iter().any(|u| u.edge == wanted) => Some((f, edges.as_slice())),
+                _ => None,
+            })
+        })
+        .collect();
+    let chosen = match request.face {
+        Some(face) => {
+            loops.iter().find(|(f, _)| *f == face).ok_or_else(|| bad(CMD, format!("face {face} of `{name}` is not one of edge {edge}'s faces")))?
+        }
+        None => loops
+            .iter()
+            .max_by_key(|(f, _)| {
+                let several_loops = record.faces.get(*f).is_some_and(|face| face.loops.len() > 1);
+                (body.body.planar_face(*f).is_some(), several_loops, std::cmp::Reverse(*f))
+            })
+            .ok_or_else(|| bad(CMD, format!("edge {edge} of `{name}` bounds no face")))?,
+    };
+    let (face, used) = *chosen;
+    let mut edges: Vec<usize> = Vec::new();
+    for u in used {
+        let e = u.edge as usize;
+        if !edges.contains(&e) {
+            edges.push(e);
+        }
+    }
+    drop(state);
+    // With `add`, an edge already selected stays as it is, at the point it was picked: it is the
+    // same body and edge index, so it is not added again at another point.
+    let add = request.add.unwrap_or(false);
+    let picked = |e: usize| s.selection.iter().any(|x| matches!(x, Sel::Edge { body, index, .. } if *body == name && *index == e));
+    let items: Vec<Value> = edges.iter().filter(|e| !(add && picked(**e))).map(|e| json!({"type": "edge", "body": name, "index": e})).collect();
+    let set = select_set(s, &json!({"items": items, "add": add}))?;
+    let selected = set.get("selected").and_then(Value::as_u64).unwrap_or_default() as usize;
+    reply(CMD, EdgeLoopResult { selected, face, edges, param_warnings: Vec::new() })
+}
+
 /// In an open sketch, every curve of it (construction ones too) and every point of it on no
 /// curve, leaving out its origin and projected geometry; outside a sketch, every shown body.
 fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2337,7 +2414,7 @@ fn only_constraints_changed(
     })
 }
 
-fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.reorder";
     let id = feature_id(s, p.get("feature"), cmd)?;
     let n = s.doc.features.len();
@@ -2795,6 +2872,21 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("faced").or_insert_with(|| json!(faced));
+    }
+    // A redefine keeps what the feature's result was (#21969): a surface body where it closes,
+    // or a solid there in a feature saved before `stays_surface`.
+    let stays = match &old.kind {
+        FeatureKind::SurfaceSweep { stays_surface, .. } if cid == "surface.sweep" => Some(*stays_surface),
+        FeatureKind::SurfaceLoft { stays_surface, .. } if cid == "surface.loft" => Some(*stays_surface),
+        FeatureKind::SurfaceOffset { stays_surface, .. } if cid == "surface.offset" => Some(*stays_surface),
+        FeatureKind::SurfaceRuled { stays_surface, .. } if cid == "surface.ruled" => Some(*stays_surface),
+        FeatureKind::SurfaceExtend { stays_surface, .. } if cid == "surface.extend" => Some(*stays_surface),
+        _ => None,
+    };
+    if let Some(stays) = stays
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("stays_surface").or_insert_with(|| json!(stays));
     }
     if let FeatureKind::Thread { continuous_flanks, .. } = &old.kind
         && cid == "solid.thread"

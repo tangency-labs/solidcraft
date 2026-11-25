@@ -122,6 +122,7 @@ const ENTITIES: &[&str] = &[
     "EDGE_CURVE",
     "VERTEX_POINT",
     "ORIENTED_EDGE",
+    "SEAM_EDGE",
     "EDGE_LOOP",
     "FACE_BOUND",
     "FACE_OUTER_BOUND",

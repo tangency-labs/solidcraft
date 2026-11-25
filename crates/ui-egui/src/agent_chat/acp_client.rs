@@ -394,6 +394,12 @@ impl ChatBackend for AcpBackend {
         self.note = acp::system_note(text);
     }
 
+    fn set_allow_paths(&mut self, paths: &[std::path::PathBuf]) {
+        if let Some(bridge) = self.bridge.as_mut() {
+            bridge.allow_paths = paths.to_vec();
+        }
+    }
+
     fn answer_permission(&mut self, key: u64, option: Option<&str>) {
         if let Some(rpc) = self.permissions.remove(&key) {
             self.send(&acp::permission_reply(rpc, option));
