@@ -9,7 +9,7 @@ use serde_json::{Map, Value, json};
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::doc::{AxisRef, Direction, FaceAt, FeatureKind, Mat, PlaneRef, Position, ProfileSel, RuledCorners, RuledMode};
+use solidcraft_engine::doc::{AxisRef, Direction, ExtendTo, FaceAt, FeatureKind, Mat, PlaneRef, Position, ProfileSel, RuledCorners, RuledMode};
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::kernel::{Construction, Continuity};
 
@@ -40,10 +40,13 @@ crate::dialog_descriptor::dialog_descriptors! {
             symmetric: bool = false => *symmetric,
             operation: usize = 0 => op_index(operation),
         } => json!({"thickness": thickness, "symmetric": symmetric, "operation": OPS.get(*operation).copied().unwrap_or("new")});
+        // `to_object`: the edges go up to the plane or face in the To Object input, not a
+        // distance. An extension back to the surface's own bounds shows as Distance.
         Extend("surface.extend", "EXTEND", [("Edges", EDGES, true)],
-            FeatureKind::SurfaceExtend { distance, .. }) {
+            FeatureKind::SurfaceExtend { distance, up_to, .. }) {
             distance: String = "10 mm".into() => distance.to_string(),
-        } => json!({"distance": distance});
+            to_object: bool = false => matches!(up_to, Some(ExtendTo::Plane(_) | ExtendTo::Face(_))),
+        } => if *to_object { json!({}) } else { json!({"distance": distance}) };
         Fair("surface.fair", "ui.fair_surface_title", [("Surface or faces", BODIES | FACES, true)],
             FeatureKind::SurfaceFair { strength, iterations, keep_edges, tolerance, .. }) {
             strength: f64 = 1.0 => *strength,
@@ -148,8 +151,10 @@ impl Surf {
     pub fn primary(&mut self) -> Option<(&'static str, ValueKind, &mut String)> {
         Some(match self {
             Surf::Thicken { thickness, .. } => ("Thickness", ValueKind::Length, thickness),
+            // Extending to an object has no distance to drag.
+            Surf::Extend { to_object: true, .. } => return None,
             Surf::Extrude { to_object: true, to_offset, .. } => ("To Offset", ValueKind::Length, to_offset),
-            Surf::Extend { distance } | Surf::Extrude { distance, .. } | Surf::Offset { distance, .. } | Surf::Ruled { distance, .. } => {
+            Surf::Extend { distance, .. } | Surf::Extrude { distance, .. } | Surf::Offset { distance, .. } | Surf::Ruled { distance, .. } => {
                 ("Distance", ValueKind::Length, distance)
             }
             Surf::Revolve { angle, .. } => ("Angle", ValueKind::Angle, angle),
@@ -222,8 +227,13 @@ const BOUNDARY_OPS: [&str; 2] = ["New Body", "Join"];
 /// Which holes Untrim takes away: every one, the picked ones, or none (the outer boundary only).
 const UNTRIM_HOLES: [&str; 3] = ["All", "Picked", "None"];
 
-/// How far a surface extrude goes: a distance, or to a picked face or point.
-const EXTRUDE_EXTENTS: [&str; 2] = ["Distance", "To Object"];
+/// How far Extend and Surface Extrude go: a distance, or up to a picked object (a plane or face for
+/// Extend, a face or point for Surface Extrude).
+const EXTENTS: [&str; 2] = ["Distance", "To Object"];
+
+/// Extend's pick input for the plane or face the edges go up to: Extrude's To Object label, taking
+/// what `surface.extend`'s `up_to` takes.
+const EXTEND_TO: &str = "To Object";
 
 /// The sides a surface extrude goes to (labels, and the `direction` parameter).
 const EXTRUDE_SIDES: [(&str, &str); 3] = [("One Side", "positive"), ("Symmetric", "symmetric"), ("Flipped", "negative")];
@@ -303,7 +313,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 }
 
 /// The rows after the inputs; true when Enter was pressed in a field. A choice that adds or
-/// removes a pick input (Surface Extrude's To Object) changes `inputs` and `active`.
+/// removes a pick input (To Object of Extend and Surface Extrude) changes `inputs` and `active`.
 pub fn rows(ui: &mut egui::Ui, k: &mut Surf, inputs: &mut Vec<SelInput>, active: &mut usize) -> bool {
     let mut enter = false;
     match k {
@@ -332,8 +342,16 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf, inputs: &mut Vec<SelInput>, active:
             });
             choice_row(ui, "Operation", "th_op", operation, &OP_LABELS);
         }
-        Surf::Extend { distance } => {
-            enter |= expr_row(ui, "Distance", distance);
+        Surf::Extend { distance, to_object } => {
+            let mut extent = usize::from(*to_object);
+            form_row(ui, "Extent Type", |ui| {
+                combo(ui, "sx_ext", &EXTENTS, &mut extent);
+            });
+            *to_object = extent == 1;
+            crate::dialogs::set_object_accepting(inputs, active, EXTEND_TO, PLANES | FACES, *to_object);
+            if !*to_object {
+                enter |= expr_row(ui, "Distance", distance);
+            }
         }
         Surf::Revolve { angle, symmetric, .. } => {
             enter |= expr_row(ui, "Angle", angle);
@@ -363,7 +381,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf, inputs: &mut Vec<SelInput>, active:
         Surf::Extrude { distance, direction, to_object, to_offset } => {
             let mut extent = usize::from(*to_object);
             form_row(ui, "Extent Type", |ui| {
-                combo(ui, "se_ext", &EXTRUDE_EXTENTS, &mut extent);
+                combo(ui, "se_ext", &EXTENTS, &mut extent);
             });
             *to_object = extent == 1;
             // The To Object input, the same one Extrude picks its object in.
@@ -879,12 +897,26 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             need(0, "the surfaces to thicken")?;
             ("surface.thicken", json!({"bodies": items(inputs, 0).body_names()}))
         }
-        Surf::Extend { .. } => {
+        Surf::Extend { to_object, .. } => {
             need(0, "the edges to extend")?;
             let body =
                 items(inputs, 0).iter().find_map(|x| if let Sel::Edge { body, .. } = x { Some(body.clone()) } else { None }).unwrap_or_default();
             let edges: Vec<Value> = items(inputs, 0).edge_points().into_iter().map(pt).collect();
-            ("surface.extend", json!({"body": body, "edges": edges}))
+            let mut p = json!({"body": body, "edges": edges});
+            let picked = inputs.iter().find(|i| i.label == EXTEND_TO).and_then(|i| i.items.first());
+            // A plane or face kept from the feature (one the dialog can't pick); a stored "bounds"
+            // goes with Distance, and a null is one Distance dropped.
+            let kept = extra.get("up_to").is_some_and(|v| !v.is_null() && v != "bounds");
+            match (*to_object, picked) {
+                (true, Some(Sel::Plane { name })) => p["up_to"] = json!(name),
+                (true, Some(Sel::Face { body, point, .. })) => p["up_to"] = json!({"body": body, "point": pt(*point)}),
+                (true, None) if kept => {}
+                (true, _) => return Err("select the plane or face to extend up to first".into()),
+                // A distance replaces the kept plane or face.
+                (false, _) if kept => p["up_to"] = Value::Null,
+                (false, _) => {}
+            }
+            ("surface.extend", p)
         }
         Surf::Trim { extend, stitch, direction, face_normal } => {
             let need_trim = |i: usize, message| {
@@ -1280,7 +1312,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             (Surf::simple_restore(kind)?, vec![bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect()])
         }
         FeatureKind::SurfaceExtend { edges, mode, up_to, neighbours, .. } => {
-            // The dialog edits the edges and the distance; the rest is kept as it was.
+            // The dialog edits the edges and the distance or the plane or face they go up to; the
+            // rest is kept as it was.
             let mut extra = Map::new();
             if !mode.is_natural() {
                 extra.insert("mode".into(), json!(mode));
@@ -1288,17 +1321,25 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             if !*neighbours {
                 extra.insert("neighbours".into(), json!(false));
             }
+            // The plane or face shows in the To Object input; one that can't be picked here is
+            // kept as stored.
+            let to_pick = match up_to {
+                Some(ExtendTo::Face(t)) => crate::dialogs::face_sel_on(s, Some(t.body.as_ref()), t.point.0),
+                Some(ExtendTo::Plane(plane)) => crate::dialogs::plane_sel(s, plane),
+                _ => None,
+            };
             match up_to {
-                Some(solidcraft_engine::doc::ExtendTo::Bounds) => {
+                Some(ExtendTo::Bounds) => {
                     extra.insert("up_to".into(), json!("bounds"));
                 }
-                Some(solidcraft_engine::doc::ExtendTo::Face(t)) => {
+                _ if to_pick.is_some() => {}
+                Some(ExtendTo::Face(t)) => {
                     extra.insert("up_to".into(), json!({"body": t.body, "point": pt(t.point.0)}));
                 }
-                Some(solidcraft_engine::doc::ExtendTo::Plane(PlaneRef::Origin { name })) => {
+                Some(ExtendTo::Plane(PlaneRef::Origin { name })) => {
                     extra.insert("up_to".into(), json!(name));
                 }
-                Some(solidcraft_engine::doc::ExtendTo::Plane(PlaneRef::Construction { feature, .. })) => {
+                Some(ExtendTo::Plane(PlaneRef::Construction { feature, .. })) => {
                     let shown = s.doc.feature(feature.0).map(|f| json!(f.name)).unwrap_or_else(|| json!(feature.0));
                     extra.insert("up_to".into(), shown);
                 }
@@ -1308,6 +1349,13 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             let mut ins = inputs(&k);
             if let Some(inp) = ins.first_mut() {
                 inp.items = edges.iter().filter_map(edge).collect();
+            }
+            if matches!(k, Surf::Extend { to_object: true, .. }) {
+                let mut active = 0;
+                crate::dialogs::set_object_accepting(&mut ins, &mut active, EXTEND_TO, PLANES | FACES, true);
+                if let Some(inp) = ins.iter_mut().find(|i| i.label == EXTEND_TO) {
+                    inp.items = to_pick.into_iter().collect();
+                }
             }
             return Some((Kind::Surface(k), ins, extra));
         }
