@@ -1047,11 +1047,8 @@ impl RegularityForms {
             Some(w) => w.mul(w, b)?,
             None => Bounded::exact(Bernstein2::constant(1.0)),
         };
-        let wk = w2.mul(&k, b)?;
-        let dd = d * d;
-        let mut q0 = x2.mul(&x2, b)?.add_scaled(&wk, dd, b)?;
-        // `d * d` is rounded once
-        q0.err += gamma(2) * dd * wk.f.max_abs_coefficient();
+        // `d^2 w^2 K'` as `d (d w^2 K')`, each product with `d` counted
+        let q0 = x2.mul(&x2, b)?.add_scaled(&w2.mul(&k, b)?.scale(d), d, b)?;
         let q1 = h.scale(d);
         Ok(Self { q0, q1, x2 })
     }
@@ -1059,8 +1056,11 @@ impl RegularityForms {
     /// Whether `Q > 0` is certified on the whole patch by the coefficients' ranges. Each
     /// form's coefficients are widened by their rounding bound, and the comparison by
     /// `gamma(8)` of the magnitudes it compares (the few roundings of the root, the
-    /// products and the sums).
+    /// products and the sums). A form that is not finite certifies nothing.
     fn certified(&self) -> bool {
+        if !(self.q0.is_finite() && self.q1.is_finite() && self.x2.is_finite()) {
+            return false;
+        }
         let x2_min = self.x2.f.min_coefficient() - self.x2.err;
         if !positive(x2_min) {
             return false;
@@ -1085,16 +1085,16 @@ impl RegularityForms {
     }
 
     fn quarters(&self) -> [Self; 4] {
-        let r = |u0: f64, u1: f64, v0: f64, v1: f64| Self {
-            q0: self.q0.quarter(u0, u1, v0, v1),
-            q1: self.q1.quarter(u0, u1, v0, v1),
-            x2: self.x2.quarter(u0, u1, v0, v1),
+        let r = |upper_u: bool, upper_v: bool| Self {
+            q0: self.q0.quarter(upper_u, upper_v),
+            q1: self.q1.quarter(upper_u, upper_v),
+            x2: self.x2.quarter(upper_u, upper_v),
         };
         [
-            r(0.0, 0.5, 0.0, 0.5),
-            r(0.5, 1.0, 0.0, 0.5),
-            r(0.0, 0.5, 0.5, 1.0),
-            r(0.5, 1.0, 0.5, 1.0),
+            r(false, false),
+            r(true, false),
+            r(false, true),
+            r(true, true),
         ]
     }
 }
@@ -1905,6 +1905,33 @@ mod tests {
             panic!("an inset past the radius folds");
         };
         assert!((largest - 10.0).abs() < 1e-9, "{largest}");
+    }
+
+    /// A patch whose margin lies inside its forms' counted rounding is not certified, and
+    /// one whose margin is past it is: `q0` and `q1` constant 1 and `X` just below 1, so
+    /// `Q = 1 - X` is positive as computed in both. A form with a NaN coefficient (an
+    /// overflow, which the coefficients' extremes pass over) or an infinite bound
+    /// certifies nothing.
+    #[test]
+    fn a_margin_inside_the_counted_rounding_is_not_certified() {
+        let form = |x: f64, err: f64| Bounded {
+            f: Bernstein2::constant(x),
+            err,
+        };
+        let forms = |margin: f64, err: f64| RegularityForms {
+            q0: form(1.0, err),
+            q1: form(1.0, 0.0),
+            x2: form((1.0 - margin) * (1.0 - margin), 0.0),
+        };
+        assert!(!forms(1e-12, 1e-10).certified());
+        assert!(forms(1e-8, 1e-10).certified());
+        assert!(!forms(1e-8, f64::INFINITY).certified());
+        let mut overflowed = forms(1e-8, 0.0);
+        overflowed.q0 = Bounded {
+            f: Bernstein2::new(1, 0, vec![1.0, f64::NAN]).unwrap(),
+            err: 0.0,
+        };
+        assert!(!overflowed.certified());
     }
 
     /// The regularity forms are built in the patch's own frame, so their counted rounding

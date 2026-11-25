@@ -188,10 +188,11 @@ X′⁴ − d X′ H′ + d² w² K′ of the same sign is what is bounded, four
 parameter: q0 − X′ q1 with q0 = X′⁴ + d² w² K′, q1 = d H′ and x2 = X′². The forms are built with
 the patch moved to its own frame, which leaves them unchanged, and carry a running error bound
 through their construction and every quartering (`bernstein::Bounded`), so their rounding follows
-the patch's size, not its distance from the origin. A patch is certified when the coefficients'
-ranges, widened by that bound, keep it above 0. Each patch's bound is subdivided into quarters on
-an explicit stack, at most
-`MAX_REGULARITY_PATCHES` (20,000); a patch whose middle value is negative is a fold, and a
+the patch's size, not its distance from the origin. The bound starts from each patch's net as the
+Bezier decomposition computed it; the decomposition's own rounding is not counted. A patch is
+certified when the coefficients' ranges, widened by that bound, keep it above 0, and a form that
+is not finite certifies nothing. Each patch's bound is subdivided into quarters on an explicit
+stack, at most `MAX_REGULARITY_PATCHES` (20,000); a patch whose middle value is negative is a fold, and a
 budget run out is refused too, since a face not proved regular is not built. A pole (a normal that
 vanishes) never certifies, so it is refused the same way.
 

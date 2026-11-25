@@ -552,6 +552,14 @@ impl Bounded {
         Self { f, err: 0.0 }
     }
 
+    /// Whether every coefficient and the bound are finite. An overflow leaves an infinite
+    /// or NaN coefficient, which the coefficients' extremes pass over, so a form that is
+    /// not finite bounds nothing.
+    #[must_use]
+    pub fn is_finite(&self) -> bool {
+        self.err.is_finite() && self.f.coefficients().iter().all(|x| x.is_finite())
+    }
+
     /// The product: the operands' errors carried (`|a| e_b + e_a |b| + e_a e_b`) and the
     /// product's own rounding ([`product_rounding`]).
     ///
@@ -629,12 +637,14 @@ impl Bounded {
         Self { f, err }
     }
 
-    /// One quarter of the square, `[u0, u1] x [v0, v1]` with each end 0, 1/2 or 1
-    /// ([`Bernstein2::restrict`]): at most one de Casteljau split at 1/2 in each parameter,
-    /// `du + dv` levels that each halve exactly and add with one rounding, convex
-    /// combinations that carry the error unchanged.
+    /// One quarter of the square: `[0, 1/2]` in the first parameter, or `[1/2, 1]` where
+    /// `upper_u`, and the same in the second with `upper_v` ([`Bernstein2::restrict`]): one
+    /// de Casteljau split at 1/2 in each parameter, `du + dv` levels that each halve exactly
+    /// and add with one rounding, convex combinations that carry the error unchanged.
     #[must_use]
-    pub fn quarter(&self, u0: f64, u1: f64, v0: f64, v1: f64) -> Self {
+    pub fn quarter(&self, upper_u: bool, upper_v: bool) -> Self {
+        let (u0, u1) = if upper_u { (0.5, 1.0) } else { (0.0, 0.5) };
+        let (v0, v1) = if upper_v { (0.5, 1.0) } else { (0.0, 0.5) };
         let f = self.f.restrict(u0, u1, v0, v1);
         let (du, dv) = f.degrees();
         let err = rounded_up(self.err + gamma(du + dv) * self.f.max_abs_coefficient());
@@ -828,6 +838,36 @@ mod tests {
         b.get(k, m) * 0.5f64.powi(k as i32)
     }
 
+    /// The exact product of `fa` and `fb`, coefficient by coefficient (row by row): the
+    /// numerator, an expansion, and the denominator `C(du, i) C(dv, j)`, exact.
+    fn exact_product(b: &Binomials, fa: &Bernstein2, fb: &Bernstein2) -> Vec<(Vec<f64>, f64)> {
+        let ((au, av), (bu, bv)) = (fa.degrees(), fb.degrees());
+        let (du, dv) = (au + bu, av + bv);
+        let mut out = Vec::new();
+        for i in 0..=du {
+            for j in 0..=dv {
+                let mut sum = vec![0.0];
+                for (ia, ra) in fa.rows().enumerate() {
+                    for (ja, &x) in ra.iter().enumerate() {
+                        for (ib, rb) in fb.rows().enumerate() {
+                            for (jb, &y) in rb.iter().enumerate() {
+                                if ia + ib != i || ja + jb != j {
+                                    continue;
+                                }
+                                let w =
+                                    b.get(au, ia) * b.get(av, ja) * b.get(bu, ib) * b.get(bv, jb);
+                                let xy = expansion::product(x, y).unwrap();
+                                sum = expansion::add(&sum, &expansion::scale(&xy, w).unwrap());
+                            }
+                        }
+                    }
+                }
+                out.push((sum, b.get(du, i) * b.get(dv, j)));
+            }
+        }
+        out
+    }
+
     /// [`Bounded::mul`] and [`Bounded::quarter`] hold each coefficient within their bound of
     /// the exact one, checked in exact arithmetic (`geom::expansion`): the product's
     /// coefficient times `C(du, i) C(dv, j)` against the exact sum of its terms, and a
@@ -842,32 +882,14 @@ mod tests {
             .unwrap();
         let (du, dv) = p.f.degrees();
         let mut rounded = 0;
-        for i in 0..=du {
-            for j in 0..=dv {
-                let mut sum = vec![0.0];
-                for (ia, ra) in fa.rows().enumerate() {
-                    for (ja, &x) in ra.iter().enumerate() {
-                        for (ib, rb) in fb.rows().enumerate() {
-                            for (jb, &y) in rb.iter().enumerate() {
-                                if ia + ib != i || ja + jb != j {
-                                    continue;
-                                }
-                                let w = b.get(3, ia) * b.get(2, ja) * b.get(4, ib) * b.get(3, jb);
-                                let xy = expansion::product(x, y).unwrap();
-                                sum = expansion::add(&sum, &expansion::scale(&xy, w).unwrap());
-                            }
-                        }
-                    }
-                }
-                let den = b.get(du, i) * b.get(dv, j);
-                let c = p.f.coefficients()[i * (dv + 1) + j];
-                assert!(within(c, &sum, den, p.err), "product {i} {j}");
-                rounded += usize::from(!within(c, &sum, den, 0.0));
-            }
+        for (k, (sum, den)) in exact_product(&b, &fa, &fb).iter().enumerate() {
+            let c = p.f.coefficients()[k];
+            assert!(within(c, sum, *den, p.err), "product {k}");
+            rounded += usize::from(!within(c, sum, *den, 0.0));
         }
         assert!(rounded > 0);
-        for (u0, u1, v0, v1) in [(0.0, 0.5, 0.5, 1.0), (0.5, 1.0, 0.0, 0.5)] {
-            let q = Bounded::exact(p.f.clone()).quarter(u0, u1, v0, v1);
+        for (u0, v0) in [(0.0, 0.5), (0.5, 0.0)] {
+            let q = Bounded::exact(p.f.clone()).quarter(u0 > 0.0, v0 > 0.0);
             let mut rounded = 0;
             for i in 0..=du {
                 for j in 0..=dv {
@@ -887,6 +909,70 @@ mod tests {
                 }
             }
             assert!(rounded > 0);
+        }
+    }
+
+    /// [`Bounded::add_scaled`], [`Bounded::scale`], the derivatives and [`Bounded::mul`] of
+    /// an operand that is itself off the exact polynomial `g` by up to its bound: each result
+    /// is within its bound of the same operation on `g`, in exact arithmetic, so the operands'
+    /// bounds are carried as well as each operation's own rounding counted.
+    #[test]
+    fn the_counted_rounding_carries_through_sums_scalings_and_derivatives() {
+        let b = Binomials::new();
+        let (g, h) = (mixed(3, 2, 0.1), mixed(3, 2, 0.9));
+        let e = 8.0 * f64::EPSILON * g.max_abs_coefficient();
+        let off = poly(3, 2, |i, j| {
+            let c = g.coefficients()[i * 3 + j];
+            if (i + j) % 2 == 0 {
+                c + 0.5 * e
+            } else {
+                c - 0.25 * e
+            }
+        });
+        let a = Bounded { f: off, err: e };
+        let x = -0.7;
+        let gc = g.coefficients();
+        let s = a.add_scaled(&Bounded::exact(h.clone()), x, &b).unwrap();
+        for (k, &c) in s.f.coefficients().iter().enumerate() {
+            let want = expansion::add(
+                &[gc[k]],
+                &expansion::product(x, h.coefficients()[k]).unwrap(),
+            );
+            assert!(within(c, &want, 1.0, s.err), "sum {k}");
+        }
+        let t = a.scale(x);
+        for (k, &c) in t.f.coefficients().iter().enumerate() {
+            let want = expansion::product(x, gc[k]).unwrap();
+            assert!(within(c, &want, 1.0, t.err), "scale {k}");
+        }
+        let du = a.deriv_u();
+        for i in 0..3 {
+            for j in 0..3 {
+                let step = expansion::sub(&[gc[(i + 1) * 3 + j]], &[gc[i * 3 + j]]);
+                let want = expansion::scale(&step, 3.0).unwrap();
+                assert!(
+                    within(du.f.coefficients()[i * 3 + j], &want, 1.0, du.err),
+                    "u {i} {j}"
+                );
+            }
+        }
+        let dv = a.deriv_v();
+        for i in 0..4 {
+            for j in 0..2 {
+                let step = expansion::sub(&[gc[i * 3 + j + 1]], &[gc[i * 3 + j]]);
+                let want = expansion::scale(&step, 2.0).unwrap();
+                assert!(
+                    within(dv.f.coefficients()[i * 2 + j], &want, 1.0, dv.err),
+                    "v {i} {j}"
+                );
+            }
+        }
+        let p = a.mul(&Bounded::exact(h.clone()), &b).unwrap();
+        for (k, (sum, den)) in exact_product(&b, &g, &h).iter().enumerate() {
+            assert!(
+                within(p.f.coefficients()[k], sum, *den, p.err),
+                "product {k}"
+            );
         }
     }
 }
