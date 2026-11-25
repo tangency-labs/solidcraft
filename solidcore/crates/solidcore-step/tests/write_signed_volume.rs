@@ -508,7 +508,18 @@ impl File {
         let curve = self.curve(rid(&ec[3]));
         let t0 = curve.param_of(a);
         let mut t1 = curve.param_of(b);
-        if matches!(curve, IsoCurve::Circle { .. } | IsoCurve::Ellipse { .. }) {
+        if let IsoCurve::Circle { .. } = curve {
+            let tau = std::f64::consts::TAU;
+            if along {
+                while t1 <= t0 + 1e-12 {
+                    t1 += tau;
+                }
+            } else {
+                while t1 >= t0 - 1e-12 {
+                    t1 -= tau;
+                }
+            }
+        } else if let IsoCurve::Ellipse { .. } = curve {
             let tau = std::f64::consts::TAU;
             if along {
                 while t1 <= t0 + 1e-12 {
@@ -748,7 +759,18 @@ fn half_moment(curve: &IsoCurve, a: P, b: P, along: bool) -> P {
     }
     let t0 = curve.param_of(a);
     let mut t1 = curve.param_of(b);
-    if matches!(curve, IsoCurve::Circle { .. } | IsoCurve::Ellipse { .. }) {
+    if let IsoCurve::Circle { .. } = curve {
+        let tau = std::f64::consts::TAU;
+        if along {
+            while t1 <= t0 + 1e-12 {
+                t1 += tau;
+            }
+        } else {
+            while t1 >= t0 - 1e-12 {
+                t1 -= tau;
+            }
+        }
+    } else if let IsoCurve::Ellipse { .. } = curve {
         let tau = std::f64::consts::TAU;
         if along {
             while t1 <= t0 + 1e-12 {

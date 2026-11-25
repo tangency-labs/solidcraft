@@ -2179,7 +2179,12 @@ mod tests {
     fn normalizes_edge_ellipse_so_semi_axis_1_is_major() {
         let mut model = triangle();
         model.bodies[0].edges[0].curve = Curve::Ellipse {
-            frame: unit(),
+            frame: Frame {
+                origin: [0.0; 3],
+                x: [1.0, 0.0, 0.0],
+                y: [0.0, 1.0, 0.0],
+                z: [0.0, 0.0, 1.0],
+            },
             semi1: 5.0,
             semi2: 8.0,
         };
