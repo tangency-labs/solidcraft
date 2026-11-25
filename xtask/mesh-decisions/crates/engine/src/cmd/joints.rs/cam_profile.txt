@@ -1,0 +1,1 @@
+samples a cam's picked edges from the display mesh

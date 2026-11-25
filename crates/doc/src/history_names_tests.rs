@@ -335,3 +335,54 @@ fn a_face_named_by_its_index_never_qualifies_an_exact_piece() {
     assert_ne!(names.faces[0], names.faces[1]);
     assert!(!names.verified(0) && !names.verified(1));
 }
+
+/// A modelled thread in a hole wider than its minor diameter narrows the bore with a tool whose
+/// faces have no roles. Its end is flush with the part's top face and merges into it: the top
+/// face keeps its exact name (a sketch can attach to it and follows a taller part), and a face
+/// made only of such a tool's faces still has none (#20594).
+#[test]
+fn a_top_face_keeps_its_exact_name_after_a_thread_narrows_the_hole() {
+    let doc_of = |height: f64| {
+        let doc = crate::Document {
+            features: serde_json::from_value(serde_json::json!([
+                {"id": 1, "name": "Cyl", "type": "cylinder", "base": [0, 0, 0], "radius": "25", "height": height.to_string()},
+                {"id": 2, "name": "Bore", "type": "hole", "position": [0, 0, height], "direction": [0, 0, -1], "diameter": "8", "depth": "15"},
+                {"id": 3, "name": "Tap", "type": "thread", "face": [4, 0, height - 5.0], "designation": "M8", "modeled": true}
+            ]))
+            .unwrap(),
+            ..crate::Document::default()
+        };
+        crate::format::read(&doc.to_json()).unwrap()
+    };
+    let top_of = |model: &crate::Model, z: f64| {
+        let state = model.state();
+        let body = state.body("Body1").unwrap().clone();
+        let tops: Vec<usize> =
+            (0..body.body.face_count()).filter(|&i| body.body.planar_face(i).is_some_and(|p| (p.origin.z - z).abs() < 1e-6)).collect();
+        (body, tops)
+    };
+
+    let doc = doc_of(25.0);
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "the thread builds");
+    let (body, tops) = top_of(&model, 25.0);
+    assert_eq!(tops.len(), 1, "one top face");
+    let names = crate::naming::names(&body);
+    assert!(names.verified(tops[0]), "the top face's name follows exact history: {:?}", names.faces);
+    let target = doc.lineage_face_target(&body, tops[0], solidcore_record::Vec3::new(10.0, 0.0, 25.0)).expect("a sketch can attach to the top face");
+
+    // A taller part: the attachment finds the top face at its new height.
+    let taller = doc_of(35.0);
+    let mut model = crate::Model::new();
+    model.evaluate(&taller);
+    let (body, tops) = top_of(&model, 35.0);
+    assert_eq!(tops.len(), 1);
+    assert_eq!(taller.configuration_face_indices(&body, &target).unwrap(), tops);
+
+    // A face made only of an unnamed tool's faces has no exact name.
+    let unnamed = Operand::Made(vec![Vec::new()]);
+    let one = OperandNames { operand: &unnamed, body: None, names: Arc::default(), edges: OnceLock::new() };
+    let only = FaceProv { origins: vec![FaceOrigin::Face { operand: 0, face: 0 }], change: solidcraft_kernel::history::Change::Kept };
+    assert!(from_origins(&only, &[one], 1).is_none());
+}

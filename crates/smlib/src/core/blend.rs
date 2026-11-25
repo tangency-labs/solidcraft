@@ -9,11 +9,8 @@
 //! [`solidcore_ops::fillet_variable_from`]). What stays here is what the entry points check of
 //! their own arguments, and ops' refusals as SolidCraft's errors ([`refused`]).
 //!
-//! What the capi asks of fork-only SMLib code SolidCraft does not take yet is
-//! [`Error::Unsupported`], refused where the capi would first reach it:
-//! - a variable radius whose law has a corner (`SplitFilletFacesAtRadiusCorners`, fork 6eecf04; solidcore#430, PR #1403).
-//!
-//! solidcore's own refusals of code it has not ported are [`Error::Unsupported`] too.
+//! The blend executive splits variable-radius faces at corners in their law. An unported kernel
+//! operation maps to [`Error::Unsupported`].
 //!
 //! The picks by point, the statuses and the result contract below ([`pick_edges`], [`status`],
 //! [`finish`], [`on_copy`]) are what the operation families still on the kernel crate share
@@ -222,7 +219,7 @@ fn ops<T>(call: &'static str, body: &Body, f: impl FnOnce() -> solidcore_ops::Re
 }
 
 /// `e`, a refusal of the entry point `call` on `body` that is this crate's own (a pick that
-/// chose nothing, the curvature fillet's wedges): while a dump folder is set, `body` is left
+/// chose nothing): while a dump folder is set, `body` is left
 /// there, as for a refusal of solidcore-ops'.
 fn failed(call: &'static str, body: &Body, e: Error) -> Error {
     super::dump::failed_ops(call, &e.to_string(), &[("brep", body)]);
@@ -234,7 +231,7 @@ fn failed(call: &'static str, body: &Body, e: Error) -> Error {
 /// too short, a swept turn not built, a corner no blend handles), the kernel's statuses as the
 /// status, the blend refusals and failures ops types carried as they are ([`Error::Refused`]),
 /// and every other error as any solidcore-ops call's ([`super::call::error`]).
-fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
+pub(super) fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
     use solidcore_ops::Error as Ops;
     match e {
         Ops::Status(code) => Error::Status(code),
@@ -346,14 +343,6 @@ pub(crate) enum Corners {
     Open,
 }
 
-/// Why a curvature fillet over edges of different wedge angles is refused: SolidCraft refuses it
-/// since every edge took the equal-area thumbweight of the first one's wedge (in the fork as in
-/// solidcore#2261), so that an edge of another wedge took off another area than its own, and
-/// which one depended on the edges' order.
-pub(crate) const CURVATURE_MIXED_WEDGES: &str = "a curvature-continuous fillet on solidcore over edges whose faces meet at different \
-angles: every edge takes the equal-area thumbweight of the first one's angle, so the others take off the wrong area \
-(https://github.com/tangency-labs/solidcore/issues/2250#issuecomment-6563419897)";
-
 /// [`blend_holes`] without its holes.
 #[allow(clippy::too_many_arguments)] // the capi's blend_call
 pub(crate) fn blend(
@@ -448,11 +437,6 @@ fn blend_call(
         .zip(&at.first)
         .map(|(&vertex, &j)| solidcore_ops::SetBack { vertex, distance: setbacks.get(j).copied().unwrap_or(0.0) })
         .collect();
-    // Edges of other wedges than the first's are not built together curvature-continuously
-    // (solidcore#2250's comment 6563419897).
-    if kind == Blend::Curvature && !ops(CALL, &w, || solidcore_ops::blend::edges_share_wedge(&w, &picked.entities))? {
-        return Err(failed(CALL, &w, Error::Unported(CURVATURE_MIXED_WEDGES)));
-    }
     let kind = match kind {
         Blend::Round => solidcore_ops::Blend::Round,
         Blend::Curvature => solidcore_ops::Blend::Curvature,
@@ -463,6 +447,7 @@ fn blend_call(
         turn: match turn {
             Turn::Mitre => solidcore_ops::Turn::Mitre,
             Turn::Swept => solidcore_ops::Turn::Swept,
+            Turn::Auto => solidcore_ops::Turn::Auto,
         },
         ..solidcore_ops::BlendOptions::default()
     };
@@ -574,40 +559,6 @@ fn law_pinches(degree: usize, knots: &[f64], radii: &[f64]) -> bool {
     false
 }
 
-/// Whether the law has a corner inside (0, 1) (`SmBSplineFilletLaw::GetCornerParameters`, fork
-/// 6eecf04): an interior knot where the radius' slope from the left and from the right differ by
-/// more than `SM_EFF_ZERO * (1 + |left| + |right|)`. The slope is the derivative B-spline's,
-/// `Q_i = p (r_{i+1} - r_i) / (u_{i+p+1} - u_{i+1})`; it jumps only at a knot repeated `m >= p`
-/// times, from `Q_{s-2}` to `Q_{s+m-1-p}` (`s` the knot's first index).
-fn law_has_corner(degree: usize, knots: &[f64], radii: &[f64]) -> bool {
-    const EFF_ZERO: f64 = 1e-12;
-    let p = degree;
-    let q = |i: usize| -> Option<f64> {
-        let (r0, r1) = (radii.get(i)?, radii.get(i + 1)?);
-        let span = knots.get(i + p + 1)? - knots.get(i + 1)?;
-        Some(p as f64 * (r1 - r0) / span)
-    };
-    let n = radii.len();
-    let mut s = p + 1;
-    while s < n {
-        let Some(&u) = knots.get(s) else { break };
-        let mut m = 1;
-        while knots.get(s + m) == Some(&u) {
-            m += 1;
-        }
-        if m >= p && u > 0.0 && u < 1.0 {
-            let (Some(left), Some(right)) = (s.checked_sub(2).and_then(q), q(s + m - 1 - p)) else {
-                return true;
-            };
-            if (left - right).abs() > EFF_ZERO * (1.0 + left.abs() + right.abs()) {
-                return true;
-            }
-        }
-        s += m;
-    }
-    false
-}
-
 /// `smlib_fillet_variable`: the one edge nearest `point` rounded with the radius law of
 /// `degree`, `knots` and `radii`, 0 at the end nearest `start`
 /// ([`solidcore_ops::fillet_variable_from`], on a copy of the body).
@@ -630,11 +581,6 @@ pub(crate) fn fillet_variable(
     let w = copy(CALL, body)?;
     let picked = picked_edges(CALL, &w, &[point], tolerance)?;
     let [e] = picked.entities[..] else { return Err(Error::NoMatch { point: 0 }) };
-    // A law with a corner splits the round's face there (`SplitFilletFacesAtRadiusCorners`,
-    // fork 6eecf04), which SolidCraft does not take yet.
-    if law_has_corner(degree, knots, radii) {
-        return Err(Error::Unsupported);
-    }
     // The round is the union of its balls (smlib#78, solidcore#2262): each ball touches it along
     // the circle shifted -r r'/|c'| from its great circle. A law whose balls fold over one
     // another is refused, [`Error::NoRoom`].
@@ -668,8 +614,8 @@ mod tests {
         use solidcore::error::Failure;
         use solidcore::error::sweep::SweepFailure;
         let sweep = |w| Failure::new("sweep::topology_sweep", w).into_error();
-        assert!(matches!(status(sweep(SweepFailure::Failed("the face was already swept"))), Error::Status(1001)));
-        assert!(matches!(status(sweep(SweepFailure::Missing("the edge's curve"))), Error::Status(1006)));
+        assert!(matches!(status(sweep(SweepFailure::FaceAlreadySwept)), Error::Status(1001)));
+        assert!(matches!(status(sweep(SweepFailure::NullTarget)), Error::Status(1006)));
         assert!(matches!(status(SolidError::sm_err("CopyFaces")), Error::Status(1001)));
         let cap = SweepFailure::RailPastStationCap { asked: 1e-6, reached: 1e-3, wires: 64 };
         assert!(matches!(status(sweep(cap)), Error::Solidcore(_)));
@@ -701,11 +647,6 @@ mod tests {
         assert!(!law_ok(4, &[0.0; 7], &[1.0, 2.0]));
         assert!(law_pinches(1, &[0.0, 0.0, 0.5, 1.0, 1.0], &[1.0, 0.0, 1.0]));
         assert!(!law_pinches(1, &[0.0, 0.0, 1.0, 1.0], &[0.0, 1.0]));
-        // A straight law has no corner; a bent one does at its inner knot; a cubic none.
-        assert!(!law_has_corner(1, &[0.0, 0.0, 1.0, 1.0], &[1.0, 2.0]));
-        assert!(!law_has_corner(1, &[0.0, 0.0, 0.5, 1.0, 1.0], &[1.0, 1.5, 2.0]));
-        assert!(law_has_corner(1, &[0.0, 0.0, 0.5, 1.0, 1.0], &[1.0, 2.0, 1.0]));
-        assert!(!law_has_corner(3, &[0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0], &[1.0, 2.0, 1.0, 2.0, 1.0]));
     }
 
     #[test]

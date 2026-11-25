@@ -107,6 +107,34 @@ fn two_sum(a: f64, b: f64) -> (f64, f64) {
     (s, (a - (s - bb)) + (b - bb))
 }
 
+/// `sin` and `cos` of `deg` degrees, enclosed: `x = deg pi / 180` with `pi` enclosed by
+/// its neighbours, then the Taylor series summed in intervals until the next term is
+/// below `1e-30`, plus that next term's magnitude, which bounds the Lagrange remainder
+/// `|x|^m / m!` of the series cut before power `m`.
+pub(crate) fn sin_cos_deg(deg: f64) -> (Iv, Iv) {
+    let pi = Iv {
+        lo: std::f64::consts::PI.next_down(),
+        hi: std::f64::consts::PI.next_up(),
+    };
+    let x = Iv::exact(deg).mul(pi).div(Iv::exact(180.0));
+    let x2 = x.mul(x);
+    let series = |first: Iv, power: usize| {
+        let (mut sum, mut term, mut m) = (Iv::ZERO, first, power);
+        loop {
+            sum = sum.add(term);
+            term = Iv::ZERO
+                .sub(term.mul(x2))
+                .div(Iv::exact(((m + 1) * (m + 2)) as f64));
+            m += 2;
+            if m > 2 + x.mag() as usize && term.mag() < 1e-30 {
+                let r = term.mag();
+                return sum.add(Iv { lo: -r, hi: r });
+            }
+        }
+    };
+    (series(x, 1), series(Iv::exact(1.0), 0))
+}
+
 /// `a b` exactly, as the rounded product and its error (the fused multiply-add rounds
 /// once, and the error of a rounded product is representable).
 pub(crate) fn two_prod(a: f64, b: f64) -> (f64, f64) {

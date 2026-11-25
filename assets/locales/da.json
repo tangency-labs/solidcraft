@@ -1012,6 +1012,7 @@
   "cmd.motion_list": "Vis bevægelsesanalyser",
   "cmd.motion_play": "Afspil bevægelsesanalyse",
   "cmd.motion_plot": "Vis diagram for bevægelsesanalyse",
+  "cmd.motion_simulate": "Simuler bevægelse",
   "cmd.motion_study": "Bevægelsesanalyse",
   "cmd.motion_trace": "Bevægelsesspor",
   "cmd.motion_trace_edit": "Redigér bevægelsesspor",

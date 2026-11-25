@@ -176,7 +176,7 @@ fn keywords(id: &str) -> &'static str {
         "file.export_step" => "stp cad",
         "file.export_stl" | "file.export_3mf" => "mesh 3d print printing",
         "file.export_obj" => "mesh",
-        "file.export_urdf" => "robot ros simulation",
+        "file.export_urdf" | "file.export_urdf_options" => "robot ros simulation",
         "file.export_sdf" => "gazebo model simulation world texture",
         "sketch.constraint.tangent" => "g1 tangency continuity smooth",
         "sketch.constraint.curvature" => "g2 curvature continuity smooth",
@@ -227,7 +227,7 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
             let (home_tab, home_panel) = crate::workspace::destination(c).unwrap_or(("", ""));
             let info = crate::render_workspace::interactive_command_info(app, c);
             let (label, tab, panel) = (
-                solidcraft_ui_text::tr_label(info.label),
+                solidcraft_ui_text::tr_command(c.id, info.label),
                 solidcraft_ui_text::tr_label(crate::workspace::tab_label(home_tab)),
                 solidcraft_ui_text::tr_label(home_panel),
             );
@@ -339,7 +339,7 @@ fn closest(query: &str) -> Option<&'static str> {
     command_specs()
         .into_iter()
         .map(|c| {
-            let label = solidcraft_ui_text::tr_label(c.label);
+            let label = solidcraft_ui_text::tr_command(c.id, c.label);
             let mut prev: Vec<_> = (0..=q.len()).collect();
             for (j, ch) in label.to_lowercase().chars().take(128).enumerate() {
                 let mut next = vec![j + 1];
@@ -414,8 +414,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     let fallback = app.sbox.at.filter(|p| p.x.is_finite() && p.y.is_finite()).unwrap_or(screen.center());
-    let width = ui_kit::CommandSearch::width().min((screen.width() - t.space_8).max(t.space_24));
-    let closed = ribbon.unwrap_or_else(|| {
+    // Open centred over the view (#18309): the field sits at full width in the view's middle,
+    // a third of the way down so the results have room under it; the ribbon slot stays empty.
+    let view = app.viewport.rect.filter(|r| r.is_finite() && r.is_positive()).unwrap_or(screen);
+    let centred = app.preferences.command_search_centred && (open || progress > 0.0);
+    let room = if centred { view.width() } else { screen.width() };
+    let width = ui_kit::CommandSearch::width().min((room - t.space_8).max(t.space_24));
+    let centre =
+        centred.then(|| Rect::from_min_size(pos2(view.center().x - width / 2.0, view.top() + view.height() / 3.0), vec2(width, t.control_height)));
+    let closed = centre.or(ribbon).unwrap_or_else(|| {
         Rect::from_min_size(
             pos2(
                 fallback.x.clamp(screen.left() + t.space_4, (screen.right() - width - t.space_4).max(screen.left() + t.space_4)),
@@ -1123,6 +1130,51 @@ mod tests {
         h.call("ui.palette", json!({}));
         h.frames(3);
         assert_eq!(order(&h), Some(egui::Order::Foreground), "the open sheet floats over windows");
+    }
+
+    /// With `command_search_centred` (#18309) the shortcut opens the same search centred over
+    /// the view, not in the ribbon's corner; Esc or a started command closes it, and the
+    /// closed field stays in the ribbon. Off (the default) it opens in place.
+    #[test]
+    fn the_preference_opens_the_search_centred_over_the_view() {
+        use crate::scenario::rect_of;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        assert!(!h.app.preferences.command_search_centred, "off by default");
+        h.frames(3);
+        let closed = rect_of("ribbon:search").unwrap();
+        h.call("ui.palette", json!({}));
+        h.frames(10);
+        assert_eq!(rect_of("ribbon:search").unwrap().right(), closed.right(), "off: it opens in the ribbon");
+        h.call("ui.key", json!({"key": "Escape"}));
+        h.frames(10);
+
+        h.app.preferences.command_search_centred = true;
+        h.frames(2);
+        assert_eq!(rect_of("ribbon:search"), Some(closed), "closed, the field stays in the ribbon");
+        h.call("ui.key", json!({"key": "S"}));
+        h.frames(10);
+        assert!(h.app.ui.palette_open);
+        let view = h.app.viewport.rect.unwrap();
+        let field = rect_of("ribbon:search").unwrap();
+        assert!(view.contains_rect(field), "{field:?} in {view:?}");
+        assert!((field.center().x - view.center().x).abs() < 1.0, "{field:?} centred in {view:?}");
+        assert!(field.top() > closed.bottom() + 100.0, "{field:?} below the ribbon");
+        assert!(view.contains_rect(rect_of("ribbon:search_popup").unwrap()), "the results under it");
+        h.call("ui.key", json!({"key": "Escape"}));
+        h.frames(10);
+        assert!(!h.app.ui.palette_open);
+        assert_eq!(rect_of("ribbon:search"), Some(closed), "Esc closes it back into the ribbon");
+
+        // The same results and keys: a command run from it closes it.
+        h.call("ui.palette", json!({}));
+        h.app.sbox.text = "extrude".into();
+        h.frames(3);
+        h.call("ui.key", json!({"key": "Enter"}));
+        h.frames(10);
+        assert!(!h.app.ui.palette_open);
+        assert_eq!(h.app.sbox.recent.first().map(String::as_str), Some("solid.extrude"));
+        assert_eq!(rect_of("ribbon:search"), Some(closed));
     }
 
     #[test]

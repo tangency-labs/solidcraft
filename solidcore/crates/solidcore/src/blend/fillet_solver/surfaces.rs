@@ -38,9 +38,10 @@ impl ConstantRadiusOps for GeometrySolver<'_> {
         self.geometry
             .offset_surface(rail, Some(&self.actual.solver))?
             .ok_or_else(|| {
-                SolidError::blend_missing(
+                SolidError::blend_null_defect(
                     "blend::fillet_solver::surfaces",
-                    "the rail's offset surface",
+                    "the geometry has no offset surface for the rail: the solver builds both \
+                     rails' offset surfaces before it is solved",
                 )
             })
     }
@@ -266,7 +267,8 @@ impl FilletSolver {
     /// use.
     ///
     /// # Errors
-    /// `SM_ERR_NULL_POINTER` when the geometry has no rail `rail` (upstream dereferences
+    /// A defect ([`crate::error::blend::BlendFailure::Defect`], status
+    /// `SM_ERR_NULL_POINTER`) when the geometry has no rail `rail` (upstream dereferences
     /// it); [`SolidError::InvalidInput`] when the geometry for the surfaces was set
     /// without a lending scope (the solver cannot reach the pseudo B-rep).
     pub(crate) fn tangent_rollover_guess(&self, rail: usize) -> Result<Option<Point2>> {
@@ -286,7 +288,11 @@ impl FilletSolver {
         match guesses.rails.get(rail).copied().flatten() {
             Some(guess) => Ok(guess),
             // pFG->GetRail(lRailIndex) is NULL: upstream dereferences it
-            None => Err(SolidError::blend_missing(OP, "the fillet geometry's rail")),
+            None => Err(SolidError::blend_null_defect(
+                OP,
+                "the tangent-rollover geometry for the surfaces has no rail at this index: \
+                 the kernel builds a tangent rollover with both of its rails",
+            )),
         }
     }
 }
