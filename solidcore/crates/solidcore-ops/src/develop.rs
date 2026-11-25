@@ -28,8 +28,8 @@ use solidcore_record::develop::{
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 
 pub use solidcore::develop::{
-    BeadAgainst, BeadRefusal, ContourRefusal, CornerTailRefusal, JointRefusal, PanelRefusal, Refusal, RuleRefusal,
-    MAX_JOINTS, MAX_PANELS, MIN_BEAD_RADIUS,
+    BeadAgainst, BeadRefusal, ContourRefusal, CornerTailRefusal, JointRefusal, PanelRefusal,
+    Refusal, RuleRefusal, MAX_JOINTS, MAX_PANELS, MIN_BEAD_RADIUS,
 };
 
 /// Sets back a record region's flange side using the kernel's contour edit.

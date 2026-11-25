@@ -449,7 +449,7 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// Last discovered pairs for these picks, retained while a value is refused.
                 corner_pairs: Vec<[SheetEdgeName; 2]>,
                 corner_picks: Vec<Sel>,
-                corner_query: Option<(u64, Vec<(String, Value)>)>,
+                corner_query: Option<Box<(u64, Vec<(String, Value)>)>>,
             },
             Unfold {
                 refold: bool,
@@ -866,7 +866,7 @@ pub(crate) fn discover_flange_corners(app: &SolveApp, dialog: &mut Dialog) {
         return;
     };
     let query = (app.session.revision, commands);
-    if corner_query.as_ref() == Some(&query) {
+    if corner_query.as_deref() == Some(&query) {
         return;
     }
     if let Ok(preview) = app.session.preview(&query.1) {
@@ -875,7 +875,7 @@ pub(crate) fn discover_flange_corners(app: &SolveApp, dialog: &mut Dialog) {
     } else if changed_picks {
         corners.clear();
     }
-    *corner_query = Some(query);
+    *corner_query = Some(Box::new(query));
 }
 
 fn flange_corner_rows(
