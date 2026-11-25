@@ -1,5 +1,6 @@
 //! A FreeCAD design's history rebuilt as SolidCraft features: its sketches, the operations that
-//! use them (Pad, Pocket, Revolution, Groove, Fillet, Chamfer) and the bodies they build.
+//! use them (Pad, Pocket, Revolution, Groove, Fillet, Chamfer, primitives, Mirrored, patterns and
+//! MultiTransform) and the bodies they build.
 //!
 //! cadmpeg decodes the file at full depth into its neutral model; this module reads that model's
 //! design arenas through their serialised (wire) form, which is stable for a pinned cadmpeg, and
@@ -24,6 +25,9 @@ use solidcraft_geom::prelude::*;
 
 /// Features read at most (a design with more is imported as solids).
 const MAX_FEATURES: usize = 2000;
+/// Steps of a MultiTransform rebuilt at most: each step's feature copies the one before it, and
+/// patterns of patterns nest at most 8 deep.
+const MAX_STEPS: usize = 8;
 /// Sketch entities and constraints read at most per sketch.
 const MAX_SKETCH_ITEMS: usize = 2000;
 /// Two sketch points closer than this (mm) are one point.
@@ -55,6 +59,10 @@ pub(super) struct Arenas {
     /// direction from the third column of its placement, where a FreeCAD origin axis runs along
     /// the first.
     pub(super) pattern_axes: HashMap<String, (Vec3, Vec3)>,
+    /// The steps of each MultiTransform, in order: the object names its `Transformations` lists,
+    /// by MultiTransform object name. cadmpeg decodes each step as a pattern of its own too; those
+    /// make no feature here, the MultiTransform makes one for each.
+    pub(super) multi_stages: HashMap<String, Vec<String>>,
 }
 
 /// A row-major 4 × 4 placement matrix.
@@ -86,6 +94,7 @@ impl Arenas {
             parameters: by_id(list(serde_json::to_value(&model.parameters).map_err(wire)?)),
             placements: HashMap::new(),
             pattern_axes: HashMap::new(),
+            multi_stages: HashMap::new(),
         })
     }
 }
@@ -181,8 +190,13 @@ pub(super) fn rebuild(arenas: &Arenas, edge_point: &EdgePoint<'_>) -> Result<Nat
         let body = body_of.get(format!("fcstd:design:feature#{object}").as_str()).map(|b| short(b));
         Some(body.and_then(|b| arenas.placements.get(b)).map_or(p, |m| apply(m, p)))
     };
+    let steps: std::collections::HashSet<&str> = arenas.multi_stages.values().flatten().map(String::as_str).collect();
     for feature in &features {
         let id = s(feature, "id").unwrap_or_default();
+        if steps.contains(short(id)) {
+            // A MultiTransform's step: the MultiTransform rebuilds it.
+            continue;
+        }
         let name = s(feature, "name").map_or_else(|| short(id).to_string(), str::to_string);
         let suppressed = feature.get("suppressed").and_then(Value::as_bool).unwrap_or(false);
         let tag = s(feature, "source_tag").unwrap_or("feature");
@@ -205,7 +219,7 @@ pub(super) fn rebuild(arenas: &Arenas, edge_point: &EdgePoint<'_>) -> Result<Nat
                 Some(b.primitive(d, &name, body.as_deref(), &placement)?)
             }
             "fillet" | "chamfer" => Some(b.edge_treatment(d, &name, body.as_deref(), &placed_edge)?),
-            "pattern" => Some(b.pattern(d, &name, body.as_deref(), arenas.pattern_axes.get(short(id)))?),
+            "pattern" => Some(b.pattern(d, &name, body.as_deref(), arenas, short(id))?),
             other => return Err(format!("{name}: FreeCAD {tag} ({other}) is not rebuilt yet")),
         };
         if let Some(fid) = made {
@@ -473,9 +487,14 @@ impl Builder {
         }
     }
 
-    /// A Mirrored, LinearPattern or PolarPattern of features: their copies, replayed.
-    /// `axis`: the origin axis the pattern names, when it names one (see [`Arenas::pattern_axes`]).
-    fn pattern(&mut self, d: &Value, name: &str, body: Option<&str>, axis: Option<&(Vec3, Vec3)>) -> Result<u64, String> {
+    /// A Mirrored, LinearPattern, PolarPattern or MultiTransform of features: their copies,
+    /// replayed. `object` is the pattern's FreeCAD object name.
+    ///
+    /// A MultiTransform's steps each apply to every copy the steps before them made, so step `k`
+    /// becomes a Mirror or Pattern of the features plus the features made for steps `1..k`: a
+    /// pattern of a pattern copies its copies, and the last step's feature is the one named after
+    /// the MultiTransform.
+    fn pattern(&mut self, d: &Value, name: &str, body: Option<&str>, arenas: &Arenas, object: &str) -> Result<u64, String> {
         if body.is_none_or(|b| !self.bodies.contains_key(b)) {
             return Err(format!("{name}: a pattern outside a body is not rebuilt yet"));
         }
@@ -488,6 +507,42 @@ impl Builder {
             return Err(format!("{name}: nothing to copy"));
         }
         let p = d.get("pattern").ok_or_else(|| format!("{name}: no pattern"))?;
+        if s(p, "kind") != Some("composite") {
+            let kind = self.stage(p, features, name, arenas.pattern_axes.get(object))?;
+            return self.add(kind, name);
+        }
+        let stages = p.get("stages").and_then(Value::as_array).ok_or_else(|| format!("{name}: no steps"))?;
+        let objects = arenas.multi_stages.get(object).map_or(&[][..], Vec::as_slice);
+        if stages.is_empty() || stages.len() != objects.len() {
+            return Err(format!("{name}: its steps could not be read"));
+        }
+        if stages.len() > MAX_STEPS {
+            return Err(format!("{name}: {} steps (at most {MAX_STEPS} are rebuilt)", stages.len()));
+        }
+        // Each step's label, as FreeCAD's tree shows it.
+        let label =
+            |step: &str| arenas.features.iter().find(|f| s(f, "id").map(short) == Some(step)).and_then(|f| s(f, "name")).unwrap_or(step).to_string();
+        let mut sources = features;
+        let mut last = None;
+        for (i, (stage, step)) in stages.iter().zip(objects).enumerate() {
+            let step_label = label(step);
+            let p = stage.get("pattern").ok_or_else(|| format!("{name}: step {step_label} has no pattern"))?;
+            if s(p, "kind") == Some("scale") {
+                return Err(format!("{name}: a Scaled step ({step_label}) is not rebuilt yet"));
+            }
+            let step_name = if i + 1 == stages.len() { name.to_string() } else { step_label };
+            let kind = self.stage(p, sources.clone(), &step_name, arenas.pattern_axes.get(step))?;
+            let made = self.add(kind, &step_name)?;
+            sources.push(solidcraft_doc::FeatureId(made));
+            last = Some(made);
+        }
+        last.ok_or_else(|| format!("{name}: no steps"))
+    }
+
+    /// One Mirrored, LinearPattern or PolarPattern (or one step of a MultiTransform) of
+    /// `features`. `axis`: the origin axis it names, when it names one (see
+    /// [`Arenas::pattern_axes`]).
+    fn stage(&self, p: &Value, features: Vec<solidcraft_doc::FeatureId>, name: &str, axis: Option<&(Vec3, Vec3)>) -> Result<FeatureKind, String> {
         let count = |k: &str| p.get(k).and_then(Value::as_u64).filter(|n| (1..=10_000).contains(n)).ok_or_else(|| format!("{name}: no count"));
         let kind = match s(p, "kind") {
             Some("mirror") => {
@@ -554,7 +609,7 @@ impl Builder {
             }
             other => return Err(format!("{name}: a {} pattern is not rebuilt yet", other.unwrap_or("unknown").replace('_', " "))),
         };
-        self.add(kind, name)
+        Ok(kind)
     }
 
     fn revolve(&mut self, d: &Value, name: &str, body: Option<&str>) -> Result<u64, String> {

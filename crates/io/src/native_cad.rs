@@ -822,6 +822,17 @@ mod convert {
                 arenas.pattern_axes.insert(owner, (at, along));
             }
         }
+        // Each MultiTransform's steps, in order.
+        for r in native.and_then(|a| a.get("properties")).into_iter().flatten() {
+            if !r.field("name").is_some_and(|n| n == "Transformations") {
+                continue;
+            }
+            let (Some(owner), Some(links)) = (r.field("owner").as_ref().and_then(object_name), r.field("links")) else { continue };
+            let steps: Option<Vec<String>> = links.as_array().map(|l| l.iter().filter_map(|link| link.get("object").and_then(object_name)).collect());
+            if let Some(steps) = steps.filter(|s| !s.is_empty()) {
+                arenas.multi_stages.insert(owner, steps);
+            }
+        }
         let index = std::cell::OnceCell::new();
         let work = WorkBudget::new(EDGE_WORK);
         let edge_point = |id: &str| edge_point(&ir, index.get_or_init(|| ModelIndex::build(&ir)), &work, id);

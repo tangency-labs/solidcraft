@@ -21,6 +21,15 @@ const KNOB_FCSTD: &[u8] = include_bytes!("fixtures/knob.FCStd");
 /// FreeCAD 26.3).
 const PLATE_FCSTD: &[u8] = include_bytes!("fixtures/plate.FCStd");
 
+/// An 80 × 50 × 5 mm plate whose holes two MultiTransforms repeat: a hole through all along X,
+/// along Y and mirrored (18 holes), and a hole 2 mm deep turned about Z then moved along Y (6 holes)
+/// (`fixtures/make_grid_fcstd.py`, FreeCAD 1.1.4).
+const GRID_FCSTD: &[u8] = include_bytes!("fixtures/grid.FCStd");
+
+/// A 40 × 20 × 5 mm plate with a hole a MultiTransform repeats along X and then scales
+/// (`fixtures/make_grid_fcstd.py`, FreeCAD 1.1.4).
+const SCALED_FCSTD: &[u8] = include_bytes!("fixtures/scaled.FCStd");
+
 /// STEP text, which these importers refuse.
 const STEP_TEXT: &str = "ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n";
 
@@ -347,7 +356,7 @@ fn detects_freecad_from_contents() {
 /// The history rebuild reads hostile files without a panic.
 #[test]
 fn hostile_freecad_history_never_panics() {
-    for good in [BRACKET_FCSTD, KNOB_FCSTD] {
+    for good in [BRACKET_FCSTD, KNOB_FCSTD, GRID_FCSTD] {
         for i in (0..good.len()).step_by((good.len() / 40).max(1)) {
             let mut b = good.to_vec();
             b[i] ^= 0x5a;
@@ -356,6 +365,50 @@ fn hostile_freecad_history_never_panics() {
         }
         let r = std::panic::catch_unwind(|| native_cad_design(&good[..good.len() / 2], "hostile.FCStd"));
         assert!(r.is_ok());
+    }
+}
+
+/// `bytes` (a FreeCAD file) with its `Document.xml` passed through `edit`.
+fn with_document(bytes: &[u8], edit: impl Fn(&str) -> String) -> Vec<u8> {
+    use std::io::{Read, Write};
+    let mut from = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut to = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for i in 0..from.len() {
+        let mut entry = from.by_index(i).unwrap();
+        let name = entry.name().unwrap().to_string();
+        let mut data = Vec::new();
+        entry.read_to_end(&mut data).unwrap();
+        if name == "Document.xml" {
+            data = edit(&String::from_utf8(data).unwrap()).into_bytes();
+        }
+        to.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+        to.write_all(&data).unwrap();
+    }
+    to.finish().unwrap().into_inner()
+}
+
+/// A MultiTransform whose steps are missing, repeated, out of order or far too many never
+/// panics and is not rebuilt: the file's solid imports instead.
+#[test]
+fn hostile_multitransform_steps_never_panic() {
+    let steps = "<LinkList count=\"3\">\n                        <Link value=\"AlongX\"/>\n                        <Link value=\"AlongY\"/>\n                        <Link value=\"AcrossYZ\"/>";
+    let many = format!("<LinkList count=\"1000\">{}", "<Link value=\"AlongX\"/>".repeat(1000));
+    let cases = [
+        "<LinkList count=\"3\"><Link value=\"AlongX\"/><Link value=\"Nowhere\"/><Link value=\"AcrossYZ\"/>".to_string(),
+        "<LinkList count=\"3\"><Link value=\"AcrossYZ\"/><Link value=\"AlongY\"/><Link value=\"AlongX\"/>".to_string(),
+        "<LinkList count=\"3\"><Link value=\"AlongX\"/><Link value=\"AlongX\"/><Link value=\"GridHoles\"/>".to_string(),
+        "<LinkList count=\"0\"><Link/><Link/><Link/>".to_string(),
+        many,
+    ];
+    for (i, case) in cases.iter().enumerate() {
+        let bytes = with_document(GRID_FCSTD, |xml| {
+            assert!(xml.contains(steps), "the fixture lists GridHoles' steps");
+            xml.replacen(steps, case, 1)
+        });
+        let r = std::panic::catch_unwind(|| native_cad_design(&bytes, "hostile.FCStd"));
+        // Reordered steps build other holes than FreeCAD's stored solid, so the comparison
+        // refuses them; the other cases are refused as they are read.
+        assert!(r.as_ref().is_ok_and(Result::is_err), "case {i}: {:?}", r.map(|d| d.map(|d| types(&d))));
     }
 }
 
@@ -372,6 +425,59 @@ fn freecad_patterns_and_mirrors_rebuild() {
     let m = measured(&d);
     assert_eq!(m.len(), 1);
     assert!((m[0].volume - 7818.009).abs() < 0.05, "volume {}", m[0].volume);
+}
+
+/// A MultiTransform rebuilds as one Mirror or Pattern per step, each copying the features and the
+/// steps before it, so each step applies to every copy made so far. The steps make no feature of
+/// their own. FreeCAD's volume is 20000 − 18·π·1.5²·5 − 6·π·1²·2 mm³; the centre (off the X axis,
+/// as turning before moving puts the holes) matches FreeCAD's too.
+#[test]
+fn freecad_multitransforms_rebuild_as_chained_patterns() {
+    let d = native_cad_design(GRID_FCSTD, "grid.FCStd").unwrap();
+    let names: Vec<&str> = d.doc.features.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["Profile", "Pad", "GridHoleSketch", "GridHole", "AlongX", "AlongY", "GridHoles", "SpokeSketch", "Spoke", "AboutZ", "Spokes"]);
+    let kinds = types(&d);
+    assert_eq!(
+        kinds[4..7],
+        ["RectangularPatternFeature", "RectangularPatternFeature", "MirrorFeature"],
+        "along X, along Y, then mirrored: {kinds:?}"
+    );
+    assert_eq!(kinds[9..], ["CircularPatternFeature", "RectangularPatternFeature"], "{kinds:?}");
+    // Each step copies the hole and every step before it.
+    let copied = |name: &str| -> Vec<&str> {
+        let f = d.doc.features.iter().find(|f| f.name == name).unwrap();
+        let ids = match &f.kind {
+            solidcraft_doc::FeatureKind::Pattern { features, .. } | solidcraft_doc::FeatureKind::Mirror { features, .. } => features,
+            other => panic!("{name}: {other:?}"),
+        };
+        ids.iter().map(|id| d.doc.feature(id.0).unwrap().name.as_str()).collect()
+    };
+    assert_eq!(copied("AlongX"), ["GridHole"]);
+    assert_eq!(copied("AlongY"), ["GridHole", "AlongX"]);
+    assert_eq!(copied("GridHoles"), ["GridHole", "AlongX", "AlongY"]);
+    assert_eq!(copied("Spokes"), ["Spoke", "AboutZ"]);
+    let m = measured(&d);
+    assert_eq!(m.len(), 1);
+    let pi = std::f64::consts::PI;
+    let expected = 20000.0 - 18.0 * pi * 1.5 * 1.5 * 5.0 - 6.0 * pi * 2.0;
+    assert!((m[0].volume - expected).abs() < 0.05, "volume {} vs {expected}", m[0].volume);
+    assert!((m[0].volume - 19326.128).abs() < 0.05, "FreeCAD's volume: {}", m[0].volume);
+    let c = m[0].centroid;
+    assert!(c.x.abs() < 1e-3 && (c.y - 0.38331).abs() < 1e-3 && (c.z - 2.49707).abs() < 1e-3, "FreeCAD's centre: {c:?}");
+}
+
+/// A MultiTransform with a Scaled step is not rebuilt: the error names the step, and the file's
+/// solid still imports.
+#[test]
+fn a_freecad_scaled_step_is_not_rebuilt() {
+    let e = native_cad_design(SCALED_FCSTD, "scaled.FCStd").err().unwrap();
+    assert!(e.contains("Scaled step (Grow)"), "{e}");
+    let f = crate::step_import_feature(SCALED_FCSTD, "scaled.FCStd").unwrap();
+    let solidcraft_doc::FeatureKind::Import { skip, .. } = &f.kind else { panic!("not an Import feature") };
+    let built: Vec<_> = f.import.bodies.iter().zip(0u64..).filter(|(_, i)| !skip.contains(i)).map(|(b, _)| b).collect();
+    assert_eq!(built.len(), 1, "{} bodies in the file, {} skipped", f.import.bodies.len(), skip.len());
+    let v = solidcraft_kernel::measure(&built[0].body).unwrap().volume;
+    assert!((v - 3956.018).abs() < 0.05, "FreeCAD's volume: {v}");
 }
 
 /// In a file saved from FreeCAD's window the tip feature's shape is shown, and so is a binder;
