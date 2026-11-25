@@ -64,7 +64,18 @@ pub(crate) struct State {
     /// The runs waiting in the control queue: each one's request serial and the session it is for.
     pending: Vec<(u64, u64)>,
     panel_pick: Option<PanelPick>,
-    panel_runs: Vec<std::sync::mpsc::Receiver<Value>>,
+    panel_runs: Vec<PanelRun>,
+}
+
+/// A docked panel's action in the control queue (#22032): the design it was queued on, and that
+/// design's revision when it ran, which a form the action asks for with `forms.open` opens against.
+struct PanelRun {
+    serial: u64,
+    session: u64,
+    reply: std::sync::mpsc::Receiver<Value>,
+    source_guard: Option<solidcraft_engine::schema::plugin::FormGuard>,
+    /// A successful reply held until its design is in front again.
+    received: Option<Value>,
 }
 
 #[cfg(test)]
@@ -1995,7 +2006,7 @@ pub(crate) fn run_panel(app: &mut SolveApp, command: String, params: Value) -> R
     }
     let (request, reply) = solidcraft_control::ControlRequest::new("engine.execute", json!({"command":command,"params":params}));
     app.plugin_menu.pending.push((request.serial, app.session.uid));
-    app.plugin_menu.panel_runs.push(reply);
+    app.plugin_menu.panel_runs.push(PanelRun { serial: request.serial, session: app.session.uid, reply, source_guard: None, received: None });
     app.control_held.push_back(request);
     Ok(())
 }
@@ -2010,6 +2021,9 @@ pub(crate) fn check_dispatch(app: &mut SolveApp, req: &solidcraft_control::Contr
         // validation and the unchanged live design share the same revision token.
         let guard =
             solidcraft_engine::schema::plugin::FormGuard { document_id: app.session.document_id.clone(), revision: app.session.design_revision() };
+        if let Some(run) = app.plugin_menu.panel_runs.iter_mut().find(|run| run.serial == req.serial) {
+            run.source_guard = Some(guard.clone());
+        }
         if let Some(running) = app.plugin_menu.dialogs.iter_mut().filter_map(|d| d.running.as_mut()).find(|r| Arc::ptr_eq(&r.ticket, &req.ticket)) {
             running.source_guard = Some(guard);
         }
@@ -2021,19 +2035,38 @@ pub(crate) fn check_dispatch(app: &mut SolveApp, req: &solidcraft_control::Contr
 }
 
 /// Take the finished runs' replies: an edit closes its dialog, a read shows its result, an error
-/// stays in its dialog.
+/// stays in its dialog. A panel action's run opens the forms it asked for, as a dialog's does.
 pub(crate) fn poll(app: &mut SolveApp) {
-    for reply in std::mem::take(&mut app.plugin_menu.panel_runs) {
-        match reply.try_recv() {
-            Ok(value) => {
-                if value.get("ok") != Some(&Value::Bool(true)) {
-                    let error = value.get("error").and_then(Value::as_str).unwrap_or_else(|| solidcraft_ui_text::tr("ui.plugin_no_result"));
-                    app.set_status(solidcraft_ui_text::format("ui.plugin_dialog_failed", &[("error", error)]), true);
+    for mut run in std::mem::take(&mut app.plugin_menu.panel_runs) {
+        let value = match run.received.take() {
+            Some(value) => value,
+            None => match run.reply.try_recv() {
+                Ok(value) => value,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    app.plugin_menu.panel_runs.push(run);
+                    continue;
                 }
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => app.plugin_menu.panel_runs.push(reply),
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => app.set_status(app.tr("ui.plugin_no_result").to_owned(), true),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    app.set_status(app.tr("ui.plugin_no_result").to_owned(), true);
+                    continue;
+                }
+            },
+        };
+        if value.get("ok") != Some(&Value::Bool(true)) {
+            let error = value.get("error").and_then(Value::as_str).unwrap_or_else(|| solidcraft_ui_text::tr("ui.plugin_no_result"));
+            app.set_status(solidcraft_ui_text::format("ui.plugin_dialog_failed", &[("error", error)]), true);
+            continue;
         }
+        // A requested form can hold picks from the action's own design: it opens once that design
+        // is in front, and not at all once that design is closed.
+        if run.session != app.session.uid {
+            if crate::documents::render_owner(app, run.session).is_some() {
+                run.received = Some(value);
+                app.plugin_menu.panel_runs.push(run);
+            }
+            continue;
+        }
+        open_requested_forms(app, &value, run.source_guard.take());
     }
     let ids: Vec<u64> = app.plugin_menu.dialogs.iter().map(|d| d.id).collect();
     for id in ids {
