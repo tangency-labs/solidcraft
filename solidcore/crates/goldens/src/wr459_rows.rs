@@ -16,10 +16,13 @@
 //! its row's [`ROWS`] hash. Not to the bit: main's own run of some of these rows already
 //! sits a few ulps off its committed line, in the mass properties and in one geometry block
 //! (inside the same comparator, so its golden file keeps the older bits; seen on
-//! `source-box-union-edge0` and `sweep5-ext_w_hole-e15-r1.0`, where this branch with main's
-//! counts put back is main's run to the bit), and last bits may differ between machines.
+//! `source-box-union-edge0`, where this branch with main's counts put back is main's run
+//! to the bit), and last bits may differ between machines.
 //! The four `sphere_diff_3cylinders` rows are not here: they keep a sphere patch boundary
 //! main merged (`units::blend_fillet_executive_p3::end_to_end`, `round_definition_rows`).
+//! Nor are the ten rows the offset surface's extension from its base moves (#21288, WR-458):
+//! main's line before WR-459 cannot be rebuilt from them any more. Each is certified on its
+//! own by `units::blend_fillet_executive_p3::wr458_certificates`, one test per row.
 
 use std::collections::BTreeMap;
 
@@ -50,19 +53,6 @@ type Row = (&'static str, u64, &'static [(usize, u8, u8)]);
 /// is main's to the bit (the unit's golden file).
 const ROWS: &[Row] = &[
     (
-        "corner3x2-union-inset-side-step-edges1-14-r1",
-        0x25f4_35fb_38a2_8eb2,
-        &[
-            (16, 2, 0),
-            (18, 2, 1),
-            (19, 2, 0),
-            (20, 2, 0),
-            (24, 2, 1),
-            (25, 2, 1),
-            (29, 2, 1),
-        ],
-    ),
-    (
         "corner3x2-union-inset-side-step-edges1-18-r1",
         0x6f92_2edf_9e0f_e43b,
         &[
@@ -72,20 +62,6 @@ const ROWS: &[Row] = &[
             (21, 2, 0),
             (25, 2, 1),
             (26, 2, 1),
-            (29, 2, 1),
-        ],
-    ),
-    (
-        "corner3x2-union-inset-side-step-edges12-13-r1",
-        0xaa43_86f6_c321_d641,
-        &[
-            (18, 2, 0),
-            (19, 2, 1),
-            (20, 2, 1),
-            (21, 2, 1),
-            (22, 2, 1),
-            (23, 2, 0),
-            (24, 2, 0),
             (29, 2, 1),
         ],
     ),
@@ -225,23 +201,6 @@ const ROWS: &[Row] = &[
             (12, 2, 1),
             (16, 2, 1),
         ],
-    ),
-    (
-        "issue_2176_tabbed_plate_tab_side_r0_5",
-        0x9231_648c_58ea_8229,
-        &[
-            (0, 2, 0),
-            (1, 2, 1),
-            (2, 2, 1),
-            (5, 2, 1),
-            (8, 2, 1),
-            (9, 2, 1),
-        ],
-    ),
-    (
-        "issue_2176_tabbed_plate_tab_top_r0_5",
-        0xc0b7_4d8b_8be8_c078,
-        &[(0, 2, 1), (2, 2, 1), (4, 2, 1), (7, 2, 1)],
     ),
     (
         "source-box-union-edge0",
@@ -698,53 +657,6 @@ const ROWS: &[Row] = &[
         ],
     ),
     (
-        "stubs3-union-inset-side-step-edges13-17-r1",
-        0x226d_112f_0a2b_4af5,
-        &[
-            (18, 2, 0),
-            (19, 2, 0),
-            (20, 2, 0),
-            (21, 2, 0),
-            (22, 2, 0),
-            (23, 2, 0),
-            (24, 2, 0),
-            (26, 2, 1),
-            (27, 2, 1),
-        ],
-    ),
-    (
-        "stubs3-union-inset-side-step-edges14-15-r1",
-        0xcdab_f75e_a696_99fd,
-        &[
-            (5, 2, 1),
-            (10, 2, 1),
-            (11, 2, 1),
-            (12, 2, 1),
-            (15, 2, 0),
-            (17, 2, 0),
-            (18, 2, 0),
-            (19, 2, 0),
-            (20, 2, 0),
-            (24, 2, 0),
-            (27, 2, 1),
-        ],
-    ),
-    (
-        "stubs3-union-inset-side-step-edges14-18-r1",
-        0x16cc_48dc_bae5_b9a1,
-        &[
-            (17, 2, 0),
-            (18, 2, 1),
-            (19, 2, 1),
-            (20, 2, 0),
-            (21, 2, 0),
-            (24, 2, 0),
-            (25, 2, 0),
-            (26, 2, 1),
-            (27, 2, 1),
-        ],
-    ),
-    (
         "stubs3-union-inset-side-step-edges16-17-r1",
         0x976f_eb11_b30c_c41b,
         &[
@@ -813,28 +725,6 @@ const ROWS: &[Row] = &[
         ],
     ),
     (
-        "stubs3-union-overhang-corner-edges14-15-r1",
-        0x0b09_895a_9670_05f9,
-        &[
-            (2, 2, 1),
-            (3, 2, 1),
-            (6, 2, 0),
-            (7, 2, 1),
-            (8, 2, 1),
-            (9, 2, 1),
-            (10, 2, 1),
-            (12, 2, 1),
-            (13, 2, 1),
-            (15, 2, 0),
-            (16, 2, 0),
-            (20, 2, 1),
-            (21, 2, 0),
-            (23, 2, 1),
-            (26, 2, 1),
-            (27, 2, 1),
-        ],
-    ),
-    (
         "stubs3-union-overhang-corner-edges14-22-r1",
         0x0155_be22_fd13_ba6c,
         &[
@@ -866,23 +756,6 @@ const ROWS: &[Row] = &[
             (22, 2, 1),
             (24, 2, 1),
             (28, 2, 1),
-        ],
-    ),
-    (
-        "stubs3-union-overhang-front-edges14-15-r1",
-        0x9209_0a97_712c_59e7,
-        &[
-            (6, 2, 1),
-            (7, 2, 1),
-            (8, 2, 1),
-            (9, 2, 1),
-            (12, 2, 1),
-            (14, 2, 1),
-            (15, 2, 0),
-            (20, 2, 1),
-            (22, 2, 1),
-            (24, 2, 1),
-            (26, 2, 1),
         ],
     ),
     (
@@ -918,24 +791,6 @@ const ROWS: &[Row] = &[
             (21, 2, 1),
             (24, 2, 1),
             (26, 2, 1),
-        ],
-    ),
-    (
-        "sweep5-ext_w_hole-e15-r1.0",
-        0xd910_493a_e6c1_810c,
-        &[
-            (0, 2, 1),
-            (1, 2, 1),
-            (2, 2, 1),
-            (3, 2, 1),
-            (5, 2, 1),
-            (7, 2, 1),
-            (9, 2, 1),
-            (11, 2, 1),
-            (13, 2, 1),
-            (16, 2, 1),
-            (17, 2, 1),
-            (18, 2, 1),
         ],
     ),
     (
