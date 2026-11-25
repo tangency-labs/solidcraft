@@ -1590,10 +1590,10 @@ fn the_runs_of_a_profile_join_as_join_arcs_joins_them() {
 #[test]
 fn a_curved_section_lofts_to_a_point_as_a_cone() {
     rig_fixes();
-    let cone = solidcore_ops::sweep::loft_to_point(&halves(), [0.0, 0.0, 10.0]).unwrap();
+    let cone = loft_to_point(&halves(), [0.0, 0.0, 10.0]).unwrap();
     assert_eq!(faces(&cone), 3, "the base and two walls");
     assert!(rel(cone.volume(1e-8).unwrap(), 250.0 * PI / 3.0) < 1e-7);
-    let half = solidcore_ops::sweep::loft_to_point(&half_disc(), [0.0, 0.0, 10.0]).unwrap();
+    let half = loft_to_point(&half_disc(), [0.0, 0.0, 10.0]).unwrap();
     assert_eq!(faces(&half), 4, "the base, two ruled walls and a triangle");
     assert!(rel(half.volume(1e-8).unwrap(), 125.0 * PI / 3.0) < 1e-7);
 }
