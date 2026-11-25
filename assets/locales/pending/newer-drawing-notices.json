@@ -1,0 +1,42 @@
+{
+  "en": {
+    "document.newer_drawing": "Drawing “{drawing}” was saved by a newer SolidCraft (format {format}, this version reads up to {reads}). If something's missing, update.",
+    "document.newer_drawing_change": "Drawing “{drawing}” was saved by a newer SolidCraft (format {format} with `{change}`, which this version doesn't know). If something's missing, update.",
+    "document.newer_drawing_not_read": "SolidCraft could not read {what} in drawing “{drawing}”. Saving keeps it."
+  },
+  "ar": {
+    "document.newer_drawing": "حُفظ الرسم «{drawing}» بإصدار أحدث من SolidCraft (الصيغة {format}، وهذا الإصدار يقرأ حتى {reads}). إذا كان هناك شيء مفقود، فحدّث البرنامج.",
+    "document.newer_drawing_change": "حُفظ الرسم «{drawing}» بإصدار أحدث من SolidCraft (الصيغة {format} مع `{change}`، الذي لا يعرفه هذا الإصدار). إذا كان هناك شيء مفقود، فحدّث البرنامج.",
+    "document.newer_drawing_not_read": "تعذّر على SolidCraft قراءة {what} في الرسم «{drawing}». يبقى في الملف عند الحفظ."
+  },
+  "de": {
+    "document.newer_drawing": "Die Zeichnung „{drawing}“ wurde mit einer neueren SolidCraft-Version gespeichert (Format {format}, diese Version liest bis {reads}). Falls etwas fehlt, aktualisiere SolidCraft.",
+    "document.newer_drawing_change": "Die Zeichnung „{drawing}“ wurde mit einer neueren SolidCraft-Version gespeichert (Format {format} mit der hier unbekannten Änderung `{change}`). Falls etwas fehlt, aktualisiere SolidCraft.",
+    "document.newer_drawing_not_read": "SolidCraft konnte {what} in der Zeichnung „{drawing}“ nicht lesen. Beim Speichern bleiben die Daten erhalten."
+  },
+  "he": {
+    "document.newer_drawing": "השרטוט ״{drawing}״ נשמר בגרסה חדשה יותר של SolidCraft (פורמט {format}, גרסה זו קוראת עד {reads}). אם משהו חסר, יש לעדכן.",
+    "document.newer_drawing_change": "השרטוט ״{drawing}״ נשמר בגרסה חדשה יותר של SolidCraft (פורמט {format} עם `{change}`, שגרסה זו אינה מכירה). אם משהו חסר, יש לעדכן.",
+    "document.newer_drawing_not_read": "SolidCraft לא הצליחה לקרוא את {what} בשרטוט ״{drawing}״. הנתונים יישמרו בקובץ."
+  },
+  "ja": {
+    "document.newer_drawing": "図面「{drawing}」は新しいバージョンの SolidCraft で保存されています（形式 {format}、このバージョンは {reads} まで読み取れます）。足りないものがあれば更新してください。",
+    "document.newer_drawing_change": "図面「{drawing}」は新しいバージョンの SolidCraft で保存されています（形式 {format}、このバージョンが認識しない `{change}` を含みます）。足りないものがあれば更新してください。",
+    "document.newer_drawing_not_read": "図面「{drawing}」の {what} を読み取れませんでした。保存しても失われません。"
+  },
+  "ko": {
+    "document.newer_drawing": "도면 “{drawing}”은 더 최신 버전의 SolidCraft에서 저장되었습니다(형식 {format}, 이 버전은 {reads}까지 읽을 수 있습니다). 누락된 내용이 있으면 업데이트하세요.",
+    "document.newer_drawing_change": "도면 “{drawing}”은 더 최신 버전의 SolidCraft에서 저장되었습니다(형식 {format}, 이 버전에서 지원하지 않는 `{change}` 포함). 누락된 내용이 있으면 업데이트하세요.",
+    "document.newer_drawing_not_read": "SolidCraft에서 도면 “{drawing}”의 {what}을 읽을 수 없습니다. 저장할 때 해당 내용은 유지됩니다."
+  },
+  "vi": {
+    "document.newer_drawing": "Bản vẽ “{drawing}” được lưu bằng phiên bản SolidCraft mới hơn (định dạng {format}, phiên bản này đọc được đến {reads}). Nếu thiếu gì, hãy cập nhật.",
+    "document.newer_drawing_change": "Bản vẽ “{drawing}” được lưu bằng phiên bản SolidCraft mới hơn (định dạng {format} có `{change}` mà phiên bản này chưa nhận biết). Nếu thiếu gì, hãy cập nhật.",
+    "document.newer_drawing_not_read": "SolidCraft không đọc được {what} trong bản vẽ “{drawing}”. Khi lưu, nội dung này vẫn được giữ lại."
+  },
+  "zh": {
+    "document.newer_drawing": "图纸“{drawing}”由较新版本的 SolidCraft 保存（格式 {format}，此版本最高可读取 {reads}）。如有缺失，请更新。",
+    "document.newer_drawing_change": "图纸“{drawing}”由较新版本的 SolidCraft 保存（格式 {format}，包含此版本未知的 `{change}`）。如有缺失，请更新。",
+    "document.newer_drawing_not_read": "SolidCraft 无法读取图纸“{drawing}”中的 {what}。保存时会保留此内容。"
+  }
+}

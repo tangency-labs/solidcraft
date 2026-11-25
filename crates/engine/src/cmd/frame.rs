@@ -5,6 +5,7 @@
 //! `frame.profile.insert` draws one into a sketch.
 //! `frame.remove_member` takes tubes out of a Frame Member (#15705), and `frame.multi_trim` sets, changes or removes
 //! one of its corner overrides (#17854).
+//! `frame.trim` trims or extends members to other members, planes and planar faces.
 
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
@@ -12,8 +13,12 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 use solidcore_record::{Loop2, Seg2, Vec2};
 use solidcraft_doc::construct::{DatumItem, GeoRef};
+use solidcraft_doc::expr::Kind;
 use solidcraft_doc::frame::sizes::{self, Family};
-use solidcraft_doc::frame::{self, Anchor, CornerOverride, CornerType, MemberGroup, MemberPair, MemberProfile, MemberRef, Profile, ProfileSpec};
+use solidcraft_doc::frame::{
+    self, Anchor, CornerOverride, CornerType, MemberGroup, MemberPair, MemberProfile, MemberRef, Profile, ProfileSpec, Side, TrimEnd, TrimMemberRef,
+    TrimTarget,
+};
 use solidcraft_doc::{Feature, FeatureKind, ModelState, SketchId};
 use solidcraft_sketch::Sketch;
 
@@ -25,11 +30,13 @@ use crate::schema::features::FeatureResult;
 use crate::schema::frame::{
     CORNER_ENTRY, CreatedIds, FrameMemberParams, MemberFeatureDeleted, MultiTrimParams, ProfileInsertParams, ProfileInsertResult, ProfileKindInfo,
     ProfileListParams, ProfileListResult, ProfileOut, ProfilePropertiesParams, ProfilePropertiesResult, ProfileSection, RemoveMemberParams,
-    RemoveMemberResult, SizeFamilyInfo, TRIM_KIND, corner_entry, removed_members, trim_kind, trim_members,
+    RemoveMemberResult, SizeFamilyInfo, TRIM_KIND, TrimParams, corner_entry, removed_members, trim_kind, trim_members,
 };
 use crate::schema::frame_plate::{BoltPattern, PlateOutline, PlateParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
+
+const TRIM_CONTRACT: TypedContract<TrimParams> = TypedContract::new();
 
 const PLATE_CONTRACT: TypedContract<PlateParams> = TypedContract::new();
 
@@ -59,8 +66,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<FeatureResult>)
         .params(concat!(
         "sketch?: the frame sketch (id or name; 2D or 3D); lines?: [curve ids] (one member each; default: every straight line drawn in the sketch: not construction, not projected or otherwise linked, not of no length); pairs?: [{a, b}] (one straight member from point a to point b each, after the lines' members, found again whenever the design changes; a and b are point references: {vertex: [x,y,z]}, {sketch, point} (a 3D sketch node as `wire:index`), {construct_point: name}, a snap point or the origin, as saved ({type, …}) too; typed coordinates are not points here; each pair is named pair1, pair2… and a pair's id is never given again; Edit Feature gives back the pairs it keeps with their `id` and `next_pair`, and an `id` without `next_pair` is refused); give `sketch`, `pairs` or both; ",
+        "continuous?: bool (default false; one member along explicitly selected lines and circular arcs in connected tangent path order, curves reversed as needed, stable member id `$path`; corner None only, without overrides, Fit Ends, Coped, Flip, gap or point pairs); ",
         profile_doc!(),
         " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); locate?: [x,y] (the profile point that sits on each line, in mm from the profile's own origin: a bar's or an angle's bottom-left corner, a channel's web back at mid-height, the centre of other profiles; takes precedence over `anchor` and keeps the member attached at that point when the profile size changes); corner?: auto|none|mitre|butt (how members ending at one point are cut; default none); flip?: bool (a butt's other member runs through); fit_ends?: bool (fit free ends to earlier Frame Members' tubes; default false); coped?: bool (cut every butt joint to the other tube's real shape, radii kept: butts, ends on a tube's middle, crossings, overlaps and fitted ends, mitres left as they are; not under none; default false; an older `coped_butt`, the frame's or an override's, reads as butt with coped); corners?: [{members: [2 to 1000 line or pair ids, or {line}], kind: auto|none|mitre|butt, gap?: length expr}] (that corner's, crossing's or overlap's own type, and its own weld gap; the members in order: the first runs through a butt, or stays whole at a crossing or overlap, and of three or more the first two make the corner; an older script's `corner` reads as `kind`, and its `flip` is saved as the order today's rules give with the first two swapped; an overlap takes no gap); gap?: length expr (the weld gap at every welded end, 0…1000 mm, default 0: each mitre plane half of it back, a butting or fitted end, a crossing's pieces' included, that far off the member it meets; through members keep their length, overlaps are notched without it); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the size's name, `RSC 203x89`, the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line or pair id: name} (names to keep, as Edit Feature keeps them). One body per line or pair, from its start to its end; each member keeps its name when other lines or pairs are added or deleted. Returns the feature and the bodies it made"
+    )),
+    CommandSpec::new("frame.trim", "Trim/Extend", crate::checked!("frame.trim", trim)).contract(&TRIM_CONTRACT).output(output_schema_for::<FeatureResult>).at("WELDMENTS", "MODIFY").icon("frame_trim").enabled(not_in_sketch).params(concat!(
+        "members: [member…] (the members to trim or extend: each a member's body name, or {feature: the frame member feature (name or id), line: its line's id}); ",
+        "to: [target…] (or one target: what each member's end is trimmed or extended to: a member (its body name, or {member, side?: right|left|top|bottom of its profile; default the side the trimmed member meets}): a butt joint against that side, worked out from its line and profile so it follows edits; or {plane: XY|XZ|YZ|a construction plane|{origin, normal}|{face: [x,y,z]} a planar face}, or {plane_ref} a plane as the design saves it, as Edit Feature keeps it); ",
+        "end?: auto|start|end (which end of each member moves; default auto: for each target the end nearer it); gap?: length expr (the weld gap between each end and its target, default 0, at most 1 m). ",
+        "Each member's end that meets a target is rebuilt flat against it (a slanted face cuts it at a slant); a member keeps its body and name. Members changed by later features are refused as members or member targets; use a planar face target for a modified body. Every member must meet a target, and two targets may not move the same end. Returns the feature and the bodies it changed"
     )),
     CommandSpec::new("frame.plate", "Mounting Plate", crate::checked!("frame.plate", plate))
         .at("WELDMENTS", "CREATE")
@@ -446,6 +460,9 @@ const GROUP_KEYS: [&str; 7] = ["lines", "anchor", "locate", "angle", "mirror", "
 /// One group of members as `p` (the command's parameters, or one of its `groups`) gives it; `at`
 /// names the group in errors, and a group of several must list its lines.
 fn member_group(s: &Session, cmd: &str, p: &Value, at: &str, several: bool) -> Result<MemberGroup> {
+    if several && p.get("continuous").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "not supported yet: continuous members cannot be combined with groups; use separate Frame Members"));
+    }
     let lines = match p.get("lines") {
         None | Some(Value::Null) if !several => Vec::new(),
         Some(Value::Array(a)) if !a.is_empty() && a.len() <= frame::MAX_MEMBERS && a.iter().all(Value::is_string) => {
@@ -596,6 +613,13 @@ fn parse_member(s: &Session, p: &Value) -> Result<Parsed> {
         }
         Some(_) => Err(bad(cmd, format!("`lines` must list 1…{} curve ids", frame::MAX_MEMBERS)))?,
     };
+    let continuous = match p.get("continuous") {
+        None | Some(Value::Null) => false,
+        Some(_) => bool_(p, "continuous").ok_or_else(|| bad(cmd, "`continuous` must be true or false"))?,
+    };
+    if continuous && lines.is_empty() {
+        return Err(bad(cmd, "a continuous member needs explicit `lines` in path order"));
+    }
     let body_name = match p.get("body_name") {
         None | Some(Value::Null) => None,
         Some(_) => Some(
@@ -709,6 +733,7 @@ fn parse_member(s: &Session, p: &Value) -> Result<Parsed> {
     let mut kind = FeatureKind::FrameMember {
         path_sketch: path_sketch.map(SketchId),
         lines,
+        continuous,
         profile,
         anchor,
         locate,
@@ -871,6 +896,15 @@ fn remove_member(s: &mut Session, p: &Value) -> Result<Value> {
         id = Some(f);
     }
     let f = id.and_then(|id| s.doc.feature(id)).cloned().ok_or_else(|| bad(cmd, "`members` must name a Frame Member"))?;
+    if matches!(&f.kind, FeatureKind::FrameMember { continuous: true, .. }) {
+        if members.len() != 1 || members.first().is_none_or(|(_, line)| line != "$path") {
+            return Err(bad(cmd, "a continuous tube is one member, identified by `$path`"));
+        }
+        // This is its only physical member: use main's existing last-tube deletion.
+        let delete = super::find_command("timeline.delete").ok_or_else(|| bad(cmd, "no command `timeline.delete`"))?;
+        delete.run_nested(s, &json!({ "feature": f.id }))?;
+        return frame_reply(cmd, RemoveMemberResult::Deleted(MemberFeatureDeleted { deleted: f.name, param_warnings: Vec::new() }));
+    }
     let mut kind = f.kind.clone();
     let FeatureKind::FrameMember { path_sketch, lines, names, pairs, corners, .. } = &mut kind else {
         return Err(bad(cmd, format!("`{}` is not a Frame Member", f.name)));
@@ -1031,4 +1065,133 @@ fn multi_trim(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.refresh();
     super::features::feature_reply(s, id, &before, true)
+}
+
+/// A member from a parameter: its body name, or `{feature, line}`. It is kept by its feature's
+/// name and its line, so a trim follows the member when its body is rebuilt or renamed.
+fn member_ref(s: &Session, v: &Value, cmd: &str) -> Result<TrimMemberRef> {
+    let feature_name = |id: u64| s.doc.feature(id).map(|f| f.name.clone());
+    match v {
+        Value::String(body) => {
+            let st = s.model.state();
+            if let Some(rec) = st.frame_member(body.trim()) {
+                let feature = feature_name(rec.feature).ok_or_else(|| bad(cmd, format!("the feature of `{}` is gone", body.trim())))?;
+                return Ok(TrimMemberRef { feature: feature.into(), line: rec.line.clone() });
+            }
+            // Auto/corner members have no rebuildable-stock record. Resolve their actual
+            // member so evaluation can explain the unsupported combination explicitly.
+            let source = st
+                .body(body.trim())
+                .and_then(|b| s.doc.feature(b.feature))
+                .filter(|f| matches!(f.kind, FeatureKind::FrameMember { .. }))
+                .ok_or_else(|| bad(cmd, format!("`{}` is not a frame member's body", body.trim())))?;
+            let line = frame::member_of_body(&s.doc, &st, source, body.trim())
+                .map_err(|e| bad(cmd, e.to_string()))?
+                .ok_or_else(|| bad(cmd, format!("`{}` is not a frame member's body", body.trim())))?;
+            Ok(TrimMemberRef { feature: source.name.clone().into(), line })
+        }
+        Value::Object(o) => {
+            let f = match o.get("feature") {
+                Some(Value::String(n)) => s.doc.find_feature(n.trim()),
+                Some(Value::Number(n)) => n.as_u64().and_then(|id| s.doc.feature(id)),
+                _ => None,
+            }
+            .ok_or_else(|| bad(cmd, "a member's `feature` must name a frame member feature (name or id)"))?;
+            if !matches!(f.kind, FeatureKind::FrameMember { .. }) {
+                return Err(bad(cmd, format!("`{}` is not a frame member feature", f.name)));
+            }
+            let line = o
+                .get("line")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && l.len() <= 128)
+                .ok_or_else(|| bad(cmd, "a member's `line` must be its line's id"))?;
+            Ok(TrimMemberRef { feature: f.name.clone().into(), line: line.to_string() })
+        }
+        _ => Err(bad(cmd, "a member is its body's name or {feature, line}")),
+    }
+}
+
+/// A trim target from a parameter: a member (body name, `{member, side?}` or `{feature, line}`)
+/// or `{plane}`, in the active component's frame. A body face is attached, as a sketch on it is,
+/// and kept in `faces` too.
+fn trim_target(s: &Session, v: &Value, cmd: &str, faces: &mut Vec<solidcraft_doc::PlaneRef>) -> Result<TrimTarget> {
+    match v {
+        // A plane as the design saves it, as Edit Feature passes a trim's planes back.
+        Value::Object(o) if o.contains_key("plane_ref") => {
+            let plane =
+                serde_json::from_value(o.get("plane_ref").cloned().unwrap_or(Value::Null)).map_err(|e| bad(cmd, format!("`plane_ref`: {e}")))?;
+            Ok(TrimTarget::Plane { plane })
+        }
+        Value::Object(o) if o.contains_key("plane") => {
+            let pv = o.get("plane");
+            let plane = match pv {
+                // Captured in the authoring frame already.
+                Some(face @ Value::Object(po)) if po.contains_key("face") => {
+                    let plane = super::sketch::face::capture(s, face, cmd)?;
+                    faces.push(plane.clone());
+                    plane
+                }
+                _ => {
+                    let mut plane = super::features::plane_param(s, pv, cmd)?;
+                    super::component::plane_to_active_frame(s, &mut plane);
+                    plane
+                }
+            };
+            Ok(TrimTarget::Plane { plane })
+        }
+        Value::Object(o) if o.contains_key("member") => {
+            let member = member_ref(s, o.get("member").unwrap_or(&Value::Null), cmd)?;
+            let side: Option<Side> = match o.get("side") {
+                None | Some(Value::Null) => None,
+                Some(v) => Some(serde_json::from_value(v.clone()).map_err(|_| bad(cmd, "`side` must be right, left, top or bottom"))?),
+            };
+            Ok(TrimTarget::Member { member, side })
+        }
+        _ => Ok(TrimTarget::Member { member: member_ref(s, v, cmd)?, side: None }),
+    }
+}
+
+fn trim(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "frame.trim";
+    let members = match p.get("members") {
+        Some(Value::Array(a)) if !a.is_empty() && a.len() <= frame::MAX_MEMBERS => {
+            a.iter().map(|v| member_ref(s, v, cmd)).collect::<Result<Vec<_>>>()?
+        }
+        Some(v @ Value::String(_)) => vec![member_ref(s, v, cmd)?],
+        _ => return Err(bad(cmd, format!("`members` must list 1…{} members (body names or {{feature, line}})", frame::MAX_MEMBERS))),
+    };
+    let mut seen = std::collections::HashSet::new();
+    if let Some(twice) = members.iter().find(|m| !seen.insert(*m)) {
+        return Err(bad(cmd, format!("member `{}` of `{}` is listed twice", twice.line, twice.feature)));
+    }
+    let mut faces = Vec::new();
+    let to = match p.get("to") {
+        Some(Value::Array(a)) if !a.is_empty() && a.len() <= frame::MAX_TRIM_TARGETS => {
+            a.iter().map(|v| trim_target(s, v, cmd, &mut faces)).collect::<Result<Vec<_>>>()?
+        }
+        Some(v @ (Value::String(_) | Value::Object(_))) => vec![trim_target(s, v, cmd, &mut faces)?],
+        _ => return Err(bad(cmd, format!("`to` must list 1…{} targets (members or {{plane}})", frame::MAX_TRIM_TARGETS))),
+    };
+    let end: TrimEnd = match p.get("end") {
+        None | Some(Value::Null) => TrimEnd::Auto,
+        Some(v) => serde_json::from_value(v.clone()).map_err(|_| bad(cmd, "`end` must be auto, start or end"))?,
+    };
+    let gap = match p.get("gap") {
+        None | Some(Value::Null) => None,
+        Some(_) => {
+            let e = expr(p, "gap").ok_or_else(|| bad(cmd, "`gap` must be a length expression"))?;
+            let g = s.doc.eval(&s.doc.with_design_unit(&e, Kind::Length), Kind::Length).map_err(|err| bad(cmd, format!("gap: {err}")))?;
+            if !(0.0..=frame::MAX_TRIM_GAP).contains(&g) {
+                return Err(bad(cmd, format!("`gap` must be 0…{} mm", frame::MAX_TRIM_GAP)));
+            }
+            Some(e)
+        }
+    };
+    // A face's attachment holds the placements it was picked under, as a sketch's does.
+    for face in &faces {
+        super::sketch::face::capture_positions(s, face)?;
+    }
+    // Every target is in the active component's frame already.
+    super::features::add_feature_in(s, p, FeatureKind::FrameTrim { members, to, end, gap }, false)
 }

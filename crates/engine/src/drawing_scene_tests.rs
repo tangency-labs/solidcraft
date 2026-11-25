@@ -7,6 +7,7 @@ use solidcraft_doc::drawing::projection_symbol::title_block_paper;
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{Exploded, ViewDirection, ViewOverrides};
 use solidcraft_geom::cell::Projection;
+use solidcraft_geom::drawing_sheet::DrawingBorderProfile;
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::{NoPictures, ObjectKind};
@@ -236,7 +237,10 @@ fn without_text(group: &Group) -> Group {
 fn border(s: &Session, sheet: u64) -> Vec<Group> {
     let d = s.drawing("test").unwrap();
     let record = d.sheets.iter().find(|x| x.id == sheet).unwrap();
-    record.border.as_ref().unwrap().layout(&record.sheet).unwrap().paper(sheet)
+    let mut groups = record.border.as_ref().unwrap().layout(&record.sheet).unwrap().paper(sheet);
+    // The frame's labels follow the lines of the drawing border's group (#20121).
+    groups[0].items.extend(labels(record).frame.into_iter().map(Item::Text));
+    groups
 }
 
 /// The box round the ends of `group`'s stroke pieces, and how long they are in all.
@@ -646,6 +650,39 @@ fn a_sheet_with_no_views_is_its_border() {
     assert_eq!((serde_json::to_string(&scene.groups).unwrap(), views.len()), (serde_json::to_string(&border(&s, second)).unwrap(), 0));
 }
 
+/// The text a scene's border groups print, run by run.
+fn frame_text(scene: &Scene) -> Vec<String> {
+    let border = scene.groups.iter().filter(|group| group.kind == ObjectKind::DrawingBorder);
+    border.flat_map(|group| group.items.iter()).filter_map(|item| if let Item::Text(run) = item { Some(run.text.clone()) } else { None }).collect()
+}
+
+/// A sheet's frame prints its zones' numbers and letters and its size as text of the border (#20121),
+/// in a font the scene holds, on a scene that still validates; a border saved before, whose profile
+/// asked for none, prints none.
+#[test]
+fn a_sheets_frame_prints_its_zone_labels_and_size() {
+    let (mut s, sheet, _) = front_and_top();
+    let SheetScene { scene, .. } = built(&s, sheet);
+    scene.validate().unwrap();
+    let mut texts = frame_text(&scene);
+    texts.sort();
+    // A3 flat: columns 1 to 8 above and below, rows A to F left and right, and the size.
+    let mut expected: Vec<String> =
+        ["1", "2", "3", "4", "5", "6", "7", "8"].iter().chain(&["A", "B", "C", "D", "E", "F"]).map(|t| t.to_string()).collect();
+    expected = expected.iter().cloned().chain(expected.iter().cloned()).chain(["A3".to_string()]).collect();
+    expected.sort();
+    assert_eq!(texts, expected);
+    assert!(!scene.fonts.is_empty());
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    for record in &mut d.sheets {
+        let record = Arc::make_mut(record);
+        record.border = record.border.map(|border| DrawingBorderProfile { zone_labels: false, ..border });
+    }
+    s.doc_mut().put_drawing(Arc::new(d));
+    let SheetScene { scene, .. } = built(&s, sheet);
+    assert_eq!(frame_text(&scene), Vec::<String>::new());
+}
+
 /// A view in `visible_hidden` is drawn as its snapshot is, its hidden lines dashed under its outline,
 /// and a sheet's provider sees the style's change as any other's: the last lines show until the view
 /// is drawn again, and it ends at the built scene. The pocket is 40 x 10 mm into the back face, so
@@ -762,11 +799,11 @@ fn the_provider_draws_a_view_a_step_until_it_is_the_built_scene() {
     let (mut s, sheet, [front, top]) = front_and_top();
     let order = if front < top { [front, top] } else { [top, front] };
     let whole = built(&s, sheet).scene;
+    // The border's three groups with the font table their frame labels are set in (#20121).
+    let mut border_scene = Scene::new(whole.size_mm, whole.groups[..3].to_vec());
+    border_scene.add_fonts(whole.fonts.clone());
     let first = extract(&mut s, sheet).unwrap();
-    assert_eq!(
-        (bytes(&first.scene), first.stale.as_slice(), first.views.len()),
-        (bytes(&Scene::new(whole.size_mm, whole.groups[..3].to_vec())), &order[..], 0)
-    );
+    assert_eq!((bytes(&first.scene), first.stale.as_slice(), first.views.len()), (bytes(&border_scene), &order[..], 0));
     let again = extract(&mut s, sheet).unwrap();
     assert!(Arc::ptr_eq(&again.scene, &first.scene) && again.generation == first.generation);
     assert_eq!(s.drawing_scenes.projections, 0);
@@ -814,6 +851,137 @@ fn a_moved_group_moves_its_picture() {
     let picture = |min: Vec2, max: Vec2| Item::Picture(Picture { source: 3, rect: Aabb2 { min, max }, opacity: 0.5 });
     let group = Group { object: 7, kind: ObjectKind::View, items: vec![picture(Vec2::new(1.0, 2.0), Vec2::new(11.0, 7.0))] };
     assert_eq!(moved(&group, Vec2::new(50.0, -2.0)).items, [picture(Vec2::new(51.0, 0.0), Vec2::new(61.0, 5.0))]);
+}
+
+/// A frustum (radius 10 below, 2.5 on top, 15 high) less a hole of 4 across along Y through x 6.5,
+/// z 6, from #19751: its hidden lines hold pieces far shorter than a unit in the last place at the
+/// sheet's 160 mm. Moved onto the sheet, such a piece's ends are one point. The front view draws at
+/// 1:1 and 2:1.
+#[test]
+fn a_view_with_pieces_too_short_to_see_draws() {
+    for scale in ["1:1", "2:1"] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cone", json!({"radius": 10, "top_radius": 2.5, "height": 15, "body_name": "Cone"}));
+        let hole = json!({"radius": 2, "height": 30, "base": [6.5, -15, 6], "axis": "Y", "operation": "cut", "targets": ["Cone"]});
+        run(&mut s, "solid.cylinder", hole);
+        run(&mut s, "drawing.create", json!({}));
+        let sheet = s.drawing("test").unwrap().sheets[0].id;
+        let made = run(&mut s, "drawing.view.base", json!({"sheet": ids::encode(sheet), "scale": scale, "position_mm": [150, 150]}));
+        let view = ids::decode(made["view"].as_str().unwrap()).unwrap();
+        settled(&mut s, sheet);
+        let status = built(&s, sheet).views.into_iter().find(|v| v.view == view).map(|v| v.status);
+        assert_eq!(status, Some(Status::Drawn), "at {scale}");
+    }
+}
+
+/// A piece the shift onto the sheet leaves with its ends at one point is left out: from a stroke
+/// (which still closes when it did), from a fill's loop, and a stroke of nothing else is left out
+/// whole. The pieces left are moved exactly, and the scene takes the group.
+#[test]
+fn a_moved_group_leaves_out_a_piece_the_shift_makes_one_point() {
+    let by = Vec2::new(150.0, 150.0);
+    // 1e-14 is under half a unit in the last place at 160, so 160 + 1e-14 is 160.
+    let (a, b, c) = (Vec2::new(10.0, -7.5), Vec2::new(10.0 + 1e-14, -7.5), Vec2::new(0.0, 0.0));
+    let line = |a, b| Seg2::Line { a, b };
+    let triangle = vec![line(c, a), line(a, b), line(b, c)];
+    let stroke = |path: Vec<Seg2>, closed| Item::Stroke { path, closed, width_mm: 0.5, pattern: None };
+    let fill = Item::Fill { region: Region2 { outer: Loop2 { segs: triangle.clone() }, holes: Vec::new() } };
+    let items = vec![stroke(triangle.clone(), true), stroke(vec![line(a, b)], false), fill];
+    let group = Group { object: 7, kind: ObjectKind::View, items };
+    let placed = moved(&group, by);
+    let shifted = |p: Vec2| p + by;
+    let kept = vec![line(shifted(c), shifted(a)), line(shifted(b), shifted(c))];
+    assert_eq!(placed.items, [stroke(kept.clone(), true), Item::Fill { region: Region2 { outer: Loop2 { segs: kept }, holes: Vec::new() } }]);
+    assert_eq!(Scene::new(Vec2::new(420.0, 297.0), vec![placed]).validate(), Ok(()));
+}
+
+/// The shift leaves out a curve of any kind whose points it rounds to one point: a cubic, a conic
+/// and a Bézier. A piece the scene refused before the shift, and one the shift takes past the
+/// paper's 1e5 mm, stay for the scene to refuse and name.
+#[test]
+fn a_moved_group_leaves_out_a_curve_of_any_kind_the_shift_makes_one_point() {
+    let by = Vec2::new(150.0, 150.0);
+    let (a, b) = (Vec2::new(10.0, -7.5), Vec2::new(10.0 + 1e-14, -7.5));
+    let mut controls = [a; solidcore_record::MAX_BEZIER_CTRL];
+    controls[1] = b;
+    let gone = [Seg2::Cubic { p0: a, p1: b, p2: a, p3: b }, Seg2::Conic { a, apex: b, b: a, w: 1.0 }, Seg2::Bezier { n: 4, p: controls }];
+    let far = Seg2::Line { a, b: Vec2::new(99_990.0, -7.5) };
+    let refused = Seg2::Line { a, b: Vec2::new(f64::NAN, -7.5) };
+    for seg in gone {
+        let group =
+            Group { object: 7, kind: ObjectKind::View, items: vec![Item::Stroke { path: vec![seg], closed: false, width_mm: 0.5, pattern: None }] };
+        assert_eq!(moved(&group, by).items, [], "{seg:?}");
+    }
+    for seg in [far, refused] {
+        let group =
+            Group { object: 7, kind: ObjectKind::View, items: vec![Item::Stroke { path: vec![seg], closed: false, width_mm: 0.5, pattern: None }] };
+        assert_eq!(moved(&group, by).items.len(), 1, "{seg:?}");
+    }
+}
+
+/// On a sheet whose pieces the paper scene all takes, moving a group is what it was before pieces
+/// could be left out: every point plus the offset, byte for byte, for views, dimensions and the
+/// border alike.
+#[test]
+fn a_moved_group_of_good_pieces_is_every_point_moved() {
+    let (mut s, sheet, ..) = holed();
+    let by = Vec2::new(20.0, -20.0);
+    let scene = settled(&mut s, sheet).scene;
+    let groups = scene.groups.iter().filter(|g| g.items.iter().any(|i| matches!(i, Item::Stroke { .. })));
+    let mut strokes = 0;
+    for group in groups {
+        let segs = |path: &[Seg2]| path.iter().map(|seg| seg.mapped(|p| p + by, ArcMap::turn(0.0, false))).collect::<Vec<_>>();
+        let every_point = group.items.iter().map(|item| match item {
+            Item::Stroke { path, closed, width_mm, pattern } => {
+                strokes += 1;
+                Item::Stroke { path: segs(path), closed: *closed, width_mm: *width_mm, pattern: pattern.clone() }
+            }
+            Item::Fill { region } => Item::Fill {
+                region: Region2 {
+                    outer: Loop2 { segs: segs(&region.outer.segs) },
+                    holes: region.holes.iter().map(|l| Loop2 { segs: segs(&l.segs) }).collect(),
+                },
+            },
+            Item::Text(run) => Item::Text(TextRun { origin: run.origin + by, ..run.clone() }),
+            Item::Picture(picture) => Item::Picture(Picture { rect: Aabb2 { min: picture.rect.min + by, max: picture.rect.max + by }, ..*picture }),
+        });
+        let every_point = Group { object: group.object, kind: group.kind, items: every_point.collect() };
+        assert_eq!(bytes_of(&moved(group, by)), bytes_of(&every_point), "{:?}", group.kind);
+    }
+    assert!(strokes > 20, "{strokes} strokes: the border, the views and the dimension");
+}
+
+/// A view the sheet still can't take names the line it can't draw and what is wrong with it, and
+/// suggests no scale: here an edge past the paper's 1e5 mm once moved to its centre.
+#[test]
+fn a_view_the_sheet_refuses_names_the_line() {
+    let (s, ..) = front_and_top();
+    let record = s.drawing("test").unwrap().sheets[0].clone();
+    let line = |a: [f64; 2], b: [f64; 2]| Seg2::Line { a: Vec2::new(a[0], a[1]), b: Vec2::new(b[0], b[1]) };
+    let stroke = |seg| Item::Stroke { path: vec![seg], closed: false, width_mm: 0.5, pattern: None };
+    let items = vec![stroke(line([0.0, 0.0], [10.0, 0.0])), stroke(line([0.0, 0.0], [99_990.0, 0.0]))];
+    let shown = Shown { index: 0, path: Vec::new(), body: "Block".into(), reference: false };
+    let owners = Owners {
+        bodies: vec![shown],
+        items: vec![Some((0, Source::Edge { edge: 2, tangent: false })), Some((0, Source::Edge { edge: 5, tangent: false }))],
+    };
+    let drawn = Drawn {
+        hatches: Vec::new(),
+        group: Some(Arc::new(Group { object: 7, kind: ObjectKind::View, items })),
+        status: Status::Drawn,
+        stats: None,
+        boundary: None,
+        frame: None,
+        owners: Some(Arc::new(owners)),
+        why: None,
+    };
+    let (_, states, ..) = assemble(&record, Projection::Third, &labels(&record), &[], &[], [(7, Vec2::new(150.0, 150.0), &drawn)].into_iter())
+        .unwrap()
+        .finish()
+        .unwrap();
+    let status = states.into_iter().find(|v| v.view == 7).map(|v| v.status);
+    let why = "paper scene: non-finite or excessive coordinate";
+    assert_eq!(status, Some(Status::Failed(format!("Block's edge 5 can't be drawn on the sheet: {why}"))));
 }
 
 /// After a model change (going back to a checkpoint taken before a tower was added) both views are
@@ -3026,7 +3194,12 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
 fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     let (s, sheet, [front, _]) = front_and_top();
     let d = s.drawing("test").unwrap().clone();
-    let record = sheet_of(&d, sheet).unwrap();
+    // On a sheet whose frame prints no labels: the font table is the dimensions' alone (the frame's
+    // zone letters and numbers would add their glyphs to it, #20121).
+    let record = &Sheet {
+        border: sheet_of(&d, sheet).unwrap().border.map(|b| DrawingBorderProfile { zone_labels: false, ..b }),
+        ..sheet_of(&d, sheet).unwrap().clone()
+    };
     let frame = ViewFrame::new(solidcore_record::Plane::XY, "1:1".parse().unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap();
     let view = Drawn {
         hatches: Vec::new(),
@@ -4562,7 +4735,9 @@ fn sheet_sketch_assembly_budget_names_only_the_excluded_sketch_and_can_recover()
             pattern: None,
         }],
     };
-    let left = MAX_RECORDS - border(&s, sheet).iter().map(Group::records).sum::<usize>();
+    // This assembly has no frame text (`assemble_with_sketches` gives it none): the border's lines alone.
+    let lines = record.border.as_ref().unwrap().layout(&record.sheet).unwrap().paper(sheet);
+    let left = MAX_RECORDS - lines.iter().map(Group::records).sum::<usize>();
     let view = Drawn {
         hatches: Vec::new(),
         group: Some(Arc::new(group(10, ObjectKind::View, left - 12))),

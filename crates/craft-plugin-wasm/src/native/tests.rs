@@ -270,6 +270,38 @@ fn ui_capability_requires_provider_exports() {
     assert!(check_component(&panel_manifest(), &component("call $box"), RuntimeOptions::default()).is_err());
 }
 
+#[test]
+fn panel_plugin_supports_dialog_hooks() {
+    let (package, version) = API.split_once('@').unwrap();
+    let dialog_export = format!(
+        "(export \"{package}/ui-provider@{version}\" (instance $provider))\n\
+         (instance $dialog (export \"json\" (type $json)) (export \"plugin-error\" (type $plugin-error)) (export \"update-fields\" (func $execute)))\n\
+         (export \"{package}/dialog-provider@{version}\" (instance $dialog))"
+    );
+    let target = format!("(export \"{package}/ui-provider@{version}\" (instance $provider))");
+    let component = wat::parse_str(
+        include_str!("../ui_fixture.wat")
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("__COMMAND__", "document.inspect")
+            .replace("__COMMAND_LEN__", "16")
+            .replace("__ARGS__", "{}")
+            .replace("__ARGS_LEN__", "2")
+            .replace(&target, &dialog_export),
+    )
+    .unwrap();
+    let mut manifest = panel_manifest();
+    manifest.capabilities.push("dialog@0.1".into());
+    manifest.runtime.as_mut().unwrap().commands.insert("document.inspect".into());
+    manifest.runtime.as_mut().unwrap().entries[0].dialog_hook = true;
+    check_component(&manifest, &component, RuntimeOptions::default()).unwrap();
+    let (mut app, result) = crate::dialog_fields(App::default(), &manifest, &component, "make", &json!({}), craft_plugin::HostLimits::default());
+    assert_eq!(result.unwrap(), "{\"bodies\":1,\"name\":\"Bracket\"}");
+    assert_eq!((app.begins, app.commits, app.rollbacks), (1, 1, 0));
+    app.panel_data.merge_frame();
+    assert_eq!(app.panel_data.get("/jobs/0/state"), Some(&craft_plugin::ui::UiValue::Text("ready".into())));
+}
+
 fn form_component() -> Vec<u8> {
     form_component_with_dialog(false)
 }
@@ -342,16 +374,28 @@ fn dialog_hook_cannot_open_forms_even_when_the_command_can() {
 #[test]
 fn form_import_accepts_patch_capability_versions() {
     let bytes = form_component();
+    for capability in ["forms@0.1", "forms@0.1.0"] {
+        let mut m = manifest();
+        m.capabilities.push(capability.into());
+        let mut app = App { interactive: true, ..Default::default() };
+        assert_eq!(run(&mut app, &m, &bytes, "make", &json!({})).unwrap(), json!({}));
+        assert_eq!(app.forms, vec![("make".into(), json!({}))]);
+    }
+}
+
+#[test]
+fn form_import_refuses_missing_or_unsupported_capabilities() {
+    let bytes = form_component();
     let mut m = manifest();
-    m.capabilities.push("forms@0.1.0".into());
     let mut app = App { interactive: true, ..Default::default() };
-    assert_eq!(run(&mut app, &m, &bytes, "make", &json!({})).unwrap(), json!({}));
-    assert_eq!(app.forms, vec![("make".into(), json!({}))]);
-    let _ = m.capabilities.pop();
     assert!(matches!(run(&mut app, &m, &bytes, "make", &json!({})), Err(HostError::PermissionDenied { .. })));
     m.capabilities.push("forms@0.2".into());
     assert!(matches!(craft_plugin::check_capabilities(&m.capabilities, "Test host"), Err(HostError::UnsupportedCapability { .. })));
-    assert!(run(&mut app, &m, &bytes, "make", &json!({})).is_err());
+    assert!(
+        matches!(run(&mut app, &m, &bytes, "make", &json!({})), Err(HostError::UnsupportedCapability { .. })),
+        "an unsupported forms version is refused"
+    );
+    assert!(app.forms.is_empty(), "refused capabilities cannot open forms");
 }
 
 #[test]
@@ -724,6 +768,7 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         design_tokens: false,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
+        created_dirs: Vec::new(),
         clock: false,
         forms: false,
         limits: StoreLimitsBuilder::new().build(),
@@ -1097,6 +1142,100 @@ fn reading_a_missing_file_is_an_answer_and_the_entry_can_then_write_it() {
 }
 
 #[test]
+fn a_write_into_a_missing_sub_folder_makes_it_and_a_discarded_run_removes_it_again() {
+    // #20493: `NewProject/network.json` in a granted folder with no `NewProject` yet.
+    use files::Host;
+    let root = std::env::temp_dir().join(format!("craft-plugin-subfolder-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("plain"), b"file").unwrap();
+    let granted = |host: &mut State<App>| {
+        host.folders.insert(
+            "projects".into(),
+            Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+        );
+    };
+
+    // Published: the folders stay with the file in them.
+    let mut host = state(App::default());
+    granted(&mut host);
+    host.write_file("projects".into(), "NewProject/pipes/network.json".into(), b"{}".to_vec()).unwrap();
+    assert_eq!(host.read_file("projects".into(), "NewProject/pipes/network.json".into()).unwrap(), b"{}");
+    assert_eq!(host.failed, None);
+    host.publish_writes().unwrap();
+    host.discard_writes();
+    assert_eq!(std::fs::read(root.join("NewProject/pipes/network.json")).unwrap(), b"{}");
+    drop(host);
+
+    // Not published (a trap, a refusal, a failed commit): nothing is left behind, and a folder
+    // that was already there stays.
+    let mut host = state(App::default());
+    granted(&mut host);
+    host.write_file("projects".into(), "NewProject/other/a/b.json".into(), b"{}".to_vec()).unwrap();
+    assert!(root.join("NewProject/other/a").is_dir());
+    host.discard_writes();
+    assert!(!root.join("NewProject/other").exists());
+    assert!(root.join("NewProject/pipes/network.json").exists());
+
+    // A file where a folder should be is a wrong path, not a denied permission.
+    let refused = host.write_file("projects".into(), "plain/network.json".into(), b"{}".to_vec()).unwrap_err();
+    assert!(matches!(&refused, PluginError::InvalidInput(types::FieldFailure { field, .. }) if field == "path"), "{refused:?}");
+    assert_eq!(std::fs::read(root.join("plain")).unwrap(), b"file");
+    drop(host);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+#[cfg(unix)]
+fn a_link_in_the_middle_of_a_new_folder_path_is_refused_before_anything_is_made() {
+    // #20493: `link/New/x.json` where `link` points outside the grant makes no folder, inside or outside.
+    use files::Host;
+    let base = std::env::temp_dir().join(format!("craft-plugin-midlink-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    let root = base.join("grant");
+    let outside = base.join("outside");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+    for path in ["link/New/x.json", "link/New/Deeper/x.json"] {
+        let mut state = state(App::default());
+        state.folders.insert(
+            "data".into(),
+            Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+        );
+        let refused = state.write_file("data".into(), path.into(), b"{}".to_vec()).unwrap_err();
+        assert!(matches!(refused, PluginError::PermissionDenied(_)), "{path}: {refused:?}");
+        assert!(state.created_dirs.is_empty() && state.staged.is_empty(), "{path}");
+    }
+    assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0, "nothing made outside the grant");
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1, "nothing made inside it but the link");
+    std::fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn a_path_of_more_than_64_components_is_refused_before_any_folder_is_made() {
+    use files::Host;
+    let root = std::env::temp_dir().join(format!("craft-plugin-deep-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    let mut state = state(App::default());
+    state.folders.insert(
+        "data".into(),
+        Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+    );
+    let deep = |folders: usize| format!("{}x.json", "d/".repeat(folders));
+    // 63 folders and the file are 64 components: allowed.
+    state.write_file("data".into(), deep(63), b"{}".to_vec()).unwrap();
+    // 64 folders and the file are 65: refused as a wrong path, naming the limit.
+    let refused = state.write_file("data".into(), deep(64).replacen("d/", "e/", 1), b"{}".to_vec()).unwrap_err();
+    assert!(
+        matches!(&refused, PluginError::InvalidInput(types::FieldFailure { field, reason }) if field == "path" && reason.contains("at most 64")),
+        "{refused:?}"
+    );
+    assert!(!root.join("e").exists(), "no folder made for a refused path");
+    state.discard_writes();
+    drop(state);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn every_file_operation_refuses_hidden_names_inside_a_granted_folder() {
     use files::Host;
     let root = std::env::temp_dir().join(format!("craft-plugin-hidden-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
@@ -1339,6 +1478,110 @@ fn an_importer_trap_or_runaway_loop_fails_that_one_call_and_the_next_call_works(
     assert_eq!(import(&slow, root.join("loop.smp"), false).unwrap_err(), HostError::Exhausted { limit: "deadline_ms".into(), allowed: 50 });
     std::fs::remove_dir_all(root).unwrap();
 }
+/// Runs `check` with every compile on this thread made by `tier`'s compiler, bypassing the cache.
+fn on_tier(tier: Tier, check: impl FnOnce()) {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            FORCED_TIER.with(|forced| forced.set(None));
+        }
+    }
+    let _reset = Reset;
+    FORCED_TIER.with(|forced| forced.set(Some(tier)));
+    check();
+}
+#[test]
+fn fuel_memory_the_deadline_and_cancel_stop_plugins_under_both_compilers() {
+    for tier in [Tier::Baseline, Tier::Optimized] {
+        on_tier(tier, || {
+            for (code, diagnostic) in [
+                ("call $box (loop $forever br $forever)", "used all 100000 fuel it asks for and was stopped"),
+                ("call $box i32.const 10000 memory.grow drop", "needed more than the 1 MiB of memory it asks for and was stopped"),
+            ] {
+                let failure = run(&mut App::default(), &manifest(), &component(code), "make", &json!({})).unwrap_err();
+                assert!(failure.to_string().contains(diagnostic), "{tier:?} {code}: {failure}");
+            }
+            let root = import_folder(&[("loop.smp", b"L"), ("fine.smp", b"fine")]);
+            let manifest = importer_manifest(false);
+            let fuel = import(&manifest, root.join("loop.smp"), false).unwrap_err();
+            assert_eq!(fuel, HostError::Exhausted { limit: "fuel".into(), allowed: 10_000_000 }, "{tier:?}");
+            assert_eq!(import(&manifest, root.join("fine.smp"), false).unwrap().design, b"fine", "{tier:?}");
+            let mut slow = importer_manifest(false);
+            let limits = &mut slow.runtime.as_mut().unwrap().limits;
+            (limits.fuel, limits.deadline_ms) = (1 << 40, 50);
+            let deadline = import(&slow, root.join("loop.smp"), false).unwrap_err();
+            assert_eq!(deadline, HostError::Exhausted { limit: "deadline_ms".into(), allowed: 50 }, "{tier:?}");
+            std::fs::remove_dir_all(root).unwrap();
+            let mut cancelled = App { cancelled: true, ..Default::default() };
+            assert_eq!(
+                run(&mut cancelled, &super::tests::manifest(), &component("(loop br 0)"), "make", &json!({})).unwrap_err(),
+                HostError::Cancelled
+            );
+        });
+    }
+}
+/// The cached code's compiler, if the cache holds `bytes`.
+fn cached_tier(bytes: &[u8]) -> Option<Tier> {
+    cache().compiled.lock().unwrap().as_ref().filter(|cached| cached.bytes.as_ref() == bytes).map(|cached| cached.tier)
+}
+#[test]
+fn imports_never_wait_for_the_cranelift_swap_and_give_the_same_design_before_and_after() {
+    let root = import_folder(&[("bracket.smp", b"design bytes")]);
+    let manifest = importer_manifest(false);
+    let component = importer_component();
+    // Hold the background compile back: every import below runs while it has not finished.
+    let gate = cache().gate.lock().unwrap();
+    let first = import_with(&component, &manifest, root.join("bracket.smp"), false).unwrap();
+    assert_eq!(cached_tier(&component), Some(Tier::Baseline));
+    // The first import started the Cranelift compile; a second one now finds it running.
+    assert!(cache().optimizing.load(Ordering::Acquire));
+    assert!(optimize_in_background().is_none());
+    let during = import_with(&component, &manifest, root.join("bracket.smp"), false).unwrap();
+    assert_eq!(cached_tier(&component), Some(Tier::Baseline));
+    drop(gate);
+    while cache().optimizing.load(Ordering::Acquire) {
+        std::thread::yield_now();
+    }
+    assert_eq!(cached_tier(&component), Some(Tier::Optimized));
+    let after = import_with(&component, &manifest, root.join("bracket.smp"), false).unwrap();
+    for imported in [&first, &during, &after] {
+        assert_eq!((imported.design.as_slice(), imported.report.summary.as_str()), (&b"design bytes"[..], "Copied the file"));
+    }
+    // Already Cranelift's: nothing more to compile.
+    assert!(optimize_in_background().is_none());
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn a_late_cranelift_compile_never_replaces_another_components_code() {
+    let stack_bytes = 512 * 1024;
+    let first: Arc<[u8]> = Arc::from(importer_component());
+    let (engine, component) = compile_with(&first, stack_bytes, Tier::Baseline).unwrap();
+    *cache().compiled.lock().unwrap() =
+        Some(Compiled { bytes: first, stack_bytes, engine: engine.clone(), component: component.clone(), tier: Tier::Baseline });
+    let gate = cache().gate.lock().unwrap();
+    let worker = optimize_in_background().unwrap();
+    // Another component (the same bytes in another allocation stand in for one) takes the cache
+    // while the first one's Cranelift compile waits.
+    let second: Arc<[u8]> = Arc::from(importer_component());
+    *cache().compiled.lock().unwrap() = Some(Compiled { bytes: second.clone(), stack_bytes, engine, component, tier: Tier::Baseline });
+    drop(gate);
+    worker.join().unwrap();
+    let cached = cache().compiled.lock().unwrap();
+    let cached = cached.as_ref().unwrap();
+    assert_eq!((cached.tier, Arc::ptr_eq(&cached.bytes, &second)), (Tier::Baseline, true));
+}
+#[test]
+fn a_component_winch_refuses_is_compiled_with_cranelift_and_runs() {
+    // Relaxed SIMD is one of the proposals Wasmtime's Winch does not compile.
+    let code = "call $box v128.const i64x2 0 0 v128.const i64x2 0 0 v128.const i64x2 0 0 f32x4.relaxed_madd drop";
+    let bytes = component(code);
+    assert!(compile_with(&bytes, 512 * 1024, Tier::Baseline).is_err());
+    let (_, _, tier) = compile_fresh(&bytes, 512 * 1024, None).unwrap();
+    assert_eq!(tier, Tier::Optimized);
+    run(&mut App::default(), &manifest(), &bytes, "make", &json!({})).unwrap();
+    assert_eq!(cached_tier(&bytes), Some(Tier::Optimized));
+    crate::check_component(&manifest(), &bytes).unwrap();
+}
 #[test]
 fn an_importer_says_a_valid_file_is_not_supported() {
     let root = import_folder(&[("sketch.smp", b"U"), ("broken.smp", b"I")]);
@@ -1361,6 +1604,41 @@ fn an_importer_built_against_wit_0_1_still_runs() {
     let failure = import_with(&old, &importer_manifest(false), root.join("loop.smp"), false).unwrap_err();
     assert_eq!(failure, HostError::Exhausted { limit: "fuel".into(), allowed: 10_000_000 });
     std::fs::remove_dir_all(root).unwrap();
+}
+
+/// A long job runs past the command limits: it may make more than 256 host calls (progress
+/// reports among them), and its deadline is the fixed job deadline, not the runtime's.
+#[test]
+fn a_long_job_runs_under_the_job_deadline_instead_of_the_command_limits() {
+    let job = |job: bool| {
+        craft_plugin::parse_manifest(
+            json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{
+                "module":"plugin.wasm","entries":[{"name":"make","job":job}],
+                "commands":["app.write"],"limits":{"fuel":u64::MAX / 2,"memory_mib":1,"deadline_ms":5000}
+            }})
+            .to_string()
+            .as_bytes(),
+            "sample",
+        )
+        .unwrap()
+    };
+    // 300 commands: one past the other at address 4000.
+    let many = component(
+        "(loop $more call $box i32.const 4000 i32.const 4000 i32.load i32.const 1 i32.add i32.store \
+         i32.const 4000 i32.load i32.const 300 i32.lt_u br_if $more)",
+    );
+    let mut app = App::default();
+    assert!(run(&mut app, &job(false), &many, "make", &json!({})).unwrap_err().to_string().contains("host call count"));
+    assert_eq!(app.value, 0, "the command's calls are rolled back");
+    run(&mut app, &job(true), &many, "make", &json!({})).unwrap();
+    assert_eq!(app.value, 300);
+    // A job that never ends stops at the job deadline and changes nothing.
+    let options = RuntimeOptions { job_deadline_ms: 200, ..Default::default() };
+    let (returned, result) =
+        crate::run_with_options(std::mem::take(&mut app), &job(true), &component("call $box (loop br 0)"), "make", &json!({}), options);
+    app = returned;
+    assert_eq!(result.unwrap_err(), HostError::Exhausted { limit: "deadline_ms".into(), allowed: 200 });
+    assert_eq!(app.value, 300);
 }
 
 fn exporter_manifest() -> Manifest {
@@ -1448,7 +1726,7 @@ fn cache_entries(root: &Path) -> Vec<PathBuf> {
     found
 }
 fn compile_cached(bytes: &[u8], cache: &wasmtime::Cache) -> Result<(Engine, Component)> {
-    compile_with(bytes, 512 * 1024, Some(cache.clone()))
+    compile_on(bytes, 512 * 1024, Tier::Optimized, true, Some(cache.clone()))
 }
 #[test]
 fn a_compiled_component_is_read_back_from_the_disk_cache_by_a_new_engine() {
@@ -1552,7 +1830,7 @@ fn a_cache_folder_that_cannot_be_made_or_written_still_compiles() {
     let blocked = root.join("blocked");
     std::fs::write(&blocked, b"a file").unwrap();
     assert!(open_disk_cache(&blocked.join("plugin-compile")).is_none());
-    compile_with(&importer_component(), 512 * 1024, None).unwrap();
+    compile_with(&importer_component(), 512 * 1024, Tier::Optimized).unwrap();
     // A folder that opens but can't be written: every compile still succeeds.
     #[cfg(unix)]
     {
@@ -1568,4 +1846,65 @@ fn a_cache_folder_that_cannot_be_made_or_written_still_compiles() {
         std::fs::set_permissions(&read_only, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     let _ = std::fs::remove_dir_all(root); // best effort: Wasmtime's cache worker may still be writing here
+}
+
+/// Gives this test thread's runtime a disk cache in a new folder, as the app's startup does.
+/// Returns the folder Wasmtime's cache writes in, inside the app's folder, as the app lays it out.
+fn with_disk_cache() -> (PathBuf, wasmtime::Cache) {
+    let root = cache_folder().join("wasmtime");
+    let disk = open_disk_cache(&root).unwrap();
+    assert!(cache().disk.set(Some(disk.clone())).is_ok());
+    (root, disk)
+}
+#[test]
+fn a_cache_miss_starts_on_winch_and_caches_the_cranelift_code_for_the_next_session() {
+    let (root, disk) = with_disk_cache();
+    let folder = import_folder(&[("bracket.smp", b"design bytes")]);
+    let component = importer_component();
+    let gate = cache().gate.lock().unwrap();
+    let first = import_with(&component, &importer_manifest(false), folder.join("bracket.smp"), false).unwrap();
+    // Nothing cached yet: Winch's code, and Winch's code is never written to the disk cache.
+    assert_eq!(cached_tier(&component), Some(Tier::Baseline));
+    assert!(cache_entries(&root).is_empty());
+    drop(gate);
+    while cache().optimizing.load(Ordering::Acquire) {
+        std::thread::yield_now();
+    }
+    // The background compile swapped in Cranelift's code and wrote it to the disk cache.
+    assert_eq!(cached_tier(&component), Some(Tier::Optimized));
+    assert_eq!((disk.cache_misses(), cache_entries(&root).len()), (1, 1));
+    // A new session, which starts with nothing in memory, loads that entry: no Winch.
+    *cache().compiled.lock().unwrap() = None;
+    let next = import_with(&component, &importer_manifest(false), folder.join("bracket.smp"), false).unwrap();
+    assert_eq!(cached_tier(&component), Some(Tier::Optimized));
+    assert_eq!((disk.cache_hits(), disk.cache_misses()), (1, 1));
+    assert_eq!((first.design, next.design), (b"design bytes".to_vec(), b"design bytes".to_vec()));
+    std::fs::remove_dir_all(folder).unwrap();
+    // Best effort: Wasmtime's cache worker may still be writing here.
+    let _ = std::fs::remove_dir_all(root.parent().unwrap());
+}
+#[test]
+fn a_cache_hit_loads_cranelift_code_without_compiling_with_winch() {
+    let (root, disk) = with_disk_cache();
+    let component = importer_component();
+    // An earlier session cached Cranelift's code for this component.
+    optimize_and_cache(&component, 512 * 1024, true, Some(&disk)).unwrap();
+    assert_eq!((disk.cache_hits(), disk.cache_misses()), (0, 1));
+    let folder = import_folder(&[("bracket.smp", b"design bytes")]);
+    let imported = import_with(&component, &importer_manifest(false), folder.join("bracket.smp"), false).unwrap();
+    assert_eq!(imported.design, b"design bytes");
+    // Read from the disk cache, Cranelift's from the start: nothing left to optimise.
+    assert_eq!(cached_tier(&component), Some(Tier::Optimized));
+    assert_eq!((disk.cache_hits(), disk.cache_misses()), (1, 1));
+    assert!(optimize_in_background().is_none());
+    // A deleted entry is only a slower start: Cranelift compiles it again and caches it.
+    for entry in cache_entries(&root) {
+        std::fs::remove_file(entry).unwrap();
+    }
+    *cache().compiled.lock().unwrap() = None;
+    import_with(&component, &importer_manifest(false), folder.join("bracket.smp"), false).unwrap();
+    assert_eq!((cached_tier(&component), disk.cache_misses(), cache_entries(&root).len()), (Some(Tier::Optimized), 2, 1));
+    std::fs::remove_dir_all(folder).unwrap();
+    // Best effort: Wasmtime's cache worker may still be writing here.
+    let _ = std::fs::remove_dir_all(root.parent().unwrap());
 }
