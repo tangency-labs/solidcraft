@@ -5315,7 +5315,7 @@ mod tests {
     #[test]
     fn grouped_unsaved_names_ticks_meaning_and_accessibility() {
         let mut h = crate::scenario::Harness::new();
-        h.app = Box::new(four_tabs());
+        *h.app = four_tabs();
         control(&mut h.app, &json!({"action":"close_all"}));
         draw_close_prompt(&mut h);
         assert!(h.widget("Ticked designs are saved; the rest close without saving.").is_some());
@@ -5338,7 +5338,7 @@ mod tests {
     #[test]
     fn grouped_tab_order_space_and_focus_stay_in_the_window() {
         let mut h = crate::scenario::Harness::new();
-        h.app = Box::new(four_tabs());
+        *h.app = four_tabs();
         h.app.home.open = false;
         control(&mut h.app, &json!({"action":"close_all"}));
         h.frames(3);
@@ -5388,7 +5388,7 @@ mod tests {
         assert_eq!(focused(&h), before, "Shift+Tab reverses Tab");
 
         let mut reverse = crate::scenario::Harness::new();
-        reverse.app = Box::new(four_tabs());
+        *reverse.app = four_tabs();
         reverse.app.home.open = false;
         control(&mut reverse.app, &json!({"action":"close_all"}));
         reverse.frames(3);
@@ -5402,7 +5402,7 @@ mod tests {
     #[test]
     fn grouped_failed_save_tries_the_others_and_displays_the_reason() {
         let mut h = crate::scenario::Harness::new();
-        h.app = Box::new(four_tabs());
+        *h.app = four_tabs();
         let bad = h.dir.join("missing/bad.sc");
         let good = h.dir.join("good.sc");
         let choices = std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::from([
@@ -5436,7 +5436,7 @@ mod tests {
     #[test]
     fn grouped_save_copy_retry_uses_the_copy_and_preserves_the_original() {
         let mut h = crate::scenario::Harness::new();
-        h.app = Box::new(four_tabs());
+        *h.app = four_tabs();
         switch(&mut h.app, 0);
         let original = h.dir.join("original.sc");
         let copy = h.dir.join("copy.sc");
@@ -5470,7 +5470,7 @@ mod tests {
     #[test]
     fn grouped_save_copy_picker_cancel_stops_later_saves_and_keeps_the_list() {
         let mut h = crate::scenario::Harness::new();
-        h.app = Box::new(four_tabs());
+        *h.app = four_tabs();
         switch(&mut h.app, 0);
         let original = h.dir.join("original.sc");
         h.app.run("file.save_as", json!({"path":original.to_string_lossy()})).unwrap();
@@ -5539,7 +5539,7 @@ mod tests {
     fn grouped_read_only_or_moved_original_asks_for_a_named_location() {
         for mode in 0..6 {
             let mut h = crate::scenario::Harness::new();
-            h.app = Box::new(four_tabs());
+            *h.app = four_tabs();
             switch(&mut h.app, 0);
             let file = h.dir.join("Original.sc");
             h.app.run("file.save_as", json!({"path":file.to_string_lossy()})).unwrap();
@@ -5583,7 +5583,7 @@ mod tests {
     #[test]
     fn grouped_cancel_while_saving_stops_the_run_and_keeps_all_tabs() {
         let mut h = crate::scenario::Harness::new();
-        h.app = Box::new(four_tabs());
+        *h.app = four_tabs();
         switch(&mut h.app, 0);
         let file = h.dir.join("first.sc");
         h.app.run("file.save_as", json!({"path":file.to_string_lossy()})).unwrap();
@@ -5637,7 +5637,7 @@ mod tests {
     fn grouped_changes_during_save_keep_new_and_saved_rows_open() {
         for (changed, row_save) in [(0, false), (1, false), (2, false), (0, true)] {
             let mut h = crate::scenario::Harness::new();
-            h.app = Box::new(four_tabs());
+            *h.app = four_tabs();
             switch(&mut h.app, 0);
             let file = h.dir.join("first.sc");
             h.app.run("file.save_as", json!({"path":file.to_string_lossy()})).unwrap();
@@ -5978,7 +5978,7 @@ mod tests {
             ("reference-1400x757.png", 1400.0, 757.0, true, false, false, false),
         ] {
             let mut h = crate::scenario::Harness::new();
-            h.app = Box::new(app());
+            *h.app = app();
             h.app.home.open = false;
             h.app.ui.dark = true;
             h.app.preferences.language = "en".into();
