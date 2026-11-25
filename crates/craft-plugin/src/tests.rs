@@ -656,19 +656,19 @@ fn dialog_layout_annotations_are_checked_at_load() {
     for source in [json!("missing"), json!("width"), json!(1)] {
         assert!(refused(json!({}), json!({"x-solidcraft-unit-from":source}), "x-solidcraft-unit-from"), "{source}");
     }
-    for url in ["https://example.com/#topic", "https://example.com/docs#x", "https://user@example.com:8443/a", "https://[::1]/"] {
+    for url in ["https://example.com/docs#x", "https://docs.example.com:8443/a?b=1"] {
         assert!(layout::help_url(url), "{url}");
     }
+    // Documentation links name a domain: IP literals are refused by design.
     for url in [
-        "http://example.com",
-        "https://",
-        "https:///path",
-        "https://#topic",
-        "https://#x",
-        "https://?q",
+        "https://[not-an-ip]/",
+        "https://[::1]/",
+        "https://127.0.0.1/",
         "https://user@#topic",
         "https://:443/",
-        "https://[]/",
+        "https://#topic",
+        "https://",
+        "http://example.com",
         "https://example.com/a b",
         "javascript:alert(1)",
     ] {

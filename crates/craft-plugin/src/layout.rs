@@ -50,18 +50,11 @@ pub(crate) fn validate(schema: &Value, field: &str) -> Result<()> {
     Ok(())
 }
 
-/// A help link the dialog may open: `https`, with a host, no spaces or control characters.
-pub fn help_url(url: &str) -> bool {
-    url.len() <= MAX_URL && !url.chars().any(|c| c.is_whitespace() || c.is_control()) && url_host(url).is_some_and(|host| !host.is_empty())
-}
-
-/// The host of an `https` URL: its authority without user info or port (an IPv6 host keeps its
-/// brackets). `None` when the URL is not `https`.
-fn url_host(url: &str) -> Option<&str> {
-    let authority = url.strip_prefix("https://")?.split(['/', '?', '#']).next()?;
-    let host_port = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
-    Some(match host_port.strip_prefix('[') {
-        Some(rest) => rest.split_once(']').map(|(ip, _)| ip)?,
-        None => host_port.split(':').next()?,
-    })
+/// A help link the dialog may open: an `https` URL whose host is a domain name (never an IP
+/// address), with no spaces or control characters.
+pub fn help_url(text: &str) -> bool {
+    text.len() <= MAX_URL
+        && !text.chars().any(|c| c.is_whitespace() || c.is_control())
+        && url::Url::parse(text)
+            .is_ok_and(|url| url.scheme() == "https" && matches!(url.host(), Some(url::Host::Domain(domain)) if !domain.is_empty()))
 }

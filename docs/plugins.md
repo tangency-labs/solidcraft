@@ -538,11 +538,12 @@ is drawn: input checks, tool schemas and the values the plugin receives stay the
 - `x-solidcraft-unit-from` on a number field names a string choice in the same schema. The
   choice's current value (for example `mm` or `in`) is drawn after the number instead of `unit`.
 - `x-solidcraft-help` on a field adds a "More about this field" link under it, opening the page
-  in the browser. Only `https://` links are allowed, and nothing opens until the link is clicked.
+  in the browser. It must be an https URL with a domain name (not an IP address), and nothing opens
+  until the link is clicked.
 
 The manifest is refused when a heading is not text or is longer than 80 characters, when
 `x-solidcraft-sections` is anything but `"collapsible"`, when `x-solidcraft-unit-from` is not on a
-number field naming another field that is a string choice, or when a help link is not `https`.
+number field naming another field that is a string choice, or when a help link is not an https URL with a domain name.
 
 ### Font fields
 
