@@ -182,11 +182,14 @@ expr.evaluate                     expression evaluation
 file.copy                        file operations: tested in crates/engine/src/cmd/file_library.rs tests
 file.export_sdf                  writes a robot model folder from the meshes: tested in crates/io/src/sdf.rs and crates/engine/src/tests.rs
 file.export_urdf_options          the URDF export with its options dialog first: tested in crates/engine/src/cmd/urdf_tests.rs
+file.freecad_import_report        writes the FreeCAD import report: tested in crates/engine/src/cmd/file.rs tests
 file.gerber_files                 a listing of a board's files: crates/engine/src/cmd/board_import_tests.rs
 file.gpg_keys                     GnuPG key listing: tested in crates/engine/src/gpg.rs tests
 file.import                       opens a file through an importer plugin: tested in crates/engine/src/plugin/tests.rs
 file.import_cache_clear           clears a cache of imported files
+file.import_freecad_sketches      FreeCAD sketch and operation import: tested in crates/engine/src/tests/native_cad_import.rs
 file.insert_gerber                board import, tested in crates/engine/src/cmd/board_import_tests.rs
+file.inspect_freecad_sketches     lists a FreeCAD file's sketches: tested in crates/engine/src/tests/native_cad_import.rs
 file.move                        file operations: tested in crates/engine/src/cmd/file_library.rs tests
 file.open_in_easyprint            hands the file to another program
 file.revert_saved                 reads the open design again from its file: tested in crates/engine/src/cmd/file.rs tests
