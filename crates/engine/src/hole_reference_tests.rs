@@ -81,6 +81,18 @@ fn a_hole_sits_at_its_distances_from_two_edges() {
 }
 
 #[test]
+fn a_reference_edge_is_found_on_its_own_part_when_another_part_touches_the_hole() {
+    // A pad lies on the plate where the hole is picked, so both surfaces are as near as can be
+    // and the pad comes first: the plate's edges must still be found on the plate.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 4, "corner": [25, 20, 10], "operation": "new", "body_name": "Pad"}));
+    run(&mut s, "solid.box", json!({"length": 50, "width": 40, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "Plate"}));
+    run(&mut s, "solid.hole", referenced(json!([{"edge": [0, 20, 10], "distance": 10}, {"edge": [25, 0, 10], "distance": "12 mm"}])));
+    let (position, _) = hole(&s);
+    assert!(position.dist(Vec3::new(10.0, 12.0, 10.0)) < 1e-6, "the hole is placed at (10, 12), not {position:?}");
+}
+
+#[test]
 fn a_hole_follows_its_edges_when_the_box_grows() {
     let mut s = plate();
     // From the far edges: 10 mm from x = len, 12 mm from y = wid.

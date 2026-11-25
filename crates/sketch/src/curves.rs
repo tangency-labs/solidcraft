@@ -9,6 +9,30 @@ use solidcore_record::Vec2;
 
 /// Polyline samples per spline span / conic / ellipse quarter.
 const SPAN_SAMPLES: usize = 24;
+/// The length a handle at fit point `i` is measured against: a third of the mean of the chords on
+/// either side of it (of the one chord at an open spline's end). A handle stores the curve's
+/// derivative per unit chord times this length, so scaling a spline's points and handles scales
+/// its curve alike (#6502), and a handle arm is as long as its control offset where the chords
+/// are equal: short enough to stay beside the curve instead of reaching across the sketch.
+pub(crate) fn handle_unit(p: &[Vec2], periodic: bool, i: usize) -> f64 {
+    let chord = |a: usize, b: usize| p.get(a).zip(p.get(b)).map(|(x, y)| x.dist(*y));
+    let count = if periodic { p.len().saturating_sub(1) } else { p.len() };
+    let before = if i > 0 {
+        chord(i - 1, i)
+    } else if periodic && count > 0 {
+        chord(count - 1, count)
+    } else {
+        None
+    };
+    let after = if i + 1 < p.len() { chord(i, i + 1) } else { None };
+    let unit = match (before, after) {
+        (Some(a), Some(b)) => (a + b) / 2.0,
+        (Some(a), None) | (None, Some(a)) => a,
+        (None, None) => 1.0,
+    };
+    let unit = unit / 3.0;
+    if unit.is_finite() { unit.max(1e-9) } else { 1.0 }
+}
 /// Most points a spline may have.
 pub const MAX_SPLINE_POINTS: usize = 500;
 
@@ -117,49 +141,7 @@ pub fn conic_polyline(a: Vec2, apex: Vec2, b: Vec2, rho: f64) -> Vec<Vec2> {
 /// Natural cubic interpolation through `p` (chord-length parameters): per span the cubic
 /// Hermite data (start, end, start tangent, end tangent) in span-parameter units.
 fn fit_spans(p: &[Vec2]) -> Vec<(Vec2, Vec2, Vec2, Vec2)> {
-    let n = p.len();
-    if n < 2 {
-        return Vec::new();
-    }
-    let h: Vec<f64> = p.windows(2).map(|w| w[0].dist(w[1]).max(1e-9)).collect();
-    if n == 2 {
-        let d = p[1] - p[0];
-        return vec![(p[0], p[1], d, d)];
-    }
-    // Second derivatives M (natural ends: M0 = Mn = 0) by the tridiagonal (Thomas) solve.
-    let m = n - 2;
-    let mut diag = vec![0.0; m];
-    let mut up = vec![0.0; m];
-    let mut low = vec![0.0; m];
-    let mut rhs = vec![Vec2::ZERO; m];
-    for i in 0..m {
-        let (h0, h1) = (h[i], h[i + 1]);
-        diag[i] = 2.0 * (h0 + h1);
-        low[i] = h0;
-        up[i] = h1;
-        rhs[i] = ((p[i + 2] - p[i + 1]) / h1 - (p[i + 1] - p[i]) / h0) * 6.0;
-    }
-    for i in 1..m {
-        let w = low[i] / diag[i - 1];
-        diag[i] -= w * up[i - 1];
-        rhs[i] = rhs[i] - rhs[i - 1] * w;
-    }
-    let mut sol = vec![Vec2::ZERO; m];
-    for i in (0..m).rev() {
-        let next = if i + 1 < m { sol[i + 1] * up[i] } else { Vec2::ZERO };
-        sol[i] = (rhs[i] - next) / diag[i];
-    }
-    let mm = |i: usize| if i == 0 || i == n - 1 { Vec2::ZERO } else { sol[i - 1] };
-    (0..n - 1)
-        .map(|i| {
-            let hi = h[i];
-            let slope = (p[i + 1] - p[i]) / hi;
-            // First derivatives (per unit chord parameter) at both ends of the span.
-            let d0 = slope - (mm(i) * 2.0 + mm(i + 1)) * (hi / 6.0);
-            let d1 = slope + (mm(i) + mm(i + 1) * 2.0) * (hi / 6.0);
-            (p[i], p[i + 1], d0 * hi, d1 * hi)
-        })
-        .collect()
+    solidcraft_kernel::services::fit_projection::natural_spans(p).unwrap_or_default()
 }
 
 fn hermite(p0: Vec2, p1: Vec2, t0: Vec2, t1: Vec2, s: f64) -> Vec2 {
@@ -238,18 +220,348 @@ pub fn end_curvature(f: &dyn Fn(f64) -> Vec2, at_end: bool) -> Vec2 {
 
 /// The cubic Bézier pieces of a fit spline (exact: each span is a cubic Hermite).
 pub fn fit_beziers(p: &[Vec2]) -> Vec<[Vec2; 4]> {
-    fit_spans(p).into_iter().map(|(p0, p1, t0, t1)| [p0, p0 + t0 / 3.0, p1 - t1 / 3.0, p1]).collect()
+    solidcraft_kernel::services::fit_projection::fit_beziers(p, false).unwrap_or_default()
 }
 
 /// Fit pieces in the explicitly selected interpolation mode.
 pub fn fit_beziers_mode(p: &[Vec2], periodic: bool) -> crate::model::Result<Vec<[Vec2; 4]>> {
-    if periodic { crate::periodic_beziers(p) } else { Ok(fit_beziers(p)) }
+    if periodic {
+        crate::periodic_beziers(p)
+    } else {
+        solidcraft_kernel::services::fit_projection::fit_beziers(p, false).map_err(|e| crate::SketchError::Invalid(e.to_string()))
+    }
 }
+
+/// The distance (mm) from `q` to a cubic Bézier piece. The closest point on the piece is at a
+/// root of the derivative of the squared distance, a degree-5 polynomial in the parameter, so
+/// the roots are bracketed between samples and bisected, and the nearest of them and the two
+/// ends is the answer: never less than the true distance. (A pair of roots inside one sample
+/// interval would be missed, which can only leave the answer too large, never too small.)
+pub fn bezier_distance(b: &[Vec2; 4], q: Vec2) -> f64 {
+    let at = |t: f64| {
+        let s = 1.0 - t;
+        b[0] * (s * s * s) + b[1] * (3.0 * t * s * s) + b[2] * (3.0 * t * t * s) + b[3] * (t * t * t)
+    };
+    let slope = |t: f64| {
+        let s = 1.0 - t;
+        let d1 = (b[1] - b[0]) * (3.0 * s * s) + (b[2] - b[1]) * (6.0 * t * s) + (b[3] - b[2]) * (3.0 * t * t);
+        let d0 = at(t) - q;
+        d0.x * d1.x + d0.y * d1.y
+    };
+    let mut best = at(0.0).dist(q).min(at(1.0).dist(q));
+    const SAMPLES: usize = 64;
+    let (mut prev_t, mut prev_s) = (0.0, slope(0.0));
+    for i in 1..=SAMPLES {
+        let t = i as f64 / SAMPLES as f64;
+        let s = slope(t);
+        if prev_s * s <= 0.0 {
+            // The squared distance turns around between the two samples: bisect the root.
+            let (mut lo, mut hi) = (prev_t, t);
+            for _ in 0..50 {
+                let mid = 0.5 * (lo + hi);
+                if slope(lo) * slope(mid) <= 0.0 {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            best = best.min(at(0.5 * (lo + hi)).dist(q));
+        }
+        prev_t = t;
+        prev_s = s;
+    }
+    best
+}
+
+/// A fit of given contour points within a tolerance (#20048): the points a spline passes
+/// through, and how far the furthest given point strays from it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToleranceFit {
+    /// The points the spline passes through, in their order along the contour. A closed
+    /// contour's list holds each point once; the closing repeat is the caller's, as
+    /// `sketch.spline.fit_point` takes it.
+    pub chosen: Vec<Vec2>,
+    /// The largest distance (mm) from any given point to the spline through `chosen`.
+    pub deviation: f64,
+}
+
+/// How near (mm) two given points must be to count as one, so spans of no length are not made:
+/// relative to the contour's size, and never more than a thousandth of the tolerance, so no
+/// point the tolerance could tell apart is folded away (#20048 review).
+fn dup_tolerance(points: &[Vec2], tolerance: f64) -> f64 {
+    let size = points.iter().fold(f64::MIN, |m, p| m.max(p.x.abs()).max(p.y.abs()));
+    (1e-9 * size.max(1.0)).min(tolerance * 1e-3)
+}
+
+/// The distance (mm) from `given[i]` to the nearest of the pieces `window` indexes: for a point
+/// of the span between `chosen[j]` and `chosen[j+1]`, the span's own piece and its neighbours.
+/// The window is some of the spline's pieces, so its answer is never nearer than the spline as
+/// a whole: a tolerance this meets, the whole spline meets.
+fn spanned_distance(given: &[Vec2], pieces: &[[Vec2; 4]], i: usize, window: [usize; 3]) -> f64 {
+    window.iter().filter_map(|w| pieces.get(*w)).map(|p| bezier_distance(p, given[i])).fold(f64::INFINITY, f64::min)
+}
+
+/// Fit one spline through as few of `points` — in order along the contour — as keep every given
+/// point within `tolerance` (mm) (#20048). Starts from the two ends of the contour (a closed
+/// one from three spread points) and adds, each round, the given point furthest from the spline
+/// in each span between chosen points, until every given point is within the tolerance or the
+/// spline's [`MAX_SPLINE_POINTS`] points cannot reach it; then the error names the deviation
+/// reached, so a caller can raise the tolerance. The returned `deviation` is measured against
+/// the whole spline, not only each span's neighbourhood.
+///
+/// The distance watched while fitting is each span's own piece and its neighbours, which is
+/// never nearer than the spline as a whole, so the tolerance is met honestly; the reported
+/// deviation is measured against every piece at the end.
+pub fn fit_within_tolerance(points: &[Vec2], tolerance: f64, periodic: bool) -> crate::model::Result<ToleranceFit> {
+    if !tolerance.is_finite() || tolerance <= 0.0 {
+        return Err(crate::SketchError::Invalid("the tolerance must be a positive number of mm".into()));
+    }
+    // Duplicates would make spans of no length between the same place. A folded point is
+    // within `eps` of the point kept in its place, and distance is 1-Lipschitz, so the fold is
+    // reserved in the budget: the fit aims a little inside the tolerance, and then every given
+    // point, folded ones included, is within it (#20048 review).
+    let eps = dup_tolerance(points, tolerance);
+    let budget = tolerance - eps;
+    let mut given: Vec<Vec2> = Vec::with_capacity(points.len());
+    for p in points {
+        if !p.is_finite() {
+            return Err(crate::SketchError::Invalid("a point is not a finite position".into()));
+        }
+        if given.last().is_none_or(|q| q.dist(*p) > eps) {
+            given.push(*p);
+        }
+    }
+    if periodic && given.len() >= 2 && given[0].dist(given[given.len() - 1]) <= eps {
+        given.pop();
+    }
+    let (least, what) =
+        if periodic { (3, "a closed contour needs at least 3 distinct points") } else { (2, "a curve needs at least 2 distinct points") };
+    if given.len() < least {
+        return Err(crate::SketchError::Invalid(what.into()));
+    }
+    let n = given.len();
+    // The closing repeat counts towards the spline's point limit, as the sketch stores it.
+    let cap = (MAX_SPLINE_POINTS - usize::from(periodic)).min(n);
+    let mut chosen: Vec<usize> = if periodic {
+        // A seed point away from both ends, so no seed chord is of no length: a contour may
+        // repeat a position without being adjacent to it (#20048 review).
+        let away = |i: usize| given[i].dist(given[0]) > eps && given[i].dist(given[n - 1]) > eps;
+        let far = |i: usize| given[0].dist(given[i]);
+        let farthest = |f: &dyn Fn(usize) -> bool| (1..n - 1).filter(|i| f(*i)).max_by(|a, b| far(*a).total_cmp(&far(*b)));
+        let far = farthest(&away).or_else(|| farthest(&|_| true)).unwrap_or(1);
+        vec![0, far, n - 1]
+    } else {
+        vec![0, n - 1]
+    };
+    // The list `fit_beziers_mode` takes: the chosen points, a closed one ending where it starts.
+    let closed_list = |chosen: &[usize]| -> Vec<Vec2> {
+        let mut v: Vec<Vec2> = chosen.iter().map(|&i| given[i]).collect();
+        if periodic {
+            v.push(given[chosen[0]]);
+        }
+        v
+    };
+    loop {
+        let pieces = fit_beziers_mode(&closed_list(&chosen), periodic)?;
+        let last_piece = pieces.len().saturating_sub(1);
+        let mut insert: Vec<(usize, usize)> = Vec::new();
+        let mut worst_seen: f64 = 0.0;
+        for j in 0..chosen.len() - 1 {
+            // A point of this span may sit nearest the piece before or after it, or (on a
+            // closed contour, for the first span) the piece that closes the contour.
+            let window = [if periodic && j == 0 { last_piece } else { j.saturating_sub(1) }, j, (j + 1).min(last_piece)];
+            let (a, b) = (chosen[j], chosen[j + 1]);
+            let mut worst: Option<(f64, usize)> = None;
+            for i in a + 1..b {
+                let d = spanned_distance(&given, &pieces, i, window);
+                worst_seen = worst_seen.max(d);
+                if d > budget && worst.is_none_or(|(w, _)| d > w) {
+                    worst = Some((d, i));
+                }
+            }
+            if let Some((_, i)) = worst {
+                insert.push((j + 1, i));
+            }
+        }
+        if insert.is_empty() {
+            // Every given point is within the tolerance of its span's neighbourhood, and so of
+            // the spline; measure against every piece and every point as supplied, folded
+            // duplicates included, for the honest deviation to report.
+            let deviation =
+                points.iter().map(|q| pieces.iter().map(|piece| bezier_distance(piece, *q)).fold(f64::INFINITY, f64::min)).fold(0.0, f64::max);
+            return Ok(ToleranceFit { chosen: chosen.iter().map(|&i| given[i]).collect(), deviation });
+        }
+        if chosen.len() + insert.len() > cap {
+            return Err(crate::SketchError::Invalid(format!(
+                "even {MAX_SPLINE_POINTS} spline points do not reach the tolerance: the largest deviation is still {worst_seen:.4} mm; the points may be too rough for a smooth spline, or the tolerance too tight"
+            )));
+        }
+        for (pos, i) in insert.iter().rev() {
+            chosen.insert(*pos, *i);
+        }
+    }
+}
+
+/// Tangent endpoints for one editable handle at each fit point. Each handle stores the natural
+/// tangent derivative per unit chord length times [`handle_unit`]; evaluation divides it back
+/// out, preserving the natural interpolant until a handle is moved.
+pub fn fit_tangent_handles(p: &[Vec2], periodic: bool) -> crate::model::Result<Vec<Vec2>> {
+    let mut derivatives = Vec::new();
+    if periodic {
+        let pieces = crate::periodic_beziers(p)?;
+        let count = p.len().saturating_sub(1);
+        derivatives.reserve(count);
+        for i in 0..count {
+            let chord = p.get(i).zip(p.get(i + 1)).map_or(0.0, |(a, b)| a.dist(*b));
+            let Some(piece) = pieces.get(i) else {
+                return Err(crate::model::SketchError::Invalid("periodic spline tangent data is incomplete".into()));
+            };
+            derivatives.push((piece[1] - piece[0]) * (3.0 / chord));
+        }
+        let mut handles: Vec<Vec2> = p.iter().take(count).enumerate().map(|(i, point)| *point + derivatives[i] * handle_unit(p, true, i)).collect();
+        for i in 0..count {
+            if handles[i].dist(p[i]) <= 1e-9 {
+                let next = p.get(i + 1).copied().unwrap_or(p[0]);
+                let direction =
+                    (next - p[i]).normalized().ok_or_else(|| crate::model::SketchError::Invalid("periodic spline has a degenerate chord".into()))?;
+                handles[i] = p[i] + direction * 1e-6;
+            }
+        }
+        return Ok(handles);
+    }
+
+    let spans = fit_spans(p);
+    if spans.is_empty() {
+        return Err(crate::model::SketchError::Invalid("a spline needs at least two fit points".into()));
+    }
+    for i in 0..p.len() {
+        let (span, tangent, chord) = if i == 0 { (spans.first(), true, p[0].dist(p[1])) } else { (spans.get(i - 1), false, p[i - 1].dist(p[i])) };
+        let Some(span) = span else {
+            return Err(crate::model::SketchError::Invalid("spline tangent data is incomplete".into()));
+        };
+        let derivative = if tangent { span.2 } else { span.3 } / chord.max(1e-9);
+        derivatives.push(derivative);
+    }
+    let mut handles: Vec<Vec2> =
+        p.iter()
+            .enumerate()
+            .map(|(i, point)| {
+                if i + 1 == p.len() { *point - derivatives[i] * handle_unit(p, false, i) } else { *point + derivatives[i] * handle_unit(p, false, i) }
+            })
+            .collect();
+    for i in 0..handles.len() {
+        if handles[i].dist(p[i]) <= 1e-9 {
+            let direction = if i + 1 < p.len() { (p[i + 1] - p[i]).normalized() } else { (p[i] - p[i - 1]).normalized() };
+            let direction = direction.ok_or_else(|| crate::model::SketchError::Invalid("spline has a degenerate tangent".into()))?;
+            handles[i] = if i + 1 == p.len() { p[i] - direction * 1e-6 } else { p[i] + direction * 1e-6 };
+        }
+    }
+    Ok(handles)
+}
+
+/// Cubic pieces using tangent-handle positions. Dividing by [`handle_unit`] preserves the natural
+/// interpolant; adjacent spans scale each derivative by their chord so the tangent remains smooth.
+pub fn fit_beziers_with_handles(p: &[Vec2], handles: &[Vec2], periodic: bool) -> crate::model::Result<Vec<[Vec2; 4]>> {
+    if handles.is_empty() {
+        return fit_beziers_mode(p, periodic);
+    }
+    let count = if periodic { p.len().saturating_sub(1) } else { p.len() };
+    if handles.len() != count || p.len() < 2 || p.iter().chain(handles).any(|point| !crate::model::in_range(*point)) {
+        return Err(crate::model::SketchError::Invalid("spline tangent handles do not match its fit points".into()));
+    }
+    if periodic {
+        crate::periodic::validate_periodic_points(p)?;
+    }
+    let derivatives: Vec<Vec2> = handles
+        .iter()
+        .enumerate()
+        .map(|(i, handle)| {
+            let point = p[i];
+            let vector = if periodic || i + 1 < p.len() { *handle - point } else { point - *handle };
+            vector / handle_unit(p, periodic, i)
+        })
+        .collect();
+    let spans = if periodic { count } else { p.len() - 1 };
+    let mut pieces = Vec::with_capacity(spans);
+    for i in 0..spans {
+        let next = if i + 1 == count { 0 } else { i + 1 };
+        let (Some(start), Some(end), Some(d0), Some(d1)) = (p.get(i), p.get(i + 1), derivatives.get(i), derivatives.get(next)) else {
+            return Err(crate::model::SketchError::Invalid("spline tangent data is incomplete".into()));
+        };
+        let chord = start.dist(*end).max(1e-9);
+        let piece = [*start, *start + *d0 * (chord / 3.0), *end - *d1 * (chord / 3.0), *end];
+        if piece.iter().any(|point| !crate::model::in_range(*point)) {
+            return Err(crate::model::SketchError::Invalid("spline tangent handle produces an out-of-range curve".into()));
+        }
+        pieces.push(piece);
+    }
+    Ok(pieces)
+}
+
+fn bezier_at(piece: [Vec2; 4], t: f64) -> Vec2 {
+    let u = 1.0 - t;
+    piece[0] * (u * u * u) + piece[1] * (3.0 * u * u * t) + piece[2] * (3.0 * u * t * t) + piece[3] * (t * t * t)
+}
+
+pub fn spline_point_with_handles(p: &[Vec2], handles: &[Vec2], periodic: bool, t: f64) -> Vec2 {
+    let Ok(pieces) = fit_beziers_with_handles(p, handles, periodic) else {
+        return p.first().copied().unwrap_or_default();
+    };
+    if pieces.is_empty() {
+        return p.first().copied().unwrap_or_default();
+    }
+    let t = t.clamp(0.0, 1.0);
+    if periodic {
+        let lengths: Vec<f64> = p.windows(2).map(|pair| pair[0].dist(pair[1])).collect();
+        let total: f64 = lengths.iter().sum();
+        if !total.is_finite() || total <= 1e-9 {
+            return p.first().copied().unwrap_or_default();
+        }
+        let mut remaining = t * total;
+        for (i, piece) in pieces.iter().enumerate() {
+            let length = lengths.get(i).copied().unwrap_or(0.0);
+            if remaining <= length || i + 1 == pieces.len() {
+                return bezier_at(*piece, (remaining / length.max(1e-9)).clamp(0.0, 1.0));
+            }
+            remaining -= length;
+        }
+        return p.first().copied().unwrap_or_default();
+    }
+    let x = t * pieces.len() as f64;
+    let i = (x.floor() as usize).min(pieces.len() - 1);
+    pieces.get(i).copied().map(|piece| bezier_at(piece, x - i as f64)).unwrap_or_default()
+}
+
+pub fn spline_polyline_with_handles(p: &[Vec2], handles: &[Vec2], periodic: bool) -> Vec<Vec2> {
+    let Ok(pieces) = fit_beziers_with_handles(p, handles, periodic) else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(pieces.len() * SPAN_SAMPLES + 1);
+    for piece in pieces {
+        for i in 0..SPAN_SAMPLES {
+            out.push(bezier_at(piece, i as f64 / SPAN_SAMPLES as f64));
+        }
+    }
+    if let Some(last) = p.last() {
+        out.push(*last);
+    }
+    out
+}
+
+pub fn spline_end_tangent_with_handles(p: &[Vec2], handles: &[Vec2], periodic: bool, at_end: bool) -> Option<Vec2> {
+    let pieces = fit_beziers_with_handles(p, handles, periodic).ok()?;
+    let piece = if at_end { pieces.last()? } else { pieces.first()? };
+    if at_end { (piece[3] - piece[2]).normalized() } else { (piece[1] - piece[0]).normalized() }
+}
+
 /// Point of a spline at `t` in [0, 1]: through its points, over them as a clamped uniform
 /// B-spline, or with its own knots and weights (`nurbs`).
 pub fn spline_point_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool, nurbs: Option<&crate::Nurbs>, t: f64) -> Vec2 {
     if let Some(nurbs) = nurbs {
         return nurbs.point(p, degree, t).unwrap_or_else(|| p.first().copied().unwrap_or_default());
+    }
+    if periodic && control {
+        return closed_control_point(p, degree, t);
     }
     if !periodic {
         return spline_point(p, control, degree, t);
@@ -276,6 +588,9 @@ pub fn spline_polyline_mode(p: &[Vec2], control: bool, degree: u8, periodic: boo
     if let Some(nurbs) = nurbs {
         return nurbs.polyline(p, degree);
     }
+    if periodic && control {
+        return closed_control_polyline(p, degree);
+    }
     if !periodic {
         return spline_polyline(p, control, degree);
     }
@@ -294,7 +609,43 @@ pub fn spline_polyline_mode(p: &[Vec2], control: bool, degree: u8, periodic: boo
     }
     out
 }
+/// Point of a closed control spline at `t` in [0, 1], over its pieces in turn.
+fn closed_control_point(p: &[Vec2], degree: u8, t: f64) -> Vec2 {
+    let Some(pieces) = crate::nurbs::closed_control_beziers(p, degree) else {
+        return p.first().copied().unwrap_or_default();
+    };
+    let x = t.clamp(0.0, 1.0) * pieces.len() as f64;
+    let i = (x.floor() as usize).min(pieces.len().saturating_sub(1));
+    let Some(seg) = pieces.get(i).and_then(|piece| solidcraft_geom::bezier(piece)) else {
+        return Vec2::ZERO;
+    };
+    seg.point_at((x - i as f64).clamp(0.0, 1.0))
+}
+
+/// Polyline of a closed control spline, its pieces sampled in turn; the last point is the first.
+fn closed_control_polyline(p: &[Vec2], degree: u8) -> Vec<Vec2> {
+    let Some(pieces) = crate::nurbs::closed_control_beziers(p, degree) else {
+        return Vec::new();
+    };
+    let mut out: Vec<Vec2> = Vec::new();
+    for seg in pieces.iter().filter_map(|piece| solidcraft_geom::bezier(piece)) {
+        for q in seg.polyline(CLOSED_SPLINE_TOL) {
+            if out.last().is_none_or(|l| l.dist(q) > 1e-12) {
+                out.push(q);
+            }
+        }
+    }
+    out
+}
+
+/// Sampling tolerance (mm) of a closed control spline's polyline.
+const CLOSED_SPLINE_TOL: f64 = 1e-3;
+
 pub fn spline_end_tangent_mode(p: &[Vec2], control: bool, periodic: bool, at_end: bool) -> Option<Vec2> {
+    if periodic && control {
+        // A closed control spline has no end, and its control points lie off the curve.
+        return None;
+    }
     if !periodic {
         return spline_end_tangent(p, control, at_end);
     }
@@ -405,12 +756,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn editable_fit_handles_preserve_natural_curves_and_change_the_curvature() {
+        let points = [Vec2::new(0.0, 0.0), Vec2::new(7.0, 8.0), Vec2::new(20.0, 4.0), Vec2::new(32.0, 13.0)];
+        let handles = fit_tangent_handles(&points, false).unwrap();
+        let natural = fit_beziers(&points);
+        let represented = fit_beziers_with_handles(&points, &handles, false).unwrap();
+        for (actual, expected) in represented.iter().zip(&natural) {
+            for (a, b) in actual.iter().zip(expected) {
+                assert!(a.dist(*b) < 1e-12, "{actual:?} differs from {expected:?}");
+            }
+        }
+
+        let mut edited = handles.clone();
+        edited[1] += Vec2::new(0.0, 3.0);
+        let changed = fit_beziers_with_handles(&points, &edited, false).unwrap();
+        assert_eq!(changed[0][0], points[0]);
+        assert_eq!(changed[0][3], points[1]);
+        assert_ne!(changed[0][2], represented[0][2]);
+        assert!(spline_end_tangent_with_handles(&points, &edited, false, false).is_some());
+    }
+
+    #[test]
+    fn editable_periodic_fit_handles_preserve_the_cyclic_interpolant() {
+        let points = [Vec2::new(0.0, 0.0), Vec2::new(8.0, 0.0), Vec2::new(6.0, 5.0), Vec2::new(-2.0, 4.0), Vec2::new(0.0, 0.0)];
+        let handles = fit_tangent_handles(&points, true).unwrap();
+        let natural = crate::periodic_beziers(&points).unwrap();
+        let represented = fit_beziers_with_handles(&points, &handles, true).unwrap();
+        for (actual, expected) in represented.iter().zip(&natural) {
+            for (a, b) in actual.iter().zip(expected) {
+                assert!(a.dist(*b) < 1e-12, "{actual:?} differs from {expected:?}");
+            }
+        }
+    }
+
+    #[test]
     fn fit_spline_passes_through_its_points_and_is_smooth() {
         let p = [Vec2::new(0.0, 0.0), Vec2::new(10.0, 5.0), Vec2::new(20.0, 0.0), Vec2::new(30.0, 8.0)];
         let poly = spline_polyline(&p, false, 3);
         for q in p {
             assert!(poly.iter().any(|x| x.dist(q) < 1e-9));
         }
+
         // A straight row of points stays straight.
         let line = [Vec2::new(0.0, 0.0), Vec2::new(1.0, 1.0), Vec2::new(3.0, 3.0)];
         assert!(spline_polyline(&line, false, 3).iter().all(|q| (q.x - q.y).abs() < 1e-9));

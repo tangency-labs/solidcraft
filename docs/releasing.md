@@ -186,6 +186,24 @@ change release infrastructure does not itself request publication of the applica
 retry that creates/updates a draft, use `--ref release -f draft=true`. Draft creation from
 another branch is rejected. A rerun must still use an unpublished, untagged version.
 
+## Test builds
+
+For a one-off build of any branch, tag, SHA or pull request, without a release: `test-build.yml`
+builds on Blacksmith, unsigned, in about ten minutes, and keeps the result as a workflow artifact
+for 7 days (`solidcraft-<shortsha>-<platform>`).
+
+- Actions > Test build > Run workflow: a `ref` (default `main`) and a platform (`windows-portable`,
+  `linux-appimage`, `macos-dmg` or `all`), or `gh workflow run test-build.yml -f ref=<ref> -f platform=<platform>`.
+- On a pull request, a maintainer adds `build:windows`, `build:linux`, `build:macos` or `build:all`.
+  The PR's head is built (fork PRs too, with no secrets), one comment on the PR is edited with the
+  artifact link and the SHA, and the label comes off so it can be added again.
+
+The packaging is the release's own scripts. The Windows build is just the portable zip
+(`solidcraft.exe` and the CLI), Linux is the x86_64 AppImage, macOS is an ad-hoc signed Apple Silicon
+dmg (first launch needs right-click > Open). The version is `<Cargo.toml version>-test+<shortsha>`,
+so About shows a test build and the in-app updater treats it like a development build and never
+offers an update. One build per ref and platform runs at a time; a newer request cancels the older.
+
 ## Flatpak repository coordination
 
 The Flatpak repository proposed in PR #39 consumes **published** releases, not these drafts.
@@ -198,6 +216,12 @@ Pages assembles the documentation, browser app, and Flatpak repository together.
 docs updates include the latest stable Flatpak release too. Verify the resulting Pages run,
 not only the dispatch job, so a release cannot erase the docs or app and docs updates cannot
 erase the package repository.
+
+Only one Pages run waits at a time, so a later push to `main` cancels the release's own Pages
+request; that later run includes the release, but if it fails nothing deploys. The Flatpak workflow
+therefore also runs hourly: when `flatpak/index.html` names an older release than the latest stable
+one and no Pages run is queued, it requests one for the latest tag, once per commit on `main`. If
+that run fails too, the hourly check fails until a Pages run succeeds.
 
 ## Snap package and Snap Store
 
@@ -332,7 +356,7 @@ and the API key secrets (`APPLE_API_KEY_P8`, `APPLE_API_KEY_ID`, `APPLE_API_ISSU
 When the `SIGNPATH_API_TOKEN` secret (the API token of the SignPath CI user) exists, the release
 workflow's Windows jobs Authenticode-sign through [SignPath Foundation](https://signpath.org)
 (organization `fa603ff4-c702-404b-8588-a524371c7a4e`, project `solidcraft`). Each architecture
-sends two signing requests: `solidcraft.exe`, `solidcraft-cli.exe` and `solvecraft-cli.exe` first,
+sends two signing requests: `solidcraft.exe` and `solidcraft-cli.exe` first,
 so the MSI, the portable zip and the plain `.exe` are made from signed binaries, then the MSI. Each
 request uploads the files as a workflow artifact, SignPath fetches and signs it, and the job checks
 that every file came back signed. Without the secret (forks) the jobs build unsigned as before.
@@ -347,9 +371,9 @@ that every file came back signed. Without the secret (forks) the jobs build unsi
 - **Test-sign without publishing:** `gh workflow run release.yml -R tangency-labs/solidcraft --ref
   <branch> -f draft=false`, then check the Windows jobs' summaries and the `release-assets`
   artifact.
-- SignPath only signs requests whose jobs leading up to them all ran on GitHub-hosted runners, so
-  the `version` and `windows` jobs stay on GitHub's runners while every other release job runs on
-  Blacksmith.
+- SignPath only signs runs whose jobs all ran on GitHub-hosted runners. Every release job now
+  runs on Blacksmith, so SignPath stays off (`WINDOWS_SIGNING=off`) until Azure Artifact Signing
+  replaces it.
 
 ## Homebrew tap
 

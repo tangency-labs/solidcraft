@@ -3,7 +3,7 @@
   {"call":"engine.execute","params":{"command":"solid.box","params":{"length":40,"width":20,"height":10,"body_name":"Block"}}},
   {"call":"engine.execute","params":{"command":"material.assign","params":{"bodies":["Block"],"material":"Steel"}}},
   {"start":"config.table"},
-  {"widget":"Add Column"},
+  {"widget":"Add column"},
   {"widget":"Block (appearance)"},
   {"expect":{"shown":"Appearance: Block"}},
   {"widget":"Library"},

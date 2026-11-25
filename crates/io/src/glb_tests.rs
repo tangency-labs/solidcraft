@@ -5,6 +5,7 @@ use solidcore_record::Vec3;
 use solidcraft_color::srgb::decode8;
 use solidcraft_doc::appearance::{FaceLook, Look};
 use solidcraft_doc::pbr_appearance::PbrParameters;
+use solidcraft_doc::render_optics::OpticalMaterial;
 use solidcraft_doc::{FeatureKind, Model, Operation, point_expr};
 use solidcraft_geom::Vec3Geom;
 
@@ -31,7 +32,7 @@ fn model(body_count: usize) -> (Document, Model) {
 }
 
 fn export(doc: &Document, model: &Model) -> Vec<u8> {
-    export_glb(doc, &model.state(), &[], "GLB box", MeshQuality::Standard).unwrap()
+    export_glb(doc, &model.state(), &model.state(), &[], "GLB box", &GlbOptions::new(MeshQuality::Standard, true)).unwrap()
 }
 
 /// Validate references with gltf, retaining raw JSON for untyped extensions.
@@ -106,7 +107,7 @@ fn face(doc: &mut Document, body: &str, look: Look) {
 }
 
 fn material() -> GlbMaterial {
-    GlbMaterial { name: "test".into(), color: [128; 3], metallic: 0.0, roughness: 0.5, ior: 1.5 }
+    GlbMaterial { name: "test".into(), color: [128; 3], metallic: 0.0, roughness: 0.5, ior: 1.5, alpha: 1.0, glass: None }
 }
 
 fn triangle() -> GlbBody {
@@ -121,11 +122,12 @@ fn triangle() -> GlbBody {
         },
         material: 0,
         faces: BTreeMap::new(),
+        parent: None,
     }
 }
 
 fn direct(body: GlbBody) -> Result<Vec<u8>> {
-    glb("hostile", &[body], &[material()])
+    glb("hostile", &[], &[body], &[material()])
 }
 
 fn assert_invalid(result: Result<Vec<u8>>, words: &[&str]) {
@@ -385,29 +387,144 @@ fn identical_body_and_face_looks_are_deduplicated() {
     }
 }
 
-/// Transparent body refusal identifies the body and unsupported transparency.
+/// A see-through body look is alpha blended with its opacity; an opaque one is not (#5296).
 #[test]
-fn transparent_body_is_refused_with_its_name() {
-    let (mut doc, model) = model(1);
-    let name = model.state().bodies[0].name.clone();
-    doc.appearances.bodies.insert(name.clone(), Look::custom([255, 0, 0], 0.5));
-    assert_invalid(export_glb(&doc, &model.state(), &[], "test", MeshQuality::Standard), &[&name, "transparent"]);
+fn transparent_body_look_is_alpha_blended() {
+    let (mut doc, model) = model(2);
+    let names: Vec<String> = model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    doc.appearances.bodies.insert(names[0].clone(), Look::custom([255, 0, 0], 0.25));
+    doc.appearances.bodies.insert(names[1].clone(), Look::custom([255, 0, 0], 1.0));
+    let (doc, _) = parse(&export(&doc, &model));
+    let materials = doc["materials"].as_array().unwrap();
+    assert_eq!(materials.len(), 2, "opacity tells the looks apart: {materials:?}");
+    let blended: Vec<&Value> = materials.iter().filter(|m| m["alphaMode"] == "BLEND").collect();
+    assert_eq!(blended.len(), 1, "{materials:?}");
+    assert_eq!(blended[0]["pbrMetallicRoughness"]["baseColorFactor"], json!([1.0, 0.0, 0.0, 0.25]));
+    assert!(doc.get("extensionsUsed").is_none(), "alpha blending is core glTF");
 }
 
-/// Transparent authored faces cannot silently become opaque.
+/// A see-through face look is blended on that face alone.
 #[test]
-fn transparent_face_is_refused_with_face_context() {
+fn transparent_face_look_is_blended_on_its_face() {
     let (mut doc, model) = model(1);
     let name = model.state().bodies[0].name.clone();
     face(&mut doc, &name, Look::custom([0, 255, 0], 0.5));
-    assert_invalid(export_glb(&doc, &model.state(), &[], "test", MeshQuality::Standard), &[&name, "face", "transparent"]);
+    let (doc, bin) = parse(&export(&doc, &model));
+    let primitives = doc["meshes"][0]["primitives"].as_array().unwrap();
+    assert_eq!(primitives.len(), 2);
+    for p in primitives {
+        let m = &doc["materials"][p["material"].as_u64().unwrap() as usize];
+        let positions = vectors(&doc, &bin, &p["attributes"]["POSITION"]);
+        let on_top = indices(&doc, &bin, p).iter().all(|i| positions[*i].z == 30.0);
+        assert_eq!(m["alphaMode"] == "BLEND", on_top, "{m}");
+    }
+}
+
+fn optics(v: Value) -> OpticalMaterial {
+    serde_json::from_value(v).unwrap()
+}
+
+fn glass_export(model: &Model, doc: &Document, optics: OpticalMaterial) -> Result<Vec<u8>> {
+    let mut opts = GlbOptions::new(MeshQuality::Standard, true);
+    opts.glass.insert(model.state().bodies[0].name.clone(), optics);
+    export_glb(doc, &model.state(), &model.state(), &[], "glass", &opts)
+}
+
+/// Closed Glass is transmitted through a volume as thick as the box's thinnest side (10 mm),
+/// keeping exp(-a / strongest a) over 1 / strongest a millimetres, written in metres; rough
+/// Glass keeps its roughness, dispersion is 20 over the Abbe number, and a thin film is
+/// iridescence of one thickness. Face looks don't show through the glass.
+#[test]
+fn closed_glass_writes_transmission_volume_dispersion_and_film() {
+    let (mut doc, model) = model(1);
+    let name = model.state().bodies[0].name.clone();
+    face(&mut doc, &name, Look::custom([0, 255, 0], 1.0));
+    let glass = optics(json!({
+        "ior": 1.6, "absorption_per_mm": [0.0, 0.05, 0.1], "boundary": "closed_mesh",
+        "model": {"roughness": 0.1, "dispersion": {"abbe_number": 40.0}, "thin_film": {"ior": 1.38, "thickness_nm": 300.0}},
+    }));
+    let (doc, _) = parse(&glass_export(&model, &doc, glass).unwrap());
+    let materials = doc["materials"].as_array().unwrap();
+    assert_eq!(materials.len(), 1, "the whole body is glass: {materials:?}");
+    let m = &materials[0];
+    assert_eq!(m["name"], json!(name));
+    assert!(m.get("alphaMode").is_none());
+    assert_eq!(m["pbrMetallicRoughness"], json!({"baseColorFactor": [1.0, 1.0, 1.0, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.1}));
+    let x = &m["extensions"];
+    assert_eq!(x["KHR_materials_transmission"], json!({"transmissionFactor": 1.0}));
+    assert_eq!(x["KHR_materials_ior"], json!({"ior": 1.6}));
+    assert_eq!(x["KHR_materials_volume"]["thicknessFactor"], 10.0);
+    near(x["KHR_materials_volume"]["attenuationDistance"].as_f64().unwrap(), 0.01);
+    assert_eq!(x["KHR_materials_volume"]["attenuationColor"], json!([1.0, (-0.5f64).exp(), (-1.0f64).exp()]));
+    assert_eq!(x["KHR_materials_dispersion"], json!({"dispersion": 0.5}));
+    assert_eq!(x["KHR_materials_iridescence"], json!({"iridescenceFactor": 1.0, "iridescenceIor": 1.38, "iridescenceThicknessMaximum": 300.0}));
+    let used: Vec<&str> = doc["extensionsUsed"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    assert_eq!(
+        used,
+        ["KHR_materials_dispersion", "KHR_materials_ior", "KHR_materials_iridescence", "KHR_materials_transmission", "KHR_materials_volume"]
+    );
+}
+
+/// A thin sheet has no volume in glTF: the light its thickness absorbs tints its base colour,
+/// clear Glass needs no attenuation, and glTF's default IOR is left unwritten.
+#[test]
+fn thin_sheet_glass_tints_its_base_colour_and_has_no_volume() {
+    let (doc, model) = model(1);
+    let glass = optics(json!({"ior": 1.5, "absorption_per_mm": [0.5, 0.0, 0.25], "boundary": "thin_sheet", "thickness_mm": 2.0}));
+    let (out, _) = parse(&glass_export(&model, &doc, glass).unwrap());
+    let m = &out["materials"][0];
+    assert_eq!(m["pbrMetallicRoughness"]["baseColorFactor"], json!([(-1.0f64).exp(), 1.0, (-0.5f64).exp(), 1.0]));
+    assert_eq!(m["pbrMetallicRoughness"]["roughnessFactor"], 0.0, "Glass without a model is smooth");
+    assert_eq!(m["extensions"], json!({"KHR_materials_transmission": {"transmissionFactor": 1.0}}));
+    assert_eq!(out["extensionsUsed"], json!(["KHR_materials_transmission"]));
+    let clear = optics(json!({"ior": 1.33, "boundary": "closed_box"}));
+    let (out, _) = parse(&glass_export(&model, &doc, clear).unwrap());
+    assert_eq!(out["materials"][0]["extensions"]["KHR_materials_volume"], json!({"thicknessFactor": 10.0}));
+}
+
+/// Glass that scatters light inside it is refused, naming the body; scattering switched off
+/// is plain glass.
+#[test]
+fn glass_with_subsurface_scattering_is_refused() {
+    let (doc, model) = model(1);
+    let name = model.state().bodies[0].name.clone();
+    let scattering = optics(json!({"ior": 1.5, "subsurface": {"scattering_per_mm": 0.5, "anisotropy": 0.0}}));
+    assert_invalid(glass_export(&model, &doc, scattering), &[&name, "subsurface"]);
+    let off = optics(json!({"ior": 1.5, "subsurface": {"scattering_per_mm": 0.0, "anisotropy": 0.0}}));
+    assert!(glass_export(&model, &doc, off).is_ok());
+}
+
+/// Hostile Glass numbers never panic or write values glTF refuses: they are clamped or left out.
+#[test]
+fn hostile_glass_numbers_are_clamped_or_left_out() {
+    let (doc, model) = model(1);
+    for (absorb, thickness, ior) in [(f64::NAN, f64::NAN, f64::NAN), (f64::INFINITY, -1.0, 0.5), (-3.0, f64::INFINITY, f64::INFINITY)] {
+        for boundary in ["thin_sheet", "closed_mesh"] {
+            let glass = OpticalMaterial {
+                absorption_per_mm: [absorb, 0.1, 0.0],
+                thickness_mm: thickness,
+                ior,
+                boundary: optics(json!({"boundary": boundary})).boundary,
+                ..OpticalMaterial::default()
+            };
+            let (out, _) = parse(&glass_export(&model, &doc, glass).unwrap());
+            let text = out.to_string();
+            assert!(!text.contains("null") && !text.contains("NaN") && !text.contains("inf"), "{text}");
+            for c in out["materials"][0]["pbrMetallicRoughness"]["baseColorFactor"].as_array().unwrap() {
+                assert!((0.0..=1.0).contains(&c.as_f64().unwrap()), "{text}");
+            }
+        }
+    }
 }
 
 /// A filter matching no body reports an empty export.
 #[test]
 fn nonexistent_body_filter_returns_empty() {
     let (doc, model) = model(1);
-    assert!(matches!(export_glb(&doc, &model.state(), &["nope".into()], "test", MeshQuality::Standard), Err(IoError::Empty)));
+    assert!(matches!(
+        export_glb(&doc, &model.state(), &model.state(), &["nope".into()], "test", &GlbOptions::new(MeshQuality::Standard, true)),
+        Err(IoError::Empty)
+    ));
 }
 
 /// A body filter selects exactly its named mesh from a two-body design.
@@ -415,7 +532,8 @@ fn nonexistent_body_filter_returns_empty() {
 fn named_body_filter_exports_only_selected_mesh() {
     let (doc, model) = model(2);
     let name = model.state().bodies[1].name.clone();
-    let bytes = export_glb(&doc, &model.state(), std::slice::from_ref(&name), "test", MeshQuality::Standard).unwrap();
+    let bytes =
+        export_glb(&doc, &model.state(), &model.state(), std::slice::from_ref(&name), "test", &GlbOptions::new(MeshQuality::Standard, true)).unwrap();
     let (doc, _) = parse(&bytes);
     assert_eq!(doc["meshes"].as_array().unwrap().len(), 1);
     assert_eq!(doc["meshes"][0]["name"], name);
@@ -490,7 +608,7 @@ fn all_repeated_index_triangles_return_empty() {
 /// An absent body list cannot create an empty glTF scene.
 #[test]
 fn no_bodies_returns_empty() {
-    assert!(matches!(glb("empty", &[], &[material()]), Err(IoError::Empty)));
+    assert!(matches!(glb("empty", &[], &[], &[material()]), Err(IoError::Empty)));
 }
 
 /// Invalid IOR values omit both the extension payload and its declaration.
@@ -499,7 +617,7 @@ fn hostile_ior_is_not_written_as_extension() {
     for ior in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.9, -1.0] {
         let mut material = material();
         material.ior = ior;
-        let (doc, _) = parse(&glb("hostile", &[triangle()], &[material]).unwrap());
+        let (doc, _) = parse(&glb("hostile", &[], &[triangle()], &[material]).unwrap());
         assert!(doc["materials"][0].get("extensions").is_none(), "ior={ior}");
         assert!(doc.get("extensionsUsed").is_none(), "ior={ior}");
     }
@@ -511,7 +629,7 @@ fn hostile_nan_metallic_and_roughness_are_written_as_zero() {
     let mut material = material();
     material.metallic = f64::NAN;
     material.roughness = f64::NAN;
-    let (doc, _) = parse(&glb("hostile", &[triangle()], &[material]).unwrap());
+    let (doc, _) = parse(&glb("hostile", &[], &[triangle()], &[material]).unwrap());
     let pbr = &doc["materials"][0]["pbrMetallicRoughness"];
     assert_eq!(pbr["metallicFactor"], 0.0);
     assert_eq!(pbr["roughnessFactor"], 0.0);
@@ -541,4 +659,456 @@ fn a_body_past_the_size_budget_is_refused_naming_it() {
     assert_eq!(add_to_budget(0, &body).unwrap(), 3 * 24 + 12);
     assert_invalid(add_to_budget(MAX_GLB_BYTES - 10, &body).map(|_| Vec::new()), &["triangle", "too large"]);
     assert_invalid(add_to_budget(usize::MAX, &body).map(|_| Vec::new()), &["too large"]);
+}
+
+/// A galvanometer-like assembly: a frame part holding a needle part placed twice, the first needle
+/// turned a quarter about Z and moved 100 mm along X, the second moved 50 mm along Y. Returns the
+/// design, its model and the model placed in the world.
+fn assembly() -> (Document, Model, ModelState) {
+    let mut doc = Document::new("Galvanometer");
+    let frame = doc.add_component(Some("Frame"), 0).unwrap();
+    let needle = doc.add_component(Some("Needle"), frame).unwrap();
+    for (component, x) in [(frame, 0.0), (needle, 5.0)] {
+        let id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(Vec3::new(x, 0.0, 0.0)),
+                    length: "10".into(),
+                    width: "20".into(),
+                    height: "30".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(id).unwrap().component = component;
+    }
+    let turned = solidcraft_doc::rigid(Vec3::new(100.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2);
+    doc.occurrences.iter_mut().find(|o| o.component == needle).unwrap().transform = turned;
+    doc.add_occurrence(needle, frame, solidcraft_doc::rigid(Vec3::new(0.0, 50.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    assert_eq!(world.bodies.len(), 3);
+    (doc, model, world)
+}
+
+fn export_assembly(bodies: &[String]) -> (Document, Model, ModelState, Vec<u8>) {
+    let (doc, model, world) = assembly();
+    let bytes = export_glb(&doc, &model.state(), &world, bodies, "Galvanometer", &GlbOptions::new(MeshQuality::Standard, true)).unwrap();
+    (doc, model, world, bytes)
+}
+
+/// The node named `name` and its index (the first one when several share it).
+fn node_named<'a>(doc: &'a Value, name: &str) -> (usize, &'a Value) {
+    doc["nodes"].as_array().unwrap().iter().enumerate().find(|(_, n)| n["name"] == name).unwrap_or_else(|| panic!("no node named {name}"))
+}
+
+fn children_of(node: &Value) -> Vec<usize> {
+    node.get("children").and_then(Value::as_array).map(|c| c.iter().map(|i| i.as_u64().unwrap() as usize).collect()).unwrap_or_default()
+}
+
+/// Each occurrence is a node named after it, in the node of the occurrence it sits in, placed as
+/// the occurrence is; each body sits in its occurrence's node under the name its part gives it.
+#[test]
+fn an_assembly_writes_each_occurrence_as_a_named_node_holding_its_bodies() {
+    let (_, model, _, bytes) = export_assembly(&[]);
+    let (doc, _) = parse(&bytes);
+    let (frame_body, needle_body) = (&model.state().bodies[0].name, &model.state().bodies[1].name);
+    let (frame, frame_node) = node_named(&doc, "Frame:1");
+    assert_eq!(children_of(&doc["nodes"][0]), vec![frame]);
+    let (first, first_node) = node_named(&doc, "Needle:1");
+    let (second, second_node) = node_named(&doc, "Needle:2");
+    let mut kids = children_of(frame_node);
+    kids.sort_unstable();
+    let bodies: Vec<&Value> = kids.iter().map(|k| &doc["nodes"][*k]["name"]).filter(|n| n.as_str() == Some(frame_body.as_str())).collect();
+    assert_eq!(bodies.len(), 1, "the frame's own body sits in the frame's node");
+    assert!(kids.contains(&first) && kids.contains(&second));
+    // Column-major placements, as the occurrences have them: a quarter turn about Z then 100 mm
+    // along X, and 50 mm along Y.
+    let matrix = |node: &Value| node["matrix"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect::<Vec<_>>();
+    let quarter = [0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 100.0, 0.0, 0.0, 1.0];
+    for (got, want) in matrix(first_node).into_iter().zip(quarter) {
+        near(got, want);
+    }
+    near(matrix(second_node)[13], 50.0);
+    for needle in [first_node, second_node] {
+        let kids = children_of(needle);
+        assert_eq!(kids.len(), 1);
+        assert_eq!(doc["nodes"][kids[0]]["name"], needle_body.as_str());
+    }
+}
+
+/// A body under an occurrence is written in its part's frame: both needles' meshes are the needle
+/// as its part has it, wherever each is placed.
+#[test]
+fn an_occurrence_s_body_mesh_is_in_its_part_s_frame() {
+    let (_, _, _, bytes) = export_assembly(&[]);
+    let (doc, bin) = parse(&bytes);
+    for name in ["Needle:1", "Needle:2"] {
+        let body = &doc["nodes"][children_of(node_named(&doc, name).1)[0]];
+        let mesh = &doc["meshes"][body["mesh"].as_u64().unwrap() as usize];
+        let (min, max) = bounds(vectors(&doc, &bin, &mesh["primitives"][0]["attributes"]["POSITION"]));
+        for i in 0..3 {
+            assert!((min[i] - [5.0, 0.0, 0.0][i]).abs() < 1e-4, "{name} min={min:?}");
+            assert!((max[i] - [15.0, 20.0, 30.0][i]).abs() < 1e-4, "{name} max={max:?}");
+        }
+    }
+}
+
+/// Placed through their nodes, the bodies land where the world has them.
+#[test]
+fn an_assembly_s_bodies_land_where_the_world_has_them() {
+    let (_, _, world, bytes) = export_assembly(&[]);
+    let gltf = gltf::Gltf::from_slice(&bytes).unwrap();
+    let (doc, bin) = parse(&bytes);
+    let mul = |a: [[f32; 4]; 4], b: [[f32; 4]; 4]| -> [[f32; 4]; 4] {
+        std::array::from_fn(|c| std::array::from_fn(|r| (0..4).map(|k| a[k][r] * b[c][k]).sum()))
+    };
+    // Each mesh node's transform below the root, walking down from it.
+    let identity: [[f32; 4]; 4] = std::array::from_fn(|c| std::array::from_fn(|r| if c == r { 1.0 } else { 0.0 }));
+    let mut stack: Vec<(usize, [[f32; 4]; 4])> = children_of(&doc["nodes"][0]).into_iter().map(|c| (c, identity)).collect();
+    let mut placed = Vec::new();
+    while let Some((i, above)) = stack.pop() {
+        let node = gltf.document.nodes().nth(i).unwrap();
+        let m = mul(above, node.transform().matrix());
+        stack.extend(children_of(&doc["nodes"][i]).into_iter().map(|c| (c, m)));
+        if let Some(mesh) = doc["nodes"][i].get("mesh") {
+            let points = vectors(&doc, &bin, &doc["meshes"][mesh.as_u64().unwrap() as usize]["primitives"][0]["attributes"]["POSITION"]);
+            let world = points.into_iter().map(|p| {
+                let q: [f64; 3] = std::array::from_fn(|r| (0..3).map(|c| m[c][r] as f64 * [p.x, p.y, p.z][c]).sum::<f64>() + m[3][r] as f64);
+                Vec3::new(q[0], q[1], q[2])
+            });
+            placed.push(bounds(world));
+        }
+    }
+    let mut expected: Vec<_> = world.bodies.iter().map(|b| bounds(display_mesh_at(&b.body, MeshQuality::Standard).unwrap().positions)).collect();
+    let key = |b: &([f64; 3], [f64; 3])| (b.0.map(|x| (x * 1000.0).round() as i64), b.1.map(|x| (x * 1000.0).round() as i64));
+    placed.sort_by_key(key);
+    expected.sort_by_key(key);
+    assert_eq!(placed.len(), expected.len());
+    for (got, want) in placed.iter().zip(&expected) {
+        for i in 0..3 {
+            assert!((got.0[i] - want.0[i]).abs() < 1e-3 && (got.1[i] - want.1[i]).abs() < 1e-3, "{got:?} != {want:?}");
+        }
+    }
+}
+
+/// Choosing one placed body writes only the occurrences it is placed through.
+#[test]
+fn a_chosen_body_brings_only_its_own_occurrences() {
+    let (doc, model, world) = assembly();
+    let second = doc.occurrences.iter().find(|o| o.name == "Needle:2").unwrap().id;
+    let name = doc.body_frames(&model.state()).into_iter().find(|(_, _, path, _)| path.last() == Some(&second)).unwrap().0;
+    assert!(world.bodies.iter().any(|b| b.name == name), "{name} is not a world body");
+    let bytes = export_glb(&doc, &model.state(), &world, std::slice::from_ref(&name), "one", &GlbOptions::new(MeshQuality::Standard, true)).unwrap();
+    let (gltf, _) = parse(&bytes);
+    let names: Vec<&str> = gltf["nodes"].as_array().unwrap().iter().filter_map(|n| n["name"].as_str()).collect();
+    assert!(names.contains(&"Frame:1") && names.contains(&"Needle:2"), "{names:?}");
+    assert!(!names.contains(&"Needle:1"), "{names:?}");
+    assert_eq!(gltf["meshes"].as_array().unwrap().len(), 1);
+}
+
+/// The glTF importer reads the occurrence nodes back as components; the two needles share a mesh
+/// (#19468), so they come back as two occurrences of one component.
+#[test]
+fn an_exported_assembly_imports_as_components_again() {
+    let (_, _, _, bytes) = export_assembly(&[]);
+    let imported = crate::read_gltf(&bytes, "galvanometer.glb", &mut |uri| panic!("unexpected external buffer: {uri}")).unwrap();
+    let plan = &imported.plan;
+    let slot = |name: &str| plan.slots.iter().position(|s| s == name).unwrap_or_else(|| panic!("no component {name}: {:?}", plan.slots));
+    let parents = |name: &str| plan.places.iter().filter(|p| p.slot == slot(name)).map(|p| p.parent).collect::<Vec<_>>();
+    assert_eq!(parents("Frame:1"), vec![None]);
+    assert_eq!(parents("Needle:1"), vec![Some(slot("Frame:1")); 2]);
+    assert_eq!(plan.bodies.len(), 2);
+}
+
+/// A part placed twice (#19468) is one mesh that both occurrences' body nodes point at, not one
+/// copy of its arrays per occurrence.
+#[test]
+fn a_part_placed_twice_shares_one_mesh() {
+    let (_, _, _, bytes) = export_assembly(&[]);
+    let (doc, _) = parse(&bytes);
+    let mesh_of = |name: &str| doc["nodes"][children_of(node_named(&doc, name).1)[0]]["mesh"].as_u64().unwrap();
+    assert_eq!(mesh_of("Needle:1"), mesh_of("Needle:2"));
+    assert_eq!(doc["nodes"].as_array().unwrap().iter().filter(|n| n.get("mesh").is_some()).count(), 3, "every occurrence keeps its body node");
+    assert_eq!(doc["meshes"].as_array().unwrap().len(), 2, "the frame and the needle");
+}
+
+/// Reused definitions are meshed once, even if independent tessellations reorder vertices.
+#[test]
+fn meshes_each_definition_once() {
+    let (doc, model, world) = assembly();
+    let mut calls = 0;
+    let bytes = export_glb_with_mesh(&doc, &model.state(), &world, &[], "reused", &GlbOptions::new(MeshQuality::Standard, true), |body, quality| {
+        calls += 1;
+        let mut mesh = display_mesh_at(body, quality)?;
+        // Same triangles and normals, a different numbering on each mesher call.
+        let len = mesh.positions.len();
+        let shift = calls % len;
+        mesh.positions.rotate_left(shift);
+        mesh.normals.rotate_left(shift);
+        for tri in &mut mesh.triangles {
+            *tri = tri.map(|i| ((i as usize + len - shift) % len) as u32);
+        }
+        Ok(mesh)
+    })
+    .unwrap();
+    let (gltf, _) = parse(&bytes);
+    assert_eq!(calls, 2, "one frame definition and one needle definition");
+    assert_eq!(gltf["meshes"].as_array().unwrap().len(), 2);
+    assert_eq!(gltf["nodes"].as_array().unwrap().iter().filter(|n| n.get("mesh").is_some()).count(), 3);
+}
+
+/// Bodies are only one mesh when everything written is the same: a different shape, material or
+/// face look keeps its own mesh.
+#[test]
+fn bodies_that_differ_keep_their_own_meshes() {
+    let same = triangle();
+    let mut moved = triangle();
+    moved.mesh.positions[1] = Vec3::new(2.0, 0.0, 0.0);
+    let mut other_material = triangle();
+    other_material.material = 1;
+    let materials = [material(), GlbMaterial { name: "other".into(), ..material() }];
+    let bytes = glb("shared", &[], &[triangle(), same, moved, other_material], &materials).unwrap();
+    let doc = json(&bytes);
+    assert_eq!(doc["meshes"].as_array().unwrap().len(), 3);
+    let nodes: Vec<u64> = doc["nodes"].as_array().unwrap().iter().filter_map(|n| n["mesh"].as_u64()).collect();
+    assert_eq!(nodes, vec![0, 0, 1, 2]);
+}
+
+/// Without `hierarchy` an assembly is written as SolidCraft 0.40 wrote it: every body a node of the
+/// root under its world name, its mesh where the world has it, and no occurrence nodes.
+#[test]
+fn without_hierarchy_an_assembly_is_flat_in_world_coordinates() {
+    let (doc, model, world) = assembly();
+    let bytes = export_glb(&doc, &model.state(), &world, &[], "flat", &GlbOptions::new(MeshQuality::Standard, false)).unwrap();
+    let (gltf, bin) = parse(&bytes);
+    let children = children_of(&gltf["nodes"][0]);
+    assert_eq!(children.len(), world.bodies.len());
+    assert_eq!(gltf["nodes"].as_array().unwrap().len(), world.bodies.len() + 1, "no occurrence nodes");
+    for (child, body) in children.iter().zip(&world.bodies) {
+        let node = &gltf["nodes"][*child];
+        assert_eq!(node["name"], body.name.as_str());
+        assert!(node.get("matrix").is_none() && node.get("children").is_none());
+        let mesh = &gltf["meshes"][node["mesh"].as_u64().unwrap() as usize];
+        assert_eq!(mesh["name"], body.name.as_str());
+        let got = bounds(vectors(&gltf, &bin, &mesh["primitives"][0]["attributes"]["POSITION"]));
+        let want = bounds(display_mesh_at(&body.body, MeshQuality::Standard).unwrap().positions);
+        for i in 0..3 {
+            assert!((got.0[i] - want.0[i]).abs() < 1e-4 && (got.1[i] - want.1[i]).abs() < 1e-4, "{}: {got:?} != {want:?}", body.name);
+        }
+    }
+}
+
+/// A bored collar with a perpendicular cut: two source bodies, placed three times.
+#[test]
+fn reused_curved_collar_keeps_two_meshes() {
+    let mut doc = Document::new("Collar");
+    let part = doc.add_component(Some("Collar"), 0).unwrap();
+    for (base, axis, radius, height, operation) in [
+        (Vec3::ZERO, Vec3::Z, "55", "60", Operation::NewBody),
+        (Vec3::new(0.0, 0.0, -5.0), Vec3::Z, "45", "70", Operation::Cut),
+        (Vec3::new(-100.0, 0.0, 30.0), Vec3::X, "35", "200", Operation::Cut),
+    ] {
+        let id = doc
+            .add_feature(
+                FeatureKind::Cylinder {
+                    base: point_expr(base),
+                    axis: point_expr(axis),
+                    radius: radius.into(),
+                    height: height.into(),
+                    operation,
+                    references: vec![],
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(id).unwrap().component = part;
+    }
+    for i in 1..3 {
+        doc.add_occurrence(
+            part,
+            0,
+            solidcraft_doc::rigid(Vec3::new(500.0 * i as f64, 0.0, 0.0), Vec3::ZERO, Vec3::Y, (17.0 * i as f64).to_radians()),
+        )
+        .unwrap();
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+    assert_eq!(model.state().bodies.len(), 2, "the cross bore splits the collar");
+    let world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    let mut calls = 0;
+    let bytes = export_glb_with_mesh(&doc, &model.state(), &world, &[], "collar", &GlbOptions::new(MeshQuality::Standard, true), |body, quality| {
+        calls += 1;
+        display_mesh_at(body, quality)
+    })
+    .unwrap();
+    let (gltf, _) = parse(&bytes);
+    assert_eq!(calls, 2);
+    assert_eq!(gltf["meshes"].as_array().unwrap().len(), 2);
+    assert_eq!(gltf["nodes"].as_array().unwrap().len(), 10);
+    assert_eq!(gltf["accessors"].as_array().unwrap().len(), 6);
+}
+
+/// A definition's canonical mesh does not erase the Glass or face look of an occurrence.
+#[test]
+fn canonical_mesh_keeps_material_variants_separate() {
+    let (mut doc, model, _) = assembly();
+    let needle = model.state().bodies[1].name.clone();
+    let mut look = Look::custom([255, 0, 0], 0.6);
+    look.pbr = Some(PbrParameters::new(0.7, 0.2, 1.4).unwrap());
+    doc.appearances.faces.push(FaceLook {
+        body: needle,
+        point: Vec3::new(10.0, 10.0, 30.0),
+        look,
+        name: None,
+        strict_name: false,
+        certificate: None,
+    });
+    let world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    let second = doc.occurrences.iter().find(|o| o.name == "Needle:2").unwrap().id;
+    let name = doc.body_frames(&model.state()).into_iter().find(|(_, _, path, _)| path.last() == Some(&second)).unwrap().0;
+    let mut opts = GlbOptions::new(MeshQuality::Standard, true);
+    opts.glass.insert(name, OpticalMaterial { ior: 1.7, ..Default::default() });
+    let mut calls = 0;
+    let bytes = export_glb_with_mesh(&doc, &model.state(), &world, &[], "looks", &opts, |body, quality| {
+        calls += 1;
+        display_mesh_at(body, quality)
+    })
+    .unwrap();
+    let (gltf, _) = parse(&bytes);
+    let mesh_of = |name: &str| gltf["nodes"][children_of(node_named(&gltf, name).1)[0]]["mesh"].as_u64().unwrap();
+    let (first, second) = (mesh_of("Needle:1"), mesh_of("Needle:2"));
+    assert_eq!(calls, 2);
+    assert_ne!(first, second);
+    assert_eq!(gltf["meshes"][first as usize]["primitives"].as_array().unwrap().len(), 2, "body and painted face");
+    assert_eq!(gltf["meshes"][second as usize]["primitives"].as_array().unwrap().len(), 1, "Glass overrides every face");
+    let painted: Vec<_> = gltf["meshes"][first as usize]["primitives"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| &gltf["materials"][p["material"].as_u64().unwrap() as usize])
+        .collect();
+    assert!(painted.iter().any(|m| m["alphaMode"] == "BLEND"
+        && m["pbrMetallicRoughness"]["metallicFactor"] == 0.7
+        && m["pbrMetallicRoughness"]["roughnessFactor"] == 0.2
+        && m["extensions"]["KHR_materials_ior"]["ior"] == 1.4));
+    let glass_primitive = &gltf["meshes"][second as usize]["primitives"][0];
+    let glass = &gltf["materials"][glass_primitive["material"].as_u64().unwrap() as usize];
+    assert_eq!(glass["extensions"]["KHR_materials_ior"]["ior"], 1.7);
+    assert_eq!(glass["extensions"]["KHR_materials_transmission"]["transmissionFactor"], 1.0);
+}
+
+/// A body offset belongs to the component frame, in addition to each occurrence's transform.
+#[test]
+fn canonical_mesh_keeps_body_offset_and_normals() {
+    let (mut doc, model, _) = assembly();
+    let needle = model.state().bodies[1].name.clone();
+    let offset = solidcraft_doc::rigid(Vec3::new(7.0, 11.0, 13.0), Vec3::ZERO, Vec3::Z, 0.3);
+    doc.body_offsets.insert(needle, offset);
+    let parent_transform = solidcraft_doc::rigid(Vec3::new(42.0, -11.0, 5.0), Vec3::ZERO, Vec3::Y, 0.43);
+    doc.occurrences.iter_mut().find(|o| o.name == "Frame:1").unwrap().transform = parent_transform;
+    let world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    let bytes = export_glb(&doc, &model.state(), &world, &[], "offset", &GlbOptions::new(MeshQuality::Standard, true)).unwrap();
+    let (gltf, bin) = parse(&bytes);
+    assert_eq!(node_named(&gltf, "Frame:1").1["matrix"], json!(parent_transform.iter().flatten().copied().collect::<Vec<_>>()));
+    let mesh_of = |name: &str| gltf["nodes"][children_of(node_named(&gltf, name).1)[0]]["mesh"].as_u64().unwrap();
+    let first = mesh_of("Needle:1");
+    assert_eq!(first, mesh_of("Needle:2"));
+    let primitive = &gltf["meshes"][first as usize]["primitives"][0];
+    let actual = bounds(vectors(&gltf, &bin, &primitive["attributes"]["POSITION"]));
+    let expected = bounds([5.0, 15.0].into_iter().flat_map(|x| {
+        [0.0, 20.0].into_iter().flat_map(move |y| [0.0, 30.0].into_iter().map(move |z| solidcraft_doc::apply_point(&offset, Vec3::new(x, y, z))))
+    }));
+    for (a, e) in actual.0.into_iter().chain(actual.1).zip(expected.0.into_iter().chain(expected.1)) {
+        assert!((a - e).abs() < 1e-5, "{a} != {e}");
+    }
+    let normals = vectors(&gltf, &bin, &primitive["attributes"]["NORMAL"]);
+    assert!(normals.iter().any(|n| (n.x - 0.3_f64.cos()).abs() < 1e-6 && (n.y - 0.3_f64.sin()).abs() < 1e-6));
+}
+
+/// Names are labels: different definitions named the same still have their own geometry.
+#[test]
+fn same_name_in_different_components_keeps_different_definitions() {
+    let (mut doc, mut model) = model(2);
+    let second = model.state().bodies[1].feature;
+    let FeatureKind::Box { length, .. } = &mut doc.feature_mut(second).unwrap().kind else {
+        panic!("box fixture");
+    };
+    *length = "25".into();
+    model.evaluate(&doc);
+    let mut state = (*model.state()).clone();
+    for (i, body) in state.bodies.iter_mut().enumerate() {
+        let part = doc.add_component(Some(&format!("Part{i}")), 0).unwrap();
+        doc.feature_mut(body.feature).unwrap().component = part;
+        body.source_name = Some("same".into());
+        body.component = part;
+        doc.add_occurrence(part, 0, solidcraft_doc::rigid(Vec3::new(0.0, 80.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+    }
+    let world = solidcraft_doc::world_state(&doc, &state).unwrap();
+    assert_eq!(world.bodies.len(), 4);
+    let mut calls = 0;
+    let bytes = export_glb_with_mesh(&doc, &state, &world, &[], "same", &GlbOptions::new(MeshQuality::Standard, true), |body, quality| {
+        calls += 1;
+        display_mesh_at(body, quality)
+    })
+    .unwrap();
+    let (gltf, _) = parse(&bytes);
+    assert_eq!(calls, 2);
+    assert_eq!(gltf["meshes"].as_array().unwrap().len(), 2);
+    let xs: Vec<_> = gltf["meshes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| gltf["accessors"][m["primitives"][0]["attributes"]["POSITION"].as_u64().unwrap() as usize]["min"][0].as_f64().unwrap())
+        .collect();
+    assert_eq!(xs, vec![0.0, 40.0]);
+    let max_x: Vec<_> = gltf["meshes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| gltf["accessors"][m["primitives"][0]["attributes"]["POSITION"].as_u64().unwrap() as usize]["max"][0].as_f64().unwrap())
+        .collect();
+    assert_eq!(max_x, vec![10.0, 65.0]);
+}
+
+/// Flat exports, missing definitions and unkeyed bodies use the established world-mesh path.
+#[test]
+fn canonical_mesh_falls_back_without_a_safe_definition() {
+    let (doc, model, world) = assembly();
+    let state = model.state();
+    let mut unkeyed = (*state).clone();
+    for body in &mut unkeyed.bodies {
+        *body = solidcraft_doc::ModelBody::new(body.name.clone(), body.body.clone(), body.feature);
+    }
+    let mut ambiguous = (*state).clone();
+    ambiguous.bodies.push(ambiguous.bodies[1].clone());
+    let unkeyed_world = solidcraft_doc::world_state(&doc, &unkeyed).unwrap();
+    assert!(unkeyed_world.bodies.iter().all(|b| b.source_key() == 0));
+    let mut scaled = doc.clone();
+    let mut scale = solidcraft_doc::IDENTITY;
+    scale[0][0] = 2.0;
+    for body in &state.bodies {
+        scaled.body_offsets.insert(body.name.clone(), scale);
+    }
+    let scaled_world = solidcraft_doc::world_state(&scaled, &state).unwrap();
+    for (doc, state, world, hierarchy) in [
+        (&doc, &*state, &world, false),
+        (&doc, &ModelState::default(), &world, true),
+        (&doc, &unkeyed, &unkeyed_world, true),
+        (&doc, &ambiguous, &world, true),
+        (&scaled, &*state, &scaled_world, true),
+    ] {
+        let mut calls = 0;
+        let bytes = export_glb_with_mesh(doc, state, world, &[], "fallback", &GlbOptions::new(MeshQuality::Standard, hierarchy), |body, quality| {
+            calls += 1;
+            display_mesh_at(body, quality)
+        })
+        .unwrap();
+        parse(&bytes);
+        assert_eq!(calls, world.bodies.len());
+    }
 }

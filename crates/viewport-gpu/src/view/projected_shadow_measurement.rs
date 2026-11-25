@@ -48,8 +48,11 @@ fn measure_projected_shadow_large_mesh() -> Result<(), Box<dyn std::error::Error
             }),
         };
         for projected in [false, true] {
-            let mut renderer =
-                Renderer::new(&device, GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false }, None);
+            let mut renderer = Renderer::new(
+                &device,
+                GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false },
+                None,
+            );
             let mut cpu = Vec::new();
             let mut gpu = Vec::new();
             let mut cold = None;
@@ -88,8 +91,8 @@ fn measure_projected_shadow_large_mesh() -> Result<(), Box<dyn std::error::Error
                     cpu.push(metadata_ms + prepare_ms);
                     gpu.push(gpu_ms);
                 }
-                assert_eq!(renderer.shadow.is_some(), projected, "large input silently lost its projection");
-                let bytes: u64 = renderer.model.blocks.values().filter_map(|b| b.vertices.as_ref()).map(wgpu::Buffer::size).sum();
+                assert_eq!(renderer.pic.shadow.is_some(), projected, "large input silently lost its projection");
+                let bytes: u64 = renderer.pic.model.blocks.values().filter_map(|b| b.vertices.as_ref()).map(wgpu::Buffer::size).sum();
                 assert_eq!(bytes, body_bytes as u64, "same existing model buffer size for both modes");
             }
             rows.push(json!({"copies":copies,"triangles":triangle_count*copies,"body_buffer_bytes":body_bytes,
@@ -134,6 +137,7 @@ fn measure_projected_shadow_cost() -> Result<(), Box<dyn std::error::Error>> {
         samples: 4,
         tess: false,
         oit: false,
+        edges: false,
     };
     let cam = Camera {
         target: Vec3::new(8.379000844961002, 2.6776676413414724, 7.806862777456871),
@@ -267,8 +271,8 @@ fn measure_projected_shadow_cost() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     renderer.prepare(&device, &queue, &mut encoder, &frame);
                     // Draw the shared opaque model separately, then time only the production shadow buffers.
-                    renderer.model.tris = None;
-                    renderer.model.block_order.clear();
+                    renderer.pic.model.tris = None;
+                    renderer.pic.model.block_order.clear();
                     let prepare_ms = started.elapsed().as_secs_f64() * 1000.0;
                     if let Some(q) = &query {
                         encoder.write_timestamp(q, 1);
@@ -293,11 +297,11 @@ fn measure_projected_shadow_cost() -> Result<(), Box<dyn std::error::Error>> {
             let mut encoder = device.create_command_encoder(&Default::default());
             renderer.prepare(&device, &queue, &mut encoder, &frame);
             // Draw the shared opaque model separately, then time only the production shadow buffers.
-            renderer.model.tris = None;
-            renderer.model.block_order.clear();
+            renderer.pic.model.tris = None;
+            renderer.pic.model.block_order.clear();
             let submission = queue.submit([encoder.finish()]);
             device.poll(wgpu::PollType::Wait { submission_index: Some(submission), timeout: Some(Duration::from_secs(30)) })?;
-            let cache_generation = renderer.shadow.as_ref().map_or(0, |s| s.generation);
+            let cache_generation = renderer.pic.shadow.as_ref().map_or(0, |s| s.generation);
             let mut full = Vec::new();
             let mut shadow = Vec::new();
             let mut prepare = Vec::new();
@@ -307,8 +311,8 @@ fn measure_projected_shadow_cost() -> Result<(), Box<dyn std::error::Error>> {
                 let started = Instant::now();
                 renderer.prepare(&device, &queue, &mut encoder, &frame);
                 // Draw the shared opaque model separately, then time only the production shadow buffers.
-                renderer.model.tris = None;
-                renderer.model.block_order.clear();
+                renderer.pic.model.tris = None;
+                renderer.pic.model.block_order.clear();
                 let prepare_ms = started.elapsed().as_secs_f64() * 1000.0;
                 if let Some(q) = &query {
                     encoder.write_timestamp(q, 0);
@@ -362,7 +366,7 @@ fn measure_projected_shadow_cost() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            let generations = renderer.shadow.as_ref().map_or(0, |s| s.generation);
+            let generations = renderer.pic.shadow.as_ref().map_or(0, |s| s.generation);
             assert_eq!(generations, cache_generation, "cached frame regenerated shadow");
             let disable = comparison_frame(GpuScene::default(), &cam, width, height, 1001);
             let mut encoder = device.create_command_encoder(&Default::default());
@@ -374,7 +378,7 @@ fn measure_projected_shadow_cost() -> Result<(), Box<dyn std::error::Error>> {
                 "cpu_cached_prepare_ms":summary(&mut prepare),"cpu_shadow_record_ms":summary(&mut record),
                 "projection_generations":generations,
                 "cached_projection_regenerations":generations.saturating_sub(cache_generation),
-                "texture_retained_after_disable":renderer.shadow.as_ref().map(|_|[SIZE,SIZE])}));
+                "texture_retained_after_disable":renderer.pic.shadow.as_ref().map(|_|[SIZE,SIZE])}));
         }
     }
     if let Some(error) = pollster::block_on(scope.pop()) {
@@ -480,7 +484,9 @@ fn comparison_frame(scene: GpuScene, cam: &Camera, width: u32, height: u32, key:
         turned_depth: None,
         back: cam.back().to_f32(),
         size_px: [width as f32, height as f32],
-        clip: [0.0; 4],
+        clip: [[0.0; 4]; super::super::MAX_SECTION_PLANES],
+        clip_hatch: [0; super::super::MAX_SECTION_PLANES],
+        selection_all: false,
         cap: [0.0; 4],
         images: Vec::new(),
         clouds: Vec::new(),
@@ -497,6 +503,10 @@ fn comparison_frame(scene: GpuScene, cam: &Camera, width: u32, height: u32, key:
         sky: [0.0; 4],
         ssaa: 1.0,
         moving: None,
+        motions: Default::default(),
+        ground: None,
+        occlusion: false,
+        edge_px: crate::view::EDGE_PX,
     }
 }
 

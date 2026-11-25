@@ -26,7 +26,7 @@ use crate::cmd::{RefForm, ref_form};
 use crate::params;
 
 /// What a reference to model geometry may look like, for the descriptions.
-const REF_FORMS: &str = "a reference: `{\"edge\": [x, y, z], \"body\"?}` (the edge through that point), `{\"face\": [x, y, z], \"body\"?}` (the edges of the face), `{\"vertex\": [x, y, z], \"body\"?}`, `{\"body\": name}` (its silhouette or outline), `{\"sketch\": id or name, \"curve\": id}` or `{\"sketch\": id or name, \"point\": id}` (a curve or point of another sketch), `\"origin\"` or `{\"origin\": …}`, `{\"axis\": \"X\"|\"Y\"|\"Z\"|a construction axis's name}`, `{\"plane\": \"XY\"|\"XZ\"|\"YZ\"|a plane's name}`; text alone is `origin`, X, Y, Z (any case) or a body's name";
+const REF_FORMS: &str = "a reference: `{\"edge\": [x, y, z], \"body\"?}` (the edge through that point), `{\"face\": [x, y, z], \"body\"?}` (the edges of the face), `{\"vertex\": [x, y, z], \"body\"?}`, `{\"body\": name}` (its silhouette or outline), `{\"sketch\": id or name, \"curve\": id}` or `{\"sketch\": id or name, \"point\": id}` (a curve or point of another sketch), `\"origin\"` or `{\"origin\": …}`, `{\"axis\": \"X\"|\"Y\"|\"Z\"|a construction axis's name|a component's origin axis, \"o:<ids>/origin/X\"}`, `{\"plane\": \"XY\"|\"XZ\"|\"YZ\"|a plane's name}`; text alone is `origin`, X, Y, Z (any case) or a body's name";
 
 /// The most references one `refs` takes into account: the handler reads no more.
 const MAX_REFS: usize = 1000;

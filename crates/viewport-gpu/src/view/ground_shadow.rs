@@ -131,8 +131,8 @@ impl Resources {
             });
             (buffer, bind)
         };
-        let (mask_uniform, mask_uniform_bind) = uniform(&[0; 112]);
-        let (moving_uniform, moving_uniform_bind) = uniform(&[0; 112]);
+        let (mask_uniform, mask_uniform_bind) = uniform(&[0; 112 + 16 * super::MAX_SECTION_PLANES]);
+        let (moving_uniform, moving_uniform_bind) = uniform(&[0; 112 + 16 * super::MAX_SECTION_PLANES]);
         let directions = [[1.0f32 / SIZE as f32, 0.0, 0.0, 0.0], [0.0, 1.0 / SIZE as f32, 0.0, 0.0]]
             .map(|direction| uniform(&direction.into_iter().flat_map(f32::to_le_bytes).collect::<Vec<_>>()).1);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -170,7 +170,7 @@ impl Resources {
         let (output, bind) = image();
         let mask_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("sc_shadow_mask"),
-            source: wgpu::ShaderSource::Wgsl(MASK_SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(MASK_SHADER.replace("CLIP_PLANES", &super::MAX_SECTION_PLANES.to_string()).into()),
         });
         let blur_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("sc_shadow_blur"),
@@ -250,18 +250,29 @@ impl Resources {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         projection: &Projection,
-        clip: [f32; 4],
+        clip: [[f32; 4]; super::MAX_SECTION_PLANES],
         batches: [&Batches; 2],
         moving: Option<(&Batches, [[f32; 4]; 4])>,
         fallback_bind: &wgpu::BindGroup,
+        motions: &super::Motions,
     ) {
         #[cfg(test)]
         {
             self.generation = self.generation.saturating_add(1);
         }
         let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        let range = motions.range();
+        let motion_range = [range[0], range[1], 0.0, 0.0];
         let bytes = |transform: &[[f32; 4]; 4]| {
-            projection.axes.iter().flatten().chain(&clip).chain(transform.iter().flatten()).flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>()
+            projection
+                .axes
+                .iter()
+                .flatten()
+                .chain(clip.iter().flatten())
+                .chain(transform.iter().flatten())
+                .chain(&motion_range)
+                .flat_map(|x| x.to_le_bytes())
+                .collect::<Vec<_>>()
         };
         queue.write_buffer(&self.mask_uniform, 0, &bytes(&identity));
         if let Some((_, transform)) = &moving {
@@ -286,6 +297,7 @@ impl Resources {
                         let instances = buffer_init(device, "sc_shadow_instances", &draw.placements, wgpu::BufferUsages::VERTEX)?;
                         Some(LevelDraw {
                             tris: level.tris.clone(),
+                            src: level.src.clone(),
                             flat: level.flat,
                             error: 0.0,
                             instances,
@@ -369,25 +381,39 @@ fn pass<'a>(encoder: &'a mut wgpu::CommandEncoder, view: &'a wgpu::TextureView) 
 // Gaussian sigma=5, support ±16 texels. Each adjacent pair uses one bilinear fetch at its
 // weighted centre, exactly reproducing the dense discrete convolution (17 texture fetches).
 const MASK_SHADER: &str = r#"
-struct Mask { u: vec4<f32>, v: vec4<f32>, clip: vec4<f32>, model: mat4x4<f32> };
+struct Mask { u: vec4<f32>, v: vec4<f32>, clip: array<vec4<f32>, CLIP_PLANES>, model: mat4x4<f32>, motion_range: vec4<f32> };
 @group(0) @binding(0) var<uniform> mask: Mask;
 @group(1) @binding(1) var pal: texture_2d<u32>;
+@group(1) @binding(7) var motions: texture_2d<f32>;
 struct M { @builtin(position) pos: vec4<f32>, @location(0) wp: vec3<f32>, @location(1) a:f32 };
-fn projected(p: vec3<f32>, c: u32) -> M {
-    let q = mask.model * vec4<f32>(p,1.0); var o: M;
-    let color = textureLoad(pal, vec2<i32>(i32(c & 2047u), i32(c >> 11u)), 0).x;
+fn projected(p: vec3<f32>, c: u32, placement: u32) -> M {
+    let entry = textureLoad(pal, vec2<i32>(i32(c & 2047u), i32(c >> 11u)), 0).xy;
+    let slot = select(entry.y >> 8u, placement, placement != 0u);
+    var moved = p;
+    if (f32(slot) >= mask.motion_range.x && f32(slot) < mask.motion_range.y) {
+        let at = vec2<i32>(i32(slot & 511u) * 3, i32(slot >> 9u));
+        let point = vec4<f32>(p, 1.0);
+        moved += vec3<f32>(dot(textureLoad(motions, at, 0), point),
+            dot(textureLoad(motions, at + vec2<i32>(1, 0), 0), point),
+            dot(textureLoad(motions, at + vec2<i32>(2, 0), 0), point));
+    }
+    let q = mask.model * vec4<f32>(moved,1.0); var o: M;
+    let color = entry.x;
     o.pos = vec4<f32>(dot(mask.u,q)*2.0-1.0, dot(mask.v,q)*2.0-1.0, 0.0, 1.0);
     o.wp=q.xyz; o.a=f32((color >> 24u) & 255u) / 255.0; return o;
 }
 @vertex fn vs_mask(@location(0) p: vec3<f32>, @location(2) c:u32) -> M {
-    return projected(p, c);
+    return projected(p, c, 0u);
 }
-@vertex fn vs_mask_inst(@location(0) p: vec3<f32>, @location(3) a: vec4<f32>, @location(4) b: vec4<f32>, @location(5) c: vec4<f32>, @location(6) color: u32) -> M {
+@vertex fn vs_mask_inst(@location(0) p: vec3<f32>, @location(3) a: vec4<f32>, @location(4) b: vec4<f32>, @location(5) c: vec4<f32>, @location(6) color: u32, @location(9) motion: u32) -> M {
     let q = vec4<f32>(p, 1.0);
-    return projected(vec3<f32>(dot(a,q),dot(b,q),dot(c,q)), color);
+    return projected(vec3<f32>(dot(a,q),dot(b,q),dot(c,q)), color, motion);
 }
 @fragment fn fs_mask(i:M) -> @location(0) vec4<f32> {
-    if (length(mask.clip.xyz)>0.5 && dot(mask.clip.xyz,i.wp)>mask.clip.w) { discard; }
+    for (var k = 0u; k < CLIP_PLANES; k++) {
+        let clip = mask.clip[k];
+        if (length(clip.xyz)>0.5 && dot(clip.xyz,i.wp)>clip.w) { discard; }
+    }
     return vec4<f32>(0.0,0.0,0.0,i.a);
 }
 "#;
@@ -431,7 +457,7 @@ mod tests {
         };
         eprintln!("shadow cache adapter: {:?}", adapter.get_info());
         let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let target = GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false };
+        let target = GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false };
         let mut renderer = Renderer::new(&device, target, None);
         let bounds = Bounds { min: Vec3::new(-1.0, -1.0, 1.0), max: Vec3::new(1.0, 1.0, 2.0) };
         let mut scene = GpuScene {
@@ -440,6 +466,7 @@ mod tests {
         };
         for point in [[-1.0, -1.0, 1.0], [1.0, -1.0, 1.0], [0.0, 1.0, 1.0]] {
             let color = scene.color([150, 150, 150, 255]);
+            assert!(std::sync::Arc::make_mut(&mut scene.palette).set_motion(color, 1));
             scene.tri(point, [0.0, 0.0, 1.0], color);
         }
         let empty = || Arc::new(Mutex::new(None));
@@ -461,7 +488,9 @@ mod tests {
             turned_depth: None,
             back: [0.0, 0.0, 1.0],
             size_px: [256.0; 2],
-            clip: [0.0; 4],
+            clip: [[0.0; 4]; super::super::MAX_SECTION_PLANES],
+            clip_hatch: [0; super::super::MAX_SECTION_PLANES],
+            selection_all: false,
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),
@@ -478,6 +507,10 @@ mod tests {
             sky: [0.0; 4],
             ssaa: 1.0,
             moving: None,
+            motions: Default::default(),
+            ground: None,
+            occlusion: false,
+            edge_px: crate::view::EDGE_PX,
         };
         let centre = std::cell::Cell::new(0.0);
         let mut prepare = |frame: &Frame| -> Result<Option<u64>, Box<dyn std::error::Error>> {
@@ -489,7 +522,7 @@ mod tests {
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                 mapped_at_creation: false,
             });
-            if let Some(shadow) = &renderer.shadow {
+            if let Some(shadow) = &renderer.pic.shadow {
                 encoder.copy_texture_to_buffer(
                     shadow.mask.texture().as_image_copy(),
                     wgpu::TexelCopyBufferInfo {
@@ -501,7 +534,7 @@ mod tests {
             }
             let submitted = queue.submit([encoder.finish()]);
             device.poll(wgpu::PollType::Wait { submission_index: Some(submitted), timeout: Some(std::time::Duration::from_secs(30)) })?;
-            if renderer.shadow.is_some() {
+            if renderer.pic.shadow.is_some() {
                 let (send, receive) = std::sync::mpsc::channel();
                 readback.slice(..).map_async(wgpu::MapMode::Read, move |result| {
                     let _ = send.send(result);
@@ -520,7 +553,7 @@ mod tests {
                 drop(bytes);
                 readback.unmap();
             }
-            Ok(renderer.shadow.as_ref().map(|s| s.generation))
+            Ok(renderer.pic.shadow.as_ref().map(|s| s.generation))
         };
         assert_eq!(prepare(&frame)?, Some(1));
         frame.back = [0.0, 0.0, -1.0];
@@ -569,11 +602,27 @@ mod tests {
         frame.pv_slot = preview(false);
         assert_eq!(prepare(&frame)?, Some(6));
         assert!(centre.get() > original_centre + 5.0, "solid preview geometry must still cast a shadow");
-        frame.clip = [1.0, 0.0, 0.0, 0.0];
+        frame.clip[0] = [1.0, 0.0, 0.0, 0.0];
         assert_eq!(prepare(&frame)?, Some(7));
         frame.pv_key += 1;
         frame.preview_bounds = Some(Bounds { min: Vec3::new(100.0, 0.0, -20.0), max: Vec3::new(103.0, 4.0, -8.0) });
         assert_eq!(prepare(&frame)?, Some(8));
+        frame.pv_key += 1;
+        frame.pv_slot = empty();
+        frame.preview_bounds = None;
+        frame.clip = [[0.0; 4]; super::super::MAX_SECTION_PLANES];
+        assert_eq!(prepare(&frame)?, Some(9));
+        let unmoved_centre = centre.get();
+        frame.motions = super::super::Motions::new([(1, [[1.0, 0.0, 0.0, 0.2], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]])]);
+        assert_eq!(prepare(&frame)?, Some(10));
+        assert!(centre.get() > unmoved_centre + 5.0, "a palette motion moves the existing caster without a scene upload");
+        assert_eq!(prepare(&frame)?, Some(10), "an unchanged motion reuses the coverage");
+        frame.motions = Default::default();
+        assert_eq!(prepare(&frame)?, Some(11));
+        assert!((centre.get() - unmoved_centre).abs() < 1e-6, "ending the motion restores the caster");
+        frame.clip[1] = [1.0, 0.0, 0.0, 0.0];
+        assert_eq!(prepare(&frame)?, Some(12));
+        assert!(centre.get() < unmoved_centre - 5.0, "later section planes clip the mask too");
         frame.key += 1;
         frame.slot = Arc::new(Mutex::new(Some(GpuScene::default())));
         assert_eq!(prepare(&frame)?, None);

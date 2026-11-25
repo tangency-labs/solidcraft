@@ -146,7 +146,7 @@ pub(super) struct Setup {
 /// selected edge use.
 fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
     use crate::own_builder::{build, counts, failed_output, Built};
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let built = match build(&mut k, &i.brep, i.validate_only, i.init_gaps)? {
         Some(built) => built,
         None => crate::own_reader::brep_in_order(
@@ -171,6 +171,32 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
         eu,
         types: ImportTypes::default(),
     }))
+}
+
+/// The scene a case's op runs on: the B-rep exactly as the Rust side builds it, and the
+/// selected edge use, before the op; `None` when the build fails or selects no edge use.
+/// For certificate tests that must check a premise on the replayed model rather than on a
+/// dump of it (`tests/issue_18325_moved_rows.rs`).
+///
+/// # Errors
+///
+/// A case that does not parse, or the build's harness error.
+pub fn scene(case: &Case) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
+    Ok(setup(&case.parse::<Inputs>()?)?
+        .ok()
+        .map(|s| (s.brep, s.eu)))
+}
+
+/// The case's B-rep after its op ran, and the selected edge use: what the case's row
+/// reports (`None` where the setup stops). For the WR-493 trim certificate (`refit::replay`).
+#[cfg(test)]
+pub(crate) fn after_op(case: &Case) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
+    let i = case.parse::<Inputs>()?;
+    let Ok(mut s) = setup(&i)? else {
+        return Ok(None);
+    };
+    run_rust_op(&i.op, &mut s.brep, s.eu)?.map_err(|e| harness(format!("rust: {e}")))?;
+    Ok(Some((s.brep, s.eu)))
 }
 
 /// A 2D curve as a [`CrvIn`] (`None` for a non-B-spline or one without NURB data).
@@ -387,7 +413,7 @@ fn run_rust_op(
     b: &mut Brep,
     eu: EdgeuseId,
 ) -> Result<Result<Vec<f64>, SolidError>, HarnessError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     Ok(match op {
         OpIn::Tangent {
             tol_deg,
@@ -406,7 +432,7 @@ fn run_rust_op(
             step_off,
             tol_deg,
             ..
-        } => eu2::is_convex_radial_sector(&Kernel::default(), b, eu, *n, *step_off, *tol_deg)
+        } => eu2::is_convex_radial_sector(&crate::runner_kernel(), b, eu, *n, *step_off, *tol_deg)
             .map(|r| vec![flag(r)]),
         OpIn::StepOff {
             frac,
@@ -437,7 +463,7 @@ fn run_rust_op(
             };
             let status = t.and_then(|t| {
                 eu2::evaluate_binormal_step_off_into(
-                    &Kernel::default(),
+                    &crate::runner_kernel(),
                     b,
                     eu,
                     t,

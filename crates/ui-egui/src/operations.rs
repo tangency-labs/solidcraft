@@ -6,7 +6,7 @@
 //!
 //! The rows are read each frame from the work itself (the file being opened and the ones queued
 //! behind it, a feature dialog's OK computing, the history's commands and a delete's check
-//! computing off the window thread, an agent's command, a save, the bodies of an opened design
+//! computing off the window thread, an agent's command, a save being written, the bodies of an opened design
 //! being meshed), so nothing has to be registered or forgotten. Work reports its progress, and
 //! learns it was cancelled, through [`solidcraft_engine::doc::progress::Progress`]: the timeline's
 //! evaluation reports each feature it reaches, and long work inside one reports its steps through
@@ -19,6 +19,7 @@ use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
 
 use crate::SolveApp;
+use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_theme::Tokens;
 
 /// How long a finished operation takes to fade out (ms).
@@ -30,6 +31,24 @@ const SLIDE_S: f32 = 0.2;
 /// The panel's width, and a row's height.
 const WIDTH: f32 = 300.0;
 const ROW: f32 = 30.0;
+
+/// Waiting agent commands the panel shows as rows of their own; those past them are one summary
+/// row. An agent may queue dozens, and a panel taller than the view is not drawn at all.
+pub(crate) const MAX_WAITING_SHOWN: usize = 4;
+
+/// The key of a waiting agent command's row, followed by its serial; and of the summary row.
+const HELD: &str = "agent:held:";
+const HELD_MORE: &str = "agent:held:more";
+
+/// A place in a queue with a name, as the catalog orders them.
+fn numbered(number: usize, name: &str) -> String {
+    solidcraft_ui_text::format("operations.numbered", &[("number", &number.to_string()), ("name", name)])
+}
+
+/// The keys of the waiting agent commands past [`MAX_WAITING_SHOWN`], in the order they run.
+fn folded(rows: &[Row]) -> Vec<String> {
+    rows.iter().filter(|r| r.key.starts_with(HELD)).skip(MAX_WAITING_SHOWN).map(|r| r.key.clone()).collect()
+}
 
 /// The panel's distance from the view's edges and from what is below it.
 const MARGIN: f32 = 12.0;
@@ -44,6 +63,8 @@ pub struct Row {
     pub label: String,
     /// Steps done of how many, when the work counts them.
     pub steps: Option<(usize, usize)>,
+    /// The steps are bytes (a file read or written): the bar says how far in per cent.
+    pub percent: bool,
     /// Waiting for the one before it.
     pub queued: bool,
     /// Done, and waiting for the person to finish what they are doing (or for its design's tab)
@@ -53,10 +74,12 @@ pub struct Row {
     pub cancelling: bool,
     /// How it ended, once it is gone (fading out); `None` while it runs, or when it didn't say.
     pub ended: Option<Outcome>,
-    /// How to cancel it; `None`: it can't be (a save being written).
+    /// How to cancel it; `None`: it can't be (an opened design's bodies being meshed).
     cancel: Option<Cancel>,
     /// An agent's command: drawn in the agent cursor's colour.
     agent: bool,
+    /// The steps of an agent's batch still to come, as (number, name): the row's tooltip.
+    pub next: Vec<(usize, String)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -73,17 +96,37 @@ enum Cancel {
     History,
     /// The `n`th history command waiting its turn (from 0).
     HistoryQueued(usize),
+    /// Cache catch-up after a sketch restores the complete model.
+    SketchRefresh,
     /// A delete's check.
     DeleteCheck,
     /// Opening a feature's editor.
     FeatureEdit,
     /// An agent's command.
     Agent,
+    /// A save being written: it stops unless the file is already being replaced.
+    Save,
+    /// The request held behind the agent's command that has this [`ControlRequest::serial`].
+    AgentQueued(u64),
+    /// The summary row standing for the waiting requests past [`MAX_WAITING_SHOWN`].
+    AgentMore,
 }
 
 impl Row {
     fn new(key: String, label: String) -> Self {
-        Row { key, label, steps: None, queued: false, waiting: false, cancelling: false, ended: None, cancel: None, agent: false }
+        Row {
+            key,
+            label,
+            steps: None,
+            percent: false,
+            queued: false,
+            waiting: false,
+            cancelling: false,
+            ended: None,
+            cancel: None,
+            agent: false,
+            next: Vec::new(),
+        }
     }
 
     /// Whether its X does anything.
@@ -119,6 +162,9 @@ impl Row {
             return Some(solidcraft_ui_text::tr("operations.waiting").to_string());
         }
         let (done, total) = self.steps.filter(|(_, total)| *total > 1)?;
+        if self.percent {
+            return Some(format!("{}%", (done.min(total) as f64 * 100.0 / total as f64).floor()));
+        }
         Some(format!("{} / {total}", (done + 1).min(total)))
     }
 }
@@ -130,7 +176,7 @@ pub fn serial() -> u64 {
 }
 
 fn command_name(id: &str) -> String {
-    solidcraft_ui_text::tr_label(crate::command_label(id)).to_string()
+    crate::agent_label::name(id)
 }
 
 /// The operations under way, oldest first.
@@ -142,7 +188,14 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
     }
     if let Some(saving) = &app.saving {
         let command = saving.command();
-        rows.push(Row::new(format!("save:{command}"), command_name(command)));
+        let (steps, percent) = work_steps(&saving.progress).map_or((None, false), |(steps, percent)| (Some(steps), percent));
+        rows.push(Row {
+            steps,
+            percent,
+            cancelling: saving.progress.is_cancelled(),
+            cancel: Some(Cancel::Save),
+            ..Row::new(format!("save:{command}"), command_name(command))
+        });
     }
     // A file being opened, inserted or exported, and those waiting behind it.
     let mut queued = 0;
@@ -159,6 +212,7 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
         };
         rows.push(Row {
             steps: file.steps,
+            percent: file.percent,
             queued: file.queued,
             waiting: file.waiting,
             cancelling: file.cancelled,
@@ -182,6 +236,16 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
             ..Row::new("feature_edit".into(), solidcraft_ui_text::tr("operations.feature_edit").to_string())
         });
     }
+    if let Some(job) = app.sketch_refreshes.get(&app.session.uid) {
+        rows.push(Row {
+            steps: evaluation_steps(&job.progress),
+            cancelling: job.progress.is_cancelled(),
+            cancel: Some(Cancel::SketchRefresh),
+            ..Row::new("sketch_refresh".into(), command_name("sketch.finish"))
+        });
+    } else if app.session.needs_sketch_finish_evaluation() && !app.stopped_sketch_refreshes.contains(&app.session.uid) {
+        rows.push(Row { queued: true, cancel: Some(Cancel::SketchRefresh), ..Row::new("sketch_refresh".into(), command_name("sketch.finish")) });
+    }
     if let Some(check) = &app.delete_check {
         rows.push(Row {
             steps: evaluation_steps(&check.progress),
@@ -200,11 +264,35 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
     if app.agent_computing().is_some() {
         let steps = app.agent_steps();
         let label = steps.as_ref().map(|s| s.current()).or_else(|| app.agent_computing().map(|(_, label)| label)).unwrap_or_default();
-        // A batch counts its steps; one command, the features it evaluates.
+        // A batch counts its steps; one command, the features it evaluates; a plugin, what it reports.
         let steps = steps.and_then(|s| if s.counts().1 > 1 { Some(s.counts()) } else { evaluation_steps(&s.progress) });
-        rows.push(Row { steps, cancel: Some(Cancel::Agent), agent: true, ..Row::new("agent".into(), label) });
+        let percent = app.agent_plugin_percent();
+        rows.push(Row {
+            steps: steps.or(percent.map(|p| (p, 100))),
+            percent: steps.is_none() && percent.is_some(),
+            cancel: Some(Cancel::Agent),
+            agent: true,
+            next: app.agent_next(),
+            ..Row::new("agent".into(), label)
+        });
+    }
+    // Each design change waiting behind it is an operation of its own, named by its place in the
+    // queue (1 runs next).
+    for (place, (serial, name)) in app.agent_held().into_iter().enumerate() {
+        let label = numbered(place + 1, &name);
+        rows.push(Row { queued: true, agent: true, cancel: Some(Cancel::AgentQueued(serial)), ..Row::new(format!("{HELD}{serial}"), label) });
     }
     rows
+}
+
+/// Long work's steps (a file read or written), and whether they are bytes ([`Row::percent`]).
+fn work_steps(progress: &solidcraft_engine::doc::progress::Progress) -> Option<((usize, usize), bool)> {
+    progress.work().map(|(stage, done, total)| ((done, total), bytes_stage(stage)))
+}
+
+/// Stages of long work whose steps are bytes.
+pub(crate) fn bytes_stage(stage: &str) -> bool {
+    matches!(stage, "reading" | "writing")
 }
 
 /// How far a watched evaluation is: the long work inside one feature while there is some, else
@@ -220,6 +308,21 @@ fn evaluation_steps(progress: &solidcraft_engine::doc::progress::Progress) -> Op
 /// Cancel the operation `key` names (as [`current`] lists it). Its work stops at its next check
 /// and nothing of it is applied; operations queued behind it go on.
 pub fn cancel(app: &mut SolveApp, key: &str) -> Result<(), String> {
+    // The summary row cancels the commands it stands for (each by its own serial, so the ones
+    // after it do not shift).
+    if key == HELD_MORE {
+        let keys = folded(&current(app));
+        if keys.is_empty() {
+            return Err(format!("no operation `{key}` is under way"));
+        }
+        let count = keys.len();
+        for key in keys {
+            let _ = cancel(app, &key);
+        }
+        // One message for the one action, not the last command's.
+        app.set_status(solidcraft_ui_text::format("operations.more_cancelled", &[("count", &count.to_string())]), false);
+        return Ok(());
+    }
     let row = current(app).into_iter().find(|r| r.key == key).ok_or_else(|| format!("no operation `{key}` is under way"))?;
     let Some(how) = row.cancel else { return Err(solidcraft_ui_text::format("operations.cannot_cancel", &[("name", &row.label)])) };
     if row.cancelling {
@@ -250,7 +353,18 @@ pub fn cancel(app: &mut SolveApp, key: &str) -> Result<(), String> {
                 edit.cancel();
             }
         }
+        Cancel::SketchRefresh => crate::sketch_view::cancel_refresh(app),
         Cancel::Agent => app.stop_agent_command(),
+        // It says itself how it ended: a save already replacing the file goes through.
+        Cancel::Save => {
+            if let Some(saving) = &app.saving {
+                saving.progress.cancel();
+            }
+            return Ok(());
+        }
+        Cancel::AgentQueued(serial) => app.cancel_held(serial),
+        // Taken above: it is no row of `current`.
+        Cancel::AgentMore => return Ok(()),
     }
     record(&mut app.operations, &row.key, row.label.clone(), Outcome::Cancelled);
     app.set_status(solidcraft_ui_text::format("operations.cancelled", &[("name", &row.label)]), false);
@@ -352,7 +466,7 @@ impl Default for Panel {
 }
 
 impl Panel {
-    /// Take in the operations under way `now` (ms), oldest first: a new one goes on top, one
+    /// Take in the operations under way `now` (ms on [`frame_ms`]'s clock), oldest first: a new one goes on top, one
     /// still running is brought up to date where it is, and one gone starts fading; rows that
     /// faded out go.
     pub fn update(&mut self, rows: Vec<Row>, now: f64) {
@@ -396,6 +510,13 @@ impl Panel {
                 self.shown.push(Shown { row, gone_at: None });
             }
         }
+        // The summary row stands above the waiting rows it follows, also when one unfolds after it.
+        let last = self.shown.iter().rposition(|s| s.row.key.starts_with(HELD));
+        if let (Some(at), Some(last)) = (self.shown.iter().position(|s| s.row.key == HELD_MORE), last)
+            && last > at
+        {
+            self.shown[at..=last].rotate_left(1);
+        }
     }
 
     /// The rows on screen, bottom first, with how opaque each is (fading out: less).
@@ -412,11 +533,20 @@ impl Panel {
     }
 }
 
+/// The panel's clock (ms): the frames' own time (`input.time`), not the wall clock. The app's
+/// frames follow the wall clock, so nothing changes there; in a test harness, whose frames are
+/// 1/60 s apart however long each takes, a row's fade lasts the same frames on any machine. On
+/// the wall clock it lasted fewer frames on a loaded machine, and the toasts placed clear of the
+/// panel moved sooner.
+pub(crate) fn frame_ms(ctx: &egui::Context) -> f64 {
+    ctx.input(|i| i.time) * 1000.0
+}
+
 /// Bring the panel up to date and draw it in `view`'s bottom-right corner, above the frame-rate
 /// readout and its details, left of a pane over that corner. Off in Preferences: nothing.
 pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
     app.operations.rect = None;
-    let now = crate::now_ms();
+    let now = frame_ms(ui.ctx());
     let mut rows = current(app);
     if !app.preferences.operations_panel {
         // Not shown, but the names are kept for `ui.operations`' list of those that ended.
@@ -432,6 +562,13 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
     if app.preferences.file_operations_wait {
         rows.retain(|r| !r.key.starts_with("file:"));
         app.operations.shown.retain(|s| !s.row.key.starts_with("file:"));
+    }
+    // An agent can queue dozens of commands: those past the first few are one row.
+    let more = folded(&rows);
+    if !more.is_empty() {
+        rows.retain(|r| !more.contains(&r.key));
+        let label = solidcraft_ui_text::format("operations.more_waiting", &[("count", &more.len().to_string())]);
+        rows.push(Row { queued: true, agent: true, cancel: Some(Cancel::AgentMore), ..Row::new(HELD_MORE.into(), label) });
     }
     app.operations.update(rows, now);
     if app.operations.is_empty() {
@@ -471,6 +608,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
     }
     // Clicks on the panel are its own, not the view's.
     let _ = ui.interact(panel, egui::Id::unique("sc_operations"), Sense::click());
+    // The first surface outside the container hosts to ask for a blurred backdrop: the running-operations card.
+    painter.add(crate::blur::Backdrop::new(panel).corners(t.radius_sm).shape(&painter));
     painter.rect(panel, t.radius_sm, t.overlay, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
     crate::scenario::publish_rect("operations:panel", panel);
     app.operations.rect = Some(panel);
@@ -478,7 +617,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
     let mut cancel = None;
     for (row, alpha, y) in placed {
         let r = Rect::from_min_max(pos2(panel.left() + pad, y - ROW), pos2(panel.right() - pad, y));
-        if paint_row(ui, &painter, &t, &row, alpha, r) {
+        if paint_row(ui, &painter, &t, &row, alpha, r, panel) {
             cancel = Some(row.key.clone());
         }
     }
@@ -490,23 +629,29 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
 }
 
 /// One row in `r`: name, bar with its step, and the X. True when the X was clicked.
-fn paint_row(ui: &egui::Ui, painter: &egui::Painter, t: &Tokens, row: &Row, alpha: f32, r: Rect) -> bool {
+fn paint_row(ui: &egui::Ui, painter: &egui::Painter, t: &Tokens, row: &Row, alpha: f32, r: Rect, panel: Rect) -> bool {
     let fade = |c: Color32| c.gamma_multiply(alpha);
     let accent = match row.ended {
         Some(Outcome::Failed(_)) => t.error,
         _ if row.agent => solidcraft_look::pointer::agent(),
         _ => t.form_primary,
     };
-    // A failed row says why when the pointer is over it.
-    if let Some(Outcome::Failed(why)) = &row.ended {
-        let _ = ui.interact(r, egui::Id::unique(("sc_operation_failed", &row.key)), Sense::hover()).on_hover_text(why);
+    // Over the row (the X's own tip wins over its corner), opening beside the panel so no row is
+    // covered: why a failed row failed, else the steps of a batch still to come.
+    let tip = match &row.ended {
+        Some(Outcome::Failed(why)) => Some(why.clone()),
+        _ if row.next.is_empty() => None,
+        _ => Some(row.next.iter().map(|(n, name)| numbered(*n, name)).collect::<Vec<_>>().join("\n")),
+    };
+    if let Some(tip) = tip {
+        let _ = ui.interact(r, egui::Id::unique(("sc_operation_row", &row.key)), Sense::hover()).backing_on_hover_text_beside(panel, tip);
     }
     crate::scenario::publish_rect(&format!("operations:row:{}", row.key), r);
     // The X on the right.
     let x = Rect::from_center_size(pos2(r.right() - ROW * 0.5, r.center().y), vec2(ROW - 6.0, ROW - 6.0));
     let response =
         ui.interact(x, egui::Id::unique(("sc_operation_cancel", &row.key)), if row.cancellable() { Sense::click() } else { Sense::hover() });
-    let response = response.on_hover_text(if row.cancellable() {
+    let response = response.backing_on_hover_text(if row.cancellable() {
         solidcraft_ui_text::format("operations.cancel", &[("name", &row.label)])
     } else {
         solidcraft_ui_text::format("operations.cannot_cancel", &[("name", &row.label)])
@@ -570,9 +715,11 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
                 "key": r.key,
                 "label": r.label,
                 "steps": r.steps.map(|(done, total)| json!({"done": done, "total": total})),
+                "percent": r.percent,
                 "queued": r.queued,
                 "cancelling": r.cancelling,
                 "cancellable": r.cancellable(),
+                "next": r.next.iter().map(|(_, name)| name).collect::<Vec<_>>(),
             })
         })
         .collect();
@@ -744,7 +891,13 @@ mod tests {
         let failed = outcome(&mut h, &key).expect("listed once it ended");
         assert_eq!(failed["outcome"], "failed", "{failed}");
         assert!(failed["error"].as_str().is_some_and(|e| !e.is_empty()), "{failed}");
-        let row = h.app.operations.rows(crate::now_ms()).find(|(r, _)| r.key == key).map(|(r, _)| r.clone()).expect("its row stays a while");
+        let row = h
+            .app
+            .operations
+            .rows(crate::operations::frame_ms(&h.ctx))
+            .find(|(r, _)| r.key == key)
+            .map(|(r, _)| r.clone())
+            .expect("its row stays a while");
         assert_eq!(row.status(), Some(solidcraft_ui_text::tr("operations.failed").to_string()));
         // Done within the app's wait (never a row): not listed.
         h.app.apply_off_thread = Some(std::time::Duration::from_secs(60));

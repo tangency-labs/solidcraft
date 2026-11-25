@@ -1,5 +1,6 @@
 //! Contracts and result types for the commands in `cmd/sketch_3d.rs`: `sketch.line3d`,
-//! `sketch.spline3d`, `sketch.point3d` and `sketch.move3d`.
+//! `sketch.spline3d`, `sketch.spline3d.control_point`, `sketch.arc3d`, `sketch.point3d` and
+//! `sketch.move3d`.
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether the sketch has 3D Sketch on, a wire
@@ -18,7 +19,8 @@ use solidcore_record::Vec3;
 use super::check::whole;
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
-use super::types::Point3;
+use super::sketch_shapes::Created;
+use super::types::{Point3, PointExpr3, SketchRef, present};
 use crate::params;
 
 /// Draw 3D lines through world points, one line per segment, joined end to end. Needs 3D Sketch
@@ -52,6 +54,49 @@ pub struct Spline3dParams {
     pub sketch: Option<SketchTarget>,
 }
 
+/// Draw a smooth cubic 3D curve shaped by world control points: it starts on the first, ends on
+/// the last and is pulled towards the ones between without passing through them. Needs 3D Sketch
+/// on for the sketch (`sketch.options` with `sketch_3d: true`). One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = points_required)]
+pub struct ControlSpline3dParams {
+    // Optional in the type and required in the schema, as `Line3dParams::points`.
+    /// The world control points [x, y, z] in mm, 3 to 500. The curve passes through the first
+    /// and the last only.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ControlPoints")]
+    pub points: Option<ControlPoints>,
+    /// The sketch to draw in: its feature id or its name. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+/// Draw an exact circular arc through three world points: it starts at `start`, bends
+/// through `through` and ends at `end`. Needs 3D Sketch on for the sketch
+/// (`sketch.options` with `sketch_3d: true`). One undo step. Three points on one line, or
+/// two that are the same point, stay the handler's to refuse.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = ends_required)]
+pub struct Arc3dParams {
+    // Optional in the type and required in the schema, as `Line3dParams::points`: left out,
+    // the handler refuses the call with its own "`start` must be a point [x, y, z]".
+    /// The arc's first end, as a world point [x, y, z] in mm.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "WorldPoint")]
+    pub start: Option<WorldPoint>,
+    /// A point the arc bends through, between its two ends, as a world point [x, y, z] in mm.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "WorldPoint")]
+    pub through: Option<WorldPoint>,
+    /// The arc's other end, as a world point [x, y, z] in mm.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "WorldPoint")]
+    pub end: Option<WorldPoint>,
+    /// The sketch to draw in: its feature id or its name. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
 /// Draw a 3D point at a world point. Needs 3D Sketch on for the sketch (`sketch.options` with
 /// `sketch_3d: true`). One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -67,8 +112,8 @@ pub struct Point3dParams {
     pub sketch: Option<SketchTarget>,
 }
 
-/// Move one fit point of a drawn 3D curve or point, to a world point or by a world offset. The
-/// points joined to it move too. One undo step.
+/// Move one fit point of a drawn 3D curve or point, or a point on the sketch plane, to a world
+/// point or by a world offset. The points joined to it move too. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = move_required)]
 pub struct Move3dParams {
@@ -77,7 +122,15 @@ pub struct Move3dParams {
     #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "WireId")]
     pub wire: Option<WireId>,
-    /// Which fit point of the curve (0 is the first), below 500. Default: 0.
+    /// Instead of `wire`: a point on the sketch plane (`l1.end`, `p3`: a line's end, a fit point
+    /// of a spline, a lone point). The lines and fit-point splines through it, or the lone
+    /// point, become drawn 3D curves through the same places first; their constraints and
+    /// dimensions go. Needs 3D Sketch on.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PlanePointId")]
+    pub point: Option<PlanePointId>,
+    /// Which fit point of the curve, or control point of a control point spline (0 is the
+    /// first), below 500. Default: 0.
     #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "FitIndex")]
     pub index: Option<FitIndex>,
@@ -109,30 +162,81 @@ fn point_required(schema: &mut Schema) {
     require(schema, "point");
 }
 
-fn move_required(schema: &mut Schema) {
-    require(schema, "wire");
-    schema.insert("anyOf".into(), json!([{"required": ["to"]}, {"required": ["by"]}]));
+fn ends_required(schema: &mut Schema) {
+    require(schema, "start");
+    require(schema, "through");
+    require(schema, "end");
 }
 
-/// The `points` of `sketch.line3d` and `sketch.spline3d`: a list of 2 to 500 points, as their
+fn move_required(schema: &mut Schema) {
+    schema.insert(
+        "allOf".into(),
+        json!([
+            {"anyOf": [{"required": ["wire"]}, {"required": ["point"]}]},
+            {"not": {"required": ["wire", "point"]}},
+            {"not": {"required": ["point", "index"]}},
+            {"anyOf": [{"required": ["to"]}, {"required": ["by"]}]},
+        ]),
+    );
+}
+
+/// What the 3D drawing commands say of a coordinate that is neither a number nor an expression.
+pub const POINT3_MUST: &str = "a 3D point's coordinates must be numbers or expressions over the design's parameters";
+
+/// A 3D point's three coordinates, from `[x, y, z]` or `{x, y, z}` (as `params::vec3` reads a
+/// point), each still as given: a number or an expression (#10608).
+pub fn point3_coordinates(v: &Value) -> Option<[&Value; 3]> {
+    match v {
+        Value::Array(a) if a.len() == 3 => Some([&a[0], &a[1], &a[2]]),
+        Value::Object(o) => Some([o.get("x")?, o.get("y")?, o.get("z")?]),
+        _ => None,
+    }
+}
+
+/// Whether a coordinate is one the 3D drawing commands take: a number in range (as
+/// `params::finite` takes it), or an expression (text of at most 4096 bytes, not blank). Whether
+/// the expression evaluates is the handler's to check: it has the design.
+fn coordinate(v: &Value) -> bool {
+    match v {
+        Value::Number(n) => n.as_f64().and_then(params::finite).is_some(),
+        Value::String(e) => !e.trim().is_empty() && e.len() <= 4096,
+        _ => false,
+    }
+}
+
+/// A 3D point whose coordinates are numbers or expressions, with the handler's messages: `shape`
+/// for something that is no point.
+fn expr_point(v: &Value, shape: &str) -> Result<[Value; 3], String> {
+    let c = point3_coordinates(v).ok_or_else(|| shape.to_string())?;
+    if !c.iter().all(|c| coordinate(c)) {
+        return Err(whole(POINT3_MUST));
+    }
+    Ok(c.map(Clone::clone))
+}
+
+/// The `points` of `sketch.line3d` and `sketch.spline3d`: a list of 2 to 500 points, each
+/// `[x, y, z]` or `{x, y, z}` with numbers or expressions over the design's parameters, as their
 /// `points` reader takes it, with its messages.
 #[derive(Clone, Debug, PartialEq)]
-pub struct DrawnPoints(pub Vec<Vec3>);
+pub struct DrawnPoints(pub Vec<[Value; 3]>);
 
 impl<'de> Deserialize<'de> for DrawnPoints {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let max = solidcraft_sketch::MAX_FIT_POINTS;
-        let Value::Array(a) = Value::deserialize(d)? else {
-            return Err(D::Error::custom(whole("`points` must list [x,y,z] points")));
-        };
-        if a.len() < 2 || a.len() > max {
-            return Err(D::Error::custom(whole(format!("`points` needs 2 to {max} points"))));
-        }
-        a.iter()
-            .map(|v| params::vec3(v).ok_or_else(|| D::Error::custom(whole("a point must be [x, y, z]"))))
-            .collect::<Result<_, _>>()
-            .map(DrawnPoints)
+        drawn_points(Value::deserialize(d)?, 2).map(DrawnPoints).map_err(D::Error::custom)
     }
+}
+
+/// A list of `min` to 500 points, each `[x, y, z]` or `{x, y, z}` with numbers or expressions, as
+/// the 3D drawing commands' `points` reader takes it, with its messages.
+fn drawn_points(v: Value, min: usize) -> Result<Vec<[Value; 3]>, String> {
+    let max = solidcraft_sketch::MAX_FIT_POINTS;
+    let Value::Array(a) = v else {
+        return Err(whole("`points` must list [x,y,z] points"));
+    };
+    if a.len() < min || a.len() > max {
+        return Err(whole(format!("`points` needs {min} to {max} points")));
+    }
+    a.iter().map(|v| expr_point(v, &whole("a point must be [x, y, z]"))).collect()
 }
 
 impl JsonSchema for DrawnPoints {
@@ -140,9 +244,9 @@ impl JsonSchema for DrawnPoints {
         "DrawnPoints".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        let point = generator.subschema_for::<Point3>();
+        let point = generator.subschema_for::<PointExpr3>();
         json_schema!({
-            "description": "World points [x, y, z] in mm, 2 to 500.",
+            "description": "World points [x, y, z] in mm, 2 to 500, each coordinate a number or an expression over the design's parameters.",
             "type": "array",
             "items": point,
             "minItems": 2,
@@ -151,13 +255,42 @@ impl JsonSchema for DrawnPoints {
     }
 }
 
-/// The `point` of `sketch.point3d`: a [`Point3`], with the handler's message.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct WorldPoint(pub Vec3);
+/// The `points` of `sketch.spline3d.control_point`: a list of 3 to 500 control points, each as a
+/// point of [`DrawnPoints`], with the handler's messages.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ControlPoints(pub Vec<[Value; 3]>);
+
+impl<'de> Deserialize<'de> for ControlPoints {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        drawn_points(Value::deserialize(d)?, solidcraft_sketch::MIN_CONTROL_POINTS).map(ControlPoints).map_err(D::Error::custom)
+    }
+}
+
+impl JsonSchema for ControlPoints {
+    fn schema_name() -> Cow<'static, str> {
+        "ControlPoints".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<PointExpr3>();
+        json_schema!({
+            "description": "World control points [x, y, z] in mm, 3 to 500, each coordinate a number or an expression over the design's parameters.",
+            "type": "array",
+            "items": point,
+            "minItems": solidcraft_sketch::MIN_CONTROL_POINTS,
+            "maxItems": solidcraft_sketch::MAX_FIT_POINTS
+        })
+    }
+}
+
+/// The `point` of `sketch.point3d` and the ends of `sketch.arc3d`: `[x, y, z]` or `{x, y, z}`,
+/// each coordinate a number or an expression over the design's parameters, with the handler's
+/// messages.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WorldPoint(pub [Value; 3]);
 
 impl<'de> Deserialize<'de> for WorldPoint {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        params::vec3(&Value::deserialize(d)?).map(WorldPoint).ok_or_else(|| D::Error::custom("must be a point [x, y, z]"))
+        expr_point(&Value::deserialize(d)?, "must be a point [x, y, z]").map(WorldPoint).map_err(D::Error::custom)
     }
 }
 
@@ -169,7 +302,7 @@ impl JsonSchema for WorldPoint {
         true
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        generator.subschema_for::<Point3>()
+        generator.subschema_for::<PointExpr3>()
     }
 }
 
@@ -221,6 +354,32 @@ impl JsonSchema for WireId {
     }
 }
 
+/// The `point` of `sketch.move3d`: a sketch point reference (`p3`, `l1.end`). Whether the
+/// sketch has that point is the handler's to check.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlanePointId(pub String);
+
+impl<'de> Deserialize<'de> for PlanePointId {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(s) => Ok(PlanePointId(s)),
+            _ => Err(D::Error::custom("must be a sketch point id")),
+        }
+    }
+}
+
+impl JsonSchema for PlanePointId {
+    fn schema_name() -> Cow<'static, str> {
+        "PlanePointId".into()
+    }
+    fn inline_schema() -> bool {
+        true
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"type": "string"})
+    }
+}
+
 /// The `index` of `sketch.move3d`: a whole number below 500, as the handler reads it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FitIndex(pub usize);
@@ -248,13 +407,21 @@ impl JsonSchema for FitIndex {
     }
 }
 
-/// What `sketch.line3d` and `sketch.spline3d` return.
+/// What `sketch.line3d`, `sketch.spline3d`, `sketch.spline3d.control_point` and `sketch.arc3d`
+/// return.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct Curves3dResult {
-    /// The ids of the curves drawn: one per segment for a line, one for a spline.
+    /// The ids of the curves drawn: one per segment for a line, one for a spline or an arc.
     pub curves: Vec<String>,
+    /// The constraints made (#10608): the Coincident joints to the drawn 3D ends it meets, and a Fix
+    /// that holds each point placed by expressions where they put it.
+    pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`, and
+    /// `wires` when there are any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -265,8 +432,15 @@ pub struct Curves3dResult {
 pub struct Point3dResult {
     /// The id of the point drawn.
     pub point: String,
+    /// The constraints made (#10608): the Coincident joints to the drawn 3D ends it meets, and a Fix
+    /// that holds each point placed by expressions where they put it.
+    pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`, and
+    /// `wires` when there are any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -277,6 +451,136 @@ pub struct Point3dResult {
 pub struct Move3dResult {
     /// How many fit points moved: the one asked for and the points joined to it.
     pub moved: usize,
+    /// With `point`: the drawn 3D curves the plane geometry through it became.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub curves: Vec<String>,
+    /// With `point`: the drawn curve the moved point is on now (the first of `curves`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire: Option<String>,
+    /// With `point`: which fit point of `wire` it is, for moving it again with `wire` and `index`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// An axis of the sketch's 3D space: `x`, `y` or `z`, in any case.
+#[derive(Clone, Copy, Debug)]
+pub enum AxisName {
+    X,
+    Y,
+    Z,
+}
+
+impl<'de> Deserialize<'de> for AxisName {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        match Value::deserialize(d)?.as_str().map(str::to_ascii_lowercase).as_deref() {
+            Some("x") => Ok(AxisName::X),
+            Some("y") => Ok(AxisName::Y),
+            Some("z") => Ok(AxisName::Z),
+            _ => Err(D::Error::custom("must be x, y or z")),
+        }
+    }
+}
+
+impl JsonSchema for AxisName {
+    fn schema_name() -> Cow<'static, str> {
+        "AxisName".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "x, y or z, in any case.", "type": "string", "pattern": "^[XxYyZz]$"})
+    }
+}
+
+/// Make drawn 3D lines parallel to an axis.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AlongAxisParams {
+    /// A drawn 3D line's id.
+    #[serde(default)]
+    pub line: Option<String>,
+    /// Several drawn 3D lines' ids, each made parallel to the axis.
+    #[serde(default)]
+    pub lines: Option<Vec<String>>,
+    /// The axis of the sketch's 3D space (its component's, for a sketch in a component).
+    pub axis: AxisName,
+    /// The sketch (default: the one being edited).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+}
+
+/// What `sketch.constraint.along_axis` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AlongAxisResult {
+    /// The constraint ids, one per line (an existing one when the line already had it).
+    pub constraints: Vec<String>,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// An origin plane of the sketch's 3D space: `xy`, `yz` or `xz`, in any case and either order, as
+/// Parallel takes them.
+#[derive(Clone, Copy, Debug)]
+pub enum PlaneName {
+    Xy,
+    Yz,
+    Xz,
+}
+
+impl<'de> Deserialize<'de> for PlaneName {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        match Value::deserialize(d)?.as_str().and_then(solidcraft_sketch::OriginPlane::from_name) {
+            Some(solidcraft_sketch::OriginPlane::Xy) => Ok(PlaneName::Xy),
+            Some(solidcraft_sketch::OriginPlane::Yz) => Ok(PlaneName::Yz),
+            Some(solidcraft_sketch::OriginPlane::Xz) => Ok(PlaneName::Xz),
+            None => Err(D::Error::custom("must be xy, yz or xz")),
+        }
+    }
+}
+
+impl JsonSchema for PlaneName {
+    fn schema_name() -> Cow<'static, str> {
+        "PlaneName".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "xy, yz or xz, in any case and either order.",
+            "type": "string",
+            "pattern": "^([XxYy][XxYy]|[YyZz][YyZz]|[XxZz][XxZz])$"
+        })
+    }
+}
+
+/// Hold 3D points on an origin plane.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct OnPlaneParams {
+    /// A 3D point ref: `<curve>.start`, `.end`, `.through`, `.<n>`, or a 3D point's id.
+    #[serde(default)]
+    pub point: Option<String>,
+    /// Several 3D point refs, each held on the plane.
+    #[serde(default)]
+    pub points: Option<Vec<String>>,
+    /// The origin plane of the sketch's 3D space.
+    pub plane: PlaneName,
+    /// The sketch (default: the one being edited).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+}
+
+/// What `sketch.constraint.on_plane` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OnPlaneResult {
+    /// The constraint ids, one per point (an existing one when the point already had it).
+    pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

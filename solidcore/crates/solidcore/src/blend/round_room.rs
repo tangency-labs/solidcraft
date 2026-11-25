@@ -9,7 +9,8 @@
 use std::collections::BTreeSet;
 
 use crate::curve::curve::p8::CurveIntersectOptions;
-use crate::error::{SolidError, SM_ERR};
+use crate::error::blend::BlendFailure;
+use crate::error::{EntityRef, SolidError, SM_ERR};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::math::Point3;
@@ -118,7 +119,12 @@ pub fn boundary_crossings(k: &Kernel, b: &Brep, f: FaceId) -> Result<Vec<Point3>
         for &e2 in edges.iter().skip(i + 1) {
             let (a, c) = (b.edge(e1)?, b.edge(e2)?);
             let (Some(c1), Some(c2)) = (a.curve.as_ref(), c.curve.as_ref()) else {
-                return Err(SolidError::blend_missing(OP, "an edge's curve"));
+                let bare = if a.curve.is_none() { e1 } else { e2 };
+                return Err(SolidError::blend_at(
+                    OP,
+                    BlendFailure::EdgeWithoutCurve,
+                    EntityRef::Edge(bare),
+                ));
             };
             let tol = a.tolerance.max(c.tolerance);
             let found = c1.global_curve_intersect::<CurveHandle>(

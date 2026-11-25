@@ -116,14 +116,15 @@ pub struct AdapterReport {
 }
 
 /// The backends a headless device looks at on this platform: Metal on macOS, Vulkan and D3D12
-/// on Windows, Vulkan and GL elsewhere; `WGPU_BACKEND` narrows them further.
+/// on Windows, Vulkan elsewhere; `WGPU_BACKEND` narrows them further. One rule on every machine,
+/// whatever its driver.
 pub fn native_backends() -> wgpu::Backends {
     let native = if cfg!(target_os = "macos") {
         wgpu::Backends::METAL
     } else if cfg!(target_os = "windows") {
         wgpu::Backends::DX12 | wgpu::Backends::VULKAN
     } else {
-        wgpu::Backends::VULKAN | wgpu::Backends::GL
+        wgpu::Backends::VULKAN
     };
     match wgpu::Backends::from_env() {
         Some(env) if !(env & native).is_empty() => env & native,
@@ -160,16 +161,40 @@ fn report(info: &wgpu::AdapterInfo) -> AdapterReport {
     }
 }
 
+/// Starts a wgpu instance; a process starts one at a time. Starting an instance loads the Vulkan
+/// drivers, and a second thread that started one meanwhile called into NVIDIA's half-loaded
+/// driver on Linux: the process crashed inside `vkEnumerateInstanceExtensionProperties` (#10232).
+/// Tests open a device each on parallel threads, so they met the crash as they began. Adapters,
+/// devices and rendering still run side by side.
+pub fn start_instance(desc: wgpu::InstanceDescriptor) -> wgpu::Instance {
+    static STARTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one_at_a_time = STARTING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    wgpu::Instance::new(desc)
+}
+
 fn instance() -> wgpu::Instance {
     let mut desc = crate::instance_descriptor_from_env();
     desc.backends = native_backends();
-    wgpu::Instance::new(desc)
+    start_instance(desc)
+}
+
+// Some Windows Vulkan drivers crash or hang while unloading their DLL during FLS cleanup.
+// Retain one successful instance for the process, while every call still creates its own
+// descriptor and devices. Retaining no device also leaves device loss and limits per caller.
+#[cfg(target_os = "windows")]
+fn retain_vulkan_instance(instance: &wgpu::Instance, found: &[wgpu::Adapter]) {
+    if found.iter().any(|adapter| adapter.get_info().backend == wgpu::Backend::Vulkan) {
+        static INSTANCE: std::sync::OnceLock<wgpu::Instance> = std::sync::OnceLock::new();
+        let _ = INSTANCE.get_or_init(|| instance.clone());
+    }
 }
 
 /// Every adapter the native backends offer, best first.
 #[cfg(not(target_arch = "wasm32"))]
 fn adapters(instance: &wgpu::Instance) -> Vec<wgpu::Adapter> {
     let mut all = pollster::block_on(instance.enumerate_adapters(native_backends()));
+    #[cfg(target_os = "windows")]
+    retain_vulkan_instance(instance, &all);
     all.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
     all
 }
@@ -210,7 +235,10 @@ pub fn pick_path(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) -> O
     }
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
     desc.backends = backends;
-    let mut all = pollster::block_on(wgpu::Instance::new(desc).enumerate_adapters(backends));
+    let instance = start_instance(desc);
+    let mut all = pollster::block_on(instance.enumerate_adapters(backends));
+    #[cfg(target_os = "windows")]
+    retain_vulkan_instance(&instance, &all);
     all.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
     all.into_iter()
         .filter(|a| keep(&a.get_info()))

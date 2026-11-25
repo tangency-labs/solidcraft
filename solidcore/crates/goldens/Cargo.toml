@@ -22,5 +22,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 toml = "0.8"
 
+[dev-dependencies]
+# The replay seam (`src/replay_seam.rs`: the WR-450 and WR-587 replays' and the target
+# bound's), for its tests only: a dev-dependency feature is not in the `goldens` binary's build (resolver 2).
+solidcore = { path = "../solidcore", features = ["wr57-replay"] }
+
 [lints]
 workspace = true

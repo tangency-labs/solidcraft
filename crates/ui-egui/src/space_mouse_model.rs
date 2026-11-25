@@ -226,10 +226,10 @@ pub(crate) fn corner_rect(view: egui::Rect, position: crate::prefs::SpaceMouseGh
 /// The device in a corner of the 3D view (`rect`, from `corner_rect`), see-through so it doesn't hide the design:
 /// cap or trackball as `calibration` says, moving as the device does. A device without a
 /// calibration is read as it reports: each axis as a share of the full deflection a reading is
-/// scaled to (`FULL_SCALE`). The picture shows the device as the view reads it: each of the
-/// view's axes shows the motion that drives it (`source` and the driver's `mapping`). The user's
-/// own inversions are left to the view: they are a matter of taste, and the picture shows the
-/// device, not the view.
+/// scaled to (`FULL_SCALE`). The picture shows the device: each of the view's axes shows the
+/// motion that drives it (`source` and the driver's `mapping`), the way the device moves it. The
+/// user's own inversions are left to the view: they are a matter of taste, and a picture leaning
+/// against the user's hand would be worse than one that disagrees with the view.
 pub(crate) fn corner(
     ui: &mut egui::Ui,
     rect: egui::Rect,
@@ -248,8 +248,9 @@ pub(crate) fn corner(
 
 /// What the corner picture shows for a reading: the kind of device, how far each of the view's
 /// axes has moved, and which markers light. The axes are the view's own — pan sideways, zoom, pan
-/// up and down, orbit up and down, orbit sideways and roll — so the picture and the view read the
-/// device the same way.
+/// up and down, orbit up and down, orbit sideways and roll — so the picture shows every motion
+/// where the view uses it. The picture shows the device, though: the inversions belong to the
+/// view, so the cap in the picture leans the way the user leans it.
 fn corner_reading(
     calibration: Option<&Calibration>,
     raw: [i16; 6],
@@ -267,13 +268,13 @@ fn corner_reading(
     (kind, still_unless_moving(kind, travel, moving), moving)
 }
 
-/// The reading as the view reads it: the rows are the device's own, each taking the motion it
+/// The reading as the picture shows it: the rows are the device's own, each taking the motion it
 /// reads (`source`), and the driver's mapping (`mapping`) sends each row to the axis it drives in
 /// the view, so the picture shows every motion where the view uses it. The picture shows the
-/// device, so neither the user's own inversions nor the driver's reversals are drawn: they are
-/// what makes the view follow the cap, and the cap is what the picture shows. An assignment that
-/// doesn't drive each motion once reads as the default, as the view does. A device with no mapping
-/// yet is read as it reports.
+/// device, so no inversion is drawn: the user's own inversions never reach the picture, and the
+/// driver's reversals are not drawn either — they are what makes the view follow the cap, and the
+/// cap is what the picture shows. An assignment that doesn't drive each motion once reads as the
+/// default, as the view does. A device with no mapping yet is read as it reports.
 fn by_view_axis(
     travel: [f32; 6],
     moving: [bool; 6],

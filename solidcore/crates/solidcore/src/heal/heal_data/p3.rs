@@ -48,7 +48,9 @@
 //! `Fix_SplitEdgesAtSeam` does not format the diagnostic of a pole split refused at
 //! an edge end (`SE_MSG`); another refused split returns `SM_ERR`.
 
-use crate::error::{ignored as ignore_soft, EntityRef, Result, SolidError};
+use crate::error::heal::HealFailure;
+use crate::error::topology::TopologyFailure;
+use crate::error::{ignored as ignore_soft, EntityRef, Failure, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::context::{MarkLock, ALL_MARKS};
 use crate::heal::face_props::{HealerOpType, LoopObject};
@@ -76,6 +78,13 @@ use crate::topology::face::p1::{self as fp1, SeamProblem};
 use crate::topology::vertex;
 
 const OP: &str = "heal::heal_data::p3";
+
+/// A defect ([`HealFailure::Defect`]) with the status `SM_ERR` of the `SE(SM_ERR)` it
+/// replaces.
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    Failure::new(OP, HealFailure::Defect { why }).into_error()
+}
 /// Maximum number of nested `UpdateTargetLists` catch-up passes.
 pub const MAX_TARGET_UPDATE_DEPTH: u64 = 32;
 
@@ -131,10 +140,7 @@ impl<O: LoopObject> HealData<O> {
         through: HealerOpType,
     ) -> Result<()> {
         if tracker.is_tracking(Some(&k.context)) {
-            return Err(SolidError::heal_failed(
-                OP,
-                "the topology changes are still being tracked",
-            ));
+            return Err(SolidError::heal(OP, HealFailure::ChangesStillTracked));
         }
         if let Some(error) = tracker.failure() {
             return Err(error);
@@ -459,7 +465,10 @@ impl<O: LoopObject> HealData<O> {
             for id in queue.into_iter().rev() {
                 let p = self.edge_props.props(id)?;
                 let e = p.edge.ok_or_else(|| {
-                    SolidError::heal_failed(OP, "the edge properties have no edge")
+                    defect(
+                        "the edge properties the healer listed as degenerate have no edge, \
+                         though it lists only properties it built for an edge",
+                    )
                 })?;
                 if p.bad_degen_edge.is_false() {
                     continue;
@@ -509,7 +518,6 @@ fn capture_changes<T>(
         let value = edit(k, b)?;
         return Ok((value, Changes::default()));
     }
-    let stop_checks_own = k.fixes.stop_tracking_checks_own_callback;
     k.context
         .set_sys_notify_callback(Some(Box::new(TopologyChangeCallback::new(1))));
     let result = edit(k, b);
@@ -518,9 +526,9 @@ fn capture_changes<T>(
         .sys_notify_callback()
         .and_then(NotifyCallback::as_any)
         .and_then(|a| a.downcast_ref::<TopologyChangeCallback>())
-        .filter(|callback| !stop_checks_own || callback.tracker() == 1)
+        .filter(|callback| callback.tracker() == 1)
         .map(|callback| (callback.lists(), callback.failure()));
-    if !stop_checks_own || captured.is_some() {
+    if captured.is_some() {
         k.context.set_sys_notify_callback(None);
     }
     let value = result?;
@@ -594,8 +602,7 @@ fn tracked_edit<R>(
     use crate::topology::brep::p3 as brep_p3;
     let lent = brep_p3::with_lent_context(k, |k, ctx| {
         // (the tracker reads its B-rep only to tell it from null)
-        let mut tracker = TrackTopologyChanges::new_with_kernel(
-            k,
+        let mut tracker = TrackTopologyChanges::new(
             Some(crate::topology::BrepId::from_index(0)),
             EDIT_TRACKER,
             true,
@@ -915,7 +922,18 @@ impl<O: LoopObject> HealData<O> {
             // Only endpoint rejection is known to leave the edge unsplit. Other errors
             // can follow interval/curve edits, so do not continue with stale properties.
             if !split.split {
-                return Err(SolidError::heal_failed(OP, "the edge was not split"));
+                // the split declines with editing off (the caller's state; only
+                // `heal_targets` enables it), a parameter outside the edge's interval,
+                // or a parameter at an end the edge has no vertex for
+                if !b.editing_enabled() {
+                    return Err(SolidError::topology(OP, TopologyFailure::EditingDisabled));
+                }
+                return Err(defect(
+                    "the edge split was declined without naming an end, on a B-rep open for \
+                     editing, so the pole's parameter lies outside the edge's interval or at \
+                     an end with no vertex, though the healer takes it from a crossing on an \
+                     edge of a face's loop, which has both its vertices",
+                ));
             }
             // UpdateTargetLists deletes old properties. Reacquire the next candidate.
             self.update_target_lists(
@@ -1729,6 +1747,8 @@ mod tests {
                 HealerOpType::FixDegenEdges
             ),
             Err(e) if e.upstream_status() == Some(SM_ERR)
+                && e.is_defect()
+                && matches!(e.heal_failure(), Some(HealFailure::Defect { .. }))
         ));
     }
 
@@ -1928,5 +1948,32 @@ mod tests {
             .unwrap();
         assert_eq!(callback.tracker(), 27);
         assert!(callback.lists().notify_events.is_empty());
+    }
+
+    /// WR-17: an edit that replaces the capture's tracker with another one is refused,
+    /// and the replacing tracker stays installed; its lists are not taken as the edit's.
+    #[test]
+    fn capture_refuses_a_replaced_tracker_and_leaves_it_installed() {
+        use crate::geom::context::NotifyCallback;
+        use crate::topology::topology::TopologyChangeCallback;
+        let mut k = Kernel::default();
+        let mut b = Brep::new();
+        let r = capture_changes(&mut k, &mut b, |k, _| {
+            k.context
+                .set_sys_notify_callback(Some(Box::new(TopologyChangeCallback::new(5))));
+            Ok(())
+        });
+        let err = r.err();
+        assert!(
+            matches!(err, Some(SolidError::InvalidInput { .. })),
+            "{err:?}"
+        );
+        let callback = k
+            .context
+            .sys_notify_callback()
+            .and_then(NotifyCallback::as_any)
+            .and_then(|a| a.downcast_ref::<TopologyChangeCallback>())
+            .unwrap();
+        assert_eq!(callback.tracker(), 5);
     }
 }

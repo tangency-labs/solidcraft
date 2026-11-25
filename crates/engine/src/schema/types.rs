@@ -340,6 +340,37 @@ impl JsonSchema for Point2 {
     }
 }
 
+/// A cylinder's axis (#18822), as `features::axis_expr_form` reads it: X, Y or Z (any case), a
+/// non-zero `[x, y, z]` of numbers, or `[x, y, z]` (or `{x, y, z}`) whose components are
+/// numbers or unitless expressions. Whether the expressions evaluate, and to a direction that
+/// isn't zero, is checked by the handler, which has the design.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AxisDirExpr(pub [Expr; 3]);
+
+impl<'de> Deserialize<'de> for AxisDirExpr {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::axis_expr_form(&Value::deserialize(d)?).map(AxisDirExpr).map_err(|why| D::Error::custom(whole(why)))
+    }
+}
+
+impl JsonSchema for AxisDirExpr {
+    fn schema_name() -> Cow<'static, str> {
+        "AxisDirExpr".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        // A number of any size gives a direction; an expression is a `NumberExpr`.
+        let c = json_schema!({"anyOf": [{"type": "number"}, generator.subschema_for::<NumberExpr>()]});
+        json_schema!({
+            "description": "An axis: X, Y or Z (any case), or a direction [x, y, z] that isn't zero, each a number or an expression with no unit such as \"-sin(t)\" (a parameter added as a plain number is a length: \"n / 1 mm\").",
+            "anyOf": [
+                {"type": "string", "pattern": format!("^[{ws}]*[XYZxyz][{ws}]*$", ws = whitespace_class())},
+                {"type": "array", "items": c, "minItems": 3, "maxItems": 3},
+                {"type": "object", "properties": {"x": c, "y": c, "z": c}, "required": ["x", "y", "z"]}
+            ]
+        })
+    }
+}
+
 /// A placement point: `[x, y, z]` or `{x, y, z}`, each a number (mm) or a length expression,
 /// as `features::point_param` reads it. Whether the expressions evaluate is checked by the
 /// handler, which has the design.
@@ -430,6 +461,57 @@ impl JsonSchema for StringList {
         json_schema!({
             "description": "A name, or a list of names.",
             "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "maxItems": 10000}]
+        })
+    }
+}
+
+/// A sweep's path (#16168): curve ids of the path's sketch, or `{"sketch", "curve"}` entries for
+/// curves of other sketches. Accepted exactly when the handler reads it; kept as the raw values.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PathList(pub Vec<Value>);
+
+impl<'de> Deserialize<'de> for PathList {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let fail = || D::Error::custom("must be a curve id or a list of path entries");
+        let entries = match Value::deserialize(d)? {
+            Value::String(s) => vec![Value::String(s)],
+            Value::Array(a) if a.len() > 1000 => return Err(D::Error::custom("must have at most 1000 items")),
+            Value::Array(a) => a,
+            _ => return Err(fail()),
+        };
+        for v in &entries {
+            match v {
+                Value::String(_) => {}
+                Value::Object(o) => {
+                    if !o.get("curve").is_some_and(Value::is_string) {
+                        return Err(D::Error::custom("each path entry must be a curve id or {\"sketch\", \"curve\"}"));
+                    }
+                    if crate::cmd::sketch_key(o.get("sketch")).is_none() {
+                        return Err(D::Error::custom("a path entry's `sketch` must be a sketch id or name"));
+                    }
+                }
+                _ => return Err(D::Error::custom("each path entry must be a curve id or {\"sketch\", \"curve\"}")),
+            }
+        }
+        Ok(PathList(entries))
+    }
+}
+
+impl JsonSchema for PathList {
+    fn schema_name() -> Cow<'static, str> {
+        "PathList".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let entry = json!({"anyOf": [
+            {"type": "string"},
+            {"type": "object", "required": ["sketch", "curve"], "properties": {
+                "sketch": {"description": "The sketch the curve is in.", "type": ["number", "string"]},
+                "curve": {"type": "string"}
+            }}
+        ]});
+        json_schema!({
+            "description": "A curve id of the path's sketch, or a list of path entries; an entry is a curve id or {\"sketch\": <sketch>, \"curve\": <id>} for a curve of another sketch.",
+            "anyOf": [{"type": "string"}, {"type": "array", "items": entry, "maxItems": 1000}]
         })
     }
 }
@@ -528,6 +610,14 @@ keyword_param!(
     "Where the section sits against the coil's diameter: center (the default; on and on_center are aliases) on it, inside it or outside it. Any case."
 );
 keyword_param!(
+    /// `solid.coil`'s `end_cut`.
+    CoilEndCutParam,
+    "end cut",
+    &["axial", "square"],
+    "axial or square",
+    "Where the wire ends: axial (the default), in a plane through the coil's axis, or square, across the wire. Any case."
+);
+keyword_param!(
     /// `solid.emboss`'s `mode`.
     EmbossModeParam,
     "mode",
@@ -579,9 +669,9 @@ keyword_param!(
     /// `solid.fillet`'s `turn`.
     FilletTurnParam,
     "turn",
-    &["mitre", "swept"],
-    "mitre or swept",
-    "How two rounds turn round a sharp, straight, convex side edge square to both on a plane (the rounds along a boss's base, at its upright edges): mitre (the default) runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus. swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal or the side edge is concave, curved or tangent. Matching ignores case."
+    &["auto", "mitre", "swept"],
+    "auto, mitre or swept",
+    "How two rounds turn where they meet at a sharp side edge on a face they share (the rounds along a boss's base, at its upright edges): auto (the default, mitre with edge_radii) sweeps each turn where the swept turn builds and mitres the rest, never refused where the mitre builds; mitre runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus. swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal, the side edge is curved or tangent, or the ball cannot pass it (a side edge of the rounds' own convexity: a pocket's or a box's corner edge). Matching ignores case."
 );
 keyword_param!(
     /// `plastic.lip`'s `type`.
@@ -1305,8 +1395,8 @@ fn geo_problem(v: &Value) -> Option<String> {
 }
 
 /// The reference types a saved reference's `type` names (`solidcraft_doc::construct::GeoRef`).
-const SAVED_REFS: [&str; 12] =
-    ["point", "datum", "origin", "vertex", "edge", "face", "plane", "world", "axis", "construct_point", "sketch_point", "sketch_curve"];
+const SAVED_REFS: [&str; 13] =
+    ["point", "datum", "origin", "vertex", "edge", "face", "plane", "world", "axis", "construct_point", "sketch_point", "sketch_curve", "snap"];
 
 /// `{key: point}`, unless it has `type` (then it is a saved reference).
 fn picked_at(key: &str, point: &Schema) -> Value {
@@ -1426,10 +1516,11 @@ fn model_axis_problem(v: &Value) -> Option<String> {
     })
 }
 
-/// The line `construct.plane.at_angle` turns about, as `features::axis_line` reads it: an edge or
-/// face of the model (as `construct::model_axis_param` reads it), else X, Y, Z, a construction
-/// axis's name or `{origin?, dir}`. Kept as given, for the handler. Whether a picked edge or face
-/// gives a line, or a name names an axis, is checked by the handler, which has the design.
+/// The line `construct.plane.at_angle` turns about, as `features::axis_line_exprs` reads it: an
+/// edge or face of the model (as `construct::model_axis_param` reads it), else X, Y, Z, a
+/// construction axis's name or `{origin?, dir}`, whose origin may be length expressions. Kept as
+/// given, for the handler. Whether a picked edge or face gives a line, a name names an axis, or an
+/// origin's expressions evaluate, is checked by the handler, which has the design.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AxisLine(pub Value);
 
@@ -1441,6 +1532,15 @@ impl<'de> Deserialize<'de> for AxisLine {
         } else {
             match &v {
                 Value::String(_) => None,
+                Value::Object(o) if o.contains_key("origin") => {
+                    if serde_json::from_value::<PointExpr3>(o.get("origin").cloned().unwrap_or(Value::Null)).is_err() {
+                        Some(whole("`axis.origin` must be a point [x, y, z] of numbers or length expressions"))
+                    } else if v.get("dir").and_then(params::vec3).and_then(solidcraft_geom::Vec3Geom::normalized).is_none() {
+                        Some(whole("axis needs a non-zero `dir`"))
+                    } else {
+                        None
+                    }
+                }
                 Value::Object(_) => crate::cmd::axis_line_object(&v).err().map(whole),
                 _ => Some(whole("`axis` is required")),
             }
@@ -1458,14 +1558,15 @@ impl JsonSchema for AxisLine {
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         let point = generator.subschema_for::<Point3>();
+        let origin = generator.subschema_for::<PointExpr3>();
         let saved = json!({"required": ["type"], "properties": {"type": {"enum": ["edge", "face"]}}});
         json_schema!({
-            "description": "An axis: X, Y or Z (any case), a construction axis's name (where it is now), {\"origin\"?: [x, y, z] in mm (default: the origin), \"dir\": [x, y, z] that isn't zero}, or a straight or circular edge, or a cylinder, cone or torus face, of a body ({\"edge\": [x, y, z]} or {\"face\": [x, y, z]}, a point on it, or as saved: {\"type\": \"edge\" or \"face\", \"at\", \"name\"?}), whose axis the plane follows as the model changes.",
+            "description": "An axis: X, Y or Z (any case), a construction axis's name (the plane follows it as it moves), {\"origin\"?: [x, y, z] of numbers in mm or length expressions such as \"r - 2 mm\" (default: the origin; the plane follows the expressions as the parameters change), \"dir\": [x, y, z] that isn't zero}, or a straight or circular edge, or a cylinder, cone or torus face, of a body ({\"edge\": [x, y, z]} or {\"face\": [x, y, z]}, a point on it, or as saved: {\"type\": \"edge\" or \"face\", \"at\", \"name\"?}), whose axis the plane follows as the model changes.",
             "anyOf": [
                 {"type": "string"},
                 {
                     "type": "object",
-                    "properties": {"origin": point, "dir": point},
+                    "properties": {"origin": origin, "dir": point},
                     "required": ["dir"],
                     "not": {"anyOf": [{"required": ["edge"]}, {"required": ["face"]}, saved]}
                 },
@@ -1477,24 +1578,15 @@ impl JsonSchema for AxisLine {
     }
 }
 
-/// Circular Pattern's `axis`, as `features::pattern_axis` reads it: an [`AxisLine`], except that
-/// the coordinates of `{origin, dir}`'s origin may be expressions. Kept as given, for the handler.
+/// Circular Pattern's `axis`, as `features::axis_line_exprs` reads it: an [`AxisLine`], under its
+/// own name so the commands that build an axis from a pick do not take it for one. Kept as given,
+/// for the handler.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PatternAxis(pub Value);
 
 impl<'de> Deserialize<'de> for PatternAxis {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let v = Value::deserialize(d)?;
-        let Some(origin) = v.get("origin").filter(|_| v.is_object() && !crate::cmd::is_model_axis(&v)) else {
-            return AxisLine::deserialize(v).map(|axis| PatternAxis(axis.0)).map_err(D::Error::custom);
-        };
-        if serde_json::from_value::<PointExpr3>(origin.clone()).is_err() {
-            return Err(D::Error::custom(whole("`axis.origin` must be a point [x, y, z] of numbers or length expressions")));
-        }
-        if v.get("dir").and_then(params::vec3).and_then(solidcraft_geom::Vec3Geom::normalized).is_none() {
-            return Err(D::Error::custom(whole("axis needs a non-zero `dir`")));
-        }
-        Ok(PatternAxis(v))
+        AxisLine::deserialize(d).map(|axis| PatternAxis(axis.0))
     }
 }
 
@@ -1503,13 +1595,7 @@ impl JsonSchema for PatternAxis {
         "PatternAxis".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        let origin = generator.subschema_for::<PointExpr3>();
-        let mut schema = AxisLine::json_schema(generator);
-        let slot = schema.as_object_mut().and_then(|o| o.get_mut("anyOf")).and_then(|forms| forms.pointer_mut("/1/properties/origin"));
-        if let Some(slot) = slot {
-            *slot = json!(origin);
-        }
-        schema
+        AxisLine::json_schema(generator)
     }
 }
 
@@ -1744,4 +1830,10 @@ pub struct FeatureCommon {
 pub fn feature_common<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D) -> Result<T, D::Error> {
     let v = Value::deserialize(d)?;
     serde_path_to_error::deserialize(&v).map_err(|e| D::Error::custom(super::check::located(&e)))
+}
+
+/// Deserializes any flattened part of a contract as [`feature_common`] does `FeatureCommon`:
+/// its problems name their keys as the parent's own would.
+pub fn flattened<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D) -> Result<T, D::Error> {
+    feature_common(d)
 }

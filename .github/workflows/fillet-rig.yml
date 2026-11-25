@@ -48,7 +48,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: fillet-rig-${{ github.ref }}
+  # A re-run (attempt 2 or later, often of an older commit) gets a group of its own, so it never cancels the live run for the PR's current head.
+  group: fillet-rig-${{ github.ref }}${{ github.run_attempt > 1 && format('-rerun-{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -68,9 +69,10 @@ jobs:
       SCCACHE_CACHE_SIZE: 10G
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
       # Only main and develop commit the cache; pull requests and forks mount a clone and never
       # write back.
       - name: Mount the compiler cache

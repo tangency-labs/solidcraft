@@ -94,12 +94,58 @@ pub(crate) fn body_from_smlib_ordered(brep: &solidcraft_smlib::Brep) -> Result<(
     Ok((Body::from_smlib_record(record)?, Some(order)))
 }
 
-/// `body` in SMLib, with where each of SMLib's faces and edges is in the body's face and edge
-/// order: SMLib's export of the imported body, checked to number every face, edge and vertex as
-/// the body's record does. `None` where it does not.
+/// A copy of the body's trusted record import, with its face and edge numbering.
+/// The import writes faces and edges in record order. MakeTopologyFromData appends them in
+/// that order with the healer off, and SmApiBrepCopy walks and appends those same lists.
+/// A complete copy therefore has identity numbering, including when a canonical *export*
+/// would visit edges in another order. Exporting just to number it builds missing UV trims.
 pub(crate) fn smlib_body_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)> {
     let brep = smlib_body(body)?;
-    Ok((brep.try_clone().map_err(|e| KernelError::smlib("SMLib", e))?, numbering(body.record(), &brep)))
+    let record = body.record();
+    if brep.counts().ok() == Some([record.faces.len(), record.edges.len(), record.vertices.len()]) {
+        return Ok((brep, Some(solidcraft_smlib::history::Order::default())));
+    }
+    // Keep the operand separate from the export that checks an unexpected copy's numbering:
+    // filling in its trims can raise local tolerances.
+    Ok((brep.try_clone().map_err(|e| KernelError::smlib("SMLib", e))?, numbering(record, &brep)))
+}
+
+/// `body`'s form in SMLib itself, shared, not a copy, with its numbering as
+/// [`smlib_body_ordered`] gives it: for a boolean or a union, which tag their operands
+/// ([`solidcraft_smlib::Brep::boolean_tagged`]: tagging reads the body and makes the copy the
+/// operation consumes) and nothing else. Their operand was a copy of a copy of the body's form,
+/// and the tagged copy was copied again: four copies of a body of many faces for each operand of
+/// each boolean (solidcore#3359). Nothing may check or change the form returned: a check (and an
+/// export) edits the body it is given, so the numbering's export is of a copy of its own, as
+/// [`smlib_body_ordered`]'s is, and an operand a failed boolean checks is a copy too.
+pub(crate) fn smlib_operand_ordered(body: &Body) -> Result<(std::sync::Arc<solidcraft_smlib::Brep>, Option<solidcraft_smlib::history::Order>)> {
+    let brep = body.smlib()?;
+    let _span = solidcraft_profile::span("kernel", "smlib_body");
+    let probe = brep.try_clone().map_err(|e| KernelError::smlib("SMLib", e))?;
+    let order = numbering(body.record(), &probe);
+    Ok((brep, order))
+}
+
+/// `body` in SMLib as a boolean's operand with the solids it keeps apart where they touch along
+/// an edge sharing that edge again. Its numbering comes from the export, which maps each shared
+/// edge to its record pieces. The record keeps one copy of such an edge and its vertices per
+/// solid; SMLib gets them shared, as its own boolean made them (`solidcraft_smlib::Brep::from_record_touching`). As copies, a third
+/// body's one edge or vertex there could not be related to both, and the boolean failed
+/// (#14419). `None` where the record has no such copies, or SMLib refuses them shared (logged):
+/// [`smlib_body_ordered`] is then the operand.
+pub(crate) fn smlib_shared_operand_ordered(body: &Body) -> Result<Option<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)>> {
+    body.require_brep("a boolean")?;
+    match solidcraft_smlib::Brep::from_record_touching(body.record(), true) {
+        Ok(Some(brep)) => {
+            let order = numbering(body.record(), &brep);
+            Ok(Some((brep, order)))
+        }
+        Ok(None) => Ok(None),
+        Err(e) => {
+            log::debug!(target: "smlib", "touching solids not shared for a boolean: {e}");
+            Ok(None)
+        }
+    }
 }
 
 /// `record` in SMLib, imported as given (SMLib's own form; a record it refuses is an error that

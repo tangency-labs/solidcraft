@@ -11,6 +11,13 @@ thread_local! {
     pub(crate) static CHAIN_CANDIDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// The angle, in radians (2°), a tangent chain continues through: the most two edges at a shared
+/// vertex, or the two faces along an edge, may turn from tangent and still be one chain. The one
+/// rule for fillet, chamfer, shell and the edge selection that picks a chain, so a near-smooth
+/// outline (lines and arcs meeting a degree or so off tangent) chains whole. Drawing and hiding
+/// edges is a different question with its own, tighter angle (`smooth_edges::ANGLE`, half a degree).
+pub const TANGENT_CHAIN: f64 = 2.0 * std::f64::consts::PI / 180.0;
+
 /// Axis-aligned bounding box.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Aabb3 {
@@ -323,6 +330,10 @@ pub trait MeshGeom {
     /// (angle between the end tangents below `max_angle`), including `e` itself.
     fn tangent_chain(&self, e: usize, max_angle: f64) -> Vec<usize>;
 
+    /// Whether the two faces at edge `i` meet tangentially (within `max_angle` radians) there: the
+    /// join [`MeshGeom::tangent_chain`] passes through. A crease the model protects is never one.
+    fn tangent_join(&self, i: usize, max_angle: f64) -> bool;
+
     fn bounds(&self) -> Aabb3;
 
     /// Signed volume (divergence theorem), surface area and volume centroid.
@@ -567,13 +578,26 @@ impl MeshGeom for Mesh {
         let radius = center.dist(a);
         let normal = n.normalized().unwrap_or(Vec3::ZERO);
         let tol = (radius * 1e-6).max(1e-9);
-        let mut rim = self.tangent_chain(edge, 2f64.to_radians());
+        let mut rim = self.tangent_chain(edge, TANGENT_CHAIN);
         if rim.len() < 2 || !radius.is_finite() {
             return single;
         }
-        // All samples must lie on this circle, and every end must join exactly one other
-        // piece. Open arcs, ellipses, and branching tangent chains stay separate.
+        // The two surfaces an edge separates, seam-split pieces counted as one surface.
+        let sides = |i: usize| {
+            self.edge_faces.get(i).map(|fs| {
+                let mut s: Vec<Vec<usize>> = fs.iter().map(|&f| self.surface_patch(f as usize)).collect();
+                s.sort_unstable();
+                s
+            })
+        };
+        let first = sides(edge);
+        // All samples must lie on this circle, every end must join exactly one other piece,
+        // and every piece must separate the same two surfaces. Open arcs, ellipses, branching
+        // tangent chains, and a circle shared by two different face pairs stay separate.
         for &i in &rim {
+            if sides(i) != first {
+                return single;
+            }
             let Some(points) = self.edges.get(i) else { return single };
             if points.iter().any(|q| !q.is_finite() || (q.dist(center) - radius).abs() > tol || (*q - center).dot(normal).abs() > tol) {
                 return single;
@@ -594,6 +618,11 @@ impl MeshGeom for Mesh {
         }
         rim.sort_unstable();
         rim
+    }
+    /// Whether the two faces at edge `i` meet tangentially (within `max_angle` radians) there: the
+    /// join [`MeshGeom::tangent_chain`] passes through. A crease the model protects is never one.
+    fn tangent_join(&self, i: usize, max_angle: f64) -> bool {
+        smooth_seam(self, i, max_angle.cos())
     }
 
     fn tangent_chain(&self, e: usize, max_angle: f64) -> Vec<usize> {

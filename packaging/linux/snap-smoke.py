@@ -104,7 +104,7 @@ def run_backend(backend, out):
     if not runtime.is_dir():
         raise RuntimeError(f"{runtime} is missing: snaps expect the login session's runtime directory")
     env = dict(os.environ, XDG_RUNTIME_DIR=str(runtime), SOLIDCRAFT_CONTROL_TOKEN=TOKEN)
-    for name in ("WAYLAND_DISPLAY", "WAYLAND_SOCKET", "DISPLAY", "SOLIDCRAFT_WAYLAND", "SOLVECRAFT_WAYLAND"):
+    for name in ("WAYLAND_DISPLAY", "WAYLAND_SOCKET", "DISPLAY", "SOLIDCRAFT_WAYLAND"):
         env.pop(name, None)
     # The snap can write to the (non-hidden) home folder, not to the host's /tmp.
     work = Path(tempfile.mkdtemp(prefix="solidcraft-snap-smoke-", dir=Path.home()))

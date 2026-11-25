@@ -127,6 +127,9 @@ fn status_of(e: &SolidError) -> Result<f64, HarnessError> {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(1007.0),
         SolidError::Upstream { code, .. } => Ok(f64::from(*code)),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            Ok(f64::from(solidcore::error::upstream_status(e).unwrap_or(-1)))
+        }
         other => Err(harness(format!("unexpected rust error: {other}"))),
     }
 }

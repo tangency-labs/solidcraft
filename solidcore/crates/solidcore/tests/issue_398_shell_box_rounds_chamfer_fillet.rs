@@ -36,6 +36,7 @@ use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::{Brep, EdgeId, Kernel};
 
 /// The closed-form volume of the part (`cavity_top: None`) or of its shell with the cavity
@@ -237,15 +238,14 @@ fn issue_398_closed_shell() {
     ));
 }
 
-/// The open-top shell with `shell_edges_on_analytics_exact` (WR-545) on as well, as the
-/// SolidCraft rig runs shell/1525: `make_edges_on_analytics_exact` intersects the result's
+/// The open-top shell, as the SolidCraft rig runs shell/1525, checked on the exact edges the
+/// shell now always ends with (WR-545): `make_edges_on_analytics_exact` intersects the result's
 /// face-owned surfaces through its face services (the fork reaches each face through
 /// `SmSurface::GetFace`); without them it failed with `Unported(topology.face_p2)`. The
 /// fork (tangency-labs/smlib 68fb9162) gives 51 faces, V = 13701.7343.
 #[test]
 fn issue_398_open_top_shell_with_edges_on_analytics_exact() {
     let (mut k, b) = part_with(true);
-    k.fixes.shell_edges_on_analytics_exact = true;
     let mut got = shell_of(&mut k, b, true).unwrap();
     assert!(brep_is_manifold_solid(&got).unwrap());
     let v = volume(&k, &mut got).unwrap();
@@ -256,13 +256,19 @@ fn issue_398_open_top_shell_with_edges_on_analytics_exact() {
     assert_eq!(got.face_list().len(), 51);
     let want = closed_form(Some(30.0));
     assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}");
-    // 1.9e-10 above the closed form since #2890 (precise properties integrate from the
+    // It was 1.9e-10 above the closed form from #2890 (precise properties integrate from the
     // trims' base; 13701.73421803366, 2.4e-9 above, before): the offset's face extensions
     // are exact (the source bit for bit, no least squares fit or knot removal moving a
     // face's own part); it was 13701.73449509504 (2.3e-8 above) on the fitted extensions,
-    // 13701.735330849975 (8.4e-8 above) with the flag off
-    let pinned = 13701.734187900483;
-    assert!((v - pinned).abs() <= 1e-9 * pinned, "{v} vs {pinned}");
+    // 13701.735330849975 (8.4e-8 above) with the flag off. With the rims' chamfer stored as
+    // its cone (WR-572, unconditional since its flag was retired) the offset corner cones
+    // meet the cavity floor in their exact circles (tangency-labs/solidcraft#16587, asserted
+    // by `issue_398_open_top_shell_floor_meets_the_corner_cones_in_exact_circles`), so the
+    // body is the closed form's: that test integrates it to within 1e-10 of the closed form at
+    // accuracy 1e-12. At this test's accuracy (1e-6) it reads 13701.734183222, 1.5e-10 below
+    // (integration error). Pinned to the closed form with the earlier pin's 1e-9 band, not to
+    // a measurement.
+    assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
 }
 
 /// Narrows the open-top failure: the shell after each step of the recipe, open at the
@@ -319,4 +325,78 @@ fn issue_398_by_step() {
             );
         }
     }
+}
+
+/// tangency-labs/solidcraft#16587: with the base chamfer's corners stored as cones, the
+/// open-top shell's floor (z = 2) meets each corner's offset cone (45°, apex 2√2 − 5 below the
+/// floor on the corner's axis) in its exact circle: z = 2, radius 7 − 2√2 about the corner's
+/// axis. So the floor's area is the closed form `A(3 + 2√2)` (the rounded square at inset
+/// 3 + 2√2) and the shell's volume the closed form, both integrated to 1e-12.
+#[test]
+fn issue_398_open_top_shell_floor_meets_the_corner_cones_in_exact_circles() {
+    use solidcore::mass::integrator::properties::{brep_volume, face_area, PropertyAttributes};
+    use solidcore::topology::topology_traverser::face_edges;
+    use std::f64::consts::{PI, SQRT_2};
+    let mut k = Kernel::default();
+    k.fixes.fillet_chamfer_cone_on_arc = true;
+    let b = part(&mut k);
+    let mut got = shell_of(&mut k, b, true).unwrap();
+    assert!(brep_is_manifold_solid(&got).unwrap());
+    let floor = planar_faces_at(&k, &got, 2, 2.0);
+    assert_eq!(floor.len(), 1, "the floor");
+    let radius = 7.0 - 2.0 * SQRT_2;
+    let mut circles = 0;
+    for e in face_edges(&got, floor[0]).unwrap() {
+        let edge = got.edges().get(e).unwrap();
+        let c = edge.curve.as_ref().unwrap();
+        let (t0, t1) = (edge.interval.min(), edge.interval.max());
+        let at = |i: u32| {
+            c.evaluate_point(&k, t0 + (t1 - t0) * f64::from(i) / 32.0)
+                .unwrap()
+        };
+        let mid = at(16);
+        // The corner's axis, where the edge's middle is past the walls' straight run both ways.
+        let axis = |x: f64| {
+            if x < 10.0 - 1e-3 {
+                Some(10.0)
+            } else if x > 40.0 + 1e-3 {
+                Some(40.0)
+            } else {
+                None
+            }
+        };
+        let (Some(ax), Some(ay)) = (axis(mid.x), axis(mid.y)) else {
+            continue;
+        };
+        circles += 1;
+        for i in 0..=32 {
+            let p = at(i);
+            let off = (p.x - ax).hypot(p.y - ay) - radius;
+            assert!(
+                (p.z - 2.0).abs() <= 1e-11 && off.abs() <= 1e-11,
+                "edge {e:?} at {p:?}: z - 2 = {:e}, r off {off:e}",
+                p.z - 2.0
+            );
+        }
+    }
+    assert_eq!(circles, 4, "one circle at each corner");
+    let d = 3.0 + 2.0 * SQRT_2;
+    let floor_area = (50.0 - 2.0 * d).powi(2) - (4.0 - PI) * (10.0 - d).powi(2);
+    let area = face_area(&k, &mut got, floor[0], 1e-12).unwrap();
+    assert!(
+        (area - floor_area).abs() <= 1e-10 * floor_area,
+        "{area} vs {floor_area}"
+    );
+    let store = solidcore::geom::attribute::AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
+    };
+    let v = brep_volume(&k, &mut got, 1e-12, &attrs).unwrap();
+    let want = closed_form(Some(30.0));
+    assert!((v - want).abs() <= 1e-10 * want, "{v} vs {want}");
+    // The body checks clean at SM_LEVEL_2: no UV trim outside its surface's domain, no
+    // vertex off an edge it bounds (moved or not).
+    let check = check_brep(&mut k, &mut got, CheckLevel::Level2).unwrap();
+    assert!(check.is_valid(), "Level2 check: {:?}", check.lines());
 }

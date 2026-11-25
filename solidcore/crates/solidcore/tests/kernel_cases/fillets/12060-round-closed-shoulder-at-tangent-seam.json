@@ -1,0 +1,77 @@
+{
+  "case": "12060-round-closed-shoulder-at-tangent-seam",
+  "area": "fillets",
+  "sources": [
+    "tangency-labs/solidcraft#12060"
+  ],
+  "what": "A cylindrical boss of radius 3 mm and height 17 mm sits on a 12 × 12 × 9 mm plate spanning −9 ≤ x ≤ 3. The 2 mm round follows one closed edge whose seam is on the tangent plane x = 3. The round ends flush with that plane.",
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  3.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  3.0,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "index": 13
+            }
+          ],
+          "points": [
+            [
+              2.1213203435596424,
+              2.1213203435596424,
+              0.0
+            ]
+          ],
+          "tolerance": 1e-09
+        },
+        "kind": "round",
+        "sizes": [
+          2.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "records": "12060-round-closed-shoulder-at-tangent-seam.bodies.json.gz",
+  "result": [
+    {
+      "made": "b2"
+    }
+  ],
+  "expected": {
+    "body_count": 1,
+    "method": "With R = 3 mm and d = 2 mm, the exact circular section has radius r = R + d − d sin θ at z = d(1 − cos θ), θ from 0 to π/2. Integrate the area with dz = d sin θ dθ. The surviving disk area is the mean of the complete disk and the symmetric strip |x| ≤ R, of area 2(R sqrt(r²−R²) + r² asin(R/r)). Add the integral of its excess over πR² to 12·12·9 + 17πR² mm³.",
+    "source": "analytic",
+    "tolerance": {
+      "abs_mm": 1e-05
+    },
+    "volume_mm3": 1792.4314959395
+  },
+  "expressible": true,
+  "operation_expressible": true
+}

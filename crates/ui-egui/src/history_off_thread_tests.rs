@@ -28,7 +28,15 @@ fn block_boss_hole() -> Harness {
 /// Frames until nothing computes or waits (a few seconds at most).
 fn until_settled(h: &mut Harness) {
     for _ in 0..500 {
-        if h.app.deferred.is_none() && h.app.deferred_queue.is_empty() && h.app.delete_check.is_none() && h.app.pending_feature_edit.is_none() {
+        // Finishing a sketch for the next edit computes off the window thread too: the edit waits
+        // for that sketch refresh (`start_after_roll`), as the control channel's `pending` does.
+        if h.app.deferred.is_none()
+            && h.app.deferred_queue.is_empty()
+            && h.app.delete_check.is_none()
+            && h.app.pending_feature_edit.is_none()
+            && h.app.start_after_roll.is_none()
+            && !h.app.sketch_refreshes.contains_key(&h.app.session.uid)
+        {
             break;
         }
         h.frames(1);
@@ -388,6 +396,13 @@ fn switching_from_a_sketch_to_a_feature_restores_partial_markers_and_sketch_chan
         let history = (h.app.session.undo.len(), h.app.session.redo.len());
         let changed = h.app.session.doc.sketch(sketches[0]).unwrap().clone();
         until_settled(&mut h);
+        for _ in 0..500 {
+            if h.app.dialog.is_some() {
+                break;
+            }
+            h.frames(1);
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert!(h.app.dialog.is_some());
         h.app.session.selection = vec![solidcraft_engine::Sel::Axis { name: "X".into() }];
         *h.app.session.model.cache.lock().unwrap() = Default::default();
@@ -399,6 +414,30 @@ fn switching_from_a_sketch_to_a_feature_restores_partial_markers_and_sketch_chan
         assert_eq!(h.app.session.doc.sketch(sketches[0]).unwrap(), &changed);
         assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
         assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Axis { name: "X".into() }]);
+    }
+}
+
+/// An editor that is still opening when it is cancelled leaves the finished sketch's refresh to
+/// run afterwards: the model shows the sketch as finished, not as it was before the edit.
+#[test]
+fn a_feature_editor_cancelled_while_opening_still_refreshes_the_finished_sketch() {
+    for when in ["opening", "open"] {
+        let (mut h, sketches) = sketches_with_later_bodies();
+        let feature = h.app.session.doc.features[3].id;
+        h.app.edit_sketch(sketches[0]);
+        h.app.run("sketch.line", json!({"points": [[0, 2], [10, 2]]})).unwrap();
+        h.app.edit_feature(feature);
+        if when == "open" {
+            until_settled(&mut h);
+            assert!(h.app.dialog.is_some());
+        }
+        crate::dialogs::cancel(&mut h.app);
+        until_settled(&mut h);
+        assert!(h.app.dialog.is_none(), "{when}");
+        assert!(!h.app.session.needs_sketch_finish_evaluation(), "{when}: the finished sketch was evaluated");
+        let drawn = h.app.session.doc.sketch(sketches[0]).unwrap().curves.len();
+        let shown = h.app.session.model.state().sketch(sketches[0]).unwrap().sketch.curves.len();
+        assert_eq!(shown, drawn, "{when}: the model shows the line the sketch finished with");
     }
 }
 
@@ -647,6 +686,51 @@ fn an_agent_design_change_computes_off_the_window_thread() {
     assert!((v - (12500.0 - holes)).abs() < 1.0, "{v}");
 }
 
+/// A continuous member keeps the worker's sweep instead of computing it again on the window thread.
+#[test]
+fn an_agent_continuous_frame_member_reuses_the_worker_result() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Chassis"})).unwrap();
+    let mut lines = Vec::new();
+    for (command, params) in [
+        ("sketch.line", json!({"points": [[100, -200], [100, 0]]})),
+        ("sketch.arc.three_point", json!({"start": [100, 0], "through": [100.0 / 2f64.sqrt(), 100.0 / 2f64.sqrt()], "end": [0, 100]})),
+        ("sketch.line", json!({"points": [[0, 100], [-300, 100]]})),
+    ] {
+        let result = h.app.run(command, params).unwrap();
+        lines.extend(result["created"]["curves"].as_array().unwrap().iter().cloned());
+    }
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h.app.preferences.agent_off_thread = true;
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.control_rx = Some(rx);
+    let before = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    let member = ask(
+        &tx,
+        "engine.execute",
+        json!({"command": "frame.member", "params": {
+            "sketch": "Chassis", "lines": lines, "continuous": true,
+            "profile": {"kind": "round_tube", "diameter": 20, "wall": 2}, "body_name": "Hoop"
+        }}),
+    );
+    let view = ask(&tx, "ui.inspect", json!({}));
+    h.frames(1);
+    assert!(view.try_recv().is_ok_and(|r| r["ok"] == true), "the window answers meanwhile");
+    if h.app.agent_computing().is_some() {
+        assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
+    }
+    let reply = reply_to(&mut h, &member);
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(h.app.session.doc.features.len(), before.features.len() + 1);
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.model.last_recomputed, 0, "the window reuses the computed member");
+    assert_eq!(h.app.session.model.state().bodies.len(), 1);
+    assert_eq!(h.app.session.model.state().bodies[0].name, "Hoop");
+}
+
 /// A person's edit while the agent's command computes goes first; the agent's command is
 /// computed again for the design as it is and lands after it, never in between.
 #[test]
@@ -713,7 +797,7 @@ fn a_design_closed_while_its_history_computes_holds_up_nothing() {
     let (job, late) = crate::deferred::Deferred::never_done("timeline.roll_to", json!({"position": 1}), h.app.session.revision);
     h.app.deferred = Some(job);
     h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 2}), 0));
-    h.app.start_after_roll = Some(("solid.extrude".into(), 1));
+    h.app.start_after_roll = Some(("solid.extrude".into(), Some(1)));
     crate::documents::close(&mut h.app, 0, true);
     assert!(h.app.computing_since().is_none(), "the blank design has nothing computing");
     assert!(h.app.deferred.is_none() && h.app.deferred_queue.is_empty() && h.app.start_after_roll.is_none());
@@ -1229,6 +1313,24 @@ fn a_confirmed_delete_runs_with_what_its_check_kept() {
     assert_eq!(kept.len(), built, "the delete built nothing the check had not kept");
 }
 
+/// A check that is not waited for leaves its reply for a later frame, even one that is already
+/// in: the frame finds it there. Read at once and not used, the reply was gone when the frame
+/// looked, and its delete was dropped as one that could not be checked (on a busy machine the
+/// worker is done before the window thread goes on). With a wait, a reply that is in is taken.
+#[test]
+fn a_reply_already_in_is_left_for_the_frame_when_the_check_is_not_waited_for() {
+    let (tx, done) = std::sync::mpsc::channel();
+    tx.send("replies").unwrap();
+    drop(tx);
+    assert_eq!(crate::deferred::reply_within(&done, Duration::ZERO), None, "not taken without a wait");
+    assert_eq!(done.try_recv(), Ok("replies"), "the frame finds the reply");
+    let (tx, done) = std::sync::mpsc::channel();
+    tx.send("replies").unwrap();
+    assert_eq!(crate::deferred::reply_within(&done, Duration::from_millis(150)), Some("replies"), "taken within a wait");
+    let (_tx, done) = std::sync::mpsc::channel::<&str>();
+    assert_eq!(crate::deferred::reply_within(&done, Duration::from_millis(1)), None, "none in time: left computing");
+}
+
 /// A design changed while its delete is checked is checked again before anything is deleted, and
 /// a second Delete meanwhile is left out.
 #[test]
@@ -1329,7 +1431,7 @@ fn a_computing_batch_is_a_row_of_the_operations_panel_that_stops_it() {
     assert_eq!(reply_to(&mut h, &single)["ok"], true);
     h.frames(1);
     let finished = crate::operations::control(&mut h.app, &json!({})).unwrap()["finished"].clone();
-    if h.app.operations.rows(crate::now_ms()).any(|(r, _)| r.key == "agent") || finished[0]["key"] == "agent" {
+    if h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).any(|(r, _)| r.key == "agent") || finished[0]["key"] == "agent" {
         assert_eq!(finished[0]["outcome"], "done", "{finished}");
     }
 }
@@ -1375,4 +1477,1046 @@ fn a_batch_the_cursor_acts_out_computes_nothing_on_the_window_thread() {
         assert_eq!(h.app.session.doc.features.len(), features + 2 + usize::from(edit), "edit {edit}");
         assert_eq!(h.app.session.model.recomputed, recomputed, "edit {edit}: nothing computed on the window thread");
     }
+}
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn plugin_package_for_worker_test(tag: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("solidcraft-plugin-worker-{}-{tag}", std::process::id()));
+    let dir = root.join("sample");
+    std::fs::create_dir_all(&dir).unwrap();
+    let (package, version) = solidcraft_engine::plugin::API.rsplit_once('@').unwrap();
+    let wat = include_str!("plugin_fixture.wat").replace("PLUGIN_PACKAGE", package).replace("PLUGIN_VERSION", version);
+    std::fs::write(dir.join("plugin.wasm"), wat::parse_str(&wat).unwrap()).unwrap();
+    std::fs::write(
+        dir.join("plugin.json"),
+        json!({"id":"sample","name":"Worker sample","version":"1","capabilities":["commands@0.1"],"runtime":{
+        "module":"plugin.wasm","entries":["make"],"commands":[]}})
+        .to_string(),
+    )
+    .unwrap();
+    root
+}
+
+#[test]
+fn design_notifications_coalesce_a_burst_and_preserve_the_latest_token() {
+    let mut session = solidcraft_engine::Session::default();
+    let mut events = crate::plugin_events::State::default();
+    let initial = session.design_token();
+    events.observe(Some(initial), 0.0);
+    session.execute("document.metadata.set", &json!({"key":"description","value":"First"})).unwrap();
+    events.observe(Some(session.design_token()), 0.02);
+    session.execute("document.metadata.set", &json!({"key":"description","value":"Second"})).unwrap();
+    let latest = session.design_token();
+    events.observe(Some(latest.clone()), 0.04);
+    assert!(events.take_due(0.099).is_none());
+    assert_eq!(events.take_due(0.1), Some(Some(latest)));
+    assert!(events.take_due(1.0).is_none(), "one invalidation for the whole burst");
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn linked_file_notifications_retry_and_deliver_without_a_design_edit() {
+    let mut h = Harness::new();
+    let root = plugin_package_for_worker_test("link-events");
+    let dir = root.join("sample");
+    let (package, version) = solidcraft_engine::plugin::API.rsplit_once('@').unwrap();
+    let wat = include_str!("plugin_fixture.wat").replace("PLUGIN_PACKAGE", package).replace("PLUGIN_VERSION", version).replace(
+        "i32.const 0\n    )\n    (data",
+        "i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store i32.const 0\n    )\n    (data",
+    );
+    std::fs::write(dir.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
+    std::fs::write(
+        dir.join("plugin.json"),
+        json!({
+            "id":"sample","name":"Worker sample","version":"1","capabilities":["commands@0.1","design@0.1"],
+            "runtime":{"module":"plugin.wasm","entries":[{"name":"design-refresh","effect":"read"},{"name":"refresh","effect":"read"}],"commands":[],
+                "listeners":[{"entry":"design-refresh","on":["design.changed"]},{"entry":"refresh","on":["design.links_changed"]}],
+                "permissions":{"files":[{"name":"work","read":true,"write":false}]}}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let inspected = h.app.session.execute("plugin.inspect", &json!({"path":dir})).unwrap();
+    h.app.preferences.plugin_grants.insert(
+        "sample".into(),
+        solidcraft_engine::plugin::Grants {
+            package_hash: Some(inspected["approval"].as_str().unwrap().into()),
+            folders: vec![solidcraft_engine::plugin::FileGrant { name: "work".into(), folder: root.clone(), read: true, write: false }],
+            ..Default::default()
+        },
+    );
+    let source = root.join("part.sc");
+    let mut part = solidcraft_engine::Session::default();
+    part.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+    part.execute("file.save", &json!({"path":source})).unwrap();
+    let inserted = h.app.session.execute("component.insert_design", &json!({"path":source,"name":"Bracket"})).unwrap();
+    let component = inserted["component"].as_u64().unwrap();
+    h.app.now = 1.0;
+    crate::plugin_events::observe(&mut h.app);
+    h.app.now = 1.11;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert!(!h.app.session.plugin_state.listener_data.contains_key("sample.refresh"), "links-only listeners skip design-only invalidation");
+    let token = h.app.session.design_token();
+    part.execute("document.metadata.set", &json!({"key":"description","value":"New source bytes"})).unwrap();
+    part.execute("file.save", &json!({})).unwrap();
+    h.app.session.execute("component.links", &json!({})).unwrap();
+    h.app.now = 2.0;
+    crate::plugin_events::observe(&mut h.app);
+    h.app.now = 2.11;
+    crate::plugin_events::tick_with_spawner_for_test(&mut h.app, &h.ctx, |_, _| None);
+    h.app.now = 2.22;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert_eq!(h.app.session.design_token(), token);
+    assert_eq!(
+        h.app.session.plugin_state.listener_data["sample.refresh"],
+        json!({"design":token,"links":[{"component":component,"name":"Bracket","path":source,"read":false}]})
+    );
+    assert!(h.app.session.plugin_state.listener_failures.is_empty(), "{:?}", h.app.session.plugin_state.listener_failures);
+    h.app.session.execute("component.links", &json!({})).unwrap();
+    h.app.now = 3.0;
+    crate::plugin_events::observe(&mut h.app);
+    assert!(h.app.plugins.events.take_due(3.11).is_none(), "the same observed file is not delivered again");
+    let cached = h.app.session.plugin_state.listener_data["sample.refresh"].clone();
+    h.app.session.execute("document.metadata.set", &json!({"key":"description","value":"Unrelated edit"})).unwrap();
+    h.app.now = 4.0;
+    crate::plugin_events::observe(&mut h.app);
+    h.app.now = 4.11;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert_eq!(h.app.session.plugin_state.listener_data["sample.refresh"], cached, "uninvoked listeners retain their output");
+    part.execute("document.metadata.set", &json!({"key":"description","value":"Another source change"})).unwrap();
+    part.execute("file.save", &json!({})).unwrap();
+    h.app.session.execute("component.links", &json!({})).unwrap();
+    h.app.now = 5.0;
+    crate::plugin_events::observe(&mut h.app);
+    h.app.now = 5.11;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    h.app.session.execute("document.metadata.set", &json!({"key":"description","value":"Edit while the links listener runs"})).unwrap();
+    let latest = h.app.session.design_token();
+    h.app.now = 5.12;
+    crate::plugin_events::observe(&mut h.app);
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert_eq!(h.app.session.plugin_state.listener_data["sample.refresh"], cached, "superseded output is not published");
+    h.app.now = 5.23;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert_eq!(
+        h.app.session.plugin_state.listener_data["sample.refresh"],
+        json!({"design":latest,"links":[{"component":component,"name":"Bracket","path":source,"read":false}]}),
+        "a links-only listener retries at the latest design token"
+    );
+    assert_eq!(
+        h.app.session.plugin_state.listener_data["sample.design-refresh"],
+        json!({"design":latest}),
+        "merging the links retry preserves the pending design invalidation"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn design_notifications_retry_a_failed_worker_spawn_after_the_interval() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let ctx = egui::Context::default();
+    crate::plugin_events::observe(&mut app);
+    let token = app.session.design_token();
+    app.now = 0.11;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |_, event| {
+        assert_eq!(event, Some(token.clone()));
+        None
+    });
+    assert!(app.plugins.events.take_due(0.209).is_none());
+    assert_eq!(app.plugins.events.take_due(0.211), Some(Some(token)));
+    assert!(app.plugins.events.take_due(1.0).is_none(), "the failed spawn retains one invalidation");
+}
+
+#[test]
+fn design_notifications_retry_a_disconnected_worker_after_the_interval() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let ctx = egui::Context::default();
+    crate::plugin_events::observe(&mut app);
+    let token = app.session.design_token();
+    app.now = 0.11;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |_, _| {
+        let (send, done) = std::sync::mpsc::channel();
+        drop(send);
+        Some(done)
+    });
+    app.now = 0.12;
+    let mut spawned = false;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |_, _| {
+        spawned = true;
+        None
+    });
+    assert!(!spawned, "a disconnected worker waits before retrying");
+    assert!(app.plugins.events.take_due(0.219).is_none());
+    assert_eq!(app.plugins.events.take_due(0.221), Some(Some(token)));
+}
+
+#[test]
+fn design_notifications_preserve_a_newer_pending_token_when_a_worker_disconnects() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let ctx = egui::Context::default();
+    crate::plugin_events::observe(&mut app);
+    let initial = app.session.design_token();
+    app.now = 0.11;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |_, _| {
+        let (send, done) = std::sync::mpsc::channel();
+        drop(send);
+        Some(done)
+    });
+    app.now = 0.12;
+    app.run("document.metadata.set", json!({"key":"description","value":"Newer state"})).unwrap();
+    let latest = app.session.design_token();
+    assert_ne!(latest, initial);
+    app.now = 0.15;
+    let mut spawned = false;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |_, _| {
+        spawned = true;
+        None
+    });
+    assert!(!spawned);
+    assert!(app.plugins.events.take_due(0.219).is_none());
+    assert_eq!(app.plugins.events.take_due(0.221), Some(Some(latest)), "a newer invalidation keeps its token and deadline");
+}
+
+#[test]
+fn design_notifications_fire_after_visibility_undo_redo_but_not_failed_history_actions() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    crate::plugin_events::observe(&mut app);
+    app.plugins.events.take_due(0.11);
+    let token = app.session.design_token();
+    let initially_hidden = app.session.visibility.hidden_origin.iter().any(|name| name == "XY");
+    app.now = 1.0;
+    app.run("browser.visibility", json!({"items":["XY"],"visible":initially_hidden})).unwrap();
+    assert_eq!(app.session.visibility.hidden_origin.iter().any(|name| name == "XY"), !initially_hidden);
+    assert_eq!(app.session.design_token(), token, "display history keeps the design token");
+    assert!(app.plugins.events.take_due(1.11).is_none());
+    for (command, time, hidden) in [("edit.undo", 2.0, initially_hidden), ("edit.redo", 3.0, !initially_hidden)] {
+        app.now = time;
+        app.run(command, json!({})).unwrap();
+        assert_eq!(app.session.visibility.hidden_origin.iter().any(|name| name == "XY"), hidden);
+        assert_eq!(app.session.design_token(), token);
+        assert!(app.plugins.events.take_due(time + 0.099).is_none());
+        assert_eq!(app.plugins.events.take_due(time + 0.11), Some(Some(token.clone())), "{command}");
+    }
+    app.now = 4.0;
+    assert!(app.run("edit.redo", json!({})).is_err());
+    assert!(app.plugins.events.take_due(4.11).is_none(), "failed redo emits no invalidation");
+    app.now = 5.0;
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(app.plugins.events.take_due(5.11), Some(Some(token)));
+    app.now = 6.0;
+    assert!(app.run("edit.undo", json!({})).is_err());
+    assert!(app.plugins.events.take_due(6.11).is_none(), "failed undo emits no invalidation");
+}
+
+#[test]
+fn design_notifications_observe_undo_redo_document_switch_and_close() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let mut events = crate::plugin_events::State::default();
+    events.observe(Some(app.session.design_token()), 0.0);
+    events.take_due(0.1);
+    app.session.execute("document.metadata.set", &json!({"key":"description","value":"Edited"})).unwrap();
+    events.observe(Some(app.session.design_token()), 1.0);
+    assert_eq!(events.take_due(1.1), Some(Some(app.session.design_token())));
+    for (command, time) in [("edit.undo", 2.0), ("edit.redo", 3.0)] {
+        app.session.execute(command, &json!({})).unwrap();
+        events.observe(Some(app.session.design_token()), time);
+        assert_eq!(events.take_due(time + 0.11), Some(Some(app.session.design_token())), "{command}");
+    }
+    crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+    events.observe(Some(app.session.design_token()), 4.0);
+    assert_eq!(events.take_due(4.11), Some(Some(app.session.design_token())));
+    let active = app.docs.active;
+    crate::documents::close(&mut app, active, true);
+    events.observe(Some(app.session.design_token()), 5.0);
+    assert_eq!(events.take_due(5.11), Some(Some(app.session.design_token())));
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn design_notifications_fire_when_an_unchanged_design_is_reopened_or_switched() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.now = 0.0;
+    crate::plugin_events::observe(&mut app);
+    let token = app.session.design_token();
+    assert_eq!(app.plugins.events.take_due(0.11), Some(Some(token.clone())));
+    let authored = app.session.doc.to_json();
+    let reopened = solidcraft_engine::Session::opened((*app.session.doc).clone(), None);
+    assert_eq!(reopened.doc.to_json(), authored, "opening preserves the complete authored design");
+    let reopened_token = reopened.design_token();
+    assert_ne!(reopened_token, token);
+    assert_ne!(reopened_token.document_id, token.document_id, "each open has its own session identity");
+    assert_ne!(reopened.uid, app.session.uid);
+    std::sync::Arc::make_mut(&mut app.session.plugin_state.listener_data).insert("sample.refresh".into(), json!({"old":true}));
+    crate::documents::open_tab(&mut app, reopened).unwrap();
+    app.now = 1.0;
+    crate::plugin_events::observe(&mut app);
+    assert!(app.session.plugin_state.listener_data.is_empty(), "the old tab's panel data does not follow it");
+    assert_eq!(app.plugins.events.take_due(1.11), Some(Some(reopened_token)));
+    crate::documents::switch(&mut app, 0);
+    app.now = 2.0;
+    crate::plugin_events::observe(&mut app);
+    assert_eq!(app.session.design_token(), token, "switching back restores the original tab's token");
+    assert_eq!(app.plugins.events.take_due(2.11), Some(Some(token)));
+    // Two switches inside one frame still invalidate once, even though the final context
+    // is exactly the one whose last invalidation has already been delivered.
+    app.now = 3.0;
+    crate::documents::switch(&mut app, 1);
+    crate::documents::switch(&mut app, 0);
+    assert_eq!(app.plugins.events.take_due(3.11), Some(Some(app.session.design_token())));
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn design_notifications_run_on_the_command_worker_and_return_panel_data() {
+    let mut h = Harness::new();
+    let root = plugin_package_for_worker_test("design-events");
+    let dir = root.join("sample");
+    let (package, version) = solidcraft_engine::plugin::API.rsplit_once('@').unwrap();
+    let wat = include_str!("plugin_fixture.wat").replace("PLUGIN_PACKAGE", package).replace("PLUGIN_VERSION", version).replace(
+        "i32.const 0\n    )\n    (data",
+        "i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store i32.const 0\n    )\n    (data",
+    );
+    std::fs::write(dir.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
+    std::fs::write(
+        dir.join("plugin.json"),
+        json!({
+            "id":"sample","name":"Worker sample","version":"1","capabilities":["commands@0.1","design@0.1"],
+            "runtime":{"module":"plugin.wasm","entries":[{"name":"refresh","effect":"read"}],"commands":[],
+                "listeners":[{"entry":"refresh","on":["design.changed"]}]}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let inspected = h.app.session.execute("plugin.inspect", &json!({"path":dir})).unwrap();
+    h.app.session.plugin_state.grants.insert(
+        "sample".into(),
+        solidcraft_engine::plugin::Grants { package_hash: Some(inspected["approval"].as_str().unwrap().into()), ..Default::default() },
+    );
+    h.app.preferences.plugin_grants.clone_from(&h.app.session.plugin_state.grants);
+    h.app.now = 1.0;
+    crate::plugin_events::observe(&mut h.app);
+    h.app.now = 1.11;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    assert!(h.app.session.plugin_state.listener_data.is_empty(), "the window does not run the handler");
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert_eq!(h.app.session.plugin_state.listener_data["sample.refresh"], json!({"design":h.app.session.design_token()}));
+    assert!(h.app.session.plugin_state.listener_failures.is_empty());
+    h.app.session.execute("document.metadata.set", &json!({"key":"description","value":"Changed"})).unwrap();
+    h.app.now = 2.0;
+    crate::plugin_events::observe(&mut h.app);
+    h.app.now = 2.11;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    h.app.preferences.disabled_plugins.insert("sample".into());
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert!(h.app.session.plugin_state.listener_data.is_empty(), "disabled listeners cannot publish a result already in flight");
+    h.app.preferences.disabled_plugins.remove("sample");
+    h.app.session.execute("document.metadata.set", &json!({"key":"description","value":"Changed again"})).unwrap();
+    h.app.now = 3.0;
+    crate::plugin_events::observe(&mut h.app);
+    h.app.now = 3.11;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    h.app.preferences.plugin_grants.remove("sample");
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert!(h.app.session.plugin_state.listener_data.is_empty(), "revoking approval prevents publication before the next frame");
+    let trapping = include_str!("plugin_fixture.wat")
+        .replace("PLUGIN_PACKAGE", package)
+        .replace("PLUGIN_VERSION", version)
+        .replace("i32.const 0\n    )\n    (data", "unreachable\n    )\n    (data");
+    std::fs::write(dir.join("plugin.wasm"), wat::parse_str(trapping).unwrap()).unwrap();
+    let inspected = h.app.session.execute("plugin.inspect", &json!({"path":dir})).unwrap();
+    h.app.preferences.plugin_grants.insert(
+        "sample".into(),
+        solidcraft_engine::plugin::Grants { package_hash: Some(inspected["approval"].as_str().unwrap().into()), ..Default::default() },
+    );
+    h.app.session.execute("document.metadata.set", &json!({"key":"description","value":"Failure"})).unwrap();
+    h.app.now = 4.0;
+    crate::plugin_events::observe(&mut h.app);
+    h.app.now = 4.11;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    h.app.preferences.plugin_grants.remove("sample");
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert!(h.app.session.plugin_state.listener_failures.is_empty(), "revoked listeners cannot publish failures already in flight");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn plugin_execution_is_off_thread_even_with_agent_off_thread_disabled() {
+    let (mut h, tx) = agent_harness();
+    h.app.preferences.agent_off_thread = false;
+    h.app.run("solid.box", json!({"length":1,"width":1,"height":1,"corner":[100,100,100]})).unwrap();
+    h.app.run("edit.undo", json!({})).unwrap();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let own_level = h.app.session.param_check;
+    let root = plugin_package_for_worker_test("responsive");
+    let path = root.join("sample").to_string_lossy().into_owned();
+    let inspection = ask(&tx, "engine.execute", json!({"command":"plugin.inspect","params":{"path":path}}));
+    let inspection = reply_to(&mut h, &inspection);
+    assert_eq!(inspection["ok"], true, "{inspection}");
+    let inspected = &inspection["result"];
+    assert_eq!(h.app.session.plugin_state.packages.get("sample"), Some(&path), "async inspection registers namespaced entries");
+    assert_eq!(
+        h.app.run("PLUGIN.RUN", json!({"path":path,"approval":inspected["approval"],"entry":"make"})).unwrap_err(),
+        h.app.tr("ui.plugin_standalone")
+    );
+    let (release, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    let request =
+        ask(&tx, "engine.execute", json!({"command":"sample.make","param_check":"strict","params":{"approval":inspected["approval"],"params":{}}}));
+    h.frames(1);
+    assert!(h.app.agent_computing().is_some());
+    let view = ask(&tx, "ui.inspect", json!({}));
+    h.frames(1);
+    assert_eq!(view.try_recv().unwrap()["ok"], true, "window answers while external code waits");
+    release.send(()).unwrap();
+    let reply = reply_to(&mut h, &request);
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["param_check"], "strict");
+    assert_eq!(h.app.session.param_check, own_level);
+    assert_eq!(reply["result"]["result"], serde_json::Value::Null);
+    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history, "a read-only plugin preserves history");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn a_plugin_result_is_discarded_after_design_or_selection_changes() {
+    for context in ["document", "expected_design", "selection", "plugin_limits", "plugin_grants"] {
+        let (mut h, tx) = agent_harness();
+        h.app.preferences.language = if context == "selection" { "ja" } else { "en" }.into();
+        h.app.run("solid.box", json!({"length":1,"width":1,"height":1,"corner":[200,200,200]})).unwrap();
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert!(!h.app.session.redo.is_empty());
+        let root = plugin_package_for_worker_test(&format!("stale-{context}"));
+        if context == "expected_design" {
+            let manifest_path = root.join("sample/plugin.json");
+            let mut manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+            manifest["capabilities"] = json!(["commands@0.1", "design@0.1"]);
+            std::fs::write(manifest_path, manifest.to_string()).unwrap();
+        }
+        if context == "plugin_grants" {
+            let manifest_path = root.join("sample/plugin.json");
+            let mut manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+            manifest["runtime"]["permissions"] = json!({"command_groups":["file"],"files":[{"name":"work","read":true,"write":false}]});
+            std::fs::write(manifest_path, manifest.to_string()).unwrap();
+            crate::prefs::set(
+                &mut h.app,
+                &json!({"plugin_grants":{"sample":{"command_groups":["file"],"folders":[{"name":"work","folder":root,"read":true,"write":false}]}}}),
+            )
+            .unwrap();
+        }
+        let path = root.join("sample").to_string_lossy().into_owned();
+        let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+        let (release, gate) = std::sync::mpsc::channel();
+        h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+        let expected = h.app.session.design_token();
+        let mut params = json!({"path":path,"approval":inspected["approval"],"entry":"make"});
+        if context == "expected_design" {
+            params["expected_design"] = json!(expected);
+        }
+        let request = ask(&tx, "engine.execute", json!({"command":"plugin.run","params":params}));
+        h.frames(1);
+        assert!(h.app.agent_computing().is_some());
+        if matches!(context, "document" | "expected_design") {
+            h.app.run("solid.box", json!({"length":2,"width":2,"height":2,"corner":[100,100,100]})).unwrap();
+        } else if context == "plugin_limits" {
+            crate::prefs::set(&mut h.app, &json!({"plugin_max_memory_mib":512})).unwrap();
+        } else if context == "plugin_grants" {
+            crate::prefs::set(&mut h.app, &json!({"plugin_grants":{}})).unwrap();
+            assert!(!h.app.session.plugin_state.grants.contains_key("sample"));
+        } else {
+            let selection = vec![solidcraft_engine::Sel::Feature { id: feature_ids(&h)[0] }];
+            if h.app.session.selection == selection {
+                h.app.session.selection.clear();
+            } else {
+                h.app.session.selection = selection;
+            }
+        }
+        let before = h.app.session.doc.to_json();
+        let history = (h.app.session.undo.len(), h.app.session.redo.len());
+        release.send(()).unwrap();
+        let reply = reply_to(&mut h, &request);
+        assert_eq!(reply["ok"], false, "{context}: {reply}");
+        let language = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language);
+        if context == "expected_design" {
+            let error = reply["error"].as_str().unwrap();
+            assert!(error.contains(&expected.to_string()), "{reply}");
+            assert!(error.contains(&h.app.session.design_token().to_string()), "{reply}");
+            assert_eq!(reply["kind"], "stale_revision", "{reply}");
+            assert_eq!(reply["expected"], json!(expected), "{reply}");
+            assert_eq!(reply["actual"], json!(h.app.session.design_token()), "{reply}");
+        } else {
+            assert_eq!(reply["error"], language.text("ui.plugin_context_changed"), "{context}: {reply}");
+            for key in ["kind", "expected", "actual"] {
+                assert!(reply.get(key).is_none(), "{context}: {reply}");
+            }
+        }
+        assert_eq!(h.app.session.doc.to_json(), before);
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn cancelling_a_plugin_worker_answers_stopped_without_adopting_its_result() {
+    let (mut h, tx) = agent_harness();
+    let root = plugin_package_for_worker_test("cancelled");
+    let path = root.join("sample").to_string_lossy().into_owned();
+    let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+    let (release, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    let before = h.app.session.doc.to_json();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let (reply, ticket) =
+        ask_ticket(&tx, "engine.execute", json!({"command":"plugin.run","params":{"path":path,"approval":inspected["approval"],"entry":"make"}}));
+    h.frames(1);
+    assert_eq!(ticket.cancel(), crate::control_job::Cancel::Stopped { writes_file: true });
+    let response = reply_to(&mut h, &reply);
+    assert_eq!((response["ok"].clone(), response["stopped"].clone()), (json!(false), json!(true)), "{response}");
+    assert!(response["error"].as_str().unwrap().contains("file may still be written"), "{response}");
+    release.send(()).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn plugin_commands_in_batches_and_scripts_are_refused_before_an_earlier_edit() {
+    let mut h = Harness::new();
+    h.app.preferences.agent_off_thread = false;
+    let root = h.dir.join("plugin-management");
+    let package = root.join("sample");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(package.join("plugin.json"), "invalid manifest: review must never read this").unwrap();
+    std::fs::write(package.join("keep.txt"), "removal must never reach this folder").unwrap();
+    h.app.session.plugin_state.plugins_dir = Some(root);
+    h.app.preferences.plugin_grants.insert("sample".into(), solidcraft_engine::plugin::Grants::default());
+    let grants = h.app.preferences.plugin_grants.clone();
+    let before = h.app.session.doc.to_json();
+    for command in ["plugin.run", "PLUGIN.RUN", "plugin.install", "PLUGIN.INSTALL", "plugin.remove", "PLUGIN.REMOVE"] {
+        for method in ["engine.batch", "engine.script"] {
+            let params = if command.eq_ignore_ascii_case("plugin.install") {
+                json!({"path":package})
+            } else if command.eq_ignore_ascii_case("plugin.remove") {
+                json!({"id":"sample"})
+            } else {
+                json!({})
+            };
+            let reply = h.call(
+                method,
+                json!({"commands":[
+                    {"command":"solid.box","params":{"length":2,"width":3,"height":4}},
+                    {"command":command,"params":params}
+                ]}),
+            );
+            let key = if command.eq_ignore_ascii_case("plugin.run") { "ui.plugin_standalone" } else { "ui.plugin_management_standalone" };
+            assert_eq!(reply["ok"], false, "{method}: {reply}");
+            assert_eq!(reply["error"], h.app.tr(key), "{method}: {reply}");
+            assert_eq!(h.app.session.doc.to_json(), before, "{method}: {command}");
+            assert!(h.app.session.undo.is_empty());
+            assert_eq!(std::fs::read_to_string(package.join("keep.txt")).unwrap(), "removal must never reach this folder");
+            assert_eq!(h.app.preferences.plugin_grants, grants, "refused management commands never revoke stored grants");
+            assert!(!crate::plugins::busy(&h.app), "refused batches start no package I/O worker");
+        }
+    }
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn plugin_preflight_checks_namespaced_calls_after_ten_thousand_steps() {
+    let mut h = Harness::new();
+    let root = plugin_package_for_worker_test("long-script");
+    let inspected = h.app.run("plugin.inspect", json!({"path":root.join("sample")})).unwrap();
+    let before = h.app.session.doc.to_json();
+    let mut steps = vec![json!({"command":"document.inspect","params":{}}); 10_000];
+    steps[0] = json!({"command":"solid.box","params":{"length":2,"width":3,"height":4}});
+    steps.push(json!({"command":"sample.make","params":{"approval":inspected["approval"]}}));
+    let (reply, _) = h.call_queued("engine.script", json!({"commands":steps}));
+    assert_eq!(reply["error"], h.app.tr("ui.plugin_standalone"), "{reply}");
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert!(h.app.session.undo.is_empty());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn plugin_inspections_reject_another_session_and_older_results() {
+    for context in ["tab", "worker", "direct"] {
+        let (mut h, tx) = agent_harness();
+        let root = plugin_package_for_worker_test(&format!("inspect-{context}"));
+        let path = root.join("sample").to_string_lossy().into_owned();
+        let (release, gate) = std::sync::mpsc::channel();
+        h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+        let first = ask(&tx, "engine.execute", json!({"command":"plugin.inspect","params":{"path":path}}));
+        h.frames(1);
+        assert_eq!(h.app.control_answering.len(), 1);
+        h.app.apply_gate = None;
+        let newer_root = if context == "tab" {
+            crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+            None
+        } else {
+            let newer_root = plugin_package_for_worker_test(&format!("inspect-new-{context}"));
+            if context == "direct" {
+                h.app.run("PLUGIN.INSPECT", json!({"path":newer_root.join("sample")})).unwrap();
+            } else {
+                let newer = ask(&tx, "engine.execute", json!({"command":"plugin.inspect","params":{"path":newer_root.join("sample")}}));
+                assert_eq!(reply_to(&mut h, &newer)["ok"], true);
+            }
+            Some(newer_root)
+        };
+        release.send(()).unwrap();
+        let reply = reply_to(&mut h, &first);
+        assert_eq!(reply["ok"], false, "{reply}");
+        assert_eq!(reply["error"], h.app.tr("ui.plugin_context_changed"));
+        if let Some(newer_root) = newer_root {
+            assert_eq!(h.app.session.plugin_state.packages["sample"], newer_root.join("sample").to_string_lossy());
+            let _ = std::fs::remove_dir_all(newer_root);
+        } else {
+            assert!(!h.app.session.plugin_state.packages.contains_key("sample"));
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+/// Approvals belong to the plugin, not to a design: the grants a person or `plugin.install` gave
+/// (a folder among them) are in force in a design opened in a new tab, and `plugin.run` there is
+/// not refused for want of them. Each tab keeps its own design: the run changes only the one shown.
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn a_design_in_a_new_tab_runs_a_plugin_with_the_approvals_already_given() {
+    let (mut h, tx) = agent_harness();
+    let root = plugin_package_for_worker_test("new-tab");
+    let manifest_path = root.join("sample/plugin.json");
+    let mut manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["runtime"]["permissions"] = json!({"command_groups":["file"],"files":[{"name":"queue","read":true,"write":false}]});
+    std::fs::write(manifest_path, manifest.to_string()).unwrap();
+    let path = root.join("sample").to_string_lossy().into_owned();
+    // What `plugin.install` with approvals stores: bound to the package that was reviewed.
+    let reviewed = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+    let grants = json!({"sample":{"package_hash":reviewed["approval"],"command_groups":["file"],"folders":[{"name":"queue","folder":root,"read":true,"write":false}]}});
+    crate::prefs::set(&mut h.app, &json!({"plugin_grants": grants})).unwrap();
+
+    let first = h.app.session.document_id.clone();
+    let before = h.app.session.doc.to_json();
+    h.app.run("file.new", json!({"name":"Sheet 2","new_tab":true})).unwrap();
+    assert_eq!(h.app.docs.count(), 2);
+    assert_ne!(h.app.session.document_id, first);
+    // The new design's session starts with no grants of its own; the next command brings them in.
+    h.app.run("document.list", json!({})).unwrap();
+    let kept = &h.app.session.plugin_state.grants["sample"];
+    assert_eq!((kept.command_groups.len(), kept.folders.len(), kept.folders[0].name.as_str()), (1, 1, "queue"));
+
+    let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+    let reply = reply_to(
+        &mut h,
+        &ask(&tx, "engine.execute", json!({"command":"plugin.run","params":{"path":path,"approval":inspected["approval"],"entry":"make"}})),
+    );
+    let error = reply["error"].as_str().unwrap_or_default();
+    assert!(!error.contains("files.read") && !error.contains("re-approval") && !error.contains("grant"), "refused for a missing approval: {reply}");
+    // Whatever the run did, it did to the design shown, and the first tab is as it was.
+    h.app.run("document.activate", json!({"document_id": first})).unwrap();
+    assert_eq!(h.app.session.doc.to_json(), before);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn stopping_a_plugin_at_the_window_warns_about_possible_file_writes() {
+    let (mut h, tx) = agent_harness();
+    let root = plugin_package_for_worker_test("stop-warning");
+    let path = root.join("sample");
+    let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+    let (release, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    let reply = ask(&tx, "engine.execute", json!({"command":"plugin.run","params":{"path":path,"entry":"make","approval":inspected["approval"]}}));
+    h.frames(1);
+    h.app.stop_agent_command();
+    let response = reply.try_recv().unwrap();
+    assert_eq!(response["stopped"], true);
+    assert!(response["error"].as_str().unwrap().contains("file may still be written"), "{response}");
+    release.send(()).unwrap();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn cancelled_plugin_display_warmup_leaves_parallel_body_meshes_cold() {
+    let mut session = solidcraft_engine::Session::default();
+    for i in 0..17 {
+        session.execute("solid.box", &json!({"length":1,"width":1,"height":1,"corner":[i*3,0,0]})).unwrap();
+    }
+    let prepared = session.scratch().compute_commands(&[], None).unwrap();
+    let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
+    let worker_progress = progress.clone();
+    let (release, gate) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        gate.recv().unwrap();
+        crate::control_job::warm_plugin_display(&prepared, solidcraft_engine::doc::display_quality::DisplayQuality::Normal, &worker_progress)
+            .unwrap();
+        prepared
+    });
+    progress.cancel();
+    release.send(()).unwrap();
+    session.accept_commands(worker.join().unwrap()).unwrap();
+    assert_eq!(session.model.state().bodies.len(), 17);
+    assert!(session.model.state().bodies.iter().all(|body| body.cached_mesh().is_none()), "a stop must reach the parallel display workers");
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn accepted_plugin_sketch_exits_clear_the_window_tool() {
+    for command in ["sketch.finish", "sketch.cancel"] {
+        let (mut h, tx) = agent_harness();
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.tool = crate::tools::Tool::for_command("sketch.line");
+        assert!(h.app.tool.is_some());
+        let root = plugin_package_for_worker_test(command);
+        let path = root.join("sample");
+        let (package, version) = solidcraft_engine::plugin::API.rsplit_once('@').unwrap();
+        let open_args = json!({"sketch":sketch,"restore_marker":false}).to_string();
+        let open = format!(
+            "(func $open i32.const 2048 i32.const 11 i32.const 3072 i32.const {} i32.const 0 call $run)\n    (func $execute",
+            open_args.len()
+        );
+        let wat = include_str!("../../engine/src/plugin/fixture.wat")
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("call $box\n      call $box", "call $open\n      call $box")
+            .replacen("(func $execute (;3;)", &format!("{open} (;3;)"), 1)
+            .replace("file.export", "sketch.edit")
+            .replacen("    (@producers", &format!("    (data (i32.const 3072) \"{}\")\n    (@producers", open_args.replace('"', r"\22")), 1)
+            .replace(
+                "i32.const 9\n      i32.const 1024\n      i32.const 33",
+                &format!("i32.const {}\n      i32.const 1024\n      i32.const 2", command.len()),
+            )
+            .replace("solid.box", command)
+            .replace(r#"{\22length\22:2,\22width\22:3,\22height\22:4}"#, "{}");
+        std::fs::write(path.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
+        let mut manifest: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path.join("plugin.json")).unwrap()).unwrap();
+        manifest["runtime"]["commands"] = json!(["sketch.edit", command]);
+        std::fs::write(path.join("plugin.json"), manifest.to_string()).unwrap();
+        let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+        let request =
+            ask(&tx, "engine.execute", json!({"command":"plugin.run","params":{"path":path,"entry":"make","approval":inspected["approval"]}}));
+        let reply = reply_to(&mut h, &request);
+        assert_eq!(reply["ok"], true, "{command}: {reply}");
+        assert!(h.app.session.active_sketch.is_none());
+        assert!(h.app.tool.is_none(), "{command} must perform sketch window cleanup");
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+/// The agent's row of the operations panel and the rows queued behind it, as listed by
+/// `ui.operations` (newest first).
+fn agent_rows(h: &mut Harness) -> Vec<serde_json::Value> {
+    let listed = crate::operations::control(&mut h.app, &json!({})).unwrap();
+    let rows = listed["operations"].as_array().unwrap().clone();
+    rows.into_iter().filter(|r| r["key"].as_str().is_some_and(|k| k.starts_with("agent"))).collect()
+}
+
+/// A design change waiting behind the agent's computing one is a row of its own until it runs,
+/// and its X cancels just that one: answered as cancelled, never run, the others still run. A
+/// request that does not change the design is no row.
+#[test]
+fn an_agent_request_waiting_its_turn_is_a_row_the_x_cancels() {
+    let (mut h, tx) = agent_harness();
+    let features = h.app.session.doc.features.len();
+    let hole = ask(&tx, "engine.execute", second_hole());
+    let boss = ask(&tx, "engine.execute", boss_step());
+    let last = ask(
+        &tx,
+        "engine.execute",
+        json!({"command": "solid.box", "params": {"corner": [70, 5, 10], "length": 5, "width": 5, "height": 5, "operation": "join"}}),
+    );
+    h.frames(1);
+    assert!(h.app.agent_computing().is_some() && boss.try_recv().is_err());
+    let rows = agent_rows(&mut h);
+    let held: Vec<_> = rows.iter().filter(|r| r["queued"] == true).collect();
+    assert!(held.len() == 2 && held.iter().all(|r| r["cancellable"] == true && !r["label"].as_str().unwrap().is_empty()), "{rows:?}");
+    // The first one waiting (newest first: the last in the list) is the boss.
+    let key = held[1]["key"].as_str().unwrap().to_string();
+    assert!(key.starts_with("agent:held:"));
+    crate::operations::cancel(&mut h.app, &key).unwrap();
+    let r = boss.try_recv().expect("answered at once");
+    assert!(r["ok"] == false && r["cancelled"] == true, "{r}");
+    assert_eq!(agent_rows(&mut h).iter().filter(|r| r["queued"] == true).count(), 1);
+    assert_eq!(reply_to(&mut h, &hole)["ok"], true);
+    assert_eq!(reply_to(&mut h, &last)["ok"], true);
+    until_settled(&mut h);
+    assert_eq!(h.app.session.doc.features.len(), features + 2, "the hole and the last box; the boss never ran");
+    assert!(agent_rows(&mut h).is_empty(), "all ran");
+    // A request that only reads is no row of the agent's work.
+    let (req, _reply) = crate::ControlRequest::new("ui.status", json!({}));
+    h.app.control_held.push_back(req);
+    assert!(agent_rows(&mut h).is_empty());
+}
+
+/// A batch waiting its turn is one row named for its commands ("Batch: Box, Cylinder"), and a
+/// command named the way an MCP client names it reads as its label, in the panel and in the echo
+/// the status line and the undo toast follow: never an id with `mcp` in it.
+#[test]
+fn waiting_agent_rows_and_echoes_name_commands_not_ids() {
+    let (mut h, tx) = agent_harness();
+    let _hole = ask(&tx, "engine.execute", second_hole());
+    let _batch = ask(&tx, "engine.batch", json!({"commands": [boss_step(), second_hole(), boss_step()]}));
+    h.frames(1);
+    let rows = agent_rows(&mut h);
+    let held: Vec<&str> = rows.iter().filter(|r| r["queued"] == true).filter_map(|r| r["label"].as_str()).collect();
+    assert_eq!(held.len(), 1, "{rows:?}");
+    assert!(held[0].ends_with("Batch: Box, Cylinder, Box") && !held[0].contains("solid."), "{held:?}");
+    until_settled(&mut h);
+    h.app.finish_command("mcp.solidcraft_solid_box", &Ok(json!({})));
+    let echo = h.app.session.log.last().cloned().unwrap_or_default();
+    assert!(echo.contains("Box") && !echo.contains("mcp"), "{echo}");
+}
+
+/// An agent that queues dozens of design changes still gets the operations panel: it shows the
+/// first few waiting ones and one row standing for the rest, whose X cancels exactly those. Every
+/// waiting one stays listed, and cancellable by its own key, over the control channel.
+#[test]
+fn many_waiting_agent_commands_keep_the_panel_and_fold_into_one_row() {
+    use crate::operations::MAX_WAITING_SHOWN;
+    let (mut h, tx) = agent_harness();
+    let features = h.app.session.doc.features.len();
+    let hole = ask(&tx, "engine.execute", second_hole());
+    let waiting: Vec<_> = (0..40).map(|_| ask(&tx, "engine.execute", boss_step())).collect();
+    h.frames(1);
+    assert!(h.app.agent_computing().is_some());
+    assert!(h.app.operations.panel_drew, "the panel is drawn with 40 commands waiting");
+    let shown = h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).count();
+    assert_eq!(shown, 1 + MAX_WAITING_SHOWN + 1, "the computing one, the first waiting ones and the summary row");
+    let rows = agent_rows(&mut h);
+    assert_eq!(rows.iter().filter(|r| r["queued"] == true).count(), 40, "all of them stay listed");
+    // The summary row's X cancels those past the shown ones, and only them.
+    crate::operations::cancel(&mut h.app, "agent:held:more").unwrap();
+    let status = h.app.status.as_ref().map(|s| s.0.clone());
+    assert_eq!(status.as_deref(), Some("36 waiting commands canceled"), "one message for the whole action");
+    for (i, w) in waiting.iter().enumerate() {
+        match w.try_recv() {
+            Ok(r) => assert!(i >= MAX_WAITING_SHOWN && r["cancelled"] == true, "{i}: {r}"),
+            Err(_) => assert!(i < MAX_WAITING_SHOWN, "{i} was not answered"),
+        }
+    }
+    assert_eq!(reply_to(&mut h, &hole)["ok"], true);
+    for w in &waiting[..MAX_WAITING_SHOWN] {
+        assert_eq!(reply_to(&mut h, w)["ok"], true);
+    }
+    until_settled(&mut h);
+    assert_eq!(h.app.session.doc.features.len(), features + 1 + MAX_WAITING_SHOWN, "none of the cancelled ones ran");
+}
+
+/// Waiting rows stay in queue order with the summary row above them all, also when the queue
+/// advances and a folded command unfolds into a row of its own.
+#[test]
+fn the_summary_row_stays_above_the_waiting_rows_when_one_unfolds() {
+    use crate::operations::MAX_WAITING_SHOWN;
+    let (mut h, tx) = agent_harness();
+    let _hole = ask(&tx, "engine.execute", second_hole());
+    let _waiting: Vec<_> = (0..MAX_WAITING_SHOWN + 2).map(|_| ask(&tx, "engine.execute", boss_step())).collect();
+    h.frames(1);
+    // The first waiting one (newest first: the last in the list) goes, and the next unfolds.
+    let rows = agent_rows(&mut h);
+    let first = rows.iter().rfind(|r| r["queued"] == true).unwrap()["key"].as_str().unwrap().to_string();
+    crate::operations::cancel(&mut h.app, &first).unwrap();
+    h.frames(1);
+    let shown: Vec<_> = h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).map(|(r, _)| (r.key.clone(), r.label.clone(), r.queued)).collect();
+    assert_eq!(shown.last().map(|r| r.0.as_str()), Some("agent:held:more"), "the summary row is the top one: {shown:?}");
+    // Those still waiting: the cancelled one is fading out, no longer queued (fully opaque on the
+    // frame it went, since its fade starts on that frame's clock).
+    let live: Vec<_> = shown.iter().filter(|r| r.0.starts_with("agent:held:") && r.0 != "agent:held:more" && r.2).collect();
+    let places: Vec<_> = live.iter().map(|r| r.1.split('.').next().unwrap().to_string()).collect();
+    assert_eq!(places, (1..=MAX_WAITING_SHOWN).map(|n| n.to_string()).collect::<Vec<_>>(), "in queue order: {shown:?}");
+}
+
+/// A plugin run is a row of the operations panel named for the plugin and its entry, and its X
+/// stops it: nothing of it lands.
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn a_plugin_run_is_an_operation_named_for_the_plugin_and_its_x_stops_it() {
+    let (mut h, tx) = agent_harness();
+    let root = plugin_package_for_worker_test("operations");
+    let path = root.join("sample").to_string_lossy().into_owned();
+    let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+    let (release, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    let before = h.app.session.doc.to_json();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let reply = ask(&tx, "engine.execute", json!({"command":"plugin.run","params":{"path":path,"approval":inspected["approval"],"entry":"make"}}));
+    h.frames(1);
+    let rows = crate::operations::current(&h.app);
+    let row = rows.iter().find(|r| r.key == "agent").expect("the run is an operation");
+    assert_eq!(row.label, "sample: make");
+    crate::operations::cancel(&mut h.app, "agent").unwrap();
+    let response = reply_to(&mut h, &reply);
+    assert_eq!((response["ok"].clone(), response["stopped"].clone()), (json!(false), json!(true)), "{response}");
+    release.send(()).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A block whose length is the parameter `len` (60 mm), with a boss and a hole placed by `len`: a
+/// change of `len` recomputes every feature. Every command computes off the window thread.
+fn block_of_len() -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("parameters.add", json!({"name": "len", "expression": "60 mm"})).unwrap();
+    for (id, p) in [
+        ("solid.box", json!({"length": "len", "width": 20, "height": 10})),
+        ("solid.box", json!({"corner": ["len / 2", 5, 10], "length": 10, "width": 10, "height": 5, "operation": "join"})),
+        ("solid.cylinder", json!({"base": ["len / 2 + 5", 10, -1], "axis": [0, 0, 1], "radius": 2, "height": 20, "operation": "cut"})),
+    ] {
+        h.app.run(id, p).unwrap();
+    }
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h
+}
+
+fn len(h: &Harness) -> Option<String> {
+    h.app.session.doc.param("len").map(|p| p.expr.clone())
+}
+
+fn volume_at_len(h: &mut Harness, mm: f64) -> f64 {
+    let v = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    v - (mm * 200.0 + 500.0 - std::f64::consts::PI * 4.0 * 15.0)
+}
+
+/// Hold the work of the heavy commands started from here on until the sender is dropped. A key
+/// press or a click takes several frames, and this design computes in a moment: on a busy
+/// machine the work was in before the test looked, where it expects the app to be computing.
+fn hold_work(h: &mut Harness) -> std::sync::mpsc::Sender<()> {
+    let (release, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    release
+}
+
+/// A parameter changed in the Parameters dialog computes off the window thread (#6777): the
+/// design stays as it was while the window goes on, saying it computes, the row shows the
+/// expression being applied, and the change is in once computed.
+#[test]
+fn a_parameter_changed_in_the_dialog_computes_off_the_window_thread() {
+    let mut h = block_of_len();
+    // The toast says it (with the operations panel on, its row does).
+    h.app.preferences.operations_panel = false;
+    h.step(&json!({"start": "parameters.change"})).unwrap();
+    h.frames(4);
+    let release = hold_work(&mut h);
+    h.run(&json!([{"click": {"handle": "param:len"}}, {"key": "A", "cmd": true}, {"text": "70 mm"}, {"key": "Enter"}])).unwrap();
+    assert!(h.app.computing_since().is_some(), "computing");
+    assert_eq!(len(&h).as_deref(), Some("60 mm"), "the design is as it was while it computes");
+    let applying = h.app.params.as_ref().and_then(|d| d.applying.get("len").cloned());
+    assert_eq!(applying.as_deref(), Some("70 mm"), "the row shows the expression it applies");
+    h.frames(1);
+    assert!(crate::scenario::rect_of("toast:computing").is_some(), "the window says it computes");
+    drop(release);
+    until_settled(&mut h);
+    assert_eq!(len(&h).as_deref(), Some("70 mm"));
+    assert!(volume_at_len(&mut h, 70.0).abs() < 1.0);
+    h.frames(1);
+    assert!(h.app.params.as_ref().is_some_and(|d| d.applying.is_empty() && d.editing.is_empty()), "nothing left pending");
+}
+
+/// Edits held for Apply (#9279) go in one change, off the window thread too.
+#[test]
+fn held_parameter_edits_applied_compute_off_the_window_thread() {
+    let mut h = block_of_len();
+    h.app.preferences.parameters_apply_live = false;
+    h.step(&json!({"start": "parameters.change"})).unwrap();
+    h.frames(4);
+    h.run(&json!([{"click": {"handle": "param:len"}}, {"key": "A", "cmd": true}, {"text": "80 mm"}, {"key": "Enter"}])).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.params.as_ref().and_then(|d| d.editing.get("len").cloned()).as_deref(), Some("80 mm"), "held for Apply");
+    let release = hold_work(&mut h);
+    h.step(&json!({"click": {"handle": "dialog:apply"}})).unwrap();
+    assert!(h.app.computing_since().is_some(), "computing");
+    assert_eq!(len(&h).as_deref(), Some("60 mm"));
+    drop(release);
+    until_settled(&mut h);
+    assert_eq!(len(&h).as_deref(), Some("80 mm"));
+    assert!(volume_at_len(&mut h, 80.0).abs() < 1.0);
+}
+
+/// A configuration activated in the configurations table computes off the window thread too.
+#[test]
+fn a_configuration_activated_computes_off_the_window_thread() {
+    let mut h = block_of_len();
+    h.app.run("config.configure", json!({"params": ["len"]})).unwrap();
+    h.app.run("config.row", json!({"name": "Long", "values": {"len": "80 mm"}})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    let release = hold_work(&mut h);
+    h.step(&json!({"click": {"handle": "config:activate:Long"}})).unwrap();
+    assert!(h.app.computing_since().is_some(), "computing");
+    assert_ne!(h.app.session.doc.configs.active.as_deref(), Some("Long"), "not active while it computes");
+    drop(release);
+    until_settled(&mut h);
+    assert_eq!(h.app.session.doc.configs.active.as_deref(), Some("Long"));
+    assert_eq!(len(&h).as_deref(), Some("80 mm"));
+    assert!(volume_at_len(&mut h, 80.0).abs() < 1.0);
+}
+
+/// Cancel puts back a live edit that computed off the window thread (#15377, #6777), whether it
+/// is in already or still computing when Cancel is clicked.
+#[test]
+fn cancel_puts_back_a_parameter_change_computed_off_the_window_thread() {
+    for in_before_cancel in [true, false] {
+        let mut h = block_of_len();
+        h.app.preferences.parameters_apply_live = true;
+        h.step(&json!({"start": "parameters.change"})).unwrap();
+        h.frames(4);
+        let mut release = Some(hold_work(&mut h));
+        h.run(&json!([{"click": {"handle": "param:len"}}, {"key": "A", "cmd": true}, {"text": "70 mm"}, {"key": "Enter"}])).unwrap();
+        assert!(h.app.computing_since().is_some(), "computing");
+        if in_before_cancel {
+            release.take();
+            until_settled(&mut h);
+            assert_eq!(len(&h).as_deref(), Some("70 mm"), "the edit is in");
+        }
+        h.step(&json!({"click": {"handle": "dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.is_none(), "Cancel closes the dialog");
+        release.take();
+        until_settled(&mut h);
+        assert_eq!(len(&h).as_deref(), Some("60 mm"), "Cancel puts the edit back (in before Cancel: {in_before_cancel})");
+        assert!(volume_at_len(&mut h, 60.0).abs() < 1.0);
+    }
+}
+
+/// #15333: an agent's interference check of a motion study ran on the window thread, so a slow
+/// pair froze the window until the app was closed as not responding (the session then ended
+/// without a clean exit). The check only reads the design, so it is read on a copy now, as
+/// `inspect.interference` is, and answers from there.
+#[test]
+fn an_interference_check_of_a_motion_study_is_read_on_a_copy() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (name, x) in [("A", 0), ("B", 20)] {
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.create", json!({"name": name})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.run("occurrence.ground", json!({"occurrence": "A:1", "grounded": true})).unwrap();
+    h.app.run("joint.create", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "name": "Rail"})).unwrap();
+    h.app.run("joint.drive", json!({"joint": "Rail", "value": 10})).unwrap();
+    h.app.run("motion.study", json!({"name": "Push", "steps": 15, "keys": [{"joint": "Rail", "points": [[0, 10], [15, -5]]}]})).unwrap();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h.app.preferences.agent_off_thread = true;
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.control_rx = Some(rx);
+    let check = ask(&tx, "engine.execute", json!({"command": "motion.interference", "params": {"study": "Push"}}));
+    h.frames(1);
+    assert_eq!(h.app.control_answering.len(), 1, "read on a copy, off the window thread");
+    let r = reply_to(&mut h, &check);
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["result"]["study"], json!("Push"), "{r}");
+    // B slides into A over the study: they collide from step 11 on.
+    let hits = r["result"]["collisions"].as_array().cloned().unwrap_or_default();
+    assert_eq!(hits.len(), 1, "{r}");
+    assert_eq!((&hits[0]["a"], &hits[0]["first_step"]), (&json!("A:1"), &json!(11.0)), "{r}");
 }

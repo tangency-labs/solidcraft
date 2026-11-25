@@ -49,13 +49,41 @@ pub struct Level {
 /// Triangles with an index out of range or a point not finite are left out; an empty or oversized
 /// mesh ([`MAX_TRIANGLES`]) has no levels.
 pub fn levels(positions: &[Vec3], triangles: &[[u32; 3]], targets: &[usize]) -> Vec<Level> {
+    make_levels(positions, triangles, targets, WeldOrder::Positions)
+}
+
+/// Simplify indexed facets as if their positions were stored once per corner in facet order.
+/// Weld each referenced source position once, keeping the facet order's vertex IDs so equally
+/// costly collapses give the same result as on expanded facets.
+pub fn levels_from_indexed_facets(
+    positions: &[Vec3],
+    triangles: &[[u32; 3]],
+    targets: &[usize],
+) -> Vec<Level> {
+    make_levels(positions, triangles, targets, WeldOrder::Facets)
+}
+
+#[derive(Clone, Copy)]
+enum WeldOrder {
+    Positions,
+    Facets,
+}
+
+fn make_levels(
+    positions: &[Vec3],
+    triangles: &[[u32; 3]],
+    targets: &[usize],
+    order: WeldOrder,
+) -> Vec<Level> {
     if triangles.is_empty() || triangles.len() > MAX_TRIANGLES {
         return Vec::new();
     }
-    let Some(mut m) = Collapser::new(positions, triangles) else {
+    let Some((mut m, source_vertices)) = Collapser::new(positions, triangles, order) else {
         return Vec::new();
     };
-    let original = Surface::new(&m.pos, &m.tris);
+    let Some(original) = Surface::new(positions, source_vertices, &m.tris) else {
+        return Vec::new();
+    };
     let mut out: Vec<Level> = Vec::new();
     let mut previous = m.live_triangles;
     for &target in targets {
@@ -78,44 +106,48 @@ pub fn levels(positions: &[Vec3], triangles: &[[u32; 3]], targets: &[usize]) -> 
 }
 
 /// The original surface, for measuring how far a level strays from it.
-struct Surface {
-    tris: Vec<[Vec3; 3]>,
+struct Surface<'a> {
+    positions: &'a [Vec3],
+    tris: Vec<[u32; 3]>,
     bvh: Bvh,
 }
 
-impl Surface {
-    fn new(pos: &[[f64; 3]], tris: &[[u32; 3]]) -> Surface {
-        let tris: Vec<[Vec3; 3]> = tris
-            .iter()
-            .map(|t| {
-                t.map(|i| {
-                    pos.get(i as usize)
-                        .map_or(Vec3::ZERO, |p| Vec3::new(p[0], p[1], p[2]))
-                })
-            })
-            .collect();
-        let boxes: Vec<Aabb3> = tris
-            .iter()
-            .map(|t| {
-                let mut b = Aabb3::EMPTY;
-                for p in t {
-                    b.add(*p);
-                }
-                b
-            })
-            .collect();
-        Surface {
-            bvh: Bvh::new(&boxes),
-            tris,
+impl<'a> Surface<'a> {
+    fn new(positions: &'a [Vec3], source_vertices: Vec<u32>, welded: &[[u32; 3]]) -> Option<Self> {
+        // Keep the original welded faces in their original order for the BVH and search seeds.
+        // The vertices they used are still in the input, so each face needs only three indices.
+        let mut tris = crate::with_room(welded.len())?;
+        let mut boxes = crate::with_room(welded.len())?;
+        for &[a, b, c] in welded {
+            let tri = [
+                *source_vertices.get(a as usize)?,
+                *source_vertices.get(b as usize)?,
+                *source_vertices.get(c as usize)?,
+            ];
+            let mut bounds = Aabb3::EMPTY;
+            for i in tri {
+                bounds.add(*positions.get(i as usize)?);
+            }
+            tris.push(tri);
+            boxes.push(bounds);
         }
+        drop(source_vertices);
+        Some(Self {
+            bvh: Bvh::new(&boxes),
+            positions,
+            tris,
+        })
     }
 
     fn to_triangle(&self, p: Vec3, t: u32) -> f64 {
-        self.tris
-            .get(t as usize)
-            .map_or(f64::INFINITY, |[a, b, c]| {
-                closest_on_triangle(p, *a, *b, *c).dist(p)
-            })
+        let Some(&[a, b, c]) = self.tris.get(t as usize) else {
+            return f64::INFINITY;
+        };
+        let at = |i: u32| self.positions.get(i as usize).copied();
+        match (at(a), at(b), at(c)) {
+            (Some(a), Some(b), Some(c)) => closest_on_triangle(p, a, b, c).dist(p),
+            _ => f64::INFINITY,
+        }
     }
 
     /// How far `p` lies from the surface, when that is more than `beyond`; otherwise
@@ -284,24 +316,6 @@ impl Ord for Candidate {
     }
 }
 
-/// A quick hasher for welding by position (the keys are coordinates' bits).
-#[derive(Default)]
-struct BitsHasher(u64);
-
-impl std::hash::Hasher for BitsHasher {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-    fn write(&mut self, bytes: &[u8]) {
-        for b in bytes {
-            self.write_u64(u64::from(*b));
-        }
-    }
-    fn write_u64(&mut self, x: u64) {
-        self.0 = (self.0.rotate_left(5) ^ x).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
-    }
-}
-
 /// The lists a collapse works with, kept between collapses.
 #[derive(Default)]
 struct Scratch {
@@ -344,35 +358,56 @@ struct Collapser {
 }
 
 impl Collapser {
-    fn new(positions: &[Vec3], triangles: &[[u32; 3]]) -> Option<Collapser> {
+    fn new(
+        positions: &[Vec3],
+        triangles: &[[u32; 3]],
+        order: WeldOrder,
+    ) -> Option<(Collapser, Vec<u32>)> {
         // Weld corners at the same position.
-        let mut index: std::collections::HashMap<
-            [u64; 3],
-            u32,
-            std::hash::BuildHasherDefault<BitsHasher>,
-        > = std::collections::HashMap::with_capacity_and_hasher(
-            // Proven: the divisor is the constant 2, not zero.
-            positions.len() / 2,
-            std::hash::BuildHasherDefault::default(),
-        );
-        // Proven: capacity of allocated `positions`' length, its elements (24 bytes) larger.
-        let mut remap: Vec<Option<u32>> = Vec::with_capacity(positions.len());
-        let mut pos: Vec<[f64; 3]> = Vec::new();
-        for p in positions {
+        let mut index = crate::hash::BitsMap::default();
+        // Estimate unique corners from the faces: a closed triangular surface typically has
+        // about one vertex per two faces, even if the source stores every corner separately.
+        index
+            .try_reserve(positions.len().min(triangles.len().div_ceil(2)))
+            .ok()?;
+        let mut remap = crate::with_room(positions.len())?;
+        let mut source_vertices = Vec::new();
+        let mut weld = |source: u32, p: &Vec3| {
             if !p.is_finite() {
-                remap.push(None);
-                continue;
+                return None;
             }
-            let next = u32::try_from(pos.len()).ok()?;
+            let next = u32::try_from(source_vertices.len()).ok()?;
             let key = [
                 (p.x + 0.0).to_bits(),
                 (p.y + 0.0).to_bits(),
                 (p.z + 0.0).to_bits(),
             ];
-            remap.push(Some(*index.entry(key).or_insert_with(|| {
-                pos.push([p.x, p.y, p.z]);
+            Some(*index.entry(key).or_insert_with(|| {
+                source_vertices.push(source);
                 next
-            })));
+            }))
+        };
+        match order {
+            WeldOrder::Positions => {
+                // The input's indices are u32, so positions after this range are unused.
+                for (source, p) in (0..=u32::MAX).zip(positions) {
+                    remap.push(weld(source, p));
+                }
+            }
+            WeldOrder::Facets => {
+                remap.resize(positions.len(), None);
+                for &[a, b, c] in triangles {
+                    if a.max(b).max(c) as usize >= positions.len() {
+                        continue;
+                    }
+                    for source in [a, b, c] {
+                        let slot = remap.get_mut(source as usize)?;
+                        if slot.is_none() {
+                            *slot = weld(source, positions.get(source as usize)?);
+                        }
+                    }
+                }
+            }
         }
         drop(index);
         // Proven: capacity of allocated `triangles`' length, with the same element type.
@@ -389,7 +424,38 @@ impl Collapser {
         if tris.is_empty() {
             return None;
         }
-        let n = pos.len();
+        // Only surviving faces need collapse state. Reuse the source remap to compact their
+        // welded indices in encounter order, retaining the first representative's coordinates.
+        remap.truncate(source_vertices.len());
+        remap.fill(None);
+        let mut used = 0;
+        for &i in tris.iter().flatten() {
+            let slot = remap.get_mut(i as usize)?;
+            if slot.is_none() {
+                *slot = Some(0);
+                used += 1;
+            }
+        }
+        if used < source_vertices.len() {
+            let mut kept = crate::with_room(used)?;
+            for (source, slot) in source_vertices.into_iter().zip(&mut remap) {
+                if slot.is_some() {
+                    *slot = Some(u32::try_from(kept.len()).ok()?);
+                    kept.push(source);
+                }
+            }
+            for i in tris.iter_mut().flatten() {
+                *i = remap.get(*i as usize).copied().flatten()?;
+            }
+            source_vertices = kept;
+        }
+        drop(remap);
+        let n = source_vertices.len();
+        let mut pos = crate::with_room(n)?;
+        for &i in &source_vertices {
+            let p = positions.get(i as usize)?;
+            pos.push([p.x, p.y, p.z]);
+        }
         let mut quadric = vec![Quadric::default(); n];
         let mut around: Vec<Vec<u32>> = vec![Vec::new(); n];
         let mut sides: Vec<(u32, u32, u32)> = crate::with_room(tris.len().checked_mul(3)?)?;
@@ -461,7 +527,7 @@ impl Collapser {
                 last = Some((a, b));
             }
         }
-        Some(m)
+        Some((m, source_vertices))
     }
 
     /// Where `u` and `v` would merge, and its cost.

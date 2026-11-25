@@ -14,6 +14,7 @@ use super::{SweepEntity, TopologySweep};
 use crate::blend::hcr::{Hcr, HcrOptions};
 use crate::boolean::topology_intersector::p1::Relations;
 use crate::curve::curve::Curve;
+use crate::error::sweep::SweepFailure;
 use crate::error::EntityRef;
 use crate::error::{Result, SolidError};
 use crate::geom::attribute::TagData;
@@ -204,9 +205,14 @@ pub trait SweepAccess {
 
     /// `SmBrep::GetInfiniteRegion`; a null region retains the upstream NER error.
     fn infinite_region(&mut self, brep: BrepId) -> Result<RegionId> {
-        self.brep(brep)?
-            .infinite_region()
-            .ok_or_else(|| SolidError::sweep_missing(super::OP, "the B-rep's infinite region"))
+        self.brep(brep)?.infinite_region().ok_or_else(|| {
+            SolidError::sweep(
+                super::OP,
+                SweepFailure::BrepWithoutInfiniteRegion {
+                    brep: EntityRef::Brep(brep),
+                },
+            )
+        })
     }
     /// `SmFace::GetEdges`, using the existing faithful co-port.
     fn face_edges(&mut self, face: FaceRef) -> Result<Vec<EdgeId>> {
@@ -345,7 +351,12 @@ pub trait SweepAccess {
                     region.0,
                     built
                         .face
-                        .ok_or_else(|| SolidError::sweep_missing(super::OP, "the built face"))?,
+                        .ok_or_else(|| {
+                            SolidError::sweep_null_defect(
+                                super::OP,
+                                "make_face returns the face it built from the region's loop; it builds one for every loop it is given",
+                            )
+                        })?,
                 ),
                 curve_edges: owners
                     .into_iter()
@@ -419,7 +430,12 @@ pub trait SweepAccess {
             face.0,
             output
                 .edge
-                .ok_or_else(|| SolidError::sweep_missing(super::OP, "the built edge"))?,
+                .ok_or_else(|| {
+                    SolidError::sweep_null_defect(
+                        super::OP,
+                        "make_edge returns the edge it built in the face; it builds one for every curve it is given",
+                    )
+                })?,
         ))
     }
     /// `SmBrep::GetFaces`, preserving the owning list's order.
@@ -439,9 +455,12 @@ pub trait SweepAccess {
             .get_faceuses()?
             .into_iter()
             .map(|id| {
-                brep.faceuse(id)?
-                    .face
-                    .ok_or_else(|| SolidError::sweep_missing(super::OP, "a faceuse's face"))
+                brep.faceuse(id)?.face.ok_or_else(|| {
+                    SolidError::sweep_null_defect(
+                        super::OP,
+                        "every faceuse of a shell the kernel keeps belongs to a face",
+                    )
+                })
             })
             .collect()
     }
@@ -490,11 +509,7 @@ pub trait SweepAccess {
         })?;
         hcr.set_hcr_for_silhouettes(silhouettes);
         let k = self.kernel_mut(brep)?;
-        let p = k.fixes.sweep_statuses_pass_on; // fork c8f6a31 (WR-662)
-        crate::error::ignore_status(crate::error::passed_on(
-            hcr.compute_global_visibility(k),
-            p,
-        )?)?;
+        hcr.compute_global_visibility(k)?;
         Ok(SweepScene {
             brep: self.retain_hcr(brep, hcr)?,
         })

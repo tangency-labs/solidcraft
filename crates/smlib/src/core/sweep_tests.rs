@@ -149,13 +149,27 @@ fn case(name: &str) -> Case {
             c(Op::Extrude(disc(), Z, 10.0, theta, DraftCorner::default(), true), Expect::Volume(frustum(PI * 25.0, PI * r2 * r2, 10.0)))
         }
         // A strip 2 wide leaning in 10° over 10: the long walls meet across the short ones
-        // (10 tan 10° > 1) before the far end.
+        // (10 tan 10° > 1) before the far end, and the section closes there along its ridge:
+        // the hip roof, ∫ (a - 2tz)(b - 2tz) dz to z* = b / 2t, V = b² (3a - b) / 12t.
         "extrude_draft_wall_closes" => c(
             Op::Extrude(
                 polygon(&[[0.0, 0.0, 0.0], [20.0, 0.0, 0.0], [20.0, 2.0, 0.0], [0.0, 2.0, 0.0]]),
                 Z,
                 10.0,
                 10f64.to_radians(),
+                DraftCorner::Curvature,
+                true,
+            ),
+            Expect::Volume(4.0 * (3.0 * 20.0 - 2.0) / (12.0 * 10f64.to_radians().tan())),
+        ),
+        // The same strip leaning in so that its long walls meet just at the far end
+        // (10 tan θ = 1): the far end would pinch to the ridge, so it is refused.
+        "extrude_draft_ridge_on_far_end" => c(
+            Op::Extrude(
+                polygon(&[[0.0, 0.0, 0.0], [20.0, 0.0, 0.0], [20.0, 2.0, 0.0], [0.0, 2.0, 0.0]]),
+                Z,
+                10.0,
+                0.1f64.atan(),
                 DraftCorner::Curvature,
                 true,
             ),
@@ -379,6 +393,7 @@ cases!(
     extrude_square_drafted_curvature,
     extrude_circle_drafted,
     extrude_draft_wall_closes,
+    extrude_draft_ridge_on_far_end,
     revolve_rectangle_full,
     revolve_rectangle_quarter,
     sweep_circle_straight,

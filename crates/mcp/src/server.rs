@@ -1,14 +1,20 @@
 //! SolidCraft's MCP server: its tools, instructions and resources over the shared server
 //! (`solidcraft-mcp-server`), with the agent's folders and the output options around each call.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::{Mutex, mpsc};
 
 use serde_json::{Value, json};
 use solidcraft_engine::io::vfs::{self, PathScope};
-use solidcraft_mcp_server::{Contents, Incoming, Info, Tools, read_message, response};
+use solidcraft_mcp_server::{Contents, Info, Tools};
+#[cfg(not(target_arch = "wasm32"))]
+use solidcraft_mcp_server::{Incoming, read_message, response};
 
-use crate::backend::{Backend, Remote};
+use crate::backend::Backend;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::backend::Remote;
 use crate::options::Options;
 use crate::tools::{call_tool_with, tool_definitions_with};
 
@@ -42,6 +48,7 @@ back (volume, errors, cylinder axes), or change them in one `batch` with `coales
 then set them back the same way before saving.\n\n\
 Fix, don't rebuild: a wrong number in a feature is changed with `timeline.edit` or `parameters.change` on its input \
 (`parameters.list {\"filter\":\"feature\"}` names them); `edit.checkpoint` and `edit.restore_checkpoint` go back exactly.\n\n\
+The user's current selection comes with every reply; when they say 'this', 'these' or 'the selected', use it.\n\n\
 A call whose error starts `still running:` was not cancelled: don't send it again; `pending` waits for its result.";
 
 /// The design files a call opens or saves (#7181): `open` and `save`, and the commands they run
@@ -69,6 +76,7 @@ fn design_files(name: &str, args: &Value) -> Vec<String> {
 
 /// The id of a `tools/call` of `running` (no arguments), the one call answered apart from the
 /// call in progress (#14007); `None` for anything else, which waits its turn.
+#[cfg(not(target_arch = "wasm32"))]
 fn running_call(line: &str) -> Option<Value> {
     let msg: Value = serde_json::from_str(line.trim()).ok()?;
     let id = msg.get("id").filter(|id| !id.is_null())?;
@@ -83,6 +91,7 @@ fn running_call(line: &str) -> Option<Value> {
 
 /// A fresh bridge to the app for a `running` call while another call is in progress, with the
 /// options tools run with; `None` when the backend is not bridged to an app.
+#[cfg(not(target_arch = "wasm32"))]
 fn side_probe(side: &Mutex<Option<(Remote, Options)>>) -> Option<(Remote, Options)> {
     let side = side.lock().ok()?;
     let (template, options) = side.as_ref()?;
@@ -90,6 +99,7 @@ fn side_probe(side: &Mutex<Option<(Remote, Options)>>) -> Option<(Remote, Option
 }
 
 /// Write one reply line and flush it, whole, whichever thread sends it.
+#[cfg(not(target_arch = "wasm32"))]
 fn write_line(output: &Mutex<impl std::io::Write>, reply: &str) -> std::io::Result<()> {
     let mut out = output.lock().map_err(|_| std::io::Error::other("output lock poisoned"))?;
     out.write_all(format!("{reply}\n").as_bytes())?;
@@ -111,6 +121,20 @@ struct Agent {
 }
 
 impl Agent {
+    /// The selection block for a reply, `None` when nothing is selected or the backend cannot say
+    /// (no app listening, an app from before `document.selection`).
+    fn selection(&mut self, tool: &str, result: &Value) -> Option<String> {
+        // `running` and `pending` ask how an earlier request is getting on: they never wait for
+        // another question to the app. Neither does a reply that says a request is still running,
+        // or one that never reached the app.
+        let says = |what: &str| result["content"].as_array().is_some_and(|c| c.iter().any(|t| t["text"].as_str().is_some_and(|t| t.contains(what))));
+        if matches!(tool, "running" | "pending") || says(crate::backend::NOT_RUNNING) || says(crate::backend::STILL_RUNNING) {
+            return None;
+        }
+        let reply = self.backend.call("document.selection", json!({})).ok()?;
+        reply["selection"].as_str().map(str::to_owned)
+    }
+
     /// The options tools use now: the server's own, with what the app's Preferences turn on. The
     /// app is asked until it answers once (it may start after the server, or be busy), and its
     /// answer then holds for this session, so the tools an agent listed keep their shape.
@@ -131,7 +155,20 @@ impl Tools for Agent {
 
     fn list(&mut self) -> Vec<Value> {
         self.listed = self.options();
-        tool_definitions_with(self.listed)
+        let mut tools = tool_definitions_with(self.listed);
+        // Every installed, enabled plugin's entries, read afresh: a plugin turned off or removed
+        // since the last listing is gone from this one.
+        tools.extend(crate::plugin_tools::definitions(self.backend.as_mut()));
+        tools
+    }
+
+    fn definition(&mut self, name: &str) -> Option<Value> {
+        self.listed = self.options();
+        if crate::plugin_tools::is_plugin_tool(name) {
+            crate::plugin_tools::definition_for(self.backend.as_mut(), name)
+        } else {
+            tool_definitions_with(self.listed).into_iter().find(|t| t["name"].as_str() == Some(name))
+        }
     }
 
     fn call(&mut self, name: &str, args: &Value) -> Value {
@@ -156,6 +193,12 @@ impl Tools for Agent {
         {
             content.push(json!({"type": "text", "text": note}));
         }
+        // What the user has selected goes with every reply, so "this" and "these" mean something.
+        if let Some(block) = self.selection(name, &result)
+            && let Some(content) = result.get_mut("content").and_then(Value::as_array_mut)
+        {
+            content.push(json!({"type": "text", "text": block}));
+        }
         result
     }
 
@@ -168,10 +211,8 @@ impl Tools for Agent {
 
     fn read_resource(&mut self, uri: &str) -> Option<Result<Contents, String>> {
         let read = match uri {
-            // The solvecraft:// URIs are what earlier releases listed (compatibility shim,
-            // docs/compatibility.md); clients that saved them still read the resource.
-            "solidcraft://design" | "solvecraft://design" => self.backend.call("document.inspect", json!({"measure": true})),
-            "solidcraft://commands" | "solvecraft://commands" => self.backend.call("engine.commands", json!({})),
+            "solidcraft://design" => self.backend.call("document.inspect", json!({"measure": true})),
+            "solidcraft://commands" => self.backend.call("engine.commands", json!({})),
             _ => return None,
         };
         Some(read.map(|v| Contents::json(&v)))
@@ -217,7 +258,9 @@ impl Server {
     /// call that arrives while another call is still being handled (a long `batch`) is answered at
     /// once on a connection of its own to the app, as its docs promise, instead of after that call
     /// (#14007). Replies to those calls may then come before the reply to the call in progress;
-    /// each carries its request's id.
+    /// each carries its request's id. Native only: it needs the stdin reader thread and the bridge
+    /// to the app, which the browser build has neither of.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn serve(&mut self, input: impl std::io::BufRead + Send, output: impl std::io::Write + Send) -> std::io::Result<()> {
         let output = Mutex::new(output);
         // Messages read and not yet answered by the main loop: counted when the reader queues one,
@@ -276,6 +319,7 @@ impl Server {
     }
     /// A fresh bridge to the app for answering `running` apart from the call in progress, with
     /// the options tools run with now; `None` when the backend is not bridged to an app.
+    #[cfg(not(target_arch = "wasm32"))]
     fn side(&mut self) -> Option<(Remote, Options)> {
         let options = self.inner.tools().listed;
         self.inner.tools().backend.side_channel().map(|r| (r, options))

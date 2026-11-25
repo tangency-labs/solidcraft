@@ -43,6 +43,7 @@ const VALUE_FLAGS: &[&str] = &[
     "--report-dir",
     "--digest-dir",
     "--goldens-dir",
+    "--dump-smb",
 ];
 
 /// In a `--jobs` child: exits the process once the parent closes our stdin (the parent

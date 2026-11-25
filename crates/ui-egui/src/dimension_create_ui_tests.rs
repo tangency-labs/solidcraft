@@ -46,8 +46,9 @@ fn dimension_editor_names_and_reference_picks_drive_new_and_existing_dimensions(
     assert!(h.widget(&format!("Dimension: {target}")).is_some(), "new dimension shows its actual parameter name");
     // Let the preceding placement clicks expire before starting a distinct double-click.
     h.frames(40);
-    h.step(&json!({"click":{"dimension":source},"double":true})).unwrap();
+    h.step(&json!({"click":{"dimension":source}})).unwrap();
     assert!(crate::dim_view::editing(), "reference click keeps the draft open");
+    h.frames(40);
     h.step(&json!({"text":" / 2"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(!crate::dim_view::editing(), "{}", h.call("ui.inspect", json!({})));
@@ -59,7 +60,8 @@ fn dimension_editor_names_and_reference_picks_drive_new_and_existing_dimensions(
     assert!(h.widget(&format!("Dimension: {target}")).is_some());
     type_value(&mut h, "2 * ");
     h.frames(40);
-    h.step(&json!({"click":{"dimension":source},"double":true})).unwrap();
+    h.step(&json!({"click":{"dimension":source}})).unwrap();
+    h.frames(40);
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(h.app.session.doc.param(&target).unwrap().expr, format!("2 * {source}"));
     h.app.run("parameters.change", json!({"name":source,"expression":"15 mm"})).unwrap();
@@ -84,7 +86,7 @@ fn editing_d2(typed: &str) -> Harness {
 fn click_d1_and_apply(h: &mut Harness) -> String {
     h.step(&json!({"click":{"dimension":"d1"}})).unwrap();
     assert!(crate::dim_view::editing(), "a reference click keeps the editor open");
-    h.frames(2);
+    h.frames(40);
     assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")), "the value field keeps the keyboard");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(!crate::dim_view::editing(), "{}", h.call("ui.inspect", json!({})));
@@ -118,7 +120,7 @@ fn clicking_another_dimension_replaces_a_lone_value() {
 fn clicking_another_dimension_lets_typing_continue_after_its_name() {
     let mut h = editing_d2("2 * ");
     h.step(&json!({"click":{"dimension":"d1"}})).unwrap();
-    h.frames(2);
+    h.frames(40);
     h.step(&json!({"text":" + 1"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "2 * d1 + 1");
@@ -141,14 +143,56 @@ fn clicking_another_dimension_replaces_the_selected_text() {
     assert_eq!(click_d1_and_apply(&mut h), "5 + d1");
 }
 
+/// Whether the open editor is the one for dimension parameter `param`.
+fn is_editing(h: &Harness, param: &str) -> bool {
+    crate::dim_view::editing() && h.widget(&format!("Dimension: {param}")).is_some()
+}
+
 #[test]
-fn double_clicking_another_dimension_inserts_its_name_once() {
-    let mut h = editing_d2("3 * ");
-    // Synthetic input feeds one pointer event per frame, so this is a click and, a frame
-    // later, a second click that egui reads as a double-click.
-    h.step(&json!({"click":{"dimension":"d1"},"double":true})).unwrap();
+fn a_single_click_waits_out_the_double_click_window_before_inserting() {
+    let mut h = editing_d2("2 * ");
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":"d1"}})).unwrap();
+    // Not yet: a second click would open d1 instead.
     h.step(&json!({"key":"Enter"})).unwrap();
-    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "3 * d1");
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "12", "an unfinished `2 * ` does not apply, so the box is open and untouched");
+    assert!(is_editing(&h, "d2"), "{}", h.call("ui.inspect", json!({})));
+    h.frames(40);
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "2 * d1", "the name went in after the delay");
+    crate::dim_view::cancel();
+}
+
+#[test]
+fn double_clicking_another_dimension_opens_it_and_inserts_nothing() {
+    let mut h = editing_d2("8");
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":"d1"},"double":true})).unwrap();
+    h.frames(40);
+    assert!(is_editing(&h, "d1"), "d1 is open: {}", h.call("ui.inspect", json!({})));
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "8", "the edit of d2 was applied, with no name in it");
+    type_value(&mut h, "30");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(!crate::dim_view::editing());
+    assert_eq!(h.app.session.doc.param("d1").unwrap().expr, "30", "d1's value was selected, so typing replaced it");
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "8");
+    crate::dim_view::cancel();
+}
+
+#[test]
+fn double_clicking_leaves_the_original_box_without_a_name_when_it_does_not_apply() {
+    let mut h = editing_d2("not a value (");
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":"d1"},"double":true})).unwrap();
+    h.frames(40);
+    assert!(is_editing(&h, "d2") && !is_editing(&h, "d1"), "an invalid value blocks the switch: {}", h.call("ui.inspect", json!({})));
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "12", "nothing was applied");
+    assert!(h.app.status.is_some(), "the error shows");
+    // The box still holds what was typed: no name was inserted.
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"7"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "7");
     crate::dim_view::cancel();
 }
 
@@ -323,6 +367,133 @@ fn double_clicking_a_dimension_opens_the_window_with_a_live_preview() {
     assert!(!crate::dim_view::editing());
     assert!((h.app.session.doc.eval("d1", solidcraft_engine::doc::expr::Kind::Length).unwrap() - 27.).abs() < 1e-6);
     assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    crate::dim_view::cancel();
+}
+
+/// The window open on `d1` of two lines whose dimensions use the user parameters `corner_r` (6 mm)
+/// and `foot` (2 mm): `d1` is `d1_expr`, `d2` is `corner_r + 4`.
+fn parameter_window(d1_expr: &str) -> Harness {
+    let mut h = windowed([20., 0.]);
+    h.app.run("sketch.line", json!({"points":[[0,10],[15,10]]})).unwrap();
+    h.app.run("parameters.add", json!({"name":"corner_r","expression":"6 mm"})).unwrap();
+    h.app.run("parameters.add", json!({"name":"foot","expression":"2 mm"})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":d1_expr,"text_at":[10,-6]})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities":["l2"],"value":"corner_r + 4","text_at":[8,16]})).unwrap();
+    h.settle();
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":"d1"},"double":true})).unwrap();
+    h.frames(3);
+    assert!(crate::dim_view::editing() && crate::scenario::rect_of("dimwin").is_some(), "the window opens on d1");
+    h
+}
+
+/// The parameter rows the open window shows, in order.
+fn parameter_rows() -> Vec<String> {
+    crate::scenario::handles("dimwin:param:").into_iter().map(|(name, _)| name.trim_start_matches("dimwin:param:").to_string()).collect()
+}
+
+fn type_in_row(h: &mut Harness, name: &str, text: &str) {
+    h.step(&json!({"click":{"handle":format!("dimwin:param:{name}")}})).unwrap();
+    h.frames(2);
+    type_value(h, text);
+    h.frames(2);
+}
+
+fn length(h: &Harness, name: &str) -> f64 {
+    h.app.session.doc.eval(name, solidcraft_engine::doc::expr::Kind::Length).unwrap_or(f64::NAN)
+}
+
+/// A dimension driven by a user parameter (`corner_r`) offers that parameter's value in its
+/// window (#16319): changing it there changes the parameter itself, so every dimension using it
+/// follows and the dimension keeps its expression, with OK in one undo step.
+#[test]
+fn a_parameter_changed_in_the_dimension_window_changes_everywhere_it_is_used() {
+    let mut h = parameter_window("corner_r");
+    assert_eq!(parameter_rows(), ["corner_r"]);
+    let undo = h.app.session.undo.len();
+    type_in_row(&mut h, "corner_r", "8");
+    assert!(crate::dim_view::editing(), "a click into the row keeps the window open");
+    assert!((length(&h, "corner_r") - 6.).abs() < 1e-9, "nothing reaches the design before OK");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(2);
+    assert!(!crate::dim_view::editing(), "Enter in the row applies the window");
+    assert_eq!(h.app.session.doc.param("corner_r").unwrap().expr, "8 mm", "a bare number takes the parameter's own unit");
+    assert!((length(&h, "corner_r") - 8.).abs() < 1e-9);
+    assert_eq!(h.app.session.doc.param("d1").unwrap().expr, "corner_r", "the dimension keeps its link");
+    assert!((length(&h, "d1") - 8.).abs() < 1e-9);
+    assert!((length(&h, "d2") - 12.).abs() < 1e-9, "the other dimension using it follows");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.param("corner_r").unwrap().expr, "6 mm");
+    assert!((length(&h, "d2") - 10.).abs() < 1e-9);
+    crate::dim_view::cancel();
+}
+
+/// A row's bare number is written in its parameter's own unit (a length's, an angle's), a
+/// unitless parameter's stays a number, and an explicit unit or an expression is kept as typed.
+#[test]
+fn a_parameter_row_writes_a_bare_number_in_the_parameter_s_unit() {
+    let mut h = parameter_window("corner_r");
+    h.app.run("parameters.add", json!({"name":"tilt","expression":"10 deg"})).unwrap();
+    h.app.run("parameters.add", json!({"name":"count","expression":"3","unit":""})).unwrap();
+    let doc = h.app.session.doc.clone();
+    let typed: std::collections::BTreeMap<String, String> =
+        [("corner_r", "8"), ("tilt", "30"), ("count", "4"), ("foot", "0.1 in")].into_iter().map(|(n, t)| (n.into(), t.into())).collect();
+    let changes = crate::dim_view::window::parameter_changes(&doc, "d1", "corner_r + tilt + count + foot", &typed).unwrap();
+    let written = |name: &str| changes.get(name).and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
+    assert_eq!(written("corner_r"), "8 mm");
+    assert_eq!(written("tilt"), "30 deg");
+    assert_eq!(written("count"), "4");
+    assert_eq!(written("foot"), "0.1 in", "an explicit unit stays");
+    let typed: std::collections::BTreeMap<String, String> = [("corner_r".to_string(), "foot * 2".to_string())].into_iter().collect();
+    let changes = crate::dim_view::window::parameter_changes(&doc, "d1", "corner_r", &typed).unwrap();
+    assert_eq!(changes.get("corner_r").and_then(serde_json::Value::as_str), Some("foot * 2"), "an expression stays as typed");
+    crate::dim_view::cancel();
+}
+
+/// Each user parameter the expression names gets one row, in the order they first appear; a
+/// dimension's own parameter (`d2`) and a plain number get none. With rows the window widens so a
+/// long expression shows whole. Cancel drops a row's change.
+#[test]
+fn the_dimension_window_lists_the_user_parameters_its_expression_names() {
+    let mut h = parameter_window("corner_r * 2 - foot");
+    assert_eq!(parameter_rows(), ["corner_r", "foot"]);
+    h.step(&json!({"click":{"handle":"dimwin:value"}})).unwrap();
+    type_value(&mut h, "foot + corner_r + foot + d2");
+    h.frames(2);
+    assert_eq!(parameter_rows(), ["foot", "corner_r"], "the rows follow what is typed, each once, without d2");
+    let width = || crate::scenario::rect_of("dimwin").map_or(0.0, |r| r.width());
+    let wide = width();
+    type_value(&mut h, "20");
+    h.frames(2);
+    assert!(parameter_rows().is_empty(), "a plain number has no parameter rows");
+    let usual = width();
+    assert!(wide > usual + 1.0, "with rows the window widens to show a long expression whole ({wide} vs {usual})");
+    type_value(&mut h, "foot * 3");
+    h.frames(2);
+    let before = h.app.session.doc.to_json();
+    type_in_row(&mut h, "foot", "5");
+    h.step(&json!({"click":{"handle":"dimwin:cancel"}})).unwrap();
+    h.frames(2);
+    assert!(!crate::dim_view::editing());
+    assert_eq!(h.app.session.doc.to_json(), before, "Cancel drops the parameter's change too");
+    crate::dim_view::cancel();
+}
+
+/// A row value the parameter cannot take says why under the rows, and OK applies nothing: neither
+/// the parameter nor the dimension's value.
+#[test]
+fn an_invalid_parameter_value_in_the_dimension_window_applies_nothing() {
+    let mut h = parameter_window("corner_r");
+    let before = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    type_in_row(&mut h, "corner_r", "no_such_name");
+    assert!(crate::scenario::rect_of("dialog:report:dimension_parameter_error").is_some(), "the refusal shows under the rows");
+    h.step(&json!({"click":{"handle":"dimwin:ok"}})).unwrap();
+    h.frames(2);
+    assert!(crate::dim_view::editing(), "a refused value keeps the window open");
+    assert_eq!(h.app.session.doc.to_json(), before, "nothing was applied");
+    assert_eq!(h.app.session.undo.len(), undo);
     crate::dim_view::cancel();
 }
 
@@ -662,7 +833,7 @@ fn pending_second_nested_plane_uses_world_picks_but_one_local_dimension() {
 }
 
 #[test]
-fn invalid_zero_negative_failed_open_and_click_away_leave_no_dimension() {
+fn invalid_zero_negative_failed_open_leave_no_dimension_and_left_click_outside_accepts() {
     let mut h = line([20., 0.]);
     let baseline = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
@@ -679,11 +850,34 @@ fn invalid_zero_negative_failed_open_and_click_away_leave_no_dimension() {
     assert!(h.app.run("doc.open", json!({"path":"missing-dimension-draft-design.solidcraft"})).is_err());
     assert!(crate::dim_view::editing(), "failed replacement must preserve the draft");
     assert_eq!(h.app.session.doc.to_json(), baseline);
+    type_value(&mut h, "25 mm");
     h.frames(8);
     h.step(&json!({"click":{"world":[12,-10,0]}})).unwrap();
     assert!(!crate::dim_view::editing());
-    assert_eq!(h.app.session.doc.to_json(), baseline);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.undo.len(), undo + 1, "left-clicking outside accepts the dimension");
+    let state = h.app.session.world_state().unwrap();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let dim = sk.constraints.iter().find(|c| c.param.is_some()).unwrap();
+    assert!((dim.kind.value().unwrap() - 25.).abs() < 1e-6);
+
+    // Type-first pinned flow: picking a line, pinning the text, typing a value, then left-clicking
+    // outside also commits the typed dimension without starting a spurious pick on that click.
+    let mut h = sketch_with(&[("sketch.line", json!({"points":[[0,0],[20,0]],"infer":false}))], [10., 0.]);
+    let dims = dimension_count(&h);
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    assert_live(&h);
+    h.step(&json!({"click":{"world":[10,-7,0]}})).unwrap();
+    assert!(crate::dim_view::editing());
+    assert_eq!(crate::dim_view::live(), None);
+    keys(&mut h, "17");
+    h.frames(8);
+    h.step(&json!({"click":{"world":[12,12,0]}})).unwrap();
+    assert!(!crate::dim_view::editing());
+    let new = added(&h, dims);
+    assert_eq!(new.len(), 1);
+    assert!((new[0].kind.value().unwrap() - 17.).abs() < 1e-6);
+    assert_eq!(h.app.tool.as_ref().map(|t| (t.cmd, t.picks.len())), Some(("sketch.dimension", 0)));
+    crate::dim_view::cancel();
 }
 
 #[test]
@@ -774,7 +968,7 @@ fn inch_dimension_entry_survives_unit_changes_undo_and_reopen() {
     let before = h.app.session.world_state().unwrap().sketch(sketch).unwrap().sketch.clone();
     let c = before.constraints.iter().find(|c| c.param.is_some()).unwrap();
     let p = h.app.session.doc.param(c.param.as_deref().unwrap()).unwrap();
-    assert_eq!(crate::dim_view::label(&c.kind, Some(&p.expr), false, "in", 2), "1.2345 in");
+    assert_eq!(crate::dim_view::label(&c.kind, Some(&p.expr), false, "in", 2, 1), "1.2345 in");
     assert!((c.kind.value().unwrap() - 31.3563).abs() < 1e-6);
     h.app.run("document.units", json!({"units":"mm"})).unwrap();
     assert_eq!(h.app.session.world_state().unwrap().sketch(sketch).unwrap().sketch, before);
@@ -1848,6 +2042,41 @@ fn shown_dimensions() -> (Harness, u64) {
     (h, sketch)
 }
 
+/// The painted model-view text of the dimension driven by `param`.
+fn model_text_shape(h: &Harness, param: &str) -> egui::epaint::TextShape {
+    let sk = h
+        .app
+        .session
+        .world_state()
+        .unwrap()
+        .sketch(h.app.session.doc.features.iter().find(|f| f.name.starts_with("Sketch")).unwrap().id)
+        .unwrap()
+        .sketch
+        .clone();
+    let id = sk.constraints.iter().find(|c| c.param.as_deref() == Some(param)).unwrap().id.clone();
+    let (_, _, centre) = crate::dim_view::model_drawn().into_iter().find(|(_, d, _)| *d == id).expect("the dimension is shown in the model view");
+    h.shapes
+        .iter()
+        .find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if (t.visual_bounding_rect().center() - centre).length() < 2.0 => Some(t.clone()),
+            _ => None,
+        })
+        .expect("the dimension's value is painted")
+}
+
+/// The painted model-view text of the shown dimension with this constraint `id` in `sketch`.
+fn model_text_shape_of(h: &Harness, sketch: u64, id: &str) -> egui::epaint::TextShape {
+    let (_, _, centre) =
+        crate::dim_view::model_drawn().into_iter().find(|(s, d, _)| *s == sketch && d == id).expect("the dimension is shown in the model view");
+    h.shapes
+        .iter()
+        .find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if (t.visual_bounding_rect().center() - centre).length() < 2.0 => Some(t.clone()),
+            _ => None,
+        })
+        .expect("the dimension's value is painted")
+}
+
 /// The model view's text of the dimension driven by `param` (screen).
 fn model_text(h: &Harness, param: &str) -> [f32; 2] {
     let sk = h
@@ -1868,6 +2097,28 @@ fn model_text(h: &Harness, param: &str) -> [f32; 2] {
 fn plate_max(h: &Harness) -> [f64; 2] {
     let b = h.app.session.world_state().unwrap().body("Plate").unwrap().mesh().bounds();
     [((b.max.x - b.min.x) * 1000.0).round() / 1000.0, ((b.max.y - b.min.y) * 1000.0).round() / 1000.0]
+}
+
+/// A shown dimension is painted with the model view, before the panels laid over the view, so
+/// a panel covers it instead of the dimension's lines and value drawing over the panel (#16846).
+#[test]
+fn shown_dimensions_are_painted_under_the_panels() {
+    fn has_text(shape: &egui::Shape, text: &str) -> bool {
+        match shape {
+            egui::Shape::Text(t) => t.galley.text() == text,
+            egui::Shape::Vec(shapes) => shapes.iter().any(|s| has_text(s, text)),
+            _ => false,
+        }
+    }
+    let (h, _) = shown_dimensions();
+    let (_, _, centre) = crate::dim_view::model_drawn().into_iter().next().expect("a dimension is shown in the model view");
+    let dimension = h
+        .shapes
+        .iter()
+        .position(|s| matches!(&s.shape, egui::Shape::Text(t) if (t.visual_bounding_rect().center() - centre).length() < 2.0))
+        .expect("the dimension's value is painted");
+    let panel = h.shapes.iter().position(|s| has_text(&s.shape, "Browser")).expect("the Browser panel is painted");
+    assert!(dimension < panel, "the dimension (shape {dimension}) is painted before the Browser panel (shape {panel})");
 }
 
 #[test]
@@ -1892,6 +2143,27 @@ fn double_clicking_a_shown_dimension_edits_it_without_editing_the_sketch() {
     h.app.run("edit.undo", json!({})).unwrap();
     h.settle();
     assert!((plate_max(&h)[1] - 10.0).abs() < 1e-6, "undo restores it");
+}
+
+#[test]
+fn double_clicking_another_shown_dimension_opens_it_from_the_model_view() {
+    let (mut h, _) = shown_dimensions();
+    let first = model_text(&h, "d1");
+    h.step(&json!({"click":first,"double":true})).unwrap();
+    assert!(crate::dim_view::editing());
+    h.frames(40);
+    let second = model_text(&h, "d2");
+    h.step(&json!({"click":second,"double":true})).unwrap();
+    h.frames(40);
+    assert!(crate::dim_view::editing() && h.widget("Dimension: d2").is_some(), "d2 is open: {}", h.call("ui.inspect", json!({})));
+    let d1 = h.app.session.doc.param("d1").unwrap().expr.clone();
+    assert!(!d1.contains("d2"), "nothing was inserted into d1: {d1}");
+    type_value(&mut h, "14");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "14");
+    assert_eq!(h.app.session.doc.param("d1").unwrap().expr, d1);
+    crate::dim_view::cancel();
 }
 
 /// A sketch seen nearly edge-on, with one of its directions pointing at the eye, keeps its
@@ -1946,6 +2218,24 @@ fn a_dimension_is_sized_from_whichever_direction_reaches_the_screen() {
     let neither = |p: Vec2| (p.x == at.x && p.y == at.y).then(|| screen(p));
     assert_eq!(mm_per_pixel(neither, at), None, "no direction projects: no size");
     assert_eq!(mm_per_pixel(|_| None, at), None, "the point itself does not project");
+}
+
+/// #14121: Show Dimensions follows the same text size and colour preferences as the open sketch.
+#[test]
+fn shown_dimensions_follow_the_dimension_text_size_and_colour() {
+    let (mut h, _) = shown_dimensions();
+    let before = model_text_shape(&h, "d1");
+    let custom = egui::Color32::from_rgb(0x12, 0x34, 0x56);
+    h.call("ui.prefs", json!({"dimension_text_scale":2.0,"dimension_colour":[0x12,0x34,0x56]}));
+    h.frames(2);
+    let after = model_text_shape(&h, "d1");
+    assert!(
+        (after.galley.size().y - before.galley.size().y * 2.0).abs() <= 2.0,
+        "the shown dimension's text height {} doubles to {}",
+        before.galley.size().y,
+        after.galley.size().y
+    );
+    assert_eq!(after.fallback_color, custom, "the shown dimension's value takes the custom colour");
 }
 
 #[test]
@@ -2121,14 +2411,14 @@ fn a_typed_value_does_not_light_a_selected_design_curve() {
     assert!(!crate::viewport::build_highlight(&h.app).overlay.is_empty(), "lit once the value is let go");
 }
 
-/// The Dimension tool's "x, y" readout gives the design's coordinates: while a value is typed it
-/// is not drawn, as the hover highlight is not.
+/// Like other constraint pick tools, the Dimension tool hides the pointer coordinate readout
+/// both while picking/pointing and while typing a value.
 #[test]
 fn a_typed_value_hides_the_pointer_readout() {
     let mut h = sketch_with(&[("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]}))], [20., 10.]);
     h.step(&json!({"move":{"world":[10,5,0]}})).unwrap();
     h.frames(1);
-    assert!(crate::scenario::rect_of("viewport:readout").is_some(), "the readout is drawn while only pointing");
+    assert!(crate::scenario::rect_of("viewport:readout").is_some(), "readout while picking in Dimension");
     h.step(&json!({"click":{"world":[20,0,0]}})).unwrap();
     assert_live(&h);
     keys(&mut h, "60");
@@ -2237,4 +2527,117 @@ fn the_pointer_ring_stays_off_the_value_being_placed() {
     assert!(!crate::tools::pointer_ring_shown(tool, pointer), "no ring on the value");
     assert!(!crate::tools::pointer_ring_shown(tool, value.right_center() + egui::vec2(4.0, 0.0)), "nor one that would touch it");
     assert!(crate::tools::pointer_ring_shown(tool, value.right_center() + egui::vec2(20.0, 0.0)), "the ring elsewhere");
+}
+
+/// #14121: a shown dimension whose constraint fails takes the established conflict colour; a
+/// satisfied shown dimension keeps the preference colour.
+#[test]
+fn shown_dimensions_in_a_conflict_take_the_conflict_colour() {
+    crate::dim_view::cancel();
+    let mut h = Harness::new();
+    // A conflict colour nothing else in a sketch uses, so the assertions cannot pass by accident.
+    h.call(
+        "ui.prefs",
+        json!({"theme_import": {"format":"solidcraft-theme/1","name":"Conflict marker","base":"light","colors":{"sketch_conflict":"#12ab34"}}}),
+    );
+    h.frame();
+    let conflict = solidcraft_theme::Tokens::get().sketch_conflict;
+    let custom = egui::Color32::from_rgb(0x12, 0x34, 0x56);
+    h.call("ui.prefs", json!({"dimension_colour":[0x12,0x34,0x56]}));
+    h.frames(2);
+
+    // `w` places a guide line; the Reach sketch ends a 12 mm line on it. Moving the guide out of
+    // reach makes the Reach sketch's length dimension fail.
+    h.app.run("parameters.add", json!({"name": "w", "expression": "10 mm"})).unwrap();
+    let guide = h.app.run("sketch.create", json!({"plane": "XY", "name": "Guide"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.line", json!({"points": [[10, -30], [10, 30]], "ids": ["guide"], "connect": false})).unwrap();
+    h.app.run("sketch.constraint.horizontal_vertical", json!({"line": "guide", "mode": "vertical"})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities": ["origin", "guide.start"], "type": "horizontal", "value": "w"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let reach = h.app.run("sketch.create", json!({"plane": "XY", "name": "Reach"})).unwrap()["sketch"].as_u64().unwrap();
+    let projected = h.app.run("sketch.project", json!({"refs": [{"sketch": "Guide", "curve": "guide"}]})).unwrap()["links"][0]["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let line = h.app.run("sketch.line", json!({"points": [[0, 0], [10, -(44.0_f64).sqrt()]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    h.app.run("sketch.dimension", json!({"entities": [line], "value": 12})).unwrap();
+    h.app.run("sketch.constraint.coincident", json!({"a": format!("{line}.end"), "b": projected})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("parameters.change", json!({"name": "w", "expression": "20 mm"})).unwrap();
+    h.settle();
+    assert!(!crate::open_meshing::session_world(&h.app.session).sketch(reach).unwrap().report.ok(), "the conflict is real");
+
+    for id in [guide, reach] {
+        crate::browser::set_sketch_visible(&mut h.app, id, true);
+        h.app.session.visibility.shown_dimensions.push(id);
+    }
+    h.call("ui.view", json!({"view": "top"}));
+    h.app.cam.distance = 80.0;
+    h.app.cam.target = solidcore_record::Vec3::new(10.0, 0.0, 0.0);
+    h.settle();
+
+    let failing = {
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let ss = st.sketch(reach).unwrap();
+        ss.sketch.constraints.iter().find(|c| c.kind.is_dimension() && ss.report.failing.contains(&c.id)).map(|c| c.id.clone())
+    }
+    .expect("a failing dimension is shown");
+    assert_eq!(model_text_shape_of(&h, reach, &failing).fallback_color, conflict, "the failing shown dimension takes the conflict colour");
+
+    // The Guide's satisfied dimension keeps the custom preference colour.
+    let satisfied = {
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let ss = st.sketch(guide).unwrap();
+        ss.sketch.constraints.iter().find(|c| c.kind.is_dimension() && !ss.report.failing.contains(&c.id)).map(|c| c.id.clone())
+    }
+    .expect("a satisfied shown dimension is drawn");
+    assert_eq!(model_text_shape_of(&h, guide, &satisfied).fallback_color, custom, "a satisfied shown dimension keeps the preference colour");
+
+    // With the Sketch preference off, the failing dimension keeps its old error red.
+    h.app.preferences.sketch_conflict_colour = false;
+    h.settle();
+    assert_eq!(model_text_shape_of(&h, reach, &failing).fallback_color, solidcraft_theme::Tokens::get().error);
+    h.call("ui.prefs", json!({"theme": "dark"}));
+    h.frame();
+}
+
+#[test]
+fn reference_pick_and_slight_drag_outside_work_on_dimension_editor() {
+    crate::dim_view::cancel();
+    let mut h = sketch_with(&[("sketch.line", json!({"points":[[0,0],[40,0]]})), ("sketch.line", json!({"points":[[0,15],[20,15]]}))], [20., 7.5]);
+    let p1 = h.app.run("sketch.dimension", json!({"entities":["l1"],"value":40,"text_at":[20,-6]})).unwrap()["param"].as_str().unwrap().to_string();
+    let p2 = h.app.run("sketch.dimension", json!({"entities":["l2"],"value":20,"text_at":[10,22]})).unwrap()["param"].as_str().unwrap().to_string();
+    h.settle();
+
+    // Open the second dimension for editing (`live == None`) and click the first dimension's
+    // label: `press_on_reference` must recognise the target after `EDIT.take()`.
+    crate::dim_view::edit_param(&h.app, &p2);
+    h.frames(5);
+    assert!(crate::dim_view::editing(), "d2 editor should open");
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":p1}})).unwrap();
+    h.frames(40);
+    assert!(crate::dim_view::editing(), "clicking another dimension inserts reference instead of closing");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.frames(2);
+    assert!(!crate::dim_view::editing());
+
+    // Outside press followed by a slight drag release accepts the editor without passing a pick
+    // through to the active Dimension tool.
+    h.step(&json!({"start":"sketch.dimension"})).unwrap();
+    crate::dim_view::edit_param(&h.app, &p2);
+    h.frames(5);
+    assert!(crate::dim_view::editing());
+    type_value(&mut h, "25");
+    let view = h.app.viewport.rect.unwrap();
+    let proj = crate::viewport::projection(&h.app, view);
+    let end = proj.to_screen(solidcore_record::Vec3::new(30.0, 0.0, 0.0)).unwrap();
+    let start = [end.x + 12.0, end.y - 10.0];
+    h.step(&json!({"drag":[start, [end.x, end.y]], "steps": 4})).unwrap();
+    h.frames(2);
+    assert!(!crate::dim_view::editing(), "outside press accepted on edit box");
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.picks.is_empty()), "slight drag release must not pick in Dimension tool");
+    let d2_val = h.app.session.doc.eval(&p2, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+    assert!((d2_val - 25.0).abs() < 1e-6, "expected accepted value 25, got {d2_val}");
+    crate::dim_view::cancel();
 }

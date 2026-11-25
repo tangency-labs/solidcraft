@@ -4,12 +4,16 @@ use solidcraft_geom::MeshGeom;
 use std::sync::Arc;
 
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
+// For the test modules below, which take it with `use super::*`.
+#[cfg(test)]
+use serde_json::json;
 use solidcraft_doc::render_settings::{RenderSettings, RenderSetup};
 
 use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::render_camera::{CameraApplied, CameraFitted, CameraInfo, CameraSet, RenderCamera};
+use crate::schema::render_info::{Bounds, CpuResourceProfile, RenderBackends, RenderObject, RenderSceneInfo, SceneBody};
 use crate::schema::render_settings::{RenderSettingsGot, RenderSettingsInfo, RenderSettingsSaved, SETUP_FIELDS, SetupFields, set_message};
 use crate::{Result, Session};
 
@@ -34,10 +38,31 @@ mod resources;
 mod shots;
 mod staging;
 mod studio_presets;
-mod surface_bindings;
+pub(super) mod surface_bindings;
 mod surface_resources;
 mod textures;
 mod transmission;
+
+/// The placed bodies (by world name) that a saved render setup gives an image texture or optics,
+/// each with the first such setup's name and what it gives: what a file without render setups
+/// cannot hold (GLB export, #1553). A binding whose body is gone binds nothing.
+pub(super) fn bound_bodies(s: &Session, cmd: &str) -> Result<std::collections::BTreeMap<String, (String, &'static str)>> {
+    let mut out = std::collections::BTreeMap::new();
+    let setups = &s.doc.render.setups;
+    if setups.values().all(|x| x.surfaces.is_empty() && x.optics.is_empty()) {
+        return Ok(out);
+    }
+    let names = surface_bindings::targets(s, cmd)?;
+    for (setup, x) in setups {
+        let bound = x.surfaces.iter().map(|b| (&b.target, "an image texture")).chain(x.optics.iter().map(|b| (&b.target, "optics")));
+        for (target, what) in bound {
+            if let Some(name) = names.get(target) {
+                out.entry(name.clone()).or_insert_with(|| (setup.clone(), what));
+            }
+        }
+    }
+    Ok(out)
+}
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("render.surface.import", "Import Surface Maps", crate::checked!("render.surface.import", surface_resources::import))
@@ -84,9 +109,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&crate::schema::TypedContract::<crate::schema::render_lights::ListParams>::new())
         .output(crate::schema::output_schema_for::<crate::schema::render_lights::ListResult>)
         .params("setup?: saved setup name OR settings?: complete RenderSetup snapshot; neither uses defaults. Returns {lights:[{id,kind,name,name_key,number,implicit,intensity,colour,...spatial fields}]}. IDs are kind:zero-based-source-slot, stable across numerical edits but not family changes/reordering/removal/rig replacement; point and spot share punctual slots. Includes implicit default/preset lights. GPU RGB radiance is factored as colour * intensity; area edges are full world-mm vectors. Read-only, no host, camera change, save, render, model evaluation or undo. See docs/render-settings.md."),
-    CommandSpec::new("render.aging.describe","Layered Surface Aging",effects::aging).icon("appearance").noundo().doc_only()
+    CommandSpec::new("render.aging.describe","Layered Surface Aging",crate::checked!("render.aging.describe", effects::aging)).icon("appearance").noundo().doc_only()
+        .contract(&crate::schema::TypedContract::<crate::schema::render_info::NoParams>::new())
+        .output(crate::schema::output_schema_for::<crate::schema::render_info::AgingDescription>)
         .params("Empty object. Read-only original Rust/patina/dust/grime/scratch/chip/fading presets and exact GPU aging contract. UI activation opens the shared Aging tab; edits remain a saved render draft, never engineering geometry or material-property mutation."),
-    CommandSpec::new("render.effects.describe","Lens and Creative Effects",effects::presentation).icon("camera").noundo().doc_only()
+    CommandSpec::new("render.effects.describe","Lens and Creative Effects",crate::checked!("render.effects.describe", effects::presentation)).icon("camera").noundo().doc_only()
+        .contract(&crate::schema::TypedContract::<crate::schema::render_info::NoParams>::new())
+        .output(crate::schema::output_schema_for::<crate::schema::render_info::EffectsDescription>)
         .params("Empty object. Read-only original photographic/creative filter defaults and constraints. UI activation opens shared Effects controls. Saved finishing and exact-master regrading preserve raw EXR bytes; no physical lens or branded-film calibration is implied."),
     CommandSpec::new("render.coat.bind", "Save Clear Coat", crate::checked!("render.coat.bind", coat_bindings::bind)).icon("appearance").doc_only()
         .contract(&crate::schema::TypedContract::<crate::schema::render::CoatBindParams>::new())
@@ -240,7 +269,9 @@ CommandSpec::new("render.export", "Export Render Image", crate::checked!("render
     .contract(&crate::schema::TypedContract::<crate::schema::render_jobs::ExportParams>::new())
     .output(crate::schema::output_schema_for::<crate::schema::render_jobs::ImageExported>)
     .params("job?: {session, serial, generation} (default selected result), path: destination matching format?: png (default), exr or denoise_mask (PNG extension), overwrite?: false. Guide masks require denoise_diagnostics captured during rendering; their separate bytes, dimensions and SHA are returned under denoise_mask, while frame identifies the parent colour result. EXR requires an opt-in raw linear master retained by that completed CPU or GPU job; never converts PNG pixels. Exports a retained completed image atomically; an existing destination is preserved on failure. See docs/render-jobs.md"),
-CommandSpec::new("render.backends", "Render Backends", backends).icon("list")
+CommandSpec::new("render.backends", "Render Backends", crate::checked!("render.backends", backends)).icon("list")
+    .contract(&crate::schema::TypedContract::<crate::schema::render_info::NoParams>::new())
+    .output(crate::schema::output_schema_for::<crate::schema::render_info::RenderBackends>)
     .noundo()
     .doc_only()
     .params("No parameters. Returns {schema_version: 1, default_backend: builtin, backends: [{id, label, availability, executors: [{id, availability, profiles, limits, scratch}]}]}. Metadata only; does not start rendering or probe a GPU. See docs/render-backends.md"),
@@ -252,7 +283,9 @@ CommandSpec::new("render.settings.set", "Save Render Settings", crate::checked!(
     .contract(&crate::schema::TypedContract::<crate::schema::render_settings::SetParams>::new())
     .output(crate::schema::output_schema_for::<RenderSettingsSaved>)
     .params("name: setup name, set: object of fields to replace (backend, mode, camera, width, height, format, exposure_ev, environment_rotation, environment_intensity, background, job, surfaces, optics, coats, stage). job?: typed active raster/cpu_raytrace/gpu_path configuration with optional validated embedded HDR reference; omitted preserves, null clears, object replaces the complete job. Creates from defaults and saves without a host, validates atomically, one undo step; identical edits are no-ops. See docs/render-settings.md"),
-CommandSpec::new("render.scene", "Inspect Render Scene", scene).noundo().at("RENDER", "SCENE").icon("render_scene")
+CommandSpec::new("render.scene", "Inspect Render Scene", crate::checked!("render.scene", scene)).noundo().at("RENDER", "SCENE").icon("render_scene")
+    .contract(&crate::schema::TypedContract::<crate::schema::render_info::NoParams>::new())
+    .output(crate::schema::output_schema_for::<crate::schema::render_info::RenderSceneInfo>)
     .params("No parameters. Authoritative product-scene metadata, without modelling overlays or mesh payloads. Explicitly settles stale geometry; does not render an image. See docs/render-workspace.md"),
 CommandSpec::new("render.settings.apply", "Apply Render Camera", crate::checked!("render.settings.apply", apply_settings)).icon("camera").noundo().doc_only()
     .contract(&crate::schema::TypedContract::<crate::schema::render_camera::ApplyParams>::new())
@@ -324,15 +357,37 @@ fn scene(s: &mut Session, params: &Value) -> Result<Value> {
             return Err(bad("render.scene", "ambiguous stable occurrence name"));
         }
     }
-    let bodies: Vec<_> = scene
+    let bounds = |b: solidcraft_geom::Aabb3| Bounds { min: b.min.into(), max: b.max.into() };
+    let bodies = scene
         .meshes
         .iter()
         .enumerate()
-        .map(|(ordinal,m)| json!({"ordinal":ordinal,"name":m.name,"stable_target":stable.get(&m.name),"triangles":m.mesh.triangles.len(),"color":m.color,"opacity":m.opacity,"face_appearances":m.faces.len(),"bounds":{"min":m.mesh.bounds().min,"max":m.mesh.bounds().max}}))
-        .collect();
-    Ok(
-        json!({"bodies":bodies,"bounds":if scene.bounds.is_empty() { Value::Null } else { json!({"min":scene.bounds.min,"max":scene.bounds.max}) },"overlays":false}),
-    )
+        .map(|(ordinal, m)| {
+            let stable_target = stable.get(&m.name).map(serde_json::to_value).transpose().map_err(|e| bad("render.scene", e.to_string()))?;
+            Ok(SceneBody {
+                ordinal,
+                name: m.name.clone(),
+                stable_target,
+                triangles: m.mesh.triangles.len(),
+                color: m.color,
+                opacity: m.opacity,
+                face_appearances: m.faces.len(),
+                bounds: bounds(m.mesh.bounds()),
+            })
+        })
+        .collect::<Result<_>>()?;
+    let reply =
+        RenderSceneInfo { bodies, bounds: (!scene.bounds.is_empty()).then(|| bounds(scene.bounds)), overlays: false, param_warnings: Vec::new() };
+    typed_reply("render.scene", reply)
+}
+
+/// A render crate value as a JSON object, for a reply that publishes it as one
+/// ([`crate::schema::render_info::RenderObject`]).
+fn render_object(cmd: &str, value: &impl serde::Serialize) -> Result<RenderObject> {
+    match serde_json::to_value(value).map_err(|e| bad(cmd, e.to_string()))? {
+        Value::Object(fields) => Ok(fields),
+        _ => Err(bad(cmd, "a render description is not an object")),
+    }
 }
 
 fn apply_settings(s: &mut Session, params: &Value) -> Result<Value> {
@@ -420,29 +475,82 @@ fn backends(s: &mut Session, params: &Value) -> Result<Value> {
     if !params.as_object().is_some_and(|p| p.is_empty()) {
         return Err(bad("render.backends", "expected an empty parameter object"));
     }
-    Ok(json!({"schema_version": 1, "default_backend": "builtin", "backends": [s.render_backend()],
-        "cpu_resource_profiles": solidcraft_render::job::CpuBudget::ALL.map(|budget| json!({"id":budget,"limits":budget.limits()}))}))
+    let cmd = "render.backends";
+    let profiles = solidcraft_render::job::CpuBudget::ALL
+        .iter()
+        .map(|budget| {
+            let id = serde_json::to_value(budget).map_err(|e| bad(cmd, e.to_string()))?;
+            Ok(CpuResourceProfile { id, limits: render_object(cmd, &budget.limits())? })
+        })
+        .collect::<Result<_>>()?;
+    let reply = RenderBackends {
+        schema_version: 1,
+        default_backend: "builtin".into(),
+        backends: vec![render_object(cmd, &s.render_backend())?],
+        cpu_resource_profiles: profiles,
+        param_warnings: Vec::new(),
+    };
+    typed_reply(cmd, reply)
 }
 
-/// The placed bodies (by world name) that a saved render setup gives an image texture or optics,
-/// each with the first such setup's name and what it gives: what a file without render setups
-/// cannot hold (GLB export, #1553). A binding whose body is gone binds nothing.
-pub(super) fn bound_bodies(s: &Session, cmd: &str) -> Result<std::collections::BTreeMap<String, (String, &'static str)>> {
+/// The placed bodies (by world name) that a saved render setup gives an image texture, each with
+/// the first such setup's name: what a file without render setups cannot hold (GLB export,
+/// #1553). A binding whose body is gone binds nothing.
+pub(super) fn textured_bodies(s: &Session, cmd: &str) -> Result<std::collections::BTreeMap<String, String>> {
     let mut out = std::collections::BTreeMap::new();
     let setups = &s.doc.render.setups;
-    if setups.values().all(|x| x.surfaces.is_empty() && x.optics.is_empty()) {
+    if setups.values().all(|x| x.surfaces.is_empty()) {
         return Ok(out);
     }
     let names = surface_bindings::targets(s, cmd)?;
     for (setup, x) in setups {
-        let bound = x.surfaces.iter().map(|b| (&b.target, "an image texture")).chain(x.optics.iter().map(|b| (&b.target, "optics")));
-        for (target, what) in bound {
-            if let Some(name) = names.get(target) {
-                out.entry(name.clone()).or_insert_with(|| (setup.clone(), what));
+        for b in x.surfaces.iter() {
+            if let Some(name) = names.get(&b.target) {
+                out.entry(name.clone()).or_insert_with(|| setup.clone());
             }
         }
     }
     Ok(out)
+}
+
+/// The Glass saved render setups give placed bodies, by world name (GLB export, #5296). A body
+/// two setups give different Glass is refused, naming both: the file holds one. Only the bodies
+/// in `bodies` are read (all when it is empty), so leaving one out clears its refusal. A binding
+/// whose body is gone binds nothing.
+pub(super) fn glass_bodies(
+    s: &Session,
+    cmd: &str,
+    bodies: &[String],
+) -> Result<std::collections::BTreeMap<String, solidcraft_doc::render_optics::OpticalMaterial>> {
+    let mut out: std::collections::BTreeMap<String, (String, solidcraft_doc::render_optics::OpticalMaterial)> = std::collections::BTreeMap::new();
+    let setups = &s.doc.render.setups;
+    if setups.values().all(|x| x.optics.is_empty()) {
+        return Ok(std::collections::BTreeMap::new());
+    }
+    let names = surface_bindings::targets(s, cmd)?;
+    for (setup, x) in setups {
+        for b in x.optics.iter() {
+            let Some(name) = names.get(&b.target) else { continue };
+            if !bodies.is_empty() && !bodies.contains(name) {
+                continue;
+            }
+            match out.get(name) {
+                Some((first, optics)) if *optics != b.optics => {
+                    return Err(bad(
+                        cmd,
+                        format!(
+                            "{name}: render setups `{first}` and `{setup}` give it different Glass, and a GLB file holds one; make them the same, or leave the body out with `bodies`"
+                        ),
+                    ));
+                }
+                Some(_) => {}
+                None => {
+                    out.insert(name.clone(), (setup.clone(), b.optics));
+                }
+            }
+        }
+    }
+    Ok(out.into_iter().map(|(name, (_, optics))| (name, optics)).collect())
 }
 
 #[cfg(test)]

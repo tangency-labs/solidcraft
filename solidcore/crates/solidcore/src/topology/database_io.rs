@@ -28,7 +28,6 @@
 //! | [`DatabaseReader::read_type`]         | `SmDatabaseIO::ReadType`                         |
 //! | [`DatabaseReader::go_to_next_line`]   | `SmDatabaseIO::GoToNextLine`                     |
 //! | [`DatabaseReader::read_failed`]       | `SmDatabaseIO::ReadFailed`                       |
-//! | [`DatabaseReader::with_fixes`], [`DatabaseReader::set_fixes`], [`DatabaseReader::byte_swap_read_boolean`] | (not upstream: `WR-47`'s opt-in, `ReadBoolean` honours `m_bByteSwap`) |
 //! | [`DatabaseWriter`]                    | `SmDatabaseIO` / `SmDatabaseIOFile` (write side) |
 //! | [`DatabaseWriter::open_for_write`]    | `SmDatabaseIOFile::OpenFileForWrite` (new file)  |
 //! | [`DatabaseWriter::write_long`] / [`DatabaseWriter::write_longs`] | `WriteLong` / `WriteLongs` |
@@ -38,12 +37,12 @@
 //! | [`DatabaseWriter::write_characters`]  | `SmDatabaseIO::WriteCharacters`                  |
 //! | [`DatabaseWriter::write_type`]        | `SmDatabaseIO::WriteType`                        |
 //! | [`DatabaseWriter::out_str`] ... [`fixed16`] | `*GetOutStreamPtr() << value` (`fixed`, precision 16) |
-//! | [`DatabaseWriter::with_round_trip_doubles`], [`round_trip`] | (not upstream: WR-655's opt-in, doubles that read back unchanged) |
+//! | [`DatabaseWriter::with_round_trip_doubles`], [`round_trip`] | (not upstream: WR-655's fix, doubles that read back unchanged) |
 //! | [`is_big_endian`]                     | `SmDatabaseIO::IsBigEndian`                      |
 //! | [`byte_swap_f64`]                     | `ByteSwap64(double)`, `ByteSwap128(double)`      |
 //! | [`byte_swap_u64`]                     | `ByteSwap64(unsigned long)`, `ByteSwap64(unsigned long long)` |
 //! | [`byte_swap_u32`]                     | `ByteSwap32(unsigned long)`, `ByteSwap32(uint32_t)` |
-//! | [`byte_swap_32_u16`], [`byte_swap_32_u16_with_fixes`] | `ByteSwap32(unsigned short)` (`WR-47` opt-in swaps the two bytes) |
+//! | [`byte_swap_32_u16`]                  | `ByteSwap32(unsigned short)` (`WR-47`: swaps the two bytes) |
 //! | [`byte_swap_u16`]                     | `ByteSwap16(unsigned short)`                     |
 //! | [`InputStream`]                       | the `std::istream` behind `m_pStreamIn` (libstdc++ semantics) |
 //! | [`InputStream::getline`]              | `std::istream::getline(char*, std::streamsize)`  |
@@ -71,17 +70,15 @@
 //!   `char sBuff[SM_MAXSIZE]` words are capped at 255 bytes
 //!   ([`InputStream::extract_word_limited`]): libstdc++ 11+ bounds `>> char*` by
 //!   `__builtin_object_size` when the caller is optimised, as the upstream build is.
-//! - **Foreign-endian `ReadBoolean` and `ByteSwap32(unsigned short)` (opt-in, `WR-47`).**
+//! - **Foreign-endian `ReadBoolean` and `ByteSwap32(unsigned short)` (`WR-47`).**
 //!   Pinned v1.0.1 `SmDatabaseIO::ReadBoolean` (`SmDatabaseIO.cpp:634`) never checks
-//!   `m_bByteSwap` (unlike `ReadBooleans` at `:547`), and `ByteSwap32(unsigned short)`
-//!   (`:113-118`, only reached by `ReadShort`/`WriteShort` if `sizeof(short) != 2`)
-//!   shifts both bytes into bits `16..31` of a 32-bit intermediate and truncates back to
-//!   `0`. By default [`DatabaseReader::read_boolean`] and [`byte_swap_32_u16`] keep
-//!   pinned behaviour; under
-//!   [`UpstreamFixes::database_io_byte_swaps_read_boolean_and_u16`] a reader configured
-//!   via [`DatabaseReader::with_fixes`] or [`DatabaseReader::set_fixes`] byte-swaps
-//!   `read_boolean` when `byte_swap` is active, and [`byte_swap_32_u16_with_fixes`]
-//!   returns [`byte_swap_u16`].
+//!   `m_bByteSwap` (unlike `ReadBooleans` at `:547`), so a byte-swapped stream's boolean
+//!   reads with its bytes reversed (`1` as `0x0100_0000`); and `ByteSwap32(unsigned
+//!   short)` (`:113-118`, only reached by `ReadShort`/`WriteShort` if `sizeof(short) !=
+//!   2`) shifts both bytes into bits `16..31` of a 32-bit intermediate and truncates back
+//!   to `0`. The port's [`DatabaseReader::read_boolean`] byte-swaps when `byte_swap` is
+//!   active, as `ReadBooleans` does, and [`byte_swap_32_u16`] swaps the two bytes
+//!   ([`byte_swap_u16`]).
 //! - **Write side.** [`DatabaseWriter`] keeps the stream in memory (no filesystem on
 //!   wasm32): only a new file (`bNewFile = TRUE`) is supported and appending is the
 //!   caller's. Upstream's byte-swapped `WriteLong`/`WriteLongs` swap the variable's
@@ -89,12 +86,11 @@
 //!   write garbage on big-endian machines or with `SM_BYTESWAP`; the port swaps the
 //!   value. On the little-endian reference build with `SM_ASCII` or `SM_BINARY` no
 //!   swap happens and the output agrees.
-//! - **ASCII doubles (opt-in).** By default an ASCII double is written as upstream's
+//! - **ASCII doubles.** By default an ASCII double is written as upstream's
 //!   `fixed`, precision 16 stream writes it ([`fixed16`]), which does not read back
 //!   unchanged below 1 (WR-655). A writer made
 //!   [`DatabaseWriter::with_round_trip_doubles`] writes [`round_trip`] text instead;
-//!   the B-rep writers do so under
-//!   [`UpstreamFixes::ascii_doubles_round_trip`].
+//!   the B-rep file writer `write_brep_to_file` always does.
 //! - **Nesting bound.** Upstream recurses through nested polymorphic reads (a curve
 //!   holding a curve holding ...) without limit. The port stops at
 //!   [`MAX_READ_NESTING`] = 32 levels ([`DatabaseReader::enter_nested`]); upstream
@@ -110,8 +106,8 @@
 //!   consumers must build the kernel optimised (`opt-level >= 1`) or raise the stack
 //!   (`-C link-arg=-zstack-size=<bytes>`, at least 2 MiB for an unoptimised build).
 
+use crate::error::topology::TopologyFailure;
 use crate::error::{Result, SolidError};
-use crate::kernel::UpstreamFixes;
 
 /// `SM_MAXSIZE`: characters `GoToNextLine` skips at most before the newline, and
 /// the size of `ReadType`'s word buffer.
@@ -197,33 +193,14 @@ pub const fn byte_swap_u16(x: u16) -> u16 {
     x.swap_bytes()
 }
 
-/// Upstream `SmDatabaseIO::ByteSwap32(unsigned short)` (`SmDatabaseIO.cpp:113-118`).
+/// Upstream `SmDatabaseIO::ByteSwap32(unsigned short)` (`SmDatabaseIO.cpp:113-118`):
+/// the two bytes of `x` swapped ([`byte_swap_u16`]).
 ///
 /// Pinned v1.0.1 promotes `x` to 32 bits, shifts its two bytes into bits `16..31`, and
-/// truncates back to `u16`, returning `0` for every input (`WR-47`). See
-/// [`byte_swap_32_u16_with_fixes`] for the opt-in
-/// [`UpstreamFixes::database_io_byte_swaps_read_boolean_and_u16`] path.
+/// truncates back to `u16`, returning `0` for every input (`WR-47`); the port swaps them.
 #[must_use]
 pub const fn byte_swap_32_u16(x: u16) -> u16 {
-    let [b0, b1] = x.to_le_bytes();
-    let n = u32::from_le_bytes([b0, b1, 0, 0]);
-    (((n & 0x0000_00FF) << 24)
-        .wrapping_add((n & 0x0000_FF00) << 8)
-        .wrapping_add((n & 0x00FF_0000) >> 8)
-        .wrapping_add((n & 0xFF00_0000) >> 24)) as u16
-}
-
-/// Swaps a 16-bit integer through `SmDatabaseIO::ByteSwap32(unsigned short)`
-/// (`SmDatabaseIO.cpp:113-118`): returns [`byte_swap_32_u16`] (`0`) by default for
-/// pinned v1.0.1 parity, or [`byte_swap_u16`] (`x.swap_bytes()`) when
-/// [`UpstreamFixes::database_io_byte_swaps_read_boolean_and_u16`] is enabled (`WR-47`).
-#[must_use]
-pub const fn byte_swap_32_u16_with_fixes(x: u16, fixes: &UpstreamFixes) -> u16 {
-    if fixes.database_io_byte_swaps_read_boolean_and_u16 {
-        byte_swap_u16(x)
-    } else {
-        byte_swap_32_u16(x)
-    }
+    byte_swap_u16(x)
 }
 
 /// `std::ios_base::iostate` bits of an [`InputStream`] (libstdc++ values).
@@ -740,8 +717,6 @@ pub struct DatabaseReader {
     version: u64,
     /// Current depth of nested polymorphic reads (not upstream; see `enter_nested`).
     nesting: u32,
-    /// Whether [`Self::read_boolean`] honours `byte_swap` (`WR-47`; not upstream).
-    byte_swap_read_boolean: bool,
 }
 
 /// Deepest nesting of polymorphic reads (a curve holding a curve holding ...) a
@@ -781,7 +756,6 @@ impl DatabaseReader {
             byte_swap: is_big_endian(),
             version: DEFAULT_VERSION,
             nesting: 0,
-            byte_swap_read_boolean: false,
         }
     }
 
@@ -794,7 +768,6 @@ impl DatabaseReader {
             byte_swap: file_type.default_byte_swap(),
             version: DEFAULT_VERSION,
             nesting: 0,
-            byte_swap_read_boolean: false,
         }
     }
 
@@ -807,19 +780,9 @@ impl DatabaseReader {
         }
     }
 
-    /// Configures this reader with `fixes` (not upstream: enables [`Self::read_boolean`]
-    /// byte-swapping when [`UpstreamFixes::database_io_byte_swaps_read_boolean_and_u16`]
-    /// is set; `WR-47`). Preserved across [`Self::open_for_read`].
-    #[must_use]
-    pub const fn with_fixes(mut self, fixes: &UpstreamFixes) -> Self {
-        self.byte_swap_read_boolean = fixes.database_io_byte_swaps_read_boolean_and_u16;
-        self
-    }
-
     /// Starts reading `data` (the contents of a file) as `file_type`
     /// (`SmDatabaseIOFile::OpenFileForRead`): replaces any stream and resets the
-    /// byte-swap flag for `file_type`. The version and opt-in fixes ([`Self::with_fixes`])
-    /// are kept.
+    /// byte-swap flag for `file_type`. The version is kept.
     pub fn open_for_read(&mut self, data: Vec<u8>, file_type: FileType) {
         self.stream = Some(InputStream::new(data));
         self.file_type = file_type;
@@ -906,20 +869,6 @@ impl DatabaseReader {
         self.byte_swap = byte_swap;
     }
 
-    /// Updates this reader's opt-in fix configuration from `fixes` (not upstream;
-    /// `WR-47`, [`UpstreamFixes::database_io_byte_swaps_read_boolean_and_u16`]).
-    pub fn set_fixes(&mut self, fixes: &UpstreamFixes) {
-        self.byte_swap_read_boolean = fixes.database_io_byte_swaps_read_boolean_and_u16;
-    }
-
-    /// Whether [`Self::read_boolean`] byte-swaps when [`Self::byte_swap`] is active
-    /// (not upstream; `WR-47`,
-    /// [`UpstreamFixes::database_io_byte_swaps_read_boolean_and_u16`]).
-    #[must_use]
-    pub const fn byte_swap_read_boolean(&self) -> bool {
-        self.byte_swap_read_boolean
-    }
-
     /// Database version (`GetVersionNum`).
     #[must_use]
     pub fn version(&self) -> u64 {
@@ -959,9 +908,10 @@ impl DatabaseReader {
 
     /// Reads exactly `N` raw bytes.
     fn read_raw<const N: usize>(&mut self, operation: &'static str) -> Result<[u8; N]> {
-        let s = self.stream.as_mut().ok_or_else(|| {
-            SolidError::topology_missing(operation, "the database's input stream")
-        })?;
+        let s = self
+            .stream
+            .as_mut()
+            .ok_or_else(|| SolidError::topology(operation, TopologyFailure::NoInputStream))?;
         let bytes = s.read_bytes(N);
         <[u8; N]>::try_from(bytes).map_err(|_| short_read(operation))
     }
@@ -972,9 +922,10 @@ impl DatabaseReader {
         n: usize,
         operation: &'static str,
     ) -> Result<Vec<[u8; N]>> {
-        let s = self.stream.as_mut().ok_or_else(|| {
-            SolidError::topology_missing(operation, "the database's input stream")
-        })?;
+        let s = self
+            .stream
+            .as_mut()
+            .ok_or_else(|| SolidError::topology(operation, TopologyFailure::NoInputStream))?;
         let total = n.checked_mul(N).ok_or_else(|| short_read(operation))?;
         let bytes = s.read_bytes(total);
         if bytes.len() != total {
@@ -1064,16 +1015,15 @@ impl DatabaseReader {
 
     /// Reads a 4-byte `SmBoolean` (`ReadBoolean`).
     ///
-    /// Pinned v1.0.1 never byte-swaps here (`SmDatabaseIO.cpp:634`, unlike
-    /// [`Self::read_booleans`] at `:547`); the port keeps that by default (`WR-47`), and
-    /// byte-swaps when [`Self::byte_swap`] and
-    /// [`UpstreamFixes::database_io_byte_swaps_read_boolean_and_u16`] (via
-    /// [`Self::with_fixes`] or [`Self::set_fixes`]) are both active.
+    /// Byte-swaps when [`Self::byte_swap`] is active, as [`Self::read_booleans`] does
+    /// (`SmDatabaseIO.cpp:547`). Pinned v1.0.1 never byte-swaps here
+    /// (`SmDatabaseIO.cpp:634`), so a byte-swapped stream's `1` read as `0x0100_0000`
+    /// (`WR-47`).
     pub fn read_boolean(&mut self) -> Result<i32> {
         let raw = u32::from_ne_bytes(
             self.read_raw::<4>("topology::database_io::DatabaseReader::read_boolean")?,
         );
-        Ok(if self.byte_swap && self.byte_swap_read_boolean {
+        Ok(if self.byte_swap {
             byte_swap_u32(raw) as i32
         } else {
             raw as i32
@@ -1132,7 +1082,7 @@ impl DatabaseReader {
             let s = self
                 .stream
                 .as_mut()
-                .ok_or_else(|| SolidError::topology_missing(OP, "the database's input stream"))?;
+                .ok_or_else(|| SolidError::topology(OP, TopologyFailure::NoInputStream))?;
             // `char sBuff[SM_MAXSIZE]`: words longer than 255 bytes are split.
             let _ = s.extract_word_limited(MAX_LINE);
             let _ = s.extract_word_limited(MAX_LINE);
@@ -1184,11 +1134,10 @@ pub fn fixed16(x: f64) -> String {
     }
 }
 
-/// A double as the shortest text that reads back as the same double, in exponent
-/// notation (`3.0000000000000004e-1`, `1e0`, `-0e0`), with [`fixed16`]'s `inf`, `-inf`,
-/// `nan` and `-nan` (not upstream: WR-655's opt-in,
-/// [`crate::kernel::UpstreamFixes::ascii_doubles_round_trip`]). Every ASCII reader
-/// accepts it: `>>` reads the exponent.
+/// A finite double as the shortest text that reads back as the same double, in exponent
+/// notation (`3.0000000000000004e-1`, `1e0`, `-0e0`) (not upstream: WR-655's fix); every
+/// ASCII reader accepts it, as `>>` reads the exponent. A non-finite value is written as
+/// [`fixed16`] writes it, which does not read back.
 #[must_use]
 pub fn round_trip(x: f64) -> String {
     if x.is_finite() {
@@ -1223,9 +1172,8 @@ impl DatabaseWriter {
     }
 
     /// This writer, writing ASCII doubles with [`round_trip`] instead of [`fixed16`]
-    /// when `on` (not upstream: WR-655's opt-in,
-    /// [`crate::kernel::UpstreamFixes::ascii_doubles_round_trip`]). Binary doubles are
-    /// written as they are either way.
+    /// when `on` (not upstream: WR-655's fix). Binary doubles are written as they are
+    /// either way.
     #[must_use]
     pub fn with_round_trip_doubles(mut self, on: bool) -> Self {
         self.round_trip_doubles = on;
@@ -1415,6 +1363,25 @@ impl DatabaseWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A read on a reader opened for nothing names the missing stream, with upstream's
+    /// `SM_ERR_NULL_POINTER`.
+    #[test]
+    fn a_read_without_a_stream_names_it() {
+        use crate::error::SM_ERR_NULL_POINTER;
+        let named = |r: Result<()>| {
+            r.is_err_and(|e| {
+                e.topology_failure() == Some(&TopologyFailure::NoInputStream)
+                    && e.upstream_status() == Some(SM_ERR_NULL_POINTER)
+            })
+        };
+        let mut db = DatabaseReader::new();
+        assert!(named(db.read_longs(1).map(drop)));
+        assert!(named(db.read_type(false).map(drop)));
+        // An ASCII reader reads the type line from the stream itself.
+        let mut ascii = DatabaseReader::with_file_type(FileType::Ascii);
+        assert!(named(ascii.read_type(false).map(drop)));
+    }
 
     #[test]
     fn nesting_is_bounded() {
@@ -1640,31 +1607,6 @@ mod tests {
     }
 
     #[test]
-    fn wr47_flag_lookup_and_reader_configuration() {
-        let mut k = crate::kernel::Kernel::default();
-        assert!(!k.fixes.database_io_byte_swaps_read_boolean_and_u16);
-        let slot = k
-            .fixes
-            .flag_mut("database_io_byte_swaps_read_boolean_and_u16")
-            .expect("flag exists in UpstreamFixes");
-        assert!(!*slot);
-        *slot = true;
-        assert!(k.fixes.database_io_byte_swaps_read_boolean_and_u16);
-
-        let r_default = DatabaseReader::new();
-        assert!(!r_default.byte_swap_read_boolean());
-
-        let mut r_opt_in = DatabaseReader::new().with_fixes(&k.fixes);
-        assert!(r_opt_in.byte_swap_read_boolean());
-        r_opt_in.open_for_read(1i32.to_be_bytes().to_vec(), FileType::ByteSwap);
-        assert!(r_opt_in.byte_swap_read_boolean());
-        assert_eq!(r_opt_in.read_boolean(), Ok(1));
-
-        r_opt_in.set_fixes(&UpstreamFixes::default());
-        assert!(!r_opt_in.byte_swap_read_boolean());
-    }
-
-    #[test]
     fn wr47_foreign_endian_read_boolean_vs_read_booleans() {
         assert!(!is_big_endian());
         let values = [1i32, 0i32, 2i32, -1i32, 0x1234_5678i32];
@@ -1676,99 +1618,57 @@ mod tests {
         }
         assert_eq!(&be_bytes[..4], &[0, 0, 0, 1]);
 
-        let default_fixes = UpstreamFixes::default();
-        let opt_in_fixes = UpstreamFixes {
-            database_io_byte_swaps_read_boolean_and_u16: true,
-            ..Default::default()
-        };
-
-        // Foreign-endian binary stream (`FileType::ByteSwap`):
-        // Default (`false`): `read_boolean` leaves bytes unswapped (`0x0100_0000` for `1`),
-        // while `read_booleans` byte-swaps to `1`.
-        let mut r_default_single =
-            DatabaseReader::with_stream(FileType::ByteSwap, InputStream::new(be_bytes.clone()))
-                .with_fixes(&default_fixes);
-        assert!(r_default_single.byte_swap());
-        let single_default = [
-            r_default_single.read_boolean().unwrap(),
-            r_default_single.read_boolean().unwrap(),
-            r_default_single.read_boolean().unwrap(),
-            r_default_single.read_boolean().unwrap(),
-            r_default_single.read_boolean().unwrap(),
+        // Foreign-endian binary stream (`FileType::ByteSwap`): `read_boolean` byte-swaps,
+        // reading the same values as `read_booleans` on the same bytes (pinned upstream
+        // read `0x0100_0000` for `1`).
+        let mut r_single =
+            DatabaseReader::with_stream(FileType::ByteSwap, InputStream::new(be_bytes.clone()));
+        assert!(r_single.byte_swap());
+        let single = [
+            r_single.read_boolean().unwrap(),
+            r_single.read_boolean().unwrap(),
+            r_single.read_boolean().unwrap(),
+            r_single.read_boolean().unwrap(),
+            r_single.read_boolean().unwrap(),
         ];
-        assert_eq!(
-            single_default,
-            [0x0100_0000, 0, 0x0200_0000, -1, 0x7856_3412]
-        );
+        assert_eq!(single, values);
 
-        let mut r_default_batch =
-            DatabaseReader::with_stream(FileType::ByteSwap, InputStream::new(be_bytes.clone()))
-                .with_fixes(&default_fixes);
-        assert_eq!(
-            r_default_batch.read_booleans(values.len()),
-            Ok(values.to_vec())
-        );
+        let mut r_batch =
+            DatabaseReader::with_stream(FileType::ByteSwap, InputStream::new(be_bytes));
+        assert_eq!(r_batch.read_booleans(values.len()), Ok(values.to_vec()));
 
-        // Opt-in (`true`): `read_boolean` byte-swaps when `byte_swap` is active, matching
-        // `read_booleans`.
-        let mut r_opt_in_single =
-            DatabaseReader::with_stream(FileType::ByteSwap, InputStream::new(be_bytes.clone()))
-                .with_fixes(&opt_in_fixes);
-        let single_opt_in = [
-            r_opt_in_single.read_boolean().unwrap(),
-            r_opt_in_single.read_boolean().unwrap(),
-            r_opt_in_single.read_boolean().unwrap(),
-            r_opt_in_single.read_boolean().unwrap(),
-            r_opt_in_single.read_boolean().unwrap(),
+        // Native-endian binary stream (`FileType::Binary`, `byte_swap == false`): unswapped.
+        let mut r_native =
+            DatabaseReader::with_stream(FileType::Binary, InputStream::new(le_bytes));
+        assert!(!r_native.byte_swap());
+        let got = [
+            r_native.read_boolean().unwrap(),
+            r_native.read_boolean().unwrap(),
+            r_native.read_boolean().unwrap(),
+            r_native.read_boolean().unwrap(),
+            r_native.read_boolean().unwrap(),
         ];
-        assert_eq!(single_opt_in, values);
+        assert_eq!(got, values);
 
-        let mut r_opt_in_batch =
-            DatabaseReader::with_stream(FileType::ByteSwap, InputStream::new(be_bytes))
-                .with_fixes(&opt_in_fixes);
+        // ASCII mode (`FileType::Ascii`): unaffected even if `set_byte_swap` is toggled on
+        // the reader.
+        let mut r_ascii =
+            DatabaseReader::with_stream(FileType::Ascii, ascii("Object Type 15002\n1\n0\n2\n"));
+        r_ascii.set_byte_swap(true);
         assert_eq!(
-            r_opt_in_batch.read_booleans(values.len()),
-            Ok(values.to_vec())
+            r_ascii.read_type(false),
+            Ok(TypeHeader {
+                type_code: Some(15002),
+                dim: None,
+            })
         );
-
-        // Native-endian binary stream (`FileType::Binary`, `byte_swap == false`):
-        // Unaffected in both modes.
-        for fixes in [&default_fixes, &opt_in_fixes] {
-            let mut r_native =
-                DatabaseReader::with_stream(FileType::Binary, InputStream::new(le_bytes.clone()))
-                    .with_fixes(fixes);
-            assert!(!r_native.byte_swap());
-            let got = [
-                r_native.read_boolean().unwrap(),
-                r_native.read_boolean().unwrap(),
-                r_native.read_boolean().unwrap(),
-                r_native.read_boolean().unwrap(),
-                r_native.read_boolean().unwrap(),
-            ];
-            assert_eq!(got, values);
-        }
-
-        // ASCII mode (`FileType::Ascii`): unaffected in both modes, even if `set_byte_swap`
-        // is toggled on the reader.
-        for fixes in [&default_fixes, &opt_in_fixes] {
-            let mut r_ascii =
-                DatabaseReader::with_stream(FileType::Ascii, ascii("Object Type 15002\n1\n0\n2\n"))
-                    .with_fixes(fixes);
-            r_ascii.set_byte_swap(true);
-            assert_eq!(
-                r_ascii.read_type(false),
-                Ok(TypeHeader {
-                    type_code: Some(15002),
-                    dim: None,
-                })
-            );
-            assert_eq!(r_ascii.in_stream_mut().unwrap().extract_int(), Some(1));
-            assert_eq!(r_ascii.in_stream_mut().unwrap().extract_int(), Some(0));
-            assert_eq!(r_ascii.in_stream_mut().unwrap().extract_int(), Some(2));
-        }
+        assert_eq!(r_ascii.in_stream_mut().unwrap().extract_int(), Some(1));
+        assert_eq!(r_ascii.in_stream_mut().unwrap().extract_int(), Some(0));
+        assert_eq!(r_ascii.in_stream_mut().unwrap().extract_int(), Some(2));
 
         // Downstream record reader (`RegionData::read_from_db`, version 30) reading a
         // big-endian binary record (`num_shells = 1`, `start_shell = 0`, `is_void = 1`):
+        // the boolean reads as written (pinned upstream read `0x0100_0000`).
         let mut region_bytes = Vec::new();
         region_bytes.extend_from_slice(&1u64.to_be_bytes());
         region_bytes.extend_from_slice(&0u64.to_be_bytes());
@@ -1778,40 +1678,18 @@ mod tests {
         let mut all = Vec::new();
         let mut attrs = crate::topology::brep_data::AttributeSink::new(&mut store, &mut all, 0);
 
-        let mut reg_default = crate::topology::brep_data::RegionData::zeroed();
-        let mut db_reg_default = DatabaseReader::new();
-        db_reg_default.open_for_read(region_bytes.clone(), FileType::ByteSwap);
-        reg_default
-            .read_from_db(30, &mut attrs, &mut db_reg_default, false)
+        let mut reg = crate::topology::brep_data::RegionData::zeroed();
+        let mut db_reg = DatabaseReader::new();
+        db_reg.open_for_read(region_bytes, FileType::ByteSwap);
+        reg.read_from_db(30, &mut attrs, &mut db_reg, false)
             .unwrap();
-        assert_eq!(reg_default.num_shells, 1);
-        assert_eq!(reg_default.start_shell, 0);
-        assert_eq!(reg_default.is_void, 0x0100_0000);
-
-        let mut reg_opt_in = crate::topology::brep_data::RegionData::zeroed();
-        let mut db_reg_opt_in = DatabaseReader::new();
-        db_reg_opt_in.open_for_read(region_bytes, FileType::ByteSwap);
-        db_reg_opt_in.set_fixes(&opt_in_fixes);
-        reg_opt_in
-            .read_from_db(30, &mut attrs, &mut db_reg_opt_in, false)
-            .unwrap();
-        assert_eq!(reg_opt_in.num_shells, 1);
-        assert_eq!(reg_opt_in.start_shell, 0);
-        assert_eq!(reg_opt_in.is_void, 1);
+        assert_eq!(reg.num_shells, 1);
+        assert_eq!(reg.start_shell, 0);
+        assert_eq!(reg.is_void, 1);
     }
 
     #[test]
-    fn wr47_byte_swap_32_u16_default_zero_vs_opt_in_swap() {
-        let default_fixes = UpstreamFixes::default();
-        let opt_in_fixes = UpstreamFixes {
-            database_io_byte_swaps_read_boolean_and_u16: true,
-            ..Default::default()
-        };
-
-        assert_eq!(byte_swap_32_u16(0x1234), 0);
-        assert_eq!(byte_swap_32_u16_with_fixes(0x1234, &default_fixes), 0);
-        assert_eq!(byte_swap_32_u16_with_fixes(0x1234, &opt_in_fixes), 0x3412);
-
+    fn wr47_byte_swap_32_u16_swaps_the_two_bytes() {
         for (input, swapped) in [
             (0x0000u16, 0x0000u16),
             (0x0001u16, 0x0100u16),
@@ -1821,20 +1699,9 @@ mod tests {
             (0xFF00u16, 0x00FFu16),
             (0xFFFFu16, 0xFFFFu16),
         ] {
-            assert_eq!(byte_swap_32_u16(input), 0);
-            assert_eq!(byte_swap_32_u16_with_fixes(input, &default_fixes), 0);
-            assert_eq!(byte_swap_32_u16_with_fixes(input, &opt_in_fixes), swapped);
-            assert_eq!(
-                byte_swap_32_u16_with_fixes(input, &opt_in_fixes),
-                byte_swap_u16(input)
-            );
-            assert_eq!(
-                byte_swap_32_u16_with_fixes(
-                    byte_swap_32_u16_with_fixes(input, &opt_in_fixes),
-                    &opt_in_fixes,
-                ),
-                input
-            );
+            assert_eq!(byte_swap_32_u16(input), swapped);
+            assert_eq!(byte_swap_32_u16(input), byte_swap_u16(input));
+            assert_eq!(byte_swap_32_u16(byte_swap_32_u16(input)), input);
         }
     }
 }

@@ -6,7 +6,7 @@
 | Started | 2026-10-14 (when #1221 opened) |
 | Apps | SolidCraft |
 | Discussion | [#1221](https://github.com/tangency-labs/solidcraft/issues/1221) |
-| Related | [#8987](https://github.com/tangency-labs/solidcraft/pull/8987) (native Wasm command plugin runtime, the base for phase 1), [#15100](https://github.com/tangency-labs/solidcraft/issues/15100) (design forms, the plugin UI mechanism), [#4933](https://github.com/tangency-labs/solidcraft/pull/4933) (plugin commands in Utilities), [#5586](https://github.com/tangency-labs/solidcraft/pull/5586) (install from a GitHub link) |
+| Related | [RFC 0015](0015-plugin-ui-workspaces.md) (plugin panels, workspaces and viewport content), [#8987](https://github.com/tangency-labs/solidcraft/pull/8987) (native Wasm command plugin runtime, the base for phase 1), [#15100](https://github.com/tangency-labs/solidcraft/issues/15100) (design forms, the plugin UI mechanism), [#4933](https://github.com/tangency-labs/solidcraft/pull/4933) (plugin commands in Utilities), [#5586](https://github.com/tangency-labs/solidcraft/pull/5586) (install from a GitHub link) |
 
 This RFC replaces `docs/plugins.md` and folds in what the 37 comments on #1221 settled. Only the Preferences page exists today. No plugin runs.
 
@@ -15,7 +15,7 @@ This RFC replaces `docs/plugins.md` and folds in what the 37 comments on #1221 s
 These are settled and override older text in this RFC, in #1221 and in the draft PRs.
 
 1. **One API.** The plugin API is the MCP engine command surface. There is no second surface.
-2. **WebAssembly is the plugin runtime.** No CPython, no pip, and no embedded script interpreter. Rhai and similar runtimes are not part of the plan.
+2. **WebAssembly is the plugin runtime.** No CPython, no pip, and no embedded script interpreter to start. Monty or Rhai may come later, on the same command surface.
 3. **No network to start.** The linker has no fetch, sockets or HTTP, and a manifest that asks for `net` is refused. `net` stays a reserved permission name. It can be granted later only to signed official plugins from the curated index (phase 6), with named `https` origins and requests made by the host, never by the plugin.
 4. **Plugin UI is host-drawn, and only where the app allows it.** Forms come from declared input schemas drawn with the design-forms mechanism in [#15100](https://github.com/tangency-labs/solidcraft/issues/15100). A plugin ships no UI code.
 5. **Phase 1 sets the shape, so it gets a design review.** The phase 1 PR is reviewed on its design (WIT, manifest, permissions, limits) before phase 2 starts. See section 8.
@@ -34,12 +34,12 @@ These are settled and override older text in this RFC, in #1221 and in the draft
 
 **Non-goals**
 - Not a way to override core commands. Overrides would make a model behave differently depending on what is installed.
-- Not where core features go. CAM, for example, stays in-tree (#1153); plugins add vendor posts, niche strategies and importers on top.
+- Not where core features go. CAM may ship as a plugin (see [RFC 0015](0015-plugin-ui-workspaces.md)); plugins add vendor posts, niche strategies and importers on top.
 - No plugin-to-plugin calls. If plugins ever cooperate, it goes through host events, and a failing listener never fails the caller.
 
 ## 2. The WIT contract
 
-World `solidcraft:plugin@1.0.0`. The interface stays thin: a few typed functions plus the JSON command set, so the WIT stays small while the commands keep growing.
+World `craft:plugin@0.1.0`. The interface stays thin: a few typed functions plus the JSON command set, so the WIT stays small while the commands keep growing.
 
 | Host import | Notes |
 |---|---|
@@ -129,9 +129,24 @@ Plugins will mostly be written by agents working from a spec, docs and the API, 
 2. **A plugin skill file.** A `skills/<name>/SKILL.md` written for agents, covering the API, the manifest, permissions, packaging and how to test. It links to the generated reference instead of repeating it.
 3. **A headless test harness.** `solidcraft-cli plugin test <dir>` runs a plugin against a design with no UI and prints machine-readable pass or fail per entry (JSON), with the resulting design and journal available for assertions. An agent can edit, run and iterate without a person.
 4. **Typed, actionable errors.** Every host failure names its cause as data: the permission that was missing, the command that failed and why, the limit that was hit (fuel, memory, size), and the manifest field at fault. A trap or a denial never comes back as a bare string.
-5. **Language is secondary.** Any language that compiles to a WebAssembly component works. The guide recommends what agents target most reliably: Rust first, TypeScript next.
+5. **Rust and TypeScript are first-class.** Any language that compiles to a WebAssembly component works, but these two are supported and documented.
+   - TypeScript is built with ComponentizeJS (`jco componentize`), which compiles a TS or JS plugin into a component with the JS engine inside the plugin. SolidCraft embeds no JS engine, and the same sandbox, limits and permissions apply.
+   - Typed bindings for both come from the same WIT (`jco types` for TypeScript, `wit-bindgen` for Rust), so they never drift.
+   - The skill file has a TypeScript quickstart and a Rust quickstart. A tiny example plugin in each language lives in the plugins repo, not in SolidCraft.
+   - `plugin test` works the same for both.
 
 Plugin inputs are schemas (section 2), so the app draws the values and variables editor through the design-forms work in #15100. A user changes numbers without touching code.
+
+## 6c. Plugins as agent tools
+
+An installed plugin should be usable from the assistant chat and over MCP without opening it first: install a converter, then say "convert my file". Today `tools/list` is built from a fixed set of definitions (`crates/mcp/src/server.rs`, `tool_definitions_with`), and a plugin entry can only be reached through generic commands such as `plugin.run` or `doc.open`, so an agent can't discover what a plugin offers.
+
+1. **Every enabled plugin's entries are named tools.** Each entry appears in `tools/list` and in the assistant's tool list as `<plugin>.<entry>`, with the manifest's description and the entry's input schema (section 2), so the same strict argument checks apply as for engine commands. A disabled or uninstalled plugin's tools disappear from the next listing.
+2. **Importers and exporters get generated tools.** An importer slot appears as, for example, "Open .f3d files with Dutchman", taking a path and the slot's options; an exporter slot as "Save the design as .<ext> with <plugin>". The schema comes from the slot's declaration (RFC 0015 section 4).
+3. **Headless, under existing grants.** A tool call runs with none of the plugin's own dialogs, under the grants the plugin already has, and is journaled and undoable like any command (one call, one undo step). A `read` entry stays read-only in every way: the host refuses it both edit commands and the file-writing host imports (`write-file` and any later import that changes something outside the design), whatever folder grants the plugin holds, and the refusal is a structured error naming the import. The same check applies when a person runs the entry, so a tool call can't do more than the entry's declared effect.
+4. **The assistant's approval still applies.** When the in-app assistant calls a plugin tool, the call goes through the same chat approval gate as any other assistant tool call, at the confirmation level of the entry's effect: `edit` and above ask first. "Headless" means only that the plugin opens no dialog of its own; a plugin tool can never skip the assistant's approval.
+5. **A missing grant is an error, never a prompt.** If a call needs a grant the plugin doesn't have (a file outside its granted folders, a memory request above the approved limit), the tool returns a structured error naming the plugin, the grant and how to approve it (the app's approval screen, or `plugin.install --approve` / the stored-grant commands headlessly). Nothing waits for a hidden dialog.
+6. **The listing stays honest.** Plugin tools are marked as plugin tools (name prefix and a `plugin` field), so an agent and a person can tell them from built-in commands, and their descriptions reach agents as plugin text, as for panels in RFC 0015.
 
 ## 6b. Shared across Craft apps
 
@@ -140,7 +155,7 @@ Plugin inputs are schemas (section 2), so the app draws the values and variables
 1. **App-agnostic core crate `craft-plugin`.** No CAD and no SolidCraft knowledge. It owns the manifest, permissions, limits (fuel, memory, no network), install and signing, and the headless test harness. The app implements one trait: its command catalog as schemas, plus "run this command". SolidCraft implements it with the MCP engine command surface. PCBCraft and other Craft apps implement their own.
 2. **Declarative UI contributions.** A plugin declares entries, placed in named slots (menu or ribbon), and inputs as schemas. The app draws them through the [#15100](https://github.com/tangency-labs/solidcraft/issues/15100) forms. A plugin ships no UI code, and each app decides which slots exist.
 3. **Runtimes are sub-crates on the same trait.** `craft-plugin-wasm` is wasmtime on desktop and jco on the web, and it is the runtime. A `craft-plugin-script` crate (Monty or Rhai) is optional, is not part of phase 1, and is not added unless the owner decides to revisit decision 2.
-4. **The WIT world is generic:** run a command, log, progress, cancel, granted files. App commands are data (schemas), not WIT types, so one WIT serves every Craft app. The `solidcraft:plugin@1.0.0` world in section 2 becomes this generic world, with SolidCraft's commands as its catalog.
+4. **The WIT world is generic:** run a command, log, progress, cancel, granted files. App commands are data (schemas), not WIT types, so one WIT serves every Craft app. The `craft:plugin@0.1.0` world in section 2 becomes this generic world, with SolidCraft's commands as its catalog.
 5. **Location.** The crates start in this repository as `crates/craft-plugin*`, and `cargo xtask layers` forbids any dependency on SolidCraft crates. They move to their own repository, as solidcore did, when a second app needs them.
 
 Phase 1 therefore builds the host as `craft-plugin` plus `craft-plugin-wasm` against that trait, not hard-coded to SolidCraft.
@@ -159,7 +174,7 @@ Phase 1 therefore builds the host as `craft-plugin` plus `craft-plugin-wasm` aga
 
 | Phase | Delivers | Who and where |
 |---|---|---|
-| 1 | WIT `solidcraft:plugin@1.0.0`, a wasmtime host with fuel and memory limits, `execute`, permissions in the manifest, no network in the linker, a manifest asking for `net` refused, tests: no file access without a grant, a runaway loop is stopped, a crash leaves the model untouched, undo works | Builds on [#8987](https://github.com/tangency-labs/solidcraft/pull/8987) |
+| 1 | WIT `craft:plugin@0.1.0`, a wasmtime host with fuel and memory limits, `execute`, permissions in the manifest, no network in the linker, a manifest asking for `net` refused, tests: no file access without a grant, a runaway loop is stopped, a crash leaves the model untouched, undo works | Builds on [#8987](https://github.com/tangency-labs/solidcraft/pull/8987) |
 | 2 | Importers and exporters, author guide, `plugin check` and `plugin test`. Measurements (component size, compile memory, binary growth) go in a #1221 comment. | After the phase 1 design review |
 | 3 | `FeatureKind::Plugin`, `evaluate`, recorded fallbacks, generic timeline row | |
 | 4 | Install from file or GitHub, Add-on Manager, plugin dialogs drawn from input schemas through [#15100](https://github.com/tangency-labs/solidcraft/issues/15100) | [#5586](https://github.com/tangency-labs/solidcraft/pull/5586), [#4933](https://github.com/tangency-labs/solidcraft/pull/4933) |
@@ -171,7 +186,7 @@ Phase 1 therefore builds the host as `craft-plugin` plus `craft-plugin-wasm` aga
 ## 9. Open questions
 
 1. **Wasmtime size and component limit.** Accept the binary growth, and raise the 16 MiB limit after measuring compile memory?
-2. **Plugin UI.** Settled for forms: host-drawn through #15100. Still open: viewport overlays and workspaces (the slicer-as-a-tab case), or whether such tools live in-tree.
+2. **Plugin UI.** Settled for forms: host-drawn through #15100. Viewport overlays and workspaces are answered in [RFC 0015](0015-plugin-ui-workspaces.md).
 3. **Defaults.** Are newly installed plugins on or off until approved?
 4. **Local network.** Not before phase 6, and under the same rule as any network: signed official plugins only. Starting a print would also need a confirmation level above `edit`.
 5. **Extending core commands.** Data-driven extension points, such as thread standards in the Hole dialog, later. Never overrides.
@@ -179,4 +194,4 @@ Phase 1 therefore builds the host as `craft-plugin` plus `craft-plugin-wasm` aga
 7. **Web.** jco, or desktop only?
 8. **Result annotations.** Text a plugin adds to command results can steer a model, so it needs its own threat model.
 9. **Recorded macros.** A plugin kind or a core feature?
-10. **Version numbers.** #4980 uses `0.1.0` until the interface settles; this RFC says `1.0.0`.
+10. **Version numbers.** Decided: `craft:plugin@0.1.0`.

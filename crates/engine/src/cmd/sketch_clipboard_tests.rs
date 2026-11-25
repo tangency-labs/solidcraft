@@ -410,6 +410,70 @@ fn replace_sketch_never_rebinds_a_reference_to_an_old_curve_onto_a_new_one() {
     assert!((volume(&s) - 3000.0).abs() > 1.0, "never built from the unrelated new curves: {}", volume(&s));
 }
 
+/// The issue's case (#21550): a sketch's edited copy is brought back with `keep_ids`, and the
+/// features that name its curves still build. The extrude picks its profile by curve ids and the
+/// fillet's edge is named after the extrude's side faces, which carry those ids. Here the square
+/// (10 x 10 x 5) becomes a 12 x 10 rectangle with the same ids, so the result is
+/// 12 x 10 x 5 = 600 mm³ less the R1 round on one 5 mm upright edge, (1 - π/4) x 5 mm³.
+/// Without `keep_ids` the same replace leaves the fillet's edge unknown.
+#[test]
+fn replace_sketch_with_keep_ids_keeps_the_features_built_on_its_curves() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Part"}));
+    let square = strs(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}))["curves"]);
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Part", "distance": 5.0, "operation": "new_body", "profiles": [{"curves": square}]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 10, 2.5]], "radius": 1}));
+    let round = (1.0 - std::f64::consts::FRAC_PI_4) * 5.0;
+    assert!((volume(&s) - (500.0 - round)).abs() < 1e-3, "{}", volume(&s));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Edited"}));
+    let edited = strs(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [12, 10]}))["curves"]);
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(square, edited, "both sketches numbered their curves alike: {square:?} {edited:?}");
+    let before = s.doc.to_json();
+
+    let out = run(&mut s, "sketch.replace", json!({"sketch": "Part", "from": "Edited", "keep_ids": true}));
+    assert_eq!(strs(&out["curves"]), square, "the source's curve ids");
+    for id in &square {
+        assert_eq!(out["ids"][id], json!(id), "{out}");
+    }
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "the extrude and the fillet still find their curves: {errors:?}");
+    assert!((volume(&s) - (600.0 - round)).abs() < 1e-3, "{}", volume(&s));
+
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before, "one undo step");
+    // The default renumbers, so the features that named the old curves say so.
+    if let Ok(out) = s.execute("sketch.replace", &json!({"sketch": "Part", "from": "Edited"})) {
+        let new = strs(&out["curves"]);
+        assert!(new.iter().all(|id| !square.contains(id)), "new ids: {new:?}");
+        for (from, to) in square.iter().zip(&new) {
+            assert_eq!(out["ids"][from], json!(to), "{out}");
+        }
+        assert!(s.model.results.iter().any(|r| r.error.is_some()), "a feature says its curves are gone");
+    }
+}
+
+/// `keep_ids` also gives the copied points their source ids, and the ids of what the target
+/// sketch held before are free to take: nothing of the old contents is left to clash with.
+#[test]
+fn replace_sketch_with_keep_ids_keeps_point_ids_over_the_old_contents() {
+    let mut s = two_sketches();
+    let big = s.doc.find_feature("Big").unwrap().id;
+    let small = s.doc.find_feature("Small").unwrap().id;
+    let source = s.doc.sketch(big).unwrap().clone();
+    let out = run(&mut s, "sketch.replace", json!({"sketch": "Small", "from": "Big", "keep_ids": true}));
+    let sk = sketch(&s, small);
+    let ids = |k: &Sketch| -> Vec<String> { k.curves.iter().map(|c| c.id.clone()).chain(k.points.iter().map(|q| q.id.clone())).collect() };
+    let (mut mine, mut theirs) = (ids(sk), ids(&source));
+    mine.sort();
+    theirs.sort();
+    assert_eq!(mine, theirs, "the same curve and point ids as the source");
+    let map = out["ids"].as_object().unwrap();
+    assert!(map.iter().all(|(k, v)| v.as_str() == Some(k.as_str())), "{map:?}");
+    assert!((volume(&s) - 3000.0).abs() < 1e-6, "{}", volume(&s));
+}
+
 /// Sketch contents come from a sketch in another design file, at the same sketch coordinates; a
 /// dimension that named that design's parameter keeps its value, without the parameter.
 #[test]
@@ -449,6 +513,8 @@ fn replace_sketch_refuses_bad_requests_and_leaves_the_design_as_it_was() {
         json!({"sketch": "Nope", "from": "Big"}),
         json!({"from": "Big"}),
         json!({"sketch": "Small", "from": "Big", "file": 3}),
+        json!({"sketch": "Small", "from": "Big", "keep_ids": "yes"}),
+        json!({"sketch": "Small", "from": "Big", "keep_ids": 1}),
         json!({"sketch": "Small", "from": "Big", "file": "Z:/no/such/file.solidcraft"}),
         json!([1, 2]),
         json!("text"),
@@ -456,4 +522,136 @@ fn replace_sketch_refuses_bad_requests_and_leaves_the_design_as_it_was() {
         assert!(s.execute("sketch.replace", &bad).is_err(), "{bad}");
         assert_eq!(s.doc.to_json(), before, "{bad}");
     }
+}
+
+/// Copying a shape that uses `Equal` constraints to tie its edges to an earlier shape in the same
+/// sketch keeps those `Equal` constraints on paste in that sketch, while positional outside
+/// constraints (like coincidence to the origin) are still dropped so the copy moves freely (#15664).
+#[test]
+fn copy_paste_keeps_external_equal_constraints_within_same_sketch() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "A"}));
+    let rect1 = strs(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}))["curves"]);
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{}.start", rect1[0]), "b": "origin"}));
+    run(&mut s, "sketch.dimension", json!({"entities": [rect1[0]], "value": 20}));
+    let width_param = sketch(&s, s.active_sketch.unwrap()).constraints.iter().find(|c| c.kind.is_dimension()).and_then(|c| c.param.clone()).unwrap();
+    run(&mut s, "sketch.dimension", json!({"entities": [rect1[1]], "value": 10}));
+
+    // Copy rect1 -> paste rect2, delete rect2's dimensions, and tie rect2 to rect1 via Equal
+    // (covering both `a` external and `b` external) plus a coincident anchor to the origin.
+    run(&mut s, "sketch.copy", json!({"entities": rect1}));
+    let paste2 = run(&mut s, "sketch.paste", json!({"at": [50, 0]}));
+    let rect2 = strs(&paste2["curves"]);
+    let sid = s.active_sketch.unwrap();
+    let rect2_dims: Vec<String> = sketch(&s, sid)
+        .constraints
+        .iter()
+        .filter(|c| strs(&paste2["constraints"]).contains(&c.id) && c.kind.is_dimension())
+        .map(|c| c.id.clone())
+        .collect();
+    run(&mut s, "sketch.delete", json!({"entities": rect2_dims}));
+    run(&mut s, "sketch.constraint.equal", json!({"a": rect1[0], "b": rect2[0]}));
+    run(&mut s, "sketch.constraint.equal", json!({"a": rect2[1], "b": rect1[1]}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{}.start", rect2[0]), "b": "origin"}));
+
+    // Copy rect2 -> paste rect3: both external Equals come along, while the origin coincidence drops.
+    let copied = run(&mut s, "sketch.copy", json!({"entities": rect2}));
+    let before = sketch(&s, sid).clone();
+    let paste3 = run(&mut s, "sketch.paste", json!({"at": [120, 40]}));
+    let rect3 = strs(&paste3["curves"]);
+    assert_eq!(rect3.len(), 4);
+    assert_eq!(strs(&paste3["constraints"]).len(), copied["constraints"].as_u64().unwrap() as usize);
+
+    let sk = sketch(&s, sid);
+    let new_cons: Vec<_> = sk.constraints.iter().filter(|c| !before.constraints.iter().any(|b| b.id == c.id)).collect();
+    assert!(!new_cons.iter().any(|c| c.kind.refers_to_point(0)), "origin anchor stays behind: {new_cons:#?}");
+    let r1_0 = sk.curve_index(&rect1[0]).unwrap();
+    let r1_1 = sk.curve_index(&rect1[1]).unwrap();
+    let r3_0 = sk.curve_index(&rect3[0]).unwrap();
+    let r3_1 = sk.curve_index(&rect3[1]).unwrap();
+    assert!(new_cons.iter().any(|c| c.kind == ConstraintKind::Equal { a: r1_0, b: r3_0 }), "{new_cons:#?}");
+    assert!(new_cons.iter().any(|c| c.kind == ConstraintKind::Equal { a: r3_1, b: r1_1 }), "{new_cons:#?}");
+
+    // The pasted shape moves freely, and resizing rect1 drives both rect2 and rect3.
+    let p0 = pos(sk, &rect3[0])[0];
+    run(&mut s, "sketch.drag", json!({"entity": rect3[0], "from": [p0.x, p0.y], "to": [p0.x + 10.0, p0.y + 5.0]}));
+    assert!(pos(sketch(&s, sid), &rect3[0])[0].dist(p0) > 1.0);
+    run(&mut s, "parameters.change", json!({"name": width_param, "expression": "35"}));
+    let span = |c: &str| {
+        let p = pos(sketch(&s, sid), c);
+        p[0].dist(p[1])
+    };
+    assert!((span(&rect1[0]) - 35.0).abs() < 1e-6);
+    assert!((span(&rect2[0]) - 35.0).abs() < 1e-6);
+    assert!((span(&rect3[0]) - 35.0).abs() < 1e-6);
+}
+
+/// `sketch.cut` + `sketch.paste` in the same sketch keeps external `Equal` constraints when the
+/// referenced curve still exists, and drops them cleanly when that curve was deleted.
+#[test]
+fn cut_paste_keeps_external_equal_while_referenced_curve_exists() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let l1 = strs(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0]]}))["curves"])[0].clone();
+    let l2 = strs(&run(&mut s, "sketch.line", json!({"points": [[0, 10], [20, 10]]}))["curves"])[0].clone();
+    let l3 = strs(&run(&mut s, "sketch.line", json!({"points": [[0, 20], [15, 20]]}))["curves"])[0].clone();
+    let l4 = strs(&run(&mut s, "sketch.line", json!({"points": [[0, 30], [15, 30]]}))["curves"])[0].clone();
+    run(&mut s, "sketch.dimension", json!({"entities": [l1], "value": 20}));
+    let sid = s.active_sketch.unwrap();
+    let param = sketch(&s, sid).constraints.iter().find(|c| c.kind.is_dimension()).and_then(|c| c.param.clone()).unwrap();
+    run(&mut s, "sketch.constraint.equal", json!({"a": l1, "b": l2}));
+    run(&mut s, "sketch.constraint.equal", json!({"a": l3, "b": l4}));
+
+    run(&mut s, "sketch.cut", json!({"entities": [l2]}));
+    let pasted = strs(&run(&mut s, "sketch.paste", json!({}))["curves"])[0].clone();
+    let sk = sketch(&s, sid);
+    let i1 = sk.curve_index(&l1).unwrap();
+    let ip = sk.curve_index(&pasted).unwrap();
+    assert!(sk.constraints.iter().any(|c| c.kind == ConstraintKind::Equal { a: i1, b: ip }));
+    run(&mut s, "parameters.change", json!({"name": param, "expression": "28"}));
+    let p = pos(sketch(&s, sid), &pasted);
+    assert!((p[0].dist(p[1]) - 28.0).abs() < 1e-6);
+
+    // If the referenced curve is deleted before paste, the dangling Equal is dropped without error.
+    run(&mut s, "sketch.copy", json!({"entities": [l4]}));
+    run(&mut s, "sketch.delete", json!({"entities": [l3]}));
+    let out = run(&mut s, "sketch.paste", json!({"translate": [0, 10]}));
+    assert_eq!(strs(&out["curves"]).len(), 1);
+    assert!(strs(&out["constraints"]).is_empty());
+}
+
+/// External `Equal` constraints are never carried into another sketch or another design, even when
+/// the target sketch has a curve with the same id.
+#[test]
+fn external_equal_is_dropped_when_pasting_to_another_sketch_or_design() {
+    let mut a = Session::default();
+    run(&mut a, "sketch.create", json!({"plane": "XY", "name": "A"}));
+    let l1 = strs(&run(&mut a, "sketch.line", json!({"points": [[0, 0], [20, 0]]}))["curves"])[0].clone();
+    let l2 = strs(&run(&mut a, "sketch.line", json!({"points": [[0, 10], [20, 10]]}))["curves"])[0].clone();
+    run(&mut a, "sketch.constraint.equal", json!({"a": l1, "b": l2}));
+    run(&mut a, "sketch.copy", json!({"entities": [l2]}));
+    let clip = a.sketch_clipboard.clone().unwrap();
+
+    // Pasting into a second sketch in the same design drops the external Equal.
+    run(&mut a, "sketch.finish", json!({}));
+    run(&mut a, "sketch.create", json!({"plane": "XZ", "name": "B"}));
+    let sb = a.active_sketch.unwrap();
+    run(&mut a, "sketch.line", json!({"points": [[0, 0], [50, 0]]}));
+    let out_b = run(&mut a, "sketch.paste", json!({}));
+    assert_eq!(strs(&out_b["curves"]).len(), 1);
+    assert!(strs(&out_b["constraints"]).is_empty());
+    assert!(!sketch(&a, sb).constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Equal { .. })));
+
+    // Pasting into another design (even with matching sketch and curve ids) drops the external Equal.
+    let mut b = Session::default();
+    run(&mut b, "sketch.create", json!({"plane": "XY", "name": "A"}));
+    let sb2 = b.active_sketch.unwrap();
+    assert_eq!(sb2, 1);
+    let other_l1 = strs(&run(&mut b, "sketch.line", json!({"points": [[0, 0], [50, 0]]}))["curves"])[0].clone();
+    assert_eq!(other_l1, l1);
+    b.sketch_clipboard = Some(clip.for_another_design());
+    let out_other = run(&mut b, "sketch.paste", json!({}));
+    assert_eq!(strs(&out_other["curves"]).len(), 1);
+    assert!(strs(&out_other["constraints"]).is_empty());
+    assert!(!sketch(&b, sb2).constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Equal { .. })));
 }

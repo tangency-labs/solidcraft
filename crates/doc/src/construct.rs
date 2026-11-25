@@ -59,6 +59,27 @@ pub enum GeoRef {
     SketchPoint { sketch: u64, point: String },
     /// A sketch curve (by sketch feature id and curve id).
     SketchCurve { sketch: u64, curve: String },
+    /// A snap point of an edge, face or sketch curve (#11228): its centre, its middle or a flat
+    /// face's centre, found again on `of` as it is now. Where `of` has more than one (a
+    /// cylinder's two end centres), `end` says which along the axis (0 the low end, 1 the
+    /// high one, set when the reference is made), else the one nearest `at`, where it was picked.
+    Snap {
+        of: Box<GeoRef>,
+        kind: SnapAt,
+        at: Vec3,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end: Option<usize>,
+    },
+}
+
+/// Which snap point of an edge, face or sketch curve a [`GeoRef::Snap`] is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapAt {
+    /// The centre of a circle or arc, a sphere or torus, or one end of a cylinder or cone.
+    Centre,
+    /// The middle of an edge or sketch curve, along its length.
+    Middle,
 }
 
 /// How a construction axis is defined.
@@ -93,6 +114,9 @@ pub enum PointDef {
     EdgeAndPlane { edge: GeoRef, plane: GeoRef },
     /// At a fraction `t` (0…1) of the way along an edge or sketch curve.
     AlongPath { path: GeoRef, t: crate::Expr },
+    /// At the average (the centroid) of two or more points (vertices, sketch points or points),
+    /// whatever their order.
+    Average { points: Vec<GeoRef> },
 }
 
 /// Resolved construction geometry, kept in the model state by feature.
@@ -293,7 +317,25 @@ fn face_of<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<(&
             return Ok((b, fi, at));
         }
     }
-    Err(bad(format!("no face at {at:?}")))
+    // A mesh body has no faces to pick: say so, rather than let the pick read as a miss (#11469).
+    if let Some(m) = st.bodies.iter().find(|b| lies_on_mesh(b, at)) {
+        return Err(bad(format!("no face at {at}: `{}` is a mesh body, which has no faces; use Convert Mesh to make it a solid first", m.name)));
+    }
+    Err(bad(format!("no face at {at}")))
+}
+
+/// Does `at` lie on the surface of a mesh body, within the pick tolerance? Only mesh bodies:
+/// their triangles are the body itself.
+fn lies_on_mesh(b: &ModelBody, at: Vec3) -> bool {
+    if !b.body.is_mesh() {
+        return false;
+    }
+    let Some((positions, triangles)) = b.body.triangle_mesh() else { return false };
+    let tol = crate::appearance::pick_tolerance(b);
+    triangles.iter().any(|t| {
+        let [a, bb, c] = t.map(|i| positions[i as usize]);
+        crate::appearance::closest_on_triangle(at, a, bb, c).dist(at) <= tol
+    })
 }
 
 /// The edge picked, as a polyline.
@@ -322,7 +364,7 @@ fn edge_pick<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<
     }
     match best {
         Some((d, b, i, pts)) if pts.len() >= 2 && d <= 1e-3 + 1e-2 * pts.iter().fold(0.0, |m: f64, p| m.max(p.len())).max(1.0) => Ok((b, i, pts)),
-        _ => Err(bad(format!("no edge at {at:?}"))),
+        _ => Err(bad(format!("no edge at {at}"))),
     }
 }
 
@@ -376,7 +418,7 @@ fn edge_circle(b: &ModelBody, index: usize, pts: &[Vec3]) -> Option<(Vec3, Vec3)
 }
 
 /// The most edge names a vertex reference keeps.
-const MAX_VERTEX_EDGES: usize = 16;
+pub(crate) const MAX_VERTEX_EDGES: usize = 16;
 
 /// Where the edges named `names` meet: the end every one of them has, nearest `at` (two edges
 /// between the same two vertices share both). `None` when an edge is gone or they share no end.
@@ -384,7 +426,7 @@ fn named_vertex(st: &ModelState, at: Vec3, names: &[String]) -> Option<Vec3> {
     if names.len() < 2 || names.len() > MAX_VERTEX_EDGES {
         return None;
     }
-    let ends: Vec<[Vec3; 2]> = names
+    let found: Vec<(*const ModelBody, usize, [Vec3; 2])> = names
         .iter()
         .map(|n| {
             // The edge with that name itself, never the one nearest the old pick, and its ends
@@ -393,23 +435,47 @@ fn named_vertex(st: &ModelState, at: Vec3, names: &[String]) -> Option<Vec3> {
             // it, so a vertex took that edge's end (#8650).
             bodies(st).find_map(|b| {
                 let hit = crate::name_lookup::locate_edge(b, n, at).ok()?;
-                let m = b.mesh();
-                let pts = m.edges.get(hit.edge)?;
-                Some([*pts.first()?, *pts.last()?])
+                let rec = b.body.record();
+                let edge = rec.edges.get(hit.edge)?;
+                let [v0, v1] = edge.vertices;
+                let p0 = rec.vertices.get(v0 as usize).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]))?;
+                let p1 = rec.vertices.get(v1 as usize).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]))?;
+                Some((std::ptr::from_ref(b), hit.edge, [p0, p1]))
             })
         })
         .collect::<Option<_>>()?;
-    let (first, rest) = ends.split_first()?;
-    let tol = |p: Vec3| 1e-6 * (1.0 + p.len());
-    first
-        .iter()
-        .copied()
-        .filter(|p| p.is_finite() && rest.iter().all(|e| e.iter().any(|q| q.dist(*p) <= tol(*p))))
-        .min_by(|p, q| p.dist(at).total_cmp(&q.dist(at)))
+    // Two names of a vertex name two edges: a name the point decides (where the body grew so the
+    // vertex lies inside another edge) can find an edge another name found.
+    if found.iter().enumerate().any(|(i, (b, e, _))| found.iter().take(i).any(|(c, f, _)| std::ptr::eq(*b, *c) && e == f)) {
+        return None;
+    }
+    let ends: Vec<[Vec3; 2]> = found.into_iter().map(|(_, _, ends)| ends).collect();
+    shared_ends(&ends).into_iter().min_by(|p, q| p.dist(at).total_cmp(&q.dist(at)))
+}
+
+/// How near two points of a body are the same point: a millionth of their distance from the
+/// origin, and at least a millionth of a millimetre.
+pub(crate) fn point_tolerance(p: Vec3) -> f64 {
+    1e-6 * (1.0 + p.len())
+}
+
+/// Where edges meet: the ends in `ends[0]` that every other list in `ends` has too (to
+/// [`point_tolerance`]), each once. Empty when they share none.
+pub(crate) fn shared_ends<E: AsRef<[Vec3]>>(ends: &[E]) -> Vec<Vec3> {
+    let tol = point_tolerance;
+    let Some((first, rest)) = ends.split_first() else { return Vec::new() };
+    let mut shared: Vec<Vec3> = Vec::new();
+    for p in first.as_ref().iter().copied() {
+        let everywhere = rest.iter().all(|e| e.as_ref().iter().any(|q| q.dist(p) <= tol(p)));
+        if p.is_finite() && everywhere && !shared.iter().any(|q| q.dist(p) <= tol(p)) {
+            shared.push(p);
+        }
+    }
+    shared
 }
 
 /// A polyline that is straight: its line.
-fn as_line(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
+pub(crate) fn as_line(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
     let (a, b) = (*pts.first()?, *pts.last()?);
     let d = (b - a).normalized()?;
     let len = (b - a).len();
@@ -417,7 +483,7 @@ fn as_line(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
 }
 
 /// A polyline on a circle: (centre, unit normal, radius).
-fn as_circle(pts: &[Vec3]) -> Option<(Vec3, Vec3, f64)> {
+pub(crate) fn as_circle(pts: &[Vec3]) -> Option<(Vec3, Vec3, f64)> {
     let n = pts.len();
     if n < 4 {
         return None;
@@ -487,12 +553,153 @@ pub(crate) fn point(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
         }
         // A round edge or face: its centre.
         GeoRef::Edge { .. } | GeoRef::Face { .. } | GeoRef::SketchCurve { .. } => centre(ctx, g),
+        GeoRef::Snap { of, kind, at, end } => snap_point(ctx.st, of, *kind, *at, *end).or_else(|_| snap_point_ctx(ctx, of, *kind, *at)),
         GeoRef::Datum { datum } => match resolve_datum_in(ctx.doc, datum, ctx.component)? {
             ConstructGeom::Point(p) => Ok(p),
             _ => Err(bad("the datum is not a point (pick the O of a component)")),
         },
         _ => Err(bad("pick a point, vertex or sketch point")),
     }
+}
+
+/// The centres of the circular edges that end a cylinder or cone face, from its B-rep (low, high
+/// along its axis), if it is one.
+fn face_axis_ends(st: &ModelState, of: &GeoRef) -> Option<Vec<Vec3>> {
+    let GeoRef::Face { at, name } = of else { return None };
+    let (b, fi, _) = face_of(st, *at, name).ok()?;
+    let (origin, axis) = match kernel::face_surface(&b.body, fi) {
+        Some(FaceSurface::Cylinder { origin, axis, .. }) => (origin, axis),
+        Some(FaceSurface::Cone { apex, axis, .. }) => (apex, axis),
+        _ => return None,
+    };
+    let tol = 1e-6 * (1.0 + b.body.size());
+    let mut ends: Vec<(f64, Vec3)> = kernel::face_edge_indices(&b.body, fi)
+        .into_iter()
+        .filter_map(|e| kernel::edge_circle(&b.body, e))
+        .filter(|c| (c.center - origin).cross(axis).len() <= tol)
+        .map(|c| ((c.center - origin).dot(axis), c.center))
+        .collect();
+    ends.sort_by(|p, q| p.0.total_cmp(&q.0));
+    ends.dedup_by(|p, q| (p.0 - q.0).abs() <= tol);
+    match ends.as_slice() {
+        [] => None,
+        [one] => Some(vec![one.1]),
+        [lo, .., hi] => Some(vec![lo.1, hi.1]),
+    }
+}
+
+/// The centres of the circular edges that bound a face (holes, circular bosses, rounded corners),
+/// if it has any.
+fn face_circular_centres(st: &ModelState, of: &GeoRef) -> Option<Vec<Vec3>> {
+    let GeoRef::Face { at, name } = of else { return None };
+    let (b, fi, _) = face_of(st, *at, name).ok()?;
+    if b.body.is_mesh() {
+        return None;
+    }
+    let tol = 1e-6 * (1.0 + b.body.size());
+    let centres: Vec<Vec3> =
+        kernel::face_edge_indices(&b.body, fi).into_iter().filter_map(|e| kernel::edge_circle(&b.body, e)).map(|c| c.center).collect();
+    let mut unique = Vec::new();
+    for c in centres {
+        if !unique.iter().any(|p: &Vec3| p.dist(c) <= tol) {
+            unique.push(c);
+        }
+    }
+    if unique.is_empty() { None } else { Some(unique) }
+}
+
+/// The middles of the edges bounding a face.
+fn face_edge_middles(st: &ModelState, of: &GeoRef) -> Option<Vec<Vec3>> {
+    let GeoRef::Face { at, name } = of else { return None };
+    let (b, fi, _) = face_of(st, *at, name).ok()?;
+    if b.body.is_mesh() {
+        return None;
+    }
+    let tol = 1e-6 * (1.0 + b.body.size());
+    let mut middles = Vec::new();
+    for e in kernel::face_edge_indices(&b.body, fi) {
+        let edge = b.body.record().edges.get(e);
+        if edge.is_some_and(|ed| ed.vertices[0] == ed.vertices[1]) {
+            continue;
+        }
+        let mid = kernel::edge_path(&b.body, e).ok().and_then(|segs| kernel::along_path(&segs, 0.5).ok().map(|(p, _)| p)).or_else(|| {
+            let ed = edge?;
+            let c = solidcraft_geom::brep::eval::CurveEval::new(ed.parameters()).ok()?;
+            let [t0, t1] = ed.interval;
+            c.point((t0 + t1) * 0.5)
+        });
+        if let Some(p) = mid
+            && !middles.iter().any(|q: &Vec3| q.dist(p) <= tol)
+        {
+            middles.push(p);
+        }
+    }
+    if middles.is_empty() { None } else { Some(middles) }
+}
+
+/// The one of `found` nearest `at`.
+fn nearest(found: Vec<Vec3>, at: Vec3) -> Option<(usize, Vec3)> {
+    found.into_iter().enumerate().filter(|(_, p)| p.is_finite()).min_by(|(_, p), (_, q)| p.dist(at).total_cmp(&q.dist(at)))
+}
+
+/// A snap point found from the model alone: a cylinder's or cone's end centre (the `end` one,
+/// else the one nearest `at`), a face's circular edge centre, or a face's edge middle.
+fn snap_point(st: &ModelState, of: &GeoRef, kind: SnapAt, at: Vec3, end: Option<usize>) -> Result<Vec3> {
+    match (kind, of) {
+        (SnapAt::Centre, GeoRef::Face { at: face_at, name }) => {
+            if let Some(ends) = face_axis_ends(st, of) {
+                return match end {
+                    Some(i) => ends.get(i).copied(),
+                    None => nearest(ends, at).map(|(_, p)| p),
+                }
+                .ok_or_else(|| bad("the snap point is gone"));
+            }
+            if let Ok((b, fi, _)) = face_of(st, *face_at, name)
+                && let Some(FaceSurface::Sphere { center, .. } | FaceSurface::Torus { center, .. }) = kernel::face_surface(&b.body, fi)
+            {
+                return Ok(center);
+            }
+            if let Some(centres) = face_circular_centres(st, of) {
+                return match end {
+                    Some(i) => centres.get(i).copied(),
+                    None => nearest(centres, at).map(|(_, p)| p),
+                }
+                .ok_or_else(|| bad("the snap point is gone"));
+            }
+            Err(bad("the face is not a cylinder, cone, sphere or torus, and has no circular edges"))
+        }
+        (SnapAt::Middle, GeoRef::Face { .. }) => {
+            let middles = face_edge_middles(st, of).ok_or_else(|| bad("the face has no edges"))?;
+            match end {
+                Some(i) => middles.get(i).copied(),
+                None => nearest(middles, at).map(|(_, p)| p),
+            }
+            .ok_or_else(|| bad("the snap point is gone"))
+        }
+        _ => Err(bad("not a face's snap point")),
+    }
+}
+
+/// A snap point of an edge or sketch curve (its middle or centre), or a sphere's or torus's centre.
+fn snap_point_ctx(ctx: &Ctx, of: &GeoRef, kind: SnapAt, at: Vec3) -> Result<Vec3> {
+    let found: Vec<Vec3> = match (kind, of) {
+        (SnapAt::Middle, GeoRef::Edge { .. } | GeoRef::SketchCurve { .. }) => {
+            vec![along(ctx, of, 0.5)?.0]
+        }
+        (SnapAt::Middle, GeoRef::Face { .. }) => face_edge_middles(ctx.st, of).ok_or_else(|| bad("the face has no edges"))?,
+        (SnapAt::Centre, GeoRef::Face { .. }) => {
+            if let Ok(c) = centre(ctx, of) {
+                vec![c]
+            } else if let Some(centres) = face_circular_centres(ctx.st, of) {
+                centres
+            } else {
+                vec![centre(ctx, of)?]
+            }
+        }
+        (SnapAt::Centre, GeoRef::Edge { .. } | GeoRef::SketchCurve { .. }) => vec![centre(ctx, of)?],
+        _ => return Err(bad("a snap point is on an edge, a face or a sketch curve")),
+    };
+    nearest(found, at).map(|(_, p)| p).ok_or_else(|| bad("the snap point is gone"))
 }
 
 /// Resolve a planar point or a drawn 3D wire's `wire:index` node in the evaluated state's frame.
@@ -554,6 +761,8 @@ pub fn model_axis_in(doc: Option<&Document>, st: &ModelState, g: &GeoRef, compon
                 _ => Err(bad("the datum is not an axis (pick the X, Y or Z of a component)")),
             }
         }
+        // A construction axis by name: where it is on each evaluation, so what turns about it follows it.
+        GeoRef::Axis { name } => crate::eval::construction_axis_in(doc, st, name, component),
         _ => model_axis(st, g),
     }
 }
@@ -567,6 +776,19 @@ pub fn canonical_dir(d: Vec3) -> Vec3 {
         Some(v) if *v < 0.0 => -d,
         _ => d,
     }
+}
+
+/// The direction of a straight line a feature is turned parallel to: a straight model edge, a
+/// sketch line, a world, construction or component origin axis. Not a round edge or face (whose
+/// axis [`model_axis`] would give).
+pub fn straight_direction(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, g: &GeoRef) -> Result<Vec3> {
+    let ctx = Ctx { doc, vals, st, depth: 0, component: 0 };
+    let (_, d) = match g {
+        GeoRef::Edge { at, name } => as_line(&edge_points(st, *at, name)?).ok_or_else(|| bad("the edge is not straight"))?,
+        GeoRef::Face { .. } => return Err(bad("pick a straight edge, line or axis")),
+        _ => line(&ctx, g)?,
+    };
+    d.normalized().filter(|d| d.is_finite()).ok_or_else(|| bad("the line has no direction"))
 }
 
 /// A reference as a line (origin, unit direction).
@@ -650,7 +872,8 @@ fn along(ctx: &Ctx, g: &GeoRef, t: f64) -> Result<(Vec3, Vec3)> {
 
 /// A picked edge or sketch curve as the path segments that are its curve exactly, from the end
 /// the drawn curve starts at: a body edge's record curve ([`kernel::edge_path`]), a planar sketch
-/// curve's exact pieces, a 3D sketch curve's arc, spline, line or linked exact curves. Only a
+/// curve's exact pieces, a 3D sketch curve's arc, spline (through its fit points or over its
+/// control points), line or linked exact curves. Only a
 /// curve that exists as points alone runs along them: an intersection edge (its record holds no
 /// exact curve, only the surfaces and a leader near it), a 3D curve known only as its points
 /// (projected onto a face, iso curves), a spline above the exact pieces' degree.
@@ -680,6 +903,9 @@ fn path_segs(ctx: &Ctx, g: &GeoRef) -> Result<Vec<kernel::PathSeg>> {
                 if let Some(arc) = &wire.arc {
                     let angle = solidcraft_sketch::arc_sweep(arc);
                     return Ok(vec![kernel::PathSeg::Arc { a: arc.start, center: arc.center, axis: arc.normal, angle }]);
+                }
+                if let Some(c) = wire.control_curve() {
+                    return Ok(kernel::curve_path(&c.curve, c.interval)?);
                 }
                 if wire.fit.len() >= 3 {
                     let spline = kernel::PathPiece::Spline { fit: wire.fit.clone(), reversed: false };
@@ -833,6 +1059,7 @@ pub(crate) fn source_bodies(ctx: &Ctx, refs: &[&GeoRef]) -> Vec<String> {
             GeoRef::Vertex { .. } => {
                 point(ctx, g).ok().and_then(|p| vertex_body(ctx.st, p)).map(|b| vec![b.definition_name().to_string()]).unwrap_or_default()
             }
+            GeoRef::Snap { of, .. } => source_bodies(ctx, &[of]),
             GeoRef::Axis { name } | GeoRef::ConstructPoint { name } => {
                 ctx.st.construct.iter().find(|c| c.name.as_str() == AsRef::<str>::as_ref(name)).map(|c| c.bodies.clone()).unwrap_or_default()
             }
@@ -904,6 +1131,16 @@ pub(crate) fn resolve_point(ctx: &Ctx, d: &PointDef) -> Result<Vec3> {
             let t = Document::eval_in(ctx.vals, t, Kind::Unitless)?;
             along(ctx, path, t).map(|(p, _)| p)
         }
+        PointDef::Average { points } => {
+            if points.len() < 2 {
+                return Err(DocError::Invalid("a point at the average of points needs two or more points".into()));
+            }
+            let mut sum = Vec3::new(0.0, 0.0, 0.0);
+            for p in points {
+                sum += point(ctx, p)?;
+            }
+            Ok(sum * (1.0 / points.len() as f64))
+        }
     }
 }
 
@@ -920,13 +1157,36 @@ fn line_plane(o: Vec3, d: Vec3, p: &Plane) -> Option<Vec3> {
 pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
     let degenerate = || bad("degenerate plane");
     match p {
-        PlaneRef::Midplane { a, b } => {
+        PlaneRef::Midplane { a, b, old_frame } => {
             let (pa, pb) = (plane(ctx, a)?, plane(ctx, b)?);
             let (na, nb) = (pa.normal(), pb.normal());
             if na.cross(nb).len() < 1e-9 {
-                // Parallel: halfway between, facing as the first.
+                // Parallel: half way between them.
                 let half = nb * ((pb.origin - pa.origin).dot(nb) * 0.5);
-                return Plane::new(pa.origin + half, pa.x, pa.y).ok_or_else(degenerate);
+                let center = pa.origin + half;
+                // A design saved before the midplane took a world plane's frame keeps the
+                // frame it was saved with: the first plane's own origin and axes (#18260).
+                if *old_frame {
+                    return Plane::new(center, pa.x, pa.y).ok_or_else(degenerate);
+                }
+                // Two planes that are parallel to a world plane give a midplane in that world
+                // plane's frame: its origin on the world axis and not at the point the planes
+                // were picked, and its axes the world's. A sketch on it then keeps its world
+                // place when it is moved onto the midplane (#18260).
+                let frame = if na.z.abs() > 1.0 - 1e-6 {
+                    Some(Plane::XY)
+                } else if na.x.abs() > 1.0 - 1e-6 {
+                    Some(Plane::YZ)
+                } else if na.y.abs() > 1.0 - 1e-6 {
+                    Some(Plane::XZ)
+                } else {
+                    None
+                };
+                return match frame {
+                    Some(frame) => Ok(frame.offset(center.dot(frame.normal()))),
+                    // Not parallel to a world plane: the midplane keeps the first plane's axes.
+                    None => Plane::new(center, pa.x, pa.y).ok_or_else(degenerate),
+                };
             }
             // Meeting at an angle: the plane through their line that halves the angle.
             let (o, dir) = plane_plane(&pa, &pb).ok_or_else(degenerate)?;
@@ -970,7 +1230,9 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
             let delta = p - origin;
             let across = delta - dir * delta.dot(dir);
             if !across.len().is_finite() || across.len() < 1e-9 {
-                return Err(bad("the point is on the axis: pick a point off the axis to define a unique plane"));
+                return Err(bad(
+                    "the point is on the axis: pick a point off the axis to define a unique plane. For a plane square to the axis through this point, use Plane Through Point, Square To Line",
+                ));
             }
             Plane::new(origin, dir, across).ok_or_else(degenerate)
         }
@@ -1002,6 +1264,11 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
                 .normalized()
                 .ok_or_else(|| bad("the line is square to the plane: every plane through it is perpendicular; pick a line in or along the plane"))?;
             Plane::new(o, d, n.cross(d)).ok_or_else(degenerate)
+        }
+        PlaneRef::SquareToLine { line: l, point: at } => {
+            let (_, d) = line(ctx, l)?;
+            let d = d.normalized().ok_or_else(|| bad("the line has no direction"))?;
+            Plane::from_normal(point(ctx, at)?, d).ok_or_else(degenerate)
         }
         PlaneRef::AlongPath { path, t } => {
             let t = Document::eval_in(ctx.vals, t, Kind::Unitless)?;
@@ -1041,6 +1308,10 @@ impl GeoRef {
             GeoRef::Point { p } => pt(p),
             GeoRef::Vertex { at, .. } | GeoRef::Edge { at, .. } | GeoRef::Face { at, .. } => pt(at),
             GeoRef::Plane { plane: p } => plane(p),
+            GeoRef::Snap { of, at, .. } => {
+                pt(at);
+                of.map_points(pt, plane);
+            }
             _ => {}
         }
     }
@@ -1064,10 +1335,15 @@ impl GeoRef {
             GeoRef::Vertex { at, edges: edges @ None } => {
                 for b in bodies(st) {
                     let tol = (b.body.size() * 1e-3).max(1e-3);
-                    let m = b.mesh();
-                    let ends_here = |e: &Vec<Vec3>| [e.first(), e.last()].into_iter().flatten().any(|q| q.dist(*at) <= tol);
+                    let rec = b.body.record();
+                    let ends_here = |e: &solidcore_record::brep::Edge| {
+                        [e.vertices[0], e.vertices[1]]
+                            .into_iter()
+                            .filter_map(|v| rec.vertices.get(v as usize).map(|pt| Vec3::new(pt.point[0], pt.point[1], pt.point[2])))
+                            .any(|q| q.dist(*at) <= tol)
+                    };
                     let mut meet: Vec<String> =
-                        m.edges.iter().zip(crate::naming::edge_names(b)).filter(|(e, n)| !n.is_empty() && ends_here(e)).map(|(_, n)| n).collect();
+                        rec.edges.iter().zip(crate::naming::edge_names(b)).filter(|(e, n)| !n.is_empty() && ends_here(e)).map(|(_, n)| n).collect();
                     if meet.is_empty() {
                         continue;
                     }
@@ -1080,6 +1356,12 @@ impl GeoRef {
                 }
             }
             GeoRef::Plane { plane } => plane.name_picks(st),
+            GeoRef::Snap { of, kind: SnapAt::Centre, at, end: end @ None } => {
+                // Which end of a cylinder or cone: it stays that end when the face grows.
+                *end = face_axis_ends(st, of).and_then(|ends| nearest(ends, *at)).map(|(i, _)| i);
+                of.name_picks(st);
+            }
+            GeoRef::Snap { of, .. } => of.name_picks(st),
             _ => {}
         }
     }
@@ -1111,6 +1393,7 @@ impl PointDef {
             PointDef::At { point } => vec![point],
             PointDef::Center { of } => vec![of],
             PointDef::TwoEdges { a, b } => vec![a, b],
+            PointDef::Average { points } => points.iter().collect(),
             PointDef::ThreePlanes { a, b, c } => vec![a, b, c],
             PointDef::EdgeAndPlane { edge, plane } => vec![edge, plane],
             PointDef::AlongPath { path, .. } => vec![path],
@@ -1122,6 +1405,7 @@ impl PointDef {
             PointDef::At { point } => vec![point],
             PointDef::Center { of } => vec![of],
             PointDef::TwoEdges { a, b } => vec![a, b],
+            PointDef::Average { points } => points.iter_mut().collect(),
             PointDef::ThreePlanes { a, b, c } => vec![a, b, c],
             PointDef::EdgeAndPlane { edge, plane } => vec![edge, plane],
             PointDef::AlongPath { path, .. } => vec![path],
@@ -1133,7 +1417,10 @@ impl PlaneRef {
     /// The references of a plane built from model geometry.
     pub fn refs_mut(&mut self) -> Vec<&mut GeoRef> {
         match self {
-            PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } | PlaneRef::AxisPoint { axis: a, point: b } => vec![a.as_mut(), b.as_mut()],
+            PlaneRef::Midplane { a, b, .. }
+            | PlaneRef::TwoEdges { a, b }
+            | PlaneRef::AxisPoint { axis: a, point: b }
+            | PlaneRef::SquareToLine { line: a, point: b } => vec![a.as_mut(), b.as_mut()],
             PlaneRef::Perpendicular { plane, line } => vec![plane.as_mut(), line.as_mut()],
             PlaneRef::ThreePoints { a, b, c } => vec![a.as_mut(), b.as_mut(), c.as_mut()],
             PlaneRef::Tangent { face, reference, .. } => {

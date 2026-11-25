@@ -46,12 +46,39 @@ fn safe(call: &str) -> String {
 /// The running call failed: its `inputs` go to the folder, as they are now (a call that edits a
 /// body in place, a query's caches, leaves it edited). Failing to write them fails nothing else.
 pub(super) fn failed(k: &Kernel, call: &str, why: &str, inputs: Inputs<'_>) {
+    if DIR.lock().unwrap_or_else(PoisonError::into_inner).is_none() {
+        return;
+    }
+    let inputs: Vec<_> = inputs.iter().map(|&(what, body)| (what, serialise(k, &body.kernel()))).collect();
+    written(call, why, &inputs);
+}
+
+/// A solidcore-ops call failed ([`super::call::ops_on`]): its `inputs`, the caller's own bodies
+/// (the call was handed copies where it consumes its operands), go to the folder as they are.
+/// They are serialised only now, so a call that answers costs nothing more than with no folder.
+pub(super) fn failed_ops(call: &str, why: &str, inputs: Inputs<'_>) {
+    if DIR.lock().unwrap_or_else(PoisonError::into_inner).is_none() {
+        return;
+    }
+    let inputs: Vec<_> = inputs
+        .iter()
+        .map(|&(what, body)| {
+            #[cfg(test)]
+            SERIALISED.with(|n| n.set(n.get() + 1));
+            (what, body.to_smb(false).map_err(|e| e.to_string()))
+        })
+        .collect();
+    written(call, why, &inputs);
+}
+
+/// A failed call's inputs, each already a binary `.smb` (or why it could not be written), go to
+/// the folder.
+fn written(call: &str, why: &str, inputs: &[(&'static str, std::result::Result<Vec<u8>, String>)]) {
     let Some(dir) = DIR.lock().unwrap_or_else(PoisonError::into_inner).clone() else { return };
     let n = SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let stem = format!("{n:06}-{}", safe(call));
     let mut text = format!("{call} -> {why}\nnumeric arguments are not recorded\n");
-    for &(what, body) in inputs {
-        let bytes = serialise(k, &body.0.lock().unwrap_or_else(PoisonError::into_inner));
+    for (what, bytes) in inputs {
         match bytes {
             Ok(b) => {
                 let name = format!("{stem}-{what}.smb");
@@ -103,6 +130,13 @@ plain!(
 );
 
 impl<T> Answer for Option<T> {}
+
+/// Points classified one by one ([`super::classify_points`]): the first point's refusal is the call's.
+impl Answer for Vec<Result<crate::PointClass>> {
+    fn refusal(&self) -> Option<String> {
+        self.iter().find_map(|r| r.as_ref().err().map(Error::to_string))
+    }
+}
 
 /// The calls running now, in the order they started.
 static IN_FLIGHT: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());

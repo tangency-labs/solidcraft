@@ -27,6 +27,56 @@ fn open(h: &mut Harness) {
 }
 
 #[test]
+fn clearing_edited_extrude_offset_keeps_the_field_available_for_replacement() {
+    for params in [json!({"start_offset":"5 mm"}), json!({"start_offset":"0 mm"}), json!({"from":[0,0,5],"start_offset":"5 mm"})] {
+        let mut h = make(params);
+        let original = extent(&h);
+        let undo = h.app.session.undo.len();
+        open(&mut h);
+        h.step(&json!({"click":{"handle":"dialog:Offset"}})).unwrap();
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.step(&json!({"key":"Backspace"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::handle_at("dialog:Offset").is_some(), "clearing a value must keep its field visible");
+        h.step(&json!({"text":"7 mm"})).unwrap();
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        assert_eq!(extent(&h).start_offset.as_deref(), Some("7 mm"));
+        assert_eq!(extent(&h).from, original.from);
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(extent(&h), original);
+    }
+}
+
+#[test]
+fn new_extrude_keeps_empty_offset_until_profile_plane_is_selected() {
+    let mut h = make(json!({}));
+    h.app.run("timeline.delete", json!({"feature":"Depth"})).unwrap();
+    let sketch = h.app.session.doc.find_feature("Base").unwrap().id;
+    h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+    h.app.start("solid.extrude");
+    h.frames(8);
+    h.step(&json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Start"}})).unwrap();
+    h.step(&json!({"widget":"Offset"})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Offset"}})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"key":"Backspace"})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::handle_at("dialog:Offset").is_some());
+    h.step(&json!({"text":"3 mm"})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Start"}})).unwrap();
+    h.step(&json!({"widget":"Profile Plane"})).unwrap();
+    assert!(crate::scenario::handle_at("dialog:Offset").is_none());
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    let FeatureKind::Extrude { extent, .. } = &h.app.session.doc.features.last().unwrap().kind else { panic!("extrude") };
+    assert!(extent.start_offset.is_none());
+    assert!(extent.from.is_none());
+}
+
+#[test]
 fn undoing_the_edited_feature_closes_its_editor_and_preserves_redo() {
     let mut h = make(json!({}));
     let feature = h.app.session.doc.find_feature("Depth").unwrap().id;
@@ -346,16 +396,79 @@ fn adjacent_profiles_from_slanted_face_use_same_merged_centre_as_geometry() {
     let angle = 0.1f64.atan();
     let point = [2.0 * angle.sin(), 0.0, 10.0 + 2.0 * angle.cos()];
     h.app.run("solid.extrude", json!({"sketch":"Adjacent","distance":10,"from":point,"name":"Depth","body_name":"Main","operation":"new"})).unwrap();
-    let min_z = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().min.z;
+    let mesh = h.app.session.world_state().unwrap().body("Main").unwrap().mesh();
+    let min_z = mesh.bounds().min.z;
+    // The extrude starts on the slanted face, so where it starts under the merged profiles'
+    // middle (x = 5, y = 5) is where a ray up through the solid first meets it.
+    let (t, _) = mesh.raycast(solidcore_record::Vec3::new(5.0, 5.0, 0.0), solidcore_record::Vec3::new(0.0, 0.0, 1.0)).unwrap();
+    let start_z = t;
+    assert!((start_z - (10.0 + 2.0 / angle.cos() - 5.0 * angle.tan())).abs() < 1e-6, "the start follows the face: {start_z}");
     open(&mut h);
     let base = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().0;
-    assert!((base.z - min_z).abs() < 1e-7, "displayed start{} geometry start{min_z}", base.z);
+    assert!((base.z - start_z).abs() < 1e-6, "displayed start {} geometry start {start_z}", base.z);
     // Averaging the two unmerged rectangle loops gives x=3.5; their internal
     // seam must not bias the reference ray used by the extent handle.
     let unmerged_height = 10.0 + 2.0 / angle.cos() - 3.5 * angle.tan();
     assert!((base.z - unmerged_height).abs() > 0.01, "fixture must distinguish the raw-profile centre");
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!((h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().min.z - min_z).abs() < 1e-7);
+}
+
+/// An extrude from a design saved before From followed a slanted face (`from_level`) still
+/// starts at the face's level, and the window's arrow starts there too, not on the slope.
+#[test]
+fn an_old_extrude_kept_on_its_flat_start_shows_the_arrow_at_that_level() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":30,"width":30,"height":2,"corner":[-10,-10,10],"body_name":"Reference"})).unwrap();
+    h.app.run("solid.move", json!({"bodies":["Reference"],"axis":[0,1,0],"angle":"atan(0.1)","origin":[0,0,10]})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Square"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let angle = 0.1f64.atan();
+    let point = [2.0 * angle.sin(), 0.0, 10.0 + 2.0 * angle.cos()];
+    h.app.run("solid.extrude", json!({"sketch":"Square","distance":10,"from":point,"name":"Depth","body_name":"Main","operation":"new"})).unwrap();
+    h.app.run("timeline.edit", json!({"feature":"Depth","set":{"extent":{"from_level":true}}})).unwrap();
+    let min_z = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().min.z;
+    let max_z = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().max.z;
+    assert!((max_z - min_z - 10.0).abs() < 1e-6, "the old start is flat: z {min_z} to {max_z}");
+    open(&mut h);
+    let base = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().0;
+    assert!((base.z - min_z).abs() < 1e-6, "displayed start {} geometry start {min_z}", base.z);
+}
+
+/// With To Object, the arrow starts where the build does (#18825). A square on the plane x 3,
+/// past the end of a slot whose wall slants across X (x = 4 (y + 11) / 7), extruded From that
+/// wall To the block's side: alone, the extrude starts on the wall's plane under the square's
+/// middle, x 4 (9 / 7); with Two Sides it starts at the From pick's level, x 20 / 7, as the build
+/// does, and the arrow follows it there.
+#[test]
+fn the_arrow_from_a_slanted_face_with_to_starts_where_the_build_does() {
+    for (two_sides, start_x) in [(false, 36.0 / 7.0), (true, 20.0 / 7.0)] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"corner":[-10,-10,0],"length":20,"width":20,"height":10,"body_name":"Block"})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY","name":"SlotSketch"})).unwrap();
+        h.app.run("sketch.line", json!({"closed":true,"points":[[0,-11],[2,-11],[6,-4],[4,-4]]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"sketch":"SlotSketch","distance":20,"operation":"cut","name":"Slot"})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"YZ","offset":3,"name":"Across"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[-3,4],"p1":[-1,6]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let mut p = json!({"sketch":"Across","from":[20.0 / 7.0, -6, 5],"to":[10, 5, 5],"operation":"new","name":"Depth","body_name":"Fill"});
+        if two_sides {
+            p["distance2"] = json!(3);
+        }
+        h.app.run("solid.extrude", p).unwrap();
+        h.frames(4);
+        // Where the body starts under the square's middle (y -2, z 5): a ray along +X first
+        // meets it there, 3 mm before the start with Two Sides.
+        let mesh = h.app.session.world_state().unwrap().body("Fill").unwrap().mesh();
+        let (t, _) = mesh.raycast(solidcore_record::Vec3::new(-20.0, -2.0, 5.0), solidcore_record::Vec3::new(1.0, 0.0, 0.0)).unwrap();
+        let built = -20.0 + t + if two_sides { 3.0 } else { 0.0 };
+        assert!((built - start_x).abs() < 1e-6, "two sides {two_sides}: the build starts at x {built}");
+        open(&mut h);
+        let base = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().0;
+        assert!((base.x - start_x).abs() < 1e-6, "two sides {two_sides}: the arrow starts at x {} where the build starts at {start_x}", base.x);
+    }
 }
 
 #[test]
@@ -452,6 +565,7 @@ fn symmetric_through_all_handle_drag_switches_to_total_distance() {
     h.call("ui.view", json!({"view":"fit"}));
     h.frames(4);
     open(&mut h);
+    assert_eq!(value_box_texts(&h), ["Distance", "All"], "the box names the extent until the drag");
     h.step(&json!({"drag":[{"handle":"arrow"},{"world":[5,5,60]}]})).unwrap();
     let d = h.app.dialog.as_ref().unwrap();
     let crate::dialogs::Kind::Extrude { distance, all, .. } = &d.kind else { panic!("extrude") };
@@ -618,6 +732,128 @@ fn two_sides_second_arrow_stays_put_when_the_first_distance_turns_negative() {
     let tips = || (crate::scenario::handle_at("arrow").unwrap().y - centre, crate::scenario::handle_at("arrow2").unwrap().y - centre);
     let (first, second) = tips();
     assert!(first > 0.0 && second > 0.0, "the first arrow turned below the sketch, the second stayed below it: {first} {second}");
+}
+
+/// The texts painted in the main value box in the view, left to right.
+fn value_box_texts(h: &Harness) -> Vec<String> {
+    fn walk(shape: &egui::Shape, area: egui::Rect, out: &mut Vec<(f32, String)>) {
+        match shape {
+            egui::Shape::Text(t) if area.contains(t.pos) && !t.galley.job.text.trim().is_empty() => {
+                out.push((t.pos.x, t.galley.job.text.trim().to_string()));
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, area, out)),
+            _ => {}
+        }
+    }
+    let area = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).expect("the value box in the view");
+    let mut texts = Vec::new();
+    h.shapes.iter().for_each(|s| walk(&s.shape, area, &mut texts));
+    texts.sort_by(|a, b| a.0.total_cmp(&b.0));
+    texts.into_iter().map(|(_, text)| text).collect()
+}
+
+/// The hint the main value box's field gives a screen reader while it is empty.
+fn value_box_hint(h: &Harness) -> String {
+    let id = egui::Id::unique("sc_canvas_value").accesskit_id();
+    let nodes = &h.output.accesskit_update.as_ref().expect("the accessibility tree").nodes;
+    nodes.iter().find(|(node, _)| *node == id).and_then(|(_, node)| node.placeholder()).unwrap_or_default().to_owned()
+}
+
+/// A 20 x 20 x 40 box that runs 10 mm above the sketch plane and 30 mm below it, cut by a
+/// circle with `params`, its dialog open on the cut.
+fn open_cut(params: Value) -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":40,"corner":[0,0,-30],"body_name":"Main"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Hole"})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[10,10],"radius":2})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let mut cut = json!({"sketch":"Hole","operation":"cut","targets":["Main"],"name":"Depth"});
+    cut.as_object_mut().unwrap().extend(params.as_object().unwrap().clone());
+    h.app.run("solid.extrude", cut).unwrap();
+    h.frames(4);
+    open(&mut h);
+    h
+}
+
+fn set_all(h: &mut Harness, on: bool) {
+    let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Extrude { all, .. }, .. }) = &mut h.app.dialog else { panic!("extrude dialog") };
+    *all = on;
+    h.frames(2);
+}
+
+fn distance_and_all(h: &Harness) -> (String, bool) {
+    let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Extrude { distance, all, .. }, .. }) = &h.app.dialog else {
+        panic!("extrude dialog")
+    };
+    (distance.clone(), *all)
+}
+
+/// Extent Type All (#18765): the depth of the Distance kept from before is not what the cut
+/// reaches, so the box in the view names the extent in place of it. A number typed there is the
+/// new Distance and ends All.
+#[test]
+fn with_extent_all_the_value_box_names_the_extent_until_a_distance_is_typed() {
+    let mut h = open_cut(json!({"distance":"10 mm","direction":"negative"}));
+    assert_eq!(value_box_texts(&h), ["Distance", "10 mm"]);
+    assert_eq!(value_box_hint(&h), "");
+    set_all(&mut h, true);
+    assert_eq!(value_box_texts(&h), ["Distance", "All"], "the arrow is at the through-all reach, not at 10 mm");
+    assert_eq!(value_box_hint(&h), "All", "the field says so to a screen reader too");
+    // A space typed there is not a Distance.
+    h.step(&json!({"text":" "})).unwrap();
+    h.frames(2);
+    assert_eq!(distance_and_all(&h), ("10 mm".into(), true), "a space alone keeps All");
+    assert_eq!(value_box_texts(&h), ["Distance", "All"]);
+    // Back to Distance, the kept value is shown again.
+    set_all(&mut h, false);
+    assert_eq!(value_box_texts(&h), ["Distance", "10 mm"]);
+    set_all(&mut h, true);
+    h.step(&json!({"text":"5"})).unwrap();
+    h.frames(2);
+    assert_eq!(distance_and_all(&h), ("5".into(), false), "typing in the box ends All");
+    assert_eq!(value_box_texts(&h), ["Distance", "5"]);
+    // The same text as the kept Distance is an entry too.
+    set_all(&mut h, true);
+    h.step(&json!({"text":"5"})).unwrap();
+    h.frames(2);
+    assert_eq!(distance_and_all(&h), ("5".into(), false), "typing the kept Distance again ends All");
+}
+
+/// With All the kept Distance still picks the side by its sign (#10415). The box names the
+/// extent for a negative one as well, and the cut stays on its side.
+#[test]
+fn with_extent_all_a_negative_kept_distance_keeps_its_side() {
+    let mut h = open_cut(json!({"distance":"-10 mm"}));
+    assert_eq!(value_box_texts(&h), ["Distance", "-10 mm"]);
+    set_all(&mut h, true);
+    assert_eq!(value_box_texts(&h), ["Distance", "All"]);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    let e = extent(&h);
+    assert_eq!((e.through_all, e.distance.as_str()), (true, "-10 mm"));
+    // Below the sketch the box is 30 mm deep, above it 10 mm.
+    let depth = (16000.0 - volume(&h, "Main")) / (std::f64::consts::PI * 4.0);
+    assert!((depth - 30.0).abs() < 0.05, "{depth}");
+}
+
+/// With value stepping on, the box that names the extent is an empty box: Up and Down have no
+/// number to step, so the kept Distance and All stay as they are.
+#[test]
+fn with_extent_all_the_value_box_has_no_number_to_step() {
+    let mut h = open_cut(json!({"distance":"10 mm","direction":"negative"}));
+    h.app.preferences.step_values = true;
+    h.frames(2);
+    h.step(&json!({"key":"ArrowUp"})).unwrap();
+    h.frames(2);
+    assert_eq!(distance_and_all(&h), ("11 mm".into(), false), "a Distance steps");
+    set_all(&mut h, true);
+    for key in ["ArrowUp", "ArrowDown"] {
+        h.step(&json!({"key":key})).unwrap();
+        h.frames(2);
+        assert_eq!(distance_and_all(&h), ("11 mm".into(), true), "{key}");
+        assert_eq!(value_box_texts(&h), ["Distance", "All"], "{key}");
+    }
 }
 
 /// Distance 2's box in the view stays while its text does not evaluate, so a cleared box or a
@@ -922,4 +1158,387 @@ fn double_clicking_a_face_of_a_moved_component_edits_its_feature() {
         h.frames(8);
         assert_eq!(editing_feature(&h), Some(feature_id(&h, "Inner")), "capture: {capture}");
     }
+}
+
+#[test]
+fn surface_extrude_dialog_has_the_drag_arrow_on_every_side() {
+    for (direction, tip_z) in [("positive", 10.0), ("negative", -10.0), ("symmetric", 5.0)] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("surface.extrude", json!({"sketch":"Base","distance":"10 mm","direction":direction,"name":"Wall","body_name":"Sheet"})).unwrap();
+        h.frames(4);
+        h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+        h.frames(8);
+        let tip = h.at(&json!({"world":[5,5,tip_z]})).unwrap();
+        let handle = h.at(&json!({"handle":"arrow"})).unwrap_or_else(|_| panic!("{direction}: a surface extrude shows the drag arrow"));
+        assert!((handle[0] - tip[0]).hypot(handle[1] - tip[1]) < 1.0, "{direction}: {handle:?} expected {tip:?}");
+        h.step(&json!({"drag":[{"handle":"arrow"},{"world":[5,5,if direction == "negative" { -30.0 } else { 30.0 }]}]})).unwrap();
+        let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Surface(crate::dialogs_surface::Surf::Extrude { distance, .. }), .. }) =
+            &h.app.dialog
+        else {
+            panic!("surface extrude dialog")
+        };
+        let total = h.app.session.doc.eval(distance, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+        let expected = if direction == "symmetric" { 60.0 } else { 30.0 };
+        assert!((total - expected).abs() < 1.0, "{direction}: dragging the arrow sets the distance, got {distance}");
+    }
+}
+
+/// Surface Extrude's Extent Type takes To Object (#16537): the window adds Extrude's To Object
+/// input, OK makes the surface end at the face picked there, and editing it again shows the
+/// same extent and pick.
+#[test]
+fn surface_extrude_dialog_ends_at_a_picked_face() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"corner":[-5,-5,10],"length":10,"width":10,"height":5,"body_name":"Lid"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[-3,0],[3,0]],"ids":["l1"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("surface.extrude", json!({"sketch":"Base","curves":["l1"],"distance":"4 mm","name":"Wall","body_name":"Sheet"})).unwrap();
+    h.frames(4);
+    let surf = |h: &Harness| match &h.app.dialog {
+        Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Surface(k @ crate::dialogs_surface::Surf::Extrude { .. }), .. }) => k.clone(),
+        _ => panic!("surface extrude dialog"),
+    };
+    let extent = |h: &Harness| match h.app.session.doc.features.iter().find(|f| f.name == "Wall").map(|f| &f.kind) {
+        Some(solidcraft_engine::doc::FeatureKind::SurfaceExtrude { extent, .. }) => extent.clone(),
+        _ => panic!("the surface extrude"),
+    };
+    let top = |h: &Harness| solidcraft_engine::kernel::measure(&h.app.session.world_state().unwrap().body("Sheet").unwrap().body).unwrap().bbox.max.z;
+
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
+    h.frames(2);
+    assert!(matches!(surf(&h), crate::dialogs_surface::Surf::Extrude { to_object: true, .. }));
+    let lid = crate::dialogs::face_sel(&h.app.session, solidcore_record::Vec3::new(0.0, 0.0, 10.0)).expect("the lid's bottom face");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        assert_eq!(d.active_input().unwrap().label, "To Object", "the To Object input takes the next pick");
+        let active = d.active;
+        d.inputs[active].items = vec![lid];
+    }
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(extent(&h).to.map(|p| p.0), Some(solidcore_record::Vec3::new(0.0, 0.0, 10.0)));
+    assert!((top(&h) - 10.0).abs() < 1e-6, "the surface ends at the lid: {}", top(&h));
+
+    // Editing it again shows To Object with the face, and OK keeps it.
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    assert!(matches!(surf(&h), crate::dialogs_surface::Surf::Extrude { to_object: true, .. }));
+    let picked = h.app.dialog.as_ref().unwrap().inputs.iter().find(|i| i.label == "To Object").map(|i| i.items.len());
+    assert_eq!(picked, Some(1));
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(extent(&h).to.map(|p| p.0), Some(solidcore_record::Vec3::new(0.0, 0.0, 10.0)));
+}
+
+/// Double-clicking the distance arrow in the view reverses the direction, as Reverse Direction
+/// does, and keeps the distance (#17402); Symmetric has no direction to reverse.
+#[test]
+fn double_click_on_the_arrow_reverses_the_direction() {
+    use solidcraft_engine::doc::Direction;
+    let mut h = make(json!({}));
+    open(&mut h);
+    h.step(&json!({"click":{"handle":"arrow"},"double":true})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    let e = extent(&h);
+    assert_eq!(e.direction, Direction::Negative);
+    let distance = h.app.session.doc.eval(e.distance.as_str(), solidcraft_engine::doc::expr::Kind::Length).unwrap();
+    assert!((distance - 10.0).abs() < 1e-9, "the distance stays: {}", e.distance);
+    open(&mut h);
+    h.step(&json!({"click":{"handle":"arrow"},"double":true})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert_eq!(extent(&h).direction, Direction::Positive, "a second double-click turns it back");
+
+    let mut h = make(json!({"direction":"symmetric"}));
+    open(&mut h);
+    h.step(&json!({"click":{"handle":"arrow"},"double":true})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert_eq!(extent(&h).direction, Direction::Symmetric, "Symmetric stays symmetric");
+}
+
+/// Two boxes and a sketch on the first one's top face whose rectangle reaches over the second
+/// one's top too, as when one extrusion should bridge parts (#17657).
+fn two_boxes_and_a_bridge() -> (Harness, u64) {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Left"})).unwrap();
+    h.app.run("solid.box", json!({"corner":[20,0,0],"length":10,"width":10,"height":10,"body_name":"Right"})).unwrap();
+    let sketch =
+        h.app.run("sketch.create", json!({"plane":{"face":[5,5,10]},"name":"Bridge","project_edges":false})).unwrap()["sketch"].as_u64().unwrap();
+    let plane = crate::open_meshing::session_world(&h.app.session).sketch(sketch).unwrap().plane;
+    let at = |x: f64, y: f64| {
+        use solidcraft_engine::geom::prelude::*;
+        let q = plane.to_local(solidcore_record::Vec3::new(x, y, 10.0));
+        json!([q.x, q.y])
+    };
+    h.app.run("sketch.rectangle.two_point", json!({"p0": at(2.0, 2.0), "p1": at(28.0, 8.0)})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.frames(4);
+    (h, sketch)
+}
+
+fn target_bodies(h: &Harness) -> Option<Vec<String>> {
+    use crate::selection::SelectionExt;
+    let d = h.app.dialog.as_ref()?;
+    d.inputs.iter().find(|i| i.label == "Target Bodies").map(|i| i.items.body_names())
+}
+
+fn overlapping_boxes_and_a_cut_profile() -> (Harness, u64) {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (name, x) in [("Left", 0), ("Right", 30)] {
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":10,"corner":[x,0,0],"operation":"new","body_name":name})).unwrap();
+    }
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY","offset":"10 mm","name":"CutProfile"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[32,5],"p1":[38,15]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.frames(4);
+    (h, sketch)
+}
+
+/// A To Object cut through overlapping bodies can leave the unpicked body intact (#17323).
+#[test]
+fn extrude_cut_only_cuts_the_target_bodies_picked_in_the_dialog() {
+    for (through_all, picked, hidden_left) in [(false, false, false), (false, true, false), (true, true, false), (false, false, true)] {
+        let (mut h, sketch) = overlapping_boxes_and_a_cut_profile();
+        if hidden_left {
+            h.app.session.visibility.hidden_bodies.push("Left".into());
+        }
+        h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+        h.app.start("solid.extrude");
+        h.frames(4);
+        {
+            let d = h.app.dialog.as_mut().unwrap();
+            let crate::dialogs::Kind::Extrude { operation, auto_op, direction, all, .. } = &mut d.kind else { panic!("extrude") };
+            *operation = 2;
+            *auto_op = false;
+            *direction = 1;
+            *all = through_all;
+            if !through_all {
+                d.pick(&h.app.session, solidcraft_engine::Sel::Vertex { body: "Right".into(), point: solidcore_record::Vec3::new(35.0, 10.0, 0.0) });
+            }
+        }
+        h.frames(2);
+        assert_eq!(target_bodies(&h), Some(vec![]), "Cut shows Target Bodies");
+        if picked {
+            let d = h.app.dialog.as_mut().unwrap();
+            d.active = d.inputs.iter().position(|i| i.label == "Target Bodies").unwrap();
+            d.pick(&h.app.session, solidcraft_engine::Sel::Body { name: "Right".into() });
+        }
+        h.frames(2);
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+        let left_volume = if picked || hidden_left { 8000.0 } else { 7400.0 };
+        assert!((volume(&h, "Left") - left_volume).abs() < 1e-6);
+        assert!((volume(&h, "Right") - 7400.0).abs() < 1e-6);
+        let FeatureKind::Extrude { targets, extent, .. } = &h.app.session.doc.features.last().unwrap().kind else { panic!("extrude") };
+        assert_eq!(targets.iter().map(|n| n.0.as_str()).collect::<Vec<_>>(), if picked || hidden_left { vec!["Right"] } else { vec![] });
+        assert_eq!(extent.to.as_ref().map(|p| p.0), (!through_all).then_some(solidcore_record::Vec3::new(35.0, 10.0, 0.0)));
+        assert_eq!(extent.through_all, through_all);
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert!((volume(&h, "Left") - 8000.0).abs() < 1e-6);
+        assert!((volume(&h, "Right") - 8000.0).abs() < 1e-6);
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert!((volume(&h, "Left") - left_volume).abs() < 1e-6);
+        assert!((volume(&h, "Right") - 7400.0).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn editing_extrude_cut_restores_targets_and_clearing_them_keeps_the_original_scope() {
+    for participants in [vec![], vec!["Left"]] {
+        let (mut h, _) = overlapping_boxes_and_a_cut_profile();
+        h.app
+            .run(
+                "solid.extrude",
+                json!({"sketch":"CutProfile","operation":"cut","direction":"negative","to":[35,10,0],
+            "targets":["Right"],"participants":participants,"name":"Depth"}),
+            )
+            .unwrap();
+        let undo = h.app.session.undo.len();
+        open(&mut h);
+        assert_eq!(target_bodies(&h), Some(vec!["Right".into()]));
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert!((volume(&h, "Left") - 8000.0).abs() < 1e-6);
+        assert!((volume(&h, "Right") - 7400.0).abs() < 1e-6);
+        open(&mut h);
+        h.app.dialog.as_mut().unwrap().inputs.iter_mut().find(|i| i.label == "Target Bodies").unwrap().items.clear();
+        h.frames(2);
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        let feature = h.app.session.doc.find_feature("Depth").unwrap();
+        let FeatureKind::Extrude { targets, .. } = &feature.kind else { panic!("extrude") };
+        assert!(targets.is_empty(), "clearing the input must remove the stored targets");
+        assert_eq!(feature.participants, participants);
+        assert!((volume(&h, "Left") - 7400.0).abs() < 1e-6);
+        assert!((volume(&h, "Right") - if participants.is_empty() { 7400.0 } else { 8000.0 }).abs() < 1e-6);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert!((volume(&h, "Left") - 8000.0).abs() < 1e-6);
+        assert!((volume(&h, "Right") - 7400.0).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn extrude_target_picks_survive_join_cut_switches_but_not_new_body() {
+    for initial_operation in ["cut", "intersect"] {
+        let (mut h, _) = overlapping_boxes_and_a_cut_profile();
+        h.app
+            .run(
+                "solid.extrude",
+                json!({"sketch":"CutProfile","operation":initial_operation,"direction":"negative","distance":"10 mm",
+        "targets":["Right"],"name":"Depth"}),
+            )
+            .unwrap();
+        open(&mut h);
+        for (op, tip) in [(2, "ui.extrude_cut_targets_tip"), (1, "ui.extrude_join_targets_tip"), (2, "ui.extrude_cut_targets_tip")] {
+            let d = h.app.dialog.as_mut().unwrap();
+            let crate::dialogs::Kind::Extrude { operation, .. } = &mut d.kind else { panic!("extrude") };
+            *operation = op;
+            h.frames(2);
+            assert_eq!(target_bodies(&h), Some(vec!["Right".into()]));
+            let input = h.app.dialog.as_ref().unwrap().inputs.iter().find(|i| i.label == "Target Bodies").unwrap();
+            assert_eq!(input.tip, Some(tip));
+        }
+        let d = h.app.dialog.as_mut().unwrap();
+        d.active = d.inputs.iter().position(|i| i.label == "Target Bodies").unwrap();
+        let crate::dialogs::Kind::Extrude { operation, .. } = &mut d.kind else { panic!("extrude") };
+        *operation = 0;
+        h.frames(2);
+        assert_eq!(target_bodies(&h), None);
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+        let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        assert!(commands[0].1["params"].get("targets").is_none(), "the discarded targets must not be applied while their input is hidden");
+        let crate::dialogs::Kind::Extrude { operation, .. } = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("extrude") };
+        *operation = 2;
+        h.frames(2);
+        assert_eq!(target_bodies(&h), Some(vec![]));
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        assert!((volume(&h, "Left") - 7400.0).abs() < 1e-6, "the discarded target must not return from the stored feature");
+        assert!((volume(&h, "Right") - 7400.0).abs() < 1e-6);
+    }
+}
+
+/// Extrude's Join shows Target Bodies, and joins the bodies picked there; with none picked it
+/// joins the body its sketch is on, as before. Editing the extrude shows the stored bodies, and
+/// another operation hides the input (#17657).
+#[test]
+fn extrude_join_joins_the_target_bodies_picked_in_the_dialog() {
+    for picked in [vec![], vec!["Left", "Right"]] {
+        let (mut h, sketch) = two_boxes_and_a_bridge();
+        let state = crate::open_meshing::session_world(&h.app.session);
+        assert_eq!(state.sketch(sketch).unwrap().profiles.len(), 1, "one rectangle, no projected outline");
+        let index = 0;
+        h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index }];
+        h.app.start("solid.extrude");
+        h.frames(4);
+        {
+            let d = h.app.dialog.as_mut().unwrap();
+            let crate::dialogs::Kind::Extrude { operation, auto_op, distance, .. } = &mut d.kind else { panic!("extrude") };
+            *operation = 1;
+            *auto_op = false;
+            *distance = "3 mm".into();
+        }
+        h.frames(2);
+        assert_eq!(target_bodies(&h), Some(vec![]), "Join shows an empty Target Bodies");
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 0, "the profiles stay the active input");
+        if !picked.is_empty() {
+            let d = h.app.dialog.as_mut().unwrap();
+            d.active = d.inputs.iter().position(|i| i.label == "Target Bodies").unwrap();
+            for name in &picked {
+                d.pick(&h.app.session, solidcraft_engine::Sel::Body { name: (*name).into() });
+            }
+            h.frames(2);
+            assert_eq!(target_bodies(&h), Some(picked.iter().map(|n| n.to_string()).collect()));
+        }
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        let FeatureKind::Extrude { targets, .. } = &h.app.session.doc.features.last().unwrap().kind else { panic!("extrude") };
+        let targets: Vec<String> = targets.iter().map(|t| t.0.clone()).collect();
+        let bodies = crate::open_meshing::session_world(&h.app.session).bodies.len();
+        if picked.is_empty() {
+            assert_eq!(targets, ["Left"], "none picked: the body the sketch is on");
+            assert_eq!(bodies, 2, "Right stays apart");
+        } else {
+            assert_eq!(targets, picked, "the picked bodies");
+            assert_eq!(bodies, 1, "the bridge joins both boxes");
+        }
+        // The editor shows the stored bodies; New Body hides them.
+        let name = h.app.session.doc.features.last().unwrap().name.clone();
+        h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
+        h.frames(4);
+        assert_eq!(target_bodies(&h), Some(targets.clone()));
+        if let Some(crate::dialogs::Kind::Extrude { operation, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *operation = 0;
+        }
+        h.frames(2);
+        assert_eq!(target_bodies(&h), None, "New Body has no Target Bodies");
+    }
+}
+
+/// A body picked into Target Bodies stops Extrude choosing its operation at once, in the pick:
+/// on the web the check runs before the form is drawn again, and a New Body it chose would take
+/// the row and the pick away (#17657).
+#[test]
+fn a_target_body_pick_stops_the_automatic_operation_at_once() {
+    let (mut h, sketch) = two_boxes_and_a_bridge();
+    h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+    h.app.start("solid.extrude");
+    h.frames(4);
+    assert!(
+        matches!(h.app.dialog.as_ref().unwrap().kind, crate::dialogs::Kind::Extrude { operation: 1, auto_op: true, .. }),
+        "a profile on a body's face: Extrude chooses Join"
+    );
+    let d = h.app.dialog.as_mut().unwrap();
+    d.active = d.inputs.iter().position(|i| i.label == "Target Bodies").expect("Join shows Target Bodies");
+    d.pick(&h.app.session, solidcraft_engine::Sel::Body { name: "Right".into() });
+    assert!(matches!(d.kind, crate::dialogs::Kind::Extrude { auto_op: false, operation: 1, .. }), "{:?}", d.kind);
+    h.frames(4);
+    assert_eq!(target_bodies(&h), Some(vec!["Right".to_string()]), "the pick stays");
+}
+
+/// Switching To Object off keeps From Object the active input when Target Bodies follows it
+/// (#17657): the active input is the same one, not the input that moved into its place.
+#[test]
+fn removing_an_earlier_input_keeps_the_active_one() {
+    use crate::selection::{BODIES, FACES, SelInput, VERTICES};
+    let mut inputs = vec![
+        SelInput::new("Profiles", FACES, true),
+        SelInput::new("To Object", FACES | VERTICES, false),
+        SelInput::new("From Object", FACES | VERTICES, false),
+        SelInput::new("Target Bodies", BODIES, true),
+    ];
+    let mut active = 2;
+    crate::dialogs::set_object_accepting(&mut inputs, &mut active, "To Object", FACES | VERTICES, false);
+    assert_eq!(inputs[active].label, "From Object");
+    // The active input itself going leaves the input after it active, as before.
+    crate::dialogs::set_object_accepting(&mut inputs, &mut active, "From Object", FACES | VERTICES, false);
+    assert_eq!(inputs[active].label, "Target Bodies");
+}
+
+#[test]
+fn editing_symmetric_extrude_toggles_symmetric_offset() {
+    let mut h = make(json!({"direction": "symmetric", "start_offset": "4 mm"}));
+    assert!(!extent(&h).symmetric_offset);
+    open(&mut h);
+    h.frames(2);
+    assert!(crate::scenario::handle_at("dialog:Symmetric Offset").is_some());
+    h.step(&json!({"click":{"handle":"dialog:Symmetric Offset"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert!(extent(&h).symmetric_offset);
 }

@@ -58,6 +58,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let refs: Vec<&kernel::Body> = idx.iter().filter_map(|i| st.bodies.get(*i).map(|b| &b.body)).collect();
             let sewn = kernel::stitch(&refs, tol)?;
             let Some(mb) = st.bodies.get(first).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let open = sewn.open_edge_count()?;
+            if open > 0 {
+                append_warning(warning, format!("Stitch result `{}` remains open (boundary edges: {open}).", mb.name));
+            }
             if let Some(slot) = st.bodies.get_mut(first) {
                 *slot = ModelBody::new(mb.name, sewn, mb.feature);
             }
@@ -110,11 +114,15 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     if chains.is_empty() {
                         return Err(DocError::Invalid(format!("sketch `{}` has no curves to trim with", ss.name)));
                     }
-                    kernel::trim_keep(
-                        &mb.body,
-                        &kernel::SplitTool::Curves { plane: ss.plane, curves: chains, along: c.direction.map(|d| d.0) },
-                        keeps,
-                    )?
+                    if c.face_normal {
+                        kernel::trim_dropped_keep(&mb.body, &ss.plane, &chains, keeps)?
+                    } else {
+                        kernel::trim_keep(
+                            &mb.body,
+                            &kernel::SplitTool::Curves { plane: ss.plane, curves: chains, along: c.direction.map(|d| d.0) },
+                            keeps,
+                        )?
+                    }
                 }
                 (None, None) => {
                     kernel::trim_keep(&mb.body, &kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?), keeps)?
@@ -271,7 +279,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             } else {
                 for p in faces {
                     let fi =
-                        crate::appearance::face_index_at(&mb, p.0).ok_or_else(|| DocError::Invalid(format!("Fair: no face of {body} at {p:?}")))?;
+                        crate::appearance::face_index_at(&mb, p.0).ok_or_else(|| DocError::Invalid(format!("Fair: no face of {body} at {}", p.0)))?;
                     if !picked.contains(&fi) {
                         picked.push(fi);
                     }
@@ -298,27 +306,34 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             Ok(())
         }
         FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent } => {
-            let ss = sketch_in_feature_frame(
+            let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
-                f.component,
+                f,
             )?;
-            if extent.through_all || extent.taper.is_some() || extent.to.is_some() || extent.from.is_some() {
-                return Err(DocError::Invalid("not supported yet: a surface extrude through all, to or from an object, or with a taper".into()));
+            if extent.through_all || extent.taper.is_some() || extent.from.is_some() || extent.symmetric_offset {
+                return Err(DocError::Invalid(
+                    "not supported yet: a surface extrude through all, from an object, with a taper, or with symmetric offset".into(),
+                ));
             }
-            let d = val(vals, &extent.distance, Kind::Length)?;
             let off = extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
-            let (a, b) = extent_sides(vals, extent, d, extent.direction)?;
             let chains = sheet_chains(&ss, profiles.as_ref(), curves)?;
-            let body = kernel::extrude_sheet(&ss.plane, &chains, a + off, b + off)?;
+            let body = match extent.to {
+                Some(to) => sheet_to_object(doc, vals, f, st, &ss, &chains, extent, to.0, off)?,
+                None => {
+                    let d = val(vals, &extent.distance, Kind::Length)?;
+                    let (a, b) = extent_sides(vals, extent, d, extent.direction)?;
+                    kernel::extrude_sheet(&ss.plane, &chains, a + off, b + off)?
+                }
+            };
             push_sheet(st, f, crate::lineage::ChainRoles { sketch: &ss, chains: &chains }.tool(body));
             Ok(())
         }
-        FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric } => {
-            let ss = sketch_in_feature_frame(
+        FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric, faced } => {
+            let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
-                f.component,
+                f,
             )?;
             let (o, d) = revolve_axis(
                 Some(doc),
@@ -329,6 +344,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 &*super::axis_state(doc, st, f.component, axis)?,
                 &|name| construction_axis_in(Some(doc), st, name, f.component),
                 &|owner, curve| {
+                    if owner == sketch.0 {
+                        return sketch_line_world(&ss, curve);
+                    }
                     let solved =
                         st.sketch(owner).ok_or_else(|| DocError::Unknown(format!("sketch {owner} (it must come earlier in the timeline)")))?;
                     sketch_line_world(&sketch_in_feature_frame(doc, solved, f.component)?, curve)
@@ -344,7 +362,11 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 (None, false) => (0.0, a),
             };
             let chains = sheet_chains(&ss, profiles.as_ref(), curves)?;
-            let body = kernel::revolve_sheet(&ss.plane, &chains, o, d, start, sweep)?;
+            let body = if *faced {
+                kernel::revolve_sheet(&ss.plane, &chains, o, d, start, sweep)?
+            } else {
+                kernel::revolve_sheet_legacy_sides(&ss.plane, &chains, o, d, start, sweep)?
+            };
             push_sheet(st, f, crate::lineage::ChainRoles { sketch: &ss, chains: &chains }.tool(body));
             Ok(())
         }
@@ -392,6 +414,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             scale,
             rails,
             rail_fit,
+            spline_as_samples,
         } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?;
             // The path is a chain of a body's edges (#2216) or the curves of a sketch.
@@ -425,15 +448,19 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             // The path runs on from the end nearest the middle of the curves.
             let pts: Vec<Vec2> = chains.iter().flatten().flat_map(|s| s.polyline(1e-2)).collect();
             let start = ss.plane.to_world(pts.iter().fold(Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64));
-            let body = match path_points(ps, path, start)? {
+            let body = match path_points(&curves_in(ps, path), start)? {
                 Some(path) => {
                     let pts = path.points();
                     let rails = crate::eval::rail_polylines(doc, st, rails, f.component, pts.first().copied().unwrap_or(start))?;
                     let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
-                    kernel::sweep_sheet_points_with(&ss.plane, &chains, &pts, &ctl)?
+                    if *spline_as_samples {
+                        kernel::sweep_sheet_points_with(&ss.plane, &chains, &pts, &ctl)?
+                    } else {
+                        kernel::sweep_sheet_point_path_with(&ss.plane, &chains, &path, &ctl)?
+                    }
                 }
                 None => {
-                    let segs = path_segments_at(ps, path, start, Some(&ss.plane))?;
+                    let segs = path_segments_at(&curves_in(ps, path), start, Some(&ss.plane))?;
                     let path_start = segs.first().map_or(start, kernel::PathSeg::start);
                     let rails = crate::eval::rail_polylines(doc, st, rails, f.component, path_start)?;
                     let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
@@ -444,13 +471,18 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             push_sheet(st, f, traced);
             Ok(())
         }
-        FeatureKind::SurfaceLoft { sections, continuity, crown, rails, rail_fit } => {
-            // A loft with edge chains for sections, or one that has to leave its ends a particular
-            // way, is built through `loft_blend` from the frames of every section; the plain one
-            // (sketch chains only, both ends G0) is the loft of old.
-            if *continuity != [kernel::Continuity::G0, kernel::Continuity::G0] || sections.iter().any(|s| s.body.is_some()) {
+        FeatureKind::SurfaceLoft { sections, continuity, crown, rails, rail_fit, faced } => {
+            // A loft with edge chains or 3D sketch curves for sections, or one that has to leave its
+            // ends a particular way, is built through `loft_blend` from the frames of every
+            // section; the plain one (planar sketch chains only, both ends G0) is the loft of old.
+            let in_space = sections.iter().any(|s| section_in_space(st, s));
+            if *continuity != [kernel::Continuity::G0, kernel::Continuity::G0] || sections.iter().any(|s| s.body.is_some()) || in_space {
                 if !rails.is_empty() {
-                    return Err(DocError::Invalid("not supported yet: guide rails on a loft with edge sections or end continuity".into()));
+                    return Err(DocError::Invalid(if in_space {
+                        "not supported yet: guide rails on a loft through 3D sketch curves".into()
+                    } else {
+                        "not supported yet: guide rails on a loft with edge sections or end continuity".into()
+                    }));
                 }
                 return loft_blend(st, f, sections, *continuity, *crown, doc);
             }
@@ -476,13 +508,18 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 secs.push((ss.plane, chain));
                 sketches.push(ss);
             }
-            let body = if rails.is_empty() {
-                kernel::loft_sheet(&secs)?
+            let rails = if rails.is_empty() {
+                Vec::new()
             } else {
                 // The rails run from the end at the first section.
                 let start = secs.first().and_then(|(p, c)| c.first().map(|seg| p.to_world(seg.start()))).unwrap_or_default();
-                let rails = crate::eval::rail_polylines(doc, st, rails, f.component, start)?;
-                kernel::loft_sheet_with_rails(&secs, &rails, crate::eval::kernel_rail_fit(*rail_fit))?
+                crate::eval::rail_polylines(doc, st, rails, f.component, start)?
+            };
+            let fit = crate::eval::kernel_rail_fit(*rail_fit);
+            let body = if *faced {
+                kernel::loft_sheet_with_rails(&secs, &rails, fit)?
+            } else {
+                kernel::loft_sheet_with_rails_legacy_sides(&secs, &rails, fit)?
             };
             // Each wall named by the section curves it runs between, as a loft's sides are.
             let loops: Vec<solidcore_record::Loop2> = secs.iter().map(|(_, c)| solidcore_record::Loop2 { segs: c.clone() }).collect();
@@ -502,7 +539,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let mut picked: Vec<usize> = Vec::new();
             for p in &picks {
                 let fi =
-                    crate::appearance::face_index_at(&mb, *p).ok_or_else(|| DocError::Invalid(format!("Offset: no face of {} at {p:?}", mb.name)))?;
+                    crate::appearance::face_index_at(&mb, *p).ok_or_else(|| DocError::Invalid(format!("Offset: no face of {} at {p}", mb.name)))?;
                 if !picked.contains(&fi) {
                     picked.push(fi);
                 }
@@ -541,7 +578,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let i = st.bodies.iter().position(|b| b.name == face.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", face.body)))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let fi = crate::appearance::face_index_at(&mb, face.point.0)
-                .ok_or_else(|| DocError::Invalid(format!("Untrim: no face of {} at {:?}", mb.name, face.point)))?;
+                .ok_or_else(|| DocError::Invalid(format!("Untrim: no face of {} at {}", mb.name, face.point.0)))?;
             let which = match holes {
                 None => kernel::UntrimHoles::All,
                 Some(points) => kernel::UntrimHoles::At(&crate::plain(points)),
@@ -561,6 +598,98 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         }
         _ => Err(DocError::Invalid("not a surface feature".into())),
     }
+}
+
+/// A surface extrude to a curved or slanted face runs its walls out further, each time
+/// [`SHEET_REACH_GROWTH`] times as far, looking for where they meet the face's surface, until they
+/// reach the extrusion limit. The count only guards against a reach that doesn't grow.
+const SHEET_REACH_TRIES: usize = 64;
+const SHEET_REACH_GROWTH: f64 = 8.0;
+
+/// A surface extrude that ends at the face, vertex or point at `to` (To Object), starting `start`
+/// along the sketch normal. A point, a vertex or a flat face square to the extrusion sets the
+/// length, moved past it by the To offset. Any other face (curved, or flat at a slant): the walls
+/// run past the body that face belongs to and are trimmed where they meet the face's surface,
+/// extended, keeping the pieces joined to the sketch. A wall that never meets that surface is
+/// refused, not left running past it.
+#[allow(clippy::too_many_arguments)]
+fn sheet_to_object(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &ModelState,
+    ss: &SolvedSketch,
+    chains: &[Vec<Seg2>],
+    extent: &crate::Extent,
+    to: Vec3,
+    start: f64,
+) -> Result<kernel::Body> {
+    let plane = &ss.plane;
+    let n = plane.normal();
+    // The target is measured where it stood when it was picked, as a solid extrude's is.
+    let tst = state_in_frame_pinned_to(doc, st, f.component, &extent.picked_placements)?;
+    let face =
+        object_face_at_level(&tst, f.face_names.first().map(String::as_str), to, plane).filter(|face| !on_edge_without_cap(&tst, *face, to, n));
+    let to_offset = extent.to_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
+    let curved = face.filter(|_| curved_face(&tst, face, Some(n)).is_some());
+    let Some((fi, target)) = curved.and_then(|(bi, fi)| Some((fi, tst.bodies.get(bi)?))) else {
+        // A point, or a face whose level is one number.
+        let level = match face.and_then(|face| square_face_level(&tst, face, plane)) {
+            Some(square) => square.level,
+            None => level_along(plane, to),
+        };
+        // Past the object by the offset, in the direction travelled.
+        let end = level + if level >= start { to_offset } else { -to_offset };
+        if (end - start).abs() < 1e-9 {
+            return Err(DocError::Invalid("the To object is where the surface extrude starts".into()));
+        }
+        let (a, b) = extent_sides(vals, extent, end - start, crate::Direction::Positive)?;
+        return Ok(kernel::extrude_sheet(plane, chains, a + start, b + start)?);
+    };
+    if to_offset.abs() > 1e-9 {
+        return Err(DocError::Invalid("not supported yet: a To offset on a surface extrude to a curved or slanted face".into()));
+    }
+    if extent.distance2.is_some() {
+        return Err(DocError::Invalid("not supported yet: a second side on a surface extrude to a curved or slanted face".into()));
+    }
+    // The picked point lies on the face, so its level says which way the face is.
+    let toward = if level_along(plane, to) >= start { 1.0 } else { -1.0 };
+    // Each wall's start: a point on each chain at the start level picks the pieces to keep.
+    let start_plane = plane.offset(start);
+    let keep: Vec<Vec3> = chains.iter().filter_map(|c| c.first()).map(|s| start_plane.to_world(s.start())).collect();
+    let tool = kernel::SplitTool::Face { body: &target.body, face: fi };
+    // First past the whole target body. The face's surface runs on past the body, though (a
+    // slanted plane), so a wall beside the body can meet it further out: while a wall still
+    // runs to the far end, or none crosses the surface, the walls run out further.
+    // The last try runs the walls out to just short of the extrusion limit.
+    let limit = MAX_EXTRUDE_REACH - 1.0 - toward * start;
+    let mut reach = through_all_distance(&tst, plane, start, std::slice::from_ref(&target.name))?;
+    for tries_left in (0..SHEET_REACH_TRIES).rev() {
+        let far = start + toward * reach;
+        extrude_within_reach([start, far])?;
+        let long = kernel::extrude_sheet(plane, chains, start.min(far), start.max(far))?;
+        let last = tries_left == 0 || reach >= limit;
+        let kept = match kernel::trim_keep(&long, &tool, kernel::TrimKeep::Regions(&keep)) {
+            Ok(kept) => kept,
+            Err(_) if !last => {
+                reach = (reach * SHEET_REACH_GROWTH).min(limit);
+                continue;
+            }
+            Err(e) => return Err(DocError::Invalid(format!("the surface extrude never meets the To face's surface ({e})"))),
+        };
+        // A wall that never met the surface still runs out to `far`; `reach` runs at least 1 past
+        // the target body, so a kept wall ending within half of that met it.
+        let [low, high] = kernel::levels_along(&kept, plane)?;
+        let furthest = if toward > 0.0 { high } else { -low };
+        if furthest <= toward * far - 0.5 {
+            return Ok(kept);
+        }
+        if last {
+            break;
+        }
+        reach = (reach * SHEET_REACH_GROWTH).min(limit);
+    }
+    Err(DocError::Invalid("part of the surface extrude never meets the To face's surface".into()))
 }
 
 /// A surface builder's body, added to the model with what its faces came from.
@@ -664,7 +793,7 @@ fn network_sources(
             let raw = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk} (it must come earlier in the timeline)")))?;
             // 3D sketch curves are followed through their points; planar ones exactly.
             let mapped = path_in_frame(doc, raw, f.component)?;
-            match path_points(&mapped, &c.curves, Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
+            match path_points(&curves_in(mapped.as_ref(), &c.curves), Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
                 Some(path) => NetSource::Points(path.points()),
                 None => {
                     let ss = sketch_in_feature_frame(doc, raw, f.component)?;
@@ -868,6 +997,11 @@ pub(super) fn curve_chains(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Vec<
     Ok(chains)
 }
 
+/// Whether a loft section names a curve of a 3D sketch (a wire), not only planar curves.
+fn section_in_space(st: &ModelState, sec: &SheetSection) -> bool {
+    sec.body.is_none() && st.sketch(sec.sketch.0).is_some_and(|ss| sec.curves.iter().any(|id| ss.sketch.wire_index(id).is_some()))
+}
+
 /// A multi-section blend: every section as frames, the body ones read off the face their edge
 /// chain bounds, and the first and last leaving with `continuity` where the caller asks for it.
 fn loft_blend(
@@ -878,9 +1012,10 @@ fn loft_blend(
     crown: [f64; 2],
     doc: &Document,
 ) -> Result<()> {
-    /// One section: a chain of sketch curves in its plane, or a body's edge chain.
+    /// One section: a chain of sketch curves (in its plane, or of a 3D sketch) as its points in
+    /// space, or a body's edge chain.
     enum Piece {
-        Sketch(solidcore_record::Plane, Vec<solidcore_record::Seg2>),
+        Points(Vec<solidcore_record::Vec3>),
         Body(String, Vec<solidcore_record::Vec3>),
     }
     let mut pieces = Vec::with_capacity(sections.len());
@@ -895,28 +1030,36 @@ fn loft_blend(
             pieces.push(Piece::Body(name.to_string(), crate::plain(&sec.edges)));
             continue;
         }
-        let ss = sketch_in_feature_frame(
-            doc,
-            st.sketch(sec.sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {} (it must come earlier in the timeline)", sec.sketch)))?,
-            f.component,
-        )?;
-        let profiles = match (&sec.profiles, sec.curves.is_empty()) {
-            (None, true) => Some(&ProfileSel::All),
-            (p, _) => p.as_ref(),
+        let raw =
+            st.sketch(sec.sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {} (it must come earlier in the timeline)", sec.sketch)))?;
+        let one_chain = || DocError::Invalid("each loft section must be one chain: one profile without holes, or curves meeting end to end".into());
+        let pts: Vec<Vec3> = if section_in_space(st, sec) {
+            // 3D sketch curves are followed through their points, as a boundary surface's u and v
+            // curves are.
+            if sec.profiles.is_some() {
+                return Err(one_chain());
+            }
+            let mapped = path_in_frame(doc, raw, f.component)?;
+            path_points(&curves_in(mapped.as_ref(), &sec.curves), Vec3::new(f64::NAN, f64::NAN, f64::NAN))?.ok_or_else(one_chain)?.points()
+        } else {
+            let ss = sketch_in_feature_frame(doc, raw, f.component)?;
+            let profiles = match (&sec.profiles, sec.curves.is_empty()) {
+                (None, true) => Some(&ProfileSel::All),
+                (p, _) => p.as_ref(),
+            };
+            let mut chains = sheet_chains(&ss, profiles, &sec.curves)?.into_iter();
+            let (Some(chain), None) = (chains.next(), chains.next()) else {
+                return Err(one_chain());
+            };
+            chain.iter().flat_map(|s| s.polyline(1e-2)).map(|p| ss.plane.to_world(p)).collect()
         };
-        let mut chains = sheet_chains(&ss, profiles, &sec.curves)?.into_iter();
-        let (Some(chain), None) = (chains.next(), chains.next()) else {
-            return Err(DocError::Invalid("each loft section must be one chain: one profile without holes, or curves meeting end to end".into()));
-        };
-        let pts: Vec<Vec2> = chain.iter().flat_map(|s| s.polyline(1e-2)).collect();
-        let centre = pts.iter().fold(solidcore_record::Vec3::ZERO, |a, p| a + ss.plane.to_world(*p)) * (1.0 / pts.len().max(1) as f64);
-        centres.push(centre);
-        pieces.push(Piece::Sketch(ss.plane, chain));
+        centres.push(pts.iter().fold(solidcore_record::Vec3::ZERO, |a, p| a + *p) * (1.0 / pts.len().max(1) as f64));
+        pieces.push(Piece::Points(pts));
     }
     // Each section leaves towards the one after it; the last one leaves back into the blend.
     let stations = BLEND_STATIONS;
     let last = pieces.len().saturating_sub(1);
-    let mut frames = Vec::with_capacity(pieces.len());
+    let mut frames: Vec<Vec<kernel::Frame>> = Vec::with_capacity(pieces.len());
     for (i, piece) in pieces.iter().enumerate() {
         let (from, to) = if i < last { (i, i + 1) } else { (last, last.saturating_sub(1)) };
         let leave = match (centres.get(from), centres.get(to)) {
@@ -928,7 +1071,27 @@ fn loft_blend(
                 let b = st.body(name).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?.body.clone();
                 frames.push(kernel::loft_blend::section_frames(&b, edges, leave, stations)?);
             }
-            Piece::Sketch(plane, chain) => frames.push(chain_frames(plane, chain, leave, stations)),
+            Piece::Points(pts) => frames.push(point_frames(pts, leave, stations)?),
+        }
+    }
+    // A 3D sketch chain runs the way its curves are listed and joined, not the way a sketch
+    // section of the plain loft is drawn, so in a loft through one each open section (a body's
+    // edge chain too) is turned to run the way the section before it does, as the plain loft
+    // turns its open sections; a closed one would need its winding and seam matched, as the
+    // plain loft does.
+    if sections.iter().any(|s| section_in_space(st, s)) {
+        let end = |f: Option<&kernel::Frame>| f.map_or([f64::NAN; 3], |f| f.p.into());
+        let ends: Vec<[[f64; 3]; 2]> = frames.iter().map(|s| [end(s.first()), end(s.last())]).collect();
+        let turns = solidcraft_kernel::services::sweep::railed::open_section_turns(&ends).map_err(|e| match e {
+            solidcraft_kernel::services::Error::Unsupported(_) => {
+                DocError::Invalid("not supported yet: a closed section in a loft through 3D sketch curves".into())
+            }
+            e => DocError::Invalid(e.to_string()),
+        })?;
+        for (these, turn) in frames.iter_mut().zip(turns) {
+            if turn {
+                these.reverse();
+            }
         }
     }
     let body = kernel::loft_blend(&frames, continuity, crown, stations)?;
@@ -937,53 +1100,15 @@ fn loft_blend(
     Ok(())
 }
 
-/// The frames of one sketch chain, sampled by arclength at `stations` stations: a sketch has no
-/// face behind it, so the surface leaves along the run with no curvature to repeat there.
-fn chain_frames(
-    plane: &solidcore_record::Plane,
-    chain: &[solidcore_record::Seg2],
-    leave: solidcore_record::Vec3,
-    stations: usize,
-) -> Vec<kernel::Frame> {
-    let mut pts: Vec<Vec2> = Vec::new();
-    for seg in chain {
-        for p in seg.polyline(1e-2) {
-            if pts.last().is_none_or(|l: &Vec2| (*l - p).len() > 1e-12) {
-                pts.push(p);
-            }
-        }
-    }
-    if pts.len() < 2 || stations < 2 {
-        return Vec::new();
-    }
-    let total: f64 = pts.windows(2).map(|w| (w[1] - w[0]).len()).sum();
-    if !(total > 1e-12) {
-        return Vec::new();
-    }
-    let step = total / (stations - 1) as f64;
-    let (mut walked, mut k) = (0.0f64, 0usize);
-    let mut out = Vec::with_capacity(stations);
-    for i in 0..stations {
-        let want = step * i as f64;
-        while k + 1 < pts.len() && walked + (pts[k + 1] - pts[k]).len() < want {
-            walked += (pts[k + 1] - pts[k]).len();
-            k += 1;
-        }
-        let (Some(a), Some(b)) = (pts.get(k).copied(), pts.get(k + 1).copied()) else {
-            if let Some(p) = pts.get(k).copied() {
-                out.push(kernel::Frame {
-                    p: plane.to_world(p),
-                    leave,
-                    bend: solidcore_record::Vec3::ZERO,
-                    bend_change: solidcore_record::Vec3::ZERO,
-                });
-            }
-            continue;
-        };
-        let span = (b - a).len();
-        let t = if span > 1e-12 { ((want - walked) / span).clamp(0.0, 1.0) } else { 0.0 };
-        let p = a * (1.0 - t) + b * t;
-        out.push(kernel::Frame { p: plane.to_world(p), leave, bend: solidcore_record::Vec3::ZERO, bend_change: solidcore_record::Vec3::ZERO });
-    }
-    out
+/// The frames of a chain given by its points in space, at `stations` stations of even arc
+/// length (solidcore's `point_frames`): a sketch has no face behind it, so the surface leaves
+/// along the run with no curvature to repeat there.
+fn point_frames(pts: &[Vec3], leave: Vec3, stations: usize) -> Result<Vec<kernel::Frame>> {
+    let pts: Vec<[f64; 3]> = pts.iter().map(|&p| p.into()).collect();
+    let frames =
+        solidcraft_kernel::services::sweep::railed::point_frames(&pts, leave.into(), stations).map_err(|e| DocError::Invalid(e.to_string()))?;
+    Ok(frames
+        .into_iter()
+        .map(|f| kernel::Frame { p: f.p.into(), leave: f.leave.into(), bend: f.bend.into(), bend_change: f.bend_change.into() })
+        .collect())
 }

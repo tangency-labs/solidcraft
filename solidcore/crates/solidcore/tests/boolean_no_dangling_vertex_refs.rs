@@ -63,19 +63,16 @@ fn operands(k: &mut Kernel, d: f64) -> (Brep, Brep) {
 fn boolean_union_of_crossing_creases_has_no_dangling_vertex_refs() {
     let mut failures = Vec::new();
     for d in [3e-6, 1e-5, 3e-5, 1e-4] {
-        for fix in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.degenerate_proto_edge_in_one_vertex = fix;
-            let (a, b) = operands(&mut k, d);
-            if let Ok(u) = boolean_union(&mut k, a, b) {
-                let bad = dangling_vertex_refs(&u);
-                if !bad.is_empty() {
-                    failures.push(format!("d={d:e} fix={fix}: {bad:?}"));
-                }
-                // every link, and the cached edge ends the Boolean refreshes on return
-                if let Err(e) = solidcore::topology::integrity::check(&u) {
-                    failures.push(format!("d={d:e} fix={fix}: integrity {e:?}"));
-                }
+        let mut k = Kernel::default();
+        let (a, b) = operands(&mut k, d);
+        if let Ok(u) = boolean_union(&mut k, a, b) {
+            let bad = dangling_vertex_refs(&u);
+            if !bad.is_empty() {
+                failures.push(format!("d={d:e}: {bad:?}"));
+            }
+            // every link, and the cached edge ends the Boolean refreshes on return
+            if let Err(e) = solidcore::topology::integrity::check(&u) {
+                failures.push(format!("d={d:e}: integrity {e:?}"));
             }
         }
     }

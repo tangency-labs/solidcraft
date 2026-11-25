@@ -16,7 +16,8 @@ use solidcraft_engine::kernel::{Construction, Continuity};
 use crate::SolveApp;
 use crate::dialogs::{Kind, OP_LABELS, OPS, combo, form_row, op_index};
 use crate::selection::{
-    AXES, AXIS_PICKS, BODIES, CURVES, EDGES, FACES, PLANES, PROFILES, SelInput, SelectionExt as _, VERTICES, items, point_value as pt,
+    AXES, AXIS_PICKS, BODIES, CURVES, EDGES, FACES, PLANES, PROFILES, SKETCH_LINES, SNAP_POINTS, SelInput, SelectionExt as _, VERTICES, items,
+    point_value as pt,
 };
 use crate::ui_kit;
 
@@ -55,10 +56,13 @@ crate::dialog_descriptor::dialog_descriptors! {
             order: usize = 1 => MATCH_CONTINUITY.iter().position(|(_, word)| *word == order.as_str()).unwrap_or(1),
         } => json!({"order": MATCH_CONTINUITY.get(*order).map_or("g2", |(_, word)| *word)});
         ; custom {
-            /// `direction`: an index into [`EXTRUDE_SIDES`].
+            /// `direction`: an index into [`EXTRUDE_SIDES`]; `to_object`: the extent is To Object
+            /// (the To Object input holds the pick), with `to_offset` past it (empty: none).
             Extrude {
                 distance: String,
                 direction: usize,
+                to_object: bool,
+                to_offset: String,
             },
             /// `axis`: a stored {origin, dir} axis, used while no axis is picked.
             Revolve {
@@ -102,10 +106,12 @@ crate::dialog_descriptor::dialog_descriptors! {
                 round: bool,
             },
             /// `direction`: the stored sweep direction of trimming curves (none: the sketch's normal).
+            /// `face_normal`: the stored choice to project them along the surface's normal instead.
             Trim {
                 extend: bool,
                 stitch: bool,
                 direction: Option<Vec3>,
+                face_normal: bool,
             },
             /// `holes`: an index into [`UNTRIM_HOLES`].
             Untrim {
@@ -142,6 +148,7 @@ impl Surf {
     pub fn primary(&mut self) -> Option<(&'static str, ValueKind, &mut String)> {
         Some(match self {
             Surf::Thicken { thickness, .. } => ("Thickness", ValueKind::Length, thickness),
+            Surf::Extrude { to_object: true, to_offset, .. } => ("To Offset", ValueKind::Length, to_offset),
             Surf::Extend { distance } | Surf::Extrude { distance, .. } | Surf::Offset { distance, .. } | Surf::Ruled { distance, .. } => {
                 ("Distance", ValueKind::Length, distance)
             }
@@ -215,6 +222,9 @@ const BOUNDARY_OPS: [&str; 2] = ["New Body", "Join"];
 /// Which holes Untrim takes away: every one, the picked ones, or none (the outer boundary only).
 const UNTRIM_HOLES: [&str; 3] = ["All", "Picked", "None"];
 
+/// How far a surface extrude goes: a distance, or to a picked face or point.
+const EXTRUDE_EXTENTS: [&str; 2] = ["Distance", "To Object"];
+
 /// The sides a surface extrude goes to (labels, and the `direction` parameter).
 const EXTRUDE_SIDES: [(&str, &str); 3] = [("One Side", "positive"), ("Symmetric", "symmetric"), ("Flipped", "negative")];
 
@@ -241,7 +251,9 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
         }
         Surf::Blend { .. } => vec![SelInput::new("From edges", EDGES, true), SelInput::new("To edges", EDGES, true)],
         Surf::Boundary { .. } => vec![SelInput::new("Curves", CURVES | EDGES, true), SelInput::new("Cross curves", CURVES | EDGES, true)],
-        Surf::Patch { .. } => vec![SelInput::new("Boundary", PROFILES | EDGES, true), SelInput::new("Pass through", VERTICES | FACES, true)],
+        Surf::Patch { .. } => {
+            vec![SelInput::new("Boundary", PROFILES | CURVES | EDGES, true), SelInput::new("Pass through", VERTICES | FACES | SNAP_POINTS, true)]
+        }
         Surf::Unstitch => vec![SelInput::new("Body, or faces to take out", BODIES | FACES, true)],
         Surf::ReverseNormal => vec![SelInput::new("Surface, or faces to turn over", BODIES | FACES, true)],
         Surf::Ruled { .. } => {
@@ -255,7 +267,11 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
             SelInput::new("Keep of the other surface", FACES, true).places(),
         ],
         Surf::Untrim { .. } => vec![SelInput::new("Face", FACES, false), SelInput::new("Holes (edges on them)", EDGES, true)],
-        Surf::SplitFace => vec![SelInput::new("Faces to split", FACES, true), SelInput::new("Splitting tool", PLANES | FACES, false)],
+        Surf::SplitFace => vec![
+            SelInput::new("Faces to split", FACES, true),
+            // A sketch's curves divide the faces, as the command does (#17555).
+            SelInput::new("Splitting tool", PLANES | FACES | SKETCH_LINES, false),
+        ],
         _ => k.simple_inputs(),
     }
 }
@@ -263,7 +279,9 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
 /// The dialog for a surface command.
 pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let k = match id {
-        "surface.extrude" => Surf::Extrude { distance: crate::dialogs::length_default(&app.session, "10"), direction: 0 },
+        "surface.extrude" => {
+            Surf::Extrude { distance: crate::dialogs::length_default(&app.session, "10"), direction: 0, to_object: false, to_offset: String::new() }
+        }
         "surface.revolve" => Surf::Revolve { angle: "360 deg".into(), symmetric: false, axis: None },
         "surface.sweep" => Surf::Sweep(crate::dialogs_sweep::SweepOpts::default()),
         "surface.loft" => Surf::Loft { rail_fit: 0 },
@@ -275,7 +293,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "surface.ruled" => {
             Surf::Ruled { distance: crate::dialogs::length_default(&app.session, "10"), mode: 0, angle: "5 deg".into(), flip: false, round: false }
         }
-        "surface.trim" => Surf::Trim { extend: false, stitch: false, direction: None },
+        "surface.trim" => Surf::Trim { extend: false, stitch: false, direction: None, face_normal: false },
         "surface.untrim" => Surf::Untrim { holes: 0, outer: false, in_place: false },
         "solid.split_face" => Surf::SplitFace,
         _ => Surf::simple_start(id)?.0,
@@ -284,8 +302,9 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     Some((crate::length_input::defaults(&app.session.doc, Kind::Surface(k)), i))
 }
 
-/// The rows after the inputs; true when Enter was pressed in a field.
-pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
+/// The rows after the inputs; true when Enter was pressed in a field. A choice that adds or
+/// removes a pick input (Surface Extrude's To Object) changes `inputs` and `active`.
+pub fn rows(ui: &mut egui::Ui, k: &mut Surf, inputs: &mut Vec<SelInput>, active: &mut usize) -> bool {
     let mut enter = false;
     match k {
         Surf::Fair { strength, iterations, keep_edges, tolerance } => {
@@ -341,11 +360,23 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
             });
             ui_kit::options(ui, "ruled_options", &mut [("Flip", flip)]);
         }
-        Surf::Extrude { distance, direction } => {
-            enter |= expr_row(ui, "Distance", distance);
-            form_row(ui, "Direction", |ui| {
-                ui_kit::segmented(ui, direction, &EXTRUDE_SIDES.map(|(label, _)| label), Default::default());
+        Surf::Extrude { distance, direction, to_object, to_offset } => {
+            let mut extent = usize::from(*to_object);
+            form_row(ui, "Extent Type", |ui| {
+                combo(ui, "se_ext", &EXTRUDE_EXTENTS, &mut extent);
             });
+            *to_object = extent == 1;
+            // The To Object input, the same one Extrude picks its object in.
+            crate::dialogs::set_to_object(inputs, active, *to_object);
+            if *to_object {
+                // To Object goes one way, toward the object.
+                enter |= expr_row(ui, "To Offset", to_offset);
+            } else {
+                enter |= expr_row(ui, "Distance", distance);
+                form_row(ui, "Direction", |ui| {
+                    ui_kit::segmented(ui, direction, &EXTRUDE_SIDES.map(|(label, _)| label), Default::default());
+                });
+            }
         }
         Surf::Untrim { holes, outer, in_place } => {
             choice_row(ui, "Holes", "ut_holes", holes, &UNTRIM_HOLES);
@@ -442,6 +473,30 @@ fn sheet_sels(app: &SolveApp, sketch: u64, profiles: Option<&ProfileSel>, curves
     sels
 }
 
+/// The planar 3D loops of a sketch that the picked curves bound (#16186). A curve of a 3D sketch
+/// that closes a loop in a plane of its own is the boundary of a patch in that plane, so the loop
+/// is what the patch takes, not the one curve picked. Nothing when the picks are no curves.
+fn patch_3d_loops(app: &SolveApp, picks: &[Sel]) -> Result<Option<(u64, Vec<usize>)>, String> {
+    let ids = picks.curve_ids();
+    if ids.is_empty() {
+        return Ok(None);
+    }
+    let sk = crate::dialogs::picks_sketch(app, picks, None).ok_or("the curves must be in one sketch")?;
+    let st = crate::open_meshing::session_world(&app.session);
+    let Some(ss) = st.sketch(sk) else { return Err("the curves are not in a sketch any more".into()) };
+    let loops: Vec<usize> = ss
+        .profiles_3d
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| ids.iter().any(|id| p.outer_curves.contains(id) || p.hole_curves.iter().any(|h| h.contains(id))))
+        .map(|(i, _)| i)
+        .collect();
+    if loops.is_empty() {
+        return Err("the curve must bound a loop of 3D curves".into());
+    }
+    Ok(Some((sk, loops)))
+}
+
 /// A splitting or trimming tool: a plane by name, a planar face as its plane, or any other
 /// face as {body, point} (its surface extended).
 fn tool(app: &SolveApp, sel: Option<&Sel>) -> Result<(&'static str, Value), String> {
@@ -453,6 +508,25 @@ fn tool(app: &SolveApp, sel: Option<&Sel>) -> Result<(&'static str, Value), Stri
         },
         _ => Err("pick a plane or a face as the tool".into()),
     }
+}
+
+/// The sketch a splitting tool names: the sketch of the curve picked in the viewport (#17555).
+fn tool_sketch(app: &SolveApp, picks: &[Sel]) -> Option<u64> {
+    picks.iter().find_map(|sel| match sel {
+        Sel::ExternalSketchCurve { sketch, .. } => Some(*sketch),
+        Sel::SketchCurve { sketch: Some(sketch), .. } => Some(*sketch),
+        Sel::SketchCurve { .. } => crate::dialogs::picks_sketch(app, picks, None),
+        _ => None,
+    })
+}
+
+/// The tool input's pick for a sketch: one of its curves stands for the whole sketch, whose
+/// curves divide the face (#17555).
+fn sketch_tool(app: &SolveApp, sketch: u64) -> Option<Sel> {
+    let st = crate::open_meshing::session_world(&app.session);
+    let ss = st.sketch(sketch)?;
+    let id = ss.sketch.curves.iter().find(|c| !c.construction).map(|c| c.id.clone())?;
+    Some(Sel::ExternalSketchCurve { sketch, id })
 }
 
 /// One curve of a boundary surface as the dialog picks it: sketch curves of one sketch, or edges
@@ -551,11 +625,18 @@ fn chains(app: &SolveApp, picks: &[Sel]) -> Result<Vec<Chain>, String> {
 pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let need = |i: usize, what: &str| if items(inputs, i).is_empty() { Err(format!("select {what} first")) } else { Ok(()) };
     let (cmd, mut p) = match k {
-        Surf::Extrude { distance, direction } => {
+        Surf::Extrude { distance, direction, to_object, to_offset } => {
             need(0, "profiles or curves to extrude")?;
             let mut p = sheet_picks(app, items(inputs, 0))?;
-            p["distance"] = json!(distance);
-            p["direction"] = json!(EXTRUDE_SIDES.get(*direction).map_or("positive", |(_, d)| *d));
+            if *to_object {
+                p["to"] = crate::dialogs::to_object_point(inputs).ok_or("select the face or point to extrude to")?;
+                if !to_offset.trim().is_empty() {
+                    p["to_offset"] = json!(to_offset);
+                }
+            } else {
+                p["distance"] = json!(distance);
+                p["direction"] = json!(EXTRUDE_SIDES.get(*direction).map_or("positive", |(_, d)| *d));
+            }
             ("surface.extrude", p)
         }
         Surf::Revolve { angle, symmetric, axis } => {
@@ -691,14 +772,17 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             }
         }
         Surf::Patch { continuity } => {
-            need(0, "a boundary (sketch profiles or a loop of edges)")?;
-            let profiles: Vec<(u64, usize)> = items(inputs, 0).profiles();
+            need(0, "a boundary (sketch profiles, a loop of 3D curves or a loop of edges)")?;
+            let picks = items(inputs, 0);
+            let profiles: Vec<(u64, usize)> = picks.profiles();
             if let Some((sk, _)) = profiles.first() {
                 let idx: Vec<usize> = profiles.iter().filter(|(s, _)| s == sk).map(|(_, i)| *i).collect();
                 ("surface.patch", json!({"sketch": sk, "profiles": idx}))
+            } else if let Some((sk, loops)) = patch_3d_loops(app, picks)? {
+                ("surface.patch", json!({"sketch": sk, "profiles_3d": loops}))
             } else {
-                let edges: Vec<Value> = items(inputs, 0).edge_points().into_iter().map(pt).collect();
-                let body = items(inputs, 0).iter().find_map(|x| if let Sel::Edge { body, .. } = x { Some(body.clone()) } else { None });
+                let edges: Vec<Value> = picks.edge_points().into_iter().map(pt).collect();
+                let body = picks.iter().find_map(|x| if let Sel::Edge { body, .. } = x { Some(body.clone()) } else { None });
                 let mut p = json!({"edges": edges, "body": body});
                 if *continuity != Continuity::G0 {
                     p["continuity"] = json!(continuity.as_str());
@@ -802,7 +886,7 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             let edges: Vec<Value> = items(inputs, 0).edge_points().into_iter().map(pt).collect();
             ("surface.extend", json!({"body": body, "edges": edges}))
         }
-        Surf::Trim { extend, stitch, direction } => {
+        Surf::Trim { extend, stitch, direction, face_normal } => {
             need(0, "the surface to trim")?;
             need(2, "what to keep (points on it)")?;
             let body = items(inputs, 0).body_names().into_iter().next().unwrap_or_default();
@@ -842,7 +926,10 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
                     }
                     let sketch = crate::dialogs::picks_sketch(app, picks, None).ok_or("the curves must be in one sketch")?;
                     let mut c = json!({"sketch": sketch, "curves": curves});
-                    if let Some(d) = direction {
+                    // What the dialog does not show is kept as the feature was made (Edit Feature).
+                    if *face_normal {
+                        c["direction"] = json!("face_normal");
+                    } else if let Some(d) = direction {
                         c["direction"] = pt(*d);
                     }
                     p["curves"] = c;
@@ -881,9 +968,21 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             need(1, "the splitting tool")?;
             let faces: Vec<Value> = items(inputs, 0).face_points().into_iter().map(pt).collect();
             let body = items(inputs, 0).iter().find_map(|x| if let Sel::Face { body, .. } = x { Some(body.clone()) } else { None });
-            let (key, t) = tool(app, items(inputs, 1).first())?;
             let mut p = json!({"faces": faces, "body": body});
-            p[key] = t;
+            // A sketch: its curves divide the faces (#17555).
+            match tool_sketch(app, items(inputs, 1)) {
+                Some(sketch) => {
+                    p["sketch"] = json!(sketch);
+                    // A split that is edited keeps the `loops` it was made with.
+                    if !extra.contains_key("loops") {
+                        p["loops"] = json!(true);
+                    }
+                }
+                None => {
+                    let (key, t) = tool(app, items(inputs, 1).first())?;
+                    p[key] = t;
+                }
+            }
             ("solid.split_face", p)
         }
     };
@@ -910,8 +1009,10 @@ fn tool_sel(app: &SolveApp, plane: &PlaneRef, tool: Option<&FaceAt>) -> Option<S
 pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
     let s = &app.session;
     let edge = |p: &solidcraft_engine::doc::Position| crate::dialogs::edge_sel(s, p.0);
+    // Stored values the dialog shows no box for, sent back unchanged on OK.
+    let mut kept = Map::new();
     let (k, fill): (Surf, Vec<Vec<Sel>>) = match kind {
-        FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric } => {
+        FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric, .. } => {
             let (pick, stored) = match axis {
                 AxisRef::World { axis } => (Some(Sel::Axis { name: axis.to_ascii_uppercase() }), None),
                 AxisRef::SketchAxis { axis } => (Some(Sel::Axis { name: axis.to_ascii_lowercase() }), None),
@@ -1051,10 +1152,22 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 Direction::Symmetric => 1,
                 Direction::Negative => 2,
             };
-            let k = Surf::Extrude { distance: extent.distance.to_string(), direction };
+            let k = Surf::Extrude {
+                distance: extent.distance.to_string(),
+                direction,
+                to_object: extent.to.is_some(),
+                to_offset: extent.to_offset.as_deref().map(str::to_string).unwrap_or_default(),
+            };
             let mut ins = inputs(&k);
             if let Some(input) = ins.first_mut() {
                 input.items = sels;
+            }
+            if let Some(to) = extent.to {
+                let mut active = 0;
+                crate::dialogs::set_to_object(&mut ins, &mut active, true);
+                if let Some(input) = ins.iter_mut().find(|i| i.label == "To Object") {
+                    input.items = vec![crate::dialogs::face_sel(s, to.0).unwrap_or(Sel::Vertex { body: String::new(), point: to.0 })];
+                }
             }
             // A symmetric extrude keeps the reading it was made with; a one-sided one made
             // symmetric here takes a new one's (timeline.redefine fills it in either way).
@@ -1064,12 +1177,22 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             }
             return Some((Kind::Surface(k), ins, extra));
         }
-        FeatureKind::Patch { sketch, edges, crown, continuity, points, .. } => {
+        FeatureKind::Patch { sketch, profiles_3d, edges, crown, continuity, points, .. } => {
             let mut sels: Vec<Sel> = edges.iter().filter_map(edge).collect();
             if let Some(sk) = sketch {
                 let st = crate::open_meshing::session_world(s);
                 if let Some(ss) = st.sketch(sk.0) {
-                    sels.extend((0..ss.profiles.len()).map(|index| Sel::Profile { sketch: sk.0, index }));
+                    if profiles_3d.is_empty() {
+                        sels.extend((0..ss.profiles.len()).map(|index| Sel::Profile { sketch: sk.0, index }));
+                    } else {
+                        // A patch on 3D loops shows the curves of those loops (#16186): the loops
+                        // are what it took, and the sketch's own profiles took no part in it.
+                        for &i in profiles_3d {
+                            if let Some(p) = ss.profiles_3d.get(i) {
+                                sels.extend(p.outer_curves.iter().map(|id| crate::selection::curve_pick(id, sk.0, s.active_sketch)));
+                            }
+                        }
+                    }
                 }
             }
             // What the dialog does not show is kept as it was: the crown, edges with a
@@ -1164,7 +1287,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 Some(solidcraft_engine::doc::ExtendTo::Plane(PlaneRef::Origin { name })) => {
                     extra.insert("up_to".into(), json!(name));
                 }
-                Some(solidcraft_engine::doc::ExtendTo::Plane(PlaneRef::Construction { feature })) => {
+                Some(solidcraft_engine::doc::ExtendTo::Plane(PlaneRef::Construction { feature, .. })) => {
                     let shown = s.doc.feature(feature.0).map(|f| json!(f.name)).unwrap_or_else(|| json!(feature.0));
                     extra.insert("up_to".into(), shown);
                 }
@@ -1198,7 +1321,12 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 (None, None) => tool_sel(app, plane, tool.as_ref()).into_iter().collect(),
             };
             (
-                Surf::Trim { extend: *extend, stitch: *stitch, direction: curves.as_ref().and_then(|c| c.direction.map(|d| d.0)) },
+                Surf::Trim {
+                    extend: *extend,
+                    stitch: *stitch,
+                    direction: curves.as_ref().and_then(|c| c.direction.map(|d| d.0)),
+                    face_normal: curves.as_ref().is_some_and(|c| c.face_normal),
+                },
                 vec![
                     vec![Sel::Body { name: body.to_string() }],
                     tools,
@@ -1219,17 +1347,30 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 vec![crate::dialogs::face_sel(s, face.point.0).into_iter().collect(), picked],
             )
         }
-        FeatureKind::SplitFace { faces, plane, tool, .. } => (
-            Surf::SplitFace,
-            vec![faces.iter().filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect(), tool_sel(app, plane, tool.as_ref()).into_iter().collect()],
-        ),
+        FeatureKind::SplitFace { faces, plane, tool, sketch, loops, .. } => {
+            // The splitting tool: a plane, a face, or the sketch whose curves divide the face
+            // (#17555). A sketch that is gone keeps its place in the kept values, as before.
+            let tool_pick = sketch.and_then(|sketch| sketch_tool(app, sketch.0));
+            if let Some(sketch) = sketch {
+                // A split that is edited keeps the `loops` it was made with.
+                kept.insert("loops".into(), json!(*loops));
+                if tool_pick.is_none() {
+                    kept.insert("sketch".into(), json!(sketch.0));
+                }
+            }
+            let tool_items: Vec<Sel> = match tool_pick {
+                Some(sel) => vec![sel],
+                None => tool_sel(app, plane, tool.as_ref()).into_iter().collect(),
+            };
+            (Surf::SplitFace, vec![faces.iter().filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect(), tool_items])
+        }
         _ => return None,
     };
     let mut ins = inputs(&k);
     for (inp, items) in ins.iter_mut().zip(fill) {
         inp.items = items;
     }
-    Some((Kind::Surface(k), ins, Map::new()))
+    Some((Kind::Surface(k), ins, kept))
 }
 
 #[cfg(test)]

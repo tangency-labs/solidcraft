@@ -1,8 +1,8 @@
-//! The custom view navigator: a body of the user's choice drawn in place of the navigation cube
-//! (`viewport::body_gizmo` draws it). A right-click on any view navigator offers Axes, Cube and
+//! The custom view navigator: a body of the user's choice drawn in place of the signed axes
+//! (`viewport::body_gizmo` draws it). A right-click on any view navigator offers Axes and
 //! Custom ([`menu_items`]); Custom opens the Custom View Navigator panel, a feature panel with OK
 //! and Cancel ([`start`], [`rows`], [`run_dialog`]): the body is picked in the view, then its
-//! texture (the cube's colours, or the body's own) and whether the cube's rotation arrows and
+//! texture (the colours, or the body's own) and whether the rotation arrows and
 //! Home button go around it. The navigator previews the panel's choices while it is open. OK
 //! runs `view.navigator` ([`command`]), which scripts and the control channel run too.
 //!
@@ -50,7 +50,7 @@ const UNIT: f64 = 10_000.0;
 /// The custom navigator's body.
 #[derive(Default)]
 pub struct State {
-    /// The body drawn in place of the cube (`None`: the cube is drawn).
+    /// The body drawn in place of the signed axes (`None`: the axes are drawn).
     pub shape: Option<Shape>,
     /// The stored form of `shape`, made once when it is chosen.
     stored: Option<Value>,
@@ -124,10 +124,8 @@ impl Shape {
     /// caps.
     pub fn from_json(v: &Value) -> Option<Shape> {
         let name: String = v.get("name")?.as_str()?.chars().take(MAX_NAME).collect();
-        let points: Vec<i16> = unpack(v, "v", 9 * MAX_TRIANGLES * 2)?.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect();
-        let words = |key: &str, cap: usize| -> Option<Vec<u16>> {
-            Some(unpack(v, key, cap * 2)?.as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b)).collect())
-        };
+        let points: Vec<i16> = numbers(v, "v", 9 * MAX_TRIANGLES)?;
+        let words = |key: &str, cap: usize| -> Option<Vec<u16>> { numbers(v, key, cap) };
         let tris = words("t", 3 * MAX_TRIANGLES)?;
         let faces = words("f", MAX_TRIANGLES)?;
         let point = |p: &[i16; 3]| Vec3::new(f64::from(p[0]) / UNIT, f64::from(p[1]) / UNIT, f64::from(p[2]) / UNIT);
@@ -164,8 +162,7 @@ impl Shape {
             mesh.tri_face.push(*face);
         }
         // Edges are optional: a snapshot without readable ones is drawn without its lines.
-        let edge_points: Vec<i16> =
-            unpack(v, "e", MAX_EDGE_POINTS * 6).unwrap_or_default().as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect();
+        let edge_points: Vec<i16> = numbers(v, "e", MAX_EDGE_POINTS * 3).unwrap_or_default();
         let mut edge_points = edge_points.as_chunks::<3>().0.iter().map(point);
         let edge_faces = words("ef", 2 * MAX_EDGES).unwrap_or_default();
         let lengths = v.get("en").and_then(Value::as_array).map(|a| a.iter().take(MAX_EDGES).collect::<Vec<_>>()).unwrap_or_default();
@@ -264,24 +261,37 @@ fn rgb(c: &Value) -> Option<[u8; 3]> {
     Some([ch(0)?, ch(1)?, ch(2)?])
 }
 
-/// The bytes of a packed field (`None`: missing, not base64, or over `cap` bytes).
-fn unpack(v: &Value, key: &str, cap: usize) -> Option<Vec<u8>> {
-    let text = v.get(key)?.as_str()?;
-    if text.len() > cap.div_ceil(3) * 4 {
-        return None;
+/// The 16-bit numbers of a stored list, at most `cap` of them (`None`: missing, not numbers of
+/// that kind, or over the cap). A list is plain numbers; one an older build stored as base64 text
+/// (little-endian words) still reads.
+fn numbers<T: TryFrom<i64> + Word>(v: &Value, key: &str, cap: usize) -> Option<Vec<T>> {
+    match v.get(key)? {
+        Value::Array(list) if list.len() <= cap => list.iter().map(|n| T::try_from(n.as_i64()?).ok()).collect(),
+        Value::String(text) if text.len() <= (cap * 2).div_ceil(3) * 4 => {
+            let bytes = solidcraft_engine::doc::canvas::base64_decode(text)?;
+            Some(bytes.as_chunks::<2>().0.iter().map(|b| T::from_le(*b)).collect())
+        }
+        _ => None,
     }
-    solidcraft_engine::doc::canvas::base64_decode(text)
 }
 
-/// Little-endian 16-bit words, as base64.
-fn pack<T: Copy>(words: &[T], bytes: impl Fn(T) -> [u8; 2]) -> String {
-    let raw: Vec<u8> = words.iter().flat_map(|w| bytes(*w)).collect();
-    solidcraft_engine::doc::canvas::base64_encode(&raw)
+/// A 16-bit word as an older build stored it, little-endian.
+trait Word {
+    fn from_le(bytes: [u8; 2]) -> Self;
+}
+impl Word for i16 {
+    fn from_le(bytes: [u8; 2]) -> Self {
+        i16::from_le_bytes(bytes)
+    }
+}
+impl Word for u16 {
+    fn from_le(bytes: [u8; 2]) -> Self {
+        u16::from_le_bytes(bytes)
+    }
 }
 
 /// The stored form of `mesh`, centred and scaled to longest side 2, in whole 1/10000s. Each
-/// list is little-endian 16-bit words as base64, about a third of the size of a JSON list:
-/// `v` the points (x, y, z), `t` three point indices per triangle, `f` each triangle's B-rep
+/// list is plain 16-bit numbers: `v` the points (x, y, z), `t` three point indices per triangle, `f` each triangle's B-rep
 /// face, `e` the points of every edge one after another with `en` the count of each, and `ef`
 /// the two faces each edge bounds ([`NO_FACE`]: none). `None` when the mesh is empty or flat to
 /// a point, or has a face number too large to store.
@@ -333,18 +343,18 @@ fn snapshot(name: &str, mesh: &Mesh, colour: Option<[u8; 3]>, faces: &BTreeMap<u
     let fc: Vec<Value> = faces.iter().map(|(f, c)| json!([f, c[0], c[1], c[2]])).collect();
     Some(json!({
         "name": name,
-        "v": pack(&v, i16::to_le_bytes),
-        "t": pack(&t, u16::to_le_bytes),
-        "f": pack(&f, u16::to_le_bytes),
-        "e": pack(&e, i16::to_le_bytes),
+        "v": v,
+        "t": t,
+        "f": f,
+        "e": e,
         "en": en,
-        "ef": pack(&ef, u16::to_le_bytes),
+        "ef": ef,
         "c": colour,
         "fc": fc,
     }))
 }
 
-/// The menu a right-click on the view navigator opens: Axes, Cube and Custom, the current one
+/// The menu a right-click on the view navigator opens: Axes and Custom, the current one
 /// marked. Custom opens the Custom View Navigator panel, which sets it on OK.
 pub(crate) fn menu_items(app: &SolveApp) -> Vec<Item> {
     NavigatorStyle::ALL
@@ -352,7 +362,6 @@ pub(crate) fn menu_items(app: &SolveApp) -> Vec<Item> {
         .map(|style| {
             let (label, icon) = match style {
                 NavigatorStyle::Axes => (app.tr("prefs.axes"), "origin"),
-                NavigatorStyle::Cube => (solidcraft_ui_text::tr_label("Cube"), "box"),
                 NavigatorStyle::Custom => (solidcraft_ui_text::tr_label("Custom"), "body"),
             };
             act("ui.navigatorStyle", label, icon).with(json!({ "style": style })).key(if app.preferences.navigator_style == style {
@@ -364,7 +373,7 @@ pub(crate) fn menu_items(app: &SolveApp) -> Vec<Item> {
         .collect()
 }
 
-/// A menu pick: Axes and Cube at once; Custom opens its panel, as the toolbar would.
+/// A menu pick: Axes at once; Custom opens its panel, as the toolbar would.
 pub(crate) fn pick_style(app: &mut SolveApp, style: NavigatorStyle) {
     if style == NavigatorStyle::Custom {
         app.start("view.navigator");
@@ -373,7 +382,7 @@ pub(crate) fn pick_style(app: &mut SolveApp, style: NavigatorStyle) {
     }
 }
 
-/// Draw body `name` of the open design as the gizmo (`None`: no body, the cube again).
+/// Draw body `name` of the open design as the gizmo (`None`: no body, the signed axes again).
 fn set_body(app: &mut SolveApp, name: Option<&str>) -> Result<(), String> {
     let shape = match name {
         None => None,
@@ -547,6 +556,14 @@ pub(crate) struct Shown {
     pub home: bool,
 }
 
+/// The navigator the view lays out for: Custom stands as the signed axes until a body is chosen.
+pub(crate) fn style(app: &SolveApp) -> NavigatorStyle {
+    match app.preferences.navigator_style {
+        NavigatorStyle::Custom if app.view_gizmo.shape.is_none() => NavigatorStyle::Axes,
+        style => style,
+    }
+}
+
 pub(crate) fn shown(app: &SolveApp) -> Shown {
     let p = &app.preferences;
     match app.dialog.as_ref().map(|d| &d.kind) {
@@ -632,10 +649,54 @@ mod tests {
         }
     }
 
+    /// The largest body a navigator stores, its lists full of the widest numbers, fits in a
+    /// settings profile with room to spare.
+    #[test]
+    fn the_largest_stored_body_fits_in_a_profile() {
+        let wide = |n: usize, x: i64| json!(vec![x; n]);
+        let largest = json!({
+            "name": "x".repeat(MAX_NAME),
+            "v": wide(9 * MAX_TRIANGLES, -10_000),
+            "t": wide(3 * MAX_TRIANGLES, 29_999),
+            "f": wide(MAX_TRIANGLES, i64::from(NO_FACE - 1)),
+            "e": wide(3 * MAX_EDGE_POINTS, -10_000),
+            "en": wide(MAX_EDGES, 50_000),
+            "ef": wide(2 * MAX_EDGES, i64::from(NO_FACE)),
+            "c": [255, 255, 255],
+            "fc": vec![json!([65_534, 255, 255, 255]); MAX_TRIANGLES],
+        });
+        let written = largest.to_string().len();
+        assert!(written + (256 << 10) < crate::settings_profiles::MAX_PROFILE_BYTES, "{written} bytes");
+    }
+
+    /// A stored body is plain numbers, never base64 text; one an older build stored as base64
+    /// (little-endian 16-bit words) reads the same.
+    #[test]
+    fn a_stored_body_is_plain_numbers_and_an_older_base64_one_still_reads() {
+        let shape = Shape::of("Body1", &box_mesh(), None, &BTreeMap::new()).unwrap();
+        let stored = shape.to_json();
+        for key in ["v", "t", "f", "e", "ef"] {
+            assert!(stored[key].is_array(), "{key}: {}", stored[key]);
+        }
+        let mut older = stored.clone();
+        for (key, signed) in [("v", true), ("t", false), ("f", false), ("e", true), ("ef", false)] {
+            let bytes: Vec<u8> = stored[key]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|n| if signed { (n.as_i64().unwrap() as i16).to_le_bytes() } else { (n.as_u64().unwrap() as u16).to_le_bytes() })
+                .collect();
+            older[key] = json!(solidcraft_engine::doc::canvas::base64_encode(&bytes));
+        }
+        let read = Shape::from_json(&older).unwrap();
+        assert_eq!(read.mesh.triangles.len(), shape.mesh.triangles.len());
+        assert_eq!(read.to_json(), stored, "read back, it stores as plain numbers again");
+    }
+
     #[test]
     fn hostile_snapshots_never_panic() {
         let good = Shape::of("Body1", &box_mesh(), None, &BTreeMap::new()).unwrap().to_json();
-        let words = |w: &[u16]| pack(w, u16::to_le_bytes);
+        let words = |w: &[u16]| json!(w);
         let triangle = words(&[0, 0, 0, 1, 0, 0, 0, 1, 0]);
         let mut cases = vec![
             json!(null),
@@ -730,19 +791,19 @@ mod tests {
     }
 
     #[test]
-    fn a_right_click_anywhere_on_the_navigator_offers_axes_cube_and_custom() {
+    fn a_right_click_anywhere_on_the_navigator_offers_axes_and_custom() {
         use crate::context_menu::{Target, items};
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10})).unwrap();
         h.frames(2);
         let design = h.app.session.doc.to_json();
-        for (from, pick, to) in [("axes", "Cube", NavigatorStyle::Cube), ("cube", "Axes", NavigatorStyle::Axes)] {
+        for (from, pick, to) in [("axes", "Axes", NavigatorStyle::Axes)] {
             h.call("ui.prefs", json!({"navigator_style": from}));
             h.frames(2);
             let outer = crate::scenario::rect_of("axis_view:outer").expect("the navigator is shown");
-            // The middle, a corner of its box, and its Home button on the cube.
+            // The middle, a corner of its box, and its Home button.
             let mut spots = vec![outer.center(), outer.left_bottom() + egui::vec2(3.0, -3.0)];
-            spots.extend(crate::scenario::handle_at("navigation_cube:control:home"));
+            spots.extend(crate::scenario::handle_at("navigator:control:home"));
             for at in spots {
                 crate::context_menu::close(&mut h.app);
                 h.call("ui.click", json!({"x": at.x, "y": at.y, "button": "right"}));
@@ -751,16 +812,16 @@ mod tests {
             }
             let rows = items(&h.app, &Target::ViewGizmo);
             let labels: Vec<_> = rows.iter().map(|r| r.label.as_str()).collect();
-            assert_eq!(labels, ["Axes", "Cube", "Custom"], "just the three types");
+            assert_eq!(labels, ["Axes", "Custom"], "just the two types");
             let current: Vec<_> = rows.iter().filter(|i| i.shortcut == "current").collect();
             assert_eq!(current.len(), 1);
             assert_eq!(current[0].params.as_ref().map(|p| p["style"].clone()), Some(json!(from)));
             assert_eq!(h.call("ui.menuPick", json!({"item": pick}))["ok"], true, "{pick}");
-            assert_eq!(h.app.preferences.navigator_style, to, "Axes and Cube apply at once");
+            assert_eq!(h.app.preferences.navigator_style, to, "Axes applies at once");
             assert!(h.app.dialog.is_none());
         }
         assert_eq!(h.app.session.doc.to_json(), design);
-        assert!(h.app.session.selection.is_empty(), "a right-click on the navigator selects nothing");
+        assert!(!h.app.session.has_selection(), "a right-click on the navigator selects nothing");
     }
 
     #[test]
@@ -768,7 +829,6 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.preferences.look_at_anim = false;
         h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10})).unwrap();
-        h.call("ui.prefs", json!({"navigator_style": "cube"}));
         h.frames(2);
         let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
         let open = |h: &mut crate::scenario::Harness| {
@@ -794,12 +854,12 @@ mod tests {
         open(&mut h);
         fill(&mut h);
         assert!(crate::scenario::count_of("body_gizmo:faces").is_some_and(|n| n >= 3.0), "the navigator previews the picked body");
-        assert!(crate::scenario::handle_at("navigation_cube:control:home").is_none(), "and the panel's Home, off");
-        assert!(crate::scenario::handle_at("navigation_cube:control:left").is_some(), "with its arrows");
+        assert!(crate::scenario::handle_at("navigator:control:home").is_none(), "and the panel's Home, off");
+        assert!(crate::scenario::handle_at("navigator:control:left").is_some(), "with its arrows");
         h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
         h.frames(2);
         assert!(h.app.dialog.is_none());
-        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Cube, "Cancel keeps the cube");
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes, "Cancel keeps the axes");
         assert!(h.app.view_gizmo.shape.is_none() && h.app.preferences.navigator_home, "Cancel keeps Home on");
 
         let undo = h.app.session.undo.len();

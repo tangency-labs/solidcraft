@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   promote:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - id: creds
         name: Check for Snap Store credentials
@@ -36,5 +36,5 @@ jobs:
         run: |
           sudo snap install snapcraft --classic
           snapcraft status solidcraft
-          snapcraft promote solidcraft --from-channel=latest/candidate --to-channel=latest/stable --yes
+          snapcraft promote solidcraft --from-channel=candidate --to-channel=stable --yes
           snapcraft status solidcraft

@@ -1,7 +1,7 @@
 //! Contracts and result types for the sketch session commands in `cmd/sketch.rs`:
-//! `sketch.create`, `sketch.construction`, `sketch.delete`, `sketch.move_point`, `sketch.drag`,
-//! `sketch.drag_end`, `sketch.dimension_text`, `sketch.options`, `sketch.chain` and
-//! `sketch.solve` (#13224).
+//! `sketch.create`, `sketch.construction`, `sketch.delete`, `sketch.move_point`,
+//! `sketch.move_points`, `sketch.drag`, `sketch.drag_end`, `sketch.dimension_text`,
+//! `sketch.options`, `sketch.chain` and `sketch.solve` (#13224).
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether a sketch, a curve, a point or a
@@ -33,12 +33,12 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value, json};
 
-use super::canvas::CanvasPlane;
+use super::canvas::{CanvasPlane, plane_schema};
 use super::check::{located, whole};
 use super::frame::SketchSolve;
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
-use super::types::{LengthExpr, Point2, present};
+use super::types::{LengthExpr, Point2, Point3, PointExpr3, present};
 use crate::params;
 
 /// The words of `sketch.create`'s refusals, as `plane_frame` and `flip_param` give them.
@@ -127,6 +127,10 @@ fn entity_ids<'de, D: Deserializer<'de>>(d: D, key: &str, empty: &str) -> Result
 
 fn curves<'de, D: Deserializer<'de>>(d: D) -> Result<Option<EntityIds>, D::Error> {
     entity_ids(d, "curves", "`curves` must list curve ids")
+}
+
+fn construction_points<'de, D: Deserializer<'de>>(d: D) -> Result<Option<EntityIds>, D::Error> {
+    entity_ids(d, "points", "`points` must list point ids")
 }
 
 fn entities<'de, D: Deserializer<'de>>(d: D) -> Result<Option<EntityIds>, D::Error> {
@@ -219,7 +223,24 @@ pub struct SketchPlane(pub Value);
 
 impl<'de> Deserialize<'de> for SketchPlane {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        CanvasPlane::deserialize(d).map(|plane| SketchPlane(plane.0))
+        let value = Value::deserialize(d)?;
+        // An explicit plane's origin may be length expressions (#8192): the rest is read as a
+        // plane at the origin, and whether the expressions work out is the handler's to say.
+        let numbers = match &value {
+            Value::Object(o) if !o.contains_key("face") => match o.get("origin") {
+                Some(origin @ Value::Array(a)) if a.iter().any(Value::is_string) => {
+                    PointExpr3::deserialize(origin)
+                        .map_err(|_| D::Error::custom(whole("`origin` must be a point [x, y, z] of numbers or length expressions")))?;
+                    let mut at_zero = value.clone();
+                    at_zero["origin"] = json!([0, 0, 0]);
+                    at_zero
+                }
+                _ => value.clone(),
+            },
+            _ => value.clone(),
+        };
+        CanvasPlane::deserialize(&numbers).map_err(|e| D::Error::custom(e.to_string()))?;
+        Ok(SketchPlane(value))
     }
 }
 
@@ -228,7 +249,13 @@ impl JsonSchema for SketchPlane {
         "SketchPlane".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        CanvasPlane::json_schema(generator)
+        let point = generator.subschema_for::<Point3>();
+        let origin = generator.subschema_for::<PointExpr3>();
+        plane_schema(
+            &point,
+            json!({"anyOf": [origin, {"type": "null"}]}),
+            "A plane: XY, XZ or YZ (or Top, Front or Right; any case), a construction plane's name or feature id, a picked planar face {\"face\": [x, y, z], \"body\"?, \"index\"?, \"path\"?, \"fixed\"?}, or an explicit plane {\"origin\"?, \"x_dir\", \"y_dir\"}: two directions [x, y, z] that aren't parallel and an origin in mm, each coordinate a number or a length expression (default: the origin); an origin with parameters in it is kept, and the sketch follows them.",
+        )
     }
 }
 
@@ -317,6 +344,10 @@ impl JsonSchema for InsidePlane {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CreateKeys {
+    /// Open Model view to edit in; defaults to the focused or most recent Model view.
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 9007199254740992_u64))]
+    pub view: Option<u64>,
     /// The plane to sketch on: XY, XZ or YZ (also Top, Front, Right), a construction plane's
     /// name or id, a picked planar face `{face: [x, y, z], body?, index?, path?, fixed?}`, or an
     /// explicit plane `{origin?, x_dir, y_dir}` in mm. Default: XY. On XY, the sketch's x and y
@@ -424,19 +455,16 @@ impl JsonSchema for CreateParams {
     }
 }
 
-/// How a new sketch is attached to its plane: `exact_face`, `sheet_face`, `internal_legacy_face`
-/// or `fixed`.
+/// How a new sketch is attached to its plane: `exact_face`, `internal_legacy_face` or `fixed`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Attachment {
     // `exact_face`: a planar face of a body, exactly, so the sketch follows the face;
-    // `sheet_face`: the panel of a sheet metal body's flat pattern;
     // `internal_legacy_face`: a face picked by a command that starts a sketch on a face
     // (Extrude, Revolve, Press Pull);
     // `fixed`: where the plane is (an origin, construction or explicit plane, or a face kept
     // with `fixed`).
     ExactFace,
-    SheetFace,
     InternalLegacyFace,
     Fixed,
 }
@@ -453,6 +481,8 @@ pub struct Activated {
 /// What `sketch.create` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct CreateResult {
+    /// The Model view owning this sketch edit. Runtime identity, not a design feature.
+    pub sketching_view: u64,
     /// The new sketch's feature id.
     pub sketch: u64,
     /// Its name.
@@ -479,26 +509,32 @@ pub struct CreateResult {
 // ---------------------------------------------------------------------------------------------
 // sketch.construction, sketch.delete
 
-fn curves_required(schema: &mut Schema) {
-    require(schema, "curves");
+/// `sketch.construction` takes curves, points or both: the handler refuses a call with neither.
+fn curves_or_points(schema: &mut Schema) {
+    schema.insert("anyOf".into(), json!([{"required": ["curves"]}, {"required": ["points"]}]));
 }
 
 fn entities_required(schema: &mut Schema) {
     require(schema, "entities");
 }
 
-/// Switch curves between normal and construction. The selection switches together (a slot or
-/// polygon as a whole): to construction unless all of it already is. Projected curves may
-/// switch too. A centerline that becomes construction stops being a centerline, and a normal
-/// line is a finite one. One undo step.
+/// Switch curves and points between normal and construction. The selection switches together
+/// (a slot or polygon as a whole): to construction unless all of it already is. Projected
+/// curves may switch too. A centerline that becomes construction stops being a centerline, and
+/// a normal line is a finite one. A construction point is reference geometry that features
+/// reading a sketch's points (a Hole from the whole sketch) leave out. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields, transform = curves_required)]
+#[schemars(deny_unknown_fields, transform = curves_or_points)]
 pub struct ConstructionParams {
-    // Optional in the type and required in the schema (`curves_required`).
+    // Optional in the type; the schema asks for curves, points or both (`curves_or_points`).
     /// The curves, by id.
     #[serde(default, deserialize_with = "curves", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "EntityIds")]
+    #[schemars(with = "Option<EntityIds>")]
     pub curves: Option<EntityIds>,
+    /// The points, by id (`p3`, `l1.end`).
+    #[serde(default, deserialize_with = "construction_points", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<EntityIds>")]
+    pub points: Option<EntityIds>,
     /// True makes them construction, false makes them normal. Default: construction unless all of
     /// them already are.
     #[serde(default, deserialize_with = "value", skip_serializing_if = "Option::is_none")]
@@ -551,7 +587,7 @@ pub struct DeleteResult {
 }
 
 // ---------------------------------------------------------------------------------------------
-// sketch.move_point, sketch.drag, sketch.drag_end
+// sketch.move_point, sketch.move_points, sketch.drag, sketch.drag_end
 
 fn move_point_required(schema: &mut Schema) {
     require(schema, "point");
@@ -581,6 +617,143 @@ pub struct MovePointParams {
 /// What `sketch.move_point` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct MovePointResult {
+    /// The sketch's solve; null when it was not solved again.
+    pub sketch: Option<SketchSolve>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+fn move_points_required(schema: &mut Schema) {
+    require(schema, "moves");
+}
+
+/// One point of a `sketch.move_points` call: which point is moved and where it goes. The handler
+/// reads `near` whenever that key is there and only looks at `point` without it, so a `point`
+/// next to a `near` is left alone.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MoveOne {
+    /// The point, by id (`p3`, `l1.end`, `origin`).
+    pub point: Option<String>,
+    /// The sketch point nearest to this position, instead of naming one.
+    pub near: Option<Point2>,
+    /// Where the point is moved to, in sketch coordinates (mm).
+    pub to: Point2,
+}
+
+impl MoveOne {
+    /// One entry of `moves`, read as the handler reads it and in its order: `to` first, then
+    /// `near` when the key is there (`near: null` is refused), and `point` only without it.
+    /// `k` is the entry's position, which the handler's messages name.
+    fn read(m: &Value, k: usize) -> Result<Self, String> {
+        let to = m.get("to").and_then(params::vec2).map(Point2).ok_or_else(|| format!("moves[{k}]: `to` must be a point [x, y]"))?;
+        let near = match m.get("near") {
+            Some(v) => Some(params::vec2(v).map(Point2).ok_or_else(|| format!("moves[{k}]: `near` must be a point [x, y]"))?),
+            None => None,
+        };
+        let point = match (near, m.get("point")) {
+            (Some(_), _) => None,
+            (None, Some(v)) => Some(v.as_str().ok_or_else(|| "`point` must be a point reference".to_string())?.to_string()),
+            (None, None) => None,
+        };
+        Ok(MoveOne { point, near, to })
+    }
+}
+
+impl JsonSchema for MoveOne {
+    fn schema_name() -> Cow<'static, str> {
+        "MoveOne".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point2>();
+        json_schema!({
+            "description": "One point of the move: where it goes, and either its id or a position \
+                            whose nearest sketch point is meant.",
+            "type": "object",
+            "properties": {
+                "point": {"description": "The point, by id (`p3`, `l1.end`, `origin`).", "type": "string"},
+                "near": point,
+                "to": point,
+            },
+            "required": ["to"],
+            "anyOf": [{"required": ["point"]}, {"required": ["near"]}]
+        })
+    }
+}
+
+/// `moves`, entry by entry as the handler reads them, with its messages. An empty list is the
+/// handler's own refusal, and so is anything that is not a list.
+fn moves<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<MoveOne>, D::Error> {
+    let list = match Value::deserialize(d)? {
+        Value::Array(list) if !list.is_empty() => list,
+        _ => return Err(refuse("`moves` must be a list of {point | near, to}")),
+    };
+    list.iter().enumerate().map(|(k, m)| MoveOne::read(m, k).map_err(refuse::<D::Error>)).collect()
+}
+
+fn moves_schema(generator: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "The points to move, one entry each; every entry needs `to`, and names its \
+                        point by `point` or by `near`, the sketch point closest to it.",
+        "type": "array",
+        "items": generator.subschema_for::<MoveOne>(),
+        "minItems": 1
+    })
+}
+
+/// `tolerance`: how close a sketch point must be to `near` to be the one moved, as the handler
+/// reads it; `null` is its default (0.1 mm).
+fn tolerance<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v => v.as_f64().and_then(params::finite).filter(|t| *t > 0.0).map(Some).ok_or_else(|| refuse("`tolerance` must be a positive length (mm)")),
+    }
+}
+
+fn tolerance_schema(_: &mut SchemaGenerator) -> Schema {
+    // Above 1e9 mm the engine does not read a length any more (`params::finite`).
+    json_schema!({"type": ["number", "null"], "exclusiveMinimum": 0.0, "exclusiveMaximum": 1e9})
+}
+
+/// Move several sketch points, each to its own target, in one edit (one undo step), and solve the
+/// sketch within its constraints: every point goes as far toward its target as they allow. A
+/// point that parameters place is refused, naming them.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = move_points_required)]
+pub struct MovePointsParams {
+    // `moves` is optional in the type and required in the schema (`move_points_required`), so a
+    // call without it gets the handler's message.
+    /// The points to move, each `{point | near, to}`.
+    #[serde(default, deserialize_with = "moves", skip_serializing_if = "Vec::is_empty")]
+    #[schemars(schema_with = "moves_schema")]
+    pub moves: Vec<MoveOne>,
+    /// How close a sketch point must be to `near` to be the one moved, mm (default 0.1).
+    #[serde(default, deserialize_with = "tolerance", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "tolerance_schema")]
+    pub tolerance: Option<f64>,
+    /// The sketch. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+/// One point of a `sketch.move_points` reply: where it was asked to go and where it ended up.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MovedPoint {
+    /// The point's id; null when the sketch no longer has it.
+    pub point: Option<String>,
+    /// Where it was asked to go: [x, y].
+    pub to: [f64; 2],
+    /// Where it is after the solve: [x, y]; null when the sketch no longer has the point.
+    pub at: Option<[f64; 2]>,
+    /// Whether it reached `to` (constraints may stop it short of it).
+    pub reached: bool,
+}
+
+/// What `sketch.move_points` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MovePointsResult {
+    /// The points it moved, in the order they were given.
+    pub moved: Vec<MovedPoint>,
     /// The sketch's solve; null when it was not solved again.
     pub sketch: Option<SketchSolve>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
@@ -965,8 +1138,14 @@ pub struct SolveResult {
     pub status: SolveOutcome,
     /// The degrees of freedom left (0: fully constrained).
     pub dof: usize,
+    /// The planar sketch's own degrees of freedom, its drawn 3D curves' left out (#10608).
+    pub planar_dof: usize,
     /// The constraints still violated after a failed solve, by id.
     pub failing: Vec<String>,
+    /// The 3D constraints' solve (#10608): `{ok, dof, failing, ...}`, or null for a sketch with no
+    /// drawn 3D curves. Its freedoms are counted in `dof`.
+    #[schemars(with = "Option<serde_json::Map<String, Value>>")]
+    pub wires_solve: Value,
     /// How many profiles the sketch has.
     pub profiles: usize,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

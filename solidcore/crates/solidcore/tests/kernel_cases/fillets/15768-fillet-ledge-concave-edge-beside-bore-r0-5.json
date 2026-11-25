@@ -1,0 +1,120 @@
+{
+ "case": "15768-fillet-ledge-concave-edge-beside-bore-r0-5",
+ "area": "fillets",
+ "sources": [
+  "tangency-labs/solidcraft#15641",
+  "tangency-labs/solidcraft#15768"
+ ],
+ "what": "the concave edge where the left ledge's top (z = 33) meets the arch's front face (y = 30), x -18 to -12, rounded r 0.5: the round ends on the bore, whose flat wall and round bottom meet tangentially at the edge's end",
+ "calls": [
+  {
+   "inputs": [
+    "b170"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b171"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b171"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b172"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b172"
+   ],
+   "op": "tagged",
+   "outputs": [
+    "b173"
+   ],
+   "params": {
+    "operand": 0
+   }
+  },
+  {
+   "inputs": [
+    "b173"
+   ],
+   "op": "blend_dropping",
+   "params": {
+    "edges": {
+     "kind": "edge",
+     "picked": [
+      {
+       "at": [
+        [
+         -18.0,
+         30.0,
+         33.0
+        ],
+        [
+         -11.999999999993713,
+         30.0,
+         33.0
+        ]
+       ],
+       "index": 65
+      }
+     ],
+     "points": [
+      [
+       -14.999999999996856,
+       30.0,
+       33.0
+      ]
+     ],
+     "tolerance": 4.905334817281545
+    },
+    "kind": "round",
+    "sizes": [
+     0.5
+    ],
+    "turn": "mitre"
+   },
+   "outputs": [
+    "b174"
+   ]
+  }
+ ],
+ "bodies": {
+  "b170": {
+   "keeping_splines": false,
+   "trusted": true
+  }
+ },
+ "params": {},
+ "result": [
+  {
+   "made": "b174"
+  }
+ ],
+ "expected": {
+  "body_count": 1,
+  "source": "analytic",
+  "sources": [
+   "tangency-labs/solidcraft#15641",
+   "tangency-labs/solidcraft#15768"
+  ],
+  "tolerance": {
+   "rel": 1e-07
+  },
+  "volume_mm3": 43914.27983412738,
+  "faces": 27,
+  "edges": 73,
+  "vertices": 48,
+  "what": "the concave edge where the left ledge's top (z = 33) meets the arch's front face (y = 30), x -18 to -12, rounded r 0.5: the round ends on the bore, whose flat wall and round bottom meet tangentially at the edge's end",
+  "method": "test11.sc from tangency-labs/solidcraft#15641 (a practice part: a 36 x 48 plate with a round end, an upright with a front notch, an arch, and a stadium bore of radius 12 through the arch and down into the upright, leaving two ledges at z = 33) up to Extrude9. V0 = 15 (1728 + 162 pi) - 6 (15 * 48 + I(-7.5, 7.5; 18)) - 432 pi - 216 pi + 36 * 27 * 18 - 18 * 6 * 18 + 36 * 18 * 12 + 2916 pi - 18 (288 + 144 pi) - 3 * 72 pi - 6 * 2 I(9, 12; 12) = 43913.957931372, with I(a, b; R) the integral of sqrt(R^2 - x^2) from a to b: the plate and its round end, the bottom slot (15 wide, 6 high, through), the counterbore (r 12, 3 deep) and hole (r 6), the upright, its front notch, the arch block and its r 18 top, less the bore (its whole stadium through the arch, its lower half disc through the ledges behind the notch, and the parts of that half disc beside the notch). The round adds the area between the corner and the r 0.5 circle along the edge's 6 mm, a prism between the side face x = -18 (+18) and the end cap on the bore's flat wall's plane x = -12 (+12): V = V0 + 6 * 0.25 (1 - pi / 4) = 43914.279834127. Counts: the operand's 26 faces, 70 edges and 46 vertices; the round adds its face, its edge becomes two rails (+1) and its two end sections (+2), two vertices at each end replace one (+2); the cap at the bore lies in the flat wall's face, so 27, 73, 48."
+ },
+ "operation_expressible": true,
+ "expressible": true,
+ "records": "15768-fillet-ledge-concave-edge-beside-bore-r0-5.bodies.json.gz",
+ "gallery_note": "The round's end on the bore lies beside two faces that meet tangentially there (the bore's flat wall and its round bottom). Its cap is on the flat wall's plane, which holds both side edges, as in the mirror image; the end face was picked as whichever side came first round the vertex, which on this side was the round bottom, and the body came out open."
+}

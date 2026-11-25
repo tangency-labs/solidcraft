@@ -6,6 +6,7 @@ const LIMITS: Limits = Limits {
     part_limit: |name| if name.ends_with(".big") { 1 << 20 } else { 1024 },
     level: |_, _| 1,
     check_size: |length| if length <= 1 << 20 { Ok(()) } else { Err("too large".into()) },
+    cancelled: None,
 };
 
 /// Parts and blobs written are read back as they were; a blob is stored once, named by its hash,
@@ -63,4 +64,90 @@ fn a_thumbnail_is_keyed_to_its_file() {
     picture.write(&mut writer, &png, b"{}", 8 << 20).unwrap();
     let mut reader = Reader::new(Cursor::new(writer.finish().unwrap()), LIMITS).unwrap();
     assert!(picture.read(&mut reader, 64).is_err(), "stale");
+}
+
+/// A blob copied from another container is written exactly as that container stores it: the file
+/// is byte for byte the one encoding the same content writes, so a save that reuses an unchanged
+/// import cannot produce a different design file.
+#[test]
+fn a_blob_copied_from_a_container_is_written_as_it_is_stored() {
+    let payload = vec![7u8; 512];
+    let mut writer = Writer::new(LIMITS);
+    writer.part("document.json", b"{}", true).unwrap();
+    let name = writer.blob(&payload, "bin", true).unwrap();
+    let source = writer.finish().unwrap();
+
+    let mut reader = Reader::new(Cursor::new(source.clone()), LIMITS).unwrap();
+    let mut copy = Writer::new(LIMITS);
+    copy.part("document.json", b"{}", true).unwrap();
+    assert_eq!(copy.blob_reusing(&payload, "bin", true, Some(&mut reader)).unwrap(), name);
+    let copied = copy.finish().unwrap();
+
+    let mut encoded = Writer::new(LIMITS);
+    encoded.part("document.json", b"{}", true).unwrap();
+    assert_eq!(encoded.blob(&payload, "bin", true).unwrap(), name);
+    assert_eq!(copied, encoded.finish().unwrap(), "a copied blob writes the container encoding it writes");
+
+    // The copy reads back to the same content.
+    let mut reader = Reader::new(Cursor::new(copied), LIMITS).unwrap();
+    let reference = serde_json::json!({"blob": name});
+    assert_eq!(reader.blob(&reference, "blob", "bin").unwrap(), &payload);
+}
+
+/// A part is copied only when its entry holds the content being saved, stored as this writer
+/// stores it: a part whose name does not match its content (a hand-made or changed file), or one
+/// stored uncompressed (an older save) where a compressed one is written, is encoded instead, so a
+/// copy can never put other content, or a larger file, into a save.
+#[test]
+fn a_blob_whose_part_does_not_hold_the_content_is_encoded_not_copied() {
+    let payload = vec![7u8; 512];
+    let mut writer = Writer::new(LIMITS);
+    let name = writer.blob(&payload, "bin", true).unwrap();
+    let Some(name) = name.as_str() else { panic!("a blob is named by a string") };
+    let mut expected = Writer::new(LIMITS);
+    expected.blob(&payload, "bin", true).unwrap();
+    let expected = expected.finish().unwrap();
+
+    // The payload's name, holding other bytes of the same length, and the payload stored.
+    let forged = |content: &[u8], method: zip::CompressionMethod| {
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        zip.start_file(name, zip::write::SimpleFileOptions::default().compression_method(method)).unwrap();
+        zip.write_all(content).unwrap();
+        zip.finish().unwrap().into_inner()
+    };
+    for (what, source) in [
+        ("other content under the payload's name", forged(&[8u8; 512], zip::CompressionMethod::Deflated)),
+        ("the payload stored, not compressed", forged(&payload, zip::CompressionMethod::Stored)),
+    ] {
+        let mut reader = Reader::new(Cursor::new(source), LIMITS).unwrap();
+        let mut copy = Writer::new(LIMITS);
+        copy.blob_reusing(&payload, "bin", true, Some(&mut reader)).unwrap();
+        assert_eq!(copy.finish().unwrap(), expected, "{what}: encoded, not copied");
+    }
+
+    // A part whose entry still says it holds the payload but whose deflated bytes were damaged
+    // (on disk, after the design was opened) is encoded, not carried into the save.
+    let mut damaged = Writer::new(LIMITS);
+    damaged.blob(&payload, "bin", true).unwrap();
+    let mut damaged = damaged.finish().unwrap();
+    let (start, length) = {
+        let mut zip = zip::ZipArchive::new(Cursor::new(damaged.clone())).unwrap();
+        let part = zip.by_name(name).unwrap();
+        (part.data_start().unwrap() as usize, part.compressed_size() as usize)
+    };
+    for byte in &mut damaged[start..start + length] {
+        *byte ^= 0x5a;
+    }
+    let mut reader = Reader::new(Cursor::new(damaged), LIMITS).unwrap();
+    let mut copy = Writer::new(LIMITS);
+    copy.blob_reusing(&payload, "bin", true, Some(&mut reader)).unwrap();
+    assert_eq!(copy.finish().unwrap(), expected, "damaged deflated bytes: encoded, not copied");
+
+    // A name the source lacks is encoded.
+    let mut writer = Writer::new(LIMITS);
+    writer.blob(b"other", "bin", true).unwrap();
+    let mut reader = Reader::new(Cursor::new(writer.finish().unwrap()), LIMITS).unwrap();
+    let mut copy = Writer::new(LIMITS);
+    copy.blob_reusing(&payload, "bin", true, Some(&mut reader)).unwrap();
+    assert_eq!(copy.finish().unwrap(), expected, "absent: encoded");
 }
