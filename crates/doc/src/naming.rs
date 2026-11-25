@@ -1342,6 +1342,25 @@ pub fn face_name_at_body(body: &ModelBody, point: Vec3) -> Option<String> {
     face_names(body).get(index).filter(|name| !name.is_empty()).cloned()
 }
 
+/// Whether `name` is a linked face of Import feature `feature` disambiguated by a positional tie
+/// number (`F<feature>:link:<digest>#<k>` or `F<feature>:link:<digest>#[…]#<k>`), which can shift
+/// onto a different sibling face when faces are added or removed.
+pub fn is_tie_numbered_link_face(name: &str, feature: u64) -> bool {
+    let clean = name.trim_start_matches(crate::name_lookup::LEGACY_MARK);
+    let prefix = format!("F{feature}:link:");
+    if !clean.starts_with(&prefix) {
+        return false;
+    }
+    clean.rsplit_once('#').is_some_and(|(_, digits)| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Whether `name` (a face name, or an edge/vertex name joining face names with `|`) references a
+/// positional tie-numbered linked face of Import feature `feature`.
+pub fn has_tie_numbered_link_face(name: &str, feature: u64) -> bool {
+    let clean = crate::piece_names::strip_edge_number(name.trim_start_matches(crate::name_lookup::LEGACY_MARK));
+    clean.split('|').any(|part| is_tie_numbered_link_face(part, feature))
+}
+
 /// The names the faces of `imported` have in `part`, by body, then face (empty where not known):
 /// `imported` are the bodies read back from the STEP text `part`'s solid bodies were written to
 /// (a linked design), where they stand in it. Each takes the names of the solid of `part` that

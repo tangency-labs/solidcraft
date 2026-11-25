@@ -2407,11 +2407,11 @@ fn loop_dof(tree: &Tree, closing: &[u64], asm: &Assembly, vals: &Values, dof: &m
         return;
     }
     let linked = set_values(asm);
-    let mut groups = loop_groups(tree, closing, asm, &linked);
-    groups.retain(|(c, _, _)| c.len() <= MAX_LOOPS);
+    let all_groups = loop_groups(tree, closing, asm, &linked);
     // The joints loops depend on: those around them, those whose values they read, and those a
-    // motion link carries any of these values into.
-    let mut relevant: BTreeSet<u64> = groups.iter().flat_map(|(_, a, t)| a.iter().copied().chain(t.iter().map(|(j, _)| *j))).collect();
+    // motion link carries any of these values into. Built from all groups (including oversized
+    // ones) so occurrences in large merged groups still enter the local fallback below.
+    let mut relevant: BTreeSet<u64> = all_groups.iter().flat_map(|(_, a, t)| a.iter().copied().chain(t.iter().map(|(j, _)| *j))).collect();
     for _ in 0..MAX_LINK_PASSES {
         let more: Vec<u64> = asm.links.iter().filter(|l| relevant.contains(&l.a) && !relevant.contains(&l.b)).map(|l| l.b).collect();
         if more.is_empty() {
@@ -2419,6 +2419,7 @@ fn loop_dof(tree: &Tree, closing: &[u64], asm: &Assembly, vals: &Values, dof: &m
         }
         relevant.extend(more);
     }
+    let groups: Vec<Group> = all_groups.into_iter().filter(|(c, _, _)| c.len() <= MAX_LOOPS).collect();
     // The occurrences a loop may hold or move: placed by such a joint, or below one that is
     // (worked out down the tree, parents first). The others keep the tree's count.
     let mut candidates: BTreeSet<u64> = BTreeSet::new();
@@ -2429,28 +2430,249 @@ fn loop_dof(tree: &Tree, closing: &[u64], asm: &Assembly, vals: &Values, dof: &m
             candidates.insert(*occ);
         }
     }
+    // Tree occurrences that have children, and closing joints incident to each occurrence.
+    let has_children: BTreeSet<u64> = tree.parent.values().map(|&(from, _, _)| from).collect();
+    let mut incident_closing: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+    for &cid in closing {
+        if let Some(j) = tree.joints.get(&cid) {
+            incident_closing.entry(j.a.occurrence).or_default().push(cid);
+            if j.b.occurrence != j.a.occurrence {
+                incident_closing.entry(j.b.occurrence).or_default().push(cid);
+            }
+        }
+    }
+    let linked_joints: BTreeSet<u64> = asm.links.iter().flat_map(|l| [l.a, l.b]).collect();
+    let mut single_loops_cache: Option<Vec<SingleLoop>> = None;
     let (mut spent, mut counted) = (0usize, 0usize);
     // A pose nearby, when one differs.
     let near = (!candidates.is_empty()).then(|| nearby_pose(tree, &groups, asm, &linked, vals)).filter(|n| n != vals);
     for occ in tree.order.iter().filter(|o| candidates.contains(o)) {
+        if spent > MAX_LOOP_WORK {
+            break;
+        }
+        let incident = incident_closing.get(occ).map(Vec::as_slice).unwrap_or_default();
+        // Fast, exact path for a leaf occurrence whose parent and every incident closing joint's
+        // other end are already fixed (dof == 0) and free of motion links: only its own incident
+        // joints can move or constrain it, avoiding oversized ancestor loop groups.
+        if !has_children.contains(occ)
+            && let Some(&(from, parent_joint, _)) = tree.parent.get(occ)
+            && let Some(leaf_reach) = fixed_leaf_reach(tree, *occ, from, parent_joint, incident, dof, &linked_joints)
+        {
+            let scale = loop_scale(tree, &leaf_reach.around, vals);
+            if let Some(free) = free_motion(tree, asm, vals, near.as_ref(), &mut spent, &leaf_reach, scale, Watched::Occurrence(*occ)) {
+                dof.insert(*occ, free.min(6));
+                continue;
+            }
+        }
         let path: Vec<u64> = tree.path(*occ).1.iter().map(|(k, _)| *k).collect();
-        let Some(reach) = loop_reach(tree, asm, &groups, &linked, &path) else { continue };
-        // No loop reaches this occurrence's values (not even through a motion link it drives):
-        // the tree's count stands.
-        if reach.closers.is_empty() {
+        let full = loop_reach(tree, asm, &groups, &linked, &path);
+        if let Some(reach) = full.as_ref().filter(|r| !r.closers.is_empty() && r.values.len() <= MAX_LOOP_VALUES) {
+            counted += 1;
+            if counted > MAX_DOF_OCCURRENCES || spent > MAX_LOOP_WORK {
+                break;
+            }
+            let scale = loop_scale(tree, &reach.around, vals);
+            if let Some(free) = free_motion(tree, asm, vals, near.as_ref(), &mut spent, reach, scale, Watched::Occurrence(*occ)) {
+                dof.insert(*occ, free.min(6));
+            }
+            continue;
+        }
+        // Full reach exceeded the caps (e.g. many fasteners merged into one loop group) or its
+        // group had > MAX_LOOPS: solve a focused subset of loops touching this occurrence/path,
+        // and also apply any local parallel-joint bound relative to its parent.
+        let need_fallback =
+            full.as_ref().is_none_or(|r| r.values.len() > MAX_LOOP_VALUES) || !incident.is_empty() || path.iter().any(|k| relevant.contains(k));
+        if !need_fallback {
             continue;
         }
         counted += 1;
         if counted > MAX_DOF_OCCURRENCES || spent > MAX_LOOP_WORK {
-            return;
+            break;
         }
-        if reach.values.len() > MAX_LOOP_VALUES {
+        let single_loops = single_loops_cache.get_or_insert_with(|| {
+            closing
+                .iter()
+                .filter_map(|&cid| {
+                    let (around, _) = one_loop(tree, cid, asm, &linked)?;
+                    let vars = unknowns(tree, &around, asm, &linked, &Held::new());
+                    Some((cid, around, vars))
+                })
+                .collect()
+        });
+        if let Some(local) = local_loop_reach(tree, asm, &linked, *occ, &path, single_loops, &has_children) {
+            let scale = loop_scale(tree, &local.around, vals);
+            if let Some(free) = free_motion(tree, asm, vals, near.as_ref(), &mut spent, &local, scale, Watched::Occurrence(*occ)) {
+                let bound = free.min(6);
+                dof.entry(*occ).and_modify(|d| *d = (*d).min(bound)).or_insert(bound);
+            }
+        }
+        if let Some(&(from, parent_joint, _)) = tree.parent.get(occ)
+            && let Some(&parent_dof) = dof.get(&from)
+            && let Some(pair_reach) = parallel_pair_reach(tree, asm, from, *occ, parent_joint, incident, &linked)
+        {
+            let scale = loop_scale(tree, &pair_reach.around, vals);
+            if let Some(rel) = free_motion(tree, asm, vals, near.as_ref(), &mut spent, &pair_reach, scale, Watched::Pair(from, *occ)) {
+                let bound = parent_dof.saturating_add(rel).min(6);
+                dof.entry(*occ).and_modify(|d| *d = (*d).min(bound)).or_insert(bound);
+            }
+        }
+    }
+    // An occurrence can never have more DOF than its tree parent plus its parent joint's own DOFs.
+    for occ in &tree.order {
+        if let Some(&(from, joint, _)) = tree.parent.get(occ)
+            && let (Some(&parent_dof), Some(j)) = (dof.get(&from), tree.joints.get(&joint))
+        {
+            let bound = parent_dof.saturating_add(j.kind.dofs().len()).min(6);
+            dof.entry(*occ).and_modify(|d| *d = (*d).min(bound)).or_insert(bound);
+        }
+    }
+}
+
+/// One closing joint's single loop: `(closing_joint, joints_around, unknown_values)`.
+type SingleLoop = (u64, BTreeSet<u64>, Vec<(u64, usize)>);
+
+/// For a leaf occurrence `occ` whose parent `from` and every incident closing joint's other end
+/// are already fixed (`dof == 0`), with none of those joints coupled to motion links: its world
+/// DOF depends solely on its own incident joints.
+fn fixed_leaf_reach(
+    tree: &Tree,
+    occ: u64,
+    from: u64,
+    parent_joint: u64,
+    incident_closers: &[u64],
+    dof: &BTreeMap<u64, usize>,
+    linked_joints: &BTreeSet<u64>,
+) -> Option<LoopReach> {
+    if incident_closers.is_empty() || dof.get(&from) != Some(&0) || linked_joints.contains(&parent_joint) {
+        return None;
+    }
+    for cid in incident_closers {
+        let j = tree.joints.get(cid)?;
+        let other = if j.a.occurrence == occ {
+            j.b.occurrence
+        } else if j.b.occurrence == occ {
+            j.a.occurrence
+        } else {
+            return None;
+        };
+        if dof.get(&other) != Some(&0) || linked_joints.contains(cid) {
+            return None;
+        }
+    }
+    let mut around = BTreeSet::from([parent_joint]);
+    around.extend(incident_closers.iter().copied());
+    let mut values = Vec::new();
+    for j in around.iter().filter_map(|id| tree.joints.get(id)) {
+        values.extend((0..j.kind.dofs().len()).map(|i| (j.id, i)));
+    }
+    (values.len() <= MAX_LOOP_VALUES && incident_closers.len() <= MAX_LOOPS).then(|| LoopReach { values, closers: incident_closers.to_vec(), around })
+}
+
+/// A focused subset of loops for `occ` fitting within `MAX_LOOP_VALUES` and `MAX_LOOPS`, used when
+/// the full connected loop group exceeds the solver caps. Omitting other loops only relaxes the
+/// mechanism, so the count is always a sound upper bound (`>= true_dof`) and exact whenever the
+/// omitted loops do not further constrain `occ`.
+fn local_loop_reach(
+    tree: &Tree,
+    asm: &Assembly,
+    linked: &BTreeSet<(u64, usize)>,
+    occ: u64,
+    path: &[u64],
+    single_loops: &[SingleLoop],
+    has_children: &BTreeSet<u64>,
+) -> Option<LoopReach> {
+    let (mut values, mut have): (Vec<(u64, usize)>, BTreeSet<(u64, usize)>) = (Vec::new(), BTreeSet::new());
+    for j in path.iter().filter_map(|k| tree.joints.get(k)) {
+        for v in (0..j.kind.dofs().len()).map(|i| (j.id, i)).filter(|v| !linked.contains(v)) {
+            if have.insert(v) {
+                values.push(v);
+            }
+        }
+        if values.len() > MAX_LOOP_VALUES {
+            return None;
+        }
+    }
+    let on_path: BTreeSet<u64> = path.iter().copied().collect();
+    for v in link_chains(asm, tree, &on_path, linked).1 {
+        if have.insert(v) {
+            values.push(v);
+        }
+        if values.len() > MAX_LOOP_VALUES {
+            return None;
+        }
+    }
+    // Prefer loops directly incident to `occ` and backbone loops along `path` before unrelated
+    // leaf occurrences' loops (so many fasteners on a plate do not crowd out plate constraints).
+    let other_leaf = |o: u64| o != occ && !tree.fixed.contains_key(&o) && !has_children.contains(&o);
+    let mut picks: Vec<(u8, usize, usize)> = single_loops
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, (cid, around, vars))| {
+            let j = tree.joints.get(cid)?;
+            let incident = j.a.occurrence == occ || j.b.occurrence == occ;
+            let touches = incident || path.iter().any(|k| around.contains(k));
+            if !touches {
+                return None;
+            }
+            let touches_other_leaf = other_leaf(j.a.occurrence) || other_leaf(j.b.occurrence);
+            let tier = match (incident, touches_other_leaf) {
+                (true, false) => 0,
+                (false, false) => 1,
+                (true, true) => 2,
+                (false, true) => 3,
+            };
+            Some((tier, vars.len(), idx))
+        })
+        .collect();
+    picks.sort_unstable();
+    let (mut closers, mut around) = (Vec::new(), BTreeSet::new());
+    for (_, _, idx) in picks {
+        if closers.len() >= MAX_LOOPS {
+            break;
+        }
+        let Some((cid, loop_around, loop_vars)) = single_loops.get(idx) else { continue };
+        let extra = loop_vars.iter().filter(|v| !have.contains(v)).count();
+        if values.len() + extra > MAX_LOOP_VALUES {
             continue;
         }
-        let scale = loop_scale(tree, &reach.around, vals);
-        let Some(free) = free_motion(tree, asm, vals, near.as_ref(), &mut spent, &reach, scale, Watched::Occurrence(*occ)) else { continue };
-        dof.insert(*occ, free.min(6));
+        closers.push(*cid);
+        around.extend(loop_around.iter().copied());
+        for &v in loop_vars {
+            if have.insert(v) {
+                values.push(v);
+            }
+        }
     }
+    (!closers.is_empty()).then_some(LoopReach { values, closers, around })
+}
+
+/// Loop reach for closing joints directly between `from` and `occ` (parallel constraints on one
+/// pair, such as concentric + flush), used for the sound upper bound `dof(from) + rel_dof`.
+fn parallel_pair_reach(
+    tree: &Tree,
+    asm: &Assembly,
+    from: u64,
+    occ: u64,
+    parent_joint: u64,
+    incident_closers: &[u64],
+    linked: &BTreeSet<(u64, usize)>,
+) -> Option<LoopReach> {
+    let parallel: Vec<u64> = incident_closers
+        .iter()
+        .copied()
+        .filter(|cid| {
+            tree.joints
+                .get(cid)
+                .is_some_and(|j| (j.a.occurrence == from && j.b.occurrence == occ) || (j.a.occurrence == occ && j.b.occurrence == from))
+        })
+        .collect();
+    if parallel.is_empty() || parallel.len() > MAX_LOOPS {
+        return None;
+    }
+    let mut around = BTreeSet::from([parent_joint]);
+    around.extend(parallel.iter().copied());
+    let values = unknowns(tree, &around, asm, linked, &Held::new());
+    (!values.is_empty() && values.len() <= MAX_LOOP_VALUES).then_some(LoopReach { values, closers: parallel, around })
 }
 
 /// The values that move what a tree path leads to, and the loops those values are held by.
@@ -3242,7 +3464,7 @@ fn build<'a>(doc: &'a Document, st: &'a ModelState, held_contents: &'a [Joint], 
                     }
                 }
             }
-            dof.insert(other, own + common.len());
+            dof.insert(other, (own + common.len()).min(6));
             moved_by.insert(other, (own, common));
             let next_depth = depth + 1;
             for &(idx, next_j) in at.get(&other).map(Vec::as_slice).unwrap_or_default() {

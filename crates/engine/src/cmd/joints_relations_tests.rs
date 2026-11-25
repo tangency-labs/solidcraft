@@ -954,3 +954,135 @@ fn assembly_constraints_keep_their_reference_axes_when_given_lateral_offsets() {
         assert_eq!(s.doc.assembly.joints[0].offset_xy, [2.0, 3.0]);
     }
 }
+
+/// Many fasteners carrying `concentric` + `flush` across two plates form a merged loop group
+/// larger than `MAX_LOOP_VALUES` (64). Adding `flush` to a `concentric` fastener must reduce its
+/// DOF (never fall back to `dof = 6`), both on fixed plates and on moving plates.
+#[test]
+fn concentric_and_flush_on_fasteners_in_large_loop_group_do_not_jump_to_six_dof() {
+    for fixed_plate_a in [true, false] {
+        let mut s = Session::default();
+        for (name, z) in [("Base", 0.0), ("PlateA", 10.0), ("PlateB", 20.0)] {
+            run(&mut s, "component.activate", json!({"component": "root"}));
+            run(&mut s, "component.create", json!({"name": name}));
+            run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "corner": [0, 0, z]}));
+            if name == "Base" {
+                run(&mut s, "solid.hole", json!({"position": [50, 30, 10], "diameter": 10}));
+            } else if name == "PlateA" {
+                run(&mut s, "solid.hole", json!({"position": [50, 30, 20], "diameter": 6}));
+            }
+        }
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let base = occ(&s, "Base");
+        run(&mut s, "occurrence.ground", json!({"occurrence": base, "grounded": true}));
+
+        if fixed_plate_a {
+            constrain(
+                &mut s,
+                "mate",
+                json!({"occurrence": "Base", "face": [10, 10, 10]}),
+                json!({"occurrence": "PlateA", "face": [10, 10, 10]}),
+                json!({"name": "PlateAMate"}),
+            );
+            constrain(
+                &mut s,
+                "flush",
+                json!({"occurrence": "Base", "face": [50, 0, 5]}),
+                json!({"occurrence": "PlateA", "face": [50, 0, 15]}),
+                json!({"name": "PlateAFront"}),
+            );
+            constrain(
+                &mut s,
+                "flush",
+                json!({"occurrence": "Base", "face": [0, 30, 5]}),
+                json!({"occurrence": "PlateA", "face": [0, 30, 15]}),
+                json!({"name": "PlateALeft"}),
+            );
+        } else {
+            // PlateA floats on Base's XY plane (3 DOF: tx, ty, rz). A vertical concentric
+            // fastener adds tz (4 DOF); adding flush to PlateB removes tz back to 3 DOF.
+            constrain(
+                &mut s,
+                "mate",
+                json!({"occurrence": "Base", "face": [10, 10, 10]}),
+                json!({"occurrence": "PlateA", "face": [10, 10, 10]}),
+                json!({"name": "PlateAMate"}),
+            );
+        }
+
+        // Lock PlateB onto PlateA (3 planar constraints = 9 values).
+        constrain(
+            &mut s,
+            "mate",
+            json!({"occurrence": "PlateA", "face": [10, 10, 20]}),
+            json!({"occurrence": "PlateB", "face": [10, 10, 20]}),
+            json!({"name": "PlateBMate"}),
+        );
+        constrain(
+            &mut s,
+            "flush",
+            json!({"occurrence": "PlateA", "face": [50, 0, 15]}),
+            json!({"occurrence": "PlateB", "face": [50, 0, 25]}),
+            json!({"name": "PlateBFront"}),
+        );
+        constrain(
+            &mut s,
+            "flush",
+            json!({"occurrence": "PlateA", "face": [0, 30, 15]}),
+            json!({"occurrence": "PlateB", "face": [0, 30, 25]}),
+            json!({"name": "PlateBLeft"}),
+        );
+
+        // 15 fasteners * (2 concentric + 3 flush = 5 values) + 9 = 84 values > MAX_LOOP_VALUES (64).
+        for k in 1..=15 {
+            let name = format!("Fastener{k}");
+            run(&mut s, "component.activate", json!({"component": "root"}));
+            run(&mut s, "component.create", json!({"name": name}));
+            run(&mut s, "solid.cylinder", json!({"base": [50, 30, 10], "axis": [0, 0, 1], "radius": 3, "height": 20}));
+            run(&mut s, "component.activate", json!({"component": "root"}));
+            constrain(
+                &mut s,
+                "concentric",
+                json!({"occurrence": "PlateA", "circle": [53, 30, 20]}),
+                json!({"occurrence": name, "circle": [53, 30, 30]}),
+                json!({"name": format!("Concentric{name}")}),
+            );
+            constrain(
+                &mut s,
+                "flush",
+                json!({"occurrence": "PlateB", "face": [10, 10, 30]}),
+                json!({"occurrence": name, "face": [50, 30, 30]}),
+                json!({"name": format!("Flush{name}")}),
+            );
+        }
+
+        let want_plate = if fixed_plate_a { 0 } else { 3 };
+        let want_both = if fixed_plate_a { 1 } else { 3 };
+        // Open-chain tree DOF sums parent + cylindrical (0+2=2 when fixed, 3+2=5 when planar).
+        let want_concentric_only = if fixed_plate_a { 2 } else { 5 };
+
+        let list = run(&mut s, "joint.list", json!({}));
+        assert!(clean(&list), "fixed={fixed_plate_a}: {list}");
+        assert_eq!(dof_of(&list, &s, "PlateA"), Some(want_plate), "fixed={fixed_plate_a}: {list}");
+        assert_eq!(dof_of(&list, &s, "PlateB"), Some(want_plate), "fixed={fixed_plate_a}: {list}");
+        assert_eq!(dof_of(&list, &s, "Fastener15"), Some(want_both), "fixed={fixed_plate_a}: {list}");
+
+        // Delete Flush on Fastener15: DOF increases to concentric-only (`2` or `4`).
+        run(&mut s, "joint.delete", json!({"joint": "FlushFastener15"}));
+        let list = run(&mut s, "joint.list", json!({}));
+        assert!(clean(&list), "fixed={fixed_plate_a}: {list}");
+        assert_eq!(dof_of(&list, &s, "Fastener15"), Some(want_concentric_only), "fixed={fixed_plate_a}: {list}");
+
+        // Re-add Flush on Fastener15: DOF must drop back (`1` or `3`), never jump to `6`.
+        let added = constrain(
+            &mut s,
+            "flush",
+            json!({"occurrence": "PlateB", "face": [10, 10, 30]}),
+            json!({"occurrence": "Fastener15", "face": [50, 30, 30]}),
+            json!({"name": "FlushFastener15"}),
+        );
+        assert!(clean(&added), "fixed={fixed_plate_a}: {added}");
+        let list = run(&mut s, "joint.list", json!({}));
+        assert_eq!(dof_of(&list, &s, "Fastener15"), Some(want_both), "fixed={fixed_plate_a}: {list}");
+    }
+}

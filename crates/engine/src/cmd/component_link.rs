@@ -1671,10 +1671,18 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         // The same bodies, their faces named for the first time (a link made before names were
         // kept): nothing a reference finds changes. Names the design gave other faces since do.
         let changed = !same || kept.is_some_and(|k| !k.is_empty()) || took;
+        // Joints on faces told apart only by a positional tie number, and where they were, so a
+        // shift this update gives them is said instead of passing unnoticed.
+        let tie_before = if same { Vec::new() } else { snapshot_tie_numbered_joints(s, comp, link.feature) };
         if !same {
             for name in numbered_references(s, comp, link.feature) {
                 warnings.push(format!(
                     "{name} refers to faces of {cname} by their place in the linked file, which this update can change: check it, and pick its faces again so it follows them by name"
+                ));
+            }
+            for name in tie_numbered_origin_references(s, comp, link.feature) {
+                warnings.push(format!(
+                    "{name} refers to a positional tie-numbered face of {cname}, which can shift when sibling faces are added or removed: check it, and pick its face again"
                 ));
             }
         }
@@ -1708,6 +1716,9 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         if !same && let (Some(before), Some(after)) = (before, s.model.result(link.feature).map(|r| r.state.clone())) {
             warnings.extend(s.doc_mut().rebind_linked_faces(link.feature, &before, &after));
             s.refresh();
+        }
+        if !tie_before.is_empty() {
+            warnings.extend(tie_numbered_joint_warnings(s, &cname, &tie_before));
         }
         let changed = inherit_properties(s, comp, &properties)? || changed;
         if changed {
@@ -1815,6 +1826,83 @@ fn numbered_references(s: &Session, comp: u64, feature: u64) -> Vec<String> {
     let joints = s.doc.assembly.joints.iter().filter(|j| on(&j.a) || on(&j.b)).map(|j| format!("joint {}", j.name));
     let origins = s.doc.assembly.origins.iter().filter(|o| on(&o.origin)).map(|o| format!("joint origin {}", o.name));
     joints.chain(origins).collect()
+}
+
+/// A joint side on a linked component referencing a positional tie-numbered linked face
+/// (`F<feature>:link:<digest>#<k>`), captured before `component.update_links` replaces the bodies.
+struct TieNumberedJointSide {
+    joint_id: u64,
+    joint_name: String,
+    is_a: bool,
+    face_name: String,
+    before: Option<solidcraft_doc::Mat>,
+}
+
+/// Snapshot every joint side on occurrences of `comp` that references a positional tie-numbered
+/// linked face of `feature`, together with its resolved origin frame before the update.
+fn snapshot_tie_numbered_joints(s: &Session, comp: u64, feature: u64) -> Vec<TieNumberedJointSide> {
+    let st = s.model.state();
+    let tie_face = |o: &solidcraft_doc::joints::JointOrigin| -> Option<String> {
+        if !s.doc.occurrences.iter().any(|x| x.id == o.part() && s.doc.component_within(x.component, comp)) {
+            return None;
+        }
+        o.snap.face_names().into_iter().find(|n| solidcraft_doc::naming::has_tie_numbered_link_face(n.as_str(), feature)).cloned()
+    };
+    let mut out = Vec::new();
+    for j in &s.doc.assembly.joints {
+        for (is_a, side) in [(true, &j.a), (false, &j.b)] {
+            if let Some(face_name) = tie_face(side) {
+                let before = solidcraft_doc::joints::resolve_origin(&s.doc, &st, side).ok();
+                out.push(TieNumberedJointSide { joint_id: j.id, joint_name: j.name.clone(), is_a, face_name, before });
+            }
+        }
+    }
+    out
+}
+
+/// Named joint origins on occurrences of `comp` that reference a positional tie-numbered linked
+/// face of `feature`.
+fn tie_numbered_origin_references(s: &Session, comp: u64, feature: u64) -> Vec<String> {
+    s.doc
+        .assembly
+        .origins
+        .iter()
+        .filter(|o| {
+            s.doc.occurrences.iter().any(|x| x.id == o.origin.part() && s.doc.component_within(x.component, comp))
+                && o.origin.snap.face_names().iter().any(|n| solidcraft_doc::naming::has_tie_numbered_link_face(n.as_str(), feature))
+        })
+        .map(|o| format!("joint origin {}", o.name))
+        .collect()
+}
+
+/// Warnings for joints that still resolve through a positional tie-numbered linked face after
+/// `component.update_links` (missing faces are reported as joint errors instead). Reports the
+/// exact shift distance whenever the resolved origin moved or tilted.
+fn tie_numbered_joint_warnings(s: &Session, cname: &str, sides: &[TieNumberedJointSide]) -> Vec<String> {
+    let st = s.model.state();
+    let mut out = Vec::new();
+    for entry in sides {
+        let Some(j) = s.doc.assembly.joints.iter().find(|j| j.id == entry.joint_id) else { continue };
+        let side = if entry.is_a { &j.a } else { &j.b };
+        let Ok(after) = solidcraft_doc::joints::resolve_origin(&s.doc, &st, side) else { continue };
+        let shifted = entry.before.and_then(|before| {
+            let (dx, dy, dz) = (after[3][0] - before[3][0], after[3][1] - before[3][1], after[3][2] - before[3][2]);
+            let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+            let dot = before[2][0] * after[2][0] + before[2][1] * after[2][1] + before[2][2] * after[2][2];
+            (dist > 1e-3 || dot < 1.0 - 1e-4).then_some(dist)
+        });
+        match shifted {
+            Some(dist) => out.push(format!(
+                "joint {} refers to a positional tie-numbered face of {cname} (`{}`) that shifted by {dist:.2} mm in this update: check it, and pick its face again",
+                entry.joint_name, entry.face_name
+            )),
+            None => out.push(format!(
+                "joint {} refers to a positional tie-numbered face of {cname} (`{}`), which can shift when sibling faces are added or removed: check it, and pick its face again",
+                entry.joint_name, entry.face_name
+            )),
+        }
+    }
+    out
 }
 
 /// Where each body of a link's design was when the link last read it, for a design that kept
@@ -3023,6 +3111,71 @@ mod tests {
         assert!(meshes(&a).is_empty());
         assert_eq!(run(&mut a, "component.update_links", json!({}))["updated"], json!(["board"]));
         assert_eq!(meshes(&a), chip);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A joint referencing a positional tie-numbered linked face (`F<id>:link:<hash>#<k>`) must
+    /// warn with the shift distance when `component.update_links` moves that face, never silently
+    /// sliding onto another location.
+    #[test]
+    fn tie_numbered_linked_face_shift_emits_warning_with_distance() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-tie-warn-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("plate.solidcraft");
+        let mut part = plate(&path);
+        let mut s = pinned(&path, false);
+        let (&comp, link) = s.doc.links.iter().next().unwrap();
+        let feature = link.feature;
+
+        // Simulate a positional tie-numbered carried face (`#2`) on the linked plate's bore wall.
+        let mut carried = s.doc.feature(feature).unwrap().link_faces.clone();
+        for body in &mut carried {
+            for face in body {
+                if face.contains(":side") && !face.contains('#') {
+                    face.push_str("#2");
+                }
+            }
+        }
+        s.doc_mut().feature_mut(feature).unwrap().link_faces = carried;
+        s.refresh();
+        let tie_name = {
+            let st = s.model.state();
+            let b = st.bodies.iter().find(|b| b.feature == feature).unwrap();
+            solidcraft_doc::naming::face_names(b)
+                .iter()
+                .find(|n| solidcraft_doc::naming::is_tie_numbered_link_face(n.as_str(), feature))
+                .cloned()
+                .unwrap()
+        };
+        if let solidcraft_doc::joints::Snap::CircleCenter { face, .. } = &mut s.doc_mut().assembly.joints[0].a.snap {
+            *face = Some(tie_name);
+        }
+        s.refresh();
+
+        let before = snapshot_tie_numbered_joints(&s, comp, feature);
+        assert_eq!(before.len(), 1);
+        assert!(before[0].before.is_some());
+
+        // Move the hole by 30 mm (`hx: 10 mm -> -20 mm`) while keeping the same tie-numbered name.
+        run(&mut part, "parameters.change", json!({"name": "hx", "expression": "-20 mm"}));
+        run(&mut part, "file.save", json!({"path": path}));
+        let update = run(&mut s, "component.update_links", json!({}));
+        assert_eq!(update["updated"], json!(["Plate"]), "{update}");
+        // Re-apply the tie-numbered carried name on the updated import and check the shift warning.
+        let mut after_carried = s.doc.feature(feature).unwrap().link_faces.clone();
+        for body in &mut after_carried {
+            for face in body {
+                if face.contains(":side") && !face.contains('#') {
+                    face.push_str("#2");
+                }
+            }
+        }
+        s.doc_mut().feature_mut(feature).unwrap().link_faces = after_carried;
+        s.refresh();
+        let warnings = tie_numbered_joint_warnings(&s, "Plate", &before);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("joint PinInHole") && warnings[0].contains("shifted by 30.00 mm"), "{warnings:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
