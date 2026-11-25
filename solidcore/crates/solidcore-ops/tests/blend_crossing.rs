@@ -726,15 +726,19 @@ fn rounds_meeting_a_tangent_chain_at_a_tab_corner_build() {
         kinds.sort_unstable();
         assert_eq!(
             kinds,
-            ["cone", "cone", "surface-of-revolution", "surface-of-revolution"],
+            [
+                "cone",
+                "cone",
+                "surface-of-revolution",
+                "surface-of-revolution"
+            ],
             "round {r}"
         );
         let v = volume(&c);
         assert!((v - want).abs() < 1e-4, "round {r}: {v}, 0.45.0 {want}");
         let section = a * r * r;
         let kept_turn = 2.0 * std::f64::consts::PI - (10.0_f64 / 13.0).acos();
-        let swept = section * (30.0 + 30.0 - y0)
-            + section * kept_turn * (13.0 - r + r / (6.0 * a));
+        let swept = section * (30.0 + 30.0 - y0) + section * kept_turn * (13.0 - r + r / (6.0 * a));
         assert!(v < volume(&part) - swept, "round {r}: {v}");
     }
 }
