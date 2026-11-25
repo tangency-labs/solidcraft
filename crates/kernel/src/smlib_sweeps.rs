@@ -454,10 +454,12 @@ mod imp {
         let distance = hi - lo;
         let base = plane.offset(lo);
         let top = plane.offset(hi);
-        let n = plane.x.cross(plane.y).normalized().ok_or_else(|| KernelError::Invalid("cylinder axis".into()))?;
+        let n = plane.normal();
         let (s, c) = crate::build::SEAM_ANGLE.sin_cos();
-        let u = (plane.x * c + plane.y * s).normalized().ok_or_else(|| KernelError::Invalid("cylinder axis".into()))?;
-        let v = n.cross(u).normalized().ok_or_else(|| KernelError::Invalid("cylinder axis".into()))?;
+        // `plane` is verified orthonormal by `frame_ok`: rotating `(x, y)` in-plane by `SEAM_ANGLE`
+        // keeps `(u, v, n)` right-handed and orthonormal.
+        let u = plane.x * c + plane.y * s;
+        let v = plane.y * c - plane.x * s;
         let o = base.origin;
         // Row-vector convention (`p' = p·A + t`): rows 0–2 are the images of +X, +Y, +Z,
         // row 3 is the translation.
@@ -472,18 +474,17 @@ mod imp {
         let tol = (size * 1e-5 + 1e-9).min(0.25 * distance);
         let seg = region.outer.segs.first().copied().ok_or_else(|| KernelError::Failed("cylinder profile segment".into()))?;
         let low_plane = Plane { origin: base.origin, x: plane.x, y: -plane.y };
-        let flat = |surface: &solidcore_record::brep::Surface| -> Option<(Vec3, Vec3)> {
-            let (fo, fu, fv) = match surface {
+        let cap_points = |surface: &solidcore_record::brep::Surface| -> Option<[Vec3; 3]> {
+            match surface {
                 solidcore_record::brep::Surface::Plane { origin, u_axis, v_axis } => {
-                    (crate::body::v3(*origin), crate::body::v3(*u_axis), crate::body::v3(*v_axis))
+                    let fo = crate::body::v3(*origin);
+                    Some([fo, fo + crate::body::v3(*u_axis), fo + crate::body::v3(*v_axis)])
                 }
                 solidcore_record::brep::Surface::PlaneThrough { origin, u_point, v_point } => {
-                    let fo = crate::body::v3(*origin);
-                    (fo, crate::body::v3(*u_point) - fo, crate::body::v3(*v_point) - fo)
+                    Some([crate::body::v3(*origin), crate::body::v3(*u_point), crate::body::v3(*v_point)])
                 }
-                _ => return None,
-            };
-            fu.cross(fv).normalized().map(|normal| (fo, normal))
+                _ => None,
+            }
         };
         let mut prov = Vec::with_capacity(r.faces.len());
         let mut sources = Vec::with_capacity(r.faces.len());
@@ -493,14 +494,12 @@ mod imp {
                 walls += 1;
                 prov.push(record::profile(&[0usize]));
                 sources.push(Some(crate::FaceSource::ExtrudeSide { segment: seg, plane: None, coalesced: false }));
-            } else if let Some((fo, normal)) = flat(&face.surface)
-                && normal.dot(n).abs() >= 1.0 - 1e-9
-            {
-                if base.height(fo).abs() <= tol {
+            } else if let Some(pts) = cap_points(&face.surface) {
+                if pts.iter().all(|pt| base.height(*pt).abs() <= tol) {
                     starts += 1;
                     prov.push(record::cap(false));
                     sources.push(Some(crate::FaceSource::ExtrudeCap { high: false, region: region.clone(), plane: low_plane }));
-                } else if top.height(fo).abs() <= tol {
+                } else if pts.iter().all(|pt| top.height(*pt).abs() <= tol) {
                     ends += 1;
                     prov.push(record::cap(true));
                     sources.push(Some(crate::FaceSource::ExtrudeCap { high: true, region: region.clone(), plane: top }));
