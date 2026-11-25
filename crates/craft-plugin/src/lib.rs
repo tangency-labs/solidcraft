@@ -42,6 +42,8 @@ pub const MAX_MEMORY_MIB: usize = 4096;
 /// The user's Max plugin fuel remains the default for packages without an approval.
 pub const MAX_APPROVED_FUEL: u64 = 10_000_000_000_000;
 
+pub mod shader;
+
 pub type Result<T> = std::result::Result<T, HostError>;
 
 /// An open document session and its committed history state, kept outside authored document data.
@@ -81,6 +83,7 @@ mod schema_refs;
 pub mod swatches;
 pub mod ui;
 pub use input::check_input;
+pub use input::check_input_field;
 pub use input::prepare_input;
 pub use input::strict_input_schema;
 
@@ -174,6 +177,7 @@ pub const CAPABILITIES: &[(&str, (u32, u32))] = &[
     ("evaluate", (0, 2)),
     ("formats", (0, 2)),
     ("forms", (0, 1)),
+    ("shaders", (0, 1)),
     ("storage", (0, 1)),
     ("ui", (0, 1)),
 ];
@@ -658,6 +662,9 @@ pub struct Manifest {
     pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RuntimeManifest>,
+    /// View backgrounds (`shaders@0.1`); a plugin may ship shaders and no runtime.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shaders: Vec<shader::Shader>,
 }
 
 /// A read-only entry called after a coalesced design or linked-file invalidation. Listeners refresh
@@ -741,12 +748,27 @@ impl RuntimeManifest {
             return Err(invalid("runtime.module", "must be one lowercase .wasm file name"));
         }
         if self.entries.is_empty() || self.entries.len() > 32 {
-            return Err(invalid("runtime.entries", "requires 1..32 distinct ids"));
+            return Err(invalid("runtime.entries", format!("declares {} entries; a plugin has 1 to 32", self.entries.len())));
         }
         let mut names = BTreeSet::new();
         for entry in &self.entries {
-            if !valid_id(&entry.name) || !names.insert(&entry.name) {
-                return Err(invalid("runtime.entries", "requires 1..32 distinct ids"));
+            // The name as written, quoted and cut short: it comes from an untrusted manifest. A cut
+            // name says so and gives its length, as its first 64 characters may be valid alone.
+            let length = entry.name.chars().count();
+            let shown = match length {
+                0..=64 => format!("{:?}", entry.name),
+                _ => format!("{:?}… ({length} characters)", entry.name.chars().take(64).collect::<String>()),
+            };
+            if !valid_id(&entry.name) {
+                return Err(invalid(
+                    "runtime.entries",
+                    format!(
+                        "entry {shown} is not a valid name: use 1 to 64 lowercase letters, digits and dashes, not starting or ending with a dash (no underscores or capitals)"
+                    ),
+                ));
+            }
+            if !names.insert(&entry.name) {
+                return Err(invalid("runtime.entries", format!("entry {shown} is declared more than once")));
             }
             validate_kind(self, entry)?;
             let field = format!("runtime.entries.{}.input_schema", entry.name);
@@ -1118,6 +1140,12 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
     }
     if manifest.runtime.as_ref().and_then(|runtime| runtime.ui.as_ref()).is_some() && !has_ui {
         return Err(invalid("runtime.ui", "panel declarations require ui@0.1"));
+    }
+    if !manifest.shaders.is_empty() {
+        if !manifest.capabilities.iter().any(|capability| capability.starts_with("shaders@")) {
+            return Err(invalid("capabilities", "a plugin with shaders needs the shaders capability: \"capabilities\": [\"shaders@0.1\"]"));
+        }
+        shader::validate(&manifest.shaders)?;
     }
     Ok(manifest)
 }

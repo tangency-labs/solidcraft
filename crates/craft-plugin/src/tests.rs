@@ -111,6 +111,7 @@ fn selection_alternatives_preserve_strict_schema_parity() {
             let schema = json!({"type":"object","properties":{key:property}});
             let value = json!({key:[{"type":"face","body":"Box","index":0,"point":[0,0,0]}]});
             assert_eq!(check_input(&schema, &value).is_ok(), selection, "{key}/{alternative}");
+            assert_eq!(check_input_field(key, &schema["properties"][key], &value[key]).is_ok(), selection, "{key}/{alternative}");
             if selection {
                 assert_eq!(prepare_input(&schema, &value).unwrap(), value);
             }
@@ -119,6 +120,21 @@ fn selection_alternatives_preserve_strict_schema_parity() {
             assert_eq!(strict["properties"][key][alternative][0]["items"].get("additionalProperties").is_none(), selection);
         }
     }
+}
+
+#[test]
+fn filtered_selection_options_keep_the_enclosing_annotation() {
+    let schema = json!({"type":"object","properties":{
+        "enabled":{"type":"boolean"},
+        "picks":{"x-solidcraft-selection":{"version":1,"accept":["body"]},"oneOf":[{
+            "type":"array","items":{"type":"object"},"x-solidcraft-when":{"field":"enabled","eq":true}
+        }]}
+    }});
+    assert!(check_input(&schema, &json!({"enabled":true,"picks":[{"type":"body","name":"Box"}]})).is_ok());
+    assert!(matches!(
+        check_input(&schema, &json!({"enabled":false,"picks":[{"type":"body","name":"Box"}]})),
+        Err(HostError::InvalidInput { field, .. }) if field == "params.picks"
+    ));
 }
 
 #[test]
@@ -489,6 +505,36 @@ fn hostile_manifest_fields_return_errors() {
     }
     assert!(matches!(parse_manifest(&vec![b' '; MAX_MANIFEST_BYTES + 1], "sample"), Err(HostError::LimitExceeded { .. })));
     assert!(parse_manifest(br#"{}"#, "sample").is_err());
+}
+
+/// A refused entry list says which entry is wrong and why: a bad name (an underscore, which
+/// command ids allow but entry names don't), a repeated name, or too many or no entries.
+#[test]
+fn a_refused_entry_list_names_the_entry_and_the_rule() {
+    let refusal = |entries: Value| {
+        let mut value = manifest();
+        value["runtime"]["entries"] = entries;
+        match parse(&value) {
+            Err(HostError::InvalidManifest { field, reason }) => (field, reason),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    };
+    let (field, reason) = refusal(json!(["make", "op_add"]));
+    assert_eq!(field, "runtime.entries");
+    assert!(reason.contains("\"op_add\"") && reason.contains("dashes") && reason.contains("no underscores"), "{reason}");
+    let (_, reason) = refusal(json!(["make", "make"]));
+    assert!(reason.contains("\"make\" is declared more than once"), "{reason}");
+    let (_, reason) = refusal(json!([]));
+    assert!(reason.contains("declares 0 entries"), "{reason}");
+    let many: Vec<String> = (0..33).map(|i| format!("e{i}")).collect();
+    let (_, reason) = refusal(json!(many));
+    assert!(reason.contains("declares 33 entries"), "{reason}");
+    // A hostile name is quoted and cut short, never echoed raw.
+    let (_, reason) = refusal(json!([format!("bad\nname{}", "x".repeat(500))]));
+    assert!(reason.contains("\\n") && !reason.contains('\n') && reason.len() < 400, "{reason}");
+    // A cut name says it was cut and how long it is: its first 64 characters may be valid alone.
+    let (_, reason) = refusal(json!([format!("{}_", "a".repeat(64))]));
+    assert!(reason.contains(&format!("\"{}\"… (65 characters)", "a".repeat(64))), "{reason}");
 }
 
 #[test]

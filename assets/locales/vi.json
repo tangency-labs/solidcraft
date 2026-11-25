@@ -1157,7 +1157,7 @@
   "ai.prefs.control_listening": "Đang lắng nghe trên 127.0.0.1:{port}",
   "ai.prefs.control_not_listening": "Không lắng nghe",
   "ai.prefs.control_port": "Cổng",
-  "ai.prefs.control_port_note": "Cổng mà các tác tử AI kết nối trên máy tính này (127.0.0.1). Mặc định là 27878: nếu cổng đang được dùng, cổng trống tiếp theo sẽ được dùng. Mọi cổng khác được dùng đúng như vậy. Hãy trỏ ứng dụng MCP của bạn đến cùng cổng, ví dụ solidcraft-cli mcp --connect 127.0.0.1:7878.",
+  "ai.prefs.control_port_note": "Cổng mà các tác tử AI kết nối trên máy tính này (127.0.0.1). Mặc định là 27878: nếu cổng đang được dùng, cổng trống tiếp theo sẽ được dùng. Mọi cổng khác được dùng đúng như vậy. Hãy trỏ ứng dụng MCP của bạn đến cùng cổng, ví dụ solidcraft-cli mcp --connect 127.0.0.1:27878.",
   "ai.prefs.control_port_taken": "Cổng {port} đang được một chương trình khác (hoặc một cửa sổ SolidCraft khác) sử dụng. Hãy chọn cổng khác.",
   "ai.prefs.follow_camera": "Theo camera",
   "ai.prefs.follow_camera_off": "Tự động xoay camera theo phác thảo đang tắt.",
