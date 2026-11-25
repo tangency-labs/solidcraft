@@ -366,6 +366,41 @@ mod tests {
         assert!(super::hint_text(&panel).contains("2"), "{}", super::hint_text(&panel));
     }
 
+    /// Trace Region: a click picks one region, Ctrl+click adds another, a plain click starts over (#20798).
+    #[test]
+    fn trace_region_ctrl_click_adds_a_region() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        h.app.home.open = false;
+        let id = canvas(&mut h);
+        h.app.tree.canvas_panel = Some(crate::browser::CanvasPanel::trace(&h.app, id));
+        h.frames(6);
+        let rect = h.app.viewport.rect.expect("viewport");
+        let proj = crate::viewport::projection(&h.app, rect);
+        let c = h.app.session.doc.canvases[0].clone();
+        let (vals, _) = h.app.session.doc.param_values();
+        let plane = h.app.session.doc.canvas_plane(&vals, &c, &h.app.session.model.state()).unwrap();
+        let screen = |x: f64, y: f64| proj.to_screen(plane.to_world(solidcore_record::Vec2::new(x, y))).expect("on screen");
+        let points = |h: &crate::scenario::Harness| h.app.tree.canvas_panel.as_ref().unwrap().points.clone();
+        let (a, b, d) = ((c.center.x - 20.0, c.center.y), (c.center.x + 20.0, c.center.y), (c.center.x, c.center.y + 10.0));
+        assert!(super::click(&mut h.app, &proj, screen(a.0, a.1), false));
+        assert_eq!(points(&h).len(), 1);
+        // Ctrl+click adds, in the order picked; the card's hint counts them.
+        assert!(super::click(&mut h.app, &proj, screen(b.0, b.1), true));
+        assert!(super::click(&mut h.app, &proj, screen(d.0, d.1), true));
+        let picked = points(&h);
+        assert_eq!(picked.len(), 3, "{picked:?}");
+        assert!((picked[0][0] - a.0).abs() < 1e-6 && (picked[1][0] - b.0).abs() < 1e-6 && (picked[2][1] - d.1).abs() < 1e-6, "{picked:?}");
+        assert!(super::hint_text(h.app.tree.canvas_panel.as_ref().unwrap()).contains('3'));
+        // A plain click replaces them all.
+        assert!(super::click(&mut h.app, &proj, screen(b.0, b.1), false));
+        let picked = points(&h);
+        assert!(picked.len() == 1 && (picked[0][0] - b.0).abs() < 1e-6, "{picked:?}");
+        // A click off the image adds nothing, even with Ctrl.
+        assert!(!super::click(&mut h.app, &proj, screen(c.center.x + 500.0, c.center.y), true));
+        assert_eq!(points(&h).len(), 1);
+    }
+
     #[test]
     fn edit_canvas_is_a_card_whose_close_keeps_the_live_edits() {
         let mut h = crate::scenario::Harness::new();
@@ -429,10 +464,10 @@ mod tests {
         let plane = h.app.session.doc.canvas_plane(&vals, &c, &h.app.session.model.state()).unwrap();
         let screen = |x: f64, y: f64| proj.to_screen(plane.to_world(solidcore_record::Vec2::new(x, y))).expect("on screen");
         let status = |h: &crate::scenario::Harness| h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
-        assert!(super::click(&mut h.app, &proj, screen(c.center.x - 15.0, c.center.y - 5.0)));
+        assert!(super::click(&mut h.app, &proj, screen(c.center.x - 15.0, c.center.y - 5.0), false));
         assert_eq!(super::hint(h.app.tree.canvas_panel.as_ref().unwrap()), "browser.straighten_click_b");
         assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr("browser.straighten_click_b")));
-        assert!(super::click(&mut h.app, &proj, screen(c.center.x + 15.0, c.center.y + 5.0)));
+        assert!(super::click(&mut h.app, &proj, screen(c.center.x + 15.0, c.center.y + 5.0), false));
         // With both points picked, the card and the status line ask for the direction, not Point A.
         assert_eq!(super::hint(h.app.tree.canvas_panel.as_ref().unwrap()), "browser.straighten_choose");
         assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr("browser.straighten_choose")));
@@ -480,18 +515,18 @@ mod tests {
         let bx = c.center.x + 20.0;
         let sa = proj.to_screen(plane.to_world(solidcore_record::Vec2::new(ax, c.center.y))).expect("point A on screen");
         let sb = proj.to_screen(plane.to_world(solidcore_record::Vec2::new(bx, c.center.y))).expect("point B on screen");
-        assert!(super::click(&mut h.app, &proj, sa), "first click sets A");
+        assert!(super::click(&mut h.app, &proj, sa, false), "first click sets A");
         let panel = h.app.tree.canvas_panel.as_ref().unwrap();
         assert_eq!(panel.next, 1);
         assert!((panel.a[0] - ax).abs() < 0.5, "{:?}", panel.a);
-        assert!(super::click(&mut h.app, &proj, sb), "second click sets B");
+        assert!(super::click(&mut h.app, &proj, sb, false), "second click sets B");
         let panel = h.app.tree.canvas_panel.as_ref().unwrap();
         assert_eq!(panel.next, 0);
         assert!((panel.b[0] - bx).abs() < 0.5, "{:?}", panel.b);
         let before = panel.a;
         let miss = plane.to_world(solidcore_record::Vec2::new(c.center.x + 500.0, c.center.y));
         if let Some(sm) = proj.to_screen(miss) {
-            assert!(!super::click(&mut h.app, &proj, sm));
+            assert!(!super::click(&mut h.app, &proj, sm, false));
             assert_eq!(h.app.tree.canvas_panel.as_ref().unwrap().a, before);
         }
     }
