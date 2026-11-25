@@ -1813,11 +1813,121 @@ fn a_stitch_too_deep_names_the_least_depth_of_its_spans() {
     }
 }
 
+/// The section of the trough of [`trough`], a cubic Bezier's control points from the root:
+/// flat at the root (its first three points in line) and tighter towards its end.
+const TROUGH: [(f64, f64); 4] = [(0.0, 0.0), (4.0, 0.0), (8.0, 0.0), (8.0, 4.0)];
+
+/// The trough's section at the Bezier's parameter `t`.
+fn trough_at(t: f64) -> (f64, f64) {
+    let s = 1.0 - t;
+    let w = [s * s * s, 3.0 * s * s * t, 3.0 * s * t * t, t * t * t];
+    TROUGH
+        .iter()
+        .zip(w)
+        .fold((0.0, 0.0), |(x, y), (p, w)| (x + w * p.0, y + w * p.1))
+}
+
+/// A plate standing in a trough, swept `LENGTH` along z: the plate's face is the plane x = 0
+/// above the root at the origin, the trough's the section `TROUGH` swept, curving up towards
+/// the bead. The body and a point on the joint's edge.
+fn trough(k: &mut Kernel) -> (Brep, [f64; 3]) {
+    use solidcore::primitive::api_curves::create_curve;
+    let p = |(x, y): (f64, f64)| Point3::new(x, y, 0.0);
+    let line = |a, b| Curve::from(create_line_segment(p(a), p(b)).unwrap());
+    let [root, c1, c2, end] = TROUGH;
+    let curves = [
+        line(root, (0.0, 40.0)),
+        line((0.0, 40.0), (-ARM, 40.0)),
+        line((-ARM, 40.0), (-ARM, -ARM)),
+        line((-ARM, -ARM), (18.0, -ARM)),
+        line((18.0, -ARM), (18.0, end.1)),
+        line((18.0, end.1), end),
+        Curve::from(create_curve(&[p(end), p(c2), p(c1), p(root)]).unwrap()),
+    ];
+    let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+    let b = create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), LENGTH, true).unwrap();
+    (b, [0.0, 0.0, LENGTH / 2.0])
+}
+
+/// The sagitta of the concave arc through the feet `a` and `b` and the point `p` of a
+/// support's section in the trough's plane (`p` on the root's side of the chord).
+fn arc_through(a: (f64, f64), b: (f64, f64), p: (f64, f64)) -> f64 {
+    let c = (b.0 - a.0).hypot(b.1 - a.1);
+    let along = ((b.0 - a.0) / c, (b.1 - a.1) / c);
+    let q = (p.0 - (a.0 + b.0) / 2.0, p.1 - (a.1 + b.1) / 2.0);
+    let (x, y) = (
+        q.0 * along.0 + q.1 * along.1,
+        (q.0 * along.1 - q.1 * along.0).abs(),
+    );
+    let depth = (c * c / 4.0 - x * x - y * y) / (2.0 * y);
+    (c * c / 4.0 + depth * depth).sqrt() - depth
+}
+
+/// For the legs `on_trough` and `on_plate` in the trough's plane: the largest concave sagitta
+/// whose arc stays off both sections between the root and the feet, from 4096 points of each
+/// and one a ten-millionth short of each foot (the arc tangent there); and the sagitta of the
+/// arc tangent to the trough at its foot alone.
+fn trough_bound(on_trough: f64, on_plate: f64) -> (f64, f64) {
+    // the Bezier's parameter at the trough's foot: its distance from the root grows with it
+    let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
+    for _ in 0..60 {
+        let t = 0.5 * (lo + hi);
+        let (x, y) = trough_at(t);
+        if x.hypot(y) < on_trough {
+            lo = t;
+        } else {
+            hi = t;
+        }
+    }
+    let (a, b) = (trough_at(lo), (0.0, on_plate));
+    let mut least = arc_through(a, b, TROUGH[0]);
+    for i in (1..4096).map(|i| f64::from(i) / 4096.0).chain([1.0 - 1e-7]) {
+        least = least
+            .min(arc_through(a, b, trough_at(lo * i)))
+            .min(arc_through(a, b, (0.0, on_plate * i)));
+    }
+    (least, arc_through(a, b, trough_at(lo * (1.0 - 1e-7))))
+}
+
+/// A concave arc is bounded along the leg, not at its foot alone: where a support curves
+/// towards the bead more tightly near the foot than the arc does, the arc tangent to the face
+/// at the foot comes back into the support between the foot and the root. In the trough (flat
+/// at the root, tighter towards the foot of a leg of 8) with a leg of 1.5 on the plate, the
+/// sagitta that fits is the bound along the trough's section, more than a fifth below the
+/// tangent arc's; with the legs the other way round it is the tangent arc's at the plate.
+#[test]
+fn a_concave_arc_is_bounded_along_the_leg_on_a_support_that_tightens_towards_its_foot() {
+    use solidcore::blend::foot_blend::FootBlend;
+    let mut k = kernel();
+    let (mut b, at) = trough(&mut k);
+    let joint = pick(&k, &b, at);
+    let (deep, tangent) = trough_bound(8.0, 1.5);
+    let (shallow, _) = trough_bound(1.5, 8.0);
+    println!("along the leg {deep}, shallow {shallow}");
+    let mut got: Vec<f64> = edge::faces(&b, joint, None)
+        .unwrap()
+        .into_iter()
+        .map(|face| {
+            let blend = FootBlend::of_edge(&k, &mut b, joint, Some(face)).unwrap();
+            blend.sagitta_that_fits(&k, [1.5, 8.0], -1.0, &[]).unwrap()
+        })
+        .collect();
+    got.sort_by(f64::total_cmp);
+    println!("the sagittas that fit {got:?}");
+    assert_eq!(got.len(), 2);
+    for (got, want) in got.iter().zip([shallow, deep]) {
+        assert!(
+            *got >= want * (1.0 - 1e-4) && *got <= want * 1.002,
+            "{got} {want}"
+        );
+    }
+    assert!(deep < 0.85 * tangent, "{deep} {tangent}");
+}
+
 /// A sagitta too large for several joints of one call is refused with the smallest sagitta
 /// that fits over all of them, whichever joint comes first: two branches of different size on
-/// one main tube, each joint alone naming its own depth, both together no more than the least
-/// of the two (to a twentieth: a joint's own size is that of its own stations), and a tenth
-/// shallower than it both beads build.
+/// one main tube, each joint alone naming its own depth, both together the least of the two,
+/// and at exactly that depth both beads build, in either order.
 #[test]
 fn a_sagitta_too_large_for_several_joints_is_refused_with_the_smallest_fit() {
     use solidcore::error::FitMeasure;
@@ -1842,20 +1952,28 @@ fn a_sagitta_too_large_for_several_joints_is_refused_with_the_smallest_fit() {
         let sizes = vec![size; edges.len()];
         weld_bead_body(&mut k, &mut part, edges, &sizes, h, &[], &[], SQUARE)
     };
-    let mut depth = |edges: &[EdgeId]| {
-        let fit = bead(edges, -1.3).err()?.fit()?;
+    let depth = |refused: Result<Brep, SolidError>| {
+        let fit = refused.err()?.fit()?;
         (fit.measure == FitMeasure::Sagitta).then_some(fit.size)
     };
-    let alone: Vec<f64> = joints.iter().filter_map(|&e| depth(&[e])).collect();
+    let alone: Vec<f64> = joints
+        .iter()
+        .filter_map(|&e| depth(bead(&[e], -1.3)))
+        .collect();
     let least = alone.iter().copied().fold(f64::INFINITY, f64::min);
     assert!(least.is_finite(), "no joint alone is refused with a depth");
     let back = [joints[1], joints[0]];
     for edges in [&joints[..], &back[..]] {
-        let together = depth(edges).expect("the joints are refused with a depth");
+        let together = depth(bead(edges, -1.3)).expect("the joints are refused with a depth");
         println!("joints alone {alone:?}, together {together}");
-        assert!(together <= least * 1.05, "{together} against {alone:?}");
+        assert!(
+            (together - least).abs() <= 1e-9 * least,
+            "{together} against {alone:?}"
+        );
+        if let Err(refused) = bead(edges, -together) {
+            panic!("refused at the depth named, {together}: {refused:?}");
+        }
     }
-    assert!(bead(&joints, -0.9 * least).is_ok(), "{least}");
 }
 
 /// Two spans round the T-joint (a stitch): one body of two lumps, each span its section face,
@@ -2139,9 +2257,13 @@ fn shaped_ends_are_built_round_a_tube_and_short_spans_are_refused() {
 /// re-checks against its definition (the motion replayed on the rebuilt net), and names no
 /// support (its supports stay where the bead was made, as a section blend's has none). A
 /// scale, uniform or not, and a mirror move the face without its definition: its legs,
-/// sagitta and bound are not the moved net's (a mirrored part with a bead still moves).
+/// sagitta and bound are not the moved net's (a mirrored part with a bead still moves). A
+/// scale of 1 within rounding is no scale: `transform_matrix` passes the lengths of a
+/// rotation's rows, 1 to the last digit or so, and the bead's body turned and moved by it
+/// keeps its foot faces, each still its definition's.
 #[test]
 fn a_moved_bead_keeps_its_motion_and_a_scale_or_mirror_leaves_its_definition() {
+    use solidcore::topology::brep::mirror::transform_matrix;
     let mut k = kernel();
     let (mut b, at) = corner(&mut k, FRAC_PI_2);
     let edge = pick(&k, &b, at);
@@ -2151,9 +2273,14 @@ fn a_moved_bead_keeps_its_motion_and_a_scale_or_mirror_leaves_its_definition() {
     turn.rotate_about_axis(0.7, Vec3::new(1.0, 2.0, 2.0) * (1.0 / 3.0));
     turn.translate(Vec3::new(5.0, -3.0, 7.0));
     let found = foot_faces(&body);
+    let count = found.len();
     assert!(!found.is_empty());
     for (_, made) in found {
-        for rigid in [None, Some(Vec3::new(1.0, 1.0, 1.0))] {
+        for rigid in [
+            None,
+            Some(Vec3::new(1.0, 1.0, 1.0)),
+            Some(Vec3::new(1.0, 1.0, 0.9999999999999999)),
+        ] {
             let mut moved = made.clone();
             moved.transform(&k, &turn, rigid).unwrap();
             let def = moved.procedural_blend().unwrap();
@@ -2176,6 +2303,28 @@ fn a_moved_bead_keeps_its_motion_and_a_scale_or_mirror_leaves_its_definition() {
                 "{scale:?} kept the definition"
             );
         }
+    }
+    // the body, by a turn of 0.01 about (1, 2, 2) / 3 and a move: the matrix's rows are the
+    // images of x, y and z, and their lengths, which the transform takes as the scale, are 1
+    // to rounding only
+    let (s, c) = 0.01_f64.sin_cos();
+    let (x, y, z, v) = (1.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0, 1.0 - c);
+    let matrix = [
+        [c + v * x * x, v * x * y + s * z, v * x * z - s * y, 0.0],
+        [v * x * y - s * z, c + v * y * y, v * y * z + s * x, 0.0],
+        [v * x * z + s * y, v * y * z - s * x, c + v * z * z, 0.0],
+        [5.0, -3.0, 7.0, 1.0],
+    ];
+    let mut body = body;
+    transform_matrix(&mut k, &mut body, &matrix, true).unwrap();
+    let kept = foot_faces(&body);
+    assert_eq!(kept.len(), count, "a turned bead lost a definition");
+    for (_, face) in kept {
+        let def = face.procedural_blend().unwrap();
+        assert!(
+            def.recertify(&k).is_ok(),
+            "a turned face is no longer its definition's"
+        );
     }
 }
 
@@ -2746,19 +2895,46 @@ fn leg_fits(k: &mut Kernel, b: &mut Brep, at: [f64; 3], legs: [f64; 2]) -> Vec<f
 
 /// A leg far past a narrow face is refused with the leg that fits: on a face 0.05 wide a leg
 /// of 1e6 is refused with 0.05 (the search stops at a ten-millionth of the leg found, not of
-/// the leg asked, which would leave 0).
+/// the leg asked, which would leave 0): no more than the face's width, where the face's plane
+/// ends and no foot is found, and below it by no more than the search's stop,
+/// `1e-7 (1 + 0.05)`. At the leg named the bead builds.
 #[test]
 fn a_leg_far_past_a_narrow_face_is_refused_with_the_leg_that_fits() {
+    use solidcore::error::FitMeasure;
     let mut k = kernel();
     let (mut b, at) = ledge(&mut k, 0.05);
-    let fits = leg_fits(&mut k, &mut b, at, [1e6, 5.0]);
-    let least = fits.iter().copied().fold(f64::INFINITY, f64::min);
-    assert!((0.05 - 1e-6..=0.05 + 1e-4).contains(&least), "{fits:?}");
+    let joint = pick(&k, &b, at);
+    // the other leg, 0.02, fits either face: the narrow one is the one that refuses 1e6 with
+    // a leg below 1
+    let mut narrow = None;
+    for face in edge::faces(&b, joint, None).unwrap() {
+        let size = ChamferSize::Distances([1e6, 0.02]);
+        let along = [Some(face)];
+        let err = weld_bead_body(&mut k, &mut b, &[joint], &[size], 0.0, &along, &[], SQUARE)
+            .err()
+            .unwrap();
+        let fit = err.fit().unwrap();
+        assert_eq!(fit.measure, FitMeasure::Leg, "{err:?}");
+        println!("a leg of 1e6 along {face:?}: {} fits, {err}", fit.size);
+        if fit.size < 1.0 {
+            narrow = Some((face, fit.size));
+        }
+    }
+    let (face, fit) = narrow.expect("the narrow face refuses the leg");
+    assert!((0.05 - 1.1e-7..=0.05).contains(&fit), "{fit}");
+    let size = ChamferSize::Distances([fit, 0.02]);
+    let along = [Some(face)];
+    if let Err(refused) =
+        weld_bead_body(&mut k, &mut b, &[joint], &[size], 0.0, &along, &[], SQUARE)
+    {
+        panic!("refused at the leg named, {fit}: {refused:?}");
+    }
 }
 
 /// A face narrower than the smallest leg the body builds leaves no room: on a face 5e-5 wide
 /// (the body's tolerance is 1e-5, a leg is built from eight times it) no leg fits, whether 1
-/// or 1e6 is asked, so the fit is 0.
+/// or 1e6 is asked, so the fit is 0. The refusal is that the face has no toe at the leg
+/// (`NoToeAtLeg`: it ends within the leg).
 #[test]
 fn a_face_narrower_than_the_body_s_resolution_leaves_no_room() {
     let mut k = kernel();
@@ -2768,6 +2944,105 @@ fn a_face_narrower_than_the_body_s_resolution_leaves_no_room() {
         let fits = leg_fits(&mut k, &mut b, at, [leg, 5.0]);
         assert!(fits.contains(&0.0), "{leg}: {fits:?}");
     }
+    let joint = pick(&k, &b, at);
+    let size = ChamferSize::Distances([1.0, 5.0]);
+    let err = weld_bead_body(&mut k, &mut b, &[joint], &[size], 0.0, &[], &[], SQUARE)
+        .err()
+        .unwrap();
+    assert!(format!("{err:?}").contains("NoToeAtLeg"), "{err:?}");
+    assert_eq!(err.fit().map(|f| f.size), Some(0.0), "{err:?}");
+}
+
+/// A leg below the body's resolution is refused for its size by the welds' one entry point
+/// with square ends (the foot blend) as by the beads apart, before anything is read or
+/// built: `SizeBelowResolution` naming the edge and the leg. Built, such a leg was a sliver
+/// that did not close into a solid, or ran the skin to its station cap. In the square corner
+/// (the body's tolerance is 1e-5, a leg is built from eight times it) legs of 5e-5 and 5,
+/// 5e-5 twice, and 1e-9 and 5; on a ledge 5e-5 wide a leg of 4e-5.
+#[test]
+fn a_leg_below_the_body_s_resolution_is_refused_by_the_foot_blend_too() {
+    let below = |err: &SolidError, leg: f64| match err.blend_failure() {
+        Some(&BlendFailure::SizeBelowResolution { size, .. }) => (size - leg).abs() <= 1e-12 * leg,
+        _ => false,
+    };
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let joint = pick(&k, &b, at);
+    let before = smb(&k, &b);
+    for legs in [[5e-5, 5.0], [5e-5, 5e-5], [1e-9, 5.0]] {
+        let size = ChamferSize::Distances(legs);
+        let apart = beads_apart(&mut k, &mut b, &[joint], &[size], 0.0, &[]).unwrap_err();
+        assert!(below(&apart, legs[0]), "{legs:?} apart: {apart:?}");
+        let err = weld_bead_body(&mut k, &mut b, &[joint], &[size], 0.0, &[], &[], SQUARE)
+            .err()
+            .unwrap();
+        assert!(below(&err, legs[0]), "{legs:?}: {err:?}");
+        assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err:?}");
+        assert_eq!(named_edge(&err), Some(joint), "{err:?}");
+        assert!(smb(&k, &b) == before, "the corner changed");
+    }
+    let mut k = kernel();
+    let (mut b, at) = ledge(&mut k, 5e-5);
+    let joint = pick(&k, &b, at);
+    let size = ChamferSize::Distances([4e-5, 5.0]);
+    let err = weld_bead_body(&mut k, &mut b, &[joint], &[size], 0.0, &[], &[], SQUARE)
+        .err()
+        .unwrap();
+    assert!(below(&err, 4e-5), "{err:?}");
+}
+
+/// With shaped ends too, what does not depend on the sagitta is refused on every joint before
+/// any joint's sagitta: on the T-joint with tapered ends and a sagitta of 100, the right
+/// bead's legs below the body's resolution are refused for their size, naming its edge (not
+/// the left bead's sagitta, nor the right's own, whose fit a retry would refuse for the legs).
+/// With the right legs as the left's the sagitta is refused, with the fit the beads apart
+/// name to within the foot blend's hair below the bound (a thousand-millionth of it, where
+/// the exact bead's is the float below).
+#[test]
+fn a_shaped_bead_s_legs_are_refused_on_every_joint_before_a_sagitta() {
+    use solidcore::error::FitMeasure;
+    let mut k = kernel();
+    let mut t = tee(&mut k);
+    let left = pick(&k, &t, [-5.0, 0.0, LENGTH / 2.0]);
+    let right = pick(&k, &t, [5.0, 0.0, LENGTH / 2.0]);
+    let spans = BeadSpan::along(&[(0.2, 0.8)]).unwrap();
+    let whole = ChamferSize::Distances([SETBACK; 2]);
+    let mut shaped = |sizes: [ChamferSize; 2]| {
+        let ends = [BeadEnd::Taper; 2];
+        weld_bead_body(
+            &mut k,
+            &mut t,
+            &[left, right],
+            &sizes,
+            100.0,
+            &[],
+            &spans,
+            ends,
+        )
+        .err()
+        .unwrap()
+    };
+    for leg in [5e-5, 1e-9] {
+        let err = shaped([whole, ChamferSize::Distances([leg; 2])]);
+        assert!(
+            matches!(
+                err.blend_failure(),
+                Some(BlendFailure::SizeBelowResolution { .. })
+            ),
+            "{leg}: {err:?}"
+        );
+        assert_eq!(named_edge(&err), Some(right), "{leg}: {err:?}");
+    }
+    let fit = shaped([whole; 2]).fit().unwrap();
+    assert_eq!(fit.measure, FitMeasure::Sagitta, "{fit:?}");
+    let apart = beads_apart(&mut k, &mut t, &[left, right], &[whole; 2], 100.0, &[])
+        .unwrap_err()
+        .fit()
+        .unwrap();
+    assert!(
+        fit.size <= apart.size && apart.size - fit.size <= 2e-9 * apart.size,
+        "{fit:?} {apart:?}"
+    );
 }
 
 /// The legs are refused before the sagitta: in the square corner (faces 40 wide) legs 60 and
