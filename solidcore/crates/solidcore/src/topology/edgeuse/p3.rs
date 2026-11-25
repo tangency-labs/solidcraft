@@ -1758,7 +1758,7 @@ pub fn get_or_create_uv_trim_curve(
 
     // arrive here to build UVTrimCurve: create a new UVTrimCurve: err return value =
     // CreateUVTrimCurve err return value
-    let mut created = match create_uv_trim_curve(k, b, eu, want_deviation, None) {
+    let created = match create_uv_trim_curve(k, b, eu, want_deviation, None) {
         Ok(c) => c,
         Err(
             e @ (SolidError::Unported { .. }
@@ -1773,31 +1773,9 @@ pub fn get_or_create_uv_trim_curve(
             return Ok(out);
         }
     };
-    // Not upstream (tangency-labs/solidcore#3399): a trim far enough from its edge to raise the
-    // edge's tolerance is fitted again, tighter, and the closer of the two is kept. The drop's
-    // fit error (up to the fit tolerance, the edge's own) is part of that distance, and the
-    // edge is raised to cover the trim, not the curve it was fitted from: a line dropped onto a
-    // cylinder at 4e-5 gave a trim 2.7e-5 from the line where the line is 2.5e-5 from the
-    // cylinder, and raised the edge and its two vertices to 5.4e-5 instead of 5.0e-5.
-    // (a validate-only pass raises nothing, so it fits once)
-    let raising = !(k.caches.hold_trim_raise || b.validate_only());
-    if let Some(e) = edge(b, eu)?.filter(|_| raising) {
-        if b.edge(e)?.tolerance < 2.0 * created.max_dist_to_surf {
-            let fit = zone_tol3d(k, REFIT_SHARE * fit_tolerance(k, b, e)?);
-            if let Some(tight) = ignored(create_uv_trim_curve_fitted(
-                k,
-                b,
-                eu,
-                want_deviation,
-                None,
-                Some(fit),
-            ))? {
-                if tight.max_dist_to_surf < created.max_dist_to_surf {
-                    created = tight;
-                }
-            }
-        }
-    }
+    // Not upstream (tangency-labs/solidcore#3399): a trim that would raise its edge is fitted
+    // again, tighter ([`refit_raising_trim`]).
+    let created = refit_raising_trim(k, b, eu, want_deviation, created)?;
 
     // Save max edge to projected TrimCurve distances. If one is Null and the other is
     // non-Null, return the whole distance in the non-Null one. (If pdOptDistToSurf is
@@ -1846,6 +1824,51 @@ pub fn get_or_create_uv_trim_curve(
         target_fail.as_mut(),
     )?;
     Ok(out)
+}
+
+/// Not upstream (tangency-labs/solidcore#3399): `created`, the new trim of `eu`, or the same
+/// trim fitted again at [`REFIT_SHARE`] of the fit tolerance where that one lies closer to the
+/// edge, when `created` lies far enough from the edge to raise its tolerance
+/// (`SetUVTrimCurve` raises a tolerance below twice the distance). The drop's fit error (up to
+/// the fit tolerance, the edge's own) is part of that distance, and the edge is raised to
+/// cover the trim, not the curve it was fitted from: a line dropped onto a cylinder at 4e-5
+/// gave a trim 2.7e-5 from the line where the line is 2.5e-5 from the cylinder, and raised the
+/// edge and its two vertices to 5.4e-5 instead of 5.0e-5. A validate-only pass raises nothing
+/// (`Kernel::with_held_trim_raise`, `bValidateOnly`), so it fits once; a refit that fails
+/// leaves `created`.
+///
+/// # Errors
+///
+/// Those of [`fit_tolerance`]; the hard statuses of [`create_uv_trim_curve`].
+fn refit_raising_trim(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    want_deviation: bool,
+    created: CreatedUvTrimCurve,
+) -> Result<CreatedUvTrimCurve> {
+    if k.caches.hold_trim_raise || b.validate_only() {
+        return Ok(created);
+    }
+    let Some(e) = edge(b, eu)? else {
+        return Ok(created);
+    };
+    if b.edge(e)?.tolerance >= 2.0 * created.max_dist_to_surf {
+        return Ok(created);
+    }
+    let fit = zone_tol3d(k, REFIT_SHARE * fit_tolerance(k, b, e)?);
+    let tight = ignored(create_uv_trim_curve_fitted(
+        k,
+        b,
+        eu,
+        want_deviation,
+        None,
+        Some(fit),
+    ))?;
+    Ok(match tight {
+        Some(t) if t.max_dist_to_surf < created.max_dist_to_surf => t,
+        _ => created,
+    })
 }
 
 /// Not upstream (#18162, #18009): the distance `SetUVTrimCurve` raises an edge's tolerance to
