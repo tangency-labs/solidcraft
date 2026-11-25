@@ -3611,6 +3611,23 @@ struct TrimBefore {
 /// pieces cut once more (about 70 µs a piece on a dense loft net).
 const KEEP_COVERED_PIECES: usize = 64;
 
+/// The share of its tolerance within which [`keep_trim_covered`] takes an edited trim as covered
+/// on the cheaper proof of `edgeuse::p3::trim_within_proved` (enclosures of the second-order
+/// term over a few pieces, many point values), before the bisection of `trim_deviation_bound`.
+///
+/// The bisection would raise nothing there either. Its budget holds while every end value it
+/// has evaluated is at most the tolerance, and with the gap proved within half of it they all
+/// are (each encloses the gap at a point, to rounding); so it either runs out of pieces (no
+/// bound, no raise) or closes every piece. A piece closes on a bound at most the tolerance, or
+/// at most the largest end value, or on a second term at most the larger of a thousandth of its
+/// end values and the floor (a thousandth of the fit tolerance, which the caller holds to at
+/// most a quarter of the tolerance), with a slack at most that of the cheaper proof's piece
+/// around it (its box inside that piece's), which that proof counts twice. Each closed piece's
+/// bound is then at most half the tolerance plus a quarter of it and rounding: the bound is
+/// within the tolerance, and nothing is raised. On Grip (#14250) none of the 2354 bounds after the corner fixes raised a
+/// tolerance, and the bisection took 22.6 s of them.
+const TRIM_PROVED_SHARE: f64 = 0.5;
+
 /// Not upstream (#18162): after [`fix_uv_trim_curves_notified`] edited the UV trim held at
 /// `holder` for `eu`, raises the edge's tolerance to the trim's enclosed distance from the
 /// edge curve (`trim_deviation_bound`) where it no longer covers the trim but covered it
@@ -3671,6 +3688,20 @@ fn keep_trim_covered(
         return Ok(());
     }
     let fit = crate::topology::edgeuse::p3::fit_tolerance(k, b, e)?;
+    // (a trim proved within half its tolerance by the cheaper proof raises nothing, and the
+    // bisection would not raise it either: see `TRIM_PROVED_SHARE`)
+    if 1.0e-3 * fit <= TRIM_PROVED_SHARE * TRIM_PROVED_SHARE * tolerance
+        && crate::topology::edgeuse::p3::trim_within_proved(
+            k,
+            b,
+            eu,
+            held_curve(b, holder)?,
+            fit,
+            TRIM_PROVED_SHARE * tolerance,
+        )?
+    {
+        return Ok(());
+    }
     let bound = {
         let trim = held_curve(b, holder)?;
         // (a bound within the tolerance raises nothing)

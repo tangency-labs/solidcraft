@@ -2755,6 +2755,44 @@ pub(crate) fn trim_same_parameter_deviation_bound(
     )
 }
 
+/// Not upstream: whether the UV trim `trim` of `eu` is proved within `limit` of its edge's
+/// curve on the surface of `eu`'s face by the cheaper proof of
+/// [`trim_image_gap_within_proved`], on the same data and with the same floor (a thousandth of
+/// `fit`, [`TRIM_BOUND_FLOOR`]) as [`trim_deviation_bound`]. `false` where it is not, or the
+/// edge use has no face, surface, edge or curve.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; the kernel's unported and cancelled statuses.
+///
+/// [`trim_image_gap_within_proved`]: crate::query::curve_surface_gap::trim_image_gap_within_proved
+pub(crate) fn trim_within_proved(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    trim: &Curve,
+    fit: f64,
+    limit: f64,
+) -> Result<bool> {
+    let Some((e, surface)) = trim_pair_surface(b, eu)? else {
+        return Ok(false);
+    };
+    let edge_rec = b.edge(e)?;
+    let Some(curve) = edge_rec.curve.as_ref() else {
+        return Ok(false);
+    };
+    let ivl = edge_rec.interval;
+    crate::query::curve_surface_gap::trim_image_gap_within_proved(
+        k,
+        &surface,
+        curve,
+        trim,
+        [ivl.min(), ivl.max()],
+        TRIM_BOUND_FLOOR * fit,
+        limit,
+    )
+}
+
 /// Not upstream (#20373): the bound of the UV trim `trim` of `eu` that its structure gives at
 /// once, whatever the fit ([`crate::query::curve_surface_gap::structured_trim_image_gap_bound`],
 /// the one [`trim_deviation_bound`] takes first where it is within `enough`); `None` where the

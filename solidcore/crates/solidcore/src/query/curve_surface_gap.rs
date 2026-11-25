@@ -923,6 +923,18 @@ fn second_term(
     c2: V3<Ivl>,
     h: Ivl,
 ) -> Result<Option<(Ivl, f64)>> {
+    Ok(second_term_ordered(s, wd, c1, c2, h)?.map(|(term, slack, _)| (term, slack)))
+}
+
+/// [`second_term`] with whether it is the second-order term `h^2 / 8 sup |g''|` (`true`) or
+/// the first-order `h sup |g'|` across a knot line the surface is only C^0 across (`false`).
+fn second_term_ordered(
+    s: &NetSurface,
+    wd: &[V3<Ivl>],
+    c1: V3<Ivl>,
+    c2: V3<Ivl>,
+    h: Ivl,
+) -> Result<Option<(Ivl, f64, bool)>> {
     let (Some(w1), Some(w2)) = (wd.get(1), wd.get(2)) else {
         return Ok(None);
     };
@@ -943,7 +955,7 @@ fn second_term(
             let Some(m) = norm_upper(gpp) else {
                 return Ok(None);
             };
-            (h * h * Ivl::from(m) * Ivl::from(0.125), slack)
+            (h * h * Ivl::from(m) * Ivl::from(0.125), slack, true)
         }
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
         // a knot line the surface is only C^0 across (a patch corner the curve ends on):
@@ -954,7 +966,7 @@ fn second_term(
             let Some(m) = norm_upper(minus(c1, sw)) else {
                 return Ok(None);
             };
-            (h * Ivl::from(m), slack)
+            (h * Ivl::from(m), slack, false)
         }
     };
     Ok(Some(term))
@@ -4298,6 +4310,275 @@ pub fn clamped_trim_gap_bound(
     }
     let bound = (Ivl::from(inner) + worst).hi;
     Ok(bound.is_finite().then_some(bound))
+}
+
+/// The pieces [`trim_image_gap_within_proved`] encloses the gap's second-order term over.
+const PROVED_PIECES: usize = 4;
+
+/// The most points [`trim_image_gap_within_proved`] evaluates in one of its pieces (a power of
+/// two).
+const PROVED_POINTS: usize = 64;
+
+/// How much longer than `h / n` a part of [`trim_image_gap_within_proved`] may be, its ends
+/// rounded: far more than the few ulps of the range the rounding can add.
+const PART_ROUNDING: f64 = 1.0 + 1.0e-9;
+
+/// Not upstream: whether the gap of the trim `uv` from `curve` (as [`trim_image_gap_bound`]
+/// bounds it, its slacks included) is proved at most `limit` by a cheaper proof than the
+/// bisection: the range is cut into [`PROVED_PIECES`] pieces, each piece's second-order term
+/// enclosed once ([`piece_reparametrised`]), and the gap's enclosures evaluated at `n + 1`
+/// evenly spaced points of the piece, `n` chosen from the term and the margin left (at most
+/// [`PROVED_POINTS`]). On each of the `n` parts the chord argument of [`piece_reparametrised`]
+/// holds with the piece's enclosure of `sup |g''|` (or of `sup |g'|` where the piece may hold
+/// a corner), which encloses the part's: the part's term is the piece's over `n^2` (over `n`
+/// at a corner), and the part's slack is at most the piece's, its box inside the piece's. The
+/// gap over the piece is then at most the largest point value plus that term plus the slack.
+/// The slack is counted twice against `limit`, so a caller may also add any slack of a part to
+/// the gap and stay within it. `false` when that does not show it at most `limit`, or where [`trim_image_gap_bound_within`]
+/// would not enclose it the same way (no exact data, a corner in the reparametrisation, or a
+/// line against a trim of degree 1, which it also bounds through the identity).
+///
+/// The proof is the bisection's with fewer enclosures and more points: a point costs about as
+/// much as an enclosure, and a gap well within `limit` needs few points but many halvings
+/// before the bisection's pieces close (`app-perf` Grip, #14250: 2354 bounds after the corner
+/// fixes of `fix_uv_trim_curves`, 22.6 s, none of them past the tolerance).
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub(crate) fn trim_image_gap_within_proved(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    uv: &Curve,
+    range: [f64; 2],
+    floor: f64,
+    limit: f64,
+) -> Result<bool> {
+    if !(floor.is_finite() && floor >= 0.0 && limit.is_finite() && limit > 0.0) {
+        return Ok(false);
+    }
+    let Some(TrimPair {
+        cn,
+        c_slack,
+        wn,
+        net,
+    }) = TrimPair::of(k, surface, curve, uv, range)?
+    else {
+        return Ok(false);
+    };
+    if cn.p == 1 && wn.p == 1 {
+        return Ok(false);
+    }
+    let Some(to_surface) = bisection_residual(surface, &net) else {
+        return Ok(false);
+    };
+    let c_slack = if to_surface > 0.0 {
+        (Ivl::from(c_slack) + Ivl::from(to_surface)).hi
+    } else {
+        c_slack
+    };
+    if !c_slack.is_finite() {
+        return Ok(false);
+    }
+    let knots: Vec<f64> = cn.u.iter().chain(wn.u.iter()).copied().collect();
+    let Some(psi) = reparametrisation(k, surface, curve, uv, range, &knots, floor)? else {
+        return Ok(false);
+    };
+    let [r0, r1] = range;
+    if !kinks(&psi, r0, r1).is_empty() {
+        return Ok(false);
+    }
+    let sides = Sides {
+        curve: &cn,
+        trim: &wn,
+        psi: &psi,
+        curve_kinks: kinks(&cn, r0, r1),
+        trim_kinks: kinks(&wn, r0, r1),
+        range,
+    };
+    // (the gap without the curve's slack, rounded down: a gap at most it has a bound at most
+    // `limit`)
+    let target = (Ivl::from(limit) - Ivl::from(c_slack)).lo;
+    if !(target > 0.0) {
+        return Ok(false);
+    }
+    let at = |i: usize, n: usize| {
+        if i == n {
+            r1
+        } else {
+            #[allow(clippy::cast_precision_loss)] // small counts
+            let f = i as f64 / n as f64;
+            r0 + (r1 - r0) * f
+        }
+    };
+    for i in 0..PROVED_PIECES {
+        k.check_cancelled(OP)?;
+        let (a, b) = (at(i, PROVED_PIECES), at(i + 1, PROVED_PIECES));
+        let Some(p) = soft(proved_piece(&sides, &net, a, b))? else {
+            return Ok(false);
+        };
+        let mut ends = 0.0_f64;
+        for t in [a, b] {
+            let Some(g) = soft(reparametrised_endpoint(&sides, &net, t))? else {
+                return Ok(false);
+            };
+            ends = ends.max(g);
+        }
+        // (the terms a part `n` times shorter has: the second order's over `n^2`, a first
+        // order's and the corners' over `n`)
+        let part = |n: f64| {
+            let order = if p.second_order { n * n } else { n };
+            (Ivl::from(p.term) / Ivl::from(order) + Ivl::from(p.corners) / Ivl::from(n))
+                * Ivl::from(PART_ROUNDING)
+        };
+        let margin = target - ends - 2.0 * p.slack;
+        if !(margin > 0.0) {
+            return Ok(false);
+        }
+        // (the parts, a power of two so that `1 / n` is exact, at least twice as many as the
+        // terms alone need: the point values between the ends may be larger than the ends)
+        let Some(n) = (0..=PROVED_POINTS.trailing_zeros())
+            .map(|e| 1usize << e)
+            .find(|&n| {
+                #[allow(clippy::cast_precision_loss)] // small counts
+                let n = n as f64;
+                part(n).hi <= 0.5 * margin
+            })
+        else {
+            return Ok(false);
+        };
+        for j in 1..n {
+            #[allow(clippy::cast_precision_loss)] // small counts
+            let t = a + (b - a) * (j as f64 / n as f64);
+            let Some(g) = soft(reparametrised_endpoint(&sides, &net, t))? else {
+                return Ok(false);
+            };
+            ends = ends.max(g);
+        }
+        #[allow(clippy::cast_precision_loss)] // small counts
+        let terms = part(n as f64);
+        let bound = (Ivl::from(ends) + terms + Ivl::from(2.0) * Ivl::from(p.slack)).hi;
+        if !(bound <= target) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// `r`, with a failure other than the kernel's unported and cancelled statuses as `None`: an
+/// evaluation past a net or on a knot line leaves [`trim_image_gap_within_proved`]'s gap
+/// unproved, as it leaves a piece of the bisection unbounded.
+fn soft<T>(r: Result<Option<T>>) -> Result<Option<T>> {
+    match r {
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(_) => Ok(None),
+        Ok(x) => Ok(x),
+    }
+}
+
+/// The terms of one piece of [`trim_image_gap_within_proved`]: `term` the second-order term
+/// `h^2 / 8 sup |g''|` of [`second_term`] (`second_order`; else its first-order `h sup |g'|`
+/// across a knot line the surface is only C^0 across), `corners` the sum over the corners of
+/// either curve inside the piece of `h / 4` times the jump of `g'` there, and the surface's
+/// slack.
+struct ProvedPiece {
+    term: f64,
+    second_order: bool,
+    corners: f64,
+    slack: f64,
+}
+
+/// The terms of the piece `[a, b]` of `g = C(ψ(s)) - S(W(s))` ([`ProvedPiece`]). Where `C` or
+/// `W` has a corner (a knot of multiplicity its degree) inside the piece, `g` is `f + Σ Δ_i
+/// (s - s_i)_+`, `f` C^1 with `f''` the hull of the spans' second derivatives and `Δ_i` the
+/// jump of `g'` at the corner `s_i`; the chord of `(s - s_i)_+` over the piece is within
+/// `h / 4` of it, so `|g - ℓ| <= h^2 / 8 sup |f''| + h / 4 Σ |Δ_i|`, `ℓ` the chord of `g`'s end
+/// values. A corner of `C` is at an unknown `s_i` (where `ψ` reaches the knot) but its jump is
+/// `ΔC' ψ'(s_i)`, enclosed with `ψ'` over the piece; a corner of `W` jumps by
+/// `S_u Δu' + S_v Δv'`. The curves' fitted intersection curves are cubic Hermite splines whose
+/// knots all have the degree's multiplicity, with one tangent each side: their jumps are
+/// rounding, where the bisection's first-order term across a corner is the gap's whole slope.
+/// `None` when a term is not enclosed.
+fn proved_piece(
+    sides: &Sides<'_>,
+    s: &NetSurface,
+    a: f64,
+    b: f64,
+) -> Result<Option<ProvedPiece>> {
+    let Sides {
+        curve: cn,
+        trim: wn,
+        psi,
+        range,
+        ..
+    } = *sides;
+    let span_ivl = Ivl::new(a, b);
+    let Some(r) = psi_over(psi, span_ivl, 2, range)? else {
+        return Ok(None);
+    };
+    let (Some(&r0), Some(&p1), Some(&p2)) = (r.first(), r.get(1), r.get(2)) else {
+        return Ok(None);
+    };
+    let cd = curve_derivs_over(cn, r0, 2, None)?;
+    let wd = curve_derivs_over(wn, span_ivl, 2, None)?;
+    let (Some(c1), Some(c2)) = (cd.get(1), cd.get(2)) else {
+        return Ok(None);
+    };
+    let cp = scaled(*c1, p1);
+    let cpp = plus(scaled(*c2, p1 * p1), scaled(*c1, p2));
+    let h = Ivl::from(b) - Ivl::from(a);
+    let Some((term, slack, second_order)) = second_term_ordered(s, &wd, cp, cpp, h)? else {
+        return Ok(None);
+    };
+    // (the one-sided first derivatives of a curve at its corner `x`: the spans ending and
+    // starting there)
+    let sides_at = |n: &NurbsCurve, x: f64| -> Result<Option<V3<Ivl>>> {
+        let right = span(&n.u, n.p, n.n, x);
+        let mut left = right;
+        while left > n.p && !(knot(&n.u, left as isize) < x) {
+            left -= 1;
+        }
+        if !(knot(&n.u, left as isize) < x && knot(&n.u, right as isize) <= x) || left == right {
+            return Ok(None);
+        }
+        let at = Ivl::from(x);
+        let l = curve_derivs_over(n, at, 1, Some(left))?;
+        let r = curve_derivs_over(n, at, 1, Some(right))?;
+        Ok(match (l.get(1), r.get(1)) {
+            (Some(&l1), Some(&r1)) => Some(minus(r1, l1)),
+            _ => None,
+        })
+    };
+    let mut jumps = Ivl::from(0.0);
+    for &x in sides.curve_kinks.iter().filter(|&&x| r0.lo < x && x < r0.hi) {
+        let Some(dc) = sides_at(cn, x)? else {
+            return Ok(None);
+        };
+        let Some(j) = norm_upper(scaled(dc, p1)) else {
+            return Ok(None);
+        };
+        jumps = jumps + Ivl::from(j);
+    }
+    for &y in sides.trim_kinks.iter().filter(|&&y| a < y && y < b) {
+        let Some(dw) = sides_at(wn, y)? else {
+            return Ok(None);
+        };
+        let w0 = curve_derivs_over(wn, Ivl::from(y), 0, None)?;
+        let (p, _) = s.partials(&w0, 1, 0)?;
+        let Some(j) = norm_upper(plus(scaled(p.at(1, 0), dw.x), scaled(p.at(0, 1), dw.y))) else {
+            return Ok(None);
+        };
+        jumps = jumps + Ivl::from(j);
+    }
+    let corners = (h * jumps * Ivl::from(0.25)).hi;
+    let term = term.hi;
+    Ok((term.is_finite() && corners.is_finite() && slack.is_finite()).then_some(ProvedPiece {
+        term,
+        second_order,
+        corners,
+        slack,
+    }))
 }
 
 /// Not upstream (#18166): the bound `first` of a curve against a surface (`None` where it is
