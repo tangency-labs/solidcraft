@@ -187,8 +187,9 @@ pub enum IntersectFailure {
         tries: usize,
     },
     /// No vertex use at an end of the edge to insert has a sector of the face the curve runs
-    /// in: the curve does not classify to that face consistently at its ends. Class
-    /// `missing`.
+    /// in: the curve does not classify to that face consistently at its ends. The sectors
+    /// are the kernel's own classification of a curve it placed on the face, so this is a
+    /// defect: class `stage_failed`.
     NoEndSector,
     /// A drop of a point onto a curve, a surface or a volume (a point solve) found no foot
     /// point. Class `failed`.
@@ -208,7 +209,8 @@ pub enum IntersectFailure {
     /// surface of a local solve). [`ErrorKind::InvalidInput`].
     NoObjectToSolve,
     /// The uv sector of a vertex use, computed with its status ignored as upstream, names no
-    /// edge use on the side the classified curve leaves along. Class `missing`.
+    /// edge use on the side the classified curve leaves along. The sector is the kernel's
+    /// own, so this is a defect: class `stage_failed`.
     NoSectorEdgeuse,
     /// The curve classification has no source curve, or its handle names no curve in the
     /// geometry given (the caller sets it with `set_curve`). The caller's classification:
@@ -373,7 +375,7 @@ pub enum IntersectFailure {
     /// has no direction.
     StepTangentTooShort,
     /// No surface cache of a surface the routine works on, or its tree, could be built (the
-    /// build's error is the cause). Class `missing`; whether it is a defect or a refusal is
+    /// build's error is the cause). Class `failed`, as `CurveCacheNotBuilt`; whether it is a defect or a refusal is
     /// its cause's ([`crate::SolidError::is_defect`] follows the chain).
     SurfaceCacheNotBuilt,
     /// Surface `surface` (0 or 1) of a law intersection is not an offset surface, the only
@@ -614,6 +616,7 @@ impl IntersectFailure {
             | Self::SphereTrimNotCertified { .. }
             | Self::SqueezeStalled
             | Self::StepTangentTooShort
+            | Self::SurfaceCacheNotBuilt
             | Self::Tangent
             | Self::ThroughPointNotEvaluated
             | Self::TouchesUnpaired { .. }
@@ -623,10 +626,7 @@ impl IntersectFailure {
             | Self::NoSurfaceNormal
             | Self::PointAtEye
             | Self::TangentAlongNormal { .. } => ErrorKind::Degenerate,
-            Self::Missing(_)
-            | Self::NoEndSector
-            | Self::NoSectorEdgeuse
-            | Self::SurfaceCacheNotBuilt => ErrorKind::Missing,
+            Self::Missing(_) => ErrorKind::Missing,
             Self::OutsideDomain(_)
             | Self::ParameterOffClassifiedCurve { .. }
             | Self::PointOutsideDomain { .. }
@@ -634,7 +634,9 @@ impl IntersectFailure {
             Self::PointsWhereAPlaneCrosses { .. } | Self::MoveNotProved { .. } => {
                 ErrorKind::NotWithinTolerance
             }
-            Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::NoEndSector | Self::NoSectorEdgeuse | Self::StageFailed | Self::Defect { .. } => {
+                ErrorKind::StageFailed
+            }
         }
     }
 }
@@ -956,11 +958,11 @@ pub(super) mod tests {
             (IntersectFailure::IntervalEndMisplaced, ErrorKind::Failed),
             (IntersectFailure::IntervalNotDegenerate, ErrorKind::Failed),
             (IntersectFailure::Missing("x"), ErrorKind::Missing),
-            (IntersectFailure::NoEndSector, ErrorKind::Missing),
+            (IntersectFailure::NoEndSector, ErrorKind::StageFailed),
             (IntersectFailure::NoFoot, ErrorKind::Failed),
             (IntersectFailure::NoIntersection, ErrorKind::Failed),
             (IntersectFailure::NoKnots, ErrorKind::Failed),
-            (IntersectFailure::NoSectorEdgeuse, ErrorKind::Missing),
+            (IntersectFailure::NoSectorEdgeuse, ErrorKind::StageFailed),
             (IntersectFailure::OnlyInterval, ErrorKind::Failed),
             (
                 IntersectFailure::OutsideDomain("x"),
@@ -974,7 +976,7 @@ pub(super) mod tests {
             (IntersectFailure::SeamTouchOffSeam, ErrorKind::Failed),
             (IntersectFailure::SqueezeStalled, ErrorKind::Failed),
             (IntersectFailure::StepTangentTooShort, ErrorKind::Failed),
-            (IntersectFailure::SurfaceCacheNotBuilt, ErrorKind::Missing),
+            (IntersectFailure::SurfaceCacheNotBuilt, ErrorKind::Failed),
             (IntersectFailure::Tangent, ErrorKind::Failed),
             (
                 IntersectFailure::ThroughPointNotEvaluated,
@@ -1344,19 +1346,17 @@ pub(super) mod tests {
                 SM_ERR,
                 K::InvalidInput,
             ),
-            (F::SurfaceCacheNotBuilt, SM_ERR_NULL_POINTER, K::Missing),
+            (F::SurfaceCacheNotBuilt, SM_ERR_NULL_POINTER, K::Failed),
             (
                 F::TouchesUnpaired { count: 3 },
                 SM_ERR_ASSERT_FAILURE,
                 K::Failed,
             ),
             (F::SeamTouchOffSeam, SM_ERR, K::Failed),
-            (F::NoSectorEdgeuse, SM_ERR_NULL_POINTER, K::Missing),
             (F::SqueezeStalled, SM_ERR, K::Failed),
             (F::RepairDidNotSettle { restarts: 4 }, SM_ERR, K::Failed),
             (F::IntervalEndMisplaced, SM_ERR, K::Failed),
             (F::PointClassNotInserted, SM_ERR, K::Failed),
-            (F::NoEndSector, SM_ERR_NULL_POINTER, K::Missing),
             (
                 F::IntervalCountsDiffer { this: 2, other: 3 },
                 SM_ERR,
@@ -1405,6 +1405,14 @@ pub(super) mod tests {
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.intersect_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+        }
+        // a sector of the kernel's own classification that is not there is a defect, keeping
+        // the null pointer status
+        for failure in [F::NoEndSector, F::NoSectorEdgeuse] {
+            let e = SolidError::intersect(op, failure);
+            assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER), "{failure:?}");
+            assert_eq!(e.kind(), K::StageFailed, "{failure:?}");
+            assert!(e.is_defect() && !e.is_refusal(), "{failure:?}");
         }
         // a cache or squeeze failure keeps the error it chains as its cause
         let why = "a step the kernel got wrong";

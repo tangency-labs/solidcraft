@@ -126,7 +126,8 @@ pub enum QueryFailure {
     NoTessDriver,
     /// The face's surface cache is not a trimmed one: its trim curves could not be cached (the
     /// trimmed build's error is not kept by the cache lease, so there is no cause to chain).
-    /// Status `SM_ERR_NULL_POINTER`, class `missing`.
+    /// Status `SM_ERR_NULL_POINTER`, class `failed`, as a surface cache that could not be
+    /// built: the cache is the kernel's, never a missing input.
     NoTrimmedCache,
     /// The cache's poly B-rep has no face (the caller's poly B-rep: phase 1 gives it one).
     /// [`ErrorKind::InvalidInput`].
@@ -267,6 +268,7 @@ impl QueryFailure {
             | Self::NoLoopClassifies
             | Self::NoLoopTouches
             | Self::NoStationDropped
+            | Self::NoTrimmedCache
             | Self::RegionNotFound
             | Self::RegionWithoutShells
             | Self::SegmentOutsideTree
@@ -296,7 +298,7 @@ impl QueryFailure {
             | Self::UvLineNotMade
             | Self::VertexuseWithoutVertex
             | Self::ZeroLengthVector => ErrorKind::InvalidInput,
-            Self::Missing(_) | Self::NoTrimmedCache => ErrorKind::Missing,
+            Self::Missing(_) => ErrorKind::Missing,
             Self::SurfaceWithoutNurbs | Self::UnsupportedObjectKind => ErrorKind::Unsupported,
         }
     }
@@ -426,7 +428,7 @@ pub(super) mod tests {
             (QueryFailure::NoLoopClassifies, ErrorKind::Failed),
             (QueryFailure::NoLoopTouches, ErrorKind::Failed),
             (QueryFailure::NoStationDropped, ErrorKind::Failed),
-            (QueryFailure::NoTrimmedCache, ErrorKind::Missing),
+            (QueryFailure::NoTrimmedCache, ErrorKind::Failed),
             (QueryFailure::RegionNotFound, ErrorKind::Failed),
             (QueryFailure::RegionWithoutShells, ErrorKind::Failed),
             (QueryFailure::SegmentOutsideTree, ErrorKind::Failed),
@@ -531,7 +533,7 @@ pub(super) mod tests {
             ),
             (F::BoundaryNotIntersected, SM_ERR, K::Failed),
             (F::NoLoopClassifies, SM_ERR, K::Failed),
-            (F::NoTrimmedCache, SM_ERR_NULL_POINTER, K::Missing),
+            (F::NoTrimmedCache, SM_ERR_NULL_POINTER, K::Failed),
             (F::UndefinedScale, SM_ERR_INVALID_INPUT, K::InvalidInput),
             (F::PolyEdgeNotContinuing, SM_ERR, K::InvalidInput),
             (F::PolyLoopEmpty, SM_ERR, K::InvalidInput),
