@@ -1911,8 +1911,14 @@ fn component_rows_inner(
     // With a dialog open a second click picks again: the dialog takes the component's bodies.
     let rename_here = r.slow_rename && app.dialog.is_none();
     if r.clicked && !r.double && !rename_here {
-        let names = bodies_of_component(app, id);
-        if !offer_bodies(app, &names, Take::Toggle) {
+        // The dialog's pick is offered only when it can take bodies: building the component's body
+        // list is every body of the design for the design row, which stalled the click on a large
+        // assembly (56,100 names, and a world lookup each, for nothing).
+        let took = dialog_takes_bodies(app) && {
+            let names = bodies_of_component(app, id);
+            offer_bodies(app, &names, Take::Toggle)
+        };
+        if !took {
             let ctrl = rows.ui().input(|i| i.modifiers.command || i.modifiers.ctrl);
             if !ctrl {
                 app.tree.picked_components.clear();
@@ -2800,6 +2806,13 @@ impl CanvasPanel {
             _ => self.angle,
         }
     }
+}
+
+/// Whether an open dialog has an input that takes bodies, i.e. whether clicking a component row
+/// could pick into it. Asked *before* building a component's body list: for the design that list
+/// is every body of the design (56,100 names on a large assembly), and nothing uses it otherwise.
+fn dialog_takes_bodies(app: &SolveApp) -> bool {
+    app.dialog.as_ref().is_some_and(|d| d.inputs.iter().any(|i| i.accept & crate::selection::BODIES != 0))
 }
 
 /// Does the open dialog's active input take bodies (Combine's target and tools, #4452;
