@@ -8,6 +8,8 @@
 //!
 //! 600 components of 15 pins give 52 MB. The defaults are 500 and 16; the path defaults to
 //! `board.step`.
+// A developer tool run by hand, not a process another program starts (see print_stderr in Cargo.toml).
+#![allow(clippy::print_stderr)]
 
 fn main() {
     if let Err(e) = run::main() {

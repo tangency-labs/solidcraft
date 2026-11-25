@@ -1411,6 +1411,57 @@ fn v_on_a_selected_profile_toggles_its_sketch() {
     assert!(crate::browser::sketch_visible(&app, sk), "and shows it again");
 }
 
+/// A construction plane, axis or point picked as a feature (its Features row or its timeline
+/// step) shows and hides with V and with its Features row's menu, as from the Construction folder.
+#[test]
+fn construction_picked_as_a_feature_shows_and_hides() {
+    use solidcraft_engine::doc::FeatureKind;
+    let mut app = sample_app();
+    app.run("construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Lid"})).unwrap();
+    app.run("construct.axis.two_planes", json!({"a": "XZ", "b": "YZ", "name": "Spine"})).unwrap();
+    app.run("construct.point.three_planes", json!({"a": "XY", "b": "XZ", "c": "YZ", "name": "Pin"})).unwrap();
+    let names = ["Lid", "Pin", "Spine"];
+    let ids: Vec<u64> = names.iter().map(|n| app.session.doc.find_feature(n).unwrap().id).collect();
+    let hidden = |app: &SolveApp| {
+        let mut h = app.session.visibility.hidden_origin.clone();
+        h.sort();
+        h
+    };
+    let items: Vec<serde_json::Value> = ids.iter().map(|id| json!({"type": "feature", "id": id})).collect();
+    app.run("select.set", json!({ "items": items })).unwrap();
+    context_menu::toggle_visibility(&mut app);
+    assert_eq!(hidden(&app), names, "V hides the picked construction features");
+    context_menu::toggle_visibility(&mut app);
+    assert!(hidden(&app).is_empty(), "and shows them again");
+
+    for (id, name) in ids.iter().zip(names) {
+        let t = Target::Feature { id: *id };
+        assert_eq!(find(&context_menu::items(&app, &t), "Show/Hide").shortcut, "V");
+        act(&mut app, &t, "Show/Hide");
+        assert_eq!(hidden(&app), [name], "the Features row's Show/Hide hides {name}");
+        act(&mut app, &t, "Show/Hide");
+        assert!(hidden(&app).is_empty(), "and shows {name} again");
+    }
+    // Other features' rows keep their menu without Show/Hide.
+    let other = app
+        .session
+        .doc
+        .features
+        .iter()
+        .find(|f| {
+            !matches!(
+                f.kind,
+                FeatureKind::Sketch { .. }
+                    | FeatureKind::ConstructionPlane { .. }
+                    | FeatureKind::ConstructionAxis { .. }
+                    | FeatureKind::ConstructionPoint { .. }
+            )
+        })
+        .map(|f| f.id)
+        .unwrap();
+    assert!(!context_menu::items(&app, &Target::Feature { id: other }).iter().any(|i| i.label == "Show/Hide"));
+}
+
 #[test]
 fn v_toggles_what_is_selected() {
     let mut app = sample_app();
@@ -1798,6 +1849,37 @@ fn double_click_on_a_body_row_renames_it_in_the_row() {
     h.frames(3);
     context_menu::finish_rename(&mut h.app, Some("Base"), true).unwrap();
     assert!(h.app.session.model.state().body("Base").is_some());
+}
+
+/// A command's menu opens Preferences › Keyboard Shortcuts on that command, waiting for the new key.
+#[test]
+fn a_commands_menu_changes_its_keyboard_shortcut() {
+    let mut app = sample_app();
+    app.ui.tab = "MODEL".into();
+    let items = crate::toolbar_custom::command_items(&app, "solid.extrude");
+    assert!(items.iter().any(|i| i.label == "Change Keyboard Shortcut…"), "{:?}", items.iter().map(|i| &i.label).collect::<Vec<_>>());
+    act(&mut app, &Target::ToolbarCommand { id: "solid.extrude".into() }, "Change Keyboard Shortcut…");
+    assert!(app.prefs_window.shell.open && app.prefs_window.shell.section == crate::prefs::PAGE_SHORTCUTS, "the Keyboard Shortcuts page is open");
+    assert!(crate::keymap::capturing(&app), "waiting for the new key");
+}
+
+/// A drop-down row's ⋯ opens the command's menu, and the drop-down stays open under it.
+#[test]
+fn a_dropdown_rows_more_button_opens_its_menu_over_the_open_dropdown() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.ui.tab = "MODEL".into();
+    h.frames(4);
+    h.step(&serde_json::json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
+    h.frames(3);
+    h.step(&serde_json::json!({"move":{"handle":"dropdown:solid.extrude"}})).unwrap();
+    h.frames(2);
+    h.step(&serde_json::json!({"click":{"handle":"dropdown_more:solid.extrude"}})).expect("a ⋯ on the Extrude row");
+    h.frames(2);
+    assert!(h.app.viewport.context_menu.is_some(), "the row's menu is open");
+    assert_eq!(h.app.menu.target, Target::ToolbarCommand { id: "solid.extrude".into() });
+    let open = h.ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")));
+    assert!(open.is_some(), "the drop-down stays open under the menu");
 }
 
 #[test]
@@ -3071,4 +3153,80 @@ fn sheet_flanges_from_a_sketch_offer_edit_profile_sketch() {
         assert!(edit.enabled);
         assert_eq!(edit.params, Some(json!({"sketch": sketch})));
     }
+}
+
+/// What Select All does on a design with more shown bodies than `select.set` takes: the
+/// whole-body scope. The tests below take it on small designs, where Select All lists the bodies.
+fn select_every_shown_body(app: &mut SolveApp) {
+    app.session.clear_selection();
+    app.session.selection_all_bodies = true;
+}
+
+#[test]
+fn a_whole_body_selection_names_every_shown_body_for_the_menus_and_hide_takes_them_all() {
+    let mut app = sample_app();
+    app.run("solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
+    app.run("solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5})).unwrap();
+    select_every_shown_body(&mut app);
+    // The menus build their body lists here: a whole-body selection names every shown body.
+    let shown: Vec<String> = app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    let bodies = context_menu::sel_bodies(&app);
+    assert_eq!(bodies, shown, "every shown body, in the world's order");
+    // Show/Hide then takes them all in one step (this was the "items must list ..." refusal).
+    app.run("browser.visibility", json!({"items": bodies, "visible": false})).unwrap();
+    let hidden = &app.session.visibility.hidden_bodies;
+    for name in &shown {
+        assert!(hidden.iter().any(|h| h == name), "{name} hidden: {hidden:?}");
+    }
+    // A body hidden afterwards leaves the scope, as it left the list before.
+    assert_eq!(app.session.selected_count().unwrap(), 0, "both hidden: nothing shown is selected");
+}
+
+#[test]
+fn a_whole_body_selection_then_appearance_covers_every_shown_body() {
+    let mut app = sample_app();
+    app.run("solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
+    app.run("solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5})).unwrap();
+    select_every_shown_body(&mut app);
+    let bodies = context_menu::sel_bodies(&app);
+    app.run("appearance.assign", json!({"bodies": bodies, "color": "#208040"})).unwrap();
+    for name in ["Block", "Spare"] {
+        assert!(app.session.doc.appearances.bodies.contains_key(name), "{name} took the appearance");
+    }
+}
+
+#[test]
+fn a_whole_body_selection_preselects_every_shown_body_for_move() {
+    use crate::selection::SelectionExt;
+    let mut app = sample_app();
+    app.run("solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
+    app.run("solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5})).unwrap();
+    select_every_shown_body(&mut app);
+    app.start("solid.move");
+    let d = app.dialog.as_ref().expect("the Move dialog opened");
+    let shown: Vec<String> = app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(d.inputs[0].items.body_names(), shown, "a whole-body selection preselects every shown body");
+}
+
+#[test]
+fn a_whole_body_selection_holds_every_shown_body_and_ctrl_click_takes_one_out() {
+    let mut app = sample_app();
+    app.run("solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
+    app.run("solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5})).unwrap();
+    select_every_shown_body(&mut app);
+    // A right-click on a body the scope covers keeps the selection for the menu.
+    assert!(crate::selection::holds_body(&app.session, "Spare"), "Select All holds every shown body");
+    // Ctrl+click on one of them leaves the others selected.
+    crate::viewport::select(&mut app, Some(solidcraft_engine::Sel::Body { name: "Spare".into() }), true, true);
+    let others: Vec<solidcraft_engine::Sel> = app
+        .session
+        .world_state()
+        .unwrap()
+        .bodies
+        .iter()
+        .filter(|b| b.name != "Spare")
+        .map(|b| solidcraft_engine::Sel::Body { name: b.name.clone() })
+        .collect();
+    assert_eq!(app.session.selection, others);
+    assert!(!app.session.selection_all_bodies);
 }

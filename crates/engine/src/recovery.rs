@@ -317,7 +317,7 @@ impl Snapshot {
         }
         let bytes = match self.kind {
             solidcraft_io::DesignKind::Single => solidcraft_io::write_design_container(&design)?,
-            kind => solidcraft_io::write_design_container_as(&design, kind, solidcraft_io::DesignCompression::Fast, None, None, None, None)?,
+            kind => solidcraft_io::write_design_container_as(&design, kind, solidcraft_io::DesignCompression::Fast, None, None, None, None, None)?,
         };
         // A tag that can't be written leaves a copy without one: still the design, recovered.
         let bytes = match self.internal_of.as_ref().map(|tag| solidcraft_io::with_internal_of(&bytes, Some(tag))) {

@@ -137,13 +137,14 @@ fn tidy(path: &str, open: &[String], now: u64) -> bool {
 }
 
 /// Before an interactive Open of a design: when another SolidCraft has it open, hold the request
-/// and ask (`None`); otherwise hand it back to be opened. Insert Design only reads the file, so
-/// it never asks.
+/// and ask (`None`); otherwise hand it back to be opened. Insert Design only reads the file, and a
+/// read-only open (`solidcraft --read-only`) never writes it, so neither asks.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) fn check_open(app: &mut SolveApp, request: Request) -> Option<Request> {
     if app.locks.is_none()
         || request.reply.is_some()
         || request.kind == crate::file_load::Kind::InsertDesign
+        || request.options.get("read_only").and_then(serde_json::Value::as_bool) == Some(true)
         || !solidcraft_engine::io::is_design_path(&request.path)
     {
         return Some(request);

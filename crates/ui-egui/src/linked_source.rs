@@ -348,9 +348,13 @@ fn inside_design_folder(design: Option<&str>, link: &str) -> bool {
     target.starts_with(&dir) || std::fs::canonicalize(&dir).is_ok_and(|real| target.starts_with(real))
 }
 
-/// Whether `folder` is `allowed` or below it. Windows paths compare without case, as Windows does.
+/// Whether `folder` is `allowed` or below it. Windows paths compare without case, as Windows does,
+/// and a drive path matches its `\\?\` spelling (`\\?\C:\parts` is `C:\parts`), the form
+/// `canonicalize` and some folder pickers return.
 fn folder_within(folder: &Path, allowed: &Path) -> bool {
-    let allowed = lexical(allowed);
+    // Both sides are normalised after the `\\?\` comes off: inside a verbatim path only `\`
+    // separates names, outside it `/` does too, so a `..` written with `/` resolves here.
+    let (folder, allowed) = (lexical(&drive_path(folder)), lexical(&drive_path(allowed)));
     if allowed.as_os_str().is_empty() || !allowed.is_absolute() {
         return false;
     }
@@ -365,6 +369,16 @@ fn folder_within(folder: &Path, allowed: &Path) -> bool {
         }
     }
     folder.starts_with(&allowed)
+}
+
+/// `p` without the `\\?\` of a verbatim drive path (`\\?\C:\parts` is `C:\parts`). Other verbatim
+/// paths (`\\?\UNC\…`, `\\?\Volume{…}\…`) have no drive spelling and stay as they are.
+fn drive_path(p: &Path) -> PathBuf {
+    let text = p.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if matches!(rest.as_bytes(), [drive, b':', b'\\', ..] if drive.is_ascii_alphabetic()) => PathBuf::from(rest),
+        _ => p.to_path_buf(),
+    }
 }
 
 /// Update Links (`options` as it was asked) read the shown design's links again: those it read
@@ -992,9 +1006,14 @@ mod tests {
         app.run("file.save", json!({"path": case})).unwrap();
         drop(app);
         save_part(&housing, [10.0, 20.0, 30.0], true);
-        // The folder as the engine reads it, symlinks in it resolved.
-        let folder = root.join("parts").canonicalize().unwrap().to_string_lossy().into_owned();
+        let folder = engine_folder(&root.join("parts"));
         (root, case, folder)
+    }
+
+    /// `dir` as the engine names it in a question: symlinks in it resolved, without the `\\?\`
+    /// that `canonicalize` adds on Windows.
+    fn engine_folder(dir: &std::path::Path) -> String {
+        solidcraft_engine::agent_setup::plain_path(&dir.canonicalize().unwrap())
     }
 
     /// Open `case` as File › Open does, or (`program`) as a control-channel caller does.
@@ -1053,7 +1072,7 @@ mod tests {
         saved.run("component.insert_design", json!({"path": housing})).unwrap();
         saved.run("file.save", json!({"path": case, "linked_bodies": false})).unwrap();
         drop(saved);
-        let folder = root.join("parts").canonicalize().unwrap().to_string_lossy().into_owned();
+        let folder = engine_folder(&root.join("parts"));
 
         let mut app = SolveApp::new(Session::default(), Default::default());
         open(&mut app, &case, false);
@@ -1092,7 +1111,7 @@ mod tests {
         assert!(autosaver.save(&stopped).unwrap());
         drop(autosaver);
         let entry = solidcraft_engine::recovery::orphans(&recovery).pop().unwrap();
-        let folder = root.join("parts").canonicalize().unwrap().to_string_lossy().into_owned();
+        let folder = engine_folder(&root.join("parts"));
 
         let mut app = SolveApp::new(Session::default(), Default::default());
         let kind = crate::file_load::Kind::Recover { id: entry.id.clone(), dir: Some(recovery.to_string_lossy().into_owned()) };
@@ -1136,11 +1155,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// On Windows a drive folder matches its `\\?\` spelling either way round, and a verbatim
+    /// folder with no drive (a volume or a server share) still matches itself and what is below it.
+    #[test]
+    fn verbatim_windows_folders_match_their_own_spelling() {
+        if !cfg!(windows) {
+            return;
+        }
+        let within = |folder: &str, allowed: &str| folder_within(Path::new(folder), Path::new(allowed));
+        assert!(within(r"C:\work\parts\gears", r"\\?\C:\work\parts"));
+        assert!(within(r"\\?\C:\work\parts", r"c:\work"));
+        assert!(within(r"\\?\Volume{0123}\parts\gears", r"\\?\Volume{0123}\parts"));
+        assert!(within(r"\\?\UNC\server\share\parts", r"\\?\UNC\server\share"));
+        assert!(!within(r"\\?\Volume{0123}\other", r"\\?\Volume{0123}\parts"));
+        assert!(!within(r"C:\work\parts-old", r"\\?\C:\work\parts"));
+        // Once the prefix is off, `/` separates names too, and a `..` written with it resolves.
+        assert!(!within(r"\\?\C:\work\parts/../other", r"C:\work\parts"));
+        assert!(!within(r"\\?\C:\work\parts/..", r"C:\work\parts"));
+        assert!(within(r"\\?\C:\work\parts/gears", r"C:\work\parts"));
+    }
+
     /// A folder the user allowed (or one below it) loads as it opens, with no question.
     #[test]
     fn a_link_in_an_allowed_folder_loads_without_asking() {
         let (root, case, folder) = outside_link("allowed");
-        for allowed in [folder.clone(), root.canonicalize().unwrap().to_string_lossy().into_owned()] {
+        let mut allowed_folders = vec![folder.clone(), engine_folder(&root)];
+        // The same folder as `canonicalize` spells it on Windows, `\\?\C:\…`, is the same folder.
+        if cfg!(windows) {
+            allowed_folders.push(format!(r"\\?\{folder}"));
+        }
+        for allowed in allowed_folders {
             let mut app = SolveApp::new(Session::default(), Default::default());
             app.preferences.linked_file_folders = vec![allowed];
             open(&mut app, &case, false);
@@ -1347,7 +1391,7 @@ mod tests {
         app.run("file.save", json!({"path": case})).unwrap();
         assert!(app.session.path.is_some(), "the design is saved");
         assert!((volume(&app) - 1000.0).abs() < 1e-6, "{}", volume(&app));
-        let folder = root.join("parts").canonicalize().unwrap().to_string_lossy().into_owned();
+        let folder = engine_folder(&root.join("parts"));
         // Away to another tab; the source is replaced there by a longer part.
         crate::documents::open_tab(&mut app, Session::default()).unwrap();
         export(30);

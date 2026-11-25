@@ -42,7 +42,6 @@
 mod deviation;
 mod error;
 mod grid;
-mod planar;
 mod surface;
 mod trim;
 
@@ -52,7 +51,6 @@ pub use error::MeshError;
 pub use grid::grid_lines;
 pub use grid::Dir;
 pub use grid::GridLines;
-pub use planar::triangulate_planar;
 pub use surface::NurbsSurface;
 pub use surface::SurfacePoint;
 pub use trim::mesh_trimmed;
