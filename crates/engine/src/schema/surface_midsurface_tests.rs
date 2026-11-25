@@ -129,6 +129,64 @@ fn the_aspect_limit_asked_for_is_stored_and_the_warning_asks_no_decision() {
         _ => None,
     });
     assert_eq!(stored, Some(Some(0.0)), "{reply}");
+
+    // The rebuild's warning judges the pairs left out by the stored limit. Up to 41 mm the
+    // block's three pairs of opposite faces are walls: 10 apart over 40 x 30 (aspect 3.46), 30
+    // apart over 40 x 10 (sqrt(400) / 30 = 0.67) and 40 apart over 30 x 10 (sqrt(300) / 40 =
+    // 0.43). With the 10 mm pair chosen, the other two are below an aspect of 5 and need a
+    // decision; with 0 they are sure, and the warning asks for none.
+    let analysis = s
+        .execute("surface.midsurface_analyze", &json!({"body": "Plate", "max_thickness": "41 mm", "min_aspect": 0}))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let pairs = analysis.get("pairs").and_then(Value::as_array).cloned().unwrap_or_default();
+    assert_eq!(pairs.len(), 3, "{analysis}");
+    let wall = pairs
+        .iter()
+        .find(|p| p.get("thickness").and_then(Value::as_f64).is_some_and(|t| (t - 10.0).abs() < 1e-9))
+        .and_then(|p| p.get("points"))
+        .cloned()
+        .unwrap_or_else(|| panic!("{analysis}"));
+    for (aspect, asks) in [(5.0, true), (0.0, false)] {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"})).unwrap_or_else(|e| panic!("{e}"));
+        let reply = s
+            .execute("surface.midsurface", &json!({"body": "Plate", "max_thickness": "41 mm", "min_aspect": aspect, "pairs": [wall]}))
+            .unwrap_or_else(|e| panic!("{e}"));
+        let warning = reply.get("warning").and_then(Value::as_str).unwrap_or("");
+        assert_eq!(warning.contains("2 pairs need a decision"), asks, "min_aspect {aspect}: {reply}");
+    }
+}
+
+/// A plate placed 100 along x (a body offset) gives its midsurface where the plate is: the sheet
+/// is read in the plate's own frame and takes its placement, so in the world it spans the plate's
+/// 40 x 30 and lies halfway up its 2, not at the origin.
+#[test]
+fn a_placed_plates_midsurface_is_where_the_plate_is() {
+    use solidcore_record::Vec3;
+    use solidcraft_geom::MeshGeom;
+    // A body's own placement applies within a component (a part), as an inserted part's does.
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap_or_else(|e| panic!("{e}"));
+    s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 2, "body_name": "Plate"})).unwrap_or_else(|e| panic!("{e}"));
+    s.doc_mut().body_offsets.insert("Plate".into(), solidcraft_doc::rigid(Vec3::new(100.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    s.refresh();
+    let reply = s.execute("surface.midsurface", &json!({"body": "Plate", "max_thickness": "5 mm"})).unwrap_or_else(|e| panic!("{e}"));
+    let name = reply.get("created_bodies").and_then(|c| c.get(0)).and_then(Value::as_str).unwrap_or_else(|| panic!("{reply}")).to_string();
+    let world = s.world_state().unwrap();
+    let bounds = |n: &str| world.bodies.iter().find(|b| b.definition_name() == n).map(|b| b.mesh().bounds()).unwrap_or_else(|| panic!("{n}"));
+    let (plate, sheet) = (bounds("Plate"), bounds(&name));
+    assert!((plate.max.x - plate.min.x - 40.0).abs() < 1e-6 && plate.min.x > 50.0, "{plate:?}");
+    let mid_z = 0.5 * (plate.min.z + plate.max.z);
+    for (got, want) in [
+        (sheet.min.x, plate.min.x),
+        (sheet.max.x, plate.max.x),
+        (sheet.min.y, plate.min.y),
+        (sheet.max.y, plate.max.y),
+        (sheet.min.z, mid_z),
+        (sheet.max.z, mid_z),
+    ] {
+        assert!((got - want).abs() < 1e-6, "{sheet:?} against {plate:?}");
+    }
 }
 
 #[test]

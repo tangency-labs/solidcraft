@@ -636,7 +636,7 @@ fn midsurface_input(s: &Session, p: &Value, cmd: &str) -> Result<MidsurfaceInput
         None => match mid::suggested_max_thickness(&body).map_err(|e| bad(cmd, e.to_string()))? {
             Some(v) => v,
             // Nothing confident at any shell-like thickness: look as far as a fifth of the body.
-            None => (body.size() * 0.2).max(1e-3),
+            None => mid::probe_max_thickness(&body),
         },
     };
     if !(min.is_finite() && max.is_finite() && min >= 0.0 && max > min) {

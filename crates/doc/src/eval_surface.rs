@@ -585,9 +585,16 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let sheets = mid::sheets_with(&mb.body, &chosen, &mid::Build { carry_holes: *carry_holes, suppress_holes_below: below })?;
             let notes = mid::report_chosen(&analysis, &chosen, &sheets);
             mid::something_built(&sheets, &notes)?;
+            // The sheets are read in the solid's own frame: a placement the solid has (a body
+            // offset) goes with them, as a reduced mesh's does, unless the new body has its own.
+            let source_offset = doc.model_body_offset(&mb).copied();
             for (k, made) in mid::surface_bodies(&sheets, *stitch)?.into_iter().enumerate() {
-                let made = Traced::step(made, &[&mb.traced()]);
                 let name = new_name(st, f, k);
+                let made = match source_offset.filter(|_| !doc.body_offsets.contains_key(&name)) {
+                    Some(offset) => kernel::transform_matrix(&made, offset)?,
+                    None => made,
+                };
+                let made = Traced::step(made, &[&mb.traced()]);
                 st.bodies.push(ModelBody::traced_new(name, made, f.id));
             }
             if *remove_original {

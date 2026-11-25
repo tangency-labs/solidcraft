@@ -157,6 +157,10 @@ pub struct Analysis {
     pub faces: usize,
     /// The slack the distances were decided with (mm): two thicknesses closer than this are one.
     pub tolerance: f64,
+    /// The smallest distance (mm) between two faces facing each other across material past the
+    /// largest thickness looked for: the thinnest wall the analysis saw but left out. A suggested
+    /// limit stays short of it.
+    pub beyond: Option<f64>,
 }
 
 /// What every pairing step looks at: the body, a query on its record, the options and the
@@ -554,8 +558,12 @@ pub fn analyze(body: &Body, opts: &Options) -> Result<Analysis> {
 
     let mut pairs: Vec<Pair> = Vec::new();
     let mut nearest: Vec<Nearest> = vec![Nearest::default(); n];
+    let mut beyond: Option<f64> = None;
     // Records, for faces `f` and `g`, a face looking back `gap` away that made no pair.
     let mut missed = |f: usize, g: usize, gap: f64| {
+        if gap > opts.max_thickness + tol {
+            nearer(&mut beyond, gap);
+        }
         for slot in [f, g] {
             if let Some(near) = nearest.get_mut(slot) {
                 let which = if gap < opts.min_thickness - tol {
@@ -630,7 +638,7 @@ pub fn analyze(body: &Body, opts: &Options) -> Result<Analysis> {
         };
         leftovers.push(Leftover { face, reason, held_by });
     }
-    Ok(Analysis { pairs, leftovers, faces: n, tolerance: tol })
+    Ok(Analysis { pairs, leftovers, faces: n, tolerance: tol, beyond })
 }
 
 /// Pairs that share a face are fine when they cover different parts of it (a flange split by its
@@ -1358,7 +1366,7 @@ pub struct Cluster {
     pub pairs: usize,
     /// A thickness limit that takes this cluster and the thinner ones and no thicker one: half
     /// as much again as the cluster, but no further than the middle to the next thicker pair (the
-    /// next cluster's, or one that needs a decision). That pair lies more than twice the
+    /// next cluster's, one that needs a decision, or a wall past the analysis's limit). That pair lies more than twice the
     /// analysis's slack past the cluster, so the scan (which takes a wall up to the limit plus
     /// that slack) still leaves it out.
     pub suggested_limit: f64,
@@ -1388,11 +1396,13 @@ pub fn thickness_clusters(analysis: &Analysis) -> Vec<Cluster> {
         // decision (chunky, competing, blocked) and could become confident at a lower limit (its
         // rival left out). Only one a limit can tell apart from this cluster: past 1% of its first
         // and more than twice the slack past its thickest, so the middle plus the slack (what the
-        // scan takes) stops short of it.
+        // scan takes) stops short of it. A wall past the analysis's own limit is no pair, but a
+        // larger limit would take it: the thinnest one it saw counts too.
         let next = analysis
             .pairs
             .iter()
             .map(|p| p.thickness)
+            .chain(analysis.beyond)
             .filter(|t| *t > c.thickness * 1.01 + 1e-6 && *t > c.up_to + 2.0 * slack)
             .min_by(f64::total_cmp);
         c.suggested_limit = next.map_or(own, |n| own.min(0.5 * (c.up_to + n)));
@@ -1400,11 +1410,18 @@ pub fn thickness_clusters(analysis: &Analysis) -> Vec<Cluster> {
     out
 }
 
+/// The largest thickness [`suggested_max_thickness`] probes for: a fifth of the body's size.
+/// Also the limit to fall back on when the probe finds no confident pair, so the two searches
+/// look as far.
+pub fn probe_max_thickness(body: &Body) -> f64 {
+    (body.size() * 0.2).max(1e-3)
+}
+
 /// The limit to use when none is given: probe the body with a generous limit (a fifth of its
 /// size, past which no wall is shell-like at the default aspect) and take the thickest confident
 /// cluster's suggestion. `None` when the probe finds no confident pair.
 pub fn suggested_max_thickness(body: &Body) -> Result<Option<f64>> {
-    let probe = Options { max_thickness: (body.size() * 0.2).max(1e-3), ..Options::default() };
+    let probe = Options { max_thickness: probe_max_thickness(body), ..Options::default() };
     let a = analyze(body, &probe)?;
     Ok(thickness_clusters(&a).last().map(|c| c.suggested_limit))
 }
@@ -1419,8 +1436,9 @@ pub fn report(analysis: &Analysis, sheets: &[Sheet]) -> Vec<String> {
 /// [`report`] of a build of `chosen` (pairs of `analysis`): a chosen pair that was not built (a
 /// round wall whose faces cover different parts of it) is named with the reason, a pair
 /// built though something lies between its faces keeps its `blocked` note (and one filled over a
-/// bore that narrows between its faces its `stepped` note, and one a face of which could not be
-/// tested exactly its `unchecked` note), and only the pairs neither chosen nor
+/// bore that narrows between its faces its `stepped` note, one whose faces overlap on only part
+/// of them its `partial` note, and one a face of which could not be tested exactly its
+/// `unchecked` note), and only the pairs neither chosen nor
 /// built are counted as needing a decision.
 pub fn report_chosen(analysis: &Analysis, chosen: &[Pair], sheets: &[Sheet]) -> Vec<String> {
     let mut out = Vec::new();
@@ -1441,6 +1459,11 @@ pub fn report_chosen(analysis: &Analysis, chosen: &[Pair], sheets: &[Sheet]) -> 
         }
         for note in p.notes.iter().filter(|n| n.starts_with("stepped")) {
             out.push(format!("the sheet of faces {:?} was built over a bore: {note}", p.faces));
+        }
+        // Faces that overlap on only part of the smaller one: the sheet covers that part alone,
+        // and the rest of each face is in no sheet.
+        for note in p.notes.iter().filter(|n| n.starts_with("partial")) {
+            out.push(format!("the sheet of faces {:?} covers only part of them: {note}", p.faces));
         }
         // A face the exact tests could not read: nothing found between is no proof of nothing.
         for note in p.notes.iter().filter(|n| n.starts_with("unchecked")) {
@@ -1630,6 +1653,15 @@ mod tests {
         untested.pairs[0].notes.push(note.clone());
         for notes in [report(&untested, &built), report_chosen(&untested, &untested.pairs, &built)] {
             assert_eq!(notes.iter().filter(|n| n.ends_with(&note)).count(), 1, "{notes:?}");
+        }
+        // So does a pair built though its faces overlap on only part of the smaller one (two
+        // skins shifted along each other): the rest of each face is in no sheet. The whole plate
+        // above (coverage 1) has no such note and its report is empty.
+        let mut shifted = a.clone();
+        let note = "partial: the faces overlap on only 25% of the smaller one".to_string();
+        shifted.pairs[0].notes.push(note.clone());
+        for notes in [report(&shifted, &built), report_chosen(&shifted, &shifted.pairs, &built)] {
+            assert_eq!(notes.iter().filter(|n| n.contains("covers only part") && n.ends_with(&note)).count(), 1, "{notes:?}");
         }
     }
 
@@ -2088,6 +2120,22 @@ mod tests {
         a.pairs.push(review(2.5));
         let c = thickness_clusters(&a);
         assert!(c.len() == 1 && c[0].pairs == 1 && (c[0].suggested_limit - 2.25).abs() < 1e-9, "{c:?}");
+    }
+
+    #[test]
+    fn a_suggested_limit_leaves_out_a_wall_past_the_analysis_limit() {
+        // Two plates 40 x 30 apart along x, 2 and 2.5 thick, analysed up to 2.1: the 2.5 wall is
+        // no pair, but a limit of 2 x 1.5 = 3 would take it. The analysis saw it 2.5 thick, so
+        // the limit stops at the middle, (2 + 2.5) / 2 = 2.25, and analysed with it the 2 mm
+        // plate is the only pair.
+        let part = union(&cuboid([0.0, 0.0, 0.0], [40.0, 30.0, 2.0]), &cuboid([100.0, 0.0, 0.0], [140.0, 30.0, 2.5]));
+        let a = analyze(&part, &opts(2.1)).unwrap();
+        assert!(a.pairs.len() == 1 && (a.pairs[0].thickness - 2.0).abs() < 1e-9, "{:?}", a.pairs);
+        assert!(a.beyond.is_some_and(|t| (t - 2.5).abs() < 1e-9), "{:?}", a.beyond);
+        let c = thickness_clusters(&a);
+        assert!(c.len() == 1 && (c[0].suggested_limit - 2.25).abs() < 1e-9, "{c:?}");
+        let again = analyze(&part, &opts(c[0].suggested_limit)).unwrap();
+        assert!(again.pairs.len() == 1 && (again.pairs[0].thickness - 2.0).abs() < 1e-9, "{:?}", again.pairs);
     }
 
     #[test]
