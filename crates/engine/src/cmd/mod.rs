@@ -134,6 +134,7 @@ pub use file::runs_plugin_importer;
 pub(crate) use file::up_form;
 pub(crate) use file::usable_path;
 pub use file::use_import_cache_dir;
+pub use frame::member_section_view;
 pub(crate) use inspect::color_param;
 pub use join_pieces::Addition;
 pub use join_pieces::addition;
