@@ -275,13 +275,19 @@ mod plugin_images;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
 #[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod plugin_panels;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod plugin_shaders;
 mod plugin_slots;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod plugin_tint;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod policy;
 pub mod prefs;
 pub mod prefs_notice;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod ui_surfaces;
 pub use solidcraft_ui_kit::prefs_window;
 #[cfg(test)]
 mod preselect_tests;
@@ -915,6 +921,12 @@ pub struct SolveApp {
     /// The view background a plugin draws (`shaders@0.1`), when one is chosen.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) plugin_shaders: plugin_shaders::State,
+    /// The ribbon and panel tint a plugin gives (`shaders@0.2`), when one is chosen.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) plugin_tint: plugin_tint::State,
+    /// The panel shader a plugin draws (`shaders@0.2`), when one is chosen.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) plugin_panels: plugin_panels::State,
     /// The bodies of a just-opened Y-up file, offered to be stood up (`stand_up`).
     pub stand_up: Option<Vec<String>>,
     /// The placement of the component that file came in as: the offer turns it.
@@ -1236,6 +1248,10 @@ impl SolveApp {
             plugin_menu: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             plugin_shaders: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            plugin_tint: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            plugin_panels: Default::default(),
             stand_up: None,
             stand_up_occurrence: None,
             stand_up_digest: None,
@@ -1421,6 +1437,10 @@ impl SolveApp {
         }
         #[cfg(not(target_arch = "wasm32"))]
         self.plugin_shaders.install(rs);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.plugin_tint.install(rs);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.plugin_panels.install(rs);
         if built.msaa_fallback {
             self.msaa_compatibility = true;
         }
@@ -4675,6 +4695,8 @@ impl SolveApp {
         params_dialog::install_expressions(ui.ctx());
         ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());
         prefs::prepare_blur(self, ui.ctx());
+        #[cfg(not(target_arch = "wasm32"))]
+        plugin_panels::prepare(self, ui.ctx());
         render_workspace::displayed::begin(self);
         let _blur_scope = self.blur.begin(ui.ctx());
         value_step::set_enabled(ui.ctx(), self.preferences.step_values);
@@ -4688,6 +4710,8 @@ impl SolveApp {
         let mut report_input = None;
         issue_report::CadInput::block(self, ui, &mut report_input);
         semantic_content::begin(self, ui.ctx());
+        #[cfg(not(target_arch = "wasm32"))]
+        plugin_tint::begin(self, ui.ctx());
         self.cad_ui(ui, &mut report_input);
         semantic_content::finalize(self, ui.ctx());
         #[cfg(not(target_arch = "wasm32"))]
@@ -4711,6 +4735,9 @@ impl SolveApp {
         }
         let watch = self.design_watch;
         control::publish_design(self, watch);
+        // Last, over everything drawn: a plugin's tint over the panels, then its pass for the frame.
+        #[cfg(not(target_arch = "wasm32"))]
+        plugin_tint::end(self, ui.ctx());
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
         render_workspace::displayed::finish(self, ui.ctx());

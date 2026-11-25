@@ -33,7 +33,6 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "offset_analytic_mate_edges",
     "bspline_trim_preserves_uv_spans",
     "offset_extension_from_base",
-    "fillet_cleanup_keeps_target_faces",
     "fillet_patch_keeps_fillet_edges",
     "fillet_knife_edge_rounds",
     "linear_sweep_arc_is_cylinder",

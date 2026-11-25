@@ -48,7 +48,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "bspline_trim_preserves_uv_spans",
     "edgeuse_convexity_propagates_step_off_failure",
     "fillet_chamfer_cone_on_arc",
-    "fillet_cleanup_keeps_target_faces",
     "fillet_exact_round_classes",
     "fillet_knife_edge_rounds",
     "fillet_patch_keeps_fillet_edges",
