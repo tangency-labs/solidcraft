@@ -77,6 +77,19 @@
 //! `γ_j + γ_k + γ_j γ_k ≤ γ_(j+k)`). Every other step rounds by a few `γ`,
 //! counted on its result.
 //!
+//! **Underflow.** The rounding model above holds in the normal range. A rational curve is the
+//! same curve with all its homogeneous coordinates scaled by one factor, so each curve is
+//! first scaled, exactly, by the power of two that brings its largest weight into `[1, 2)`
+//! (no bound when that scaling is not exact); with the refusal of a smallest weight within
+//! twice `e` of 0 every weight is then above `5·10^-15`, and with a radius of at least
+//! [`R_MIN`] the largest `F` coefficient's term-magnitude sum `S` is past `10^-209`, far
+//! above the at most `2^-1075` an operation in the subnormal range loses, which the `γ` count's spare
+//! roundings (`2p + 12` counted, at most `p + 8` taken) cover. A planar cross or dot product
+//! one of whose products underflows has no error bound (no bound for the curves);
+//! `D_z`, `ℓ` and `D_ρ`'s sum are raised to [`FLOOR`] when positive and below it, so that
+//! their squares are normal. The frame map's bound carries an absolute `16 · 2^-1074` for
+//! the at most six operations of a coordinate that may round in the subnormal range.
+//!
 //! Deviations: none (no upstream counterpart). 3D curves of positive weights (or
 //! non-rational), degree 1 to [`MAX_DEGREE`], knots clamped; arcs of less than a half turn
 //! about the reference circle. The halving is a work list, not a recursion, of at most
@@ -87,7 +100,7 @@ use crate::error::{Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::knots::MAX_DEGREE;
-use crate::nurbs::math::{gamma, NOW, NOZ};
+use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
 
 const OP: &str = "nurbs::circle_deviation::hausdorff_about_circle";
 
@@ -96,6 +109,13 @@ pub const MAX_LEVEL: usize = 20;
 
 /// The most pieces one curve's `F` bound looks at, halved ones included (module docs).
 pub const MAX_ITEMS: usize = 1 << 13;
+
+/// The smallest radius a bound is given for (module docs, underflow).
+pub const R_MIN: f64 = 1e-90;
+
+/// What `D_z`, `ℓ` and `D_ρ`'s sum are raised to when positive and below it, so that their
+/// squares are normal (module docs, underflow).
+pub const FLOOR: f64 = 1e-150;
 
 /// The reference circle: center `center`, radius `radius`, in the plane of `x_axis` and
 /// `y_axis` (unit and orthogonal up to rounding; the module docs count how far).
@@ -119,18 +139,20 @@ pub struct RefCircle {
 /// # Errors
 ///
 /// `InvalidInput` for a 2D curve, a weight not positive, a number not finite, knots not
-/// clamped, a degree out of range, an interval reversed, of no length or not inside its
-/// curve's domain, or a circle of a radius not positive; [`QueryFailure::Failed`] when a
-/// curve does not run along the circle closely enough for the bound (a point on its axis, a
-/// half turn or more, ends not on one side); [`QueryFailure::BoundOverflows`] when the bound
-/// overflows; those of the refinement and the extraction.
+/// clamped, decreasing or repeated past the degree, a degree out of range, an interval reversed, of no length or not inside its
+/// curve's domain, or a circle of a radius not positive; [`QueryFailure::BoundOverflows`] when
+/// the bound overflows; those of the refinement and the extraction. `Ok(None)` (no bound, an
+/// answer rather than a failure) when a curve does not run along the circle closely enough
+/// for one: a point on its axis, a half turn or more, or ends not on one side; or when the
+/// numbers leave the range the rounding is counted in (a radius below [`R_MIN`], a weight
+/// scaling that is not exact).
 pub fn hausdorff_about_circle(
     a: &Curve,
     ia: [f64; 2],
     b: &Curve,
     ib: [f64; 2],
     circle: &RefCircle,
-) -> Result<f64> {
+) -> Result<Option<f64>> {
     let r = circle.radius;
     if !(r.is_finite() && r > 0.0) {
         return Err(SolidError::invalid_input(
@@ -138,44 +160,48 @@ pub fn hausdorff_about_circle(
             "a circle of a radius not positive",
         ));
     }
+    if r < R_MIN {
+        return Ok(None);
+    }
     let frame = Frame::of(circle)?;
-    let na = Near::of(a, ia, &frame, r)?;
-    let nb = Near::of(b, ib, &frame, r)?;
+    let Some(na) = Near::of(a, ia, &frame, r)? else {
+        return Ok(None);
+    };
+    let Some(nb) = Near::of(b, ib, &frame, r)? else {
+        return Ok(None);
+    };
     // `b`'s ends on `a`'s side, so that all four ends' angles share `a`'s chart
     if !(na.on_side(nb.u0) && na.on_side(nb.u1)) {
-        return Err(unbounded());
+        return Ok(None);
     }
-    let chord = |p: [f64; 2], q: [f64; 2]| -> Result<f64> {
+    let chord = |p: [f64; 2], q: [f64; 2]| -> Option<f64> {
         let (p, q) = (unit(p)?, unit(q)?);
         let (dx, dy) = (p[0] - q[0], p[1] - q[1]);
         // each unit vector's components carry `γ_4`, the difference and norm `γ_4` more
-        Ok(r * ((dx * dx + dy * dy).sqrt() + 4.0 * gamma(4)) * (1.0 + gamma(4)))
+        Some(r * ((dx * dx + dy * dy).sqrt() + 4.0 * gamma(4)) * (1.0 + gamma(4)))
     };
-    let arcs = chord(na.u0, nb.u0)?.max(chord(na.u1, nb.u1)?);
+    let (Some(c0), Some(c1)) = (chord(na.u0, nb.u0), chord(na.u1, nb.u1)) else {
+        return Ok(None);
+    };
+    let arcs = c0.max(c1);
     let s = frame.stretch;
     let moved = s * (na.real_moved + nb.real_moved) + na.frame_moved + nb.frame_moved;
     let bound = s * (na.h + nb.h + arcs + moved) * (1.0 + gamma(6));
     if !bound.is_finite() {
         return Err(SolidError::query(OP, QueryFailure::BoundOverflows));
     }
-    Ok(bound)
+    Ok(Some(bound))
 }
 
-fn unbounded() -> SolidError {
-    SolidError::query(
-        OP,
-        QueryFailure::Failed("the curves do not run along the circle closely enough for a bound"),
-    )
-}
-
-/// `v` divided by its length, each component within `γ_4` of the exact unit vector's.
-fn unit(v: [f64; 2]) -> Result<[f64; 2]> {
+/// `v` divided by its length, each component within `γ_4` of the exact unit vector's; `None`
+/// for a vector too short (or too long) to divide by its length (no bound).
+fn unit(v: [f64; 2]) -> Option<[f64; 2]> {
     let [x, y] = v;
     let n = (x * x + y * y).sqrt();
     if !(n.is_finite() && n > f64::MIN_POSITIVE) {
-        return Err(unbounded());
+        return None;
     }
-    Ok([x / n, y / n])
+    Some([x / n, y / n])
 }
 
 /// The circle's frame: its rows, center and stretch `s` (module docs).
@@ -222,7 +248,8 @@ impl Frame {
     }
 
     /// The homogeneous point `(x, y, z, w)` in the frame, `M (x - w c)`, and the error bound
-    /// of each of its coordinates (`γ_5` of its terms' sum).
+    /// of each of its coordinates (`γ_5` of its terms' sum, plus `16 · 2^-1074` for steps
+    /// that round in the subnormal range, module docs).
     fn map(&self, p: [f64; 4]) -> ([f64; 4], f64) {
         let [x, y, z, w] = p;
         let d = [
@@ -242,7 +269,7 @@ impl Frame {
             let [m0, m1, m2] = m;
             *o = e.x * d0 + e.y * d1 + e.z * d2;
             let sum = e.x.abs() * m0 + e.y.abs() * m1 + e.z.abs() * m2;
-            err = err.max(gamma(5) * sum * (1.0 + gamma(4)));
+            err = err.max(gamma(5) * sum * (1.0 + gamma(4)) + 16.0 * f64::from_bits(1));
         }
         if let Some(o) = out.get_mut(3) {
             *o = w;
@@ -265,16 +292,33 @@ struct Near {
     frame_moved: f64,
 }
 
+/// Whether `x y`, rounded, may have lost more than its relative rounding: both factors
+/// nonzero and the product below the normal range.
+fn underflows(x: f64, y: f64) -> bool {
+    x != 0.0 && y != 0.0 && (x * y).abs() < f64::MIN_POSITIVE
+}
+
+/// The error bound of `a ± b`, the rounded products `x0 y0` and `x1 y1`: `γ_2` of the
+/// magnitudes' sum (a sum or difference in the subnormal range is exact), or infinite when a
+/// product underflowed (no bound).
+fn two_terms([x0, y0, x1, y1]: [f64; 4], a: f64, b: f64) -> f64 {
+    if underflows(x0, y0) || underflows(x1, y1) {
+        f64::INFINITY
+    } else {
+        gamma(2) * (a.abs() + b.abs())
+    }
+}
+
 /// `p × q` (planar) and its error bound.
 fn cross(p: [f64; 2], q: [f64; 2]) -> (f64, f64) {
     let (a, b) = (p[0] * q[1], p[1] * q[0]);
-    (a - b, gamma(2) * (a.abs() + b.abs()))
+    (a - b, two_terms([p[0], q[1], p[1], q[0]], a, b))
 }
 
 /// `p · q` (planar) and its error bound.
 fn dot(p: [f64; 2], q: [f64; 2]) -> (f64, f64) {
     let (a, b) = (p[0] * q[0], p[1] * q[1]);
-    (a + b, gamma(2) * (a.abs() + b.abs()))
+    (a + b, two_terms([p[0], q[0], p[1], q[1]], a, b))
 }
 
 impl Near {
@@ -284,10 +328,13 @@ impl Near {
         d > e
     }
 
-    fn of(c: &Curve, [lo, hi]: [f64; 2], frame: &Frame, r: f64) -> Result<Self> {
-        let (pieces, inserted) = checked_pieces(c, [lo, hi])?;
+    fn of(c: &Curve, [lo, hi]: [f64; 2], frame: &Frame, r: f64) -> Result<Option<Self>> {
+        let Some((c, pieces, inserted)) = checked_pieces(c, [lo, hi])? else {
+            return Ok(None);
+        };
+        let c = &c;
         // homogeneous coordinates, a non-rational point weighing 1
-        let homog = |p: &crate::nurbs::math::CPoint| {
+        let homog = |p: &CPoint| {
             let w = if p.w == NOW { 1.0 } else { p.w };
             [p.x, p.y, p.z, w]
         };
@@ -329,7 +376,7 @@ impl Near {
         // the computed weights are within `e_ref` of the exact ones, so the exact
         // smallest is at least `w_min - e_ref`, taken rounded down
         if e_ref.is_nan() || e_ref >= 0.5 * w_min {
-            return Err(unbounded());
+            return Ok(None);
         }
         let w_low = (w_min - e_ref) * (1.0 - gamma(1));
         // multiplied by the frame's stretch where it is summed (`hausdorff_about_circle`)
@@ -344,21 +391,24 @@ impl Near {
         };
         let (mut u0, mut u1) = ([x0, y0], [x1, y1]);
         let (turn, e) = cross(u0, u1);
-        if !(turn.is_finite() && e.is_finite()) {
+        if !turn.is_finite() {
             return Err(SolidError::query(OP, QueryFailure::BoundOverflows));
         }
+        // an infinite `e`: a product underflowed, or the sum overflowed; no bound
         if turn.abs() <= e {
-            return Err(unbounded());
+            return Ok(None);
         }
         if turn < 0.0 {
             std::mem::swap(&mut u0, &mut u1);
         }
-        let (h0, h1) = (unit(u0)?, unit(u1)?);
+        let (Some(h0), Some(h1)) = (unit(u0), unit(u1)) else {
+            return Ok(None);
+        };
         let m = [h0[0] + h1[0], h0[1] + h1[1]];
         let (c1, e1) = cross(m, u1);
         let (c0, e0) = cross(u0, m);
         if !(c1 > e1 && c0 > e0) {
-            return Err(unbounded());
+            return Ok(None);
         }
         // the half plane, the height and the overrun past the ends' angles
         let (n0, n1) = (
@@ -371,14 +421,19 @@ impl Near {
         for &[x, y, z, w] in mapped.iter().flatten() {
             let (d, e) = dot([x, y], m);
             if d <= e {
-                return Err(unbounded());
+                return Ok(None);
             }
-            d_z = d_z.max((z / w).abs() * (1.0 + gamma(1)));
+            let q = (z / w).abs() * (1.0 + gamma(1));
+            d_z = d_z.max(if z != 0.0 && q < FLOOR { FLOOR } else { q });
             let (a, ea) = cross(u1, [x, y]);
             let (b, eb) = cross([x, y], u0);
+            if !(ea.is_finite() && eb.is_finite()) {
+                return Ok(None);
+            }
             let past = ((a + ea) / n1).max((b + eb) / n0);
             if past > 0.0 {
-                over = over.max(past / w * (1.0 + gamma(3)));
+                let o = past / w * (1.0 + gamma(3));
+                over = over.max(if o < FLOOR { FLOOR } else { o });
             }
         }
         let (f_abs, f_low) = f_bounds(&mapped, r)?;
@@ -390,30 +445,31 @@ impl Near {
             (r2 + f_low) * (1.0 - gamma(2))
         };
         if rho2.is_nan() || rho2 <= 0.0 {
-            return Err(unbounded());
+            return Ok(None);
         }
         let rho_min = rho2.sqrt() * (1.0 - gamma(1));
         let d_rho = f_abs / (rho_min + r) * (1.0 + gamma(2));
-        let radial = (d_rho + over * over / rho_min) * (1.0 + gamma(3));
+        let radial = ((d_rho + over * over / rho_min) * (1.0 + gamma(3))).max(FLOOR);
         let h = (radial * radial + over * over + d_z * d_z).sqrt() * (1.0 + gamma(5));
         if !h.is_finite() {
             return Err(SolidError::query(OP, QueryFailure::BoundOverflows));
         }
-        Ok(Self {
+        Ok(Some(Self {
             u0,
             u1,
             m,
             h,
             real_moved,
             frame_moved,
-        })
+        }))
     }
 }
 
-/// The Bézier pieces of `c` over `[lo, hi]`, after the checks, and how many knots the
-/// refinement and the extraction inserted in all (module docs): the whole decomposition's
-/// joined knot vector (each inner knot `p` times) less `c`'s.
-fn checked_pieces(c: &Curve, [lo, hi]: [f64; 2]) -> Result<(Vec<Curve>, usize)> {
+/// After the checks: `c` scaled so its largest weight is in `[1, 2)` (module docs,
+/// underflow), its Bézier pieces over `[lo, hi]`, and how many knots the refinement and the
+/// extraction inserted in all (module docs): the whole decomposition's joined knot vector
+/// (each inner knot `p` times) less `c`'s. `None` when the scaling is not exact.
+fn checked_pieces(c: &Curve, [lo, hi]: [f64; 2]) -> Result<Option<(Curve, Vec<Curve>, usize)>> {
     let p = c.degree();
     if !((1..=MAX_DEGREE).contains(&p) && c.knots().len() == c.cpts().len() + p + 1) {
         return Err(SolidError::invalid_input(
@@ -443,6 +499,15 @@ fn checked_pieces(c: &Curve, [lo, hi]: [f64; 2]) -> Result<(Vec<Curve>, usize)> 
     if !flat(knots.get(..=p)) || !flat(last.and_then(|s| knots.get(s..))) {
         return Err(SolidError::invalid_input(OP, "knots not clamped"));
     }
+    // knots that decrease, end knots of multiplicity other than `p + 1`, or an interior
+    // knot of multiplicity past `p` (the curve may then break there, and the pieces would
+    // not join into it)
+    if c.knot_vector().and_then(|kv| kv.validate(p)).is_err() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "knots that decrease, or a knot repeated more than the degree allows",
+        ));
+    }
     let (Some(&k0), Some(&k1)) = (knots.first(), knots.last()) else {
         return Err(SolidError::invalid_input(OP, "a curve without knots"));
     };
@@ -452,6 +517,9 @@ fn checked_pieces(c: &Curve, [lo, hi]: [f64; 2]) -> Result<(Vec<Curve>, usize)> 
             "an interval reversed, of no length or not inside its curve's domain",
         ));
     }
+    let Some(c) = weights_near_one(c)? else {
+        return Ok(None);
+    };
     let missing: Vec<f64> = [lo, hi]
         .into_iter()
         .filter(|&u| u > k0 && u < k1 && !knots.contains(&u))
@@ -475,7 +543,44 @@ fn checked_pieces(c: &Curve, [lo, hi]: [f64; 2]) -> Result<(Vec<Curve>, usize)> 
                 && x.knots().last().is_some_and(|&k| k <= hi)
         })
         .collect();
-    Ok((pieces, inserted))
+    Ok(Some((c, pieces, inserted)))
+}
+
+/// `c` with every homogeneous coordinate multiplied by the power of two that brings its
+/// largest weight into `[1, 2)`: the same curve (module docs, underflow); a non-rational curve
+/// unchanged. `None` when the scaling is not exact (a coordinate leaving the normal range).
+/// The weights are finite and positive (checked).
+fn weights_near_one(c: &Curve) -> Result<Option<Curve>> {
+    let w_max = c
+        .cpts()
+        .iter()
+        .filter(|q| q.w != NOW)
+        .fold(0.0_f64, |m, q| m.max(q.w));
+    if w_max == 0.0 {
+        return Ok(Some(c.clone()));
+    }
+    let mut s = 1.0_f64;
+    while w_max * s >= 2.0 {
+        s *= 0.5;
+    }
+    while w_max * s < 1.0 {
+        s *= 2.0;
+    }
+    if s == 1.0 {
+        return Ok(Some(c.clone()));
+    }
+    let exact = |v: f64| {
+        let t = v * s;
+        t.is_finite() && t / s == v
+    };
+    let mut pw = Vec::new();
+    for q in c.cpts() {
+        if q.w == NOW || !(exact(q.x) && exact(q.y) && exact(q.z) && exact(q.w)) {
+            return Ok(None);
+        }
+        pw.push(CPoint::new(q.x * s, q.y * s, q.z * s, q.w * s));
+    }
+    Ok(Some(Curve::new(pw, c.degree(), c.knots().to_vec())?))
 }
 
 /// `C(n, k)` for `k = 0..=n` (exact: every value is an integer below `2^53` for
@@ -629,7 +734,6 @@ fn f_bounds(pieces: &[Vec<[f64; 4]>], r: f64) -> Result<(f64, f64)> {
 mod tests {
     use super::*;
     use crate::nurbs::knots::Side;
-    use crate::nurbs::math::CPoint;
     use std::f64::consts::FRAC_1_SQRT_2;
 
     /// The quarter circle of radius `r` about `(cx, cy, z)` from angle `a0` (a rational
@@ -697,7 +801,9 @@ mod tests {
     fn an_arc_is_no_distance_from_itself() {
         let a = quarter(1.15, 4.0, 248.0, 7.0, 0.5);
         let c = circle(1.15, 4.0, 248.0, 7.0);
-        let d = hausdorff_about_circle(&a, [0.0, 1.0], &a, [0.0, 1.0], &c).unwrap();
+        let d = hausdorff_about_circle(&a, [0.0, 1.0], &a, [0.0, 1.0], &c)
+            .unwrap()
+            .unwrap();
         assert!(d <= allowance(), "{d} vs {}", allowance());
     }
 
@@ -711,13 +817,17 @@ mod tests {
             let b = quarter(1.15 + dr, 4.0, 248.0, 7.0 + dz, 0.0);
             let want = (dr * dr + dz * dz).sqrt();
             let c = circle(1.15, 4.0, 248.0, 7.0);
-            let d = hausdorff_about_circle(&a, [0.0, 1.0], &b, [0.0, 1.0], &c).unwrap();
+            let d = hausdorff_about_circle(&a, [0.0, 1.0], &b, [0.0, 1.0], &c)
+                .unwrap()
+                .unwrap();
             let allow = allowance();
             assert!(
                 d >= want && d <= want * (1.0 + 1e-9) + allow,
                 "{d} vs {want}"
             );
-            let d = hausdorff_about_circle(&b, [0.0, 1.0], &a, [0.0, 1.0], &c).unwrap();
+            let d = hausdorff_about_circle(&b, [0.0, 1.0], &a, [0.0, 1.0], &c)
+                .unwrap()
+                .unwrap();
             assert!(
                 d >= want && d <= want * (1.0 + 1e-9) + allow,
                 "{d} vs {want}"
@@ -735,13 +845,17 @@ mod tests {
             let a = quarter(r, 0.0, 0.0, 0.0, 0.0);
             let b = quarter(r, 0.0, 0.0, 0.0, theta);
             let want = 2.0 * r * (theta / 2.0).sin();
-            let d = hausdorff_about_circle(&a, [0.0, 1.0], &b, [0.0, 1.0], &c).unwrap();
+            let d = hausdorff_about_circle(&a, [0.0, 1.0], &b, [0.0, 1.0], &c)
+                .unwrap()
+                .unwrap();
             assert!(
                 d >= want && d <= want * (1.0 + 1e-6) + 1e-11,
                 "{d} vs {want}"
             );
             let rev = b.reversed().unwrap();
-            let d = hausdorff_about_circle(&a, [0.0, 1.0], &rev, [0.0, 1.0], &c).unwrap();
+            let d = hausdorff_about_circle(&a, [0.0, 1.0], &rev, [0.0, 1.0], &c)
+                .unwrap()
+                .unwrap();
             assert!(
                 d >= want && d <= want * (1.0 + 1e-6) + 1e-11,
                 "{d} vs {want}"
@@ -766,7 +880,9 @@ mod tests {
                 let rho = (p.x * p.x + p.y * p.y).sqrt();
                 sampled = sampled.max(((rho - r).powi(2) + p.z * p.z).sqrt());
             }
-            let d = hausdorff_about_circle(&a, [0.0, 1.0], &b, [0.0, hi], &c).unwrap();
+            let d = hausdorff_about_circle(&a, [0.0, 1.0], &b, [0.0, hi], &c)
+                .unwrap()
+                .unwrap();
             assert!(d >= sampled, "{d} < {sampled}");
             assert!(d <= 2.0 * sampled + 1e-10, "{d} vs {sampled}");
         }
@@ -779,10 +895,85 @@ mod tests {
         let a = quarter(r, 0.0, 0.0, 0.0, 0.0);
         // the opposite quarter: its ends are not on the first's side
         let b = quarter(r, 0.0, 0.0, 0.0, std::f64::consts::PI);
-        assert!(hausdorff_about_circle(&a, [0.0, 1.0], &b, [0.0, 1.0], &c).is_err());
+        assert!(hausdorff_about_circle(&a, [0.0, 1.0], &b, [0.0, 1.0], &c)
+            .unwrap()
+            .is_none());
         // a sub-interval of no length, and one outside the domain
         assert!(hausdorff_about_circle(&a, [0.5, 0.5], &a, [0.0, 1.0], &c).is_err());
         assert!(hausdorff_about_circle(&a, [0.0, 1.5], &a, [0.0, 1.0], &c).is_err());
+    }
+
+    /// A degree-1 curve whose interior knot is repeated past its degree breaks there: its two
+    /// segments do not join, so pieces bounded one by one bound no connected curve; refused.
+    #[test]
+    fn an_interior_knot_past_the_degree_is_refused() {
+        let c = circle(1.0, 0.0, 0.0, 0.0);
+        let a = quarter(1.0, 0.0, 0.0, 0.0, 0.0);
+        let pw = vec![
+            CPoint::new(1.0, 0.0, 0.0, NOW),
+            CPoint::new(0.9, 0.1, 0.0, NOW),
+            CPoint::new(0.1, 0.9, 0.0, NOW),
+            CPoint::new(0.0, 1.0, 0.0, NOW),
+        ];
+        let b = Curve::new(pw, 1, vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0]).unwrap();
+        let got = hausdorff_about_circle(&a, [0.0, 1.0], &b, [0.0, 1.0], &c);
+        assert!(
+            matches!(got, Err(SolidError::InvalidInput { .. })),
+            "{got:?}"
+        );
+    }
+
+    /// A circle of a radius below [`R_MIN`] has no bound (an answer, not a failure), even
+    /// for an arc against itself.
+    #[test]
+    fn a_radius_below_the_range_has_no_bound() {
+        let r = R_MIN / 10.0;
+        let c = circle(r, 0.0, 0.0, 0.0);
+        let a = quarter(r, 0.0, 0.0, 0.0, 0.0);
+        let got = hausdorff_about_circle(&a, [0.0, 1.0], &a, [0.0, 1.0], &c).unwrap();
+        assert_eq!(got, None);
+    }
+
+    /// The arc raised by `10^-200` against the arc in the circle's plane: their Hausdorff
+    /// distance is `10^-200` (closed form), whose square underflows; the bound is still at
+    /// least that, as its `D_z` is raised to [`FLOOR`].
+    #[test]
+    fn an_offset_whose_square_underflows_is_still_bounded() {
+        let c = circle(1.0, 0.0, 0.0, 0.0);
+        let a = quarter(1.0, 0.0, 0.0, 1e-200, 0.0);
+        let b = quarter(1.0, 0.0, 0.0, 0.0, 0.0);
+        let d = hausdorff_about_circle(&a, [0.0, 1.0], &b, [0.0, 1.0], &c)
+            .unwrap()
+            .unwrap();
+        assert!((1e-200..1e-11).contains(&d), "{d}");
+    }
+
+    /// Two quadratic Béziers with every weight `w`: ends `(1, ∓1/4)` and middle control points
+    /// `(1, 0)` and `(33/32, 0)`, so `b`'s midpoint `(1 + 1/64, 0)` is `1/64` from `a` (the
+    /// segment `x = 1`; closed form), and the bound is at least that. Scaling every weight
+    /// by one factor leaves the curves, and the bound, as they are: at `w = 2^-536` the
+    /// products of weights would round in the subnormal range unscaled.
+    #[test]
+    fn a_bound_does_not_depend_on_the_weights_scale() {
+        let c = circle(1.0, 0.0, 0.0, 0.0);
+        let bez = |mid: f64, w: f64| {
+            let pw = [(1.0, -0.25), (mid, 0.0), (1.0, 0.25)]
+                .iter()
+                .map(|&(x, y)| CPoint::new(x * w, y * w, 0.0, w))
+                .collect();
+            Curve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap()
+        };
+        let tiny = 2.0_f64.powi(-536);
+        let mut got = Vec::new();
+        for w in [1.0, tiny, 4.0] {
+            let (a, b) = (bez(1.0, w), bez(33.0 / 32.0, w));
+            let d = hausdorff_about_circle(&a, [0.0, 1.0], &b, [0.0, 1.0], &c)
+                .unwrap()
+                .unwrap();
+            assert!(d >= 1.0 / 64.0, "w = {w}: {d}");
+            got.push(d);
+        }
+        assert!(got.windows(2).all(|p| p[0] == p[1]), "{got:?}");
     }
 
     /// Sub-intervals: the arc over `[0, 1/2]` against itself over `[0, 1/2]` and over
@@ -793,10 +984,14 @@ mod tests {
         let r = 1.15;
         let c = circle(r, 0.0, 0.0, 0.0);
         let a = quarter(r, 0.0, 0.0, 0.0, 0.0);
-        let d = hausdorff_about_circle(&a, [0.0, 0.5], &a, [0.0, 0.5], &c).unwrap();
+        let d = hausdorff_about_circle(&a, [0.0, 0.5], &a, [0.0, 0.5], &c)
+            .unwrap()
+            .unwrap();
         assert!(d < 1e-11, "{d}");
         let want = 2.0 * r * (std::f64::consts::PI / 8.0).sin();
-        let d = hausdorff_about_circle(&a, [0.0, 0.5], &a, [0.0, 1.0], &c).unwrap();
+        let d = hausdorff_about_circle(&a, [0.0, 0.5], &a, [0.0, 1.0], &c)
+            .unwrap()
+            .unwrap();
         assert!(d >= want && d <= want * (1.0 + 1e-9), "{d} vs {want}");
     }
 }

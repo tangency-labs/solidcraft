@@ -379,7 +379,9 @@ fn about_circle(
         radius: e.radius_x,
     };
     let (na, nb) = (a.nurb_ref().ok()?, b.nurb_ref().ok()?);
-    hausdorff_about_circle(na, [ia.min(), ia.max()], nb, [ib.min(), ib.max()], &circle).ok()
+    hausdorff_about_circle(na, [ia.min(), ia.max()], nb, [ib.min(), ib.max()], &circle)
+        .ok()
+        .flatten()
 }
 
 /// Not upstream (WR-754): the coincident edges along which a solid touches itself, glued back
