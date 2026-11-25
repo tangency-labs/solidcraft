@@ -432,11 +432,14 @@ fn parts_list(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, 
                 fold: false,
                 purchased_contents: false,
                 mass: MassFormat::default(),
+                hardware: true,
             })
             .default_table(),
         )
     });
     let table = stored.map(|stored| &stored.table).or(fallback.as_ref());
+    // A list not drawn yet starts with its hardware rows; one saved says what it has.
+    let mut hardware = stored.is_none_or(|stored| matches!(&stored.kind, Kind::PartsList(list) if list.hardware));
     ui.add_enabled_ui(false, |ui| {
         choice(ui, tr("ui.drawing_panel.model"), 0, &[source]);
         segments(
@@ -446,6 +449,7 @@ fn parts_list(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, 
             &[tr("ui.top"), tr("ui.bottom")],
         );
         text(ui, tr("ui.drawing_panel.row_height"), &format!("{} mm", table.map_or(7.0, |table| table.row_height_mm)));
+        ui_kit::checkbox(ui, tr("ui.drawing_panel.press_in_hardware"), &mut hardware);
         ui_kit::section_heading(ui, tr("ui.drawing_panel.columns"));
         if let Some(table) = table {
             for column in &table.columns {

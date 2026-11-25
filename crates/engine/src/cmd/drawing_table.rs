@@ -60,7 +60,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<TableResult>)
         .params(
-            "table: its id; set: {sheet?, list?: {component?, levels?, group_by?, group_children?, show_purchased_contents?, mass?: \
+            "table: its id; set: {sheet?, list?: {component?, levels?, group_by?, group_children?, show_purchased_contents?, press_in_hardware?: a row for each kind of press-in hardware, true on a new list, mass?: \
              {unit: g|kg|lb, decimals}}, columns?, heading?: top|bottom, row_height_mm?, cap_mm?, filter?, overrides?, place?: \
              {anchor: {corner, offset_mm?}} or {at: [x, y]}}, columns, filter ({only?, ballooned?: sheet|drawing: only the rows \
              a balloon there reads, text?}) and overrides as a drawing saves them → as \
@@ -204,7 +204,15 @@ fn new_list(s: &Session, d: &Drawing, sheet: u64) -> Result<PartsList> {
     let design = || d.own_source().or_else(|| d.sources.first().map(|source| source.id)).map(|source| SheetComponent { source, component: 0 });
     let of = documents.or_else(design).ok_or_else(|| bad(ADD, "the drawing draws no design to list"))?;
     s.drawn(d, of.source).map_err(|why| bad(ADD, why.to_string()))?;
-    Ok(PartsList { of, view: Default::default(), group: Default::default(), fold: false, purchased_contents: false, mass: MassFormat::default() })
+    Ok(PartsList {
+        of,
+        view: Default::default(),
+        group: Default::default(),
+        fold: false,
+        purchased_contents: false,
+        mass: MassFormat::default(),
+        hardware: true,
+    })
 }
 
 fn listed(table: &SheetTable) -> Option<PartsList> {
@@ -260,6 +268,7 @@ fn apply_list(s: &Session, d: &Drawing, list: &mut PartsList, set: ListSet, cmd:
             ("group_by", set.group_by),
             ("group_children", set.group_children),
             ("show_purchased_contents", set.show_purchased_contents),
+            ("press_in_hardware", set.press_in_hardware),
             ("mass", set.mass),
         ],
         cmd,

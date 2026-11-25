@@ -205,8 +205,15 @@ fn add_list(d: &mut Drawing, sheet: u64, id: u64) {
     use crate::drawing::SheetComponent;
     use crate::drawing::table::{MassFormat, PartsList};
     let of = SheetComponent { source: d.sources[0].id, component: 0 };
-    let list =
-        PartsList { of, view: Default::default(), group: Default::default(), fold: false, purchased_contents: false, mass: MassFormat::default() };
+    let list = PartsList {
+        of,
+        view: Default::default(),
+        group: Default::default(),
+        fold: false,
+        purchased_contents: false,
+        mass: MassFormat::default(),
+        hardware: false,
+    };
     let kind = Kind::PartsList(list);
     d.tables.add([Arc::new(SheetTable { id, sheet, table: kind.default_table(), place: kind.default_place(), kind })]);
 }

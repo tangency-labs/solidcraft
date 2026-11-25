@@ -23,6 +23,7 @@ fn tabled() -> (Drawing, u64) {
         fold: false,
         purchased_contents: false,
         mass: MassFormat::default(),
+        hardware: false,
     });
     let first = d.allocate_id(&mut id_source).unwrap();
     let second = d.allocate_id(&mut id_source).unwrap();
@@ -41,6 +42,7 @@ fn parts_list(mass: MassFormat) -> PartsList {
         fold: false,
         purchased_contents: false,
         mass,
+        hardware: false,
     }
 }
 
@@ -289,6 +291,7 @@ fn a_list_asks_for_its_view() {
         fold: true,
         purchased_contents: true,
         mass: MassFormat::default(),
+        hardware: false,
     };
     let request = list.request();
     assert_eq!(

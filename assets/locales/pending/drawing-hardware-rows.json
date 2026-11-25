@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "ui.drawing_panel.press_in_hardware": "قطع التثبيت بالكبس"
+  },
+  "de": {
+    "ui.drawing_panel.press_in_hardware": "Einpresselemente"
+  },
+  "en": {
+    "ui.drawing_panel.press_in_hardware": "Press-in hardware"
+  },
+  "he": {
+    "ui.drawing_panel.press_in_hardware": "חומרת לחיצה"
+  },
+  "ja": {
+    "ui.drawing_panel.press_in_hardware": "圧入ハードウェア"
+  },
+  "ko": {
+    "ui.drawing_panel.press_in_hardware": "압입 하드웨어"
+  },
+  "vi": {
+    "ui.drawing_panel.press_in_hardware": "Phụ kiện ép"
+  },
+  "zh": {
+    "ui.drawing_panel.press_in_hardware": "压铆件"
+  }
+}

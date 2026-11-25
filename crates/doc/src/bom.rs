@@ -266,6 +266,45 @@ pub struct Total {
     pub mass: Mass,
 }
 
+/// Press-in hardware of the parts a list lists (#20112): how many of one kind, thread and length.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HardwareCount {
+    pub kind: crate::hardware_catalog::HardwareKind,
+    /// The thread as written (`M3`).
+    pub thread: String,
+    /// A stud's or standoff's length (mm).
+    pub length: Option<f64>,
+    /// The catalogue part id (`nut.m3`).
+    pub part: String,
+    pub count: u64,
+}
+
+impl HardwareCount {
+    /// Adds `times` of `one` to the entry of its kind, thread and length, or starts one.
+    fn add(into: &mut Vec<HardwareCount>, one: &HardwareCount, times: u64) {
+        let same = |c: &&mut HardwareCount| c.kind == one.kind && c.thread == one.thread && micrometres(c.length) == micrometres(one.length);
+        match into.iter_mut().find(same) {
+            Some(c) => c.count = c.count.saturating_add(times),
+            None => into.push(HardwareCount { count: times, ..one.clone() }),
+        }
+    }
+
+    /// Kind order, then thread by size (M3 before M10), then length.
+    fn order(a: &HardwareCount, b: &HardwareCount) -> std::cmp::Ordering {
+        let size = |t: &str| t.trim_start_matches(['M', 'm']).parse::<f64>().ok().filter(|v| v.is_finite()).map(|v| (v * 1000.0) as i64);
+        a.kind
+            .cmp(&b.kind)
+            .then_with(|| size(&a.thread).cmp(&size(&b.thread)))
+            .then_with(|| a.thread.cmp(&b.thread))
+            .then_with(|| micrometres(a.length).cmp(&micrometres(b.length)))
+    }
+}
+
+/// A length to the micrometre, so that equal lengths gather.
+fn micrometres(mm: Option<f64>) -> Option<i64> {
+    mm.filter(|v| v.is_finite()).map(|v| (v * 1000.0).round() as i64)
+}
+
 /// The rows of one bill of materials view.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Bom {
@@ -402,6 +441,8 @@ pub struct Tree<'a> {
     /// What one placement of each definition with a quantity counts: `None` when it doesn't
     /// evaluate.
     amounts: HashMap<u64, Option<Amount>>,
+    /// The state's flat patterns of sheet metal bodies, which say what press-in hardware a part has.
+    sheets: &'a [crate::SurfaceSheet],
 }
 
 /// One occurrence: its id, and the component it places with the type it counts as there.
@@ -437,7 +478,17 @@ impl<'a> Tree<'a> {
         let suppressing = doc.features.iter().take(doc.marker.unwrap_or(usize::MAX)).filter(|f| f.suppressed).map(|f| f.component).collect();
         let values = std::cell::OnceCell::new();
         let amounts = components.values().filter_map(|c| Some((c.id, quantity::amount_in(doc, &values, c.metadata.bom_quantity()?).ok()))).collect();
-        Tree { doc, children, components, bodies, suppressing, weighed: BTreeMap::new(), made_of: BTreeMap::new(), amounts }
+        Tree {
+            doc,
+            children,
+            components,
+            bodies,
+            suppressing,
+            weighed: BTreeMap::new(),
+            made_of: BTreeMap::new(),
+            amounts,
+            sheets: &state.surface_sheets,
+        }
     }
 
     /// Component `id` is a part a configuration switches off: it places nothing and has no bodies,
@@ -523,6 +574,63 @@ impl<'a> Tree<'a> {
 
     fn own_bodies(&self, id: u64) -> &[&'a ModelBody] {
         self.bodies.get(&id).map_or(&[], Vec::as_slice)
+    }
+
+    /// The component the placement at occurrence `path`, from `source`, is of: `None` when the path
+    /// runs through nothing, or is too deep.
+    fn component_at(&self, source: u64, path: &[u64]) -> Option<u64> {
+        if path.len() > MAX_PLACEMENT_DEPTH {
+            return None;
+        }
+        let mut component = source;
+        for id in path {
+            component = self.contents(component).iter().find(|p| p.occurrence == *id)?.member.component;
+        }
+        Some(component)
+    }
+
+    /// The press-in hardware of the parts `list` lists (#20112): the mounting holes each listed
+    /// part's sheet bodies still have, one for each hole, times the part's placements in the list,
+    /// gathered by kind, thread and length, in that order. A hole a later feature cut away is none.
+    pub fn press_in_hardware(&self, list: &Bom) -> Vec<HardwareCount> {
+        let mut found: Vec<HardwareCount> = Vec::new();
+        let mut per_part: HashMap<u64, Vec<HardwareCount>> = HashMap::new();
+        for (_, row) in list.rows_deep() {
+            // The placements by their components: each is a part the row counts, as many times as it is placed.
+            let mut placed: BTreeMap<u64, u64> = BTreeMap::new();
+            for path in &row.members {
+                if let Some(component) = self.component_at(list.source, path) {
+                    *placed.entry(component).or_default() += 1;
+                }
+            }
+            if placed.is_empty()
+                && let Some(first) = row.components.first()
+            {
+                placed.insert(*first, row.count);
+            }
+            for (component, times) in placed {
+                let own = per_part.entry(component).or_insert_with(|| self.hardware_of(component));
+                for one in own.iter() {
+                    HardwareCount::add(&mut found, one, one.count.saturating_mul(times));
+                }
+            }
+        }
+        found.sort_by(HardwareCount::order);
+        found
+    }
+
+    /// The press-in hardware one of component `id` holds, one entry for each kind, thread and length.
+    fn hardware_of(&self, id: u64) -> Vec<HardwareCount> {
+        let mut out: Vec<HardwareCount> = Vec::new();
+        for body in self.own_bodies(id) {
+            for sheet in self.sheets.iter().filter(|s| s.body == body.name) {
+                for h in sheet.hardware_holes() {
+                    let one = HardwareCount { kind: h.kind, thread: h.thread.clone(), length: h.length, part: h.part.clone(), count: 1 };
+                    HardwareCount::add(&mut out, &one, 1);
+                }
+            }
+        }
+        out
     }
 
     /// What a row of `member` gathers by: its part number when `group` asks for that and it has

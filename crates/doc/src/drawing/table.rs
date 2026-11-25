@@ -70,6 +70,10 @@ pub struct PartsList {
     pub purchased_contents: bool,
     #[serde(default)]
     pub mass: MassFormat,
+    /// One more row for each kind of press-in hardware (a self-clinching nut, stud or standoff) in
+    /// the parts listed (#20112). A drawing saved without it lists none, as it always did.
+    #[serde(default, rename = "press_in_hardware", skip_serializing_if = "std::ops::Not::not")]
+    pub hardware: bool,
 }
 
 /// How a parts list shows a mass.
@@ -135,6 +139,13 @@ impl PartsList {
     /// values formatted. A length is shown in `units`. A value the row doesn't have is left out, so the
     /// cell shows [`solidcraft_geom::cell::MISSING`]: a mass not weighed or not known, or a quantity that doesn't add up.
     pub fn rows(&self, list: &Bom, units: &str) -> Vec<table::Row> {
+        self.rows_with(list, units, &[])
+    }
+
+    /// [`PartsList::rows`], then, when the list shows press-in hardware, a row for each of
+    /// `hardware` (what [`bom::Tree::press_in_hardware`] counts in the parts listed): a purchased
+    /// part named by its kind and thread, with the catalogue part id as its part number.
+    pub fn rows_with(&self, list: &Bom, units: &str, hardware: &[bom::HardwareCount]) -> Vec<table::Row> {
         let row = |(item, row): (Vec<u32>, &bom::Row)| {
             // Free properties first, so that none takes the place of a value below.
             let mut fields = row.properties.clone();
@@ -165,8 +176,43 @@ impl PartsList {
             let kind = if row.assembly { table::RowKind::Assembly } else { table::RowKind::Part };
             table::Row { key: row.key.text(), kind, purchased: row.bom_type == BomType::Purchased, fields }
         };
-        list.rows_deep().into_iter().map(row).collect()
+        let mut rows: Vec<table::Row> = list.rows_deep().into_iter().map(row).collect();
+        if self.hardware {
+            rows.extend(hardware.iter().map(|h| hardware_row(h, units)));
+        }
+        rows
     }
+}
+
+/// The row of one kind of press-in hardware: its key is stable (`hardware:nut.m5`, a length after a
+/// colon in millimetres), so a row's overrides stay with it.
+fn hardware_row(h: &bom::HardwareCount, units: &str) -> table::Row {
+    use crate::hardware_catalog::HardwareKind;
+    let shown = match h.kind {
+        HardwareKind::Nut => "Self-clinching nut",
+        HardwareKind::FlushNut => "Flush nut",
+        HardwareKind::Stud => "Stud",
+        HardwareKind::Standoff => "Standoff",
+    };
+    let length = h.length.filter(|_| h.kind.has_length());
+    let description = match length {
+        Some(mm) => format!("{} \u{d7} {}", h.thread, format_length(mm, units, 2)),
+        None => h.thread.clone(),
+    };
+    let key = match length {
+        // To the micrometre, written the shortest way: 10 mm is `10`.
+        Some(mm) => format!("hardware:{}:{}", h.part, (mm * 1000.0).round() / 1000.0),
+        None => format!("hardware:{}", h.part),
+    };
+    let count = h.count.to_string();
+    let fields = [
+        ("name", format!("{shown} {}", h.thread)),
+        ("description", description),
+        ("part_number", h.part.clone()),
+        ("quantity", count.clone()),
+        ("count", count),
+    ];
+    table::Row { key, kind: table::RowKind::Part, purchased: true, fields: fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect() }
 }
 
 impl MassFormat {
