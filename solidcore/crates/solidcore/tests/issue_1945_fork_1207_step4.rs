@@ -38,7 +38,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.offset_extension_from_base = true;
-    k.fixes.offset_analytic_mate_edges = true;
     k.fixes.fillet_trace_reaches_rails = true;
 }
 

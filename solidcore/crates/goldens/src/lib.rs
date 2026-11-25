@@ -62,6 +62,8 @@ mod wr459_rows;
 #[cfg(test)]
 pub(crate) mod wr493_rows;
 #[cfg(test)]
+mod wr495_rows;
+#[cfg(test)]
 mod wr587_replay;
 
 pub use case::Case;

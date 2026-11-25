@@ -1624,7 +1624,7 @@ impl Session {
 
     /// Ask the host's check, if any, whether `spec` may run with `params`. A check that panics
     /// refuses the command as an internal error instead of taking the session down.
-    fn check_command(&self, spec: &CommandSpec, params: &Value) -> Result<()> {
+    pub(crate) fn check_command(&self, spec: &CommandSpec, params: &Value) -> Result<()> {
         let Some(check) = &self.command_check else { return Ok(()) };
         // The check sees the parameters as the command will (no parameters: an empty object).
         let empty = Value::Object(Default::default());

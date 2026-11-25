@@ -6,12 +6,12 @@
 )]
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI, SQRT_2, TAU};
 
+use super::budget::{Budget, Limits};
+use super::clip::{ClippedLine, Frame, PreparedRegion};
+use super::generate::clip_with_limits;
+use super::phase::{Dyadic, Param};
 use super::support::{HatchLoop, HatchVec};
-use crate::hatch::budget::{Budget, Limits};
-use crate::hatch::clip::{ClippedLine, Frame, PreparedRegion};
-use crate::hatch::generate::generate_with_limits;
-use crate::hatch::phase::{Dyadic, Param};
-use crate::hatch::{self, Family, Invalid, Mark, Pattern};
+use super::{clip, Invalid, LineFamily, Mark};
 use crate::math::Vec2;
 use crate::prism::profile::{Loop2, Region2, Seg2, MAX_BEZIER_CTRL};
 
@@ -160,19 +160,15 @@ fn diagonal_segments(
 }
 
 fn generated_diagonal_segments(region: &Region2) -> Vec<Segment> {
-    let pattern = Pattern {
-        name: "ORIGINAL_45".into(),
-        description: "Independent rectangle and hole oracles".into(),
-        families: vec![Family {
-            angle: FRAC_PI_4,
-            origin: Vec2::ZERO,
-            delta_x: 0.0,
-            delta_y: 5.0,
-            dashes: vec![],
-        }],
-    };
+    let pattern = [LineFamily {
+        angle: FRAC_PI_4,
+        origin: Vec2::ZERO,
+        delta_x: 0.0,
+        delta_y: 5.0,
+        dashes: vec![],
+    }];
     let before = pattern.clone();
-    let marks = hatch::generate(&pattern, region).unwrap();
+    let marks = clip(&pattern, region).unwrap();
     assert_eq!(pattern, before);
     marks
         .into_iter()
@@ -463,20 +459,16 @@ fn underflowed_product_residual_is_not_an_exact_boundary_contact() {
 
     // At this angle cos(a) rounds to 1 and sin(a) to a. The public generator
     // must also refuse the uncertainty, rather than return a false contact.
-    let pattern = Pattern {
-        name: "RESIDUAL_UNDERFLOW".into(),
-        description: "Independent binary64 projection adversary".into(),
-        families: vec![Family {
-            angle: a,
-            origin: Vec2::ZERO,
-            delta_x: 0.0,
-            delta_y: 2.0,
-            dashes: vec![],
-        }],
-    };
-    pattern.validate().unwrap();
+    let pattern = [LineFamily {
+        angle: a,
+        origin: Vec2::ZERO,
+        delta_x: 0.0,
+        delta_y: 2.0,
+        dashes: vec![],
+    }];
+    pattern[0].validate().unwrap();
     assert_eq!(
-        hatch::generate(&pattern, &region).unwrap_err(),
+        clip(&pattern, &region).unwrap_err(),
         Invalid("unresolved clipping arithmetic")
     );
     assert_eq!(region, before);
@@ -919,21 +911,17 @@ fn interval_adapter_preserves_reflex_contact_splits_and_unique_dot_ownership() {
 #[test]
 fn public_dash_crossing_a_hole_keeps_the_member_phase_after_the_gap() {
     let region = interval_contact_region();
-    let pattern = Pattern {
-        name: "HOLE_PHASE".into(),
-        description: "Original global-phase split across a hole".into(),
-        families: vec![Family {
-            angle: 0.0,
-            origin: p(-1.0, -4.0),
-            delta_x: 2.0,
-            delta_y: 4.0,
-            dashes: vec![8.0, -4.0],
-        }],
-    };
+    let pattern = [LineFamily {
+        angle: 0.0,
+        origin: p(-1.0, -4.0),
+        delta_x: 2.0,
+        delta_y: 4.0,
+        dashes: vec![8.0, -4.0],
+    }];
     let before = (region.clone(), pattern.clone());
     // Only k=1 meets the region: its stroke is x=1..9, cut by the hole 4..6.
     assert_eq!(
-        hatch::generate(&pattern, &region).unwrap(),
+        clip(&pattern, &region).unwrap(),
         vec![
             Mark::Line {
                 a: p(1.0, 0.0),
@@ -954,17 +942,13 @@ fn distinct_zero_tokens_survive_hole_traversal_and_every_repeated_visit_is_charg
         outer: rectangle(-1.0, -1.0, 13.0, 1.0),
         holes: vec![rectangle(3.0, -0.5, 5.0, 0.5)],
     };
-    let pattern = Pattern {
-        name: "ZERO_IDENTITIES".into(),
-        description: "Distinct zeros across cycles and separated material spans".into(),
-        families: vec![Family {
-            angle: 0.0,
-            origin: Vec2::ZERO,
-            delta_x: 0.0,
-            delta_y: 10.0,
-            dashes: vec![0.0, 0.0, -4.0, 0.0],
-        }],
-    };
+    let pattern = [LineFamily {
+        angle: 0.0,
+        origin: Vec2::ZERO,
+        delta_x: 0.0,
+        delta_y: 10.0,
+        dashes: vec![0.0, 0.0, -4.0, 0.0],
+    }];
     let before = (region.clone(), pattern.clone());
     // At each x, two leading tokens and the preceding cycle's trailing token
     // survive. x=4 lies in the hole. A repeated span visit adds no extra dot.
@@ -979,7 +963,7 @@ fn distinct_zero_tokens_survive_hole_traversal_and_every_repeated_visit_is_charg
         ..Limits::default()
     };
     assert_eq!(
-        generate_with_limits(&pattern, &region, admitted).unwrap(),
+        clip_with_limits(&pattern, &region, admitted).unwrap(),
         expected
     );
     let exhausted = Limits {
@@ -987,7 +971,7 @@ fn distinct_zero_tokens_survive_hole_traversal_and_every_repeated_visit_is_charg
         ..Limits::default()
     };
     assert_eq!(
-        generate_with_limits(&pattern, &region, exhausted),
+        clip_with_limits(&pattern, &region, exhausted),
         Err(Invalid("dash step budget exhausted"))
     );
     assert_eq!((region, pattern), before);
@@ -1573,7 +1557,7 @@ fn canonical_circles_reject_hostile_fields_and_enforce_the_complete_coordinate_b
         )
         .is_err());
     }
-    let limit = hatch::MAX_LENGTH_MM;
+    let limit = super::MAX_LENGTH_MM;
     let edge_center = p(limit - 5.0, -limit + 5.0);
     let region = circular_region(edge_center, 5.0, None);
     let mut budget = Budget::default();

@@ -161,7 +161,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
-    k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;
     let mut b = plate(&mut k);
