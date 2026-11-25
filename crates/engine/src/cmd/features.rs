@@ -80,6 +80,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "start_offset?: expr (along the sketch normal, also with direction: negative); ",
             "symmetric_offset?: bool (with direction: symmetric and start_offset: offset both sides symmetrically away from the sketch plane, leaving a clearance gap); ",
             "to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); ",
+            "to_body_apart?: bool (Join To Object: keep the body the To Object pick is on apart, so the join changes only the bodies in `targets`; a call that names its targets keeps that body apart, and `false` takes it too); ",
             "from?: [x,y,z] (From Object: start at that face or point; on a flat face at a slant the start follows the face, and a distance moves it along the extrusion); ",
             "operation?: new|join|cut|intersect|auto (cut into a body, otherwise join existing solids; new in an empty component); ",
             "touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); ",
@@ -462,7 +463,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "bodies: [names]; ",
             "translate?: [x,y,z] (length exprs or numbers, applied after rotation); ",
             "axis?: [x,y,z] (default: world Z with origin, else the body's component's Z, world Z at the root); ",
-            "about?: {edge|face: [x,y,z], body?} (the edge or round face the turn is about, kept as a reference so the turn follows it when an earlier step moves the body; axis and origin give the turn's sense and where it is now); ",
+            "about?: {edge|face: [x,y,z], body?} (the edge or round face the turn is about, kept as a reference so the turn follows it when an earlier step moves the body; axis gives the turn's sense, and with origin the line used when the edge is not found); ",
             "angle?: angle expr; ",
             "origin?: [x,y,z] (length exprs or numbers in world coordinates; default: the body's component's origin, the world origin at the root); ",
             "matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); ",
@@ -1385,15 +1386,16 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
     let (sketch, face_profile, face_body) = if let Some(grouped) = grouped {
         grouped
     } else {
-        match p.get("face").and_then(vec3) {
-            Some(fp) => {
+        match p.get("face") {
+            Some(value) => {
+                let fp = vec3(value).ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z]"))?;
                 let (id, inside, body) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"), fixed_param(p, cmd)?)?;
                 (id, Some(ProfileSel::Points { points: vec![inside] }), Some(body))
             }
             None => (feature_sketch(s, p, cmd)?, None, None),
         }
     };
-    let extent = extent_param(s, p, cmd)?;
+    let mut extent = extent_param(s, p, cmd)?;
     let thin = match bool_(p, "thin") {
         Some(true) => {
             if face_profile.is_some() || p.get("profiles").is_some() {
@@ -1417,6 +1419,16 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
         operation(p, cmd)?
     };
     let mut targets = string_list(cmd, p, "targets")?;
+    // Only a Join takes the body it runs to, so only a Join can keep it apart (#19671).
+    if extent.to_body_apart && (operation != Operation::Join || extent.to.is_none()) {
+        return Err(bad(cmd, "`to_body_apart: true` needs a Join that runs to an object (`to`)"));
+    }
+    // A Join To Object joins the bodies named in Target Bodies, and no other: the body it runs
+    // to stays its own body, unless the call names no targets at all (then it is the scope the
+    // app picks, as it was since 0.24.1, #6424) or asks for it (#19671).
+    if extent.to.is_some() && operation == Operation::Join && p.get("to_body_apart").is_none() {
+        extent.to_body_apart = named;
+    }
     let mut p = std::borrow::Cow::Borrowed(p);
     if operation == Operation::Join && targets.is_empty() && string_list(cmd, &p, "participants")?.is_empty() {
         // A face's outward extension joins that body, and so does a profile sketched on a body's
@@ -1588,7 +1600,9 @@ fn body_reachable(s: &Session, body_name: &str, path: &[u64]) -> Result<()> {
         if c == s.active_component || c == 0 {
             break;
         }
-        if s.doc.links.contains_key(&c) {
+        // STEP links remain editable import bases: downstream features rebuild when their
+        // source updates. Linked designs keep their own editable history in the source file.
+        if s.doc.links.get(&c).is_some_and(|link| link.step_names.is_none()) {
             return Err(EngineError::Other(format!(
                 "`{}` is in {}, which is linked to a design file: open that design to change it, or break the link first",
                 body.name,
@@ -1807,6 +1821,13 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         check_expr(s, d, Kind::Length, cmd, "start_offset")?;
     }
     let symmetric_offset = bool_(p, "symmetric_offset").unwrap_or(false);
+    // A Join To Object can leave the body it runs to apart (#19671): the extent says so, and the
+    // command refuses it where no body would be taken.
+    let to_body_apart = match p.get("to_body_apart") {
+        None => false,
+        Some(Value::Bool(apart)) => *apart,
+        Some(_) => return Err(bad(cmd, "`to_body_apart` must be true or false")),
+    };
     // A symmetric distance the call doesn't qualify is the total, split evenly around the start
     // plane, for solid and surface extrudes alike.
     let convention = match p.get("convention") {
@@ -1827,7 +1848,7 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         to: p.get("to").and_then(vec3).map(FacePick),
         to_offset: expr(p, "to_offset"),
         from: p.get("from").and_then(vec3).map(FacePick),
-        to_body_apart: false,
+        to_body_apart,
         from_level: false,
         picked_placements: Vec::new(),
         one_sided_direction: None,
@@ -1912,19 +1933,24 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
     add_feature(s, &p, kind)
 }
 
-/// A revolve axis of `sketch` from its parameter: a sketch line id, the sketch's x or y axis, a
-/// world axis (also as saved: {type: world, axis: X|Y|Z}), a construction axis by name
+/// A revolve axis of `sketch` from its parameter: a sketch line id, the sketch's x or y axis (also
+/// as saved: {type: sketch_axis, axis: x|y}), a world axis (also as saved: {type: world, axis:
+/// X|Y|Z}), a construction axis by name
 /// (followed when it is edited), a component origin axis (saved as its datum, so it follows the
 /// placement), {origin, dir} (each origin coordinate a number or an expression over
 /// the parameters, which the axis follows), {sketch, curve} (a line of another sketch, followed in
 /// that sketch, #6548; also as saved: {type: sketch_line, …}), or an edge
 /// or round face of the model ({edge|face: [x,y,z]}), which the revolve follows as the model
 /// changes. A line of the sketch wins over a construction axis of the same name.
-pub(super) fn axis_param(s: &Session, sketch: u64, p: &Value, cmd: &str) -> Result<AxisRef> {
+pub(crate) fn axis_param(s: &Session, sketch: u64, p: &Value, cmd: &str) -> Result<AxisRef> {
     if let Some((geo, ..)) = super::construct::model_axis_param(s, p.get("axis"), cmd)? {
         return Ok(AxisRef::Model { geo });
     }
     if let Some(o) = p.get("axis").filter(|v| v.is_object()) {
+        if str_(o, "type") == Some("sketch_axis") {
+            let axis = str_(o, "axis").filter(|a| matches!(*a, "x" | "y")).ok_or_else(|| bad(cmd, "sketch axis requires `axis` to be x or y"))?;
+            return Ok(AxisRef::SketchAxis { axis: axis.into() });
+        }
         if str_(o, "type") == Some("world") {
             let axis =
                 str_(o, "axis").filter(|a| matches!(*a, "X" | "Y" | "Z")).ok_or_else(|| bad(cmd, "world axis requires `axis` to be X, Y or Z"))?;
@@ -2214,7 +2240,7 @@ struct RowHit {
 }
 
 /// How many bodies a refusal names before "and N more".
-const NAMED_BODIES: usize = 8;
+pub(crate) const NAMED_BODIES: usize = 8;
 
 /// A body's size, its edges' polylines and which of them are seams.
 type EdgeShape = (f64, Vec<Vec<Vec3>>, Vec<bool>, Option<solidcraft_geom::Mesh>);
@@ -2225,7 +2251,7 @@ fn polyline_dist(points: &[Vec3], q: Vec3) -> f64 {
 }
 
 /// How far from an edge of a body this big a pick still means it.
-fn edge_reach(size: f64) -> f64 {
+pub(crate) fn edge_reach(size: f64) -> f64 {
     size * 0.05 + 1e-3
 }
 
@@ -2534,7 +2560,7 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
 }
 
 /// "A", "A and B", "A, B and C", and past `most` names "A, B and 3 more".
-fn and_list(names: &[String], most: usize) -> String {
+pub(crate) fn and_list(names: &[String], most: usize) -> String {
     let mut shown: Vec<String> = names.iter().take(most).cloned().collect();
     if names.len() > most {
         shown.push(format!("{} more", names.len() - most));
@@ -2548,7 +2574,7 @@ fn and_list(names: &[String], most: usize) -> String {
 
 /// The distance from `q` to edge `index` of `body` on its exact curve, and the point there:
 /// samples, then a golden-section search between the best one's neighbours.
-fn edge_foot(body: &solidcraft_kernel::Body, index: usize, q: Vec3) -> Option<(f64, Vec3)> {
+pub(crate) fn edge_foot(body: &solidcraft_kernel::Body, index: usize, q: Vec3) -> Option<(f64, Vec3)> {
     const SAMPLES: usize = 32;
     const STEPS: usize = 40;
     let e = body.record().edges.get(index)?;
@@ -2789,13 +2815,18 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "`setbacks` are built for a constant-radius fillet (`type: constant`, `fit: exact`) only"));
         }
     }
-    // How two rounds turn at a sharp side edge.
+    // How two rounds turn at a sharp side edge: a new fillet sweeps each turn where the swept turn
+    // builds and mitres the rest (`auto`), except one at per-edge radii, which is mitred.
     let turn = match str_(p, "turn").map(str::to_ascii_lowercase).as_deref() {
+        None if edge_radii.is_empty() => solidcraft_doc::FilletTurn::Auto,
+        Some("auto") => solidcraft_doc::FilletTurn::Auto,
         None | Some("mitre") => solidcraft_doc::FilletTurn::Mitre,
         Some("swept") => solidcraft_doc::FilletTurn::Swept,
-        Some(o) => return Err(bad(cmd, format!("unknown turn `{o}` (mitre or swept)"))),
+        Some(o) => return Err(bad(cmd, format!("unknown turn `{o}` (auto, mitre or swept)"))),
     };
-    if !turn.is_mitre() && (!style.is_constant() || fit == solidcraft_doc::FilletFit::Taper || !corner.is_rolling() || !setbacks.is_empty()) {
+    if turn == solidcraft_doc::FilletTurn::Swept
+        && (!style.is_constant() || fit == solidcraft_doc::FilletFit::Taper || !corner.is_rolling() || !setbacks.is_empty())
+    {
         return Err(bad(cmd, solidcraft_doc::SWEPT_TAKES));
     }
     let tangent_chain = bool_(p, "tangent_chain").unwrap_or(true);
@@ -2962,7 +2993,7 @@ fn move_split(s: &mut Session, moves: &[Value]) -> Result<Value> {
     let mut features = Vec::new();
     let mut lists: [(&str, Vec<Value>); 3] = [("created_bodies", Vec::new()), ("changed_bodies", Vec::new()), ("removed_bodies", Vec::new())];
     let mut last = Value::Null;
-    for p in moves {
+    for p in &about_once(moves) {
         let reply = move_body_feature(s, p)?;
         features.push(reply.get("feature").cloned().unwrap_or(Value::Null));
         for (key, list) in &mut lists {
@@ -3111,19 +3142,43 @@ fn move_placements(s: &mut Session, p: &Value, plan: crate::frames::PlacementMov
     Ok(out)
 }
 
+/// The parts of a split move with the turn's `about` (#17974) kept by one part only: the one
+/// that moves the edge's body (`about.body`), else the first. The parts run one after another, so
+/// a later part would look for the edge where an earlier part has already moved it, and a Move
+/// turning other bodies about an edge it doesn't move would follow that edge when it moves. The
+/// other parts turn about the line they are given.
+fn about_once(moves: &[Value]) -> Vec<Value> {
+    let Some(about) = moves.iter().find_map(|p| p.get("about")) else { return moves.to_vec() };
+    let holds = |p: &Value| {
+        let body = about.get("body").and_then(Value::as_str);
+        body.is_some_and(|b| p.get("bodies").and_then(Value::as_array).is_some_and(|l| l.iter().any(|n| n.as_str() == Some(b))))
+    };
+    let keeper = moves.iter().position(holds).unwrap_or(0);
+    moves
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let mut p = p.clone();
+            if i != keeper
+                && let Some(o) = p.as_object_mut()
+            {
+                o.remove("about");
+            }
+            p
+        })
+        .collect()
+}
+
 /// The edge or round face of the model a move's turn is about (`about`, #17974), kept so the turn
-/// follows it. It needs `axis`, along it, and `angle`; `axis` gives the turn's sense, and with
-/// `origin` the line the move turns about when the edge is no longer found.
+/// follows it. It needs `axis` and `angle`: the edge gives the line the move turns about, `axis`
+/// the sense of the turn, and with `origin` the line it turns about when the edge is not found.
 fn move_turn_about(s: &Session, p: &Value, cmd: &str) -> Result<Option<solidcraft_doc::construct::GeoRef>> {
     let Some(v) = p.get("about") else { return Ok(None) };
-    let Some((geo, _, d)) = super::construct::model_axis_param(s, Some(v), cmd)? else {
+    let Some((geo, ..)) = super::construct::model_axis_param(s, Some(v), cmd)? else {
         return Err(bad(cmd, "`about` must be {edge: [x,y,z], body?} or {face: [x,y,z], body?}"));
     };
-    let (Some(axis), Some(_)) = (p.get("axis").and_then(vec3).and_then(|a| a.normalized()), p.get("angle")) else {
+    if p.get("axis").and_then(vec3).is_none() || p.get("angle").is_none() {
         return Err(bad(cmd, "`about` needs `axis` and `angle`"));
-    };
-    if axis.cross(d).len() > 1e-6 {
-        return Err(bad(cmd, "`about` does not lie along `axis`"));
     }
     Ok(Some(geo))
 }
@@ -3179,6 +3234,18 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
 /// the sources' order.
 fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd: &str) -> Result<()> {
     let id = reply.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "the copy has no feature id"))?;
+    copy_keeps_appearance_for(s, id, sources, None, cmd)
+}
+
+/// Copy each source body's body-level appearance and physical material onto its copies created by
+/// feature `id`. Bodies in `preserve` keep any explicit assignment they already have (#21245).
+pub(super) fn copy_keeps_appearance_for(
+    s: &mut Session,
+    id: u64,
+    sources: &[String],
+    preserve: Option<&std::collections::HashSet<String>>,
+    cmd: &str,
+) -> Result<()> {
     let copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
     let each = copies.len().checked_div(sources.len()).filter(|each| *each > 0 && each * sources.len() == copies.len());
     let Some(each) = each else {
@@ -3186,11 +3253,21 @@ fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd
     };
     for (source, copies) in sources.iter().zip(copies.chunks(each)) {
         for copy in copies {
+            if preserve.is_some_and(|existing| existing.contains(copy)) {
+                continue;
+            }
             if let Some(look) = s.doc.appearances.bodies.get(source).cloned() {
                 s.doc_mut().appearances.bodies.insert(copy.clone(), look);
+            } else {
+                s.doc_mut().appearances.bodies.remove(copy);
             }
             if let Some(material) = s.doc.materials.get(source).cloned() {
                 s.doc_mut().materials.insert(copy.clone(), material);
+            } else {
+                s.doc_mut().materials.remove(copy);
+            }
+            if let Some(shape) = s.doc.collision_shapes.get(source).copied() {
+                s.doc_mut().collision_shapes.insert(copy.clone(), shape);
             }
         }
     }
@@ -4328,7 +4405,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             if single && (ids.len() != 1 || flip) {
                 return Err(bad(cmd, "a `single` hole takes one sketch point and no `flip`"));
             }
-            Some((solidcraft_doc::SketchPoints { sketch: SketchId(sketch), ids, flip, single }, first, -n))
+            Some((solidcraft_doc::SketchPoints { sketch: SketchId(sketch), ids, flip, single, legacy_face_roles: false }, first, -n))
         }
         _ => None,
     };
@@ -4789,7 +4866,8 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
             ends.push(*p);
         }
     }
-    ss.sketch.points.iter().enumerate().filter(|(i, p)| p.id != "origin" && !ends.contains(i)).map(|(_, p)| p.id.clone()).collect()
+    // A point marked construction (#18448) is reference geometry too.
+    ss.sketch.points.iter().enumerate().filter(|(i, p)| p.id != "origin" && !p.construction && !ends.contains(i)).map(|(_, p)| p.id.clone()).collect()
 }
 
 fn face_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
@@ -5429,7 +5507,16 @@ fn scale(s: &mut Session, p: &Value) -> Result<Value> {
     };
     check_expr(s, &factor, Kind::Unitless, cmd, "factor")?;
     let origin = p.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
-    add_feature(s, p, FeatureKind::Scale { bodies: bodies.into_iter().map(BodyName).collect(), origin: Position(origin), factor, factors })
+    // What it scales about, found again each time the design updates: `"centre"` (the bodies'
+    // centre) or a reference (a vertex, face, edge or sketch point), which follows the model. A
+    // fixed `origin` stays where it is.
+    let about = match p.get("about") {
+        None | Some(Value::Null) => None,
+        Some(_) if p.get("origin").is_some_and(|o| !o.is_null()) => return Err(bad(cmd, "give `origin` or `about`, not both")),
+        Some(Value::String(c)) if c == "centre" || c == "center" => Some(solidcraft_doc::ScaleAbout::Centre),
+        Some(v) => Some(solidcraft_doc::ScaleAbout::Pick { at: super::construct::geo(s, Some(v), cmd, "about")? }),
+    };
+    add_feature(s, p, FeatureKind::Scale { bodies: bodies.into_iter().map(BodyName).collect(), origin: Position(origin), about, factor, factors })
 }
 
 fn delete_face(s: &mut Session, p: &Value) -> Result<Value> {
@@ -5607,13 +5694,15 @@ mod corner_tests {
         assert!(err.contains("not supported yet") && err.contains("(40.000, 20.000, 20.000)") && err.contains("all convex or all concave"), "{err}");
     }
 
-    /// `solid.fillet turn?: mitre|swept` on the four base edges of a 10 x 10 x 5 boss on a
+    /// `solid.fillet turn?: auto|mitre|swept` on the four base edges of a 10 x 10 x 5 boss on a
     /// 40 x 30 x 10 plate, r 1: at each upright boss edge the two rounds turn round it. Each base
     /// edge gains the spandrel A = (1 - π/4) r² along its 10, and the corners the rounds' part
     /// beyond both walls, whose section's first moment about the upright edge is
-    /// M = (5/6 - π/4) r³: mitred (the default), 8 M; swept, that section revolved a quarter turn at
-    /// each corner, 2π M, the corner's face the horn torus of radii r, r about the upright edge,
-    /// centred r above the plate. The turn is saved; an unknown turn and a swept chord round are
+    /// M = (5/6 - π/4) r³: mitred, 8 M; swept, that section revolved a quarter turn at each corner,
+    /// 2π M, the corner's face the horn torus of radii r, r about the upright edge, centred r above
+    /// the plate. The default, auto, sweeps every turn the swept turn builds: these four concave
+    /// rounds turn round convex upright edges, so it is the swept body. The turn is saved (a
+    /// mitred one writes none); an unknown turn and a swept chord round are
     /// refused as parameters, and swept rounds along a pocket's floor (its upright edges concave)
     /// with the kernel's reason.
     #[test]
@@ -5638,8 +5727,8 @@ mod corner_tests {
             assert!(body.validity().is_empty(), "{:?}", body.validity());
             (s, solidcraft_kernel::measure(&body).unwrap(), body)
         };
-        let (mitred, mitre, _) = turned(None);
-        let (_, named, _) = turned(Some("mitre"));
+        let (defaulted, auto, _) = turned(None);
+        let (mitred, mitre, _) = turned(Some("mitre"));
         let (swept_session, swept, body) = turned(Some("swept"));
         eprintln!("mitre: {} faces, {:.9}; swept: {} faces, {:.9}", mitre.faces, mitre.volume, swept.faces, swept.volume);
         let r: f64 = 1.0;
@@ -5647,8 +5736,8 @@ mod corner_tests {
         let near = |v: f64, want: f64| (v - want).abs() < 1e-9 * want;
         assert!(near(mitre.volume, 12500.0 + 40.0 * a + 8.0 * m), "{}", mitre.volume);
         assert!(near(swept.volume, 12500.0 + 40.0 * a + 2.0 * PI * m), "{}", swept.volume);
-        assert_eq!(named.volume.to_bits(), mitre.volume.to_bits(), "mitre is the default");
-        assert_eq!((mitre.faces, swept.faces), (15, 19));
+        assert_eq!(auto.volume.to_bits(), swept.volume.to_bits(), "the default sweeps every turn here");
+        assert_eq!((mitre.faces, swept.faces, auto.faces), (15, 19, 19));
         // The four corner faces (the record's torus is a ring torus, so a horn torus is its exact
         // rational form): every point on the horn torus about its upright edge.
         let mut corners = 0;
@@ -5671,10 +5760,11 @@ mod corner_tests {
         }
         assert_eq!(corners, 4);
         assert!(!mitred.doc.to_json().contains("\"turn\""));
+        assert!(defaulted.doc.to_json().contains("\"turn\": \"auto\""));
         assert!(swept_session.doc.to_json().contains("\"turn\": \"swept\""));
         let mut s = boss();
         let e = s.execute("solid.fillet", &json!({"edges": BASE, "radius": 1, "turn": "round"})).unwrap_err().to_string();
-        assert!(e.contains("unknown turn `round` (mitre or swept)"), "{e}");
+        assert!(e.contains("unknown turn `round` (auto, mitre or swept)"), "{e}");
         let e = s.execute("solid.fillet", &json!({"edges": BASE, "radius": 1, "turn": "swept", "type": "chord"})).unwrap_err().to_string();
         assert!(e.contains(solidcraft_doc::SWEPT_TAKES), "{e}");
         // A pocket 5 deep in the plate, its floor's edges rounded: the rounds meet at its concave
@@ -5686,6 +5776,34 @@ mod corner_tests {
         let e = s.execute("solid.fillet", &json!({"edges": rim, "radius": 1, "turn": "swept"})).unwrap_err().to_string();
         eprintln!("swept along a pocket's rim: {e}");
         assert!(e.contains("swept corner at (") && e.contains("round that edge at a radius of at least 1 first"), "{e}");
+    }
+
+    /// The default turn never refuses a fillet the mitre builds. Along a pocket's floor the
+    /// rounds meet at its concave upright edges, where no ball turns (`turn: swept` is refused
+    /// there): the default mitres them, the mitre's closed form 11000 + 60 A - 8 M (A and M as in
+    /// [`rounds_turning_round_a_boss_edge_are_mitred_or_swept`], the floor's rounds adding
+    /// material). A fillet at per-edge radii, which builds only mitred, is mitred by default and
+    /// writes no `turn`.
+    #[test]
+    fn the_default_turn_mitres_where_no_ball_turns_and_at_per_edge_radii() {
+        use std::f64::consts::PI;
+        let mut s = Session::default();
+        run(&mut s, "solid.box", &json!({"length": 40, "width": 30, "height": 10, "body_name": "P"}));
+        run(&mut s, "solid.box", &json!({"corner": [10, 10, 5], "length": 20, "width": 10, "height": 6, "operation": "cut"}));
+        let rim = json!([[20, 10, 5], [30, 15, 5], [20, 20, 5], [10, 15, 5]]);
+        let reply = run(&mut s, "solid.fillet", &json!({"edges": rim, "radius": 1}));
+        assert_eq!(reply["warning"], json!(null), "{reply}");
+        let body = s.world_state().unwrap().body("P").unwrap().body.clone();
+        assert!(body.validity().is_empty(), "{:?}", body.validity());
+        let (a, m) = (1.0 - PI / 4.0, 5.0 / 6.0 - PI / 4.0);
+        let v = solidcraft_kernel::measure(&body).unwrap().volume;
+        let want = 11000.0 + 60.0 * a - 8.0 * m;
+        assert!((v - want).abs() < 1e-9 * want, "{v} against {want}");
+        assert!(s.doc.to_json().contains("\"turn\": \"auto\""));
+        let mut s = Session::default();
+        run(&mut s, "solid.box", &json!({"length": 40, "width": 30, "height": 10, "body_name": "B"}));
+        run(&mut s, "solid.fillet", &json!({"edges": [[20, 0, 10], [20, 30, 10]], "radius": 1, "edge_radii": [1, 3], "tangent_chain": false}));
+        assert!(!s.doc.to_json().contains("\"turn\""));
     }
 
     /// `solid.fillet edge_radii: [r, ...]`: each picked edge at its own radius in one blend. On a

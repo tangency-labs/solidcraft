@@ -381,6 +381,16 @@ impl Auto {
 }
 
 impl Backend for Auto {
+    fn batch_backend(&mut self) -> Option<&mut dyn Backend> {
+        if self.remote.is_none() {
+            self.look_for_app();
+        }
+        match (&mut self.remote, &mut self.headless) {
+            (Some(remote), _) => Some(remote),
+            (None, Some(headless)) => Some(headless),
+            (None, None) => None,
+        }
+    }
     fn supports_plugin_tools(&mut self) -> bool {
         if self.remote.is_none() {
             self.look_for_app();
