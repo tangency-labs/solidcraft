@@ -216,8 +216,9 @@ which suits scripts and agents checking a whole assembly:
 It returns `overlaps` (pairs sharing at least `min_volume`, 0.01 mm³ by default, with the shared
 volume, area, box and centre), `near` (pairs closer than `clearance`, with the distance and the
 two nearest points; a contact sharing less than `min_volume` is listed here at 0 with its
-`overlap_mm3`), `nearest` (each body's `nearest` closest bodies) and `unchecked` (pairs whose
-overlap could not be worked out, with the reason). `against` limits the check to pairs with one
+`overlap_mm3`), `nearest` (each body's `nearest` closest checked bodies, omitting pairs in
+`unchecked`) and `unchecked` (pairs whose overlap could not be worked out, with the reason).
+`against` limits the check to pairs with one
 body in `bodies` and the other in `against`, and `skip_within` leaves out pairs inside one
 occurrence (`"occurrence"`) or one placed component, its subcomponents included
 (`"component"`): the parts of a bought component that touch by design. Distances are measured on
@@ -538,10 +539,15 @@ which. So does a link whose part file changed since the assembly read it, and a 
 older SolidCraft that kept no record of the file it read: run **Update Links**, then save again. A `.sc` assembly saved this way has no saved model, so it is evaluated when it opens. A
 part that is a plain `.json` design is evaluated the first time it is read this way, and that
 evaluation is kept on this computer with the reused imports (**Clear Reused Imports** removes
-them), so later opens read an unchanged part without building it again. The
-mesh bodies of a linked part stay in the assembly's file, and so do the bodies of a linked STEP
-file. There is no button for this yet: run
-the command from a script, the command line or an agent.
+them), so later opens read an unchanged part without building it again. A linked STEP file
+(**Insert STEP**) is left out the same way and read again from the STEP file when the assembly
+opens; if the STEP file changed meanwhile, its new bodies come in and **List Links** shows it as
+changed. A STEP file inserted with `reader: "cadmpeg"` keeps its bodies in the file, because
+reading it again gives STEP text, not the records it was read into. Each save without linked
+bodies names it in its warnings. The mesh bodies a linked part brings (an STL or 3MF inserted in
+the part) are left out with its solids and read back with them. An STL, 3MF or OBJ inserted
+straight into the assembly is not linked, so it stays in the file. There is no button for this
+yet: run the command from a script, the command line or an agent.
 
 Linked files from other folders load after you allow them. When an assembly opens, the parts in
 its own folder, or below it, are read again by themselves as above. If a changed part is in
@@ -599,6 +605,16 @@ it has them. It becomes an occurrence of the component already linked to that de
 new linked component; the other occurrences keep the old source. Scripts pass the occurrence:
 `component.relink {component, occurrence, path}`, and the reply's `component` is then the one
 the occurrence shows and `previous_component` the one it showed.
+
+Relink Source leaves the linked bodies' names as they are, unless the new source has another
+number of bodies, when they take the source's names. **Relink Source and Use Its Names…**
+(in the same menu) gives the bodies the new source's names instead: what the design keeps under
+the old names (materials, appearances, later features that name the body) follows each body to
+its new name, and the linked feature takes the source design's name when it still had its
+component's. The component's own name stays yours, and a body whose new name another body
+already has keeps its name and is reported in the warnings. Scripts pass `names: "keep"`
+(the default) or `names: "sync"`; it applies when the whole component is relinked, not to one
+placement shown by `occurrence`, which shows a component made from the new source.
 
 Scripts use `component.relink {component, path}`. The reply includes `previous_path`, `path`,
 `warnings`, `joint_errors` and `joint_conflicts`. Changed geometry can invalidate a joint's

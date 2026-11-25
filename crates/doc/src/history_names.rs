@@ -131,7 +131,7 @@ pub(crate) fn derive(b: &ModelBody, o: &NamingOrigin, lineage: &Lineage) -> Opti
         }
     }
     let named: Vec<Named> = named.into_iter().collect::<Option<_>>()?;
-    let centres = || crate::naming::face_centres(b);
+    let centres = || crate::naming::face_centres(b).unwrap_or_default();
     Some(qualify_at(named, &adjacency(h), by_place(&o.feature, &centres)))
 }
 
@@ -191,7 +191,7 @@ impl<'a> OperandNames<'a> {
                     .get_or_init(|| {
                         Arc::new(derive(body, o, &stage.lineage).unwrap_or_else(|| {
                             let names = crate::naming::geometric_names(body, o, body.body.face_count());
-                            let centres = || crate::naming::face_centres(body);
+                            let centres = || crate::naming::face_centres(body).unwrap_or_default();
                             Names::unverified(names, &crate::naming::mesh_adjacency(body), by_place(&o.feature, &centres))
                         }))
                     })

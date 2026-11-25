@@ -18,6 +18,11 @@
 //! | [`srf_piece_box`]                     | none (not upstream)                         |
 //!
 //! Deviations:
+//! - [`is_nsrf_degenerate`] floors its tolerance with `max(1000 * SM_EFF_ZERO,
+//!   SM_EFF_ZERO * (1 + max |coord|))`, not `1000 * SM_EFF_ZERO * (1 + max |coord|)`
+//!   (#18634): the scaled part is the Level 2 check's coincidence resolution, so a net
+//!   far from the origin that the check accepts is not called a point. The floor is
+//!   never above upstream's and equals it at the origin.
 //! - [`srf_piece_box`] is not upstream: the box of the control points of the piece of
 //!   the surface over a parameter rectangle alone, which shrinks with the rectangle, for
 //!   clearance proofs that split a face's domain until its boxes are clear.
@@ -1111,8 +1116,11 @@ pub fn split_srf(sur: &Surface, t: f64, dir: Direction) -> Result<(Surface, Surf
 // ---- degeneracy ---------------------------------------------------------------------
 
 /// `true` when the box of the surface's control net is point sized within
-/// `max(tol3d, 1000 * SM_EFF_ZERO * (1 + max |coord|))` (`sm_IsNSrfDegenerate`;
-/// upstream default `tol3d = SM_EFF_ZERO`).
+/// `max(tol3d, 1000 * SM_EFF_ZERO, SM_EFF_ZERO * (1 + max |coord|))`
+/// (`sm_IsNSrfDegenerate`; upstream default `tol3d = SM_EFF_ZERO`). Upstream's floor is
+/// `1000 * SM_EFF_ZERO * (1 + max |coord|)`, a thousand times the Level 2 check's
+/// coincidence resolution far from the origin, which refused nets the check accepts
+/// (#18634); its value at the origin is kept.
 ///
 /// Errors with the errors of [`Surface::bbox`].
 pub fn is_nsrf_degenerate(sur: &Surface, tol3d: f64) -> Result<bool> {
@@ -1120,8 +1128,9 @@ pub fn is_nsrf_degenerate(sur: &Surface, tol3d: f64) -> Result<bool> {
     let b = sur.bbox()?;
     let bx = Extent3d::from_bounds(b.xl, b.yb, b.zn, b.xr, b.yt, b.zf);
 
-    // Select a tolerance scaled to the box.
-    let scaled_zero = 1000.0 * EFF_ZERO * (1.0 + bx.max_dimension());
+    // Select a tolerance: the caller's, at least upstream's floor at the origin and the
+    // scaled zero of the box.
+    let scaled_zero = max2(1000.0 * EFF_ZERO, EFF_ZERO * (1.0 + bx.max_dimension()));
     let tol = max2(tol3d, scaled_zero);
 
     // Test the box for point size.

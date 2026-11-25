@@ -27,7 +27,7 @@ pub(crate) struct Item {
     pub slot: Slot,
     /// An importer chooses its own file, so it needs no open design.
     pub importer: bool,
-    /// The command's icon: its own from the package, else the generic plugin icon.
+    /// The entry's icon: its own from the package, else the generic plugin icon.
     pub icon: String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -166,9 +166,19 @@ pub(crate) fn invalidate(app: &mut SolveApp) {
 fn discovered(app: &mut SolveApp, inventory: Inventory) {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        if inventory.root.as_deref().is_some_and(Path::is_dir) {
+            let present = |id: &str| inventory.plugins.iter().any(|p| p.id == id) || inventory.skipped.iter().any(|s| s.folder == id);
+            crate::plugin_shaders::drop_pictures_not_in(app, &present);
+        }
         app.plugin_slots.items = inventory.plugins.iter().flat_map(declared).take(8192).collect();
     }
     let root = inventory.root.clone();
+    // The Plugins menu and the Model tab's ribbon list what this scan found, once, here: no frame
+    // reads the plugin folders itself (#21594).
+    #[cfg(not(target_arch = "wasm32"))]
+    if !app.plugin_menu.loaded {
+        crate::plugin_menu::adopt(app, &inventory.plugins);
+    }
     app.plugin_slots.inventory = Some(inventory);
     app.plugin_slots.scanned = Some((crate::now_ms(), root));
 }
@@ -431,7 +441,7 @@ impl RibbonGroup {
                     run: &entry.command,
                     label: &entry.entry,
                     name: &entry.label,
-                    icon: "prefs_plugins",
+                    icon: &entry.icon,
                     size: ribbon::ButtonSize { width: ribbon::button_width(ui.painter(), &entry.entry), min_width: ribbon::BUTTON_MIN_WIDTH },
                     planned: false,
                     enabled: true,
@@ -451,15 +461,7 @@ impl RibbonGroup {
             more: self
                 .entries
                 .iter()
-                .map(|e| ribbon::MoreRow {
-                    id: &e.command,
-                    label: &e.label,
-                    icon: "prefs_plugins",
-                    shortcut: "",
-                    enabled: true,
-                    checked: None,
-                    hint: None,
-                })
+                .map(|e| ribbon::MoreRow { id: &e.command, label: &e.label, icon: &e.icon, shortcut: "", enabled: true, checked: None, hint: None })
                 .collect(),
         }
     }
@@ -560,6 +562,8 @@ mod tests {
             groups: Default::default(),
             images: Default::default(),
             swatches: Default::default(),
+            updates: None,
+            themes: Vec::new(),
             entries: serde_json::from_value(json!([
                 {"name":"report","effect":"read","slots":[
                     {"kind":"menu","name":"Manufacturing"}, {"kind":"menu","name":"Plugins"},
@@ -570,6 +574,11 @@ mod tests {
                 ]}
             ]))
             .unwrap(),
+            shaders: Vec::new(),
+            tints: Vec::new(),
+            panels: Vec::new(),
+            shader_settings: Default::default(),
+            pictures: Vec::new(),
         };
         let items = declared(&plugin);
         assert_eq!(items.len(), 3, "unmapped menus and the Model tab are omitted and repeated placements are deduplicated");
@@ -577,6 +586,35 @@ mod tests {
         assert_eq!(items[1].slot, Slot::Menu("File"));
         assert_eq!(items[2].slot, Slot::Menu("Help"));
         assert_eq!(menu_name("Manufacturing"), None);
+    }
+
+    /// A plugin folder deleted by hand takes the pictures chosen for its backgrounds with it.
+    #[test]
+    fn a_deleted_plugin_folder_drops_its_chosen_pictures() {
+        let mut h = crate::scenario::Harness::new();
+        let root = h.dir.join("installed");
+        let dir = root.join("own");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("plugin.json"),
+            r#"{"id":"own","name":"Own","version":"1","capabilities":["shaders@0.2"],"shaders":[{"id":"own","name":"Own","kind":"background","source":"own.wgsl","textures":[{"name":"picture","choose":"Picture"}]}]}"#,
+        )
+        .unwrap();
+        h.app.session.plugin_state.plugins_dir = Some(root);
+        let picked = h.dir.join("a.png").to_string_lossy().into_owned();
+        for key in ["own/own/picture", "gone/own/picture"] {
+            h.app.preferences.background_shader_pictures.insert(key.into(), picked.clone());
+        }
+        invalidate(&mut h.app);
+        refresh(&mut h.app);
+        wait_for_discovery(&mut h.app);
+        let kept = |h: &crate::scenario::Harness| h.app.preferences.background_shader_pictures.keys().cloned().collect::<Vec<_>>();
+        assert_eq!(kept(&h), ["own/own/picture"], "a plugin that is not installed has no pictures kept; an installed one keeps its");
+        std::fs::remove_dir_all(&dir).unwrap();
+        invalidate(&mut h.app);
+        refresh(&mut h.app);
+        wait_for_discovery(&mut h.app);
+        assert!(kept(&h).is_empty(), "{:?}", kept(&h));
     }
 
     #[test]
@@ -775,5 +813,51 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "timed out");
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+    }
+
+    /// #21228, #21594: once the installed plugins have been read, drawing frames (the Model tab's
+    /// ribbon, the app bar, the viewport) reads and hashes no plugin file. Only a change reads
+    /// them again, once, in the background.
+    #[test]
+    fn steady_state_frames_read_no_plugin_files() {
+        let mut h = crate::scenario::Harness::new();
+        let root = h.dir.join("plugins-steady");
+        let package = root.join("big-importer");
+        std::fs::create_dir_all(&package).unwrap();
+        // A component big enough that hashing it every frame would show in the time of a frame.
+        std::fs::write(package.join("plugin.wasm"), vec![7u8; 8 << 20]).unwrap();
+        let manifest = json!({
+            "id":"big-importer", "name":"Big importer", "version":"1", "capabilities":["commands@0.1"],
+            "runtime":{"module":"plugin.wasm","commands":[],
+                "entries":[{"name":"report","effect":"read","slots":[{"kind":"menu","name":"Help"}]}]}
+        });
+        std::fs::write(package.join("plugin.json"), manifest.to_string()).unwrap();
+        h.app.session.plugin_state.plugins_dir = Some(root.clone());
+        invalidate(&mut h.app);
+        let settle = |h: &mut crate::scenario::Harness| {
+            for _ in 0..2000 {
+                h.frame();
+                let scanned_here = h.app.plugin_slots.scanned.as_ref().is_some_and(|(_, at)| at.as_deref() == Some(root.as_path()));
+                if scanned_here && h.app.plugin_slots.discovery.is_none() {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            panic!("discovery never finished");
+        };
+        settle(&mut h);
+        let reads = plugins::inventory_reads(&root);
+        assert!(reads >= 1, "the first frames read the installed plugins");
+        assert_eq!(h.app.plugin_menu.listed.len(), 1, "the ribbon and menus list what discovery found");
+        assert_eq!(items(&h.app, Slot::Menu("Help")).len(), 1);
+        h.frames(150);
+        assert_eq!(plugins::inventory_reads(&root), reads, "steady-state frames read no plugin file");
+        assert!(h.app.plugin_slots.discovery.is_none());
+
+        // A change reads them again, once.
+        invalidate(&mut h.app);
+        settle(&mut h);
+        h.frames(150);
+        assert_eq!(plugins::inventory_reads(&root), reads + 1);
     }
 }

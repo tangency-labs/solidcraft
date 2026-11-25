@@ -201,6 +201,17 @@ face still in several pieces, asks to be picked again. Test:
 `a_chamfer_saved_under_numbered_side_pieces_of_a_peg_is_found_at_its_pick`
 (`crates/engine/src/face_name_tests.rs`).
 
+Pieces of a folded panel's cap (#21300): where a Fold parts a sheet metal panel into pieces that
+the faces around them do not tell apart (a round base flange's, whose rims are all one circle's),
+releases up to 0.47.0 numbered the pieces of each cap by where they lie (`F2:top#1`, `F2:top#2`),
+not exactly. They are now numbered in the order of their panels' keys (the panel the fold leaves
+first, then the pieces it folds), exactly, and a sketch attaches to them. A reference a design
+saved under such a number may now name the other piece. No sketch could be attached there before
+(it was refused), but another feature may have kept such a name. A piece the faces around it tell
+apart (`F2:bottom#[F2:side:r3]`) is named as before. Test:
+`every_flat_face_of_a_folded_round_sheet_takes_an_attached_sketch`
+(`crates/engine/src/cmd/sheet_tests.rs`).
+
 Round edge numbers (#14479): where a fillet or chamfer rounded one of several edges between the
 same two faces (`F2:side:c1|F2:side:l1~2`), 0.30.1 wrote an edge of that round in the older form,
 with the round's edge number at the end (`F2:top|F3:blend:F2:side:c1|F2:side:l1~2`). That form

@@ -359,6 +359,19 @@ impl UnownedWindow {
         leap!(window.set_title_inner(&window_attrs.title)).ignore_error();
         leap!(window.set_decorations_inner(window_attrs.decorations)).ignore_error();
 
+        if let Some(crate::platform_impl::Window::X(owner)) =
+            window_attrs.owned_by.as_ref().map(|owner| &owner.window)
+        {
+            leap!(leap!(xconn.change_property(
+                window.xwindow,
+                xproto::AtomEnum::WM_TRANSIENT_FOR.into(),
+                xproto::AtomEnum::WINDOW.into(),
+                xproto::PropMode::REPLACE,
+                &[owner.xwindow],
+            ))
+            .check());
+        }
+
         if let Some(theme) = window_attrs.preferred_theme {
             leap!(window.set_theme_inner(Some(theme))).ignore_error();
         }

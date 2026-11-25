@@ -274,6 +274,11 @@ two seconds and a pin in its corner can be clicked to pin it to the ribbon or re
 quicker click anywhere on the icon starts the command). Right-clicking the icon, or dragging it
 onto the ribbon, also pins it; a pinned command always shows its pin.
 
+To change the order of a section's menu, drag a command to another place in it (list or large
+icons): a line shows where it will go. A command stays within its group (Edges, Faces, …). The
+order is kept with the toolbar, and **Reset Toolbar** restores it. Two menus keep their built-in
+order and can't be rearranged: Sketch › **Create** and the **»** overflow menu.
+
 Interface › **Leave pinned commands out of the drop-down menus** (off by default) lists in a
 section's menu only the commands that are not already buttons on the ribbon. When the window is
 too narrow for a section's buttons, its menu lists them again.
@@ -539,6 +544,18 @@ A choice comparison must name a declared choice. Unknown option ids, mixed compa
 malformed values are refused with the overlay's one-based position. An overlay may override
 `colors`, `radii`, `borders` and `icon_palette`; all their existing key and value checks apply.
 Overlays only select literal tables: there are no scripts, expressions or interpolation.
+
+The optional boolean `accepts_accent` (default `false`) lets the Accent preference apply over the
+theme. Under the themes, **Accent** then puts another accent colour over it: the theme's own (the
+default), one of eight presets, or any colour from the colour picker. It recolours the accent, the
+selected row, the primary buttons, the selection in the view and the File view's primary action;
+the Sketch, Surface and other tabs keep their own colours. A theme without the field shows the
+row disabled, with the reason "This theme keeps its own accent", and ignores a saved accent, which
+is kept for a theme that accepts one. The built-in Light and Dark accept an accent, as do the
+built-in themes Akari, Blueprint, Catppuccin Mocha, Clay, Clay Dark, Cupertino, Graphite, Gruvbox
+Dark and Light, Nord, Nosferatu, Okibi, One Dark, Onyx and Tokyo Night. The others keep their own
+accent: the 1-bit themes, CGA, High Contrast, the green and amber phosphor themes, Platinum 9,
+SolidCraft 95 and the Solarized themes, whose colours are the theme's identity or a fixed standard.
 
 The optional integer `requires` defaults to 1; this app supports levels through 2. A larger level
 loads the authored base value tables, disables options and overlays, and exposes a
