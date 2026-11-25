@@ -52,9 +52,11 @@ component.break_link              component links
 component.copies                  a listing of identical copies
 component.cycle_color             component colours
 component.delete                  removes a component: no geometry built
+component.design_parameters       component links: a linked design's parameters, a listing (crates/engine/src/cmd/component_link_parameters_tests.rs)
 component.edit_in_place           component links
 component.finish_edit             component links
 component.hide_history            the History bar: which features it lists
+component.link_parameters         component links: parameter values a design sets on a design it links (crates/engine/src/cmd/component_link_parameters_tests.rs)
 component.links                   component links
 component.list                    a listing
 component.metadata                component metadata
