@@ -113,7 +113,8 @@ the code runs:
 `Geometry` (level 1) and `All` (level 2, the slow geometric tests); each failed test is one line
 `<type>::Test #<n> <name>: <message>`, and warnings (`SmBrep` test 21) are not failures. Every
 operation's result in ops passes `finish` (`solidcore-ops/src/body.rs`): a result with no faces is
-`Error::Empty`, and a solid input whose result fails `is_outward_solid` is `Error::NotSolid`. A
+`Error::Empty`, and a solid input whose result fails `is_outward_solid` is
+`Error::NotSolidBecause`, naming the test it fails. A
 boolean's result is checked with `is_outward_touching_solids` instead, which allows solids that touch
 along an edge or at a vertex, and the boolean returns `None` for an empty result
 ([booleans.md](booleans.md) §3).

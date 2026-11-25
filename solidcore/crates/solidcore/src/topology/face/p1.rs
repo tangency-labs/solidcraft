@@ -30,6 +30,15 @@
 //! | [`FixSeamPlanType`]                          | `SmFixSeamPlanType` (`SmTypes.h`)            |
 //!
 //! Deviations:
+//! - **A seam move needs a closed direction.** `move_seam` drops a crossed or near-miss
+//!   seam reported in a direction the surface does not close in: closed means the net
+//!   certifies its two boundary curves within the face's tolerance of each other
+//!   everywhere, with equal boundary weights so the join's average stays within half
+//!   that gap (`BSplineSurface::closes_within`; a creased closure counts, an unclamped
+//!   net or a weight not positive certifies nothing), not a sampled test (#21491). Upstream splits the surface there and joins the open ends, so the face's
+//!   surface no longer passes through its edges (11.8 away on `vase_rev.smb`), and the
+//!   seam split that follows merges interval ends onto edge points up to 4.19 away,
+//!   growing the vertex tolerances to 1.18-2.59 (#21368).
 //! - **Shrink keeps exact trims and ends on knots (the fork's, not upstream).**
 //!   `shrink_geometry` keeps the face's trim curves where its surface's trim keeps the
 //!   surface's parameterization (WR-700, the fork's tangency-labs/smlib@6f811b8), and
@@ -204,6 +213,7 @@ use crate::topology::face::p2 as fp2;
 use crate::topology::face::p3 as fp3;
 use crate::topology::face::p4::BrepSeamObjects;
 use crate::topology::loopuse as lu1;
+use crate::topology::loopuse::QueryTopology;
 use crate::topology::trimming_tools as tt;
 use crate::topology::vertex as vx;
 use crate::topology::vertexuse as vu1;
@@ -324,20 +334,41 @@ fn has_seam_problem<O: LoopObject>(
 
 /// `pEU->NormalizedEvaluate(dT, TRUE, rUV)` (UV evaluation; default arguments: no
 /// first derivative, `bOKToMakeUVTrimCurve = TRUE`).
-fn normalized_evaluate_uv(k: &Kernel, b: &mut Brep, eu: EdgeuseId, t: f64) -> Result<Point3> {
-    Ok(eu3::normalized_evaluate(k, b, eu, t, true, false, true)?.point)
+/// Read only ([`QueryTopology::Prepared`]), the UV trim curve must exist: nothing is made.
+fn normalized_evaluate_uv(
+    k: &Kernel,
+    b: &mut QueryTopology<'_>,
+    eu: EdgeuseId,
+    t: f64,
+) -> Result<Point3> {
+    Ok(match b {
+        QueryTopology::Mutable(b) => eu3::normalized_evaluate(k, b, eu, t, true, false, true)?,
+        QueryTopology::Prepared(b) | QueryTopology::Requested(b, _) => {
+            eu3::normalized_evaluate_existing_uv(k, b, eu, t, false)?
+        }
+    }
+    .point)
 }
 
 /// `pEU->GetOrCreateUVTrimCurve(rpUVCurve)` (default arguments: no distance or
 /// deviation, `bOKToMakeUVTrimCurve = TRUE`): the returned status, and the edge use's
 /// (or its mate's) UV trim curve afterwards, which a failing status can still leave
-/// attached.
+/// attached. Read only ([`QueryTopology::Prepared`]), the existing curve's fetch, and
+/// [`SolidError::PreparationRequired`] where there is none: nothing is made.
 fn fetch_uv_trim_curve(
     k: &Kernel,
-    b: &mut Brep,
+    b: &mut QueryTopology<'_>,
     eu: EdgeuseId,
 ) -> Result<(std::result::Result<(), SolidError>, Option<Curve>)> {
-    let fetch = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
+    let fetch = match b {
+        QueryTopology::Mutable(b) => {
+            eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?
+        }
+        QueryTopology::Prepared(b) | QueryTopology::Requested(b, _) => {
+            eu3::existing_uv_trim_curve(b, eu, false)?
+                .ok_or(SolidError::PreparationRequired { operation: OP })?
+        }
+    };
     let curve = eu1::uv_trim_curve(b, eu)?.0.cloned();
     Ok((fetch.status, curve))
 }
@@ -345,6 +376,12 @@ fn fetch_uv_trim_curve(
 /// `SER(pEU->GetOrCreateUVTrimCurve(rpUVCurve))`: the UV trim curve; a failing status
 /// returns, and a missing curve is the null dereference that follows upstream.
 fn get_or_create_uv_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<Curve> {
+    uv_trim_curve_in(k, &mut QueryTopology::Mutable(b), eu)
+}
+
+/// [`get_or_create_uv_trim_curve`] through `b`: read only ([`QueryTopology::Prepared`]),
+/// the curve must exist ([`fetch_uv_trim_curve`]).
+fn uv_trim_curve_in(k: &Kernel, b: &mut QueryTopology<'_>, eu: EdgeuseId) -> Result<Curve> {
     let (status, curve) = fetch_uv_trim_curve(k, b, eu)?;
     status?;
     curve.ok_or_else(|| {
@@ -425,7 +462,7 @@ fn merge_intervals<O: LoopObject>(
             _ => {
                 return Err(null(
                     "MergeIntervals made an edge the caller cannot resolve",
-                ))
+                ));
             }
         }
     }
@@ -435,7 +472,7 @@ fn merge_intervals<O: LoopObject>(
             _ => {
                 return Err(null(
                     "MergeIntervals made a vertex the caller cannot resolve",
-                ))
+                ));
             }
         }
     }
@@ -709,6 +746,34 @@ pub fn calculate_uv_domain_from_uv_trim_curves_into(
     Ok(())
 }
 
+/// Not upstream: [`calculate_uv_domain_from_uv_trim_curves`] read-only and certified: the
+/// union of the certified boxes ([`Curve::certified_bounding_box`], each holding its whole
+/// curve) of the UV trim curves the face's edge uses already hold ([`eu1::uv_trim_curve`]:
+/// an edge use's, else its mate's), so every loop of the face lies in it. `None` when the
+/// face has no loop, or an edge use has no UV trim curve (none is made here), or a trim
+/// curve has no certified box.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of the loop traversal and the boxes.
+pub fn certified_uv_trim_domain(k: &Kernel, b: &Brep, f: FaceId) -> Result<Option<Extent2d>> {
+    let mut domain: Option<Extent2d> = None;
+    for lu in upward_loopuses(b, f)? {
+        for eu in eu1::loopuse_edgeuses(b, lu)? {
+            // the edge use's trim, or its mate's (the same face's other side)
+            let Some(curve) = eu1::uv_trim_curve(b, eu)?.0 else {
+                return Ok(None);
+            };
+            let Some(bx) = curve.certified_bounding_box(k, &curve.natural_interval())? else {
+                return Ok(None);
+            };
+            let bx = Extent2d::from_extent3d(&bx);
+            domain = Some(domain.map_or(bx, |d| d.union(&bx)));
+        }
+    }
+    Ok(domain)
+}
+
 // ---- oriented trim boundary ---------------------------------------------------------------
 
 /// The outputs of [`create_oriented_trim_boundary`].
@@ -739,10 +804,37 @@ pub struct OrientedTrimBoundary {
 /// dereferences null; those of the copies, conversions, reversals and evaluations;
 /// [`SolidError::Unported`] (`CreateUVTrimCurves`, and the deferred callees of
 /// `NormalizedEvaluate` / `GetOrCreateUVTrimCurve`).
-#[allow(clippy::too_many_lines)] // one upstream routine
 pub fn create_oriented_trim_boundary(
     k: &Kernel,
     b: &mut Brep,
+    f: FaceId,
+    parameter_space: bool,
+    fill_singularities: bool,
+    loop_to_use: Option<LoopId>,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+) -> Result<OrientedTrimBoundary> {
+    oriented_trim_boundary_in(
+        k,
+        &mut QueryTopology::Mutable(b),
+        f,
+        parameter_space,
+        fill_singularities,
+        loop_to_use,
+        key_of,
+    )
+}
+
+/// [`create_oriented_trim_boundary`] through `b`: read only ([`QueryTopology::Prepared`])
+/// every UV trim curve it reads must exist, and nothing is made; where one is missing,
+/// [`SolidError::PreparationRequired`].
+///
+/// # Errors
+///
+/// Those of [`create_oriented_trim_boundary`], and [`SolidError::PreparationRequired`].
+#[allow(clippy::too_many_lines)] // one upstream routine
+pub(crate) fn oriented_trim_boundary_in(
+    k: &Kernel,
+    b: &mut QueryTopology<'_>,
     f: FaceId,
     parameter_space: bool,
     fill_singularities: bool,
@@ -762,7 +854,12 @@ pub fn create_oriented_trim_boundary(
 
     // Create trimCurves for all Face->Edgeuses
     if !have_trimming_curves {
-        create_uv_trim_curves(k, b, f)?;
+        match b {
+            QueryTopology::Mutable(b) => create_uv_trim_curves(k, b, f)?,
+            QueryTopology::Prepared(_) | QueryTopology::Requested(..) => {
+                return Err(SolidError::PreparationRequired { operation: OP });
+            }
+        }
     }
 
     let mut out = OrientedTrimBoundary {
@@ -818,7 +915,7 @@ pub fn create_oriented_trim_boundary(
             // for every edgeuse in this loop
             for &eu in &edgeuses {
                 if eu1::orientation(b, eu)? == OrientType::Same {
-                    let uv_curve = get_or_create_uv_trim_curve(k, b, eu)?;
+                    let uv_curve = uv_trim_curve_in(k, b, eu)?;
                     let ivl = uv_curve.natural_interval();
 
                     // get trim curve's start UV point
@@ -883,7 +980,7 @@ pub fn create_oriented_trim_boundary(
                     out.edgeuses.push(Some(eu));
                 } else {
                     let mut bsc = if parameter_space {
-                        let orig = get_or_create_uv_trim_curve(k, b, eu)?;
+                        let orig = uv_trim_curve_in(k, b, eu)?;
                         let mut bsc = orig.copy(k)?;
                         bsc.convert_to_2d(k)?;
                         let _ = bsc.set_owner(orig.owner(), None);
@@ -1162,7 +1259,7 @@ pub fn trim_boundary_rectangle(
         Err(e) => {
             return Err(Failure::new(OP, TopologyFailure::TrimBoundaryNotBuilt)
                 .caused_by(e)
-                .into_error())
+                .into_error());
         }
     };
 
@@ -2063,7 +2160,9 @@ fn vertexuse_uv(k: &Kernel, b: &mut Brep, vu: VertexuseId) -> Result<Point2> {
 ///
 /// `SM_ERR_INVALID_INPUT` for a surface that is not a B-spline kind; `SM_ERR` when the
 /// surface cannot be split; [`SolidError::InvalidInput`] as in the module docs; those
-/// of the surface join, the knot query and the classification state;
+/// of the surface join, the knot query, the closure test
+/// ([`crate::nurbs::b_spline_surface::BSplineSurface::closes_within`]: a boundary
+/// control point not finite) and the classification state;
 /// [`SolidError::Unported`] (`GetUpwardLoopuses`, `IsCrossedByEdge`, `HasNearMisses`,
 /// `GetUpwardVertexuses`, `GetBrep`, `SmFace::Notify` (also through `ReplaceSurface`),
 /// `HasSeamProblem`, the split).
@@ -2188,6 +2287,28 @@ pub fn move_seam_notified<O: LoopObject>(
             has_near_misses(k, crv_class_v, &objects)?,
         )
     };
+    // not upstream: a seam exists only where the surface closes on itself, so a seam
+    // problem reported in a direction the surface does not close in is no seam problem
+    // (upstream splits and rejoins the open ends there, gluing edges the surface no longer
+    // passes through; UB-138's trigger). A direction is closed when its net certifies
+    // that the two boundary curves lie within the face's tolerance of each other
+    // everywhere, with equal weights on the two boundary lines
+    // (`BSplineSurface::closes_within`, #21491): the join below then averages each pair of
+    // boundary points at their common weight, so it moves the surface by at most half the
+    // gap (the joint knot's removal after it is upstream's own `zone_tol` heuristic). The
+    // final split below merges only across a direction this same check on the surface
+    // as it came in closes. A creased (C0)
+    // closure is closed: the surface still passes through its edges. No sample decides it
+    // (§7.6): `IsPeriodic`'s six samples and the healer's sampled closure grade prove
+    // nothing between their points.
+    let closes = (
+        net_closes(k, surface0, Sp::U, zone_tol)?,
+        net_closes(k, surface0, Sp::V, zone_tol)?,
+    );
+    let closed_u = !(crosses_u || near_miss_u) || closes.0;
+    let closed_v = !(crosses_v || near_miss_v) || closes.1;
+    let (crosses_u, near_miss_u) = (crosses_u && closed_u, near_miss_u && closed_u);
+    let (crosses_v, near_miss_v) = (crosses_v && closed_v, near_miss_v && closed_v);
     let fix_seam_both = (crosses_u || near_miss_u) && (crosses_v || near_miss_v);
 
     for ii in 0..2usize {
@@ -2534,6 +2655,13 @@ pub fn move_seam_notified<O: LoopObject>(
         ))?
         .unwrap_or(false)
     {
+        // not upstream: the split merges only across a seam the face's surface closes on
+        // (`closes`, the gate's check on the surface as it came in: the join and its knot
+        // removal since then moved the net by the gap's half and upstream's tolerance
+        // heuristic, which must not reopen a direction the gate certified). `HasSeamProblem`
+        // and the split read closure off `IsPeriodic`'s samples or the face properties,
+        // which can name a direction the net does not close in; merging there glues the
+        // open ends (#21491)
         // status ignored upstream, passed on by the fork (tangency-labs/smlib 6997962)
         out.split = split_at_seam_depth(
             k,
@@ -2545,10 +2673,38 @@ pub fn move_seam_notified<O: LoopObject>(
             problem,
             props,
             resolve,
+            closes,
             0,
         )?;
     }
     Ok(out)
+}
+
+/// Whether `surface` closes on itself in `dir` within `tol` as a seam join needs
+/// ([`BSplineSurface::closes_within`] on its control net); `false` for a surface without
+/// one.
+///
+/// [`BSplineSurface::closes_within`]: crate::nurbs::b_spline_surface::BSplineSurface::closes_within
+fn net_closes(k: &Kernel, surface: &Surface, dir: SurfParamType, tol: f64) -> Result<bool> {
+    let net = match surface.kind_with_nurb(k)? {
+        SurfaceKind::BSpline(b) => Some(b),
+        SurfaceKind::ProceduralBlend(pb) => Some(pb.net()),
+        SurfaceKind::BallPatch(bp) => Some(bp.net()),
+        SurfaceKind::Plane(p) => Some(p.base()),
+        SurfaceKind::Cone(c) => Some(c.rev().base()),
+        SurfaceKind::Sphere(s) => Some(s.base().base()),
+        SurfaceKind::Torus(t) => Some(t.base().base()),
+        SurfaceKind::SurfOfRevolution(r) => Some(r.base()),
+        SurfaceKind::SurfOfExtrusion(e) => Some(e.base()),
+        SurfaceKind::CurveBounded(_)
+        | SurfaceKind::Step(_)
+        | SurfaceKind::OffsetSurface(_)
+        | SurfaceKind::SrfInVolume(_) => None,
+    };
+    match net {
+        Some(net) => net.closes_within(dir, tol),
+        None => Ok(false),
+    }
 }
 
 /// `smos_Min(a, b)`: `a < b ? a : b` (unlike `f64::min`, a NaN `a` gives `b` and a
@@ -2650,6 +2806,7 @@ pub fn split_at_seam_notified<O: LoopObject>(
         problem,
         props,
         resolve,
+        (true, true),
         0,
     )
 }
@@ -2703,6 +2860,36 @@ pub fn complete_merged_face_seam(
     Ok(())
 }
 
+/// Test-only fault injection for [`complete_imported_face_seams`], compiled out of every
+/// other build: the retained-seam attempt is reached only by an import whose seam trim runs
+/// a sliver past the cut, which no small body makes, so a test forces the branch decisions
+/// and the error the attempt then returns.
+#[cfg(test)]
+mod seam_faults {
+    use std::cell::Cell;
+
+    /// What a test forces; the default forces nothing.
+    #[derive(Clone, Copy, Default)]
+    pub(super) struct SeamFaults {
+        /// Mark the face's internal seams for replacement and the face as needing completion.
+        pub(super) force_redundant: bool,
+        /// The deleting attempt reports that it inserted no seam.
+        pub(super) first_inserts_nothing: bool,
+        /// The retained-seam attempt fails with a cancellation once it has edited the body.
+        pub(super) retained_cancelled: bool,
+    }
+
+    thread_local! {
+        pub(super) static FAULTS: Cell<SeamFaults> = const {
+            Cell::new(SeamFaults {
+                force_redundant: false,
+                first_inserts_nothing: false,
+                retained_cancelled: false,
+            })
+        };
+    }
+}
+
 /// Complete an imported face after its trims have been lifted across periodic cuts.
 /// An edge used on both sides by this face is an internal cut: if its trim crosses the
 /// base-period cut or leaves a sector missing a seam, remove it before inserting the natural
@@ -2723,9 +2910,6 @@ pub fn complete_imported_face_seams(
     b: &mut Brep,
     f: FaceId,
 ) -> Result<Option<Vec<FaceId>>> {
-    use crate::topology::brep::p1::HealLoopHandle;
-    use crate::topology::brep::p4::{delete_edge, DeleteEnv};
-
     let mut needs_completion = false;
     for eu in super::p4::upward_edgeuses(b, f, false, None)? {
         let trim = get_or_create_uv_trim_curve(k, b, eu)?;
@@ -2737,12 +2921,71 @@ pub fn complete_imported_face_seams(
             redundant.push(e);
         }
     }
+    #[cfg(test)]
+    if seam_faults::FAULTS.get().force_redundant {
+        for e in face_edges(b, f)? {
+            let uses = crate::topology::edge::edgeuses(b, e, None, None)?;
+            let mut all_on_f = true;
+            for &eu in &uses {
+                all_on_f &= eu1::face(b, eu)? == Some(f);
+            }
+            if uses.len() > 1 && all_on_f && !redundant.contains(&e) {
+                redundant.push(e);
+            }
+        }
+        needs_completion = true;
+    }
     if !needs_completion && redundant.is_empty() {
         return Ok(None);
     }
 
+    if !redundant.is_empty() {
+        // A removed internal seam is only worth removing when the seam classification then
+        // puts a natural one back. When it finds nothing missing (the loops now run round
+        // the period without a cut, their lifted trims continuing one another) nothing
+        // would be inserted, and moving each trim piece into the base period on its own
+        // would leave a loop's consecutive uses a whole period apart. The edit is then
+        // undone and the seam kept, as it was imported.
+        let replaced = b.with_rollback(
+            |b| complete_face_seams_edit(k, b, f, &redundant, false),
+            |r| matches!(r, Ok(Some((_, true)))),
+        )?;
+        if let Some((faces, true)) = replaced {
+            return Ok(Some(faces));
+        }
+        if !needs_completion {
+            return Ok(None);
+        }
+        // With its seam kept the face's trims may still not be movable one by one into the
+        // base period (a loop continuing across the cut with no edge there): the face is
+        // then left as imported, and the caller's own checks decide about the record. Any
+        // other failure (a cancellation, say) is the caller's, and the body is put back.
+        let kept = b.with_rollback(
+            |b| complete_face_seams_edit(k, b, f, &[], true),
+            |r| matches!(r, Ok(Some(_))),
+        )?;
+        return Ok(kept.map(|(faces, _)| faces));
+    }
+    Ok(complete_face_seams_edit(k, b, f, &[], false)?.map(|(faces, _)| faces))
+}
+
+/// The edit of [`complete_imported_face_seams`]: delete the `redundant` internal seams,
+/// insert the natural seam where the classification finds one missing or crossed, and
+/// translate every trim piece into the base period. Returns the pieces of `f` and whether a
+/// seam was inserted; `None` where `untranslatable_is_none` and a trim cannot be moved into
+/// the base period (the one failure that is not an error then).
+fn complete_face_seams_edit(
+    k: &mut Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    redundant: &[EdgeId],
+    untranslatable_is_none: bool,
+) -> Result<Option<(Vec<FaceId>, bool)>> {
+    use crate::topology::brep::p1::HealLoopHandle;
+    use crate::topology::brep::p4::{delete_edge, DeleteEnv};
+
     brep_p3::edit_brep(k, b, |k, b, scope| {
-        for e in redundant {
+        for &e in redundant {
             if b.edge(e).is_err() {
                 continue;
             }
@@ -2757,6 +3000,7 @@ pub fn complete_imported_face_seams(
         )?;
         let mut faces = vec![f];
         let mut seams = Vec::new();
+        let mut inserted = false;
         if check.problem.crossed != SurfParamType::Neither
             || check.problem.missing != SurfParamType::Neither
         {
@@ -2775,6 +3019,7 @@ pub fn complete_imported_face_seams(
             for e in split.edges {
                 store_imported_seam_curve(k, b, e, scope.env)?;
                 seams.push(e);
+                inserted = true;
             }
             for face in split.faces {
                 if !faces.contains(&face) {
@@ -2782,18 +3027,28 @@ pub fn complete_imported_face_seams(
                 }
             }
         }
+        #[cfg(test)]
+        let inserted =
+            inserted && (!seam_faults::FAULTS.get().first_inserts_nothing || redundant.is_empty());
+        if !redundant.is_empty() && !inserted {
+            // Nothing replaces the deleted seams: the caller undoes this edit.
+            return Ok(Some((faces, false)));
+        }
         for &face in &faces {
             for eu in super::p4::upward_edgeuses(b, face, false, None)? {
                 let mut trim = get_or_create_uv_trim_curve(k, b, eu)?;
-                let shift = imported_trim_shift(k, b, face, &trim)?.ok_or_else(|| {
-                    SolidError::topology(
+                let Some(shift) = imported_trim_shift(k, b, face, &trim)? else {
+                    if untranslatable_is_none {
+                        return Ok(None);
+                    }
+                    return Err(SolidError::topology(
                         OP,
                         TopologyFailure::Defect {
                             why: "the imported face's seam edit left a trim crossing the base \
                                   period, though the seam classification split its boundary",
                         },
-                    )
-                })?;
+                    ));
+                };
                 if shift != Vec3::ZERO {
                     let mut axis = Axis2Placement::default();
                     axis.set_canonical(shift, Vec3::X, Vec3::Y)?;
@@ -2842,7 +3097,11 @@ pub fn complete_imported_face_seams(
                 calculate_uv_domain_from_uv_trim_curves(k, b, face, true, false, false)?.domain;
             fp2::set_uv_domain(b, face, &domain)?;
         }
-        Ok(Some(faces))
+        #[cfg(test)]
+        if untranslatable_is_none && seam_faults::FAULTS.get().retained_cancelled {
+            return Err(SolidError::Cancelled { operation: OP });
+        }
+        Ok(Some((faces, inserted)))
     })
 }
 
@@ -2984,6 +3243,7 @@ fn split_at_seam_depth<O: LoopObject>(
     mut problem: SeamProblem,
     props: Option<&FaceProps<O>>,
     resolve: &dyn Fn(O) -> Option<EntityRef>,
+    closes: (bool, bool),
     depth: usize,
 ) -> Result<SeamSplit> {
     use SurfParamType as Sp;
@@ -3037,8 +3297,12 @@ fn split_at_seam_depth<O: LoopObject>(
 
     let vertex_only_closed_surface = fp3::is_closed_surface_with_vertex_loops(k, b, f, props)?;
 
-    let merge_u = names(problem.crossed, Sp::U) || names(problem.missing, Sp::U);
-    let merge_v = names(problem.crossed, Sp::V) || names(problem.missing, Sp::V);
+    // (`closes`: the directions a caller certified closed; `(true, true)` upstream)
+    let merge_u = closes.0 && (names(problem.crossed, Sp::U) || names(problem.missing, Sp::U));
+    let merge_v = closes.1 && (names(problem.crossed, Sp::V) || names(problem.missing, Sp::V));
+    if !(merge_u || merge_v) {
+        return Ok(out);
+    }
 
     // allow Brep modifications (upstream's SmTemporaryChangeValue of
     // pBrep->m_bEditingEnabled and the context's DoingBoolean flag, restored on
@@ -3059,6 +3323,7 @@ fn split_at_seam_depth<O: LoopObject>(
         depth,
         (merge_u, merge_v),
         vertex_only_closed_surface,
+        closes,
     );
     b.set_editing_enabled(editing);
     k.context.set_doing_boolean(doing_boolean);
@@ -3110,6 +3375,7 @@ fn split_at_seam_merges<O: LoopObject>(
     depth: usize,
     (merge_u, merge_v): (bool, bool),
     vertex_only_closed_surface: bool,
+    closes: (bool, bool),
 ) -> Result<SeamSplit> {
     use SurfParamType as Sp;
     let mut out = SeamSplit::default();
@@ -3162,6 +3428,7 @@ fn split_at_seam_merges<O: LoopObject>(
                     this_problem,
                     props,
                     resolve,
+                    closes,
                     depth + 1,
                 )?;
                 out.faces.extend_from_slice(&s.faces);
@@ -4067,6 +4334,7 @@ mod tests {
             0,
             (true, false),
             false,
+            (true, true),
         );
         // (the plane has no seam curve, so the merge after it may still fail; not on the
         // seam's vertex)
@@ -4098,9 +4366,64 @@ mod tests {
             p,
             None,
             &|_| None,
+            (true, true),
             MAX_SPLIT_AT_SEAM_DEPTH + 1,
         );
         assert!(matches!(e, Err(SolidError::InvalidInput { .. })));
+    }
+
+    /// #21491: `move_seam`'s final split merges only across a
+    /// direction its net closes in; a problem the samples or props report in another
+    /// direction leaves the face as it is.
+    #[test]
+    fn split_at_seam_merges_only_across_a_direction_that_closes() {
+        use crate::primitive::api_primitives::create_cylinder;
+
+        let run = |closes: (bool, bool)| {
+            let mut k = Kernel::default();
+            let mut b = create_cylinder(&mut k, Vec3::ZERO, 5.0, 3.0).unwrap();
+            let f = b
+                .faces()
+                .iter()
+                .find_map(|(f, _)| {
+                    let s = surface_deref(&b, f).ok()?;
+                    let d = s.natural_uv_domain_with_nurb(&k).ok()?;
+                    s.is_closed(&k, &d, SurfParamType::U, None, false)
+                        .ok()?
+                        .0
+                        .then_some(f)
+                })
+                .unwrap();
+            let mut cu = CurveClassification::<H>::new(&k);
+            let mut cv = CurveClassification::<H>::new(&k);
+            let p = SeamProblem {
+                crossed: SurfParamType::U,
+                missing: SurfParamType::U,
+                near_miss: SurfParamType::Neither,
+            };
+            let r = split_at_seam_depth(
+                &mut k,
+                &mut b,
+                None,
+                f,
+                &mut cu,
+                &mut cv,
+                p,
+                None,
+                &|_| None,
+                closes,
+                0,
+            );
+            (r, b.faces().len(), b.edges().len())
+        };
+        // the cylinder's three faces and three edges, untouched
+        let (masked, faces, edges) = run((false, true));
+        assert_eq!(masked.unwrap(), SeamSplit::default());
+        assert_eq!((faces, edges), (3, 3));
+        // unmasked, the same call goes on into the merge (which, with no classification
+        // handles here, refuses): the mask is what stops it
+        let (merged, _, _) = run((true, true));
+        assert!(merged.is_err());
     }
 
     #[test]
@@ -4186,5 +4509,84 @@ mod swap_refused_tests {
         let e = swap_uv(&k, &mut b, face).unwrap_err();
         assert!(e.upstream_status().is_some(), "{e:?}");
         assert!(state(&b) == before, "the refused swap changed the face");
+    }
+}
+
+#[cfg(test)]
+mod seam_completion_fault_tests {
+    use super::seam_faults::{SeamFaults, FAULTS};
+    use super::*;
+    use crate::math::Point3;
+    use crate::primitive::api_primitives::create_cylinder;
+    use crate::surface::surface::SurfaceKind;
+
+    fn wall_of_a_cylinder(k: &mut Kernel) -> (Brep, FaceId) {
+        let b = create_cylinder(k, Point3::ZERO, 5.0, 3.0).unwrap();
+        let wall = b
+            .faces()
+            .ids()
+            .find(|&f| {
+                b.face(f)
+                    .unwrap()
+                    .surface
+                    .as_ref()
+                    .is_some_and(|s| matches!(s.kind(), SurfaceKind::Cone(_)))
+            })
+            .unwrap();
+        (b, wall)
+    }
+
+    /// #20575: the retained-seam attempt of the seam completion (the one made when deleting
+    /// the marked seam would insert none) hands an error that is not the untranslatable-trim
+    /// case to its caller, and the body is as it was. The error is injected after the attempt
+    /// has edited the body ([`seam_faults`]); an attempt that turned every error into "leave
+    /// the face as imported" would return `Ok(None)` here.
+    #[test]
+    fn the_retained_seam_attempt_returns_an_error_that_is_not_the_untranslatable_trim() {
+        let mut k = Kernel::default();
+        let (mut b, wall) = wall_of_a_cylinder(&mut k);
+        let before = (b.faces().ids().count(), b.edgeuses().iter().count());
+        FAULTS.set(SeamFaults {
+            force_redundant: true,
+            first_inserts_nothing: true,
+            retained_cancelled: true,
+        });
+        let r = complete_imported_face_seams(&mut k, &mut b, wall);
+        FAULTS.set(SeamFaults::default());
+        assert!(matches!(r, Err(SolidError::Cancelled { .. })), "{r:?}");
+        assert_eq!(
+            (b.faces().ids().count(), b.edgeuses().iter().count()),
+            before
+        );
+        // the seam is still there, used twice by the wall
+        let seam_uses = |b: &Brep| {
+            b.edges()
+                .ids()
+                .filter(|&e| {
+                    let uses = crate::topology::edge::edgeuses(b, e, None, None).unwrap();
+                    uses.len() > 1
+                        && uses
+                            .iter()
+                            .all(|&eu| eu1::face(b, eu).unwrap() == Some(wall))
+                })
+                .count()
+        };
+        assert_eq!(seam_uses(&b), 1);
+    }
+
+    /// The same face reaches the retained-seam attempt and, with nothing injected into it,
+    /// the attempt completes: the seam is kept and the face's pieces come back.
+    #[test]
+    fn the_retained_seam_attempt_keeps_the_seam_when_it_succeeds() {
+        let mut k = Kernel::default();
+        let (mut b, wall) = wall_of_a_cylinder(&mut k);
+        FAULTS.set(SeamFaults {
+            force_redundant: true,
+            first_inserts_nothing: true,
+            retained_cancelled: false,
+        });
+        let r = complete_imported_face_seams(&mut k, &mut b, wall);
+        FAULTS.set(SeamFaults::default());
+        assert_eq!(r.unwrap(), Some(vec![wall]));
     }
 }

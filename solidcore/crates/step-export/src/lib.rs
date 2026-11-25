@@ -45,11 +45,13 @@ pub mod geom;
 pub mod map;
 pub mod validate;
 
-pub use map::{import, Limits};
+pub use map::import;
+pub use map::Limits;
 
 #[cfg(test)]
 mod import_tests;
-pub use brep_to_model::{brep_to_model, ExportModelError};
+pub use brep_to_model::brep_to_model;
+pub use brep_to_model::ExportModelError;
 
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
