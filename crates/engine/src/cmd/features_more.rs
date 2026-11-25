@@ -4,15 +4,16 @@ use serde_json::Value;
 use solidcore_record::Vec3;
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::{AlignFrame, FeatureKind};
-use solidcraft_doc::{BodyName, SketchId};
+use solidcraft_doc::{BodyName, Expr, SketchId};
 use solidcraft_doc::{Dir, DomeShape, FacePick, Position};
 use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use super::features::{
-    add_face_feature, add_feature, axis_dir_param, check_expr, feature_sketch, length_operands, plane_param, point_param, profiles, typed_length_unit,
+    add_face_feature, add_feature, axis_expr_param, check_expr, feature_sketch, length_operands, plane_param, point_param, profiles,
+    typed_length_unit,
 };
-use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
+use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec3};
 use crate::schema::align::AlignParams;
 use crate::schema::features::FeatureResult;
 use crate::schema::features_more::{BoundaryFillParams, CoilParams, DomeParams, EmbossParams, RemoveParams, ReplaceFaceParams, RibParams};
@@ -62,7 +63,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("emboss")
         .contract(&EMBOSS_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] on the face to emboss: planar, a cylinder wall (on a partial outside wall, a profile running past the wall's edge carries on onto the face there when that face is a rectangle tangent to the wall; the profile must lie within the wall and those faces) or another curved face (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
+        .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] on the face to emboss: planar, a cylinder wall (on a partial outside wall, a profile running past the wall's edge carries on onto the face there when that face is a rectangle tangent to the wall; the profile must lie within the wall and those faces) or another curved face (inferred when exactly one supported tangent cylinder matches the selected profiles); offset_x?, offset_y?: length expr (a shift of the profiles along the sketch's x and y before they are laid on the face; the sketch is not changed); angle?: angle expr (a turn of the profiles, counter-clockwise in the sketch, about the middle of their bounds; the offsets are not turned with them)"),
     CommandSpec::new("solid.dome", "Dome", crate::checked!("solid.dome", dome)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("dome")
@@ -112,11 +113,11 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
                 || v.is_object() && ["origin", "dir", "curve", "edge", "face", "type"].iter().any(|key| v.get(*key).is_some()))
     });
     let (axis, axis_ref) = if let Some(geo) = coil_placed_edge(s, p.get("axis"), cmd)? {
-        (Vec3::Z, Some(solidcraft_doc::AxisRef::Model { geo }))
+        (solidcraft_doc::dir_expr(Vec3::Z), Some(solidcraft_doc::AxisRef::Model { geo }))
     } else if reference {
-        (Vec3::Z, Some(super::features::axis_param(s, sketch.map_or(0, |id| id.0), p, cmd)?))
+        (solidcraft_doc::dir_expr(Vec3::Z), Some(super::features::axis_param(s, sketch.map_or(0, |id| id.0), p, cmd)?))
     } else {
-        (axis_dir_param(p, cmd)?, None)
+        (axis_expr_param(s, p, cmd)?.0, None)
     };
     let diameter = if profile_mode {
         None
@@ -177,7 +178,7 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
         p,
         FeatureKind::Coil {
             base,
-            axis: Dir(axis),
+            axis,
             axis_ref,
             reversed: super::reversed_param(p, "reversed", cmd)?,
             sketch,
@@ -264,6 +265,12 @@ fn emboss(s: &mut Session, p: &Value) -> Result<Value> {
     let profiles = profiles(p, cmd)?;
     let depth = req_expr(cmd, p, "depth")?;
     check_expr(s, &depth, Kind::Length, cmd, "depth")?;
+    // #20386: where the profiles go, apart from where the sketch has them.
+    let placement = EmbossPlacement {
+        offset_x: placement_expr(s, p, "offset_x", Kind::Length)?,
+        offset_y: placement_expr(s, p, "offset_y", Kind::Length)?,
+        angle: placement_expr(s, p, "angle", Kind::Angle)?,
+    };
     let deboss = match str_(p, "mode").map(str::to_ascii_lowercase).as_deref() {
         None | Some("emboss") => false,
         Some("deboss") => true,
@@ -334,17 +341,62 @@ fn emboss(s: &mut Session, p: &Value) -> Result<Value> {
         targets = vec![name.to_owned()];
         Some(face)
     } else {
-        let inferred = infer_emboss_selection(s, sketch, &profiles, &depth, deboss, &targets)?;
+        let inferred = infer_emboss_selection(s, sketch, &profiles, &placement, &depth, deboss, &targets)?;
         if let Some(face) = &inferred {
             targets = vec![face.body.0.clone()];
         }
         inferred
     };
+    let EmbossPlacement { offset_x, offset_y, angle } = placement;
     add_feature(
         s,
         p,
-        FeatureKind::Emboss { sketch: SketchId(sketch), profiles, depth, deboss, targets: targets.into_iter().map(BodyName).collect(), face },
+        FeatureKind::Emboss {
+            sketch: SketchId(sketch),
+            profiles,
+            depth,
+            deboss,
+            targets: targets.into_iter().map(BodyName).collect(),
+            face,
+            offset_x,
+            offset_y,
+            angle,
+        },
     )
+}
+
+/// Where an Emboss puts its profiles, apart from where their sketch has them (#20386): a shift
+/// along the sketch's x and y and a turn about the middle of their bounds, each left out or an
+/// expression.
+struct EmbossPlacement {
+    offset_x: Option<Expr>,
+    offset_y: Option<Expr>,
+    angle: Option<Expr>,
+}
+
+/// An Emboss placement input: an expression of `kind`, or `None` when the call leaves it out or
+/// gives `null`. A value given that isn't a number or an expression is refused rather than read
+/// as left out.
+fn placement_expr(s: &Session, p: &Value, key: &str, kind: Kind) -> Result<Option<Expr>> {
+    let Some(given) = p.get(key).filter(|v| !v.is_null()) else { return Ok(None) };
+    let e = expr(p, key).ok_or_else(|| bad("solid.emboss", format!("`{key}` {}", expr_problem(Some(given)))))?;
+    check_expr(s, &e, kind, "solid.emboss", key)?;
+    Ok(Some(e))
+}
+
+impl EmbossPlacement {
+    /// `regions` as the feature will lay them on its face (`solidcraft_doc::emboss_placement`),
+    /// with the values the inputs give now. A bare length reads in the design's unit, as it is
+    /// saved.
+    fn place(&self, s: &Session, regions: Vec<solidcore_record::Region2>) -> Result<Vec<solidcore_record::Region2>> {
+        let cmd = "solid.emboss";
+        let now = |e: &Option<Expr>, kind: Kind| match e {
+            Some(e) => s.doc.eval(&s.doc.with_design_unit(e, kind), kind).map_err(|err| bad(cmd, err.to_string())),
+            None => Ok(0.0),
+        };
+        let shift = solidcore_record::Vec2::new(now(&self.offset_x, Kind::Length)?, now(&self.offset_y, Kind::Length)?);
+        solidcraft_doc::emboss_placement(regions, shift, now(&self.angle, Kind::Angle)?).map_err(|e| bad(cmd, e.to_string()))
+    }
 }
 
 fn emboss_selection(s: &Session, selected: &solidcraft_doc::ModelBody, at: Vec3) -> Result<solidcraft_doc::EmbossFace> {
@@ -392,6 +444,7 @@ fn infer_emboss_selection(
     s: &Session,
     sketch: u64,
     profiles: &solidcraft_doc::ProfileSel,
+    placement: &EmbossPlacement,
     depth: &str,
     deboss: bool,
     targets: &[String],
@@ -399,7 +452,8 @@ fn infer_emboss_selection(
     let cmd = "solid.emboss";
     let original = s.model.state();
     let ss = original.sketch(sketch).ok_or_else(|| bad(cmd, "the sketch is not evaluated"))?;
-    let regions = solidcraft_doc::select_profiles(ss, profiles).map_err(|e| bad(cmd, e.to_string()))?;
+    // The wall is the one the profiles lie on once the Emboss has placed them (#20386).
+    let regions = placement.place(s, solidcraft_doc::select_profiles(ss, profiles).map_err(|e| bad(cmd, e.to_string()))?)?;
     let sketch_owner = s.doc.feature(sketch).map(|f| f.component).ok_or_else(|| bad(cmd, "profile sketch no longer exists"))?;
     let d = s.doc.eval(&s.doc.with_design_unit(depth, Kind::Length), Kind::Length).map_err(|e| bad(cmd, e.to_string()))?;
     let world = s.world_state()?;

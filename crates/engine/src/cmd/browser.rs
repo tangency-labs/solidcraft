@@ -2170,6 +2170,7 @@ fn redefine_in_place(s: &mut Session, id: u64, p: &Value, cmd: &str) -> Result<R
     trial.refresh();
     s.doc = trial.doc;
     s.pending_moves = trial.pending_moves;
+    s.pending_move_records = trial.pending_move_records;
 
     let attachment = s.doc.feature(id).and_then(|feature| match &feature.kind {
         FeatureKind::Sketch { plane, .. } => {

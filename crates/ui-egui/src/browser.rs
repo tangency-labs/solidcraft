@@ -2212,6 +2212,8 @@ fn occurrence_rows_inner(
         let names = app.session.occurrence_bodies(path, true).unwrap_or_default();
         if !offer_bodies(app, &names, Take::Toggle) {
             click_select(app, r.how.as_ref(), Some(Sel::Occurrence { path: path.to_vec() }));
+        } else if let Some(d) = app.dialog.as_mut() {
+            crate::dialogs_assembly::picked_whole_component(d, &names);
         }
     }
     if rename_here {
@@ -4047,7 +4049,7 @@ pub fn save_as_question(name: &str, extension: &str) -> String {
 /// Yes while components were moved without capturing their positions, except for the commands
 /// that capture, revert or keep moving.
 pub fn needs_capture(app: &SolveApp, what: &str) -> bool {
-    !app.session.pending_moves.is_empty()
+    app.session.has_uncaptured_positions()
         && !matches!(
             what,
             "component.capture_position"
@@ -4055,6 +4057,12 @@ pub fn needs_capture(app: &SolveApp, what: &str) -> bool {
                 | "occurrence.move"
                 | "occurrence.align"
                 | "occurrence.drag"
+                | "joint.drive"
+                | "joint.reach"
+                | "joint.gear"
+                | "joint.screw"
+                | "joint.rack_pinion"
+                | "motion.study"
                 | "edit.undo"
                 | "edit.redo"
         )

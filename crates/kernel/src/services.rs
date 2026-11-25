@@ -1,5 +1,5 @@
 //! solidcore's services that the application uses beside the body-making operations: 2D and
-//! curve helpers, line-family clipping, affine maps, sheet development, frame members and the
+//! curve helpers, line-family clipping, affine maps, sheet development and the
 //! display plan. They read records and data; none
 //! makes a body, so none is routed (`docs/design/kernel-layer.md` §2).
 //!
@@ -28,9 +28,6 @@ pub use solidcore_ops::dxf;
 pub use solidcore_ops::face_pair;
 pub use solidcore_ops::face_surface;
 pub use solidcore_ops::fit_projection;
-pub use solidcore_ops::frame_gusset;
-pub use solidcore_ops::frame_member;
-pub use solidcore_ops::frame_trim;
 pub use solidcore_ops::hole_stacks;
 pub use solidcore_ops::joint_turn;
 pub use solidcore_ops::mid_joint;
