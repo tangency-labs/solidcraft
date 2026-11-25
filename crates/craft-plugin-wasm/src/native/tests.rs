@@ -28,6 +28,7 @@ struct App {
     panel_visible: bool,
     interactive: bool,
     forms: Vec<(String, Value)>,
+    messages: Vec<(craft_plugin::LogLevel, String)>,
 }
 impl PluginHost for App {
     fn open_form(&mut self, entry: &str, params: &Value) -> Result<()> {
@@ -129,7 +130,12 @@ impl PluginHost for App {
         self.panel_visible = visible;
         Ok(())
     }
-    fn log(&mut self, _: &str) {}
+    fn log(&mut self, message: &str) {
+        self.messages.push((craft_plugin::LogLevel::Info, message.to_string()));
+    }
+    fn log_level(&mut self, level: craft_plugin::LogLevel, message: &str) {
+        self.messages.push((level, message.to_string()));
+    }
     fn progress(&mut self, _: f32, _: &str) {}
     fn is_cancelled(&self) -> bool {
         self.cancelled
@@ -1178,6 +1184,26 @@ fn form_import_requires_capability_and_refuses_programmatic_hosts() {
     let mut hostile = state(App::default());
     hostile.forms = true;
     assert!(forms::Host::open(&mut hostile, "../entry".into(), "{}".into()).is_err());
+}
+
+#[test]
+fn log_preserves_severity_level_and_message() {
+    use crate::native::log::Host;
+    let mut st = state(App::default());
+    st.log(crate::native::log::Level::Debug, "diagnostic details".into());
+    st.log(crate::native::log::Level::Info, "normal progress".into());
+    st.log(crate::native::log::Level::Warn, "warning: mortise cheek is thin".into());
+    st.log(crate::native::log::Level::Error, "fatal error occurred\r\n".into());
+
+    assert_eq!(
+        st.host.messages,
+        vec![
+            (craft_plugin::LogLevel::Debug, "diagnostic details".into()),
+            (craft_plugin::LogLevel::Info, "normal progress".into()),
+            (craft_plugin::LogLevel::Warn, "warning: mortise cheek is thin".into()),
+            (craft_plugin::LogLevel::Error, "fatal error occurred".into()),
+        ]
+    );
 }
 
 #[test]

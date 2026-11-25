@@ -98,6 +98,7 @@ drawing.auto_center_mark.include  a drawing: tested in crates/engine/src/drawing
 drawing.auto_center_mark.inspect  a drawing: tested in crates/engine/src/drawing_dimension_tests.rs
 drawing.auto_center_mark.set      a drawing: tested in crates/engine/src/drawing_dimension_tests.rs
 drawing.balloon.add               a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.balloon.delete            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.edit              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.inspect           a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.repair            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
@@ -128,6 +129,7 @@ drawing.image.add                 a drawing: its tests in crates/engine/src/cmd/
 drawing.inspect                   a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.list                      a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.note.add                  a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.note.delete               a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.note.edit                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.note.inspect              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.open                      a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
@@ -195,6 +197,7 @@ explode.delete                    exploded views: display offsets
 explode.list                      exploded views: display offsets
 expr.evaluate                     expression evaluation
 file.copy                        file operations: tested in crates/engine/src/cmd/file_library.rs tests
+file.export_mjcf                 writes a MuJoCo model and its STL meshes: tested in crates/engine/src/cmd/mjcf_tests.rs
 file.export_sdf                  writes a robot model folder from the meshes: tested in crates/io/src/sdf.rs and crates/engine/src/tests.rs
 file.export_urdf_options          the URDF export with its options dialog first: tested in crates/engine/src/cmd/urdf_tests.rs
 file.gerber_files                 a listing of a board's files: crates/engine/src/cmd/board_import_tests.rs
@@ -449,6 +452,7 @@ sketch.construction_line.tangent_external  2D sketch only (the sketch solver and
 sketch.construction_line.tangent_two  2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.construction_line.vertical 2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.copy                       2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.create3d                   3D sketch lifecycle: a new sketch with 3D Sketch on (engine tests, sketch_3d_frame_tests.rs); no kernel operation
 sketch.cut                        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.delete                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.dimension_text             2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -502,6 +506,7 @@ sketch.slot.center_point          2D sketch only (the sketch solver and engine t
 sketch.snap                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.solve                      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.spline.control_knots       2D sketch only (crates/engine/src/cmd/sketch_knots_tests.rs: the 33-point non-uniform example draws as exact Bezier spans and extrudes to a closed body); no new kernel operation
+sketch.spline.control_polygon     2D sketch only (crates/engine/src/cmd/sketch_create.rs: blend_tests::spline_control_polygon_constraints_move_the_real_control_points); no kernel operation
 sketch.spline.fit_tolerance       2D sketch only (crates/engine/src/cmd/sketch_fit_tolerance_tests.rs: the 800-point contour fits within the tolerance and a closed contour extrudes to its body); no new kernel operation
 sketch.spline.handles             2D sketch only (crates/engine/src/cmd/sketch_create.rs: fit_spline_handles_are_visible_lines_and_accept_existing_constraints); no kernel operation
 sketch.spline.insert_point        2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -521,6 +526,8 @@ storage.get                       plugins: a plugin's own data in the design, no
 storage.list                      plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 storage.patch                     plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 storage.set                       plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
+surface.midsurface                tested in the engine: crates/engine/src/schema/surface_midsurface_tests.rs and crates/engine/src/midsurface_samples_tests.rs (the pairing and sheets in crates/doc/src/midsurface.rs tests)
+surface.midsurface_analyze        read-only analysis, no geometry made: crates/engine/src/schema/surface_midsurface_tests.rs (the analysis in crates/doc/src/midsurface.rs tests)
 tab.layout.apply                   manages an application view layout; no geometry, tested in the engine and UI
 tab.layout.list                    manages an application view layout; no geometry, tested in the engine and UI
 tab.layout.remove                  manages an application view layout; no geometry, tested in the engine and UI
@@ -637,6 +644,11 @@ file.export_view_dxf              drawings: the projection of the model a view D
 inspect.draft                     inspect: the number or curves it reports
 inspect.parameter_sweep           inspect: results rebuilt over a parameter range
 inspect.section                   inspect: the number or curves it reports
+inspect.section.delete            display: saved Section Analyses; crates/engine/src/tests.rs saved sections
+inspect.section.list              display: saved Section Analyses; crates/engine/src/tests.rs saved sections
+inspect.section.rename            display: saved Section Analyses; crates/engine/src/tests.rs saved sections
+inspect.section.save              display: saved Section Analyses; crates/engine/src/tests.rs saved sections
+inspect.section.show              display: saved Section Analyses; crates/engine/src/tests.rs saved sections
 motion.trace.edit                 assemblies: motion results
 motion.trace.keep                 assemblies: motion results
 parts.fastener                    standard parts: a fastener body
