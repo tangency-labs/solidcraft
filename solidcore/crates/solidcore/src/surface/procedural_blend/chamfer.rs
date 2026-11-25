@@ -59,16 +59,31 @@ pub enum ChamferSize {
     Chord(f64),
 }
 
+/// What a chamfer's sizes are held as along its edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChamferKind {
+    /// Two offsets of a ball's point, converted from the sizes at one wedge (today's
+    /// chamfer): the sizes hold where the wedge was measured.
+    #[default]
+    Offsets,
+    /// Setbacks held at every station: each foot a straight line of its size from the edge,
+    /// in the plane square to it (#13710; `blend::fillet_section::setback_station`). No ball,
+    /// no wedge (written 0).
+    Setbacks,
+}
+
 /// A chamfer's sizes and the wedge angle they were converted to offsets at.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ChamferDefinition {
     /// The sizes as asked.
     pub size: ChamferSize,
     /// The angle between the supports at the edge, inside the wedge the chamfer cuts
-    /// across, `0 < wedge < pi`.
+    /// across, `0 < wedge < pi`; 0 for a chamfer of setbacks.
     pub wedge: f64,
     /// The two offsets follow the local wedge to preserve an equal setback on the supports.
     stationwise: bool,
+    /// How the sizes are held along the edge.
+    kind: ChamferKind,
 }
 
 fn positive(x: f64) -> bool {
@@ -88,13 +103,65 @@ impl ChamferDefinition {
             size,
             wedge,
             stationwise: false,
+            kind: ChamferKind::Offsets,
         };
         definition.validate()?;
         Ok(definition)
     }
 
+    /// A chamfer of setbacks held at every station: two distances, each finite and
+    /// positive, its wedge 0. A chord of setbacks (its setback found at each station) and a
+    /// distance and an angle are not built yet.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a size that is not finite and positive; `Unsupported` for a
+    /// chord or a distance and an angle.
+    pub fn of_setbacks(size: ChamferSize) -> Result<Self> {
+        let definition = Self {
+            size,
+            wedge: 0.0,
+            stationwise: false,
+            kind: ChamferKind::Setbacks,
+        };
+        definition.validate()?;
+        Ok(definition)
+    }
+
+    /// How the sizes are held along the edge.
+    #[must_use]
+    pub const fn kind(&self) -> ChamferKind {
+        self.kind
+    }
+
+    /// Whether the sizes are setbacks held at every station.
+    #[must_use]
+    pub fn is_setbacks(&self) -> bool {
+        self.kind == ChamferKind::Setbacks
+    }
+
     /// Check the public size and wedge against the kind of chamfer being stored.
     pub(super) fn validate(&self) -> Result<()> {
+        if self.kind == ChamferKind::Setbacks {
+            return match self.size {
+                ChamferSize::Distances([a, b])
+                    if positive(a) && positive(b) && self.wedge == 0.0 && !self.stationwise =>
+                {
+                    Ok(())
+                }
+                ChamferSize::Distances(_) => Err(SolidError::invalid_input(
+                    OP,
+                    "a chamfer of setbacks has two finite positive distances and no wedge",
+                )),
+                ChamferSize::Chord(_) | ChamferSize::DistanceAngle { .. } => {
+                    Err(SolidError::Unsupported {
+                        operation: OP,
+                        reason: "a chamfer of setbacks by a chord or a distance and an angle is \
+                                 not built yet",
+                    })
+                }
+            };
+        }
         let wedge = self.wedge;
         if !(wedge.is_finite() && wedge > 0.0 && wedge < PI) {
             return Err(SolidError::invalid_input(
@@ -127,6 +194,12 @@ impl ChamferDefinition {
     /// Hold the same setback in the tangent planes at every pair of support feet.
     /// The stored wedge describes the reference section for reporting the sizes.
     pub(crate) fn at_every_station(mut self) -> Result<Self> {
+        if self.is_setbacks() {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a chamfer of setbacks already holds them at every station",
+            ));
+        }
         self.stationwise = true;
         self.validate()?;
         Ok(self)
@@ -179,6 +252,12 @@ impl ChamferDefinition {
     /// `InvalidInput` where an offset is not positive: the distances fold (the chord
     /// would leave the wedge; a second distance at most the first's `cos(wedge)`).
     pub fn offsets(&self) -> Result<[f64; 2]> {
+        if self.is_setbacks() {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a chamfer of setbacks has no ball and so no offsets",
+            ));
+        }
         let [d1, d2] = self.setbacks();
         let (s, c) = self.wedge.sin_cos();
         let r = [(d2 - d1 * c) / s, (d1 - d2 * c) / s];
@@ -219,6 +298,7 @@ impl ChamferDefinition {
             size,
             wedge: self.wedge,
             stationwise: self.stationwise,
+            kind: self.kind,
         }
     }
 }
@@ -285,6 +365,53 @@ mod tests {
         assert!(c.offsets().is_err());
         let c = ChamferDefinition::new(ChamferSize::Distances([2.0, 1.1]), PI / 3.0).unwrap();
         assert!(c.offsets().is_ok());
+    }
+
+    #[test]
+    fn a_chamfer_of_setbacks_has_no_ball() {
+        let c = ChamferDefinition::of_setbacks(ChamferSize::Distances([2.0, 1.0])).unwrap();
+        assert_eq!(c.kind(), ChamferKind::Setbacks);
+        assert!(c.is_setbacks());
+        assert_eq!(c.wedge, 0.0);
+        assert_eq!(c.setbacks(), [2.0, 1.0]);
+        assert!(c.offsets().is_err());
+        assert!(!c.holds([1.0, 1.0]));
+        assert!(c.at_every_station().is_err());
+        assert_eq!(c.constant_setback(), None);
+        let big = c.scaled(3.0);
+        assert!(big.is_setbacks());
+        assert_eq!(big.setbacks(), [6.0, 3.0]);
+        // today's chamfer is the default kind
+        let offsets = ChamferDefinition::new(ChamferSize::Distances([2.0, 1.0]), 0.5 * PI).unwrap();
+        assert_eq!(offsets.kind(), ChamferKind::Offsets);
+        assert!(!offsets.is_setbacks());
+    }
+
+    #[test]
+    fn a_chamfer_of_setbacks_refuses_bad_sizes_and_the_kinds_not_built() {
+        for d in [
+            [0.0, 1.0],
+            [1.0, -1.0],
+            [f64::NAN, 1.0],
+            [1.0, f64::INFINITY],
+        ] {
+            assert!(matches!(
+                ChamferDefinition::of_setbacks(ChamferSize::Distances(d)),
+                Err(SolidError::InvalidInput { .. })
+            ));
+        }
+        for size in [
+            ChamferSize::Chord(1.0),
+            ChamferSize::DistanceAngle {
+                distance: 1.0,
+                angle: 0.5,
+            },
+        ] {
+            assert!(matches!(
+                ChamferDefinition::of_setbacks(size),
+                Err(SolidError::Unsupported { .. })
+            ));
+        }
     }
 
     #[test]
