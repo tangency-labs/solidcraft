@@ -22,6 +22,7 @@ use solidcore::query::api_queries::{
 };
 use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects, Ray};
 use solidcore::query::face::p1 as face_p1;
+use solidcore::topology::brep::mirror::transform_matrix;
 use solidcore::topology::brep::outward_solid_failure;
 use solidcore::topology::brep::p3::{
     brep_copy_mapped, merge_brep, notify_serial, topology_ref, with_kernel_callbacks,
@@ -704,6 +705,32 @@ impl Body {
             return Err(Error::Status(crate::error::INVALID_INPUT));
         }
         Ok((lo, hi))
+    }
+
+    /// How far the body reaches along the normal of the plane through `origin` with axes `x`
+    /// and `y` (`x × y` made unit), measured from that plane: the least and the greatest level
+    /// of its points, `[low, high]`. A copy of the body is moved rigidly into the plane's own
+    /// frame ([`solidcore::Transform::into_plane_frame`]: the normal becomes Z) and its exact box
+    /// read there ([`Body::bounds`]'s), so the span is the body's own, not the shadow of its
+    /// world box. The body is unchanged.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an entry that is not finite, an axis of no length or axes along
+    /// one line (the kernel's refusal); [`Error::Status`] `SM_ERR_INVALID_INPUT` for no box;
+    /// the kernel's error.
+    pub fn levels_along(&self, origin: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Result<[f64; 2]> {
+        let to_plane = solidcore::Transform::into_plane_frame(point(origin)?, point(x)?, point(y)?)
+            .map_err(|_| Error::Argument)?
+            .m;
+        let span = measure_body("levels_along", self, |k, b| {
+            transform_matrix(k, b, &to_plane, true)?;
+            brep_bounding_box(k, b, true)
+        })?;
+        let (lo, hi) = (span.min().z, span.max().z);
+        if !(lo.is_finite() && hi.is_finite() && lo <= hi) {
+            return Err(Error::Status(crate::error::INVALID_INPUT));
+        }
+        Ok([lo, hi])
     }
 
     /// The samples of the kernel's edge/face gap for record edge `edge` and record face `face`
@@ -2759,6 +2786,41 @@ pub(crate) mod tests {
             area += ball.face_area(&o, f, 1e-8).unwrap();
         }
         assert!(rel(area, 36.0 * PI), "{area}");
+    }
+
+    /// A box's reach along a plane's normal, from the plane: away from the origin, and on a
+    /// plane whose normal is not a world axis's direction (its world box would overstate it).
+    /// The box itself does not move; axes that make no plane are refused.
+    #[test]
+    fn levels_along_a_plane_are_the_bodys_own() {
+        all_fixes();
+        let b = make_box([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+        let [lo, hi] = b
+            .levels_along([3.0, 4.0, 5.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+            .unwrap();
+        assert!(
+            (lo + 5.0).abs() < 1e-9 && (hi - 5.0).abs() < 1e-9,
+            "{lo} {hi}"
+        );
+        // x = Z and y = (1, -1, 0)/√2 make the normal x × y = (1, 1, 0)/√2: the box's corners
+        // reach from 0 to 20/√2 along it.
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let [lo, hi] = b
+            .levels_along([0.0; 3], [0.0, 0.0, 1.0], [s, -s, 0.0])
+            .unwrap();
+        assert!(lo.abs() < 1e-9 && (hi - 20.0 * s).abs() < 1e-9, "{lo} {hi}");
+        let (min, max) = b.bounds().unwrap();
+        assert!(
+            min.iter().all(|v| v.abs() < 1e-9) && max.iter().all(|v| (v - 10.0).abs() < 1e-9),
+            "{min:?} {max:?}"
+        );
+        for (x, y) in [
+            ([0.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+            ([1.0, 0.0, 0.0], [-2.0, 0.0, 0.0]),
+            ([f64::NAN, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        ] {
+            assert_eq!(b.levels_along([0.0; 3], x, y), Err(Error::Argument));
+        }
     }
 
     /// A box's faces square to +Z: the top and the bottom, at their closed-form levels measured
