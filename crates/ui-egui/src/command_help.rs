@@ -163,6 +163,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sheet.flange",
     "sheet.flat_pattern",
     "sheet.fold",
+    "sheet.hardware",
     "sheet.hem",
     "sheet.manage_rules",
     "sheet.path_flange",

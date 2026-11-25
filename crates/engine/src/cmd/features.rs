@@ -4377,7 +4377,12 @@ fn beyond_coarse_sizes(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<(f
 }
 
 fn hole(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "solid.hole";
+    hole_with(s, p, "solid.hole", None)
+}
+
+/// A hole: `solid.hole`'s, or the mounting hole of press-in hardware (`sheet.hardware`, #17752),
+/// which names its `hardware` and has no thread of its own.
+pub(super) fn hole_with(s: &mut Session, p: &Value, cmd: &'static str, hardware: Option<solidcraft_doc::Hardware>) -> Result<Value> {
     // At sketch points: the holes go perpendicular to the sketch and follow its points.
     let points = match (p.get("sketch"), p.get("points"), p.get("position")) {
         (Some(_), Some(_), _) | (Some(_), None, None) => {
@@ -4695,6 +4700,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             to: to.map(FacePick),
             references,
             old_surface_start,
+            hardware,
         },
     )
 }

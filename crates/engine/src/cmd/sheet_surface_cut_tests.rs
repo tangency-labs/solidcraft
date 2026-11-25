@@ -1215,3 +1215,411 @@ fn a_cut_out_with_a_corner_on_the_sheets_edge_at_a_bend_folds_with_the_sheet() {
     run(&mut s, "sheet.refold", json!({}));
     check(&s, whole - 3.0, "folded again");
 }
+
+/// What `sheet.hardware` refused with, and that it left the design as it was.
+fn hardware_refused(s: &mut Session, p: Value) -> String {
+    let before = s.doc.to_json();
+    let e = s.execute("sheet.hardware", &p).expect_err(&format!("{p} should be refused")).to_string();
+    assert_eq!(s.doc.to_json(), before, "{p}: refused, the design stays as it was");
+    e
+}
+
+/// #17752: a nut's mounting hole is a plain through hole of the table's size (M3: 4.25), a cut-out
+/// of the flat that the folded part, the flat pattern and the DXF all carry; the hole records the
+/// hardware (kind, thread, part), and is no tapped hole.
+#[test]
+fn press_in_hardware_cuts_its_mounting_hole_and_records_the_hardware() {
+    let mut s = plate();
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
+    let v0 = exact_volume(&s);
+    let reply = run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [50, 30, T], "name": "Nut"}));
+    assert_eq!(reply["hardware"]["part"], "nut.m3");
+    assert_eq!(reply["hardware"]["kind"], "nut");
+    assert_eq!(reply["hardware"]["hole_diameter"].as_f64(), Some(4.25));
+    assert_eq!(reply["hardware"]["min_edge_distance"].as_f64(), Some(4.8));
+    let circles = flat_circles(&mut s);
+    assert!(circles.len() == 1 && (circles[0].0 - 2.125).abs() < 1e-9, "{circles:?}");
+    let want = v0 - PI * 2.125 * 2.125 * T;
+    assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", exact_volume(&s));
+    let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or("").to_string();
+    assert!(dxf.contains("CIRCLE") || dxf.contains("ARC"), "the hole is in the DXF");
+    // The record: the hole has no thread of its own.
+    let id = reply["feature"].as_u64().unwrap();
+    let Some(solidcraft_doc::FeatureKind::Hole { hardware: Some(h), thread, diameter, .. }) = s.doc.feature(id).map(|f| f.kind.clone()) else {
+        panic!("not a hardware hole");
+    };
+    assert_eq!((h.thread.as_str(), h.part.as_str(), h.length.is_none()), ("M3", "nut.m3", true));
+    assert!(thread.is_none() && diameter.as_str().starts_with("4.25"), "{thread:?} {diameter:?}");
+    // Unfolded and folded again, the hole stays.
+    run(&mut s, "sheet.unfold", json!({}));
+    run(&mut s, "sheet.refold", json!({}));
+    assert!((exact_volume(&s) - want).abs() < 1e-6 * want);
+    assert_eq!(flat_circles(&mut s).len(), 1);
+}
+
+/// A stud's or standoff's length is saved with it and does not change the hole; a nut has none.
+#[test]
+fn a_stud_takes_its_length_and_a_nut_takes_none() {
+    let mut s = plate();
+    let reply = run(&mut s, "sheet.hardware", json!({"kind": "stud", "thread": "M4", "length": "10 mm", "position": [30, 30, T]}));
+    assert_eq!(reply["hardware"]["length"].as_f64(), Some(10.0));
+    assert_eq!(reply["hardware"]["part"], "stud.m4");
+    let circles = flat_circles(&mut s);
+    assert!(circles.len() == 1 && (circles[0].0 - 2.0).abs() < 1e-9, "{circles:?}");
+    let at = json!({"position": [70, 30, T]});
+    let mut p = |extra: Value| {
+        let mut q = at.clone();
+        q.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        hardware_refused(&mut s, q)
+    };
+    assert!(p(json!({"kind": "stud", "thread": "M4"})).contains("needs its `length`"));
+    assert!(p(json!({"kind": "nut", "thread": "M4", "length": "5 mm"})).contains("has no `length`"));
+    assert!(p(json!({"kind": "stud", "thread": "M4", "length": "0 mm"})).contains("`length` must be more than 0"));
+    assert!(p(json!({"kind": "stud", "thread": "M4", "length": "1e9 mm"})).contains("`length` must be more than 0"));
+}
+
+/// A size the table lacks, a hole outside the makers' tolerance, a point off the sheet's face and
+/// a part that is no sheet are refused, and a refusal leaves the design as it was.
+#[test]
+fn press_in_hardware_refuses_what_the_table_or_the_sheet_cannot_hold() {
+    let mut s = plate();
+    let on = json!({"position": [50, 30, T]});
+    let mut p = |extra: Value| {
+        let mut q = on.clone();
+        q.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        hardware_refused(&mut s, q)
+    };
+    assert!(p(json!({"kind": "nut", "thread": "M7"})).contains("the table has no nut in `M7`"));
+    assert!(p(json!({"kind": "standoff", "thread": "M6", "length": "8 mm"})).contains("its sizes are M3, M4, M5"));
+    assert!(p(json!({"kind": "nut", "thread": "1/4-20 UNC"})).contains("the table has no nut"));
+    assert!(p(json!({"kind": "nut", "thread": "M3", "diameter": "4.5 mm"})).contains("an M3 nut takes a hole of 4.25 to 4.33 mm"));
+    assert!(
+        p(json!({"kind": "stud", "thread": "M8", "length": "10 mm"}))
+            .contains("Plate is 2 mm thick: an M8 stud is made for a sheet of at least 2.4 mm"),
+        "a 2 mm sheet is thinner than an M8 stud's 2.4, said without markdown marks and with the article an M8 takes"
+    );
+    // Off the face of every body.
+    assert!(p(json!({"kind": "nut", "thread": "M3", "position": [50, 30, 50]})).contains("not on a face"));
+    // Not a sheet.
+    let mut plain = session();
+    run(&mut plain, "solid.box", json!({"length": 100, "width": 60, "height": T, "body_name": "Block"}));
+    let e = hardware_refused(&mut plain, json!({"kind": "nut", "thread": "M3", "position": [50, 30, T]}));
+    assert!(e.contains("not in a sheet metal part"), "{e}");
+}
+
+/// #17752: in an inch design a bare `length` or `diameter` means inches, as it does for every other
+/// command: the table's 4.25 to 4.33 mm check and the length in the reply read it so. A bare
+/// `diameter: 4.3` is 109 mm, refused, not 4.3 mm; a bare `length: 10` is 254 mm.
+#[test]
+fn press_in_hardware_in_an_inch_design_reads_bare_numbers_as_inches() {
+    let mut s = plate();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    let on = |extra: Value| {
+        let mut q = json!({"position": [50, 30, T]});
+        q.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        q
+    };
+    let e = hardware_refused(&mut s, on(json!({"kind": "nut", "thread": "M3", "diameter": "4.3"})));
+    assert!(e.contains("takes a hole of 4.25 to 4.33 mm") && e.contains("109"), "{e}");
+    let reply = run(&mut s, "sheet.hardware", on(json!({"kind": "stud", "thread": "M4", "length": "10"})));
+    assert_eq!(reply["hardware"]["length"].as_f64(), Some(254.0), "{reply}");
+    let id = reply["feature"].as_u64().unwrap();
+    let Some(solidcraft_doc::FeatureKind::Hole { hardware: Some(h), .. }) = s.doc.feature(id).map(|f| f.kind.clone()) else {
+        panic!("not a hardware hole");
+    };
+    assert_eq!(h.length.map(|e| e.to_string()), Some("10 in".to_string()), "stored in the design's unit, as the check read it");
+    // A length too long to be real is refused in millimetres as the design's unit converts it.
+    let longest = hardware_refused(&mut s, on(json!({"kind": "stud", "thread": "M4", "length": "100"})));
+    assert!(longest.contains("`length` must be more than 0 and at most 1000 mm, not 2540"), "{longest}");
+}
+
+/// Press-in hardware is a plain through hole: the keys that shape any other hole (a depth, a
+/// counterbore, a thread, a clearance fit, ...) are refused, not passed on to a hole that then
+/// records hardware it is not the mounting hole of.
+#[test]
+fn press_in_hardware_takes_no_key_that_shapes_the_hole() {
+    let mut s = plate();
+    for (key, value) in [("depth", json!("1 mm")), ("type", json!("counterbore")), ("tip_angle", json!("118 deg")), ("to", json!([50, 30, 0]))] {
+        let mut p = json!({"kind": "nut", "thread": "M3", "position": [50, 30, T]});
+        p[key] = value;
+        let e = hardware_refused(&mut s, p);
+        assert!(e.contains("plain through hole") && e.contains(&format!("`{key}`")), "{key}: {e}");
+    }
+}
+
+/// The hole must lie in sheet metal and nowhere else: a solid block the hole also passes through
+/// (named in `targets`) is refused, as a call aimed at the block alone is.
+#[test]
+fn press_in_hardware_refuses_a_hole_that_also_cuts_a_solid_block() {
+    let mut s = plate();
+    run(&mut s, "solid.box", json!({"corner": [40, 20, -20], "length": 20, "width": 20, "height": 20, "body_name": "Block"}));
+    let e = hardware_refused(&mut s, json!({"kind": "nut", "thread": "M3", "position": [50, 30, T], "targets": ["Plate", "Block"]}));
+    assert!(e.contains("cuts only sheet metal bodies"), "{e}");
+}
+
+/// Redefining a hardware hole goes through `sheet.hardware`, which keeps (or changes) the record;
+/// `solid.hole` would drop it, so it is refused.
+#[test]
+fn a_hardware_hole_is_redefined_by_sheet_hardware() {
+    let mut s = plate();
+    let reply = run(&mut s, "sheet.hardware", json!({"kind": "flush_nut", "thread": "M4", "position": [50, 30, T]}));
+    let id = reply["feature"].as_u64().unwrap();
+    let e = s
+        .execute("timeline.redefine", &json!({"feature": id, "command": "solid.hole", "params": {"position": [50, 30, T], "diameter": 5}}))
+        .expect_err("a plain redefine would drop the hardware")
+        .to_string();
+    assert!(e.contains("the mounting hole of an M4 flush nut: redefine it with `sheet.hardware`"), "{e}");
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": id, "command": "sheet.hardware", "params": {"kind": "flush_nut", "thread": "M5", "position": [40, 30, T]}}),
+    );
+    let Some(solidcraft_doc::FeatureKind::Hole { hardware: Some(h), .. }) = s.doc.feature(id).map(|f| f.kind.clone()) else {
+        panic!("the hardware is gone");
+    };
+    assert_eq!((h.thread.as_str(), h.part.as_str()), ("M5", "flush-nut.m5"));
+    let circles = flat_circles(&mut s);
+    assert!(circles.len() == 1 && (circles[0].0 - 3.96).abs() < 1e-9, "{circles:?}");
+}
+
+fn warning(reply: &Value) -> String {
+    reply["warning"].as_str().unwrap_or("").to_string()
+}
+
+/// A hole centre nearer a free edge than the hardware's minimum (M3 nut: 4.8 mm) is a warning, the
+/// hole is cut all the same; one far enough has none.
+#[test]
+fn a_hardware_hole_near_an_edge_warns() {
+    let mut s = plate();
+    let far = run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [50, 30, T]}));
+    assert_eq!(warning(&far), "", "a centre 30 mm from every edge");
+    let near = run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [3, 30, T]}));
+    let w = warning(&near);
+    assert!(w.starts_with("The hole at (3, 30) is 3 mm from the nearest edge, cut-out or other hole") && w.contains("an M3 nut needs 4.8 mm"), "{w}");
+    assert!(!w.contains("from a bend"), "{w}");
+    assert_eq!(flat_circles(&mut s).len(), 2, "the hole is cut");
+    // Another hole's rim counts as an edge: 4.8 mm minimum from a cut-out too. The two holes are 6 mm
+    // apart centre to centre, 6 - 2.125 = 3.875 mm from the first's rim to this centre, and clear of each other.
+    let beside = run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [50, 36, T]}));
+    assert!(warning(&beside).contains("3.88 mm from the nearest edge, cut-out or other hole"), "{}", warning(&beside));
+}
+
+/// A centre too near a bend is a warning measured to where the bend starts, the boundary of the
+/// bend's zone (read here from the flat pattern's `bend_zones`); the same hole far from the bend has
+/// none. The hole is clear of the zone, so the sheet cuts it, but its centre is nearer than 4.8 mm.
+#[test]
+fn a_hardware_hole_near_a_bend_warns() {
+    let mut s = plate();
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
+    let near = run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [50, 8, T]}));
+    let w = warning(&near);
+    assert!(w.contains("mm from a bend (to where the bend starts)") && w.contains("an M3 nut needs 4.8 mm"), "{w}");
+    assert!(!w.contains("nearest edge"), "{w}");
+    // The distance is the centre's from the nearest side of the bend's zone in the flat.
+    let flat = run(&mut s, "sheet.flat_pattern", json!({}));
+    let at = flat["cutout_shapes"][0]["circle"]["center"][1].as_f64().unwrap_or(f64::NAN);
+    let zone = &flat["bend_zones"][0];
+    let side = |i: usize| (at - zone[i].as_f64().unwrap_or(f64::NAN)).abs();
+    let shown: f64 = w.split(" mm from a bend").next().and_then(|t| t.rsplit(' ').next()).and_then(|n| n.parse().ok()).unwrap_or(f64::NAN);
+    assert!((shown - side(2).min(side(3))).abs() < 0.006, "{shown} vs the zone {zone} and the centre at {at}: {w}");
+    let far = run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [50, 30, T]}));
+    assert_eq!(warning(&far), "");
+}
+
+/// A pattern or mirror records hardware only when every hole it copies is the mounting hole of the
+/// same hardware. Copying a hardware hole together with a plain hole records none of the copies, and
+/// says so: the plain hole's copy is no nut, and the nut's copy is not guessed at.
+#[test]
+fn a_pattern_of_hardware_and_plain_holes_records_no_copy_and_says_so() {
+    let mut s = plate();
+    run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [30, 15, T], "name": "Nut"}));
+    run(&mut s, "solid.hole", json!({"position": [30, 45, T], "diameter": 3, "name": "Plain"}));
+    let listed = |s: &mut Session| run(s, "sheet.flat_pattern", json!({}))["hardware"].as_array().cloned().unwrap_or_default();
+    assert_eq!(listed(&mut s).len(), 1, "the nut");
+    let reply = run(&mut s, "solid.pattern.rectangular", json!({"features": ["Nut", "Plain"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30}));
+    assert_eq!(flat_circles(&mut s).len(), 4, "every copy is cut");
+    let w = warning(&reply);
+    assert!(w.contains("different press-in hardware") && w.contains("not recorded"), "{w}");
+    let now = listed(&mut s);
+    assert_eq!(now.len(), 1, "no copy is recorded, least of all the plain hole's: {now:?}");
+    assert!((now[0]["position"][0].as_f64().unwrap_or(f64::NAN) - 30.0).abs() < 1e-6, "{now:?}");
+    // A pattern of one kind of hardware alone still records every copy.
+    let mut s = plate();
+    run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [30, 15, T], "name": "Nut"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Nut"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30}));
+    assert_eq!(listed(&mut s).len(), 2);
+}
+
+/// A centre inside a bend's zone is in the bend, however wide the zone is: a wide bend's middle is
+/// farther than the minimum from both sides of its zone, and must warn all the same. Cut while the
+/// sheet is unfolded (folded, the sheet refuses a hole through a bend).
+#[test]
+fn a_hardware_hole_inside_a_wide_bend_zone_warns() {
+    let mut s = plate();
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20, "radius": "10 mm"}));
+    run(&mut s, "sheet.unfold", json!({}));
+    let zone = run(&mut s, "sheet.flat_pattern", json!({}))["bend_zones"][0].clone();
+    let (y0, y1) = (zone[2].as_f64().unwrap_or(f64::NAN), zone[3].as_f64().unwrap_or(f64::NAN));
+    let middle = (y0 + y1) / 2.0;
+    assert!((y1 - y0) / 2.0 > 4.8 + 1.0, "the zone's middle is farther than the minimum from both sides: {zone}");
+    let reply = run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [50, middle, T]}));
+    let w = warning(&reply);
+    assert!(w.contains("is in a bend") && w.contains("an M3 nut needs its centre 4.8 mm from where a bend starts"), "{w}");
+    assert!(!w.contains("mm from a bend"), "{w}");
+    // Clear of the zone by more than the minimum: none.
+    let far = run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [50, y1 + 12.0, T]}));
+    assert_eq!(warning(&far), "");
+}
+
+/// A sheet that is rebuilt thinner than the hardware (the gauge changed) only warns: the timeline
+/// still evaluates. (`sheet.hardware` run on a sheet that thin refuses.)
+#[test]
+fn a_sheet_made_thinner_than_its_hardware_warns_and_still_builds() {
+    let mut s = session();
+    rule(&mut s, "Test", T, 0.44, 2.0, 0.5);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    let reply = run(&mut s, "sheet.hardware", json!({"kind": "flush_nut", "thread": "M3", "position": [50, 30, T]}));
+    let id = reply["feature"].as_u64().unwrap();
+    assert_eq!(warning(&reply), "");
+    rule(&mut s, "Test", 1.0, 0.44, 1.0, 0.5);
+    let result = s.model.result(id).cloned().expect("the hardware feature was evaluated");
+    assert!(result.error.is_none(), "a thinner gauge must not break the timeline: {:?}", result.error);
+    let w = result.warning.unwrap_or_default();
+    assert!(w.contains("is 1 mm thick") && w.contains("an M3 flush nut is made for a sheet of at least 1.5 mm"), "{w}");
+    assert!(w.starts_with("Body1 is 1 mm thick: ") && !w.contains('`'), "a message starts with a capital and has no markdown marks: {w}");
+}
+
+/// A mirrored copy of a sheet is sheet metal with its flat pattern (`SurfaceSheet::copied`): the
+/// hardware holes of the source are the copy's, at the mirror image of their centres, with the DXF
+/// notes beside them.
+#[test]
+fn a_mirrored_sheet_copy_keeps_its_hardware() {
+    let mut s = plate();
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
+    run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [20, 30, T]}));
+    run(&mut s, "sheet.hardware", json!({"kind": "stud", "thread": "M4", "length": "10 mm", "position": [70, 40, T]}));
+    let source = run(&mut s, "sheet.flat_pattern", json!({"body": "Plate"}));
+    let listed = |f: &Value| f["hardware"].as_array().cloned().unwrap_or_default();
+    assert_eq!(listed(&source).len(), 2, "{source}");
+    run(&mut s, "solid.mirror", json!({"bodies": ["Plate"], "plane": "YZ"}));
+    let copy = s.model.state().bodies[1].name.clone();
+    let mirrored = run(&mut s, "sheet.flat_pattern", json!({"body": copy}));
+    let (was, now) = (listed(&source), listed(&mirrored));
+    assert_eq!(now.len(), 2, "the copy keeps its hardware: {mirrored}");
+    for (a, b) in was.iter().zip(&now) {
+        assert_eq!((&a["part"], &a["thread"], &a["length"]), (&b["part"], &b["thread"], &b["length"]));
+        let at = |v: &Value, i: usize| v["position"][i].as_f64().unwrap_or(f64::NAN);
+        // The flat is turned over about its y axis: x becomes -x, y stays.
+        assert!((at(a, 0) + at(b, 0)).abs() < 1e-9 && (at(a, 1) - at(b, 1)).abs() < 1e-9, "{a} against {b}");
+    }
+    let dxf = run(&mut s, "sheet.export_dxf", json!({"body": copy, "hardware_notes": true}))["dxf"].as_str().unwrap_or("").to_string();
+    assert!(dxf.contains("M3 nut") && dxf.contains("M4 stud 10 mm"), "the copy's DXF names its hardware");
+}
+
+/// A sheet drawn at an angle has holes whose arcs went through float work (the sketch's rotation, the
+/// panels' placement, an unfold and a fold, a mirror): they are still found, as the hardware they
+/// are, with its DXF note and its edge warning, at every step. The whole-circle recognition the flat
+/// is read by is exact, so this is where a rounding in a hole's arcs would drop it.
+#[test]
+fn hardware_in_a_sheet_drawn_at_an_angle_is_found_through_every_rebuild() {
+    let mut s = session();
+    rule(&mut s, "Test", T, 0.44, 2.0, 0.5);
+    let (sin, cos) = 33f64.to_radians().sin_cos();
+    let turned = |x: f64, y: f64| json!([x * cos - y * sin, x * sin + y * cos]);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Skew"}));
+    run(&mut s, "sketch.line", json!({"points": [turned(0.0, 0.0), turned(100.0, 0.0), turned(100.0, 60.0), turned(0.0, 60.0)], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"type": "base", "sketch": "Skew"}));
+    let place = |x: f64, y: f64| json!([x * cos - y * sin, x * sin + y * cos, T]);
+    run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": place(50.0, 30.0)}));
+    run(&mut s, "sheet.hardware", json!({"kind": "stud", "thread": "M4", "length": "10 mm", "position": place(75.0, 40.0)}));
+    let near = run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": place(3.0, 30.0)}));
+    assert!(warning(&near).starts_with("The hole at"), "the edge warning in a turned frame: {}", warning(&near));
+    let found = |s: &mut Session, body: &str| run(s, "sheet.flat_pattern", json!({"body": body}))["hardware"].as_array().map_or(0, Vec::len);
+    let noted = |s: &mut Session, body: &str| {
+        let dxf = run(s, "sheet.export_dxf", json!({"body": body, "hardware_notes": true}))["dxf"].as_str().unwrap_or("").to_string();
+        ["M3 nut", "M4 stud 10 mm"].iter().all(|note| dxf.contains(note))
+    };
+    let body = s.model.state().surface_sheets[0].body.clone();
+    assert_eq!(found(&mut s, &body), 3);
+    assert!(noted(&mut s, &body));
+    run(&mut s, "sheet.unfold", json!({}));
+    assert_eq!(found(&mut s, &body), 3, "unfolded");
+    run(&mut s, "sheet.refold", json!({}));
+    assert_eq!(found(&mut s, &body), 3, "folded again");
+    run(&mut s, "sheet.flange", json!({"edges": [place(50.0, 0.0)], "height": 15}));
+    assert_eq!(found(&mut s, &body), 3, "after a flange on the edge");
+    assert!(noted(&mut s, &body));
+    run(&mut s, "solid.mirror", json!({"bodies": [body], "plane": "YZ"}));
+    let copy = s.model.state().bodies[1].name.clone();
+    assert_eq!(found(&mut s, &copy), 3, "the mirrored copy");
+    assert!(noted(&mut s, &copy));
+}
+
+/// Hardware is kept by the sheet through what is done to it later: a flange on another edge, an
+/// unfold and a refold, and a rule's gauge change. The list and the DXF notes are still there, the
+/// holes where they were.
+#[test]
+fn hardware_survives_later_sheet_features_and_unfolding() {
+    let mut s = plate();
+    run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [30, 30, T]}));
+    let list = |s: &mut Session| run(s, "sheet.flat_pattern", json!({"body": "Plate"}))["hardware"].as_array().cloned().unwrap_or_default();
+    let noted = |s: &mut Session| {
+        run(s, "sheet.export_dxf", json!({"body": "Plate", "hardware_notes": true}))["dxf"].as_str().unwrap_or("").contains("M3 nut")
+    };
+    let first = list(&mut s);
+    assert_eq!(first.len(), 1);
+    assert!(noted(&mut s));
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
+    assert_eq!(list(&mut s), first, "after a flange on another edge");
+    assert!(noted(&mut s));
+    run(&mut s, "sheet.unfold", json!({}));
+    assert_eq!(list(&mut s), first, "unfolded");
+    assert!(noted(&mut s));
+    run(&mut s, "sheet.refold", json!({}));
+    assert_eq!(list(&mut s), first, "folded again");
+    assert!(noted(&mut s));
+    run(&mut s, "sheet.hardware", json!({"kind": "stud", "thread": "M4", "length": "8 mm", "position": [70, 30, T]}));
+    assert_eq!(list(&mut s).len(), 2, "a second piece of hardware after the flange and the fold");
+}
+
+/// #17752: the flat pattern lists each press-in hardware hole (kind, thread, a stud's length, the
+/// part id, the hole's centre and diameter) at the place of its cut-out, and no plain hole; a
+/// design with no hardware has no `hardware` key; a pattern of a hardware hole lists every copy;
+/// a hole a later cut takes away is not listed.
+#[test]
+fn the_flat_pattern_lists_each_hardware_hole() {
+    let mut s = plate();
+    assert!(flat(&mut s).get("hardware").is_none(), "no hardware, no key");
+    run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [30, 30, T], "name": "Nut"}));
+    run(&mut s, "sheet.hardware", json!({"kind": "stud", "thread": "M4", "length": "10 mm", "position": [70, 30, T]}));
+    run(&mut s, "solid.hole", json!({"position": [50, 10, T], "diameter": 3}));
+    let f = flat(&mut s);
+    let listed = f["hardware"].as_array().cloned().unwrap_or_default();
+    assert_eq!(listed.len(), 2, "{f}");
+    let circles = flat_circles(&mut s);
+    assert_eq!(circles.len(), 3, "the plain hole is a cut-out too");
+    let at = |h: &Value| [h["position"][0].as_f64().unwrap_or(f64::NAN), h["position"][1].as_f64().unwrap_or(f64::NAN)];
+    for h in &listed {
+        let d = h["hole_diameter"].as_f64().unwrap_or(f64::NAN);
+        assert!(
+            circles.iter().any(|(r, c)| (r * 2.0 - d).abs() < 1e-9 && (c[0] - at(h)[0]).abs() < 1e-9 && (c[1] - at(h)[1]).abs() < 1e-9),
+            "{h} is no cut-out of the flat"
+        );
+    }
+    let (nut, stud) = (&listed[0], &listed[1]);
+    assert_eq!((nut["kind"].as_str(), nut["thread"].as_str(), nut["part"].as_str()), (Some("nut"), Some("M3"), Some("nut.m3")));
+    assert_eq!((nut["length"].is_null(), nut["hole_diameter"].as_f64()), (true, Some(4.25)));
+    assert_eq!((stud["kind"].as_str(), stud["part"].as_str(), stud["length"].as_f64()), (Some("stud"), Some("stud.m4"), Some(10.0)));
+    // The nut and the stud are 40 mm apart along x, as placed.
+    assert!(((at(stud)[0] - at(nut)[0]).abs() - 40.0).abs() < 1e-9 && (at(stud)[1] - at(nut)[1]).abs() < 1e-9, "{listed:?}");
+    // A pattern copies the hardware with the hole.
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Nut"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 12}));
+    assert_eq!(flat(&mut s)["hardware"].as_array().map(Vec::len), Some(3), "the copy is listed too");
+    // A cut that takes a hardware hole away takes it off the list.
+    run(&mut s, "solid.box", json!({"corner": [60, 20, -5], "length": 20, "width": 20, "height": 20, "operation": "cut"}));
+    assert_eq!(flat(&mut s)["hardware"].as_array().map(Vec::len), Some(2), "the stud's hole is gone");
+}

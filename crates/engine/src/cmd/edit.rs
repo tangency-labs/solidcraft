@@ -2818,6 +2818,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
             "sheet.flange"
                 | "sheet.hem"
                 | "sheet.perforate"
+                | "sheet.hardware"
                 | "sheet.fold"
                 | "sheet.path_flange"
                 | "sheet.tab"
@@ -2902,6 +2903,13 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && parameters.get("designation").is_none_or(|d| d.is_null() || d.as_str().is_some_and(|d| d.trim().is_empty()))
     {
         parameters.entry("old_auto_size").or_insert_with(|| json!(true));
+    }
+    // Press-in hardware's hole is redefined by the command that made it: the Hole command would
+    // drop the hardware it names and leave a plain hole of its size (#17752).
+    if let FeatureKind::Hole { hardware: Some(h), .. } = &old.kind
+        && cid == "solid.hole"
+    {
+        return Err(bad(cmd, format!("this hole is the mounting hole of an {} {}: redefine it with `sheet.hardware`", h.thread, h.kind.label())));
     }
     // A hole saved before a sketch on a derived plane started its holes at that plane keeps
     // starting at the surface when it is edited (#11538).

@@ -492,7 +492,7 @@ crates/engine/src/cmd/features.rs:axis_line_object normalized
 crates/engine/src/cmd/features.rs:beyond_coarse_sizes dot
 crates/engine/src/cmd/features.rs:edge_points dot
 crates/engine/src/cmd/features.rs:extrude_reach dot
-crates/engine/src/cmd/features.rs:hole normalized
+crates/engine/src/cmd/features.rs:hole_with normalized
 crates/engine/src/cmd/features.rs:leaving normalized
 crates/engine/src/cmd/features.rs:move_bodies normalized
 crates/engine/src/cmd/features_more.rs:align dot,normalized

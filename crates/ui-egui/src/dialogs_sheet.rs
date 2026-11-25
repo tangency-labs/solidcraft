@@ -11,17 +11,24 @@ use serde_json::{Map, Value, json};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
+use solidcraft_engine::doc::hardware_catalog::{HardwareKind, hardware_size, hardware_sizes_of};
 use solidcraft_engine::doc::sheet::SheetRule;
 use solidcraft_engine::doc::{FeatureKind, FoldSide, ProfileSel};
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
-use crate::dialogs::{Dialog, Kind, edge_sel, face_sel, form_row, profile_indices};
+use crate::dialogs::{Dialog, HOLE_FACES, Kind, edge_sel, face_sel, form_row, profile_indices};
 use crate::selection::{AXES, BODIES, CURVES, EDGES, FACES, PLANAR_FACES, PROFILES, SelInput, SelectionExt as _, items, point_value as pt};
 use solidcraft_theme::Tokens;
 
 const PERFORATION_PATTERNS: [&str; 2] = ["staggered", "square"];
 const PERFORATION_LABELS: [&str; 2] = ["ui.perforate_staggered", "ui.perforate_square"];
+
+/// The kinds of press-in hardware the dialog offers, in the table's order, and their labels.
+const HARDWARE_KINDS: [HardwareKind; 4] = [HardwareKind::Nut, HardwareKind::FlushNut, HardwareKind::Stud, HardwareKind::Standoff];
+const HARDWARE_LABELS: [&str; 4] = ["ui.hardware_kind_nut", "ui.hardware_kind_flush_nut", "ui.hardware_kind_stud", "ui.hardware_kind_standoff"];
+/// What the Hardware dialog passes on to the command's own keys, and the keys it keeps to itself.
+const HARDWARE_OWN_KEYS: [&str; 5] = ["single_point", "flip", "position_exprs", "all_points", "diameter_for"];
 
 const FOLD_POSITIONS: [&str; 4] = ["centerline", "start", "end", "mould"];
 const FOLD_POSITION_LABELS: [&str; 4] = ["Centerline", "Start of Bend", "End of Bend", "Outside Mould Line"];
@@ -187,11 +194,22 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// The material the rule is for (a label; #18304).
                 material: String,
             },
+            /// Press-in hardware (#17752): the kind (index into `HARDWARE_KINDS`), its thread (a size
+            /// the table has for the kind) and, for a stud or a standoff, its length. The picks are
+            /// where it goes: a place on a face or sketch points.
+            Hardware {
+                kind: usize,
+                thread: String,
+                length: String,
+            },
             /// The flat pattern of the picked (or last) sheet body.
             FlatPattern {
                 data: Option<Result<Value, String>>,
                 key: Option<(u64, Option<String>)>,
                 status: Option<String>,
+                /// Export DXF also writes a note beside each press-in hardware hole (#17752). Off:
+                /// the file has the sheet and its mounting holes only.
+                hardware_notes: bool,
             },
         }
     }
@@ -207,6 +225,7 @@ impl Sm {
             Sm::Recognize { .. } => "RECOGNIZE SHEET METAL",
             Sm::Rules { .. } => "SHEET METAL RULES",
             Sm::FlatPattern { .. } => "FLAT PATTERN",
+            Sm::Hardware { .. } => "ui.hardware_title",
             _ => self.simple_metadata().map_or("", |(_, title)| title),
         }
     }
@@ -278,7 +297,14 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
                 vec![],
             )
         }
-        "sheet.flat_pattern" => (Sm::FlatPattern { data: None, key: None, status: None }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
+        "sheet.hardware" => (
+            Sm::Hardware { kind: 0, thread: "M3".into(), length: crate::dialogs::length_default(&app.session, "10") },
+            vec![SelInput::new("ui.hardware_place", HOLE_FACES, true)],
+        ),
+        "sheet.flat_pattern" => (
+            Sm::FlatPattern { data: None, key: None, status: None, hardware_notes: false },
+            vec![SelInput::new("Body (last if none)", BODIES, false)],
+        ),
         _ => Sm::simple_start(id)?,
     };
     Some((crate::length_input::defaults(&app.session.doc, Kind::Sheet(sm)), inputs))
@@ -599,6 +625,32 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             crate::ui_kit::caption(ui, "Flanges", solidcraft_ui_text::tr_label("set by the sketch's lines"));
             enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
         }
+        Sm::Hardware { kind, thread, length } => {
+            choice_row(ui, "Type", "sm_hardware_kind", kind, &HARDWARE_LABELS);
+            let which = HARDWARE_KINDS.get(*kind).copied().unwrap_or(HardwareKind::Nut);
+            // The sizes the table has for the kind: a thread it lacks falls back to the first.
+            let sizes = hardware_sizes_of(which);
+            let names: Vec<&str> = sizes.iter().map(|size| size.thread).collect();
+            let mut at = names.iter().position(|name| *name == thread.as_str()).unwrap_or(0);
+            choice_row(ui, "ui.hardware_thread", "sm_hardware_thread", &mut at, &names);
+            if let Some(name) = names.get(at).filter(|name| **name != thread.as_str()) {
+                *thread = (*name).to_string();
+            }
+            if which.has_length() {
+                enter |= expr_row(ui, "Length", length);
+            }
+            if let Some(size) = sizes.get(at) {
+                let (hole, sheet, edge) = (size.hole.to_string(), size.min_sheet.to_string(), size.edge.to_string());
+                let limits =
+                    solidcraft_ui_text::format("ui.hardware_limits", &[("hole", hole.as_str()), ("sheet", sheet.as_str()), ("edge", edge.as_str())]);
+                crate::ui_kit::status_line(ui, &limits, crate::ui_kit::StatusTone::Dim);
+            }
+            // What the sheet cannot hold is said as it is previewed: a sheet too thin is refused (the
+            // preview's error, shown with the dialog's), a centre too near an edge or a bend warns.
+            if let Some(warning) = app.preview.warning.as_deref() {
+                crate::ui_kit::status_line(ui, warning, crate::ui_kit::StatusTone::Warning);
+            }
+        }
         Sm::Tab {} => {
             // No thickness to set: the tab takes the sheet's own.
             form_row(ui, "Thickness", |ui| {
@@ -693,7 +745,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 }
             }
         }
-        Sm::FlatPattern { data, key, status } => {
+        Sm::FlatPattern { data, key, status, hardware_notes } => {
             let body = inputs.first().and_then(|i| i.items.first()).and_then(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None });
             let want = (app.session.revision, body.clone());
             if key.as_ref() != Some(&want) {
@@ -755,9 +807,13 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                             ));
                         });
                     }
+                    // Only a sheet with press-in hardware has notes to ask for.
+                    if v["hardware"].as_array().is_some_and(|h| !h.is_empty()) {
+                        crate::ui_kit::options(ui, "sheet_flat_options", &mut [("ui.hardware_notes", &mut *hardware_notes)]);
+                    }
                     ui.vertical(|ui| {
                         if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export DXF…"), crate::ui_kit::Button::Normal).clicked() {
-                            *status = Some(export_flat(app, v["body"].as_str().unwrap_or(""), "dxf"));
+                            *status = Some(export_flat_with(app, v["body"].as_str().unwrap_or(""), "dxf", *hardware_notes));
                         }
                     });
                     ui.vertical(|ui| {
@@ -807,12 +863,22 @@ pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
 }
 
 fn export_flat(app: &mut SolveApp, body: &str, extension: &str) -> String {
+    export_flat_with(app, body, extension, false)
+}
+
+/// `hardware_notes` asks the DXF for the note beside each press-in hardware hole; the bend table
+/// has none.
+fn export_flat_with(app: &mut SolveApp, body: &str, extension: &str, hardware_notes: bool) -> String {
     let name = format!("{}-{body}.{extension}", app.session.doc.name);
     let body = body.to_string();
     let command = if extension == "csv" { "sheet.export_bend_table" } else { "sheet.export_dxf" };
     app.pick_save(&name, &[extension], move |app, path| {
         let message = if let Some(path) = path {
-            match app.run(command, json!({"body": body, "path": path})) {
+            let mut params = json!({"body": body, "path": path});
+            if hardware_notes && command == "sheet.export_dxf" {
+                params["hardware_notes"] = json!(true);
+            }
+            match app.run(command, params) {
                 Ok(_) => {
                     app.set_status(format!("Exported {path}"), false);
                     format!("Saved {path}")
@@ -1051,6 +1117,93 @@ fn remove_segment(list: &mut Vec<SegmentRow>, m: usize) {
 }
 
 /// The commands the dialog's OK runs (`extra`: parameters kept from the feature being edited).
+/// Whether a refusal of `sheet.hardware` says what to change in the dialog (a sheet too thin for the
+/// hardware, a size or a hole diameter the table lacks, a missing length, a place that is no sheet),
+/// rather than a failure of the design or the kernel.
+pub(crate) fn hardware_refusal(error: &str) -> bool {
+    [
+        "is made for a sheet of at least",
+        "the table has no ",
+        "takes a hole of ",
+        "needs its `length`",
+        "needs its length",
+        "has no `length`",
+        "`length` must be more than 0",
+        "is not in a sheet metal part",
+    ]
+    .iter()
+    .any(|known| error.contains(known))
+}
+
+/// What the Hardware dialog runs: one `sheet.hardware` per sketch whose points are picked, and one
+/// per place picked on a face (a place on a sketch point follows the point, as a Single hole's
+/// does). The picks decide which; nothing is run until one is made.
+fn hardware_commands(
+    app: &SolveApp,
+    kind: usize,
+    thread: &str,
+    length: &str,
+    inputs: &[SelInput],
+    extra: &Map<String, Value>,
+) -> Result<Vec<(String, Value)>, String> {
+    let which = HARDWARE_KINDS.get(kind).copied().unwrap_or(HardwareKind::Nut);
+    let mut base = json!({"kind": which.name(), "thread": thread});
+    if which.has_length() {
+        if length.trim().is_empty() {
+            return Err(format!("a {} needs its length", which.name()));
+        }
+        base["length"] = json!(length);
+    }
+    let size_now = format!("{}:{thread}", which.name());
+    for (key, value) in extra {
+        let own = HARDWARE_OWN_KEYS.contains(&key.as_str());
+        let stale = key == "diameter" && extra.get("diameter_for").and_then(Value::as_str) != Some(size_now.as_str());
+        if !own && !stale {
+            base[key] = value.clone();
+        }
+    }
+    let flip = extra.get("flip").and_then(Value::as_bool).unwrap_or(false);
+    let mut by_sketch: Vec<(u64, Vec<String>)> = Vec::new();
+    let mut places: Vec<Value> = Vec::new();
+    for x in items(inputs, 0) {
+        match x {
+            Sel::SketchPoint { id } => {
+                let Some((sketch, point)) = id.split_once(':').and_then(|(sk, point)| Some((sk.parse::<u64>().ok()?, point))) else { continue };
+                match by_sketch.iter_mut().find(|(sk, _)| *sk == sketch) {
+                    Some((_, ids)) => ids.push(point.to_string()),
+                    None => by_sketch.push((sketch, vec![point.to_string()])),
+                }
+            }
+            Sel::Face { point, .. } => places.push(match crate::dialogs::single_point_at(app, extra, *point) {
+                Some((sketch, id)) => json!({"sketch": sketch, "points": [id], "single": true}),
+                None => json!({"position": pt(*point)}),
+            }),
+            _ => {}
+        }
+    }
+    let sketches = by_sketch.into_iter().map(|(sketch, ids)| {
+        let mut place = json!({"sketch": sketch, "points": ids});
+        if flip {
+            place["flip"] = json!(true);
+        }
+        place
+    });
+    let places: Vec<Value> = sketches.chain(places).collect();
+    if places.is_empty() {
+        return Err("select where the hardware goes: a place on a face, or sketch points".into());
+    }
+    Ok(places
+        .into_iter()
+        .map(|place| {
+            let mut p = base.clone();
+            if let (Some(p), Some(place)) = (p.as_object_mut(), place.as_object()) {
+                p.extend(place.clone());
+            }
+            ("sheet.hardware".to_string(), p)
+        })
+        .collect())
+}
+
 pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
     let (cmd, mut p): (&str, Value) = match k {
@@ -1308,6 +1461,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             ("sheet.manage_rules", p)
         }
         Sm::FlatPattern { .. } => return Ok(Vec::new()),
+        Sm::Hardware { kind, thread, length } => return hardware_commands(app, *kind, thread, length, inputs, extra),
     };
     k.fill_simple_params(&mut p);
     if let Value::Object(m) = &mut p {
@@ -1460,6 +1614,53 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             if let Some(i) = ins.get_mut(1) {
                 i.items = curves.iter().map(|id| crate::selection::curve_pick(id, sketch.0, app.session.active_sketch)).collect();
+            }
+            return Some((Kind::Sheet(k), ins, extra));
+        }
+        FeatureKind::Hole { hardware: Some(h), position, direction, diameter, points, .. } => {
+            let which = HARDWARE_KINDS.iter().position(|k| *k == h.kind).unwrap_or(0);
+            let length = h.length.as_ref().map_or_else(|| crate::dialogs::length_default(s, "10"), |e| e.to_string());
+            let k = Sm::Hardware { kind: which, thread: h.thread.clone(), length };
+            // A hole that is not the table's size keeps its own.
+            // It is that size's alone (`diameter_for`): the window has no diameter field, so a kind or
+            // thread chosen afterwards takes the table's again.
+            if hardware_size(h.kind, &h.thread).is_none_or(|size| diameter.as_str() != format!("{} mm", size.hole)) {
+                extra.insert("diameter".into(), json!(diameter.to_string()));
+                extra.insert("diameter_for".into(), json!(format!("{}:{}", h.kind.name(), h.thread)));
+            }
+            let (_, mut ins) = start(app, "sheet.hardware")?;
+            match points {
+                Some(sp) if sp.single => {
+                    // A Single hole at a sketch point: picked on its face where the point is now.
+                    let id = sp.ids.first().cloned().unwrap_or_default();
+                    let at = st
+                        .sketch(sp.sketch.0)
+                        .and_then(|ss| ss.sketch.points.iter().find(|p| p.id == id).map(|p| ss.plane.to_world(p.pos)))
+                        .unwrap_or(position.0);
+                    if let Some(i) = ins.first_mut() {
+                        i.multi = false;
+                        i.items = vec![face_sel(s, at).unwrap_or(Sel::Face { body: String::new(), index: 0, point: at })];
+                    }
+                    extra.insert("direction".into(), pt(direction.0));
+                    extra.insert("single_point".into(), json!({"point": pt(at), "sketch": sp.sketch.0, "id": id}));
+                }
+                Some(sp) => {
+                    // Points gone from the sketch are left out, so OK drops them.
+                    let kept = |id: &&String| st.sketch(sp.sketch.0).is_none_or(|ss| ss.sketch.points.iter().any(|p| &p.id == *id));
+                    if let Some(i) = ins.first_mut() {
+                        i.items = sp.ids.iter().filter(kept).map(|id| Sel::SketchPoint { id: format!("{}:{id}", sp.sketch) }).collect();
+                    }
+                    if sp.flip {
+                        extra.insert("flip".into(), json!(true));
+                    }
+                }
+                None => {
+                    if let Some(i) = ins.first_mut() {
+                        i.multi = false;
+                        i.items = vec![face_sel(s, position.0).unwrap_or(Sel::Face { body: String::new(), index: 0, point: position.0 })];
+                    }
+                    extra.insert("direction".into(), pt(direction.0));
+                }
             }
             return Some((Kind::Sheet(k), ins, extra));
         }

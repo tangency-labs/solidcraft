@@ -55,6 +55,7 @@ impl Walk for solidcraft_kernel::StepNode {}
 // An import kept as records holds no expressions, references or names to walk.
 impl Walk for Option<std::sync::Arc<solidcraft_kernel::ImportRecords>> {}
 impl Walk for crate::document::Operation {}
+impl Walk for crate::hardware_catalog::HardwareKind {}
 impl Walk for solidcraft_kernel::Continuity {}
 impl Walk for solidcraft_kernel::DraftCorner {}
 impl Walk for crate::document::Direction {}
