@@ -4,13 +4,14 @@
 
 use std::f64::consts::PI;
 
+use solidcore_ops::check::{CheckLevel, ValidityScope};
 use solidcore_ops::face_surface::FaceSurface;
 use solidcore_ops::session;
 use solidcore_ops::surface::ruled;
 use solidcore_ops::sweep::{planar_faces, Curve as SweepCurve};
 use solidcore_ops::{
-    make_box, make_cylinder, make_sphere, make_torus, Body, Error, Order, PointClass,
-    EDGE_POINTS_MAX,
+    make_box, make_cylinder, make_sphere, make_torus, pick, Body, Error, Order, PointClass,
+    PointLocation, EDGE_POINTS_MAX,
 };
 use solidcore_record::brep::{Brep, Curve};
 
@@ -118,6 +119,103 @@ fn a_box_classifies_many_points_as_each_alone() {
         .classify_points(&[[f64::NAN, 0.0, 0.0], [0.0, f64::INFINITY, 0.0]])
         .unwrap();
     assert!(refused.len() == 2 && refused.iter().all(Result::is_err));
+}
+
+/// Located points are the classified points, each a location where the class names one; an
+/// unsure region never arises on a box, whose regions the kernel knows.
+#[test]
+fn a_box_locates_points_as_it_classifies_them() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    let points = [
+        [0.5, 1.0, 1.5],
+        [f64::INFINITY, 0.0, 0.0],
+        [5.0, 1.0, 1.5],
+        [1.0, 1.0, 1.5],
+    ];
+    let located = b.locate_points(&points).unwrap();
+    let classified = b.classify_points(&points).unwrap();
+    assert_eq!(located.len(), classified.len());
+    for (l, c) in located.iter().zip(&classified) {
+        let as_class = l.as_ref().ok().map(|l| match l {
+            PointLocation::OnBoundary => PointClass::OnBoundary,
+            PointLocation::Inside => PointClass::Inside,
+            PointLocation::Outside => PointClass::Outside,
+            PointLocation::Unsure { .. } => panic!("a box has no unsure region"),
+        });
+        assert_eq!(as_class, c.as_ref().ok().copied());
+        assert_eq!(l.is_err(), c.is_err());
+    }
+    assert_eq!(located[1], Err(Error::Argument));
+}
+
+/// A body's own order is its lists as the kernel holds them: a box's 6 faces, 12 edges and 8
+/// vertices, and an edge picked by a point is the one at that index of the own order (the
+/// nearest edge to a point on it is at distance 0).
+#[test]
+fn a_box_own_order_names_its_picked_edges() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    let order = b.own_order();
+    assert_eq!(
+        (order.faces.len(), order.edges.len(), order.vertices.len()),
+        (6, 12, 8)
+    );
+    assert_eq!(order.split_edges, 0);
+    let at = [0.5, 0.0, 0.0];
+    let Ok(picked) = pick::edges(&b, &[at], 1e-6).unwrap() else {
+        panic!("a point on an edge picks it")
+    };
+    let p = b
+        .edge_closest_point(&order, picked[0], at)
+        .unwrap()
+        .unwrap();
+    assert!(p.distance <= 1e-12, "{p:?}");
+}
+
+/// The largest gap sample of an edge against each face of a box is the largest of the gap
+/// samples, and an edge lies on the faces it bounds: its largest gap to them is nothing.
+#[test]
+fn a_box_edge_largest_gap_is_its_largest_sample() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    let order = b.own_order();
+    let mut bounded = 0;
+    for face in 0..order.faces.len() {
+        let largest = b.edge_face_largest_gap(&order, 0, face).unwrap();
+        let samples = b.edge_face_gap_samples(&order, 0, face).unwrap();
+        let most = samples
+            .iter()
+            .map(|s| s.distance.value)
+            .fold(0.0_f64, f64::max);
+        assert!(
+            (largest - most).abs() <= 1e-12,
+            "face {face}: {largest} against {most}"
+        );
+        if largest <= 1e-12 {
+            bounded += 1;
+        }
+    }
+    assert!(bounded >= 2, "an edge lies on the two faces it bounds");
+    assert!(b.edge_face_largest_gap(&order, 99, 0).is_err());
+}
+
+/// A check scoped to the whole body is the plain check; a valid box is valid in either scope.
+#[test]
+fn a_box_checks_the_same_in_either_scope() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    let plain = b.check(CheckLevel::All).unwrap();
+    assert_eq!(
+        b.check_scoped(CheckLevel::All, ValidityScope::Body)
+            .unwrap(),
+        plain
+    );
+    assert!(plain.is_valid(), "{plain}");
+    assert!(b
+        .check_scoped(CheckLevel::All, ValidityScope::Stitched)
+        .unwrap()
+        .is_valid());
 }
 
 #[test]

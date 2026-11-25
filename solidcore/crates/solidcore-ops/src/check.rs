@@ -4,7 +4,7 @@
 use std::fmt::Write as _;
 
 use solidcore::geom::assert_array::{obj_type_string, AssertArray, AssertReport};
-use solidcore::topology::brep::validation::{check_brep, CheckLevel as KernelCheckLevel};
+use solidcore::topology::brep::validation::{check_brep_scoped, CheckLevel as KernelCheckLevel};
 
 /// What a check holds the tolerance pass to: [`ValidityScope::Stitched`] for a body a stitch produced.
 pub use solidcore::topology::brep::validation::ValidityScope;
@@ -109,6 +109,16 @@ impl Body {
     /// [`Error::Exception`] if the kernel skipped the topology test after a clean pointer check;
     /// those of the session's call.
     pub fn check(&self, level: CheckLevel) -> Result<CheckReport> {
+        self.check_scoped(level, ValidityScope::Body)
+    }
+
+    /// [`Body::check`] with the tolerance pass held to `scope`: [`ValidityScope::Body`] is
+    /// [`Body::check`]; [`ValidityScope::Stitched`] for a body a stitch produced, whose edges'
+    /// tolerances the stitch set.
+    ///
+    /// # Errors
+    /// Those of [`Body::check`].
+    pub fn check_scoped(&self, level: CheckLevel, scope: ValidityScope) -> Result<CheckReport> {
         let lv = match level {
             CheckLevel::Basic => KernelCheckLevel::Level0,
             CheckLevel::Geometry => KernelCheckLevel::Level1,
@@ -119,7 +129,7 @@ impl Body {
             if naming == NamingScheme::Unknown {
                 return Ok(Err(Refusal::Naming));
             }
-            match check_brep(k, b, lv) {
+            match check_brep_scoped(k, b, lv, scope) {
                 Err(e @ SolidError::Unported { upstream, .. }) => {
                     // the refusal keeps the kernel's code ([`crate::session::noted`])
                     drop(crate::session::noted(
