@@ -2,51 +2,98 @@
 //! runtime action sink; resolved geometry and drag previews are observational.
 use std::collections::BTreeMap;
 
-use solidcraft_engine::panels::*;
+use solidcraft_panel_layout::*;
+use solidcraft_ui_kit::{self as ui_kit, BackingTooltipExt as _, HostChrome};
 
 #[cfg(not(target_arch = "wasm32"))]
 use super::drag_paint::WindowCard;
 use super::drag_paint::{CardPaint, DragPaint, shape_count};
-use super::runtime::{RuntimeHostProposal, standalone_header_action};
-use super::*;
-use crate::ui_kit::{self, BackingTooltipExt as _, HostChrome};
+use super::host::{
+    ContentSlot, FramePanelContent, LocalRequest, LocalScope, Motion, NativeHostAdapter, PanelContext, PanelHost, PanelLocalServices,
+    PanelPresentation,
+};
+use super::interaction::{
+    HostDragOut, HostDropTargetId, HostInteraction, HostPointerEvent, HostPointerTarget, HostPreview, HostResizeEdge, PreparedHostLayout,
+    prepare_host_layout,
+};
+use super::layout::{
+    HostGeometryPolicy, HostIdentityReservations, HostLayout, HostMetrics, HostSection, HostSurfaceAlpha, host_identity_reservations,
+    next_host_section_id, resolve_host_layout_in_domain, resolve_usable_region,
+};
+use super::runtime::{
+    ContentOwner, ContentServices, ControllerKey, PanelController, PanelModels, PanelRuntime, RuntimeActionSink, RuntimeHostProposal,
+    standalone_header_action,
+};
+use super::surfaces::HostSurfaceStyle;
 
 // Raw input plus per-control focus, gesture and command outcomes, with room for
 // pass diagnostics. Repeated passes replace a snapshot rather than growing it.
 const MAX_HOST_FRAME_OUTCOMES: usize = 4096 + 3 * (MAX_INSTANCES + MAX_SECTIONS * (MAX_HEADER_ACTIONS + 8)) + 2;
 
-/// The command executor stages the injected catalogue before dispatch takes
+/// Host-side persistence and reservation hook for [`WorkspacePanelHost`].
+///
+/// Hosts without an external preset/envelope catalogue can use [`DirectLayoutStore`],
+/// which validates the live layout's preparation context and commits directly through
+/// the runtime sink.
+pub trait PanelLayoutStore {
+    /// Opaque cache key for the remembered envelope of `workspace`, if any.
+    /// When the key, workspace and registry are unchanged, cached reservations
+    /// are reused without decoding the envelope again.
+    fn remembered_key(&self, _workspace: &WorkspaceId) -> Option<&[u8]> {
+        None
+    }
+
+    /// Current workspace envelope used to reserve opaque/dormant panel identities
+    /// before generating widget and pointer ids.
+    fn current_envelope(&self, state: &LayoutReply, _registry: &PanelRegistry) -> PanelResult<LayoutEnvelope> {
+        Ok(LayoutEnvelope::new(state.layout.clone()))
+    }
+
+    /// Commit `action` through `sink`. Hosts with a layout catalogue stage and
+    /// publish it around `sink.dispatch_in_context`; direct hosts validate the
+    /// live envelope's preparation context and dispatch directly.
+    fn execute_action(&mut self, action: LayoutAction, sink: &mut dyn ActionSink, registry: &PanelRegistry) -> PanelResult<LayoutReply> {
+        if standalone_header_action(&action) {
+            return sink.dispatch(action);
+        }
+        let state = sink.inspect();
+        let envelope = self.current_envelope(&state, registry)?;
+        let preparation = preparation_context(&envelope)?;
+        sink.dispatch_in_context(action, &preparation)
+    }
+}
+
+/// Default [`PanelLayoutStore`] for hosts without an external layout catalogue.
+#[derive(Default)]
+pub struct DirectLayoutStore;
+impl PanelLayoutStore for DirectLayoutStore {}
+
+/// The layout store stages any persistence before dispatch takes
 /// this exact proposal. No reducer, allocator or controller factory runs here.
 fn commit_catalogued_proposal(
     runtime: &mut PanelRuntime,
     proposal: RuntimeHostProposal,
     native: &mut dyn NativeHostAdapter,
     services: &mut ContentServices<'_>,
-    catalogue: &mut dyn commands::LayoutCatalogue,
+    store: &mut dyn PanelLayoutStore,
 ) -> PanelResult<LayoutReply> {
     let action = proposal.action().clone();
     let registry = runtime.layout().registry().clone();
     let mut sink = RetainedCandidateSink { runtime, native, services, proposal: Some(proposal) };
-    commands::execute_layout_action(
-        action,
-        &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue, web: cfg!(target_arch = "wasm32") },
-    )
+    store.execute_action(action, &mut sink, &registry)
 }
 fn commit_registered_action(
     runtime: &mut PanelRuntime,
     action: LayoutAction,
     native: &mut dyn NativeHostAdapter,
     services: &mut ContentServices<'_>,
-    catalogue: &mut dyn commands::LayoutCatalogue,
+    store: &mut dyn PanelLayoutStore,
 ) -> PanelResult<LayoutReply> {
     let registry = runtime.layout().registry().clone();
     let mut sink = RuntimeActionSink { runtime, native, services };
-    // The shared executor dispatches this standalone owner action before any
-    // catalogue access. Its runtime sink still validates the owning binding.
-    commands::execute_layout_action(
-        action,
-        &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue, web: cfg!(target_arch = "wasm32") },
-    )
+    // The layout store dispatches this standalone owner action before any
+    // storage access. Its runtime sink still validates the owning binding.
+    store.execute_action(action, &mut sink, &registry)
 }
 struct RetainedCandidateSink<'a, 'services> {
     runtime: &'a mut PanelRuntime,
@@ -715,23 +762,23 @@ impl WorkspacePanelHost {
         };
         resolve_frame_layout(runtime, domain, capacity, chrome, &self.options)
     }
-    /// Capture the injected catalogue's full envelope, including opaque/dormant
+    /// Capture the layout store's full envelope, including opaque/dormant
     /// reservations, before either widget or pointer identity generation.
-    pub(crate) fn capture_reservations(&mut self, runtime: &PanelRuntime, catalogue: &dyn commands::LayoutCatalogue) -> PanelResult<()> {
+    pub(crate) fn capture_reservations(&mut self, runtime: &PanelRuntime, store: &dyn PanelLayoutStore) -> PanelResult<()> {
         let service = runtime.layout();
         let state = service.inspect();
         let workspace = &state.layout.workspace;
-        let remembered = catalogue.state().remembered(workspace);
+        let remembered = store.remembered_key(workspace);
         let made = self.remembered_reservations.as_ref().filter(|made| {
-            remembered.is_some_and(|stored| *made.bytes == *stored.bytes()) && made.workspace == *workspace && made.registry == *service.registry()
+            remembered.is_some_and(|bytes| *made.bytes == *bytes) && made.workspace == *workspace && made.registry == *service.registry()
         });
         let mut reservations = match made {
             Some(made) => made.reservations.clone(),
             None => {
-                let envelope = commands::current_envelope_snapshot(catalogue, &state, service.registry())?;
+                let envelope = store.current_envelope(&state, service.registry())?;
                 let reservations = host_identity_reservations(&envelope)?;
-                self.remembered_reservations = remembered.map(|stored| RememberedReservations {
-                    bytes: stored.bytes().into(),
+                self.remembered_reservations = remembered.map(|bytes| RememberedReservations {
+                    bytes: bytes.into(),
                     workspace: workspace.clone(),
                     registry: service.registry().clone(),
                     reservations: reservations.clone(),
@@ -982,10 +1029,10 @@ impl WorkspacePanelHost {
         runtime: &mut PanelRuntime,
         native: &mut dyn NativeHostAdapter,
         services: &mut ContentServices<'_>,
-        catalogue: &mut dyn commands::LayoutCatalogue,
+        store: &mut dyn PanelLayoutStore,
     ) -> PanelResult<()> {
         let painted = self.show_deferred(ui, runtime, native, services);
-        let finished = self.finish(ui, runtime, native, services, catalogue);
+        let finished = self.finish(ui, runtime, native, services, store);
         painted.and(finished)
     }
 
@@ -1373,7 +1420,7 @@ impl WorkspacePanelHost {
         runtime: &mut PanelRuntime,
         native: &mut dyn NativeHostAdapter,
         services: &mut ContentServices<'_>,
-        catalogue: &mut dyn commands::LayoutCatalogue,
+        store: &mut dyn PanelLayoutStore,
     ) -> PanelResult<()> {
         self.note_native_capabilities(native.capabilities());
         let Some(pending) = self.pending.take() else {
@@ -1391,7 +1438,7 @@ impl WorkspacePanelHost {
             return Err(error(Rule::Placement, "host context changed after paint"));
         }
         self.capture_metrics(runtime, services.models)?;
-        self.capture_reservations(runtime, catalogue)?;
+        self.capture_reservations(runtime, store)?;
         let PendingHostCommands { scope, frame_number, allow_actions, mut commands, mut pointer_events, mount, drag_cards, .. } = pending;
         let Some(mut frame) = self.frame.take() else {
             ui.ctx().request_repaint();
@@ -1653,7 +1700,7 @@ impl WorkspacePanelHost {
                     let landing = candidate.window_landing().cloned();
                     let result = with_local_tracking(services, &scope, frame.layout.capacity, &mut overlays, |services| {
                         let proposal = runtime.retain_host_candidate(*candidate, frame.layout.clone(), services.models)?;
-                        commit_catalogued_proposal(runtime, proposal, native, services, catalogue)
+                        commit_catalogued_proposal(runtime, proposal, native, services, store)
                     });
                     match result {
                         Ok(reply) => {
@@ -1686,10 +1733,10 @@ impl WorkspacePanelHost {
                     sent_layout = true;
                     let result: PanelResult<LayoutReply> = with_local_tracking(services, &scope, frame.layout.capacity, &mut overlays, |services| {
                         let reply = if standalone_header_action(&action) {
-                            commit_registered_action(runtime, action.clone(), native, services, catalogue)?
+                            commit_registered_action(runtime, action.clone(), native, services, store)?
                         } else {
                             let proposal = runtime.prepare_host_proposal(frame.layout.clone(), action.clone(), services.models)?;
-                            commit_catalogued_proposal(runtime, proposal, native, services, catalogue)?
+                            commit_catalogued_proposal(runtime, proposal, native, services, store)?
                         };
                         Ok(super::runtime::normalize_native_reply(reply, &self.native_capabilities))
                     });
@@ -1990,7 +2037,7 @@ impl WorkspacePanelHost {
             return false;
         }
         let previous = self.options.geometry.scroll;
-        let next = crate::navigation::panel_scroll_offset(ui.ctx(), egui::vec2(previous.x, previous.y), maximum);
+        let next = ui_kit::panel_scroll_offset(ui.ctx(), egui::vec2(previous.x, previous.y), maximum);
         self.options.geometry.scroll = Point { x: next.x, y: next.y };
         previous != self.options.geometry.scroll
     }
@@ -2856,7 +2903,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                     if let HostPointerTarget::HeaderAction { instance, action } = target
                         && response.interact_rect.is_positive()
                     {
-                        crate::scenario::publish_target(&format!("{}:{}", instance.0, action.0), response.interact_rect);
+                        solidcraft_ui_registry::publish_target(&format!("{}:{}", instance.0, action.0), response.interact_rect);
                     }
                     let clicked = response.clicked();
                     let secondary = response.secondary_clicked();

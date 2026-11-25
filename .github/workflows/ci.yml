@@ -15,8 +15,9 @@
 # nightly. The reference tests and the doc tests run in the merge queue, on main and nightly, not
 # on pull requests (the fast lane, in Select checks); a break there is fixed forward on main. The
 # Windows jobs (D3D12 shaders and app startup) run nightly, and in the merge queue only for a group
-# that changes what they exercise. The wasm compile check runs in the merge queue for a group that
-# touches the crates below the apps, the web app or the manifests. Dependency advisories run nightly
+# that changes what they exercise. The wasm check and browser smoke (up to 45 minutes) run nightly and in
+# the merge queue for a group that touches app dependencies, the web app, assets or the browser
+# tests, not on pull requests, so pull request CI stays fast. Dependency advisories run nightly
 # and on any pull request or merge group that changes Cargo.lock or a Cargo.toml. Only main saves the build caches; pull requests restore them.
 # sccache is on a Blacksmith sticky disk that only main commits.
 # A push to main runs only the repository checks when a passing merge-queue run tested that very
@@ -162,7 +163,7 @@ jobs:
       doctests: ${{ steps.paths.outputs.doctests }}
       # Cargo.lock or a Cargo.toml changed (pull requests and merge groups): Dependency advisories.
       deps: ${{ steps.paths.outputs.deps }}
-      # A merge group reaches the wasm build: Compile WebAssembly.
+      # Relevant merge groups (and batch/** pushes), or the nightly: wasm build and browser smoke.
       wasm: ${{ steps.paths.outputs.wasm }}
       # solidcore/** changed (approved pull requests, merge groups, pushes to main): SolidCore checks.
       solidcore: ${{ steps.paths.outputs.solidcore }}
@@ -254,7 +255,7 @@ jobs:
                 Cargo.lock|Cargo.toml|*/Cargo.toml) deps=true ;;
               esac
               case "$path" in
-                crates/*|apps/solidcraft-web/*|vendor/*|solidcore/*|Cargo.lock|Cargo.toml|rust-toolchain*|.cargo/*|.github/workflows/ci.yml|docs/book/plugin-examples/*|docs/book/src/dev/plugins.md) wasm=true ;;
+                crates/*|apps/solidcraft-web/*|assets/*|xtask/*|vendor/*|solidcore/*|Cargo.lock|Cargo.toml|rust-toolchain*|.cargo/*|.github/workflows/ci.yml|docs/book/plugin-examples/*|docs/book/src/dev/plugins.md) wasm=true ;;
               esac
             done < "$1"
           }
@@ -386,13 +387,16 @@ jobs:
             gpu_paths=true
             # Run workflow (a fork's full run too) checks SolidCore as the merge queue does.
             if [ "$EVENT_NAME" = workflow_dispatch ]; then solidcore=true; fi
+            # PRs cannot save the wasm cache. Warm it nightly instead of rebuilding after every merge.
+            if [ "$EVENT_NAME" = schedule ]; then wasm=true; fi
           else
             # Compare both old and new paths of renames; unknown paths run native checks.
             git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/ci-paths"
             # Computed as for a merge group, then turned off below (the fast lane).
             windows_paths "$RUNNER_TEMP/ci-paths" "$BASE_SHA...$HEAD_SHA"
             # The advisories run on the pull request itself (it builds nothing of ours: about two minutes, most of it installing cargo-deny);
-            # the wasm compile waits for the merge queue.
+            # the wasm build and browser smoke wait for the merge queue (and the nightly), so pull
+            # request CI stays fast.
             deps_wasm_paths "$RUNNER_TEMP/ci-paths"
             wasm=false
             solidcore_paths "$RUNNER_TEMP/ci-paths"
@@ -1486,14 +1490,17 @@ jobs:
 
   # Every crate below the apps and the web app must build for the browser (`cargo xtask wasm`, a
   # cargo check, no tests), and the plugin guide's example plugins must match the guide and build
-  # (`cargo xtask plugin-examples`). In the merge queue for a group that reaches the wasm build (Select
-  # checks' `wasm`), where `ci` requires it; by hand with cross_compile.
+  # (`cargo xtask plugin-examples`), then run the built web client in headless Chrome. In the
+  # merge queue for a group that reaches the wasm build (Select checks' `wasm`), where `ci`
+  # requires it, and nightly; never on pull requests; by hand with cross_compile. Pages keeps the
+  # full API and offline browser tests.
   wasm:
-    name: Compile WebAssembly
+    name: Compile WebAssembly and test browser startup
     needs: changes
     if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && inputs.cross_compile) || needs.changes.outputs.wasm == 'true') }}
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
-    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
+    # Full code generation needs more time than the former check-only job, especially cold.
+    timeout-minutes: ${{ vars.CI_RUNNER && 135 || 45 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/merge-main
@@ -1506,6 +1513,23 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - run: cargo xtask wasm
       - run: cargo xtask plugin-examples
+      - name: Install trunk
+        env:
+          TRUNK_VERSION: v0.21.14
+          TRUNK_SHA256: f2b4680cd239693a646a2795e4633c625328d7b2a044fbe749fa3a2fe9e7036b
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          archive="$RUNNER_TEMP/trunk.tar.gz"
+          curl -fsSL -o "$archive" "https://github.com/trunk-rs/trunk/releases/download/${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz"
+          echo "$TRUNK_SHA256  $archive" | sha256sum -c -
+          tar -xzf "$archive" -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Build the browser app
+        working-directory: apps/solidcraft-web
+        # No release LTO or wasm-opt: this gate checks runtime behavior, not package size.
+        run: trunk build --cargo-profile ci --public-url ./
+      - name: Test browser startup, frames and opening a design
+        run: cargo xtask web-api-test --smoke --site dist/web
 
   # SolidCore's own checks (its required fmt, clippy, test, kernel-rig, goldens and wasm, and its
   # deny and publish-dry-run, in solidcore/.github/workflows/ci.yml, which GitHub does not run from

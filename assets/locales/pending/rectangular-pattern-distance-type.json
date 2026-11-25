@@ -86,5 +86,16 @@
     "ui.pattern_extent": "总长",
     "ui.pattern_extent_2": "总长 2",
     "ui.pattern_spacing_extent": "间距和总长"
+  },
+  "fr": {
+    "ui.pattern_copy_at_end": "Copier à la fin",
+    "ui.pattern_copy_at_end_2": "Copier à la fin 2",
+    "ui.pattern_count_extent": "Quantité et étendue",
+    "ui.pattern_count_spacing": "Quantité et espacement",
+    "ui.pattern_distance_type": "Type de distance",
+    "ui.pattern_distance_type_2": "Type de distance 2",
+    "ui.pattern_extent": "Étendue",
+    "ui.pattern_extent_2": "Étendue 2",
+    "ui.pattern_spacing_extent": "Espacement et étendue"
   }
 }
