@@ -22,7 +22,8 @@ use crate::{IoError, Result};
 
 /// Largest KiCad board file read.
 pub const MAX_KICAD_BYTES: usize = 128 << 20;
-const MAX_TOKENS: usize = 2_000_000;
+/// Token cap for a small file; a larger file may hold as many tokens as `token_cap` allows.
+const MIN_TOKEN_CAP: usize = 2_000_000;
 const MAX_DEPTH: usize = 128;
 const MAX_FOOTPRINTS: usize = 100_000;
 /// Fields kept per footprint for its text variables.
@@ -3735,7 +3736,16 @@ fn numbers_but(expr: &Expr<'_>, minimum: usize, skip: &str) -> std::result::Resu
     Ok(values)
 }
 
+/// The most tokens a board of `len` bytes may hold: one per two bytes, the densest a real file gets
+/// (a token is at least one byte and consecutive atoms are separated by a byte), so a file under
+/// `MAX_KICAD_BYTES` is never refused for its token count alone. The size cap bounds the memory:
+/// at most `MAX_KICAD_BYTES / 2` tokens.
+fn token_cap(len: usize) -> usize {
+    MIN_TOKEN_CAP.max(len / 2)
+}
+
 fn tokenize(source: &str) -> Result<Vec<Token<'_>>> {
+    let cap = token_cap(source.len());
     let mut tokens = Vec::new();
     let mut index = 0usize;
     while index < source.len() {
@@ -3771,8 +3781,8 @@ fn tokenize(source: &str) -> Result<Vec<Token<'_>>> {
                 tokens.push(Token::Atom(word));
             }
         }
-        if tokens.len() > MAX_TOKENS {
-            return Err(IoError::Invalid(format!("KiCad PCB has more than {MAX_TOKENS} s-expression tokens")));
+        if tokens.len() > cap {
+            return Err(IoError::Invalid(format!("KiCad PCB has more than {cap} s-expression tokens")));
         }
     }
     Ok(tokens)
@@ -3828,7 +3838,7 @@ impl<'a> Parser<'a> {
             return Err(IoError::Invalid(format!("KiCad PCB nesting exceeds {MAX_DEPTH}")));
         }
         self.nodes = self.nodes.saturating_add(1);
-        if self.nodes > MAX_TOKENS {
+        if self.nodes > self.tokens.len() {
             return Err(IoError::Invalid("KiCad PCB has too many s-expression nodes".into()));
         }
         match self.tokens.get(self.next).cloned() {
