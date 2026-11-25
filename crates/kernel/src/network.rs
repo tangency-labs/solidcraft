@@ -35,7 +35,7 @@
 //!   such a boundary is part of the surface, so it must already leave the face tangent to it
 //!   (G1) and with its curvature (G2), within tolerance; otherwise the network is refused,
 //!   naming the curve.
-//! - The three surfaces are brought into one space ([`crate::spline_space::embed`]: Bézier degree
+//! - The three surfaces are brought into one space ([`solidcraft_geom::spline_space::embed`]: Bézier degree
 //!   elevation and knot insertion) and summed.
 //!
 //! - A side may collapse to a point ([`PointCurve`]: the apex of a three-sided patch, where the
@@ -50,10 +50,14 @@
 //! Input is hostile: sizes are capped, every evaluation is checked, and failures are
 //! [`SplineError`]s naming the curves; nothing here panics.
 
-use crate::bspline::{NurbsSurface, SplineError, SplineResult, invalid};
-use crate::prelude::*;
-use crate::spline_space::{Cond, Interpolant, Linear, Monotone, Space, embed};
 use solidcore_record::Vec3;
+use solidcraft_geom::bspline::{NurbsSurface, SplineError, SplineResult};
+use solidcraft_geom::prelude::*;
+use solidcraft_geom::spline_space::{Cond, Interpolant, Linear, Monotone, Space, embed};
+
+fn invalid<T>(msg: impl Into<String>) -> SplineResult<T> {
+    Err(SplineError::Invalid(msg.into()))
+}
 
 /// Most curves in one direction of a network.
 pub const MAX_NETWORK_CURVES: usize = 32;
