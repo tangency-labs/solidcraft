@@ -40,6 +40,7 @@
 # intersect.surface_drop_lib_p1: main's file with trim0351 and trim0384 dropping cleanly across a closed U-seam (#20836): both move from 0 curves ([0.0, 0.0, 0.0, 0.0]) to 2 UV pieces meeting on opposite U-seam sides (n=182 and n=196); no tolerance moves
 # offset.offset_executive_p2: a rounded offset's tube that folds over itself is refused (#13685): this branch's file, 20 lines moved, none a ROWS case. 4 move from status 1000 to 1001 (extrude_holes1_face0_outset24_7_rounded and _unstitched, extrude_holes1_face3_outset24_7_rounded, fill_gap_extrudeHoles1_face0_round_d13, each unsound on main), and 16 refused on main stay 1001 with the smaller partial offset an earlier refusal records; proved by tests/issue_13685_tube_folds.rs and the unit's soundness probe
 # sweep.rotational_sweep_geometry: a nearly flat cone keeps its cone (#18005) moves gen0175 (its swept face a cone, not a surface of revolution; its two profile edges lines, not B-splines); no tolerance moves; the digest is the branch file
+# boolean.api_brep: a planar face swept into its own body without merging is refused, status 1001 (#21673, #22067): the digest is this branch's file (no ROWS case in the unit; on top of #20227's torus_guard_major_2x_eff_zero line above). 15 lines move, each from status 0 with a body to 1001 with no record or values: the 12 box face 0 sweeps (z = 0, outward -z, swept 5 into the box: sweep_face0, sweep_long_dir, sweep_region_null_face0, sweep_region_swept_face0, attributed_sweep_face0 and its _reference, _standalone_copy, _standalone_reference and _temp variants, attributed_sweep_long_dir, attributed_sweep_region_null_face0, attributed_sweep_region_swept_face0) and the generated merge-off box sweeps more0070 (face 2, v.n < 0), more0100 (face 3, v.n < 0) and more0143 (faces 1 and 3 inward at distance -25.9), each a self-intersecting body on main; no tolerance moves
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -65,7 +66,7 @@ blend.fillet_standard_solver_p1	fcd2f44f6127b6b5
 blend.fillet_standard_solver_p2	e8c0be100d77a5a3
 blend.hcr	a705633d84e1c3b4
 blend.identify_fillet	47f73eabb1499edd
-boolean.api_brep	9e85ef5f95f90792
+boolean.api_brep	d5beae8b73c8f99e
 boolean.merge_p1	f6ed153954de93fa
 boolean.merge_p2	1d11ada3d7bc45f9
 boolean.merge_p3	0a6b36b7967dcf31
