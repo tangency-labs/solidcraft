@@ -3404,24 +3404,23 @@ impl CircularCrossSectionFsg {
                     let num_unique_knots = current.number_of_unique_knots()?;
 
                     // when needed - replace pArc with a new Arc with appropriate number of knots
-                    if num_unique_knots != *max_num_unique_knots {
-                        let max_ctrl_pts = add(*max_num_unique_knots, 2, OP)? as u64;
-                        *slot = Some(BSplineCurve::approximate_arc(
-                            3,
-                            Some(max_ctrl_pts),
-                            &placement,
-                            radius1,
-                            0.0,
-                            angle * 180.0 / PI,
-                            self.tol_percent_radius,
-                        )?);
-                    } else {
+                    if num_unique_knots == *max_num_unique_knots {
                         // Not upstream (WR-21288): a section that already has the most
                         // knots is kept as the 1st pass made it, mirrored already. Upstream
                         // mirrors it again below, back to the unmirrored arc; only a
                         // section built again here is mirrored.
                         continue;
                     }
+                    let max_ctrl_pts = add(*max_num_unique_knots, 2, OP)? as u64;
+                    *slot = Some(BSplineCurve::approximate_arc(
+                        3,
+                        Some(max_ctrl_pts),
+                        &placement,
+                        radius1,
+                        0.0,
+                        angle * 180.0 / PI,
+                        self.tol_percent_radius,
+                    )?);
                 } else {
                     // on 2nd pass with unequal gapVector radii
                     // Do need to fix knot vector of blend

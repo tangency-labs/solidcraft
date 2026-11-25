@@ -511,7 +511,7 @@ fn removed_bound(
     // by spans `l` of the other direction (live columns `l - q ..= l`)
     for k in p..kr.len().saturating_sub(p + 1) {
         let (a, b) = (*kr.get(k).ok_or("knot")?, *kr.get(k + 1).ok_or("knot")?);
-        if !(a < b) || k < p + off || k >= off + n_rows {
+        if a.partial_cmp(&b) != Some(std::cmp::Ordering::Less) || k < p + off || k >= off + n_rows {
             continue;
         }
         let maxn: Vec<f64> = (k - p..=k)
@@ -519,7 +519,7 @@ fn removed_bound(
             .collect::<Result<_, _>>()?;
         for l in q..ko.len().saturating_sub(q + 1) {
             let (c0, c1) = (*ko.get(l).ok_or("knot")?, *ko.get(l + 1).ok_or("knot")?);
-            if !(c0 < c1) {
+            if c0.partial_cmp(&c1) != Some(std::cmp::Ordering::Less) {
                 continue;
             }
             let live = |x: &&(usize, usize, f64, f64, f64)| {
@@ -543,7 +543,7 @@ fn removed_bound(
             for x in cells.iter().filter(live) {
                 w_min = w_min.min(x.4);
             }
-            if !(w_min > 0.0) {
+            if w_min.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
                 return Err("a non-positive live weight".into());
             }
             spans += 1;

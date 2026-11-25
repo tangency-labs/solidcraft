@@ -311,7 +311,7 @@ fn cylinder_bound(n: &solidcore::nurbs::srf_basic::Surface, axis: [f64; 2], r: f
             (0..=q).map(|j| by_v.iter().map(|r| r[sv][j]).collect()).collect();
         let by_u: Vec<Vec<Vec<[f64; 2]>>> =
             cols.iter().map(|c| bezier_segments(n.u_knots(), p, c)).collect();
-        for su in 0..by_u[0].len() {
+        for (su, _) in by_u[0].iter().enumerate() {
             // patch[i][j]: u index i, v index j
             let patch: Vec<Vec<[f64; 2]>> =
                 (0..=p).map(|i| (0..=q).map(|j| by_u[j][su][i]).collect()).collect();
