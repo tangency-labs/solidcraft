@@ -8,11 +8,27 @@
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod assembly;
 
-/// Largest IGES file we read.
+/// Largest IGES file we read by default.
 pub const MAX_IGES_BYTES: usize = 512 << 20;
+
+/// The largest IGES text [`translate`] reads, in bytes; `solidcraft_io::limits` keeps it at the
+/// limit in force (Preferences › General › Largest file to open, or `--max-file-size`), so
+/// the reader reads every file the size check let through (#20304).
+static MAX_BYTES: AtomicUsize = AtomicUsize::new(MAX_IGES_BYTES);
+
+/// Read IGES texts of up to `bytes` from now on (never less than the default).
+pub fn set_max_bytes(bytes: usize) {
+    MAX_BYTES.store(bytes.max(MAX_IGES_BYTES), Ordering::Relaxed);
+}
+
+/// The largest IGES text [`translate`] reads now.
+pub fn max_bytes() -> usize {
+    MAX_BYTES.load(Ordering::Relaxed)
+}
 const MAX_ENTITIES: usize = 2_000_000;
 const MAX_DEPTH: usize = 32;
 const MAX_LIST: usize = 1_000_000;
@@ -1351,7 +1367,7 @@ pub fn iges_to_step(text: &str) -> std::result::Result<(String, Vec<String>), St
 }
 
 fn translate(text: &str) -> std::result::Result<(String, Vec<String>), String> {
-    if text.len() > MAX_IGES_BYTES {
+    if text.len() > max_bytes() {
         return Err("IGES file too large".into());
     }
     let f = solidcraft_profile::scope("import", "iges.parse", || parse(text))?;

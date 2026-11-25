@@ -350,6 +350,8 @@ pub use iges_in::MAX_IGES_BYTES;
 pub use iges_in::iges_import;
 pub use iges_in::iges_native_system;
 pub use iges_in::iges_to_step;
+pub use iges_in::max_bytes as iges_max_bytes;
+pub use iges_in::set_max_bytes as set_iges_max_bytes;
 pub use iges_out::iges_export_bodies;
 pub use intersection::MeetingEdge;
 pub use intersection::meeting_edges;
