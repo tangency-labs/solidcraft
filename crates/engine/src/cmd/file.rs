@@ -1832,6 +1832,14 @@ pub fn runs_plugin_importer(s: &Session, command: &str, params: &Value) -> bool 
     if command.eq_ignore_ascii_case("file.import") {
         return true;
     }
+    if command.eq_ignore_ascii_case("component.insert_design") {
+        let Some(path) = params.get("path").and_then(Value::as_str) else { return false };
+        return !matches!(super::component_link::insert_importer(s, params, path), Ok(None));
+    }
+    if command.eq_ignore_ascii_case("component.update_links") {
+        // Update Links reads again with the importer a link recorded, so it runs that plugin.
+        return s.doc.links.values().any(|link| link.importer.is_some());
+    }
     if !command.eq_ignore_ascii_case("doc.open") {
         return false;
     }

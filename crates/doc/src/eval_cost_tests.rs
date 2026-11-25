@@ -475,6 +475,68 @@ fn a_boundary_surface_keeps_its_result_when_another_sketch_changes() {
     assert!(model.state().bodies[0].body.size() > size, "the patch reaches the moved corner");
 }
 
+/// Construction geometry can follow another part in a sketch while the whole boundary extruded
+/// from it stays put. A shared point still moves the drawn curve, and a missing boundary fails.
+#[test]
+fn a_whole_profile_extrusion_reads_its_boundary_and_naming_curves() {
+    let mut doc = Document::new("Construction geometry");
+    block(&mut doc, "Other", Vec3::new(30.0, 30.0, 30.0), [2.0; 3]);
+    let other = doc.features[0].id;
+    let mut sketch = Sketch::new();
+    let center = sketch.add_point(Vec2::new(3.0, 2.0), None).unwrap();
+    sketch.add_circle(Vec2::ZERO, 4.0, Some(center), Some("rim")).unwrap();
+    let end = sketch.add_point(Vec2::new(20.0, 2.0), None).unwrap();
+    let guide = sketch.add_line_pts(center, end, None).unwrap();
+    sketch.curves[guide].construction = true;
+    let id = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
+    let extrude = doc
+        .add_feature(
+            FeatureKind::Extrude {
+                thin: None,
+                sketch: id.into(),
+                profiles: ProfileSel::WholeBoundaries { profiles: vec![WholeProfileBoundary { outer: vec!["rim".into()], holes: Vec::new() }] },
+                extent: serde_json::from_value(serde_json::json!({"distance": "2"})).unwrap(),
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(extrude).unwrap().body_names = vec!["Disk".into()];
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let first = model.state();
+    let disk = first.body("Disk").unwrap();
+    let names = crate::naming::face_names(disk);
+    let mut reopened = Model::adopt(&doc, &model.saved(&doc).unwrap()).unwrap();
+    // With another body gone, only the relative cache entry can give back the disk.
+    doc.feature_mut(other).unwrap().suppressed = true;
+    doc.sketch_mut(id).unwrap().points[end].pos.x = 25.0;
+    for session in [&mut model, &mut reopened] {
+        let before = session.state();
+        session.evaluate(&doc);
+        assert_eq!(session.last_recomputed, 1, "only the sketch");
+        assert_eq!(session.last_restored, 1);
+        let next = session.state();
+        assert!(next.body("Other").is_none());
+        assert_eq!(next.sketch(id).unwrap().sketch.point(end).unwrap().x, 25.0);
+        let disk = next.body("Disk").unwrap();
+        assert!(disk.body.same(&before.body("Disk").unwrap().body));
+        assert_eq!(crate::naming::face_names(disk), names);
+    }
+
+    doc.sketch_mut(id).unwrap().points[center].pos.x = 8.0;
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 2, "the guide and rim share the moved point");
+    assert!((centroid_of(&model, extrude).x - 8.0).abs() < 1e-7);
+    assert_eq!(crate::naming::face_names(model.state().body("Disk").unwrap()), names);
+
+    doc.sketch_mut(id).unwrap().curves[0].id = "other".into();
+    model.evaluate(&doc);
+    assert!(model.result(extrude).unwrap().error.is_some(), "the old pick no longer resolves");
+    assert!(model.state().body("Disk").is_none());
+}
+
 #[test]
 fn a_sketch_on_a_face_still_sees_the_placed_bodies() {
     let parts = 3;
