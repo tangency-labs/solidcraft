@@ -539,6 +539,150 @@ fn each_schema_type_becomes_its_field_with_limits_labels_and_defaults() {
 }
 
 #[test]
+fn font_fields_send_full_names_and_keep_string_constraints() {
+    let schema = json!({"type":"object","required":["font"],"properties":{
+        "font":{"type":"string","title":"Font","x-solidcraft-font":true,"default":"Liberation Sans","minLength":3,"maxLength":100}
+    }});
+    let mut fields = form(&schema).expect("font field drawn");
+    assert!(fields[0].0.font);
+    assert_eq!(params(&fields), Ok(json!({"font":"Liberation Sans"})));
+    fields[0].1 = Input::Text("Unknown family".into());
+    assert_eq!(params(&fields), Ok(json!({"font":"Unknown family"})));
+    fields[0].1 = Input::Text("a".into());
+    assert!(params(&fields).is_err());
+    for property in [json!({"type":"number","x-solidcraft-font":true}), json!({"type":"string","x-solidcraft-font":false})] {
+        assert!(form(&json!({"properties":{"font":property}})).is_none());
+    }
+}
+
+#[test]
+fn font_fields_follow_conditions_and_keep_edited_full_names() {
+    let schema = json!({"type":"object","required":["font"],"properties":{
+        "show":{"type":"boolean","default":false},
+        "editable":{"type":"boolean","default":true},
+        "alternate":{"type":"boolean","default":false},
+        "font":{"type":"string","x-solidcraft-font":true,
+            "x-solidcraft-visible-when":{"field":"show","eq":true},
+            "x-solidcraft-enabled-when":{"field":"editable","eq":true},
+            "x-solidcraft-defaults":[
+                {"when":{"field":"alternate","eq":false},"value":"Liberation Sans"},
+                {"when":{"field":"alternate","eq":true},"value":"Unknown family"}]}
+    }});
+    let mut fields = form(&schema).expect("conditional font form");
+    assert!(!params(&fields).unwrap().as_object().unwrap().contains_key("font"));
+    set_input(&mut fields, "show", Input::Boolean(true));
+    assert_eq!(params(&fields).unwrap()["font"], "Liberation Sans");
+    set_input(&mut fields, "alternate", Input::Boolean(true));
+    assert_eq!(params(&fields).unwrap()["font"], "Unknown family");
+    let field = &fields.iter().find(|(f, _)| f.key == "font").unwrap().0;
+    assert!(field.font && field.visible && field.enabled);
+    set_input(&mut fields, "font", Input::Text("Custom full family".into()));
+    set_input(&mut fields, "editable", Input::Boolean(false));
+    set_input(&mut fields, "alternate", Input::Boolean(false));
+    let field = &fields.iter().find(|(f, _)| f.key == "font").unwrap().0;
+    assert!(field.font && field.visible && !field.enabled);
+    assert_eq!(params(&fields).unwrap()["font"], "Custom full family");
+    assert_eq!(craft_plugin::prepare_input(&schema, &params(&fields).unwrap()).unwrap(), params(&fields).unwrap());
+    set_input(&mut fields, "show", Input::Boolean(false));
+    assert!(!params(&fields).unwrap().as_object().unwrap().contains_key("font"));
+}
+
+/// Real plugin window meshes, rasterised using the same fixture as other dialog evidence.
+#[test]
+fn font_dialog_filters_picks_with_keyboard_and_click_and_renders() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let mut make = entry("make", "edit", json!([]));
+    make.input_schema = json!({"type":"object","required":["font"],"properties":{
+        "font":{"type":"string","title":"Font","x-solidcraft-font":true,"default":"Liberation Sans"}
+    }});
+    app.plugin_menu.listed = vec![listed("lettering", vec![make])];
+    app.plugin_menu.loaded = true;
+    open_entry(&mut app, 0, 0);
+    let ctx = crate::fonts::test_context();
+    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
+    let screen = std::cell::Cell::new(bounds);
+    let mut textures = Default::default();
+    let mut draw = |app: &mut SolveApp, events: Vec<egui::Event>, shot: Option<&str>| {
+        crate::scenario::clear_handles();
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen.get()), focused: true, events, ..Default::default() }, |ui| {
+            show(app, ui.ctx());
+        });
+        ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+        output.textures_delta.clear();
+        if let Some(name) = shot {
+            let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/plugin-font-field");
+            std::fs::create_dir_all(&dir).unwrap();
+            let image = ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures);
+            assert_eq!(image.dimensions(), (1280, 720));
+            image.save(dir.join(name)).unwrap();
+        }
+    };
+    for _ in 0..16 {
+        draw(&mut app, vec![], None);
+    }
+    assert!(app.plugin_menu.dialog().unwrap().ready(&app).is_ok());
+    draw(&mut app, vec![], Some("closed.png"));
+    let click = |at, pressed| {
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+        ]
+    };
+    let at = crate::scenario::handle_at("plugin_dialog:field:font").unwrap();
+    for pressed in [true, false] {
+        draw(&mut app, click(at, pressed), None);
+    }
+    for _ in 0..3 {
+        draw(&mut app, vec![], None);
+    }
+    draw(&mut app, vec![egui::Event::Text("lIbErAtIoN".into())], None);
+    // Capture the settled popup, after its native fade and any content sizing pass.
+    for _ in 0..16 {
+        draw(&mut app, vec![], None);
+    }
+    draw(&mut app, vec![], Some("filtered.png"));
+    assert!(crate::scenario::handle_at("plugin_dialog:font:font:Liberation Sans").is_some(), "partial, case-insensitive match");
+    let key = |key| vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }];
+    draw(&mut app, key(egui::Key::ArrowDown), None);
+    draw(&mut app, key(egui::Key::Enter), None);
+    draw(&mut app, vec![], None);
+    assert_eq!(app.plugin_menu.dialog().unwrap().ready(&app), Ok(json!({"font":"Liberation Sans"})));
+    assert_eq!(app.plugin_menu.dialogs.len(), 1, "Enter chooses the font without running or closing the dialog");
+    assert!(app.control_held.is_empty() && app.plugin_menu.dialog().unwrap().running.is_none());
+    app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap()[0].1 = Input::Text("Unknown family".into());
+    for pressed in [true, false] {
+        draw(&mut app, click(at, pressed), None);
+    }
+    for _ in 0..3 {
+        draw(&mut app, vec![], None);
+    }
+    let choice = crate::scenario::handle_at("plugin_dialog:font:font:Liberation Sans").unwrap();
+    for pressed in [true, false] {
+        draw(&mut app, click(choice, pressed), None);
+    }
+    assert_eq!(app.plugin_menu.dialog().unwrap().ready(&app), Ok(json!({"font":"Liberation Sans"})));
+    draw(&mut app, vec![], None);
+    for pressed in [true, false] {
+        draw(&mut app, click(at, pressed), None);
+    }
+    for _ in 0..3 {
+        draw(&mut app, vec![], None);
+    }
+    draw(&mut app, key(egui::Key::Escape), None);
+    draw(&mut app, vec![], None);
+    assert_eq!(app.plugin_menu.dialogs.len(), 1, "Escape closes the font list only");
+    draw(&mut app, key(egui::Key::Escape), None);
+    assert!(app.plugin_menu.dialogs.is_empty(), "the next Escape cancels the dialog");
+    let small = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
+    screen.set(small);
+    open_entry(&mut app, 0, 0);
+    for _ in 0..4 {
+        draw(&mut app, vec![], None);
+    }
+    assert!(small.contains_rect(crate::scenario::rect_of("dialog:control:Font *").unwrap()), "the font control fits a small window");
+}
+
+#[test]
 fn shared_field_definitions_are_drawn_like_inline_fields() {
     let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],
         "$defs":{"angle":{"type":"string","title":"Angle","enum":["14.5","20","25"],"default":"20"}},
@@ -562,6 +706,8 @@ fn described_field_labels_and_values_show_the_same_tooltip() {
         json!({"type":"boolean"}),
         json!({"type":"string","enum":["one","two"]}),
         json!({"type":"string"}),
+        json!({"type":"string","format":"directory"}),
+        json!({"type":"string","x-solidcraft-font":true,"default":"Liberation Sans"}),
         json!({"type":"array","x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
     ] {
         property["title"] = json!("Saw kerf");
@@ -2231,16 +2377,18 @@ fn ungranted_command_groups_keep_run_off_and_are_named() {
 /// A directory field gets Browse when the host has a folder picker, and no button otherwise.
 /// The picked folder is the value sent to the plugin. A plain string field stays a text box.
 /// Run refuses a folder outside the install grant, and the grant is unchanged. Paste still
-/// fills either field.
+/// fills either field. A font picker in the same dialog sends its full family name.
 #[test]
 fn a_directory_field_browses_a_folder_and_an_outside_folder_stays_ungranted() {
     let schema = json!({"type":"object","properties":{
         "folder":{"type":"string","title":"Folder","format":"directory"},
-        "note":{"type":"string","title":"Note"}
+        "note":{"type":"string","title":"Note"},
+        "typeface":{"type":"string","title":"Font","x-solidcraft-font":true,"default":"Liberation Sans"}
     }});
     let parsed = form(&schema).expect("drawn");
     assert!(matches!(parsed[0].0.kind, Kind::Text { directory: true, .. }), "format directory is remembered");
     assert!(matches!(parsed[1].0.kind, Kind::Text { directory: false, .. }));
+    assert!(parsed[2].0.font, "the font picker is drawn alongside the folder field");
 
     let mut h = crate::scenario::Harness::new();
     let granted = h.dir.join("granted");
@@ -2292,7 +2440,7 @@ fn a_directory_field_browses_a_folder_and_an_outside_folder_stays_ungranted() {
     assert_eq!(folder_text(&h), picked, "the picked folder is the field value");
     assert!(!h.widgets(&picked).is_empty(), "the text box shows the picked folder, so paste can replace it");
     let fields = h.app.plugin_menu.dialog().unwrap().fields.clone().unwrap();
-    assert_eq!(params(&fields), Ok(json!({"folder": picked})), "that path is the value sent to the plugin");
+    assert_eq!(params(&fields), Ok(json!({"folder": picked, "typeface": "Liberation Sans"})), "the folder path and full family name are sent");
     let err = run(&mut h.app).unwrap_err();
     assert!(err.contains("file path has no applicable folder grant"), "{err}");
     assert!(h.app.control_held.is_empty(), "Run does not go ahead with a folder outside the grant");
@@ -2304,7 +2452,7 @@ fn a_directory_field_browses_a_folder_and_an_outside_folder_stays_ungranted() {
         fields.iter_mut().find(|(field, _)| field.key == "folder").unwrap().1 = Input::Text(allowed.clone());
         fields.iter_mut().find(|(field, _)| field.key == "note").unwrap().1 = Input::Text("pasted".into());
     }
-    let sent = json!({"folder": allowed, "note": "pasted"});
+    let sent = json!({"folder": allowed, "note": "pasted", "typeface": "Liberation Sans"});
     assert_eq!(
         h.app.plugin_menu.dialog().unwrap().ready(&h.app).as_ref().unwrap(),
         &sent,

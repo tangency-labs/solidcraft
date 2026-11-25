@@ -351,6 +351,9 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         {
             crate::scenario::publish_target("prefs:navigator", all);
         }
+        if app.preferences.navigator_style == NavigatorStyle::Custom && app.view_gizmo.shape.is_none() {
+            ui_kit::text(ui, app.tr("view_gizmo.pick_body_hint"), ui_kit::Text::Note("navigator_body_hint"));
+        }
         setting::look_at_anim(app, ui);
         let width =
             ["ui.animation_speed", "prefs.home_fit_size"].into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr(id))).fold(0.0, f32::max);
