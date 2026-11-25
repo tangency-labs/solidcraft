@@ -1037,8 +1037,8 @@ fn a_refused_hole_names_the_value_at_fault() {
     // and the gap are each named when they are at fault.
     let e = refused(json!({"clearance": "M4", "head": "DIN 912"}));
     assert!(e.contains("no head standard `DIN 912`") && e.contains("ISO 4762") && e.contains("ISO 7380-1") && e.contains("ISO 10642"), "{e}");
-    let e = refused(json!({"clearance": "M2.5", "head": "ISO 7380-1"}));
-    assert!(e.contains("no ISO 7380-1 head for `M2.5`") && e.contains("M3 to M16"), "{e}");
+    let e = refused(json!({"clearance": "M14", "head": "ISO 7380-1"}));
+    assert!(e.contains("no ISO 7380-1 head for `M14`") && e.contains("M2 to M16"), "{e}");
     let e = refused(json!({"diameter": 4.5, "head": "ISO 4762"}));
     assert!(e.contains("`head` needs `clearance`"), "{e}");
     let e = refused(json!({"clearance": "M4", "head": "ISO 4762", "type": "countersink", "cs_diameter": 9}));
@@ -1046,8 +1046,8 @@ fn a_refused_hole_names_the_value_at_fault() {
     // A countersunk head sits in a countersink, and its table starts at M3 (#17728).
     let e = refused(json!({"clearance": "M6", "head": "ISO 10642", "type": "counterbore", "cb_diameter": 14, "cb_depth": 4}));
     assert!(e.contains("`head` needs `type: countersink`"), "{e}");
-    let e = refused(json!({"clearance": "M2", "head": "ISO 10642"}));
-    assert!(e.contains("no ISO 10642 head for `M2`") && e.contains("M3 to M20"), "{e}");
+    let e = refused(json!({"clearance": "M1.6", "head": "ISO 10642"}));
+    assert!(e.contains("no ISO 10642 head for `M1.6`") && e.contains("M2 to M20"), "{e}");
     let e = refused(json!({"clearance": "M4", "head": "ISO 4762", "head_gap": -1}));
     assert!(e.contains("`head_gap` must be 0 to 7 mm") && e.contains("not -1"), "{e}");
     let e = refused(json!({"clearance": "M4", "head": "ISO 4762", "head_gap": "width"}));

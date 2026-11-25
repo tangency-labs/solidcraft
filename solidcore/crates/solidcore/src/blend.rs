@@ -13,6 +13,7 @@ pub mod blend_setback;
 pub mod carried_face;
 pub mod chamfer_side;
 pub mod definition_check;
+pub mod exact_round;
 pub mod feature_executive;
 pub mod fillet_classification;
 pub mod fillet_cliff_overflow;

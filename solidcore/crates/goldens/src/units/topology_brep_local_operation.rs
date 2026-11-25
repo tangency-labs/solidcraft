@@ -240,6 +240,8 @@ fn edited(case: &Case) -> Result<Edited, HarnessError> {
             return Ok(Edited::Ended(o));
         }
     };
+    // (a probe's input, for the result's soundness: capture off, nothing)
+    crate::soundness::input(Some(&b));
     let mut run = || -> SolidResult<Option<Vec<f64>>> {
         let Some((faces, surfaces)) = planes(&k, &b, &i)? else {
             return Ok(None);
@@ -294,6 +296,20 @@ pub fn result_breps(case: &Case) -> Result<super::surface_surface_p2::Drawn, Har
     }
 }
 
+/// The case's input B-rep as [`Runner`] reads it, before the edit (tests only: the lines
+/// its `check_brep` level 2 reports are the input model's own).
+///
+/// # Errors
+///
+/// The case's inputs are bad, or its file is not read.
+#[cfg(test)]
+pub(crate) fn input_brep(case: &Case) -> Result<Brep, HarnessError> {
+    let i: Inputs = case.parse()?;
+    let mut k = crate::runner_kernel();
+    crate::own_reader::read_file_rebuild(&mut k, &path(&i)?, i.rebuild)?
+        .map_err(|e| herr(format!("rust read: {e}")))
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "topology.brep_local_operation"
@@ -308,6 +324,7 @@ impl UnitDiff for Runner {
             }
         };
         // (a probe's measure, before the export strips the body: capture off, none)
+        crate::dump::body(&k, "result", &b);
         crate::soundness::measure(&mut b);
         strip_unrecorded(&mut b).map_err(herr)?;
         normalize_face_shells(&mut b).map_err(herr)?;

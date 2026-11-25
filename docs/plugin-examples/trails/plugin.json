@@ -1,0 +1,17 @@
+{
+  "id": "trails",
+  "name": "Trails",
+  "version": "1.0.0",
+  "description": "A spot circles behind the model and leaves a trail that fades: a state example.",
+  "capabilities": ["shaders@0.2"],
+  "shaders": [
+    {
+      "id": "trails",
+      "name": "Trails",
+      "kind": "background",
+      "source": "trails.wgsl",
+      "animated": true,
+      "state": {"width": 64, "height": 64}
+    }
+  ]
+}

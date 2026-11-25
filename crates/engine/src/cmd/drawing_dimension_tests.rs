@@ -38,7 +38,16 @@ fn drawn_from_the_front(mut s: Session) -> (Session, u64) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), ..ViewOverrides::default() };
-    d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At([200.0, 150.0]), settings, reference_shown_percent: 0.0, label: None })]);
+    d.add_views([Arc::new(View {
+        id,
+        sheet,
+        kind,
+        place: ViewPlace::At([200.0, 150.0]),
+        settings,
+        reference_shown_percent: 0.0,
+        centre_marks: None,
+        label: None,
+    })]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
     (s, id)
@@ -1118,6 +1127,62 @@ fn two_flat_faces_read_the_distance_between_them() {
         assert!(e.contains(why), "{p}: {e}");
     }
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+}
+
+/// The front box with its four edges along Y (the corners the front view sees) rounded to R5, drawn:
+/// the session and the front view's id.
+fn rounded_front_view() -> (Session, u64) {
+    let (mut s, view) = front_view();
+    let drawing = s.drawing("test").unwrap().id;
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.fillet", json!({"edges": [[0, 20, 0], [80, 20, 0], [0, 20, 30], [80, 20, 30]], "radius": 5, "body": "Box"}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    (s, view)
+}
+
+/// An overall size reads a body's width or height in the view with its rounded corners included
+/// (#20123): the box with R5 corners is 80 wide and 30 high in the front view, where its top edge
+/// reads 70. It is saved as the dimension between the two bounding faces, by name, and a missing
+/// body or a view with no flat face square to the axis is refused with the drawing unchanged.
+#[test]
+fn an_overall_size_reads_the_width_of_a_plate_with_rounded_corners() {
+    let (mut s, view) = rounded_front_view();
+    let top = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
+    reads(&top, 70.0, "70.00");
+    let width = add(&mut s, view, json!({"overall": {"body": "Box"}}));
+    reads(&width, 80.0, "80.00");
+    assert_eq!((width["exact"].clone(), width["record"]["kind"]["faces"]["direction"].clone()), (json!(true), json!("aligned")), "{width}");
+    let height = add(&mut s, view, json!({"overall": {"body": "Box", "direction": "vertical"}}));
+    reads(&height, 30.0, "30.00");
+    // The same dimension as one picked between the side faces, so it is saved and repaired as that kind.
+    let picked = add(&mut s, view, json!({"faces": {"a": [0, 20, 15], "b": [80, 20, 15]}}));
+    assert_eq!(width["record"]["kind"], picked["record"]["kind"]);
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let v = ids::encode(view);
+    for (kind, why) in
+        [(json!({"overall": {"body": "Nope"}}), "no body `Nope`"), (json!({"overall": {"body": "Box", "direction": "diagonal"}}), "diagonal")]
+    {
+        let e = refused(&mut s, json!({"view": v, "kind": kind}));
+        assert!(e.contains(why), "{e}");
+    }
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+}
+
+/// A length whose edge stops short of its body, where a corner is rounded, says so and where the
+/// overall size is (#20123): the top edge of the rounded plate reads 70 of 80. The same edge of the
+/// plain box, and an edge the body reaches no farther than, say nothing.
+#[test]
+fn a_length_shorter_than_its_body_says_so() {
+    let (mut s, view) = rounded_front_view();
+    let top = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
+    let warned = top["warnings"].as_array().map(|w| w.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" ")).unwrap_or_default();
+    assert!(warned.contains("70.00") && warned.contains("80.00") && warned.contains("overall"), "{top}");
+    // Inspect says it again, as it is read now.
+    assert_eq!(run(&mut s, INSPECT, json!({"dimension": top["dimension"]}))["warnings"], top["warnings"]);
+    let (mut plain, view) = front_view();
+    let edge = add(&mut plain, view, json!({"length": {"edge": [40, 0, 30]}}));
+    reads(&edge, 80.0, "80.00");
+    assert!(edge.get("warnings").is_none_or(|w| w.as_array().is_some_and(Vec::is_empty)), "{edge}");
 }
 
 /// The material surface and the pocket floor already name real faces. Their depth can be placed

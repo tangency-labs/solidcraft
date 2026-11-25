@@ -18,7 +18,6 @@ use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use solidcore_ops::prism::tapered_flange_ends;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 use crate::expr::Kind;
@@ -35,12 +34,18 @@ pub mod sizes;
 pub const MAX_MEMBERS: usize = 1000;
 /// The largest profile dimension (mm).
 pub const MAX_PROFILE_SIZE: f64 = 10_000.0;
+
+/// Is `v` a finite length within [`MAX_PROFILE_SIZE`] either way: a coordinate of a member's
+/// `locate`, or an offset from its anchor, the engine takes.
+pub fn within_profile_size(v: f64) -> bool {
+    v.is_finite() && v.abs() <= MAX_PROFILE_SIZE
+}
 /// The smallest profile dimension (mm): walls and sides thinner than this are refused, and so
 /// are radii smaller than this but not 0.
 pub const MIN_PROFILE_DIMENSION: f64 = 0.01;
 /// How far from vertical (radians) a member's line may lean and still count as vertical for its
 /// orientation ([`member_axes`]).
-pub const VERTICAL_TOLERANCE: f64 = solidcore_ops::frame_member::VERTICAL_TOLERANCE;
+pub const VERTICAL_TOLERANCE: f64 = solidcraft_kernel::services::frame_member::VERTICAL_TOLERANCE;
 
 /// A built-in profile and its dimensions (mm). `Option` dimensions take a default worked out from
 /// the profile's size ([`Profile::filled`] says which).
@@ -350,8 +355,8 @@ impl crate::walk::Walk for ProfileSpec {
 
 pub use crate::eval::frame_member::{
     LaterPieces, SectionView, corner_at_point, corner_point, default_order, default_orders, group_member_names, is_crossing, is_member_line,
-    is_member_wire, member_line_ids, member_names, member_of_body, member_parts, member_segments, member_turns, members_cross, members_of_bodies,
-    overlap_parent, section_view,
+    is_member_wire, located_point, member_line_ids, member_names, member_of_body, member_parts, member_segments, member_turns, members_cross,
+    members_of_bodies, overlap_parent, section_view,
 };
 pub use crate::frame_corners::{CornerOverride, CornerType, MAX_GAP, MemberRef, checked_gap, read_coped};
 pub use crate::frame_plate::{PlateHoles, PlateMember, PlateShape, plate_member, plate_region};
@@ -504,6 +509,56 @@ pub enum Anchor {
     BottomLeft,
     Bottom,
     BottomRight,
+}
+
+/// The world direction a frame member's profile takes as up ([`member_axes`]): world +Z by default,
+/// or another world axis for a part drawn with that axis up (a part with Y up takes `Y`). Lines
+/// along it are the vertical members.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UpAxis {
+    #[serde(rename = "X")]
+    X,
+    #[serde(rename = "-X")]
+    NegX,
+    #[serde(rename = "Y")]
+    Y,
+    #[serde(rename = "-Y")]
+    NegY,
+    #[default]
+    #[serde(rename = "Z")]
+    Z,
+    #[serde(rename = "-Z")]
+    NegZ,
+}
+
+/// Every [`UpAxis`] as JSON spells it.
+pub const UP_AXES: [&str; 6] = ["X", "-X", "Y", "-Y", "Z", "-Z"];
+
+impl UpAxis {
+    pub fn is_z(&self) -> bool {
+        *self == UpAxis::Z
+    }
+
+    /// The up direction, a world unit vector.
+    pub fn up(self) -> Vec3 {
+        match self {
+            UpAxis::X => Vec3::X,
+            UpAxis::NegX => -Vec3::X,
+            UpAxis::Y => Vec3::Y,
+            UpAxis::NegY => -Vec3::Y,
+            UpAxis::Z => Vec3::Z,
+            UpAxis::NegZ => -Vec3::Z,
+        }
+    }
+
+    /// The world direction a vertical member's profile x takes: world +X, or world +Y when X is
+    /// up.
+    pub fn across(self) -> Vec3 {
+        match self {
+            UpAxis::X | UpAxis::NegX => Vec3::Y,
+            _ => Vec3::X,
+        }
+    }
 }
 
 impl Anchor {
@@ -991,13 +1046,22 @@ pub fn mirrored(region: &Region2) -> Region2 {
 }
 
 /// The directions a member's profile x and y take in the world, for a member running along `d`
-/// (any length): the profile's y points up (world +Z) as far as the line allows and x = y × d, so
-/// x × y runs along the line; a vertical member's x is world +X (a line leaning less than
-/// [`VERTICAL_TOLERANCE`] counts as vertical, so rounding never turns a post). `angle` (radians) then turns the
-/// profile counter-clockwise about the line, seen looking back from its end. `None` for a
-/// direction of no length.
-pub fn member_axes(d: Vec3, angle: f64) -> Option<(Vec3, Vec3)> {
-    solidcore_ops::frame_member::member_axes(d, angle).ok().flatten()
+/// (any length): the profile's y points up (`up`, world +Z by default) as far as the line allows
+/// and x = y × d, so x × y runs along the line; a vertical member's x is [`UpAxis::across`] (a
+/// line leaning less than [`VERTICAL_TOLERANCE`] from `up` counts as vertical, so rounding never
+/// turns a post). `angle` (radians) then turns the profile counter-clockwise about the line, seen
+/// looking back from its end. `None` for a direction of no length. The kernel's member axes take
+/// world +Z as up; another up axis turns the world so that it is +Z and `across` is +X, and back.
+pub fn member_axes(d: Vec3, angle: f64, up: UpAxis) -> Option<(Vec3, Vec3)> {
+    let axes = |d| solidcraft_kernel::services::frame_member::member_axes(d, angle).ok().flatten();
+    if up.is_z() {
+        return axes(d);
+    }
+    let (z, x) = (up.up(), up.across());
+    let y = z.cross(x);
+    let world = |v: Vec3| x * v.x + y * v.y + z * v.z;
+    let (ax, ay) = axes(Vec3::new(d.dot(x), d.dot(y), d.dot(z)))?;
+    Some((world(ax), world(ay)))
 }
 
 /// [`member_axes`] for a member running along `dir` with its `up` given (#4003 Auto's lined-up sections): the
@@ -1146,6 +1210,17 @@ pub fn check_group_options(kind: &crate::FeatureKind) -> crate::Result<()> {
         }
     }
     Ok(())
+}
+
+/// A tapered flange's thickness at its two ends: `(at the toe, at the root)`. The flange is
+/// `thickness` thick at the middle of its inside length `inside` (a channel's width less its web)
+/// and its inside face slopes by `slope` degrees across that length, so each end differs from the
+/// middle by half the length times the slope's tangent. No slope: `thickness` at both ends.
+/// Inputs are not checked: a caller refuses a slope or a length out of its range first; a
+/// non-finite input gives a non-finite answer, never a panic.
+fn tapered_flange_ends(inside: f64, thickness: f64, slope: f64) -> (f64, f64) {
+    let change = inside / 2.0 * slope.to_radians().tan();
+    (thickness - change, thickness + change)
 }
 
 /// Group placements as flat views of the same feature: same id, component, profile, pinned

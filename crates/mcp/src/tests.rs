@@ -882,6 +882,37 @@ fn measure_summary_keeps_only_the_check_fields() {
     assert_eq!(raw_tool(&mut s, "measure", json!({"summary": "yes"}))["error"]["code"], -32602);
 }
 
+#[test]
+fn measure_region_filters_bodies_and_totals_in_tools_and_batches() {
+    let mut s = server();
+    for (name, x) in [("Inside", 0), ("Touching", 10), ("Outside", 30)] {
+        tool(&mut s, "execute", json!({"command":"solid.box","params":{"length":10,"width":10,"height":10,"corner":[x,0,0],"body_name":name}}));
+    }
+    let within = json!({"min":[0,0,0],"max":[10,10,10]});
+    let full = tool(&mut s, "measure", json!({}));
+    assert_eq!(full["body_count"], 3);
+    let intersects = tool(&mut s, "measure", json!({"summary":true,"within":within}));
+    assert_eq!(intersects["body_count"], 2, "{intersects}");
+    assert!((intersects["total"]["volume_mm3"].as_f64().unwrap() - 2000.0).abs() < 1e-6);
+    let inside = tool(&mut s, "measure", json!({"summary":true,"within":within,"mode":"inside"}));
+    assert_eq!(inside["body_count"], 1, "{inside}");
+    assert_eq!(inside["bodies"][0]["name"], "Inside");
+    let batch = tool(&mut s, "batch", json!({"commands":[{"command":"measure","params":{"summary":true,"within":within,"mode":"inside"}}]}));
+    assert_eq!(batch["results"][0], inside, "{batch}");
+    let empty = tool(&mut s, "measure", json!({"within":within,"body":"Outside"}));
+    assert_eq!(empty["body_count"], 0, "{empty}");
+    assert_eq!(tool(&mut s, "measure", json!({})), full);
+    for args in [json!({"within":null}), json!({"within":within,"mode":null})] {
+        let direct = raw_tool(&mut s, "measure", args.clone());
+        assert_eq!(direct["result"]["isError"], true, "{direct}");
+        let reply = raw_tool(&mut s, "batch", json!({"commands":[{"command":"measure","params":args}]}));
+        assert_eq!(reply["result"]["isError"], true, "{reply}");
+        let batch: Value = serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(batch["completed"], 0, "{batch}");
+        assert!(batch["failed"].is_object(), "{batch}");
+    }
+}
+
 /// `open` hands `up` and `names` to the STEP import, and the tool's schema refuses other values.
 #[test]
 fn open_stands_a_y_up_step_file_up() {
@@ -3760,6 +3791,16 @@ fn batch_does_not_resend_after_a_transport_error() {
     assert!(body.as_str().is_some_and(|t| t.contains("may have run") && t.contains("timed out")), "{body}");
 }
 
+/// A batch the user declined ran nothing: it is not reported as one that may have run.
+#[test]
+fn batch_declined_by_the_user_says_it_did_not_run() {
+    let (b, body, is_error) =
+        recorded_batch(Err("not run: the user declined this call".into()), json!({"commands": [{"command": "a.one"}, {"command": "a.two"}]}));
+    assert_eq!(methods(&b), ["engine.batch"]);
+    assert!(is_error);
+    assert_eq!(body.as_str(), Some("not run: the user declined this call"), "{body}");
+}
+
 /// A batch longer than one control line goes step by step instead of being refused unrun.
 #[test]
 fn batch_too_large_for_one_control_line_goes_per_step() {
@@ -4773,6 +4814,64 @@ fn auto_session_bridges_to_a_late_app_only_while_empty() {
     let r = raw_tool(&mut s, "inspect_design", json!({}));
     assert!(text(&r).contains("headless session because the SolidCraft app was not found"), "{r}");
     assert!(!s.backend().has_ui());
+}
+
+/// Regression (#21377): starting a new headless design with `new_design` (`file.new`) clears
+/// `doc.features`, so a running desktop app appearing afterward must not hijack the session.
+#[test]
+fn auto_session_stays_headless_after_new_design() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use crate::backend::Backend;
+
+    let text = |r: &Value| r["result"]["content"].as_array().unwrap().iter().filter_map(|c| c["text"].as_str()).collect::<Vec<_>>().join("\n");
+
+    // 1) Headless work followed by `new_design` stays headless even after an app starts.
+    let port = Rc::new(Cell::new(None::<u16>));
+    let seen = port.clone();
+    let mut s = Server::new(Box::new(crate::Auto::new(Headless::default(), Box::new(move || seen.get()), None)));
+    let r = raw_tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+    assert_ne!(r["result"]["isError"], json!(true), "{r}");
+    let r = raw_tool(&mut s, "new_design", json!({"name": "PartB"}));
+    assert_ne!(r["result"]["isError"], json!(true), "{r}");
+    port.set(Some(1));
+    let r = raw_tool(&mut s, "inspect_design", json!({}));
+    assert!(!s.backend().has_ui());
+    assert!(text(&r).contains("headless session because the SolidCraft app was not found"), "{r}");
+
+    // 2) Calling `new_design` directly from a fresh headless session also commits the session to headless.
+    let port = Rc::new(Cell::new(None::<u16>));
+    let seen = port.clone();
+    let mut s = Server::new(Box::new(crate::Auto::new(Headless::default(), Box::new(move || seen.get()), None)));
+    let r = raw_tool(&mut s, "new_design", json!({}));
+    assert_ne!(r["result"]["isError"], json!(true), "{r}");
+    port.set(Some(1));
+    let r = raw_tool(&mut s, "inspect_design", json!({}));
+    assert!(!s.backend().has_ui());
+    assert!(text(&r).contains("headless session because the SolidCraft app was not found"), "{r}");
+
+    // 3) A failing `engine.script` that already ran `file.new` before a later step failed
+    // still commits the session to headless (its `file.new` effect was kept on the session).
+    let port = Rc::new(Cell::new(None::<u16>));
+    let seen = port.clone();
+    let mut auto = crate::Auto::new(Headless::default(), Box::new(move || seen.get()), None);
+    let err = auto.call("engine.script", json!({"commands": [{"command": "file.new", "params": {}}, {"command": "no.such.command", "params": {}}]}));
+    assert!(err.is_err(), "expected failing script step: {err:?}");
+    port.set(Some(1));
+    auto.call("engine.execute", json!({"command": "document.inspect", "params": {}})).unwrap();
+    assert!(!auto.has_ui());
+
+    // 4) A failing `engine.script` that fails *before* `file.new` runs leaves the session clean,
+    // so a desktop app appearing afterward can still take over.
+    let port = Rc::new(Cell::new(None::<u16>));
+    let seen = port.clone();
+    let mut auto = crate::Auto::new(Headless::default(), Box::new(move || seen.get()), None);
+    let err = auto.call("engine.script", json!({"commands": [{"command": "no.such.command", "params": {}}, {"command": "file.new", "params": {}}]}));
+    assert!(err.is_err(), "expected failing script step: {err:?}");
+    port.set(Some(1));
+    let _ = auto.supports_plugin_tools();
+    assert!(auto.has_ui());
 }
 
 #[test]
