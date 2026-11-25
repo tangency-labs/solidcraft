@@ -2,7 +2,8 @@
 use std::sync::Arc;
 
 use egui::Color32;
-use solidcraft_engine::panels::{ContrastFailure, ContrastOutcome, PanelSurface};
+use solidcraft_panel_layout::{ContrastFailure, ContrastOutcome, PanelSurface};
+use solidcraft_ui_kit as ui_kit;
 
 use solidcraft_theme::Tokens;
 
@@ -30,7 +31,7 @@ impl HostSurfaceStyle {
     /// retains the actual shared frame's effective theme/blur alpha.
     pub fn capture(ctx: &egui::Context, force_opaque: bool, requested_opacity: Option<f32>, previous: Option<&Self>) -> Self {
         let authored = Tokens::get();
-        let raw_fills = [crate::ui_kit::panel_host_frame(ctx, false).fill, crate::ui_kit::panel_host_frame(ctx, true).fill];
+        let raw_fills = [ui_kit::panel_host_frame(ctx, false).fill, ui_kit::panel_host_frame(ctx, true).fill];
         let requested_bits = requested_opacity.map(f32::to_bits);
         let dark = solidcraft_theme::is_dark();
         if let Some(previous) = previous.filter(|previous| {

@@ -184,7 +184,9 @@ pub(crate) fn is_model_axis(v: &Value) -> bool {
 
 /// An axis on an edge or round face of the model (`{edge: [x,y,z]}` or `{face: [x,y,z]}`, the
 /// point on it), with the line it gives now (`solidcraft_doc::construct::model_axis`); `None`
-/// for any other form of `axis`.
+/// for any other form of `axis`. The pick is named in the world, where the axis is found now and
+/// on each evaluation: on a moved component, another edge can pass through the picked point
+/// before the move (#20492).
 pub(super) fn model_axis_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<Option<(GeoRef, Vec3, Vec3)>> {
     let Some(v) = v.filter(|v| is_model_axis(v)) else { return Ok(None) };
     let state = s.world_state()?;
@@ -195,7 +197,7 @@ pub(super) fn model_axis_param(s: &Session, v: Option<&Value>, cmd: &str) -> Res
         let line = solidcraft_doc::construct::coil_model_axis(&state, &g);
         (placed_edge_of_pick(s, &state, g), line)
     } else {
-        let g = geo(s, Some(v), cmd, "axis")?;
+        let g = geo_in(s, Some(v), cmd, "axis", &state)?;
         let line = solidcraft_doc::construct::model_axis_in(Some(&s.doc), &state, &g, 0);
         (g, line)
     };
