@@ -1,5 +1,5 @@
 use super::*;
-use crate::{EPS, prelude::*};
+use solidcraft_geom::{EPS, prelude::*};
 
 #[test]
 fn diameter_twenty_and_paper_overshoot_at_both_scales() {
@@ -30,7 +30,7 @@ fn invalid_sizes_and_coordinates_are_refused() {
 
 #[test]
 fn geometry_is_valid_paper_scene_input_and_moves_with_its_centre() {
-    use crate::paper::{Group, Item, ObjectKind, Scene};
+    use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
 
     let first = strokes(Vec2::new(25.0, 50.0), 5.0, 2.0).unwrap();
     let moved = strokes(Vec2::new(35.0, 70.0), 5.0, 2.0).unwrap();
