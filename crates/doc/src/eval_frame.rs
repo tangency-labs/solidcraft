@@ -7,9 +7,9 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::f64::consts::{PI, TAU};
 
-use solidcore_ops::frame_member as stock;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::{Aabb2, Ring};
+use solidcraft_kernel::services::frame_member as stock;
 use solidcraft_kernel::{self as kernel, BoolOp};
 use solidcraft_sketch::{CurveKind, Sketch};
 
@@ -2897,8 +2897,8 @@ fn round_record(
     straight_frame: Option<(Plane, f64)>,
 ) -> Result<Option<crate::frame_cope::RoundMember>> {
     use crate::frame_cope::{Bounds, RoundMember, Terminal};
-    use solidcore_ops::frame_member::Segment;
-    use solidcore_ops::tube_cope;
+    use solidcraft_kernel::services::frame_member::Segment;
+    use solidcraft_kernel::services::tube_cope;
     let MemberProfile::Library { profile } = profile else { return Ok(None) };
     let frame::Profile::RoundTube { diameter, wall } = profile.resolve(|_, e, kind| val(vals, e, kind))? else { return Ok(None) };
     // An off-centre circular profile sweeps about a different centreline at a bend.

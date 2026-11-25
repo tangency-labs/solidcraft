@@ -3,8 +3,8 @@
 //! is the kernel's, through `solidcore_ops::tube_cope`. No display mesh is used.
 
 use serde::{Deserialize, Serialize};
-use solidcore_ops::tube_cope::{self as ops, Refusal, TemplateRefusal};
 use solidcore_record::{Vec2, Vec3};
+use solidcraft_kernel::services::tube_cope::{self as ops, Refusal, TemplateRefusal};
 
 use crate::{DocError, ModelBody, Result};
 

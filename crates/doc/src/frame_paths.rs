@@ -5,9 +5,9 @@ use solidcraft_geom::prelude::*;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashSet};
 
-use solidcore_ops::frame_member as stock;
 use solidcore_record::{Plane, Region2, Vec2, Vec3};
 use solidcraft_kernel as kernel;
+use solidcraft_kernel::services::frame_member as stock;
 use solidcraft_sketch::CurveKind;
 
 use super::{ModelBody, ModelState, SolvedSketch, new_name, path_in_frame, sketch_in_feature_frame};

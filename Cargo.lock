@@ -1390,6 +1390,7 @@ name = "craft-plugin"
 version = "0.48.0"
 dependencies = [
  "image",
+ "naga",
  "schemars",
  "serde",
  "serde_json",
@@ -6232,9 +6233,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "solidcore-ops",
  "solidcore-record",
- "solidcore-tess",
  "solidcraft-color",
  "solidcraft-derive",
  "solidcraft-develop",
