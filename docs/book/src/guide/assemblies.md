@@ -636,9 +636,9 @@ with its components.
   Rigid** removes the joints and shows the saved pose again. It does not need the file of the
   linked design.
 
-A new occurrence is rigid. It is flexible when you ask for that (`flexible: true`), or when
-the preference **A new occurrence of a linked design with joints is flexible** is on. A linked
-design without joints always gives rigid occurrences.
+A new occurrence is rigid. It is flexible when you ask for that: **Flexible** in Insert
+Design's options, or `flexible: true` on `component.insert_design`, `component.relink` or
+`component.link_mode`. A linked design without joints always gives rigid occurrences.
 
 The joints of a flexible occurrence:
 
