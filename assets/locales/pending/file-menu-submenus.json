@@ -16,5 +16,35 @@
     "prefs.file_menu_flat_help": "Aus: Das Datei-Menü fasst sie in den Untermenüs Einfügen und Exportieren zusammen.",
     "ui.file_menu.export": "Exportieren",
     "ui.file_menu.insert": "Einfügen"
+  },
+  "ar": {
+    "prefs.file_menu_flat": "إظهار كل إدخالات الإدراج والتصدير في أعلى قائمة ملف",
+    "prefs.file_menu_flat_help": "إيقاف: تجمعها قائمة ملف في قائمتين فرعيتين، إدراج وتصدير.",
+    "ui.file_menu.export": "تصدير",
+    "ui.file_menu.insert": "إدراج"
+  },
+  "he": {
+    "prefs.file_menu_flat": "הצג את כל פריטי ההוספה והייצוא בראש תפריט קובץ",
+    "prefs.file_menu_flat_help": "כבוי: תפריט קובץ מקבץ אותם בתת-תפריטים הוספה וייצוא.",
+    "ui.file_menu.export": "ייצוא",
+    "ui.file_menu.insert": "הוספה"
+  },
+  "ja": {
+    "prefs.file_menu_flat": "挿入とエクスポートの項目をすべてファイルメニューの先頭に表示する",
+    "prefs.file_menu_flat_help": "オフ: ファイルメニューでは、挿入とエクスポートのサブメニューにまとめます。",
+    "ui.file_menu.export": "エクスポート",
+    "ui.file_menu.insert": "挿入"
+  },
+  "vi": {
+    "prefs.file_menu_flat": "Hiện mọi mục Chèn và Xuất ở đầu menu Tệp",
+    "prefs.file_menu_flat_help": "Tắt: menu Tệp gom chúng vào hai menu con Chèn và Xuất.",
+    "ui.file_menu.export": "Xuất",
+    "ui.file_menu.insert": "Chèn"
+  },
+  "zh": {
+    "prefs.file_menu_flat": "在文件菜单顶部显示所有插入和导出项",
+    "prefs.file_menu_flat_help": "关闭：文件菜单将它们归入插入和导出两个子菜单。",
+    "ui.file_menu.export": "导出",
+    "ui.file_menu.insert": "插入"
   }
 }
