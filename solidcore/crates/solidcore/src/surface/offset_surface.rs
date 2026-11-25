@@ -3654,6 +3654,152 @@ mod tests {
         OffsetSurface::new(&k, d, plane(), true, crate::geom::extent2d::SS_NONE).unwrap()
     }
 
+    /// #13610's dome: a quadratic net whose first row is the point (0, 0, 1), offset by 0.2.
+    /// Indexed `[u][v]`; its pole is the u = 0 row.
+    const DOME_13610_ROWS: [[[f64; 3]; 4]; 4] = [
+        [
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0],
+            [-0.0, 0.0, 1.0],
+            [-0.0, 0.0, 1.0],
+        ],
+        [
+            [0.3333333333333333, 0.0, 0.8888888888888888],
+            [0.16666666666666669, 0.28867513459481287, 0.8888888888888888],
+            [
+                -0.16666666666666657,
+                0.28867513459481287,
+                0.8888888888888888,
+            ],
+            [
+                -0.3333333333333333,
+                4.082155997157844e-17,
+                0.8888888888888888,
+            ],
+        ],
+        [
+            [0.6666666666666666, 0.0, 0.5555555555555556],
+            [0.33333333333333337, 0.5773502691896257, 0.5555555555555556],
+            [-0.33333333333333315, 0.5773502691896257, 0.5555555555555556],
+            [
+                -0.6666666666666666,
+                8.164311994315688e-17,
+                0.5555555555555556,
+            ],
+        ],
+        [
+            [1.0, 0.0, 0.0],
+            [0.5000000000000001, 0.8660254037844386, 0.0],
+            [-0.4999999999999998, 0.8660254037844387, 0.0],
+            [-1.0, 1.2246467991473532e-16, 0.0],
+        ],
+    ];
+
+    fn dome_13610_with(rows: &[[[f64; 3]; 4]; 4], singularities: u32) -> OffsetSurface {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        let w = -f64::MAX;
+        let net = rows
+            .iter()
+            .map(|r| r.iter().map(|&[x, y, z]| CPoint::new(x, y, z, w)).collect())
+            .collect();
+        let knots = vec![0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0];
+        let nl = NlSurface::new(net, 2, 2, knots.clone(), knots).unwrap();
+        let base = Surface::from(BSplineSurface::from_nurb(nl, false));
+        OffsetSurface::new(&Kernel::default(), 0.2, base, true, singularities).unwrap()
+    }
+
+    /// The dome with its pole at u = 0 (`SS_UMIN`).
+    fn dome_13610() -> OffsetSurface {
+        dome_13610_with(&DOME_13610_ROWS, SS_UMIN)
+    }
+
+    /// The dome with its rows reversed: the pole at u = 1 (`SS_UMAX`).
+    fn dome_13610_reversed() -> OffsetSurface {
+        let mut rows = DOME_13610_ROWS;
+        rows.reverse();
+        dome_13610_with(&rows, SS_UMAX)
+    }
+
+    /// The dome transposed: the pole at v = 0 (`SS_VMIN`).
+    fn dome_13610_transposed() -> OffsetSurface {
+        let rows: [[[f64; 3]; 4]; 4] =
+            std::array::from_fn(|i| std::array::from_fn(|j| DOME_13610_ROWS[j][i]));
+        dome_13610_with(&rows, SS_VMIN)
+    }
+
+    /// At a point `uv` of a collapsed boundary, the simple and the exact evaluation give the
+    /// regular point, and their first-order outputs are those of the limit (the values at
+    /// `inside`, next to the boundary).
+    fn assert_collapsed_limit(off: &OffsetSurface, uv: Point2, inside: Point2) {
+        let k = &Kernel::default();
+        let p = off.evaluate_point(k, uv).unwrap();
+        let near = off
+            .evaluate_simple(k, inside, 1, 1, flags(false, false))
+            .unwrap();
+        for m in [
+            off.evaluate_simple(k, uv, 1, 1, flags(false, false))
+                .unwrap(),
+            off.evaluate(k, uv, 1, 1, flags(false, false)).unwrap(),
+        ] {
+            assert!(
+                (p - m[0][0]).length() < 1e-12,
+                "the point moved: {:?} vs {p:?}",
+                m[0][0]
+            );
+            for (i, j) in [(1, 0), (0, 1), (1, 1)] {
+                assert!(
+                    (m[i][j] - near[i][j]).length() < 1e-4,
+                    "({i},{j}) not the limit: {:?} vs {:?}",
+                    m[i][j],
+                    near[i][j]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn issue_13610_simple_offset_derivatives_at_a_collapsed_boundary_are_the_limits() {
+        let k = &Kernel::default();
+        let off = dome_13610();
+        let uv = Point2::new(0.0, 0.5);
+        for m in [
+            off.evaluate_simple(k, uv, 1, 1, flags(false, false))
+                .unwrap(),
+            off.evaluate(k, uv, 1, 1, flags(false, false)).unwrap(),
+        ] {
+            assert!(
+                (m[0][1].x + 0.248_868_406_735_302_2).abs() < 1e-9,
+                "(0,1).x = {}",
+                m[0][1].x
+            );
+            assert!(
+                (m[1][0].y - 1.279_844_877_855_972).abs() < 1e-9,
+                "(1,0).y = {}",
+                m[1][0].y
+            );
+            assert!(
+                (m[1][1].x + 3.100_179_375_173_321).abs() < 1e-8,
+                "(1,1).x = {}",
+                m[1][1].x
+            );
+        }
+        assert_collapsed_limit(&off, uv, Point2::new(1e-6, 0.5));
+    }
+
+    #[test]
+    fn issue_13610_limit_at_the_pole_on_the_upper_u_side() {
+        let off = dome_13610_reversed();
+        assert_collapsed_limit(&off, Point2::new(1.0, 0.5), Point2::new(1.0 - 1e-6, 0.5));
+    }
+
+    #[test]
+    fn issue_13610_limit_at_the_pole_on_the_lower_v_side() {
+        let off = dome_13610_transposed();
+        assert_collapsed_limit(&off, Point2::new(0.5, 0.0), Point2::new(0.5, 1e-6));
+    }
+
     #[test]
     fn plane_offset_point_and_derivatives() {
         let k = &Kernel::default();
