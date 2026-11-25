@@ -57,6 +57,28 @@ pub fn rotation(point: [f64; 3], axis: [f64; 3], angle: f64) -> Result<Matrix> {
     taken(Transform::rotation(vec3(point), vec3(axis), angle))
 }
 
+/// Whether a map is a rotation or reflection and a translation, with the caller's
+/// axis and homogeneous-entry tolerances. Non-finite maps or invalid tolerances are false.
+pub fn is_rigid(matrix: &Matrix, axis_tol: f64, affine_tol: f64) -> bool {
+    Transform { m: *matrix }.is_rigid(axis_tol, affine_tol)
+}
+
+/// The change between two source placements in a sketch's orthonormal plane frame.
+/// Returns none for an unchanged map, a singular source frame, a tilt or an in-plane
+/// reflection. A normal translation does not change the projected shape.
+pub fn projection_motion(
+    seen: &Matrix,
+    now: &Matrix,
+    origin: [f64; 3],
+    x: [f64; 3],
+    y: [f64; 3],
+) -> Option<([[f64; 2]; 2], [f64; 2])> {
+    let inverse = Transform { m: *seen }.inverse().ok()?;
+    let moved = inverse.concat(&Transform { m: *now });
+    let (a, b) = moved.plane_motion(vec3(origin), vec3(x), vec3(y), 1e-9, 1e-12)?;
+    Some((a, b.to_array()))
+}
+
 /// The orthonormal axes along `x` and in the plane of `x` and `y` (on `y`'s side),
 /// using the kernel's [`Transform::orthonormal_frame`]. If `y` is parallel to `x` or has
 /// no length, the kernel chooses a perpendicular direction. This restores a unit frame after
@@ -365,6 +387,38 @@ mod tests {
             axis_squared_axes([1.0, 0.0, 0.0], [1.0, 0.0, 0.0], 1e-12),
             None
         );
+    }
+
+    #[test]
+    fn projection_motion_undoes_seen_before_applying_now() {
+        let seen = translation([3.0, 4.0, 0.0]).unwrap();
+        let now = [
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [10.0, 20.0, 0.0, 1.0],
+        ];
+        let motion = |seen: &Matrix, now: &Matrix| {
+            projection_motion(seen, now, [0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+        };
+        let (a, b) = motion(&seen, &now).unwrap();
+        // Old point (3,4) is the source origin. It now projects to (10,20).
+        assert_eq!(a, [[0.0, -1.0], [1.0, 0.0]]);
+        assert_eq!(b, [14.0, 17.0]);
+        assert_eq!(
+            [
+                a[0][0] * 3.0 + a[0][1] * 4.0 + b[0],
+                a[1][0] * 3.0 + a[1][1] * 4.0 + b[1]
+            ],
+            [10.0, 20.0]
+        );
+        assert!(motion(&seen, &seen).is_none());
+        let mut singular = seen;
+        singular[0] = [0.0; 4];
+        assert!(motion(&singular, &now).is_none());
+        let mut hostile = now;
+        hostile[3][1] = f64::INFINITY;
+        assert!(motion(&seen, &hostile).is_none());
     }
 
     #[test]

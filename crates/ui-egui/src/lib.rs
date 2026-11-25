@@ -360,6 +360,7 @@ mod sketch_families;
 #[cfg(test)]
 mod sketch_guidance_ui_tests;
 pub(crate) mod sketch_line_arc;
+mod sketch_link_tree;
 pub mod sketch_modify_ui;
 #[cfg(test)]
 mod sketch_modify_ui_tests;
@@ -507,6 +508,9 @@ pub struct UiState {
     pub lasso_select: bool,
     /// What a click on the model picks (#4255, `select.mode`).
     pub pick_mode: solidcraft_engine::PickMode,
+    /// Project's session-only opt-in for projection actions and occurrence-aware picking.
+    /// Off keeps the existing menus and picking. Never exported in preferences.
+    pub project_link_tools: bool,
     /// 0: shaded with edges, 1: shaded, 2: wireframe, 3: shaded with hidden edges.
     pub visual_style: u8,
     /// A soft shadow on the ground under the model (seen from above).
@@ -545,6 +549,7 @@ impl Default for UiState {
             render_pick: "face".into(),
             lasso_select: false,
             pick_mode: Default::default(),
+            project_link_tools: false,
             visual_style: 0,
             ground_shadow: true,
             up_axis: Default::default(),
@@ -1737,6 +1742,7 @@ impl SolveApp {
         if matches!(id, "drawing.sketch.create" | "drawing.sketch.edit") {
             crate::sketch_view::prepare_sheet_start(self, id, &mut params)?;
         }
+        crate::sketch_tools::projection_policy(self, id, &mut params);
         crate::plugins::sync_policy(self);
         if plugins::busy(self) && matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
             return Err(plugins::busy_message(self));
