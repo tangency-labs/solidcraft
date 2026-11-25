@@ -1372,7 +1372,6 @@
     "sketch_finish.edit": "Muokkaa luonnosta",
     "sketch_finish.finished": "{name} valmis",
     "sketch_mode.announcement": "{view}, luonnostila",
-    "sketch_mode.editing": "Muokataan",
     "sketch_mode.model_card_unavailable": "Avaa mallinäkymä ennen luonnoksen aloittamista tässä",
     "sketch_mode.view_name": "{view} · {sketch}",
     "sketch_panel.edge_on_hint": "{planes} näkyvät tästä näkymästä sivuttain, joten niitä ei voi napsauttaa tässä. Valitse ne selaimen Origo-kansiosta tai valitse Palaa edelliseen näkymään kohdassa Asetukset > Luonnos > Kun luonnos päättyy.",
