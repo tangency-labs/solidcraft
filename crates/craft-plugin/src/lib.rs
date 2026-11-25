@@ -2,7 +2,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 use schemars::JsonSchema;
@@ -80,6 +80,7 @@ impl std::fmt::Display for DesignToken {
 pub mod conditions;
 pub mod dialog;
 mod input;
+mod schema_order;
 mod schema_refs;
 pub mod swatches;
 pub mod ui;
@@ -558,6 +559,11 @@ pub struct Entry {
     /// The entry's options, as an object schema. A format slot's options are drawn as a form
     /// before the import or export.
     pub input_schema: Value,
+    /// Property names in declaration order, keyed by the object schema's JSON Pointer (the
+    /// empty string for the root). Host metadata keeps that order across entry round trips;
+    /// ordinary JSON maps remain sorted. Missing keys use the dialog's usual field order.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub input_property_order: BTreeMap<String, Vec<String>>,
     /// Opt in to the read-only dialog-provider export (dialog@0.1).
     pub dialog_hook: bool,
     pub slots: Vec<UiSlot>,
@@ -604,8 +610,12 @@ struct DeclaredEntry {
     /// still opens a new design.
     #[serde(default)]
     effect: Option<Effect>,
-    #[serde(default = "empty_input_schema")]
-    input_schema: Value,
+    #[serde(default)]
+    #[schemars(with = "Value")]
+    input_schema: schema_order::InputSchema,
+    // Present in a host's serialized Entry; plugin authors only declare schema properties.
+    #[serde(default)]
+    input_property_order: Option<BTreeMap<String, Vec<String>>>,
     #[serde(default)]
     dialog_hook: bool,
     #[serde(default)]
@@ -624,6 +634,7 @@ impl From<EntryDeclaration> for Entry {
                 needs_plugin_data: false,
                 effect: Effect::Edit,
                 input_schema: empty_input_schema(),
+                input_property_order: BTreeMap::new(),
                 dialog_hook: false,
                 slots: Vec::new(),
                 job: false,
@@ -640,7 +651,8 @@ impl From<EntryDeclaration> for Entry {
                     (EntryKind::Exporter, None) => Effect::Read,
                     (EntryKind::Command, None) => Effect::Edit,
                 },
-                input_schema: value.input_schema,
+                input_schema: value.input_schema.value,
+                input_property_order: value.input_property_order.unwrap_or(value.input_schema.property_order),
                 dialog_hook: value.dialog_hook,
                 slots: value.slots,
                 job: value.job,
@@ -778,6 +790,11 @@ impl RuntimeManifest {
             let field = format!("runtime.entries.{}.input_schema", entry.name);
             if !entry.input_schema.is_object() || entry.input_schema.get("type").and_then(Value::as_str) != Some("object") {
                 return Err(invalid(&field, "entry inputs must be an object schema"));
+            }
+            if let Some(order) = entry.input_schema.get("x-solidcraft-field-order")
+                && order.as_str() != Some("declared")
+            {
+                return Err(invalid(format!("{field}.x-solidcraft-field-order"), "must be \"declared\" when present"));
             }
             validate_list_inputs(&entry.input_schema, &field)?;
             conditions::validate_conditions(&entry.input_schema)?;
@@ -1022,7 +1039,9 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         return Err(HostError::LimitExceeded { limit: "manifest size exceeds 64 KiB".into() });
     }
     // A plugin from before capabilities names its API in `runtime.api`: say so plainly.
-    let mut parsed = serde_json::from_slice::<Value>(text).ok();
+    // Read with each schema's declared property order stored beside it: expansion below works on
+    // a sorted JSON value, and a schema's order would be alphabetical by then.
+    let mut parsed = serde_json::from_slice::<schema_order::MarkedManifest>(text).ok().map(|marked| marked.0);
     if let Some(value) = &parsed {
         if let Some(api) = value.get("runtime").and_then(|runtime| runtime.get("api")) {
             let api = api.as_str().map(|api| api.chars().take(64).collect::<String>()).unwrap_or_else(|| "an older plugin API".into());
@@ -1046,7 +1065,10 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         _ => None,
     };
     let mut manifest: Manifest = match expanded {
-        Some(value) => serde_json::from_value(value),
+        Some(mut value) => {
+            schema_order::take_orders(&mut value);
+            serde_json::from_value(value)
+        }
         None => serde_json::from_slice(text),
     }
     .map_err(|error| invalid("manifest", error.to_string()))?;

@@ -1571,7 +1571,7 @@ struct PluginGroup {
 /// The tab's panels for one pass of the ribbon, as the component's data.
 struct RibbonPanels {
     panels: Vec<Panel>,
-    /// The Plugins group after the panels, when the tab has one and a plugin is on.
+    /// The Plugins group after the ordinary panels and before the exit panel, when present.
     plugins: Option<PluginGroup>,
     /// The last panel leaves the sketch or the edit.
     exit: bool,
@@ -1715,7 +1715,7 @@ impl RibbonPanels {
         reveal: Option<ribbon::Reveal<'a>>,
         more_tip: &'a str,
     ) -> ribbon::Row<'a> {
-        ribbon::Row {
+        let mut row = ribbon::Row {
             groups: self
                 .panels
                 .iter()
@@ -1797,17 +1797,40 @@ impl RibbonPanels {
             reveal,
             more_tip,
             handles: RIBBON_HANDLES,
+        };
+        if self.exit
+            && self.plugins.is_some()
+            && let Some(tail) = row.groups.get_mut(self.panels.len().saturating_sub(1)..)
+        {
+            // The component reserves the last group's room for leaving the edit.
+            tail.rotate_right(1);
         }
+        row
+    }
+
+    /// The Plugins group's place in the drawn row, before the exit when one is present.
+    fn plugin_group(&self) -> Option<usize> {
+        self.plugins.as_ref().map(|_| self.panels.len().saturating_sub(usize::from(self.exit)))
+    }
+
+    /// Map a drawn group back to the built-in panel list, which does not contain Plugins.
+    fn panel_index(&self, group: usize) -> Option<usize> {
+        let index = match self.plugin_group() {
+            Some(plugin) if group == plugin => return None,
+            Some(plugin) if group > plugin => group.checked_sub(1)?,
+            _ => group,
+        };
+        self.panels.get(index).map(|_| index)
     }
 
     /// The id of panel `group`'s drop-down.
     fn popup_id(&self, group: usize) -> Option<egui::Id> {
-        self.panels.get(group).map(|p| p.popup_id)
+        self.panels.get(self.panel_index(group)?).map(|p| p.popup_id)
     }
 
     /// The plugin command button the component drew as `drawn`, when it is one.
     fn plugin_button(&self, drawn: &ribbon::Drawn) -> Option<&crate::plugin_menu::RibbonButton> {
-        if drawn.group != self.panels.len() || drawn.cell {
+        if Some(drawn.group) != self.plugin_group() || drawn.cell {
             return None;
         }
         self.plugins.as_ref()?.buttons.get(drawn.index)
@@ -1815,7 +1838,7 @@ impl RibbonPanels {
 
     /// The panel button the component drew as `drawn`.
     fn panel_button(&self, drawn: &ribbon::Drawn) -> Option<&PanelButton> {
-        let panel = self.panels.get(drawn.group)?;
+        let panel = self.panels.get(self.panel_index(drawn.group)?)?;
         if drawn.cell { panel.gallery.get(drawn.index) } else { panel.large.get(drawn.index) }
     }
 }
@@ -2002,7 +2025,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         }
         let mut out = {
             let mut more_rows = |ui: &mut egui::Ui, group: usize| {
-                let Some((panel, cmds, shown)) = lists.get(group) else { return false };
+                let Some((panel, cmds, shown)) = panels.panel_index(group).and_then(|i| lists.get(i)) else { return false };
                 if tab == "SKETCH" && *panel == "CREATE" {
                     let cmds = menu_commands(cmds, shown);
                     sketch_create_menu(app, ui, &cmds, dropdown_width(app, ui, &cmds), &mut menu, &mut toggle);
@@ -2066,7 +2089,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         }
         // What was chosen on the row, in order.
         let mut opened = Vec::new();
-        let plugin_group = panels.plugins.as_ref().map(|_| panels.panels.len());
+        let plugin_group = panels.plugin_group();
         for action in std::mem::take(&mut out.actions) {
             if let ribbon::Action::Section { group } | ribbon::Action::Open { group } = action
                 && Some(group) == plugin_group
@@ -2132,7 +2155,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     if id.starts_with(crate::plugin_menu::RIBBON_PREFIX) {
                         continue;
                     }
-                    if let Some((panel, _, _)) = lists.get(group) {
+                    if let Some((panel, _, _)) = panels.panel_index(group).and_then(|i| lists.get(i)) {
                         drop = Some((id, *panel, before));
                     }
                 }
@@ -2155,7 +2178,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 }
                 continue;
             }
-            let (Some((panel, cmds, shown)), Some(data)) = (lists.get(g.group), panels.panels.get(g.group)) else { continue };
+            let Some(index) = panels.panel_index(g.group) else { continue };
+            let (Some((panel, cmds, shown)), Some(data)) = (lists.get(index), panels.panels.get(index)) else { continue };
             let panel: &&str = panel;
             let sketch_create = tab == "SKETCH" && *panel == "CREATE";
             let popup_id = data.popup_id;

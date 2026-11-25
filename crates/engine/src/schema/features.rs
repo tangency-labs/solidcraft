@@ -1061,7 +1061,7 @@ fn alignment_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<sol
     serde_json::from_value(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole(format!("`{key}` must be left, center or right"))))
 }
 
-/// A pattern's flip under `key`, as `cmd::reversed_param` reads it, with its message. `null` is
+/// A reversal flag under `key`, as `cmd::reversed_param` reads it, with its message. `null` is
 /// refused, as the reader refuses it.
 fn reversed_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<bool>, D::Error> {
     serde_json::from_value(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole(format!("`{key}` must be true or false"))))
@@ -1076,7 +1076,7 @@ fn pattern_alignment2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<solidcra
     alignment_at(d, "alignment2")
 }
 
-fn pattern_reversed<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+pub(super) fn reversed_flag<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
     reversed_at(d, "reversed")
 }
 
@@ -1111,7 +1111,7 @@ pub struct PatternCircularParams {
     #[schemars(schema_with = "super::sketch_modify::alignment_schema")]
     pub alignment: Option<solidcraft_sketch::PatternAlignment>,
     /// Flip the pattern's direction; for an even count centred, selects the extra side.
-    #[serde(default, deserialize_with = "pattern_reversed", skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "reversed_flag", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub reversed: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
@@ -1305,7 +1305,7 @@ pub struct PatternRectangularParams {
     #[schemars(schema_with = "super::sketch_modify::alignment_schema")]
     pub alignment2: Option<solidcraft_sketch::PatternAlignment>,
     /// Flip the first direction; for an even count centred, selects the extra side.
-    #[serde(default, deserialize_with = "pattern_reversed", skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "reversed_flag", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub reversed: Option<bool>,
     /// Flip the second direction.
