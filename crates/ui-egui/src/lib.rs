@@ -3130,6 +3130,7 @@ impl SolveApp {
         }
         if let Some(mut t) = tools::Tool::for_command(id) {
             t.classic = self.preferences.construction_line_classic;
+            t.arc_modes = self.preferences.sketch_arc_tangent_snap;
             if t.classic && solidcraft_engine::cmd::construction_line_mode(id).is_some() {
                 // The classic switch starts at Construction, whatever the palette chose last.
                 t.line_type = 3;
