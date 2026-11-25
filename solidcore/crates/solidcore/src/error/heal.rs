@@ -295,6 +295,33 @@ mod tests {
         assert_eq!(missing.heal_failure(), Some(&defect));
     }
 
+    /// No healing message names an SMLib API: outside comments, no line of the healing
+    /// sources (`src/heal.rs` and everything under `src/heal/`) says `SmApi`.
+    #[test]
+    fn no_heal_message_names_an_upstream_api() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = vec![src.join("heal.rs")];
+        let mut dirs = vec![src.join("heal")];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).expect("read dir") {
+                let path = entry.expect("dir entry").path();
+                if path.is_dir() {
+                    dirs.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    files.push(path);
+                }
+            }
+        }
+        assert!(files.len() >= 7, "{files:?}");
+        for path in files {
+            let text = std::fs::read_to_string(&path).expect("read");
+            for (i, line) in text.lines().enumerate() {
+                let code = line.split("//").next().unwrap_or("");
+                assert!(!code.contains("SmApi"), "{}:{}", path.display(), i + 1);
+            }
+        }
+    }
+
     /// The named causes of the stitcher and the healer have their status and class.
     #[test]
     fn the_heal_causes_keep_their_status_and_have_their_class() {
