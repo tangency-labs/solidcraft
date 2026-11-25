@@ -85,8 +85,10 @@ mod schema_order;
 mod schema_refs;
 pub mod swatches;
 pub mod ui;
+pub use input::FONT_KEY;
 pub use input::check_input;
 pub use input::check_input_field;
+pub use input::font_field;
 pub use input::prepare_input;
 pub use input::strict_input_schema;
 
@@ -842,6 +844,9 @@ pub struct RuntimeManifest {
     /// A single file name within the package, never a directory or absolute path.
     pub module: String,
     pub entries: Vec<Entry>,
+    /// Explicit ribbon menus. Entries not named here keep their individual buttons.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ribbon_groups: Vec<RibbonGroup>,
     /// Opt-in notifications, under capability `design@0.1`. Missing for existing packages.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub listeners: Vec<Listener>,
@@ -861,6 +866,23 @@ pub struct RuntimeManifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ui: Option<ui::Declarations>,
 }
+
+/// A plugin's opt-in ribbon button and the entries its menu lists, in order.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RibbonGroup {
+    pub label: String,
+    /// A package-relative SVG path, checked and loaded by the host like an entry icon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    pub entries: Vec<String>,
+}
+
+/// The package-relative SVG paths a host may read for plugin icons.
+pub fn valid_icon_path(path: &str) -> bool {
+    images::valid_path(path)
+}
+
 impl RuntimeManifest {
     /// Whether this runtime is an importer (world `importer-plugin`, optionally with storage).
     /// A runtime's entries are all commands, all importers or all exporters.
@@ -927,6 +949,7 @@ impl RuntimeManifest {
                 return Err(invalid("runtime.entries.slots", "requires at most 16 named menu or ribbon slots"));
             }
         }
+        self.validate_ribbon_groups()?;
         if self.listeners.len() > 16 {
             return Err(invalid("runtime.listeners", "at most 16 distinct listeners"));
         }
@@ -979,6 +1002,41 @@ impl RuntimeManifest {
             }
             if self.limits.deadline_ms > MAX_COMMAND_DEADLINE_MS {
                 return Err(invalid("runtime.limits.deadline_ms", "must be 1..30000"));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_ribbon_groups(&self) -> Result<()> {
+        if self.ribbon_groups.len() > 32 {
+            return Err(invalid("runtime.ribbon_groups", "requires at most 32 ribbon groups"));
+        }
+        let mut labels = BTreeSet::new();
+        let mut grouped = BTreeSet::new();
+        for (index, group) in self.ribbon_groups.iter().enumerate() {
+            let field = format!("runtime.ribbon_groups.{index}");
+            if !plain(&group.label, 80) {
+                return Err(invalid(format!("{field}.label"), "requires 1..80 printable characters"));
+            }
+            if !labels.insert(group.label.trim()) {
+                return Err(invalid(format!("{field}.label"), format!("ribbon group `{}` is listed twice", group.label.trim())));
+            }
+            if group.icon.as_deref().is_some_and(|icon| !valid_icon_path(icon)) {
+                return Err(invalid(format!("{field}.icon"), "must be a relative .svg path inside the package, at most 128 characters"));
+            }
+            if group.entries.is_empty() || group.entries.len() > 32 {
+                return Err(invalid(format!("{field}.entries"), "requires 1..32 distinct entry names"));
+            }
+            for name in &group.entries {
+                if !self.entries.iter().any(|entry| entry.name == *name) {
+                    return Err(invalid(format!("{field}.entries"), format!("unknown entry `{name}`; name an entry from runtime.entries")));
+                }
+                if !grouped.insert(name) {
+                    return Err(invalid(
+                        format!("{field}.entries"),
+                        format!("entry `{name}` is listed twice; an entry belongs to at most one ribbon group"),
+                    ));
+                }
             }
         }
         Ok(())
@@ -1203,6 +1261,7 @@ fn validate_list_inputs(schema: &Value, field: &str) -> Result<()> {
             {
                 return Err(invalid(&field, "selection and target inputs must be lists"));
             }
+            font_field(property).map_err(|_| invalid(format!("{field}.{FONT_KEY}"), "must be true on a string property"))?;
             validate_list_inputs(property, &field)?;
         }
     }

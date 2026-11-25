@@ -1072,6 +1072,24 @@ impl SpaceMouseGhost {
     pub const ALL: [Self; 3] = [Self::LeftViewport, Self::RightViewport, Self::LeftWindow];
 }
 
+/// What the 3D mouse's cap moves (Preferences: "Motion model").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpaceMouseMotion {
+    /// The cap holds the model: push it right and the model goes right, tilt it and the model
+    /// tilts the same way. How the 3D mouse has always moved the view.
+    #[default]
+    Object,
+    /// The cap holds the camera, which looks at the point the view turns around: push it right and
+    /// the camera goes right, so the model goes left; tilt it forward and the camera rises over the
+    /// model. Every axis moves the other way from `Object`.
+    TargetCamera,
+}
+
+impl SpaceMouseMotion {
+    pub const ALL: [Self; 2] = [Self::Object, Self::TargetCamera];
+}
+
 impl SpaceMouseDriver {
     pub const ALL: [Self; 3] = [Self::Automatic, Self::Spacenavd, Self::Direct];
 
@@ -1341,6 +1359,45 @@ impl MiddleDoubleClick {
     }
 }
 
+/// The key that turns a mouse orbit drag into the other orbit style (`free_orbit_key`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FreeOrbitKey {
+    Off,
+    Alt,
+    Ctrl,
+}
+
+impl FreeOrbitKey {
+    pub const ALL: &[(FreeOrbitKey, &str)] = &[(FreeOrbitKey::Off, "none"), (FreeOrbitKey::Alt, "alt"), (FreeOrbitKey::Ctrl, "ctrl")];
+
+    /// The preference's setting (no key for an unknown one).
+    pub fn of(app: &SolveApp) -> FreeOrbitKey {
+        Self::parse(&app.preferences.free_orbit_key).unwrap_or(FreeOrbitKey::Off)
+    }
+
+    pub fn parse(id: &str) -> Option<FreeOrbitKey> {
+        Self::ALL.iter().find(|(_, i)| *i == id).map(|(k, _)| *k)
+    }
+
+    /// Whether this key is down in `mods` (Ctrl is Cmd on macOS). No key is never held.
+    pub fn held(self, mods: Modifiers) -> bool {
+        match self {
+            FreeOrbitKey::Off => false,
+            FreeOrbitKey::Alt => mods.alt,
+            FreeOrbitKey::Ctrl => mods.ctrl || mods.command,
+        }
+    }
+
+    /// `mods` with this key let go.
+    pub fn released(self, mods: Modifiers) -> Modifiers {
+        match self {
+            FreeOrbitKey::Off => mods,
+            FreeOrbitKey::Alt => Modifiers { alt: false, ..mods },
+            FreeOrbitKey::Ctrl => Modifiers { ctrl: false, command: false, ..mods },
+        }
+    }
+}
+
 impl Prefs {
     /// Explicit files, samples and control clients keep their existing launch behavior.
     pub fn home_on_launch(&self, has_file: bool, sample: bool, controlled: bool) -> bool {
@@ -1576,9 +1633,11 @@ impl Snapshot {
         let update = std::mem::take(&mut app.preferences.update);
         let stand_up_answers = std::mem::take(&mut app.preferences.stand_up_answers);
         let plugin_grants = std::mem::take(&mut app.preferences.plugin_grants);
+        let plugin_importer_options = std::mem::take(&mut app.preferences.plugin_importer_options);
         let view_window_setups = std::mem::take(&mut app.preferences.view_window_setups);
         app.preferences = self.prefs;
         app.preferences.plugin_grants = plugin_grants;
+        app.preferences.plugin_importer_options = plugin_importer_options;
         app.preferences.view_window_setups = view_window_setups;
         app.plugin_themes.signature = None;
         crate::plugins::sync_policy(app);
@@ -1648,6 +1707,7 @@ impl Snapshot {
             held.update.clone_from(&app.preferences.update);
             held.stand_up_answers.clone_from(&app.preferences.stand_up_answers);
             held.plugin_grants.clone_from(&app.preferences.plugin_grants);
+            held.plugin_importer_options.clone_from(&app.preferences.plugin_importer_options);
             held.view_window_setups.clone_from(&app.preferences.view_window_setups);
             held == app.preferences
         };
@@ -1685,6 +1745,7 @@ pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, ser
     prefs.update.clone_from(&app.preferences.update);
     prefs.stand_up_answers.clone_from(&app.preferences.stand_up_answers);
     prefs.plugin_grants.clone_from(&app.preferences.plugin_grants);
+    prefs.plugin_importer_options.clone_from(&app.preferences.plugin_importer_options);
     prefs.view_window_setups.clone_from(&app.preferences.view_window_setups);
     let mut shortcut_box = app.sbox.prefs();
     if let Some(o) = shortcut_box.as_object_mut() {
@@ -2838,6 +2899,7 @@ pub fn restore_space_mouse_defaults(app: &mut SolveApp) {
     p.space_mouse_ghost_position = d.space_mouse_ghost_position;
     p.space_mouse_in_view = d.space_mouse_in_view;
     p.space_mouse_model_pivot = d.space_mouse_model_pivot;
+    p.space_mouse_motion = d.space_mouse_motion;
     p.space_mouse_sketch_orbit = d.space_mouse_sketch_orbit;
 }
 
@@ -3251,8 +3313,8 @@ fn button_jobs_that_read<'de, D: serde::Deserializer<'de>>(
         .collect())
 }
 
-/// Every theme the Theme list offers, as (id, name): the modes, the built-in theme files, then
-/// the imported ones.
+/// Every theme the Theme list offers, as (id, name): Light and Dark first, then the built-in
+/// and imported theme files together by name, ignoring case (#8637).
 fn theme_choices(app: &SolveApp) -> Vec<(String, String)> {
     let modes =
         THEMES.iter().filter(|(id, _)| *id != "system").map(|(id, label)| ((*id).to_string(), solidcraft_ui_text::tr_label(label).to_string()));
@@ -3261,10 +3323,14 @@ fn theme_choices(app: &SolveApp) -> Vec<(String, String)> {
     let custom = app.preferences.custom_themes.iter().map(|t| (t.id.clone(), t.name.clone()));
     let plugins = crate::theme_files::plugin_theme_choices().into_iter();
     let mut choices: Vec<_> = modes.chain(builtins).chain(custom).chain(plugins).collect();
-    choices.sort_by_key(|(id, _)| match id.as_str() {
-        "light" => 0,
-        "dark" => 1,
-        _ => 2,
+    choices.sort_by_cached_key(|(id, name)| {
+        let rank = match id.as_str() {
+            "light" => 0,
+            "dark" => 1,
+            _ => 2,
+        };
+        let name = if rank < 2 { String::new() } else { name.to_lowercase() };
+        (rank, name, id.clone())
     });
     choices
 }
@@ -3892,6 +3958,11 @@ fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
     if !accepted::max_sketch_points(&p) {
         p.max_sketch_points = Prefs::default().max_sketch_points;
     }
+    p.plugin_importer_options.retain(|id, entries| {
+        entries.retain(|name, memory| crate::plugin_menu::valid_saved_options(name, &memory.values));
+        crate::plugins::valid_id(id) && entries.len() <= crate::plugins::MAX_DISABLED
+    });
+    p.plugin_importer_options = p.plugin_importer_options.into_iter().take(crate::plugins::MAX_DISABLED).collect();
     p.plugin_grants.retain(|id, grants| crate::plugins::valid_id(id) && crate::plugins::valid_grants(grants));
     p.plugin_grants = p.plugin_grants.into_iter().take(crate::plugins::MAX_DISABLED).collect();
     for grants in p.plugin_grants.values_mut() {
@@ -4140,6 +4211,15 @@ fn prepare_preferences(
     if new.ui_font != app.preferences.ui_font && !new.ui_font.trim().is_empty() && crate::fonts::ui_font(&new.ui_font).is_none() {
         return Err(format!("`ui_font`: `{}` is not an installed font family or a readable font file", new.ui_font.trim()));
     }
+    if new.plugin_importer_options.len() > crate::plugins::MAX_DISABLED
+        || new.plugin_importer_options.iter().any(|(id, entries)| {
+            !crate::plugins::valid_id(id)
+                || entries.len() > crate::plugins::MAX_DISABLED
+                || entries.iter().any(|(name, memory)| !crate::plugin_menu::valid_saved_options(name, &memory.values))
+        })
+    {
+        return Err("`plugin_importer_options` needs bounded plugin ids, entry names and option objects".into());
+    }
     if new.plugin_grants.len() > crate::plugins::MAX_DISABLED
         || new.plugin_grants.iter().any(|(id, grants)| !crate::plugins::valid_id(id) || !crate::plugins::valid_grants(grants))
     {
@@ -4239,6 +4319,9 @@ fn prepare_preferences(
     }
     if !SUPERSAMPLING.contains(&new.supersampling) {
         return Err("`supersampling` must be 1 (off), 1.5 or 2".into());
+    }
+    if FreeOrbitKey::parse(&new.free_orbit_key).is_none() {
+        return Err("`free_orbit_key` must be none, alt or ctrl".into());
     }
     if MiddleDoubleClick::parse(&new.middle_double_click).is_none() {
         return Err("`middle_double_click` must be home, fit or off".into());
@@ -4532,6 +4615,27 @@ mod tests {
         assert!(state.night && state.tone == Some(true));
         state.aim(false);
         assert!(!state.night && state.tone == Some(false));
+    }
+
+    /// #8637: Light and Dark stay first; the theme files follow by name, ignoring case, built in
+    /// and imported together, whatever the built-in `order` says.
+    #[test]
+    fn theme_choices_keep_the_modes_first_and_sort_the_files_by_name() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        for name in ["Zz last", "aardvark"] {
+            let file = crate::theme_files::from_value(&json!({"format":"solidcraft-theme/1", "name":name, "base":"dark"})).unwrap();
+            crate::theme_files::add(&mut app.preferences.custom_themes, file).unwrap();
+        }
+        let choices = theme_choices(&app);
+        let ids: Vec<&str> = choices.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids[..2], ["light", "dark"], "{ids:?}");
+        let names: Vec<String> = choices[2..].iter().map(|(_, name)| name.to_lowercase()).collect();
+        assert!(names.windows(2).all(|w| w[0] <= w[1]), "{names:?}");
+        // Built-in names starting with a digit (1-bit) come before it.
+        let first_letter = names.iter().find(|n| n.starts_with(|c: char| c.is_alphabetic()));
+        assert_eq!(first_letter.map(String::as_str), Some("aardvark"), "imported files sort with the built-in ones");
+        assert_eq!(names.last().map(String::as_str), Some("zz last"));
+        assert_eq!(choices.len(), crate::theme_files::builtin().len() + 4);
     }
 
     #[test]
@@ -5696,6 +5800,7 @@ mod tests {
         p.space_mouse_ghost_position = SpaceMouseGhost::LeftWindow;
         p.space_mouse_in_view = true;
         p.space_mouse_model_pivot = true;
+        p.space_mouse_motion = SpaceMouseMotion::TargetCamera;
         p.space_mouse_sketch_orbit = true;
         let before = h.app.preferences.clone();
         let camera = h.app.cam;
@@ -5709,6 +5814,7 @@ mod tests {
         assert_eq!((p.space_mouse_axis_speed, p.space_mouse_axis_source), (d.space_mouse_axis_speed, d.space_mouse_axis_source));
         assert_eq!((p.space_mouse_ghost_position, p.space_mouse_in_view), (d.space_mouse_ghost_position, d.space_mouse_in_view));
         assert_eq!((p.space_mouse_model_pivot, p.space_mouse_sketch_orbit), (d.space_mouse_model_pivot, d.space_mouse_sketch_orbit));
+        assert_eq!(p.space_mouse_motion, d.space_mouse_motion);
         // Kept: the calibration (dead zone too), the buttons, the offered set, never, enabled, the rest of the page.
         assert_eq!(p.space_mouse_calibrations, before.space_mouse_calibrations);
         assert_eq!(p.space_mouse_buttons, before.space_mouse_buttons);
@@ -5718,6 +5824,20 @@ mod tests {
         assert_eq!(h.app.cam, camera);
         // And it asks first: the real button only arms it (see cancelling_the_restore_question_changes_nothing).
         assert!(!h.app.space_mouse.restore_pending);
+    }
+
+    /// The 3D mouse's motion model is a choice of two: Object (the default, as before) moves the
+    /// model the way the cap goes, Target camera moves the camera that way.
+    #[test]
+    fn the_3d_mouse_motion_model_is_object_or_target_camera() {
+        let mut h = changed_3d_mouse_settings(None);
+        assert_eq!(h.app.preferences.space_mouse_motion, SpaceMouseMotion::Object, "object is the default");
+        scroll_to_and_click(&mut h, "prefs:3d_mouse_motion_model_target_camera");
+        assert_eq!(h.app.preferences.space_mouse_motion, SpaceMouseMotion::TargetCamera, "target camera is opt-in");
+        scroll_to_and_click(&mut h, "prefs:3d_mouse_motion_model_object");
+        assert_eq!(h.app.preferences.space_mouse_motion, SpaceMouseMotion::Object, "object again");
+        let saved = serde_json::to_value(Prefs { space_mouse_motion: SpaceMouseMotion::TargetCamera, ..Default::default() }).unwrap_or_default();
+        assert_eq!(saved["space_mouse_motion"], "target_camera", "saved by a stable name");
     }
 
     /// The 3D mouse's orbit is a choice of two: Classic turns around the view's centre, Traced
@@ -10847,6 +10967,59 @@ mod tests {
         h.call("ui.click", json!({"x":axis.x,"y":axis.y}));
         assert!(h.app.cam.back().dist(Vec3::Y) < 1e-6, "original axes retain click-again reversal");
         assert_eq!(h.app.session.doc.to_json(), design);
+    }
+
+    #[test]
+    fn custom_navigator_explains_the_missing_body_and_hides_the_hint_once_assigned() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        h.app.run("solid.box", json!({"length": 30, "width": 20, "height": 10})).unwrap();
+        h.app.session.mark_saved();
+        let design = h.app.session.doc.to_json();
+        let revision = h.app.session.revision;
+        let history = h.app.session.undo.len();
+        let camera = h.app.cam;
+        let nav = h.app.preferences.nav.clone();
+        let hint = "Close Preferences, right-click the navigator and choose Custom. Pick a body in the view to use it as the navigator.";
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
+        h.call("ui.prefs", json!({"open": "Navigation"}));
+        super::reveal_preference(&mut h, "prefs:navigator");
+        assert!(h.widget(hint).is_none(), "Axes needs no custom body");
+        let custom = crate::scenario::rect_of("prefs:navigator:Custom").unwrap().center();
+        h.call("ui.click", json!({"x": custom.x, "y": custom.y}));
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Custom);
+        assert!(h.widget(hint).is_some(), "Custom explains why it still shows axes without a body");
+
+        h.app.run("view.navigator", json!({"body": "Body1"})).unwrap();
+        h.frames(3);
+        assert!(h.app.view_gizmo.shape.is_some());
+        assert!(h.widget(hint).is_none(), "the assigned body's snapshot needs no missing-body hint");
+        h.app.run("view.navigator", json!({"body": null})).unwrap();
+        h.frames(3);
+        assert!(h.widget(hint).is_some(), "clearing the body restores the hint");
+        assert_eq!(h.app.preferences.nav, nav);
+        assert_eq!(h.app.cam, camera);
+        assert_eq!(h.app.session.doc.to_json(), design);
+        assert_eq!(h.app.session.revision, revision);
+        assert_eq!(h.app.session.undo.len(), history);
+        assert!(!h.app.session.is_dirty());
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
+
+        // The hinted route remains reachable while Custom has no body and shows axes.
+        h.call("ui.prefs", json!({"open": "Navigation", "navigator_style": "custom"}));
+        h.call("ui.prefs", json!({"button": "ok"}));
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Custom);
+        assert!(h.app.view_gizmo.shape.is_none());
+        assert_eq!(crate::view_gizmo::style(&h.app), NavigatorStyle::Axes);
+        let fallback = crate::scenario::rect_of("axis_view:outer").unwrap().center();
+        h.call("ui.click", json!({"x": fallback.x, "y": fallback.y, "button": "right"}));
+        assert_eq!(h.call("ui.menuPick", json!({"item": "Custom"}))["ok"], true);
+        h.frames(2);
+        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::ViewNavigator(_))));
+        h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
+        assert!(h.app.view_gizmo.shape.is_none(), "opening and cancelling the picker assigns no body");
     }
 
     /// The texts one frame paints.

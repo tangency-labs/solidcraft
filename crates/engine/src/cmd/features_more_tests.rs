@@ -4258,6 +4258,62 @@ fn a_narrow_profile_across_a_wall_along_the_extrusion_keeps_the_trim_to_the_body
     );
 }
 
+/// #19532: a dome on a box top adds two thirds of its base times its height, and it is kept when
+/// the design is saved and read back.
+#[test]
+fn a_dome_on_a_box_top_adds_two_thirds_of_its_base_times_its_height_and_survives_a_save() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Stock"}));
+    run(&mut s, "solid.dome", json!({"face":[5,5,10],"height":5,"name":"Cap"}));
+    let want = 1000.0 + 2.0 / 3.0 * 100.0 * 5.0;
+    assert!((body_volume(&s, "Stock") - want).abs() < 1e-3, "{}", body_volume(&s, "Stock"));
+    assert!(s.model.results.iter().all(|f| f.error.is_none()), "{:?}", s.model.results);
+    let mut loaded = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Default::default() };
+    loaded.refresh();
+    assert!(loaded.model.results.iter().all(|f| f.error.is_none()), "{:?}", loaded.model.results);
+    assert!((body_volume(&loaded, "Stock") - want).abs() < 1e-3, "{}", body_volume(&loaded, "Stock"));
+}
+
+/// #19532: the dome's face is the box top whatever the box's height is, so changing the height
+/// parameter rebuilds the dome on the new top.
+#[test]
+fn a_dome_follows_its_face_when_the_box_height_parameter_changes() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"box_h","expression":"10 mm"}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":"box_h","body_name":"Stock"}));
+    run(&mut s, "solid.dome", json!({"face":[5,5,10],"height":5}));
+    run(&mut s, "parameters.change", json!({"name":"box_h","expression":"20 mm"}));
+    assert!(s.model.results.iter().all(|f| f.error.is_none()), "{:?}", s.model.results);
+    let want = 10.0 * 10.0 * 20.0 + 2.0 / 3.0 * 100.0 * 5.0;
+    assert!((body_volume(&s, "Stock") - want).abs() < 1e-3, "{}", body_volume(&s, "Stock"));
+}
+
+/// #19532: every refusal of a dome comes back as the command's error, and the design stays as it
+/// was.
+#[test]
+fn every_dome_refusal_is_a_command_error_and_changes_nothing() {
+    let box_cases = [
+        (json!({"face":[5,5,10],"height":0}), "the height must be positive"),
+        (json!({"face":[5,5,10],"height":-2}), "the height must be positive"),
+        (json!({"face":[5,5,10],"height":5,"shape":"spherical"}), "a spherical dome needs a circular face"),
+        (json!({"face":[5,5,10],"height":5,"reverse":true}), "not supported yet"),
+        (json!({"face":[5,5,10],"height":5,"shape":"cone"}), "unknown shape `cone`"),
+        (json!({"height":5}), "`face` must be a point"),
+    ];
+    for (params, message) in box_cases {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Stock"}));
+        let e = s.execute("solid.dome", &params);
+        assert!(e.as_ref().is_err_and(|e| e.to_string().contains(message)), "{params}: {e:?}");
+        assert!((body_volume(&s, "Stock") - 1000.0).abs() < 1e-6, "{params}");
+    }
+    let mut ball = Session::default();
+    run(&mut ball, "solid.sphere", json!({"radius":5,"center":[0,0,0],"operation":"new","body_name":"Ball"}));
+    let e = ball.execute("solid.dome", &json!({"face":[0,0,5],"height":2}));
+    assert!(e.as_ref().is_err_and(|e| e.to_string().contains("the face is not planar")), "{e:?}");
+    assert!(ball.model.results.iter().all(|f| f.error.is_none()), "{:?}", ball.model.results);
+}
+
 /// A 3° draft on a pocket wall whose vertical corners carry 4 mm rounds drafts the wall with the
 /// rounds following, or refuses and says what to do; never a bare kernel status. With sharp
 /// corners it builds; with the rounds it is "SMLib failed (status 1001)" today

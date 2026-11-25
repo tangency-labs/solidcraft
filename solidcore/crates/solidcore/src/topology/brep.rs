@@ -24,6 +24,7 @@
 //! Deviations: the B-rep records are the arenas of [`crate::topology::Brep`].
 
 pub mod cutting;
+pub mod dome;
 pub mod enclosing;
 pub mod local_operation;
 pub mod mirror;

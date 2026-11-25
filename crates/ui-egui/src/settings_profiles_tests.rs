@@ -43,7 +43,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     // 108 -> 109 because Turn Around adds one portable Navigation preference.
     assert_eq!(
         keys.len(),
-        109,
+        110,
         "include the repeated-shortcut preference, the browser scroll wheel preferences and the centred command search among the current portable settings"
     );
     for key in [
@@ -826,6 +826,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "direct_interaction",
         "escape_twice_finishes_sketch",
         "free_orbit",
+        "free_orbit_key",
         "free_orbit_upright",
         "hidden_toolbar_tabs",
         "hide_constraint_glyphs_zoomed_out",
@@ -925,9 +926,10 @@ fn profile_keys_cover_the_current_portable_preferences() {
     actual.sort_unstable();
     // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
     // Test change: one more portable key, nav_button_map (what each mouse button drags).
+    // Test change: one more portable key, free_orbit_key (the key that makes one orbit drag free).
     // Test change: two fewer portable keys, show_document_browser and library_thumbnail_size, gone with the document browser;
     // Turn Around adds one portable Navigation preference to the 108 keys on main.
-    assert_eq!(expected.len(), 109);
+    assert_eq!(expected.len(), 110);
     assert_eq!(actual, expected);
 }
 
