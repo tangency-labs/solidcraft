@@ -31,6 +31,7 @@ pub(crate) const KIT_COMPONENTS: &[&str] = &[
     "nav_bar_layout.rs",
     "nav_bar_tests.rs",
     "navigation_bar.rs",
+    "panel_runtime",
     "prefs_window.rs",
     "prefs_window_tests.rs",
     "ribbon.rs",
@@ -78,7 +79,10 @@ pub(crate) fn guard_file(name: &str) -> std::path::PathBuf {
         return kit_src().join(if kit == "mod.rs" { "lib.rs" } else { kit });
     }
     if KIT_COMPONENTS.iter().any(|component| name.starts_with(component)) {
-        return kit_src().join(name);
+        let kit_path = kit_src().join(name);
+        if kit_path.exists() {
+            return kit_path;
+        }
     }
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(name)
 }

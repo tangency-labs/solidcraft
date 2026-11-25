@@ -24,6 +24,7 @@ there are no built-in themes.
 | `ribbon`, `app_bar`, `history_bar`, `nav_bar`, `navigation_bar`, `view_compass`, `prefs_window`, `start_page`, `window_chrome` | Components: plain data in, the action chosen out |
 | `browser` | The Browser panel: the host emits its rows each frame, the panel returns events (select, fold, eye, rename, move, menu, reveal) and never changes host state |
 | `frame` | Dock dragging and bounded anchors |
+| `panel_runtime` | App-neutral panel placement runtime: docking, stacking, tabbing, floating, desktop pop-out windows, and `PanelLayoutStore` persistence, built atop the low-level `panel_host` chrome widgets |
 | `blur` | The blurred backing behind translucent panels |
 | `theme_files`, `theme_options` | Theme files: reading, validating, resolving to `Tokens`, their options; the host's built-in themes |
 

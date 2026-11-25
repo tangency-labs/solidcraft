@@ -4,17 +4,17 @@ use super::drag_paint::WindowCard;
 use super::host::{ContentSlot, FramePanelContent, Motion, PanelContext, PanelHost, PanelPresentation};
 use super::runtime::{ContentServices, PanelController, PanelRuntime};
 use super::workspace::{EmptyPanelHost, egui_rect, logical_rect};
+use crate::{self as ui_kit, BackingTooltipExt as _, Container, HostChrome, Surface};
 use solidcraft_theme::Tokens;
-use solidcraft_ui_kit::{self as ui_kit, BackingTooltipExt as _, Container, HostChrome, Surface};
 
-pub(super) enum WindowAction {
+pub enum WindowAction {
     Activate(InstanceId),
     Expand(SectionId),
     Content(InstanceId, ControlId),
     Redock,
 }
 
-pub(super) fn paint(
+pub fn paint(
     runtime: &mut PanelRuntime,
     services: &mut ContentServices<'_>,
     content: &mut dyn FramePanelContent,
@@ -124,13 +124,13 @@ pub(super) fn paint(
 
 /// A panel window's height besides its body: the row of its actions, when the
 /// panel has any. The system draws the title bar outside the window's content.
-pub(super) fn window_chrome(ctx: &egui::Context, actions: bool) -> f32 {
+pub fn window_chrome(ctx: &egui::Context, actions: bool) -> f32 {
     if actions { Tokens::get().form_close_size + ctx.global_style().spacing.item_spacing.y } else { 0.0 }
 }
 
 /// The window a drag shows before the panel opens in it: the panel's body as
 /// painted this frame, where its content will be, under the window's `chrome`.
-pub(super) fn paint_drop(ui: &mut egui::Ui, card: Option<&WindowCard>, chrome: f32) {
+pub fn paint_drop(ui: &mut egui::Ui, card: Option<&WindowCard>, chrome: f32) {
     let panel = Container::new(ui.ctx(), Surface::Viewport).central();
     let frame = Container::new(ui.ctx(), Surface::Panel).edge_frame(Tokens::get().dialog_body);
     Container::show_central(ui, panel, frame, |ui| {

@@ -328,7 +328,7 @@ mod tests {
         h.app.preferences.timeline_2d = true;
         h.call("ui.resize", json!({"width": 1400, "height": 900}));
         h.frames(3);
-        h.app.set_panel_native_adapter(Box::new(crate::panel_runtime::native::DesktopNativeAdapter::default())).unwrap();
+        h.app.set_panel_native_adapter(Box::new(crate::panel_runtime::DesktopNativeAdapter::default())).unwrap();
         h.frames(2);
         let instance = InstanceId("timeline-2d".into());
         click_control(&mut h, &HostControlTarget::Pointer(HostPointerTarget::Menu { instance: instance.clone() }));

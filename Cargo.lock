@@ -6669,6 +6669,7 @@ dependencies = [
  "serde_json",
  "solidcraft-color",
  "solidcraft-icon-svg",
+ "solidcraft-panel-layout",
  "solidcraft-theme",
  "solidcraft-ui-registry",
  "solidcraft-ui-text",

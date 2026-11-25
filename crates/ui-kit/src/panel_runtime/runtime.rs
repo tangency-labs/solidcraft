@@ -253,29 +253,29 @@ struct RuntimeCohort {
     providers: BTreeMap<ControllerKey, std::sync::Arc<dyn HostContentMetrics>>,
 }
 
-pub(crate) struct RuntimeHostProposal {
+pub struct RuntimeHostProposal {
     candidate: PreparedHostLayout,
     reference: HostLayout,
     source_reference: HostLayout,
     cohort: RuntimeCohort,
 }
 impl RuntimeHostProposal {
-    pub(crate) fn action(&self) -> &LayoutAction {
+    pub fn action(&self) -> &LayoutAction {
         self.candidate.action()
     }
-    pub(crate) fn layout(&self) -> &Layout {
+    pub fn layout(&self) -> &Layout {
         self.candidate.prepared().layout()
     }
-    pub(crate) fn validate_preparation_context(&self, context: &LayoutPreparationContext) -> PanelResult<()> {
+    pub fn validate_preparation_context(&self, context: &LayoutPreparationContext) -> PanelResult<()> {
         if self.reference.geometry_policy.identity_reservations.preparation_context()? != *context {
             return Err(error(Rule::Revision, "host proposal preparation context changed"));
         }
         Ok(())
     }
-    pub(crate) fn validate_captured(&self, runtime: &PanelRuntime, models: &dyn PanelModels) -> PanelResult<()> {
+    pub fn validate_captured(&self, runtime: &PanelRuntime, models: &dyn PanelModels) -> PanelResult<()> {
         self.validate(runtime, &self.source_reference, models)
     }
-    pub(crate) fn validate(&self, runtime: &PanelRuntime, reference: &HostLayout, models: &dyn PanelModels) -> PanelResult<()> {
+    pub fn validate(&self, runtime: &PanelRuntime, reference: &HostLayout, models: &dyn PanelModels) -> PanelResult<()> {
         if &self.source_reference != reference {
             return Err(error(Rule::Revision, "host proposal source environment changed"));
         }
@@ -288,7 +288,7 @@ impl RuntimeHostProposal {
     }
 }
 
-pub(crate) fn standalone_header_action(action: &LayoutAction) -> bool {
+pub fn standalone_header_action(action: &LayoutAction) -> bool {
     matches!(action, LayoutAction::Apply { mutations, .. } if matches!(mutations.as_slice(), [Mutation::HeaderAction { .. }]))
 }
 
@@ -336,7 +336,7 @@ pub struct RuntimeActionSink<'a, 'services> {
     pub services: &'a mut ContentServices<'services>,
 }
 
-pub(crate) fn normalize_native_reply(mut reply: LayoutReply, native: &HostCapabilities) -> LayoutReply {
+pub fn normalize_native_reply(mut reply: LayoutReply, native: &HostCapabilities) -> LayoutReply {
     reply.capabilities.native_windows &= native.native_windows;
     reply.capabilities.max_native_hosts = reply.capabilities.max_native_hosts.min(native.max_native_hosts);
     reply
@@ -390,7 +390,7 @@ impl PanelRuntime {
         self.bindings.insert(kind, binding);
         Ok(())
     }
-    pub(super) fn register_panel(&mut self, spec: PanelSpec, binding: ControllerBinding) -> PanelResult<()> {
+    pub fn register_panel(&mut self, spec: PanelSpec, binding: ControllerBinding) -> PanelResult<()> {
         self.require_live()?;
         if self.bindings.contains_key(&spec.kind) || self.bindings.len() >= MAX_INSTANCES {
             return Err(error(Rule::CollectionLimit, "panel controller registration unavailable"));
@@ -521,15 +521,10 @@ impl PanelRuntime {
         }
         Ok(())
     }
-    pub(crate) fn prepare_host_proposal(
-        &self,
-        reference: HostLayout,
-        action: LayoutAction,
-        models: &dyn PanelModels,
-    ) -> PanelResult<RuntimeHostProposal> {
+    pub fn prepare_host_proposal(&self, reference: HostLayout, action: LayoutAction, models: &dyn PanelModels) -> PanelResult<RuntimeHostProposal> {
         self.prepare_host_proposal_with(reference, action, models, None, None)
     }
-    pub(crate) fn prepare_host_proposal_in_context(
+    pub fn prepare_host_proposal_in_context(
         &self,
         reference: HostLayout,
         action: LayoutAction,
@@ -538,7 +533,7 @@ impl PanelRuntime {
     ) -> PanelResult<RuntimeHostProposal> {
         self.prepare_host_proposal_with(reference, action, models, None, Some(context))
     }
-    pub(crate) fn revise_host_proposal(
+    pub fn revise_host_proposal(
         &self,
         previous: RuntimeHostProposal,
         reference: HostLayout,
@@ -599,7 +594,7 @@ impl PanelRuntime {
     }
     /// Pointer candidates already own their geometry. Capture current retained
     /// owners without replaying their action, and reject a mismatching snapshot.
-    pub(crate) fn retain_host_candidate(
+    pub(super) fn retain_host_candidate(
         &self,
         candidate: PreparedHostLayout,
         reference: HostLayout,
@@ -622,7 +617,7 @@ impl PanelRuntime {
         cohort.metric_revision = snapshot.metrics.revision();
         Ok(RuntimeHostProposal { candidate, source_reference: reference.clone(), reference, cohort })
     }
-    pub(crate) fn commit_host_proposal(
+    pub fn commit_host_proposal(
         &mut self,
         proposal: RuntimeHostProposal,
         native: &mut dyn NativeHostAdapter,
@@ -640,7 +635,7 @@ impl PanelRuntime {
     pub fn update_errors(&self) -> &[RuntimeUpdateError] {
         &self.update_errors
     }
-    pub(crate) fn require_live(&self) -> PanelResult<()> {
+    pub fn require_live(&self) -> PanelResult<()> {
         if self.destroyed {
             return Err(error(Rule::Lifecycle, "runtime destroyed"));
         }
@@ -1216,7 +1211,7 @@ impl PanelRuntime {
         self.mount_frame(resolved, host, services, &PresentationCohort::Native(native_host.clone()), true)
     }
 
-    pub(crate) fn repaint_in_app(
+    pub(super) fn repaint_in_app(
         &mut self,
         resolved: &ResolvedLayout,
         host: &mut dyn PanelHost,
@@ -1227,7 +1222,7 @@ impl PanelRuntime {
 
     /// After a kit Area sizing pass, reconcile actual visibility without
     /// invoking any content renderer twice or deactivating native peers.
-    pub(crate) fn reconcile_in_app_presentation(&mut self, resolved: &ResolvedLayout, local: &mut dyn PanelLocalServices) {
+    pub(super) fn reconcile_in_app_presentation(&mut self, resolved: &ResolvedLayout, local: &mut dyn PanelLocalServices) {
         self.sync_presented_states(Some(resolved), &PresentationCohort::InApp, local);
     }
 

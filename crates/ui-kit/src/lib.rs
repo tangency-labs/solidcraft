@@ -1,6 +1,6 @@
 //! The UI kit: tokenised dense controls (rows, fields, menus, panels, windows) and the components
 //! built from them (the ribbon, app bar, history bar, navigation bar, Browser, view compass,
-//! preferences window, start page, window chrome and theme files). Everything is drawn from plain data the host
+//! preferences window, start page, window chrome, panel runtime and theme files). Everything is drawn from plain data the host
 //! passes or installs (its icon set, glyphs, tab table, text and built-in themes) and returns what
 //! the user chose; nothing here reads an app's state.
 //! `Panel` owns card composition; rows own aligned label/control columns and retain egui focus.
@@ -17,6 +17,7 @@ pub mod history_bar;
 pub mod nav_bar;
 pub mod nav_bar_layout;
 pub mod navigation_bar;
+pub mod panel_runtime;
 pub mod prefs_window;
 pub mod ribbon;
 pub mod start_page;

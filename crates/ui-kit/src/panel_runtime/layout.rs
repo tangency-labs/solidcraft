@@ -285,7 +285,7 @@ pub struct HostMetrics {
 pub(super) const DOCKED_GRAB_WIDTH: f32 = 8.0;
 /// A floating card's handles reach this far out of its border, and inward as far
 /// as the content inset on that axis, so content and scrollbars keep their presses.
-pub(super) const FLOATING_GRAB_REACH: f32 = 4.0;
+pub const FLOATING_GRAB_REACH: f32 = 4.0;
 
 impl Default for HostMetrics {
     fn default() -> Self {
@@ -378,7 +378,7 @@ impl HostIdentityReservations {
         }
         Ok(())
     }
-    pub(super) fn preparation_context(&self) -> PanelResult<LayoutPreparationContext> {
+    pub fn preparation_context(&self) -> PanelResult<LayoutPreparationContext> {
         self.validate()?;
         Ok(LayoutPreparationContext {
             sections: self.sections.clone(),
@@ -387,7 +387,7 @@ impl HostIdentityReservations {
             replacement_ownership: self.replacement_ownership.clone(),
         })
     }
-    pub(super) fn include_layout(&mut self, layout: &Layout) -> PanelResult<()> {
+    pub fn include_layout(&mut self, layout: &Layout) -> PanelResult<()> {
         if layout.sections.len() > MAX_HOST_RESERVED_IDS
             || layout.instances.len() > MAX_HOST_RESERVED_IDS
             || layout.columns.len() > MAX_HOST_RESERVED_IDS
@@ -592,14 +592,14 @@ pub struct HostGeometryPolicy {
     pub requested_opacity: Option<f32>,
     pub default_opaque: bool,
     pub effective_surfaces: BTreeMap<SectionId, PanelSurface>,
-    pub(crate) hidden_header_actions: BTreeMap<InstanceId, BTreeSet<ControlId>>,
+    pub(super) hidden_header_actions: BTreeMap<InstanceId, BTreeSet<ControlId>>,
     /// Actions that sit at the header's right end, beside the menu, also in a one-row header.
-    pub(crate) trailing_header_actions: BTreeMap<InstanceId, BTreeSet<ControlId>>,
-    pub(crate) header_title_widths: BTreeMap<InstanceId, f32>,
+    pub(super) trailing_header_actions: BTreeMap<InstanceId, BTreeSet<ControlId>>,
+    pub(super) header_title_widths: BTreeMap<InstanceId, f32>,
     /// Panels whose content takes the title's place in the header, with the narrowest width
     /// that content takes (`ContentSlot::Title`).
-    pub(crate) header_content: BTreeMap<InstanceId, f32>,
-    pub(crate) tab_title_widths: BTreeMap<InstanceId, f32>,
+    pub(super) header_content: BTreeMap<InstanceId, f32>,
+    pub(super) tab_title_widths: BTreeMap<InstanceId, f32>,
     pub content: Vec<SideContentMeasure>,
     pub content_revision: u64,
     pub scroll: Point,

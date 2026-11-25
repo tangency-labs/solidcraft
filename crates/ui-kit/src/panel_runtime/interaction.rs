@@ -44,7 +44,7 @@ impl HostResizeEdge {
         matches!(self, Self::Right | Self::TopRight | Self::BottomRight)
     }
 
-    pub(super) fn moves_north(self) -> bool {
+    pub fn moves_north(self) -> bool {
         matches!(self, Self::Top | Self::TopLeft | Self::TopRight)
     }
 
@@ -389,12 +389,7 @@ impl PreparedHostLayout {
 /// Resolve the display while a dragged tab is outside every admitted target.
 /// The private topology keeps the committed layout and capture untouched. A
 /// contextual panel can be detached for display even when it cannot be closed.
-pub(super) fn detached_drag_layout(
-    service: &LayoutService,
-    scope: &LocalScope,
-    reference: &HostLayout,
-    instance: &InstanceId,
-) -> PanelResult<HostLayout> {
+pub fn detached_drag_layout(service: &LayoutService, scope: &LocalScope, reference: &HostLayout, instance: &InstanceId) -> PanelResult<HostLayout> {
     validate_context(service, scope, reference)?;
     service.availability(instance).require()?;
     let section_id = &service.layout().containing(instance)?.id;
@@ -965,7 +960,7 @@ pub struct HostInteraction {
 }
 
 impl HostInteraction {
-    pub(super) fn set_live_drag(&mut self, enabled: bool) {
+    pub fn set_live_drag(&mut self, enabled: bool) {
         if self.live_drag != enabled {
             self.cancel();
             self.live_drag = enabled;
@@ -974,7 +969,7 @@ impl HostInteraction {
 
     /// None turns the Window target off. A change during a drag (the app
     /// window moved) cancels it.
-    pub(super) fn set_drag_out(&mut self, drag_out: Option<HostDragOut>) {
+    pub fn set_drag_out(&mut self, drag_out: Option<HostDragOut>) {
         let drag_out = drag_out.filter(|value| value.validate().is_ok());
         if self.drag_out != drag_out {
             self.cancel();
@@ -984,7 +979,7 @@ impl HostInteraction {
 
     /// The panel and the screen point where its desktop window would open.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn window_landing(&self) -> Option<(&InstanceId, Point)> {
+    pub fn window_landing(&self) -> Option<(&InstanceId, Point)> {
         let preview = self.preview.as_ref().filter(|preview| preview.rejection.is_none() && self.candidate.is_some())?;
         Some((self.move_source()?, preview.window?))
     }
@@ -993,7 +988,7 @@ impl HostInteraction {
     /// `shown`, kept on its monitor. Ignored unless `requested` is the current
     /// Window landing.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn confirm_window_shown(&mut self, requested: Point, shown: LogicalRect) {
+    pub fn confirm_window_shown(&mut self, requested: Point, shown: LogicalRect) {
         if self.window_landing().is_some_and(|(_, origin)| origin == requested) && shown.validate().is_ok() {
             self.window_shown = Some(shown);
         }
@@ -1016,14 +1011,14 @@ impl HostInteraction {
 
     /// Identity feedback follows the held Move, independently of drop admission.
     /// A suspended drag retains its source but has no current cursor position.
-    pub(crate) fn move_source(&self) -> Option<&InstanceId> {
+    pub fn move_source(&self) -> Option<&InstanceId> {
         match &self.capture {
             Some(Gesture { kind: GestureKind::Move { instance, .. }, dragging: true, .. }) => Some(instance),
             _ => None,
         }
     }
 
-    pub(crate) fn move_position(&self) -> Option<Point> {
+    pub fn move_position(&self) -> Option<Point> {
         self.move_source().and(self.last_position)
     }
 
@@ -1395,7 +1390,7 @@ fn begin_gesture(
 
 /// Keyboard resizing uses the same pure candidate geometry as a pointer preview.
 /// It neither captures a pointer nor publishes a second allocation.
-pub(crate) fn keyboard_resize_action(
+pub(super) fn keyboard_resize_action(
     service: &LayoutService,
     layout: &HostLayout,
     target: &HostPointerTarget,

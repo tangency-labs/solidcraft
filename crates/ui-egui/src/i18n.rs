@@ -1917,7 +1917,10 @@ mod tests {
         fn inside_kit(&self, path: &std::path::Path) -> bool {
             let module = module_path(path);
             module.get(1).is_some_and(|module| module == "ui_kit")
-                && !module.get(2).is_some_and(|name| crate::test_support::KIT_COMPONENTS.contains(&format!("{name}.rs").as_str()))
+                && !module.get(2).is_some_and(|name| {
+                    crate::test_support::KIT_COMPONENTS.contains(&name.as_str())
+                        || crate::test_support::KIT_COMPONENTS.contains(&format!("{name}.rs").as_str())
+                })
         }
     }
 
@@ -2847,5 +2850,12 @@ mod tests {
         let lo = Locale::for_language("lo");
         assert_eq!(lo.name(), "ພາສາລາວ");
         assert!(is_supported("lo"));
+    }
+
+    #[test]
+    fn inside_kit_excludes_directory_backed_kit_components() {
+        let context = Context::new(&[]);
+        assert!(!context.inside_kit(std::path::Path::new("crates/ui-kit/src/panel_runtime/workspace.rs")));
+        assert!(context.inside_kit(std::path::Path::new("crates/ui-kit/src/choice.rs")));
     }
 }

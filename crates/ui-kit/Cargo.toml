@@ -18,6 +18,7 @@ test-support = ["dep:image"]
 solidcraft-icon-svg = { workspace = true }
 # The token contract every control draws with.
 solidcraft-theme = { workspace = true }
+solidcraft-panel-layout = { workspace = true }
 # The widget registry (handles, rects, counts) every control publishes into.
 solidcraft-ui-registry = { workspace = true }
 solidcraft-ui-text = { workspace = true }

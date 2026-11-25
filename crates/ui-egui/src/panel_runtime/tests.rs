@@ -4,6 +4,16 @@ use solidcraft_engine::panels::*;
 
 use super::*;
 
+fn rect(x: f32, y: f32, width: f32, height: f32) -> LogicalRect {
+    LogicalRect { origin: Point { x, y }, size: Size { width, height } }
+}
+fn right(bounds: LogicalRect) -> f32 {
+    bounds.origin.x + bounds.size.width
+}
+fn bottom(bounds: LogicalRect) -> f32 {
+    bounds.origin.y + bounds.size.height
+}
+
 fn surface_test_palette(dark: bool) -> solidcraft_theme::Tokens {
     let mut tokens = if dark { solidcraft_theme::Tokens::dark() } else { solidcraft_theme::Tokens::light() };
     tokens.panel = if dark { egui::Color32::BLACK } else { egui::Color32::WHITE };
@@ -1055,12 +1065,12 @@ fn fixture_metric_policy(service: &LayoutService) -> HostGeometryPolicy {
         .iter()
         .map(|instance| (instance.id.clone(), service.registry().get(&instance.kind).unwrap().side_height_policy))
         .collect();
-    HostGeometryPolicy {
-        measure: Some(std::sync::Arc::new(AllocationMetricsFixture { revision: 7, policies, width: None, narrow_height: 240.0, wide_height: 240.0 })),
-        content_revision: 7,
-        identity_reservations: fixture_complete_reservations(service),
-        ..HostGeometryPolicy::default()
-    }
+    let mut policy = HostGeometryPolicy::default();
+    policy.measure =
+        Some(std::sync::Arc::new(AllocationMetricsFixture { revision: 7, policies, width: None, narrow_height: 240.0, wide_height: 240.0 }));
+    policy.content_revision = 7;
+    policy.identity_reservations = fixture_complete_reservations(service);
+    policy
 }
 fn host_layout(h: &PanelMountHarness, width: f32, height: f32, direction: Direction) -> HostLayout {
     resolve_host_layout(
@@ -1227,16 +1237,17 @@ fn allocation_sole_content_uses_assigned_width_metrics_and_fill_leaves_no_false_
     for zone in [Zone::Left, Zone::Right] {
         let mut service = fixture_service(false).unwrap();
         apply_fixture(&mut service, vec![fixture_open("fixture.log", "one", "one", zone, 0).unwrap()]);
-        let snapshot = |policy| HostGeometryPolicy {
-            content_revision: 11,
-            measure: Some(std::sync::Arc::new(AllocationMetricsFixture {
+        let snapshot = |policy| {
+            let mut out = HostGeometryPolicy::default();
+            out.content_revision = 11;
+            out.measure = Some(std::sync::Arc::new(AllocationMetricsFixture {
                 revision: 11,
                 policies: [(id("one"), policy)].into(),
                 width: None,
                 narrow_height: 360.0,
                 wide_height: 180.0,
-            })),
-            ..HostGeometryPolicy::default()
+            }));
+            out
         };
         for direction in [Direction::Ltr, Direction::Rtl] {
             let content = allocate_fixture(&service, Size { width: 1200.0, height: 800.0 }, direction, &snapshot(SideHeightPolicy::Content));
@@ -1274,17 +1285,15 @@ fn allocation_active_available_tab_owns_policy_while_inactive_height_limit_still
             },
         ],
     );
-    let policy = HostGeometryPolicy {
-        content_revision: 3,
-        measure: Some(std::sync::Arc::new(AllocationMetricsFixture {
-            revision: 3,
-            policies: [(id("fill"), SideHeightPolicy::Fill)].into(),
-            width: None,
-            narrow_height: 180.0,
-            wide_height: 180.0,
-        })),
-        ..HostGeometryPolicy::default()
-    };
+    let mut policy = HostGeometryPolicy::default();
+    policy.content_revision = 3;
+    policy.measure = Some(std::sync::Arc::new(AllocationMetricsFixture {
+        revision: 3,
+        policies: [(id("fill"), SideHeightPolicy::Fill)].into(),
+        width: None,
+        narrow_height: 180.0,
+        wide_height: 180.0,
+    }));
     let content = allocate_fixture(&service, Size { width: 1000.0, height: 800.0 }, Direction::Ltr, &policy);
     assert_eq!(content.sections[0].outer.size.height, 180.0);
     apply_fixture(&mut service, vec![Mutation::Activate { instance: id("fill") }]);
@@ -1306,12 +1315,10 @@ fn allocation_missing_or_stale_width_metrics_reject_before_any_candidate_is_show
     let base = fixture_metric_policy(&service);
     let request = host_measure_requests(&service, service.layout(), capacity, Direction::Ltr, metrics, &base).unwrap().remove(0);
     let measured = base.measure.as_ref().unwrap().measure(&request).unwrap();
-    let policy = HostGeometryPolicy {
-        content: vec![measured],
-        content_revision: 7,
-        identity_reservations: fixture_complete_reservations(&service),
-        ..HostGeometryPolicy::default()
-    };
+    let mut policy = HostGeometryPolicy::default();
+    policy.content = vec![measured];
+    policy.content_revision = 7;
+    policy.identity_reservations = fixture_complete_reservations(&service);
     let host = resolve_host_layout(&service, capacity, Direction::Ltr, metrics, &policy).unwrap();
     let column = service.layout().sections[0].column.clone().unwrap();
     let before = service.inspect();
@@ -1430,8 +1437,9 @@ fn allocation_scroll_changes_clipped_footprints_without_changing_extent_or_rende
     );
     let policy = fixture_metric_policy(&service);
     let before = allocate_fixture(&service, Size { width: 100.0, height: 80.0 }, Direction::Ltr, &policy);
-    let scrolled =
-        allocate_fixture(&service, before.capacity.size, Direction::Ltr, &HostGeometryPolicy { scroll: Point { x: 999.0, y: 999.0 }, ..policy });
+    let mut scrolled_policy = policy;
+    scrolled_policy.scroll = Point { x: 999.0, y: 999.0 };
+    let scrolled = allocate_fixture(&service, before.capacity.size, Direction::Ltr, &scrolled_policy);
     assert_eq!(before.extent, scrolled.extent);
     assert_eq!(before.render_domain, scrolled.render_domain);
     assert!(scrolled.allocation_environment.scroll.x > 0.0);
@@ -1556,7 +1564,7 @@ fn detached_drag_preview_reflows_panels_without_committing_a_close() {
     let before = service.inspect();
     let instance = id("log-0");
     let scope = fixture_scope(service);
-    let detached = super::interaction::detached_drag_layout(service, &scope, &frame.layout, &instance).unwrap();
+    let detached = super::detached_drag_layout(service, &scope, &frame.layout, &instance).unwrap();
     let closed = prepare_host_layout(
         service,
         &scope,
@@ -8898,7 +8906,7 @@ fn floating_handles_agree_with_input_regions_and_leave_content_presses_alone() {
         assert!(layout.consumes_pointer(point), "{edge:?} grab outside the card still consumes the pointer");
     }
     let header = raw.host.frame().unwrap().layout.sections.iter().find(|candidate| candidate.section == section("editor-section")).unwrap().header;
-    let reach = super::layout::FLOATING_GRAB_REACH;
+    let reach = super::FLOATING_GRAB_REACH;
     let tokens = solidcraft_theme::Tokens::get();
     let (outer_box, inner_box) =
         (egui_rect(card).expand(reach), egui_rect(card).shrink2(egui::vec2(tokens.space_4.min(reach), tokens.space_2.min(reach))));
@@ -10881,12 +10889,10 @@ fn host_resolver_measurement_exercise_for_twenty_four_panels() {
     let snapshot_started = Instant::now();
     let provider = h.runtime.capture_metrics(&h.models).unwrap();
     let reservations = fixture_complete_reservations(h.runtime.layout());
-    let policy = HostGeometryPolicy {
-        content_revision: provider.revision(),
-        measure: Some(provider),
-        identity_reservations: reservations,
-        ..Default::default()
-    };
+    let mut policy = HostGeometryPolicy::default();
+    policy.content_revision = provider.revision();
+    policy.measure = Some(provider);
+    policy.identity_reservations = reservations;
     let snapshot_cost = snapshot_started.elapsed();
     let before = h.runtime.layout().inspect();
     let domain = LogicalRect { origin: Point { x: 0.0, y: 32.0 }, size: Size { width: 1800.0, height: 1000.0 } };
@@ -15139,7 +15145,7 @@ fn universal_registered_header_command_invokes_only_the_declared_synthetic_bindi
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn desktop_panel_windows_reserve_ids_only_after_commit_and_fit_the_current_monitor() {
-    use super::native::{DesktopNativeAdapter, NativeMonitor};
+    use super::{DesktopNativeAdapter, NativeMonitor};
 
     let mut adapter = DesktopNativeAdapter::default();
     let host = HostId::new("desktop-test").unwrap();
@@ -15410,7 +15416,7 @@ fn drag_out_refuses_a_panel_that_cannot_pop_out_and_a_host_without_native_window
 
 #[test]
 fn a_dropped_window_opens_at_the_shown_place_kept_on_its_monitor() {
-    use super::native::{DesktopNativeAdapter, NativeMonitor};
+    use super::{DesktopNativeAdapter, NativeMonitor};
 
     let mut adapter = DesktopNativeAdapter::default();
     let monitor = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(2000.0, 1600.0));

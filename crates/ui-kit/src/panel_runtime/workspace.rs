@@ -2,8 +2,8 @@
 //! runtime action sink; resolved geometry and drag previews are observational.
 use std::collections::BTreeMap;
 
+use crate::{self as ui_kit, BackingTooltipExt as _, HostChrome};
 use solidcraft_panel_layout::*;
-use solidcraft_ui_kit::{self as ui_kit, BackingTooltipExt as _, HostChrome};
 
 #[cfg(not(target_arch = "wasm32"))]
 use super::drag_paint::WindowCard;
@@ -377,8 +377,8 @@ fn validate_requested_opacity(opacity: Option<f32>) -> PanelResult<()> {
 }
 
 impl WorkspacePanelHost {
-    #[cfg(test)]
-    pub(crate) fn set_float_in_place(&mut self, panels: Vec<InstanceId>) {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_float_in_place(&mut self, panels: Vec<InstanceId>) {
         self.options.float_in_place = panels;
     }
 
@@ -406,13 +406,13 @@ impl WorkspacePanelHost {
 
     /// Puts the panel's `action` at the right end of its header, next to the menu, also when
     /// the header is one row with the content (the bottom History).
-    pub(crate) fn set_header_action_trailing(&mut self, instance: InstanceId, action: ControlId) {
+    pub fn set_header_action_trailing(&mut self, instance: InstanceId, action: ControlId) {
         if self.options.geometry.trailing_header_actions.entry(instance).or_default().insert(action) {
             self.invalidate_geometry();
         }
     }
 
-    pub(crate) fn set_header_action_visible(&mut self, instance: InstanceId, action: ControlId, visible: bool) {
+    pub fn set_header_action_visible(&mut self, instance: InstanceId, action: ControlId, visible: bool) {
         let hidden = &mut self.options.geometry.hidden_header_actions;
         let changed = if visible {
             hidden.get_mut(&instance).is_some_and(|actions| actions.remove(&action))
@@ -427,7 +427,7 @@ impl WorkspacePanelHost {
 
     /// Puts the panel's `ContentSlot::Title` in its title's place, `min_width` wide at least
     /// (narrower headers move their actions to a row below), or gives the title back (`None`).
-    pub(crate) fn set_header_content(&mut self, instance: InstanceId, min_width: Option<f32>) {
+    pub fn set_header_content(&mut self, instance: InstanceId, min_width: Option<f32>) {
         let slots = &mut self.options.geometry.header_content;
         let changed = match min_width {
             Some(width) => slots.insert(instance, width) != Some(width),
@@ -438,7 +438,7 @@ impl WorkspacePanelHost {
         }
     }
 
-    pub(crate) fn set_live_drag(&mut self, enabled: bool) {
+    pub fn set_live_drag(&mut self, enabled: bool) {
         self.live_drag = enabled;
         self.interaction.set_live_drag(enabled);
         if !enabled {
@@ -454,19 +454,19 @@ impl WorkspacePanelHost {
 
     /// The panel and screen point where a drag would open its desktop window.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn window_landing_preview(&self) -> Option<(InstanceId, Point)> {
+    pub fn window_landing_preview(&self) -> Option<(InstanceId, Point)> {
         self.interaction.window_landing().map(|(instance, origin)| (instance.clone(), origin))
     }
 
     /// How the panel being dragged out looks this frame.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn window_card(&self) -> Option<&WindowCard> {
+    pub fn window_card(&self) -> Option<&WindowCard> {
         self.window_card.as_ref()
     }
 
     /// The side card a panel dragged out of the bottom strip is painted as.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn leaving_side_card(&self) -> Option<&HostSection> {
+    pub fn leaving_side_card(&self) -> Option<&HostSection> {
         self.leaving_side_card.as_ref()
     }
 
@@ -510,17 +510,17 @@ impl WorkspacePanelHost {
 
     /// The host showed the window for the landing at `requested` at `shown` this frame.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn confirm_window_shown(&mut self, requested: Point, shown: LogicalRect) {
+    pub fn confirm_window_shown(&mut self, requested: Point, shown: LogicalRect) {
         self.interaction.confirm_window_shown(requested, shown);
     }
 
     /// Where the last drag past the edge of the app popped a panel out.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn take_window_landing(&mut self) -> Option<(InstanceId, LogicalRect)> {
+    pub fn take_window_landing(&mut self) -> Option<(InstanceId, LogicalRect)> {
         self.window_landing.take()
     }
 
-    pub(crate) fn set_gap(&mut self, gap: f32) -> PanelResult<()> {
+    pub fn set_gap(&mut self, gap: f32) -> PanelResult<()> {
         let metrics = HostMetrics { gap, ..self.options.metrics };
         metrics.validate()?;
         if metrics != self.options.metrics {
@@ -530,8 +530,8 @@ impl WorkspacePanelHost {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_wide_grab(&mut self, wide: bool) {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_wide_grab(&mut self, wide: bool) {
         let (docked_grab_width, floating_grab_reach) =
             if wide { (super::layout::DOCKED_GRAB_WIDTH, super::layout::FLOATING_GRAB_REACH) } else { (0.0, 0.0) };
         if (docked_grab_width, floating_grab_reach) != (self.options.metrics.docked_grab_width, self.options.metrics.floating_grab_reach) {
@@ -605,11 +605,11 @@ impl WorkspacePanelHost {
             remembered_reservations: None,
         })
     }
-    pub(crate) fn set_keyboard_shortcuts(&mut self, shortcuts: Vec<(ContextualPanelAction, egui::KeyboardShortcut)>) {
+    pub fn set_keyboard_shortcuts(&mut self, shortcuts: Vec<(ContextualPanelAction, egui::KeyboardShortcut)>) {
         self.keyboard_shortcuts = shortcuts.into_iter().take(ContextualPanelAction::ALL.len() * 8).collect();
     }
 
-    pub(crate) fn contextual_action(&self, runtime: &PanelRuntime, action: ContextualPanelAction) -> PanelResult<LayoutAction> {
+    pub fn contextual_action(&self, runtime: &PanelRuntime, action: ContextualPanelAction) -> PanelResult<LayoutAction> {
         let frame = self.frame.as_ref().ok_or_else(|| error(Rule::Availability, "panel host is not presented"))?;
         let reference = self.command_reference(runtime)?;
         if reference != frame.layout {
@@ -732,10 +732,10 @@ impl WorkspacePanelHost {
             self.outcome_frame = Some(frame_number);
         }
     }
-    pub(crate) fn note_native_capabilities(&mut self, capabilities: HostCapabilities) {
+    pub fn note_native_capabilities(&mut self, capabilities: HostCapabilities) {
         self.native_capabilities = capabilities;
     }
-    pub(crate) fn capture_metrics(&mut self, runtime: &PanelRuntime, models: &dyn PanelModels) -> PanelResult<()> {
+    pub fn capture_metrics(&mut self, runtime: &PanelRuntime, models: &dyn PanelModels) -> PanelResult<()> {
         let metrics = runtime.capture_metrics(models)?;
         if self.options.geometry.measure.as_ref().is_some_and(|old| old.revision() == metrics.revision()) {
             return Ok(());
@@ -750,7 +750,7 @@ impl WorkspacePanelHost {
     }
     /// Programmatic changes use the exact allocator and admission of gestures.
     /// No host or captured environment means no structural admission.
-    pub(crate) fn command_reference(&self, runtime: &PanelRuntime) -> PanelResult<HostLayout> {
+    pub fn command_reference(&self, runtime: &PanelRuntime) -> PanelResult<HostLayout> {
         let (domain, capacity, chrome) = if let Some(frame) = &self.frame {
             (frame.layout.render_domain, frame.layout.capacity, frame.layout.chrome_obstacles.as_slice())
         } else {
@@ -764,7 +764,7 @@ impl WorkspacePanelHost {
     }
     /// Capture the layout store's full envelope, including opaque/dormant
     /// reservations, before either widget or pointer identity generation.
-    pub(crate) fn capture_reservations(&mut self, runtime: &PanelRuntime, store: &dyn PanelLayoutStore) -> PanelResult<()> {
+    pub fn capture_reservations(&mut self, runtime: &PanelRuntime, store: &dyn PanelLayoutStore) -> PanelResult<()> {
         let service = runtime.layout();
         let state = service.inspect();
         let workspace = &state.layout.workspace;
@@ -793,7 +793,7 @@ impl WorkspacePanelHost {
         }
         Ok(())
     }
-    pub(crate) fn cancel_gesture(&mut self) {
+    pub fn cancel_gesture(&mut self) {
         if self.interaction.move_source().is_some()
             && let Some(ctx) = &self.egui_context
         {
@@ -808,22 +808,22 @@ impl WorkspacePanelHost {
     pub fn interaction(&self) -> &HostInteraction {
         &self.interaction
     }
-    pub(crate) fn has_pending(&self) -> bool {
+    pub fn has_pending(&self) -> bool {
         self.pending.is_some()
     }
-    pub(crate) fn prepared_geometry(&self) -> Option<(LogicalRect, LogicalRect, Vec<LogicalRect>)> {
+    pub fn prepared_geometry(&self) -> Option<(LogicalRect, LogicalRect, Vec<LogicalRect>)> {
         Some((self.last_domain?, self.last_capacity?, self.last_chrome.clone()))
     }
-    pub(crate) fn wants_escape(&self, runtime: &PanelRuntime) -> bool {
+    pub fn wants_escape(&self, runtime: &PanelRuntime) -> bool {
         let _ = runtime;
         self.interaction.is_captured() || self.menu.is_some()
     }
-    pub(crate) fn request_escape(&mut self) {
+    pub fn request_escape(&mut self) {
         self.pending_escape = true;
     }
     /// Discard geometry and provisional input without tearing down an eligible
     /// editor's keyboard focus or retained egui caret/selection state.
-    pub(crate) fn invalidate_geometry(&mut self) {
+    pub fn invalidate_geometry(&mut self) {
         if self.interaction.move_source().is_some()
             && let Some(ctx) = &self.egui_context
         {
@@ -841,7 +841,7 @@ impl WorkspacePanelHost {
         self.last_mount_revision = None;
     }
     /// Owner/scope loss and application hiding also release owned keyboard input.
-    pub(crate) fn invalidate_context(&mut self) {
+    pub fn invalidate_context(&mut self) {
         self.drag_paint.clear();
         self.invalidate_geometry();
         self.content_focus = None;
@@ -854,7 +854,7 @@ impl WorkspacePanelHost {
             ctx.memory_mut(|memory| memory.surrender_focus(focused));
         }
     }
-    pub(crate) fn reconcile_scope(&mut self, runtime: &PanelRuntime) {
+    pub fn reconcile_scope(&mut self, runtime: &PanelRuntime) {
         let identity = (runtime_scope(runtime), runtime.environment().window.clone());
         if self.scope.as_ref() != Some(&identity) {
             let replacing_owner = self.scope.is_some();
@@ -876,7 +876,7 @@ impl WorkspacePanelHost {
             }
         }
     }
-    pub(crate) fn note_reply(&mut self, reply: &LayoutReply) {
+    pub fn note_reply(&mut self, reply: &LayoutReply) {
         for effect in &reply.effects {
             if let HostEffect::Focus { instance } = effect {
                 self.focus_request = Some(instance.clone());
@@ -885,7 +885,7 @@ impl WorkspacePanelHost {
     }
     /// App ticks/programmatic forwarding use the same overlay ledger as render
     /// and pointer dispatch, so background cleanup cannot leave stale input.
-    pub(crate) fn with_local_services<R>(
+    pub fn with_local_services<R>(
         &mut self,
         scope: &LocalScope,
         services: &mut ContentServices<'_>,
@@ -897,7 +897,7 @@ impl WorkspacePanelHost {
             .map_or(LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width: 0.0, height: 0.0 } }, |frame| frame.layout.capacity);
         with_local_tracking(services, scope, capacity, &mut self.overlays, use_services)
     }
-    pub(crate) fn with_command_services<R>(
+    pub fn with_command_services<R>(
         &mut self,
         scope: &LocalScope,
         services: &mut ContentServices<'_>,
@@ -916,7 +916,7 @@ impl WorkspacePanelHost {
         self.prepare_in_domain(runtime, capacity, capacity, &[])
     }
 
-    pub(crate) fn note_egui_context(&mut self, ctx: &egui::Context, force_opaque: bool) {
+    pub fn note_egui_context(&mut self, ctx: &egui::Context, force_opaque: bool) {
         self.egui_context = Some(ctx.clone());
         let surfaces = HostSurfaceStyle::capture(ctx, force_opaque, self.options.geometry.requested_opacity, self.options.geometry.surfaces.as_ref());
         let surface_alpha = Some(HostSurfaceAlpha {
@@ -2282,7 +2282,7 @@ impl WorkspacePanelHost {
     }
 }
 
-pub(crate) fn runtime_scope(runtime: &PanelRuntime) -> LocalScope {
+pub fn runtime_scope(runtime: &PanelRuntime) -> LocalScope {
     let environment = runtime.environment();
     LocalScope { workspace: environment.workspace.clone(), document: environment.document.clone(), viewport: environment.viewport.clone() }
 }
@@ -2564,10 +2564,10 @@ fn control_id(runtime: &PanelRuntime, owners: &BTreeMap<InstanceId, ContentOwner
     };
     scoped_id(&runtime_scope(runtime), &runtime.environment().window, instance.and_then(|id| owners.get(id)), target)
 }
-pub(crate) fn egui_rect(rect: LogicalRect) -> egui::Rect {
+pub fn egui_rect(rect: LogicalRect) -> egui::Rect {
     egui::Rect::from_min_size(egui::pos2(rect.origin.x, rect.origin.y), egui::vec2(rect.size.width, rect.size.height))
 }
-pub(crate) fn logical_rect(rect: egui::Rect) -> LogicalRect {
+pub fn logical_rect(rect: egui::Rect) -> LogicalRect {
     LogicalRect { origin: point(rect.min), size: Size { width: rect.width(), height: rect.height() } }
 }
 fn point(at: egui::Pos2) -> Point {
@@ -2577,7 +2577,7 @@ fn center(rect: LogicalRect) -> Point {
     Point { x: rect.origin.x + rect.size.width / 2.0, y: rect.origin.y + rect.size.height / 2.0 }
 }
 
-pub(crate) struct EmptyPanelHost;
+pub struct EmptyPanelHost;
 impl PanelHost for EmptyPanelHost {
     fn mount(
         &mut self,
@@ -2591,7 +2591,7 @@ impl PanelHost for EmptyPanelHost {
     }
 }
 
-pub(super) fn rule_key(rule: Rule) -> &'static str {
+pub fn rule_key(rule: Rule) -> &'static str {
     match rule {
         Rule::Availability => "ui.panel_host.rule.availability",
         Rule::Bounds => "ui.panel_host.rule.bounds",
