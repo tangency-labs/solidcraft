@@ -1307,13 +1307,18 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 ui_kit::options(ui, "feature_options", &mut [("Flip", flip), (extend_label, extend)]);
             }
         }
-        Kind::Emboss { depth, deboss } => {
+        Kind::Emboss { depth, deboss, offset_x, offset_y, angle } => {
             enter |= expr_row(ui, "Depth", depth);
             form_row(ui, "Type", |ui| {
                 let mut i = usize::from(*deboss);
                 ui_kit::segmented(ui, &mut i, &["Emboss", "Deboss"], Default::default());
                 *deboss = i == 1;
             });
+            // Where the profiles go on the face, apart from where the sketch has them (#20386):
+            // along the sketch's x and y, and turned about their middle.
+            enter |= hint_row(ui, "Offset X", offset_x, tr("none"));
+            enter |= hint_row(ui, "Offset Y", offset_y, tr("none"));
+            enter |= hint_row(ui, "Angle", angle, tr("none"));
             ui.add(egui::Label::new(solidcraft_ui_text::tr("ui.emboss_wrap_note")).wrap());
         }
         Kind::Align { flip, components, axes: [ax, ay, az], angle } => {

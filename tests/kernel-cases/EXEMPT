@@ -480,6 +480,7 @@ sketch.line.midpoint              2D sketch only (the sketch solver and engine t
 sketch.link_visibility            projection links: engine tests in crates/engine/src/cmd/sketch_link_manage_tests.rs
 sketch.loose_ends                 2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.loose_ends.tie             2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.merge_lines                2D sketch only; crates/engine/src/cmd/sketch_merge_lines_tests.rs
 sketch.mirror                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.move                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.move3d                     2D sketch only (the sketch solver and engine tests); no kernel operation

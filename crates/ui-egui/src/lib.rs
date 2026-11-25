@@ -2966,6 +2966,10 @@ impl SolveApp {
             sketch_palette::toggle_construction(self);
             return;
         }
+        if id == "sketch.merge_lines" {
+            sketch_modify_ui::merge_selected_lines(self);
+            return;
+        }
         if id == "doc.open" {
             self.file_load.home_at_start = self.home.open;
         }

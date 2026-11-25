@@ -1652,6 +1652,63 @@ fn file_export_urdf_takes_the_mimic_choice() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Triangles in every binary STL file of `dir`, and the volume (mm³) they hold.
+fn stl_triangles_and_volume(dir: &std::path::Path) -> (u32, f64) {
+    let (mut count, mut volume) = (0, 0.0);
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if e.path().extension().is_some_and(|x| x == "stl") {
+            let bytes = std::fs::read(e.path()).unwrap_or_default();
+            count += bytes.get(80..84).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+            volume += stl_volume(&bytes).unwrap_or(f64::NAN) * 1e9;
+        }
+    }
+    (count, volume)
+}
+
+/// A screw for a simulator (#20393): a Ø3 × 14 mm shank under a Ø5.5 × 1.65 mm head. The
+/// standard meshes follow it to 1/5000 of its size, a few thousand triangles more than a
+/// simulator needs; `chord` gives every link mesh one tolerance in mm, and `quality` is taken too.
+#[test]
+fn file_export_urdf_takes_the_mesh_chord() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"diameter": 3, "height": 14, "body_name": "Screw"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 5.5, "height": 1.65, "base": [0, 0, 14], "operation": "join", "targets": ["Screw"]}));
+    s.param_check = crate::schema::ParamCheck::Strict;
+    let exact = std::f64::consts::PI * (1.5f64.powi(2) * 14.0 + 2.75f64.powi(2) * 1.65);
+    let export = |s: &mut Session, tag: &str, extra: Value| {
+        let dir = temp(tag);
+        let mut p = json!({"path": dir.join("screw.urdf").to_string_lossy()});
+        if let (Some(p), Value::Object(extra)) = (p.as_object_mut(), extra) {
+            p.extend(extra);
+        }
+        run(s, "file.export_urdf", p);
+        let out = stl_triangles_and_volume(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        out
+    };
+    let (standard, standard_volume) = export(&mut s, "chord-standard", json!({}));
+    let (coarse, coarse_volume) = export(&mut s, "chord-coarse", json!({"chord": 0.05}));
+    let (fine, _) = export(&mut s, "chord-fine", json!({"quality": "fine"}));
+    eprintln!("screw link meshes: standard {standard}, fine {fine}, chord 0.05 {coarse} triangles");
+    assert!(coarse > 0 && coarse * 10 < standard, "chord 0.05: {coarse} triangles, standard {standard}");
+    assert!(fine > standard, "fine: {fine} triangles, standard {standard}");
+    // Facets stand at most 0.05 mm inside the round faces: the volume lost is under that much
+    // all over the area of the round faces (and the head's ring).
+    let round = std::f64::consts::PI * (3.0 * 14.0 + 5.5 * 1.65 + 2.75f64.powi(2) - 1.5f64.powi(2));
+    for (what, v) in [("standard", standard_volume), ("chord 0.05", coarse_volume)] {
+        assert!(v <= exact * (1.0 + 1e-6) && v > exact - 0.05 * round, "{what}: {v} mm³, exact {exact}");
+    }
+    let dir = temp("chord-refused");
+    for p in [json!({"chord": 0.0005}), json!({"chord": 0.05, "quality": "fine"})] {
+        let mut p = p;
+        p["path"] = json!(dir.join("screw.urdf").to_string_lossy());
+        let e = s.execute("file.export_urdf", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("chord"), "{p}: {e}");
+    }
+    assert_eq!(std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0), 0, "nothing written");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // Robot exports read back as any URDF reader reads them. Each design is exported with
 // `file.export` as the desktop dialog does it (motion links as `<mimic>`), the written file is
 // read with a general XML reader, and the expected values are worked out by hand, never taken

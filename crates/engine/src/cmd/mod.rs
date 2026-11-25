@@ -304,6 +304,7 @@ mod sketch_freeform;
 mod sketch_import;
 mod sketch_inspect;
 mod sketch_links;
+mod sketch_merge_lines;
 mod sketch_modify;
 mod sketch_project;
 pub(crate) use sketch_project::MAX_PROJECTED_ENTITIES;
@@ -638,6 +639,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_create::COMMANDS.iter());
     v.extend(sketch_construction::COMMANDS.iter());
     v.extend(sketch_divide::COMMANDS.iter());
+    v.extend(sketch_merge_lines::COMMANDS.iter());
     v.extend(sketch_equation::COMMANDS.iter());
     v.extend(sketch_constraints::COMMANDS.iter());
     v.extend(sketch_import::COMMANDS.iter());

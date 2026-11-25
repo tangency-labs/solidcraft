@@ -1034,7 +1034,7 @@ fn a_new_rib_starts_with_extend_ends_off() {
     }
 }
 form_case!(web, "solid.web", ["Direction", "Thickness", "Depth"]);
-form_case!(emboss, "solid.emboss", ["Depth", "Type"]);
+form_case!(emboss, "solid.emboss", ["Depth", "Type", "Offset X", "Offset Y", "Angle"]);
 form_case!(replace_face, "solid.replace_face", []);
 form_case!(boundary_fill, "solid.boundary_fill", ["Cells", "Operation"]);
 form_case!(align, "solid.align", ["Object Type", "From Snap", "To Snap"]);

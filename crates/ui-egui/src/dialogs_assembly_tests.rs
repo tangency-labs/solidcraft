@@ -138,7 +138,7 @@ fn coderabbit_review_no_cylinder_circle_marker_uses_edge_axis() {
 #[test]
 fn coderabbit_review_alignment_hover_cache_tracks_rollback() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     h.app.start("joint.create");
     h.app.dialog.as_mut().unwrap().active = 2;
     h.frames(2);
@@ -597,7 +597,7 @@ fn secondary_alignment_round_origins_zero_then_one_confirmed_hover_leave_and_cli
 #[test]
 fn secondary_alignment_circle_centers_are_automatic_without_technical_mode_widgets() {
     let mut h = crate::scenario::Harness::new();
-    h.app = round_plates();
+    *h.app = round_plates();
     h.app.start("joint.create");
     let mut d = h.app.dialog.take().unwrap();
     for p in [Vec3::new(23.0, 20.0, 9.0), Vec3::new(173.0, 20.0, 9.0)] {
@@ -745,7 +745,7 @@ fn settle_alignment_preview(h: &mut crate::scenario::Harness) {
 #[test]
 fn secondary_alignment_feedback_picks_the_solved_geometry() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     h.app.start("joint.create");
     let mut d = h.app.dialog.take().unwrap();
     for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
@@ -776,7 +776,7 @@ fn secondary_alignment_feedback_picks_the_solved_geometry() {
 #[test]
 fn secondary_alignment_feedback_invalid_first_pick_keeps_the_last_pose() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     h.app.start("joint.create");
     let mut d = h.app.dialog.take().unwrap();
     for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
@@ -900,7 +900,7 @@ fn secondary_alignment_feedback_primary_repick_maps_from_preview_to_author_frame
 #[test]
 fn secondary_alignment_circle_hover_survives_preview_and_small_motion_until_real_leave() {
     let mut h = crate::scenario::Harness::new();
-    h.app = round_plates();
+    *h.app = round_plates();
     h.app.start("joint.create");
     let mut d = h.app.dialog.take().unwrap();
     for p in [Vec3::new(23.0, 20.0, 9.0), Vec3::new(173.0, 20.0, 9.0)] {
@@ -933,7 +933,7 @@ fn secondary_alignment_circle_hover_survives_preview_and_small_motion_until_real
 #[test]
 fn secondary_alignment_feedback_stationary_hover_keeps_identity_until_pointer_moves() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     h.app.start("joint.create");
     h.app.dialog.as_mut().unwrap().active = 2;
     h.frames(2);
@@ -1104,7 +1104,7 @@ fn secondary_alignment_refuses_other_occurrences_and_static_offset_origins() {
 #[test]
 fn secondary_alignment_single_inversion_keeps_component_flip_and_clear_saved_references() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     h.app.start("joint.create");
     let mut d = h.app.dialog.take().unwrap();
     for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(40.0, 20.0, 5.0), Vec3::new(20.0, 10.0, 5.0)] {
@@ -1210,7 +1210,7 @@ fn editing_a_joint_keeps_all_three_offsets() {
 
     let before = app.session.doc.clone();
     let mut harness = crate::scenario::Harness::new();
-    harness.app = app;
+    *harness.app = app;
     harness.app.home.open = false;
     harness.app.dialog = Some(edited);
     harness.settle();
@@ -1836,7 +1836,7 @@ fn a_picked_snap_is_measured_once_not_every_frame() {
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [60, 0, 0]})).unwrap();
     s.execute("component.activate", &json!({"component": "root"})).unwrap();
     let mut h = crate::scenario::Harness::new();
-    h.app = SolveApp::new(s, Services::default());
+    *h.app = SolveApp::new(s, Services::default());
     let (plate, peg) = (occ(&h.app, "Plate"), occ(&h.app, "Peg"));
     h.app.run("occurrence.ground", json!({"occurrence": plate, "grounded": true})).unwrap();
     h.app.start("joint.create");
@@ -2214,7 +2214,7 @@ fn drive_value_takes_the_keyboard() {
 #[test]
 fn drive_slider_previews_intermediate_positions_before_release() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     let (a, b) = (occ(&h.app, "A"), occ(&h.app, "B"));
     h.app
         .run(
@@ -2278,7 +2278,7 @@ fn drive_slider_previews_intermediate_positions_before_release() {
 #[test]
 fn slider_drag_does_not_open_suggestions_over_the_slider() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     for name in ["depth", "drop"] {
         h.app.run("parameters.add", json!({"name": name, "expression": "5 mm"})).unwrap();
     }
@@ -2601,7 +2601,7 @@ fn drive_opens_on_the_picked_joint() {
 #[test]
 fn drive_on_a_rigid_joint_says_why_and_offers_edit_joint() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     let at = |o: &str| json!({"occurrence": o, "point": [25, 10, 5], "z": [1, 0, 0]});
     h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Glue"})).unwrap();
     let glue = h.app.session.doc.assembly.joints[0].id;
@@ -2624,7 +2624,7 @@ fn drive_on_a_rigid_joint_says_why_and_offers_edit_joint() {
 #[test]
 fn secondary_alignment_review_drive_entry_restores_all_four_inputs() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     h.app.start("joint.create");
     let mut d = h.app.dialog.take().unwrap();
     for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(40.0, 20.0, 5.0), Vec3::new(20.0, 10.0, 5.0)] {
@@ -2656,7 +2656,7 @@ fn secondary_alignment_review_drive_entry_restores_all_four_inputs() {
 #[test]
 fn edit_joint_from_drive_joints_keeps_its_two_sides() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     let at = |o: &str| json!({"occurrence": o, "point": [25, 10, 5], "z": [1, 0, 0]});
     h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Glue"})).unwrap();
     let glue = h.app.session.doc.assembly.joints[0].id;
@@ -3018,7 +3018,7 @@ fn interference_checks_off_the_window_thread_and_drops_a_check_of_a_changed_desi
 /// The Joint dialog over two boxes, Component 1 taking a pick, in the harness (a real viewport).
 fn joint_picking_component_1() -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     h.app.cam.distance = 160.0;
     h.settle();
     h.app.start("joint.create");
@@ -3632,7 +3632,7 @@ fn measure_still_takes_sketch_curve_picks() {
 #[test]
 fn lateral_offset_controls_do_not_change_assembly_constraint_rules() {
     let mut harness = crate::scenario::Harness::new();
-    harness.app = two_boxes();
+    *harness.app = two_boxes();
     harness.app.home.open = false;
     harness
         .app

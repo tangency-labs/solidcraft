@@ -5070,7 +5070,7 @@ mod tests {
     #[test]
     fn grouped_row_save_closes_only_its_tab_and_keeps_the_last_row_grouped() {
         let mut h = crate::scenario::Harness::new();
-        h.app = four_tabs();
+        *h.app = four_tabs();
         let file = h.dir.join("row.solidcraft");
         let to = file.to_string_lossy().into_owned();
         h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(Some(to.clone())))));
@@ -5156,7 +5156,7 @@ mod tests {
     #[test]
     fn grouped_row_discard_closes_only_its_tab_without_saving() {
         let mut h = crate::scenario::Harness::new();
-        h.app = four_tabs();
+        *h.app = four_tabs();
         let file = h.dir.join("discard.solidcraft");
         switch(&mut h.app, 0);
         h.app.run("file.save_as", json!({"path":file.to_string_lossy()})).unwrap();
@@ -5173,7 +5173,7 @@ mod tests {
     fn grouped_last_row_finishes_close_or_quit() {
         for quit in [false, true] {
             let mut h = crate::scenario::Harness::new();
-            h.app = four_tabs();
+            *h.app = four_tabs();
             let file = h.dir.join("last.solidcraft");
             let to = file.to_string_lossy().into_owned();
             h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(Some(to.clone())))));
@@ -5212,7 +5212,7 @@ mod tests {
     fn grouped_row_cancelled_picker_or_failed_save_keeps_the_row() {
         for fail in [false, true] {
             let mut h = crate::scenario::Harness::new();
-            h.app = four_tabs();
+            *h.app = four_tabs();
             let bad = h.dir.join("missing").join("row.solidcraft").to_string_lossy().into_owned();
             h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(fail.then(|| bad.clone())))));
             let before = control(&mut h.app, &json!({"action":"quit", "save_indices":[2]}));
@@ -5230,7 +5230,7 @@ mod tests {
     #[test]
     fn grouped_save_selected_writes_only_checked_designs() {
         let mut h = crate::scenario::Harness::new();
-        h.app = four_tabs();
+        *h.app = four_tabs();
         let file = h.dir.join("selected.solidcraft");
         let to = file.to_string_lossy().into_owned();
         h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(Some(to.clone())))));
@@ -5248,7 +5248,7 @@ mod tests {
     #[test]
     fn grouped_existing_paths_save_only_selected_and_failure_keeps_tabs() {
         let mut h = crate::scenario::Harness::new();
-        h.app = four_tabs();
+        *h.app = four_tabs();
         let first = h.dir.join("first.solidcraft");
         let second = h.dir.join("second.solidcraft");
         for (i, file) in [(0, &first), (2, &second)] {
@@ -5265,7 +5265,7 @@ mod tests {
             let design = solidcraft_engine::io::read_design(&std::fs::read(file).unwrap()).unwrap();
             assert_eq!(design.features.len(), features);
         }
-        h.app = four_tabs();
+        *h.app = four_tabs();
         let bad = h.dir.join("missing").join("bad.solidcraft").to_string_lossy().into_owned();
         h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(Some(bad.clone())))));
         control(&mut h.app, &json!({"action":"quit"}));
@@ -5280,7 +5280,7 @@ mod tests {
     #[test]
     fn grouped_later_save_as_cancel_keeps_all_tabs_and_saves_in_order() {
         let mut h = crate::scenario::Harness::new();
-        h.app = four_tabs();
+        *h.app = four_tabs();
         let file = h.dir.join("first.solidcraft");
         let to = file.to_string_lossy().into_owned();
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -5306,7 +5306,7 @@ mod tests {
     #[test]
     fn grouped_prompt_names_select_tabs_and_keyboard_answers() {
         let mut h = crate::scenario::Harness::new();
-        h.app = four_tabs();
+        *h.app = four_tabs();
         h.app.home.open = false;
         h.app.preferences.language = "en".into();
         switch(&mut h.app, 0);
