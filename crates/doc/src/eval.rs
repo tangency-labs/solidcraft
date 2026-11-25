@@ -14072,18 +14072,19 @@ fn chamfer_with(
 }
 
 #[cfg(test)]
-type FingerJointInterval = solidcore_ops::finger_joint::Interval;
+type FingerJointInterval = solidcraft_kernel::services::finger_joint::Interval;
 
 /// Generate logical intervals without constructing geometry or applying allowances.
 #[cfg(test)]
 fn finger_joint_pattern(span: (f64, f64), count: usize) -> Result<Vec<FingerJointInterval>> {
-    solidcore_ops::finger_joint::pattern([span.0, span.1], count).map_err(|error| DocError::Invalid(error.to_string()))
+    solidcraft_kernel::services::finger_joint::pattern([span.0, span.1], count).map_err(|error| DocError::Invalid(error.to_string()))
 }
 
 /// Apply edge offsets and validate clearance without changing the interval sequence.
 #[cfg(test)]
 fn finger_joint_allowances(pattern: &mut [FingerJointInterval], span: (f64, f64), edge_offset: f64, clearance: f64) -> Result<()> {
-    solidcore_ops::finger_joint::allowances(pattern, [span.0, span.1], edge_offset, clearance).map_err(|error| DocError::Invalid(error.to_string()))
+    solidcraft_kernel::services::finger_joint::allowances(pattern, [span.0, span.1], edge_offset, clearance)
+        .map_err(|error| DocError::Invalid(error.to_string()))
 }
 
 fn eval_finger_joint_pair(

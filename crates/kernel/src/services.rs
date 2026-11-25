@@ -27,6 +27,7 @@ pub use solidcore_ops::curve_fit;
 pub use solidcore_ops::develop;
 pub use solidcore_ops::export_geometry;
 pub use solidcore_ops::face_surface;
+pub use solidcore_ops::finger_joint;
 pub use solidcore_ops::fit_projection;
 pub use solidcore_ops::frame_gusset;
 pub use solidcore_ops::frame_member;
