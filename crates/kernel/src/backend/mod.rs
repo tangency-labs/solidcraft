@@ -10,6 +10,7 @@
 use solidcore_record::brep::Brep;
 use solidcraft_kernel_api::{Backend, BackendError, BackendId, Exported, OpKind, Support};
 
+mod cell_grid;
 mod modelling;
 
 use crate::body::Body;

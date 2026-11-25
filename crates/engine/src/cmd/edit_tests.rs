@@ -2976,6 +2976,111 @@ fn feature_and_folder_names_count_characters_not_bytes() {
     assert_eq!(reopened.map(|d| d.timeline_groups[0].name.clone()), Ok(long));
 }
 
+/// #18094: one rim edge of a pocket selects the pocket's rim, the loop of the flat top face that
+/// holds the edge, from the exact topology; `face` picks another of the edge's faces, and a call
+/// that names no edge, half an edge, a face the edge doesn't bound or an unknown key is refused
+/// with the selection as it was. With `add`, an edge already selected is not added again.
+#[test]
+fn select_edge_loop_takes_the_rim_of_a_pocket_from_one_edge() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name":"Plate", "length":20, "width":20, "height":10}));
+    run(&mut s, "solid.box", json!({"corner":[5,5,5], "length":10, "width":10, "height":5, "operation":"cut"}));
+    assert!(s.execute("select.edge_loop", &json!({})).is_err(), "nothing selected");
+    run(&mut s, "select.set", json!({"items":[{"type":"edge","body":"Plate","point":[10,5,10]}]}));
+    let Some(Sel::Edge { index: picked, .. }) = s.selection.first().cloned() else { panic!("{:?}", s.selection) };
+    let history = (s.undo.len(), s.redo.len());
+    let selected_edges = |s: &Session| {
+        let mut out: Vec<usize> = s.selection.iter().filter_map(|x| if let Sel::Edge { index, .. } = x { Some(*index) } else { None }).collect();
+        out.sort_unstable();
+        out
+    };
+    let sorted = |r: &Value| {
+        let mut out: Vec<usize> = r["edges"].as_array().unwrap().iter().map(|e| e.as_u64().unwrap() as usize).collect();
+        out.sort_unstable();
+        out
+    };
+
+    // The pocket's rim, read from the B-rep record without the command: the plate's top is the
+    // face with an inner loop (not its first, outer one) through the picked edge, and the rim is
+    // that loop's edges.
+    let (expected_top, mut expected_rim) = {
+        let state = s.world_state().unwrap();
+        let record = state.body("Plate").unwrap().body.record();
+        record
+            .faces
+            .iter()
+            .enumerate()
+            .find_map(|(f, face)| {
+                face.loops.iter().skip(1).find_map(|l| match l {
+                    solidcore_record::brep::Loop::Edges { edges } if edges.iter().any(|u| u.edge as usize == picked) => {
+                        Some((f, edges.iter().map(|u| u.edge as usize).collect::<Vec<usize>>()))
+                    }
+                    _ => None,
+                })
+            })
+            .expect("the picked edge is on the top face's inner loop")
+    };
+    expected_rim.sort_unstable();
+    let r = run(&mut s, "select.edge_loop", json!({}));
+    assert_eq!(r["selected"], 4, "{r}");
+    let rim = sorted(&r);
+    assert_eq!(rim, expected_rim, "by default the loop is the pocket's rim on the top face: {r}");
+    assert_eq!(r["face"].as_u64(), Some(expected_top as u64), "{r}");
+    assert!(rim.contains(&picked), "{r}");
+    assert!(s.selection.iter().all(|x| matches!(x, Sel::Edge { body, .. } if body == "Plate")), "{:?}", s.selection);
+    assert_eq!(selected_edges(&s), rim);
+    let top = r["face"].as_u64().unwrap() as usize;
+    assert_eq!(history, (s.undo.len(), s.redo.len()), "selecting is not an undo step");
+
+    // The pocket wall under the picked edge: its own loop of four, the picked edge the only one
+    // it shares with the rim.
+    let state = s.world_state().unwrap();
+    let record = state.body("Plate").unwrap().body.record();
+    let wall = (0..record.faces.len())
+        .find(|&f| {
+            f != top
+                && record.faces[f]
+                    .loops
+                    .iter()
+                    .any(|l| matches!(l, solidcore_record::brep::Loop::Edges { edges } if edges.iter().any(|u| u.edge as usize == picked)))
+        })
+        .unwrap();
+    drop(state);
+    let r = run(&mut s, "select.edge_loop", json!({"body":"Plate", "edge":picked, "face":wall}));
+    assert_eq!((r["face"].as_u64(), r["selected"].as_u64()), (Some(wall as u64), Some(4)), "{r}");
+    let around_wall = sorted(&r);
+    assert_eq!(selected_edges(&s), around_wall);
+    assert_eq!(around_wall.iter().filter(|e| !rim.contains(e)).count(), 3, "{r}");
+
+    // `add` keeps what was selected: the rim's four and the wall's three others.
+    run(&mut s, "select.edge_loop", json!({"body":"Plate", "edge":picked, "add":true}));
+    assert_eq!(s.selection.len(), 7, "{:?}", s.selection);
+
+    // An edge picked away from its middle and then grown with `add` stays one item, at the point
+    // it was picked: the loop adds the other three only.
+    let off_middle = Vec3::new(7.0, 5.0, 10.0);
+    run(&mut s, "select.set", json!({"items":[{"type":"edge","body":"Plate","point":off_middle}]}));
+    run(&mut s, "select.edge_loop", json!({"add":true}));
+    assert_eq!(selected_edges(&s), rim, "{:?}", s.selection);
+    assert!(s.selection.contains(&Sel::Edge { body: "Plate".into(), index: picked, point: off_middle }), "{:?}", s.selection);
+
+    let selected = s.selection.clone();
+    for params in [
+        json!({"body":"Plate"}),
+        json!({"edge":picked}),
+        json!({"body":"Missing", "edge":0}),
+        json!({"body":"Plate", "edge":u64::MAX}),
+        json!({"body":"Plate", "edge":-1}),
+        json!({"body":"Plate", "edge":picked, "face":u64::MAX}),
+        json!({"body":"Plate", "edge":picked, "face":(0..20).find(|f| *f != top && *f != wall).unwrap()}),
+        json!({"body":"Plate", "edge":picked, "extra":true}),
+        json!([]),
+    ] {
+        assert!(s.execute("select.edge_loop", &params).is_err(), "{params}");
+        assert_eq!(s.selection, selected, "{params}");
+    }
+}
+
 /// #19632: `solid.hole` takes length expressions as `position`, but the stored hole keeps them in
 /// `at` and `position` is the evaluated point, so editing `position` with an expression failed
 /// with "expected f64". The edit takes it as the creation command does and the hole follows it.
