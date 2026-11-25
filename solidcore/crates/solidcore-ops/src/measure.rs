@@ -3006,9 +3006,11 @@ pub(crate) mod tests {
             assert!((value - expected).abs() < 1e-12, "{face_normal:?}");
         }
 
-        // `Body::face_normal_at_point` tests membership in the band classification uses:
-        // all three points lie on the x = 0 face within its tolerance, none on x = 10.
-        for p in [face_pt, edge_pt, vertex_pt] {
+        // `Body::face_normal_at_point` tests membership in the Euclidean `face_point_tol` band
+        // (2 * tol here): `face_pt` (1.5 * tol) and `edge_pt` (sqrt(2) * 1.2 * tol ≈ 1.70 * tol)
+        // lie within it, whereas `vertex_pt` (sqrt(3) * 1.2 * tol ≈ 2.08 * tol) lies outside it
+        // and proves `classify_points_with_normals` falls back to the located vertex hit.
+        for p in [face_pt, edge_pt] {
             let Some(normal) = b.face_normal_at_point(&order, x0_face, p).unwrap() else {
                 panic!("expected {p:?} on the x=0 face");
             };
@@ -3016,6 +3018,10 @@ pub(crate) mod tests {
                 assert!((value - expected).abs() < 1e-12, "{normal:?}");
             }
         }
+        assert_eq!(
+            b.face_normal_at_point(&order, x0_face, vertex_pt).unwrap(),
+            None
+        );
 
         for (result, allowed) in [
             (results[1], [[-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]].as_slice()),
