@@ -18,7 +18,7 @@
 //! session: circular rounds per edge, each set-back vertex marked (`add_set_back_vertex`)
 //! before the corners are made, then `set_corner_setback` on the vertex's corner, and with
 //! a G2 corner the corner's patch marked (`set_mark_corner_patches`) for SolidCraft to
-//! replace; then `StitchAndOrient`. The fixes are the corpus's `fixes.json`. The values are
+//! replace; then `StitchAndOrient`. The fixes are SolidCraft's preset. The values are
 //! those the same calls give on the Setback (solidcore#2933), every one: counts, the
 //! patch's faces and the volume to 1e-9. The rig's values are the N x N corner's (013's
 //! filled corner) or SolidCraft's G2 patch's, so here the corner's own Setback fill is
@@ -51,10 +51,9 @@ use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::{edge, EdgeId, VertexId};
 use solidcore::{Brep, Kernel, SolidError};
 
-/// SolidCraft's whole preset (`tests/kernel_cases/fixes.json`). That includes
-/// `closed_smooth_pole_tangent_limit`, which the rig run also turned on, and since the
-/// file matches `core::fixes()`, `face_swap_uv_transposes_trims`, `fillet_chamfer_corner` and
-/// `brep_ray_classifies_current_trims`. Every value here is unchanged under them.
+/// SolidCraft's whole preset (`support/solidcraft_fixes.rs`). That includes
+/// `closed_smooth_pole_tangent_limit`, which the rig run also turned on. Every value here
+/// is unchanged under it.
 fn solidcraft_fixes() -> Kernel {
     Kernel {
         fixes: solidcraft_fixes::solidcraft_fixes(),

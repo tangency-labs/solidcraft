@@ -385,6 +385,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if app.services.graphics_path.is_some() {
                     graphics_api_row(app, ui, help_label_width);
                     graphics_card_row(app, ui, help_label_width);
+                    safe_graphics_row(app, ui);
                 }
                 #[cfg(target_os = "linux")]
                 window_system_row(app, ui, help_label_width);
@@ -629,4 +630,17 @@ fn field_of_view_row(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         response
     });
+}
+
+/// Start in safe graphics mode, the next launch only (`crate::safe_graphics`): written to
+/// `graphics.json` at once, as the graphics API is.
+fn safe_graphics_row(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let mut next = app.safe_graphics_next;
+    let response = ui_kit::checkbox(ui, app.tr("prefs.safe_graphics_next"), &mut next).backing_on_hover_text(app.tr("prefs.safe_graphics_next_help"));
+    crate::scenario::publish_target("prefs:safe_graphics_next", response.rect);
+    if next != app.safe_graphics_next
+        && let Err(error) = crate::safe_graphics::set_next_launch(app, next)
+    {
+        app.set_status(error, true);
+    }
 }

@@ -183,7 +183,7 @@ pub(crate) fn own_model(brep: &Value) -> Result<Result<Model, Output>, HarnessEr
     let (path, _) = fixture_input(brep.clone())?;
     let src: BrepIn = serde_json::from_value(brep.clone())
         .map_err(|e| harness(format!("topology fixture: {e}")))?;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let built = match &src {
         BrepIn::File { rebuild, .. } => {
             read_as(&mut k, &path, *rebuild, false, false, &Conventions::EDGEUSE_GRAPH)?
@@ -251,12 +251,16 @@ fn run_box(input: &BoxInput) -> Result<Output, HarnessError> {
     let Some(id) = pick(input.index, n) else {
         return Ok(none_output());
     };
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let tight = input.tight && !input.use_default;
     let mut bx = Extent3d::from_points(
         Vec3::new(SEED_MIN[0], SEED_MIN[1], SEED_MIN[2]),
         Vec3::new(SEED_MAX[0], SEED_MAX[1], SEED_MAX[2]),
     );
+    if tight {
+        // the body boxed, kept when a test captures it (`dump::capture`)
+        crate::dump::body(&k, "tight", b);
+    }
     let r = match input.target {
         0 => p1::calculate_bounding_box(&k, b, FaceId::from_index(id), tight).map(|x| bx = x),
         1 => p1::calculate_shell_bounding_box_into(
@@ -341,7 +345,7 @@ fn pc_block(pc: &PointClassification<EntityRef>) -> Vec<f64> {
         f64::from(pc.point_class().code()),
         kind,
         index,
-        pc.gap_3d(&Kernel::default(), &NoGeometry, None)
+        pc.gap_3d(&crate::runner_kernel(), &NoGeometry, None)
             .unwrap_or(f64::NAN),
         pc.src_zone_tol_3d(),
         pc.pre_snap_param(),
@@ -374,12 +378,9 @@ impl solidcore::intersect::point_class::ClassGeometry<EntityRef> for NoGeometry 
 }
 
 /// The reference shim's `drop_trim_cache(f)` (before `Point3DClassify`):
-/// `SmCacheMgr::DeleteObjectsCache(SM_OC_TRIMSRF, srf)`. The cache's tree state lives in
-/// the deleted object upstream, so the slot goes back to [`CacheTreeState::NoCache`]: the
-/// next lookup makes a cache whose tree is built, as upstream's does. (A Rust `.smb` read
-/// can leave a kept cache whose state is `Unbuilt`.)
+/// `SmCacheMgr::DeleteObjectsCache(SM_OC_TRIMSRF, srf)`: the next lookup makes a cache
+/// whose tree is built.
 pub(crate) fn drop_trim_cache(b: &Brep, f: FaceId) -> Result<(), HarnessError> {
-    use solidcore::surface::surface::CacheTreeState;
     if let Some(surface) = b
         .face(f)
         .map_err(|e| harness(e.to_string()))?
@@ -387,7 +388,6 @@ pub(crate) fn drop_trim_cache(b: &Brep, f: FaceId) -> Result<(), HarnessError> {
         .as_ref()
     {
         surface.delete_trim_cache();
-        surface.set_cache_tree_state(CacheTreeState::NoCache);
     }
     Ok(())
 }
@@ -400,7 +400,7 @@ fn run_point(k: &Kernel, i: &PointInput) -> Result<Output, HarnessError> {
     let Some(a) = point_args(k, &m, i)? else {
         return Ok(none_output());
     };
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let mut b = m.brep;
     drop_trim_cache(&b, a.face)?;
     let mut pc = PointClassification::new(zone_tol3d(&k, i.pc_tol));
@@ -453,7 +453,7 @@ fn run_edge_on(i: &EdgeOnInput) -> Result<Output, HarnessError> {
     let edge = (i.edge >= 0)
         .then(|| pick(i.edge as usize, n_edges).map(EdgeId::from_index))
         .flatten();
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let [px, py, pz] = i.p;
     let [qx, qy, qz] = i.q;
     let line = match BSplineCurve::create_line_segment(
@@ -732,7 +732,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        let k = &Kernel::default();
+        let k = &crate::runner_kernel();
         run(k, case)
     }
 

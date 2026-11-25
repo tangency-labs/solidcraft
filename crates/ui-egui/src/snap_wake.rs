@@ -54,8 +54,12 @@ pub fn wanted(app: &SolveApp) -> bool {
 }
 
 /// Whether the active dialog input takes snap points (Move, Align, Measure, joints).
+/// Not a joint origin's while the selection filter leaves Vertices out: its points could not be
+/// picked (#18255).
 fn input_takes(app: &SolveApp) -> bool {
-    app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::SNAP_POINTS != 0)
+    let Some(d) = app.dialog.as_ref() else { return false };
+    let joint = crate::dialogs_assembly::takes_snaps(d);
+    d.active_input().is_some_and(|i| i.accept & crate::selection::SNAP_POINTS != 0) && !(joint && app.ui.pick_off.iter().any(|x| x == "vertices"))
 }
 
 /// Whether a sketch tool that places points is active (2D or 3D).

@@ -49,13 +49,14 @@ SKETCH appears during sketch editing; with Preferences › Interface › **Keep 
 | SKETCH | REFERENCE | **`sketch.project`**, `sketch.intersect`, `sketch.include_3d`, `sketch.project_to_surface`, `sketch.intersection_curve`, `sketch.spun_profile`, `sketch.isoparametric_curve`, `sketch.fit_curves_to_section`, `sketch.insert_dxf`, `sketch.insert_svg`, `canvas.insert` |
 | SKETCH | FINISH SKETCH | **`sketch.finish`**, `sketch.finish_auto_constrain` |
 | SHEET METAL | SKETCH | **`sketch.create`** |
-| SHEET METAL | CREATE | **`sheet.flange`**, **`sheet.hem`**, **`sheet.fold`**, **`sheet.perforate`**, `sheet.convert` |
+| SHEET METAL | CREATE | **`sheet.flange`**, **`sheet.hem`**, **`sheet.fold`**, **`sheet.perforate`**, `sheet.convert`, `sheet.recognize` |
 | SHEET METAL | FLAT | **`sheet.unfold`**, **`sheet.refold`**, **`sheet.flat_pattern`** |
 | SHEET METAL | OUTPUT | **`sheet.export_dxf`**, **`sheet.export_bend_table`** |
 | SHEET METAL | RULES | **`sheet.manage_rules`** |
 | SHEET METAL | CONFIGURE | **`parameters.change`**, **`config.table`**, `config.configure` |
 | WELDMENTS | SKETCH | **`sketch.create`** |
 | WELDMENTS | CREATE | **`frame.member`** |
+| WELDMENTS | MODIFY | **`frame.trim`** |
 | WELDMENTS | CONFIGURE | **`parameters.change`**, **`config.table`**, `config.configure` |
 | SKETCH | CONFIGURE | **`parameters.change`**, **`config.table`**, `config.configure` |
 | RENDER | SCENE | **`render.scene`** |
@@ -116,6 +117,7 @@ Explicit command-id lists override the default placement mapping. Shared command
 | SURFACE / INSPECT | INSPECT / SURFACE QUALITY | `inspect.continuity` |
 | SURFACE / MODIFY | SURFACE / EDIT | `surface.stitch`, `surface.extend`, `surface.trim`, `surface.untrim`, `surface.unstitch`, `surface.reverse_normal`, `surface.fair`, `surface.fillet`, `surface.match` |
 | WELDMENTS / CREATE | WELDMENTS / CREATE | `frame.member` |
+| WELDMENTS / MODIFY | WELDMENTS / MODIFY | `frame.trim` |
 
 ## Placement decisions and missing commands
 

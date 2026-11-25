@@ -116,6 +116,8 @@ fn strict_keeps_todays_errors() {
         ("sketch.constraint.tangent", on(json!({"a": {"point": 1}, "b": "x"}))),
         ("sketch.constraint.tangent", on(json!({"b": "x"}))),
         ("sketch.constraint.parallel", on(json!({"a": true, "b": "x"}))),
+        // A planar model face is a 3D sketch's plane (#10616): the handler reads it.
+        ("sketch.constraint.parallel", on(json!({"a": "w1", "b": {"face": [0, 0, 10]}}))),
         ("sketch.constraint.perpendicular", on(json!({"a": "x", "b": 3}))),
         ("sketch.constraint.collinear", on(json!({"a": [1], "b": "x"}))),
         ("sketch.constraint.equal", on(json!({"a": 5, "b": "l1"}))),
@@ -203,6 +205,13 @@ fn the_types_read_each_key_as_the_handlers_do() {
     assert!(matches!(p.a, Some(Operand::Model(_))));
     let p: ParallelParams = parse(json!({})).unwrap();
     assert_eq!((p.a, p.b), (None, None), "left out: the handler's to refuse");
+    // Parallel, and only Parallel, also takes a planar model face: in a 3D sketch the plane a
+    // drawn 3D line is held parallel to (#10616). The handler checks the point.
+    let face = json!({"face": [0, 0, 10], "body": "Body1"});
+    let p: ParallelParams = parse(json!({"a": "w1", "b": face})).unwrap();
+    assert_eq!(p.b, Some(Operand::Face(face.clone())));
+    let e = parse::<PerpendicularParams>(json!({"a": "w1", "b": face})).map(|_| ()).unwrap_err();
+    assert_eq!(whole_message(e), "`b` must be a curve id, or x / y for a sketch axis");
     let e = parse::<ParallelParams>(json!({"a": 5, "b": "y"})).map(|_| ()).unwrap_err();
     assert_eq!(whole_message(e), "`a` must be a curve id, or x / y for a sketch axis");
     let e = parse::<ConcentricParams>(json!({"a": "c1", "b": {"midpoint": "l1"}})).map(|_| ()).unwrap_err();
@@ -241,6 +250,10 @@ fn the_types_read_each_key_as_the_handlers_do() {
     assert_eq!(p.a, Some(PointOperand::Midpoint("l1".into())));
     let msg = |v: Value| whole_message(parse::<CoincidentParams>(v).map(|_| ()).unwrap_err());
     assert_eq!(msg(json!({"a": {"midpoint": 3}, "b": "p1"})), "`midpoint` must be a curve id");
+    assert_eq!(msg(json!({"a": {"midpoint": {"vertex": [0, 0, 0]}}, "b": "p1"})), "`midpoint` must be a curve id");
+    let edge = json!({"edge": [1, 2, 3], "body": "Body1"});
+    let p: CoincidentParams = parse(json!({"a": "p1", "b": {"midpoint": edge}})).unwrap();
+    assert_eq!(p.b, Some(PointOperand::ModelMidpoint(edge)));
     assert_eq!(msg(json!({"a": "p1", "b": 3})), "`b` must be a point or curve");
     assert_eq!(msg(json!({"a": 3, "b": "p1"})), "`a` must be a point reference");
     // The handler reads `b` before `a`.

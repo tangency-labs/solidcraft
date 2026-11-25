@@ -15,7 +15,7 @@
 //! parameter); pcurves and domains come from the records, never from STEP's parameters.
 
 use crate::vec::Vec3Geom as _;
-use std::f64::consts::{FRAC_PI_2, TAU};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve as BCurve, Surface as BSurface};
@@ -337,6 +337,13 @@ fn is_closed(c: &Curve) -> bool {
 /// SURFACE_OF_REVOLUTION: the profile turned about the axis, u the angle and v the profile's
 /// parameter (`forward: false`), so the natural normal is ∂S/∂angle × ∂S/∂profile, STEP's.
 fn revolution(profile: &Curve, axis: &Axis1, ext: &Extent) -> R<BSurface> {
+    revolution_of(profile, axis, ext, None)
+}
+
+/// [`revolution`] of a profile whose distance from the axis is known: `tube` is a torus's
+/// major and minor radius where the profile is its tube's circle ([`torus_revolved`]), the
+/// circle's centre from the axis and its radius as the file gives them.
+fn revolution_of(profile: &Curve, axis: &Axis1, ext: &Extent, tube: Option<(f64, f64)>) -> R<BSurface> {
     let c = basis(profile)?;
     let (o, k) = (v3(axis.origin), v3(axis.direction));
     let k = k.normalized().ok_or("a revolution about no direction")?;
@@ -402,7 +409,7 @@ fn revolution(profile: &Curve, axis: &Axis1, ext: &Extent) -> R<BSurface> {
                 Span::Open { inner, .. } => 0.5 * (inner.0 + inner.1),
                 Span::Turn { start } => start + (mid - start).rem_euclid(TAU),
             };
-            let arc = conic_side_arc(c, o, e, face_mid);
+            let arc = conic_side_arc(c, o, e, face_mid, tube);
             let side = |t: f64| probe(t).map(|q| (q - o).dot(e));
             let s = match (s, arc) {
                 (_, Some(arc)) => Span::Open { inner: arc, outer: arc },
@@ -447,7 +454,7 @@ fn torus_revolved(position: &Placement, major: f64, minor: f64, ext: &Extent) ->
         },
         radius: minor,
     };
-    revolution(&circle, &Axis1 { origin: position.origin, direction: position.axis }, ext)
+    revolution_of(&circle, &Axis1 { origin: position.origin, direction: position.axis }, ext, Some((major, minor)))
 }
 
 /// The arc of a circle or ellipse profile on the positive side of the plane through the axis
@@ -456,15 +463,24 @@ fn torus_revolved(position: &Placement, major: f64, minor: f64, ext: &Extent) ->
 /// meet it. On the conic `O + a cos t X + b sin t Y` the side is `s₀ + A cos t + B sin t =
 /// s₀ + M cos(t − φ)`, zero at `φ ± acos(−s₀/M)`; a profile that only touches the axis (a horn
 /// torus's tube) has its arc a whole turn, both ends at the touching point.
-fn conic_side_arc(c: &Curve, o: Vec3, e: Vec3, near: f64) -> Option<(f64, f64)> {
+///
+/// `tube` is a torus's major and minor radius where the profile is its tube's circle: `s₀` and
+/// `M` are then those radii, as the file gives them. Worked out from the circle's centre they
+/// are the difference of two points' coordinates, which for a horn torus off the origin comes
+/// out a few units in the last place either side of touching: a miss (no arc, a form that runs
+/// past the pole) or a crossing just short of it.
+fn conic_side_arc(c: &Curve, o: Vec3, e: Vec3, near: f64, tube: Option<(f64, f64)>) -> Option<(f64, f64)> {
     let (position, a, b) = match c {
         Curve::Circle { position, radius } => (position, *radius, *radius),
         Curve::Ellipse { position, semi_axis_1, semi_axis_2 } => (position, *semi_axis_1, *semi_axis_2),
         _ => return None,
     };
-    let s0 = (v3(position.origin) - o).dot(e);
     let (ca, cb) = (a * v3(position.ref_direction).dot(e), b * v3(position.y()).dot(e));
-    let m = ca.hypot(cb);
+    let (s0, m) = match tube {
+        // The tube's centre lies along the circle's reference direction, on the side `e` is.
+        Some((major, minor)) => (major * ca.signum(), minor.abs()),
+        None => ((v3(position.origin) - o).dot(e), ca.hypot(cb)),
+    };
     let ratio = -s0 / m;
     if !(m > 0.0 && (-1.0..=1.0).contains(&ratio)) {
         return None;
@@ -710,12 +726,127 @@ fn step_profile(c: &BCurve) -> R<Option<Curve>> {
     }))
 }
 
+/// Samples a spline's angle round its circle is read at.
+const CIRCLE_SAMPLES: usize = 64;
+
+/// A rational B-spline that is exactly a circle or an arc of one, as that circle, its angle
+/// running the way the spline runs and starting at the spline's start, and the angle the spline
+/// sweeps (a full turn or more for one that closes); `None` for any other spline. The circle is
+/// the one through the spline's points at the start and a third and two thirds of the way along
+/// its parameter. The whole spline lies on it, proved on its control points, not at samples
+/// ([`on_circle`]): to within 1e-9 of the spline's own size (its samples' spread, the same
+/// wherever the spline lies) plus the rounding of deciding it. The angle it sweeps is read at
+/// [`CIRCLE_SAMPLES`] + 1 samples a fraction of a turn apart. A non-finite sample, point or
+/// weight refuses.
+pub(super) fn spline_circle(b: &crate::geom::BSplineCurve) -> Option<(Curve, f64)> {
+    let weights = b.weights.as_ref()?;
+    let (t0, t1) = b.domain()?;
+    let at = |s: f64| b.point(t0 + (t1 - t0) * s).map(v3);
+    let samples: Vec<Vec3> = (0..=CIRCLE_SAMPLES).map(|k| at(k as f64 / CIRCLE_SAMPLES as f64)).collect::<Option<_>>()?;
+    let (a, m, c) = (at(0.0)?, at(1.0 / 3.0)?, at(2.0 / 3.0)?);
+    let (ab, ac) = (m - a, c - a);
+    let n = ab.cross(ac);
+    let nn = n.dot(n);
+    if !(nn > 0.0) {
+        return None;
+    }
+    // The circumcentre of a, m and c.
+    let centre = a + (n.cross(ab) * ac.dot(ac) + ac.cross(n) * ab.dot(ab)) * (0.5 / nn);
+    let radius = (a - centre).len();
+    let axis = n.normalized()?;
+    let x = (a - centre).normalized()?;
+    let y = axis.cross(x);
+    // On the circle to 1e-9 of the spline's own size, its samples' spread, the same wherever it
+    // lies; not of the circle's radius and centre: three points of a spline that is nearly
+    // straight lie on a circle kilometres wide, 1e-9 of which is microns, and a sweep's straight
+    // seam microns off any circle was taken for one, about 4 µm off its face (#21379). The
+    // samples only measure the size; whether the spline is on the circle is proved on all of it.
+    let inf = f64::INFINITY;
+    let (mut lo, mut hi) = (Vec3 { x: inf, y: inf, z: inf }, Vec3 { x: -inf, y: -inf, z: -inf });
+    for p in &samples {
+        if !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
+            return None;
+        }
+        lo = Vec3 { x: lo.x.min(p.x), y: lo.y.min(p.y), z: lo.z.min(p.z) };
+        hi = Vec3 { x: hi.x.max(p.x), y: hi.y.max(p.y), z: hi.z.max(p.z) };
+    }
+    if !on_circle(b, weights, centre, axis, radius, 1e-9 * (hi - lo).len()) {
+        return None;
+    }
+    let (mut swept, mut last) = (0.0, 0.0);
+    for p in samples {
+        let d = p - centre;
+        let angle = d.dot(y).atan2(d.dot(x));
+        let step = (angle - last + PI).rem_euclid(TAU) - PI;
+        // Samples a fraction of a turn apart: a step back is not this spline's way round.
+        if !(step >= -1e-9) {
+            return None;
+        }
+        swept += step;
+        last = angle;
+    }
+    Some((Curve::Circle { position: Placement { origin: p3(centre), axis: p3(axis), ref_direction: p3(x) }, radius }, swept))
+}
+
+/// Whether every point of the rational spline `b` (weights `weights`) lies within `reach` of the
+/// circle of `centre`, unit `axis` and `radius`, plus the rounding of deciding it, proved on the
+/// control points over the whole parameter range (`definitions-and-certificates.md` §7, "a check
+/// at sample points proves nothing"):
+/// - in the circle's plane: with positive weights each point of the spline is a convex
+///   combination of its control points, so none is further from the plane than the furthest of
+///   them; plus the rounding of that distance, γ_8 of the numbers it works on;
+/// - on the circle's sphere: by [`solidcore::eval::sphere::curve_on_sphere`], which proves
+///   `|H − C W|² − R² W²` on the Bézier pieces' Bernstein coefficients. A coefficient bound `F`
+///   holds the spline within `F / (W² R)` of the sphere, and `W` is at least the least weight
+///   `w_lo`, so its tolerance `rel_tol (R w_max)²` is set to hold it within `reach` (plus the
+///   rounding of the homogeneous points, γ_3 of the largest control point, and of the
+///   coefficients, which `curve_on_sphere` adds).
+///
+/// A weight that is not positive or a point that is not finite refuses.
+fn on_circle(b: &crate::geom::BSplineCurve, weights: &[f64], centre: Vec3, axis: Vec3, radius: f64, reach: f64) -> bool {
+    use solidcore::nurbs::math::gamma;
+    if weights.len() != b.points.len() || !weights.iter().all(|w| w.is_finite() && *w > 0.0) {
+        return false;
+    }
+    let (mut w_lo, mut w_hi, mut far) = (f64::INFINITY, 0.0f64, 0.0f64);
+    for (p, w) in b.points.iter().zip(weights) {
+        let p = v3(*p);
+        let off = (p - centre).dot(axis).abs();
+        if !(off <= reach + gamma(8) * (p.len() + centre.len())) {
+            return false;
+        }
+        (w_lo, w_hi, far) = (w_lo.min(*w), w_hi.max(*w), far.max(p.len()));
+    }
+    let mut knots = Vec::new();
+    for (k, m) in b.knots.iter().zip(&b.multiplicities) {
+        knots.extend(std::iter::repeat_n(*k, *m));
+    }
+    let homogeneous = b.points.iter().zip(weights).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, *w]).collect();
+    // The certificate takes clamped knots: an unclamped spline (a circle written periodically,
+    // its end knots single) is the same spline over its domain clamped there, exactly
+    // (tangency-labs/solidcore#3401).
+    let Ok((knots, homogeneous)) = crate::assembly::clamped(b.degree, knots, homogeneous) else { return false };
+    let curve = solidcore::eval::Curve::RationalSpline { knots, homogeneous };
+    let within = reach + gamma(3) * far * (w_hi / w_lo);
+    let rel_tol = within / radius * (w_lo / w_hi) * (w_lo / w_hi);
+    rel_tol.is_finite() && solidcore::eval::sphere::curve_on_sphere(&curve, p3(centre), radius, rel_tol).is_ok()
+}
+
 /// An extruded circle along its axis is a cylinder; a circle in a plane through the axis,
 /// revolved, a ring torus. `None` for anything else.
 fn canonical(s: &Surface, reversed: &mut bool) -> Option<BSurface> {
     let c = match s {
         Surface::Extrusion { profile, .. } | Surface::Revolution { profile, .. } => basis(profile).ok()?,
         _ => return None,
+    };
+    // A rational spline that is exactly a circle (an exporter's NURBS circle) is that circle.
+    let fitted;
+    let c = match c {
+        Curve::BSpline(b) => {
+            fitted = spline_circle(b)?.0;
+            &fitted
+        }
+        c => c,
     };
     let Curve::Circle { position, radius } = c else { return None };
     let n = v3(position.axis);

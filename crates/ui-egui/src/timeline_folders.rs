@@ -88,12 +88,14 @@ impl Folders {
         self.names.get(&id).map_or("Folder", String::as_str)
     }
 
-    /// The deepest folder whose run holds the slot between features `slot - 1` and `slot` (a
-    /// slot at a folder's edge is outside it), as a dropped feature joins it.
-    pub(crate) fn at_slot(&self, slot: usize) -> Option<u64> {
+    /// The deepest folder whose run holds the slot between features `slot - 1` and `slot`, as a
+    /// dropped feature joins it. A slot at a folder's edge is outside it, except the first slot
+    /// of a folder in `past` (open, dropped on its chip or after it), so a folder of one feature
+    /// takes drops too (#18471).
+    pub(crate) fn at_slot(&self, slot: usize, past: &[u64]) -> Option<u64> {
         let mut level = &self.spans;
         let mut found = None;
-        while let Some(span) = level.iter().find(|s| s.start < slot && slot < s.end) {
+        while let Some(span) = level.iter().find(|s| slot < s.end && (s.start < slot || (s.start == slot && past.contains(&s.id)))) {
             found = Some(span.id);
             level = &span.children;
         }
@@ -328,9 +330,10 @@ fn folder_menu(app: &mut SolveApp, ui: &mut egui::Ui, folder: &Folder, view: &cr
 /// out of every folder), else `timeline.move_many` into the folder the slot is in (or out of
 /// folders), so a feature dropped between an open folder's features joins it.
 /// `active`: the drop lands before the history marker, which sits at `marker_slot`; crossing it
-/// rolls the feature back or forward in the same step.
-pub(crate) fn drop_feature(app: &mut SolveApp, folders: &Folders, id: u64, slot: usize, active: bool, marker_slot: usize) {
-    let target = folders.at_slot(slot);
+/// rolls the feature back or forward in the same step. `past`: the open folders whose chip the
+/// drop is on or right of.
+pub(crate) fn drop_feature(app: &mut SolveApp, folders: &Folders, id: u64, slot: usize, active: bool, marker_slot: usize, past: &[u64]) {
+    let target = folders.at_slot(slot, past);
     let from = app.session.doc.feature_index(id).unwrap_or(0);
     let home = app.session.doc.timeline_groups.iter().find(|g| g.features.contains(&id)).map(|g| g.id);
     if home == target {
@@ -391,14 +394,12 @@ mod tests {
         assert_eq!(depth, super::DEPTH_MAX, "nesting stops at the deepest allowed level");
     }
 
-    /// An inserted assembly's folder holds its whole rigid group, also the joints inside its
-    /// sub-assemblies, whose two ends meet in a component below the import's own; none is left
-    /// for the joints chip after the history.
+    /// An inserted assembly's one rigid group holds its sub-assemblies' contents too, at any
+    /// depth, so there are no joints for its folder or for the joints chip after the history.
     #[test]
-    fn an_import_folder_holds_the_joints_of_its_sub_assemblies() {
+    fn an_import_holds_its_sub_assemblies_with_one_rigid_group() {
         use serde_json::json;
         use solidcraft_engine::Session;
-        use solidcraft_engine::doc::joints::JointKind;
         let run = |s: &mut Session, command: &str, params: serde_json::Value| s.execute(command, &params).unwrap();
         // Outer holds a plate and Inner, placed twice: the file nests Inner in Outer.
         let mut s = Session::default();
@@ -416,12 +417,10 @@ mod tests {
         let mut s = Session::default();
         let folder = run(&mut s, "file.insert_step", json!({"path": path, "folder": true}))["group"].as_u64().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
-        let mut rigid: Vec<u64> = s.doc.assembly.joints.iter().filter(|j| j.kind == JointKind::Rigid).map(|j| j.id).collect();
-        rigid.sort_unstable();
-        let mut held = super::Folders::of(&s.doc).joints.get(&folder).cloned().unwrap_or_default();
-        held.sort_unstable();
-        assert!(rigid.len() >= 3, "the plate and both Inner placements are held: {rigid:?}");
-        assert_eq!(held, rigid, "every joint of the import is in its folder");
+        // One rigid group holds the plate and both Inner placements; the folder holds the feature.
+        let [group] = s.doc.assembly.rigid_groups.as_slice() else { panic!("one rigid group: {:?}", s.doc.assembly.rigid_groups) };
+        assert!(s.doc.rigid_group_members(group).len() >= 3, "the plate and both Inner placements are held");
+        assert!(super::Folders::of(&s.doc).joints.get(&folder).is_none_or(Vec::is_empty), "no joints to put in the folder");
     }
 
     /// A new folder goes in the innermost folder holding all the features grouped.

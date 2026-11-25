@@ -13,6 +13,28 @@ use crate::start_page;
 /// Recent designs kept.
 pub const MAX_RECENT: usize = 12;
 const THUMB: [usize; 2] = solidcraft_engine::io::THUMBNAIL_SIZE;
+
+/// A design whose placed world holds more bodies than this gets no picture on Home (its card
+/// shows without one). Each placed body is a copy of its part where it stands, made to draw the
+/// picture: a large assembly placed a hundred times took tens of gigabytes for it, enough to
+/// stall the machine while the design opened. One large assembly placed once is about 600.
+const PICTURE_MAX_BODIES: usize = 5_000;
+
+/// How many bodies the design's placed world holds, counted from the design: each component's
+/// own bodies at each of its placements, as the world is placed, without placing anything.
+fn placed_bodies(s: &Session) -> usize {
+    let st = s.model.state();
+    let mut per_component: HashMap<u64, usize> = HashMap::new();
+    for c in s.doc.model_body_components(&st) {
+        *per_component.entry(c).or_default() += 1;
+    }
+    if s.doc.occurrences.is_empty() {
+        return st.bodies.len();
+    }
+    let placements = s.doc.placements();
+    let root = if placements.iter().any(|(c, _, _)| *c == 0) { 0 } else { per_component.get(&0).copied().unwrap_or(0) };
+    root + placements.iter().map(|(c, _, _)| per_component.get(c).copied().unwrap_or(0)).sum::<usize>()
+}
 const SAMPLE_PICTURES: [&[u8]; 6] = [
     include_bytes!("../../../assets/samples/exports/0.png"),
     include_bytes!("../../../assets/samples/exports/1.png"),
@@ -37,6 +59,9 @@ pub struct HomeState {
     /// the recent list from its stored designs (the web build, see `sync_recents`) does not add
     /// them back. Opening or saving a design clears it from here.
     pub forgotten: std::collections::BTreeSet<String>,
+    /// The Start page's recovery banner was closed (×): hidden until the next launch, while
+    /// Recover still lists the designs.
+    pub recovery_banner_hidden: bool,
     thumbs: HashMap<String, Option<egui::TextureHandle>>,
     /// Keys whose picture could not be made (an empty or unreadable design). Terminal: the card
     /// shows a placeholder instead of spinning forever. Cleared when the design is opened or saved
@@ -145,6 +170,10 @@ impl HomeState {
 
 /// A picture of a design: iso view, fitted.
 pub fn thumbnail(s: &Session) -> Option<egui::ColorImage> {
+    // Decided before anything is placed: placing the world is what costs.
+    if placed_bodies(s) > PICTURE_MAX_BODIES {
+        return None;
+    }
     let mut cam = Camera::default();
     cam.set_view(StandardView::Iso);
     // No picture of a model that cannot be placed.
@@ -161,6 +190,26 @@ pub fn thumbnail(s: &Session) -> Option<egui::ColorImage> {
     Some(egui::ColorImage::from_rgba_unmultiplied(THUMB, &picture.rgba))
 }
 
+/// A picture of the part alone over transparent pixels, for the parts library's tiles: no
+/// backdrop, grid or axes.
+#[cfg(not(target_arch = "wasm32"))]
+fn cutout(s: &Session) -> Option<egui::ColorImage> {
+    let mut cam = Camera::default();
+    cam.set_view(StandardView::Iso);
+    let b = solidcraft_engine::view::bounds(s).ok()?;
+    if b.is_empty() {
+        return None;
+    }
+    cam.fit(&solidcraft_engine::render::view_bounds(&b));
+    cam.distance *= 0.7;
+    let guides = solidcraft_engine::view::Guides { grid: false, axes: false };
+    let mut scene = solidcraft_engine::view::scene_with_guides(s, &cam, &s.section, guides).ok()?;
+    scene.transparent = true;
+    // Over transparent black, the edges come back premultiplied.
+    let picture = solidcraft_engine::capture::rgba(&scene, &cam, THUMB[0] as u32, THUMB[1] as u32).ok()?;
+    Some(egui::ColorImage::from_rgba_premultiplied(THUMB, &picture.rgba))
+}
+
 /// File identity, not just its path: saving or replacing a design invalidates its picture.
 #[cfg(not(target_arch = "wasm32"))]
 fn cache_path(key: &str) -> Option<std::path::PathBuf> {
@@ -170,6 +219,11 @@ fn cache_path(key: &str) -> Option<std::path::PathBuf> {
     key.hash(&mut h);
     meta.len().hash(&mut h);
     meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.hash(&mut h);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (meta.ctime(), meta.ctime_nsec()).hash(&mut h);
+    }
     Some(pictures_dir()?.join(format!("{:016x}.png", h.finish())))
 }
 
@@ -255,6 +309,9 @@ pub(crate) fn remember_file(s: &Session, key: &str) -> Option<egui::ColorImage> 
 fn remember_at(s: &Session, key: &str, #[cfg(not(target_arch = "wasm32"))] identity: Option<std::path::PathBuf>) -> Option<egui::ColorImage> {
     #[cfg(target_arch = "wasm32")]
     let _ = key;
+    // Off the window's thread: the app may still be setting up the renderer that draws it (#1210).
+    #[cfg(not(target_arch = "wasm32"))]
+    solidcraft_engine::capture::wait_for_renderer(std::time::Duration::from_secs(60));
     let img = thumbnail(s)?;
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(path) = identity.filter(|p| cache_path(key).as_ref() == Some(p)) {
@@ -343,6 +400,38 @@ pub(crate) fn install(h: &mut HomeState, ctx: &egui::Context, key: &str, img: Op
     }
 }
 
+/// A file's picture for the parts library, made once by opening the file (on a worker thread);
+/// a file that can't be drawn shows its stored picture, if it has one.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn part_picture(key: &str) -> Option<egui::ColorImage> {
+    // Kept apart from Home's pictures, which have their backdrop.
+    let path = cache_path(key).map(|p| p.with_file_name(format!("part-{}", p.file_name().unwrap_or_default().to_string_lossy())));
+    if let Some(bytes) = path.as_ref().and_then(|p| std::fs::read(p).ok())
+        && let Some(img) = decode_thumbnail(bytes)
+    {
+        return Some(img);
+    }
+    let mut s = Session::default();
+    let drawn = s.execute("doc.open", &serde_json::json!({ "path": key })).ok().and_then(|_| cutout(&s));
+    let Some(img) = drawn else {
+        return picture(key);
+    };
+    let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+    if let (Some(path), Some(bytes)) = (path, solidcraft_viewport::png(THUMB[0], THUMB[1], rgba))
+        && let Some(dir) = path.parent()
+        && std::fs::create_dir_all(dir).is_ok()
+    {
+        let _ = solidcraft_engine::io::write_atomic(&path, &bytes, false);
+    }
+    Some(img)
+}
+
+/// Upload a picture into a texture map (the parts library's).
+pub(crate) fn install_texture(map: &mut HashMap<String, Option<egui::TextureHandle>>, ctx: &egui::Context, key: &str, img: Option<egui::ColorImage>) {
+    let tex = img.map(|i| ctx.load_texture(format!("library:{key}"), i, egui::TextureOptions::LINEAR));
+    map.insert(key.to_string(), tex);
+}
+
 /// Read a disposable picture without evaluating, importing or meshing a model.
 fn picture(key: &str) -> Option<egui::ColorImage> {
     #[cfg(not(target_arch = "wasm32"))]
@@ -428,19 +517,28 @@ fn read_pictures(keys: Vec<String>, tx: &std::sync::mpsc::Sender<Made>) -> Optio
     Some(cold)
 }
 
+/// Send the pictures already there, then `sweep` the old ones ([`clean_old_pictures`]): reading a
+/// picture marks it as in use, so the recent designs' pictures are kept even after a month without
+/// a launch, and only those of designs that went cold are rebuilt. Returns those designs.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_then_sweep(mut keys: Vec<String>, tx: &std::sync::mpsc::Sender<Made>, sweep: impl FnOnce()) -> Option<Vec<String>> {
+    // Prefer local PNGs; even the metadata checks belong off the window thread.
+    keys.sort_by_key(|k| !cache_path(k).is_some_and(|p| p.exists()));
+    let cold = read_pictures(keys, tx);
+    sweep();
+    cold
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn start_jobs(h: &mut HomeState) {
     if h.rx.is_some() || h.queued.is_empty() {
         return;
     }
-    let mut keys = std::mem::take(&mut h.queued);
+    let keys = std::mem::take(&mut h.queued);
     let (tx, rx) = std::sync::mpsc::channel();
     let stop = h.stop.clone();
     let spawned = std::thread::Builder::new().name("thumbnails".into()).spawn(move || {
-        clean_old_pictures();
-        // Prefer local PNGs; even the metadata checks belong off the window thread.
-        keys.sort_by_key(|k| !cache_path(k).is_some_and(|p| p.exists()));
-        let Some(cold) = read_pictures(keys, &tx) else { return };
+        let Some(cold) = read_then_sweep(keys, &tx, clean_old_pictures) else { return };
         for k in cold {
             if stop.is_cancelled() {
                 return;
@@ -691,6 +789,10 @@ enum FileAction {
     Link(&'static str),
     /// Recover (true) or discard the recoverable design at this index.
     Recovery(usize, bool),
+    /// Ask, then discard every recoverable design (the banner's Discard all).
+    DiscardAllRecovery,
+    /// Close the recovery banner until the next launch; the designs stay recoverable.
+    HideRecoveryBanner,
     /// The recent design at this index in `HomeState::recent`.
     OpenRecent(usize),
     ForgetRecent(usize),
@@ -721,6 +823,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         // A file waiting for its unit is asked on this page too (#15598): its Escape gives the
         // question up, and does not close the page behind it.
         && app.mesh_units.is_none()
+        && app.import_options.is_none()
+        // The recovery banner's Discard all asks on this page too: Escape cancels that question.
+        && !app.recovery_discard_all
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
         app.home.open = false;
@@ -774,12 +879,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         id: "home",
         name: app.tr("ui.start_page").into(),
         interactive,
-        back: start_page::Back {
+        back: Some(start_page::Back {
             template: app.tr("home.back").into(),
             document: app.session.doc.name.as_str().into(),
             shortcut: "Esc".into(),
             chosen: FileAction::Back,
-        },
+            // The File view handles Escape above, after its own windows and questions.
+            escape: false,
+        }),
         rail: rail(app),
         title: match app.home.section {
             Section::Start => app.tr_label("Start").into(),
@@ -802,6 +909,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     };
     if let Some(action) = start_page::show(ui, page) {
         dispatch(app, ui.ctx(), action);
+    }
+    // The first start usually opens on Home: the usage statistics notice shows here as in the view.
+    #[cfg(feature = "usage-stats")]
+    {
+        let t = solidcraft_theme::Tokens::get();
+        let _ = crate::usage_stats::notice_toast(app, ui, ui.max_rect().shrink(t.space_16));
     }
 }
 
@@ -860,7 +973,7 @@ fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'_, FileAction>> {
 }
 
 fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
-    let banner = app.recoverable.first().map(|entry| {
+    let banner = app.recoverable.first().filter(|_| !app.home.recovery_banner_hidden).map(|entry| {
         let filename = entry
             .path
             .as_deref()
@@ -874,7 +987,13 @@ fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
             filename,
             after_filename: format!(" · {}", crate::recovery_ui::ago(entry.saved_at)).into(),
             recover: (app.tr_label("Recover").into(), if single { FileAction::Recovery(0, true) } else { FileAction::Section(Section::Recovery) }),
-            discard: single.then(|| (app.tr_label("Discard").into(), FileAction::Recovery(0, false))),
+            // One design is discarded at once; several ask first (#9299).
+            discard: Some(if single {
+                (app.tr_label("Discard").into(), FileAction::Recovery(0, false))
+            } else {
+                (app.tr("recovery.discard_all").into(), FileAction::DiscardAllRecovery)
+            }),
+            close: Some((app.tr("home.recovery_hide").into(), FileAction::HideRecoveryBanner)),
         }
     });
     let shortcut = if cfg!(target_os = "macos") { "⌘O" } else { "Ctrl+O" };
@@ -998,9 +1117,6 @@ fn recent_kind(app: &SolveApp, path: &str) -> String {
     if solidcraft_engine::io::is_design_ext(ext) || ext.eq_ignore_ascii_case("json") {
         return app.tr("home.design_workspace").to_string();
     }
-    if solidcraft_engine::io::is_drawing_path(path) {
-        return app.tr_label("Drawing").to_string();
-    }
     let label = match ext.to_ascii_lowercase().as_str() {
         "step" | "stp" => "STEP",
         "igs" | "iges" => "IGES",
@@ -1010,6 +1126,7 @@ fn recent_kind(app: &SolveApp, path: &str) -> String {
         "glb" | "gltf" => "glTF",
         "fcstd" => "FreeCAD",
         "3dm" => "Rhino",
+        "usd" | "usda" | "usdc" | "usdz" => "OpenUSD",
         other if !other.is_empty() => return other.to_ascii_uppercase(),
         _ => return app.tr("home.design_workspace").to_string(),
     };
@@ -1022,7 +1139,7 @@ fn recent_time(app: &SolveApp, path: &str) -> String {
     recent_time_at(app, *time, now)
 }
 
-fn recent_time_at(app: &SolveApp, time: u64, now: u64) -> String {
+pub(crate) fn recent_time_at(app: &SolveApp, time: u64, now: u64) -> String {
     let seconds = now.saturating_sub(time);
     if seconds < 60 {
         return app.tr("home.opened_just_now").to_string();
@@ -1075,11 +1192,16 @@ fn export_tiles(app: &SolveApp) -> start_page::Tiles<'_, FileAction> {
         ("view_dxf", "DXF", None, FileAction::ViewDxf),
         ("obj", "OBJ", None, FileAction::Export("obj")),
         ("glb", "GLB", None, FileAction::Export("glb")),
+        ("usd", "OpenUSD", None, FileAction::Export("usd")),
+        ("3dm", "Rhino", None, FileAction::Export("3dm")),
         ("urdf", "URDF", None, FileAction::Export("urdf")),
+        ("sdf", "SDF", None, FileAction::Export("sdf")),
         ("json", "JSON", Some("home.export_json_hint"), FileAction::Export("json")),
     ];
     let tiles = formats
         .into_iter()
+        // cadmpeg's Rhino writer needs a temporary file, which the browser has not.
+        .filter(|(id, ..)| *id != "3dm" || !cfg!(target_arch = "wasm32"))
         .map(|(id, format, hint, chosen)| start_page::Tile {
             id: format!("home:export:{id}").into(),
             icon: start_page::Icon::Kit("export"),
@@ -1119,13 +1241,12 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
                 app.open_chosen_file(&path);
             }
         }),
-        FileAction::Import => {
-            app.pick_open_for(&["step", "stp", "iges", "igs", "stl", "obj", "3mf", "gltf", "glb", "ply", "xyz", "pts"], |app, path| {
-                if let Some(path) = path {
-                    app.open_path_async(&path);
-                }
-            })
-        }
+        // Every foreign file Import takes, from the format registry (#7328).
+        FileAction::Import => app.pick_open_for(&solidcraft_engine::io::formats::import_extensions(true), |app, path| {
+            if let Some(path) = path {
+                app.open_path_async(&path);
+            }
+        }),
         FileAction::Save => {
             app.home.open = false;
             crate::toolbar::save(app);
@@ -1163,6 +1284,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
                 crate::recovery_ui::apply(app, entry, recover);
             }
         }
+        FileAction::DiscardAllRecovery => app.recovery_discard_all = true,
+        FileAction::HideRecoveryBanner => app.home.recovery_banner_hidden = true,
         FileAction::OpenRecent(index) => {
             if let Some(path) = app.home.recent.get(index).cloned() {
                 open_recent(app, &path);
@@ -1184,7 +1307,64 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
 
 #[cfg(test)]
 mod tests {
+    /// The count that decides whether a design gets a picture is the number of bodies its placed
+    /// world holds, counted without placing it: a part's bodies at each of its placements, and
+    /// the design's own. Past [`PICTURE_MAX_BODIES`] no picture is made.
+    #[test]
+    fn a_designs_picture_is_left_out_past_a_count_of_its_placed_bodies() {
+        let mut s = Session::default();
+        s.execute("solid.box", &serde_json::json!({"length": 5, "width": 5, "height": 5, "body_name": "Own"})).unwrap();
+        let c = s.execute("component.create", &serde_json::json!({"name": "Part", "grounded": false})).unwrap();
+        for k in 0..10 {
+            s.execute(
+                "solid.box",
+                &serde_json::json!({"corner": [10 * k, 0, 0], "length": 5, "width": 5, "height": 5, "body_name": format!("B{k}")}),
+            )
+            .unwrap();
+        }
+        s.execute("component.activate", &serde_json::json!({"component": 0})).unwrap();
+        for k in 1..5 {
+            s.execute("occurrence.copy", &serde_json::json!({"component": c["component"], "translate": [0, 20 * k, 0]})).unwrap();
+        }
+        let world = s.world_state().unwrap().bodies.len();
+        assert_eq!(world, 1 + 10 * 5, "the design's own body and the part's ten at five placements");
+        assert_eq!(placed_bodies(&s), world, "counted as the world places them");
+        // Placed past the limit: no picture, decided without placing the world.
+        // Ten bodies at 600 more placements (a 30 by 20 pattern): 6,000 bodies and more.
+        let pattern = serde_json::json!({"components": ["Part"], "dir1": [1, 0, 0], "count1": 30, "spacing1": 40, "dir2": [0, 1, 0], "count2": 20, "spacing2": 40});
+        s.execute("solid.pattern.rectangular", &pattern).unwrap();
+        assert!(placed_bodies(&s) > PICTURE_MAX_BODIES);
+        assert!(thumbnail(&s).is_none());
+    }
+
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn library_cache_identity_tracks_replacements_with_preserved_mtime() {
+        let h = crate::scenario::Harness::new();
+        let path = h.dir.join("replaced.sc");
+        std::fs::write(&path, b"old").unwrap();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let before = cache_path(path.to_str().unwrap()).unwrap();
+        // The change time ticks at the kernel's coarse clock (one jiffy, often 4 ms or more), so a
+        // replacement inside the same tick is indistinguishable by metadata. Replace until it ticks.
+        use std::os::unix::fs::MetadataExt;
+        let ctime = |p: &std::path::Path| std::fs::metadata(p).map(|m| (m.ctime(), m.ctime_nsec())).unwrap();
+        let first = ctime(&path);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            std::fs::write(&path, b"new").unwrap();
+            std::fs::File::options().write(true).open(&path).unwrap().set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
+            if ctime(&path) != first || std::time::Instant::now() > deadline {
+                break;
+            }
+        }
+        assert_ne!(ctime(&path), first, "the change time never moved");
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), modified);
+        assert_ne!(cache_path(path.to_str().unwrap()).unwrap(), before);
+    }
 
     #[test]
     fn recent_paths_only_abbreviate_complete_home_ancestors() {
@@ -1463,6 +1643,36 @@ mod tests {
         TEST_PICTURES.with(|d| *d.borrow_mut() = None);
     }
 
+    /// Home reads the recent designs' pictures before it sweeps the old ones: after a month without
+    /// a launch, the pictures it is about to show are still there, not rebuilt from the designs.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_first_pass_reads_the_pictures_before_sweeping_old_ones() {
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let own = std::env::temp_dir().join(format!("solidcraft-swept-pictures-{}-{nonce}", std::process::id()));
+        TEST_PICTURES.with(|d| *d.borrow_mut() = Some(own.clone()));
+        let design = std::env::temp_dir().join(format!("solidcraft-swept-thumb-{}-{nonce}.sc", std::process::id()));
+        std::fs::write(&design, b"design").unwrap();
+        let key = design.to_string_lossy().into_owned();
+        let png = cache_path(&key).unwrap();
+        std::fs::create_dir_all(png.parent().unwrap()).unwrap();
+        let rgba = vec![128u8; THUMB[0] * THUMB[1] * 4];
+        std::fs::write(&png, solidcraft_viewport::png(THUMB[0], THUMB[1], rgba).unwrap()).unwrap();
+        let then = std::time::SystemTime::now() - 2 * KEEP_PICTURES;
+        std::fs::File::options().write(true).open(&png).unwrap().set_modified(then).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sweep = || {
+            solidcraft_engine::slicer_files::sweep(png.parent().unwrap(), std::time::SystemTime::now(), KEEP_PICTURES);
+        };
+        let cold = read_then_sweep(vec![key.clone()], &tx, sweep).unwrap();
+        assert!(cold.is_empty(), "the picture was there: nothing to rebuild");
+        assert!(rx.try_iter().any(|(k, img, _)| k == key && img.is_some()));
+        assert!(png.exists(), "the sweep keeps the picture just read");
+        std::fs::remove_file(design).unwrap();
+        std::fs::remove_dir_all(own).unwrap();
+        TEST_PICTURES.with(|d| *d.borrow_mut() = None);
+    }
+
     /// STEP opens deliberately have no save path, but their source still gets a cache entry.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
@@ -1579,6 +1789,33 @@ mod tests {
         }
         assert_eq!(h.app.home.ready_samples(), solidcraft_engine::sample::samples().len());
         assert!(h.app.home.samples.is_empty(), "no sample model was built");
+    }
+
+    #[test]
+    fn opening_a_sample_from_home_restores_the_assistant_contents() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ai_features = true;
+        h.app.start("ui.assistant");
+        h.frames(3);
+        assert!(h.app.agent_chat.panel_rect.is_some());
+        h.app.disable_panel_runtime().unwrap();
+        let saved = std::mem::take(&mut h.app.panel_layout_preferences);
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.disable_panel_runtime().unwrap();
+        h.app.panel_layout_preferences = saved;
+        h.app.preferences.ai_features = true;
+        h.app.home.open = true;
+        h.frames(2);
+        assert!(!h.app.agent_chat.open);
+
+        // Deliver a ready sample during Home's paint, after the panel services' frame tick.
+        h.app.home.samples.insert(0, Session::default());
+        h.app.home.wanted = Some(0);
+        h.frames(3);
+        assert!(!h.app.home.open);
+        assert!(h.app.agent_chat.panel_rect.is_some(), "the restored Assistant must draw its contents in the new document");
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1725,6 +1962,26 @@ mod tests {
         }
     }
 
+    /// Start › Import asks the host's picker for every foreign file it takes, FreeCAD, Rhino and
+    /// KiCad among them (#7328).
+    #[test]
+    fn start_import_offers_every_file_kind_import_takes() {
+        let mut h = crate::scenario::Harness::new();
+        let asked: std::rc::Rc<std::cell::RefCell<Vec<Vec<String>>>> = Default::default();
+        let log = asked.clone();
+        h.app.services.pick_open = Some(Box::new(move |extensions| {
+            log.borrow_mut().push(extensions.iter().map(|e| e.to_string()).collect());
+            Box::pin(std::future::ready(None))
+        }));
+        h.app.home.show(0);
+        click_file(&mut h, "home:import");
+        let want: Vec<String> = solidcraft_engine::io::formats::import_extensions(true).iter().map(|e| e.to_string()).collect();
+        assert_eq!(asked.borrow().last(), Some(&want));
+        for e in ["fcstd", "3dm", "kicad_pcb", "step", "ply"] {
+            assert!(want.iter().any(|x| x == e), "{e} missing from {want:?}");
+        }
+    }
+
     #[test]
     fn file_view_save_as_and_export_act_only_after_an_explicit_file_action() {
         let mut h = crate::scenario::Harness::new();
@@ -1756,6 +2013,36 @@ mod tests {
         assert_eq!(h.app.session.doc.to_json(), original, "export leaves the design unchanged");
     }
 
+    /// #5296: the GLB tile writes an assembly's occurrences as named nodes; with the
+    /// `glb_export_hierarchy` preference off it writes the flat file of SolidCraft 0.40.
+    #[test]
+    fn the_glb_tile_follows_the_hierarchy_preference() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("component.create", serde_json::json!({"name":"Bracket"})).unwrap();
+        h.app.run("solid.box", serde_json::json!({"length":10,"width":12,"height":14})).unwrap();
+        h.app.run("component.activate", serde_json::json!({"component":"root"})).unwrap();
+        h.app.run("occurrence.copy", serde_json::json!({"component":"Bracket","translate":[0,40,0]})).unwrap();
+        let nodes = |h: &mut crate::scenario::Harness| -> Vec<serde_json::Value> {
+            h.app.home.show(0);
+            click_file(h, "home:export");
+            click_file(h, "home:export:glb");
+            h.settle();
+            let glb = std::fs::read(h.dir.join(format!("{}.glb", h.app.session.doc.name))).unwrap_or_default();
+            assert!(glb.starts_with(b"glTF"), "{} bytes", glb.len());
+            let len = u32::from_le_bytes(glb[12..16].try_into().unwrap()) as usize;
+            let json: serde_json::Value = serde_json::from_slice(&glb[20..20 + len]).unwrap();
+            json["nodes"].as_array().unwrap().clone()
+        };
+        assert!(h.app.preferences.glb_export_hierarchy, "on by default");
+        let tree = nodes(&mut h);
+        let names: Vec<&str> = tree.iter().filter_map(|n| n["name"].as_str()).collect();
+        assert!(names.contains(&"Bracket:1") && names.contains(&"Bracket:2"), "{names:?}");
+        h.app.preferences.glb_export_hierarchy = false;
+        let flat = nodes(&mut h);
+        assert_eq!(flat.len(), 3, "the root and the two placed bodies");
+        assert!(flat.iter().all(|n| n.get("matrix").is_none() && n["name"] != "Bracket:1"), "{flat:?}");
+    }
+
     #[test]
     fn file_view_recovery_reuses_dirty_design_protection_and_keeps_the_entry() {
         let mut h = crate::scenario::Harness::new();
@@ -1775,6 +2062,42 @@ mod tests {
         assert_eq!(h.app.recoverable.len(), 1);
         assert!(h.app.status.as_ref().is_some_and(|(message, _, error)| *error && message.contains("save or discard")));
         assert!(crate::scenario::rect_of("dialog:report:home_status").is_some(), "the refusal is visible on File");
+    }
+
+    /// Several recovered designs: the banner offers Discard all (asking first) and a close (×)
+    /// that hides it for this launch while Recover still lists the designs.
+    #[test]
+    fn file_view_recovery_banner_discards_all_after_asking_and_closes_without_discarding() {
+        let entry =
+            |id: &str, name: &str| solidcraft_engine::recovery::Entry { id: id.into(), name: name.into(), path: None, saved_at: 0, features: 3 };
+        let mut h = crate::scenario::Harness::new();
+        h.app.recoverable = vec![entry("a", "Bracket"), entry("b", "Housing")];
+        h.app.home.show(0);
+        h.frames(3);
+        assert!(crate::scenario::handle_at("home:recovery:discard").is_some(), "several designs: Discard all");
+        assert!(crate::scenario::handle_at("home:recovery:close").is_some(), "the banner can be closed");
+        click_file(&mut h, "home:recovery:discard");
+        assert!(h.app.recovery_discard_all, "Discard all asks first");
+        assert!(h.widget("Discard 2 autosaves?").is_some(), "its confirmation opens over File view");
+        assert_eq!(h.app.recoverable.len(), 2, "nothing is discarded before the answer");
+        h.step(&serde_json::json!({"widget": "Cancel"})).unwrap();
+        h.frames(3);
+        assert!(!h.app.recovery_discard_all);
+        assert_eq!(h.app.recoverable.len(), 2, "Cancel keeps every design");
+        // Escape answers the question, and does not close File view behind it.
+        click_file(&mut h, "home:recovery:discard");
+        assert!(h.app.recovery_discard_all);
+        h.step(&serde_json::json!({"key": "Escape"})).unwrap();
+        h.frames(3);
+        assert!(!h.app.recovery_discard_all, "Escape cancels Discard all");
+        assert!(h.app.home.open, "Escape leaves File view open");
+        assert_eq!(h.app.recoverable.len(), 2);
+        click_file(&mut h, "home:recovery:close");
+        assert!(h.app.home.recovery_banner_hidden);
+        assert!(crate::scenario::handle_at("home:recovery:recover").is_none(), "the banner is gone");
+        assert_eq!(h.app.recoverable.len(), 2, "closing discards nothing");
+        click_file(&mut h, "home:recover");
+        assert!(crate::scenario::handle_at("home:recovery:0:recover").is_some(), "Recover still lists them");
     }
 
     #[test]
@@ -1815,7 +2138,13 @@ mod tests {
             let page = crate::scenario::rect_of("home:page").unwrap();
             let tile = crate::scenario::rect_of("home:new_mm").unwrap();
             assert!(page.contains_rect(tile), "{dark}: the new tile escapes the narrow page");
-            h.step(&serde_json::json!({"widget":"Start page"})).unwrap();
+            // The movable Home button shares this label; use the File page's own navigation.
+            let navigation = h
+                .widgets("Start page")
+                .into_iter()
+                .find(|[x, y]| page.contains(egui::pos2(*x as f32, *y as f32)))
+                .expect("the narrow page's navigation");
+            h.step(&serde_json::json!({"click":navigation})).unwrap();
             h.frames(2);
             assert!(crate::scenario::handle_at("home:settings").is_some(), "all File actions remain available through the narrow menu");
         }

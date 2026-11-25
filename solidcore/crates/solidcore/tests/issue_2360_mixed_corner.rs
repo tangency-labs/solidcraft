@@ -126,13 +126,7 @@ fn pick(k: &Kernel, b: &Brep, p: [f64; 3]) -> EdgeId {
 
 /// The front top edge and the concave arc rounded (`xsect` 1) or chamfered (0) at `r`.
 fn blended(r: f64, xsect: u32) -> (Kernel, Brep, solidcore::Result<()>) {
-    blended_kept(true, r, xsect)
-}
-
-/// [`blended`], with `definition` (`fillet_round_as_definition`, #2488) set.
-fn blended_kept(definition: bool, r: f64, xsect: u32) -> (Kernel, Brep, solidcore::Result<()>) {
     let mut k = kernel();
-    k.fixes.fillet_round_as_definition = definition;
     let mut b = read(&mut k);
     let es: Vec<EdgeId> = [[20.0, 0.0, 10.0], [32.0, 8.0, 10.0]]
         .iter()
@@ -511,33 +505,6 @@ fn corner_faces(b: &Brep, kind: CornerKind) -> Vec<Surface> {
         .collect()
 }
 
-/// Every face's surface over a 9 x 9 grid of its natural domain, as bits; a round that is
-/// a procedural blend by its net (its own definition is #2480's, and evaluates by solving
-/// it).
-fn face_bits(k: &Kernel, b: &Brep) -> Vec<Vec<[u64; 3]>> {
-    b.faces()
-        .ids()
-        .filter_map(|f| b.face(f).unwrap().surface.clone())
-        .map(|s| {
-            let s = match s.kind() {
-                SurfaceKind::ProceduralBlend(pb) => Surface::from(pb.net().copy()),
-                _ => s.clone(),
-            };
-            let d = s.natural_uv_domain_with_nurb(k).unwrap();
-            let mut pts = Vec::new();
-            for i in 0..=8 {
-                for j in 0..=8 {
-                    let u = d.min().x + (d.max().x - d.min().x) * f64::from(i) / 8.0;
-                    let v = d.min().y + (d.max().y - d.min().y) * f64::from(j) / 8.0;
-                    let p = s.evaluate_point(k, Point2::new(u, v)).unwrap();
-                    pts.push([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
-                }
-            }
-            pts
-        })
-        .collect()
-}
-
 /// Stored points `points` (weighted by `weights` when rational) moved by `by` along x, y
 /// and z.
 fn shift(points: &mut [[f64; 3]], weights: Option<&Vec<f64>>, by: f64) {
@@ -577,7 +544,7 @@ fn moved(rec: &SupportRecord, by: f64) -> SupportRecord {
 #[test]
 fn the_mixed_faces_are_their_rules() {
     for (xsect, order) in [(1, 1), (0, 0)] {
-        let (k, mut b, res) = blended_kept(true, 2.0, xsect);
+        let (k, b, res) = blended(2.0, xsect);
         res.unwrap();
         let faces = corner_faces(&b, CornerKind::Mixed);
         assert_eq!(faces.len(), 2);
@@ -590,26 +557,12 @@ fn the_mixed_faces_are_their_rules() {
             // where built, the net is its rule's patch
             assert_eq!(d.recertify(&k).unwrap(), 0.0);
         }
-        let (k0, mut b0, res0) = blended_kept(false, 2.0, xsect);
-        res0.unwrap();
-        assert!(corner_faces(&b0, CornerKind::Mixed).is_empty());
-        let (v, v0) = (volume(&k, &mut b, 1e-9), volume(&k0, &mut b0, 1e-9));
-        if xsect == 1 {
-            // the rounds are the same either way: the body bit for bit
-            assert_eq!(v.to_bits(), v0.to_bits());
-            assert_eq!(face_bits(&k, &b), face_bits(&k0, &b0));
-        } else {
-            // a chamfer is its definition with the flag on (#2486), its net certified
-            // within its bound of the chord, so the corner is built on other nets: the body
-            // moves within that bound (3.2e-8 of it here)
-            assert!((v - v0).abs() <= 1e-7 * v0, "{v} vs {v0}");
-        }
     }
 }
 
 #[test]
 fn a_mixed_face_round_trips_through_its_record() {
-    let (k, b, res) = blended_kept(true, 2.0, 1);
+    let (k, b, res) = blended(2.0, 1);
     res.unwrap();
     for s in corner_faces(&b, CornerKind::Mixed) {
         let rec = corner_to_record(&k, &s).unwrap();
@@ -622,7 +575,7 @@ fn a_mixed_face_round_trips_through_its_record() {
 
 #[test]
 fn a_moved_mixed_face_is_certified_again() {
-    let (k, b, res) = blended_kept(true, 2.0, 1);
+    let (k, b, res) = blended(2.0, 1);
     res.unwrap();
     for s in corner_faces(&b, CornerKind::Mixed) {
         let mut s = s.copy(&k).unwrap();
@@ -639,7 +592,7 @@ fn a_moved_mixed_face_is_certified_again() {
 
 #[test]
 fn a_mixed_face_off_its_blend_or_t_is_refused() {
-    let (k, b, res) = blended_kept(true, 2.0, 1);
+    let (k, b, res) = blended(2.0, 1);
     res.unwrap();
     for s in corner_faces(&b, CornerKind::Mixed) {
         let CornerRecord::Mixed(rec) = corner_to_record(&k, &s).unwrap() else {
@@ -698,4 +651,311 @@ fn a_mixed_chamfer_face_round_trips_through_its_record() {
             .to_string();
         assert!(why.contains("rule's patch"), "{why}");
     }
+}
+
+// ---- #19817: a Mixed record's curves the rule reads are checked as the caller's input ----
+
+use solidcore::error::ErrorKind;
+
+/// Puts a curve into one slot of a mixed corner record.
+type SetCurve = fn(&mut MixedCornerRecord, BezierCurveRecord);
+use solidcore::surface::procedural_blend::record::{BezierCurveRecord, MixedCornerRecord};
+
+/// A record whose curve the rule reads is empty or has an empty segment is refused as
+/// the caller's input, before the rule's algebra reads it: not reported as the kernel's
+/// defect (the four cases #20725's review reproduced).
+#[test]
+fn a_mixed_record_with_an_empty_curve_the_rule_reads_is_invalid_input() {
+    let (k, b, res) = blended(2.0, 1);
+    res.unwrap();
+    let face = corner_faces(&b, CornerKind::Mixed).remove(0);
+    let CornerRecord::Mixed(rec) = corner_to_record(&k, &face).unwrap() else {
+        panic!("not a mixed record");
+    };
+    assert!(!rec.bilinear, "the Coons rule");
+    let empty = || BezierCurveRecord {
+        brk: Vec::new(),
+        seg: Vec::new(),
+    };
+    let hollow = || BezierCurveRecord {
+        brk: vec![0.0, 1.0],
+        seg: vec![Vec::new()],
+    };
+    let cases: [(&str, SetCurve); 3] = [
+        ("sides[0].c", |r, c| r.sides[0].c = c),
+        ("sides[1].c", |r, c| r.sides[1].c = c),
+        ("trim_uv", |r, c| r.trim_uv = c),
+    ];
+    let mut tried = Vec::new();
+    for (name, set) in cases {
+        for (shape, curve) in [("emptied", empty()), ("[[]]", hollow())] {
+            let mut off = rec.clone();
+            set(&mut off, curve);
+            let e = corner_rebuild(&k, &CornerRecord::Mixed(off)).unwrap_err();
+            assert_eq!(e.kind(), ErrorKind::InvalidInput, "{name} {shape}: {e}");
+            assert!(!e.is_defect(), "{name} {shape}: {e}");
+            tried.push((name, shape));
+        }
+    }
+    assert_eq!(tried.len(), 6);
+}
+
+/// Every field of every side, emptied, hollowed or cut to one control point, and the
+/// trimline's uv likewise: the record is rebuilt or refused, and never reaches a defect
+/// of the rule's algebra (whose tables are sound only for curves of control points).
+#[test]
+fn no_mixed_record_curve_shape_reaches_a_defect() {
+    for xsect in [1, 0] {
+        let (k, b, res) = blended(2.0, xsect);
+        res.unwrap();
+        for face in corner_faces(&b, CornerKind::Mixed) {
+            let CornerRecord::Mixed(rec) = corner_to_record(&k, &face).unwrap() else {
+                panic!("not a mixed record");
+            };
+            let shapes = |c: &BezierCurveRecord| {
+                let point = c.seg.first().and_then(|s| s.first()).copied();
+                let mut out = vec![
+                    BezierCurveRecord {
+                        brk: Vec::new(),
+                        seg: Vec::new(),
+                    },
+                    BezierCurveRecord {
+                        brk: vec![0.0, 1.0],
+                        seg: vec![Vec::new()],
+                    },
+                ];
+                if let Some(p) = point {
+                    out.push(BezierCurveRecord {
+                        brk: vec![0.0, 1.0],
+                        seg: vec![vec![p]],
+                    });
+                }
+                out
+            };
+            let mut variants = Vec::new();
+            for i in 0..rec.sides.len() {
+                for field in 0..3 {
+                    let curve = match field {
+                        0 => &rec.sides[i].c,
+                        1 => &rec.sides[i].dir,
+                        _ => &rec.sides[i].t,
+                    };
+                    for shape in shapes(curve) {
+                        let mut off = rec.clone();
+                        match field {
+                            0 => off.sides[i].c = shape,
+                            1 => off.sides[i].dir = shape,
+                            _ => off.sides[i].t = shape,
+                        }
+                        variants.push((format!("sides[{i}] field {field}"), off));
+                    }
+                }
+            }
+            for shape in shapes(&rec.trim_uv) {
+                let mut off = rec.clone();
+                off.trim_uv = shape;
+                variants.push(("trim_uv".to_string(), off));
+            }
+            for (name, off) in variants {
+                if let Err(e) = corner_rebuild(&k, &CornerRecord::Mixed(off)) {
+                    assert!(!e.is_defect(), "xsect {xsect} {name}: {e}");
+                }
+            }
+        }
+    }
+}
+
+/// A record whose curve the rule reads has its breaks off `[0, 1]` or out of order: each
+/// shape #20725's second review reproduced (the breaks scaled, shifted, reversed, all
+/// equal, or an extra segment past the end), on every side's curves and the trim curve,
+/// for the Coons and the bilinear rule. The rule's sides' curves are refused as the
+/// caller's input; nothing reaches the algebra's table defect.
+#[test]
+fn a_mixed_record_with_breaks_off_the_unit_range_is_invalid_input() {
+    type Shape = fn(&BezierCurveRecord) -> BezierCurveRecord;
+    let shapes: [(&str, Shape); 8] = [
+        ("scaled", |c| BezierCurveRecord {
+            brk: c.brk.iter().map(|b| b * 2.0).collect(),
+            seg: c.seg.clone(),
+        }),
+        ("shifted", |c| BezierCurveRecord {
+            brk: c.brk.iter().map(|b| b + 0.5).collect(),
+            seg: c.seg.clone(),
+        }),
+        ("reversed", |c| BezierCurveRecord {
+            brk: c.brk.iter().rev().copied().collect(),
+            seg: c.seg.clone(),
+        }),
+        ("all equal", |c| BezierCurveRecord {
+            brk: vec![0.5; c.brk.len()],
+            seg: c.seg.clone(),
+        }),
+        ("extra segment", |c| {
+            let mut r = c.clone();
+            r.brk.push(2.0);
+            r.seg.push(c.seg.last().unwrap().clone());
+            r
+        }),
+        // breaks that strictly increase but lie within the rounding the algebra's union
+        // merges (#20725's third review)
+        ("tiny first segment", |c| {
+            let mut r = c.clone();
+            r.brk.insert(1, 1e-15);
+            r.seg.insert(0, c.seg[0].clone());
+            r
+        }),
+        ("tiny last segment", |c| {
+            let mut r = c.clone();
+            let n = r.brk.len();
+            r.brk.insert(n - 1, 1.0 - 1e-15);
+            r.seg.push(c.seg.last().unwrap().clone());
+            r
+        }),
+        ("split mid", |c| {
+            let mut r = c.clone();
+            r.brk.extend([0.5, 0.5 + 5e-14]);
+            r.brk.sort_by(f64::total_cmp);
+            r.seg.push(c.seg.last().unwrap().clone());
+            r.seg.push(c.seg.last().unwrap().clone());
+            r
+        }),
+    ];
+    let mut refused = 0;
+    for xsect in [1, 0] {
+        let (k, b, res) = blended(2.0, xsect);
+        res.unwrap();
+        for face in corner_faces(&b, CornerKind::Mixed) {
+            let CornerRecord::Mixed(rec) = corner_to_record(&k, &face).unwrap() else {
+                panic!("not a mixed record");
+            };
+            let mut slots: Vec<(String, BezierCurveRecord)> = Vec::new();
+            for (i, side) in rec.sides.iter().enumerate() {
+                slots.push((format!("sides[{i}].c"), side.c.clone()));
+                slots.push((format!("sides[{i}].dir"), side.dir.clone()));
+                slots.push((format!("sides[{i}].t"), side.t.clone()));
+            }
+            slots.push(("trim_uv".to_string(), rec.trim_uv.clone()));
+            for (slot, curve) in &slots {
+                if curve.seg.is_empty() {
+                    continue;
+                }
+                for (shape, make) in shapes {
+                    let mut off = rec.clone();
+                    let bad = make(curve);
+                    let name = slot.as_str();
+                    if name == "trim_uv" {
+                        off.trim_uv = bad;
+                    } else {
+                        let i: usize = name[6..7].parse().unwrap();
+                        let s = &mut off.sides[i];
+                        match &name[9..] {
+                            "c" => s.c = bad,
+                            "dir" => s.dir = bad,
+                            _ => s.t = bad,
+                        }
+                    }
+                    let Err(e) = corner_rebuild(&k, &CornerRecord::Mixed(off)) else {
+                        continue;
+                    };
+                    assert!(!e.is_defect(), "xsect {xsect} {slot} {shape}: {e}");
+                    if name != "trim_uv" && &name[9..] == "c" {
+                        assert_eq!(
+                            e.kind(),
+                            ErrorKind::InvalidInput,
+                            "xsect {xsect} {slot} {shape}: {e}"
+                        );
+                    }
+                    if e.kind() == ErrorKind::InvalidInput {
+                        refused += 1;
+                    }
+                }
+            }
+        }
+    }
+    // every side's c on both faces of both rules, at least, in every shape
+    assert!(refused >= 2 * 2 * 4 * 8, "{refused} refused");
+}
+
+/// Review r3 (B1): a break a rounding (5e-14) from another curve's break. The algebra's
+/// union of breaks merges the two but its refinement keeps both, so the two curves it
+/// combines would end with different segment counts and reach the table Defect. The record
+/// check refuses such a record as `InvalidInput` exactly when the rule reads the moved curve
+/// (every side's `c`; the Coons rule's `dir`, and its `t` where the side has one); a curve
+/// the rule does not read rebuilds. No shape reaches a Defect.
+#[test]
+fn a_mixed_record_with_breaks_of_two_curves_a_rounding_apart_is_invalid_input() {
+    let mut read_runs = 0;
+    let mut unread_runs = 0;
+    for xsect in [1, 0] {
+        let (k, b, res) = blended(2.0, xsect);
+        res.unwrap();
+        for face in corner_faces(&b, CornerKind::Mixed) {
+            let CornerRecord::Mixed(rec) = corner_to_record(&k, &face).unwrap() else {
+                panic!("not a mixed record");
+            };
+            let mut all: Vec<f64> = rec.trim_uv.brk.clone();
+            // the breaks of the curves the rule reads
+            for side in &rec.sides {
+                all.extend_from_slice(&side.c.brk);
+                if !rec.bilinear {
+                    all.extend_from_slice(&side.dir.brk);
+                    if side.has_t {
+                        all.extend_from_slice(&side.t.brk);
+                    }
+                }
+            }
+            all.retain(|t| *t > 0.0 && *t < 1.0);
+            all.sort_by(f64::total_cmp);
+            all.dedup();
+            assert!(
+                !all.is_empty(),
+                "xsect {xsect}: the record has inner breaks"
+            );
+            for i in 0..rec.sides.len() {
+                for which in 0..3 {
+                    for &t in &all {
+                        for d in [5e-14, -5e-14] {
+                            let mut off = rec.clone();
+                            let s = &mut off.sides[i];
+                            let c = match which {
+                                0 => &mut s.c,
+                                1 => &mut s.dir,
+                                _ => &mut s.t,
+                            };
+                            if c.seg.is_empty() {
+                                continue;
+                            }
+                            let x = t + d;
+                            if c.brk.iter().any(|b| (b - x).abs() < 1e-12) {
+                                continue;
+                            }
+                            c.brk.push(x);
+                            c.brk.sort_by(f64::total_cmp);
+                            let last = c.seg.last().unwrap().clone();
+                            c.seg.push(last);
+                            // every side's c is read, by both rules; the Coons rule also
+                            // reads dir, and t where the side has one
+                            let read = which == 0 || (!rec.bilinear && (which == 1 || s.has_t));
+                            let what = format!(
+                                "xsect {xsect} side {i} curve {which} read {read} t {t} d {d}"
+                            );
+                            if let Err(e) = corner_rebuild(&k, &CornerRecord::Mixed(off)) {
+                                assert!(read, "{what}: an unread curve is refused: {e}");
+                                assert_eq!(e.kind(), ErrorKind::InvalidInput, "{what}: {e}");
+                                read_runs += 1;
+                            } else {
+                                assert!(!read, "{what}: a read curve rebuilds");
+                                unread_runs += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // both rules, both faces, every side's c at each inner break, both ways
+    assert!(
+        read_runs >= 2 * 2 * 4 * 2,
+        "{read_runs} read runs refused, {unread_runs} unread runs rebuilt"
+    );
 }

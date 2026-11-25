@@ -273,6 +273,61 @@ impl Transform {
         }
     }
 
+    /// The axis-aligned box around the eight corners of the box `lo`..`hi` mapped by
+    /// [`Self::transform_point`]: it holds the exact image of every point of the box, and for
+    /// a map that turns it is larger than the image itself. An empty box (`lo` above `hi` on
+    /// any axis) maps to itself.
+    ///
+    /// Rounding: each mapped coordinate `t + x a + y b + z c` is four terms summed in order,
+    /// within `gamma_4` of the sum of their sizes; the sizes' sum is itself rounded, so each
+    /// side moves out by `gamma_5` of it, plus the smallest normal number for products that
+    /// underflow, and then by one more double for the subtraction or addition.
+    #[must_use]
+    pub fn transformed_box(&self, lo: Point3, hi: Point3) -> (Point3, Point3) {
+        use crate::geom::certified::{next_down, next_up};
+        use crate::nurbs::math::gamma;
+        if lo.x > hi.x || lo.y > hi.y || lo.z > hi.z {
+            return (lo, hi);
+        }
+        let (tx, ty, tz, td) = (
+            self.x_axis(),
+            self.y_axis(),
+            self.z_axis(),
+            self.translation_part(),
+        );
+        let g = gamma(5);
+        let mut min = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        let mut max = Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for i in 0..8 {
+            let corner = Point3::new(
+                if i & 1 == 0 { lo.x } else { hi.x },
+                if i & 2 == 0 { lo.y } else { hi.y },
+                if i & 4 == 0 { lo.z } else { hi.z },
+            );
+            let p = self.transform_point(corner);
+            let size = |t: f64, a: f64, b: f64, c: f64| {
+                g * (t.abs() + (corner.x * a).abs() + (corner.y * b).abs() + (corner.z * c).abs())
+                    + f64::MIN_POSITIVE
+            };
+            let e = Vec3::new(
+                size(td.x, tx.x, ty.x, tz.x),
+                size(td.y, tx.y, ty.y, tz.y),
+                size(td.z, tx.z, ty.z, tz.z),
+            );
+            min = Vec3::new(
+                min.x.min(next_down(p.x - e.x)),
+                min.y.min(next_down(p.y - e.y)),
+                min.z.min(next_down(p.z - e.z)),
+            );
+            max = Vec3::new(
+                max.x.max(next_up(p.x + e.x)),
+                max.y.max(next_up(p.y + e.y)),
+                max.z.max(next_up(p.z + e.z)),
+            );
+        }
+        (min, max)
+    }
+
     /// The rigid placement `p` as a transform: its axes' images and its origin (the
     /// z axis as the placement derives it).
     #[must_use]
@@ -408,6 +463,70 @@ impl Transform {
         }
     }
 
+    /// Whether this finite affine map is a rotation or reflection and a translation.
+    /// Axis lengths and mutual dot products use `axis_tol`; the homogeneous entries use
+    /// `affine_tol`. Both tolerances must be finite and positive.
+    #[must_use]
+    pub fn is_rigid(&self, axis_tol: f64, affine_tol: f64) -> bool {
+        let [x, y, z, t] = &self.m;
+        let (a, b, c) = (self.x_axis(), self.y_axis(), self.z_axis());
+        axis_tol.is_finite()
+            && axis_tol > 0.0
+            && affine_tol.is_finite()
+            && affine_tol > 0.0
+            && self.m.iter().flatten().all(|v| v.is_finite())
+            && [x, y, z].iter().all(|r| r[3].abs() < affine_tol)
+            && (t[3] - 1.0).abs() < affine_tol
+            && [a, b, c]
+                .iter()
+                .all(|v| (v.length() - 1.0).abs() < axis_tol)
+            && a.dot(b).abs() < axis_tol
+            && b.dot(c).abs() < axis_tol
+            && c.dot(a).abs() < axis_tol
+    }
+
+    /// The orientation-preserving 2D map induced on an orthonormal plane frame.
+    /// Translation normal to the plane is discarded, as for an orthogonal projection.
+    /// Returns none for an identity within `identity_tol`, a changed normal, or a 2D
+    /// determinant differing from one by at least `tol`. The caller establishes rigidity.
+    #[must_use]
+    pub fn plane_motion(
+        &self,
+        origin: Point3,
+        x: Vec3,
+        y: Vec3,
+        tol: f64,
+        identity_tol: f64,
+    ) -> Option<([[f64; 2]; 2], Vec2)> {
+        if !(tol.is_finite()
+            && tol > 0.0
+            && identity_tol.is_finite()
+            && identity_tol > 0.0
+            && finite3(origin)
+            && finite3(x)
+            && finite3(y)
+            && self.m.iter().flatten().all(|v| v.is_finite()))
+            || self
+                .m
+                .iter()
+                .flatten()
+                .zip(Self::IDENTITY.m.iter().flatten())
+                .all(|(a, b)| (a - b).abs() < identity_tol)
+        {
+            return None;
+        }
+        let n = x.cross(y);
+        if (self.transform_vector(n) - n).length() > tol {
+            return None;
+        }
+        let (rx, ry) = (self.transform_vector(x), self.transform_vector(y));
+        let shift = self.transform_point(origin) - origin;
+        let a = [[rx.dot(x), ry.dot(x)], [rx.dot(y), ry.dot(y)]];
+        let det = a[0][0] * a[1][1] - a[0][1] * a[1][0];
+        let b = Vec2::new(shift.dot(x), shift.dot(y));
+        ((det - 1.0).abs() < tol && b.x.is_finite() && b.y.is_finite()).then_some((a, b))
+    }
+
     /// The unit, orthogonal frame axes nearest to `x` and `y`: `x` normalized, and `y` made
     /// perpendicular to it and normalized (the kernel picks a perpendicular when `y` is parallel to
     /// `x` or has no length). Restores a frame carried through a rigid motion to exactly unit and
@@ -418,6 +537,27 @@ impl Transform {
     pub fn orthonormal_frame(x: Vec3, y: Vec3) -> crate::error::Result<[Vec3; 2]> {
         let [x, y, _] = x.make_unit_ortho_vectors(Some(y))?;
         Ok([x, y])
+    }
+
+    /// Not upstream: plane axes `x` and `y` with each coordinate smaller than `noise` dropped,
+    /// each made unit again. A flat face's plane read back from a body comes tilted by rounding
+    /// (about 2e-15); a cut by that plane meets the face only nearly, where the same plane with
+    /// the rounding dropped meets it exactly. Axes with nothing to drop come back unit and
+    /// otherwise unchanged. `None` when a coordinate or `noise` is not finite, `noise` is
+    /// negative, an axis has no length once cleaned, or the cleaned axes are parallel: the
+    /// caller then keeps the axes it has.
+    #[must_use]
+    pub fn axis_squared_frame(x: Vec3, y: Vec3, noise: f64) -> Option<[Vec3; 2]> {
+        if !(finite3(x) && finite3(y) && noise.is_finite() && noise >= 0.0) {
+            return None;
+        }
+        let clean = |v: Vec3| {
+            let c = |a: f64| if a.abs() < noise { 0.0 } else { a };
+            Vec3::new(c(v.x), c(v.y), c(v.z)).unitize().ok()
+        };
+        let (x, y) = (clean(x)?, clean(y)?);
+        x.cross(y).unitize().ok()?;
+        Some([x, y])
     }
 
     /// Carry a plane's axes by a rigid motion, preserving its UV scales and orthogonality.
@@ -494,6 +634,35 @@ impl Transform {
         )
     }
 
+    /// Map a point on a line and its direction. Translation affects only the point.
+    #[must_use]
+    pub fn transform_line(&self, point: Point3, direction: Vec3) -> (Point3, Vec3) {
+        (
+            self.transform_point(point),
+            self.transform_vector(direction),
+        )
+    }
+
+    /// Map an undirected axis to this frame and orient its unit direction here.
+    ///
+    /// # Errors
+    /// Refuses a non-finite point or a direction with length at most 1e-9.
+    pub fn transform_canonical_axis(
+        &self,
+        point: Point3,
+        direction: Vec3,
+    ) -> crate::Result<(Point3, Vec3)> {
+        let (point, direction) = self.transform_line(point, direction);
+        let length = direction.length();
+        if !finite3(point) || !length.is_finite() || length <= 1e-9 {
+            return Err(crate::SolidError::InvalidInput {
+                operation: OP_MAPS,
+                reason: "the axis has no finite point and direction",
+            });
+        }
+        Ok((point, (direction / length).canonical_axis_direction()))
+    }
+
     /// Not upstream: how far the linear part of this map (its rows 0 to 2, no translation) takes
     /// the point `pivot` from where it was, as the move it adds to the map's turn about `pivot`:
     /// `pivot - transform_vector(pivot)`. A turn about the origin followed by this move is the
@@ -510,6 +679,155 @@ const OP_MAPS: &str = "math::Transform";
 /// Whether every coordinate of `v` is finite.
 fn finite3(v: Vec3) -> bool {
     v.x.is_finite() && v.y.is_finite() && v.z.is_finite()
+}
+
+/// Not upstream: the corners of a parallelogram on a plane, such as a reference image pinned to
+/// points of a sketch. Its bottom edge runs from `bl` to `br`; its top-left corner is
+/// `top_left` when the shape may stretch, and otherwise lies `aspect` (height over
+/// width) times the bottom edge's length from `bl`, square to the edge and on its left looking
+/// down `normal` (a unit normal of the plane). Returns bottom-left, bottom-right, top-right and
+/// top-left; `None` when the corners give no area: an edge not finite or shorter than a
+/// nanometre, or the two edges within a microradian of one line.
+#[must_use]
+pub fn rect_of_aspect(
+    bl: Point3,
+    br: Point3,
+    top_left: Option<Point3>,
+    normal: Vec3,
+    aspect: f64,
+) -> Option<[Point3; 4]> {
+    let along = br - bl;
+    let up = match top_left {
+        Some(tl) => tl - bl,
+        None => normal.cross(along) * aspect,
+    };
+    let (width, height) = (along.length(), up.length());
+    let ok = width > 1e-9
+        && height > 1e-9
+        && width.is_finite()
+        && height.is_finite()
+        && along.cross(up).length() > 1e-6 * width * height;
+    if !ok {
+        return None;
+    }
+    Some([bl, br, br + up, bl + up])
+}
+
+/// Not upstream: how a rectangle `aspect` (height over width) times as high as wide fits a frame
+/// pinned at `bl`, `br` and `tl`: its width (the bottom edge's length), and whether `tl` lies off
+/// the rectangle's own top-left corner, square to the bottom edge on the frame's plane, by more
+/// than a millionth of (1 + its larger side): the frame stretches it. `None` when the frame gives
+/// no area, as [`rect_of_aspect`] refuses it.
+#[must_use]
+pub fn fit_aspect(bl: Point3, br: Point3, tl: Point3, aspect: f64) -> Option<(f64, bool)> {
+    let (along, up) = (br - bl, tl - bl);
+    let normal = along.cross(up).unitize().ok()?;
+    rect_of_aspect(bl, br, Some(tl), normal, aspect)?;
+    let width = along.length();
+    let height = width * aspect;
+    let own = bl + normal.cross(along) * aspect;
+    let stretched = (tl - own).length() > 1e-6 * (1.0 + width.max(height));
+    Some((width, stretched))
+}
+
+/// Not upstream: a quad offset from its own plane on both sides, such as a decal drawn just off
+/// the face it lies on so the face never hides it. `corners` are bottom-left, bottom-right,
+/// top-right and top-left; the normal is the unit cross product of the bottom edge with the left
+/// one. Returns that normal, the corners moved `lift` along it and the corners moved `lift`
+/// against it; `None` for a coordinate or lift not finite, or corners whose edges give no normal.
+#[must_use]
+pub fn offset_quad(corners: [Point3; 4], lift: f64) -> Option<(Vec3, [Point3; 4], [Point3; 4])> {
+    if !(corners.iter().all(|p| finite3(*p)) && lift.is_finite()) {
+        return None;
+    }
+    let [bl, br, _, tl] = corners;
+    let normal = (br - bl).cross(tl - bl).unitize().ok()?;
+    let off = normal * lift;
+    Some((normal, corners.map(|p| p + off), corners.map(|p| p - off)))
+}
+
+/// Not upstream: the point `s` along the edge `u` and `t` along the edge `v` of the
+/// parallelogram with a corner at `corner`, `corner + s u + t v`, as a picture's texture
+/// coordinates place a point on the quad it is drawn on.
+#[must_use]
+pub fn parallelogram_point(corner: Point3, u: Vec3, v: Vec3, s: f64, t: f64) -> Point3 {
+    corner + u * s + v * t
+}
+
+/// The operation name of the refusals of [`centroid_and_mean_radius`].
+const OP_CENTROID: &str = "math::centroid_and_mean_radius";
+
+/// A point set's arithmetic centroid and mean Euclidean distance from that centroid.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PointSetSummary {
+    /// The arithmetic mean of the input points.
+    pub centroid: Point2,
+    /// The arithmetic mean of each point's distance from `centroid`.
+    pub mean_distance: f64,
+}
+
+/// Not upstream: the arithmetic centroid and mean radial distance of a non-empty point set.
+///
+/// # Errors
+/// [`crate::error::SolidError::InvalidInput`] for an empty set, a non-finite point, or a
+/// non-finite intermediate or result.
+pub fn centroid_and_mean_radius(points: &[Point2]) -> crate::error::Result<PointSetSummary> {
+    use crate::error::SolidError;
+    if points.is_empty() {
+        return Err(SolidError::invalid_input(OP_CENTROID, "empty point set"));
+    }
+    if points.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) {
+        return Err(SolidError::invalid_input(OP_CENTROID, "non-finite point"));
+    }
+
+    let (mut x, mut y) = (0.0, 0.0);
+    for point in points {
+        x += point.x;
+        y += point.y;
+        if !x.is_finite() || !y.is_finite() {
+            return Err(SolidError::invalid_input(
+                OP_CENTROID,
+                "point centroid overflows",
+            ));
+        }
+    }
+    let count = points.len() as f64;
+    let centroid = Point2::new(x / count, y / count);
+    if !centroid.x.is_finite() || !centroid.y.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP_CENTROID,
+            "point centroid is not finite",
+        ));
+    }
+
+    let mut total_distance = 0.0;
+    for point in points {
+        let distance = point.distance(centroid);
+        if !distance.is_finite() {
+            return Err(SolidError::invalid_input(
+                OP_CENTROID,
+                "point distance overflows",
+            ));
+        }
+        total_distance += distance;
+        if !total_distance.is_finite() {
+            return Err(SolidError::invalid_input(
+                OP_CENTROID,
+                "mean point distance overflows",
+            ));
+        }
+    }
+    let mean_distance = total_distance / count;
+    if !mean_distance.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP_CENTROID,
+            "mean point distance is not finite",
+        ));
+    }
+    Ok(PointSetSummary {
+        centroid,
+        mean_distance,
+    })
 }
 
 /// Not upstream: the rigid motions and scalings an application asks for by their numbers
@@ -607,6 +925,38 @@ impl Transform {
         ))
     }
 
+    /// The rigid map from world coordinates into the frame of the plane through `origin` with
+    /// x axis along `x` and y axis on `y`'s side in the plane of the two (each any length):
+    /// the unit axes `x̂`, `n = unit(x̂ × y)` and `ŷ = n × x̂` become X, Z and Y, and `origin`
+    /// the origin. A point's Z after the map is its level above the plane along its normal.
+    /// The linear part's columns are `x̂`, `ŷ` and `n` (the transpose of the frame's rows),
+    /// its translation `-(origin·x̂, origin·ŷ, origin·n)`.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an origin or axis not finite, or an `x` or `x̂ × y` whose squared
+    /// length is below [`EFF_ZERO_SQ`] (an axis of no length, or axes along one line).
+    pub fn into_plane_frame(origin: Point3, x: Vec3, y: Vec3) -> crate::error::Result<Self> {
+        use crate::error::SolidError;
+        if !(finite3(origin) && finite3(x) && finite3(y)) {
+            return Err(SolidError::invalid_input(
+                OP_MAPS,
+                "a plane's numbers not finite",
+            ));
+        }
+        let none =
+            |_| SolidError::invalid_input(OP_MAPS, "a plane's axes of no length or along one line");
+        let x = x.unitize().map_err(none)?;
+        let n = x.cross(y).unitize().map_err(none)?;
+        let y = n.cross(x);
+        Ok(Self::from_axes(
+            Vec3::new(x.x, y.x, n.x),
+            Vec3::new(x.y, y.y, n.y),
+            Vec3::new(x.z, y.z, n.z),
+            Vec3::new(-origin.dot(x), -origin.dot(y), -origin.dot(n)),
+        ))
+    }
+
     /// The map that undoes this one: `p = (p' - t) A⁻¹`, its linear part `A⁻¹` (the adjugate
     /// over the determinant: with `a`, `b`, `c` the rows of `A`, row `i` holds the `i`-th
     /// components of `b × c`, `c × a` and `a × b`, over `a · (b × c)`) and its translation
@@ -648,6 +998,87 @@ impl Transform {
 mod tests {
     use super::*;
 
+    /// Rounding below `noise` along a world axis is dropped and the axes come back unit; a plane
+    /// tilted for real, and one with nothing to drop, keep their axes; parallel, empty or
+    /// non-finite axes and a bad `noise` give `None`.
+    #[test]
+    fn an_axis_squared_frame_drops_only_the_rounding() {
+        let tilted = Transform::axis_squared_frame(
+            Vec3::new(1.0, 2e-15, 0.0),
+            Vec3::new(-3e-16, 1.0, 1e-15),
+            1e-12,
+        );
+        assert_eq!(tilted, Some([Vec3::X, Vec3::Y]));
+        let (s, c) = (0.3_f64.sin(), 0.3_f64.cos());
+        let real = [Vec3::new(c, s, 0.0), Vec3::new(-s, c, 0.0)];
+        assert_eq!(
+            Transform::axis_squared_frame(real[0], real[1], 1e-12),
+            Some(real)
+        );
+        assert_eq!(
+            Transform::axis_squared_frame(Vec3::X, Vec3::new(1.0, 1e-15, 0.0), 1e-12),
+            None,
+            "parallel once cleaned"
+        );
+        assert_eq!(
+            Transform::axis_squared_frame(Vec3::new(1e-13, 0.0, 0.0), Vec3::Y, 1e-12),
+            None,
+            "no length once cleaned"
+        );
+        assert_eq!(
+            Transform::axis_squared_frame(Vec3::new(f64::NAN, 0.0, 0.0), Vec3::Y, 1e-12),
+            None
+        );
+        for noise in [-1.0, f64::INFINITY, f64::NAN] {
+            assert_eq!(Transform::axis_squared_frame(Vec3::X, Vec3::Y, noise), None);
+        }
+    }
+
+    #[test]
+    fn rigid_maps_include_reflections_but_reject_scale_shear_and_hostile_entries() {
+        let rigid = |m: Transform| m.is_rigid(1e-6, 1e-12);
+        assert!(rigid(Transform::IDENTITY));
+        assert!(rigid(Transform::translation(Vec3::new(3.0, -4.0, 5.0))));
+        assert!(rigid(
+            Transform::rotation(Point3::ZERO, Vec3::Z, 0.7).unwrap()
+        ));
+        assert!(rigid(Transform::reflection(Point3::ZERO, Vec3::X).unwrap()));
+        for (row, col, value) in [
+            (0, 0, 2.0),
+            (1, 0, 0.01),
+            (0, 3, 1e-6),
+            (3, 3, 0.0),
+            (3, 0, f64::INFINITY),
+            (2, 1, f64::NAN),
+        ] {
+            let mut m = Transform::IDENTITY;
+            m.m[row][col] = value;
+            assert!(!rigid(m), "{row} {col} {value}");
+        }
+        assert!(!Transform::IDENTITY.is_rigid(f64::NAN, 1e-12));
+        assert!(!Transform::IDENTITY.is_rigid(1e-6, 0.0));
+    }
+
+    #[test]
+    fn plane_motion_uses_the_plane_origin_and_axes_and_rejects_tilts_and_reflections() {
+        // Plane normal X, with local axes Y and Z, away from the world origin.
+        // A quarter turn about X maps (10, 20, 30) to (10, -30, 20).
+        let origin = Point3::new(10.0, 20.0, 30.0);
+        let motion = |m: Transform| m.plane_motion(origin, Vec3::Y, Vec3::Z, 1e-9, 1e-12);
+        let turn = Transform::from_axes(Vec3::X, Vec3::Z, -Vec3::Y, Vec3::ZERO);
+        let (a, b) = motion(turn).unwrap();
+        assert_eq!(a, [[0.0, -1.0], [1.0, 0.0]]);
+        assert_eq!(b, Vec2::new(-50.0, -10.0));
+        assert!(motion(Transform::IDENTITY).is_none());
+        assert!(motion(Transform::rotation(Point3::ZERO, Vec3::Y, 0.2).unwrap()).is_none());
+        assert!(motion(Transform::reflection(Point3::ZERO, Vec3::Y).unwrap()).is_none());
+        // A normal displacement leaves every projected coordinate unchanged.
+        let (a, b) = motion(Transform::translation(Vec3::X * 5.0)).unwrap();
+        assert_eq!(a, [[1.0, 0.0], [0.0, 1.0]]);
+        assert_eq!(b, Vec2::ZERO);
+        assert!(motion(Transform::translation(Vec3::new(f64::NAN, 0.0, 0.0))).is_none());
+    }
+
     #[test]
     fn point_arrays_keep_their_order_under_an_affine_map() {
         let map = Transform {
@@ -662,6 +1093,40 @@ mod tests {
         map.transform_points(&mut points);
         assert_eq!(points, [[14.0, 18.0, 33.0], [23.0, 15.0, 36.0]]);
         map.transform_points(&mut []);
+    }
+
+    #[test]
+    fn transformed_box_holds_its_moved_corners_and_an_empty_box_stays_empty() {
+        // A quarter turn about z, then a move by (10, 20, 30): x goes to y, y to -x.
+        let map = Transform {
+            m: [
+                [0.0, 1.0, 0.0, 0.0],
+                [-1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [10.0, 20.0, 30.0, 1.0],
+            ],
+        };
+        let (lo, hi) = map.transformed_box(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 2.0, 3.0));
+        let (want_lo, want_hi) = (Point3::new(8.0, 20.0, 30.0), Point3::new(10.0, 21.0, 33.0));
+        for (got, want, out) in [
+            (lo.x, want_lo.x, -1.0),
+            (lo.y, want_lo.y, -1.0),
+            (lo.z, want_lo.z, -1.0),
+            (hi.x, want_hi.x, 1.0),
+            (hi.y, want_hi.y, 1.0),
+            (hi.z, want_hi.z, 1.0),
+        ] {
+            // outside the exact image, by no more than its rounding
+            assert!((got - want) * out > 0.0 && (got - want).abs() < 1e-13);
+        }
+        let empty = (Point3::new(1.0, 0.0, 0.0), Point3::new(0.0, 1.0, 1.0));
+        assert_eq!(map.transformed_box(empty.0, empty.1), empty);
+        // 1 + 2^-53 rounds to 1: the box still holds it.
+        let tiny = 2f64.powi(-53);
+        let shift = Transform::translation(Vec3::new(1.0, 0.0, 0.0));
+        let p = Point3::new(tiny, 0.0, 0.0);
+        let (lo, hi) = shift.transformed_box(p, p);
+        assert!(lo.x < 1.0 && hi.x > 1.0 && hi.x - lo.x < 1e-14);
     }
 
     #[test]
@@ -803,6 +1268,51 @@ mod tests {
             Point3::ZERO,
             Vec3::new(f64::NAN, 1.0, 0.0)
         )));
+        assert!(bad(Transform::into_plane_frame(
+            Point3::ZERO,
+            Vec3::ZERO,
+            Vec3::Y
+        )));
+        assert!(bad(Transform::into_plane_frame(
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::new(-3.0, 0.0, 0.0)
+        )));
+        assert!(bad(Transform::into_plane_frame(
+            Point3::new(f64::NAN, 0.0, 0.0),
+            Vec3::X,
+            Vec3::Y
+        )));
+    }
+
+    /// Into a plane's frame: the plane's origin goes to the origin, a point along its x axis
+    /// to X, along its normal to Z (its level above the plane), and the map is rigid. The
+    /// plane through (3, 4, 5) with x = 2Z and y = (1, -1, 0) has the unit normal
+    /// x̂ × ŷ = (1, 1, 0)/√2; a skew `y` in that plane gives the same frame.
+    #[test]
+    fn into_a_planes_frame_its_normal_is_z() {
+        let o = Point3::new(3.0, 4.0, 5.0);
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let n = Vec3::new(s, s, 0.0);
+        let skew = Vec3::new(1.0, -1.0, 7.0);
+        for y in [Vec3::new(1.0, -1.0, 0.0), skew] {
+            let t = Transform::into_plane_frame(o, Vec3::new(0.0, 0.0, 2.0), y).unwrap();
+            let near = |a: Point3, b: Point3| (a - b).length() < 1e-12;
+            assert!(near(t.transform_point(o), Point3::ZERO));
+            assert!(near(
+                t.transform_point(o + Vec3::Z * 2.5),
+                Point3::new(2.5, 0.0, 0.0)
+            ));
+            assert!(near(
+                t.transform_point(o + n * 4.0),
+                Point3::new(0.0, 0.0, 4.0)
+            ));
+            assert!(near(
+                t.transform_point(o + Vec3::new(s, -s, 0.0)),
+                Point3::new(0.0, 1.0, 0.0)
+            ));
+            assert!(t.is_regular(0.0).is_yes());
+        }
     }
 
     #[test]
@@ -942,6 +1452,73 @@ mod tests {
         assert_eq!(Transform::IDENTITY.pivot_displacement(pivot), Vec3::ZERO);
         let tr = Transform::translation(Vec3::new(1.0, 2.0, 3.0));
         assert_eq!(tr.pivot_displacement(pivot), Vec3::ZERO);
+    }
+
+    #[test]
+    fn centroid_and_mean_radius_uses_the_arithmetic_mean_radius() {
+        let points = [
+            Point2::new(0.0, 0.0),
+            Point2::new(6.0, 0.0),
+            Point2::new(0.0, 6.0),
+        ];
+        let summary = centroid_and_mean_radius(&points).unwrap();
+        assert_eq!(summary.centroid, Point2::new(2.0, 2.0));
+        let expected = (2.0 * 2.0_f64.sqrt() + 4.0 * 5.0_f64.sqrt()) / 3.0;
+        assert!((summary.mean_distance - expected).abs() <= 2.0 * f64::EPSILON * expected);
+        assert_ne!(
+            summary.mean_distance, 4.0,
+            "the RMS radius is not the mean radius"
+        );
+
+        let moved = [
+            Point2::new(0.0, 0.0),
+            Point2::new(6.0, 0.0),
+            Point2::new(0.0, 12.0),
+        ];
+        let moved_summary = centroid_and_mean_radius(&moved).unwrap();
+        assert_eq!(moved_summary.centroid, Point2::new(2.0, 4.0));
+        let moved_expected =
+            (2.0 * 5.0_f64.sqrt() + 4.0 * 2.0_f64.sqrt() + 2.0 * 17.0_f64.sqrt()) / 3.0;
+        assert!(
+            (moved_summary.mean_distance - moved_expected).abs()
+                <= 2.0 * f64::EPSILON * moved_expected
+        );
+    }
+
+    #[test]
+    fn centroid_and_mean_radius_accepts_single_and_duplicate_points() {
+        let one = Point2::new(3.0, -4.0);
+        assert_eq!(
+            centroid_and_mean_radius(&[one]).unwrap(),
+            PointSetSummary {
+                centroid: one,
+                mean_distance: 0.0,
+            }
+        );
+        assert_eq!(
+            centroid_and_mean_radius(&[one, one, one]).unwrap(),
+            PointSetSummary {
+                centroid: one,
+                mean_distance: 0.0,
+            }
+        );
+    }
+
+    #[test]
+    fn centroid_and_mean_radius_refuses_empty_non_finite_and_overflowing_sets() {
+        assert!(centroid_and_mean_radius(&[]).is_err());
+        assert!(centroid_and_mean_radius(&[Point2::new(f64::NAN, 0.0)]).is_err());
+        assert!(centroid_and_mean_radius(&[Point2::new(0.0, f64::INFINITY)]).is_err());
+        assert!(centroid_and_mean_radius(&[
+            Point2::new(f64::MAX, 0.0),
+            Point2::new(f64::MAX, 0.0),
+        ])
+        .is_err());
+        assert!(centroid_and_mean_radius(&[
+            Point2::new(-f64::MAX, 0.0),
+            Point2::new(f64::MAX, 0.0),
+        ])
+        .is_err());
     }
 
     #[test]

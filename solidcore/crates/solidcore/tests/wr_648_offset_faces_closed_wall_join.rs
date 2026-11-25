@@ -25,12 +25,6 @@ use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::topology::{Brep, FaceId};
 use solidcore::Kernel;
 
-fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.local_operation_step_walls = true;
-    k
-}
-
 fn stepped(k: &mut Kernel) -> Brep {
     let block = create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
     let cut = create_box(k, Point3::new(20.0, -1.0, 10.0), 21.0, 32.0, 11.0).unwrap();
@@ -68,7 +62,7 @@ fn top_at(k: &Kernel, b: &Brep, z: f64) -> FaceId {
 
 /// The top at `z` moved by `d` along its outward normal; the face count and volume.
 fn move_top(z: f64, d: f64) -> (usize, f64) {
-    let mut k = kernel();
+    let mut k = Kernel::default();
     let mut b = stepped(&mut k);
     let top = top_at(&k, &b, z);
     let mut ex = OffsetFacesExecutive::new();

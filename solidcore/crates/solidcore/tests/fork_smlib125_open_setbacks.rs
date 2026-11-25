@@ -40,14 +40,12 @@ use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::{edge, EdgeId, VertexId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity`.
+/// Every fix.
 fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     // (the log changes no result: issue_2489_blend_faces_are_definitions)
@@ -444,8 +442,8 @@ fn bar_into_post(k: &mut Kernel, open: bool) -> Blended {
 /// builds the sheet of 10 faces, 30 edges and 21 vertices, 9 of them free. In solidcore
 /// the trim classified the bar's inside as outside (the B-rep ray built its face caches
 /// afresh while the target was being edited, without their trims) and refused the blend
-/// as `NoRoom`, until #2503 (`brep_ray_classifies_current_trims`, WR-732, which `all_fixes`
-/// turns on): the trim classifies against the faces' current trims.
+/// as `NoRoom`, until #2503 (WR-732): the trim classifies against the faces' current
+/// trims.
 #[test]
 fn open_hole_on_a_body_with_a_closed_face_is_the_corner_nine_edges() {
     let mut k = all_fixes();

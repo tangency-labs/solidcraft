@@ -1,6 +1,6 @@
 [
  {
-  "note": "Sheet Metal Rules: the Corner Relief Shape row sets the rule's corner_relief_shape, and the tray made with the rule follows. The bend on the 120 mm edge is 120 - 2*s0 long (s0 = 3*tan 36 deg) and 8 mm shorter with a relief 8 mm across at both its ends. Torn, its centre line is sin 72 deg - 0.5/sqrt 2 longer: each end runs half that past the corner, toward its flange's closed end."
+  "note": "Sheet Metal Rules: the Corner Relief Shape row sets the rule's corner_relief_shape, and the tray made with the rule follows. The bend on the 120 mm edge is 120 - 2*s0 long (s0 = 3*tan 36 deg). A relief 8 mm across, round or rectangular, is centred where the two bends' zones' centre lines cross, c = s0 - BA/2 in from the edges (BA = 0.4*pi*(R + K*T) = 0.8*pi, so c = 3*tan 36 deg - 0.4*pi = 0.922990523), and the bend's centre line stops 4 past that at both its ends: 120 - 2c - 8 = 110.154018955 (the flat-first relief, set on the corner of the bends s0 in, made it 120 - 2*s0 - 8). Torn, its centre line is sin 72 deg - 0.5/sqrt 2 longer: each end runs half that past the corner, toward its flange's closed end."
  },
  {
   "call": "ui.set",
@@ -159,7 +159,7 @@
      0,
      "length"
     ],
-    "value": 107.640744832
+    "value": 110.154018955
    }
   }
  },
@@ -207,7 +207,7 @@
      0,
      "length"
     ],
-    "value": 107.640744832
+    "value": 110.154018955
    }
   }
  },

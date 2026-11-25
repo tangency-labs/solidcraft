@@ -2,11 +2,12 @@
 //! centre (panic fuzz of #2490, case `body_queries:15857720670000042863`; #2756): a
 //! 64-gon of radius 6.29 extruded to 9.19 at 72 degrees, so the offset,
 //! `9.19 * tan 72° = 28.3`, is four times the radius and the trimmed offset is empty.
-//! Its sides as lines now take the tangent corner rule, which builds the pyramid directly
-//! (#17265); as B-spline segments, the cancel cases below, they take the offset method.
-//! The taper then takes its surface intersection method: the untrimmed walls are merged
-//! piecewise, which splits them into a number of faces that grows as the square of the
-//! sides (464 for 16 sides), and the faces that do not reach their generating curve's
+//! Its sides as lines, or as B-spline segments (#16639), now take the tangent corner rule,
+//! which builds the pyramid directly (#17265); bowed a little, the cancel cases below, they
+//! take the offset method. The taper then takes its surface intersection method: the
+//! untrimmed walls are merged piecewise, which splits them into a number of faces that
+//! grows as the square of the
+//! sides, and the faces that do not reach their generating curve's
 //! ends are deleted one by one. Each deletion walks the shells of the whole merged
 //! B-rep, and the loop never checked the kernel's cancel token: cancelled at 240 s, the
 //! 64-gon went on deleting for another 100 s. The loop now checks the token before each
@@ -32,10 +33,13 @@ use solidcore::curve::curve::Curve;
 use solidcore::error::SolidError;
 use solidcore::geom::context::NotifyCallback;
 use solidcore::geom::object::{NotifyOperation, ObjectRef};
+use solidcore::nurbs::b_spline_curve::p1::{
+    BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
+};
 use solidcore::primitive::api_curves as curves;
 use solidcore::sweep::api_brep as sweeps;
 use solidcore::topology::face::p2::TYPE as FACE;
-use solidcore::{CancelToken, Kernel, Point3};
+use solidcore::{CancelToken, Kernel, Point3, Vec3};
 
 /// The fuzz case's height and radius (angle 72 degrees, no caps, linear corners).
 const HEIGHT: f64 = 9.188_299_504_644_123;
@@ -93,9 +97,8 @@ fn polygon(sides: u64) -> Vec<Curve> {
         .collect()
 }
 
-/// The same `sides`-gon's sides as B-spline segments: the tangent rule builds exact walls
-/// only for lines and arcs, so its taper takes the offset method and from there the
-/// surface intersection method, as the lines' did before the rule became the only path.
+/// The same `sides`-gon's sides as B-spline segments: straight, so the tangent rule takes
+/// them as lines (#16639).
 fn bspline_polygon(sides: u64) -> Vec<Curve> {
     curves::create_regular_polygon(Point3::new(0.0, 0.0, 0.0), sides, RADIUS)
         .unwrap()
@@ -104,8 +107,45 @@ fn bspline_polygon(sides: u64) -> Vec<Curve> {
         .collect()
 }
 
-/// The taper of the `sides`-gon (its sides B-spline segments), cancelled at the first face
-/// it removes: the result and the number of faces removed.
+/// How far each side of [`bowed_polygon`] bows out at its middle: its radius of curvature,
+/// about `side^2 / (8 BOW)` (750 for 16 sides, 48 for 64), stays over the offset (28.3), so
+/// its offset is a curve.
+const BOW: f64 = 0.001;
+
+/// The `sides`-gon with each side a quadratic B-spline bowed out by [`BOW`] at its middle:
+/// not a line or an arc, so the tangent rule leaves it to the offset method and from there
+/// the surface intersection method, as the lines' did before the rule became the only path.
+fn bowed_polygon(sides: u64) -> Vec<Curve> {
+    let corner = |i: u64| {
+        let a = 2.0 * std::f64::consts::PI * i as f64 / sides as f64;
+        Vec3::new(RADIUS * a.cos(), RADIUS * a.sin(), 0.0)
+    };
+    (0..sides)
+        .map(|i| {
+            let (a, b) = (corner(i), corner(i + 1));
+            let mid = (a + b) * 0.5;
+            // a quadratic's middle is half its middle control point's offset away
+            let control = [a, mid + mid.unitize().unwrap() * (2.0 * BOW), b];
+            Curve::from(
+                BSplineCurve::create_canonical(&CanonicalData {
+                    dim: 3,
+                    degree: 2,
+                    control_points: &control,
+                    form: BSplineCurveForm::default(),
+                    knot_multiplicities: &[3, 3],
+                    knots: &[0.0, 1.0],
+                    knot_type: KnotType::default(),
+                    weights: None,
+                    trim: None,
+                })
+                .unwrap(),
+            )
+        })
+        .collect()
+}
+
+/// The taper of the `sides`-gon (its sides bowed B-splines), cancelled at the first face it
+/// removes: the result and the number of faces removed.
 fn cancelled_taper(sides: u64) -> (solidcore::Result<usize>, usize) {
     let mut k = Kernel::default();
     let token = CancelToken::new();
@@ -116,7 +156,7 @@ fn cancelled_taper(sides: u64) -> (solidcore::Result<usize>, usize) {
             token,
             removed: Arc::clone(&removed),
         })));
-    let polygon = bspline_polygon(sides);
+    let polygon = bowed_polygon(sides);
     let refs: Vec<Option<&Curve>> = polygon.iter().map(Some).collect();
     let r = sweeps::create_taper_extrude(&mut k, &refs, HEIGHT, 72.0, 0, false)
         .map(|b| b.faces().len());
@@ -136,8 +176,8 @@ fn assert_stops_at_the_first_removal(sides: u64) {
     assert_eq!(removed, 1, "faces removed after the cancel");
 }
 
-/// The fuzz case's taper with 16 sides (0.8 s in release): 464 faces are removed
-/// without the check, one with it.
+/// The fuzz case's taper with 16 sides: without the check every face to delete is
+/// removed, with it one.
 #[test]
 fn taper_extrude_past_the_centre_stops_in_its_face_deletions() {
     within_budget(std::time::Duration::from_secs(300), || {
@@ -345,9 +385,8 @@ fn an_apex_on_the_far_end_is_still_refused() {
     });
 }
 
-/// Uncancelled, the 16-gon of B-spline segments (the cancel case's input) still builds its
-/// pyramid through the surface intersection method, as its lines did before the tangent
-/// rule took them.
+/// The 16-gon of B-spline segments is its lines' pyramid: straight B-splines take the
+/// tangent rule as lines (#16639).
 #[test]
 fn the_bspline_16_gon_still_builds_its_pyramid() {
     within_budget(std::time::Duration::from_secs(300), || {
