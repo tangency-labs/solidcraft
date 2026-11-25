@@ -382,12 +382,11 @@ fn collapsed_boundary_limit(
     offset_distance: f64,
     out: &mut [Vec3],
 ) -> Result<()> {
-    const BINOMIAL: [[f64; 5]; 5] = [
-        [1.0, 0.0, 0.0, 0.0, 0.0],
-        [1.0, 1.0, 0.0, 0.0, 0.0],
-        [1.0, 2.0, 1.0, 0.0, 0.0],
-        [1.0, 3.0, 3.0, 1.0, 0.0],
-        [1.0, 4.0, 6.0, 4.0, 1.0],
+    const BINOMIAL: [[f64; 4]; 4] = [
+        [1.0, 0.0, 0.0, 0.0],
+        [1.0, 1.0, 0.0, 0.0],
+        [1.0, 2.0, 1.0, 0.0],
+        [1.0, 3.0, 3.0, 1.0],
     ];
     let order = hod + 2;
     let m = surface.evaluate_simple(
@@ -435,8 +434,6 @@ fn collapsed_boundary_limit(
     };
 
     let cond_uv = (only_upper_half && hod >= 2) || (!only_upper_half && hu >= 1 && hv >= 1);
-    let cond_uuv = (only_upper_half && hod >= 3) || (!only_upper_half && hu >= 2 && hv >= 1);
-    let cond_uvv = (only_upper_half && hod >= 3) || (!only_upper_half && hu >= 1 && hv >= 2);
 
     let c = g(0, 0)?;
     let m_len = c.length();
@@ -447,8 +444,8 @@ fn collapsed_boundary_limit(
     put(out, 0, d(0, 0)? + offset_distance * n)?;
 
     let zero = Vec3::new(0.0, 0.0, 0.0);
-    let (mut cu, mut cv, mut cuu, mut cuv, mut cvv) = (zero, zero, zero, zero, zero);
-    let (mut mu, mut mv, mut muu, mut muv, mut mvv) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    let (mut cu, mut cv) = (zero, zero);
+    let (mut mu, mut mv) = (0.0, 0.0);
     let (mut nu, mut nv, mut nuu, mut nuv, mut nvv) = (zero, zero, zero, zero, zero);
     if hod >= 1 {
         cu = g(1, 0)?;
@@ -465,14 +462,14 @@ fn collapsed_boundary_limit(
         put(out, 1, d(0, 1)? + offset_distance * nv)?;
     }
     if hod >= 2 {
-        cuu = g(2, 0)?;
-        muu = (cu.dot(cu) + c.dot(cuu) - mu * mu) / m_len;
+        let cuu = g(2, 0)?;
+        let muu = (cu.dot(cu) + c.dot(cuu) - mu * mu) / m_len;
         nuu = (cuu - 2.0 * mu * nu - muu * n) / m_len;
-        cuv = g(1, 1)?;
-        muv = (cu.dot(cv) + c.dot(cuv) - mu * mv) / m_len;
+        let cuv = g(1, 1)?;
+        let muv = (cu.dot(cv) + c.dot(cuv) - mu * mv) / m_len;
         nuv = (cuv - mu * nv - mv * nu - muv * n) / m_len;
-        cvv = g(0, 2)?;
-        mvv = (cv.dot(cv) + c.dot(cvv) - mv * mv) / m_len;
+        let cvv = g(0, 2)?;
+        let mvv = (cv.dot(cv) + c.dot(cvv) - mv * mv) / m_len;
         nvv = (cvv - 2.0 * mv * nv - mvv * n) / m_len;
     }
     if hu >= 2 {
@@ -483,34 +480,6 @@ fn collapsed_boundary_limit(
     }
     if hv >= 2 {
         put(out, 2, d(0, 2)? + offset_distance * nvv)?;
-    }
-    if hu >= 3 {
-        let cuuu = g(3, 0)?;
-        let muuu = (3.0 * cu.dot(cuu) + c.dot(cuuu) - 3.0 * mu * muu) / m_len;
-        let nuuu = (cuuu - 3.0 * mu * nuu - 3.0 * muu * nu - muuu * n) / m_len;
-        put(out, 3 * (hv + 1), d(3, 0)? + offset_distance * nuuu)?;
-    }
-    if cond_uuv {
-        let cuuv = g(2, 1)?;
-        let muuv =
-            (cuu.dot(cv) + 2.0 * cu.dot(cuv) + c.dot(cuuv) - muu * mv - 2.0 * mu * muv) / m_len;
-        let nuuv =
-            (cuuv - mv * nuu - 2.0 * muv * nu - 2.0 * mu * nuv - muu * nv - muuv * n) / m_len;
-        put(out, 2 * (hv + 1) + 1, d(2, 1)? + offset_distance * nuuv)?;
-    }
-    if cond_uvv {
-        let cuvv = g(1, 2)?;
-        let muvv =
-            (cvv.dot(cu) + 2.0 * cv.dot(cuv) + c.dot(cuvv) - mvv * mu - 2.0 * mv * muv) / m_len;
-        let nuvv =
-            (cuvv - mu * nvv - 2.0 * muv * nv - 2.0 * mv * nuv - mvv * nu - muvv * n) / m_len;
-        put(out, (hv + 1) + 2, d(1, 2)? + offset_distance * nuvv)?;
-    }
-    if hv >= 3 {
-        let cvvv = g(0, 3)?;
-        let mvvv = (3.0 * cv.dot(cvv) + c.dot(cvvv) - 3.0 * mv * mvv) / m_len;
-        let nvvv = (cvvv - 3.0 * mv * nvv - 3.0 * mvv * nv - mvvv * n) / m_len;
-        put(out, 3, d(0, 3)? + offset_distance * nvvv)?;
     }
     Ok(())
 }
@@ -1854,16 +1823,11 @@ impl OffsetSurface {
             return Ok(());
         }
 
-        // A simple evaluation at a point of a collapsed boundary of the base (a pole): the
-        // limit from inside the domain (#13610), where the offset records the point as
-        // singular (one of its recorded sides passes through it). Which side is collapsed
-        // is read from the base's own derivatives, not from the record, which can name the
-        // other side at a corner: the point is on exactly one side in that parameter, and
-        // every pure derivative of the base along that side vanishes up to order hod + 1.
-        // That is what makes N and its derivatives along the side up to order hod vanish,
-        // so that N = (u - u0) G to the order the limit reads. The limit of order hod reads
-        // base derivatives of order hod + 2: a request past the evaluator's largest order
-        // keeps the path below, as does a point where both sides or neither qualify.
+        // A simple evaluation on a collapsed boundary of the base (a pole) takes the limit
+        // from inside the domain (#13610). The collapsed side is read from the base's
+        // derivatives, not the record, since the record can name the other side at a
+        // corner. Orders past MAX_DERIVATIVE, or a point where both or neither side
+        // qualifies, keep the path below.
         let on = domain.point_boundaries(uv, EFF_ZERO);
         if do_eval_simple
             && !use_ext
@@ -3939,6 +3903,13 @@ mod tests {
         dome_13610_with(&rows, SS_VMIN)
     }
 
+    /// The dome transposed with its columns reversed: the pole at v = 1 (`SS_VMAX`).
+    fn dome_13610_transposed_reversed() -> OffsetSurface {
+        let rows: [[[f64; 3]; 4]; 4] =
+            std::array::from_fn(|i| std::array::from_fn(|j| DOME_13610_ROWS[3 - j][i]));
+        dome_13610_with(&rows, SS_VMAX)
+    }
+
     /// At a point `uv` of a collapsed boundary, the simple and the exact evaluation give the
     /// regular point, and their first-order outputs are those of the limit (the values at
     /// `inside`, next to the boundary).
@@ -4008,6 +3979,28 @@ mod tests {
     fn issue_13610_limit_at_the_pole_on_the_lower_v_side() {
         let off = dome_13610_transposed();
         assert_collapsed_limit(&off, Point2::new(0.5, 0.0), Point2::new(0.5, 1e-6));
+    }
+
+    #[test]
+    fn issue_13610_limit_at_the_pole_on_the_upper_v_side() {
+        let k = &Kernel::default();
+        let off = dome_13610_transposed_reversed();
+        let uv = Point2::new(0.5, 1.0);
+        let inside = Point2::new(0.5, 1.0 - 1e-6);
+        assert_collapsed_limit(&off, uv, inside);
+        // the second-order entries, with the upper-half flags that keep the order at two
+        let m = off
+            .evaluate_simple(k, uv, 2, 2, flags(false, true))
+            .unwrap();
+        let near = off.evaluate(k, inside, 2, 2, flags(false, true)).unwrap();
+        for (i, j) in [(2, 0), (0, 2)] {
+            assert!(
+                (m[i][j] - near[i][j]).length() <= 1e-4 * (1.0 + near[i][j].length()),
+                "({i},{j}) not the limit: {:?} vs {:?}",
+                m[i][j],
+                near[i][j]
+            );
+        }
     }
 
     /// At a corner the record can name the side that is not collapsed: the collapsed side is
