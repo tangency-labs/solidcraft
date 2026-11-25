@@ -391,6 +391,7 @@ mod tests {
         let plane = r::SupportRecord::Nurbs {
             kind: r::SupportKindRecord::Plane,
             form,
+            revolution: None,
         };
         let d = r::BlendDefinition::Procedural(Box::new(r::BlendDefinitionRecord {
             supports: [plane.clone(), plane],
