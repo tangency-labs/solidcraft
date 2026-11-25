@@ -2,7 +2,9 @@
 //! narrower block on top and a window through both, rounded along every edge of both end faces.
 //! And rounds whose bands never meet, one of them ending at a crease (SolidCraft #16729).
 //! And rounds on the top edges of a block whose corners a sphere trims, whose rails cross past
-//! the edges' ends (SolidCraft #18563).
+//! the edges' ends (SolidCraft #18563). And rounds along a tab's two top edges, the outer one's
+//! tangent chain running on round a ring's top edge to meet the inner one at a corner
+//! (SolidCraft #21749).
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)] // test helpers
 
 mod common;
@@ -14,7 +16,7 @@ mod volume_leak;
 
 use solidcore::blend::definition_check::surface_kind_name;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
-use solidcore::primitive::api_primitives::create_box;
+use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::topology::proto_topology::p1::api_transform::{
     api_rotate, api_translate, TransformObject,
 };
@@ -646,4 +648,93 @@ fn chamfers_on_a_land_with_tilted_trench_plane_or_hole_are_refused_with_fit() {
     // At y ~ 2.5 the land is ~1.0556 wide, so the on-face bisector fit is ~0.526 mm
     // (strictly above the y = 2 cap fit 0.4985 mm, and well below 1.0 mm).
     assert!(size > 0.52 && size < 0.54, "end hole: fit {size}");
+}
+
+/// SolidCraft #21749: a ring (outer radius 13, inner 10, z 0 to 10) joined to a tab, the box
+/// x -13..-10, y -30..0, z 0..10. The tab's outer face x = -13 runs tangentially into the
+/// ring's outer cylinder at (-13, 0); its inner face x = -10 meets the cylinder at an angle at
+/// (-10, -y0), y0 = sqrt(13^2 - 10^2). The cylinder's seam at +x splits the ring's outer top edge
+/// in two arcs. The part has 8 faces (top, bottom, bore, the outer cylinder's two halves and the
+/// tab's three side faces), 18 edges and 12 vertices; with the tab's two long top edges, the
+/// four edges of their tangent chain are those two and the two arcs. Returns the part and those
+/// four edges: inner, outer, the arc through (0, -13) and the arc through (0, 13).
+fn ring_with_tab() -> (Body, [usize; 4]) {
+    all_fixes();
+    let part = built(|k| {
+        let outer = create_cylinder(k, Vec3::new(0.0, 0.0, 0.0), 13.0, 10.0)?;
+        let inner = create_cylinder(k, Vec3::new(0.0, 0.0, -1.0), 10.0, 12.0)?;
+        let ring = boolean_difference(k, outer, inner)?;
+        let tab = create_box(k, Vec3::new(-13.0, -30.0, 0.0), 3.0, 30.0, 10.0)?;
+        boolean_union(k, ring, tab)
+    });
+    let edges = [
+        [-10.0, -20.0, 10.0],
+        [-13.0, -20.0, 10.0],
+        [0.0, -13.0, 10.0],
+        [0.0, 13.0, 10.0],
+    ]
+    .map(|p| edge_at(&part, p));
+    (part, edges)
+}
+
+/// Rounding the four edges of [`ring_with_tab`]'s tangent chain with mitred corners. The inner
+/// edge's round and the near arc's meet at the corner (-10, -y0, 10), where the tab's inner face
+/// meets the cylinder in a concave side edge: past that corner both rails run on to their mitre,
+/// and the near arc's rail runs on over the tab. The band check took that arc's band on past the
+/// corner as a strip as wide as its section, across the tab's top, and found the outer edge's
+/// rail (x = -13 + r) inside it from r = 1.3 on, refusing the round as larger than its faces
+/// allow. Past an end where another rounded edge meets it the band ends at their mitre, so the
+/// rounds build: a valid closed body of 12 faces, 27 edges and 17 vertices. Each round adds a
+/// face (two cylinders on the straight edges, as cones, and two surfaces of revolution on the
+/// arcs), and replaces its edge by two rails (+4 edges); the ends on the face y = -30 add two
+/// edges and four vertices for the five top vertices the rounds take; the two smooth joins of
+/// the chain (at (-13, 0) and at the seam) a section edge and two vertices each; the corner a
+/// mitre edge from the rails' crossing on the top face down to the side edge, two vertices.
+///
+/// The volumes are SolidCraft 0.45.0's for this design, as the report gives them (2844.9272 at
+/// 1.4 and 2841.1111 at 1.45), which matched the original part. A check from closed forms: the
+/// part less the round's section `a r^2` (`a = 1 - pi/4`) swept along the straight edges
+/// (30 and 30 - y0 long) and, by Pappus, round the arcs (the 2 pi - acos(10/13) the ring keeps,
+/// at the section centroid's radius `13 - r + r / (6 a)`) leaves out what the mitre's run-on
+/// takes past the corner, so the body is smaller than that.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed forms, not ops computing geometry
+fn rounds_meeting_a_tangent_chain_at_a_tab_corner_build() {
+    let (part, edges) = ring_with_tab();
+    assert_eq!(part.counts().unwrap(), [8, 18, 12]);
+    // 0.45.0's body before the round
+    assert!((volume(&part) - 2897.31).abs() < 1e-4, "{}", volume(&part));
+    let y0 = (13.0_f64.powi(2) - 10.0_f64.powi(2)).sqrt();
+    let a = 1.0 - std::f64::consts::FRAC_PI_4;
+    for (r, want) in [(1.4, 2844.9272), (1.45, 2841.1111)] {
+        let c = part.copy().unwrap();
+        let made = blend(&c, Blend::Round, &edges, &[r], &[], Corners::Filled)
+            .unwrap_or_else(|e| panic!("round {r}: {e:?}"));
+        assert_eq!(made.dropped, [false; 4], "round {r}");
+        assert!(c.check(CheckLevel::All).unwrap().is_valid(), "round {r}");
+        assert_eq!(c.solid_count().unwrap(), 1, "round {r}");
+        assert_eq!(c.counts().unwrap(), [12, 27, 17], "round {r}");
+        let (_, read) = kernel_copy(&c);
+        let mut kinds: Vec<&str> = made
+            .made
+            .iter()
+            .map(|&f| {
+                let face = read.face_list()[f];
+                surface_kind_name(read.face(face).unwrap().surface.as_ref().unwrap())
+            })
+            .collect();
+        kinds.sort_unstable();
+        assert_eq!(
+            kinds,
+            ["cone", "cone", "surface-of-revolution", "surface-of-revolution"],
+            "round {r}"
+        );
+        let v = volume(&c);
+        assert!((v - want).abs() < 1e-4, "round {r}: {v}, 0.45.0 {want}");
+        let section = a * r * r;
+        let kept_turn = 2.0 * std::f64::consts::PI - (10.0_f64 / 13.0).acos();
+        let swept = section * (30.0 + 30.0 - y0)
+            + section * kept_turn * (13.0 - r + r / (6.0 * a));
+        assert!(v < volume(&part) - swept, "round {r}: {v}");
+    }
 }
