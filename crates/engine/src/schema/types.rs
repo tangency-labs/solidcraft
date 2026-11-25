@@ -280,6 +280,69 @@ impl JsonSchema for AxisDir {
     }
 }
 
+/// Coil's numeric direction or a picked axis, in the same forms as Revolve's axis.
+/// References are resolved against the design by the command handler.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CoilAxis(pub Value);
+
+impl<'de> Deserialize<'de> for CoilAxis {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(d)?;
+        if value.get("type").and_then(Value::as_str) == Some("placed_edge") {
+            return match geo_problem(&value) {
+                Some(why) => Err(D::Error::custom(why)),
+                None => Ok(Self(value)),
+            };
+        }
+        match crate::cmd::axis_dir_form(&value) {
+            Ok(_) => Ok(Self(value)),
+            Err(_)
+                if value.as_str().is_some_and(|name| !name.trim().is_empty())
+                    || value
+                        .as_object()
+                        .is_some_and(|object| ["origin", "dir", "curve", "edge", "face", "type"].iter().any(|key| object.contains_key(*key))) =>
+            {
+                RevolveAxis::deserialize(value).map(|axis| Self(axis.0)).map_err(D::Error::custom)
+            }
+            Err(why) => Err(D::Error::custom(whole(why))),
+        }
+    }
+}
+
+impl JsonSchema for CoilAxis {
+    fn schema_name() -> Cow<'static, str> {
+        "CoilAxis".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let direction = generator.subschema_for::<AxisDir>();
+        let reference = generator.subschema_for::<RevolveAxis>();
+        let point = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "X, Y or Z (any case), a non-zero direction [x, y, z], a named or picked axis in the same forms as Revolve, or an edge on a specific occurrence. Use the tagged sketch_axis form for the profile sketch's x or y axis. A placed edge names the definition body and persistent edge and records the pick point in the body's frame.",
+            "anyOf": [{
+                "type": "object",
+                "properties": {
+                    "type": {"enum": ["placed_edge"]},
+                    "body": {"type": "string"},
+                    "path": {"type": "array", "maxItems": solidcraft_doc::MAX_PLACEMENT_DEPTH + 1, "items": {"type": "integer", "minimum": 1}},
+                    "author_path": {"type": "array", "maxItems": solidcraft_doc::MAX_PLACEMENT_DEPTH + 1, "items": {"type": "integer", "minimum": 1}},
+                    "at": point,
+                    "name": {"type": "string"}
+                },
+                "required": ["type", "body", "path", "at", "name"]
+            }, {
+                "not": {"type": "object", "required": ["type"], "properties": {"type": {"enum": ["placed_edge"]}}},
+                "anyOf": [direction, {
+                    "allOf": [reference, {"anyOf": [
+                        {"type": "string", "minLength": 1, "pattern": not_blank_pattern()},
+                        {"type": "object"}
+                    ]}]
+                }]
+            }]
+        })
+    }
+}
+
 /// A camera, as the view commands read it (`cmd::view_navigation::camera_form`): the render
 /// `Camera`, with finite fields, a positive distance and a field of view in [0, π), and the
 /// handlers' message, "invalid camera", for anything else (#10898).
@@ -669,9 +732,9 @@ keyword_param!(
     /// `solid.fillet`'s `turn`.
     FilletTurnParam,
     "turn",
-    &["mitre", "swept"],
-    "mitre or swept",
-    "How two rounds turn round a sharp, straight, convex side edge square to both on a plane (the rounds along a boss's base, at its upright edges): mitre (the default) runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus. swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal or the side edge is concave, curved or tangent. Matching ignores case."
+    &["auto", "mitre", "swept"],
+    "auto, mitre or swept",
+    "How two rounds turn where they meet at a sharp side edge on a face they share (the rounds along a boss's base, at its upright edges): auto (the default, mitre with edge_radii) sweeps each turn where the swept turn builds and mitres the rest, never refused where the mitre builds; mitre runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus. swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal, the side edge is curved or tangent, or the ball cannot pass it (a side edge of the rounds' own convexity: a pocket's or a box's corner edge). Matching ignores case."
 );
 keyword_param!(
     /// `plastic.lip`'s `type`.
@@ -1606,6 +1669,10 @@ const REVOLVE_AXIS_MESSAGE: &str =
 /// What `features::axis_param` finds wrong with an object axis that isn't an edge or face of the
 /// model, before it looks anything up in the design.
 fn revolve_axis_object_problem(o: &Value) -> Option<String> {
+    if o.get("type").and_then(Value::as_str) == Some("sketch_axis") {
+        let ok = o.get("axis").and_then(Value::as_str).is_some_and(|a| matches!(a, "x" | "y"));
+        return (!ok).then(|| whole("sketch axis requires `axis` to be x or y"));
+    }
     if o.get("type").and_then(Value::as_str) == Some("world") {
         let ok = o.get("axis").and_then(Value::as_str).is_some_and(|a| matches!(a, "X" | "Y" | "Z"));
         return (!ok).then(|| whole("world axis requires `axis` to be X, Y or Z"));
@@ -1627,8 +1694,9 @@ fn revolve_axis_object_problem(o: &Value) -> Option<String> {
 }
 
 /// Revolve's `axis`, as `features::axis_param` reads it before it looks anything up: a sketch
-/// line's id or name, `x` or `y`, X, Y or Z, a construction axis's name (any text), `{type: "world",
-/// axis}`, `{sketch?, curve}` (a line of another sketch, #6548), `{origin?, dir}`, or an edge or
+/// line's id or name, `x` or `y` (also as `{type: "sketch_axis", axis}`), X, Y or Z, a
+/// construction axis's name (any text), `{type: "world", axis}`, `{sketch?, curve}` (a line of
+/// another sketch, #6548), `{origin?, dir}`, or an edge or
 /// face of the model (as `construct::model_axis_param`
 /// reads it). Kept as given, for the handler. Whether a line or axis exists, and whether a picked
 /// edge or face gives an axis, is checked by the handler, which has the design.
@@ -1662,18 +1730,29 @@ impl JsonSchema for RevolveAxis {
         let point = generator.subschema_for::<Point3>();
         let origin = generator.subschema_for::<PointExpr3>();
         let id_or_name = generator.subschema_for::<IdOrName>();
-        let model = json!({"anyOf": [{"required": ["edge"]}, {"required": ["face"]}, {"required": ["type"], "properties": {"type": {"enum": ["edge", "face"]}}}]});
+        // The parser resolves a model pick or tagged coordinate axis before reading a curve or direction.
+        let model_pick = json!({"anyOf": [{"required": ["edge"]}, {"required": ["face"]}]});
+        let model_or_coordinate_axis = json!({"anyOf": [
+            model_pick,
+            {"required": ["type"], "properties": {"type": {"enum": ["edge", "face", "sketch_axis", "world"]}}}
+        ]});
         json_schema!({
             "description": "The axis to turn about: a sketch line's id or name (a line of the profile's sketch wins over a construction axis of the same name); {\"sketch\"?: an id or name, \"curve\": an id} — a line of that sketch, which the revolve follows when that sketch is edited; x or y, the sketch's own axes; X, Y or Z, the world axes (any other case is a name); a construction axis's name, which the revolve follows when it is edited; {\"type\": \"world\", \"axis\": X, Y or Z}, as timeline.inspect gives one back; {\"origin\"?: [x, y, z] (numbers or length expressions; default: the world origin), \"dir\": [x, y, z]}, which the revolve follows when parameters change; or an edge or face of a body ({\"edge\": [x, y, z]} or {\"face\": [x, y, z]}, a point on a straight or circular edge, or on a cylinder, cone or torus face, or as saved: {\"type\": \"edge\" or \"face\", \"at\", \"name\"?}), about whose axis it turns, followed as the model changes.",
             "anyOf": [
                 {"type": "string"},
-                {"type": "object", "properties": {"type": {"enum": ["world"]}, "axis": {"enum": ["X", "Y", "Z"]}}, "required": ["type", "axis"]},
-                {"type": "object", "properties": {"sketch": id_or_name, "curve": {"type": "string"}}, "required": ["curve"]},
+                {"type": "object", "properties": {"type": {"enum": ["sketch_axis"]}, "axis": {"enum": ["x", "y"]}}, "required": ["type", "axis"], "not": model_pick},
+                {"type": "object", "properties": {"type": {"enum": ["world"]}, "axis": {"enum": ["X", "Y", "Z"]}}, "required": ["type", "axis"], "not": model_pick},
+                {
+                    "type": "object",
+                    "properties": {"sketch": id_or_name, "curve": {"type": "string"}},
+                    "required": ["curve"],
+                    "not": model_or_coordinate_axis
+                },
                 {
                     "type": "object",
                     "properties": {"origin": origin, "dir": point},
                     "required": ["dir"],
-                    "not": {"anyOf": [model, {"required": ["type"], "properties": {"type": {"enum": ["world"]}}}]}
+                    "not": model_or_coordinate_axis
                 },
                 picked_at("face", &point),
                 picked_at("edge", &point),

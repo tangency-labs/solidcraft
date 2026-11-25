@@ -571,6 +571,18 @@ impl ThinSide {
     }
 }
 
+/// What a Scale grows its bodies about. Each evaluation finds the point again, so it follows
+/// the features before the Scale when they change.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ScaleAbout {
+    /// The centre of the bodies' exact bounding box, as the features before the Scale leave them.
+    Centre,
+    /// A picked vertex, sketch point, construction point, circular edge or face (a flat face's
+    /// middle, a hole's or shaft's round end), found by its reference.
+    Pick { at: GeoRef },
+}
+
 /// Revolve axis.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -969,8 +981,11 @@ pub enum FeatureKind {
         /// from the vertex instead of where the rounds meet (a constant-radius fillet only).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         setbacks: Vec<CornerSetback>,
-        /// How two rounds turn where they meet at a sharp side edge: in a mitre (the default) or
-        /// swept round it (a constant-radius, exact, rolling-corner fillet without setbacks only).
+        /// How two rounds turn where they meet at a sharp side edge: in a mitre, swept round it
+        /// (a constant-radius, exact, rolling-corner fillet without setbacks only), or each turn
+        /// swept where the swept turn builds and mitred where not (`auto`, what `solid.fillet`
+        /// gives a new fillet). A fillet saved without it, as every fillet before `auto` was
+        /// (`format/pending/fillet-auto-turn.rs`), is mitred.
         #[serde(default, skip_serializing_if = "FilletTurn::is_mitre")]
         turn: FilletTurn,
         /// Round each picked edge's tangent chain with it (the default: edges continuing it
@@ -1393,8 +1408,13 @@ pub enum FeatureKind {
     /// Scale bodies about a point (uniform, or per axis).
     Scale {
         bodies: Vec<BodyName>,
+        /// The fixed point it scales about when `about` is not given (the design origin in
+        /// designs saved before `about`).
         #[serde(default)]
         origin: Position,
+        /// What it scales about, found again on each evaluation: the bodies' centre or a pick.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        about: Option<ScaleAbout>,
         #[walk(unitless = "Scale factor")]
         factor: Expr,
         /// Per-axis factors instead of `factor`.
@@ -1766,6 +1786,12 @@ pub enum FeatureKind {
         base: PointExpr,
         #[serde(default = "z_axis")]
         axis: Dir,
+        /// A picked axis, using the same persistent references as Revolve.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis_ref: Option<AxisRef>,
+        /// Grow against the axis direction, keeping the coil's hand (`clockwise`).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reversed: bool,
         /// The sketch whose plane and profile the coil sweeps. Its absence means the primitive
         /// circular or square section below.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1793,7 +1819,7 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Start angle")]
         start_angle: Option<Expr>,
-        /// Turn the other way (left-handed).
+        /// Reverse rotation about the reference axis without changing axial propagation.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         clockwise: bool,
         /// Where the wire ends; axial when absent.
@@ -2536,9 +2562,10 @@ pub enum FeatureKind {
         #[walk(length = "Tolerance")]
         tolerance: Expr,
     },
-    /// A surface body trimmed by a plane, by a face of a body (`tool`, its surface extended) or
-    /// by sketch curves swept onto it (`curves`), keeping the side of `keep`; with `keep_more`,
-    /// the regions (pieces that hang together once cut) `keep` and those points pick instead.
+    /// A surface body trimmed by a plane, a complete bounded sheet (`tool_body`), a face of a
+    /// body (`tool`, its surface extended), or sketch curves swept onto it (`curves`). A sheet
+    /// keeps the connected region of `keep`; a plane or face keeps its side. With `keep_more`,
+    /// it keeps the regions (pieces that hang together once cut) those points pick instead.
     /// With `with`, a mutual trim: `body` and `with` (one face each) cut each other, `with`
     /// keeping the side of its one `keep_with` point or the regions of several; `extend`
     /// extends one that stops short of the other to meet it, and `stitch` sews the two kept
@@ -2548,6 +2575,9 @@ pub enum FeatureKind {
         plane: PlaneRef,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool: Option<FaceAt>,
+        /// The complete bounded cutting sheet. Older designs use `tool` for one extended face.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_body: Option<BodyName>,
         keep: Position,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         keep_more: Vec<Position>,
@@ -2686,6 +2716,10 @@ pub enum FilletTurn {
     /// The rounds end at the side edge and the corner is their section revolved about it, a
     /// torus tangent to both (`solidcraft_kernel::FilletTurn::Swept`).
     Swept,
+    /// Each turn swept where the swept turn builds (the rolling ball can pass the side edge) and
+    /// mitred where it does not, decided per corner (`solidcraft_kernel::FilletTurn::Auto`):
+    /// never refused where the mitre builds, and taking every option the mitre takes.
+    Auto,
 }
 
 /// Why a swept turn is refused with a fillet's other options: the kernel sweeps the turn of two
@@ -2709,6 +2743,7 @@ impl FilletTurn {
         match self {
             FilletTurn::Mitre => solidcraft_kernel::FilletTurn::Mitre,
             FilletTurn::Swept => solidcraft_kernel::FilletTurn::Swept,
+            FilletTurn::Auto => solidcraft_kernel::FilletTurn::Auto,
         }
     }
 }

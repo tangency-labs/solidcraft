@@ -14,11 +14,12 @@ use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::face_flux::face_flux;
 use solidcore_ops::pcurve;
 use solidcore_record::Vec3;
 use solidcore_record::brep::{self as b, Curve2};
 use solidcraft_geom::Ring;
-use solidcraft_geom::brep::eval::{SurfaceEval, face_flux};
+use solidcraft_geom::brep::eval::SurfaceEval;
 
 use crate::body::Body;
 use crate::{KernelError, Result, guard};
