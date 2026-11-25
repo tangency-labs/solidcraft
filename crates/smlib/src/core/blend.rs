@@ -690,7 +690,7 @@ mod tests {
     fn surface_failures_pass_on_as_their_status() {
         use solidcore::error::surface::SurfaceFailure;
         let surface = |s| Failure::new("surface::surface::p2::Surface::step_inversion", s).into_error();
-        assert!(matches!(status(surface(SurfaceFailure::Failed("the point is not on the generator"))), Error::Status(1001)));
+        assert!(matches!(status(surface(SurfaceFailure::ExtensionTowardFailed)), Error::Status(1001)));
         assert!(matches!(status(surface(SurfaceFailure::NoNurb)), Error::Status(1006)));
         assert!(matches!(status(surface(SurfaceFailure::LineDirectionZero)), Error::Status(1007)));
         assert!(matches!(status(surface(SurfaceFailure::PointOutsideSweep)), Error::Status(1020)));

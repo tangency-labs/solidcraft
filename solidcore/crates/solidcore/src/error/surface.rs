@@ -1503,13 +1503,11 @@ mod tests {
     /// operation, status, kind and entity of the routine failure it replaced.
     #[test]
     fn the_trim_cache_and_blend_samples_keep_their_routine_answers() {
-        let samples = [
-            (
-                "surface::trim_srf_cache::TrimSrfCache::build_tree_with_face",
-                SurfaceFailure::DisjointFaceDomain,
-                SM_ERR_INVALID_INPUT,
-            ),
-        ];
+        let samples = [(
+            "surface::trim_srf_cache::TrimSrfCache::build_tree_with_face",
+            SurfaceFailure::DisjointFaceDomain,
+            SM_ERR_INVALID_INPUT,
+        )];
         for (operation, failure, code) in samples {
             let typed = SolidError::surface(operation, failure);
             let before = SolidError::failed_routine(operation, code);

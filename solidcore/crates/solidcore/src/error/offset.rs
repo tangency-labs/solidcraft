@@ -2447,7 +2447,6 @@ mod tests {
                 ErrorKind::OffsetFolds,
                 false,
                 false,
-                false,
             ),
             (
                 O::TubeNotCertified {
@@ -2455,7 +2454,6 @@ mod tests {
                     distance: 1.2,
                 },
                 ErrorKind::OffsetFolds,
-                false,
                 false,
                 false,
             ),

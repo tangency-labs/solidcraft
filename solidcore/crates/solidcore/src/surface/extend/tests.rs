@@ -1687,7 +1687,7 @@ fn a_span_past_its_work_budget_is_passed_on_not_an_ask_that_does_not_work() {
         Some(cancelled)
     );
     // a plain status failure, an invalid input and an unproved span: no ask
-    let failed = SolidError::failed_routine("t", crate::error::SM_ERR);
+    let failed = SolidError::failed_routine("t", SM_ERR);
     assert!(failed.failed_routine_status().is_some() && !failed.is_unported_or_cancelled());
     assert!(matches!(span_of_ask(Err(failed), feet), Ok(None)));
     let invalid = SolidError::invalid_input("t", "x");
