@@ -3204,6 +3204,32 @@ fn a_free_form_pieces_extremes_are_values_it_takes() {
 }
 
 #[test]
+fn a_free_form_piece_that_touches_a_zero_level_settles_at_any_size() {
+    // Under z = x the level is x. The cubic from (1, 0) by (-1, 0) and (0, 1) to (4, 1) runs
+    // along x = (1 - 3t)², so its level spans [0, 4], touching 0 at t = 1/3, never an end of a
+    // halved piece. Near there a piece's controls, its level and its coordinates all shrink as
+    // its width squared, so a rounding taken from the piece's own coordinates shrinks with its
+    // enclosure and never lets the search settle. Scaled by `s` the level spans [0, 4 s]; the
+    // part also sits 1e8 above the world origin.
+    let far = 1e8;
+    let plane = raised(&sloped(1.0, 0.0), far - 1.0);
+    for s in [1e-3, 1.0, 1e6] {
+        let touching = cubic_and_chord(p(s, 0.0), p(-s, 0.0), p(0.0, s), p(4.0 * s, s));
+        let (lo, hi) = plane_rise(&raised(&xy(), far), &plane, &[touching])
+            .unwrap_or_else(|e| panic!("s = {s}: {e:?}"));
+        let size = 4.0 * s;
+        assert!(
+            (-1e-14 * size..=1e-12 * size).contains(&lo),
+            "s = {s}: least {lo}"
+        );
+        assert!(
+            (hi - size).abs() <= 1e-12 * size && hi <= size * (1.0 + 1e-14),
+            "s = {s}: most {hi}"
+        );
+    }
+}
+
+#[test]
 fn the_gap_between_two_planes_over_a_profile_turns_negative_only_where_they_cross() {
     // From z = 0 to z = 1 + x / 2: the gap is 1 + x / 2.
     let gap = |r: Region2| plane_gap(&xy(), &xy(), &half_slope(), &[r]).unwrap();
