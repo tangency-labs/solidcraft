@@ -128,7 +128,8 @@ pub fn run_api(site: &str) -> Result<(), String> {
 /// The drawing milestone's plate (#4894 W23, acceptance case 84) made and checked by commands
 /// alone in a tab of its own, so the steps before leave nothing in it. Kept as a host keeps a
 /// design (`document.export`), the app started again in that tab and the design put back
-/// (`document.import`), its drawing reads and exports the same, byte for byte.
+/// (`document.import`), its drawing reads the same, its SVG is the same byte for byte, and its PNG
+/// (written to a file, #19897) has the same size in bytes and pixels.
 fn drawing_test(browser: &Chrome, port: u16) -> Result<String, String> {
     let mut tab = browser.new_tab()?;
     tab.call("Page.bringToFront", json!({}))?;
@@ -139,7 +140,7 @@ fn drawing_test(browser: &Chrome, port: u16) -> Result<String, String> {
     if let Some(key) = ["read", "svg", "png"].into_iter().find(|&key| opened[key] != made[key]) {
         return Err(format!("web-api-test: the plate's drawing changed once the app started again: its {key}"));
     }
-    Ok("the M2 plate's drawing made by commands, and the same SVG, PNG and dimensions after the app started again".into())
+    Ok("the M2 plate's drawing made by commands, and the same SVG, PNG size and dimensions after the app started again".into())
 }
 
 /// The app started afresh at `?drawing={step}`, then [`DRAWING_TEST`] run in it with `kept`.
@@ -210,15 +211,18 @@ const DRAWING_TEST: &str = r#"(async (plate, kept) => {
     const shown = groups.map(g => g.items.filter(item => item.kind === 'text').map(item => item.text).join(''));
     check(same([...shown].sort(), [...read].sort()), 'the sheet shows ' + JSON.stringify(shown));
     const svg = await run('drawing.export', {sheet: 'Sheet 1'});
-    const png = await run('drawing.export', {sheet: 'Sheet 1', format: 'png', dpi: 150});
+    // A PNG is written to a file (#19897), here in the browser's file storage.
+    const pngPath = '/upload/plate-sheet-1.png';
+    const png = await run('drawing.export', {sheet: 'Sheet 1', format: 'png', dpi: 150, path: pngPath});
     check(svg.svg.includes('width="420mm" height="297mm"'), 'the SVG is A3');
+    check(png.path === pngPath && png.bytes > 0, 'the PNG is written to ' + pngPath + ', not ' + JSON.stringify(png.path));
     check(same(png.report.pixels, [2481, 1754]), 'the PNG is ' + JSON.stringify(png.report.pixels) + ' pixels');
     // An export leaves out_of_date out of its reply when nothing is out of date.
     check([svg, png].every(e => (e.out_of_date || []).length === 0 && e.views.length === 3 && e.views.every(v => v.status === 'drawn')),
         'every view is drawn and nothing is out of date');
     const exported = await app.request('document.export');
     await app.request('document.saved', {revision: exported.revision});
-    return {drawing, dimensions, text: exported.text, read, svg: svg.svg, png: png.data};
+    return {drawing, dimensions, text: exported.text, read, svg: svg.svg, png: {bytes: png.bytes, pixels: png.report.pixels}};
 })"#;
 
 /// The app's mouse buttons follow the browser's: a chord leaves none held (a second button
@@ -400,11 +404,65 @@ const API_TEST: &str = r#"(async () => {
     await app.request('ui.click', {x, y});
     // The click is queued for a later frame. Keep this design until the export has finished.
     await waitForUi(ui => !ui.dialog && !ui.file_picker_busy && !ui.file_busy, 'view export finishes');
+    // An export to the same explicit path can publish newer virtual bytes while Save is waiting.
+    {
+        const handle = FileSystemFileHandle.prototype;
+        const createWritable = handle.createWritable;
+        const sharedPath = '/opfs/concurrent-write.sc';
+        let opened, finish;
+        const opening = new Promise(resolve => { opened = resolve; });
+        const allowWrite = new Promise(resolve => { finish = resolve; });
+        handle.createWritable = function (...args) {
+            if (this.name !== 'concurrent-write.sc') return createWritable.apply(this, args);
+            opened();
+            return allowWrite.then(() => createWritable.apply(this, args));
+        };
+        await app.execute('parameters.add', {name: 'newer_value', expression: '5 mm'});
+        const saving = app.execute('file.save_as', {path: sharedPath});
+        try {
+            await Promise.race([opening, saving.then(() => { throw new Error('save completed before storage opened'); })]);
+            await app.execute('parameters.export', {path: sharedPath, format: 'json'});
+            finish();
+            await saving;
+        } finally {
+            finish();
+            handle.createWritable = createWritable;
+        }
+        await app.execute('parameters.delete', {name: 'newer_value'});
+        const imported = await app.execute('parameters.import', {path: sharedPath});
+        check(imported.imported.includes('newer_value'), 'save completion preserves the newer virtual file');
+    }
     // Browser files exist only in the VFS: native filesystem metadata cannot find them.
     await app.execute('file.save', {path: '/upload/linked-part.sc'});
     await app.execute('file.new');
     const linked = await app.execute('component.insert_design', {path: '/upload/linked-part.sc'});
+    // The browser's persistence promise controls when Save can acknowledge this revision.
+    const handle = FileSystemFileHandle.prototype;
+    const createWritable = handle.createWritable;
+    let reached, release;
+    const writing = new Promise(resolve => { reached = resolve; });
+    const fail = new Promise(resolve => { release = resolve; });
+    handle.createWritable = function (...args) {
+        if (this.name !== 'linked-assembly.sc') return createWritable.apply(this, args);
+        reached();
+        return fail.then(() => { throw new Error('test OPFS write failed'); });
+    };
+    try {
+        const saving = rejects(() => app.execute('file.save', {path: '/opfs/linked-assembly.sc'}), 'test OPFS write failed');
+        await writing;
+        check((await app.request('document.export')).dirty, 'pending OPFS save leaves the design unsaved');
+        release();
+        await saving;
+        check((await app.request('document.export')).dirty, 'failed OPFS save leaves the design unsaved');
+    } finally {
+        release();
+        handle.createWritable = createWritable;
+    }
     await app.execute('file.save', {path: '/opfs/linked-assembly.sc'});
+    const dir = await navigator.storage.getDirectory();
+    const savedHandle = await dir.getFileHandle('linked-assembly.sc');
+    check((await savedHandle.getFile()).size > 0, 'successful save is already readable in OPFS');
+    check(!(await app.request('document.export')).dirty, 'successful OPFS save acknowledges its design');
     const links = await app.execute('component.links');
     check(links.links[0].found === true, 'linked part is found in browser storage');
     check(links.links[0].path === '../upload/linked-part.sc', 'assembly stores a relative link');
@@ -1302,7 +1360,13 @@ impl Cdp {
         let mut message = Vec::new();
         loop {
             let mut h = [0u8; 2];
-            self.stream.read_exact(&mut h).map_err(|e| format!("DevTools: {e}"))?;
+            self.stream.read_exact(&mut h).map_err(|e| match e.kind() {
+                // The read timeout ran out: Linux reports it as EAGAIN, which reads as a socket fault.
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+                    format!("DevTools: the page sent no reply within {LAUNCH_TIMEOUT:?}; the app may have stopped (a wasm panic shows in the browser console)")
+                }
+                _ => format!("DevTools: {e}"),
+            })?;
             let (fin, opcode) = (h[0] & 0x80 != 0, h[0] & 0x0f);
             let len = match h[1] & 0x7f {
                 126 => {

@@ -28,7 +28,6 @@ const DELTA: f64 = 1e-10;
 /// The revolve: the torus faces' (major, minor) radii and SMLib's check lines.
 fn revolve() -> (Vec<(f64, f64)>, Vec<String>) {
     let mut k = Kernel::default();
-    k.fixes.revolve_analytic_profile_faces = true;
     let r = R + DELTA;
     let s = (r * r - R * R).sqrt();
     let a_deg = s.atan2(-R).to_degrees();
