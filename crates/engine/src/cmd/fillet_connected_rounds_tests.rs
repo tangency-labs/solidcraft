@@ -227,3 +227,26 @@ fn a_refused_fillet_carries_the_kernel_calls_code() {
     let row = doc["timeline"].as_array().unwrap().iter().find(|r| r["id"] == id).cloned().unwrap();
     assert_eq!(&row["error_code"], timeline_code, "{row}");
 }
+
+/// #22148: a refused fillet's code says the kernel's class of its error, a refusal (change the
+/// input), in the command's error and in the timeline JSON, in full and in short, so a client
+/// tells it from the kernel's fault without a copy of the kind table.
+#[test]
+fn a_refused_fillets_code_says_it_is_a_refusal() {
+    let mut s = wall();
+    let edges = json!([[15, 0, 10], [15, 2, 10]]);
+    let e = s.execute("solid.fillet", &json!({"edges":edges, "radius":"1.5 mm"})).unwrap_err();
+    let code = e.error_code().cloned().unwrap_or_else(|| panic!("no code: {e}"));
+    assert_eq!(json!(code)["class"], "refusal", "{code}");
+
+    let out = run(&mut s, "solid.fillet", json!({"edges":edges, "radius":"top_radius"}));
+    let id = out["feature"].as_u64().unwrap();
+    s.execute("parameters.change", &json!({"name":"top_radius", "expression":"1.8 mm"})).ok();
+    let inspected = run(&mut s, "timeline.inspect", json!({"feature":id}));
+    assert_eq!(inspected["error_code"]["class"], "refusal", "{inspected}");
+    for detail in [json!(true), json!("summary")] {
+        let doc = run(&mut s, "document.inspect", json!({"timeline":detail}));
+        let row = doc["timeline"].as_array().unwrap().iter().find(|r| r["id"] == id).cloned().unwrap();
+        assert_eq!(row["error_code"]["class"], "refusal", "{detail}: {row}");
+    }
+}
