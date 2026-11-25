@@ -812,7 +812,13 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                 .and_then(serde_json::Value::as_array)
                 .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
                 .unwrap_or_default();
-            solidcraft_engine::doc::through_all_distance(&state, &plane, 0.0, &targets).ok()
+            let reach = solidcraft_engine::doc::through_all_distance(&state, &plane, 0.0, &targets).ok()?;
+            // On the side the extrude goes: the kept Distance's sign picks it, as in the model.
+            let kept = match &d.kind {
+                Kind::Extrude { distance, .. } => crate::length_input::eval(&app.session.doc, distance, ValueKind::Length).ok(),
+                _ => None,
+            };
+            Some(solidcraft_engine::doc::through_all_side(reach, kept))
         })
     } else {
         None

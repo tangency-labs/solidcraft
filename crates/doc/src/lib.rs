@@ -228,6 +228,7 @@ pub use eval::suggested_thread;
 pub use eval::suggested_thread_in;
 pub use eval::tangent_face_chain;
 pub use eval::through_all_distance;
+pub use eval::through_all_side;
 pub use eval::to_end_is_flat;
 pub use eval::with_placed_copies;
 pub use eval::world_body_paths;

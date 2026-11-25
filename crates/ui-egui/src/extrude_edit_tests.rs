@@ -837,6 +837,34 @@ fn with_extent_all_a_negative_kept_distance_keeps_its_side() {
     assert!((depth - 30.0).abs() < 0.05, "{depth}");
 }
 
+/// The side of the sketch the arrow's tip is on: 1 along the normal, -1 against it.
+fn arrow_side(h: &mut Harness) -> f64 {
+    let tip = crate::scenario::handle_at("arrow").expect("the arrow");
+    let mut screen = |at: f64| {
+        let p = h.call("ui.at", on_arrow(h, at));
+        egui::pos2(p["result"][0].as_f64().unwrap() as f32, p["result"][1].as_f64().unwrap() as f32)
+    };
+    let (ahead, behind) = (screen(5.0), screen(-5.0));
+    if tip.distance(ahead) < tip.distance(behind) { 1.0 } else { -1.0 }
+}
+
+/// With All the arrow goes to the side the extrude goes to (#21844): a negative kept Distance
+/// cuts below the sketch, and the arrow points there, with either Direction of one side.
+#[test]
+fn with_extent_all_the_arrow_points_where_the_extrude_goes() {
+    for (params, side) in [
+        (json!({"distance":"-10 mm"}), -1.0),
+        (json!({"distance":"10 mm"}), 1.0),
+        (json!({"distance":"-10 mm","direction":"negative"}), 1.0),
+        (json!({"distance":"10 mm","direction":"negative"}), -1.0),
+    ] {
+        let mut h = open_cut(params.clone());
+        assert_eq!(arrow_side(&mut h), side, "{params}: the Distance's arrow");
+        set_all(&mut h, true);
+        assert_eq!(arrow_side(&mut h), side, "{params}: with All, on the same side");
+    }
+}
+
 /// With value stepping on, the box that names the extent is an empty box: Up and Down have no
 /// number to step, so the kept Distance and All stay as they are.
 #[test]
