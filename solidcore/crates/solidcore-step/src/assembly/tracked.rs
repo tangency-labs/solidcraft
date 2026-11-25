@@ -363,18 +363,15 @@ fn shift(c: &mut Curve2, d: usize, by: f64) {
 ///
 /// # Errors
 /// A use whose pcurve cannot be evaluated at its ends.
-fn align(on: &SurfaceEval, l: &[(u32, bool)], pcs: &mut [Curve2], k: usize) -> R<()> {
+fn align(periods: [Option<f64>; 2], l: &[(u32, bool)], pcs: &mut [Curve2], k: usize) -> R<()> {
     let n = l.len();
-    let periods = on.domain().period;
     for i in 0..n.saturating_sub(1) {
         let j = (k + i) % n;
         let before = use_end(l, pcs, (j + n - 1) % n, true).ok_or("pcurve end")?;
         let start = use_end(l, pcs, j, false).ok_or("pcurve start")?;
         let mut moved = false;
         for (d, ((b, s), period)) in before.into_iter().zip(start).zip(periods).enumerate() {
-            if let Some(p) = period.filter(|p| *p > 0.0)
-                && (b - s).abs() > 0.5 * p
-            {
+            if let Some(p) = period.filter(|p| turns_apart(b, s, *p)) {
                 shift(pcs.get_mut(j).ok_or("pcurve")?, d, ((b - s) / p).round() * p);
                 moved = true;
             }
@@ -384,6 +381,46 @@ fn align(on: &SurfaceEval, l: &[(u32, bool)], pcs: &mut [Curve2], k: usize) -> R
         }
     }
     Ok(())
+}
+
+/// Whether `a` and `b` lie half a period `p` or more apart: a jump across the seam, not a step.
+fn turns_apart(a: f64, b: f64, p: f64) -> bool {
+    p > 0.0 && (a - b).abs() >= 0.5 * p
+}
+
+/// Whether each use of a loop starts across the seam from where the use before it ends.
+///
+/// # Errors
+/// A use whose pcurve cannot be evaluated at its ends.
+fn jumps(periods: [Option<f64>; 2], l: &[(u32, bool)], pcs: &[Curve2]) -> R<Vec<bool>> {
+    let n = l.len();
+    (0..n)
+        .map(|j| {
+            let before = use_end(l, pcs, (j + n - 1) % n, true).ok_or("pcurve end")?;
+            let start = use_end(l, pcs, j, false).ok_or("pcurve start")?;
+            Ok(before.into_iter().zip(start).zip(periods).any(|((b, s), p)| p.is_some_and(|p| turns_apart(b, s, p))))
+        })
+        .collect()
+}
+
+/// `again` put in for use `k` of a loop and the uses after it moved to run on from it
+/// ([`align`]), or nothing changed where that leaves the loop jumping across the seam at a joint
+/// where it did not before (the use before `k` is not moved, so a followed pcurve that ends a
+/// period from the use after it in a loop of two cannot be made to meet both): whether it was.
+///
+/// # Errors
+/// A use whose pcurve cannot be evaluated at its ends.
+fn install(periods: [Option<f64>; 2], l: &[(u32, bool)], pcs: &mut [Curve2], k: usize, again: Curve2) -> R<bool> {
+    let kept = pcs.clone();
+    let was = jumps(periods, l, pcs)?;
+    let Some(slot) = pcs.get_mut(k) else { return Ok(false) };
+    *slot = again;
+    align(periods, l, pcs, k)?;
+    if jumps(periods, l, pcs)?.iter().zip(&was).any(|(now, before)| *now && !*before) {
+        pcs.clone_from_slice(&kept);
+        return Ok(false);
+    }
+    Ok(true)
 }
 
 /// The pcurves of a spline face's uses (`pcs`, in the order of `edge_loops`) that lie [`FAR`] off
@@ -427,13 +464,58 @@ pub(super) fn retrack(surface: &BSurface, edges: &[EdgeB], edge_loops: &[Vec<(u3
                 }
             }
             if let Some((_, again)) = best
-                && let Some(slot) = loop_pcs.get_mut(k)
+                && install(on.domain().period, l, loop_pcs, k, again)?
             {
-                *slot = again;
                 made += 1;
-                align(&on, l, loop_pcs, k)?;
             }
         }
     }
     Ok(made)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+mod tests {
+    use super::*;
+
+    /// A straight pcurve from `a` to `b`.
+    fn line(a: [f64; 2], b: [f64; 2]) -> Curve2 {
+        Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![a, b] }
+    }
+
+    const U_TURN: [Option<f64>; 2] = [Some(1.0), None];
+
+    /// #20575's loop: the cut's second piece followed round the tube the other way from the
+    /// kernel's trim, a period up from it, and the seam's second use after it on the kernel's side.
+    /// Both are moved a period down to run on from the cut's first piece, and the loop closes.
+    #[test]
+    fn a_followed_trim_a_period_off_moves_the_seam_use_after_it() {
+        let l = [(0, true), (1, true), (2, true), (3, true), (1, false)];
+        let mut pcs = vec![
+            line([0.0, 0.0], [1.0, 0.0]),
+            line([1.0, 0.0], [1.0, 0.5]),
+            line([1.0, 0.5], [0.75, 0.8]),
+            line([0.25, 0.6], [1.0, 0.5]),
+            line([1.0, 0.0], [1.0, 0.5]),
+        ];
+        assert!(install(U_TURN, &l, &mut pcs, 3, line([1.75, 0.8], [1.0, 0.5])).unwrap());
+        assert_eq!(use_end(&l, &pcs, 3, false).unwrap(), [0.75, 0.8]);
+        assert_eq!(use_end(&l, &pcs, 3, true).unwrap(), [0.0, 0.5]);
+        assert_eq!(use_end(&l, &pcs, 4, true).unwrap(), [0.0, 0.0]);
+        assert!(jumps(U_TURN, &l, &pcs).unwrap().iter().all(|j| !j));
+        // The uses before it stay as they were.
+        assert_eq!(use_end(&l, &pcs, 1, false).unwrap(), [1.0, 0.0]);
+    }
+
+    /// A loop of two uses where the followed pcurve meets the use before it but ends a period from
+    /// the start of the use after it (which is the use before it too): no move of the other use
+    /// closes both joints, so the followed pcurve is not put in and the loop stays as it was.
+    #[test]
+    fn a_followed_trim_that_cannot_meet_both_neighbours_is_not_put_in() {
+        let l = [(0, true), (1, true)];
+        let given = vec![line([0.0, 0.0], [0.25, 1.0]), line([0.25, 1.0], [0.0, 0.0])];
+        let mut pcs = given.clone();
+        assert!(!install(U_TURN, &l, &mut pcs, 0, line([0.0, 0.0], [-0.75, 1.0])).unwrap());
+        assert_eq!(pcs, given);
+    }
 }
