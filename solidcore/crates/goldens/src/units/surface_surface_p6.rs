@@ -611,8 +611,8 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 p2(*guess_uv),
                 *guess_t,
             ))? {
-                Ok(None) => o.extend([0.0, 0.0]),
-                Ok(Some(x)) => o.extend([0.0, 1.0, x.uv.x, x.uv.y, x.t, x.deviation]),
+                Ok(None) => o.extend([crate::status::ok_slot(0.0), 0.0]),
+                Ok(Some(x)) => o.extend([crate::status::ok_slot(0.0), 1.0, x.uv.x, x.uv.y, x.t, x.deviation]),
                 Err(c) => o.push(c),
             }
         }

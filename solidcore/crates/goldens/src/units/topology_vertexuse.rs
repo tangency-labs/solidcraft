@@ -860,7 +860,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                 2 => vu1::calc_vertex_edge_gap(&k, b, v, *want_out, *f)
                     .map(|g| vec![0.0, g.map_or(-1.0, |g| flag(g.is_init()))]),
                 3 => match vu1::calc_vertex_face_gap(&k, b, v, *want_out, *f) {
-                    Ok(g) => Ok(vec![0.0, g.map_or(-1.0, |g| flag(g.is_init()))]),
+                    Ok(g) => Ok(vec![crate::status::ok_slot(0.0), g.map_or(-1.0, |g| flag(g.is_init()))]),
                     Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
                         // the output was reset before the failing step
                         Ok(vec![status_of(&e)?, if *want_out { 0.0 } else { -1.0 }])

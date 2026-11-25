@@ -593,7 +593,7 @@ fn put_piece(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
     o.extend([n.min(), n.max()]);
     for i in 0..5 {
         match c.evaluate_point(k, n.evaluate(f64::from(i) / 4.0)) {
-            Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
+            Ok(p) => o.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
             Err(e) => o.extend([
                 crate::status::kind_slot(&e, crate::output::blend_status(&e).map_or(-1.0, f64::from)),
                 0.0,

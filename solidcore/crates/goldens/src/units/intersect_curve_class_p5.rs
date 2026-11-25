@@ -358,7 +358,7 @@ fn put_curve(k: &Kernel, out: &mut Vec<f64>, curve: &Curve) {
     ]);
     for j in 0..=4 {
         match curve.evaluate_point(k, domain.evaluate(f64::from(j) / 4.0)) {
-            Ok(p) => out.extend([0., p.x, p.y, p.z]),
+            Ok(p) => out.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
             Err(e) => out.extend([status(&e), -f64::MAX, -f64::MAX, -f64::MAX]),
         }
     }

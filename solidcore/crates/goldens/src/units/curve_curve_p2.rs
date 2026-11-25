@@ -1165,7 +1165,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         OpIn::Reverse { a, b: bb } => {
             let mut c = c_ref()?.clone();
             match c.reverse_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb)) {
-                Ok(nv) => o.extend([0.0, nv.min(), nv.max()]),
+                Ok(nv) => o.extend([crate::status::ok_slot(0.0), nv.min(), nv.max()]),
                 Err(e) => match deferred_or_status(e) {
                     Err(d) => return Ok(*d),
                     Ok(s) => o.push(s),

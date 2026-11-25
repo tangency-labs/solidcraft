@@ -472,7 +472,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                     &mut ext,
                     link(call.node),
                 ) {
-                    Ok(()) => o.push(0.0),
+                    Ok(()) => o.push(crate::status::ok_slot(0.0)),
                     Err(e) if e.is_unported() => {
                         err = Some(e);
                         break;

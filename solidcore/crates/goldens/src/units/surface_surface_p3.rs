@@ -334,7 +334,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
                 *tol,
                 *ang,
             ))? {
-                Ok(m) => o.extend([0.0, b(m)]),
+                Ok(m) => o.extend([crate::status::ok_slot(0.0), b(m)]),
                 Err(c) => o.push(c),
             }
         }

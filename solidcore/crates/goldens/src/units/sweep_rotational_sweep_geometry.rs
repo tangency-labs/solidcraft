@@ -619,7 +619,7 @@ fn run_rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                 v3(*vec),
                 *amount,
             ) {
-                Ok(st) => o.extend([0.0, f64::from(st.code())]),
+                Ok(st) => o.extend([crate::status::ok_slot(0.0), f64::from(st.code())]),
                 Err(e) => {
                     defer(&e)?;
                     o.push(status(&e));

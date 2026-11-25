@@ -334,7 +334,7 @@ fn rust(i: &In) -> Result<Output, HarnessError> {
                 parameter.0
             };
             match api::evaluate_continuity(&k, &c, t) {
-                Ok(ct) => record(vec![0.0, f64::from(ct as i32)]),
+                Ok(ct) => record(vec![crate::status::ok_slot(0.0), f64::from(ct as i32)]),
                 Err(e) => failed(&e),
             }
         }

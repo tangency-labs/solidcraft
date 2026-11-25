@@ -740,7 +740,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 conts(tc)?,
                 &sol,
             ))? {
-                Ok(keep) => o.extend([0.0, b(keep)]),
+                Ok(keep) => o.extend([crate::status::ok_slot(0.0), b(keep)]),
                 Err(c) => o.extend([c, 1.0]),
             }
         }

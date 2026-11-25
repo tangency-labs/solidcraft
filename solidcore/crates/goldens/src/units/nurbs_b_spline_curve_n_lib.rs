@@ -864,7 +864,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             &uv_points,
             *pct,
         ) {
-            Ok(modified) => vec![0.0, flag(modified), k],
+            Ok(modified) => vec![crate::status::ok_slot(0.0), flag(modified), k],
             Err(e) => {
                 if let Some(d) = Output::unported(&e) {
                     return Ok(d);
