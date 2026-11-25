@@ -367,16 +367,7 @@ pub fn rebuild_within(
     })?
 }
 
-/// What [`fit_spline_bounds`] certifies, in the points' units.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FitSplineBounds {
-    /// How far, at most, a point given with a fit point is from the curve there
-    /// ([`interpolation_bound`]); 0 without such points.
-    pub deviation: f64,
-    /// How far, at most, the curve is from the polygon through its fit points, each span
-    /// against its chord at the same share of the span ([`certified_distance`]).
-    pub bulge: f64,
-}
+pub use solidcore_record::curve_query::FitSplineBounds;
 
 impl Answer for FitSplineBounds {}
 

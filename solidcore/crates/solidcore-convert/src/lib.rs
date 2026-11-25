@@ -601,3 +601,17 @@ pub fn record_region2(r: &kp::Region2) -> Region2 {
         holes: r.holes.iter().map(record_loop2).collect(),
     }
 }
+
+/// The kernel's standing of an imported cubic as the record's.
+#[must_use]
+pub fn record_cubic_standing(
+    s: solidcore::curve::hermite_curve::CubicStanding,
+) -> solidcore_record::curve_query::CubicStanding {
+    use solidcore::curve::hermite_curve::CubicStanding as K;
+    use solidcore_record::curve_query::CubicStanding as R;
+    match s {
+        K::Chord => R::Chord,
+        K::Curve => R::Curve,
+        K::Refused => R::Refused,
+    }
+}

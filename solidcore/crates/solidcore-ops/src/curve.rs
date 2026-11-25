@@ -47,11 +47,11 @@ use crate::session::run;
 use crate::sweep::{coord_ok, CURVE_MAX_POINTS};
 use crate::{Error, Result};
 
-/// What an imported cubic Bezier curve on `[0, 1]` stands as in the model: its chord, a curve,
-/// or a curve the B-spline curve check refuses.
-pub use solidcore::curve::hermite_curve::CubicStanding;
+pub use solidcore_record::curve_query::{
+    Crossing, CubicPiece, CubicStanding, CurvePoint, PlanePart, PlaneSection,
+};
 
-impl crate::session::Answer for CubicStanding {}
+impl crate::session::Answer for solidcore::curve::hermite_curve::CubicStanding {}
 
 /// [`CubicStanding`] of the cubic Bezier curve through `points` on `[0, 1]`, the curve a profile
 /// cubic is built as: its chord where the whole curve (bounded by the larger distance of its
@@ -69,16 +69,7 @@ pub fn classify_cubic(points: [[f64; 3]; 4]) -> Result<CubicStanding> {
     run("classify_cubic", |k| {
         solidcore::curve::hermite_curve::classify_cubic(k, points.map(point))
     })
-}
-
-/// One piece of an imported cubic Bezier curve ([`cubic_pieces`]): the cubic Bezier curve through
-/// `points` on `[0, 1]` and what it stands as.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CubicPiece {
-    /// Its four control points.
-    pub points: [[f64; 3]; 4],
-    /// What it stands as in the model.
-    pub standing: CubicStanding,
+    .map(solidcore_convert::record_cubic_standing)
 }
 
 impl crate::session::Answer for Vec<CubicPiece> {}
@@ -102,7 +93,7 @@ pub fn cubic_pieces(points: [[f64; 3]; 4]) -> Result<Vec<CubicPiece>> {
             .into_iter()
             .map(|p| CubicPiece {
                 points: p.points.map(|q| [q.x, q.y, q.z]),
-                standing: p.standing,
+                standing: solidcore_convert::record_cubic_standing(p.standing),
             })
             .collect())
     })
@@ -803,19 +794,6 @@ pub fn curve_surface_deviation(
     })?
 }
 
-/// The point of a free curve nearest a given point ([`closest_point`]).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CurvePoint {
-    /// The curve's parameter there, the record's.
-    pub parameter: f64,
-    /// The curve's point there.
-    pub point: [f64; 3],
-    /// Its distance from the given point: the kernel solve's (not certified). A solution
-    /// within the tolerance of an end is snapped to that end and keeps the solve's distance, so
-    /// it is the distance to `point` within the tolerance.
-    pub distance: f64,
-}
-
 /// The record parameter range [`closest_point`] drops over: a line's segment from its start
 /// (0) to its end (1), a circle's or ellipse's one turn from its frame's x axis, any other
 /// curve's own range; `None` for an unbounded range.
@@ -1014,20 +992,6 @@ pub fn samples_at_fractions(
     })?
 }
 
-/// Where two free curves cross ([`crossings`]).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Crossing {
-    /// The first curve's parameter there, the record's.
-    pub a: f64,
-    /// The second curve's parameter there, the record's.
-    pub b: f64,
-    /// The first curve's point there.
-    pub on_a: [f64; 3],
-    /// The second curve's point there: `on_a` within the tolerance in space; as seen along a
-    /// direction, the point the second curve passes behind or in front of it.
-    pub on_b: [f64; 3],
-}
-
 /// Where curves `a` and `b` cross within `tolerance`, each over the record's own range (as
 /// [`closest_point`] takes it), in order along `a`: in space with `along` `None`, or as seen
 /// along the direction `along` (curves drawn in different planes, crossing in a view). The
@@ -1183,32 +1147,6 @@ pub fn plane_crossings(
         PlaneSection::InPlane => Vec::new(),
         PlaneSection::Meets { points, .. } => points,
     })
-}
-
-/// Where a curve meets a plane ([`plane_section`]).
-#[derive(Clone, Debug, PartialEq)]
-pub enum PlaneSection {
-    /// The curve lies in the plane over the whole interval.
-    InPlane,
-    /// The curve meets the plane at isolated points and over parts of its interval, or
-    /// misses it.
-    Meets {
-        /// The isolated intersections, in curve order and in the plane's local coordinates.
-        /// A point at an end of a part in `in_plane` is not among them.
-        points: Vec<solidcore_record::Vec2>,
-        /// The parts of the curve lying in the plane, in curve order. Together they never
-        /// cover the whole interval.
-        in_plane: Vec<PlanePart>,
-    },
-}
-
-/// A part of a curve lying in a plane ([`PlaneSection::Meets`]).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PlanePart {
-    /// The part's interval in the record's parameter (radians on a circle or ellipse).
-    pub interval: [f64; 2],
-    /// The curve's points at the two ends of `interval`.
-    pub ends: [solidcore_record::Vec3; 2],
 }
 
 /// Where `curve` over the record's parameter `interval` meets `plane`: whether it lies in
