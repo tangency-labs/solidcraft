@@ -146,6 +146,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.list", "List Components", crate::checked!("component.list", list))
         .icon("list")
         .noundo()
+        .read_only()
         .contract(&LIST_CONTRACT)
         .output(output_schema_for::<ListResult>)
         .params(

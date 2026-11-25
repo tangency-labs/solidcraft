@@ -140,8 +140,11 @@ fn transport_view(app: &SolveApp) -> crate::timeline_fold::View {
                 && section.tabs.iter().any(|instance| instance.0 == "history")
         })
     });
-    if side_history || app.preferences.history_in_browser || !app.preferences.history_steps_component {
+    if app.preferences.history_in_browser || !app.preferences.history_steps_component {
         return crate::timeline_fold::View::of(doc, None, true);
+    }
+    if side_history {
+        return crate::timeline_fold::View::of(doc, None, app.tree.history_show_hidden);
     }
     let within = crate::timeline_scope::shown(app).map(|c| crate::timeline_scope::components_within(app, c));
     crate::timeline_fold::View::of(doc, within.as_ref(), app.tree.history_show_hidden)

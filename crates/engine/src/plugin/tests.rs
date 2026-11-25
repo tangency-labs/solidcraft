@@ -1588,6 +1588,46 @@ mod native {
         assert!(s.undo.is_empty());
     }
 
+    /// Hook code that runs `command` with `args` through `commands.run` and ignores the reply: the
+    /// strings are stored at 2200 and 2400, below the realloc heap, and the result goes to 2600.
+    fn hook_runs(command: &str, args: &str) -> String {
+        let mut code = String::new();
+        for (base, text) in [(2200, command), (2400, args)] {
+            for (i, byte) in text.bytes().enumerate() {
+                code.push_str(&format!("i32.const {} i32.const {byte} i32.store8\n", base + i));
+            }
+        }
+        code + &format!("i32.const 2200 i32.const {} i32.const 2400 i32.const {} i32.const 2600 call $run\n", command.len(), args.len())
+    }
+
+    /// #22038: a dialog hook runs as a read entry. It can list the components and read its own
+    /// data, and a write is still refused.
+    #[test]
+    fn a_dialog_hook_lists_components_and_reads_its_own_data() {
+        let code = hook_runs("component.list", r#"{"compact":true,"bodies":true}"#) + &hook_runs("storage.get", "{}");
+        let f = dialog_fixture(&code);
+        let path = f.0.join("sample/plugin.json");
+        let mut m: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        m["capabilities"] = json!(["commands@0.1", "dialog@0.1", "storage@0.1"]);
+        m["runtime"]["data_format"] = json!(1);
+        m["runtime"]["commands"] = json!(["component.list", "storage.get", "storage.set"]);
+        std::fs::write(&path, m.to_string()).unwrap();
+        let mut s = Session::default();
+        s.execute("component.create", &json!({"name": "Bracket"})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let before = s.doc.to_json();
+        let undo = s.undo.len();
+        let reply = f.run(&mut s).unwrap();
+        assert_eq!(reply["result"]["width"], 24, "the hook ran and filled the default: {reply}");
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, undo), "the hook changed nothing");
+
+        // A write from the hook is still refused, and fails the run.
+        let write = dialog_fixture(&hook_runs("storage.set", r#"{"document":{"teeth":24}}"#));
+        std::fs::write(write.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let error = write.run(&mut s).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { .. })), "{error}");
+    }
+
     #[test]
     fn plugin_run_dialog_hook_timeout_is_typed_and_never_runs_the_entry() {
         let f = dialog_fixture("(loop $forever br $forever)");
@@ -3421,7 +3461,9 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         user_data: None,
     };
     let catalog = host.command_catalog();
-    for command in ["sketch.edit", "sketch.finish", "sketch.cancel", "solid.box", "sketch.export_dxf"] {
+    // `component.links` notes each linked file it looked at for the link-change events, so it is
+    // not a plain read.
+    for command in ["sketch.edit", "sketch.finish", "sketch.cancel", "solid.box", "sketch.export_dxf", "component.links"] {
         assert_eq!(catalog.iter().find(|c| c.name == command).unwrap().effect, Effect::Edit, "{command}");
     }
     for command in [
@@ -3435,6 +3477,15 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         "sketch.inspect",
         "sketch.solve",
         "doc.info",
+        // Listings of the design that change nothing (#22038).
+        "component.list",
+        "component.metadata",
+        "contact.list",
+        "explode.list",
+        "joint.list",
+        "motion.list",
+        "note.list",
+        "parameters.list",
     ] {
         assert_eq!(catalog.iter().find(|c| c.name == command).unwrap().effect, Effect::Read, "{command}");
     }

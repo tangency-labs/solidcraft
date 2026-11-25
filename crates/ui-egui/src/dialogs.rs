@@ -86,6 +86,8 @@ pub const MODIFIERS: &[ToolModifiers] = &[
 
 pub(crate) const OPS: [&str; 4] = ["new", "join", "cut", "intersect"];
 pub(crate) const OP_LABELS: [&str; 4] = ["New Body", "Join", "Cut", "Intersect"];
+/// A pipe's section: a solid rod or a hollow tube, which has a wall (#18344).
+pub(crate) const PIPE_TYPES: [&str; 2] = ["Solid", "Hollow"];
 const DIRS: [&str; 5] = ["positive", "negative", "symmetric", "positive", "negative"];
 /// The "Two sides" direction (a second distance the other way).
 pub const TWO_SIDES: usize = 3;
@@ -188,6 +190,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::Pipe { diameter, wall, operation, .. }) {
             diameter: String = "5 mm".into() => shown_expr(diameter, ValueKind::Length),
             wall: String = String::new() => wall.as_deref().map(|e| shown_expr(e, ValueKind::Length)).unwrap_or_default(),
+            // A pipe is a solid rod or a hollow tube: a tube has a wall (#18344).
+            hollow: usize = 0 => usize::from(wall.is_some()),
             operation: usize = 0 => op_index(operation),
         } => json!({"diameter": diameter, "operation": OPS.get(*operation).copied().unwrap_or("new")});
         Emboss("solid.emboss", "EMBOSS", [("Profiles", PROFILES, true), ("Target Face (optional)", FACES, false)],
@@ -525,10 +529,12 @@ crate::dialog_descriptor::dialog_descriptors! {
             SketchIntersect {
                 bodies: bool,
                 projection_link: bool,
+                construction: bool,
             },
             SketchProject {
                 bodies: bool,
                 projection_link: bool,
+                construction: bool,
             },
         }
     }
@@ -1035,14 +1041,14 @@ impl Dialog {
             "sketch.intersect" => {
                 let bodies = s.selection.iter().any(|sel| matches!(sel, Sel::Body { .. }));
                 Dialog::new(
-                    Kind::SketchIntersect { bodies, projection_link: true },
+                    Kind::SketchIntersect { bodies, projection_link: true, construction: s.project_construction },
                     vec![SelInput::new("ui.sketch_intersect_geometry", if bodies { BODIES } else { INTERSECT_GEOMETRY }, true)],
                 )
             }
             "sketch.project" => {
                 let bodies = s.selection.iter().any(|sel| matches!(sel, Sel::Body { .. }));
                 Dialog::new(
-                    Kind::SketchProject { bodies, projection_link: true },
+                    Kind::SketchProject { bodies, projection_link: true, construction: s.project_construction },
                     vec![SelInput::new("ui.sketch_project_geometry", if bodies { BODIES } else { PROJECT_GEOMETRY }, true)],
                 )
             }
@@ -6543,6 +6549,16 @@ fn section_from_geometry(d: &mut Dialog, plane: solidcraft_engine::SectionPlane,
     d.extra.insert("plane".into(), json!({"origin": base, "normal": canonical}));
 }
 
+/// Load the section on show into the open Section Analysis dialog (its last plane, as Edit does),
+/// so the dialog's preview and OK stand for it rather than for the plane it opened with.
+pub(crate) fn load_shown_section(app: &SolveApp, d: &mut Dialog) {
+    let mut planes: Vec<solidcraft_engine::SectionPlane> = app.session.section.iter().chain(&app.session.section_hidden).copied().collect();
+    planes.sort_by_key(|c| c.id);
+    let Some(plane) = planes.last().copied() else { return };
+    let edit = (planes.len() > 1).then_some(plane.id);
+    section_from_geometry(d, plane, app.session.section_hatch, edit);
+}
+
 /// What the Section Analysis dialog's OK made for one plane (its id): its distance, flip and
 /// plane pick, and the cut (origin, normal) they made, so Edit reopens the dialog where it was
 /// while that plane stands there.
@@ -7493,11 +7509,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             pattern_objects(s, sels(d, 0), &mut p);
             ("solid.pattern.path", p)
         }
-        Kind::Pipe { wall, .. } => {
+        Kind::Pipe { wall, hollow, .. } => {
             need(0, "the path")?;
             let path = sels(d, 0).curve_ids();
             let sketch = picks_sketch(app, sels(d, 0), None).ok_or("the path curves must be in one sketch")?;
             let mut p = json!({"path_sketch": sketch, "path": path});
+            // A pipe is a solid rod or a hollow tube (#18344). A tube needs a wall, and the wall the
+            // window holds is the pipe's wall: a thickness typed in it is never dropped.
+            if *hollow == 1 && wall.trim().is_empty() {
+                return Err("type a wall thickness for a hollow pipe".into());
+            }
             put(&mut p, &[("wall", wall)]);
             ("solid.pipe", p)
         }
@@ -8002,7 +8023,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
         Kind::RenameGroup { group, name } => ("timeline.rename_group", json!({"group": group, "name": name})),
         Kind::ConfirmDelete { features, groups, .. } => ("timeline.delete", crate::timeline::delete_params(features, groups)),
-        Kind::SketchIntersect { projection_link, .. } => {
+        Kind::SketchIntersect { projection_link, construction, .. } => {
             need(0, "geometry or bodies")?;
             let refs = sels(d, 0)
                 .iter()
@@ -8014,13 +8035,13 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     _ => Err("select geometry or bodies".to_string()),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            ("sketch.intersect", json!({"refs": refs, "projection_link": projection_link}))
+            ("sketch.intersect", json!({"refs": refs, "projection_link": projection_link, "construction": construction}))
         }
-        Kind::SketchProject { projection_link, .. } => {
+        Kind::SketchProject { projection_link, construction, .. } => {
             need(0, "geometry or bodies")?;
             let refs =
                 crate::tools::projection_preselection(sels(d, 0)).ok_or_else(|| "select geometry or bodies that can be projected".to_string())?;
-            ("sketch.project", json!({"refs": refs, "projection_link": projection_link}))
+            ("sketch.project", json!({"refs": refs, "projection_link": projection_link, "construction": construction}))
         }
         Kind::Sketch | Kind::Measure { .. } => return Ok(Vec::new()),
         Kind::Assembly(k) => return crate::dialogs_assembly::commands(app, k, &d.inputs),

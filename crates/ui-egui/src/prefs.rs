@@ -240,6 +240,9 @@ pub struct NavPreset {
     /// Choosing the preset sets "Right drag orbits" (`None` leaves it as it is).
     pub right_drag_orbits: Option<bool>,
     pub bindings: &'static [NavBinding],
+    /// While the middle button drags, holding one of these buttons too does its mode instead (NX:
+    /// middle + right pans, middle + left zooms, #22063). Empty: a second button changes nothing.
+    pub chords: &'static [(NavButton, NavMode)],
 }
 
 impl NavPreset {
@@ -263,6 +266,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::SHIFT, Orbit), bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
+        chords: &[],
     },
     NavPreset {
         id: "solidworks",
@@ -279,6 +283,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
             bind(Middle, NavKeys::NONE, Orbit),
             bind(Right, NavKeys::NONE, Orbit),
         ],
+        chords: &[],
     },
     // Public Creo Parametric dynamic-viewing bindings; no product code or assets are used.
     // https://support.ptc.com/help/creo/creo_pma/r12/usascii/fundamentals/fundamentals/About_Dynamic_Viewing.html
@@ -291,19 +296,20 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::NONE, Orbit)],
+        chords: &[],
     },
     NavPreset {
         id: "nx",
         label: "NX",
         // NX's CAD1 scheme drags middle to rotate, middle + left to zoom and middle + right to
-        // pan; the bindings here hold one button at a time, so the two-button drags are the
-        // middle drag with Ctrl (zoom) and Shift (pan).
-        help: "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera",
+        // pan (the chords, #22063); Shift and Ctrl with the middle drag do the same.
+        help: "Middle drag orbits, middle + right drag or Shift+middle pans, middle + left drag or Ctrl+middle zooms; right drag leaves the camera",
         reverse_zoom: false,
         reverse_drag_zoom: false,
         middle_double_click: Some("fit"),
         right_drag_orbits: Some(false),
         bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
+        chords: &[(Right, Pan), (Left, Zoom)],
     },
     NavPreset {
         id: "inventor",
@@ -319,6 +325,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
             bind(Middle, NavKeys::NONE, Pan),
             bind(Right, NavKeys::NONE, Orbit),
         ],
+        chords: &[],
     },
     NavPreset {
         id: "alias",
@@ -336,6 +343,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
             bind(Middle, NavKeys::NONE, Pan),
             bind(Right, NavKeys::NONE, Orbit),
         ],
+        chords: &[],
     },
     NavPreset {
         id: "maya",
@@ -351,6 +359,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
             bind(Right, NavKeys::ALT, Zoom),
             bind(Middle, NavKeys::NONE, Pan),
         ],
+        chords: &[],
     },
     NavPreset {
         id: "blender",
@@ -361,6 +370,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
+        chords: &[],
     },
     NavPreset {
         id: "tinkercad",
@@ -371,6 +381,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Right, NavKeys::SHIFT, Pan), bind(Right, NavKeys::NONE, Orbit), bind(Middle, NavKeys::NONE, Pan)],
+        chords: &[],
     },
     NavPreset {
         id: OPENSCAD_NAV,
@@ -387,6 +398,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
             bind(Right, NavKeys::NONE, Pan),
             bind(Middle, NavKeys::NONE, Pan),
         ],
+        chords: &[],
     },
     NavPreset {
         id: "hfss",
@@ -399,6 +411,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         // Ctrl+left orbit is the drag from empty space every preset has: as a binding it would
         // also take a Ctrl+click on geometry, which adds to the selection.
         bindings: &[bind(Left, NavKeys::SHIFT_ALT, Zoom), bind(Left, NavKeys::ALT, Pan)],
+        chords: &[],
     },
     NavPreset {
         id: TOUCHPAD_NAV,
@@ -409,6 +422,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
+        chords: &[],
     },
 ];
 
@@ -2230,6 +2244,16 @@ pub fn nav_mode(app: &SolveApp, button: NavButton, mods: Modifiers) -> Option<Na
         return None;
     }
     mode
+}
+
+/// What a middle drag with `other` held too does, from the preset's chords (NX: middle + right
+/// pans, middle + left zooms, #22063). None when the preset has no such chord, or when the middle
+/// button is mapped to something of the user's own in Preferences.
+pub fn nav_chord(app: &SolveApp, other: NavButton) -> Option<NavMode> {
+    if nav_choice(&app.preferences, NavButton::Middle).is_some() {
+        return None;
+    }
+    nav_preset(&app.preferences.nav).chords.iter().find(|(button, _)| *button == other).map(|(_, mode)| *mode)
 }
 
 /// +1, or −1 when horizontal scrolling pans the other way (#2007).
@@ -11752,6 +11776,16 @@ mod tests {
                     rows.iter()
                         .any(|(keys, action)| keys.iter().any(|key| key == "Ctrl/Cmd") && action == solidcraft_ui_text::tr("prefs.gesture_zoom"))
                 );
+            }
+            // NX lists its two-button drags (#22063).
+            if preset.id == "nx" {
+                let chord = |other: NavButton, mode: &str| {
+                    rows.iter().any(|(keys, action)| {
+                        keys == &[navigation::button_label(NavButton::Middle), navigation::button_label(other)]
+                            && action == solidcraft_ui_text::tr(mode)
+                    })
+                };
+                assert!(chord(NavButton::Right, "prefs.gesture_pan") && chord(NavButton::Left, "prefs.gesture_zoom"), "{rows:?}");
             }
             if preset.id == TOUCHPAD_NAV {
                 assert!(rows.iter().any(|(keys, action)| keys == &[solidcraft_ui_text::tr("prefs.shift").to_owned()]

@@ -62,14 +62,18 @@ fn panel_surface_contrast_covers_actual_light_dark_and_bundled_high_contrast() {
                 let palette = style.palette(appearance);
                 match appearance.contrast.as_ref().unwrap() {
                     ContrastOutcome::Readable { effective_background_alpha } => {
-                        assert!(!impossible, "a shipped unreadable authored pair cannot be reported compliant: {name}");
                         assert!(*effective_background_alpha >= requested);
-                        assert_eq!(inks(palette), inks(&authored), "ordinary resolution preserves every canonical ink: {name}");
+                        for (before, after) in inks(&authored).into_iter().zip(inks(palette)) {
+                            if solidcraft_theme::contrast_ratio(before, opaque) >= 4.5 {
+                                assert_eq!(before, after, "ordinary resolution preserves every readable canonical ink: {name}");
+                            } else {
+                                assert!(impossible);
+                                assert!(solidcraft_theme::contrast_ratio(after, opaque) >= 4.5, "an unreadable ink is lifted: {name}");
+                            }
+                        }
                     }
-                    ContrastOutcome::RetainReadableFallback { reason } => {
-                        assert!(impossible, "fallback is justified by an independently checked opaque pair: {name}");
-                        assert_eq!(*reason, ContrastFailure::UnreadableAtFullOpacity);
-                        assert_eq!(appearance.fill.a(), 255);
+                    ContrastOutcome::RetainReadableFallback { .. } => {
+                        panic!("a shipped theme keeps its own panel colours and lifts only unreadable inks: {name}");
                     }
                 }
                 for viewport in [0, 1, 64, 117, 192, 254, 255] {
@@ -200,7 +204,8 @@ fn panel_surface_cache_tracks_dark_mode_even_with_identical_authored_tokens() {
     let _restore = RestoreDark(solidcraft_theme::is_dark());
     let ctx = egui::Context::default();
     let mut tokens = surface_test_palette(false);
-    tokens.form_dim = tokens.panel;
+    // A translucent-clear ink cannot be lifted, so only the known-theme fallback reads.
+    tokens.form_dim = egui::Color32::TRANSPARENT;
     let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
     solidcraft_theme::set_dark(false);
     let light = HostSurfaceStyle::capture(&ctx, false, Some(0.5), None);
@@ -216,7 +221,8 @@ fn panel_surface_cache_tracks_dark_mode_even_with_identical_authored_tokens() {
 fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
     let ctx = egui::Context::default();
     let mut tokens = surface_test_palette(false);
-    tokens.form_dim = tokens.panel;
+    // A translucent-clear ink cannot be lifted, so only the known-theme fallback reads.
+    tokens.form_dim = egui::Color32::TRANSPARENT;
     tokens.space_4 = 7.0;
     let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
     for override_alpha in [Some(0.5), Some(f32::NAN), Some(f32::INFINITY), Some(-0.1), Some(1.1)] {
@@ -234,6 +240,72 @@ fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
         let cached = HostSurfaceStyle::capture(&ctx, false, override_alpha, Some(&style));
         assert_eq!(cached, style, "even an invalid raw NaN override has a stable bitwise cache key");
     }
+}
+
+#[test]
+fn built_in_themes_keep_their_own_panel_colours_and_lift_only_failing_inks() {
+    // #16023: a built-in theme whose muted ink missed 4.5:1 on its panel got the
+    // Dark or Light theme's panel colours (slate blue in Amber Phosphor).
+    crate::test_support::host_data();
+    struct RestoreDark(bool);
+    impl Drop for RestoreDark {
+        fn drop(&mut self) {
+            solidcraft_theme::set_dark(self.0);
+        }
+    }
+    let _restore = RestoreDark(solidcraft_theme::is_dark());
+    let inks = |t: &solidcraft_theme::Tokens| [t.text, t.text_dim, t.form_ink, t.form_dim, t.dialog_label];
+    let mut lifted = Vec::new();
+    for theme in crate::theme_files::builtin() {
+        let authored = crate::theme_files::resolve(theme);
+        solidcraft_theme::set_dark(theme.base.is_dark());
+        let _scope = solidcraft_theme::scoped_panel_tokens(authored);
+        let ctx = egui::Context::default();
+        let style = HostSurfaceStyle::capture(&ctx, false, None, None);
+        let appearance = style.appearance(PanelSurface::Opaque, false);
+        let id = &theme.id;
+        assert!(matches!(appearance.contrast, Some(ContrastOutcome::Readable { .. })), "{id}: panel fell back to another theme");
+        let own = crate::ui_kit::panel_host_frame(&ctx, false).fill.to_opaque();
+        assert_eq!(appearance.fill.to_opaque(), own, "{id}: the panel keeps its own fill");
+        let palette = style.palette(appearance);
+        assert!(solidcraft_theme::panel_surface_readable(appearance.fill, palette), "{id}");
+        for (before, after) in inks(&authored).into_iter().zip(inks(palette)) {
+            if solidcraft_theme::contrast_ratio(before, own) >= 4.5 {
+                assert_eq!(before, after, "{id}: a readable ink stays as authored");
+            } else {
+                assert!(solidcraft_theme::contrast_ratio(after, own) >= 4.5, "{id}: a lifted ink reads");
+            }
+        }
+        if inks(&authored) != inks(palette) {
+            lifted.push(id.clone());
+            // The paint path scopes the lifted inks for the panel body; a
+            // checked palette alone would leave the faint ink on screen.
+            assert_eq!(style.paint_palette(appearance), Some(palette), "{id}");
+            let bounds = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(200.0, 120.0));
+            let mut painted = None;
+            crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+                crate::ui_kit::panel_host_surface(
+                    ui,
+                    egui::Id::unique(id),
+                    bounds,
+                    false,
+                    appearance.fill,
+                    style.paint_palette(appearance),
+                    |_, _| {
+                        painted = Some(solidcraft_theme::Tokens::get());
+                    },
+                );
+            });
+            assert_eq!(painted.as_ref().map(inks), Some(inks(palette)), "{id}: the panel body paints the lifted inks");
+        } else {
+            assert_eq!(style.paint_palette(appearance), None, "{id}: an unchanged theme keeps the window's own tokens");
+        }
+        if id == "amber-phosphor" {
+            let dim = palette.text_dim;
+            assert!(dim.r() > dim.g() && dim.g() > dim.b(), "Amber Phosphor's muted ink stays amber: {dim:?}");
+        }
+    }
+    assert!(!lifted.is_empty(), "some built-in theme still exercises the lift path");
 }
 
 #[test]
@@ -765,6 +837,75 @@ fn panel_layout_tile_selection_tracks_complete_arrangements_and_manual_reversion
     let reverted = layout_preferences_view(&app).unwrap();
     assert!(reverted.default_matches);
     assert_eq!(reverted.entries.iter().filter(|entry| entry.selected).count(), 1);
+}
+
+/// The host saves preferences on any settings change and every 30 s. Building them converts
+/// every remembered layout in the catalogue, which cost ~0.9 s on a 56,100-body design; a save
+/// whose layout and conversion inputs are unchanged reuses the last build, and a changed layout
+/// is converted again.
+#[test]
+fn a_save_with_the_same_panel_layout_reuses_the_portable_preferences() {
+    use commands::LayoutCatalogue as _;
+    let mut fixture = PanelMountHarness::new(true).unwrap();
+    fixture.command("panel.open", &panel_command_editor()).unwrap();
+    fixture.command("panel.popout", &panel_command_native_move()).unwrap();
+    fixture.command("layout.save", &serde_json::json!({"name":"Native arrangement"})).unwrap();
+    let workspace = fixture.runtime.layout().layout().workspace.clone();
+    let record = |rejected: serde_json::Value| {
+        super::preferences::PreferenceRecord {
+            version: 1,
+            selected: workspace.clone(),
+            catalogue: fixture.catalogue.state().export().unwrap(),
+            rejected: Some(rejected),
+            legacy: None,
+            unread: Vec::new(),
+        }
+        .value()
+    };
+    let mut app = crate::SolveApp::new(Default::default(), Default::default());
+    let empty = PanelMountHarness::new(false).unwrap();
+    app.enable_panel_runtime(
+        empty.runtime,
+        Box::new(AppFixtureServices {
+            models: FakeModels { editable: true },
+            commands: FakeContentCommands::default(),
+            local: FakeLocalServices::default(),
+            refreshed: 0,
+        }),
+    )
+    .unwrap();
+    let builds = |app: &crate::SolveApp| app.portable_prefs.lock().unwrap().as_ref().map_or(0, |c| c.builds);
+    // The layout the save converts: a catalogue whose remembered layout has a native window,
+    // which the conversion projects away (the costly path).
+    let held = |app: &crate::SolveApp| crate::prefs::held_panel_layout(app).unwrap_or_else(|| preferences_value(app));
+    let windowless = |app: &crate::SolveApp, saved: &str| {
+        let saved: serde_json::Value = serde_json::from_str(saved).unwrap();
+        let registry = app.panel_runtime().unwrap().layout().registry();
+        let catalogue = super::preferences::PreferenceRecord::read(&saved["panel_layout"], registry).unwrap().catalogue(registry).unwrap();
+        let mut windows = 0;
+        catalogue
+            .map_envelopes(registry, |_, envelope| {
+                windows += envelope.layout.sections.iter().filter(|section| section.location.zone() == Zone::Window).count();
+                Ok(envelope)
+            })
+            .unwrap();
+        windows == 0
+    };
+    let loaded = serde_json::json!({"panel_layout":record(serde_json::json!({"first":1}))}).to_string();
+    assert!(!windowless(&app, &loaded), "the saved layout has a native window to project");
+    app.load_prefs(&loaded);
+    assert!(held(&app).is_some(), "a panel layout to convert");
+    let first = app.try_prefs().unwrap();
+    assert!(windowless(&app, &first), "the remembered layout went through the portable conversion");
+    let again = app.try_prefs().unwrap();
+    assert_eq!(first, again, "what the first conversion made");
+    assert_eq!(builds(&app), 1, "the second save reuses the first's conversion");
+    // Another layout is converted again.
+    app.load_prefs(&serde_json::json!({"panel_layout":record(serde_json::json!({"second":2}))}).to_string());
+    let other = app.try_prefs().unwrap();
+    assert_eq!(builds(&app), 2, "a changed layout is converted again");
+    assert_ne!(other, first);
+    assert!(windowless(&app, &other));
 }
 
 #[test]
