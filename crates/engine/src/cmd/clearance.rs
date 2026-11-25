@@ -480,9 +480,17 @@ fn measure_pair(
             if d.distance < tolerance {
                 d.distance = 0.0;
             }
-            out.distance = Some(d);
+            if incomplete_pair && (d.distance > 0.0 || !d.exact) {
+                out.unchecked = Some("mesh incomplete: clearance could not be verified on unmeshed faces".into());
+            } else {
+                out.distance = Some(d);
+            }
         }
-        Ok(None) => {}
+        Ok(None) => {
+            if incomplete_pair && gap > 0.0 {
+                out.unchecked = Some("mesh incomplete: clearance could not be verified on unmeshed faces".into());
+            }
+        }
         Err(e) => out.unchecked = Some(e.to_string()),
     }
     out

@@ -682,11 +682,10 @@ fn unchecked_pairs_are_excluded_from_nearest() {
     assert_eq!(a_near_ok, vec![("B", 0.0), ("C", 5.0)]);
 }
 
-/// Exact analytical overlap volume of a flat-faced rib penetrating depth `50 - d` into a
-/// cylinder of radius `r` over height `h` (when the rib spans wider than the chord).
-fn cylinder_rib_segment_volume(r: f64, d: f64, h: f64) -> f64 {
-    (r * r * (d / r).acos() - d * (r * r - d * d).sqrt()) * h
-}
+/// Reference overlap volume (mm³) for the fixed fixture below: a flat-faced rib penetrating
+/// 1.35 mm (`d = 48.65 mm`) into an `R = 50 mm` cylinder over height `h = 13 mm`:
+/// `(R² · arccos(d / R) − d · √(R² − d²)) · h ≈ 270.7796 mm³`.
+const RIB_CYLINDER_OVERLAP_MM3: f64 = 270.7796;
 
 /// Saves a hollow cylinder (`CylBody`, outer radius 50, inner radius 40, z 0..40), a part with a
 /// mounting plate touching z = 40 and a rib penetrating 1.35 mm into the cylinder wall over z
@@ -745,7 +744,7 @@ fn linked_subassembly_with_rotated_part_detects_rib_overlap_and_touching_face() 
     let ty = -1100.0;
     let tz = -693.8051;
     let matrix = json!([0, -1, 0, tx, 1, 0, 0, ty, 0, 0, 1, tz]);
-    let want_vol = cylinder_rib_segment_volume(50.0, 48.65, 13.0);
+    let want_vol = RIB_CYLINDER_OVERLAP_MM3;
 
     // Part A: overlapping rib (1.35 mm penetration, ~271 mm³) + touching mounting face (0 mm gap).
     let mut sub = Session::default();
@@ -815,7 +814,7 @@ fn nested_two_level_linked_subassembly_detects_overlap() {
     let inner_matrix = json!([0, -1, 0, tx, 1, 0, 0, ty, 0, 0, 1, tz]);
     // Second rigid rotation+translation (+90° about X, plus translation) for the parent scene.
     let outer_matrix = json!([1, 0, 0, 250.0, 0, 0, -1, 120.0, 0, 1, 0, -80.0]);
-    let want_vol = cylinder_rib_segment_volume(50.0, 48.65, 13.0);
+    let want_vol = RIB_CYLINDER_OVERLAP_MM3;
 
     // Build and save the sub-assembly containing both linked components.
     let mut sub = Session::default();
