@@ -2377,7 +2377,7 @@ mod wr457_certificates {
     use solidcore::mass::enclosure::enclose_volume;
     use solidcore::surface::surface::p2::SurfaceKind;
     use solidcore::topology::brep::p1;
-    use solidcore::topology::brep::p2::is_manifold_solid;
+    use solidcore::topology::brep::p2::{create_missing_uv_trim_curves, is_manifold_solid};
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 
     /// The moved rows: (fixture file, case name).
@@ -2552,6 +2552,11 @@ mod wr457_certificates {
             }
             apply(&mut k, &mut body, &selected, &input)
                 .unwrap_or_else(|e| panic!("{name}: the round failed: {e:?}"));
+            // The round keeps the union's own faces (WR-459), which come without UV trims,
+            // so the trims are made once here, as the enclosure would make them: the check
+            // then runs on the body itself (#21105) and the trims its walk repairs, the
+            // corner patch's edges among them, stay on the body the enclosure measures.
+            create_missing_uv_trim_curves(&k, &mut body).expect("trims");
             let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
                 .expect("check")
                 .lines();
