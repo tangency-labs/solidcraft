@@ -157,6 +157,10 @@ fn load(app: &mut SolveApp, library: &mut LocalLibrary) -> Result<String, String
 }
 
 pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &[SelInput]) {
+    // Before the section: a collapsed section skips its body, and Favorites still needs the
+    // remembered library's looks.
+    #[cfg(not(target_arch = "wasm32"))]
+    restore(app, k);
     ui_kit::section(ui, "local_library", "Local library", true, |ui| {
         #[cfg(not(target_arch = "wasm32"))]
         import_rows(app, ui, k, inputs);
@@ -189,7 +193,6 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &[SelInpu
 
 #[cfg(not(target_arch = "wasm32"))]
 fn import_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &[SelInput]) {
-    restore(app, k);
     let path = ui_kit::row(ui, "Library file", |ui| {
         let id = ui.make_persistent_id("library_path");
         ui_kit::cell_editor(ui, id, &mut k.local.path, "Library file", false)
