@@ -5,7 +5,8 @@
 //! exchange structure as parsed from a file with the units of its representation contexts and
 //! its Part 42 curves and surfaces ([`step`]), a sheet metal part's surfaces and its flat
 //! pattern ([`develop`]), frame-stock paths, trimmed members and gussets ([`frame`]), curve
-//! queries' answers ([`curve_query`]), and how exactly a drawn curve stands for its source
+//! queries' answers ([`curve_query`]), planar projections and outlines ([`projection`]), and how
+//! exactly a drawn curve stands for its source ([`CurveAccuracy`]).
 //! ([`CurveAccuracy`]).
 //!
 //! The record computes no geometric quantity: no square roots, trigonometry, dot or cross
@@ -35,6 +36,7 @@ pub mod plane;
 // is and its fields are the names in its formula.
 #[allow(missing_docs)]
 pub mod profile;
+pub mod projection;
 pub mod step;
 pub mod vec;
 

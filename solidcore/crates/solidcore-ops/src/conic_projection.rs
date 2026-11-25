@@ -8,47 +8,8 @@ use crate::prism::{PlanarPiece, PlanarSpline};
 use crate::Result;
 use solidcore::curve::conic_projection as k;
 use solidcore_convert::{plane, record_vec2, vec2};
+pub use solidcore_record::projection::{PlaneRelation, Projection};
 use solidcore_record::{Plane, Vec2};
-
-/// A planar projected image, ready for an application's link state.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Projection {
-    /// An already exact native segment.
-    Segment(solidcore_record::Seg2),
-    /// A point image.
-    Point(Vec2),
-    /// A complete linear image.
-    Line(Vec2, Vec2),
-    /// A control spline.
-    Spline {
-        /// Its exact spline definition.
-        spline: PlanarSpline,
-        /// The requested source degree.
-        degree: usize,
-        /// Whether the source omitted uniform knots.
-        implicit: bool,
-    },
-    /// A rational quadratic conic.
-    Conic {
-        /// Its first point.
-        a: Vec2,
-        /// Its middle control point.
-        apex: Vec2,
-        /// Its last point.
-        b: Vec2,
-        /// Its conic weight ratio.
-        rho: f64,
-    },
-    /// A full ellipse.
-    Ellipse {
-        /// Its centre.
-        center: Vec2,
-        /// A point on its major axis.
-        major: Vec2,
-        /// Its minor radius.
-        minor: f64,
-    },
-}
 
 pub(crate) fn record_projection(p: k::Projection) -> Projection {
     match p {
@@ -122,17 +83,6 @@ fn kernel_projection(p: Projection) -> k::Projection {
             minor,
         },
     }
-}
-
-/// The relative orientation of two sketch planes.
-#[derive(Clone, Copy, Debug)]
-pub struct PlaneRelation {
-    /// Their normals are parallel.
-    pub parallel: bool,
-    /// Their projected plane has only roundoff width.
-    pub edge_on: bool,
-    /// Their projection reverses orientation.
-    pub flip: bool,
 }
 
 /// Ask the kernel for the relationship between two planes.

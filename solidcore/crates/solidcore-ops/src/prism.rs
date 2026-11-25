@@ -321,27 +321,7 @@ pub fn prism_equivalent(a: &Body, b: &Body) -> Result<Option<bool>> {
     })
 }
 
-/// A free-form curve of several spans in a plane, as the one B-spline it is.
-#[derive(Clone, Debug, PartialEq)]
-pub struct PlanarSpline {
-    /// Its degree.
-    pub degree: usize,
-    /// Its clamped knots.
-    pub knots: Vec<f64>,
-    /// Its control points in the plane's coordinates.
-    pub points: Vec<Vec2>,
-    /// Its weights (empty: all one).
-    pub weights: Vec<f64>,
-}
-
-/// One piece of an edge read exactly in a plane.
-#[derive(Clone, Debug, PartialEq)]
-pub enum PlanarPiece {
-    /// A line, arc or single free-form segment.
-    Seg(Seg2),
-    /// A free-form curve of several spans.
-    Spline(PlanarSpline),
-}
+pub use solidcore_record::projection::{PlanarPiece, PlanarSpline};
 
 /// Edges read in a plane, with the tolerance they were read to.
 #[derive(Clone, Debug, PartialEq)]
