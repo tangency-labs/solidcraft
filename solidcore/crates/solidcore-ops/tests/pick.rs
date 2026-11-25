@@ -133,6 +133,8 @@ fn a_box_outline_touches_nowhere() {
     all_fixes();
     let b = make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap();
     assert_eq!(b.outline_touch().unwrap(), None);
+}
+
 /// A sphere inside a box cuts it into the ball and the rest: a closed tool's sheet is a closed
 /// shell, split by intersection and difference.
 #[test]
