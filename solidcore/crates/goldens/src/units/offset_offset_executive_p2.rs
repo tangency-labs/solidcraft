@@ -1655,6 +1655,19 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         .as_ref()
         .map(|fixture| build(&mut kernel, fixture, input.tolerance, NAMESPACE_FOREIGN))
         .transpose()?;
+    // (a probe's input, for the result's soundness: capture off, nothing). Named only where
+    // the call promises a finished solid of a solid: a shell, or a merged and stitched
+    // offset of the whole body (no shell faces kept); a member call left unmerged, unstitched
+    // or keeping shell faces hands back pieces, not a solid (#13685)
+    let promises_solid = match input.operation {
+        Operation::StaticShell | Operation::ApiShell => true,
+        _ => {
+            input.config.merge_results
+                && !input.config.skip_stitch_merge
+                && input.faces.is_empty()
+        }
+    };
+    crate::soundness::input(source.as_ref().filter(|_| promises_solid));
     let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     if let Some(brep) = source.as_mut() {
@@ -1788,6 +1801,10 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         .and_then(OffsetExecutive::offset_brep)
         .map(rust_result_projection)
         .transpose()?;
+    // (a probe's copies of the bodies the projections read: capture off, none)
+    if let Some(b) = exec.as_ref().and_then(OffsetExecutive::offset_brep) {
+        crate::dump::body(&kernel, "executive_offset", b);
+    }
     // A consumed source that comes back as the result (a Difference assigns its
     // result to the inset's primary operand, the original) keeps the source's
     // identity: native lifetime/origin 2 (`result == source`). Any other result is

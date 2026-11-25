@@ -259,8 +259,7 @@ pub(crate) fn form(schema: &Value) -> Option<Vec<(Field, Input)>> {
         return None;
     }
     let mut fields = properties.iter().map(|(key, property)| field(key, property, required.contains(&key.as_str()))).collect::<Option<Vec<_>>>()?;
-    // A JSON object has no order: the required fields come first in the order `required` names
-    // them, then the rest by name.
+    // The default remains required-first; open_entry applies declared order only on opt-in.
     let rank = |key: &str| required.iter().position(|r| *r == key).unwrap_or(usize::MAX);
     fields.sort_by(|(a, _), (b, _)| rank(&a.key).cmp(&rank(&b.key)).then_with(|| a.key.cmp(&b.key)));
     for (field, _) in &mut fields {
@@ -1326,6 +1325,14 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         return;
     }
     let mut fields = form(&entry.input_schema);
+    if entry.input_schema.get("x-solidcraft-field-order").and_then(Value::as_str) == Some("declared")
+        && let Some(fields) = &mut fields
+        && let Some(order) = entry.input_property_order.get("")
+    {
+        // Stable sorting retains the usual order for keys absent from the recorded list.
+        // Condition evaluation uses its own indices and never changes these field positions.
+        fields.sort_by_key(|(field, _)| order.iter().position(|key| key == &field.key).unwrap_or(usize::MAX));
+    }
     let opens = (entry.kind == solidcraft_engine::plugin::EntryKind::Importer).then(|| entry.extensions.clone());
     let writes = (entry.kind == solidcraft_engine::plugin::EntryKind::Exporter).then(|| entry.extensions.clone());
     let id = app.plugin_menu.next_dialog;
@@ -2671,4 +2678,4 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
 
 #[cfg(test)]
 #[path = "plugin_menu_tests.rs"]
-mod tests;
+pub(crate) mod tests;

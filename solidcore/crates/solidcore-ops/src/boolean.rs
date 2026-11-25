@@ -206,7 +206,7 @@ pub fn union_copies(a: &Body, b: &Body) -> Result<Option<Body>> {
         let reverse = union_pair(k, cb, ca, expect, Contract::Proved);
         if matches!(
             reverse,
-            Ok(Done::Body(..)) | Err(SolidError::Cancelled { .. })
+            Ok(Done::Body(..)) | Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
         ) || reverse
             .as_ref()
             .is_err_and(|e| e.root_cause().is_not_certified())
@@ -219,7 +219,8 @@ pub fn union_copies(a: &Body, b: &Body) -> Result<Option<Body>> {
             union_pair(k, cb, ca, expect, Contract::Proved)
         })();
         match rebuilt {
-            done @ (Ok(Done::Body(..)) | Err(SolidError::Cancelled { .. })) => done,
+            done @ (Ok(Done::Body(..))
+            | Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => done,
             Err(e) if e.root_cause().is_not_certified() => Err(e),
             _ => Err(original),
         }
