@@ -153,7 +153,9 @@ impl SurfaceSheet {
                 panels.iter().find_map(|(i, frame, own)| {
                     let local = placements.get(*i).copied().flatten()?.inverse().point(h.center);
                     let there = own.holes.iter().filter_map(loop_circle).any(|c| same_circle(c, (local, h.radius), SAME));
-                    let on = |z: f64| frame.point(Vec3::new(local.x + h.radius, local.y, z));
+                    // A quarter turn round from the circle's start: a hole's edge may be two half circles
+                    // meeting at 0 and 180 degrees, and a point where they meet is on both.
+                    let on = |z: f64| frame.point(Vec3::new(local.x, local.y + h.radius, z));
                     there.then(|| [on(0.0), on(self.thickness)])
                 })
             })
