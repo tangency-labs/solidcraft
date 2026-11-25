@@ -2534,6 +2534,87 @@ fn a_round_too_small_to_change_the_part_is_refused() {
     assert!(volume(&b) < before);
 }
 
+/// #3351: on a square edge of a body of tolerance 1e-5, a round narrower across its faces
+/// than eight tolerances (its chord, r*sqrt(2), below 8e-5) is refused as too small, naming
+/// the smallest that builds, 8e-5/sqrt(2) and one part in a million: 2e-5 lies within
+/// tolerance of the edge, 2.5e-5 failed with no fillet faces made and 4e-5 failed matching
+/// its edges, untyped. A round of the smallest named builds exact, and so do rounds just
+/// above it. So on a 120 degree turn, where a chord of exactly eight tolerances fails.
+#[test]
+fn a_round_narrower_than_eight_tolerances_is_refused_naming_one_that_builds() {
+    all_fixes();
+    let floor = 8e-5 / std::f64::consts::SQRT_2 * (1.0 + 1e-6);
+    let mut smallest = 0.0;
+    for r in [2e-5, 2.5e-5, 4e-5, 5.5e-5] {
+        let b = block();
+        let e = edge_at(&b, [15.0, 0.0, 0.0]);
+        match blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled) {
+            Err(Error::RoundTooSmall {
+                edge, smallest: s, ..
+            }) => {
+                assert_eq!(edge, e);
+                assert!((s - floor).abs() < 1e-9 * floor, "{r} {s}");
+                smallest = s;
+            }
+            other => panic!("{r}: {other:?}"),
+        }
+        assert!(rel(volume(&b), ABC) < 1e-12, "{r}");
+    }
+    for r in [smallest, 5.7e-5, 6e-5] {
+        let b = block();
+        let e = edge_at(&b, [15.0, 0.0, 0.0]);
+        blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled)
+            .unwrap_or_else(|err| panic!("a round of {r} builds: {err}"));
+        let removed = 30.0 * r * r * (1.0 - std::f64::consts::FRAC_PI_4);
+        assert!(
+            ((ABC - volume(&b)) - removed).abs() < 1e-3 * removed,
+            "{r} {}",
+            volume(&b)
+        );
+        assert_eq!(b.counts().unwrap(), [7, 15, 10], "{r}");
+    }
+    // a prism whose edge at the origin turns its faces by 120 degrees
+    let a = 10.0 / 60f64.to_radians().tan();
+    let prism = || {
+        swept(
+            &[
+                segment((0.0, 0.0), (20.0, 0.0)),
+                segment((20.0, 0.0), (20.0, 10.0)),
+                segment((20.0, 10.0), (a, 10.0)),
+                segment((a, 10.0), (0.0, 0.0)),
+            ],
+            10.0,
+        )
+    };
+    let turn = 120f64.to_radians();
+    let floor = 8e-5 / (2.0 * (0.5 * turn).sin()) * (1.0 + 1e-6);
+    let b = prism();
+    let before = volume(&b);
+    let e = edge_at(&b, [0.0, 0.0, 5.0]);
+    match blend(&b, Blend::Round, &[e], &[4.5e-5], &[], Corners::Filled) {
+        Err(Error::RoundTooSmall {
+            edge, smallest: s, ..
+        }) => {
+            assert_eq!(edge, e);
+            assert!((s - floor).abs() < 1e-9 * floor, "{s}");
+            smallest = s;
+        }
+        other => panic!("4.5e-5 at 120 degrees: {other:?}"),
+    }
+    assert!(rel(volume(&b), before) < 1e-12);
+    for r in [smallest, 4.7e-5] {
+        let b = prism();
+        let e = edge_at(&b, [0.0, 0.0, 5.0]);
+        blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled)
+            .unwrap_or_else(|err| panic!("a round of {r} at 120 degrees builds: {err}"));
+        let removed = 10.0 * r * r * ((0.5 * turn).tan() - 0.5 * turn);
+        assert!(
+            ((before - volume(&b)) - removed).abs() < 1e-3 * removed,
+            "{r}"
+        );
+    }
+}
+
 /// #17511: a round of 8 on a quarter circle of radius 10 that meets a straight side 16.7
 /// degrees off tangent. On the top, the round of the arc touches the circle of radius 2 about
 /// the arc's centre and the round of the side touches the line 8 in from it; they cross twice,
@@ -3345,6 +3426,53 @@ fn the_ledge_corner_rolls_over_across_the_bores_tangent_seam() {
             "{which}: S, the seam edge and the rib's two pieces"
         );
     }
+}
+
+/// #18671: the ledge's operand asked 2.5e-4 wide, below the 7.4e-4 its strips settle at
+/// ([`the_ledge_corner_rolls_over_across_the_bores_tangent_seam`]), ends at its floor: the
+/// enclosure's least width (the strips' least widths however they are cut) is past 2.5e-4, so no
+/// refinement reaches it, and the enclosure is within 2.5e-4 of that least width, so no refinement
+/// narrows it by more than the width asked. It still holds the operand's closed-form volume, and it
+/// takes well under a quarter of the cell budget: before, it spent all of [`CELL_BUDGET`] (131,375
+/// cells, 129,094 of them strip cells) for 7.43e-4. A looser ask on the other side of the least
+/// width is still reached, and its answer bounds how much wider the Floor answer can be.
+#[test]
+fn the_ledge_operand_asked_below_its_strips_ends_at_its_floor() {
+    use solidcore::mass::enclosure::{enclose_volume, EnclosureStop, CELL_BUDGET};
+    rig_fixes();
+    let b = ledge();
+    let v0 = ledge_operand_volume();
+    let (k, mut brep) = kernel_copy(&b);
+    let e = enclose_volume(&k, &mut brep, 2.5e-4).unwrap();
+    assert_eq!(e.stop, EnclosureStop::Floor, "{e:?}");
+    assert!(e.least > 2.5e-4, "{e:?}");
+    assert!(
+        e.least <= e.width() && e.width() - e.least <= 2.5e-4,
+        "{e:?}"
+    );
+    // and no wider than the 1e-3 the ledge's own test asks and reaches
+    assert!(e.width() <= 1e-3, "{e:?}");
+    assert!(e.lo <= v0 && v0 <= e.hi, "{e:?} {v0}");
+    assert!(e.counts.cells < CELL_BUDGET / 4, "{e:?}");
+
+    // #21588 review: asked just below the Floor answer (7.456e-4, against 7.4638e-4 at least
+    // 5.09e-4), past that least width, refinement goes on and reaches it (in 23,191 cells), so
+    // the looser ask is answered narrower. That is the contract ([`enclose_volume`]): a rule that
+    // kept the answers monotone would have to end this reachable ask unreached as well, or refine
+    // 2.5e-4 on to the whole budget. The last two asserts hold by construction whatever the cells
+    // become: the looser answer, as every answer, is at least the Floor answer's least width wide,
+    // so the Floor answer is at most the width it asked wider. The Floor stop above and the reach
+    // here depend on the measured numbers (the Floor answer is 2.37e-4 off its least width against
+    // the 2.5e-4 asked, and the strips settle at 7.43e-4 given the whole budget).
+    let a = e.width() * (1.0 - 1e-3);
+    assert!(e.least <= a && a < e.width(), "{e:?}");
+    let (k, mut brep) = kernel_copy(&b);
+    let loose = enclose_volume(&k, &mut brep, a).unwrap();
+    assert_eq!(loose.stop, EnclosureStop::Reached, "{loose:?}");
+    assert!(loose.width() <= a, "{loose:?}");
+    assert!(loose.lo <= v0 && v0 <= loose.hi, "{loose:?} {v0}");
+    assert!(loose.width() >= e.least, "{loose:?} {e:?}");
+    assert!(e.width() - loose.width() <= 2.5e-4, "{loose:?} {e:?}");
 }
 
 /// The ledge's planar twin (#10876): the slab [0, 10] x [-10, 10] x [-10, 0] with the riser
@@ -6896,4 +7024,97 @@ fn a_round_meeting_a_short_rib_s_end_reads_back() {
     blend(&b, Blend::Round, &[rim], &[2.0], &[], Corners::Filled)
         .unwrap_or_else(|e| panic!("the rim fillet builds: {e}"));
     read_back(b, "the rim fillet");
+}
+
+/// The cylinder of radius 9.5 about +z, 30 high, its seam at `seam` radians from +x (SolidCraft's
+/// `solid.cylinder` extrudes one arc starting at 0.6131), less the notch 20 x 8 x 6 across its top
+/// on the side of `sign` y: the box x -10..10, |y| 5..13, z 26..32.
+fn seamed_notched_cylinder(seam: f64, sign: f64) -> Body {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::BooleanOp;
+    let cylinder = extrude(
+        &[Curve::Arc {
+            center: [0.0; 3],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: 9.5,
+            start: seam,
+            end: seam + 2.0 * PI,
+        }],
+        [0.0, 0.0, 1.0],
+        30.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let y = if sign > 0.0 { 5.0 } else { -13.0 };
+    let notch = make_box([-10.0, y, 26.0], [20.0, 8.0, 6.0]).unwrap();
+    boolean(cylinder, notch, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// tangency-labs/solidcraft#21416: the notch's inside edge (y = 5, z = 26) rounded or chamfered
+/// 1 builds wherever the cylinder's seam lies. The blend adds material in the notch's corner and
+/// ends on the cylinder at both ends; near x > 0 its end curve runs from the wall's rail, at
+/// atan(5 / 8.078) = 31.76 degrees, to the floor's, at atan(6 / 7.365) = 39.17 degrees. Where
+/// the seam lies between them (SolidCraft's at 35.13 degrees), the end curve crosses it; the
+/// intersections traced the curve within the cylinder's domain, which ends at its seam, so none
+/// ran from one end to the other, and the blend failed ("failure to calculate intersection of
+/// fillet surface with side face"); traced across the seam, the cut of its UV curve beyond the
+/// seam lay a period outside the face's domain. The seams tried lie beside each end of the end
+/// curve, in its middle, and away from it (near the notch's far end, on the -x side, and a
+/// quarter turn off), on the notch at +y and at -y (the mirror image, which built before).
+///
+/// Expected: a valid, closed solid, whose volume is the closed form: the cylinder, less the
+/// notch's circular segment R^2 acos(d/R) - d sqrt(R^2 - d^2) (d = 5) over its 4 mm depth, plus
+/// the blend's section at the height and depth (s, t) from the edge times the cylinder's chord
+/// there, 2 sqrt(R^2 - (d + s)^2): for the round the section is the square [0, 1]^2 less the
+/// ball's quarter disc, so with s = 1 - sin(a) its depth is 1 - cos(a); for the chamfer it is
+/// the triangle t < 1 - s. The integrals are smooth and taken by Simpson's rule on 2000 panels,
+/// far below the 1e-10 compared (the round's is 8303.852506129, the issue's).
+#[test]
+fn a_notch_s_round_and_chamfer_end_across_the_cylinder_s_seam() {
+    rig_fixes();
+    let (big_r, d, r) = (9.5_f64, 5.0_f64, 1.0_f64);
+    let simpson = |f: &dyn Fn(f64) -> f64, a: f64, b: f64| {
+        let n = 2000;
+        let h = (b - a) / f64::from(n);
+        let mut s = f(a) + f(b);
+        for i in 1..n {
+            s += f(a + h * f64::from(i)) * if i % 2 == 1 { 4.0 } else { 2.0 };
+        }
+        s * h / 3.0
+    };
+    let chord = |y: f64| 2.0 * (big_r * big_r - y * y).sqrt();
+    let notched = PI * big_r * big_r * 30.0
+        - 4.0 * (big_r * big_r * (d / big_r).acos() - d * (big_r * big_r - d * d).sqrt());
+    let round = notched
+        + simpson(
+            &|a: f64| chord(d + r - r * a.sin()) * (r - r * a.cos()) * r * a.cos(),
+            0.0,
+            PI / 2.0,
+        );
+    let chamfer = notched + simpson(&|y: f64| chord(y) * (d + r - y), d, d + r);
+    assert!(rel(round, 8_303.852_506_129) < 1e-12, "{round}");
+    let degrees: [f64; 8] = [35.13, 31.9, 32.5, 38.5, 39.0, 120.0, 200.0, 305.0];
+    for seam in degrees {
+        for sign in [1.0, -1.0] {
+            for (kind, want) in [(Blend::Round, round), (Blend::Chamfer, chamfer)] {
+                let case = format!("seam {seam} degrees, notch at {sign} y, {kind:?}");
+                // the -y notch at the seam's mirror image: the same part mirrored in y = 0
+                let at = if sign > 0.0 { seam } else { -seam };
+                let b = seamed_notched_cylinder(at.to_radians(), sign);
+                let edge = edge_at(&b, [0.0, d * sign, 26.0]);
+                blend(&b, kind, &[edge], &[r], &[], Corners::Filled)
+                    .unwrap_or_else(|e| panic!("{case}: {e:?}"));
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(report.is_valid(), "{case}: {}", report.text);
+                b.check_solid().unwrap_or_else(|e| panic!("{case}: {e:?}"));
+                let v = b.volume(1e-11).unwrap();
+                assert!(rel(v, want) < 1e-10, "{case}: {v} {want}");
+            }
+        }
+    }
 }

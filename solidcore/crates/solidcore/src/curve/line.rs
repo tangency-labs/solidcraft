@@ -2437,6 +2437,28 @@ fn segment_boxes_apart(a: [Point3; 2], b: [Point3; 2], tol: f64) -> bool {
     bbox1.are_disjoint(&bbox2, 0.0)
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for Line {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            base,
+            point,
+            vector,
+            anal_domain,
+            scale,
+            inside_out,
+        } = self;
+        d.tag(0x11E);
+        base.content(d)?;
+        point.content(d)?;
+        vector.content(d)?;
+        anal_domain.content(d)?;
+        d.f64(*scale);
+        d.bool(*inside_out);
+        Some(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
