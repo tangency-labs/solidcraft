@@ -3941,6 +3941,7 @@ pub fn needs_capture(app: &SolveApp, what: &str) -> bool {
                 | "joint.gear"
                 | "joint.screw"
                 | "joint.rack_pinion"
+                | "motion.study"
                 | "edit.undo"
                 | "edit.redo"
         )
