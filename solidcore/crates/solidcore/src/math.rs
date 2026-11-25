@@ -661,6 +661,47 @@ pub fn parallelogram_point(corner: Point3, u: Vec3, v: Vec3, s: f64, t: f64) -> 
     corner + u * s + v * t
 }
 
+/// The sine of the angle to a plane's normal below which [`plane_onto_line`] takes a line as
+/// square to the plane: nearer than that, which way the plane tilts would come from rounding in
+/// the line's direction.
+pub const PLANE_ONTO_LINE_SQUARE_SIN: f64 = 1e-6;
+
+/// Not upstream: the plane through `origin` with the unit, square axes `x` and `y` brought onto
+/// the line through `at` along the unit direction `dir`, as a plane at an angle through an axis
+/// starts from its base: tilted by the least turn that makes it parallel to the line (about the
+/// axis square to both its normal `x × y` and the line), then moved along its normal until it
+/// holds the line. A plane that already holds the line comes back unchanged. Returns the new
+/// origin and axes; `None` for a number not finite or a line within
+/// [`PLANE_ONTO_LINE_SQUARE_SIN`] of the normal, which no tilt makes the plane hold.
+#[must_use]
+pub fn plane_onto_line(
+    origin: Point3,
+    x: Vec3,
+    y: Vec3,
+    at: Point3,
+    dir: Vec3,
+) -> Option<(Point3, Vec3, Vec3)> {
+    if ![origin, x, y, at, dir].into_iter().all(finite3) {
+        return None;
+    }
+    let n = x.cross(y);
+    let along = n - dir * dir.dot(n);
+    if along.length() <= PLANE_ONTO_LINE_SQUARE_SIN {
+        return None;
+    }
+    let to = along.unitize().ok()?;
+    let k = n.cross(to);
+    let (sin, cos) = (k.length(), n.dot(to));
+    let (x, y) = match k.unitize() {
+        Ok(k) if sin > 1e-12 => {
+            let tilt = |v: Vec3| v * cos + k.cross(v) * sin + k * (k.dot(v) * (1.0 - cos));
+            (tilt(x), tilt(y))
+        }
+        _ => (x, y),
+    };
+    Some((origin - to * to.dot(origin - at), x, y))
+}
+
 /// The operation name of the refusals of [`centroid_and_mean_radius`].
 const OP_CENTROID: &str = "math::centroid_and_mean_radius";
 
@@ -1175,6 +1216,53 @@ mod tests {
             ));
             assert!(t.is_regular(0.0).is_yes());
         }
+    }
+
+    /// Onto a line: the top plane brought onto a line 30° above it through (1, 2, 3) along
+    /// (0, cos 30°, sin 30°) tilts 30° about X (its x axis stays) and holds the line; onto a
+    /// line it lies parallel to it only moves; a line square to it, or within
+    /// [`PLANE_ONTO_LINE_SQUARE_SIN`] of square, and numbers not finite are refused.
+    #[test]
+    fn a_plane_brought_onto_a_line_tilts_the_least_and_holds_it() {
+        let near = |a: Vec3, b: Vec3| (a - b).length() < 1e-12;
+        let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+        let (at, dir) = (Point3::new(1.0, 2.0, 3.0), Vec3::new(0.0, c, s));
+        let (o, x, y) = plane_onto_line(Point3::ZERO, Vec3::X, Vec3::Y, at, dir).unwrap();
+        let n = x.cross(y);
+        assert!(near(x, Vec3::X), "{x:?}");
+        assert!(near(y, dir), "{y:?}");
+        assert!((n.dot(Vec3::Z) - c).abs() < 1e-12 && n.dot(dir).abs() < 1e-12);
+        assert!((at - o).dot(n).abs() < 1e-12 && (at + dir * 7.0 - o).dot(n).abs() < 1e-12);
+
+        let (o, x, y) = plane_onto_line(
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Point3::new(0.0, 3.0, 2.0),
+            Vec3::X,
+        )
+        .unwrap();
+        assert_eq!((x, y), (Vec3::X, Vec3::Y));
+        assert!(near(o, Point3::new(0.0, 0.0, 2.0)), "{o:?}");
+
+        let tilt = 1e-8;
+        let steep = Vec3::new(0.0, tilt, (1.0 - tilt * tilt).sqrt());
+        for dir in [Vec3::Z, -Vec3::Z, steep] {
+            assert_eq!(
+                plane_onto_line(Point3::ZERO, Vec3::X, Vec3::Y, at, dir),
+                None
+            );
+        }
+        assert_eq!(
+            plane_onto_line(
+                Point3::new(f64::NAN, 0.0, 0.0),
+                Vec3::X,
+                Vec3::Y,
+                at,
+                Vec3::X
+            ),
+            None
+        );
     }
 
     #[test]

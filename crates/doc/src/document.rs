@@ -4191,32 +4191,15 @@ fn is_root(c: &u64) -> bool {
     *c == 0
 }
 
-/// The sine of the angle to the base normal below which [`onto_axis`] takes a line as square to the
-/// plane: nearer than that, which way the plane tilts would come from rounding in the line's direction.
-const SQUARE_SIN: f64 = 1e-6;
-
-/// `base` brought onto the line through `at` along the unit direction `dir`: tilted by the least
-/// turn that makes it parallel to the line, then moved along its normal until it holds the line.
-/// A base that already holds the line comes back unchanged (#6180). A line within
-/// [`SQUARE_SIN`] of the base normal counts as square to it and is refused.
+/// `base` brought onto the line through `at` along the unit direction `dir`, by the kernel
+/// ([`solidcraft_kernel::services::affine::plane_onto_line`]): tilted by the least turn that makes
+/// it parallel to the line, then moved along its normal until it holds the line. A base that
+/// already holds the line comes back unchanged (#6180). A line square to the base is refused.
 fn onto_axis(base: Plane, at: Vec3, dir: Vec3) -> Result<Plane> {
-    let n = base.normal();
-    let along = n - dir * dir.dot(n);
-    let to = (along.len() > SQUARE_SIN)
-        .then(|| along.normalized())
-        .flatten()
-        .ok_or_else(|| DocError::Invalid("the axis is square to the plane, so no plane at an angle from it goes through the axis".into()))?;
-    let k = n.cross(to);
-    let (sin, cos) = (k.len(), n.dot(to));
-    let (x, y) = match k.normalized() {
-        Some(k) if sin > 1e-12 => {
-            let tilt = |v: Vec3| v * cos + k.cross(v) * sin + k * (k.dot(v) * (1.0 - cos));
-            (tilt(base.x), tilt(base.y))
-        }
-        _ => (base.x, base.y),
-    };
-    let origin = base.origin - to * to.dot(base.origin - at);
-    Plane::new(origin, x, y).ok_or_else(|| DocError::Invalid("degenerate plane".into()))
+    let (origin, [x, y]) =
+        solidcraft_kernel::services::affine::plane_onto_line(base.origin.into(), base.x.into(), base.y.into(), at.into(), dir.into())
+            .ok_or_else(|| DocError::Invalid("the axis is square to the plane, so no plane at an angle from it goes through the axis".into()))?;
+    Plane::new(origin.into(), x.into(), y.into()).ok_or_else(|| DocError::Invalid("degenerate plane".into()))
 }
 
 /// A standard part (fastener, pin, bearing) inserted as a component.
