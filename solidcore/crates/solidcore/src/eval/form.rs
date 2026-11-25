@@ -39,6 +39,131 @@ const SLACK: f64 = 1e-12;
 /// use to tell a whole turn from less.
 const TURN_ROUNDING: f64 = 1e-9;
 
+/// A sphere whose boundary ends at a pole, placed with both poles clear of its boundary,
+/// using a cylinder's `support` frame. An endpoint of `junctions` (the edges shared with
+/// that cylinder) coincident with a pole to arithmetic roundoff witnesses the ambiguity.
+/// The same pole must also lie on the analytic cylinder, checked relative to its origin:
+/// an endpoint snapped within the model tolerance alone does not establish incidence.
+/// A modeling tolerance permits a gap; it does not establish that coincidence. Without the
+/// witness, or without a proved clear candidate, the frame stays as given. An internal seam's
+/// pole alone is not a reason to move the frame.
+/// Only the frame changes: the sphere's centre and radius stay exact.
+///
+/// Each edge is enclosed by certified boxes over eight pieces, including its tolerance and
+/// the rounding of constructing the poles. Subdivision only tightens the enclosures; it never
+/// samples the curve to decide clearance. An unsupported enclosure leaves the frame unchanged.
+/// This is for consumers that reconstruct parameters from 3D edges, without retained pcurves.
+pub fn sphere_frame(
+    frame: &Frame,
+    radius: f64,
+    support: &Frame,
+    support_radius: f64,
+    edges: &[(&Curve, [f64; 2], f64)],
+    junctions: &[(&Curve, [f64; 2], f64)],
+) -> Frame {
+    use crate::curve::from_parameters::from_parameters;
+    use crate::geom::extent1d::Extent1d;
+    use crate::geom::extent3d::Extent3d;
+    use crate::kernel::Kernel;
+    use crate::nurbs::math::gamma;
+
+    if edges.is_empty()
+        || !(radius.is_finite()
+            && radius > 0.0
+            && support_radius.is_finite()
+            && support_radius > 0.0)
+    {
+        return frame.clone();
+    }
+    let k = Kernel::default();
+    let mut boxes = Vec::new();
+    let origin = Vec3::from_array(frame.origin);
+    let Some(axis) = Vec3::from_array(frame.x_axis)
+        .cross(Vec3::from_array(frame.y_axis))
+        .normalized()
+    else {
+        return frame.clone();
+    };
+    let rounding = gamma(64) * (origin.len() + radius);
+    let poles = [origin + axis * radius, origin - axis * radius];
+    let Some(support_axis) = Vec3::from_array(support.x_axis)
+        .cross(Vec3::from_array(support.y_axis))
+        .normalized()
+    else {
+        return frame.clone();
+    };
+    let relative = origin - Vec3::from_array(support.origin);
+    let incidence_rounding = gamma(64) * (relative.len() + radius + support_radius);
+    let on_support = [1.0, -1.0].map(|sign| {
+        let radial = (relative + axis * (sign * radius))
+            .cross(support_axis)
+            .len();
+        radial.is_finite() && (radial - support_radius).abs() <= incidence_rounding
+    });
+    let mut pole_end = false;
+    for &(curve, interval, tolerance) in junctions {
+        if !(tolerance.is_finite() && tolerance >= 0.0) {
+            return frame.clone();
+        }
+        let Ok(edge) = from_parameters(&k, curve, interval) else {
+            return frame.clone();
+        };
+        pole_end |= [0.0, 1.0].iter().any(|&t| {
+            edge.curve
+                .evaluate_point(&k, edge.interval.evaluate(t))
+                .is_ok_and(|q| {
+                    poles
+                        .iter()
+                        .zip(on_support)
+                        .any(|(p, on)| on && p.distance(q) <= rounding)
+                })
+        });
+    }
+    if !pole_end {
+        return frame.clone();
+    }
+    for &(curve, interval, tolerance) in edges {
+        if !(tolerance.is_finite() && tolerance >= 0.0) {
+            return frame.clone();
+        }
+        let Ok(edge) = from_parameters(&k, curve, interval) else {
+            return frame.clone();
+        };
+        for i in 0..8 {
+            let on = Extent1d::from_min_max(
+                edge.interval.evaluate(f64::from(i) / 8.0),
+                edge.interval.evaluate(f64::from(i + 1) / 8.0),
+            );
+            let Ok(Some(bounds)) = edge.curve.certified_bounding_box(&k, &on) else {
+                return frame.clone();
+            };
+            boxes.push((bounds, tolerance));
+        }
+    }
+    for candidate in [frame, support] {
+        let axis = Vec3::from_array(candidate.x_axis).cross(Vec3::from_array(candidate.y_axis));
+        let Some(axis) = axis.normalized() else {
+            continue;
+        };
+        // Cross, norm, normalisation, scaling and adding the origin, bounded at their own
+        // magnitudes. The certified curve boxes already include their construction rounding.
+        let rounding = gamma(64) * (origin.len() + radius);
+        let poles = [origin + axis * radius, origin - axis * radius];
+        if poles.iter().all(|&p| {
+            boxes
+                .iter()
+                .all(|(b, tol)| b.min_distance(&Extent3d::from_point(p)) > tol + rounding)
+        }) {
+            return Frame {
+                origin: frame.origin,
+                x_axis: candidate.x_axis,
+                y_axis: candidate.y_axis,
+            };
+        }
+    }
+    frame.clone()
+}
+
 /// Whether a face's box ([`extent`]) goes round its axis more than a turn. [`extent`] clamps a
 /// box to one turn unless its angle runs past a turn by more than rounding and the angle the
 /// edges' distance off the surface makes, so a box wider than a turn and rounding is a face that

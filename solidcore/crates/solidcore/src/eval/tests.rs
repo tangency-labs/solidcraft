@@ -37,6 +37,68 @@ const IDENTITY: [[f64; 4]; 3] = [
     [0.0, 0.0, 1.0, 0.0],
 ];
 
+#[test]
+fn sphere_frame_proves_both_poles_clear_of_all_edges() {
+    let support = a_frame();
+    let tilted = Frame {
+        origin: support.origin,
+        x_axis: [0.8, 0.0, -0.6],
+        y_axis: [0.0, 1.0, 0.0],
+    };
+    let rims: Vec<_> = [-4.0, 4.0]
+        .into_iter()
+        .map(|z| Curve::Circle {
+            frame: Frame {
+                origin: [1.0, 2.0, 3.0 + z],
+                ..support.clone()
+            },
+            radius: 3.0,
+        })
+        .collect();
+    let edges: Vec<_> = rims.iter().map(|c| (c, [0.0, TAU], 1e-5)).collect();
+    assert_eq!(
+        form::sphere_frame(&tilted, 5.0, &support, 3.0, &edges, &[]),
+        tilted
+    );
+    let near_angle = 0.6_f64.asin() + 0.001;
+    let near = Frame {
+        origin: support.origin,
+        x_axis: [near_angle.cos(), 0.0, -near_angle.sin()],
+        y_axis: [0.0, 1.0, 0.0],
+    };
+    assert_eq!(
+        form::sphere_frame(&near, 5.0, &support, 3.0, &edges, &edges),
+        near
+    );
+    assert_eq!(
+        form::sphere_frame(&tilted, 5.0, &support, 3.0, &edges, &edges),
+        support
+    );
+    assert_eq!(
+        form::sphere_frame(&support, 5.0, &tilted, 3.0, &edges, &edges),
+        support
+    );
+    assert_eq!(
+        form::sphere_frame(&tilted, 5.0, &support, 0.0, &edges, &edges),
+        tilted
+    );
+    assert_eq!(
+        form::sphere_frame(&tilted, 5.0, &tilted, 3.0, &edges, &edges),
+        tilted
+    );
+    // A candidate clear of the rims still must not put a pole on another boundary edge.
+    let crossing = Curve::Line {
+        start: [1.0, 2.0, -3.0],
+        end: [1.0, 2.0, 9.0],
+    };
+    let mut blocked = edges;
+    blocked.push((&crossing, [0.0, 1.0], 1e-5));
+    assert_eq!(
+        form::sphere_frame(&tilted, 5.0, &support, 3.0, &blocked, &blocked),
+        tilted
+    );
+}
+
 fn line(a: Vec3, b: Vec3) -> EvalCurve {
     EvalCurve::new(
         1,
@@ -2206,6 +2268,55 @@ fn a_half_sphere_lune_is_the_half_on_its_loops_left() {
                 (v[0] + FRAC_PI_2).abs() < 1e-9 && (v[1] - FRAC_PI_2).abs() < 1e-9,
                 "centre {centre}, {name}: {v:?}"
             );
+        }
+    }
+}
+
+/// The 3-4-5 pole coincidence is an arithmetic event. Enlarging a modeling tolerance
+/// must not turn a nearby rim into an exactly coincident one, including far from the origin.
+#[test]
+fn sphere_frame_witness_does_not_grow_with_modelling_tolerance() {
+    for origin in [[0.0; 3], [1e6, -1e6, 1e6], [1e9, -1e9, 1e9]] {
+        let support = Frame {
+            origin,
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        };
+        let tilted = Frame {
+            x_axis: [0.8, 0.0, -0.6],
+            ..support.clone()
+        };
+        let rims: Vec<_> = [-4.0, 4.0]
+            .into_iter()
+            .map(|z| Curve::Circle {
+                frame: Frame {
+                    origin: [origin[0], origin[1], origin[2] + z],
+                    ..support.clone()
+                },
+                radius: 3.0,
+            })
+            .collect();
+        for tolerance in [2e-6, 2e-5, 2e-4] {
+            let edges: Vec<_> = rims
+                .iter()
+                .map(|curve| (curve, [0.0, TAU], tolerance))
+                .collect();
+            assert_eq!(
+                form::sphere_frame(&tilted, 5.0, &support, 3.0, &edges, &edges),
+                support
+            );
+            for delta in [-1e-3, 1e-3, -1e-6, 1e-6, -1e-8, 1e-8] {
+                let angle = 0.6_f64.asin() + delta;
+                let near = Frame {
+                    x_axis: [angle.cos(), 0.0, -angle.sin()],
+                    ..support.clone()
+                };
+                assert_eq!(
+                    form::sphere_frame(&near, 5.0, &support, 3.0, &edges, &edges),
+                    near,
+                    "origin {origin:?}, delta {delta}, tolerance {tolerance}"
+                );
+            }
         }
     }
 }

@@ -1142,6 +1142,86 @@ fn a_sphere_a_cone_and_a_torus_are_written_right_side_out() {
     assert_right_side_out("torus", &mut kernel, &mut torus, 2.0 * PI * PI * 5.0 * 2.25, 1e-9);
 }
 
+/// A radius-5 sphere bored by a radius-3 cylinder has height 8 and volume π·8³/6.
+/// Its tilted poles lie on the rims. Moving only the cyclic start of the spherical loop
+/// used to make OCCT read 779.114867 instead of 268.082573, while declaring the body valid.
+#[test]
+fn a_bored_sphere_exports_clear_poles_for_every_loop_start() {
+    use solidcore::topology::brep::mirror::transform_matrix;
+    use solidcore_record::brep::{Loop, Surface};
+    let mut k = Kernel::default();
+    let mut ball = api::create_sphere(&mut k, Point3::ZERO, 5.0).unwrap();
+    transform_matrix(&mut k, &mut ball, &[[0.8, 0.0, -0.6, 0.0], [0.0, 1.0, 0.0, 0.0], [0.6, 0.0, 0.8, 0.0], [0.0, 0.0, 0.0, 1.0]], true).unwrap();
+    let bore = api::create_cylinder(&mut k, Point3::new(0.0, 0.0, -6.0), 3.0, 12.0).unwrap();
+    let mut ring = boolean_difference(&mut k, ball, bore).unwrap();
+    let (record, _) = to_record(&mut k, &mut ring).unwrap();
+    let sphere = record.faces.iter().position(|f| matches!(f.surface, Surface::Sphere { .. })).unwrap();
+    let Loop::Edges { edges } = &record.faces[sphere].loops[0] else { panic!("edge loop") };
+    let count = edges.len();
+    for start in 0..count {
+        let mut rotated = record.clone();
+        let Loop::Edges { edges } = &mut rotated.faces[sphere].loops[0] else { panic!("edge loop") };
+        edges.rotate_left(start);
+        for edge in &mut rotated.edges {
+            for u in &mut edge.uses {
+                if u.face as usize == sphere && u.r#loop == 0 {
+                    u.position = ((u.position as usize + count - start) % count) as u32;
+                }
+            }
+        }
+        let before = rotated.clone();
+        let mut w = Writer::new();
+        topology::brep(&mut GeomWriter::new(&mut w), &rotated, "ring").unwrap();
+        assert_eq!(rotated, before, "export must not change the record");
+        let text = w.file("ring", "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF");
+        let file = File { x: p21::parse(&text).unwrap() };
+        let surface = file.x.entities.values().find(|e| e.name() == "SPHERICAL_SURFACE").unwrap();
+        let (origin, _, _, axis) = file.frame(rid(&surface.params()[1]));
+        assert_eq!(origin, [0.0; 3]);
+        assert_eq!(real(&surface.params()[2]), 5.0);
+        assert!(norm(sub(axis, [0.0, 0.0, 1.0])) < 1e-12, "start {start}: axis {axis:?}");
+    }
+}
+
+#[test]
+fn a_bored_sphere_keeps_frames_without_a_pole_at_a_shared_rim() {
+    use solidcore::topology::brep::mirror::transform_matrix;
+    use solidcore_record::brep::Surface;
+    for angle in [
+        0.0,
+        0.6_f64.asin() - 0.001,
+        0.6_f64.asin() + 0.001,
+        0.6_f64.asin() - 1e-6,
+        0.6_f64.asin() + 1e-6,
+        0.6_f64.asin() - 1e-8,
+        0.6_f64.asin() + 1e-8,
+    ] {
+        let mut k = Kernel::default();
+        let mut ball = api::create_sphere(&mut k, Point3::ZERO, 5.0).unwrap();
+        let (s, c) = angle.sin_cos();
+        transform_matrix(&mut k, &mut ball, &[[c, 0.0, -s, 0.0], [0.0, 1.0, 0.0, 0.0], [s, 0.0, c, 0.0], [0.0, 0.0, 0.0, 1.0]], true).unwrap();
+        let bore = api::create_cylinder(&mut k, Point3::new(0.0, 0.0, -6.0), 3.0, 12.0).unwrap();
+        let mut ring = boolean_difference(&mut k, ball, bore).unwrap();
+        let (record, _) = to_record(&mut k, &mut ring).unwrap();
+        let frame = record
+            .faces
+            .iter()
+            .find_map(|f| match &f.surface {
+                Surface::Sphere { frame, .. } => Some(frame),
+                _ => None,
+            })
+            .unwrap();
+        let mut w = Writer::new();
+        topology::brep(&mut GeomWriter::new(&mut w), &record, "control").unwrap();
+        let file = File { x: p21::parse(&w.file("control", "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF")).unwrap() };
+        let sphere = file.x.entities.values().find(|e| e.name() == "SPHERICAL_SURFACE").unwrap();
+        let (origin, x, _, z) = file.frame(rid(&sphere.params()[1]));
+        assert_eq!(origin, frame.origin);
+        assert!(norm(sub(x, frame.x_axis)) < 1e-12);
+        assert!(norm(sub(z, cross(frame.x_axis, frame.y_axis))) < 1e-12);
+    }
+}
+
 /// A solid bounded by an inside-out torus (its minor circle's NURB running against STEP's
 /// minor angle), on the default kernel: the torus knows it is inside out, as its generator
 /// says, so the file's face is the right way round. TOROIDAL_SURFACE's normal points out of

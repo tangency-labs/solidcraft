@@ -24,6 +24,7 @@
 
 use crate::vec::Vec3Geom as _;
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use solidcore::surface::face_surface::analytic_label;
@@ -557,7 +558,36 @@ impl BrepWriter<'_, '_, '_> {
             }
             return Ok(s);
         }
-        let (s, map) = surface(&face.surface).map_err(|m| format!("face {f}: {m}"))?;
+        let (mut s, map) = surface(&face.surface).map_err(|m| format!("face {f}: {m}"))?;
+        if face.nurbs.is_some()
+            && let BSurface::Sphere { frame, radius } = &face.surface
+            && face.loops.iter().all(|l| matches!(l, Loop::Edges { .. }))
+        {
+            // A spherical label has no exported pcurves. A pole on a rim makes lifting the
+            // 3D loop ambiguous, even when only its cyclic starting edge changes. Adjacent
+            // cylinders supply natural pole axes; the kernel proves clearance of all edges,
+            // including seams, before changing the output placement. Native UVs stay intact.
+            let edge_ids: BTreeSet<_> = face
+                .loops
+                .iter()
+                .flat_map(|l| match l {
+                    Loop::Edges { edges } => edges.as_slice(),
+                    _ => &[],
+                })
+                .map(|u| u.edge)
+                .collect();
+            let edges: Vec<_> = edge_ids.into_iter().map(|e| edge_of(self.b, e)).collect::<R<_>>()?;
+            let adjacent: BTreeSet<_> = edges.iter().flat_map(|e| &e.uses).map(|u| u.face).collect();
+            let candidates: Vec<_> = adjacent
+                .into_iter()
+                .filter_map(|id| match &self.b.faces.get(id as usize)?.surface {
+                    BSurface::Cylinder { frame, radius } => Some((id, frame.clone(), *radius)),
+                    _ => None,
+                })
+                .collect();
+            let frame = crate::kernel::sphere_frame(frame, *radius, &candidates, &edges, self.b);
+            s = Surface::Sphere { position: placement(&frame), radius: *radius };
+        }
         // A face on its NURBS form is written as the analytic surface it is, with no pcurves
         // (STEP's are in the angle); only which way its normal points carries over.
         let map = match &face.nurbs {
