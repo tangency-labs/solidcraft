@@ -283,7 +283,7 @@ fn a_drawing_of_the_design_is_kept_in_it_and_opened() {
     assert!(d.sheets[0].border.is_some(), "the ISO border");
     let built_in = template::built_in(template::default_for(false)).unwrap().unwrap();
     assert_eq!(d.sheets[0].title_block, built_in.sheets[0].title_block, "the built-in block");
-    assert_eq!(sheet["title_block"]["size_mm"], json!([180.0, 49.0]));
+    assert_eq!(sheet["title_block"]["size_mm"], json!([180.0, 61.0]));
     assert_eq!((s.doc.drawings.len(), s.open_drawing), (1, Some(d.id)));
     assert_eq!((s.undo.len(), s.undo.last().map(|u| u.part)), (undo + 1, Some(None)), "a step of the model");
     assert_eq!((s.evaluations, &s.doc.features), (evaluations, &features), "nothing evaluated, the model as it was");
@@ -1658,6 +1658,41 @@ fn focusing_another_drawing_preserves_the_sheet_edit_and_its_receiver() {
     assert_eq!(s.open_drawing, ids::decode(second["id"].as_str().unwrap()));
     assert!(s.active_sheet_sketch.is_none());
     assert_eq!(s.evaluations, evaluations);
+}
+
+/// #19860: while the model has the focus (Design or Render), where the shared sketch tools work on
+/// the model's sketch, starting or entering a sheet sketch is refused, naming the Drawing workspace,
+/// and changes nothing: no empty sketch is left open out of reach. With the drawing focused both
+/// work, and the sketch tools draw into the sheet sketch.
+#[test]
+fn a_sheet_sketch_is_started_and_entered_only_with_the_drawing_focused() {
+    let (mut s, _, _, made) = sheet_editor();
+    run(&mut s, "sketch.finish", json!({}));
+    s.model_focus = true;
+    let before = (s.doc.to_json(), s.undo.len());
+    for (command, params) in [("drawing.sketch.create", json!({"owner": made["sheet"]})), ("drawing.sketch.edit", json!({"sketch": made["sketch"]}))]
+    {
+        let why = refused(&mut s, command, params);
+        assert!(why.contains("not available right now") && why.contains("edited in the Drawing workspace"), "{command}: {why}");
+        assert!(find_command(command).unwrap().allowed(&s).is_err(), "{command} is not offered");
+    }
+    assert!(s.active_sheet_sketch.is_none());
+    assert_eq!((s.doc.to_json(), s.undo.len()), before);
+    // A model sketch open in Design stays open: the refusal comes before it would be finished.
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [5, 5]], "infer": false}));
+    let open = (s.active_sketch, s.doc.to_json(), s.undo.len());
+    assert!(open.0.is_some());
+    for (command, params) in [("drawing.sketch.create", json!({"owner": made["sheet"]})), ("drawing.sketch.edit", json!({"sketch": made["sketch"]}))]
+    {
+        refused(&mut s, command, params);
+        assert_eq!((s.active_sketch, s.doc.to_json(), s.undo.len()), open, "{command} left the model's sketch open");
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    s.model_focus = false;
+    run(&mut s, "drawing.sketch.edit", json!({"sketch": made["sketch"]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "infer": false}));
+    assert_eq!(run(&mut s, "drawing.sketch.inspect", json!({}))["curves"].as_array().map(Vec::len), Some(1));
 }
 
 #[test]
@@ -3969,9 +4004,13 @@ fn sheet_batch_extend_and_path_trim_keep_paper_geometry_without_model_pruning() 
 /// Existing fillet/chamfer geometry must use an authored sheet expression, never a model param.
 #[test]
 fn sheet_batch_fillet_chamfer_and_rounded_rectangle_are_drawing_local() {
-    for command in
-        ["sketch.fillet", "sketch.chamfer.equal_distance", "sketch.chamfer.two_distance", "sketch.chamfer.distance_angle", "sketch.rectangle.rounded"]
-    {
+    for (command, chamfer_dimensions) in [
+        ("sketch.fillet", None),
+        ("sketch.chamfer.equal_distance", Some(["4 mm", "4 mm"])),
+        ("sketch.chamfer.two_distance", Some(["3 mm", "4 mm"])),
+        ("sketch.chamfer.distance_angle", Some(["4 mm", "45 deg"])),
+        ("sketch.rectangle.rounded", None),
+    ] {
         let (mut s, drawing, sketch, _) = sheet_editor();
         s.doc_mut().set_param("Inset", "1", Some("in"), None).unwrap();
         let before = s.doc.clone();
@@ -4000,7 +4039,10 @@ fn sheet_batch_fillet_chamfer_and_rounded_rectangle_are_drawing_local() {
         assert!(result["curves"].is_array(), "{command}: {result}");
         let saved = &s.doc.drawing(drawing).unwrap().sheet_sketch(sketch).unwrap().sketch;
         assert!(saved.curves.len() >= 5, "{command}");
-        if command == "sketch.fillet" || command == "sketch.rectangle.rounded" {
+        if let Some(expected) = chamfer_dimensions {
+            let bindings: Vec<_> = saved.constraints.iter().filter_map(|c| c.param.as_deref()).collect();
+            assert_eq!(bindings, expected, "{command}");
+        } else {
             assert_eq!(result["param"], Value::Null, "{command}: no model parameter");
             assert_eq!(result["expression"], "Inset / 5", "{command}");
             assert!(saved.constraints.iter().any(|c| c.param.as_deref() == Some("Inset / 5")), "{command}");

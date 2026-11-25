@@ -30,24 +30,14 @@ use solidcore::Kernel;
 /// less those retired since (their behaviour is now the default).
 const SOLIDCRAFT_FIXES: &[&str] = &[
     "fillet_chamfer_cone_on_arc",
-    "proto_vertex_miss_is_false",
-    "revolve_analytic_profile_faces",
-    "offset_analytic_mate_edges",
     "uv_trim_corner_end_points_only",
     "bspline_trim_preserves_uv_spans",
-    "new_edge_vertex_tolerance_covers_gap",
-    "analytic_copy_keeps_parameterization",
     "offset_extension_from_base",
-    "fillet_cleanup_keeps_target_faces",
     "fillet_patch_keeps_fillet_edges",
     "fillet_knife_edge_rounds",
     "linear_sweep_arc_is_cylinder",
     "fillet_trace_reaches_rails",
-    "curve_loop_normal_from_area",
     "offset_extension_as_itself",
-    "fillet_variable_span_follows_fillet",
-    "simple_coincidence_crossing_is_point",
-    "ssi_proto_topology_statuses_pass_on",
     "fillet_exact_round_classes",
     "edgeuse_convexity_propagates_step_off_failure",
     "keep_exact_pcurves",
@@ -55,6 +45,7 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "brep_ray_classifies_current_trims",
 ];
 
+/// SolidCraft's fixes.
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
@@ -91,6 +82,11 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     brep_volume(k, b, 1e-8, &attrs).unwrap()
 }
 
+/// WR-647 part B: the blend/cylinder pair returns the round's tangent edge twice: once as a curve
+/// that is the edge from vertex to vertex, once as a curve that runs along it from 0.35
+/// to its end. The second run is a copy of the edge (the topology intersector's
+/// `duplicate_edge_run`); before it was dropped, its inner end split the edge the first
+/// curve keeps whole and the merge failed with `RelateConflict`.
 #[test]
 fn g2_round_minus_its_carried_body_cuts() {
     let mut k = kernel();

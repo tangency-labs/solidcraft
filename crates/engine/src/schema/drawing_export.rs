@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::drawing_scene::{
-    SheetSceneBalloon, SheetSceneDimension, SheetSceneFill, SheetSceneNote, SheetSceneSketch, SheetSceneTable, SheetSceneView,
+    SheetAnnotationFailure, SheetSceneBalloon, SheetSceneDimension, SheetSceneFill, SheetSceneNote, SheetSceneSketch, SheetSceneTable, SheetSceneView,
 };
 use super::drawing_sheet::sheet_ref;
 
@@ -192,6 +192,9 @@ pub struct ExportResult {
     /// Each note on the sheet or its views, as `drawing.scene` reports it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<SheetSceneNote>,
+    /// Centre annotations omitted and why, as `drawing.scene` reports them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotation_failures: Vec<SheetAnnotationFailure>,
     /// Each balloon of a view on the sheet, as `drawing.scene` reports it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub balloons: Vec<SheetSceneBalloon>,

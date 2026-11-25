@@ -1650,6 +1650,62 @@ fn an_equal_area_gn_section_continues_over_its_thumbweights_proved_enclosure() {
     assert!(recertify_with_thumbweight(&kk, &pb).unwrap().1.is_none());
 }
 
+/// An ask along a blend's spine whose span's certificate spent its work budget is passed on
+/// as an error, as a cancellation is (work given up is never another ask's result); a span
+/// that failed with a plain status, or is not proved, is an ask that does not work (`None`).
+/// The certificate's budget is not reachable through `span_of_definition` today, so the
+/// ask's decision is tested on the span's result.
+#[test]
+fn a_span_past_its_work_budget_is_passed_on_not_an_ask_that_does_not_work() {
+    use super::blend::span_of_ask;
+    use crate::blend::fillet_section::recertify::DefinitionSpan;
+    use crate::error::blend::BlendFailure;
+    let span = |certified: f64| DefinitionSpan {
+        homog: Vec::new(),
+        weights: Vec::new(),
+        certified,
+        ld: 0,
+        stations: Vec::new(),
+    };
+    let feet = |_: &DefinitionSpan| Ok(true);
+    let budget = SolidError::blend(
+        "t",
+        BlendFailure::NotCertified {
+            halvings: 1,
+            stations: 2,
+        },
+    );
+    assert!(budget.upstream_status().is_some());
+    assert_eq!(
+        span_of_ask(Err(budget.clone()), feet).err(),
+        Some(budget),
+        "a certificate past its budget is passed on"
+    );
+    let cancelled = SolidError::cancelled("t");
+    assert_eq!(
+        span_of_ask(Err(cancelled.clone()), feet).err(),
+        Some(cancelled)
+    );
+    // a plain status failure, an invalid input and an unproved span: no ask
+    let failed = SolidError::blend("t", BlendFailure::Failed("x"));
+    assert!(failed.upstream_status().is_some() && !failed.is_unported_or_cancelled());
+    assert!(matches!(span_of_ask(Err(failed), feet), Ok(None)));
+    let invalid = SolidError::invalid_input("t", "x");
+    assert!(matches!(span_of_ask(Err(invalid), feet), Ok(None)));
+    assert!(matches!(
+        span_of_ask(Ok(span(f64::INFINITY)), feet),
+        Ok(None)
+    ));
+    assert!(matches!(
+        span_of_ask(Ok(span(1e-9)), |_| Ok(false)),
+        Ok(None)
+    ));
+    let ran = span_of_ask(Ok(span(1e-9)), feet)
+        .unwrap()
+        .expect("the span");
+    assert_eq!(ran.certified, 1e-9);
+}
+
 #[test]
 fn a_round_along_past_its_supports_is_refused_naming_a_distance_that_works() {
     // the planes run to x = 20 and the spine ends at x = 10: past x = 20 a foot leaves its

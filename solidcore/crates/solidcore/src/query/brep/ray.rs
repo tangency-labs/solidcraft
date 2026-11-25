@@ -30,6 +30,7 @@ pub use live::{
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::error::query::QueryFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::Point2;
@@ -204,7 +205,7 @@ fn face_surface_cache(
         .face(face)?
         .surface
         .as_ref()
-        .ok_or_else(|| SolidError::query_missing(OP, "the face's surface"))?
+        .ok_or_else(|| SolidError::query(OP, QueryFailure::FaceWithoutSurface))?
         .clone_for_evaluation()?;
     // WR-732: while editing, classify against the face's current trims; a face whose
     // loops are open has no boundary to implant, and no answer
@@ -226,6 +227,7 @@ fn face_surface_cache(
     let trims_failed = |e: SolidError| match e {
         e @ (SolidError::Unported { .. }
         | SolidError::Cancelled { .. }
+        | SolidError::OutOfFuel { .. }
         | SolidError::PreparationRequired { .. }) => e,
         _ if editing => unavailable.clone(),
         e => e,
@@ -382,7 +384,7 @@ impl SurfaceSolveContext<CacheObject> for RaySurfaceContext<'_> {
             .face(face)?
             .surface
             .as_ref()
-            .ok_or_else(|| SolidError::query_missing(OP, "the face's surface"))?
+            .ok_or_else(|| SolidError::query(OP, QueryFailure::FaceWithoutSurface))?
             .face()?;
         if surface.face()? != owner {
             return Err(SolidError::invalid_input(OP, "surface owner mismatch"));

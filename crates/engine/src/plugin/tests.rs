@@ -51,6 +51,89 @@ fn edit_form_prefill_uses_visible_controllers_and_reports_condition_errors() {
 }
 
 #[test]
+fn edit_form_validates_conditional_root_alternatives_under_the_field_key() {
+    let s = Session::default();
+    let schema = json!({"type":"object","additionalProperties":true,"properties":{
+        "gate":{"type":"boolean"},
+        "mode":{"type":"boolean","x-solidcraft-visible-when":{"field":"gate","eq":true}}
+    },"oneOf":[{
+        "type":"object","properties":{
+            "mode":{"type":"boolean"},
+            "secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}
+        }
+    }]});
+    let invalid = json!({"gate":true,"mode":true,"secret":"invalid"});
+    assert!(matches!(check_input(&schema, &invalid), Err(HostError::InvalidInput { field, .. }) if field == "params.secret"));
+    let errors = form_errors(&s, &schema, &invalid);
+    assert!(matches!(errors.get("secret"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })), "{errors:?}");
+    assert!(!errors.contains_key("params"), "{errors:?}");
+    assert!(form_errors(&s, &schema, &json!({"gate":false,"mode":true,"secret":"hidden"})).is_empty());
+    assert!(form_errors(&s, &schema, &json!({"gate":true,"mode":true,"secret":7})).is_empty());
+}
+
+#[test]
+fn edit_form_validates_values_against_an_additional_property_schema() {
+    let s = Session::default();
+    let mut schema = json!({"type":"object","properties":{"depth":{"type":"integer"}},"additionalProperties":{"type":"integer"}});
+    assert!(form_errors(&s, &schema, &json!({"depth":2,"operation_id":7})).is_empty());
+    let errors = form_errors(&s, &schema, &json!({"depth":"invalid","operation_id":"invalid"}));
+    assert!(matches!(errors.get("depth"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })));
+    assert!(matches!(errors.get("operation_id"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })));
+    schema["additionalProperties"] = json!(false);
+    assert!(form_errors(&s, &schema, &json!({"operation_id":7})).contains_key("operation_id"));
+    schema["additionalProperties"] = json!(true);
+    assert!(form_errors(&s, &schema, &json!({"operation_id":"allowed"})).is_empty());
+}
+
+#[test]
+fn edit_form_keeps_selection_context_in_alternatives_and_ordinary_object_arrays_closed() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":1,"width":1,"height":1,"body_name":"Stock"})).unwrap();
+    let selection = json!({"targets":[{"type":"body","name":"Stock"}]});
+    let schema = json!({"type":"object","properties":{
+        "targets":{"oneOf":[{"type":"array","items":{"type":"object"}}]}
+    }});
+    assert!(check_input(&schema, &selection).is_ok());
+    assert!(form_errors(&s, &schema, &selection).is_empty());
+    let ordinary = json!({"type":"object","properties":{
+        "records":{"oneOf":[{"type":"array","items":{"type":"object"}}]}
+    }});
+    let values = json!({"records":[{"type":"body","name":"Stock"}]});
+    assert!(check_input(&ordinary, &values).is_err());
+    assert!(matches!(form_errors(&s, &ordinary, &values).get("records"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })));
+}
+
+#[test]
+fn edit_form_checks_pick_existence_in_selection_array_alternatives() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":1,"width":1,"height":1,"body_name":"Stock"})).unwrap();
+    for composition in ["oneOf", "anyOf"] {
+        let schema = json!({"type":"object","properties":{
+            "enabled":{"type":"boolean"},
+            "picks":{composition:[{"type":"array","items":{"type":"object"}}],"x-solidcraft-selection":{"version":1,"accept":["body"]},
+                "x-solidcraft-visible-when":{"field":"enabled","eq":true}}
+        }});
+        let values = json!({"enabled":true,"picks":[{"type":"body","name":"Stock"}]});
+        assert!(check_input(&schema, &values).is_ok());
+        assert!(form_errors(&s, &schema, &values).is_empty(), "{composition}");
+        let deleted = json!({"enabled":true,"picks":[{"type":"body","name":"deleted"}]});
+        assert!(check_input(&schema, &deleted).is_ok());
+        assert!(matches!(form_errors(&s, &schema, &deleted).get("picks"), Some(crate::schema::plugin::FormFieldError::MissingPick)), "{composition}");
+    }
+    let filtered = json!({"type":"object","properties":{
+        "enabled":{"type":"boolean"},
+        "picks":{"x-solidcraft-selection":{"version":1,"accept":["body"]},"oneOf":[{
+            "type":"array","items":{"type":"object"},"x-solidcraft-when":{"field":"enabled","eq":true}
+        }]}
+    }});
+    assert!(form_errors(&s, &filtered, &json!({"enabled":true,"picks":[{"type":"body","name":"Stock"}]})).is_empty());
+    assert!(matches!(
+        form_errors(&s, &filtered, &json!({"enabled":false,"picks":[{"type":"body","name":"Stock"}]})).get("picks"),
+        Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })
+    ));
+}
+
+#[test]
 fn edit_form_accepts_approximate_pick_coordinates_without_substituting_indices() {
     use solidcore_record::Vec3;
     let mut s = Session::default();
@@ -428,6 +511,7 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
         ("canvas.insert", Some("file")),
         ("library.export", Some("file")),
         ("doc.open", Some("doc")),
+        ("doc.info", Some("doc")),
         ("settings.get", Some("app")),
         ("plugin.run", Some("plugin")),
     ] {
@@ -521,6 +605,58 @@ fn read_only_folder_allows_step_insert_but_refuses_file_writes() {
     assert!(host.run_command("file.export_stl", &json!({"path":output})).is_err(), "export also requires write authority");
     assert!(!output.exists());
     assert!(source_path.exists(), "the imported STEP is unchanged");
+    host.rollback_transaction().unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// A granted `file` command names a file by its grant's name; the reply names the real file.
+/// A read-only grant serves only input readers; a name the command may not use is refused first.
+#[test]
+fn file_commands_name_files_in_granted_folders_by_the_grants_name() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-grant-paths-{}", std::process::id()));
+    let (outbox, input) = (root.join("outbox"), root.join("input"));
+    std::fs::create_dir_all(&outbox).unwrap();
+    std::fs::create_dir_all(&input).unwrap();
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::from(["file".into()]),
+        file_folders: vec![outbox.clone()],
+        file_read_folders: vec![outbox.clone(), input.clone()],
+        evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
+    };
+    host.session.plugin_state.file_grants = vec![
+        FileGrant { name: "outbox".into(), folder: outbox.clone(), read: true, write: true },
+        FileGrant { name: "input".into(), folder: input.clone(), read: true, write: false },
+    ];
+    host.begin_transaction().unwrap();
+    s_box(&mut host);
+    let exported = host.run_command("file.export_step", &json!({"path":"grant:outbox/part.step"})).unwrap();
+    assert!(outbox.join("part.step").is_file());
+    assert_eq!(exported["path"], json!(outbox.join("part.step").to_string_lossy()), "the reply names the file where it is");
+    std::fs::copy(outbox.join("part.step"), input.join("part.step")).unwrap();
+    let inserted = host.run_command("file.insert_step", &json!({"path":"grant:input/part.step"}));
+    assert!(inserted.is_ok(), "an input reader uses a read-only grant: {inserted:?}");
+    for path in ["grant:input/copy.step", "grant:elsewhere/copy.step", "grant:outbox/../copy.step"] {
+        let refused = host.run_command("file.export_step", &json!({"path": path}));
+        assert!(matches!(&refused, Err(HostError::PermissionDenied { permission }) if permission.starts_with(path)), "{path}: {refused:?}");
+    }
+    // The rewritten path is then judged by the command's scope like any other (here Windows' rules
+    // for device names and streams), so the grant form reaches nothing a full path could not.
+    if cfg!(windows) {
+        for path in ["grant:outbox/nul.step", "grant:outbox/part.step:stream"] {
+            let refused = host.run_command("file.export_step", &json!({"path": path}));
+            assert!(
+                matches!(&refused, Err(HostError::CommandFailed { reason, .. }) if reason.contains("not allowed for this agent")),
+                "{path}: {refused:?}"
+            );
+        }
+    }
+    assert!(!input.join("copy.step").exists() && !root.join("copy.step").exists());
     host.rollback_transaction().unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -705,6 +841,89 @@ mod native {
             s.execute("plugin.install", &json!({"path":zip,"replace":true,"approve":approve})).unwrap()["folder"].as_str().unwrap().into()
         }
     }
+    /// A 0.41 plugin runs as before, alone and with a background shader added.
+    #[test]
+    fn a_commands_plugin_from_041_installs_and_runs_unchanged_beside_shaders() {
+        let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-041-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut s = Session::default();
+        s.plugin_state.plugins_dir = Some(root.join("plugins"));
+        std::fs::create_dir_all(&root).unwrap();
+        let wasm = component("call $box");
+        let shader = b"fn background(px: ScPixel) -> vec4<f32> { return sc.top; }
+";
+        let mut with_shader = manifest();
+        with_shader["id"] = json!("shaded");
+        with_shader["capabilities"] = json!(["commands@0.1", "shaders@0.1"]);
+        with_shader["shaders"] = json!([{"id": "plain", "name": "Plain", "kind": "background", "source": "plain.wgsl"}]);
+        for (id, plugin) in [("sample", manifest()), ("shaded", with_shader)] {
+            let text = serde_json::to_vec(&plugin).unwrap();
+            let zip = solidcraft_io::safe_zip::write(&[("plugin.json", &text[..]), ("plugin.wasm", &wasm[..]), ("plain.wgsl", &shader[..])]).unwrap();
+            let path = root.join(format!("{id}.zip"));
+            std::fs::write(&path, zip).unwrap();
+            let installed = s.execute("plugin.install", &json!({"path": path.to_string_lossy()})).unwrap();
+            assert_eq!(installed["entries"], json!([format!("{id}.make")]));
+            let folder = root.join("plugins").join(id).to_string_lossy().into_owned();
+            let approval = s.execute("plugin.inspect", &json!({"path": folder})).unwrap()["approval"].clone();
+            let before = s.model.state().bodies.len();
+            s.execute("plugin.run", &json!({"path": folder, "approval": approval, "entry": "make", "params": {}})).unwrap();
+            assert_eq!(s.model.state().bodies.len(), before + 1, "{id} made its box");
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A theme-only plugin (`themes@0.1`, no runtime) installs from its `.zip`. A package whose
+    /// theme file is missing, or is not a theme file, does not.
+    #[test]
+    fn a_theme_only_plugin_installs_and_a_bad_theme_file_does_not() {
+        let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-themes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut s = Session::default();
+        s.plugin_state.plugins_dir = Some(root.join("plugins"));
+        let plugin = json!({"id":"tints","name":"Tints","version":"1","capabilities":["themes@0.1"],"themes":[{"id":"night","source":"night.json"}]});
+        let text = serde_json::to_vec(&plugin).unwrap();
+        let theme: &[u8] = br#"{"format":"solidcraft-theme/1","name":"Night","base":"dark"}"#;
+        let not_a_theme: &[u8] = br#"{"name":"Night"}"#;
+        let packages =
+            [("missing.zip", vec![("plugin.json", &text[..])]), ("bad.zip", vec![("plugin.json", &text[..]), ("night.json", not_a_theme)])];
+        for (name, files) in packages {
+            let zip = solidcraft_io::safe_zip::write(&files).unwrap();
+            let path = root.join(name);
+            std::fs::write(&path, zip).unwrap();
+            assert!(s.execute("plugin.install", &json!({"path": path.to_string_lossy()})).is_err(), "{name} is refused");
+        }
+        let zip = solidcraft_io::safe_zip::write(&[("plugin.json", &text[..]), ("night.json", theme)]).unwrap();
+        let path = root.join("good.zip");
+        std::fs::write(&path, zip).unwrap();
+        let dry = s.execute("plugin.install", &json!({"path": path.to_string_lossy(), "dry_run": true})).unwrap();
+        assert_eq!(dry["themes"], json!([{"id":"night","source":"night.json"}]));
+        let installed = s.execute("plugin.install", &json!({"path": path.to_string_lossy()})).unwrap();
+        assert_eq!(installed["id"], "tints");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// `plugin.check` reports a theme file the package lacks under `themes`, with advice about the
+    /// theme list, not about the component.
+    #[test]
+    fn check_reports_a_missing_theme_file_under_themes() {
+        let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-theme-check-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut s = Session::default();
+        let plugin = json!({"id":"tints","name":"Tints","version":"1","capabilities":["themes@0.1"],"themes":[{"id":"night","source":"night.json"}]});
+        let text = serde_json::to_vec(&plugin).unwrap();
+        let path = root.join("tints.zip");
+        std::fs::write(&path, solidcraft_io::safe_zip::write(&[("plugin.json", &text[..])]).unwrap()).unwrap();
+        let reply = s.execute("plugin.check", &json!({"path": path.to_string_lossy()})).unwrap();
+        assert_eq!(reply["ok"], false, "{reply}");
+        let problem = &reply["problems"][0];
+        assert_eq!(problem["field"], "themes", "{reply}");
+        let fix = problem["fix"].as_str().unwrap();
+        assert!(fix.contains("night.json") && !fix.contains("component"), "{fix}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     impl Drop for Fixture {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
@@ -1965,6 +2184,52 @@ mod native {
         }
     }
 
+    /// A plugin saves into its folder by the grant's name; under a read-only grant nothing is written.
+    #[test]
+    fn a_plugin_saves_into_its_granted_folder_by_the_grants_name() {
+        for write in [true, false] {
+            let f = Fixture::new("call $box");
+            let outbox = f.0.join("outbox");
+            std::fs::create_dir_all(&outbox).unwrap();
+            let (command, args) = ("file.save_as", r#"{"path":"grant:outbox/part.sc"}"#);
+            let call = format!("      i32.const 2048 i32.const {} i32.const 3072 i32.const {} i32.const 0 call $run\n", command.len(), args.len());
+            let source = component_template()
+                .replace("      call $box\n      call $box\n", &call)
+                .replace("\"file.export\"", &format!("\"{command}\")\n    (data (i32.const 3072) \"{}\"", args.replace('"', "\\22")));
+            std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+            let mut m = manifest();
+            m["runtime"]["commands"] = json!([command]);
+            m["runtime"]["permissions"] = json!({"command_groups":["file"],"files":[{"name":"outbox","read":true,"write":write}]});
+            std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+            s.plugin_state.grants.insert(
+                "sample".into(),
+                Grants {
+                    package_hash: Some(read_package(&f.path()).unwrap().approval),
+                    command_groups: BTreeSet::from(["file".into()]),
+                    folders: vec![FileGrant { name: "outbox".into(), folder: outbox.clone(), read: true, write }],
+                    fuel: None,
+                    memory_mib: None,
+                    input_folder: false,
+                },
+            );
+            let saved = outbox.join("part.sc");
+            let result = f.run(&mut s);
+            if write {
+                result.unwrap();
+                assert!(saved.is_file(), "the design is saved in the granted folder");
+            } else {
+                let error = result.unwrap_err();
+                assert!(
+                    matches!(error.host_error(), Some(HostError::PermissionDenied { permission }) if permission.contains("`outbox` is not a folder this command may use")),
+                    "{error}"
+                );
+                assert!(!saved.exists(), "a read-only grant writes nothing");
+            }
+        }
+    }
+
     #[test]
     fn hand_installed_plugins_get_no_legacy_or_other_plugins_folder_grants() {
         let f = Fixture::new("call $box");
@@ -2017,6 +2282,50 @@ mod native {
         s.plugin_state.grants.remove("sample");
         assert!(matches!(f.run(&mut s).err().as_ref().and_then(EngineError::host_error), Some(HostError::PermissionDenied { .. })));
         assert!(s.doc.features.is_empty());
+    }
+
+    #[test]
+    fn doc_info_in_a_plugin_run_needs_the_doc_grant_and_names_the_users_design() {
+        let f = Fixture::new("call $box");
+        let source = component_template()
+            .replace(
+                "      call $box\n      call $box\n",
+                "      call $box i32.const 2048 i32.const 8 i32.const 3072 i32.const 2 i32.const 0 call $run\n",
+            )
+            .replace("file.export", "doc.info\")\n    (data (i32.const 3072) \"{}");
+        std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(&source).unwrap()).unwrap();
+        let mut m = manifest();
+        m["runtime"]["commands"] = json!(["solid.box", "doc.info"]);
+        m["runtime"]["permissions"] = json!({"command_groups":["doc"]});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let file = f.0.join("Bracket.sc").to_string_lossy().into_owned();
+        let mut s = Session::default();
+        s.execute("file.save_as", &json!({"path": file})).unwrap();
+        let bytes = std::fs::read(&file).unwrap();
+        let before = s.execute("doc.info", &json!({})).unwrap();
+        let error = f.run(&mut s).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { permission }) if permission.contains("`doc`")), "{error}");
+        assert!(s.doc.features.is_empty() && s.undo.is_empty());
+        let approval = read_package(&f.path()).unwrap().approval;
+        s.plugin_state.grants.insert(
+            "sample".into(),
+            Grants { package_hash: Some(approval.clone()), command_groups: BTreeSet::from(["doc".to_string()]), ..Default::default() },
+        );
+        assert_eq!(f.run(&mut s).unwrap()["result"], before, "saved before the run, though the run's box came first");
+        assert_eq!((s.doc.features.len(), s.path.as_deref()), (1, Some(file.as_str())));
+        assert_eq!(std::fs::read(&file).unwrap(), bytes, "the run wrote nothing to the file");
+        // What the run was told stays in the run: the user's session keeps none of it.
+        assert_eq!((s.plugin_state.caller_design.as_ref(), s.source_path.as_deref()), (None, None));
+        // The desktop's worker: a copy of a copy, neither with a `path`.
+        let now = s.execute("doc.info", &json!({})).unwrap();
+        assert_eq!(now["unsaved"], true);
+        let params = json!({"path": f.path(), "approval": approval, "entry": "make", "params": {}});
+        let prepared = s.scratch().compute_commands(&[("plugin.run".into(), params)], None).unwrap();
+        assert!(prepared.is_current(&s));
+        let replies = s.accept_commands(prepared).unwrap();
+        assert_eq!(replies[0].1["result"], now, "{replies:?}");
+        assert_eq!(s.doc.features.len(), 2);
+        assert_eq!((s.plugin_state.caller_design.as_ref(), s.source_path.as_deref()), (None, None));
     }
 
     /// `plugin.check` finds what Install and a call would refuse, with a fix for each, and runs
@@ -2729,6 +3038,7 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         "inspect.measure",
         "sketch.inspect",
         "sketch.solve",
+        "doc.info",
     ] {
         assert_eq!(catalog.iter().find(|c| c.name == command).unwrap().effect, Effect::Read, "{command}");
     }
@@ -2780,6 +3090,45 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         assert!(host.authorize_file_path(&root.join(".hidden/public.txt"), false).is_ok());
         assert!(host.authorize_file_path(&root.join(".hidden/public.txt"), true).is_err());
     });
+}
+
+#[test]
+fn a_write_may_reach_a_missing_folder_exactly_when_its_nearest_existing_folder_is_in_scope() {
+    // #20493: under `--allow-path`, `New/Deep/x.json` in an allowed folder needs folders that do not exist yet.
+    let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-new-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let outside = root.with_file_name(format!("solidcraft-plugin-new-outside-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&outside);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let mut session = Session::default();
+    session.plugin_state.file_grants = vec![FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true }];
+    let host = SolidCraftHost {
+        session,
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
+        evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
+    };
+    solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([root.clone()])), || {
+        assert!(host.authorize_file_path(&root.join("New/Deep/x.json"), true).is_ok(), "two missing levels inside the scope");
+        assert!(host.authorize_file_path(&root.join("New/Deep/x.json"), false).is_err(), "a read still needs the path to exist");
+        assert!(host.authorize_file_path(&root.join("../elsewhere/New/x.json"), true).is_err(), "outside the scope");
+        assert!(host.authorize_file_path(&outside.join("New/Deep/x.json"), true).is_err(), "a missing folder under an out-of-scope one");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+            assert!(host.authorize_file_path(&root.join("link/New/Deep/x.json"), true).is_err(), "an existing link out of scope");
+        }
+    });
+    assert!(!root.join("New").exists() && !outside.join("New").exists(), "checking creates nothing");
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&outside);
 }
 
 /// Importer plugins: an installed importer opens the files it claims as new, unsaved designs.
@@ -3385,6 +3734,22 @@ mod install_zip {
         path.to_string_lossy().into_owned()
     }
 
+    /// A package of a plugin that does not ask for themes is reviewed and installed as it always was:
+    /// its review names no theme, and the installed manifest has none.
+    #[test]
+    fn a_plugin_without_themes_reviews_and_installs_as_before() {
+        let (mut s, root) = session("legacy");
+        let path = put(&root, "gears.zip", &gears("0.1.0"));
+        let dry = s.execute("plugin.install", &json!({"path": path, "dry_run": true})).unwrap();
+        assert_eq!(dry["capabilities"], json!(["commands@0.1"]), "{dry}");
+        assert!(dry.get("themes").is_none(), "{dry}");
+        let reply = s.execute("plugin.install", &json!({"path": path, "approval": dry["approval"], "archive": dry["archive"]})).unwrap();
+        assert_eq!(reply["id"], "gears");
+        let installed: Value = serde_json::from_slice(&std::fs::read(root.join("plugins/gears/plugin.json")).unwrap()).unwrap();
+        assert!(installed.get("themes").is_none());
+        assert_eq!(installed["capabilities"], json!(["commands@0.1"]));
+    }
+
     #[test]
     fn invalid_swatches_warn_in_check_and_install_review_but_install_succeeds() {
         let (mut s, root) = session("swatches");
@@ -3460,6 +3825,73 @@ mod install_zip {
         let only = std::fs::read_dir(root.join("plugins")).unwrap().count();
         assert_eq!(only, 1, "no staging folders are left behind");
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn sky(shader: &[u8], extra: &[(&str, &[u8])]) -> Vec<u8> {
+        let manifest = json!({"id": "sky", "name": "Sky", "version": "1.0.0", "capabilities": ["shaders@0.1"], "shaders": [
+            {"id": "dusk", "name": "Dusk", "kind": "background", "source": "dusk.wgsl", "textures": [{"name": "stars", "file": "stars.png"}]}
+        ]});
+        let text = serde_json::to_vec(&manifest).unwrap();
+        let mut files: Vec<(&str, &[u8])> = vec![("plugin.json", &text[..]), ("dusk.wgsl", shader)];
+        files.extend_from_slice(extra);
+        zip(&files)
+    }
+    const DUSK: &[u8] = b"fn background(px: ScPixel) -> vec4<f32> {
+    return mix(sc.bottom, textureSample(stars, sc_repeat, px.uv), 0.5);
+}
+";
+
+    #[test]
+    fn a_shader_plugin_installs_without_a_runtime() {
+        let (mut s, root) = session("shaders");
+        let path = put(&root, "sky.zip", &sky(DUSK, &[("stars.png", b"png")]));
+        let reply = s.execute("plugin.install", &json!({"path": path})).unwrap();
+        assert_eq!((reply["shaders"].clone(), reply["entries"].clone()), (json!(["sky/dusk"]), json!([])));
+        let list = s.execute("plugin.list", &json!({})).unwrap();
+        assert_eq!(list["plugins"][0]["manifest"]["shaders"][0]["source"], "dusk.wgsl");
+        assert!(root.join("plugins/sky/dusk.wgsl").is_file() && root.join("plugins/sky/stars.png").is_file());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_panel_shader_installs_and_is_reported_apart_from_backgrounds() {
+        let (mut s, root) = session("panels");
+        let manifest = json!({"id": "frost", "name": "Frost", "version": "1.0.0", "capabilities": ["shaders@0.2"], "shaders": [
+            {"id": "frost", "name": "Frost", "kind": "panel", "source": "frost.wgsl", "blur": 16}
+        ]});
+        let text = serde_json::to_vec(&manifest).unwrap();
+        let wgsl = b"fn panel(px: ScPanel) -> vec4<f32> {
+    return vec4<f32>(sc_blurred(px.position).rgb, 0.9);
+}
+";
+        let path = put(&root, "frost.zip", &zip(&[("plugin.json", &text[..]), ("frost.wgsl", &wgsl[..])]));
+        let reply = s.execute("plugin.install", &json!({"path": path})).unwrap();
+        assert_eq!(reply["panel_shaders"], json!(["frost/frost"]));
+        assert!(reply["shaders"].as_array().is_none_or(Vec::is_empty), "not a background: {reply}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_shader_that_cannot_draw_is_refused_at_install() {
+        let missing_texture = unpack(&sky(DUSK, &[])).unwrap_err();
+        assert_eq!(missing_texture, InstallError::MissingModule("stars.png".into()));
+        let broken = unpack(&sky(
+            b"fn background(px: ScPixel) -> vec4<f32> {
+    return 1.0;
+}
+",
+            &[("stars.png", b"png")],
+        ))
+        .unwrap_err();
+        assert!(broken.to_string().contains("dusk.wgsl: line ") && broken.to_string().contains("vec4<f32>"), "{broken}");
+        let bound = b"@group(0) @binding(7) var<storage, read_write> out: array<u32>;
+fn background(px: ScPixel) -> vec4<f32> { return sc.top; }
+";
+        assert!(unpack(&sky(bound, &[("stars.png", b"png")])).unwrap_err().to_string().contains("resource `out`"));
+        let text = serde_json::to_vec(&json!({"id": "sky", "name": "Sky", "version": "1", "capabilities": ["shaders@0.1"],
+            "shaders": [{"id": "dusk", "name": "Dusk", "kind": "background", "source": "dusk.wgsl"}]}))
+        .unwrap();
+        assert_eq!(unpack(&zip(&[("plugin.json", &text[..])])).unwrap_err(), InstallError::MissingModule("dusk.wgsl".into()));
     }
 
     #[test]
@@ -4054,4 +4486,73 @@ mod stored_grants {
         assert_eq!(restarted, desktop_grants);
         std::fs::remove_dir_all(plugins).unwrap();
     }
+}
+
+/// The shader examples in docs/plugin-examples parse and compile. The test lives here, not in
+/// craft-plugin, because a shared crate's tests may not read files outside the crate.
+#[test]
+fn the_documented_shader_examples_compile() {
+    for (folder, manifest_text, source) in [
+        ("dusk", include_str!("../../../../docs/plugin-examples/dusk/plugin.json"), include_str!("../../../../docs/plugin-examples/dusk/dusk.wgsl")),
+        (
+            "panorama",
+            include_str!("../../../../docs/plugin-examples/panorama/plugin.json"),
+            include_str!("../../../../docs/plugin-examples/panorama/panorama.wgsl"),
+        ),
+        (
+            "trails",
+            include_str!("../../../../docs/plugin-examples/trails/plugin.json"),
+            include_str!("../../../../docs/plugin-examples/trails/trails.wgsl"),
+        ),
+    ] {
+        let manifest = craft_plugin::parse_manifest(manifest_text.as_bytes(), folder).unwrap();
+        craft_plugin::shader::compile(&manifest.shaders[0], source).unwrap_or_else(|e| panic!("{folder}: {e}"));
+    }
+}
+
+/// The tint example in docs/plugin-examples/accent-sweep parses with its two settings and compiles.
+#[test]
+fn the_documented_tint_example_compiles() {
+    let manifest =
+        craft_plugin::parse_manifest(include_str!("../../../../docs/plugin-examples/accent-sweep/plugin.json").as_bytes(), "accent-sweep").unwrap();
+    assert_eq!(manifest.shaders[0].settings.len(), 2);
+    craft_plugin::shader::compile(&manifest.shaders[0], include_str!("../../../../docs/plugin-examples/accent-sweep/accent-sweep.wgsl")).unwrap();
+}
+
+/// Shader plugins written before pictures could be chosen parse, validate and serialize as they
+/// did: no `choose`, the shipped `file` kept, nothing new in the manifest's JSON.
+#[test]
+fn legacy_shader_manifests_without_a_chosen_texture_are_unchanged() {
+    for (folder, text) in [
+        ("dusk", include_str!("../../../../docs/plugin-examples/dusk/plugin.json")),
+        ("panorama", include_str!("../../../../docs/plugin-examples/panorama/plugin.json")),
+    ] {
+        let plugin = craft_plugin::parse_manifest(text.as_bytes(), folder).unwrap();
+        craft_plugin::shader::validate(&plugin.shaders).unwrap();
+        let original: serde_json::Value = serde_json::from_str(text).unwrap();
+        let again = serde_json::to_value(&plugin).unwrap();
+        for (got, want) in again["shaders"].as_array().unwrap().iter().zip(original["shaders"].as_array().unwrap()) {
+            assert_eq!(got.get("textures"), want.get("textures"), "{folder}");
+        }
+        for texture in plugin.shaders.iter().flat_map(|shader| &shader.textures) {
+            assert!(texture.choose.is_none() && texture.file.is_some(), "{folder}");
+        }
+    }
+}
+
+/// A plugin written before `state` existed (the dusk example): no `state` key, so it parses,
+/// validates, serialises without one, and compiles to a module that declares none of the state
+/// bindings.
+#[test]
+fn a_plugin_without_a_state_grid_is_unchanged() {
+    let manifest_text = include_str!("../../../../docs/plugin-examples/dusk/plugin.json");
+    let manifest = craft_plugin::parse_manifest(manifest_text.as_bytes(), "dusk").unwrap();
+    let shader = &manifest.shaders[0];
+    assert_eq!(shader.state, None);
+    assert!(shader.animated);
+    assert!(!serde_json::to_string(shader).unwrap().contains("state"));
+    craft_plugin::shader::validate(&manifest.shaders).unwrap();
+    let compiled = craft_plugin::shader::compile(shader, include_str!("../../../../docs/plugin-examples/dusk/dusk.wgsl")).unwrap();
+    assert!(!compiled.wgsl.contains("sc_state"), "{}", compiled.wgsl);
+    assert!(!compiled.wgsl.contains("@binding(7)") && !compiled.wgsl.contains("@binding(8)"), "{}", compiled.wgsl);
 }
