@@ -1549,21 +1549,11 @@ fn board_bodies(board: &KicadBoard, thickness: f64, plating: bool) -> Result<(Ve
     Ok((bodies, holes_lost, notes))
 }
 
-/// Does `p` lie on a drill's wall? A drill is a stadium, a round one with no straight part: its
-/// wall is half its narrow size from the line between its two end centres. A slot's ends are drawn
-/// as chords (see [`slot_loop`]), whose middles fall a little inside that.
+/// Does `p` lie on a drill's wall? A drill is a stadium, a round one with no straight part. A
+/// slot's ends are drawn as chords (see [`slot_loop`]), whose middles fall a little inside its wall;
+/// the kernel's test allows for that.
 fn on_drill_wall(drill: &KicadDrill, p: Vec2) -> bool {
-    let (wide, narrow) = (drill.size[0].max(drill.size[1]), drill.size[0].min(drill.size[1]));
-    let r = narrow * 0.5;
-    let half = (wide - narrow) * 0.5;
-    // The long axis: along the slot's angle when it is wider than tall.
-    let (s, c) = drill.angle.sin_cos();
-    let axis = if drill.size[0] >= drill.size[1] { Vec2::new(c, s) } else { Vec2::new(-s, c) };
-    let centre = Vec2::new(drill.center[0], drill.center[1]);
-    let along = ((p - centre).dot(axis)).clamp(-half, half);
-    let distance = p.dist(centre + axis * along);
-    let slack = (r * 0.006).max(1e-6);
-    distance <= r + slack && distance >= r - slack
+    solidcraft_kernel::services::board_drill::on_hole_wall(drill.center, drill.size, drill.angle, [p.x, p.y])
 }
 
 /// The board substrate as exact solids, exported as a STEP file: the engine adds it as an Import

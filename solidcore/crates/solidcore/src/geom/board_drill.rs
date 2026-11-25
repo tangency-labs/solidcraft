@@ -62,6 +62,36 @@ pub fn hole_reaches_loops(
     })
 }
 
+/// Whether `point` lies on the wall of a drilled hole, the stadium of [`hole_reaches_loops`]: its
+/// distance from the hole's centre segment is the hole's radius, within 0.6 % of that radius
+/// (at least 1e-6). The slack takes in a slot's ends drawn as chords. A non-finite or negative
+/// input is on no wall.
+#[must_use]
+pub fn on_hole_wall(center: [f64; 2], size: [f64; 2], angle: f64, point: [f64; 2]) -> bool {
+    let [width, height] = size;
+    let finite = center
+        .iter()
+        .chain(&size)
+        .chain(&point)
+        .all(|v| v.is_finite())
+        && angle.is_finite();
+    if !finite || width < 0.0 || height < 0.0 {
+        return false;
+    }
+    let radius = width.min(height) * 0.5;
+    let half = (width.max(height) - width.min(height)) * 0.5;
+    let along = if width >= height {
+        angle
+    } else {
+        angle + std::f64::consts::FRAC_PI_2
+    };
+    let c = Vec2::from_array(center);
+    let axis = Vec2::new(along.cos(), along.sin()) * half;
+    let distance = point_segment_distance(Vec2::from_array(point), c - axis, c + axis);
+    let slack = (radius * 0.006).max(1e-6);
+    (distance - radius).abs() <= slack
+}
+
 fn cross(a: Vec2, b: Vec2) -> f64 {
     a.x * b.y - a.y * b.x
 }
@@ -167,6 +197,33 @@ mod tests {
         ));
         let broken = vec![vec![[f64::NAN, 0.0], [20.0, 0.0]], vec![], vec![[0.0, 0.0]]];
         assert!(!hole_reaches_loops([0.0, 20.0], [1.0, 1.0], 0.0, &broken));
+    }
+
+    #[test]
+    fn a_point_is_on_a_hole_wall_at_the_holes_radius() {
+        // A round 1 mm hole: its wall is 0.5 from the centre, in any direction.
+        assert!(on_hole_wall([2.0, 3.0], [1.0, 1.0], 0.0, [2.5, 3.0]));
+        assert!(on_hole_wall([2.0, 3.0], [1.0, 1.0], 0.0, [2.0, 2.5]));
+        assert!(!on_hole_wall([2.0, 3.0], [1.0, 1.0], 0.0, [2.0, 3.0]));
+        assert!(!on_hole_wall([2.0, 3.0], [1.0, 1.0], 0.0, [2.6, 3.0]));
+        // A 4 × 1 slot along +Y: its straight sides are 0.5 from the Y axis, its ends 2 from the centre.
+        assert!(on_hole_wall([0.0, 0.0], [4.0, 1.0], FRAC_PI_2, [0.5, 1.0]));
+        assert!(on_hole_wall([0.0, 0.0], [4.0, 1.0], FRAC_PI_2, [0.0, -2.0]));
+        assert!(!on_hole_wall([0.0, 0.0], [4.0, 1.0], FRAC_PI_2, [2.0, 0.0]));
+        // A chord's middle, just inside the round end, is within the slack.
+        assert!(on_hole_wall(
+            [0.0, 0.0],
+            [4.0, 1.0],
+            FRAC_PI_2,
+            [0.0, 1.998]
+        ));
+        assert!(!on_hole_wall([f64::NAN, 0.0], [1.0, 1.0], 0.0, [0.5, 0.0]));
+        assert!(!on_hole_wall(
+            [0.0, 0.0],
+            [1.0, 1.0],
+            0.0,
+            [f64::INFINITY, 0.0]
+        ));
     }
 
     #[test]

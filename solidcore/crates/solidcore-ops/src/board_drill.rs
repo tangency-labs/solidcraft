@@ -20,3 +20,10 @@ pub fn hole_reaches_loops(
 ) -> bool {
     solidcore::geom::board_drill::hole_reaches_loops(center, size, angle, loops)
 }
+
+/// Whether `point` lies on the wall of the drilled hole of [`hole_reaches_loops`], within a slack
+/// of 0.6 % of its radius; a non-finite or negative input is on no wall.
+#[must_use]
+pub fn on_hole_wall(center: [f64; 2], size: [f64; 2], angle: f64, point: [f64; 2]) -> bool {
+    solidcore::geom::board_drill::on_hole_wall(center, size, angle, point)
+}
