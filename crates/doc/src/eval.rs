@@ -111,6 +111,10 @@ pub struct ModelBody {
     /// one of the bodies a feature works on unless the feature names it (not by `*`, nor by
     /// naming none).
     pub envelope: bool,
+    /// A surface body by what made it, whether or not its shells close: a Surface workspace
+    /// operation's result (a full turn of a closed profile is a closed sheet, not a solid). Stitch
+    /// makes a solid of it. False for bodies whose kind follows their shells ([`Body::is_surface`]).
+    pub sheet: bool,
     /// [`Body::retained_bytes`] of `body`, measured when a feature made or changed it (0: not
     /// measured), so the evaluation cache's budget does not walk every body after every feature.
     bytes: usize,
@@ -206,6 +210,7 @@ impl ModelBody {
             component: self.component,
             transferred: self.transferred,
             imported: self.imported.clone(),
+            sheet: self.sheet,
             ..ModelBody::new(self.name.clone(), body, self.feature)
         });
         if let Some(key) = key
@@ -248,6 +253,7 @@ impl ModelBody {
             split_from: None,
             imported: None,
             envelope: false,
+            sheet: false,
             bytes: 0,
             source_key: 0,
             outline: Arc::new(OnceLock::new()),
@@ -290,16 +296,23 @@ impl ModelBody {
         (frame.normal().dot(exact.normal()) >= 1.0 - 1e-9 && (frame.origin - exact.origin).dot(exact.normal()).abs() <= tol).then_some(frame)
     }
 
-    /// A surface body: some shell does not close ([`Body::is_surface`]), worked out once.
+    /// A surface body: one a Surface workspace operation made ([`ModelBody::sheet`]), closed or
+    /// not, or one some shell of which does not close ([`Body::is_surface`]), worked out once.
     pub fn is_surface(&self) -> bool {
-        !self.body.is_mesh() && self.is_open()
+        !self.body.is_mesh() && (self.is_closed_sheet() || self.is_open())
+    }
+
+    /// A surface body whose shells all close (a full turn of a closed profile): no solid until
+    /// Stitch makes it one.
+    pub fn is_closed_sheet(&self) -> bool {
+        self.sheet && !self.body.is_mesh() && !self.is_open()
     }
 
     /// The body encloses a volume: a solid whose shells all close ([`ModelBody::is_surface`]),
     /// or a mesh body every side of which two triangles share ([`Body::is_closed_mesh`]).
     /// Worked out once.
     pub fn is_closed(&self) -> bool {
-        !self.is_open()
+        !self.is_open() && !self.is_closed_sheet()
     }
 
     fn is_open(&self) -> bool {
@@ -6629,6 +6642,12 @@ pub(crate) fn boolean_scope(state: &ModelState, f: &Feature, targets: &[String])
 }
 
 /// Suggest one nearby body without changing the default component scope or running a boolean.
+/// A boolean or other solid-only step refused on a closed surface body (#21969): its shells
+/// close, but a surface operation made it, so it is no solid until Stitch makes it one.
+pub(crate) fn closed_sheet_refusal(name: &str) -> DocError {
+    DocError::Invalid(format!("{name} is a surface body: Stitch it into a solid first."))
+}
+
 fn empty_boolean_targets(doc: &Document, state: &ModelState, f: &Feature, tools: &[Traced], default_targets: bool) -> DocError {
     let plain = "there is no body to cut or intersect";
     if !default_targets {
@@ -6794,6 +6813,9 @@ fn apply_traced_with(
                         untouched.insert(i);
                         continue;
                     }
+                }
+                if b.is_closed_sheet() {
+                    return Err(closed_sheet_refusal(&b.name));
                 }
                 let verb = if op == Operation::Cut { "a cut" } else { "an intersect" };
                 return Err(DocError::Invalid(format!(
@@ -14875,6 +14897,22 @@ fn eval_feature_kind(
             }
             Ok(())
         }
+        FeatureKind::Dome { face, height, shape, reverse, body } => {
+            let h = val(vals, height, Kind::Length)?;
+            let i = body_at(st, body, &[face.0])?;
+            let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let index =
+                crate::appearance::face_index_at(&mb, face.0).ok_or_else(|| DocError::Invalid("the dome's face is not on the body".into()))?;
+            let shape = match shape {
+                crate::DomeShape::Elliptical => kernel::DomeShape::Elliptical,
+                crate::DomeShape::Spherical => kernel::DomeShape::Spherical,
+            };
+            let nb = Traced::step(kernel::dome(&mb.body, index, h, shape, *reverse)?, &[&mb.traced()]);
+            if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = mb.remade(nb);
+            }
+            Ok(())
+        }
         FeatureKind::Draft { faces, angle, neutral, pull, body } => {
             let a = val(vals, angle, Kind::Angle)?;
             let pl = doc.resolve_plane_in(vals, neutral, 0, f.component, Some(st))?;
@@ -15503,6 +15541,9 @@ fn eval_feature_kind(
                     let surface =
                         std::iter::once(target).chain(tools.iter()).find(|n| st.body(n).or_else(|| placed.body(n)).is_some_and(|b| b.is_surface()));
                     if let Some(name) = surface {
+                        if st.body(name).or_else(|| placed.body(name)).is_some_and(ModelBody::is_closed_sheet) {
+                            return Err(closed_sheet_refusal(name));
+                        }
                         return Err(DocError::Invalid(format!(
                             "{name} is a surface body, and a join needs solids: Thicken it first, or Stitch closed surfaces with Surface › Stitch"
                         )));
@@ -15510,6 +15551,9 @@ fn eval_feature_kind(
                 }
                 Operation::Cut => {
                     if let Some(name) = tools.iter().find(|n| st.body(n).or_else(|| placed.body(n)).is_some_and(|b| !b.is_closed())) {
+                        if st.body(name).or_else(|| placed.body(name)).is_some_and(ModelBody::is_closed_sheet) {
+                            return Err(closed_sheet_refusal(name));
+                        }
                         return Err(DocError::Invalid(format!(
                             "\"{name}\" isn't a closed solid (it has open edges), so it can't cut. Close it with Stitch, or use a closed body as the tool"
                         )));
@@ -15517,6 +15561,9 @@ fn eval_feature_kind(
                 }
                 Operation::Intersect => {
                     if let Some(name) = tools.iter().find(|n| st.body(n).or_else(|| placed.body(n)).is_some_and(|b| !b.is_closed())) {
+                        if st.body(name).or_else(|| placed.body(name)).is_some_and(ModelBody::is_closed_sheet) {
+                            return Err(closed_sheet_refusal(name));
+                        }
                         return Err(DocError::Invalid(format!(
                             "\"{name}\" isn't a closed solid (it has open edges), so it can't intersect. Close it with Stitch, or use a closed body as the tool"
                         )));
