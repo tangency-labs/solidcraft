@@ -28,11 +28,11 @@ use crate::eval::sphere;
 use crate::eval::Curve as RecordCurve;
 use crate::eval::Surface as Record;
 use crate::geom::extent2d::Extent2d;
-use crate::geom::vector3d::Point3;
+use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::surface::ball_patch::BallPatch;
-use crate::surface::from_parameters::from_parameters;
+use crate::surface::from_parameters::{from_parameters, plane_axes_square};
 use crate::surface::implicit::{AnalyticSupport, SupportKind};
 use crate::surface::surface::{Surface, SurfaceKind};
 
@@ -150,7 +150,7 @@ pub fn face_surface(
             });
             match loop_on.then(|| BallPatch::create_certified(&net, centre, *radius)) {
                 Some(Ok(b)) => Surface::from(b),
-                Some(Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. }))) => {
+                Some(Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. }))) => {
                     return Err(e)
                 }
                 // owner 22254: a label its form or its loop does not prove is dropped; the
@@ -239,12 +239,20 @@ fn extruded(s: &BSplineSurface) -> bool {
 /// that is; otherwise the NURBS itself.
 fn recognised(k: &Kernel, net: BSplineSurface, kinds: &[SupportKind]) -> Result<Surface> {
     for &kind in kinds {
-        let Ok(support) = AnalyticSupport::derive(k, kind, &net) else {
-            continue;
+        // a derivation stopped by its caller (cancelled, or out of fuel) is no non-match: it
+        // goes up, so the NURBS is never returned in place of an answer nobody waited for
+        let support = match AnalyticSupport::derive(k, kind, &net) {
+            Ok(support) => support,
+            Err(e) if e.is_cancelled() => return Err(e),
+            Err(_) => continue,
         };
         match support.build(k, net.copy()) {
             Ok(s) => return Ok(s),
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(_) => {}
         }
     }
@@ -268,7 +276,11 @@ fn labelled(k: &Kernel, label: &Record, net: BSplineSurface) -> Result<Surface> 
     };
     match support.build(k, net.copy()) {
         Ok(s) => Ok(s),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         Err(_) => Ok(Surface::from(net)),
     }
 }
@@ -278,7 +290,7 @@ fn labelled(k: &Kernel, label: &Record, net: BSplineSurface) -> Result<Surface> 
 /// degrees. A torus's tube start moves only its parametrisation, which is its form's here.
 fn label_support(label: &Record) -> Option<AnalyticSupport> {
     let placement = |f: &crate::eval::Frame| {
-        let v = |a: [f64; 3]| crate::geom::vector3d::Vec3::new(a[0], a[1], a[2]);
+        let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
         crate::geom::axis2_placement::Axis2Placement::from_stored(
             Point3::new(f.origin[0], f.origin[1], f.origin[2]),
             v(f.x_axis),
@@ -337,10 +349,34 @@ pub struct RecordFace {
     pub agrees: bool,
 }
 
+/// A plane placement's y axis as the record writes it: `y` itself when it is square to `x` to
+/// the rounding the reader takes ([`plane_axes_square`]), else `y` with its part along `x`
+/// taken out and made unit again. A placement keeps axes up to 10⁻¹² off square
+/// (`SetCanonical`), and a plane fitted through far corners can be off by 10⁻¹⁴, which the
+/// reader refuses (solidcore#3377); the move is that angle times the face's size. `None` when
+/// two passes do not square it (axes parallel, or NaN); the reader refuses an axis that is
+/// not finite on its own.
+fn square_plane_axis(x: Vec3, y: Vec3) -> Option<Vec3> {
+    let mut y = y;
+    for _ in 0..2 {
+        if plane_axes_square(x, y) {
+            return Some(y);
+        }
+        let off = y - x * (x.dot(y) / x.length_squared());
+        let len = off.length();
+        if !(len.is_finite() && len > 0.0) {
+            return None;
+        }
+        y = off / len;
+    }
+    plane_axes_square(x, y).then_some(y)
+}
+
 /// The record of the kernel's face surface `s` over `uv_domain` (the face's box in the
 /// kernel's parameters), the inverse of [`face_surface`]:
 ///
-/// - **Plane:** its placement's origin and unit axes, copied (no cross product), its box
+/// - **Plane:** its placement's origin and unit axes, copied (no cross product), its y axis
+///   made square to its x to the record's rounding ([`square_plane_axis`]), its box
 ///   and pcurves its kernel parameters times its scales: the kernel's plane is
 ///   `origin + su u x + sv v y` in its NURBS parameters, so the record's parameters are an
 ///   exact image of the kernel's, and their normals agree when `su sv > 0`.
@@ -375,6 +411,7 @@ pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<Reco
     if let SurfaceKind::Plane(p) = s.kind_with_nurb(k)? {
         A::check(k, s)?;
         let (o, x, y) = p.position().canonical();
+        let y = square_plane_axis(x, y).ok_or_else(|| bad("a plane's axes are not square"))?;
         let sc = p.uv_scale();
         if !(sc.x.is_finite() && sc.y.is_finite() && sc.x != 0.0 && sc.y != 0.0) {
             return Err(bad("a plane's scale is zero or not finite"));
@@ -408,9 +445,11 @@ pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<Reco
             let form = as_b_spline(k, s)?.ok_or_else(|| bad("the surface has no NURBS form"))?;
             let proved = match own.build(k, form.into_owned()) {
                 Ok(_) => Some(own),
-                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                    return Err(e)
-                }
+                Err(
+                    e @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }),
+                ) => return Err(e),
                 Err(_) => None,
             };
             proved.map(support_record).transpose()?
@@ -422,9 +461,11 @@ pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<Reco
                     center: [c.x, c.y, c.z],
                     radius: bp.radius(),
                 }),
-                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                    return Err(e)
-                }
+                Err(
+                    e @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }),
+                ) => return Err(e),
                 Err(_) => None,
             }
         }
@@ -541,12 +582,20 @@ pub fn analytic_label(k: &Kernel, nurbs: &Record, domain: [[f64; 2]; 2]) -> Resu
     ] {
         let support = match AnalyticSupport::derive(k, kind, &net) {
             Ok(support) => support,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(_) => continue,
         };
         match support.build(k, net.copy()) {
             Ok(_) => return support_record(support).map(Some),
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(_) => {}
         }
     }

@@ -1878,13 +1878,13 @@ impl FilletCorner {
 /// A miss of the corner's surface step at `op` ([`BlendFailure::CornerPatchNotMade`]), with
 /// the miss's status.
 #[track_caller]
-fn patch_miss(op: &'static str, miss: CornerPatchMiss) -> SolidError {
+pub(super) fn patch_miss(op: &'static str, miss: CornerPatchMiss) -> SolidError {
     SolidError::blend(op, BlendFailure::CornerPatchNotMade(miss))
 }
 
 /// An edge use `eu` of a corner edge or rail without its fillet geometry
 /// ([`CornerInput::EdgeUseWithoutFilletGeometry`]), status `status` (the site's).
-fn no_fillet_geom(op: &'static str, eu: EdgeuseId, status: i32) -> SolidError {
+pub(super) fn no_fillet_geom(op: &'static str, eu: EdgeuseId, status: i32) -> SolidError {
     corner_input(
         op,
         CornerInput::EdgeUseWithoutFilletGeometry,
@@ -1895,7 +1895,7 @@ fn no_fillet_geom(op: &'static str, eu: EdgeuseId, status: i32) -> SolidError {
 
 /// A cross-section's edge use `eu` spanning no fillet geometry
 /// ([`FilletSetUp::CrossSectionGeom`]), status `status` (the site's).
-fn no_cross_section_geom(op: &'static str, eu: EdgeuseId, status: i32) -> SolidError {
+pub(super) fn no_cross_section_geom(op: &'static str, eu: EdgeuseId, status: i32) -> SolidError {
     set_up(
         op,
         FilletSetUp::CrossSectionGeom,
@@ -1905,7 +1905,7 @@ fn no_cross_section_geom(op: &'static str, eu: EdgeuseId, status: i32) -> SolidE
 }
 
 /// A rail `rail` without its curve ([`FilletSetUp::RailCurve`], `SM_ERR_NULL_POINTER`).
-fn no_rail_curve(op: &'static str, rail: EdgeId) -> SolidError {
+pub(super) fn no_rail_curve(op: &'static str, rail: EdgeId) -> SolidError {
     set_up(
         op,
         FilletSetUp::RailCurve,
@@ -1916,7 +1916,7 @@ fn no_rail_curve(op: &'static str, rail: EdgeId) -> SolidError {
 
 /// A corner edge `e` of the pseudo-B-rep without its curve
 /// ([`CornerInput::EdgeWithoutCurve`]), status `status` (the site's).
-fn no_curve(op: &'static str, e: EdgeId, status: i32) -> SolidError {
+pub(super) fn no_curve(op: &'static str, e: EdgeId, status: i32) -> SolidError {
     corner_input(
         op,
         CornerInput::EdgeWithoutCurve,
@@ -1927,7 +1927,7 @@ fn no_curve(op: &'static str, e: EdgeId, status: i32) -> SolidError {
 
 /// A face `face` a rail or the corner lies on without its surface
 /// ([`BlendFailure::FaceHasNoSurface`] at the face, `SM_ERR_NULL_POINTER`: upstream `NER`).
-fn no_surface(op: &'static str, face: FaceId) -> SolidError {
+pub(super) fn no_surface(op: &'static str, face: FaceId) -> SolidError {
     Failure::new(op, BlendFailure::FaceHasNoSurface)
         .with_status(SM_ERR_NULL_POINTER)
         .at(EntityRef::Face(face))
@@ -1948,7 +1948,11 @@ fn no_rail_end_use(op: &'static str, v: VertexId) -> SolidError {
 /// The fillet geometry `fillet_geom` of the edge `e` without its fillet surface
 /// ([`BlendFailure::Solver`]: [`SolverFailure::FilletGeomWithoutSurface`] at the edge,
 /// `SM_ERR_NULL_POINTER`: upstream `NER`).
-fn no_fillet_surface(op: &'static str, fillet_geom: FilletGeomId, e: EdgeId) -> SolidError {
+pub(super) fn no_fillet_surface(
+    op: &'static str,
+    fillet_geom: FilletGeomId,
+    e: EdgeId,
+) -> SolidError {
     Failure::new(
         op,
         BlendFailure::Solver(SolverFailure::FilletGeomWithoutSurface { fillet_geom }),
@@ -1969,6 +1973,7 @@ fn soft<T>(r: Result<T>) -> Result<Option<T>> {
                 e,
                 SolidError::Unported { .. }
                     | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
                     | SolidError::InvalidInput { .. }
                     | SolidError::PortInvariant { .. }
             ) || e.is_not_certified() =>

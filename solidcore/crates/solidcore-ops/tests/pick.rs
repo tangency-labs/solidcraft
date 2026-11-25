@@ -93,3 +93,44 @@ fn a_pick_grows_across_a_split_line_but_not_a_kept_one() {
     );
     assert!(b.faces_on_one_surface(&o, &[99], &[]).is_err());
 }
+
+/// Each face centre of a box picks its own face, six in all; a point on an edge is as near two
+/// faces and ambiguous; a point farther than the tolerance from every face picks none.
+#[test]
+fn a_box_face_picks_by_point() {
+    all_fixes();
+    let b = make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap();
+    let centres = [
+        [0.0, 1.0, 1.5],
+        [1.0, 1.0, 1.5],
+        [0.5, 0.0, 1.5],
+        [0.5, 2.0, 1.5],
+        [0.5, 1.0, 0.0],
+        [0.5, 1.0, 3.0],
+    ];
+    let picked = solidcore_ops::pick::faces(&b, &centres, 1e-6)
+        .unwrap()
+        .unwrap();
+    let mut distinct = picked.clone();
+    distinct.sort_unstable();
+    distinct.dedup();
+    assert_eq!((picked.len(), distinct.len()), (6, 6), "{picked:?}");
+    assert!(distinct.iter().all(|&f| f < 6));
+    assert_eq!(
+        solidcore_ops::pick::faces(&b, &[[0.0, 0.0, 1.5]], 1e-6).unwrap(),
+        Err(solidcore_ops::pick::Miss::Ambiguous(0))
+    );
+    assert_eq!(
+        solidcore_ops::pick::faces(&b, &[[0.5, 1.0, 3.0], [9.0, 9.0, 9.0]], 1e-6).unwrap(),
+        Err(solidcore_ops::pick::Miss::None(1))
+    );
+    assert!(solidcore_ops::pick::faces(&b, &[[f64::NAN, 0.0, 0.0]], 1e-6).is_err());
+}
+
+/// A box's faces each have one loop of four distinct corners: no outline touches itself.
+#[test]
+fn a_box_outline_touches_nowhere() {
+    all_fixes();
+    let b = make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap();
+    assert_eq!(b.outline_touch().unwrap(), None);
+}

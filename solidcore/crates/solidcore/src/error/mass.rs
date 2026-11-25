@@ -8,15 +8,15 @@
 //!
 //! | Rust                            | Status difftest compares |
 //! |---------------------------------|--------------------------|
-//! | [`MassFailure::Failed`]         | `SM_ERR`                 |
-//! | [`MassFailure::Missing`]        | `SM_ERR_NULL_POINTER`    |
-//! | [`MassFailure::StepControl`]    | `SM_ERR`                 |
-//! | [`MassFailure::Integrand`]      | `SM_ERR`                 |
-//! | [`MassFailure::SkippedSpan`]    | `SM_ERR`                 |
 //! | [`MassFailure::Defect`]         | `SM_ERR` (or the site's, through `with_status`) |
+//! | [`MassFailure::EdgeCurveSingular`], [`MassFailure::TrimNotFinite`] | `SM_ERR`  |
 //! | [`MassFailure::EdgeWithoutCurve`], [`MassFailure::FaceWithoutSurface`], [`MassFailure::FaceuseWithoutRegion`] | `SM_ERR_NULL_POINTER` (or the site's, through `with_status`) |
 //! | [`MassFailure::FaceWithoutFaceuse`], [`MassFailure::FaceuseWithoutMate`], [`MassFailure::EdgeuseWithoutEdge`], [`MassFailure::EdgeuseWithoutVertexuse`], [`MassFailure::VertexuseWithoutVertex`] | `SM_ERR_NULL_POINTER` |
-//! | [`MassFailure::EdgeCurveSingular`], [`MassFailure::TrimNotFinite`] | `SM_ERR`  |
+//! | [`MassFailure::Failed`]         | `SM_ERR`                 |
+//! | [`MassFailure::Integrand`]      | `SM_ERR`                 |
+//! | [`MassFailure::Missing`]        | `SM_ERR_NULL_POINTER`    |
+//! | [`MassFailure::SkippedSpan`]    | `SM_ERR`                 |
+//! | [`MassFailure::StepControl`]    | `SM_ERR`                 |
 //!
 //! [`MassFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). The named causes from
@@ -36,20 +36,6 @@ use super::{ErrorKind, Failure, Reason, SM_ERR, SM_ERR_NULL_POINTER};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum MassFailure {
-    /// The routine could not continue, as the phrase says (for example "the strip has
-    /// no such side").
-    Failed(&'static str),
-    /// Something the routine needs is missing, as the phrase says (for example "the
-    /// edge's curve").
-    Missing(&'static str),
-    /// The integrator's step control cannot meet the accuracy: the step shrank below
-    /// its minimum, or the steps ran out, or the error owed exceeds the accuracy.
-    StepControl,
-    /// The integrand evaluated to no number (a surface evaluated to a non-finite
-    /// point).
-    Integrand,
-    /// The integrator took no step over a span of a face.
-    SkippedSpan,
     /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
     /// `why` names the step that failed and why that is the kernel's fault, not the
     /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
@@ -58,36 +44,50 @@ pub enum MassFailure {
         /// The step that failed, and why that is the kernel's fault.
         why: &'static str,
     },
-    /// The edge the caller gave has no curve. [`ErrorKind::InvalidInput`]; status
-    /// `SM_ERR_NULL_POINTER` unless its site says otherwise.
-    EdgeWithoutCurve,
-    /// The face the caller gave has no surface. [`ErrorKind::InvalidInput`]; status
-    /// `SM_ERR_NULL_POINTER`.
-    FaceWithoutSurface,
     /// The edge's curve has a zero or non-finite derivative where the face's closure looks
     /// for the point nearest a trim point, from both seeds (or the trim point itself is not
     /// finite), so the strip onto the edge has no parameter there.
     /// [`ErrorKind::Degenerate`]; status `SM_ERR`.
     EdgeCurveSingular,
-    /// A trim of the face evaluates to a point or tangent that is not finite.
-    /// [`ErrorKind::InvalidInput`]; status `SM_ERR`.
-    TrimNotFinite,
-    /// A face use of the caller's body is in no shell or its shell in no region.
-    /// [`ErrorKind::InvalidInput`]; status `SM_ERR_NULL_POINTER`.
-    FaceuseWithoutRegion,
-    /// A face of the caller's body has no (upward) face use. The B-rep's links are public,
-    /// and the mass routines do not validate the body first.
-    /// [`ErrorKind::InvalidInput`]; status `SM_ERR_NULL_POINTER`.
-    FaceWithoutFaceuse,
-    /// A face use of the caller's body has no mate. [`ErrorKind::InvalidInput`]; status
-    /// `SM_ERR_NULL_POINTER`.
-    FaceuseWithoutMate,
+    /// The edge the caller gave has no curve. [`ErrorKind::InvalidInput`]; status
+    /// `SM_ERR_NULL_POINTER` unless its site says otherwise.
+    EdgeWithoutCurve,
     /// An edge use of a loop of the caller's body has no edge.
     /// [`ErrorKind::InvalidInput`]; status `SM_ERR_NULL_POINTER`.
     EdgeuseWithoutEdge,
     /// An edge use of a loop of the caller's body has no vertex use.
     /// [`ErrorKind::InvalidInput`]; status `SM_ERR_NULL_POINTER`.
     EdgeuseWithoutVertexuse,
+    /// A face of the caller's body has no (upward) face use. The B-rep's links are public,
+    /// and the mass routines do not validate the body first.
+    /// [`ErrorKind::InvalidInput`]; status `SM_ERR_NULL_POINTER`.
+    FaceWithoutFaceuse,
+    /// The face the caller gave has no surface. [`ErrorKind::InvalidInput`]; status
+    /// `SM_ERR_NULL_POINTER`.
+    FaceWithoutSurface,
+    /// A face use of the caller's body has no mate. [`ErrorKind::InvalidInput`]; status
+    /// `SM_ERR_NULL_POINTER`.
+    FaceuseWithoutMate,
+    /// A face use of the caller's body is in no shell or its shell in no region.
+    /// [`ErrorKind::InvalidInput`]; status `SM_ERR_NULL_POINTER`.
+    FaceuseWithoutRegion,
+    /// The routine could not continue, as the phrase says (for example "the strip has
+    /// no such side").
+    Failed(&'static str),
+    /// The integrand evaluated to no number (a surface evaluated to a non-finite
+    /// point).
+    Integrand,
+    /// Something the routine needs is missing, as the phrase says (for example "the
+    /// edge's curve").
+    Missing(&'static str),
+    /// The integrator took no step over a span of a face.
+    SkippedSpan,
+    /// The integrator's step control cannot meet the accuracy: the step shrank below
+    /// its minimum, or the steps ran out, or the error owed exceeds the accuracy.
+    StepControl,
+    /// A trim of the face evaluates to a point or tangent that is not finite.
+    /// [`ErrorKind::InvalidInput`]; status `SM_ERR`.
+    TrimNotFinite,
     /// A vertex use of the caller's body has no vertex. [`ErrorKind::InvalidInput`];
     /// status `SM_ERR_NULL_POINTER`.
     VertexuseWithoutVertex,
@@ -97,22 +97,22 @@ impl MassFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Missing(_)
-            | Self::EdgeWithoutCurve
-            | Self::FaceWithoutSurface
-            | Self::FaceuseWithoutRegion
-            | Self::FaceWithoutFaceuse
-            | Self::FaceuseWithoutMate
-            | Self::EdgeuseWithoutEdge
-            | Self::EdgeuseWithoutVertexuse
-            | Self::VertexuseWithoutVertex => SM_ERR_NULL_POINTER,
-            Self::Failed(_)
-            | Self::StepControl
+            Self::Defect { .. }
+            | Self::EdgeCurveSingular
+            | Self::Failed(_)
             | Self::Integrand
             | Self::SkippedSpan
-            | Self::Defect { .. }
-            | Self::EdgeCurveSingular
+            | Self::StepControl
             | Self::TrimNotFinite => SM_ERR,
+            Self::EdgeWithoutCurve
+            | Self::EdgeuseWithoutEdge
+            | Self::EdgeuseWithoutVertexuse
+            | Self::FaceWithoutFaceuse
+            | Self::FaceWithoutSurface
+            | Self::FaceuseWithoutMate
+            | Self::FaceuseWithoutRegion
+            | Self::Missing(_)
+            | Self::VertexuseWithoutVertex => SM_ERR_NULL_POINTER,
         }
     }
 
@@ -126,16 +126,16 @@ impl MassFailure {
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::EdgeCurveSingular => ErrorKind::Degenerate,
             Self::EdgeWithoutCurve
-            | Self::FaceWithoutSurface
-            | Self::TrimNotFinite
-            | Self::FaceuseWithoutRegion
-            | Self::FaceWithoutFaceuse
-            | Self::FaceuseWithoutMate
             | Self::EdgeuseWithoutEdge
             | Self::EdgeuseWithoutVertexuse
+            | Self::FaceWithoutFaceuse
+            | Self::FaceWithoutSurface
+            | Self::FaceuseWithoutMate
+            | Self::FaceuseWithoutRegion
+            | Self::TrimNotFinite
             | Self::VertexuseWithoutVertex => ErrorKind::InvalidInput,
-            Self::EdgeCurveSingular => ErrorKind::Degenerate,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -144,26 +144,26 @@ impl MassFailure {
 impl core::fmt::Display for MassFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::Failed(what) => f.write_str(what),
-            Self::Missing(what) => write!(f, "{what} is missing"),
             Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
-            Self::StepControl => {
-                f.write_str("the integrator's step control cannot meet the accuracy")
-            }
-            Self::Integrand => f.write_str("the integrand is not a finite number"),
-            Self::SkippedSpan => f.write_str("the integrator took no step over a span of a face"),
-            Self::EdgeWithoutCurve => f.write_str("the edge has no curve"),
-            Self::FaceWithoutSurface => f.write_str("the face has no surface"),
             Self::EdgeCurveSingular => f.write_str(
                 "the edge curve's derivative is zero or not finite where the face's closure \
                  meets it",
             ),
-            Self::TrimNotFinite => f.write_str("the trim's point or tangent is not finite"),
-            Self::FaceuseWithoutRegion => f.write_str("the face use has no region"),
-            Self::FaceWithoutFaceuse => f.write_str("the face has no face use"),
-            Self::FaceuseWithoutMate => f.write_str("the face use has no mate"),
+            Self::EdgeWithoutCurve => f.write_str("the edge has no curve"),
             Self::EdgeuseWithoutEdge => f.write_str("the edge use has no edge"),
             Self::EdgeuseWithoutVertexuse => f.write_str("the edge use has no vertex use"),
+            Self::FaceWithoutFaceuse => f.write_str("the face has no face use"),
+            Self::FaceWithoutSurface => f.write_str("the face has no surface"),
+            Self::FaceuseWithoutMate => f.write_str("the face use has no mate"),
+            Self::FaceuseWithoutRegion => f.write_str("the face use has no region"),
+            Self::Failed(what) => f.write_str(what),
+            Self::Integrand => f.write_str("the integrand is not a finite number"),
+            Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::SkippedSpan => f.write_str("the integrator took no step over a span of a face"),
+            Self::StepControl => {
+                f.write_str("the integrator's step control cannot meet the accuracy")
+            }
+            Self::TrimNotFinite => f.write_str("the trim's point or tangent is not finite"),
             Self::VertexuseWithoutVertex => f.write_str("the vertex use has no vertex"),
         }
     }
