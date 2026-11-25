@@ -100,7 +100,7 @@ Only codecs for open formats are compiled in: the workspace turns off cadmpeg's 
 
 ### Selective FreeCAD sketch and operation import
 
-FreeCAD sketches have a separate editable import path. **File > Import FreeCAD…** reads the
+FreeCAD sketches have a separate editable import path. The **Import FreeCAD Sketches** command (command palette) reads the
 project's Part, Body and Sketch hierarchy and lets the user select individual sketches. Supported sketch
 geometry, dimensions and constraints are converted on a best-effort basis, with skipped items reported as
 warnings. Origin and datum plane placements are preserved, including Part/Body transforms and saved sketch

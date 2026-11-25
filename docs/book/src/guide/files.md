@@ -15,7 +15,7 @@ design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSO
 | `.json` (self-contained plain JSON design) | yes | yes |
 | STEP (AP203, AP214, AP242) | solids, assemblies, units, names, colours | AP242 with names, colours and the component tree |
 | IGES 5.3 | manifold solids, or trimmed surfaces sewn into solids | manifold solids with names and colours |
-| FreeCAD `.FCStd` | sketches and features (Pad, Pocket, Revolution, Groove, Fillet, Chamfer, primitives, Mirrored, patterns), else solids, through cadmpeg; File > Import FreeCAD selects sketches and operations | |
+| FreeCAD `.FCStd` | sketches and features (Pad, Pocket, Revolution, Groove, Fillet, Chamfer, primitives, Mirrored, patterns), else solids, through cadmpeg; the **Import FreeCAD Sketches** command (command palette) selects sketches and operations | |
 | Rhino `.3dm` | solids, through cadmpeg | Rhino 8, through cadmpeg: bodies with flat faces and straight edges exact, others as meshes; names and colours (desktop only) |
 | 3MF, STL, OBJ | mesh bodies | yes |
 | glTF 2.0 (`.glb`, `.gltf` with its `.bin` files) | mesh bodies in the node tree's components, materials as appearances | `.glb`: placed bodies with their colours, metallic and roughness, in metres with Y up |
@@ -105,7 +105,7 @@ removing the oldest first, in SolidCraft's data folder across updates. Preferenc
 **Reuse imports I've opened before** is on by default; turn it off to import every time,
 or use **Clear** beside it to remove cached imports without forgetting stand-up answers.
 
-To bring editable FreeCAD sketches into an existing design, choose **File > Import FreeCAD…**.
+To bring editable FreeCAD sketches into an existing design, run **Import FreeCAD Sketches** from the command palette.
 SolidCraft lists the Parts, Bodies and Sketches found in the project so you can select the sketches to add.
 Supported geometry, dimensions and constraints are retained on a best-effort basis. Each imported sketch
 keeps its saved origin or datum plane where possible, including parent placements, offsets and orientation.

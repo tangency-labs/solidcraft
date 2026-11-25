@@ -57,7 +57,6 @@ const FIXED: &[FileAction] = &[
     FileAction::New,
     FileAction::NewDrawing,
     FileAction::Open,
-    FileAction::ImportFreeCadSketches,
     FileAction::ClearRecent,
     FileAction::Save,
     FileAction::SaveAs,
@@ -114,7 +113,6 @@ fn id_of(action: &FileAction) -> (String, Option<Value>) {
         FileAction::Export(format) => ("ui.file.export".into(), Some(json!({ "format": format }))),
         FileAction::ExportMesh(format) => ("ui.file.export_mesh".into(), Some(json!({ "format": format }))),
         FileAction::Command(command) => fixed(command),
-        FileAction::ImportFreeCadSketches => fixed("ui.file.import_freecad_sketches"),
         FileAction::Undo => fixed("edit.undo"),
         FileAction::Redo => fixed("edit.redo"),
         FileAction::AgentChat => ("ui.agent_chat".into(), Some(json!({ "toggle": true }))),
@@ -173,7 +171,6 @@ fn menu_bar(app: &SolveApp, recent: &[String]) -> MenuBar {
     file.push(item(app.tr("ui.new_drawing"), &FileAction::NewDrawing));
     file.extend([item(&more("ui.open"), &FileAction::Open), submenu(RECENT, app.tr("ui.open_recent"), recent_items(app, recent)), Item::sep()]);
     file.extend(INSERTS.iter().map(|(label, action)| item(app.tr_label(label), action)));
-    file.push(item(&format!("{}\u{2026}", app.tr("cmd.file_import_freecad_sketches")), &FileAction::ImportFreeCadSketches));
     file.extend([
         Item::sep(),
         item(app.tr("ui.save"), &FileAction::Save),
@@ -353,8 +350,8 @@ mod tests {
         leaves(&bar.menus, &mut entries);
         entries.retain(|i| i.id != "-");
         // App menu 2 + Quit; File: New, New Drawing, Open, 1 recent, Clear, 3 inserts, Save, Save As,
-        // FreeCAD sketches, Revert, JSON, Verify Signature, 8 exports, Properties; Edit 2; Window 1; Help 7.
-        assert_eq!(entries.len(), 3 + 5 + 4 + 4 + 1 + 8 + 1 + 2 + 1 + 7, "{:?}", entries.iter().map(|i| &i.id).collect::<Vec<_>>());
+        // Revert, JSON, Verify Signature, 8 exports, Properties; Edit 2; Window 1; Help 7.
+        assert_eq!(entries.len(), 3 + 5 + 3 + 4 + 1 + 8 + 1 + 2 + 1 + 7, "{:?}", entries.iter().map(|i| &i.id).collect::<Vec<_>>());
         for item in &entries {
             assert!(entry_of(&item.id, item.params.as_ref()).is_some(), "`{}` {:?} runs nothing", item.id, item.params);
         }

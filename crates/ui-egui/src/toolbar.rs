@@ -582,8 +582,6 @@ pub enum FileAction {
     ExportMesh(&'static str),
     /// Start an existing interactive command.
     Command(&'static str),
-    /// Pick a FreeCAD project, inspect it, then choose editable sketches to import.
-    ImportFreeCadSketches,
     /// Open an entry from the recent-design list.
     OpenRecent(String),
     /// Clear recent designs and their last-opened dates.
@@ -612,7 +610,6 @@ impl FileAction {
                 | Self::ExportMesh(_)
                 | Self::Command(_)
                 | Self::VerifySignature
-                | Self::ImportFreeCadSketches
         ) || matches!(self, Self::Export(extension) if *extension != "json");
         // An open bug report describes the designs as they are, and a window opened behind it
         // covers it (#7188). Quit too, as behind any modal window: it would switch to a design
@@ -662,7 +659,6 @@ impl FileAction {
             Self::Export(extension) => export(app, extension),
             Self::ExportMesh(format) => crate::dialogs_save_mesh::start_with_format(app, format),
             Self::Command(command) => app.start(command),
-            Self::ImportFreeCadSketches => crate::freecad_import::start(app),
             Self::OpenRecent(path) => crate::home::open_recent(app, path),
             Self::ClearRecent => {
                 app.home.recent.clear();
@@ -745,7 +741,6 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("file.insert_step", &format!("{}…", app.tr_label("Insert STEP")), "", "import", shown));
     rows.push(row("file.insert_mesh", &format!("{}…", app.tr_label("Insert Mesh")), "", "import", shown));
     rows.push(row("pointcloud.insert", &format!("{}…", app.tr_label("Insert Point Cloud")), "", "import", shown));
-    rows.push(row("import_freecad_sketches", &format!("{}…", app.tr("cmd.file_import_freecad_sketches")), "", "import", shown));
     rows.push(row("component.insert_design", &format!("{}…", app.tr_label("Insert Design")), "", "component", shown));
     rows.push(row("save", app.tr("ui.save"), "Ctrl+S", "save", shown));
     // Save As shows the shortcut of the command it runs, from the app's own registry.
@@ -842,7 +837,6 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "clear_recent" => FileAction::ClearRecent.run(app),
         "file.insert_step" => FileAction::Command("file.insert_step").run(app),
         "file.insert_mesh" => FileAction::Command("file.insert_mesh").run(app),
-        "import_freecad_sketches" => FileAction::ImportFreeCadSketches.run(app),
         "component.insert_design" => FileAction::Command("component.insert_design").run(app),
         "file.export_stl" => FileAction::Command("file.export_stl").run(app),
         "file.export_3mf" => FileAction::Command("file.export_3mf").run(app),

@@ -2928,6 +2928,12 @@ impl SolveApp {
             }
             return;
         }
+        if id == "file.import_freecad_sketches" {
+            // From the command palette: ask for the FreeCAD project and open the sketch chooser,
+            // rather than running the command with no path.
+            freecad_import::start(self);
+            return;
+        }
         if id == "doc.open" {
             // Open asks for the file (and a board for its import options) rather than running
             // the command with no path.
