@@ -150,7 +150,7 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, direction_only, through_axis, .. } }) {
             angle: String = "45 deg".into() => shown_expr(angle, ValueKind::Angle),
             direction_only: bool = false => *direction_only,
-            // A new plane takes `plane_at_angle_through_axis` instead (#6180), see `start`.
+            // A new plane starts with it on (#6180), see `start`.
             through_axis: bool = false => *through_axis,
         } => json!({"angle": angle, "direction_only": direction_only});
         // With a reference plane, the plane touches where the face turns towards it (#8822).
@@ -1297,9 +1297,9 @@ impl Dialog {
                 Dialog::new(kind, inputs)
             }
         };
-        // A new Plane at Angle goes through its axis unless the preference keeps the old turn (#6180).
+        // A new Plane at Angle goes through its axis; the dialog's own option turns that off (#6180).
         if let Kind::AnglePlane { through_axis, .. } = &mut d.kind {
-            *through_axis = app.preferences.plane_at_angle_through_axis;
+            *through_axis = true;
         }
         recall(app, &mut d);
         // Patterns of features picked in the timeline: the objects are features.

@@ -11912,7 +11912,6 @@ mod tests {
         s.execute("sketch.finish", &json!({})).unwrap();
         let mut app = SolveApp::new(s, crate::Services::default());
         // The plane as it turned before #6180, about the line where it is.
-        app.preferences.plane_at_angle_through_axis = false;
         let selected = Sel::SketchCurve { id, sketch: None };
         let (origin, dir) = crate::dialogs::axis_of(&app, &selected).unwrap();
         assert!(origin.dist(Vec3::new(10., 20., 30.)) < 1e-9);
@@ -11920,8 +11919,9 @@ mod tests {
         let mut dialog = crate::dialogs::Dialog::for_command(&app, "construct.plane.at_angle").unwrap();
         dialog.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
         dialog.inputs[1].items = vec![selected];
-        if let crate::dialogs::Kind::AnglePlane { angle, .. } = &mut dialog.kind {
+        if let crate::dialogs::Kind::AnglePlane { angle, through_axis, .. } = &mut dialog.kind {
             *angle = "90 deg".into();
+            *through_axis = false;
         }
         for (command, params) in crate::dialogs::apply_commands(&app, &dialog).unwrap() {
             app.run(&command, params).unwrap();

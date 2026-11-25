@@ -6751,7 +6751,6 @@ mod tests {
             ("extrude_auto_to_object", json!(false), PAGE_TOOLS),
             ("extrude_view_isometric", json!(true), PAGE_TOOLS),
             ("extrude_view_return", json!(true), PAGE_TOOLS),
-            ("plane_at_angle_through_axis", json!(false), PAGE_TOOLS),
             ("auto_operation", json!(false), PAGE_TOOLS),
             ("placement_handles", json!(true), PAGE_TOOLS),
             ("assembly_move_handles", json!(false), PAGE_TOOLS),

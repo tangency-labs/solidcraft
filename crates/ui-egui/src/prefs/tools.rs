@@ -57,16 +57,6 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     });
                     extrude_start(app, ui);
                 });
-                create_row(ui, app.tr("ui.plane_at_angle"), None, &["plane_angle"], false, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        let help = "prefs.plane_at_angle_through_axis_note";
-                        let response = setting::plane_at_angle_through_axis(app, ui).backing_on_hover_text(app.tr(help));
-                        crate::scenario::publish_target("prefs:plane_at_angle_through_axis", response.rect);
-                        if !crate::ui_kit::settings_search::suppress_chrome(ui) {
-                            ui_kit::help_icon(ui, app.tr(help));
-                        }
-                    });
-                });
                 // Found by the name of every feature that has the marker, as well as by the label.
                 let placed = PLACED_FEATURES.iter().map(|key| app.tr(key)).collect::<Vec<_>>().join(" ");
                 create_row(ui, app.tr("prefs.design_tools.placement_group"), Some(&placed), &["rest", "boss", "snap_fit"], false, |ui| {

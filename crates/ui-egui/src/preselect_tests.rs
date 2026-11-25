@@ -3712,19 +3712,21 @@ fn plane_at_angle_direction_only_shows_a_pivot_and_applies() {
     assert!(reopened.inputs.iter().any(|i| i.label == "Pivot" && !i.items.is_empty()), "{:?}", reopened.inputs);
 }
 
-/// A new Plane at Angle starts with "Through the axis" from its preference and goes through an
-/// edge off the base; with the preference off it starts without it and sends nothing new (#6180).
+/// A new Plane at Angle starts with "Through the axis" on and goes through an edge off the base;
+/// with the option turned off it sends nothing new (#6180).
 #[test]
-fn plane_at_angle_through_the_axis_follows_its_preference() {
+fn plane_at_angle_through_the_axis_starts_on_and_can_be_turned_off() {
     let mut h = crate::scenario::Harness::new();
     h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Box"})).unwrap();
     let mut made = Vec::new();
     for on in [true, false] {
-        h.app.preferences.plane_at_angle_through_axis = on;
         h.app.start("construct.plane.at_angle");
         h.frames(2);
         let d = h.app.dialog.as_mut().unwrap();
-        assert!(matches!(d.kind, Kind::AnglePlane { through_axis, direction_only: false, .. } if through_axis == on), "{:?}", d.kind);
+        assert!(matches!(d.kind, Kind::AnglePlane { through_axis: true, direction_only: false, .. }), "{:?}", d.kind);
+        if let Kind::AnglePlane { through_axis, .. } = &mut d.kind {
+            *through_axis = on;
+        }
         d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
         d.extra.insert("axis".into(), json!({"edge": [20, 0, 20]}));
         let (cmd, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
@@ -3736,8 +3738,7 @@ fn plane_at_angle_through_the_axis_follows_its_preference() {
     let height = |id: u64| planes.iter().find(|(fid, _, _)| *fid == id).map(|(_, _, pl)| pl.height(Vec3::new(10.0, 0.0, 20.0)).abs()).unwrap();
     assert!(height(made[0]) < 1e-6, "through the top front edge");
     assert!((height(made[1]) - 20.0).abs() < 1e-6, "turned about the edge where it is, as before");
-    // Reopened, each shows how it was made, whatever the preference says now.
-    h.app.preferences.plane_at_angle_through_axis = false;
+    // Reopened, each shows how it was made.
     let reopened = crate::dialogs::for_feature(&h.app, made[0], None).unwrap();
     assert!(matches!(reopened.kind, Kind::AnglePlane { through_axis: true, .. }), "{:?}", reopened.kind);
 }
