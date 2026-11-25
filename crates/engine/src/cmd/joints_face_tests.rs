@@ -1169,3 +1169,125 @@ fn planar_face_with_hole_locates_outline_centre_from_brep_loops() {
     // The plate outline is [-50, 50] in X and Y, centered at (0, 0), so outline centre is at (0, 0, 10).
     assert!((point.x).abs() < 1e-4 && (point.y).abs() < 1e-4 && (point.z - 10.0).abs() < 1e-4, "expected (0, 0, 10), got {point:?}");
 }
+
+#[test]
+fn joint_create_and_edit_face_on_cylinder_hole_resolves_axis_on_identity_and_rotated_occurrences() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    // A plate with a vertical through-hole of radius 4.5 at (200, -100), z in [-20.0, -5.5], plus
+    // an arm extending 380 mm in +Y whose +X planar face lies on x = 204.5 (coplanar with the pick
+    // on the hole's +X wall, ~210 mm away) so a planar-face fallback would jump there with normal
+    // (1, 0, 0).
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 14.5, "corner": [170, -120, -20.0]}));
+    run(&mut s, "solid.box", json!({"length": 30, "width": 381, "height": 14.5, "corner": [174.5, -81, -20.0], "operation": "join"}));
+    run(&mut s, "solid.cylinder", json!({"base": [200, -100, -25], "axis": [0, 0, 1], "radius": 4.5, "height": 30, "operation": "cut"}));
+    let plate1 = occ(&s, "Plate");
+    run(&mut s, "occurrence.ground", json!({"occurrence": plate1, "grounded": true}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let plate2 = run(&mut s, "occurrence.copy", json!({"occurrence": plate1, "translate": [0, 0, 0]}))["occurrence"].as_u64().unwrap();
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence": plate2, "axis": [0, 0, 1], "angle": "180 deg", "origin": [0, 0, 0], "translate": [200, 0, 0]}),
+    );
+    run(&mut s, "occurrence.ground", json!({"occurrence": plate2, "grounded": true}));
+    run(&mut s, "component.create", json!({"name": "Pin", "grounded": false}));
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "radius": 4.5, "height": 30}));
+    let pin = occ(&s, "Pin");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+
+    let local_pick = Vec3::new(204.5, -100.0, -12.75);
+    let hole_wall = face_name(&mut s, "Plate", local_pick);
+    let pin_wall = face_name(&mut s, "Pin", Vec3::new(4.5, 0.0, 15.0));
+    assert!(!hole_wall.is_empty() && !pin_wall.is_empty());
+
+    let vec = |v: &Value| Vec3::new(v[0].as_f64().unwrap(), v[1].as_f64().unwrap(), v[2].as_f64().unwrap());
+    let assert_side_on_hole = |s: &mut Session, occ_id: u64| {
+        let info = run(s, "joint.inspect", json!({"joint": "Cyl"}));
+        let j = &info["joints"][0];
+        assert_eq!(j["errors"], json!([]), "{info}");
+        assert_eq!(j["conflicts"], json!([]), "{info}");
+        let side = &j["a"];
+        assert_eq!(side["occurrence"].as_u64(), Some(occ_id), "{side}");
+        assert_eq!(side["resolves"], json!(true), "{side}");
+        assert_eq!(side["snap"]["type"], json!("circle_center"), "{side}");
+        assert_eq!(side["snap"]["face"].as_str(), Some(hole_wall.as_str()), "{side}");
+        assert!(side["snap"]["end"].as_str().is_some_and(|e| !e.is_empty()), "{side}");
+        let t = solidcraft_doc::joints::occurrence_world(&s.doc, occ_id);
+        let axis_dir = solidcraft_doc::apply_vector(&t, Vec3::Z).normalized().unwrap();
+        let axis_lo = solidcraft_doc::apply_point(&t, Vec3::new(200.0, -100.0, -20.0));
+        let axis_hi = solidcraft_doc::apply_point(&t, Vec3::new(200.0, -100.0, -5.5));
+        let origin = vec(&side["frame"]["origin"]);
+        let z = vec(&side["frame"]["z"]);
+        let rel = origin - axis_lo;
+        let along = rel.dot(axis_dir);
+        let radial = (rel - axis_dir * along).len();
+        let span = (axis_hi - axis_lo).dot(axis_dir);
+        assert!(radial < 1e-6, "origin {origin:?} is {radial} mm off cylinder axis ({axis_lo:?}..{axis_hi:?})");
+        assert!(along >= -1e-6 && along <= span + 1e-6, "origin {origin:?} outside axial span [0, {span}]: {along}");
+        assert!(z.dot(axis_dir).abs() > 1.0 - 1e-9, "z {z:?} not parallel to cylinder axis {axis_dir:?}");
+    };
+
+    // 1. joint.create with `face: [x, y, z]` on cylindrical walls (identity occurrence).
+    let r = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "cylindrical",
+            "name": "Cyl",
+            "a": {"occurrence": plate1, "face": [local_pick.x, local_pick.y, local_pick.z]},
+            "b": {"occurrence": pin, "face": [4.5, 0.0, 15.0]}
+        }),
+    );
+    assert_eq!(r["errors"], json!([]), "{r}");
+    assert_side_on_hole(&mut s, plate1);
+    let inspected = run(&mut s, "joint.inspect", json!({"joint": "Cyl"}));
+    assert_eq!(inspected["joints"][0]["b"]["snap"]["type"], json!("circle_center"), "{inspected}");
+    assert_eq!(inspected["joints"][0]["b"]["snap"]["face"].as_str(), Some(pin_wall.as_str()), "{inspected}");
+
+    // 2. joint.edit onto the 180-degree-rotated second occurrence via `face: [x, y, z]`.
+    let t2 = solidcraft_doc::joints::occurrence_world(&s.doc, plate2);
+    let pick2 = solidcraft_doc::apply_point(&t2, local_pick);
+    let r = run(&mut s, "joint.edit", json!({"joint": "Cyl", "a": {"occurrence": plate2, "face": [pick2.x, pick2.y, pick2.z]}}));
+    assert_eq!(r["errors"], json!([]), "{r}");
+    assert_side_on_hole(&mut s, plate2);
+
+    // 3. joint.edit with `face: "<cylinder_face_name>"` on both occurrences.
+    for occ_id in [plate1, plate2] {
+        let r = run(&mut s, "joint.edit", json!({"joint": "Cyl", "a": {"occurrence": occ_id, "face": hole_wall}}));
+        assert_eq!(r["errors"], json!([]), "{r}");
+        assert_side_on_hole(&mut s, occ_id);
+    }
+
+    // 4. joint.edit with `face: [x, y, z]` on a planar face still produces `face_center` with its plane normal.
+    let r = run(&mut s, "joint.edit", json!({"joint": "Cyl", "a": {"occurrence": plate1, "face": [185.0, -100.0, -5.5]}}));
+    assert_eq!(r["errors"], json!([]), "{r}");
+    let info = run(&mut s, "joint.inspect", json!({"joint": "Cyl"}));
+    assert_eq!(info["joints"][0]["a"]["snap"]["type"], json!("face_center"), "{info}");
+    assert!(near(vec(&info["joints"][0]["a"]["frame"]["z"]), Vec3::Z), "{info}");
+
+    // 5. Legacy saved `Snap::FaceCenter` naming a cylinder resolves to the cylinder axis, not the distant plane.
+    let legacy = solidcraft_doc::joints::JointOrigin::new(plate1, Snap::FaceCenter { pick: local_pick, face: Some(hole_wall.clone()), x: None });
+    let m = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &legacy).unwrap();
+    let legacy_origin = Vec3::new(m[3][0], m[3][1], m[3][2]);
+    let legacy_z = Vec3::new(m[2][0], m[2][1], m[2][2]);
+    assert!(
+        (legacy_origin.x - 200.0).abs() < 1e-6
+            && (legacy_origin.y + 100.0).abs() < 1e-6
+            && legacy_origin.z >= -20.0 - 1e-6
+            && legacy_origin.z <= -5.5 + 1e-6,
+        "legacy origin {legacy_origin:?} off hole axis"
+    );
+    assert!(legacy_z.dot(Vec3::Z).abs() > 1.0 - 1e-9, "legacy z {legacy_z:?}");
+
+    // 6. A non-planar, non-cylindrical face (sphere) given as `face` is refused rather than jumping to a plane.
+    run(&mut s, "component.create", json!({"name": "Orb"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0]}));
+    run(&mut s, "solid.sphere", json!({"center": [10, 10, 20], "radius": 8, "operation": "new", "body_name": "Ball"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let err = s
+        .execute("joint.origin", &json!({"occurrence": "Orb", "face": [18, 10, 20], "name": "OnBall"}))
+        .expect_err("sphere face must not silently snap to box plane")
+        .to_string();
+    assert!(err.contains("not planar or cylindrical"), "{err}");
+}

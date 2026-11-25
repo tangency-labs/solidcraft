@@ -540,10 +540,9 @@ fn concentric_and_insert_leave_a_slide_and_a_turn_or_a_turn() {
     assert!(near(place(&s, "Collar", Vec3::new(50.0, 10.0, 40.0)), Vec3::new(0.0, 0.0, 30.0), 1e-6), "standing on the shaft, not through it");
 }
 
-/// A round face given as a `face` (a point on its wall, or its name) is its axis where the rule
-/// needs one, as the Constrain dialog takes a click on it (#21549): concentric takes the shaft's
-/// and the collar's walls, and a planar face is still refused. A rule that takes a plane keeps
-/// the plane a cylinder's `face` meant before.
+/// A round face given as a `face` (a point on its wall, or its name) resolves as a round origin
+/// (its axis): concentric takes the shaft's and the collar's walls, a planar cap is refused for
+/// concentric, mate refuses a round wall, and orientation rules (parallel) keep its cylinder axis.
 #[test]
 fn a_round_face_given_as_a_face_is_its_axis_where_the_rule_needs_one() {
     let shaft = || {
@@ -593,12 +592,20 @@ fn a_round_face_given_as_a_face_is_its_axis_where_the_rule_needs_one() {
         s.execute("assembly.constraint.create", &json!({"type": "concentric", "a": shaft_wall.clone(), "b": cap})).expect_err("a cap").to_string();
     assert!(e.contains("two round faces"), "{e}");
     assert!(s.doc.assembly.joints.is_empty());
-    // A mate takes planes: the collar's wall as a `face` means the planar face it meant before.
+    // A mate takes two planar faces: a cylinder's wall given as a `face` is round, so mate refuses
+    // it instead of falling back to an unrelated planar face, while parallel keeps its axis.
     let mut s = shaft();
     let top = json!({"occurrence": "Shaft", "face": [2, 0, 20]});
-    let r = constrain(&mut s, "mate", top, collar_wall, json!({}));
+    let e = s
+        .execute("assembly.constraint.create", &json!({"type": "mate", "a": top.clone(), "b": collar_wall.clone()}))
+        .expect_err("a round wall")
+        .to_string();
+    assert!(e.contains("two planar faces"), "{e}");
+    assert!(s.doc.assembly.joints.is_empty());
+    let r = constrain(&mut s, "parallel", top, collar_wall, json!({}));
     assert!(clean(&r), "{r}");
-    assert_eq!(s.doc.assembly.joints.first().map(|j| j.kind), Some(solidcraft_doc::joints::JointKind::Planar), "{r}");
+    assert_eq!(s.doc.assembly.joints.first().map(|j| j.kind), Some(solidcraft_doc::joints::JointKind::Parallel), "{r}");
+    assert!(matches!(s.doc.assembly.joints.first().map(|j| &j.b.snap), Some(solidcraft_doc::joints::Snap::CircleCenter { .. })), "{r}");
 }
 
 /// The rules' remaining freedoms: parallel 4, perpendicular and angle 5, point on axis 4, tangent

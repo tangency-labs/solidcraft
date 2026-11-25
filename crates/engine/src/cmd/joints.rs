@@ -60,7 +60,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ORIGIN_CONTRACT)
         .output(output_schema_for::<MakeJointOriginResult>)
         .params(
-        "name?, export_frame?: bool (robot exports write it as a frame of its own), occurrence?: id|name (default: from the pick, or the named face's component), path?: [occurrence ids from the root] (the placement picked on, ending at the occurrence: a part in a sub-assembly placed more than once is then on that copy; default: the occurrence's first placement, or with no occurrence the placement nearest the pick), face: [x,y,z] | \"<name>\" (centre of a planar face) | circle: [x,y,z] | \"<name>\" (centre of a round end: a point on its wall or rim, the end's centre, or the round face's name as model.faces lists it) | edge: [x,y,z] (a point on an edge of a planar face: the edge's middle, z out of the face, y into it; on?: [x,y,z] a point on the face (default: the larger planar face beside the edge); corner?: [x,y,z] near one end: the corner there, x and y along its two edges into the face; found again by name, so it follows the face as it changes size; z?: [x,y,z] the frame's z instead of the face's normal, along the edge when it runs that way, x chosen from z: an edge or corner picked as it is, kept as a point where it can't be found by name) | point: [x,y,z], z?: [x,y,z] | plane: \"XY\"|\"XZ\"|\"YZ\"|\"o:<ids>/origin/<item>\"|\"<name>\" | axis: \"X\"|\"Y\"|\"Z\"|\"o:<ids>/origin/<item>\"|\"<name>\"; a circle's z?: [x,y,z] (a round edge's centre with the way out of it: its end by name when that is the frame it shows, else a point there); body?: the named face's body; end?: \"<name>\" (a circle's end: the face across its rim there; default the end nearer the pick); x?: [x,y,z] (a direction, world) | \"<face name>\" | {face: [x,y,z]} (the frame's x: a direction, a plane's normal, or the way to another hole's axis; keeps a round origin's turn; a point's x is a direction, laid square to its z, default: chosen from z alone). Faces are kept by name: the origin follows its face, and a circle its end, when the design changes",
+        "name?, export_frame?: bool (robot exports write it as a frame of its own), occurrence?: id|name (default: from the pick, or the named face's component), path?: [occurrence ids from the root] (the placement picked on, ending at the occurrence: a part in a sub-assembly placed more than once is then on that copy; default: the occurrence's first placement, or with no occurrence the placement nearest the pick), face: [x,y,z] | \"<name>\" (centre of a planar face, or a round end of a cylindrical face) | circle: [x,y,z] | \"<name>\" (centre of a round end: a point on its wall or rim, the end's centre, or the round face's name as model.faces lists it) | edge: [x,y,z] (a point on an edge of a planar face: the edge's middle, z out of the face, y into it; on?: [x,y,z] a point on the face (default: the larger planar face beside the edge); corner?: [x,y,z] near one end: the corner there, x and y along its two edges into the face; found again by name, so it follows the face as it changes size; z?: [x,y,z] the frame's z instead of the face's normal, along the edge when it runs that way, x chosen from z: an edge or corner picked as it is, kept as a point where it can't be found by name) | point: [x,y,z], z?: [x,y,z] | plane: \"XY\"|\"XZ\"|\"YZ\"|\"o:<ids>/origin/<item>\"|\"<name>\" | axis: \"X\"|\"Y\"|\"Z\"|\"o:<ids>/origin/<item>\"|\"<name>\"; a circle's z?: [x,y,z] (a round edge's centre with the way out of it: its end by name when that is the frame it shows, else a point there); body?: the named face's body; end?: \"<name>\" (a circle's end: the face across its rim there; default the end nearer the pick); x?: [x,y,z] (a direction, world) | \"<face name>\" | {face: [x,y,z]} (the frame's x: a direction, a plane's normal, or the way to another hole's axis; keeps a round origin's turn; a point's x is a direction, laid square to its z, default: chosen from z alone). Faces are kept by name: the origin follows its face, and a circle its end, when the design changes",
     ),
     CommandSpec::new("joint.origin_frame", "Export Origin as Frame", crate::checked!("joint.origin_frame", origin_frame))
         .icon("joint_origin")
@@ -937,7 +937,8 @@ fn origin_on_part(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
             // The face's name, which it is found by from then on (a circle's is its wall's).
             let face = joints::face_name_at(&s.doc, &st, component, pick, what == "circle");
             let x = x_param(s, v, component, &inv, cmd)?;
-            if what == "face" { Snap::FaceCenter { pick, face, x } } else { Snap::CircleCenter { pick, face, end: None, x } }
+            let round = what == "circle" || face.as_deref().is_some_and(|n| joints::face_is_round(&s.doc, &st, component, pick, n));
+            if round { Snap::CircleCenter { pick, face, end: None, x } } else { Snap::FaceCenter { pick, face, x } }
         }
         "edge" => {
             let (on, corner) = (v.get("on").and_then(vec3).map(local), v.get("corner").and_then(vec3).map(local));
@@ -1089,20 +1090,9 @@ fn origin_by_name(s: &Session, v: &Value, what: &str, name: &str, cmd: &str) -> 
     let inv = solidcraft_doc::mat_inverse(&t).ok_or_else(|| bad(cmd, "occurrence transform"))?;
     let x = x_param(s, v, component, &inv, cmd)?;
     let face = Some(name.to_string());
-    let snap = if what == "face" { Snap::FaceCenter { pick, face, x } } else { Snap::CircleCenter { pick, face, end: None, x } };
+    let round = what == "circle" || joints::face_is_round(&s.doc, &st, component, pick, name);
+    let snap = if round { Snap::CircleCenter { pick, face, end: None, x } } else { Snap::FaceCenter { pick, face, x } };
     settle(s, JointOrigin::new(occurrence, snap), v, cmd)
-}
-
-/// A round face already named and picked (`pick`, the component's coordinates) on `occurrence`,
-/// made a circle origin there: its axis, with the `x?` and `end?` that `v` gives, checked as a
-/// `circle` origin is. It keeps the face it is given, so no second search by the point can land on
-/// another face.
-pub(crate) fn round_origin(s: &Session, occurrence: u64, pick: Vec3, name: &str, v: &Value, cmd: &str) -> Result<JointOrigin> {
-    let component = component_of(s, occurrence);
-    let t = if occurrence == 0 { solidcraft_doc::IDENTITY } else { joints::occurrence_world(&s.doc, occurrence) };
-    let inv = solidcraft_doc::mat_inverse(&t).ok_or_else(|| bad(cmd, "occurrence transform"))?;
-    let x = x_param(s, v, component, &inv, cmd)?;
-    settle(s, JointOrigin::new(occurrence, Snap::CircleCenter { pick, face: Some(name.to_string()), end: None, x }), v, cmd)
 }
 
 /// A new joint origin checked: `end?` (a circle's end, by the name of the face across its rim

@@ -1579,16 +1579,22 @@ fn resolve_snap(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<Mat>
         Snap::Frame { origin, z, x } => frame(*origin, *z, *x).ok_or_else(bad),
         Snap::Point { point, z, x } => frame(*point, z.unwrap_or(Vec3::Z), *x).ok_or_else(bad),
         Snap::FaceCenter { pick, face, x } => {
-            // A named planar face gives its own centre and normal; another face (or none) the
-            // planar face nearest the point.
+            // A named planar face gives its own centre and normal; a named cylindrical face (e.g.
+            // from a design saved before cylindrical `face` picks became `circle_center`) gives
+            // its round end; an unnamed pick takes the planar face nearest the point.
             let comp = component_of(doc, o.occurrence)?;
-            let named = match face.as_deref() {
-                Some(n) => Some(face::named_face(doc, st, comp, *pick, n)?),
-                None => None,
-            };
-            let (c, n) = match named.as_ref().map(face::NamedFace::plane).transpose()?.flatten() {
-                Some(cn) => cn,
-                None => nearest_plane(doc, st, o, named.as_ref().map_or(*pick, |f| f.point))?,
+            let (c, n) = match face.as_deref() {
+                Some(n) => {
+                    let nf = face::named_face(doc, st, comp, *pick, n)?;
+                    if let Some(cn) = nf.plane()? {
+                        cn
+                    } else if let Some(r) = nf.round() {
+                        (r.centre, r.z)
+                    } else {
+                        return Err(DocError::Invalid(format!("joint origin: face `{n}` is not planar or cylindrical")));
+                    }
+                }
+                None => nearest_plane(doc, st, o, *pick)?,
             };
             frame_with_x_policy(c, n, face::x_axis(doc, st, comp, x.as_ref(), c)?, o.snap.strict_alignment()).ok_or_else(bad)
         }
