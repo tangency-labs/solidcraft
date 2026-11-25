@@ -5,6 +5,10 @@
 //! gives on the same bodies built again, and the bodies are the same after the call, in their
 //! file bytes and in memory. On the rod, `intersect_faces` itself changes the bodies in memory,
 //! which the test asserts, so the check that the read-only call does not can fail.
+//!
+//! Also: faces kept as their definition (a screw thread's walls) against a plane, two faces
+//! that touch at one point with the points asked for (a ball resting on the plate), and a
+//! read-only call on bodies an earlier `intersect_faces` left its caches on.
 
 #![allow(clippy::unwrap_used, clippy::panic)] // test
 
@@ -17,9 +21,11 @@ use solidcore::intersect::api_intersectors::{
 use solidcore::kernel::Kernel;
 use solidcore::math::Vec3;
 use solidcore::primitive::api_curves::create_circle;
-use solidcore::primitive::api_primitives::{create_box, create_cylinder};
+use solidcore::primitive::api_curves::create_line_segment;
+use solidcore::primitive::api_primitives::{create_box, create_cylinder, create_sphere};
 use solidcore::query::api_queries::edge_closest_point;
 use solidcore::sweep::api_brep::create_linear_sweep;
+use solidcore::sweep::screw::screw_sweep;
 use solidcore::topology::api_files::write_brep_to_file;
 use solidcore::topology::brep_data_write::FromBrepEnv;
 use solidcore::topology::edge;
@@ -257,4 +263,94 @@ fn a_face_not_of_its_body_is_refused() {
         .unwrap();
     let got = intersect_faces_read_only(&k, &r, stranger, &p, top, false);
     assert!(matches!(got, Err(SolidError::NotFound { .. })), "{got:?}");
+}
+
+/// A square thread, 0.9 by 0.9 at radius 4.1 to 5, two turns of pitch 1.5 about the z axis:
+/// its walls are nets kept with their sweep definition.
+fn thread(k: &mut Kernel) -> Brep {
+    let points = [
+        Vec3::new(4.1, 0.0, 0.0),
+        Vec3::new(5.0, 0.0, 0.0),
+        Vec3::new(5.0, 0.0, 0.9),
+        Vec3::new(4.1, 0.0, 0.9),
+    ];
+    let profile: Vec<Curve> = points
+        .iter()
+        .zip(points.iter().cycle().skip(1))
+        .map(|(&a, &b)| Curve::from(create_line_segment(a, b).unwrap()))
+        .collect();
+    screw_sweep(k, &profile, Vec3::ZERO, Vec3::Z, 1.5, 2.0, 1.5e-4).unwrap()
+}
+
+/// The faces of `b` kept with a definition beside their net.
+fn defined_faces(b: &Brep) -> Vec<FaceId> {
+    b.face_list()
+        .iter()
+        .copied()
+        .filter(|&f| {
+            b.face(f)
+                .unwrap()
+                .surface
+                .as_ref()
+                .is_some_and(|s| s.procedural_definition().is_some())
+        })
+        .collect()
+}
+
+#[test]
+fn faces_kept_as_their_definition_are_read_as_intersect_faces_reads_them() {
+    let mut k = k();
+    // a block whose bottom face, at z = 1.2, cuts the thread's walls
+    let make = |k: &mut Kernel| (thread(k), block(k, [-10.0, -10.0, 1.2], [20.0, 20.0, 10.0]));
+    let (t, cap) = make(&mut k);
+    let bottom = face_at(&k, &cap, [0.0, -10.0, 1.2], [-10.0, 0.0, 1.2]);
+    let walls = defined_faces(&t);
+    assert!(!walls.is_empty(), "the thread keeps no definition");
+    let mut met = 0;
+    for &w in &walls {
+        let got = read_only(&k, &t, w, &cap, bottom);
+        met += got.curves.len();
+        let (mut t2, mut cap2) = make(&mut k);
+        in_place_agrees(&k, &got, &mut t2, w, &mut cap2, bottom);
+    }
+    assert!(
+        met > 0,
+        "no wall meets the plane: the case reads no definition"
+    );
+}
+
+#[test]
+fn a_ball_resting_on_the_plate_with_points_asked_for() {
+    let mut k = k();
+    let make = |k: &mut Kernel| {
+        (
+            create_sphere(k, Point3::new(50.0, 50.0, 20.0), 10.0).unwrap(),
+            plate(k),
+        )
+    };
+    let (ball, p) = make(&mut k);
+    let top = face_at(&k, &p, [50.0, 0.0, 10.0], [0.0, 50.0, 10.0]);
+    for &f in ball.face_list() {
+        let before = state(&k, &ball, &p);
+        let got = intersect_faces_read_only(&k, &ball, f, &p, top, true).unwrap();
+        assert!(state(&k, &ball, &p) == before, "a body changed");
+        let (mut ball2, mut p2) = make(&mut k);
+        let there =
+            intersect_faces(&k, FaceBodies::Two(&mut ball2, &mut p2), f, top, true).unwrap();
+        assert_eq!(format!("{:?}", got.curves), format!("{:?}", there.curves));
+        assert_eq!(format!("{:?}", got.points), format!("{:?}", there.points));
+    }
+}
+
+#[test]
+fn bodies_an_earlier_intersection_left_its_caches_on_are_read_and_left_so() {
+    let mut k = k();
+    let (mut r, mut p) = (rod(&mut k), plate(&mut k));
+    let side = face_at(&k, &r, [65.0, 50.0, 10.0], [65.0, 50.0, 60.0]);
+    let top = face_at(&k, &p, [50.0, 0.0, 10.0], [0.0, 50.0, 10.0]);
+    // in place first: the bodies now hold the caches and trims that call made
+    intersect_faces(&k, FaceBodies::Two(&mut r, &mut p), side, top, false).unwrap();
+    let got = read_only(&k, &r, side, &p, top);
+    is_foot(&k, &got);
+    in_place_agrees(&k, &got, &mut r, side, &mut p, top);
 }
