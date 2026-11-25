@@ -12,6 +12,7 @@
 //! The shared host owns panel placement. In Classic, the palette docks at the right edge and its
 //! header drags it, like a command dialog's title (#8923).
 
+use crate::i18n::LocaleNames as _;
 use crate::ui_kit::BackingTooltipExt as _;
 use std::cell::Cell;
 
@@ -100,13 +101,29 @@ pub fn set_mode(app: &mut SolveApp, m: u8) {
 /// switch construction mode on or off.
 pub fn toggle_construction(app: &mut SolveApp) {
     let curves = selected_curves(app);
-    if curves.is_empty() && app.session.active_sketch.is_none() {
+    // Selected points switch too (#18448); the origin is the sketch's own and stays as it is.
+    let points: Vec<String> = app
+        .session
+        .selection
+        .iter()
+        .filter_map(|sel| crate::sketch_modify_ui::point_id(&app.session, sel))
+        .filter(|id| *id != "origin")
+        .map(str::to_string)
+        .collect();
+    if curves.is_empty() && points.is_empty() && app.session.active_sketch.is_none() {
         app.set_status("Construction mode is for drawing in a sketch: edit a sketch first", false);
-    } else if curves.is_empty() {
+    } else if curves.is_empty() && points.is_empty() {
         let m = if mode(app) == 1 { 0 } else { 1 };
         set_mode(app, m);
     } else {
-        let _ = app.run("sketch.construction", json!({ "curves": curves }));
+        let mut params = json!({});
+        if !curves.is_empty() {
+            params["curves"] = json!(curves);
+        }
+        if !points.is_empty() {
+            params["points"] = json!(points);
+        }
+        let _ = app.run("sketch.construction", params);
     }
 }
 
@@ -359,8 +376,13 @@ pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime
     let world = crate::open_meshing::session_world(&app.session);
     let sketch = world.sketch(active)?;
     let solved = sketch.report.shown_ok();
-    let title =
-        if sketch.name.trim().is_empty() || sketch.name.len() > 256 { app.tr("ui.palette_sketch_options").to_owned() } else { sketch.name.clone() };
+    // A default name such as `Sketch1` reads as the browser shows it (`Esquisse1` in French); a
+    // name the user gave stays as typed.
+    let title = if sketch.name.trim().is_empty() || sketch.name.len() > 256 {
+        app.tr("ui.palette_sketch_options").to_owned()
+    } else {
+        solidcraft_ui_text::Locale::for_language(&app.preferences.language).given_name(&sketch.name)
+    };
     Some(crate::panel_runtime::PanelPresentation {
         title,
         icon: "sketch".into(),
@@ -697,6 +719,23 @@ mod tests {
             h.call("ui.click", json!({"x":at.x,"y":at.y}));
             assert_eq!(h.app.preferences.frame_images_in_sketch, on, "{cmd}");
         }
+    }
+
+    /// The palette's title names the sketch as the browser does: a default name is translated, a
+    /// name the user gave is kept.
+    #[test]
+    fn palette_title_translates_a_default_sketch_name() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        let title = |app: &SolveApp| shared_presentation(app).map(|p| p.title);
+        assert_eq!(title(&h.app).as_deref(), Some("Sketch1"));
+        h.app.preferences.language = "fr".into();
+        assert_eq!(title(&h.app).as_deref(), Some("Esquisse1"));
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY", "name":"Leg"})).unwrap();
+        h.settle();
+        assert_eq!(title(&h.app).as_deref(), Some("Leg"));
     }
 
     #[test]
@@ -1232,7 +1271,7 @@ mod tests {
         }
         h.settle();
         assert!(h.app.tool.is_none(), "Esc still puts the tool down");
-        assert!(h.app.session.selection.is_empty(), "and clears the selection");
+        assert!(!h.app.session.has_selection(), "and clears the selection");
         assert_eq!(h.app.session.active_sketch, sketch, "the sketch stays open");
 
         h.app.finish_sketch();
@@ -1298,7 +1337,7 @@ mod tests {
 
         h.app.start("sketch.line");
         h.settle();
-        assert!(h.app.session.selection.is_empty(), "starting a drawing tool clears the prior curve selection");
+        assert!(!h.app.session.has_selection(), "starting a drawing tool clears the prior curve selection");
 
         let construction = crate::scenario::handle_at("dialog:Line Type:construction").unwrap();
         h.call("ui.click", json!({"x": construction.x, "y": construction.y}));

@@ -72,7 +72,8 @@ impl FieldConditions {
     pub fn enabled(&self, values: &Map<String, Value>) -> bool {
         self.enabled.as_ref().is_none_or(|c| c.matches(values))
     }
-    pub(crate) fn has_choice_filter(&self) -> bool {
+    /// Whether any choice has an availability condition to evaluate.
+    pub fn has_choice_filter(&self) -> bool {
         self.options.iter().any(Option::is_some)
     }
     pub fn option_available(&self, index: usize, values: &Map<String, Value>) -> bool {

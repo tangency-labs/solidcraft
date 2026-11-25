@@ -8,6 +8,8 @@
 macro_rules! plugins_preferences {
     ($next:ident $(, $rest:ident)* ; $($fields:tt)*) => {
         $next! { $($rest),* ; $($fields)*
+            /// A plugin's background effect, `plugin-id/shader-id` (`shaders@0.1`); empty for none.
+            background_shader: String = String::new(), PAGE_PLUGINS;
             /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
             disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
             /// Show the global fuel and memory controls on Preferences > Plugins (#18764).

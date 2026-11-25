@@ -418,7 +418,7 @@ pub fn reveal_feature(app: &mut SolveApp, feature: u64) {
 }
 
 /// The features of these folders and of the folders nested in them, in timeline order.
-fn folder_features(app: &SolveApp, roots: &[u64]) -> Vec<u64> {
+pub(crate) fn folder_features(app: &SolveApp, roots: &[u64]) -> Vec<u64> {
     let groups = &app.session.doc.timeline_groups;
     let inside = |feature: u64| {
         group_for(groups, feature).is_some_and(|group| roots.contains(&group) || roots.iter().any(|root| group_is_descendant(groups, group, *root)))
@@ -2208,7 +2208,7 @@ mod tests {
         h.settle();
         assert!(row_y("timeline:Block") < row_y("timeline:Profile") && row_y("timeline:Profile") < row_y("timeline:Second"));
         assert!(handle_at("timeline:Pocket").is_none(), "only the opened feature shows its sketch");
-        assert!(h.app.session.selection.is_empty(), "the fold arrow only folds");
+        assert!(!h.app.session.has_selection(), "the fold arrow only folds");
         // The fold is kept with the browser's folds, between runs.
         let mut restored = Harness::new();
         restored.app.load_prefs(&h.app.prefs());
@@ -2365,7 +2365,7 @@ mod tests {
         h.frames(30);
         h.step(&json!({"click": {"handle": "timeline:Profile"}})).unwrap();
         assert!(h.app.dialog.is_some() && h.app.session.active_sketch.is_none(), "the sketch row's click goes to the dialog too");
-        assert!(h.app.session.selection.is_empty(), "dialog picks leave the ordinary selection alone");
+        assert!(!h.app.session.has_selection(), "dialog picks leave the ordinary selection alone");
     }
 
     #[test]

@@ -45,7 +45,8 @@ mod end_sections_fit;
 #[path = "p5/rails_fit.rs"]
 mod rails_fit;
 pub use rails_fit::{
-    edge_bounds_material, inside_material, is_concave_edge, is_knife_edge, RailsFit,
+    edge_bounds_material, edge_bounds_material_linked, inside_material, is_concave_edge,
+    is_knife_edge, RailsFit,
 };
 
 const OP: &str = "blend::fillet_solver::p5";
