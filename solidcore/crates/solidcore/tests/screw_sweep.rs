@@ -514,9 +514,9 @@ fn joined_walls_run_on_across_the_half_turns() {
     )
     .unwrap();
     assert!(p2::is_manifold_solid(&joined).unwrap());
-    let walls = walls(&joined);
-    assert_eq!(walls.len(), 2, "one face per flank");
-    for wall in &walls {
+    let flanks = walls(&joined);
+    assert_eq!(flanks.len(), 2, "one face per flank");
+    for wall in &flanks {
         let c = check_wall(wall, p, &[]);
         assert!(c.bound <= tol, "bound {} past the tolerance {tol}", c.bound);
         let d = wall.procedural_sweep().unwrap();

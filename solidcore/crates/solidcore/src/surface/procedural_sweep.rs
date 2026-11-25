@@ -1345,7 +1345,7 @@ mod tests {
             assert!((mixed.turn_at(t).0 - want).abs() < 1e-15, "{t}");
         }
         // mid-span, the arc turns as a span of its own half angle does
-        for (t0, t1, half) in [(0.0, 0.2, 0.1), (0.2, 0.3, 0.05)] {
+        for (t0, t1, half) in [(0.0_f64, 0.2_f64, 0.1_f64), (0.2, 0.3, 0.05)] {
             let t = t0 + 0.3 * (t1 - t0);
             let s = 2.0 * (t - t0) / (t1 - t0) - 1.0;
             let want = 0.5 * (t0 + t1) + 2.0 * ((0.5 * half).tan() * s).atan();
