@@ -34,11 +34,13 @@ fn isolating(app: &SolveApp) -> bool {
 /// or vertices.
 fn can_isolate(app: &SolveApp) -> bool {
     use solidcraft_engine::Sel;
-    app.session.selection.iter().any(|item| match item {
-        Sel::Occurrence { .. } | Sel::Body { .. } => true,
-        Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => !body.is_empty(),
-        _ => false,
-    })
+    // Select All's whole-body scope counts too.
+    app.session.all_bodies_selected()
+        || app.session.selection.iter().any(|item| match item {
+            Sel::Occurrence { .. } | Sel::Body { .. } => true,
+            Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => !body.is_empty(),
+            _ => false,
+        })
 }
 
 /// The page picks by a rule of its own, not the selection mode: an open sketch picks its own

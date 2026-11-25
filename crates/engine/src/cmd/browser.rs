@@ -717,13 +717,15 @@ fn isolate_selection(s: &mut Session, p: &Value) -> Result<Value> {
     if bool_(p, "clear").unwrap_or(false) {
         return unisolate_all(s, &json!({}));
     }
+    // Select All's whole-body scope counts as its bodies.
+    let selection = s.selected_items()?;
     let paths: Vec<Vec<u64>> =
-        s.selection.iter().filter_map(|item| if let crate::Sel::Occurrence { path } = item { Some(path.clone()) } else { None }).collect();
+        selection.iter().filter_map(|item| if let crate::Sel::Occurrence { path } = item { Some(path.clone()) } else { None }).collect();
     if !paths.is_empty() {
         return visibility(s, &json!({"visible": true, "paths": paths, "isolate": true}));
     }
     let mut bodies: Vec<String> = Vec::new();
-    for name in s.selection.iter().filter_map(crate::Sel::body_name) {
+    for name in selection.iter().filter_map(crate::Sel::body_name) {
         if !bodies.iter().any(|b| b == name) {
             bodies.push(name.to_owned());
         }
@@ -2332,8 +2334,14 @@ mod tests {
         run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "body_name": "C"}));
         let spec = |id: &str| crate::find_command(id).unwrap_or_else(|| panic!("{id}"));
         assert_eq!((spec("browser.isolate").shortcut, spec("browser.unisolate").shortcut), (Some("Ctrl+I"), Some("Ctrl+Shift+I")));
-        s.selection.clear();
+        s.clear_selection();
         assert!(s.execute("browser.isolate", &json!({})).is_err(), "nothing selected");
+        // Select All's whole-body scope isolates its bodies: nothing to hide, nothing refused.
+        s.selection_all_bodies = true;
+        run(&mut s, "browser.isolate", json!({}));
+        assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.before_isolate.is_some());
+        run(&mut s, "browser.unisolate", json!({}));
+        s.clear_selection();
         assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.before_isolate.is_none());
         s.selection = vec![crate::Sel::Face { body: "B".into(), index: 0, point: Default::default() }];
         run(&mut s, "browser.isolate", json!({}));

@@ -3103,6 +3103,9 @@ fn the_isolation_pill_shows_off_the_bar_and_its_close_exits_isolation() {
     assert!(h.app.session.visibility.before_isolate.is_some(), "Escape never exits isolation");
     h.app.preferences.navigation_bar.slots.push("isolate".into());
     assert!(crate::viewport_status::presentation(&h.app, &effect).is_none(), "the bar's Isolate slot shows it instead");
+    h.app.ui.show_navigation_bar = false;
+    assert!(crate::viewport_status::presentation(&h.app, &effect).is_some(), "the bar hidden: the pill shows it");
+    h.app.ui.show_navigation_bar = true;
     h.app.preferences.navigation_bar.slots.pop();
     h.settle();
     h.step(&json!({"click": {"handle": close}})).unwrap();
