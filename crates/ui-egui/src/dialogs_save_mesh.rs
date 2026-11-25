@@ -467,7 +467,7 @@ fn copy_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
     form_row(ui, solidcraft_ui_text::tr("ui.send_copy_folder"), |ui| {
         let busy = app.file_picker_busy();
         if crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.send_copy_choose"), crate::ui_kit::Button::Small).clicked() && !busy {
-            app.pick_folder(|app, path| app.slicer_menu.picked_folder = path);
+            app.pick_folder(&k.copy_folder, |app, path| app.slicer_menu.picked_folder = path);
         }
         ui.add(egui::Label::new(k.copy_folder.as_str()).truncate());
     });
