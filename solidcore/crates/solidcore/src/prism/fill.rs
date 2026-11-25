@@ -188,6 +188,12 @@ pub enum FillNote {
         side: FillSide,
         /// The overlap asked for.
         overlap: f64,
+        /// The height asked for.
+        asked: f64,
+        /// The sharp face's height: the one asked, at most half the chord where the blended face
+        /// allows more (a height at or below the zone tolerance is then built flat, with
+        /// [`FillNote::BuiltFlat`] too).
+        height: f64,
     },
     /// A concave contour dips below the chord between its toes.
     BelowToes {
@@ -379,6 +385,28 @@ fn build(k: &Kernel, section: &Channel, options: &FillOptions) -> Result<Filled>
             &mut notes,
         )?);
     }
+    // the profile's budget, before any fit is offered and before the pairwise check: the loop's
+    // lines and arcs as they will be built (long walls cut short count only as cut). Blended
+    // toes that stay blended close in five pieces (a line, three arcs, a line); every other face
+    // in one (an arc, or the chord, also where it is built flat)
+    let pieces = |contour: Contour| match contour {
+        Contour::ConvexBlended { height, overlap } if overlap > 0.0 && height > zone => 5,
+        _ => 1,
+    };
+    let count = pieces(shallow_options.face)
+        + right_wall.len()
+        + left_wall.len()
+        + if second_used {
+            pieces(second(&shallow_options))
+        } else {
+            bottom.len()
+        };
+    if count > MAX_SEGMENTS {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a section of more lines and arcs than a profile takes (MAX_SEGMENTS)",
+        ));
+    }
     let face_floor;
     (shallow_options.face, face_floor) = shallow(
         FillSide::Face,
@@ -412,22 +440,6 @@ fn build(k: &Kernel, section: &Channel, options: &FillOptions) -> Result<Filled>
         None
     };
     let face_path = close(l0, r0, options.face);
-    // the profile's budget, before any fit is offered and before the pairwise check: the loop's
-    // lines and arcs as built (long walls cut short count only as cut)
-    let count = face_path.as_ref().map_or(1, Vec::len)
-        + right_wall.len()
-        + left_wall.len()
-        + if second_used {
-            second_path.as_ref().map_or(1, Vec::len)
-        } else {
-            bottom.len()
-        };
-    if count > MAX_SEGMENTS {
-        return Err(SolidError::invalid_input(
-            OP,
-            "a section of more lines and arcs than a profile takes (MAX_SEGMENTS)",
-        ));
-    }
     // a concave face: the deepest that touches none of the section's other sides
     let walls: Vec<Seg2> = right_wall.iter().chain(&left_wall).copied().collect();
     let mut limits = Vec::new();
@@ -841,13 +853,18 @@ fn toes(
         return Ok(contour);
     }
     if overlap <= zone {
-        notes.push(FillNote::SharpToes { side, overlap });
-        let height = if height <= a + overlap + eps {
+        let built = if height <= a + overlap + eps {
             height.min(a)
         } else {
             height
         };
-        return Ok(Contour::Convex { height });
+        notes.push(FillNote::SharpToes {
+            side,
+            overlap,
+            asked: height,
+            height: built,
+        });
+        return Ok(Contour::Convex { height: built });
     }
     if !along {
         return Err(

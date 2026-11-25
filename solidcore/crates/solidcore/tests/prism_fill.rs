@@ -1065,7 +1065,9 @@ fn an_overlap_within_the_zone_tolerance_is_built_with_sharp_toes() {
             blended.notes,
             vec![FillNote::SharpToes {
                 side: FillSide::Face,
-                overlap: 1e-6
+                overlap: 1e-6,
+                asked: 1.0,
+                height: 1.0
             }]
         );
         // a height the blended face allows (up to a + o) but the sharp one does not (past a):
@@ -1082,7 +1084,39 @@ fn an_overlap_within_the_zone_tolerance_is_built_with_sharp_toes() {
             face: Contour::Convex { height: a },
             ..w.clone()
         });
-        assert_eq!(section(&top(a + 0.5e-6)).region, half.region);
+        let capped = section(&top(a + 0.5e-6));
+        assert_eq!(capped.region, half.region);
+        assert_eq!(
+            capped.notes,
+            vec![FillNote::SharpToes {
+                side: FillSide::Face,
+                overlap: 1e-6,
+                asked: a + 0.5e-6,
+                height: a
+            }]
+        );
+        // the second face, capped at its own half chord (the root gap's, 0.5)
+        let root = |second_face: Contour| Case {
+            second_face: Some(second_face),
+            ..w.clone()
+        };
+        let capped = section(&root(Contour::ConvexBlended {
+            height: 0.5 + 0.5e-6,
+            overlap: 1e-6,
+        }));
+        assert_eq!(
+            capped.region,
+            section(&root(Contour::Convex { height: 0.5 })).region
+        );
+        assert_eq!(
+            capped.notes,
+            vec![FillNote::SharpToes {
+                side: FillSide::Second,
+                overlap: 1e-6,
+                asked: 0.5 + 0.5e-6,
+                height: 0.5
+            }]
+        );
         // past a + o: refused with the sharp face's limit, which builds
         let (why, fit) = refused(&top(a + 1e-4));
         assert_eq!(
@@ -1122,23 +1156,49 @@ fn the_crossing_check_flags_a_corner_within_its_tolerance_of_a_side() {
 fn a_section_past_the_profile_budget_is_refused_before_the_crossing_check() {
     // a wall of 10 000 steps: refused on its count, at once (not after some 5e7 pairs)
     let n = 10_000;
-    let right: Vec<Seg2> = (0..n)
-        .map(|i| {
-            let y = |j: usize| -6.0 * j as f64 / n as f64;
-            line(p(3.0, y(i)), p(3.0, y(i + 1)))
-        })
-        .collect();
-    // a concave face too deep for the walls too: refused on the count, not with a fit that
-    // the count would then refuse (brett19 on #18947)
-    for face in [Contour::Flat, Contour::Concave { depth: 5.0 }] {
+    let wall = |x: f64| -> Vec<Seg2> {
+        (0..n)
+            .map(|i| {
+                let y = |j: usize| -6.0 * j as f64 / n as f64;
+                line(p(x, y(i)), p(x, y(i + 1)))
+            })
+            .collect()
+    };
+    let (right, wide) = (wall(3.0), wall(1e5));
+    // faces too high, too deep or (2e5 wide, the smallest arc about 5 high) too shallow for
+    // the walls too, with sharp toes and blended toes that stay blended: refused on the count,
+    // not with a fit that the count would then refuse (brett19 on #18947)
+    let cases = [
+        (Contour::Flat, &right),
+        (Contour::Concave { depth: 5.0 }, &right),
+        (Contour::Convex { height: 100.0 }, &right),
+        (
+            Contour::ConvexBlended {
+                height: 100.0,
+                overlap: 1e-6,
+            },
+            &right,
+        ),
+        (
+            Contour::ConvexBlended {
+                height: 100.0,
+                overlap: 0.5,
+            },
+            &right,
+        ),
+        (Contour::Convex { height: 1e-7 }, &right),
+        (Contour::Convex { height: 1.0 }, &wide),
+    ];
+    for (face, right) in cases {
         let err = run(&Case {
             face,
-            ..channel(mirror(&right), right.clone())
+            depth_normal: Some(Vec2::new(0.0, 1.0)),
+            ..channel(mirror(right), right.clone())
         })
         .unwrap_err();
         assert!(
             matches!(err, SolidError::InvalidInput { reason, .. } if reason.contains("MAX_SEGMENTS")),
-            "{err:?}"
+            "{face:?}: {err:?}"
         );
     }
 }
