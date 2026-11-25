@@ -121,10 +121,9 @@
 //!   told apart. The certificates do bounded work: at most 16 control points of a curve's
 //!   stretch for the cones, 4096 piece pairs a level over 24 levels in the subdivision,
 //!   and 64 pieces of each in the conic slope test; past that, or for curve kinds they do
-//!   not cover, the ranges are kept. With `Kernel::fixes.simple_coincidence_crossing_is_point`
-//!   a span pair whose separation keeps one side without vanishing is already the nearest
-//!   point (`Curve::simple_coincidence_checker`), and `drop_ranges_of_tangencies` then makes
-//!   a section tangent to a floor arc at their shared end one point (#18064).
+//!   not cover, the ranges are kept. A face/face section tangent to a floor arc at
+//!   their shared end vertex is made one point by the tangency witness, from the
+//!   surfaces (`crate::intersect::curve_class::witness`, #18064).
 //! - **Flank points of an ellipse's touch (#18828).** After the spurious points are
 //!   culled, consecutive point solutions of a line and an ellipse that is no circle are
 //!   replaced by the line's one touch with the ellipse when the line lies in the ellipse's
@@ -253,6 +252,7 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
     other: &Curve,
     other_interval: &Extent1d,
     dist_tol: f64,
+    excluded_target_ends: [bool; 2],
     sols: &mut SolutionArray<O>,
 ) -> Result<()> {
     let mut moved_any = Vec::new();
@@ -280,6 +280,9 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
             };
             let (sol_on_end, sol_on_drop) = if which == 0 { (t1, t2) } else { (t2, t1) };
             for end in 0..2 {
+                if which == 1 && excluded_target_ends.get(end).copied() == Some(true) {
+                    continue;
+                }
                 if moved {
                     break;
                 }
@@ -314,6 +317,16 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                     continue;
                 }
                 let drop_t = dropped.parameter;
+                // Dropping a source end can also land on an excluded target end.
+                // Reject the move before it can replace or remove the interior root.
+                let target_t = if which == 0 { drop_t } else { end_t };
+                if excluded_target_ends
+                    .iter()
+                    .zip([other_interval.min(), other_interval.max()])
+                    .any(|(&excluded, end)| excluded && target_t == end)
+                {
+                    continue;
+                }
                 // A range solution overlapping the stretch (in either curve's parameter)
                 // already reports that contact as a coincidence. Moving the point across
                 // it onto the range's far end would drop the point there as named twice,
@@ -338,6 +351,7 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                 // has a point of the other within tolerance). Not certified (a curve kind
                 // without a speed bound, a point too far, the piece budget spent): the
                 // solution stays where upstream puts it.
+                k.work_counters.add_contact_stretch_certification();
                 let Some(within) = native_failure(curves_stay_within(
                     k,
                     end_curve,
@@ -857,6 +871,7 @@ impl Curve {
             [None, None],
             0.0,
             true,
+            [false; 2],
         )
     }
 
@@ -896,6 +911,7 @@ impl Curve {
             cache2,
             [None, None],
             0.0,
+            [false; 2],
         )
     }
 
@@ -928,6 +944,7 @@ impl Curve {
         cache2: &mut Option<CurveCache<O>>,
         zone_tols: [Option<f64>; 2],
         contact_tol: f64,
+        excluded_target_ends: [bool; 2],
     ) -> Result<SolutionArray<O>> {
         if opts.handles == [None, None] && opts.analytic_handles == [None, None] {
             let own = operand_handles(self, other);
@@ -948,6 +965,7 @@ impl Curve {
                     &mut None,
                     zone_tols,
                     contact_tol,
+                    excluded_target_ends,
                 )?
                 .without_objects());
         }
@@ -963,6 +981,7 @@ impl Curve {
             zone_tols,
             contact_tol,
             false,
+            excluded_target_ends,
         )
     }
 
@@ -1007,6 +1026,7 @@ impl Curve {
                 [None, None],
                 0.0,
                 false,
+                [false; 2],
             )?
             .without_objects())
     }
@@ -1032,6 +1052,7 @@ impl Curve {
         zone_tols: [Option<f64>; 2],
         contact_tol: f64,
         own_slots: bool,
+        excluded_target_ends: [bool; 2],
     ) -> Result<SolutionArray<O>> {
         let [h_this, h_other] = opts.handles;
         let same_curve = core::ptr::eq(self, other);
@@ -1476,6 +1497,7 @@ impl Curve {
                 other,
                 other_interval,
                 dist_tol,
+                excluded_target_ends,
                 &mut sols,
             )?;
         }
@@ -2456,11 +2478,11 @@ impl Curve {
     ///   of one sign; or [`curves_meet_at_most_once`]); else (two curved curves tangent to
     ///   each other, an exact or near overlap, also with a conic over an arc, two touches)
     ///   the stretch keeps its ranges: a tangency has no sign change, so at the scaled zero
-    ///   it is a short coincidence and no bound tells it from one. With
-    ///   `Kernel::fixes.simple_coincidence_crossing_is_point` the span pairs of a one-sided
-    ///   approach are already nearest points, and `drop_ranges_of_tangencies` makes a
-    ///   section tangent to a floor arc at their shared end one point (#18064). So does a curve
-    ///   against itself whose touch is where it folds back onto itself. Curves that come
+    ///   it is a short coincidence and no bound tells it from one. `drop_ranges_of_tangencies`
+    ///   drops the flank ranges beside a touch (a curve against itself whose touch is where
+    ///   it folds back onto itself), and a face/face section tangent to a floor arc at their
+    ///   shared end vertex is made one point by the tangency witness
+    ///   (`crate::intersect::curve_class::witness`, #18064). Curves that come
     ///   back within the tolerance elsewhere without changing sides
     ///   are one coincidence whose separation passes the tolerance here and there (a fitted
     ///   copy of a closed section, #1036), and keep their ranges; so do two separate touches
@@ -2809,9 +2831,8 @@ impl Curve {
                 // overlap, a fitted copy touching its edge where the fit is exact, two
                 // touches) and keeps its ranges: a tangency of two curved curves has no
                 // sign change, so at the scaled zero it cannot be told from a short
-                // coincidence. With `simple_coincidence_crossing_is_point` the per-span
-                // nearest points and `drop_ranges_of_tangencies` make the shared-end
-                // tangency of a section and a floor arc one point (#18064)
+                // coincidence (the face/face tangency witness makes the shared-end
+                // tangency of a section and a floor arc one point, #18064)
                 if !(touch_is_alone(
                     k,
                     self,
@@ -4389,7 +4410,8 @@ mod tests {
         let mut sols = SolutionArray::new();
         sols.add(&range);
         sols.add(&point);
-        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, &mut sols).unwrap();
+        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, [false; 2], &mut sols)
+            .unwrap();
         assert_eq!(sols.len(), 2, "the point is kept");
         let kept = sols.get(1).unwrap();
         assert_eq!(kept.solution_type, SolutionType::SingleValue);
@@ -4400,7 +4422,8 @@ mod tests {
         // so it moves there
         let mut alone = SolutionArray::new();
         alone.add(&point);
-        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, &mut alone).unwrap();
+        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, [false; 2], &mut alone)
+            .unwrap();
         assert_eq!(alone.len(), 1);
         assert_eq!(alone.get(0).unwrap().start.parameters[..2], [0.0, 0.0]);
 
@@ -4409,9 +4432,39 @@ mod tests {
         for t in [0.1, 0.3, 0.5] {
             chain.add(&sol(SolutionType::SingleValue, [t, t], [0.0, 0.0]));
         }
-        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, &mut chain).unwrap();
+        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, [false; 2], &mut chain)
+            .unwrap();
         assert_eq!(chain.len(), 1);
         assert_eq!(chain.get(0).unwrap().start.parameters[..2], [0.0, 0.0]);
+
+        // A source end drops onto the bounded target's start, even though the
+        // actual oblique crossing is interior to both curves. Its mask applies
+        // through this indirect route as well as when moving to a target end.
+        let zone = 1e-5;
+        let oblique = polyline(&[
+            [-3.0 * zone, 0.0, 4.8 * zone],
+            [0.0, 0.0, 1.8 * zone],
+            [1.9 * zone, 0.0, -0.1 * zone],
+        ]);
+        let bounded = polyline(&[[0.0, 0.0, 0.0], [0.0, 0.0, 6.0 * zone]]);
+        let crossing = sol(SolutionType::SingleValue, [0.5, 0.3], [0.0, 0.0]);
+        for (mask, expected) in [([false; 2], [1.0, 0.0]), ([true, false], [0.5, 0.3])] {
+            let mut contact = SolutionArray::new();
+            contact.add(&crossing);
+            move_contacts_to_curve_ends(
+                &k,
+                &oblique,
+                &unit(),
+                &bounded,
+                &unit(),
+                2.0 * zone,
+                mask,
+                &mut contact,
+            )
+            .unwrap();
+            assert_eq!(contact.len(), 1);
+            assert_eq!(contact.get(0).unwrap().start.parameters[..2], expected);
+        }
 
         let crosses = |others: &[Solution<H>], gone: &[usize]| {
             let mut s = SolutionArray::new();
@@ -4890,6 +4943,7 @@ mod tests {
                     &mut None,
                     [None, None],
                     1e-5,
+                    [false; 2],
                 )
                 .unwrap();
             let points: Vec<Vec3> = sols

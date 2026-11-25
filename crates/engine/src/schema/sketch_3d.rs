@@ -1,5 +1,6 @@
 //! Contracts and result types for the commands in `cmd/sketch_3d.rs`: `sketch.line3d`,
-//! `sketch.spline3d`, `sketch.arc3d`, `sketch.point3d` and `sketch.move3d`.
+//! `sketch.spline3d`, `sketch.spline3d.control_point`, `sketch.arc3d`, `sketch.point3d` and
+//! `sketch.move3d`.
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether the sketch has 3D Sketch on, a wire
@@ -48,6 +49,23 @@ pub struct Spline3dParams {
     #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "DrawnPoints")]
     pub points: Option<DrawnPoints>,
+    /// The sketch to draw in: its feature id or its name. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+/// Draw a smooth cubic 3D curve shaped by world control points: it starts on the first, ends on
+/// the last and is pulled towards the ones between without passing through them. Needs 3D Sketch
+/// on for the sketch (`sketch.options` with `sketch_3d: true`). One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = points_required)]
+pub struct ControlSpline3dParams {
+    // Optional in the type and required in the schema, as `Line3dParams::points`.
+    /// The world control points [x, y, z] in mm, 3 to 500. The curve passes through the first
+    /// and the last only.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ControlPoints")]
+    pub points: Option<ControlPoints>,
     /// The sketch to draw in: its feature id or its name. Default: the one being edited.
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
@@ -111,7 +129,8 @@ pub struct Move3dParams {
     #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PlanePointId")]
     pub point: Option<PlanePointId>,
-    /// Which fit point of the curve (0 is the first), below 500. Default: 0.
+    /// Which fit point of the curve, or control point of a control point spline (0 is the
+    /// first), below 500. Default: 0.
     #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "FitIndex")]
     pub index: Option<FitIndex>,
@@ -203,15 +222,21 @@ pub struct DrawnPoints(pub Vec<[Value; 3]>);
 
 impl<'de> Deserialize<'de> for DrawnPoints {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let max = solidcraft_sketch::MAX_FIT_POINTS;
-        let Value::Array(a) = Value::deserialize(d)? else {
-            return Err(D::Error::custom(whole("`points` must list [x,y,z] points")));
-        };
-        if a.len() < 2 || a.len() > max {
-            return Err(D::Error::custom(whole(format!("`points` needs 2 to {max} points"))));
-        }
-        a.iter().map(|v| expr_point(v, &whole("a point must be [x, y, z]")).map_err(D::Error::custom)).collect::<Result<_, _>>().map(DrawnPoints)
+        drawn_points(Value::deserialize(d)?, 2).map(DrawnPoints).map_err(D::Error::custom)
     }
+}
+
+/// A list of `min` to 500 points, each `[x, y, z]` or `{x, y, z}` with numbers or expressions, as
+/// the 3D drawing commands' `points` reader takes it, with its messages.
+fn drawn_points(v: Value, min: usize) -> Result<Vec<[Value; 3]>, String> {
+    let max = solidcraft_sketch::MAX_FIT_POINTS;
+    let Value::Array(a) = v else {
+        return Err(whole("`points` must list [x,y,z] points"));
+    };
+    if a.len() < min || a.len() > max {
+        return Err(whole(format!("`points` needs {min} to {max} points")));
+    }
+    a.iter().map(|v| expr_point(v, &whole("a point must be [x, y, z]"))).collect()
 }
 
 impl JsonSchema for DrawnPoints {
@@ -225,6 +250,33 @@ impl JsonSchema for DrawnPoints {
             "type": "array",
             "items": point,
             "minItems": 2,
+            "maxItems": solidcraft_sketch::MAX_FIT_POINTS
+        })
+    }
+}
+
+/// The `points` of `sketch.spline3d.control_point`: a list of 3 to 500 control points, each as a
+/// point of [`DrawnPoints`], with the handler's messages.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ControlPoints(pub Vec<[Value; 3]>);
+
+impl<'de> Deserialize<'de> for ControlPoints {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        drawn_points(Value::deserialize(d)?, solidcraft_sketch::MIN_CONTROL_POINTS).map(ControlPoints).map_err(D::Error::custom)
+    }
+}
+
+impl JsonSchema for ControlPoints {
+    fn schema_name() -> Cow<'static, str> {
+        "ControlPoints".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<PointExpr3>();
+        json_schema!({
+            "description": "World control points [x, y, z] in mm, 3 to 500, each coordinate a number or an expression over the design's parameters.",
+            "type": "array",
+            "items": point,
+            "minItems": solidcraft_sketch::MIN_CONTROL_POINTS,
             "maxItems": solidcraft_sketch::MAX_FIT_POINTS
         })
     }
@@ -355,7 +407,8 @@ impl JsonSchema for FitIndex {
     }
 }
 
-/// What `sketch.line3d`, `sketch.spline3d` and `sketch.arc3d` return.
+/// What `sketch.line3d`, `sketch.spline3d`, `sketch.spline3d.control_point` and `sketch.arc3d`
+/// return.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct Curves3dResult {
     /// The ids of the curves drawn: one per segment for a line, one for a spline or an arc.

@@ -157,6 +157,11 @@ panel, and in the right-click menu of a body) open the same dialog with that for
 the selected bodies as STL, 3MF or 3MF with face tags (below) to a file you name, and you can change
 the format there.
 
+If a body cannot be meshed, STL, OBJ and 3MF exports still write the other bodies. The toast
+names each body that was left out and stays until you dismiss it, and the command's reply lists
+them in `skipped`, with the reason for each in `warnings`. If no body can be meshed, the export
+fails.
+
 A 3MF has one object per body, so a slicer arranges the bodies of a multi-body part apart on the
 bed. Scripts and the control channel can keep each component together: `file.export` or
 `file.save_mesh` with `objects: "component"` writes every placed component that holds two or more
@@ -351,9 +356,17 @@ points up (+Z), a positive angle lowers the leading edge: the usual washout at t
 Opening a design from your file manager, or with `solidcraft part.sc`, while SolidCraft is already
 running opens it in that window, as File > Open does, and no second app starts. The two launches
 talk through a socket in your settings folder (a named pipe on Windows) that only you can reach;
-nothing listens on the network, and only file paths are sent. If the running window does not answer
-within a moment, the new launch starts normally. `solidcraft --new-instance part.sc` always starts
-a separate app.
+nothing listens on the network, and only file paths are sent, with whether they open read-only.
+If the running window does not answer within a moment, the new launch starts normally.
+`solidcraft --new-instance part.sc` always starts a separate app.
+
+`solidcraft --read-only part.sc` opens the design read-only, as **Open Read-Only** does (see
+[Designs in shared or synced folders](#designs-in-shared-or-synced-folders)): you can change it,
+and Save asks for a new file. It covers every file named on that command line, in a new window or
+in the running one. A design that another SolidCraft has open opens without asking. A SolidCraft
+from before this option doesn't take read-only files from a new launch; that launch opens them in
+a window of its own. STEP, mesh and other imported files always open as new, unsaved designs, so
+the option changes nothing for them. Without a file it does nothing.
 
 ## Large files
 
@@ -400,6 +413,7 @@ placeholder in it is replaced:
 |---|---|
 | `{design}` | The design's name |
 | `{body}` | The exported body's name. When an export holds several bodies, the first one |
+| `{source}` | The name, without folder or extension, of the file the exported body was imported from; for a body a later feature made, the design's first import. Without an import, the design's name |
 | `{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}` | That [design property](#design-properties) |
 
 The help icon next to the setting lists the same placeholders. A design property that is not set
@@ -412,6 +426,23 @@ name that Windows keeps for a device, such as `CON` or `NUL`, gets a `_` in fron
 cut to 200 characters and 240 bytes, so it fits with its extension. Left empty, File → Export
 offers the design's name, and Save As Mesh and a body's Export… offer the body's name. The control
 channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
+
+## Default folders
+
+**Preferences → Design → Folders** sets where the save dialogs open. Both settings are empty by
+default. An empty setting keeps the old behaviour: the dialog opens in the folder you used last, or
+in the folder of the open design.
+
+- **Designs folder**: **Save** and **Save As** open here for a design that has never been saved.
+  **Save As** for a design that is already saved still opens in that design's folder.
+- **Exports folder**: **File → Export**, **Save As Mesh**, drawings and the other files SolidCraft
+  saves open here. When you choose another folder in one of these dialogs, the next one opens in
+  that folder until you quit or change the setting.
+
+Type a folder or choose one with **Browse…**. **Clear** empties the setting. A folder that no longer
+exists is ignored, and the dialog opens in the folder you used last. The web app saves through the
+browser, so it has no folder settings. The control channel sets them with
+`ui.prefs {"designs_folder": "/home/sam/Designs", "exports_folder": "/home/sam/Prints"}`.
 
 ## Design properties
 

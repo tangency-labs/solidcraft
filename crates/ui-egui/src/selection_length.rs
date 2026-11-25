@@ -88,18 +88,19 @@ fn format_readout(app: &SolveApp, length: f64, count: usize) -> String {
 /// Paints the readout in the bottom left corner of `free`, the area the corner legends leave
 /// (see `viewport_details::legacy_legends`), placed as the next legend up would be. Not while a
 /// command dialog is open: Measure and the commands that take edges show their own values.
-pub(crate) fn paint(app: &SolveApp, painter: &Painter, free: Rect) {
+/// Returns where it is drawn, so the scale bar keeps clear of it.
+pub(crate) fn paint(app: &SolveApp, painter: &Painter, free: Rect) -> Option<Rect> {
     if app.dialog.is_some() || app.session.selection.is_empty() || app.session.selection.len() > MAX_ITEMS {
-        return;
+        return None;
     }
     // Only edges and sketch curves have a length; anything else shows nothing, and the model
     // isn't placed for it (a face lit during a joint drag must not place the world again).
     if !app.session.selection.iter().all(|s| matches!(s, Sel::Edge { .. } | Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. })) {
-        return;
+        return None;
     }
     let id = egui::Id::unique("sc_selection_length");
     // A model that cannot be placed has nothing to measure.
-    let Ok(state) = app.session.world_state() else { return };
+    let Ok(state) = app.session.world_state() else { return None };
     let cached = painter.ctx().data(|d| d.get_temp::<Cached>(id));
     let measured = match cached {
         Some(c) if c.selection == app.session.selection && Arc::ptr_eq(&c.state, &state) => c.measured,
@@ -109,7 +110,7 @@ pub(crate) fn paint(app: &SolveApp, painter: &Painter, free: Rect) {
             measured
         }
     };
-    let Some((length, count)) = measured else { return };
+    let (length, count) = measured?;
     let text = format_readout(app, length, count);
     let t = Tokens::get();
     let galley = painter.layout_no_wrap(text, FontId::proportional(t.font_body), t.text);
@@ -127,4 +128,5 @@ pub(crate) fn paint(app: &SolveApp, painter: &Painter, free: Rect) {
     painter.rect(r, t.radius_sm, t.overlay, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
     crate::scenario::publish_target("viewport:selection_length", r);
     painter.galley(r.left_center() + vec2(8.0, -galley.size().y / 2.0), galley, t.text);
+    Some(r)
 }
