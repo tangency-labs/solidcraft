@@ -334,7 +334,7 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
         }
         2 => {
             let (u, v) = (start - centre, local - centre);
-            if let Ok(turn) = solidcore_ops::joint_turn([u.x, u.y], [v.x, v.y]) {
+            if let Ok(turn) = solidcore_ops::joint_turn::joint_turn([u.x, u.y], [v.x, v.y]) {
                 let signed = if u.x * v.y < u.y * v.x { -turn } else { turn };
                 params["angle"] = json!((drag.angle + signed).to_degrees());
             }
