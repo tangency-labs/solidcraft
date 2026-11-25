@@ -50,6 +50,7 @@ const PROFILE_KEYS: &[&str] = &[
     "browser_scroll_wheel",
     "center_arc_follows_cursor",
     "color_vision",
+    "command_search_centred",
     "design_reopen_views",
     "design_reuse_views",
     "design_sub_tab_render",
