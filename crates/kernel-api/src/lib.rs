@@ -23,10 +23,12 @@ use solidcore_record::brep::Brep;
 use solidcore_record::brep::history::History;
 
 pub mod cell_grid;
+pub mod curves;
 pub mod exchange;
 pub mod modelling;
 
 pub use cell_grid::{CellGrid, CellGridLimits};
+pub use curves::{CurveRefused, Curves};
 pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
 
@@ -75,6 +77,8 @@ pub enum OpKind {
     CellGrid,
     /// The exchange helpers: a STEP string, CADIR read and written ([`Exchange`]).
     Exchange,
+    /// Curves queried and splines fitted ([`Curves`]).
+    Curves,
 }
 
 impl OpKind {
@@ -94,6 +98,7 @@ impl OpKind {
         OpKind::OffsetFaces,
         OpKind::CellGrid,
         OpKind::Exchange,
+        OpKind::Curves,
     ];
 
     /// The operation's stable name, as the support matrix and route files spell it.
@@ -113,6 +118,7 @@ impl OpKind {
             OpKind::OffsetFaces => "offset_faces",
             OpKind::CellGrid => "cell_grid",
             OpKind::Exchange => "exchange",
+            OpKind::Curves => "curves",
         }
     }
 

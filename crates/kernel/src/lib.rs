@@ -435,6 +435,7 @@ pub use route::box_solid;
 pub use route::cell_regions;
 pub use route::chamfer;
 pub use route::chamfer_sides;
+pub use route::curves;
 pub use route::cylinder;
 pub use route::default_cell_grid;
 pub use route::extrude;

@@ -11,6 +11,7 @@ use solidcore_record::brep::Brep;
 use solidcraft_kernel_api::{Backend, BackendError, BackendId, Exported, OpKind, Support};
 
 mod cell_grid;
+mod curves;
 mod exchange;
 mod modelling;
 

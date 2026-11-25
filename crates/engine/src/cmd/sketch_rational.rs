@@ -32,7 +32,7 @@ fn interval(curve: &Curve, [a, b]: [f64; 2], cmd: &str) -> Result<(Vec<Vec2>, u8
     } else {
         let tail = subcurve(curve, a, 1.0, cmd)?;
         let head = subcurve(curve, 0.0, b - 1.0, cmd)?;
-        solidcraft_kernel::services::curve::join_curves(&tail, &head, 1e-7).map_err(|e| bad(cmd, e.to_string()))?
+        solidcraft_kernel::curves::join_curves(&tail, &head, 1e-7).map_err(|e| bad(cmd, e.to_string()))?
     };
     let Curve::RationalSpline { knots, homogeneous } = piece else { return Err(bad(cmd, "expected a rational sketch spline interval")) };
     let degree =
