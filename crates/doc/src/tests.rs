@@ -26,6 +26,7 @@ fn boundary_fill_classifies_cells_on_exact_surfaces() {
         .add_feature(
             FeatureKind::BoundaryFill {
                 tools: vec![BodyName(tool)],
+                planes: Vec::new(),
                 cells: vec![Position(Vec3::new(0.0, 0.0, 5.0))],
                 operation: Operation::NewBody,
                 remove_tools: true,
@@ -48,6 +49,20 @@ fn boundary_fill_classifies_cells_on_exact_surfaces() {
     let error = model.result(fill).unwrap().error.as_ref().unwrap();
     assert!(error.contains("Boundary Fill cell points must be away from tool boundaries"), "{error}");
     assert_eq!(model.state().bodies.len(), 1, "the original tool is kept on failure");
+}
+
+/// A design saved before Boundary Fill took planes has none, and one without planes saves as it did.
+#[test]
+fn boundary_fill_without_planes_reads_and_saves_as_before() {
+    let old = serde_json::json!({"type": "boundary_fill", "tools": ["B"], "cells": [[0.0, 0.0, 5.0]]});
+    let kind: FeatureKind = serde_json::from_value(old).unwrap();
+    let FeatureKind::BoundaryFill { planes, .. } = &kind else { panic!("Boundary Fill") };
+    assert!(planes.is_empty());
+    assert!(serde_json::to_value(&kind).unwrap().get("planes").is_none());
+    let with = serde_json::json!({"type": "boundary_fill", "tools": ["B"], "planes": [{"type": "origin", "name": "XY"}], "cells": [[0.0, 0.0, 5.0]]});
+    let kind: FeatureKind = serde_json::from_value(with).unwrap();
+    let FeatureKind::BoundaryFill { planes, .. } = &kind else { panic!("Boundary Fill") };
+    assert_eq!(planes.len(), 1);
 }
 
 #[test]
@@ -1661,6 +1676,8 @@ fn a_coil_follows_its_sketch() {
         FeatureKind::Coil {
             base: point_expr(Vec3::new(0.0, 0.0, 0.0)),
             axis: Dir(Vec3::Z),
+            axis_ref: None,
+            reversed: false,
             sketch: Some(crate::SketchId(sketch)),
             profiles: ProfileSel::All,
             diameter: None,
