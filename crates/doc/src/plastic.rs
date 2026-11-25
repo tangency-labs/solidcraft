@@ -51,9 +51,11 @@ impl PlasticRule {
             PlasticRule::new("ABS (1.5mm)", "ABS Plastic", false, "1.5 mm", "3.5 mm", "1.2 mm"),
             PlasticRule::new("Nylon (PA6) (2.5mm)", "Nylon 6", false, "2.5 mm", "3 mm", "0.8 mm"),
             PlasticRule::new("Polypropylene (PP) (3 mm)", "Polypropylene", false, "3 mm", "3.8 mm", "0.8 mm"),
-            PlasticRule::new("ABS (0.1 in)", "ABS Plastic", true, "0.1 in", "3.5 mm", "1.2 mm"),
-            PlasticRule::new("Nylon (PA6) (0.1 in)", "Nylon 6", true, "0.1 in", "3 mm", "0.8 mm"),
-            PlasticRule::new("Polypropylene (PP) (0.1 in)", "Polypropylene", true, "0.1 in", "3.8 mm", "0.8 mm"),
+            // Every length of an inch rule is in inches (#22133); designs saved before keep the
+            // millimetre limits these had (format/pending/plastic-inch-rule-limits.rs).
+            PlasticRule::new("ABS (0.1 in)", "ABS Plastic", true, "0.1 in", "0.14 in", "0.05 in"),
+            PlasticRule::new("Nylon (PA6) (0.1 in)", "Nylon 6", true, "0.1 in", "0.12 in", "0.03 in"),
+            PlasticRule::new("Polypropylene (PP) (0.1 in)", "Polypropylene", true, "0.1 in", "0.15 in", "0.03 in"),
         ]
     }
 
@@ -204,5 +206,49 @@ mod tests {
         let pp_in = d.plastic_values(&vals, &d.plastic_rule("Polypropylene (PP) (0.1 in)").unwrap()).unwrap();
         assert!((pp_in.thickness - 2.54).abs() < 1e-9 && (pp_in.nominal_radius - 1.27).abs() < 1e-9 && (pp_in.clearance - 0.1016).abs() < 1e-9);
         assert_eq!(d.plastic_rules().len(), 6);
+    }
+
+    /// A library rule gives every plain length in one unit: inches for a rule named in inches,
+    /// millimetres for the others (#22133). Expressions of `Thickness` follow the thickness.
+    #[test]
+    fn library_rules_keep_one_unit() {
+        for rule in PlasticRule::library() {
+            let unit = if rule.name.contains(" in)") { " in" } else { " mm" };
+            for (field, e, kind) in rule.fields() {
+                if kind == Kind::Length && !e.contains("Thickness") {
+                    assert!(e.ends_with(unit), "`{}` gives its {field} as `{e}`, not in{unit}", rule.name);
+                }
+            }
+        }
+    }
+
+    /// A design saved before #22133 that uses an inch rule keeps the millimetre limits it had;
+    /// a design saved now takes the inch limits.
+    #[test]
+    fn older_designs_keep_the_old_inch_rule_limits() {
+        let limits = |d: &Document, name: &str| {
+            let r = d.plastic_rule(name).unwrap();
+            (r.max_thickness, r.min_thickness)
+        };
+        let mut doc = Document::default();
+        doc.plastic.active = Some("ABS (0.1 in)".into());
+        doc.plastic.assigned.insert("Body1".into(), "Nylon (PA6) (0.1 in)".into());
+        let now = crate::format::read(&doc.to_json()).unwrap();
+        assert_eq!(limits(&now, "ABS (0.1 in)"), ("0.14 in".into(), "0.05 in".into()));
+        assert!(now.plastic.rules.is_empty(), "a design saved now keeps no copy of a library rule");
+
+        let mut old: serde_json::Value = serde_json::from_str(&doc.to_json()).unwrap();
+        old["format"] = serde_json::json!(crate::format::format_string(68));
+        if let Some(o) = old.as_object_mut() {
+            o.remove("format_pending");
+        }
+        let opened = crate::format::read(&old.to_string()).unwrap();
+        assert_eq!(limits(&opened, "ABS (0.1 in)"), ("3.5 mm".into(), "1.2 mm".into()));
+        assert_eq!(limits(&opened, "Nylon (PA6) (0.1 in)"), ("3 mm".into(), "0.8 mm".into()));
+        assert_eq!(limits(&opened, "Polypropylene (PP) (0.1 in)"), ("0.15 in".into(), "0.03 in".into()), "an unused rule takes the new limits");
+        let mut kept = opened.plastic_rule("ABS (0.1 in)").unwrap();
+        (kept.max_thickness, kept.min_thickness) = ("0.14 in".into(), "0.05 in".into());
+        assert_eq!(Some(kept), PlasticRule::library().into_iter().find(|r| r.name == "ABS (0.1 in)"), "only the limits differ");
+        assert_eq!(opened.plastic_rules().len(), 6);
     }
 }
