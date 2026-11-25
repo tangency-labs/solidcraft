@@ -1185,6 +1185,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 
 - `accent` (default `""`: the theme's own; `#rrggbb`: that accent over a theme that sets `accepts_accent`, for the accent, its soft tint, the selected row, chips, the primary action, the selection in the view and the File view's primary action; the tabs' own accents stay the theme's; any other theme ignores it and keeps the value; anything else is an error)
 - `angle_decimals`
+- `ask_insert_design_configuration` (default false; Preferences > General > Dialogs): interactive Insert Design asks which saved configuration to insert; false preserves one-click insertion of the source's saved state. Programmatic `component.insert_design` calls never ask and use their `configuration` parameter.
 - `assembly_move_handles` (default true): explicit Assembly Move uses the permitted joint-motion handles; false keeps the previous Move panel.
 - `auto_operation` (default true: feature windows choose Join, New Body or Cut from what their material touches until one is picked; false: each keeps the operation it opens with, Extrude its own Join or Cut)
 - `background_image` (string, default empty: a picture's file, shown behind the model and covering the window from its centre; a photo stored turned by its EXIF orientation is shown upright, #19138).

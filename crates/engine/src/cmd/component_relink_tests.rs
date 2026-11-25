@@ -1737,6 +1737,81 @@ fn linked_configurations_reject_row_ids_recycled_after_source_undo() {
 }
 
 #[test]
+fn insert_configuration_identity_accepts_the_same_row_after_a_rename() {
+    for legacy in [false, true] {
+        let dir = folder(if legacy { "insert-identity-rename-legacy" } else { "insert-identity-rename" });
+        let file = dir.join("family.sc");
+        let (mut source, _, row) = configured_part(&file);
+        if legacy {
+            source.doc_mut().configs.row_identities.remove(&row);
+            run(&mut source, "file.save", json!({"path": file}));
+        }
+        let identity = source.doc.configs.row_identity(row);
+        assert_eq!(identity.is_none(), legacy);
+        let mut s = Session::default();
+        let first = run(&mut s, "component.insert_design", json!({"path": file, "configuration": row, "configuration_identity": identity}));
+        let component = first["component"].as_u64().unwrap();
+        assert_eq!(s.doc.links[&component].configuration_identity, identity);
+        assert_variant_length(&mut s, first["occurrence"].as_u64().unwrap(), 30.0);
+
+        run(&mut source, "config.row", json!({"name": row, "rename": "Renamed", "values": {"L": "32 mm"}}));
+        assert_eq!(source.doc.configs.row_identity(row), identity);
+        run(&mut source, "file.save", json!({"path": file}));
+        let renamed = run(&mut s, "component.insert_design", json!({"path": file, "configuration": row, "configuration_identity": identity}));
+        assert_variant_length(&mut s, renamed["occurrence"].as_u64().unwrap(), 32.0);
+        assert_eq!(s.doc.links[&renamed["component"].as_u64().unwrap()].configuration_identity, identity);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
+fn insert_configuration_identity_refuses_a_recycled_row_before_new_or_reused_insert() {
+    for legacy in [false, true] {
+        let dir = folder(if legacy { "insert-identity-recycled-legacy" } else { "insert-identity-recycled" });
+        let file = dir.join("family.sc");
+        let (mut source, _, _) = configured_part(&file);
+        run(&mut source, "config.row", json!({"name": "Victim", "values": {"L": "35 mm"}}));
+        let row = source.doc.configs.rows.iter().find(|r| r.name == "Victim").unwrap().id;
+        if legacy {
+            source.doc_mut().configs.row_identities.remove(&row);
+        }
+        let identity = source.doc.configs.row_identity(row);
+        run(&mut source, "file.save", json!({"path": file}));
+        let mut s = Session::default();
+        let original =
+            run(&mut s, "component.insert_design", json!({"path": file, "configuration": row, "configuration_identity": identity, "reuse": true}));
+
+        run(&mut source, "edit.undo", json!({}));
+        run(&mut source, "config.row", json!({"name": "Replacement", "values": {"L": "35 mm"}}));
+        assert_eq!(source.doc.configs.rows.iter().find(|r| r.name == "Replacement").unwrap().id, row);
+        assert_ne!(source.doc.configs.row_identity(row), identity);
+        run(&mut source, "file.save", json!({"path": file}));
+        // An unchecked caller may intentionally select the replacement and warm both the
+        // source read cache and the reusable definition. Neither bypasses the next check.
+        run(&mut s, "component.insert_design", json!({"path": file, "configuration": row, "reuse": true}));
+        let before = s.doc.clone();
+        let undo = s.undo.len();
+        for reuse in [false, true] {
+            for from_memory in [false, true] {
+                let mut params = json!({"configuration": row, "configuration_identity": identity, "reuse": reuse});
+                if from_memory {
+                    params["document"] = json!(source.doc.to_json());
+                } else {
+                    params["path"] = json!(file);
+                }
+                let error = s.execute("component.insert_design", &params).unwrap_err();
+                assert!(matches!(&error, crate::EngineError::BadParams { .. }), "{error}");
+                assert!(error.to_string().contains("was replaced"), "{error}");
+                assert_eq!(s.doc, before);
+                assert_eq!(s.undo.len(), undo);
+                assert_variant_length(&mut s, original["occurrence"].as_u64().unwrap(), 35.0);
+            }
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
 fn relinking_one_occurrence_selects_a_configuration_and_keeps_other_placements() {
     let dir = folder("configuration-placement");
     let file = dir.join("family.sc");

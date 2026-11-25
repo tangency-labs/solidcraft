@@ -1,0 +1,74 @@
+{
+  "ar": {
+    "insert_design.configuration": "التكوين",
+    "insert_design.configuration_help": "اختر تكوينًا، أو استخدم حالة الملف المحفوظة.",
+    "insert_design.configuration_loading": "جارٍ قراءة التكوينات…",
+    "insert_design.configuration_read_failed": "تعذرت قراءة التكوينات: {reason}",
+    "insert_design.saved_state": "الحالة المحفوظة",
+    "settings.ask_insert_design_configuration": "السؤال عن تكوين التصميم قبل إدراجه",
+    "settings.ask_insert_design_configuration_help": "اختر تكوينًا محفوظًا عند إدراج تصميم. أوقف هذا الخيار لإدراج الحالة المحفوظة دون سؤال."
+  },
+  "de": {
+    "insert_design.configuration": "Konfiguration",
+    "insert_design.configuration_help": "Wählen Sie eine Konfiguration oder verwenden Sie den gespeicherten Zustand der Datei.",
+    "insert_design.configuration_loading": "Konfigurationen werden gelesen…",
+    "insert_design.configuration_read_failed": "Konfigurationen konnten nicht gelesen werden: {reason}",
+    "insert_design.saved_state": "Gespeicherter Zustand",
+    "settings.ask_insert_design_configuration": "Vor dem Einfügen nach der Konfiguration eines Entwurfs fragen",
+    "settings.ask_insert_design_configuration_help": "Wählen Sie beim Einfügen eines Entwurfs eine gespeicherte Konfiguration. Deaktivieren Sie diese Option, um den gespeicherten Zustand ohne Nachfrage einzufügen."
+  },
+  "en": {
+    "insert_design.configuration": "Configuration",
+    "insert_design.configuration_help": "Choose a configuration, or use the file's saved state.",
+    "insert_design.configuration_loading": "Reading configurations…",
+    "insert_design.configuration_read_failed": "Could not read configurations: {reason}",
+    "insert_design.saved_state": "Saved state",
+    "settings.ask_insert_design_configuration": "Ask for a design's configuration before inserting",
+    "settings.ask_insert_design_configuration_help": "Choose a saved configuration when inserting a design. Turn this off to insert the saved state without asking."
+  },
+  "he": {
+    "insert_design.configuration": "תצורה",
+    "insert_design.configuration_help": "בחרו תצורה או השתמשו במצב השמור של הקובץ.",
+    "insert_design.configuration_loading": "קריאת תצורות…",
+    "insert_design.configuration_read_failed": "לא ניתן לקרוא את התצורות: {reason}",
+    "insert_design.saved_state": "מצב שמור",
+    "settings.ask_insert_design_configuration": "לשאול על תצורת התכנון לפני הוספתו",
+    "settings.ask_insert_design_configuration_help": "בחרו תצורה שמורה בעת הוספת תכנון. כבו אפשרות זו כדי להוסיף את המצב השמור ללא שאלה."
+  },
+  "ja": {
+    "insert_design.configuration": "構成",
+    "insert_design.configuration_help": "構成を選択するか、ファイルの保存済みの状態を使用してください。",
+    "insert_design.configuration_loading": "構成を読み込み中…",
+    "insert_design.configuration_read_failed": "構成を読み込めませんでした: {reason}",
+    "insert_design.saved_state": "保存済みの状態",
+    "settings.ask_insert_design_configuration": "設計を挿入する前に構成を確認する",
+    "settings.ask_insert_design_configuration_help": "設計を挿入するときに保存済みの構成を選択します。オフにすると、確認せずに保存済みの状態を挿入します。"
+  },
+  "ko": {
+    "insert_design.configuration": "구성",
+    "insert_design.configuration_help": "구성을 선택하거나 파일에 저장된 상태를 사용하세요.",
+    "insert_design.configuration_loading": "구성을 읽는 중…",
+    "insert_design.configuration_read_failed": "구성을 읽을 수 없습니다: {reason}",
+    "insert_design.saved_state": "저장된 상태",
+    "settings.ask_insert_design_configuration": "설계를 삽입하기 전에 구성 묻기",
+    "settings.ask_insert_design_configuration_help": "설계를 삽입할 때 저장된 구성을 선택합니다. 이 옵션을 끄면 묻지 않고 저장된 상태를 삽입합니다."
+  },
+  "vi": {
+    "insert_design.configuration": "Cấu hình",
+    "insert_design.configuration_help": "Chọn một cấu hình hoặc sử dụng trạng thái đã lưu của tệp.",
+    "insert_design.configuration_loading": "Đang đọc các cấu hình…",
+    "insert_design.configuration_read_failed": "Không thể đọc các cấu hình: {reason}",
+    "insert_design.saved_state": "Trạng thái đã lưu",
+    "settings.ask_insert_design_configuration": "Hỏi cấu hình của thiết kế trước khi chèn",
+    "settings.ask_insert_design_configuration_help": "Chọn một cấu hình đã lưu khi chèn thiết kế. Tắt tùy chọn này để chèn trạng thái đã lưu mà không hỏi."
+  },
+  "zh": {
+    "insert_design.configuration": "配置",
+    "insert_design.configuration_help": "选择配置，或使用文件的已保存状态。",
+    "insert_design.configuration_loading": "正在读取配置…",
+    "insert_design.configuration_read_failed": "无法读取配置：{reason}",
+    "insert_design.saved_state": "已保存状态",
+    "settings.ask_insert_design_configuration": "插入设计前询问配置",
+    "settings.ask_insert_design_configuration_help": "插入设计时选择已保存的配置。关闭此选项可直接插入已保存状态而不询问。"
+  }
+}

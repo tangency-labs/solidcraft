@@ -120,6 +120,8 @@ pub struct Request {
     /// An open (`doc.open` with `new_tab`) that gets a tab of its own, even where a blank design
     /// would be replaced.
     pub new_tab: bool,
+    /// Interactive Insert Design reads the saved configuration rows before inserting anything.
+    pub(crate) choose_configuration: bool,
 }
 
 impl Request {
@@ -144,6 +146,7 @@ impl Request {
             plugin_import: false,
             print: false,
             new_tab: false,
+            choose_configuration: false,
         }
     }
     /// It adds what it reads to the active design.
@@ -230,6 +233,8 @@ struct Made {
     result: Value,
     /// Draw its Home picture once it is open (off the UI thread: a large design takes a while).
     thumbnail: bool,
+    /// A read-only first step of interactive Insert Design; no session changes have run yet.
+    configurations: Option<solidcraft_engine::doc::config::ConfigTable>,
 }
 type Job = Result<Made, String>;
 struct Running {
@@ -500,7 +505,7 @@ impl SolveApp {
     /// on, the design waits (commands, shortcuts and edits) while one runs or waits its turn.
     /// Off, the design stays usable: an operation's result lands after the person's edits.
     pub fn file_load_holds(&self) -> bool {
-        self.preferences.file_operations_wait && self.file_load.busy()
+        self.insert_design_options.is_some() || (self.preferences.file_operations_wait && self.file_load.busy())
     }
 }
 
@@ -602,6 +607,25 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
     }
     #[cfg(target_arch = "wasm32")]
     {
+        if request.choose_configuration {
+            request.choose_configuration = false;
+            let rows = solidcraft_engine::io::vfs::scoped(request.scope.clone(), || {
+                solidcraft_engine::io::vfs::allowing_hosts(&request.allow_hosts, || {
+                    crate::insert_design_options::read(&request.path, app.session.path.as_deref())
+                })
+            });
+            match rows {
+                Ok(rows) if !rows.rows.is_empty() => {
+                    crate::insert_design_options::offer(app, request, rows);
+                    return Ok(());
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    app.set_status(error.clone(), true);
+                    return Err(error);
+                }
+            }
+        }
         if staged_kind(&request) {
             app.file_load.queued.push_back(request);
             start_staged(app);
@@ -808,6 +832,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         plugin_import: id == "file.import",
         print: false,
         new_tab,
+        choose_configuration: false,
     };
     let _ = begin_request(app, request);
     None
@@ -940,6 +965,7 @@ fn start(app: &mut SolveApp) {
     let scope = request.scope.clone();
     let allow_hosts = request.allow_hosts.clone();
     let thumbnail = request.kind == Kind::Open;
+    let choose_configuration = request.choose_configuration;
     let export = request.kind.exports();
     // While a design rebuilds, a picture of what is built so far (a large design takes a while).
     let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1005,7 +1031,7 @@ fn start(app: &mut SolveApp) {
         // Servers allowed once hold for this request only, on this worker thread.
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             solidcraft_engine::io::vfs::allowing_hosts(&allow_hosts, || {
-                compute(scratch, command, &params, scope, thumbnail, export, &worker_phase, &worker_progress)
+                compute(scratch, command, &params, scope, thumbnail, export, choose_configuration, &worker_phase, &worker_progress)
             })
         }))
         .unwrap_or_else(|_| Err("the file operation failed; the current design is unchanged".into()));
@@ -1157,7 +1183,7 @@ fn step_staged(running: &mut Running) {
         }
         let (Some(session), Some(result)) = (staged.session.take(), staged.ran.take()) else { return };
         let thumbnail = staged.command == "doc.open" && staged.triangles <= STAGED_THUMBNAIL_TRIANGLES;
-        send(staged, Ok(Made { session, result, thumbnail }));
+        send(staged, Ok(Made { session, result, thumbnail, configurations: None }));
         return;
     }
     if staged.command == "doc.open" && solidcraft_engine::io::is_design_path(&path) {
@@ -1441,6 +1467,7 @@ fn compute(
     scope: Option<solidcraft_engine::io::vfs::PathScope>,
     thumbnail: bool,
     export: bool,
+    choose_configuration: bool,
     phase: &AtomicU8,
     progress: &Arc<Progress>,
 ) -> Job {
@@ -1450,6 +1477,16 @@ fn compute(
     if progress.is_cancelled() {
         return cancelled();
     }
+    if choose_configuration {
+        let path = params.get("path").and_then(Value::as_str).unwrap_or_default();
+        let rows = solidcraft_engine::io::vfs::scoped(scope.clone(), || crate::insert_design_options::read(path, session.path.as_deref()))?;
+        if progress.is_cancelled() {
+            return cancelled();
+        }
+        if !rows.rows.is_empty() {
+            return Ok(Made { session, result: Value::Null, thumbnail: false, configurations: Some(rows) });
+        }
+    }
     // The timeline's rebuild reports each feature and stops at the next one after Cancel. An
     // agent's scope is per thread, so it is set again here.
     let result =
@@ -1458,7 +1495,7 @@ fn compute(
     if export {
         // A successful export has already published its complete file. A Cancel arriving
         // after that commit must not turn a completed save into a misleading cancellation.
-        return Ok(Made { session, result, thumbnail: false });
+        return Ok(Made { session, result, thumbnail: false, configurations: None });
     }
     if progress.is_cancelled() {
         return cancelled();
@@ -1484,7 +1521,7 @@ fn compute(
             began.elapsed().as_secs_f64() * 1000.0
         );
     }
-    Ok(Made { session, result, thumbnail })
+    Ok(Made { session, result, thumbnail, configurations: None })
 }
 
 /// A sheet export's line on the card: the PNG's rows drawn so far, once its band loop reports them.
@@ -1634,6 +1671,7 @@ fn quiet(app: &SolveApp, r: &Running) -> bool {
         && app.docs.closing.is_none()
         && app.docs.quitting.is_none()
         && app.docs.batch.is_none()
+        && app.insert_design_options.is_none()
 }
 
 fn landing(app: &SolveApp, r: &Running) -> Land {
@@ -1655,6 +1693,7 @@ fn landing(app: &SolveApp, r: &Running) -> Land {
         Kind::Open | Kind::Recover { .. } if quiet(app, r) => Land::Now,
         Kind::Open | Kind::Recover { .. } => Land::Behind,
         _ if r.request.tab.is_some_and(|tab| tab != app.docs.current_tab()) || !quiet(app, r) => Land::Wait,
+        _ if job.as_ref().is_ok_and(|made| made.configurations.is_some()) => Land::Now,
         _ if r.matches(&app.session) || r.request.tries >= MAX_TRIES => Land::Now,
         _ => Land::Again,
     }
@@ -1739,9 +1778,19 @@ pub(crate) fn cancel_waiting(app: &mut SolveApp, serial: u64) {
 
 /// Take up a finished file operation now.
 fn land_now(app: &mut SolveApp, mut running: Running) {
-    let Some(job) = running.ready.take() else { return };
+    let Some(mut job) = running.ready.take() else { return };
     if app.file_load.warm.as_ref().is_some_and(|(serial, _)| *serial == running.request.serial) {
         app.file_load.warm = None;
+    }
+    if !running.cancelled()
+        && let Ok(made) = &mut job
+        && let Some(rows) = made.configurations.take()
+    {
+        running.request.choose_configuration = false;
+        crate::operations::ended(app, &format!("file:{}", running.request.serial), Outcome::Done);
+        let request = std::mem::replace(&mut running.request, Request::new("", Kind::Open));
+        crate::insert_design_options::offer(app, request, rows);
+        return;
     }
     // Opened while the person kept working: it lands, whatever they changed in the design shown.
     let opens = !app.preferences.file_operations_wait && matches!(running.request.kind, Kind::Open | Kind::Recover { .. });
@@ -2056,6 +2105,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         solidcraft_ui_text::tr_label("dxf.cancelling")
     } else if cancelled {
         solidcraft_ui_text::tr("file_load.waiting")
+    } else if r.request.choose_configuration {
+        solidcraft_ui_text::tr("insert_design.configuration_loading")
     } else {
         solidcraft_ui_text::tr(match r.request.kind {
             Kind::Insert | Kind::InsertDesign => "file_load.inserting",
@@ -2199,7 +2250,7 @@ mod tests {
 
     fn completed_open(app: &mut SolveApp, request: Request, session: Session) {
         let (tx, rx) = std::sync::mpsc::channel();
-        tx.send(Ok(Made { session, result: json!({"loaded": true}), thumbnail: false })).unwrap();
+        tx.send(Ok(Made { session, result: json!({"loaded": true}), thumbnail: false, configurations: None })).unwrap();
         app.file_load.running = Some(Running {
             request,
             base: app.session.doc.clone(),
@@ -2755,7 +2806,7 @@ M30
                 ready: None,
                 sketch: None,
             });
-            tx.send(Ok(Made { session: other, result: json!({"visible":12}), thumbnail: false })).unwrap();
+            tx.send(Ok(Made { session: other, result: json!({"visible":12}), thumbnail: false, configurations: None })).unwrap();
             h.frames(2);
             assert_eq!(reply_rx.try_recv().unwrap()["result"]["visible"], 12);
             assert!(Arc::ptr_eq(&base, &h.app.session.doc));
@@ -2811,7 +2862,7 @@ M30
         let key = format!("file:{}", running.request.serial);
         let (worker, result) = std::sync::mpsc::channel();
         running.rx = result;
-        worker.send(Ok(Made { session: Session::default(), result: json!({"svg": "<svg/>"}), thumbnail: false })).unwrap();
+        worker.send(Ok(Made { session: Session::default(), result: json!({"svg": "<svg/>"}), thumbnail: false, configurations: None })).unwrap();
         crate::operations::control(&mut app, &json!({"cancel": key})).unwrap();
         tick(&mut app, &crate::fonts::test_context());
         assert_eq!(reply.try_recv().unwrap(), json!({"ok": false, "error": "file operation cancelled"}));
@@ -2904,7 +2955,7 @@ M30
             let newer = app.session.doc.clone();
             tick(&mut app, &crate::fonts::test_context());
             assert!(app.file_load.running.as_ref().unwrap().preview.is_none());
-            tx.send(Ok(Made { session: Session::default(), result: Value::Null, thumbnail: false })).unwrap();
+            tx.send(Ok(Made { session: Session::default(), result: Value::Null, thumbnail: false, configurations: None })).unwrap();
             tick(&mut app, &crate::fonts::test_context());
             assert!(Arc::ptr_eq(&newer, &app.session.doc));
             assert!(app.status.as_ref().unwrap().0.contains("discarded"));
@@ -3004,7 +3055,7 @@ M30
             app.file_load.queued.push_back(queued);
             let mut computed = Session::default();
             computed.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
-            let made = Ok(Made { session: computed, result: Value::Null, thumbnail: false });
+            let made = Ok(Made { session: computed, result: Value::Null, thumbnail: false, configurations: None });
             // Both races: the result was queued before Cancel, or arrives afterwards.
             let late = if finished {
                 tx.send(made).unwrap();

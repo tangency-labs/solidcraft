@@ -1673,3 +1673,239 @@ fn an_opened_files_import_warnings_are_said_on_the_web_as_on_the_desktop() {
     assert_eq!(desktop.app.status.as_ref().map(|s| (s.0.as_str(), s.2)), Some((warned, false)));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A saved family whose active Short row is different from the Long row offered for insertion.
+fn insert_design_configuration_source(path: &std::path::Path) -> (Session, u64) {
+    let mut source = Session::default();
+    for (command, params) in [
+        ("parameters.add", json!({"name": "L", "expression": "25 mm"})),
+        ("solid.box", json!({"length": "L", "width": 10, "height": 10})),
+        ("config.configure", json!({"params": ["L"]})),
+        ("config.row", json!({"name": "Default", "rename": "Short"})),
+        ("config.row", json!({"name": "Long", "values": {"L": "30 mm"}})),
+        ("config.activate", json!({"row": "Short"})),
+        ("file.save", json!({"path": path})),
+    ] {
+        source.execute(command, &params).unwrap();
+    }
+    let long = source.doc.configs.rows.iter().find(|row| row.name == "Long").unwrap().id;
+    (source, long)
+}
+
+#[test]
+fn insert_design_configuration_picker_uses_the_chosen_row_or_the_saved_state() {
+    for choose_long in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ask_insert_design_configuration = true;
+        h.app.preferences.language = "en".into();
+        let path = h.dir.join("family.sc");
+        let (_, long) = insert_design_configuration_source(&path);
+        let saved = std::fs::read(&path).unwrap();
+        let before = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+
+        // The real Browse entry point, not a test-only setter or engine command.
+        h.step(&json!({"choose_file": "family.sc"})).unwrap();
+        h.app.start("component.insert_design");
+        h.settle();
+        let ask = h.app.insert_design_options.as_ref().expect("a saved family asks which row to insert");
+        assert_eq!(ask.selected, 0, "following the saved state differs from selecting its active row");
+        assert_eq!(ask.rows.rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(), ["Short", "Long"]);
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &before));
+        assert_eq!(h.app.session.undo.len(), undo);
+        assert!(h.app.run("file.new", json!({})).is_err(), "the target design stays put while the question is open");
+        let state = h.call("ui.inspect", json!({}));
+        assert!(state["result"]["windows"].as_array().unwrap().iter().any(|window| window == "component.insert_design"));
+
+        if choose_long {
+            h.step(&json!({"click": {"handle": "insert_design:configuration"}})).unwrap();
+            h.step(&json!({"widget": "Long"})).unwrap();
+        }
+        h.step(&json!({"click": {"handle": "insert_design:ok"}})).unwrap();
+        h.settle();
+        assert!(h.app.insert_design_options.is_none());
+        let link = h.app.session.doc.links.values().next().expect("the selected design was inserted");
+        assert_eq!(link.configuration, choose_long.then_some(long));
+        let measured = h.app.session.execute("inspect.measure", &json!({})).unwrap();
+        assert!((measured["total"]["volume_mm3"].as_f64().unwrap() - if choose_long { 3000.0 } else { 2500.0 }).abs() < 1e-6);
+        assert_eq!(h.app.session.undo.len(), undo + 1, "inserting is one undo step; choosing is none");
+        assert_eq!(std::fs::read(&path).unwrap(), saved, "the source is never activated or saved by the picker");
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert!(h.app.session.doc.links.is_empty());
+    }
+}
+
+#[test]
+fn insert_design_configuration_cancel_and_escape_leave_the_design_and_source_unchanged() {
+    for escape in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ask_insert_design_configuration = true;
+        let path = h.dir.join("family.solidcraft");
+        insert_design_configuration_source(&path);
+        let source = std::fs::read(&path).unwrap();
+        let before = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+        h.app.insert_design_async(&path.to_string_lossy(), None);
+        h.settle();
+        assert!(h.app.insert_design_options.is_some());
+        if escape {
+            h.step(&json!({"key": "Escape"})).unwrap();
+        } else {
+            h.step(&json!({"click": {"handle": "insert_design:cancel"}})).unwrap();
+        }
+        h.settle();
+        assert!(h.app.insert_design_options.is_none() && h.app.file_load.idle());
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &before));
+        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(std::fs::read(&path).unwrap(), source);
+    }
+}
+
+#[test]
+fn insert_design_configuration_picker_keeps_the_saved_rows_of_an_unsaved_open_source() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.ask_insert_design_configuration = true;
+    let path = h.dir.join("family.sc");
+    let (mut source, _) = insert_design_configuration_source(&path);
+    source.execute("config.row", &json!({"name": "Unsaved", "values": {"L": "40 mm"}})).unwrap();
+    crate::documents::open_tab(&mut h.app, source).unwrap();
+    crate::documents::switch(&mut h.app, 0);
+    h.app.start("component.insert_design");
+    h.frames(3);
+    let picked = h.call("ui.menuPick", json!({"item": "ui.insertOpenDesign"}));
+    assert_eq!(picked["ok"], true, "{picked}");
+    let ask = h.app.insert_design_options.as_ref().expect("the open source also asks");
+    assert_eq!(ask.rows.rows.len(), 2, "an unsaved row is not in the file being linked");
+    h.step(&json!({"click": {"handle": "insert_design:ok"}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.doc.links.len(), 1);
+    assert!(h.app.status.as_ref().is_some_and(|(text, _, error)| !error && text.contains("unsaved changes")));
+}
+
+#[test]
+fn insert_design_configuration_list_errors_do_not_fall_back_to_inserting() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.ask_insert_design_configuration = true;
+    let path = h.dir.join("bad.sc");
+    std::fs::write(&path, "not a design").unwrap();
+    let before = h.app.session.doc.clone();
+    h.app.insert_design_async(&path.to_string_lossy(), None);
+    h.settle();
+    assert!(h.app.insert_design_options.is_none() && h.app.file_load.idle());
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &before));
+    assert!(h.app.status.as_ref().is_some_and(|(text, _, error)| *error && text.contains("Could not read configurations")));
+}
+
+#[test]
+fn insert_design_configuration_picker_refuses_a_row_replaced_after_it_was_offered() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.ask_insert_design_configuration = true;
+    let path = h.dir.join("family.sc");
+    let (mut source, _) = insert_design_configuration_source(&path);
+    source.execute("config.row", &json!({"name": "Victim", "values": {"L": "35 mm"}})).unwrap();
+    let row = source.doc.configs.rows.iter().find(|row| row.name == "Victim").unwrap().id;
+    source.execute("file.save", &json!({"path": path})).unwrap();
+    let before = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    h.app.insert_design_async(&path.to_string_lossy(), None);
+    h.settle();
+    let ask = h.app.insert_design_options.as_mut().unwrap();
+    ask.selected = ask.rows.rows.iter().position(|choice| choice.id == row).unwrap() + 1;
+    let identity = ask.rows.row_identity(row);
+
+    source.execute("edit.undo", &json!({})).unwrap();
+    source.execute("config.row", &json!({"name": "Replacement", "values": {"L": "35 mm"}})).unwrap();
+    assert_eq!(source.doc.configs.rows.iter().find(|choice| choice.name == "Replacement").unwrap().id, row);
+    assert_ne!(source.doc.configs.row_identity(row), identity);
+    source.execute("file.save", &json!({"path": path})).unwrap();
+    h.step(&json!({"click": {"handle": "insert_design:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.insert_design_options.is_none() && h.app.file_load.idle());
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &before));
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert!(h.app.status.as_ref().is_some_and(|(text, _, error)| *error && text.contains("was replaced")));
+}
+
+#[test]
+fn insert_design_configuration_picker_preserves_user_row_names_in_a_translated_window() {
+    for name in ["Open".to_string(), format!("{}Open", "Long configuration name ".repeat(5))] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ask_insert_design_configuration = true;
+        h.app.preferences.language = "ja".into();
+        h.call("ui.resize", json!({"width": 800, "height": 600}));
+        let path = h.dir.join("family.sc");
+        let (mut source, long) = insert_design_configuration_source(&path);
+        source.execute("config.row", &json!({"name": long, "rename": name})).unwrap();
+        source.execute("file.save", &json!({"path": path})).unwrap();
+        h.app.insert_design_async(&path.to_string_lossy(), None);
+        h.settle();
+        h.step(&json!({"click": {"handle": "insert_design:configuration"}})).unwrap();
+        // A name also used by a command stays literal; long names stay selectable in a small window.
+        h.step(&json!({"widget": name})).unwrap();
+        h.step(&json!({"click": {"handle": "insert_design:ok"}})).unwrap();
+        h.settle();
+        assert!(h.app.insert_design_options.is_none());
+        assert_eq!(h.app.session.doc.links.values().next().unwrap().configuration, Some(long));
+    }
+}
+
+#[test]
+fn insert_design_configuration_programmatic_insertion_never_opens_the_picker() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.ask_insert_design_configuration = true;
+    let path = h.dir.join("family.sc");
+    let (_, long) = insert_design_configuration_source(&path);
+    let reply = h.call("engine.execute", json!({"command": "component.insert_design", "params": {"path": path, "configuration": long}}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert!(h.app.insert_design_options.is_none());
+    assert_eq!(h.app.session.doc.links.values().next().unwrap().configuration, Some(long));
+}
+
+#[test]
+fn insert_design_configuration_preference_is_opt_in_and_can_be_changed_through_control() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    assert!(!h.app.preferences.ask_insert_design_configuration, "insertion keeps its existing default flow");
+    let path = h.dir.join("family.sc");
+    insert_design_configuration_source(&path);
+    h.app.insert_design_async(&path.to_string_lossy(), None);
+    h.settle();
+    assert!(h.app.insert_design_options.is_none());
+    assert_eq!(h.app.session.doc.links.len(), 1);
+    assert_eq!(h.app.session.doc.links.values().next().unwrap().configuration, None);
+
+    let enabled = h.call("ui.prefs", json!({"ask_insert_design_configuration": true}));
+    assert_eq!(enabled["ok"], true, "{enabled}");
+    assert!(h.app.preferences.ask_insert_design_configuration);
+    h.app.insert_design_async(&path.to_string_lossy(), None);
+    h.settle();
+    assert!(h.app.insert_design_options.is_some(), "enabling it offers the saved rows");
+    h.step(&json!({"click": {"handle": "insert_design:cancel"}})).unwrap();
+    assert_eq!(h.app.session.doc.links.len(), 1);
+    let disabled = h.call("ui.prefs", json!({"ask_insert_design_configuration": false}));
+    assert_eq!(disabled["ok"], true, "{disabled}");
+    assert!(!h.app.preferences.ask_insert_design_configuration);
+}
+
+#[test]
+fn insert_design_configuration_option_does_not_ask_for_a_design_without_rows() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.ask_insert_design_configuration = true;
+    let path = h.dir.join("ordinary.sc");
+    let mut source = Session::default();
+    source.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    source.execute("file.save", &json!({"path": path})).unwrap();
+    assert!(source.doc.configs.rows.is_empty());
+    h.app.insert_design_async(&path.to_string_lossy(), None);
+    h.settle();
+    assert!(h.app.insert_design_options.is_none() && h.app.file_load.idle());
+    assert_eq!(h.app.session.doc.links.len(), 1, "the enabled option does not add an empty question");
+}

@@ -54,7 +54,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "path: a .sc design → a new component linked to it, holding its solid bodies as placed in that design, its canvases and decals where the design shows them, and a copy of its design properties; \
          document?: the design itself, as its JSON, for a design open in the session that has no file yet: its bodies come in as they are and the link names no file (not with path); \
-         configuration?: a row name or id (null or omitted: the saved source state); name? (default: the design's name); parent?: component id or name (default: the active one); \
+         configuration?: a row name or id (null or omitted: the saved source state); configuration_identity?: expected row creation identity, an unsigned integer or null for a legacy row without one (requires an explicit non-null configuration; omitted: unchecked); \
+         name? (default: the design's name); parent?: component id or name (default: the active one); \
          translate?: [x,y,z] in mm from the destination parent's origin (default [0,0,0], also with reuse); \
          axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; \
          matrix?: [12 or 16 numbers] (row-major 3x4 or 4x4, its translation column numbers or length expressions) or to_matrix?: [12 or 16 numbers]; \
@@ -731,13 +732,18 @@ fn configuration_key<'a>(p: &'a Value, default: Option<u64>, cmd: &str) -> Resul
 }
 
 /// Resolve a name once. Links keep the row's stable id through source row renames.
-fn configuration_id(bytes: &[u8], key: Option<RowKey<'_>>) -> Result<Option<SelectedConfiguration>> {
+fn configuration_id(bytes: &[u8], key: Option<RowKey<'_>>, expected: Option<Option<u64>>) -> Result<Option<SelectedConfiguration>> {
     let Some(key) = key else { return Ok(None) };
     let doc = solidcraft_io::read_design(bytes).map_err(|e| EngineError::Other(e.to_string()))?;
-    doc.configs
+    let selected = doc
+        .configs
         .row(key)
-        .map(|row| Some(SelectedConfiguration { row: row.id, identity: doc.configs.row_identity(row.id) }))
-        .ok_or_else(|| EngineError::Other(format!("configuration `{key}` does not exist in the source design")))
+        .map(|row| SelectedConfiguration { row: row.id, identity: doc.configs.row_identity(row.id) })
+        .ok_or_else(|| EngineError::Other(format!("configuration `{key}` does not exist in the source design")))?;
+    if expected.is_some_and(|identity| identity != selected.identity) {
+        return Err(EngineError::Other(format!("configuration `{key}` was replaced; select a configuration again")));
+    }
+    Ok(Some(selected))
 }
 
 /// Linked files' digests as [`file_sha256`] last worked them out, by file, with the time and
@@ -1602,6 +1608,14 @@ fn placement_transform(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_
 fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.insert_design";
     let selection = configuration_key(p, None, cmd)?;
+    let expected_identity = match p.get("configuration_identity") {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(value) => Some(Some(value.as_u64().ok_or_else(|| bad(cmd, "`configuration_identity` must be an unsigned integer or null"))?)),
+    };
+    if expected_identity.is_some() && selection.is_none() {
+        return Err(bad(cmd, "`configuration_identity` requires an explicit, non-null `configuration`"));
+    }
     // The design to link: a file, or the design the caller holds in memory (one open in this
     // session that has no file yet, #16829).
     let (given, held) = match (p.get("path"), p.get("document")) {
@@ -1641,7 +1655,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         None => None,
     };
     let configuration = match &selected_bytes {
-        Some(bytes) => configuration_id(bytes, selection).map_err(|e| bad(cmd, e.to_string()))?,
+        Some(bytes) => configuration_id(bytes, selection, expected_identity).map_err(|e| bad(cmd, e.to_string()))?,
         None => None,
     };
     if p.get("reuse").and_then(Value::as_bool).unwrap_or(false) {
@@ -2221,7 +2235,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     let same_source = same_link_source(s, &link, &file);
     let selection = configuration_key(p, if same_source { link.configuration } else { None }, cmd)?;
     let bytes = read_link(&file, s.path.as_deref()).map_err(|e| bad(cmd, e.to_string()))?;
-    let configuration = configuration_id(&bytes, selection).map_err(|e| bad(cmd, e.to_string()))?;
+    let configuration = configuration_id(&bytes, selection, None).map_err(|e| bad(cmd, e.to_string()))?;
     if same_source && p.get("configuration").is_none() && configuration != selected_configuration(&link) {
         return Err(bad(cmd, "the selected configuration was replaced; select a configuration again"));
     }

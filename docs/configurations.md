@@ -53,9 +53,16 @@ feature that produces that body, and become visible when it returns.
 ## Link several configurations from one file
 
 `component.insert_design` accepts `configuration` as a row name or row id. Each linked
-component can select a different row from the same source file. Select the row through command
-parameters; the Insert Design dialog does not yet include a configuration picker. A bolt design
-with rows `M6x20` and `M6x30` can supply both sizes in one assembly:
+component can select a different row from the same source file. To choose the row in the UI,
+enable **Ask for a design's configuration before inserting** in **Preferences > General >
+Dialogs**. It is off by default, preserving the existing one-click insertion of the source's
+saved state. With it enabled, **Insert Design** asks for one of the file's saved configuration
+rows or **Saved state** (the default choice) before inserting it. A file with no configuration
+rows is inserted automatically. The list comes from
+the saved file, even when that design is open in another tab with unsaved changes. Selecting a
+row applies it to the inserted component without changing the source file. **Cancel** inserts
+nothing. Scripts can select the row through command parameters. A bolt design with rows
+`M6x20` and `M6x30` can supply both sizes in one assembly:
 
 ```json
 {"command":"component.insert_design","params":{"path":"bolt.sc","name":"Short bolt","configuration":"M6x20"}}

@@ -125,6 +125,7 @@ pub mod icon_svg;
 pub mod icons;
 pub mod import_options;
 pub mod inference;
+mod insert_design_options;
 pub mod insert_handles;
 pub mod install;
 pub mod issue_report;
@@ -927,6 +928,8 @@ pub struct SolveApp {
     pub import_options: Option<import_options::Ask>,
     /// Files asked while another waits for its options (several dropped at once), asked in turn.
     pub import_options_waiting: std::collections::VecDeque<import_options::Ask>,
+    /// A linked design waiting for the configuration chosen in its saved file.
+    pub(crate) insert_design_options: Option<insert_design_options::Ask>,
     /// The Plugins menu and the open plugin entry dialog (`plugin_menu`).
     pub(crate) plugin_menu: plugin_menu::State,
     /// The view background a plugin draws (`shaders@0.1`), when one is chosen.
@@ -1260,6 +1263,7 @@ impl SolveApp {
             mesh_units: None,
             import_options: None,
             import_options_waiting: Default::default(),
+            insert_design_options: None,
             plugin_menu: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             plugin_shaders: Default::default(),
@@ -2382,6 +2386,8 @@ impl SolveApp {
         let mut request = file_load::Request::new(path, file_load::Kind::InsertDesign);
         request.allow_hosts = solidcraft_engine::io::vfs::network_host(path).into_iter().collect();
         request.note = note;
+        request.choose_configuration = self.preferences.ask_insert_design_configuration;
+        request.tab = Some(self.docs.active_tab());
         // A request that could not be queued has said why in the status line.
         let _ = file_load::begin_request(self, request);
     }
@@ -4820,6 +4826,7 @@ impl SolveApp {
         file_load::show(self, ui.ctx());
         // A file's import options are asked on Home too, where Open and Import start.
         import_options::show(self, ui.ctx());
+        insert_design_options::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
@@ -4997,8 +5004,12 @@ impl SolveApp {
             // window, inspection and screenshots still answer, #1989). `engine.script` runs
             // directly, past `SolveApp::run`'s guard, so without the save here it changed the
             // design the save was taken up for (#6003).
-            let waits =
-                self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() || self.control_job.is_some() || self.agent.busy();
+            let waits = self.file_load.busy()
+                || self.file_picker.is_some()
+                || self.insert_design_options.is_some()
+                || self.saving.is_some()
+                || self.control_job.is_some()
+                || self.agent.busy();
             // A screenshot waiting for an opened design to be meshed holds what came after it.
             let shot_waits = open_meshing::active(self) && self.control_held.front().is_some_and(|r| r.method == "ui.screenshot");
             // Held requests go first, in order, once nothing makes them wait.

@@ -432,6 +432,17 @@ fn drop_point(app: &SolveApp, proj: &crate::viewport::Proj, pos: egui::Pos2) -> 
 /// as Insert Design's file dialog allows it.
 pub fn insert(app: &mut SolveApp, path: &Path, at: Vec3) -> Result<(), String> {
     let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(&path.to_string_lossy()).into_iter().collect();
+    if app.preferences.ask_insert_design_configuration && Kind::of(path) == Some(Kind::Design) {
+        let mut request = crate::file_load::Request::new(&path.to_string_lossy(), crate::file_load::Kind::InsertDesign);
+        request.allow_hosts = hosts;
+        request.options.insert("translate".into(), json!([at.x, at.y, at.z]));
+        request.options.insert("reuse".into(), json!(true));
+        request.choose_configuration = true;
+        request.tab = Some(app.docs.active_tab());
+        let name = path.file_stem().map_or_else(String::new, |s| s.to_string_lossy().to_string());
+        request.note = Some(solidcraft_ui_text::format("parts_library.inserted", &[("name", &name)]));
+        return crate::file_load::begin_request(app, request);
+    }
     insert_allowing(app, path, at, &hosts)
 }
 
@@ -467,11 +478,13 @@ pub fn view_drop(app: &mut SolveApp, ui: &egui::Ui, rect: egui::Rect, proj: &cra
     if ctx.input(|i| i.pointer.primary_released())
         && let Some(d) = egui::DragAndDrop::take_payload::<Dragged>(ctx)
     {
+        let deferred = app.preferences.ask_insert_design_configuration && Kind::of(&d.0) == Some(Kind::Design);
         match insert(app, &d.0, at) {
-            Ok(()) => {
+            Ok(()) if !deferred => {
                 let name = d.0.file_stem().map_or_else(String::new, |s| s.to_string_lossy().to_string());
                 app.set_status(solidcraft_ui_text::format("parts_library.inserted", &[("name", &name)]), false);
             }
+            Ok(()) => {}
             Err(e) => app.set_status(e, true),
         }
     }
@@ -1129,6 +1142,65 @@ mod tests {
         h.frames(2);
         assert!(h.app.parts_library.shown.is_none(), "hidden");
         assert!(control(&mut h.app, &json!({"folder": h.dir.join("bracket.solidcraft").to_string_lossy()})).is_err(), "a file is not a folder");
+    }
+
+    /// A card's insertion chooses a saved row while keeping its drop position and reused
+    /// definition. The control route keeps inserting without a question, even when enabled.
+    #[test]
+    fn insert_design_configuration_library_choice_keeps_placement_and_control_stays_nonmodal() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        let path = h.dir.join("family.sc");
+        let mut source = solidcraft_engine::Session::default();
+        for (command, params) in [
+            ("parameters.add", json!({"name": "L", "expression": "25 mm"})),
+            ("solid.box", json!({"length": "L", "width": 10, "height": 10})),
+            ("config.configure", json!({"params": ["L"]})),
+            ("config.row", json!({"name": "Default", "rename": "Short"})),
+            ("config.row", json!({"name": "Long", "values": {"L": "30 mm"}})),
+            ("config.activate", json!({"row": "Short"})),
+            ("file.save", json!({"path": path})),
+        ] {
+            source.execute(command, &params).unwrap();
+        }
+        let long = source.doc.configs.rows.iter().find(|row| row.name == "Long").unwrap().id;
+        let saved = std::fs::read(&path).unwrap();
+        insert(&mut h.app, &path, Vec3::ZERO).unwrap();
+        assert!(h.app.insert_design_options.is_none(), "the option starts off");
+        assert_eq!(h.app.session.doc.links.values().next().unwrap().configuration, None);
+        h.app.run("edit.undo", json!({})).unwrap();
+
+        h.app.preferences.ask_insert_design_configuration = true;
+        let inserted = solidcraft_ui_text::format("parts_library.inserted", &[("name", "family")]);
+        for x in [50.0, 100.0] {
+            h.app.status = None;
+            insert(&mut h.app, &path, Vec3::new(x, 0.0, 0.0)).unwrap();
+            h.settle();
+            assert!(h.app.insert_design_options.is_some(), "an interactive insertion offers the saved rows");
+            assert!(h.app.status.as_ref().is_none_or(|status| status.0 != inserted), "choosing a row has not inserted anything yet");
+            h.step(&json!({"click": {"handle": "insert_design:configuration"}})).unwrap();
+            h.step(&json!({"widget": "Long"})).unwrap();
+            h.step(&json!({"click": {"handle": "insert_design:ok"}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.status.as_ref().map(|status| status.0.as_str()), Some(inserted.as_str()), "success is reported after insertion");
+        }
+        assert_eq!(h.app.session.doc.links.len(), 1, "the same row reuses its definition");
+        let link = h.app.session.doc.links.values().next().unwrap();
+        assert_eq!(link.configuration, Some(long));
+        assert_eq!(link.configuration_identity, source.doc.configs.row_identity(long));
+        assert_eq!(h.app.session.doc.occurrences.len(), 2);
+        let bounds = solidcraft_engine::view::bounds(&h.app.session).unwrap();
+        assert!((bounds.min.x - 50.0).abs() < 1e-6 && (bounds.max.x - 130.0).abs() < 1e-6, "each drop keeps its position: {bounds:?}");
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert!(h.app.session.doc.links.is_empty());
+
+        control(&mut h.app, &json!({"folder": h.dir.to_string_lossy()})).unwrap();
+        control(&mut h.app, &json!({"insert": "family", "at": [75, 0, 0]})).unwrap();
+        assert!(h.app.insert_design_options.is_none(), "ui.library never opens a question");
+        assert_eq!(h.app.session.doc.links.values().next().unwrap().configuration, None);
+        assert_eq!(std::fs::read(&path).unwrap(), saved, "the picker leaves the source untouched");
     }
 
     /// Frames until a file being opened has opened (or a minute has passed).

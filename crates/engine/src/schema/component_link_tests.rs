@@ -15,7 +15,22 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<InsertDesignParams>(),
-        &["angle", "axis", "configuration", "document", "matrix", "name", "origin", "parent", "path", "reuse", "to_matrix", "tolerance", "translate"],
+        &[
+            "angle",
+            "axis",
+            "configuration",
+            "configuration_identity",
+            "document",
+            "matrix",
+            "name",
+            "origin",
+            "parent",
+            "path",
+            "reuse",
+            "to_matrix",
+            "tolerance",
+            "translate",
+        ],
     );
     assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components", "linked_bodies"]);
     assert_keys(input_schema_for::<RelinkParams>(), &["component", "configuration", "occurrence", "path"]);
@@ -40,6 +55,9 @@ fn strict_keeps_todays_errors() {
         ("component.insert_design", json!({"path": "plate.solidcraft", "translate": [1, 2]})),
         ("component.insert_design", json!({"path": "plate.solidcraft", "translate": null})),
         ("component.insert_design", json!({"path": "plate.solidcraft", "translate": [1e9, 0, 0]})),
+        ("component.insert_design", json!({"path": "plate.sc", "configuration_identity": 1})),
+        ("component.insert_design", json!({"path": "plate.sc", "configuration": null, "configuration_identity": null})),
+        ("component.insert_design", json!({"path": "plate.sc", "configuration": 1, "configuration_identity": true})),
         ("component.update_links", json!({"component": 0, "components": [0]})),
         ("component.update_links", json!({"component": true})),
         ("component.update_links", json!({"component": null})),
@@ -173,6 +191,41 @@ fn configuration_selectors_accept_names_ids_and_null() {
     let id: RelinkParams = serde_json::from_value(json!({"component": 1, "path": "bolt.sc", "configuration": 17})).unwrap();
     assert_eq!(name.configuration, Some(super::RowRef::Name("17".into())));
     assert_eq!(id.configuration, Some(super::RowRef::Id(17)));
+}
+
+#[test]
+fn insert_configuration_identity_distinguishes_absent_legacy_and_fixed_identities() {
+    let schema = input_schema_for::<InsertDesignParams>();
+    let schema = schema.as_value();
+    for (identity, expected) in [(None, None), (Some(Value::Null), Some(None)), (Some(json!(u64::MAX)), Some(Some(u64::MAX)))] {
+        let mut params = json!({"path": "bolt.sc", "configuration": 17});
+        if let Some(identity) = identity {
+            params["configuration_identity"] = identity;
+        }
+        assert!(conforms(schema, schema, &params), "{params}");
+        assert!(crate::schema::issues("component.insert_design", &params).is_empty(), "{params}");
+        let parsed: InsertDesignParams = serde_json::from_value(params).unwrap();
+        assert_eq!(parsed.configuration_identity, expected);
+    }
+    for identity in [json!(-1), json!(1.5), json!(true), json!("17"), json!([]), json!({})] {
+        let params = json!({"path": "bolt.sc", "configuration": 17, "configuration_identity": identity});
+        assert!(!conforms(schema, schema, &params), "{params}");
+        let issues = crate::schema::issues("component.insert_design", &params);
+        assert_eq!(issues.len(), 1, "{params}");
+        assert_eq!(issues[0].message, "`configuration_identity` must be an unsigned integer or null");
+    }
+    for configuration in [None, Some(Value::Null)] {
+        for identity in [Value::Null, json!(17)] {
+            let mut params = json!({"path": "bolt.sc", "configuration_identity": identity});
+            if let Some(configuration) = &configuration {
+                params["configuration"] = configuration.clone();
+            }
+            assert!(!conforms(schema, schema, &params), "{params}");
+            let issues = crate::schema::issues("component.insert_design", &params);
+            assert_eq!(issues.len(), 1, "{params}");
+            assert_eq!(issues[0].message, "`configuration_identity` requires an explicit, non-null `configuration`");
+        }
+    }
 }
 
 /// The warning for what a key gets wrong, and the check that a list of components takes only
