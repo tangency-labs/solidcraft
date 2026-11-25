@@ -100,6 +100,7 @@ mod meshbody;
 #[cfg(test)]
 mod modify_history_tests;
 mod native;
+pub mod network;
 mod numbered;
 mod offset;
 mod offset_backend;
@@ -650,6 +651,7 @@ impl Cause for solidcraft_smlib::CheckReport {}
 impl Cause for solidcraft_smlib::export::ExportError {}
 impl Cause for solidcore_record::brep::history::Failed {}
 impl Cause for solidcore_ops::pcurve::Error {}
+impl Cause for solidcraft_geom::brep::eval::Error {}
 impl<T: Cause + ?Sized> Cause for &T {
     fn panic(&self) -> Option<&str> {
         (**self).panic()
