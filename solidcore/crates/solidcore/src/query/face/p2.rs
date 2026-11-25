@@ -635,6 +635,7 @@ fn surface_cache_of_face(
             match e {
                 SolidError::Unported { .. }
                 | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }
                 | SolidError::InvalidInput { .. }
                 | SolidError::PortInvariant { .. }
                 | SolidError::NotFound { .. } => Err(e),
@@ -1432,6 +1433,7 @@ pub fn classify_param_on_faces(
             Err(
                 e @ (SolidError::Unported { .. }
                 | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }
                 | SolidError::InvalidInput { .. }
                 | SolidError::PortInvariant { .. }
                 | SolidError::NotFound { .. }),
@@ -1669,6 +1671,9 @@ impl<G: ClassGeometry<O>, O: ClassObject> ClassGeometry<O> for WithVertexFaceGap
     fn curve(&self, o: O) -> Option<&Curve> {
         self.inner.curve(o)
     }
+    fn intersect_curve(&self, o: O) -> Option<&Curve> {
+        self.inner.intersect_curve(o)
+    }
     fn surface(&self, o: O) -> Option<&Surface> {
         self.inner.surface(o)
     }
@@ -1833,6 +1838,9 @@ impl<O: ClassObject, G: ClassGeometry<O>> ClassGeometry<O> for SnapshotObjects<'
     fn curve(&self, o: O) -> Option<&Curve> {
         self.inner.curve(o)
     }
+    fn intersect_curve(&self, o: O) -> Option<&Curve> {
+        self.inner.intersect_curve(o)
+    }
     fn surface(&self, o: O) -> Option<&Surface> {
         self.inner.surface(o)
     }
@@ -1987,6 +1995,12 @@ where
             Some((_, c)) => Some(c),
             None => self.inner.curve(o),
         }
+    }
+    fn intersect_curve(&self, o: O) -> Option<&Curve> {
+        if self.trims.iter().any(|(h, _)| *h == o) {
+            return None;
+        }
+        self.inner.intersect_curve(o)
     }
     fn surface(&self, o: O) -> Option<&Surface> {
         self.inner.surface(o)

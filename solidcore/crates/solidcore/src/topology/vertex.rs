@@ -1428,14 +1428,14 @@ fn certified_end_distance(k: &Kernel, curve: &Curve, t: f64, at: Point3) -> Opti
 }
 
 /// The B-spline form of `curve` whose points equal the curve's at every parameter, or
-/// `None` for a kind that has none: the B-spline itself, or the B-spline part an
-/// ellipse, hyperbola or parabola is evaluated from.
+/// `None` for a kind that has none: an exact copy (no knot fix-up) of the B-spline
+/// itself, or of the B-spline part an ellipse, hyperbola or parabola is evaluated from.
 fn spline_form(curve: &Curve) -> Option<crate::nurbs::b_spline_curve::BSplineCurve> {
     match curve.kind() {
-        CurveKind::BSpline(c) => Some(c.clone()),
-        CurveKind::Ellipse(c) => Some(c.base().clone()),
-        CurveKind::Hyperbola(c) => Some(c.base().clone()),
-        CurveKind::Parabola(c) => Some(c.base().clone()),
+        CurveKind::BSpline(c) => Some(c.clone_exact()),
+        CurveKind::Ellipse(c) => Some(c.base().clone_exact()),
+        CurveKind::Hyperbola(c) => Some(c.base().clone_exact()),
+        CurveKind::Parabola(c) => Some(c.base().clone_exact()),
         _ => None,
     }
 }
@@ -1451,7 +1451,8 @@ fn spline_form(curve: &Curve) -> Option<crate::nurbs::b_spline_curve::BSplineCur
 /// curve's end at `target`, changes its points only in the span next to that end and
 /// leaves the other end's control point, the only one the curve has at that end, where
 /// it was. The result is a B-spline: a moved ellipse, hyperbola or parabola is not one
-/// any more. `None` for a kind with no such form (offset, curves on surfaces,
+/// any more, and its STEP form is unspecified (a conic's base says `EllipticArc`, ...,
+/// which the edited spline no longer is). `None` for a kind with no such form (offset, curves on surfaces,
 /// composite, ...), a line whose ends would meet, a degenerate interval or one off the
 /// natural interval: nothing is moved then.
 ///
@@ -1495,54 +1496,101 @@ fn curve_with_moved_end(
     if !spline.move_point_at_knot(t, from_right, target)? {
         return Ok(None);
     }
+    spline.form = crate::nurbs::b_spline_curve::BSplineCurveForm::Unspecified;
     Ok(Some(Curve::from(spline)))
 }
 
-/// Not upstream (#21511): `interval` with each end flagged in `far` (start, end) moved to
-/// the parameter where `curve` passes nearest `target` (a local projection seeded at that
-/// end), the curve itself kept. This is the exact edit when the surf/surf/surf point lies
-/// on the edge's curve, as it does on an intersection edge whose curve is exact (a line or
-/// conic of two analytic surfaces): the edge then ends at the point on its own, unchanged
-/// curve, which stays a line, an ellipse, a hyperbola or a parabola. `None` when both ends
-/// are flagged (a closed edge: one projection cannot tell its two ends apart), `interval`
-/// is not inside the curve's natural interval (an edge across a periodic curve's seam,
-/// whose foot could land a period away), a projection fails or leaves the natural
-/// interval, or the new interval is not increasing. Both intervals inside the natural
-/// interval keep the edge to at most the curve's one traversal: it cannot wrap.
-fn retrimmed_interval(
+/// Not upstream (#21511): the parameter in `curve`'s natural interval where the curve
+/// passes `target` within half `tol`, or `None` when it does not: the global closest point
+/// (`GlobalPointSolve`, `SM_SO_MINIMIZE`, a single solution, over the whole natural
+/// interval, so no stationary foot near a seed stands in for it), accepted only by its
+/// certified distance ([`certified_end_distance`]). Whether a surf/surf/surf point lies on
+/// an edge's curve, as it does on an intersection edge whose curve is exact (a line or conic
+/// of two analytic surfaces), decides how [`carry_far_edge_ends`] moves the edge's end.
+///
+/// # Errors
+///
+/// The solve's [`SolidError::Cancelled`] or [`SolidError::OutOfFuel`]: the caller asked
+/// to stop, so the answer is not "off the curve". Any other failure of the solve is `None`.
+fn point_on_curve(k: &Kernel, curve: &Curve, target: Point3, tol: f64) -> Result<Option<f64>> {
+    use crate::curve::curve::p1::GlobalPointSolveOptions;
+    use crate::geom::global_solver::{SolutionRequested, SolverOperation};
+    use crate::surface::surface::p4::NoObject;
+    let natural = curve.natural_interval();
+    let sols = match curve.global_point_solve(
+        k,
+        &natural,
+        SolverOperation::Minimize,
+        target,
+        tol,
+        SolutionRequested::Single,
+        &GlobalPointSolveOptions::<NoObject>::default(),
+    ) {
+        Ok(sols) => sols,
+        Err(e) if e.is_cancelled() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    let Some(t) = sols.get(0).and_then(|s| s.start.param(0).ok()) else {
+        return Ok(None);
+    };
+    let on = natural.contains_value(t, 0.0)
+        && certified_end_distance(k, curve, t, target).is_some_and(|d| d <= 0.5 * tol);
+    Ok(on.then_some(t))
+}
+
+/// Not upstream (#21511): the parameter of `t`'s point that the far end of an edge takes.
+/// On a closed curve the seam point has two parameters, the natural interval's two ends,
+/// and the closest-point solve returns one of them; an edge's far end takes the start when
+/// its start is far and the end when its end is far. The other natural end stands for the
+/// same point only when its own certified distance to `target` is within half `tol`, as
+/// [`point_on_curve`] requires of `t`; otherwise `t` is kept. One point, its two names: no
+/// second construction.
+fn seam_parameter(
     k: &Kernel,
+    curve: &Curve,
+    far: [bool; 2],
+    t: f64,
+    target: Point3,
+    tol: f64,
+) -> f64 {
+    let natural = curve.natural_interval();
+    let twin = if far[1] && t == natural.min() {
+        natural.max()
+    } else if far[0] && t == natural.max() {
+        natural.min()
+    } else {
+        return t;
+    };
+    if certified_end_distance(k, curve, twin, target).is_some_and(|d| d <= 0.5 * tol) {
+        twin
+    } else {
+        t
+    }
+}
+
+/// Not upstream (#21511): `interval` with its end flagged in `far` (start, end) moved to
+/// `t`, the curve itself kept: the exact edit when the surf/surf/surf point lies on the
+/// edge's curve at `t` ([`point_on_curve`]); the edge then ends at the point on its own,
+/// unchanged curve, which stays a line, an ellipse, a hyperbola or a parabola. `None` when
+/// both or neither ends are flagged (a closed edge: one parameter cannot be both of its
+/// ends), `interval` is not inside the curve's natural interval (an edge across a periodic
+/// curve's seam, whose foot could land a period away) or the new interval is not
+/// increasing. Both intervals inside the natural interval keep the edge to at most the
+/// curve's one traversal: it cannot wrap.
+fn retrimmed_interval(
     curve: &Curve,
     interval: &Extent1d,
     far: [bool; 2],
-    target: Point3,
+    t: f64,
 ) -> Option<Extent1d> {
-    use crate::curve::curve::p3::PointSolveOptions;
-    use crate::geom::global_solver::SolverOperation;
-    if far[0] && far[1] {
+    if far[0] == far[1] {
         return None;
     }
-    let natural = curve.natural_interval();
-    if !interval.is_contained_by(&natural, 0.0) {
+    if !interval.is_contained_by(&curve.natural_interval(), 0.0) {
         return None;
     }
     let (mut t0, mut t1) = (interval.min(), interval.max());
-    let at_start = far[0];
-    let seed = if at_start { t0 } else { t1 };
-    let (found, foot) = curve
-        .local_point_solve::<usize>(
-            k,
-            &natural,
-            SolverOperation::Minimize,
-            target,
-            &PointSolveOptions::default(),
-            seed,
-        )
-        .ok()?;
-    let t = foot.start.param(0).ok()?;
-    if !found || !natural.contains_value(t, 0.0) {
-        return None;
-    }
-    if at_start {
+    if far[0] {
         t0 = t;
     } else {
         t1 = t;
@@ -1594,24 +1642,32 @@ fn edge_end_edit_certified(
 
 /// Not upstream (#21511): after a point merge moved `v` to its surf/surf/surf point
 /// (`SmPointClassification::MergeIntoObject`'s `SetPoint(m_vSSSPoint)`), moves the ends of
-/// `v`'s edges that the move left outside `v`'s ball (farther than its tolerance; the ends
-/// inside are [`cover_merged_ends`]'s) to `v`'s point, so the edges keep ending at the
+/// `v`'s edges that the move left outside `v`'s ball (farther than its tolerance by the
+/// certified bound [`edge_end_reach`] uses, so no end falls between this test and
+/// [`cover_merged_ends`]'s, which covers the ends inside) to `v`'s point, so the edges keep ending at the
 /// vertex that bounds them. Upstream moves only the vertex and leaves those ends behind,
 /// past `AssertValid`'s edge-end test (half the vertex tolerance), and no tolerance can
 /// cover them without the ball swallowing geometry the vertex does not bound.
 ///
-/// Two edits are tried, in order, and the first certified one is kept:
-/// 1. [`retrimmed_interval`]: the curve unchanged and its far end's parameter moved to
-///    where the curve passes `v`'s point. Exact, and the curve keeps its class, when the
-///    point lies on the curve (an intersection edge of exact surfaces).
-/// 2. Only for a wire edge (no face uses it): [`curve_with_moved_end`] at every far end
+/// The geometry decides the edit, one per edge; none is tried after another fails:
+/// 1. `v`'s point lies on the curve ([`point_on_curve`]: an intersection edge of exact
+///    surfaces), one end is far and moving it there keeps the edge one increasing traversal
+///    of the curve: [`retrimmed_interval`], the curve unchanged and the far end's parameter
+///    moved to the point's. Exact, and the curve keeps its class.
+/// 2. Otherwise, only for a wire edge (no face uses it): [`curve_with_moved_end`] at every far end
 ///    (a closed edge moves both), the curve itself edited to end at `v`'s point. A line
 ///    stays a line; a B-spline, ellipse, hyperbola or parabola becomes a B-spline, since a
 ///    conic cannot end at a point off it and stay that conic. An edge of a face is never
 ///    edited this way: the edit would pull the curve off the face's surface over the
 ///    changed span, trading the edge-end gap for an edge/face gap. Such an edge is moved
-///    only by the exact re-trim, which keeps it on its unchanged curve.
+///    only by the exact re-trim, which keeps it on its unchanged curve. A wire edge is
+///    edited only when case 1 does not hold (a closed one, with both ends far, always:
+///    no one parameter is both of its ends).
 ///
+/// The edge's curve is read as an exact copy ([`crate::topology::edge::evaluation_curve`]:
+/// no knot fix-up), so a re-trim installs the curve the edge held, unchanged. The kept
+/// edit's curve gets the edge as owner and then the edge's tolerance recorded
+/// ([`Curve::set_owner_zone_tol_3d`] keys the record to the owner).
 /// The kept edit sets the curve with [`crate::topology::edge::set_curve`] (`SetCurve`: the
 /// change is notified, which deletes the edge uses' UV trim curves, which end at the old
 /// point, as upstream deletes them when the surf/surf/surf point edits an edge curve,
@@ -1622,14 +1678,17 @@ fn edge_end_edit_certified(
 /// An edit is certified by [`edge_end_edit_certified`]: every far end moved and within
 /// half `v`'s tolerance, and every other end of the edge that was within half its
 /// vertex's tolerance still within it.
-/// When neither edit is certified, and for a curve neither edit applies to, the edge is
-/// left as upstream leaves it.
+/// When the chosen edit is not certified or cannot be made, and for a curve neither edit
+/// applies to, the edge is left as upstream leaves it.
 ///
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id; those of
-/// [`crate::topology::edge::set_curve`] and [`crate::topology::edge::set_interval`]. A
-/// failed edit of a curve leaves its edge as it is.
+/// [`crate::topology::edge::set_curve`] and [`crate::topology::edge::set_interval`];
+/// [`SolidError::Cancelled`] or [`SolidError::OutOfFuel`] from [`point_on_curve`]'s solve
+/// (the edge it was solving for is not edited; edges
+/// before it in the walk may already be). Any other failed edit of a curve leaves
+/// its edge as it is.
 pub(crate) fn carry_far_edge_ends(
     k: &Kernel,
     b: &mut Brep,
@@ -1641,14 +1700,16 @@ pub(crate) fn carry_far_edge_ends(
     let tol = tolerance(b, v)?;
     for x in edges(b, v, None)? {
         let (s0, s1) = edge::start_end_vertices(b, x)?;
-        let rec = b.edge(x)?;
-        let Some(curve) = rec.curve.clone() else {
+        // an exact copy: a curve nested past the copy bound is left as it is
+        let Ok(Some(curve)) = edge::evaluation_curve(b, x) else {
             continue;
         };
-        let interval = rec.interval;
+        let rec = b.edge(x)?;
+        let (interval, edge_tol) = (rec.interval, rec.tolerance);
         let ends = [s0, s1];
         let params = [interval.evaluate(0.0), interval.evaluate(1.0)];
-        // the ends at `v` certainly outside its ball (NaN is not outside)
+        // the ends at `v` that `cover_merged_ends` cannot cover: certified bound outside its
+        // ball (the evaluated distance for a curve with no error bound; NaN is not outside)
         let mut far = [false; 2];
         for (i, (&end, &t)) in ends.iter().zip(params.iter()).enumerate() {
             if end != Some(v) {
@@ -1657,7 +1718,8 @@ pub(crate) fn carry_far_edge_ends(
             let Ok(p) = curve.evaluate_point(k, t) else {
                 continue;
             };
-            if at.distance(p) > tol {
+            let reach = certified_end_distance(k, &curve, t, at).unwrap_or_else(|| at.distance(p));
+            if reach > tol {
                 if let Some(slot) = far.get_mut(i) {
                     *slot = true;
                 }
@@ -1667,15 +1729,24 @@ pub(crate) fn carry_far_edge_ends(
             continue;
         }
         let old = (&curve, &interval);
-        // 1. the curve kept, its far end re-trimmed to the point on it
         let mut kept: Option<(Curve, Extent1d)> = None;
-        if let Some(iv) = retrimmed_interval(k, &curve, &interval, far, at) {
+        let on_curve = if far[0] == far[1] {
+            None
+        } else {
+            point_on_curve(k, &curve, at, tol)?
+        };
+        let retrim = on_curve
+            .map(|t| seam_parameter(k, &curve, far, t, at, tol))
+            .and_then(|t| retrimmed_interval(&curve, &interval, far, t));
+        if let Some(iv) = retrim {
+            // 1. the point on the curve within the edge's traversal: the curve kept, its far
+            // end re-trimmed to it
             if edge_end_edit_certified(k, b, ends, old, (&curve, &iv), far)? {
-                kept = Some((curve.clone(), iv));
+                // the exact copy of the edge's own curve, unchanged
+                kept = Some((curve, iv));
             }
-        }
-        // 2. a wire edge's curve edited to end at the point
-        if kept.is_none() && edge::faces(b, x, None)?.is_empty() {
+        } else if edge::faces(b, x, None)?.is_empty() {
+            // 2. the point off a wire edge's curve: the curve edited to end at it
             let mut moved: Option<Curve> = None;
             let mut moved_ends = [false; 2];
             for (i, &is_far) in far.iter().enumerate() {
@@ -1703,9 +1774,9 @@ pub(crate) fn carry_far_edge_ends(
         };
         let new_curve = {
             let mut c = new_curve;
-            c.set_owner_zone_tol_3d(curve.owner_zone_tol_3d());
             let owner = (env.key_of)(EntityRef::Edge(x));
             let _ = c.set_owner(Some(owner), Some(crate::topology::brep::p2::brep_ref(b)));
+            c.set_owner_zone_tol_3d(Some(edge_tol));
             c
         };
         let options = edge::SetCurveOptions {
@@ -2908,8 +2979,11 @@ mod tests {
     /// is its line, a cubic B-spline over its natural interval, one over an interior
     /// sub-interval (v2 moved onto that curve's point there) or (3) the quarter ellipse
     /// of radii 2 and 1 about the origin from `(2, 0, 0)` to `(0, 1, 0)` over its natural
-    /// interval.
-    fn sss_merge(edge1: u8, sss: Point3) -> (Kernel, Brep, [VertexId; 4], [EdgeId; 2]) {
+    /// interval. Also returns v0's and v2's points before the merge.
+    fn sss_merge(
+        edge1: u8,
+        sss: Point3,
+    ) -> (Kernel, Brep, [VertexId; 4], [EdgeId; 2], [Point3; 2]) {
         use crate::intersect::point_class::{BrepMerge, PointClassType, PointClassification};
         use crate::nurbs::b_spline_curve::BSplineCurve;
         use crate::nurbs::crv_basic::Curve as NurbCurve;
@@ -2979,6 +3053,7 @@ mod tests {
             b.vertex_mut(v[1]).unwrap().point = p0;
             b.vertex_mut(v[2]).unwrap().point = p1;
         }
+        let before = [b.vertex(v[0]).unwrap().point, b.vertex(v[2]).unwrap().point];
         let mut pc = PointClassification::new(ZONE_TOL_3D);
         pc.set_class_object(PointClassType::Vertex, Some(Ent(EntityRef::Vertex(v[1]))));
         pc.set_sss_point(sss);
@@ -3006,7 +3081,7 @@ mod tests {
             },
         )
         .unwrap();
-        (k, b, v, e)
+        (k, b, v, e, before)
     }
 
     #[test]
@@ -3019,11 +3094,10 @@ mod tests {
                 Point3::new(20.0, 3.0, 4.0),
                 Point3::new(10.0, -10.0, 20.0),
             ] {
-                let (k, b, v, e) = sss_merge(edge1, sss);
-                let before: Vec<Point3> = [v[0], v[2]]
-                    .iter()
-                    .map(|&w| b.vertex(w).unwrap().point)
-                    .collect();
+                let (k, b, v, e, before) = sss_merge(edge1, sss);
+                // the far vertices did not move
+                assert_eq!(b.vertex(v[0]).unwrap().point, before[0]);
+                assert_eq!(b.vertex(v[2]).unwrap().point, before[1]);
                 // the vertex is at `sss`, sized to the merged points alone: its ends at the
                 // old point lie outside its ball, and only a carried end can be on it
                 let moved = b.vertex(v[1]).unwrap();
@@ -3046,6 +3120,12 @@ mod tests {
                     };
                     assert_eq!(s.degree().unwrap(), 3);
                 }
+                // the replaced curves read back their edge's tolerance
+                for &x in &e {
+                    let rec = b.edge(x).unwrap();
+                    let c = rec.curve.as_ref().unwrap();
+                    assert_eq!(c.owner_zone_tol_3d(), Some(rec.tolerance), "edge {x:?}");
+                }
             }
         }
     }
@@ -3058,7 +3138,7 @@ mod tests {
         let on = Point3::new(2.0 * (PI / 6.0).cos(), (PI / 6.0).sin(), 0.0);
         let off = Point3::new(1.5, 0.9, 0.3);
         for (sss, stays_ellipse) in [(on, true), (off, false)] {
-            let (k, b, v, e) = sss_merge(3, sss);
+            let (k, b, v, e, _) = sss_merge(3, sss);
             assert_eq!(b.vertex(v[1]).unwrap().point, sss);
             let (ok, far) = ends_on_vertices(&k, &b, &[v[0], v[1], v[2]]);
             assert!(ok, "sss {sss:?}: {far:?}");
@@ -3075,12 +3155,16 @@ mod tests {
                 );
                 assert!(rec.interval.min() > c1.natural_interval().min());
             } else {
-                assert!(
-                    matches!(c1.kind(), CurveKind::BSpline(_)),
-                    "{:?}",
-                    c1.kind()
+                // the edited spline is no elliptic arc any more
+                let CurveKind::BSpline(s) = c1.kind() else {
+                    panic!("{:?}", c1.kind())
+                };
+                assert_eq!(
+                    s.form(),
+                    crate::nurbs::b_spline_curve::BSplineCurveForm::Unspecified
                 );
             }
+            assert_eq!(c1.owner_zone_tol_3d(), Some(rec.tolerance));
         }
     }
 
@@ -3216,5 +3300,188 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// #21511: whether the point lies on the curve is decided by the global closest point,
+    /// not by a foot near the old end. A wire unit-circle arc from 0° to 270° whose start
+    /// vertex moves to the 180° point is re-trimmed to 180°..270° and stays a circle; a
+    /// solve seeded at 0° stops there (the gap is normal to the tangent at the farthest
+    /// point) and the arc became a B-spline.
+    #[test]
+    fn issue_21511_point_on_an_arc_far_from_the_old_end_keeps_the_arc() {
+        let k = Kernel::default();
+        let (mut b, v, e) = chain(true, Vec3::X, Vec3::Y);
+        let arc = Extent1d::from_min_max(0.0, 270.0);
+        let frame = crate::geom::axis2_placement::Axis2Placement::default();
+        let c = Curve::from(
+            crate::curve::ellipse::Ellipse::create_canonical(
+                &k,
+                &frame,
+                1.0,
+                1.0,
+                Some(&arc),
+                None,
+            )
+            .unwrap(),
+        );
+        let iv = c.natural_interval();
+        let p1 = c.evaluate_point(&k, iv.max()).unwrap();
+        assert!(p1.distance(Point3::new(0.0, -1.0, 0.0)) < 1e-12, "{p1:?}");
+        {
+            let rec = b.edge_mut(e[1]).unwrap();
+            rec.curve = Some(c);
+            rec.interval = iv;
+        }
+        b.vertex_mut(v[2]).unwrap().point = p1;
+        b.vertex_mut(v[1]).unwrap().point = Point3::new(-1.0, 0.0, 0.0);
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let mut env = crate::topology::edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &crate::topology::loopuse::notify_ref,
+        };
+        carry_far_edge_ends(&k, &mut b, v[1], &mut env).unwrap();
+        let (ok, far) = ends_on_vertices(&k, &b, &[v[0], v[1], v[2]]);
+        assert!(ok, "{far:?}");
+        let rec = b.edge(e[1]).unwrap();
+        let c1 = rec.curve.as_ref().unwrap();
+        assert!(
+            matches!(c1.kind(), CurveKind::Ellipse(_)),
+            "{:?}",
+            c1.kind()
+        );
+        // 180° of the arc's 0°..270°
+        let at_180 = iv.min() + (iv.max() - iv.min()) * (2.0 / 3.0);
+        assert!(
+            (rec.interval.min() - at_180).abs() < 1e-9,
+            "{:?}",
+            rec.interval
+        );
+        assert_eq!(rec.interval.max(), iv.max());
+    }
+
+    /// #21511 review: a cancelled closest-point solve is not "off the curve". A wire cubic
+    /// B-spline edge (the solve runs the branch solver, which polls the kernel's token)
+    /// whose start vertex moved off it: with the token cancelled, the carry returns
+    /// `Cancelled` and leaves the B-spline as it was. Before, the solve's error read as
+    /// `None` and the wire branch edited the curve after the caller had asked to stop.
+    #[test]
+    fn issue_21511_cancelled_point_on_curve_solve_is_passed_on() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        let mut k = Kernel::default();
+        let (mut b, v, e) = chain(true, Vec3::X, Vec3::Y);
+        let cp = |x: f64, y: f64| CPoint::new(x, y, 0.0, NOW);
+        let pw = vec![cp(1.0, 0.0), cp(1.4, 0.3), cp(0.8, 0.7), cp(1.0, 1.0)];
+        let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let c = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(pw, 3, knots).unwrap(),
+            3,
+            false,
+        ));
+        let (p0, p1) = (
+            c.evaluate_point(&k, 0.0).unwrap(),
+            c.evaluate_point(&k, 1.0).unwrap(),
+        );
+        b.edge_mut(e[1]).unwrap().curve = Some(c);
+        b.edge_mut(e[0]).unwrap().curve = Some(Curve::from(Line::from_points(Vec3::ZERO, p0, 3)));
+        b.vertex_mut(v[2]).unwrap().point = p1;
+        b.vertex_mut(v[1]).unwrap().point = Point3::new(1.5, 0.9, 0.3);
+        let token = crate::kernel::CancelToken::new();
+        k.set_cancel_token(token.clone());
+        token.cancel();
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let mut env = crate::topology::edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &crate::topology::loopuse::notify_ref,
+        };
+        let r = carry_far_edge_ends(&k, &mut b, v[1], &mut env);
+        assert!(matches!(r, Err(SolidError::Cancelled { .. })), "{r:?}");
+        // the B-spline edge still starts at its old point
+        let c1 = b.edge(e[1]).unwrap().curve.as_ref().unwrap();
+        assert_eq!(c1.evaluate_point(&k, 0.0).unwrap(), p0);
+    }
+
+    /// #21511: a surf/surf/surf point at a closed curve's seam has two parameters. A wire
+    /// edge on a full unit circle from 90° to 300° whose end vertex moves to the 0°/360°
+    /// point is re-trimmed to 90°..360° and stays a circle; the closest-point solve names
+    /// the seam 0°, which would make the interval decreasing, and the arc became a B-spline.
+    #[test]
+    fn issue_21511_point_at_a_circle_seam_keeps_the_circle() {
+        let k = Kernel::default();
+        let (mut b, v, e) = chain(true, Vec3::X, Vec3::Y);
+        let frame = crate::geom::axis2_placement::Axis2Placement::default();
+        let c = Curve::from(
+            crate::curve::ellipse::Ellipse::create_canonical(&k, &frame, 1.0, 1.0, None, None)
+                .unwrap(),
+        );
+        let nat = c.natural_interval();
+        let at = |deg: f64| nat.min() + (nat.max() - nat.min()) * (deg / 360.0);
+        let iv = Extent1d::from_min_max(at(90.0), at(300.0));
+        let seam = c.evaluate_point(&k, nat.max()).unwrap();
+        assert!(
+            seam.distance(Point3::new(1.0, 0.0, 0.0)) < 1e-12,
+            "{seam:?}"
+        );
+        {
+            let rec = b.edge_mut(e[1]).unwrap();
+            rec.curve = Some(c);
+            rec.interval = iv;
+        }
+        b.vertex_mut(v[2]).unwrap().point = seam;
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let mut env = crate::topology::edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &crate::topology::loopuse::notify_ref,
+        };
+        carry_far_edge_ends(&k, &mut b, v[2], &mut env).unwrap();
+        let (ok, far) = ends_on_vertices(&k, &b, &[v[2]]);
+        assert!(ok, "{far:?}");
+        let rec = b.edge(e[1]).unwrap();
+        let c1 = rec.curve.as_ref().unwrap();
+        assert!(
+            matches!(c1.kind(), CurveKind::Ellipse(_)),
+            "{:?}",
+            c1.kind()
+        );
+        assert_eq!(rec.interval.min(), iv.min());
+        assert_eq!(rec.interval.max(), nat.max());
+    }
+
+    /// #21511: an end exactly the vertex tolerance off (`d == tol`) is outside the ball by
+    /// the certified bound `cover_merged_ends` uses, so it is carried, not left between the
+    /// two tests (neither carried nor covered, past half the tolerance).
+    #[test]
+    fn issue_21511_end_at_exactly_the_tolerance_is_carried() {
+        let k = Kernel::default();
+        let (mut b, v, _) = chain(true, Vec3::X, Vec3::Y);
+        // a power of two, so the distance to (1, 0, 0) is exactly `tol`
+        let tol = 0.5_f64.powi(20);
+        {
+            let rec = b.vertex_mut(v[1]).unwrap();
+            rec.point = Point3::new(1.0, 0.0, tol);
+            rec.tolerance = tol;
+        }
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let mut env = crate::topology::edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &crate::topology::loopuse::notify_ref,
+        };
+        carry_far_edge_ends(&k, &mut b, v[1], &mut env).unwrap();
+        cover_merged_ends(&k, &mut b, v[1]).unwrap();
+        let (ok, far) = ends_on_vertices(&k, &b, &[v[0], v[1], v[2]]);
+        assert!(ok, "{far:?}");
     }
 }
