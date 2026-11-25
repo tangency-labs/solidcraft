@@ -621,12 +621,16 @@ impl PrimitiveCreation {
                 join_profile_wire_ends(a, brep, &edges)?;
                 faces.clear();
             }
-            let base = faces.first().copied();
             for &face in &faces {
                 edges.extend(a.face_edges((brep, face))?);
             }
             let mut cap = options.cap_ends;
-            if let Some(face) = base {
+            if faces.is_empty() {
+                cap = false;
+            }
+            // Not upstream (#22035 review): every cap face is checked, not only the first;
+            // a profile of several loops in one plane gives several faces, each capped
+            for &face in &faces {
                 let bound = a.primitive_face_box((brep, face))?.sphere_bound();
                 let direction = axis.unitize()?;
                 let param = line_closest_point(axis_base, direction, bound.center);
@@ -635,7 +639,7 @@ impl PrimitiveCreation {
                 let end = point + 2.0 * bound.radius * direction;
                 let axis_curve = Curve::from(BSplineCurve::create_line_segment(3, start, end)?);
                 if a.axis_inside_face((brep, face), &axis_curve)? {
-                    a.delete_primitive_faces(brep, &[face])?;
+                    a.delete_primitive_faces(brep, &faces)?;
                     return Err(SolidError::primitive(OP, PrimitiveFailure::AxisInsideFace));
                 }
                 // Not upstream (#21671): the check above sees only an axis lying in the
@@ -643,11 +647,9 @@ impl PrimitiveCreation {
                 // that point fixed, so both caps contain it, and two caps through a common
                 // inside point cross (or overlap, when the axis is the plane's normal)
                 if cap && axis_crosses_face_inside(a, (brep, face), axis_base, axis)? {
-                    a.delete_primitive_faces(brep, &[face])?;
+                    a.delete_primitive_faces(brep, &faces)?;
                     return Err(SolidError::primitive(OP, PrimitiveFailure::AxisInsideFace));
                 }
-            } else {
-                cap = false;
             }
             // Not upstream (WR-448, #545): analytic side faces (with `make_analytics`, the default)
             let rotation = RotationalSweepGeometry::new(axis_base, axis, angle_deg, tolerance);
@@ -858,6 +860,28 @@ mod tests {
             );
         }
 
+        // #22035 review: a profile of two loops in one plane gives two cap faces; the axis
+        // through the second square's centre (7, 1, 0) is refused as well
+        let two: Vec<Curve> = square(2.0).into_iter().chain(square(6.0)).collect();
+        let two: Vec<Option<&Curve>> = two.iter().map(Some).collect();
+        let got = create_rotational_sweep(
+            &mut k,
+            &two,
+            Point3::new(7.0, 1.0, 0.0),
+            Vec3::new(1.0, 0.0, 1.0),
+            90.0,
+            true,
+        );
+        assert_eq!(
+            got.as_ref()
+                .err()
+                .and_then(|e| e.primitive_failure())
+                .copied(),
+            Some(PrimitiveFailure::AxisInsideFace),
+            "the axis through the second square: {:?}",
+            got.map(|_| ())
+        );
+
         let pi = std::f64::consts::PI;
         let on_edge = square(0.0);
         let on_edge: Vec<Option<&Curve>> = on_edge.iter().map(Some).collect();
@@ -872,7 +896,8 @@ mod tests {
                 crate::topology::brep::p2::is_manifold_solid(&body).unwrap(),
                 "{what}"
             );
-            let volume = brep_volume_default(&k, &mut body, 1e-8).unwrap().abs();
+            // signed: an inward-facing solid fails too
+            let volume = brep_volume_default(&k, &mut body, 1e-8).unwrap();
             assert!(
                 (volume - want).abs() < 1e-6 * want,
                 "y axis {what}: volume {volume}, want {want}"
