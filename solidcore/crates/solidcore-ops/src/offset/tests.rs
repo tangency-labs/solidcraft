@@ -3195,6 +3195,29 @@ mod drafts {
             &points
         ));
     }
+
+    /// #1126 further past the critical angle, t = 1: the wall ends in a point on the line
+    /// x = 0, y = 15 at z = 20 - 5/t = 15, and the sides meet along a new edge from there
+    /// down to the bottom, as at t = 1/2. V = 4500 - 125 / (3 t) = 13375/3; 6 faces,
+    /// 12 edges, 8 vertices.
+    #[test]
+    #[ignore = "fails until #1126 is fixed"]
+    fn a_short_wall_drafted_at_45_degrees_past_where_its_sides_converge() {
+        all_fixes();
+        let mut points = CONVERGING_TOP.to_vec();
+        points.extend([
+            [-15.0, 0.0, 0.0],
+            [15.0, 0.0, 0.0],
+            [0.0, 15.0, 0.0],
+            [0.0, 15.0, 15.0],
+        ]);
+        assert!(draft_the_short_wall(
+            std::f64::consts::FRAC_PI_4,
+            13375.0 / 3.0,
+            [6, 12, 8],
+            &points
+        ));
+    }
 }
 
 /// Kernel diagnostics cross the application seam here; the app receives only ops
