@@ -7,8 +7,9 @@
 //! (butt joints), planar faces or planes, with the end that moves and a weld gap.
 
 use serde_json::{Map, Value, json};
+use solidcore_record::Vec2;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::doc::frame::{self, CornerType, MemberProfile, TrimEnd, TrimMemberRef, TrimTarget};
+use solidcraft_engine::doc::frame::{self, Anchor, CornerType, MemberProfile, SectionView, TrimEnd, TrimMemberRef, TrimTarget};
 use solidcraft_engine::doc::frame_corners::CORNER_TOL;
 use solidcraft_engine::doc::{FeatureKind, PlaneRef, ProfileSel};
 use solidcraft_engine::geom::prelude::*;
@@ -24,8 +25,9 @@ use crate::selection::{
 use crate::ui_kit::{Button, button, choice_row, expr_row, hint_row, row_height, sized_row, text_row};
 use crate::viewport::Hit;
 
-/// The anchors as `frame.member` names them, and their labels.
-const ANCHORS: &[(&str, &str)] = &[
+/// The anchors as `frame.member` names them, and their labels, in `frame::Anchor::ALL` order
+/// (the hot points in the view, `place_gizmo::frame_anchor`, go by it).
+pub(crate) const ANCHORS: &[(&str, &str)] = &[
     ("origin", "Origin"),
     ("center", "Center"),
     ("centroid", "Centroid"),
@@ -83,13 +85,28 @@ fn corner_index(corner: &CornerType) -> usize {
     CORNER_TYPES.iter().position(|c| name.as_ref().and_then(Value::as_str) == Some(c.0)).unwrap_or(NONE)
 }
 
+/// The anchor at `index` in [`ANCHORS`], whose order is `Anchor::ALL`'s.
+pub(crate) fn anchor_at(index: usize) -> Option<Anchor> {
+    Anchor::ALL.get(index).copied()
+}
+
+/// The index of `anchor` in [`ANCHORS`] (the inverse of [`anchor_at`]).
+pub(crate) fn anchor_index(anchor: Anchor) -> Option<usize> {
+    Anchor::ALL.iter().position(|a| *a == anchor)
+}
+
+/// How near (mm) a `locate` worked out again from the offsets must come to the one the dialog
+/// holds for that one to stay: float noise does not rewrite a feature's located point.
+const SAME_LOCATE: f64 = 1e-5;
+
 /// A group of lines and how its members sit on them, while another group is shown.
 #[derive(Clone, Debug, Default)]
 pub struct Group {
     pub lines: Vec<Sel>,
     pub anchor: usize,
-    /// The located profile point (`frame.member`'s `locate`), which the dialog has no field for:
-    /// kept with its group so an edit leaves the group's members where they are attached.
+    /// The located profile point (`frame.member`'s `locate`), shown as Offset A and B while the
+    /// group is shown: kept with its group so an edit leaves the group's members where they are
+    /// attached.
     pub locate: Option<[f64; 2]>,
     pub angle: String,
     pub mirror: bool,
@@ -113,6 +130,21 @@ pub struct Member {
     pub whole: Option<u64>,
     pub anchor: usize,
     pub locate: Option<[f64; 2]>,
+    /// Offset A and B: how far the section is moved from its anchor, along its own axes as drawn
+    /// (A its width, B its height; not the world's X and Y; both empty: none). The user's
+    /// intention: kept as the shown group's `locate` (`sync_offset`), which the engine reads, and
+    /// worked out again into it when the profile, Anchor, Mirror or Angle change.
+    pub offset: [String; 2],
+    /// The offset text `locate` was last worked out from (or shown from): a different text is an
+    /// edit to apply.
+    offset_applied: [String; 2],
+    /// The `locate` this dialog last wrote or showed as offsets: a different one was set
+    /// elsewhere (Edit Feature, a script, another group shown) and shows as the offsets from the
+    /// anchor.
+    locate_written: Option<[f64; 2]>,
+    /// The parameters without `locate` (`base_params`) `locate` was last worked out for: other
+    /// ones (a dimension, the Anchor, Mirror) work it out again from the offsets.
+    params_applied: Option<String>,
     pub angle: String,
     pub mirror: bool,
     pub name: String,
@@ -449,6 +481,10 @@ impl Member {
             whole: None,
             anchor: 0,
             locate: None,
+            offset: Default::default(),
+            offset_applied: Default::default(),
+            locate_written: None,
+            params_applied: None,
             angle: String::new(),
             mirror: false,
             name: String::new(),
@@ -546,6 +582,12 @@ impl Member {
         self.angle = g.angle;
         self.mirror = g.mirror;
         self.name = g.name;
+        // Offset A and B are worked out again from this group's `locate` (`sync_offset`), so the
+        // last group's typed offset is not applied to this one.
+        self.offset = Default::default();
+        self.offset_applied = Default::default();
+        self.locate_written = None;
+        self.params_applied = None;
         if let Some(i) = inputs.first_mut() {
             i.items = g.lines;
             self.sync(&i.items);
@@ -926,7 +968,7 @@ fn tr(text: &str) -> &str {
 /// pressed in a value.
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
     let Kind::Frame(m) = &mut d.kind else { return false };
-    let mut enter = member_rows(app, ui, m, &mut d.inputs);
+    let mut enter = member_rows(app, ui, m, &mut d.inputs, &d.extra);
     ui.separator();
     let labels = CORNER_TYPES.map(|c| c.1);
     choice_row(ui, "Corner Type", "frame_corner", &mut m.corner, &labels);
@@ -1224,7 +1266,7 @@ fn group_rows(ui: &mut egui::Ui, m: &mut Member, inputs: &mut [SelInput]) {
 }
 
 /// The Frame Member rows proper: the section, its placement and the name.
-fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &mut [SelInput]) -> bool {
+fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &mut [SelInput], extra: &Map<String, Value>) -> bool {
     let mut enter = false;
     m.sync(crate::selection::items(inputs, 0));
     if m.groups.len() == 1 {
@@ -1254,17 +1296,171 @@ fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &mut [
     }
     let anchors: Vec<&str> = ANCHORS.iter().map(|a| a.1).collect();
     choice_row(ui, "Anchor", "frame_anchor", &mut m.anchor, &anchors);
+    let [a, b] = &mut m.offset;
+    enter |= hint_row(ui, "ui.frame_offset_a", a, "0 mm");
+    enter |= hint_row(ui, "ui.frame_offset_b", b, "0 mm");
     enter |= hint_row(ui, "Angle", &mut m.angle, "0 deg");
     form_row(ui, "Mirror", |ui| check(ui, &mut m.mirror));
     enter |= text_row(ui, "Name", &mut m.name, tr("from the profile")).0;
     form_row(ui, "Ghost Frame Members", |ui| check(ui, &mut m.ghost));
+    sync_offset(app, m, inputs, extra);
     enter
+}
+
+/// Keep Offset A and B and the shown group's `locate` in step. The offsets are the user's
+/// intention: typed (or set by an arrow or the marker in the view), they set `locate` (the
+/// anchor's point minus the offset; both empty: none), and a later change of the profile, Anchor,
+/// Mirror or Angle works `locate` out again from them. A `locate` set otherwise (Edit Feature, a
+/// script, another group shown) shows as the offsets from the anchor. A click on a hot point
+/// empties both.
+fn sync_offset(app: &SolveApp, m: &mut Member, inputs: &[SelInput], extra: &Map<String, Value>) {
+    let held = m.locate;
+    let edited = m.offset != m.offset_applied;
+    // Within float noise of the `locate` written: not set elsewhere (an arrow's move must not
+    // rewrite the other offset's text from it).
+    let elsewhere = match (held, m.locate_written) {
+        (Some(h), Some(w)) => !same_locate(h, w),
+        (h, w) => h.is_some() != w.is_some(),
+    };
+    if !edited && elsewhere {
+        let offset = match held {
+            None => Some(Default::default()),
+            Some(at) => base_view(app, m, inputs, extra)
+                .and_then(|v| offset_of(&v, m.anchor, at))
+                .map(|o| o.map(|v| crate::length_input::model(&app.session.doc, nanometre(v)))),
+        };
+        // No section to read it on yet: tried again as values change.
+        if let Some(offset) = offset {
+            m.offset_applied = offset.clone();
+            m.offset = offset;
+            m.locate_written = held;
+            m.params_applied = base_key(app, m, inputs, extra);
+        }
+        return;
+    }
+    let key = base_key(app, m, inputs, extra);
+    if !edited && key == m.params_applied {
+        return;
+    }
+    let at = match offset_mm(app, m) {
+        // Half typed: `locate` stays as it was, and with it the section in the view; OK refuses.
+        Err(_) => return,
+        Ok(None) => None,
+        // No section yet (no line, an unfinished value), or past the largest profile: tried
+        // again as values change, rather than taken as applied and later wiped; OK refuses.
+        Ok(Some(off)) => match base_view(app, m, inputs, extra).and_then(|v| locate_for(&v, m.anchor, off)) {
+            Some(at) => Some(at),
+            None => return,
+        },
+    };
+    match at {
+        Some(at) if !held.is_some_and(|h| same_locate(h, at)) => m.locate = Some(at),
+        Some(_) => {}
+        None => m.locate = None,
+    }
+    m.offset_applied = m.offset.clone();
+    m.locate_written = m.locate;
+    m.params_applied = key;
+}
+
+/// Two `locate`s within [`SAME_LOCATE`] of each other.
+fn same_locate(a: [f64; 2], b: [f64; 2]) -> bool {
+    (a[0] - b[0]).abs() <= SAME_LOCATE && (a[1] - b[1]).abs() <= SAME_LOCATE
+}
+
+/// `v` (mm) rounded to a nanometre, without a negative zero: an offset worked out from a
+/// `locate` shows as `50 mm`, not as the float noise of the section's layout (`49.99999999 mm`).
+fn nanometre(v: f64) -> f64 {
+    (v * 1e6).round() / 1e6 + 0.0
+}
+
+/// Offset A and B in mm; none when both are empty (an empty one is 0).
+fn offset_mm(app: &SolveApp, m: &Member) -> Result<Option<[f64; 2]>, String> {
+    let [a, b] = [m.offset[0].trim(), m.offset[1].trim()];
+    if a.is_empty() && b.is_empty() {
+        return Ok(None);
+    }
+    let mm = |t: &str| -> Result<f64, String> {
+        if t.is_empty() {
+            return Ok(0.0);
+        }
+        crate::length_input::eval(&app.session.doc, t, ValueKind::Length)
+            .ok()
+            // The limit is on the `locate` they give (`locate_for`), not on each offset: a stored
+            // `locate` the engine takes can be farther than that from its anchor.
+            .filter(|v| v.is_finite())
+            .ok_or_else(|| "Offset A and Offset B must be lengths".to_string())
+    };
+    Ok(Some([mm(a)?, mm(b)?]))
+}
+
+/// The shown group's parameters without a located point: what the anchors are read from (they do
+/// not move with one).
+fn base_params(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Value, String> {
+    let mut p = shown_params(app, m, inputs, extra)?;
+    if let Value::Object(o) = &mut p {
+        o.remove("locate");
+    }
+    Ok(p)
+}
+
+/// What the anchors are worked out from: the dialog's values and the design's parameters and units
+/// (a profile dimension may name a parameter that changes while the dialog is open).
+fn base_key(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Option<String> {
+    let doc = &app.session.doc;
+    base_params(app, m, inputs, extra).ok().map(|p| format!("{p} {} {:?}", doc.units, doc.param_values().0))
+}
+
+/// The section the shown group's values make without a located point, from the section cache the
+/// view's hot points share.
+fn base_view(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Option<SectionView> {
+    crate::place_gizmo::frame_anchor::section_view(app, &base_params(app, m, inputs, extra).ok()?).ok()
+}
+
+/// The `locate` that moves the section by Offset A and B (`a`, `b`) from anchor `anchor`: the
+/// anchor's point minus the offset is the point on the line. None past the largest profile.
+pub(crate) fn locate_for(v: &SectionView, anchor: usize, [a, b]: [f64; 2]) -> Option<[f64; 2]> {
+    let p = frame::anchor_point(&v.regions, anchor_at(anchor)?);
+    let at = v.locate_of(Vec2::new(p.x - a, p.y - b));
+    at.iter().all(|c| frame::within_profile_size(*c)).then_some(at)
+}
+
+/// How far `locate` moves the section from anchor `anchor` (the inverse of `locate_for`).
+fn offset_of(v: &SectionView, anchor: usize, at: [f64; 2]) -> Option<[f64; 2]> {
+    let (p, q) = (frame::anchor_point(&v.regions, anchor_at(anchor)?), v.locate_point(at));
+    let off = [p.x - q.x, p.y - q.y];
+    off.iter().all(|c| c.is_finite()).then_some(off)
+}
+
+/// The `locate` typed Offset A and B (`off`) give the shown group with the dialog's values now;
+/// refused, naming the fields, when they cannot be applied, so OK never runs a `locate` left from
+/// other values.
+fn applied_locate(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>, off: [f64; 2]) -> Result<[f64; 2], String> {
+    let view = crate::place_gizmo::frame_anchor::section_view(app, &base_params(app, m, inputs, extra)?)
+        .map_err(|e| format!("Offset A and Offset B cannot be applied: {e}"))?;
+    locate_for(&view, m.anchor, off).ok_or_else(|| {
+        format!("Offset A and Offset B move the section's point on the line past the largest profile ({} mm)", frame::MAX_PROFILE_SIZE)
+    })
 }
 
 /// The command the dialog's OK runs (`extra`: parameters kept from the feature being edited).
 /// Group placement uses the same path/profile reader as an ordinary frame. Unsupported joined
 /// groups are refused, preserving the selected corner and finishing controls for the user.
 pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
+    // Offset A and B typed for the group shown are applied to its `locate` as the values are now.
+    let applied;
+    let m = match offset_mm(app, m)? {
+        Some(off) => {
+            let at = applied_locate(app, m, inputs, extra, off)?;
+            if m.locate.is_some_and(|h| same_locate(h, at)) {
+                m
+            } else {
+                applied = Member { locate: Some(at), ..m.clone() };
+                &applied
+            }
+        }
+        None => m,
+    };
     if m.groups.len() <= 1 {
         return flat_commands(app, m, inputs, extra);
     }
@@ -1324,6 +1520,16 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
     let mut p = common.ok_or("select lines for the path first")?;
     p["groups"] = json!(grouped);
     Ok(vec![("frame.member".into(), p)])
+}
+
+/// The `frame.member` parameters of the group shown alone (its lines, anchor, `locate`, angle and
+/// mirror, as one flat member): what the hot points in the view and Offset A and B lay out.
+pub(crate) fn shown_params(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Value, String> {
+    let mut kept = extra.clone();
+    kept.remove("groups");
+    kept.remove("locate");
+    let (_, p) = flat_commands(app, m, inputs, &kept)?.into_iter().next().ok_or("select lines for the path first")?;
+    Ok(p)
 }
 
 fn flat_commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
@@ -1510,7 +1716,7 @@ fn flat_commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<St
             o.entry(key.clone()).or_insert_with(|| v.clone());
         }
     }
-    Ok(vec![("frame.member".to_string(), p)])
+    Ok(vec![("frame.member".into(), p)])
 }
 
 /// Whether a weld gap typed as `g` is none: empty, or a plain 0 (`0`, `0 mm`; a parameter that is 0 now is kept).
@@ -1622,18 +1828,15 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
             }
         }
     }
-    let anchor = serde_json::to_value(anchor).ok();
-    m.anchor = ANCHORS.iter().position(|(a, _)| anchor.as_ref().and_then(Value::as_str) == Some(*a)).unwrap_or(0);
+    m.anchor = anchor_index(*anchor).unwrap_or(0);
     m.angle = angle.as_deref().map(|a| shown_expr(a, ValueKind::Angle)).unwrap_or_default();
     m.mirror = *mirror;
     m.locate = *locate;
     m.name = body_name.clone().unwrap_or_default();
-    // The dialog has no field for a located point: an edit keeps it, so the member stays where it
-    // is attached.
+    // A located point stays as the feature has it (`m.locate`: the member stays where it is
+    // attached); Offset A and B show it from the anchor, worked out once below (or once a section
+    // can be laid out, `sync_offset`).
     let mut extra = Map::new();
-    if let Some(at) = locate {
-        extra.insert("locate".into(), json!(at));
-    }
     m.corner = corner_index(corner);
     m.flip = *flip;
     m.fit_ends = *fit_ends;
@@ -1689,11 +1892,10 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
         m.groups = groups
             .iter()
             .map(|g| {
-                let value = serde_json::to_value(g.anchor).ok();
                 let ids = if g.lines.is_empty() { frame::member_line_ids(&st, kind).unwrap_or_default() } else { g.lines.clone() };
                 Group {
                     lines: ids.into_iter().map(|id| Sel::ExternalSketchCurve { sketch: path.0, id }).collect(),
-                    anchor: ANCHORS.iter().position(|(a, _)| value.as_ref().and_then(Value::as_str) == Some(*a)).unwrap_or(0),
+                    anchor: anchor_index(g.anchor).unwrap_or(0),
                     locate: g.locate,
                     angle: g.angle.as_deref().map(|a| shown_expr(a, ValueKind::Angle)).unwrap_or_default(),
                     mirror: g.mirror,
@@ -1704,7 +1906,9 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
         m.current = usize::MAX;
         m.all = matches!(groups.as_slice(), [one] if one.lines.is_empty());
         m.show(0, &mut inputs);
-        extra.remove("locate");
+    }
+    if m.locate.is_some() {
+        sync_offset(app, &mut m, &inputs, &extra);
     }
     Some((Kind::Frame(m), inputs, extra))
 }

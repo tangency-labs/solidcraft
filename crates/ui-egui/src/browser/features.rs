@@ -1098,7 +1098,7 @@ mod tests {
         let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{round}")).unwrap();
         h.step(&json!({"move":[row.x,row.y]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, Some(round));
-        assert!(h.app.session.selection.is_empty(), "hovering doesn't select");
+        assert!(!h.app.session.has_selection(), "hovering doesn't select");
         h.step(&json!({"move":[5,5]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, None);
         // The timeline's own hover still lights it: the browser clears only what it set.
@@ -1561,6 +1561,60 @@ mod tests {
 
     /// A feature's browser row has the timeline's actions: its sketch button and menu edit the
     /// profile sketch, and the menu suppresses and rolls back; rolled-back rows stay listed.
+    #[test]
+    fn coil_and_revolve_share_the_browser_profile_sketch_reference() {
+        for history in [false, true] {
+            for command in ["solid.revolve", "solid.coil"] {
+                let mut h = Harness::new();
+                let sketch = h.app.run("sketch.create", json!({"plane":"XZ","name":"Section"})).unwrap()["sketch"].as_u64().unwrap();
+                h.app.run("sketch.rectangle.two_point", json!({"p0":[10,-0.5],"p1":[11,0.5]})).unwrap();
+                h.app.run("sketch.finish", json!({})).unwrap();
+                let params = if command == "solid.coil" {
+                    json!({"sketch":sketch,"axis":"Z","pitch":8,"revolutions":1,"name":"Turn"})
+                } else {
+                    json!({"sketch":sketch,"axis":"Z","angle":90,"name":"Turn"})
+                };
+                let feature = h.app.run(command, params).unwrap()["feature"].as_u64().unwrap();
+                h.app.tree.expanded.insert("c0/features".into());
+                if history {
+                    h.app.preferences.history_sketches = crate::prefs::HistorySketches::UnderFeature;
+                    h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+                }
+                h.frames(4);
+                for target in [Target::Feature { id: feature }, Target::Timeline { feature }] {
+                    let items = crate::context_menu::items(&h.app, &target);
+                    let edit = items.iter().find(|item| item.id == "ui.editSketch").unwrap();
+                    assert!(edit.enabled, "{command}, history={history}");
+                    assert_eq!(edit.params.as_ref().unwrap()["sketch"], json!(sketch));
+                }
+                if history {
+                    assert_eq!(fold_of("Turn"), Some(false));
+                    h.step(&json!({"click":{"handle":"fold:Turn"}})).unwrap();
+                    h.frames(2);
+                    assert_eq!(count("Section"), 1, "the source sketch is listed under {command}");
+                }
+                h.step(&json!({"click":{"handle":"action:Turn"}})).unwrap();
+                h.frames(2);
+                assert_eq!(h.app.session.active_sketch, Some(sketch), "{command}, history={history}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_primitive_coil_has_no_profile_sketch_reference() {
+        let mut h = Harness::new();
+        let feature = h.app.run("solid.coil", json!({"diameter":20,"section_size":1,"pitch":8,"revolutions":1,"name":"Spring"})).unwrap()["feature"]
+            .as_u64()
+            .unwrap();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.frames(3);
+        assert!(crate::scenario::handle_at("action:Spring").is_none());
+        let menu = crate::context_menu::items(&h.app, &Target::Feature { id: feature });
+        assert!(!menu.iter().find(|item| item.id == "ui.editSketch").unwrap().enabled);
+        let timeline = crate::timeline::feature_items(&h.app, feature);
+        assert!(timeline.iter().all(|item| item.id != "ui.editSketch"));
+    }
+
     #[test]
     fn browser_feature_row_edits_its_sketch_suppresses_and_rolls_back() {
         let mut h = Harness::new();
@@ -2089,7 +2143,7 @@ mod tests {
         h.step(&json!({"click": {"handle": format!("row:browser-feature:c0:{id}")}})).unwrap();
         let picked = h.app.dialog.as_ref().map(|dialog| dialog.inputs[0].items.clone());
         assert_eq!(picked, Some(vec![Sel::Feature { id }]), "the row's click goes to the dialog");
-        assert!(h.app.session.selection.is_empty(), "dialog picks leave the ordinary selection alone");
+        assert!(!h.app.session.has_selection(), "dialog picks leave the ordinary selection alone");
     }
 
     #[test]
@@ -2111,7 +2165,7 @@ mod tests {
         let row_feature = crate::scenario::handle_at(&format!("row:browser-feature:c0:{round}")).unwrap();
         h.step(&json!({"move":[row_feature.x, row_feature.y]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, Some(round));
-        assert!(h.app.session.selection.is_empty(), "hovering doesn't select");
+        assert!(!h.app.session.has_selection(), "hovering doesn't select");
         h.step(&json!({"move":[5, 5]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, None);
 
@@ -2119,7 +2173,7 @@ mod tests {
         let row_sketch = crate::scenario::handle_at("row:MySketch").unwrap();
         h.step(&json!({"move":[row_sketch.x, row_sketch.y]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, Some(sketch));
-        assert!(h.app.session.selection.is_empty(), "hovering sketch doesn't select");
+        assert!(!h.app.session.has_selection(), "hovering sketch doesn't select");
         h.step(&json!({"move":[5, 5]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, None);
     }

@@ -561,7 +561,8 @@ fn trim_with_schema(_: &mut SchemaGenerator) -> Schema {
 
 fn trim_tool_schema(generator: &mut SchemaGenerator) -> Schema {
     let mut face = face_on_body(generator);
-    face.insert("description".into(), json!("A face to cut with, its surface extended."));
+    face.insert("description".into(), json!("The whole bounded cutting sheet (`body`), or one extended face (`body` and `point`)."));
+    face.insert("required".into(), json!(["body"]));
     face
 }
 
@@ -840,6 +841,12 @@ pub struct SurfaceLoftParams {
     /// How the rails reshape the sections. Default: scale. Used only with `rails`.
     #[serde(default)]
     pub rail_fit: Option<RailFitParam>,
+    /// Through planar sketch sections, the walls face out of the region closed sections bound,
+    /// as `solid.loft`'s faces do, and along an open section's direction crossed with its sketch
+    /// normal, as `surface.extrude`'s. Default: true. False keeps each wall along its skinned
+    /// surface's normal, as surface lofts saved before it build.
+    #[serde(default)]
+    pub faced: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

@@ -809,6 +809,49 @@ fn clean_contour(points: &[[f64; 2]]) -> Option<Vec<[f64; 2]>> {
     (pts.len() >= 3).then_some(pts)
 }
 
+/// Take a fill outline apart at its bridges. KiCad saves a filled polygon with holes as one
+/// outline that runs in to each hole along a zero-width bridge, round the hole and back out along
+/// the same line (and from one hole on to the next the same way). Kept, a bridge is an edge with
+/// nothing beside it, drawn as a line across the pour. So the bridges go, and the pieces they held
+/// together are loops of their own: the pour's outline and its holes, which nesting sorts out (see
+/// [`regions_from_loops`]).
+///
+/// One walk round the outline, with the points it has not closed yet on a stack, the way brackets
+/// are matched: a step back along the edge just walked is a bridge going back out and takes that
+/// edge off; a step back onto a point still on the stack closes the loop since it. Each point goes
+/// on and off the stack once, so a hatched fill with thousands of holes costs one pass.
+fn split_bridges(points: &[[f64; 2]]) -> Vec<Vec<[f64; 2]>> {
+    let key = |p: [f64; 2]| (p[0].to_bits(), p[1].to_bits());
+    let mut loops = Vec::new();
+    let mut path: Vec<[f64; 2]> = Vec::with_capacity(points.len());
+    let mut on_path: HashMap<(u64, u64), usize> = HashMap::with_capacity(points.len());
+    // Round once and back to the first point, so the outline's last edge closes it.
+    for &point in points.iter().chain(points.first()) {
+        if path.last() == Some(&point) {
+            continue;
+        }
+        if path.len() >= 2 && path.get(path.len() - 2) == Some(&point) {
+            if let Some(top) = path.pop() {
+                on_path.remove(&key(top));
+            }
+            continue;
+        }
+        if let Some(&at) = on_path.get(&key(point)) {
+            let span = path.split_off((at + 1).min(path.len()));
+            for q in &span {
+                on_path.remove(&key(*q));
+            }
+            if span.len() >= 2 {
+                loops.push(std::iter::once(point).chain(span).collect());
+            }
+            continue;
+        }
+        on_path.insert(key(point), path.len());
+        path.push(point);
+    }
+    loops
+}
+
 /// A copper zone's filled polygons, one zone per layer they lie on. KiCad 9 writes a zone that
 /// spans layers as `(layers "F.Cu" "B.Cu")` with a `filled_polygon` per layer, so the fill's own
 /// layer decides (the zone's `(layer …)` is the fallback).
@@ -819,15 +862,17 @@ fn parse_zone(expr: &Expr<'_>, warnings: &mut Vec<String>) -> Vec<KicadZone> {
     for fill in children(expr).iter().filter(|e| head(e) == Some("filled_polygon")) {
         let layer = layer_of(fill).or_else(|| zone_layer.clone());
         let Some(layer) = layer.filter(|layer| is_outer_copper(layer)) else { continue };
-        let Some(points) = poly_points(fill).and_then(|points| clean_contour(&points)) else { continue };
+        let Some(points) = poly_points(fill) else { continue };
         total = total.saturating_add(points.len());
         if total > MAX_ZONE_POINTS {
             warnings.push("a copper zone was too large and was skipped".into());
             return Vec::new();
         }
-        match contours.iter_mut().find(|(l, _)| *l == layer) {
-            Some((_, list)) => list.push(points),
-            None => contours.push((layer, vec![points])),
+        for points in split_bridges(&points).iter().filter_map(|piece| clean_contour(piece)) {
+            match contours.iter_mut().find(|(l, _)| *l == layer) {
+                Some((_, list)) => list.push(points),
+                None => contours.push((layer.clone(), vec![points])),
+            }
         }
     }
     contours.into_iter().map(|(layer, contours)| KicadZone { layer, contours }).collect()
@@ -1752,7 +1797,8 @@ fn extrude_regions(regions: &[Region2], z0: f64, z1: f64) -> Result<Vec<solidcra
     for region in regions {
         items.push(region_loops(region)?);
     }
-    let (mut points, triangles) = solidcore_tess::triangulate_union(&items).map_err(|error| IoError::Invalid(format!("KiCad copper: {error}")))?;
+    let (mut points, triangles) =
+        solidcraft_kernel::services::tess::triangulate_union(&items).map_err(|error| IoError::Invalid(format!("KiCad copper: {error}")))?;
     // One face of each triangle, without the ones that could not be on a surface: a corner twice
     // has an edge of its own, and the same triangle twice would put two faces on one edge.
     let mut seen: HashSet<[u32; 3]> = HashSet::with_capacity(triangles.len());
@@ -2449,7 +2495,7 @@ impl Plate {
     fn add_surface_region(&mut self, region: &Region2, z0: f64, z1: f64) -> bool {
         let Some(front) = self.surface else { return false };
         let Ok(loops) = region_loops(region) else { return false };
-        let Ok((points, mut triangles)) = solidcore_tess::triangulate_planar(&loops) else { return false };
+        let Ok((points, mut triangles)) = solidcraft_kernel::services::tess::triangulate_planar(&loops) else { return false };
         if triangles.is_empty() {
             return false;
         }

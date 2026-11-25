@@ -410,6 +410,70 @@ fn replace_sketch_never_rebinds_a_reference_to_an_old_curve_onto_a_new_one() {
     assert!((volume(&s) - 3000.0).abs() > 1.0, "never built from the unrelated new curves: {}", volume(&s));
 }
 
+/// The issue's case (#21550): a sketch's edited copy is brought back with `keep_ids`, and the
+/// features that name its curves still build. The extrude picks its profile by curve ids and the
+/// fillet's edge is named after the extrude's side faces, which carry those ids. Here the square
+/// (10 x 10 x 5) becomes a 12 x 10 rectangle with the same ids, so the result is
+/// 12 x 10 x 5 = 600 mm³ less the R1 round on one 5 mm upright edge, (1 - π/4) x 5 mm³.
+/// Without `keep_ids` the same replace leaves the fillet's edge unknown.
+#[test]
+fn replace_sketch_with_keep_ids_keeps_the_features_built_on_its_curves() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Part"}));
+    let square = strs(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}))["curves"]);
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Part", "distance": 5.0, "operation": "new_body", "profiles": [{"curves": square}]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 10, 2.5]], "radius": 1}));
+    let round = (1.0 - std::f64::consts::FRAC_PI_4) * 5.0;
+    assert!((volume(&s) - (500.0 - round)).abs() < 1e-3, "{}", volume(&s));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Edited"}));
+    let edited = strs(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [12, 10]}))["curves"]);
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(square, edited, "both sketches numbered their curves alike: {square:?} {edited:?}");
+    let before = s.doc.to_json();
+
+    let out = run(&mut s, "sketch.replace", json!({"sketch": "Part", "from": "Edited", "keep_ids": true}));
+    assert_eq!(strs(&out["curves"]), square, "the source's curve ids");
+    for id in &square {
+        assert_eq!(out["ids"][id], json!(id), "{out}");
+    }
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "the extrude and the fillet still find their curves: {errors:?}");
+    assert!((volume(&s) - (600.0 - round)).abs() < 1e-3, "{}", volume(&s));
+
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before, "one undo step");
+    // The default renumbers, so the features that named the old curves say so.
+    if let Ok(out) = s.execute("sketch.replace", &json!({"sketch": "Part", "from": "Edited"})) {
+        let new = strs(&out["curves"]);
+        assert!(new.iter().all(|id| !square.contains(id)), "new ids: {new:?}");
+        for (from, to) in square.iter().zip(&new) {
+            assert_eq!(out["ids"][from], json!(to), "{out}");
+        }
+        assert!(s.model.results.iter().any(|r| r.error.is_some()), "a feature says its curves are gone");
+    }
+}
+
+/// `keep_ids` also gives the copied points their source ids, and the ids of what the target
+/// sketch held before are free to take: nothing of the old contents is left to clash with.
+#[test]
+fn replace_sketch_with_keep_ids_keeps_point_ids_over_the_old_contents() {
+    let mut s = two_sketches();
+    let big = s.doc.find_feature("Big").unwrap().id;
+    let small = s.doc.find_feature("Small").unwrap().id;
+    let source = s.doc.sketch(big).unwrap().clone();
+    let out = run(&mut s, "sketch.replace", json!({"sketch": "Small", "from": "Big", "keep_ids": true}));
+    let sk = sketch(&s, small);
+    let ids = |k: &Sketch| -> Vec<String> { k.curves.iter().map(|c| c.id.clone()).chain(k.points.iter().map(|q| q.id.clone())).collect() };
+    let (mut mine, mut theirs) = (ids(sk), ids(&source));
+    mine.sort();
+    theirs.sort();
+    assert_eq!(mine, theirs, "the same curve and point ids as the source");
+    let map = out["ids"].as_object().unwrap();
+    assert!(map.iter().all(|(k, v)| v.as_str() == Some(k.as_str())), "{map:?}");
+    assert!((volume(&s) - 3000.0).abs() < 1e-6, "{}", volume(&s));
+}
+
 /// Sketch contents come from a sketch in another design file, at the same sketch coordinates; a
 /// dimension that named that design's parameter keeps its value, without the parameter.
 #[test]
@@ -449,6 +513,8 @@ fn replace_sketch_refuses_bad_requests_and_leaves_the_design_as_it_was() {
         json!({"sketch": "Nope", "from": "Big"}),
         json!({"from": "Big"}),
         json!({"sketch": "Small", "from": "Big", "file": 3}),
+        json!({"sketch": "Small", "from": "Big", "keep_ids": "yes"}),
+        json!({"sketch": "Small", "from": "Big", "keep_ids": 1}),
         json!({"sketch": "Small", "from": "Big", "file": "Z:/no/such/file.solidcraft"}),
         json!([1, 2]),
         json!("text"),
