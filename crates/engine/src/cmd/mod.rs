@@ -293,6 +293,7 @@ pub(crate) use sketch_project::ref_form;
 mod sketch_rational;
 pub mod sketch_selection;
 mod sketch_store;
+mod socket_reach;
 mod surface;
 mod surface_analysis;
 mod surface_boundary;
@@ -642,6 +643,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(joints::constraint::COMMANDS.iter());
     v.extend(clearance::COMMANDS.iter());
     v.extend(hole_stacks::COMMANDS.iter());
+    v.extend(socket_reach::COMMANDS.iter());
     v.extend(motion::COMMANDS.iter());
     v.extend(motion_simulate::COMMANDS.iter());
     v.extend(panels::COMMANDS.iter());
