@@ -58,7 +58,7 @@ pub struct SectionCurve {
 
 /// How the producer represents its source: the hidden-line drawing's accuracy, which a section
 /// shares.
-pub use solidcore_ops::hlr::CurveAccuracy;
+pub use solidcore_record::CurveAccuracy;
 
 /// An ordered connected chain. `closed` is explicit, never inferred or repaired.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

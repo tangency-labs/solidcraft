@@ -6,7 +6,8 @@
 //! [`solidcore::Transform::uniform_scaling`], [`solidcore::Transform::reflection`],
 //! [`solidcore::Transform::concat`], [`solidcore::Transform::inverse`]); ops checks the
 //! numbers and passes them on. Beside them, how far a point or a box reaches along a direction
-//! ([`distance_along`], [`span_along`]), as the kernel measures it, a point under a map
+//! ([`distance_along`], [`span_along`]), whether a forward ray meets a padded box
+//! ([`ray_meets_box`]), as the kernel measures it, a point under a map
 //! ([`apply_point`]), parallelograms on a plane ([`rect_of_aspect`], [`fit_aspect`],
 //! [`offset_quad`], [`parallelogram_point`]), and a direction turned to the sense of another
 //! ([`same_sense`]).
@@ -56,6 +57,28 @@ pub fn rotation(point: [f64; 3], axis: [f64; 3], angle: f64) -> Result<Matrix> {
     taken(Transform::rotation(vec3(point), vec3(axis), angle))
 }
 
+/// Whether a map is a rotation or reflection and a translation, with the caller's
+/// axis and homogeneous-entry tolerances. Non-finite maps or invalid tolerances are false.
+pub fn is_rigid(matrix: &Matrix, axis_tol: f64, affine_tol: f64) -> bool {
+    Transform { m: *matrix }.is_rigid(axis_tol, affine_tol)
+}
+
+/// The change between two source placements in a sketch's orthonormal plane frame.
+/// Returns none for an unchanged map, a singular source frame, a tilt or an in-plane
+/// reflection. A normal translation does not change the projected shape.
+pub fn projection_motion(
+    seen: &Matrix,
+    now: &Matrix,
+    origin: [f64; 3],
+    x: [f64; 3],
+    y: [f64; 3],
+) -> Option<([[f64; 2]; 2], [f64; 2])> {
+    let inverse = Transform { m: *seen }.inverse().ok()?;
+    let moved = inverse.concat(&Transform { m: *now });
+    let (a, b) = moved.plane_motion(vec3(origin), vec3(x), vec3(y), 1e-9, 1e-12)?;
+    Some((a, b.to_array()))
+}
+
 /// The orthonormal axes along `x` and in the plane of `x` and `y` (on `y`'s side),
 /// using the kernel's [`Transform::orthonormal_frame`]. If `y` is parallel to `x` or has
 /// no length, the kernel chooses a perpendicular direction. This restores a unit frame after
@@ -79,6 +102,18 @@ pub fn orthonormal_axes(x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2]> {
 pub fn axis_squared_axes(x: [f64; 3], y: [f64; 3], noise: f64) -> Option<[[f64; 3]; 2]> {
     let [x, y] = Transform::axis_squared_frame(vec3(x), vec3(y), noise)?;
     Some([[x.x, x.y, x.z], [y.x, y.y, y.z]])
+}
+
+/// Signed angle about unit `normal`, from unit `start` to unit `end`, in radians.
+/// Calls [`Vec3::signed_unit_angle`], including its positive choice for a half turn.
+///
+/// # Errors
+/// [`Error::Refused`] for non-finite, non-unit or non-perpendicular directions,
+/// retaining the kernel routine and reason.
+pub fn signed_unit_angle(normal: [f64; 3], start: [f64; 3], end: [f64; 3]) -> Result<f64> {
+    vec3(normal)
+        .signed_unit_angle(vec3(start), vec3(end))
+        .map_err(crate::error::status)
 }
 
 /// Carry planar axes by a rigid `matrix`, keeping UV scales and keeping square source
@@ -249,6 +284,26 @@ pub fn span_along(
     Ok(span)
 }
 
+/// Whether the forward ray from `origin` along `direction` (`t >= 0`) meets the box from `min` to
+/// `max` inflated by a conservative margin derived from its size and `tolerance`, through
+/// [`Extent3d::meets_ray`]. Conservative on non-finite inputs (returns `true`).
+#[must_use]
+pub fn ray_meets_box(
+    min: [f64; 3],
+    max: [f64; 3],
+    origin: [f64; 3],
+    direction: [f64; 3],
+    tolerance: f64,
+) -> bool {
+    let [min_x, min_y, min_z] = min;
+    let [max_x, max_y, max_z] = max;
+    Extent3d::from_bounds(min_x, min_y, min_z, max_x, max_y, max_z).meets_ray(
+        vec3(origin),
+        vec3(direction),
+        tolerance,
+    )
+}
+
 /// The axis-aligned box around the corners of the box `lo`..`hi` moved by `matrix`, through
 /// [`Transform::transformed_box`]: it holds the moved box, a little larger for a turn. An empty box
 /// (`lo` above `hi` on an axis) comes back as it is.
@@ -347,6 +402,38 @@ mod tests {
     }
 
     #[test]
+    fn projection_motion_undoes_seen_before_applying_now() {
+        let seen = translation([3.0, 4.0, 0.0]).unwrap();
+        let now = [
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [10.0, 20.0, 0.0, 1.0],
+        ];
+        let motion = |seen: &Matrix, now: &Matrix| {
+            projection_motion(seen, now, [0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+        };
+        let (a, b) = motion(&seen, &now).unwrap();
+        // Old point (3,4) is the source origin. It now projects to (10,20).
+        assert_eq!(a, [[0.0, -1.0], [1.0, 0.0]]);
+        assert_eq!(b, [14.0, 17.0]);
+        assert_eq!(
+            [
+                a[0][0] * 3.0 + a[0][1] * 4.0 + b[0],
+                a[1][0] * 3.0 + a[1][1] * 4.0 + b[1]
+            ],
+            [10.0, 20.0]
+        );
+        assert!(motion(&seen, &seen).is_none());
+        let mut singular = seen;
+        singular[0] = [0.0; 4];
+        assert!(motion(&singular, &now).is_none());
+        let mut hostile = now;
+        hostile[3][1] = f64::INFINITY;
+        assert!(motion(&seen, &hostile).is_none());
+    }
+
+    #[test]
     fn a_direction_takes_the_sense_of_another_and_none_without_length() {
         assert_eq!(
             same_sense([0.0, -2.0, 0.0], [0.1, 1.0, 0.0]),
@@ -364,6 +451,30 @@ mod tests {
         assert_eq!(same_sense([0.0; 3], [0.0, 1.0, 0.0]), None);
         assert_eq!(same_sense([0.0, 1.0, 0.0], [0.0; 3]), None);
         assert_eq!(same_sense([f64::NAN, 1.0, 0.0], [0.0, 1.0, 0.0]), None);
+    }
+
+    #[test]
+    fn signed_unit_angle_keeps_the_axis_order_and_half_turn_direction() {
+        let (normal, start, end) = ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        assert_eq!(
+            signed_unit_angle(normal, start, end).unwrap(),
+            std::f64::consts::FRAC_PI_2
+        );
+        assert_eq!(
+            signed_unit_angle(normal, end, start).unwrap(),
+            -std::f64::consts::FRAC_PI_2
+        );
+        assert_eq!(
+            signed_unit_angle(normal, start, [-1.0, -5e-13, 0.0]).unwrap(),
+            std::f64::consts::PI
+        );
+        assert_eq!(
+            signed_unit_angle(start, normal, start),
+            Err(Error::Refused {
+                operation: "geom::vector3d::Vec3::signed_unit_angle",
+                reason: "expected unit directions perpendicular to a unit normal",
+            })
+        );
     }
 
     /// The mirror in the plane y = 0.
@@ -632,5 +743,46 @@ mod tests {
             span_along([0.0; 3], [f64::MAX; 3], o, d),
             Err(Error::Argument)
         );
+    }
+
+    #[test]
+    fn ray_meets_box_handles_hits_misses_and_non_finite_inputs() {
+        let (min, max) = ([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
+        assert!(ray_meets_box(
+            min,
+            max,
+            [5.0, 5.0, 50.0],
+            [0.0, 0.0, -1.0],
+            1e-6
+        ));
+        assert!(ray_meets_box(
+            min,
+            max,
+            [5.0, 5.0, 5.0],
+            [1.0, 0.0, 0.0],
+            1e-6
+        ));
+        assert!(!ray_meets_box(
+            min,
+            max,
+            [5.0, 5.0, 50.0],
+            [0.0, 0.0, 1.0],
+            1e-6
+        ));
+        assert!(!ray_meets_box(
+            min,
+            max,
+            [25.0, 5.0, 50.0],
+            [0.0, 0.0, -1.0],
+            1e-6
+        ));
+        let nan_min = [f64::NAN, 0.0, 0.0];
+        assert!(ray_meets_box(
+            nan_min,
+            max,
+            [5.0, 5.0, 50.0],
+            [0.0, 0.0, -1.0],
+            1e-6
+        ));
     }
 }
