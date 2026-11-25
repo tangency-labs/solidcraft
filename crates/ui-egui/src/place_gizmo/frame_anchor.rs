@@ -162,14 +162,14 @@ fn finite3(p: Vec3) -> bool {
 /// How far apart two section points are (mm), as the kernel measures it; none for a coordinate
 /// that is not finite or a distance that overflows.
 fn apart(a: Vec2, b: Vec2) -> Option<f64> {
-    solidcore_ops::point_distance([a.x, a.y, 0.0], [b.x, b.y, 0.0]).ok().map(|d| d.value)
+    solidcraft_kernel::services::point_distance([a.x, a.y, 0.0], [b.x, b.y, 0.0]).ok().map(|d| d.value)
 }
 
 /// How far apart two screen points are (pixels), as the kernel measures it; infinite where it
 /// refuses them, so such a point is never the nearest nor within reach.
 fn px_apart(a: Pos2, b: Pos2) -> f64 {
     let lift = |p: Pos2| [f64::from(p.x), f64::from(p.y), 0.0];
-    solidcore_ops::point_distance(lift(a), lift(b)).map_or(f64::INFINITY, |d| d.value)
+    solidcraft_kernel::services::point_distance(lift(a), lift(b)).map_or(f64::INFINITY, |d| d.value)
 }
 
 /// The unit normal of the section's plane: the plane is square to the member's line, so its
@@ -178,7 +178,8 @@ fn px_apart(a: Pos2, b: Pos2) -> f64 {
 /// of its uses ([`on_plane`] and the edge-on test) take either sign alike. None for a line with no
 /// length.
 fn plane_normal(view: &SectionView) -> Option<Vec3> {
-    let len = solidcore_ops::point_distance([view.start.x, view.start.y, view.start.z], [view.end.x, view.end.y, view.end.z]).ok()?.value;
+    let len =
+        solidcraft_kernel::services::point_distance([view.start.x, view.start.y, view.start.z], [view.end.x, view.end.y, view.end.z]).ok()?.value;
     (len.is_finite() && len > 0.0).then(|| (view.end - view.start) * (1.0 / len)).filter(|n| finite3(*n))
 }
 
@@ -283,7 +284,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let across = if bounds.is_positive() { bounds.width().max(bounds.height()) } else { 0.0 };
     // Seen edge-on, a pointer on the section's plane is centimetres a pixel: nothing takes a press.
     let ray = proj.ray(start).1;
-    let live = solidcore_ops::affine::distance_along([0.0; 3], [n.x, n.y, n.z], [ray.x, ray.y, ray.z]).abs() >= 0.05;
+    let live = solidcraft_kernel::services::affine::distance_along([0.0; 3], [n.x, n.y, n.z], [ray.x, ray.y, ray.z]).abs() >= 0.05;
     let dots: Vec<(Dot, Pos2)> = if live && across >= MIN_ACROSS {
         sh.dots.iter().filter_map(|dot| to_screen(dot.at).map(|s| (dot.clone(), s))).collect()
     } else {
