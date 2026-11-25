@@ -872,6 +872,17 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
     refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!([]), "extensions");
     refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!([".f3d"]), "extensions");
     refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!(["f3d", "f3d"]), "extensions");
+    refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!(["_xb"]), "extensions");
+    refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!(["xb_"]), "extensions");
+    refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!(["_"]), "extensions");
+    refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!(["X_B"]), "extensions");
+    refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!(["x-b"]), "extensions");
+    let mut underscored = importer();
+    underscored["runtime"]["entries"][0]["extensions"] = json!(["x_b", "x_t", "xmt_txt"]);
+    let u_runtime = parse(&underscored).unwrap().runtime.unwrap();
+    assert_eq!(u_runtime.importer_for(Path::new("/x/Part.X_B")).map(|e| e.name.as_str()), Some("convert"));
+    assert_eq!(u_runtime.importer_for(Path::new("/x/Part.x_t")).map(|e| e.name.as_str()), Some("convert"));
+    assert_eq!(u_runtime.importer_for(Path::new("/x/Asm.XMT_TXT")).map(|e| e.name.as_str()), Some("convert"));
     refused(&|v| v["runtime"]["entries"][0]["effect"] = json!("read"), "effect");
     // An importer opens a file as a new design: that is its effect, whether it says so, says
     // nothing, or says `edit` as manifests written before `open` did; a command never opens.
@@ -919,6 +930,10 @@ fn an_export_slot_claims_extensions_reads_the_design_and_asks_for_no_files() {
     let slot = &runtime.entries[0];
     assert_eq!((slot.label.as_str(), slot.effect, slot.needs_plugin_data), ("Sample mesh", Effect::Read, true));
     assert!(slot.writes(Path::new("/x/Part.SMP")) && !slot.claims(Path::new("/x/part.smp")));
+    let mut u_export = exporter();
+    u_export["runtime"]["entries"][0]["extensions"] = json!(["x_t"]);
+    let u_exp_runtime = parse(&u_export).unwrap().runtime.unwrap();
+    assert!(u_exp_runtime.entries[0].writes(Path::new("/x/Part.X_T")));
     let refused = |change: &dyn Fn(&mut Value), field: &str| {
         let mut value = exporter();
         change(&mut value);
