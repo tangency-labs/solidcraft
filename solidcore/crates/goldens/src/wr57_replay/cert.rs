@@ -50,6 +50,8 @@ pub(super) fn classify(c: &Call<'_>, main: &Answer) -> String {
     match c.seam {
         Seam::Degen => degen(&k, c, main),
         Seam::Invert => invert(&k, c, main),
+        // (the WR-450 seams' calls never reach the WR-57 hooks)
+        Seam::AnalyticCopy | Seam::SplitTrims | Seam::CarryGate => "FAULT: not a WR-57 call",
     }
     .to_string()
 }

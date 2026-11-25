@@ -1667,7 +1667,7 @@ fn a_change_by_hand_between_messages_is_told_to_the_agent() {
     let (mut app, script, ctx) = app_with_script();
     let (tx, rx) = channel();
     app.agent_chat.tools_rx = Some(rx);
-    app.agent_chat.attach_selection = false;
+    *app.agent_chat.attach_selection = false;
     let expr = |app: &SolveApp| app.session.doc.params.iter().find(|p| p.name == "w").map(|p| p.expr.clone()).unwrap();
 
     send(&mut app, &ctx, "a box and a parameter w".into());
@@ -3910,13 +3910,14 @@ fn box_selection(app: &mut SolveApp) -> Vec<solidcraft_engine::Sel> {
 fn an_attached_selection_goes_as_text_for_the_agent_and_as_chips_in_the_conversation() {
     let (mut app, script, ctx) = app_with_script();
     app.session.selection = box_selection(&mut app);
-    // Off: the message is just the message.
+    // Off (the box starts ticked, so a person has to untick it): the message is just the message.
+    *app.agent_chat.attach_selection = false;
     send(&mut app, &ctx, "plain".into());
     assert_eq!(script.calls(), ["prompt: plain"]);
     ended(&script, "");
     poll(&mut app, &ctx);
 
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     send(&mut app, &ctx, "round this".into());
     let prompt = script.calls().pop().expect("a prompt");
     assert!(prompt.starts_with("prompt: round this\n\n[Selected in SolidCraft"), "{prompt}");
@@ -3936,13 +3937,25 @@ fn an_attached_selection_goes_as_text_for_the_agent_and_as_chips_in_the_conversa
     assert_eq!(script.calls().pop().as_deref(), Some("prompt: nothing"));
 }
 
+/// The owner made Attach selection on by default (2026-11-24): a new chat sends what is selected
+/// with the first message, with no box ticked.
+#[test]
+fn attach_selection_starts_on() {
+    assert!(*AgentChat::default().attach_selection);
+    let (mut app, script, ctx) = app_with_script();
+    app.session.selection = box_selection(&mut app);
+    send(&mut app, &ctx, "round this".into());
+    let prompt = script.calls().pop().expect("a prompt");
+    assert!(prompt.starts_with("prompt: round this\n\n[Selected in SolidCraft"), "{prompt}");
+}
+
 /// A queued message keeps the selection of the moment it was typed; queued messages go as one
 /// prompt with all their items.
 #[test]
 fn queued_messages_keep_the_selection_they_were_typed_with() {
     use solidcraft_engine::Sel;
     let (mut app, script, ctx) = app_with_script();
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     send(&mut app, &ctx, "first".into());
     app.session.selection = vec![Sel::Body { name: "Alpha".into() }];
     send(&mut app, &ctx, "second".into());
@@ -4507,7 +4520,7 @@ fn picks_reach_the_agent_at_the_place_they_were_made() {
     pick_pill(&mut app, 5, &sels[..1]);
     assert_eq!(app.agent_chat.pills.len(), 2);
     app.session.selection = vec![sels[1].clone()];
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     let text = std::mem::take(&mut app.agent_chat.input);
     send(&mut app, &ctx, text);
     let prompt = script.calls().pop().expect("a prompt");
@@ -4527,7 +4540,7 @@ fn picks_reach_the_agent_at_the_place_they_were_made() {
     // The next message carries nothing of it.
     ended(&script, "");
     poll(&mut app, &ctx);
-    app.agent_chat.attach_selection = false;
+    *app.agent_chat.attach_selection = false;
     send(&mut app, &ctx, "and now?".into());
     assert_eq!(script.calls().pop().as_deref(), Some("prompt: and now?"));
 }
@@ -4655,7 +4668,7 @@ fn a_picked_thing_that_is_also_selected_is_listed_once() {
     let sels = box_selection(&mut app);
     pick_pill(&mut app, 0, &sels[3..]);
     app.session.selection = vec![sels[3].clone(), sels[1].clone()];
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     let text = std::mem::take(&mut app.agent_chat.input);
     send(&mut app, &ctx, text);
     let prompt = script.calls().pop().expect("a prompt");
@@ -4676,7 +4689,7 @@ fn a_face_picked_and_selected_at_another_point_is_listed_once() {
     app.agent_chat.input = "see ".into();
     pick_pill(&mut app, 4, &sels[..1]);
     app.session.selection = vec![elsewhere];
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     let text = std::mem::take(&mut app.agent_chat.input);
     send(&mut app, &ctx, text);
     let queued = app.agent_chat.pending.last().expect("queued");
@@ -4694,7 +4707,7 @@ fn a_pick_that_was_also_attached_stays_once_when_its_pill_is_taken_out() {
     app.agent_chat.input = "see ".into();
     pick_pill(&mut app, 4, &sels[3..]);
     app.session.selection = vec![sels[3].clone()];
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     let text = std::mem::take(&mut app.agent_chat.input);
     send(&mut app, &ctx, text);
     let bodies = |p: &Pending| p.context.items.iter().filter(|i| i.kind == context::Kind::Body).map(|i| i.group).collect::<Vec<_>>();
@@ -4836,7 +4849,7 @@ fn a_rim_clicked_once_is_one_item_not_its_pieces() {
     assert_eq!(app.session.selection.len(), 2, "two clicks selected the two rims");
     assert_eq!(selected_count(&mut app), 2, "the checkbox counts the two clicks");
 
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     send(&mut app, &ctx, "these two rims".into());
     let prompt = script.calls().pop().expect("a prompt");
     assert!(prompt.contains("2 item(s)"), "{prompt}");
@@ -4869,9 +4882,9 @@ fn a_split_wall_clicked_once_is_one_item() {
         false,
         false,
     );
-    assert!(!app.session.selection.is_empty());
+    assert!(app.session.has_selection());
     assert_eq!(selected_count(&mut app), 1, "one click, however many patches it selected: {:?}", app.session.selection);
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     send(&mut app, &ctx, "this wall".into());
     let prompt = script.calls().pop().expect("a prompt");
     assert!(prompt.contains("1 item(s)") && prompt.contains("Round face r10"), "{prompt}");

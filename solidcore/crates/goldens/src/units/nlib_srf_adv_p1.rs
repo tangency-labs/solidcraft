@@ -974,3 +974,78 @@ mod tests {
         assert!(stats.iter().all(|&k| k >= 10), "{stats:?}");
     }
 }
+
+/// #21383: the 48 rows the G1R change moved, each an unbounded evaluation that grows a
+/// G1R extension of a rational surface. The extension is replayed step by step
+/// (`crate::g1r_cert::extend_to_certified`, the evaluator's own step choice), each step
+/// certified G1 across its side with its input kept bit for bit, and the replay must be
+/// bit for bit the evaluator's `ext.surface`: every value of the row is then an
+/// evaluation of a surface that is the base on the base's domain and G1 across each
+/// grown side.
+#[cfg(test)]
+mod g1r_moved_rows {
+    use super::*;
+    use crate::g1r_cert::{extend_to_certified, same_surface, SideCert};
+
+    const MOVED: [&str; 48] = [
+        "gen0011", "gen0015", "gen0068", "gen0116", "gen0166", "gen0256", "gen0421", "gen0458",
+        "gen0474", "gen0527", "gen0621", "gen0776", "gen0778", "gen0817", "gen0839", "gen0847",
+        "gen0910", "gen1076", "gen1179", "gen1288", "gen1312", "gen1404", "gen1447", "gen1569",
+        "gen1636", "gen1699", "gen1726", "gen1753", "gen1760", "gen1793", "gen1844", "gen1954",
+        "gen1997", "gen2012", "gen2051", "gen2086", "gen2156", "gen2168", "gen2244", "gen2266",
+        "gen2295", "gen2311", "gen2351", "gen2445", "gen2447", "gen2459", "gen2466", "gen2477",
+    ];
+
+    #[test]
+    fn each_moved_row_evaluates_a_certified_g1_extension() {
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let mut seen = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            if !MOVED.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let Inputs::Unbounded { sur, cont, ndr, uv } = c.parse::<Inputs>().unwrap() else {
+                panic!("{}: not an unbounded evaluation", c.name)
+            };
+            assert_eq!(ExtendContinuity::from_flag(cont), Some(ExtendContinuity::G1R), "{}", c.name);
+            let s = build(&resolve(&sur).unwrap()).unwrap();
+            // As the runner: the evaluations up to the first failure (a bare-flag
+            // refusal, which happens before any extension).
+            let mut ext = None;
+            let mut ok = 0;
+            for &[u, v] in &uv {
+                if adv::eval_pt_derivs_unbounded(&s, u, v, ndr, ExtendContinuity::G1R, &mut ext).is_err() {
+                    break;
+                }
+                ok += 1;
+            }
+            let uv = &uv[..ok];
+            let ext = ext.unwrap();
+            let closed = ext.closed;
+            let mut r: Option<Surface> = None;
+            let mut mixed = 0;
+            for &[u, v] in uv {
+                let cur = r.as_ref().unwrap_or(&s);
+                let b = cur.parameter_bounds();
+                if u >= b.ul && u <= b.ur && v >= b.vb && v <= b.vt {
+                    continue;
+                }
+                let mut x = r.take().unwrap_or_else(|| s.clone());
+                for (t, lo, hi, d) in [(u, b.ul, b.ur, Direction::U), (v, b.vb, b.vt, Direction::V)] {
+                    let wraps = matches!((closed, d), (Some(Direction::UV), _) | (Some(Direction::U), Direction::U) | (Some(Direction::V), Direction::V));
+                    if (t < lo || t > hi) && !wraps {
+                        let (e, certs) = extend_to_certified(&x, t, lo, hi, d)
+                            .unwrap_or_else(|e| panic!("{}: {e}", c.name));
+                        mixed += certs.iter().filter(|c| matches!(c, SideCert::Ruled { mixed: true, .. })).count();
+                        x = e;
+                    }
+                }
+                r = Some(x);
+            }
+            assert!(same_surface(r.as_ref().unwrap(), &ext.surface), "{}: replay differs", c.name);
+            assert!(mixed > 0, "{}: no mixed-ratio step", c.name);
+        }
+        assert_eq!(seen, MOVED.len());
+    }
+}

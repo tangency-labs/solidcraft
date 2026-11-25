@@ -361,8 +361,10 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::BoundingSolid { .. } => "bounding_solid",
         FeatureKind::Pipe { .. } => "pipe",
         FeatureKind::FrameEndCap { .. } => "end_cap",
+        FeatureKind::FrameGusset { .. } => "gusset",
         FeatureKind::FrameMember { .. } => "frame_member",
         FeatureKind::FrameMemberTurn { .. } => "rotate_member",
+        FeatureKind::FrameTrim { .. } => "frame_trim",
         FeatureKind::FramePlate { .. } => "frame_plate",
         FeatureKind::Emboss { .. } => "emboss",
         FeatureKind::ReplaceFace { .. } => "replace_face",
@@ -370,6 +372,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Coil { .. } => "coil",
         FeatureKind::SheetPerforate { .. } => "perforate",
         FeatureKind::CellGrid { .. } => "perforate",
+        FeatureKind::SheetBead { .. } => "rib",
         FeatureKind::BoundaryFill { .. } => "boundary_fill",
         FeatureKind::Patch { .. } => "surface_patch",
         FeatureKind::Stitch { .. } => "surface_stitch",
@@ -872,6 +875,19 @@ pub(crate) fn import_warning_status(app: &SolveApp, reply: &Value) -> Option<Str
         let w = reply.get("warnings").and_then(Value::as_array).filter(|w| !w.is_empty())?;
         Some(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")))
     })
+}
+
+/// The window shows a design's results without waiting for SMLib's check of the bodies its last
+/// features keep: the checks end beside the window, and a check that refuses a feature's bodies
+/// fails that feature, as it would have failed had the evaluation waited
+/// ([`solidcraft_engine::Session::set_background_checks`]). A frame is asked for while a check
+/// runs, so its outcome lands within a frame of its end.
+pub(crate) fn tick_feature_checks(app: &mut SolveApp, ctx: &egui::Context) {
+    app.session.set_background_checks(true);
+    app.session.settle_feature_checks(false);
+    if app.session.model.checking_features() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+    }
 }
 
 /// SMLib's check of an import's parts runs on after the design shows (#17697). When it ends,
@@ -1394,8 +1410,9 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
     // The features scroll horizontally in the space right of the playback controls.
     let strip_rect = Rect::from_min_max(pos2(x, r.top()), r.right_bottom());
     let rows = BarRows::cached(app, ui);
+    let mut heads = Vec::new();
     let out = {
-        let mut steps = BarSteps { app: &mut *app, history: &history, strip: &strip, rows: &rows, reveal, marker, marker_view };
+        let mut steps = BarSteps { app: &mut *app, history: &history, strip: &strip, rows: &rows, reveal, marker, marker_view, heads: &mut heads };
         history_bar::strip(ui, &bar, r, strip_rect, ("history_strip", history.within), &mut steps)
     };
     crate::semantic_content::set_timeline_feature_hover(app, out.hovered);
@@ -1435,8 +1452,11 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
                 let _ = app.run_heavy("timeline.roll_to", if slot >= n { json!({}) } else { json!({ "position": slot }) });
             }
             // Crossing the marker rolls the feature back or forward, in the same step.
+            // Dropped on an open folder's chip or past it, a feature may join it at its start.
             history_bar::Action::Reorder { step, slot, before } => {
-                crate::timeline_folders::drop_feature(app, &history.folders, step, position(slot, before), before, marker.min(n));
+                let x = ui.input(|i| i.pointer.hover_pos()).map_or(f32::NEG_INFINITY, |p| p.x);
+                let past: Vec<u64> = heads.iter().filter(|(_, left)| *left <= x).map(|(id, _)| *id).collect();
+                crate::timeline_folders::drop_feature(app, &history.folders, step, position(slot, before), before, marker.min(n), &past);
             }
         }
     }
@@ -1470,6 +1490,8 @@ struct BarSteps<'a> {
     /// The marker's design position, and its slot among the features shown.
     marker: usize,
     marker_view: usize,
+    /// Each open folder's id and its chip's left edge, as drawn.
+    heads: &'a mut Vec<(u64, f32)>,
 }
 
 impl history_bar::Contents for BarSteps<'_> {
@@ -1511,6 +1533,9 @@ impl history_bar::Contents for BarSteps<'_> {
                     let rect = s.chip(folder.start, folder.end, folder.open, folder.depth, |ui, p, at| {
                         crate::timeline_folders::folder_chip(app, ui, p, at, &folder, history, strip)
                     });
+                    if folder.open {
+                        self.heads.push((folder.id, rect.left()));
+                    }
                     let holds = self.reveal.is_some_and(|k| folder.start <= k && k < folder.end && !folder.open);
                     if reveal_once(s.ui(), &mut self.reveal, holds, rect, egui::Align::Min) {
                         app.tree.timeline_reveal = None;
@@ -4125,6 +4150,49 @@ mod tests {
         let order: Vec<&str> = h.app.session.doc.features.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(order, ["D", "B", "A", "C"]);
         assert!(folder_names(&h, &[("Mid", &["B", "A", "C"])]), "dropped inside the open folder, it joins it: {:?}", folders(&h));
+    }
+
+    /// An open folder of one feature has no gap between two of its features, so a feature
+    /// dropped on its chip, or between its chip and its feature, joins it at its start; dropped
+    /// left of the folder, it goes before it (#18471).
+    #[test]
+    fn a_feature_dropped_on_an_open_one_feature_folder_joins_it() {
+        use crate::scenario::{handle_at, rect_of};
+        let mut h = boxes(&["A", "B", "C", "D"]);
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+        h.app.run("timeline.group", json!({"name": "Solo", "features": ["B"]})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "timeline-folder-chip:Solo"}})).unwrap();
+        let order = |h: &Harness| h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+
+        // Between the chip and its feature.
+        let chip = rect_of("timeline-folder-chip:Solo").unwrap();
+        let (b, d) = (handle_at("timeline:B").unwrap(), handle_at("timeline:D").unwrap());
+        h.step(&json!({"drag": [[d.x, d.y], [(chip.right() + b.x - 14.0) / 2.0, chip.center().y]]})).unwrap();
+        h.settle();
+        assert_eq!(order(&h), ["A", "D", "B", "C"]);
+        assert!(folder_names(&h, &[("Solo", &["D", "B"])]), "dropped after the chip, it joins it: {:?}", folders(&h));
+
+        // On the chip.
+        h.app.run("timeline.group", json!({"name": "One", "features": ["C"]})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "timeline-folder-chip:One"}})).unwrap();
+        let chip = rect_of("timeline-folder-chip:One").unwrap();
+        let a = handle_at("timeline:A").unwrap();
+        h.step(&json!({"drag": [[a.x, a.y], [chip.center().x, chip.center().y]]})).unwrap();
+        h.settle();
+        assert_eq!(order(&h), ["D", "B", "A", "C"]);
+        assert!(folder_names(&h, &[("Solo", &["D", "B"]), ("One", &["A", "C"])]), "dropped on the chip, it joins it: {:?}", folders(&h));
+
+        // Left of the folder: before it, outside.
+        h.app.run("timeline.ungroup", json!({"group": h.app.session.doc.timeline_groups[0].id})).unwrap();
+        h.frames(2);
+        let chip = rect_of("timeline-folder-chip:One").unwrap();
+        let d = handle_at("timeline:D").unwrap();
+        h.step(&json!({"drag": [[d.x, d.y], [chip.left() - 6.0, chip.center().y]]})).unwrap();
+        h.settle();
+        assert_eq!(order(&h), ["B", "D", "A", "C"]);
+        assert!(folder_names(&h, &[("One", &["A", "C"])]), "dropped left of the folder, it stays out: {:?}", folders(&h));
     }
 
     /// An assembly's STEP file (here one cylinder placed twice) shows as one folded chip named

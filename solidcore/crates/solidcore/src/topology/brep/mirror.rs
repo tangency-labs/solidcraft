@@ -43,7 +43,8 @@
 //! After the decomposition, a failed `SetCanonical` or `AngleBetween` is returned, as
 //! the fork does (WR-658), where upstream reads the angle as `0`.
 
-use crate::error::{ignore_status, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{ignore_status, Failure, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::matrix::Matrix;
 use crate::kernel::Kernel;
@@ -102,10 +103,6 @@ pub fn mirror_with_notifications(
     }
 }
 
-fn null() -> SolidError {
-    SolidError::topology_missing(OP, "a link of the B-rep's topology")
-}
-
 fn mirror_in(
     k: &mut Kernel,
     b: &mut Brep,
@@ -150,7 +147,7 @@ fn mirror_in(
             .edge(edge)?
             .curve
             .as_ref()
-            .ok_or_else(null)?
+            .ok_or_else(|| SolidError::topology(OP, TopologyFailure::EdgeWithoutCurve))?
             .create_mirror_curve(k, mirror_plane)?;
         // SetCurve(pNewCurve, FALSE, FALSE) (status ignored), then SetOwner(pEdge); the
         // old curve is dropped here (upstream deletes it after the edge use reversal)
@@ -180,7 +177,7 @@ fn mirror_in(
             .face(face)?
             .surface
             .as_ref()
-            .ok_or_else(null)?
+            .ok_or_else(|| SolidError::topology(OP, TopologyFailure::FaceWithoutSurface))?
             .create_mirror_surface(k, mirror_plane)?;
 
         // Copy pTmpSurface for new face, when possible as an analytic surface
@@ -344,9 +341,6 @@ fn degenerate_low_work_transform(
         // (the caller's WR-57 replay seam, test only: the trial calls through it)
         #[cfg(feature = "wr57-replay")]
         replay: k.replay.clone(),
-        // (the caller's WR-469 replay seam, test only)
-        #[cfg(feature = "wr469-replay")]
-        wr469_replay: k.wr469_replay.clone(),
         ..Kernel::default()
     };
     let mut copy = b.clone_standing_for_self()?;
@@ -488,11 +482,12 @@ pub fn transform_matrix_with_notifications(
     let (d_diag, mut ut) = match sv.sv_decompose() {
         Ok(r) => r,
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(_) => {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the transform matrix could not be decomposed",
-            ))
+        Err(e) => {
+            return Err(
+                Failure::new(OP, TopologyFailure::MatrixNotDecomposed { class: e.kind() })
+                    .caused_by(e)
+                    .into_error(),
+            )
         }
     };
     ut.transpose()?;
@@ -963,6 +958,71 @@ mod tests {
         }
     }
 
+    /// A cylinder of radius 10 and height 100 at x = 50, mirrored in the plane x = 0: its two
+    /// end circles stay circles of radius 10 (not the rational B-splines of their NURBs,
+    /// WR-21139), and each edge parameter gives the mirror of the point it gave before, so
+    /// the edge intervals stay valid. A second mirror gives the source points back.
+    #[test]
+    fn mirrors_a_cylinder_s_circles_as_circles() {
+        use crate::curve::curve::p2::CurveKind;
+        use crate::primitive::api_primitives::create_cylinder;
+        let mut k = Kernel::default();
+        let mut b = create_cylinder(&mut k, Vec3::new(50.0, 0.0, 0.0), 10.0, 100.0).unwrap();
+        let samples = |k: &Kernel, b: &Brep| -> Vec<Vec<Vec3>> {
+            p1::edges(b, None)
+                .unwrap()
+                .iter()
+                .map(|&e| {
+                    let edge = b.edge(e).unwrap();
+                    let (lo, hi) = (edge.interval.min(), edge.interval.max());
+                    let curve = edge.curve.as_ref().unwrap();
+                    [0.0, 0.2, 0.5, 0.7, 1.0]
+                        .iter()
+                        .map(|f| curve.evaluate_point(k, lo + f * (hi - lo)).unwrap())
+                        .collect()
+                })
+                .collect()
+        };
+        let circles = |b: &Brep| -> usize {
+            p1::edges(b, None)
+                .unwrap()
+                .iter()
+                .filter(
+                    |&&e| match b.edge(e).unwrap().curve.as_ref().unwrap().kind() {
+                        CurveKind::Line(_) => false,
+                        CurveKind::Ellipse(c) => {
+                            assert!(c.is_circle_class() && (c.radius() - 10.0).abs() < 1e-12);
+                            true
+                        }
+                        other => panic!("a curved edge is not a circle: {other:?}"),
+                    },
+                )
+                .count()
+        };
+        assert_eq!(circles(&b), 2);
+        let before = samples(&k, &b);
+        // the plane x = 0 (normal +X)
+        let plane = Axis2Placement::new(Vec3::ZERO, Vec3::Y, Vec3::Z);
+        mirror(&mut k, &mut b, &plane).unwrap();
+        assert_eq!(circles(&b), 2);
+        for (got, want) in samples(&k, &b).iter().zip(&before) {
+            for (q, p) in got.iter().zip(want) {
+                let expected = Vec3::new(-p.x, p.y, p.z);
+                assert!(
+                    (*q - expected).length() < 1e-9,
+                    "{q:?}, expected {expected:?}"
+                );
+            }
+        }
+        mirror(&mut k, &mut b, &plane).unwrap();
+        assert_eq!(circles(&b), 2);
+        for (got, want) in samples(&k, &b).iter().zip(&before) {
+            for (q, p) in got.iter().zip(want) {
+                assert!((*q - *p).length() < 1e-9, "{q:?}, expected {p:?}");
+            }
+        }
+    }
+
     fn points(b: &Brep) -> Vec<Vec3> {
         p1::vertices(b, None)
             .unwrap()
@@ -1025,6 +1085,36 @@ mod tests {
         ];
         let r = transform_matrix(&mut k, &mut b, &m, true);
         assert!(zero_length(&r), "{r:?}");
+        assert_eq!(points(&b), before);
+        assert_eq!(counts(&b), [6, 12, 8]);
+    }
+
+    /// A matrix the decomposition cannot take (a NaN entry) fails as
+    /// `MatrixNotDecomposed`, keeps the decomposition's error as its cause and takes its
+    /// class from it, with status `SM_ERR`; the box is left as it was (review of #21132).
+    #[test]
+    fn a_matrix_the_decomposition_refuses_keeps_its_error_as_the_cause() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Vec3::ZERO, 2.0, 3.0, 4.0).unwrap();
+        let before = points(&b);
+        let m = [
+            [f64::NAN, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        let e = transform_matrix(&mut k, &mut b, &m, true).unwrap_err();
+        let cause = e.cause().expect("the decomposition's error is the cause");
+        assert_eq!(cause.operation(), "geom::matrix::Matrix::sv_decompose");
+        assert_eq!(cause.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::MatrixNotDecomposed {
+                class: crate::error::ErrorKind::InvalidInput
+            })
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(points(&b), before);
         assert_eq!(counts(&b), [6, 12, 8]);
     }
