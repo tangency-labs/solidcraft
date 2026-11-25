@@ -1,6 +1,6 @@
 //! SolidCraft desktop app.
 //!
-//! Usage: `solidcraft [--control <port>] [--sample] [--crash-log] [--safe-mode] [design.sc | part.step]`
+//! Usage: `solidcraft [--control <port>] [--sample] [--crash-log] [--safe-mode] [--read-only] [design.sc | part.step]`
 //!
 //! `--safe-mode` (or `SOLIDCRAFT_SAFE_MODE=1`) starts with default settings, no recovery offer and
 //! the software renderer; see `startup` and docs/book/src/guide/troubleshooting.md.
@@ -32,6 +32,7 @@ mod desktop_theme;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 mod desktop_transparency;
 mod device_lost;
+mod gpu_startup;
 #[cfg(target_os = "windows")]
 mod native_crash;
 #[cfg(target_os = "macos")]
@@ -40,6 +41,8 @@ mod native_crash_macos;
 mod native_frame;
 #[cfg(any(target_os = "macos", test))]
 mod native_menu;
+#[cfg(target_os = "macos")]
+mod native_titlebar_macos;
 mod nav_bridge;
 #[cfg(target_os = "macos")]
 mod open_documents;
@@ -157,6 +160,30 @@ struct App {
     /// Preferences › Layout's `windows_smooth_window_drag`, as winit was given it.
     #[cfg(target_os = "windows")]
     window_move: native_frame::WindowMove,
+    /// After a lost device: the first frame stores it, since the setup's frames save nothing.
+    clear_stored_background: bool,
+}
+
+/// Flushes the stored settings with the background effect off; false when none was stored.
+fn clear_stored_background(storage: &mut dyn eframe::Storage) -> bool {
+    let Some(cleared) = solidcraft_ui_egui::prefs::stored(|key| storage.get_string(key)).as_deref().and_then(without_background) else {
+        return false;
+    };
+    storage.set_string(solidcraft_ui_egui::prefs::STORAGE_KEY, cleared);
+    storage.flush();
+    true
+}
+
+/// `None` when no effect is stored or the settings don't read.
+fn without_background(stored: &str) -> Option<String> {
+    let mut prefs: serde_json::Value = serde_json::from_str(stored).ok()?;
+    // Stored as `SolveApp::prefs` writes them: the Preferences fields sit under "preferences".
+    let effect = prefs.get_mut("preferences")?.get_mut("background_shader")?;
+    if effect.as_str().is_none_or(str::is_empty) {
+        return None;
+    }
+    *effect = serde_json::Value::String(String::new());
+    serde_json::to_string(&prefs).ok()
 }
 
 /// Settings written to the settings file soon after they change (#8275). eframe saves them
@@ -300,8 +327,12 @@ impl eframe::App for App {
         }
         // Files other launches handed over (single_instance.rs).
         if !self.solve.file_picker_busy() {
-            for f in single_instance::take() {
-                self.solve.open_chosen_file(&f);
+            for (f, read_only) in single_instance::take() {
+                if read_only {
+                    self.solve.open_chosen_file_read_only(&f);
+                } else {
+                    self.solve.open_chosen_file(&f);
+                }
             }
         }
         #[cfg(target_os = "macos")]
@@ -379,6 +410,11 @@ impl eframe::App for App {
     /// A frame's UI: the starting page while the setup runs (in the saved language and fonts),
     /// then the app's, whose changed settings are written soon after (#8275).
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if std::mem::take(&mut self.clear_stored_background)
+            && let Some(storage) = frame.storage_mut()
+        {
+            clear_stored_background(storage);
+        }
         // Logic-only control updates cannot present a frame or complete startup.
         let ctx = ui.ctx();
         if self.window_frames < 2 && ctx.current_pass_index() == 0 {
@@ -712,7 +748,8 @@ impl App {
     /// closed ([`restart_after_hang`]). Windows only: elsewhere a hidden window's frames can wait
     /// as long (Wayland, macOS).
     fn watch_for_a_hang(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
-        if !cfg!(target_os = "windows") {
+        // Legacy startup only (`gpu_startup`): standard startup restarts on no other API.
+        if !cfg!(target_os = "windows") || !gpu_startup::GpuStartup::current().legacy() {
             return;
         }
         let progressing = self.gpu_progressing(frame);
@@ -1627,12 +1664,16 @@ fn main() -> eframe::Result {
     let mut max_file_size = None;
     // `--new-instance`: open this launch as its own app even when SolidCraft already runs.
     let mut new_instance = false;
+    // `--read-only`: the files named open read-only (Save asks for a new file), here or in the
+    // window they are handed to.
+    let mut read_only = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
             "--sample" => sample = true,
             "--new-instance" => new_instance = true,
+            "--read-only" => read_only = true,
             "--theme-file" => theme_file = args.next(),
             "--max-file-size" => max_file_size = Some(args.next()),
             s if s.starts_with("--max-file-size=") => max_file_size = Some(s.strip_prefix("--max-file-size=").map(str::to_string)),
@@ -1657,7 +1698,7 @@ fn main() -> eframe::Result {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--new-instance] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
+                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--new-instance] [--read-only] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
                 );
                 return Ok(());
             }
@@ -1675,7 +1716,10 @@ fn main() -> eframe::Result {
         && let Some(endpoint) = settings.as_deref().and_then(single_instance::Endpoint::in_settings)
     {
         let absolute: Vec<String> = files.iter().map(|f| single_instance::absolute(f)).collect();
-        if single_instance::forward(&endpoint, &absolute) {
+        // A window from before `--read-only` refuses read-only files, and this launch opens them itself.
+        let handed =
+            if read_only { single_instance::forward_read_only(&endpoint, &absolute) } else { single_instance::forward(&endpoint, &absolute) };
+        if handed {
             return Ok(());
         }
     }
@@ -1733,8 +1777,11 @@ fn main() -> eframe::Result {
     // The crash guard (#18683): an API whose driver crashed the process while the last launch
     // started it is skipped from now on (until the next version), and each API this launch
     // probes or starts is named on disk first.
+    // Standard startup (`gpu_startup`) names no API on disk and skips none.
+    let gpu_startup = gpu_startup::GpuStartup::current();
+    solidcraft_engine::note!("SolidCraft graphics: {} startup", gpu_startup.name());
     let (backend_guard, skipped) = match (&settings, &backend_path) {
-        (Some(dir), Some(path)) => {
+        (Some(dir), Some(path)) if gpu_startup.legacy() => {
             let (guard, skipped) = startup::BackendGuard::begin(dir, path, solidcraft_ui_egui::help::VERSION);
             (Some(guard), skipped)
         }
@@ -1803,7 +1850,7 @@ fn main() -> eframe::Result {
     let wgpu_options = if safe {
         safe_wgpu_options(cpu_renderer, failed_backend.as_deref(), skipped.crashed)
     } else {
-        wgpu_options(cpu_renderer, backend_launch.backend.as_deref(), skipped, backend_guard.as_ref())
+        wgpu_options(gpu_startup, cpu_renderer, backend_launch.backend.as_deref(), skipped, backend_guard.as_ref())
     };
     // Named on disk when egui-wgpu creates the instance that loads the drivers (`startup_step`),
     // not before: the window system's event loop comes first, and a panic there (a missing
@@ -1946,12 +1993,20 @@ fn main() -> eframe::Result {
                 if !native_frame::set_class_icon(cc) {
                     solidcraft_engine::note!("SolidCraft window: no class icon; the taskbar may show a generic one");
                 }
+                // Every window that draws SolidCraft's title bar hands it to Windows: the main
+                // window here, a pop-out when it first draws its bar (#13996).
+                native_frame::register(&cc.egui_ctx);
                 // The OS hit test offers the resize border, at the window's DPI, from the first
                 // message (#1381).
                 app.native_resize_border = custom_titlebar && native_frame::install(cc);
                 if custom_titlebar && !app.native_resize_border {
                     solidcraft_engine::note!("SolidCraft window: no native resize border; egui edge zones instead");
                 }
+            }
+            // macOS: AppKit must not move the window from a press on a tab or a bar button.
+            #[cfg(target_os = "macos")]
+            if !native_titlebar_macos::install(cc) {
+                eprintln!("SolidCraft window: could not stop native title bar drags; tabs may move the window");
             }
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.cpu_meshing = safe_mode || safe;
@@ -2050,6 +2105,10 @@ fn main() -> eframe::Result {
             if !new_instance && !sample && control_port.is_none() {
                 single_instance::start(instance_dir.as_deref(), &cc.egui_ctx);
             }
+            // `--read-only` covers the files named on the command line: the first this many of `files`.
+            // Finder's come after them, and the designs reopened from the last session only when none was
+            // named, so neither opens read-only.
+            let read_only_count = if read_only { files.len() } else { 0 };
             // A launch from Finder: its files arrived before the window.
             #[cfg(target_os = "macos")]
             let files = {
@@ -2061,6 +2120,14 @@ fn main() -> eframe::Result {
             // A design that stopped the last session while it was being reopened is skipped this
             // time, so one bad file cannot brick every launch (#5064).
             app.reopen_guard_dir = recovery_dir.clone();
+            // The effect may be what the driver gave up on; the first frame stores it off, so
+            // another stop, even during the setup, cannot bring it back.
+            let cleared_background = after_loss && !app.preferences.background_shader.is_empty();
+            if cleared_background {
+                let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
+                notes.push(language.format("prefs.background_shader_after_loss", &[("name", &app.preferences.background_shader)]));
+                app.preferences.background_shader.clear();
+            }
             let files = if files.is_empty() && !sample && control_port.is_none() {
                 let (reopen, skipped) = solidcraft_ui_egui::documents::reopen_plan(&app, recovery_dir.as_deref());
                 if !skipped.is_empty() {
@@ -2120,8 +2187,12 @@ fn main() -> eframe::Result {
                     // Lock files next to open designs: a design open on another computer says so (#5467),
                     // the files given at launch included.
                     solidcraft_ui_egui::open_elsewhere::start(app);
-                    for f in &files {
-                        app.open_chosen_file(f);
+                    for (i, f) in files.iter().enumerate() {
+                        if i < read_only_count {
+                            app.open_chosen_file_read_only(f);
+                        } else {
+                            app.open_chosen_file(f);
+                        }
                     }
                     // No file and no sample: the empty design takes Units of new designs (#1205).
                     // An opened file and the sample part keep the units they were saved or built with.
@@ -2175,6 +2246,7 @@ fn main() -> eframe::Result {
             Ok(Box::new(App {
                 // Before `app` moves: the settings as read, already on disk.
                 prefs_writer: PrefsWriter::read(app.prefs()),
+                clear_stored_background: cleared_background,
                 solve: app,
                 setup,
                 gpu_job: None,
@@ -2216,7 +2288,7 @@ fn main() -> eframe::Result {
     }
     match result {
         Err(e) if !created.load(std::sync::atomic::Ordering::SeqCst) => {
-            no_window(e, cpu_renderer, safe, started, skipped.crashed | skipped.failed, settings.as_deref(), backend_attempt.as_ref())
+            no_window(e, gpu_startup, cpu_renderer, safe, started, skipped.crashed | skipped.failed, settings.as_deref(), backend_attempt.as_ref())
         }
         r => r,
     }
@@ -2321,12 +2393,15 @@ fn startup_step(step: &'static str, detail: &str) {
 /// vblank). Two in flight let the CPU build the next frame while the GPU draws this one.
 const WINDOW_SURFACE: eframe::egui_wgpu::SurfaceConfig = eframe::egui_wgpu::SurfaceConfig::HIGH_THROUGHPUT;
 
-/// The renderer settings: with `cpu`, the software adapter (WARP, lavapipe, llvmpipe). The
-/// backends come from `startup::choose_backends` (on Windows Vulkan first, and only the backend
-/// in use is started); `preference` is `graphics.json`'s `backend`. `skipped`: the APIs that
-/// crashed while starting or whose window failed to start; `guard` names each API on disk before
-/// it is probed.
+/// The renderer settings: with `cpu`, the software adapter (WARP, lavapipe, llvmpipe);
+/// `preference` is `graphics.json`'s `backend`. Under [`gpu_startup::GpuStartup::Standard`] the
+/// instance has wgpu's backends and a hardware Vulkan adapter is picked first
+/// ([`gpu_startup::vulkan_first`]). Under `Legacy` the backends come from
+/// `startup::choose_backends` (on Windows Vulkan first, and only the backend in use is started);
+/// `skipped`: the APIs that crashed while starting or whose window failed to start; `guard` names
+/// each API on disk before it is probed.
 fn wgpu_options(
+    startup_strategy: gpu_startup::GpuStartup,
     cpu: bool,
     preference: Option<&str>,
     skipped: startup::SkippedBackends,
@@ -2344,9 +2419,12 @@ fn wgpu_options(
             Some(guard) => guard.probe(backends, || startup::has_hardware_adapter(backends)),
             None => startup::has_hardware_adapter(backends),
         };
-        if let Some(backends) =
+        let chosen = if startup_strategy.legacy() {
             startup::choose_backends(cfg!(target_os = "windows"), env_set, cpu, preference, skipped.crashed, skipped.failed, probe)
-        {
+        } else {
+            gpu_startup::standard_backends(cfg!(target_os = "windows"), env_set, cpu, preference)
+        };
+        if let Some(backends) = chosen {
             solidcraft_engine::note!("SolidCraft graphics: starting {backends:?}");
             setup.instance_descriptor.backends = backends;
         }
@@ -2357,7 +2435,19 @@ fn wgpu_options(
         setup.instance_descriptor.backend_options.dx12.shader_compiler = solidcraft_viewport_gpu::dx12_compiler();
         let environment = std::env::var("WGPU_ADAPTER_NAME").ok();
         let adapter = graphics().and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str).map(str::to_string));
-        startup::configure_adapter(setup, cpu, environment, adapter);
+        if startup_strategy.legacy() || cpu {
+            startup::configure_adapter(setup, cpu, environment, adapter);
+        } else {
+            // An adapter named by WGPU_ADAPTER_NAME or Preferences first, else a hardware Vulkan
+            // one, else wgpu's own request.
+            setup.native_adapter_selector = Some(std::sync::Arc::new(move |adapters, surface| {
+                let names: Vec<_> = adapters.iter().map(|a| startup::AdapterChoice::of(a, surface)).collect();
+                let kinds: Vec<_> = adapters.iter().map(|a| gpu_startup::AdapterKind::of(a, surface)).collect();
+                let picked =
+                    startup::choose_adapter(&names, environment.as_deref(), adapter.as_deref()).or_else(|| gpu_startup::vulkan_first(&kinds));
+                Ok(picked.and_then(|i| adapters.get(i)).cloned())
+            }));
+        }
         // A float depth buffer with a stencil (see `FLOAT_DEPTH_BITS`), indirect draws that start
         // at an instance (instanced meshes drawn a call per pipeline), and timestamp queries for
         // the GPU time the frame-rate readout shows, wherever the adapter has them.
@@ -2404,6 +2494,7 @@ fn safe_wgpu_options(cpu: bool, failed: Option<&str>, crashed: eframe::wgpu::Bac
 /// event loop or a failed device; each retry advances through the APIs, then software once.
 fn no_window(
     error: eframe::Error,
+    startup_strategy: gpu_startup::GpuStartup,
     tried_cpu: bool,
     safe_graphics: bool,
     failed: eframe::wgpu::Backends,
@@ -2442,6 +2533,7 @@ fn no_window(
     // automatic order from now on, so the next launch of this version starts on the API that
     // works without failing on this one first. Window-system errors are not the API's fault.
     if matches!(error, eframe::Error::Wgpu(_))
+        && startup_strategy.legacy()
         && !explicit
         && !tried_cpu
         && !safe_graphics
@@ -2450,8 +2542,9 @@ fn no_window(
     {
         startup::record_failed_backend(&dir.join("graphics.json"), failed, solidcraft_ui_egui::help::VERSION);
     }
-    // Safe graphics tries no other graphics API, only the software renderer as the last resort.
-    let next = if safe_graphics && !explicit && !tried_cpu {
+    // Safe graphics and standard startup try no other graphics API, only the software renderer as
+    // the last resort.
+    let next = if (safe_graphics || !startup_strategy.legacy()) && !explicit && !tried_cpu {
         Some("cpu")
     } else {
         startup::fallback_backend(cfg!(target_os = "windows"), explicit, tried_cpu, failed, skipped)
@@ -2723,6 +2816,20 @@ mod tickets_http_tests {
 }
 
 #[cfg(test)]
+mod background_after_loss_tests {
+    #[test]
+    fn the_stored_background_is_cleared_and_nothing_else() {
+        let stored = r#"{"preferences":{"background_shader":"dusk/dusk","language":"de"},"recent":["a"]}"#;
+        let cleared: serde_json::Value = serde_json::from_str(&super::without_background(stored).unwrap()).unwrap();
+        assert_eq!(cleared, serde_json::json!({"preferences": {"background_shader": "", "language": "de"}, "recent": ["a"]}));
+        assert_eq!(super::without_background(r#"{"preferences":{"background_shader":""}}"#), None);
+        assert_eq!(super::without_background(r#"{"background_shader":"dusk/dusk"}"#), None, "only the stored shape counts");
+        assert_eq!(super::without_background(r#"{"preferences":{}}"#), None);
+        assert_eq!(super::without_background("not json"), None);
+    }
+}
+
+#[cfg(test)]
 mod prefs_writer_tests {
     /// In-process MCP-to-UI integration, without opening a native window or socket session.
     #[test]
@@ -2831,6 +2938,23 @@ mod prefs_writer_tests {
 
     fn new_app() -> solidcraft_ui_egui::SolveApp {
         solidcraft_ui_egui::SolveApp::new(solidcraft_engine::Session::default(), solidcraft_ui_egui::Services::default())
+    }
+
+    #[test]
+    fn the_first_frame_after_a_lost_device_stores_the_background_off() {
+        let mut app = new_app();
+        app.preferences.background_shader = "dusk/dusk".into();
+        app.preferences.language = "de".into();
+        let mut disk = Disk::default();
+        disk.pending.insert(STORAGE_KEY.into(), app.prefs());
+        assert!(super::clear_stored_background(&mut disk), "a stored effect is turned off");
+        assert_eq!(disk.flushes, 1);
+        app.preferences.background_shader.clear();
+        let expected: serde_json::Value = serde_json::from_str(&app.prefs()).unwrap();
+        let flushed: serde_json::Value = serde_json::from_str(&disk.flushed[STORAGE_KEY]).unwrap();
+        assert_eq!(flushed, expected, "only the effect changes");
+        assert!(!super::clear_stored_background(&mut disk), "nothing more to turn off");
+        assert_eq!(disk.flushes, 1);
     }
 
     /// #8275: Preferences' View navigator and Display quality, changed and confirmed, are on disk

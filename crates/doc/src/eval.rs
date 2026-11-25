@@ -80,7 +80,7 @@ pub struct ModelBody {
     plan: Arc<[OnceLock<Option<Arc<TessPlan>>>; 4]>,
     /// Each display plan in the form the GPU evaluates ([`crate::gpu_plan`]), made once from it
     /// and shared like it, so the viewport sees the same allocation every frame.
-    gpu_plan: Arc<[OnceLock<Option<Arc<solidcore_tess::TessPlan>>>; 4]>,
+    gpu_plan: Arc<[OnceLock<Option<Arc<solidcraft_kernel::services::tess::TessPlan>>>; 4]>,
     /// The plan evaluated on the CPU (none without a plan), shared like the mesh: the triangles a
     /// GPU viewport draws, so a highlight over a face lies exactly on it.
     plan_mesh: Arc<[OnceLock<Option<Arc<Mesh>>>; 4]>,
@@ -457,7 +457,7 @@ impl ModelBody {
     /// The display plan at a given display quality in the form the GPU evaluates
     /// ([`crate::gpu_plan`]): made once per level from [`ModelBody::display_plan_at`], the same
     /// allocation on every call.
-    pub fn gpu_plan_at(&self, q: crate::display_quality::DisplayQuality) -> Option<Arc<solidcore_tess::TessPlan>> {
+    pub fn gpu_plan_at(&self, q: crate::display_quality::DisplayQuality) -> Option<Arc<solidcraft_kernel::services::tess::TessPlan>> {
         self.gpu_plan.get(q.index())?.get_or_init(|| self.display_plan_at(q).map(|plan| Arc::new(crate::gpu_plan::gpu_plan(&plan)))).clone()
     }
 
@@ -634,7 +634,11 @@ impl ModelBody {
     /// see [`crate::display_quality::refinement_for`]). Step 0 is the cached plan at `q`; finer
     /// steps are made on each call and kept by the viewport, which evicts them when it runs over
     /// its budget. `None` when the body has no plan at that step.
-    pub fn refined_display(&self, q: crate::display_quality::DisplayQuality, k: u8) -> Option<(Arc<solidcore_tess::TessPlan>, Arc<Mesh>)> {
+    pub fn refined_display(
+        &self,
+        q: crate::display_quality::DisplayQuality,
+        k: u8,
+    ) -> Option<(Arc<solidcraft_kernel::services::tess::TessPlan>, Arc<Mesh>)> {
         if k == 0 {
             return Some((self.gpu_plan_at(q)?, self.plan_mesh_at(q)?));
         }
@@ -720,6 +724,17 @@ pub struct SolvedSketch {
     pub profiles_3d: Vec<solidcraft_sketch::Profile3D>,
     /// Open and untied ends of its profile curves (where a profile can fail).
     pub ends: solidcraft_sketch::EndReport,
+}
+
+/// One more placement of a component's sketch than the one it is drawn and edited at: where the
+/// sketch shows on another copy of its part, and what picks there are made on.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SketchCopy {
+    /// The placement's occurrence ids, from the root.
+    pub path: Vec<u64>,
+    /// From where the sketch is drawn (its [`SolvedSketch::plane`] in the world state) to this
+    /// placement.
+    pub delta: Mat,
 }
 
 /// A constant fillet of `edges`; with [`FilletFit::Reduce`](crate::FilletFit::Reduce), a radius too
@@ -1102,6 +1117,10 @@ pub struct ModelState {
     pub bodies: Vec<ModelBody>,
     /// Shared between states: a feature that does not change a sketch keeps it as it was.
     pub sketches: Vec<Arc<SolvedSketch>>,
+    /// The other placements of each component sketch (by sketch feature id), in a world state:
+    /// a part placed more than once shows its sketches on every copy, not only on the one they
+    /// are edited at. Empty in a model's own state.
+    pub sketch_copies: BTreeMap<u64, Arc<[SketchCopy]>>,
     pub body_counter: usize,
     /// Body names the design used and must not use again (a name a `body.rename` freed, #4957),
     /// and the names stored on the suppressed features so far, so a body made while a feature is
@@ -1197,6 +1216,7 @@ impl ModelState {
             threads,
             bodies: _,
             sketches,
+            sketch_copies,
             body_counter,
             reserved_body_names,
             surface_sheets,
@@ -1218,6 +1238,7 @@ impl ModelState {
             threads: threads.clone(),
             bodies,
             sketches: sketches.clone(),
+            sketch_copies: sketch_copies.clone(),
             body_counter: *body_counter,
             reserved_body_names: reserved_body_names.clone(),
             surface_sheets: surface_sheets.clone(),
@@ -1328,7 +1349,7 @@ impl ModelState {
     /// `f` must have gone through [`naming_feature`]: face naming reads no parameter values.
     fn stamp(&mut self, doc: &Document, before: &Arc<ModelState>, f: &Feature, key: u64, mats: Vec<Mat>) {
         let feature = f.id;
-        let depth = before.bodies.iter().filter_map(|b| b.names.depth()).max().unwrap_or(0) + 1;
+        let depth = crate::naming::depth_after(before);
         let origin = Arc::new(crate::naming::NamingOrigin { feature: f.clone(), before: before.clone(), depth, mats });
         // Pieces a cut left are named after their faces, not the kernel's shell order (unless
         // the feature was saved when they were named in that order).
@@ -1378,6 +1399,9 @@ impl ModelState {
                     // holds no lineage to trace them from again.
                     let saved = b.key == stamped && b.lineage().is_none() && b.names.is_saved();
                     b.key = stamped;
+                    if saved {
+                        b.names.saved_at(depth);
+                    }
                     if !saved && !matches!(f.kind, FeatureKind::BodyTransfer { .. }) {
                         b.names = crate::naming::NameCell::traced(Some(origin.clone()), b.lineage());
                     }
@@ -1814,6 +1838,16 @@ impl ModelState {
     }
     pub fn sketch(&self, feature: u64) -> Option<&SolvedSketch> {
         self.sketches.iter().find(|s| s.feature == feature).map(|s| &**s)
+    }
+
+    /// Point `id` of sketch `sketch` on the copy of its part at `path` ([`SketchCopy`]), in the
+    /// world, and the sketch plane's normal there. A copy's delta is rigid (placements are), so
+    /// the moved normal is still a unit vector.
+    pub fn placed_sketch_point(&self, sketch: u64, path: &[u64], id: &str) -> Option<(Vec3, Vec3)> {
+        let ss = self.sketch(sketch)?;
+        let copy = self.sketch_copies.get(&sketch)?.iter().find(|c| c.path == path)?;
+        let at = ss.plane.to_world(ss.sketch.point(ss.sketch.resolve_point(id)?)?);
+        Some((crate::apply_point(&copy.delta, at), crate::apply_vector(&copy.delta, ss.plane.normal())))
     }
 }
 
@@ -2525,12 +2559,25 @@ fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
 /// parameters they use), components and body placement. Construction geometry is not among
 /// them: each feature reads only the constructions it names ([`construct_digest`]).
 fn context_digest(doc: &Document, vals: &BTreeMap<String, Value>) -> u64 {
+    digest_context(doc, vals, true)
+}
+
+/// [`context_digest`] without the design's components: units and the sheet metal and plastic
+/// rules. A change told by what a feature read ([`Relative`]) takes the feature's own components
+/// instead ([`EvalKey`]), and is placed in the components as they are when it is reused.
+fn shared_context_digest(doc: &Document, vals: &BTreeMap<String, Value>) -> u64 {
+    digest_context(doc, vals, false)
+}
+
+fn digest_context(doc: &Document, vals: &BTreeMap<String, Value>, components: bool) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     doc.units.hash(&mut h);
     serde_json::to_string(&doc.sheet).unwrap_or_default().hash(&mut h);
     serde_json::to_string(&doc.plastic).unwrap_or_default().hash(&mut h);
-    serde_json::to_string(&doc.components).unwrap_or_default().hash(&mut h);
-    serde_json::to_string(&doc.body_components).unwrap_or_default().hash(&mut h);
+    if components {
+        serde_json::to_string(&doc.components).unwrap_or_default().hash(&mut h);
+        serde_json::to_string(&doc.body_components).unwrap_or_default().hash(&mut h);
+    }
     for e in doc.sheet.rules.iter().flat_map(|r| r.fields().map(|(_, e, _)| e)) {
         for n in expr::references(e) {
             vals.get(&n).map(|v| v.v.to_bits()).hash(&mut h);
@@ -2804,15 +2851,20 @@ struct EvalKey {
     /// From what it reads alone, with that ([`Feature::reads`]); `None` when it may read
     /// anything.
     reads: Option<(u64, Reads)>,
+    /// From what it reads alone, without the names of the bodies it does not read: the key of a
+    /// change that holds whatever those bodies are ([`Relative`]). Set with `reads`.
+    relative: Option<u64>,
 }
 
 impl EvalKey {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         doc: &Document,
         vals: &BTreeMap<String, Value>,
         f: &Feature,
         fp: u64,
         ctx: u64,
+        shared: u64,
         st: &ModelState,
         steps: &ImportDigests,
         geo: u64,
@@ -2821,35 +2873,13 @@ impl EvalKey {
         let local = fingerprint(doc, 0, f, vals, false, steps)
             ^ placement_digest(doc, f, Some(st))
             ^ construct_digest(doc, vals, f, Some(st))
-            ^ turns_digest(doc, vals, f).unwrap_or(0);
+            ^ turns_digest(doc, vals, f).unwrap_or(0)
+            ^ depth_digest(st);
         let whole = cache_key(f, fp, local, ctx, st);
         let reads = f.reads(doc, st).map(|read| {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             "reads".hash(&mut h);
-            local.hash(&mut h);
-            ctx.hash(&mut h);
-            f.id.hash(&mut h);
-            // An import reads the file it names and nothing of the model, so it keeps its result
-            // while the features before it are the same: a part that moves leaves the file
-            // unread (#17310). The features' own inputs, without where they are placed, are in
-            // the key: a change to them (a new length) reads the file again.
-            if matches!(f.kind, FeatureKind::Import { .. }) {
-                geo.hash(&mut h);
-            }
-            // A pattern replays its features' definitions.
-            if let FeatureKind::Pattern { features, .. } = &f.kind {
-                for id in features {
-                    source_feature(doc, *id).ok().map(|src| fingerprint(doc, 0, src, vals, false, steps)).hash(&mut h);
-                }
-            }
-            // A sketch's stored solve exactly: its fingerprint rounds it to a grid, and a sketch
-            // that rounds alike gives back the solve it was taken from, which an edit compares
-            // exactly (deleting a dimension that changed its points by less than the grid).
-            if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                for p in &sketch.points {
-                    (p.pos.x.to_bits(), p.pos.y.to_bits()).hash(&mut h);
-                }
-            }
+            own_inputs(doc, vals, f, local, ctx, geo, steps, &mut h);
             // Every body's name and component: new names avoid the names, a cut's pieces are
             // numbered past them, a tool's default targets are its component's bodies.
             for b in &st.bodies {
@@ -2866,11 +2896,106 @@ impl EvalKey {
                 st.sketch_keys.get(id).hash(&mut h);
             }
             st.body_counter.hash(&mut h);
+            // A body numbered from the counter skips the numbers reserved past it.
+            if f.body_names.is_empty() || f.body_names.iter().any(|n| n.is_empty() || st.body(n).is_some()) {
+                for n in st.reserved_body_names.iter().filter(|n| crate::is_counted_body_name(n)) {
+                    n.hash(&mut h);
+                }
+            }
             // A cut drops the threads of bodies it removes.
             serde_json::to_string(&st.threads).unwrap_or_default().hash(&mut h);
             (h.finish(), read)
         });
-        EvalKey { whole, reads }
+        let relative = reads.as_ref().map(|(_, read)| {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            "relative".hash(&mut h);
+            own_inputs(doc, vals, f, local, shared, geo, steps, &mut h);
+            // Its own component and those it lies in, not every component of the design: a
+            // component deleted or added elsewhere changes nothing it reads.
+            let mut c = f.component;
+            for _ in 0..=crate::MAX_PLACEMENT_DEPTH {
+                let comp = doc.components.iter().find(|x| x.id == c);
+                serde_json::to_string(&comp).unwrap_or_default().hash(&mut h);
+                match comp {
+                    Some(comp) if comp.id != 0 && comp.parent != comp.id => c = comp.parent,
+                    _ => break,
+                }
+            }
+            // The bodies it reads by name, not by where they stand: bodies before them come and go.
+            let mut names = Vec::with_capacity(read.bodies.len());
+            for &i in &read.bodies {
+                let b = st.bodies.get(i);
+                b.map(|b| (&b.name, b.key, b.feature, b.component, b.transferred)).hash(&mut h);
+                names.extend(b.map(|b| b.name.as_str()));
+            }
+            for id in &read.sketches {
+                id.hash(&mut h);
+                st.sketch_keys.get(id).hash(&mut h);
+            }
+            // A body takes the name the feature stores for it only while no other body has it.
+            for n in &f.body_names {
+                (n, st.body(n).is_some()).hash(&mut h);
+            }
+            // A cut drops the threads of bodies it removes.
+            for t in st.threads.iter().filter(|t| names.contains(&t.body.as_str())) {
+                serde_json::to_string(t).unwrap_or_default().hash(&mut h);
+            }
+            h.finish()
+        });
+        EvalKey { whole, reads, relative }
+    }
+}
+
+/// What the naming depth adds to a feature's keys: nothing up to the limit, past which the bodies
+/// it makes name their faces by position. Every body before it counts, so features it reads
+/// nothing of put it past the limit: a result named one way is not kept where the design
+/// evaluated afresh names it the other, and the references to it find other faces or none (#20956).
+fn depth_digest(st: &ModelState) -> u64 {
+    if !crate::naming::past_limit(st) {
+        return 0;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    "past the naming limit".hash(&mut h);
+    h.finish()
+}
+
+/// A feature's own inputs, for the keys of what it reads ([`EvalKey`]): its definition and
+/// placement (`local`), the document context, its id, the definitions a pattern replays and a
+/// sketch's stored solve.
+#[allow(clippy::too_many_arguments)]
+fn own_inputs(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    local: u64,
+    ctx: u64,
+    geo: u64,
+    steps: &ImportDigests,
+    h: &mut impl Hasher,
+) {
+    local.hash(h);
+    ctx.hash(h);
+    f.id.hash(h);
+    // An import reads the file it names and nothing of the model, so it keeps its result
+    // while the features before it are the same: a part that moves leaves the file
+    // unread (#17310). The features' own inputs, without where they are placed, are in
+    // the key: a change to them (a new length) reads the file again.
+    if matches!(f.kind, FeatureKind::Import { .. }) {
+        geo.hash(h);
+    }
+    // A pattern replays its features' definitions.
+    if let FeatureKind::Pattern { features, .. } = &f.kind {
+        for id in features {
+            source_feature(doc, *id).ok().map(|src| fingerprint(doc, 0, src, vals, false, steps)).hash(h);
+        }
+    }
+    // A sketch's stored solve exactly: its fingerprint rounds it to a grid, and a sketch
+    // that rounds alike gives back the solve it was taken from, which an edit compares
+    // exactly (deleting a dimension that changed its points by less than the grid).
+    if let FeatureKind::Sketch { sketch, .. } = &f.kind {
+        for p in &sketch.points {
+            (p.pos.x.to_bits(), p.pos.y.to_bits()).hash(h);
+        }
     }
 }
 
@@ -2953,7 +3078,9 @@ fn blend_candidates(st: &ModelState, edges: &[Vec3]) -> Option<Vec<usize>> {
                 return None;
             }
             let tol = (b.body.size() * 2e-3).max(1e-3);
-            hit |= matches!(b.body.nearest_edge(p, tol), Ok(Some((_, d))) if d <= BLEND_REACH);
+            // A note names every body with an edge within twice this distance
+            // ([`body_on_edge_noted`]): those too are among the bodies near.
+            hit |= matches!(b.body.nearest_edge(p, tol), Ok(Some((_, d))) if 2.0 * d + 1e-3 <= BLEND_REACH);
         }
         if !hit {
             return None;
@@ -3015,13 +3142,17 @@ impl Feature {
             if names.iter().any(|n| n == "*") {
                 return None;
             }
-            names.iter().map(|n| st.bodies.iter().position(|b| &b.name == n)).collect()
+            // A name evaluation may refuse as ambiguous, for other bodies of this component
+            // ([`named_target`]): what it finds is not all that is read.
+            names.iter().map(|n| named_target(doc, st, self, n).ok()).collect()
         };
         // The bodies a tool operates on, as `apply_traced` picks them.
         let operated = |(op, targets): (Operation, Vec<String>)| -> Option<Vec<usize>> {
             let targets = if targets.is_empty() { &self.participants } else { &targets };
             match op {
-                Operation::NewBody => Some(Vec::new()),
+                // A new body reads none of the bodies it names, but fails without them.
+                Operation::NewBody if targets.is_empty() || targets.iter().all(|n| n == "*") => Some(Vec::new()),
+                Operation::NewBody => named(targets).map(|_| Vec::new()),
                 _ if targets.is_empty() => Some(
                     st.bodies.iter().enumerate().filter(|(_, b)| b.component == self.component || b.feature == self.id).map(|(i, _)| i).collect(),
                 ),
@@ -3115,6 +3246,28 @@ struct Change {
     pattern_left_out: Option<Vec<usize>>,
     /// Where the feature found its named faces.
     named_faces: Option<Vec<Vec3>>,
+    /// The same change whatever the bodies the feature did not read, when it can be told so.
+    relative: Option<Arc<Relative>>,
+}
+
+/// A change told by the bodies a feature read, by name, and the bodies it made after every
+/// other: it holds on any model whose bodies it read are the same, whatever other bodies come
+/// before, between or after them (see [`ModelState::with_relative`]).
+#[derive(Debug)]
+struct Relative {
+    /// Each body it read, in order: what it became.
+    read: Vec<(String, Fate)>,
+    /// Bodies it made under names the feature stores, after all others.
+    made: Vec<ModelBody>,
+    /// The body counter a stored `BodyN` name among them counted up to (0: none).
+    counter: usize,
+}
+
+#[derive(Debug)]
+enum Fate {
+    Kept,
+    Changed(Box<ModelBody>),
+    Removed,
 }
 
 #[derive(Clone, Debug)]
@@ -3140,11 +3293,114 @@ impl Change {
     }
 }
 
+impl Relative {
+    /// `after`'s bodies as a change of `before`'s by feature `f`, which read the bodies `read`:
+    /// every body it did not read stands where it stood, each body it read is kept, changed under
+    /// its own name or removed in place, and the bodies it made under the names it stores come
+    /// after all of them (only when it changed none: pieces of a split stand by their body).
+    /// `None` when the change is not of that form.
+    fn of(before: &ModelState, after: &ModelState, f: &Feature, read: &Reads) -> Option<Relative> {
+        let mut is_read = vec![false; before.bodies.len()];
+        for &i in &read.bodies {
+            *is_read.get_mut(i)? = true;
+        }
+        let mut names = std::collections::HashSet::with_capacity(before.bodies.len());
+        let mut next = after.bodies.iter().peekable();
+        let mut fates = Vec::with_capacity(read.bodies.len());
+        let mut changed = false;
+        for (x, read) in before.bodies.iter().zip(is_read) {
+            // A name twice (a damaged state) does not say which body a read meant.
+            if !names.insert(x.name.as_str()) {
+                return None;
+            }
+            let same = |b: &ModelBody| b.key == x.key && b.body.same(&x.body);
+            if !read {
+                next.next().filter(|b| b.name == x.name && same(b))?;
+                continue;
+            }
+            let fate = match next.next_if(|b| b.name == x.name) {
+                Some(b) if same(b) => Fate::Kept,
+                Some(b) => Fate::Changed(Box::new(b.clone())),
+                None => Fate::Removed,
+            };
+            changed |= !matches!(fate, Fate::Kept);
+            fates.push((x.name.clone(), fate));
+        }
+        let made: Vec<ModelBody> = next.cloned().collect();
+        // Each in its own slot: a body numbered from the counter can come out with a name stored
+        // in another.
+        let stored = |(k, b): (usize, &ModelBody)| f.body_names.get(k) == Some(&b.name) && !names.contains(b.name.as_str());
+        if !made.is_empty() && (changed || !made.iter().enumerate().all(stored)) {
+            return None;
+        }
+        // Nor is it one that bodies it did not read have a say in.
+        let changes = fates.iter().filter_map(|(_, fate)| match fate {
+            Fate::Changed(b) => Some(b.as_ref()),
+            Fate::Kept | Fate::Removed => None,
+        });
+        if unnamed_edges(f) || !made.iter().chain(changes).all(|b| names_alone(b, f)) {
+            return None;
+        }
+        // Counted only by a stored `BodyN` name: a body numbered from the counter is named by
+        // every body before it.
+        let number = |b: &ModelBody| b.name.strip_prefix("Body").filter(|_| crate::is_counted_body_name(&b.name))?.parse::<usize>().ok();
+        let counter = match (after.body_counter, made.iter().filter_map(number).max()) {
+            (c, Some(n)) if c == n && n > before.body_counter => n,
+            (c, _) if c != before.body_counter => return None,
+            (c, Some(n)) if n <= c => {
+                // Counted already here, but maybe not where it is made again: only a tool's new
+                // body is known to count ([`new_name`]).
+                if !independent_solid(f) {
+                    return None;
+                }
+                n
+            }
+            _ => 0,
+        };
+        Some(Relative { read: fates, made, counter })
+    }
+}
+
+/// Whether blend `f` finds its edges by name on any body ([`named_body`]), not on one it names.
+fn unnamed_edges(f: &Feature) -> bool {
+    matches!(&f.kind, FeatureKind::Fillet { body: None, .. } | FeatureKind::Chamfer { body: None, .. }) && f.edge_names.iter().any(|n| !n.is_empty())
+}
+
+/// A solid of its own: its faces are never named after the bodies it lies on.
+fn independent_solid(f: &Feature) -> bool {
+    let kind = &f.kind;
+    let solid =
+        numeric_tool(kind) && !matches!(kind, FeatureKind::Coil { .. }) || matches!(kind, FeatureKind::Extrude { .. } | FeatureKind::Revolve { .. });
+    solid && feature_operation(f) == Some(Operation::NewBody)
+}
+
+/// Whether body `b`, as feature `f` made or changed it, names its faces from its own history: a
+/// face named from geometry is named after whatever bodies it lies on
+/// ([`crate::naming::geometric_names`]), also ones the feature did not read. The names a saved
+/// model kept were worked out when it was made.
+fn names_alone(b: &ModelBody, f: &Feature) -> bool {
+    use crate::lineage::{Lineage, Operand};
+    fn exact(l: &Lineage) -> bool {
+        l.history.faces.iter().all(|face| !face.origins.is_empty())
+            && l.operands.iter().all(|operand| match operand.as_ref() {
+                Operand::Made(roles) | Operand::CopiedTool { roles, .. } | Operand::Rebuilt { roles, .. } => roles.iter().all(|r| !r.is_empty()),
+                Operand::Grown { faces, .. } => faces.iter().all(Option::is_some),
+                Operand::Stage(stage) => exact(&stage.lineage),
+                Operand::Body(_) | Operand::Copy { .. } | Operand::Inner(_) => true,
+            })
+    }
+    if matches!(f.kind, FeatureKind::Move { .. }) || independent_solid(f) {
+        return true;
+    }
+    b.lineage().map_or(b.names.is_saved(), |l| exact(&l))
+}
+
 impl ModelState {
     /// How feature `feature`, which read the bodies `read` of `before`, took it to this state
     /// (not stamped yet); `None` when it changed anything else: a body it did not read, a sketch
     /// other than its own, the construction, threads or blend records.
-    fn change_from(&self, before: &ModelState, feature: u64, read: &Reads) -> Option<Change> {
+    fn change_from(&self, before: &ModelState, f: &Feature, read: &Reads) -> Option<Change> {
+        let feature = f.id;
         let (kept, sketch) = match self.sketches.split_last() {
             Some((last, rest)) if last.feature == feature => (rest, Some(last.clone())),
             _ => (self.sketches.as_slice(), None),
@@ -3194,6 +3450,7 @@ impl ModelState {
             kept_separate: self.kept_separate.get(&feature).copied(),
             pattern_left_out: self.pattern_left_out.get(&feature).cloned(),
             named_faces: self.named_faces.get(&feature).cloned(),
+            relative: Relative::of(before, self, f, read).map(Arc::new),
         })
     }
 
@@ -3208,12 +3465,48 @@ impl ModelState {
                 Changed::Made(b) => Some((**b).clone()),
             })
             .collect::<Option<Vec<_>>>()?;
+        Some(self.with_changed_bodies(change, feature, bodies, change.body_counter))
+    }
+
+    /// This state with `change`'s relative form ([`Relative`]) made to it: the bodies it read,
+    /// found by name, as it left them, every other body where it stands, and the bodies it made
+    /// after them; `None` when it has none, or this state lacks a body it read or holds a name it
+    /// made.
+    fn with_relative(&self, change: &Change, feature: u64) -> Option<ModelState> {
+        let relative = change.relative.as_deref()?;
+        let fates: std::collections::HashMap<&str, &Fate> = relative.read.iter().map(|(n, fate)| (n.as_str(), fate)).collect();
+        let mut found = 0;
+        let mut bodies = Vec::with_capacity(self.bodies.len() + relative.made.len());
+        for b in &self.bodies {
+            let before = || ModelBody { made: crate::lineage::Made::Before, ..b.clone() };
+            match fates.get(b.name.as_str()) {
+                None => bodies.push(before()),
+                Some(fate) => {
+                    found += 1;
+                    match fate {
+                        Fate::Kept => bodies.push(before()),
+                        Fate::Changed(c) => bodies.push((**c).clone()),
+                        Fate::Removed => {}
+                    }
+                }
+            }
+        }
+        // Each body it read once, and no body under a name it made.
+        if found != relative.read.len() || relative.made.iter().any(|m| self.body(&m.name).is_some()) {
+            return None;
+        }
+        bodies.extend(relative.made.iter().cloned());
+        Some(self.with_changed_bodies(change, feature, bodies, self.body_counter.max(relative.counter)))
+    }
+
+    /// This state with `bodies` and the rest of `change` (feature `feature`'s) made to it.
+    fn with_changed_bodies(&self, change: &Change, feature: u64, bodies: Vec<ModelBody>, body_counter: usize) -> ModelState {
         let mut sketches = self.sketches.clone();
         if let Some(s) = &change.sketch {
             sketches.retain(|s| s.feature != feature);
             sketches.push(s.clone());
         }
-        let mut next = ModelState { bodies, sketches, body_counter: change.body_counter, ..self.clone() };
+        let mut next = ModelState { bodies, sketches, body_counter, ..self.clone() };
         next.blend_edges.remove(&feature);
         next.fitted.remove(&feature);
         next.tapered.remove(&feature);
@@ -3238,7 +3531,7 @@ impl ModelState {
         if let Some(p) = &change.named_faces {
             next.named_faces.insert(feature, p.clone());
         }
-        Some(next)
+        next
     }
 }
 
@@ -3625,7 +3918,9 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     }
     // The faces To / From Object names, in `face_points` order.
     let object_names = match &f.kind {
-        FeatureKind::Extrude { extent, .. } => usize::from(extent.to.is_some()) + usize::from(extent.from.is_some()),
+        FeatureKind::Extrude { extent, .. } | FeatureKind::SurfaceExtrude { extent, .. } => {
+            usize::from(extent.to.is_some()) + usize::from(extent.from.is_some())
+        }
         FeatureKind::Revolve { to, .. } => usize::from(to.is_some()),
         _ => 0,
     };
@@ -4444,6 +4739,7 @@ impl Model {
         let with_import = doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Import { .. }));
         let mut geo = 0u64;
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
+        let shared_ctx = shared_context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let previous_context = self.context;
         let mut rolled_results = std::mem::take(&mut self.rolled_results);
         self.context = ctx;
@@ -4624,7 +4920,7 @@ impl Model {
                     continue;
                 }
                 // The same feature on the same inputs: its earlier result.
-                let key = EvalKey::new(doc, &vals, f, fp, ctx, &state, &self.import_digests, geo_in);
+                let key = EvalKey::new(doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests, geo_in);
                 // A check that refused this feature's bodies on these inputs after its evaluation
                 // returned: it fails as it would have failed there.
                 if let Some(c) = carried.as_ref().filter(|c| c.id == f.id && c.key == key.whole) {
@@ -4707,9 +5003,12 @@ impl Model {
                 let reads = key.reads.as_ref().filter(|_| {
                     !self.no_cache && checks.refused_at(i).is_none() && param_names(f).iter().all(|n| !self.param_errors.contains_key(n))
                 });
-                let reused = reads
-                    .and_then(|(k, _)| self.cache.lock().ok().and_then(|mut m| m.change(*k)))
-                    .and_then(|c| state.with_change(&c.state, f.id).map(|next| (next, c)));
+                let relative = reads.and(key.relative);
+                let change_at = |k: u64| self.cache.lock().ok().and_then(|mut m| m.change(k));
+                let by_relative = relative.and_then(change_at).and_then(|c| state.with_relative(&c.state, f.id).map(|next| (next, c)));
+                let hit_relative = by_relative.is_some();
+                let reused = by_relative
+                    .or_else(|| reads.and_then(|(k, _)| change_at(*k)).and_then(|c| state.with_change(&c.state, f.id).map(|next| (next, c))));
                 // Each feature computed is a profiler span named after its kind.
                 let _feature_span = solidcraft_profile::span("feature", f.kind.type_name());
                 let before = state.clone();
@@ -4869,11 +5168,15 @@ impl Model {
                 // What it changed, when that is only what it read: kept for whatever the rest of the
                 // model holds, and its bodies are known by what it read.
                 let change = match (&cached, reads) {
-                    (None, Some((_, read))) if r.is_ok() => next.change_from(&state, f.id, read),
+                    (None, Some((_, read))) if r.is_ok() => next.change_from(&state, f, read),
                     _ => None,
                 };
-                let stamp_key = match reads {
-                    Some((k, _)) if cached.is_some() || change.is_some() => *k,
+                // A change that holds whatever the bodies it did not read is known by the key
+                // without them, and so are the bodies it made.
+                let relative = relative.filter(|_| hit_relative || change.as_ref().is_some_and(|c| c.relative.is_some()));
+                let stamp_key = match (reads, relative) {
+                    (Some(_), Some(k)) => k,
+                    (Some((k, _)), None) if cached.is_some() || change.is_some() => *k,
                     _ => key.whole,
                 };
                 let error = match r {
@@ -4942,7 +5245,7 @@ impl Model {
                         ms,
                         state: state.clone(),
                     };
-                    let change = reads.zip(change).map(|((k, _), change)| (*k, whole.with(change)));
+                    let change = reads.zip(change).map(|((k, _), change)| (relative.unwrap_or(*k), whole.with(change)));
                     let entry = CacheEntry { key: key.whole, bytes: state.added_bytes(&before), whole, change };
                     // Held while a check before it, or its own, runs.
                     checks.store(i, entry, &self.cache, &self.kept);
@@ -6416,7 +6719,7 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
     // Each union keeps the lineage of what it joins, so the joined body's faces keep
     // their names (the tool's new faces are named by their roles).
     let union = |a: &Traced, b: &Traced| -> Result<Traced> {
-        let u = kernel::boolean(&a.body, &b.body, BoolOp::Union)?.ok_or_else(|| DocError::Invalid("join produced nothing".into()))?;
+        let u = crate::flush_join::join_bodies(&a.body, &b.body, "join produced nothing")?;
         Ok(Traced::step(u, &[a, b]))
     };
     // One target takes every tool, whichever it meets: the result is the union of all of
@@ -7756,11 +8059,22 @@ fn hole_drill_scope(f: &Feature) -> &[String] {
 /// component under the opening (#17358). A body the hole cuts further along the axis still takes
 /// it. When the hole cuts every body, or none, every body counts.
 pub fn hole_start(st: &ModelState, f: &Feature, p: Vec3, dir: Vec3) -> Vec3 {
+    let scope = hole_drill_scope(f);
+    // A spot already on a named solid's face stays there. Prove that before asking a
+    // nearby reference mesh to classify the spot or intersect the drill axis.
+    if !scope.is_empty() && st.bodies.iter().any(|b| b.body.is_mesh()) && on_a_brep_face(st, p, scope) {
+        return p;
+    }
     let anywhere = hole_on_surface(st, p, dir, &[]);
     // `hole_on_surface` hands `p` itself back when `p` is on a body's boundary (or meets no body
-    // at all); the B-rep also says whether it is on a face within the chord tolerance.
-    if anywhere == p || on_a_brep_face(st, p) {
+    // at all).
+    if anywhere == p {
         return p;
+    }
+    // A point within a body's chord tolerance of a face (a pick on its display mesh) starts on
+    // that face, where the axis meets its exact surface (#20741).
+    if let Some(q) = brep_face_start(st, p, dir) {
+        return q;
     }
     let targets = hole_targets(st, f);
     if targets.len() == st.bodies.len() {
@@ -7774,11 +8088,40 @@ pub fn hole_start(st: &ModelState, f: &Feature, p: Vec3, dir: Vec3) -> Vec3 {
 /// ([`ModelBody::display_tol`], so the face's mesh is within reach): solidcore decides it on the
 /// face's surface and trim ([`solidcraft_kernel::Body::point_lies_on_face`]); the mesh only
 /// names the faces to ask.
-fn on_a_brep_face(st: &ModelState, p: Vec3) -> bool {
+fn on_a_brep_face(st: &ModelState, p: Vec3, scope: &[String]) -> bool {
     let reach = st.bodies.iter().map(ModelBody::display_tol).fold(0.0, f64::max);
-    faces_near(st, p, reach, &[])
+    faces_near(st, p, reach, scope)
         .into_iter()
         .any(|(_, i, face, _)| st.bodies.get(i).is_some_and(|b| matches!(b.body.point_lies_on_face(face as usize, p, b.display_tol()), Ok(Some(_)))))
+}
+
+/// Where a hole at `p` along `dir` starts when `p` lies on a face of a B-rep body within the
+/// body's chord tolerance ([`ModelBody::display_tol`], so the face's mesh is within reach, as a
+/// pick on the display mesh is), `None` when it lies on none. solidcore decides that on the face's
+/// surface and trim ([`solidcraft_kernel::Body::point_lies_on_face`]; the mesh only names the
+/// faces to ask), and the start is where the axis meets that face's exact surface within the same
+/// reach ([`solidcraft_kernel::Body::face_line_hit`]), never the facet under `p`, which lies up to
+/// the display sag inside a curved face (#20741). Of several such faces (near an edge) the meeting
+/// nearest `p` wins; an axis that meets none of them so near (one grazing the face) keeps `p`.
+fn brep_face_start(st: &ModelState, p: Vec3, dir: Vec3) -> Option<Vec3> {
+    let reach = st.bodies.iter().map(ModelBody::display_tol).fold(0.0, f64::max);
+    let mut on = false;
+    let mut best: Option<Vec3> = None;
+    for (_, i, face, _) in faces_near(st, p, reach, &[]) {
+        let Some(b) = st.bodies.get(i) else { continue };
+        let tol = b.display_tol();
+        let Ok(Some(foot)) = b.body.point_lies_on_face(face as usize, p, tol) else { continue };
+        on = true;
+        // How far the meeting may lie from `p` is bounded across the surface (the same gap the
+        // membership test allows), not along an oblique axis.
+        if let Ok(Some(q)) = b.body.face_line_hit(face as usize, p, dir)
+            && solidcraft_kernel::Body::distance_across_surface(p, foot, q) <= tol
+            && best.is_none_or(|bq| q.dist(p) < bq.dist(p))
+        {
+            best = Some(q);
+        }
+    }
+    on.then(|| best.unwrap_or(p))
 }
 
 fn in_hole_scope(scope: &[String], b: &ModelBody) -> bool {
@@ -8076,16 +8419,15 @@ fn hole_feature_tools(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
         return Err(DocError::Invalid("a hole needs 1…10000 points".into()));
     }
     let kept_inside = !hole_from_inside(doc, f);
+    let mesh_scope = hole_mesh_scope(st, hole_drill_scope(f));
     let mut tools = Vec::new();
     for spot in spots {
         let depth = hole_depth_to(st, &spot.at, dir, &to.map(Vec3::from), depth)?;
         let prefix = spot.point.map(hole_point_role);
         tools.extend(
-            hole_tools_and_prisms(vals, st, &spot.at, dir, diameter, &depth, hole, kept_inside)?.into_iter().map(|(tool, prism)| HoleTool {
-                traced: tool.with_part_prefix(prefix.as_deref()),
-                prism,
-                point_role: prefix.clone(),
-            }),
+            hole_tools_and_prisms(vals, st, &spot.at, dir, diameter, &depth, hole, kept_inside, mesh_scope)?
+                .into_iter()
+                .map(|(tool, prism)| HoleTool { traced: tool.with_part_prefix(prefix.as_deref()), prism, point_role: prefix.clone() }),
         );
     }
     Ok(tools)
@@ -8116,11 +8458,17 @@ fn may_hold(b: &ModelBody, p: Vec3) -> bool {
         && (bb.min.z - pad..=bb.max.z + pad).contains(&p.z)
 }
 
-/// Where a hole meets the part at `p`: the exact class of `p` in each body that [`may_hold`] it.
-/// The other bodies are outside and are not classified: in a design of many parts, classifying
-/// `p` in each one cost far more than the hole (#19946).
-fn hole_point_classes(st: &ModelState, p: Vec3) -> impl Iterator<Item = kernel::Result<kernel::PointClass>> + '_ {
-    st.bodies.iter().filter(move |b| may_hold(b, p)).map(move |b| {
+/// Use explicit cut targets to decide which meshes take part in material checks. A
+/// Combine can consume a target and the cut can follow it to its new body, so retain the
+/// full set when any name is missing. An empty scope also covers all-body and implicit cuts.
+fn hole_mesh_scope<'a>(st: &ModelState, targets: &'a [String]) -> &'a [String] {
+    if targets.iter().all(|name| st.body(name).is_some()) { targets } else { &[] }
+}
+
+/// The exact class of `p` in bodies whose bounds [`may_hold`] it. Other solids can back
+/// the cut at its exit. Mesh bodies take part when the hole's scope includes them (#21255).
+fn hole_point_classes<'a>(st: &'a ModelState, p: Vec3, mesh_scope: &'a [String]) -> impl Iterator<Item = kernel::Result<kernel::PointClass>> + 'a {
+    st.bodies.iter().filter(move |b| (!b.body.is_mesh() || in_hole_scope(mesh_scope, b)) && may_hold(b, p)).map(move |b| {
         #[cfg(test)]
         cost_tests::count(|c| c.hole_points += 1);
         b.body.classify_point(p)
@@ -8252,8 +8600,9 @@ fn hole_tools_and_prisms(
     depth: &Option<crate::Expr>,
     hole: &HoleKind,
     kept_inside: bool,
+    mesh_scope: &[String],
 ) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
-    let reach = hole_reach(vals, st, position, dir, diameter, depth, hole, kept_inside)?;
+    let reach = hole_reach(vals, st, position, dir, diameter, depth, hole, kept_inside, mesh_scope)?;
     hole_tools_reaching(vals, st, position, dir, diameter, depth, hole, &reach)
 }
 
@@ -8298,6 +8647,7 @@ fn hole_reach(
     depth: &Option<crate::Expr>,
     hole: &HoleKind,
     kept_inside: bool,
+    mesh_scope: &[String],
 ) -> Result<HoleReach> {
     let r = val(vals, diameter, Kind::Length)? / 2.0;
     if !(r > 1e-6) {
@@ -8309,7 +8659,7 @@ fn hole_reach(
     // #11538) starts there: the reach above a face, there so the tool's top never lies on that
     // face, would cut the material above the plane. Judged at the spot itself, so a plane just
     // under a face keeps the thin roof above it.
-    if kept_inside && hole_point_classes(st, *position).any(|c| matches!(c, Ok(kernel::PointClass::Inside))) {
+    if kept_inside && hole_point_classes(st, *position, mesh_scope).any(|c| matches!(c, Ok(kernel::PointClass::Inside))) {
         top = size * 1e-4;
     }
     // Tools are cylinders and cones made by (tapered) extrudes along the axis, cut one
@@ -8342,7 +8692,7 @@ fn hole_reach(
     // cannot tell.
     let at = |h: f64| *position + dir * (-h);
     let eps = size * 1e-6;
-    let classes = |h: f64| hole_point_classes(st, at(h)).collect::<std::result::Result<Vec<_>, _>>();
+    let classes = |h: f64| hole_point_classes(st, at(h), mesh_scope).collect::<std::result::Result<Vec<_>, _>>();
     let exits = depth.is_some()
         && classes(bottom + eps).is_ok_and(|c| c.contains(&kernel::PointClass::Inside))
         && classes(bottom - eps).is_ok_and(|c| c.iter().all(|c| *c == kernel::PointClass::Outside));
@@ -8454,7 +8804,7 @@ fn hole_tools_reaching(
                 // must end inside a body (exact classification), short of the exit face.
                 if depth.is_none() {
                     let past = *position + dir * (dc + 2.0 * layer + size * 1e-6);
-                    let classes = hole_point_classes(st, past).collect::<std::result::Result<Vec<_>, _>>()?;
+                    let classes = hole_point_classes(st, past, &[]).collect::<std::result::Result<Vec<_>, _>>()?;
                     if !classes.contains(&kernel::PointClass::Inside) {
                         return Err(bridge_too_deep(layer, "make the counterbore shallower or the bridge thinner"));
                     }
@@ -10073,7 +10423,8 @@ fn sweep_readers(doc: &Document, profile: u64, path: &[crate::PathEntry], path_s
 /// A path that uses 3D sketch curves (wires), as one chain of pieces put in order from the end
 /// nearest `start` (no start: the first curve runs toward the second): each drawn 3D spline as
 /// its fit points (the kernel has its exact curve), each curve held exactly (a planar sketch
-/// curve, a linked curve with [`solidcraft_sketch::Wire::exact`]) as its path segments, and a
+/// curve, a drawn 3D control point spline, a linked curve with
+/// [`solidcraft_sketch::Wire::exact`]) as its path segments, and a
 /// linked curve known only as points as those points. `None` when the path is all planar curves.
 fn path_points(curves: &[PathCurve], start: Vec3) -> Result<Option<kernel::PointPath>> {
     if !curves.iter().any(|c| c.ss.sketch.wire_index(&c.id).is_some()) {
@@ -10094,6 +10445,12 @@ fn path_points(curves: &[PathCurve], start: Vec3) -> Result<Option<kernel::Point
                     let frame = solidcore_record::brep::Frame { origin: arc.center.into(), x_axis: x.into(), y_axis: y.into() };
                     let circle = solidcore_record::brep::Curve::Circle { frame, radius: arc.radius };
                     kernel::PathPiece::Segs(kernel::curve_path(&circle, [0.0, solidcraft_sketch::arc_sweep(arc)])?)
+                }
+                // A drawn control point spline is its B-spline, as its Bézier spans (a spline
+                // through its control points is another curve).
+                Some(w) if w.control.is_some() => {
+                    let c = w.control_curve().ok_or_else(|| DocError::Invalid(format!("3D control point spline `{}` has no curve", w.id)))?;
+                    kernel::PathPiece::Segs(kernel::curve_path(&c.curve, c.interval)?)
                 }
                 Some(w) if w.fit.len() >= 3 => kernel::PathPiece::Spline { fit: w.fit.clone(), reversed: false },
                 Some(w) if !w.exact.is_empty() => {
@@ -10687,13 +11044,13 @@ fn pattern_skipped_note(skipped: &[String], why: &DocError) -> String {
 /// older designs, which saved no placement and mirror the body's own geometry.
 fn mirrored_placement(doc: &Document, own: u64, mb: &ModelBody, path: Option<&[u64]>) -> Result<Option<(u64, Mat, Mat)>> {
     let Some(path) = path else { return Ok(None) };
-    let lost = || DocError::Invalid(format!("the placement `{}` was mirrored at no longer exists", mb.name));
+    let lost = || DocError::Invalid(format!("the placement `{}` was copied from no longer shows it", mb.name));
     // A stale or edited path that leads to another component no longer shows the body.
     let (at, _) = doc.path_placement(path).ok_or_else(lost)?;
     if !placement_shows(doc, mb, at) {
         return Err(lost());
     }
-    let singular = || DocError::Invalid(format!("the placement `{}` was mirrored at is singular", mb.name));
+    let singular = || DocError::Invalid(format!("the placement `{}` was copied from is singular", mb.name));
     let (component, frame, picked) = mirror_copy_frame(doc, own, path).ok_or_else(singular)?;
     let source = doc.model_body_offset(mb).map(|offset| crate::mat_mul(&picked, offset)).unwrap_or(picked);
     Ok(Some((component, frame, source)))
@@ -11323,6 +11680,30 @@ fn hole_targets<'a>(st: &'a ModelState, f: &Feature) -> Vec<&'a ModelBody> {
         .collect()
 }
 
+/// Whether every face of `mb`, as the feature that made it traces them, came from `mb` as it was
+/// before the feature, none from a tool: the feature's tools took no material from it. A tool
+/// that shares material with a body leaves some of its boundary inside the body (unless the body
+/// lies inside the tool, and is gone), and a cut keeps that boundary as faces of the body. A body
+/// the history does not trace, or a face it traces to anything else (a tool's face, edge,
+/// profile or cap), says nothing.
+fn no_face_from_tools(mb: &ModelBody) -> bool {
+    use solidcraft_kernel::history::FaceOrigin;
+    let crate::lineage::Made::Traced(lineage) = &mb.made else { return false };
+    if lineage.history.faces.len() != mb.body.face_count() {
+        return false;
+    }
+    let own: Vec<bool> = lineage.operands.iter().map(|op| matches!(op.as_ref(), crate::lineage::Operand::Body(n) if *n == mb.name)).collect();
+    lineage.history.faces.iter().all(|face| {
+        !face.origins.is_empty()
+            && face.origins.iter().all(|origin| match *origin {
+                FaceOrigin::Face { operand, .. } | FaceOrigin::Edge { operand, .. } | FaceOrigin::Offset { operand, .. } => {
+                    own.get(operand) == Some(&true)
+                }
+                _ => false,
+            })
+    })
+}
+
 /// Whether `new` has a face on a surface no face of `old` lies on. A plane, cylinder, cone,
 /// sphere or torus is compared by its geometry, to within a ten-millionth of the bodies' size;
 /// any other surface (a spline) by its exact definition in the record. A cut that removes
@@ -11940,11 +12321,15 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
                 }
                 match (k, hole_axis) {
                     (0, Some(axis)) => match hit.along(input, from, axis) {
-                        Some(q) => *p = q,
+                        Ok(Some(q)) => *p = q,
                         // The place still lies on the face (the axis may run along it).
-                        None if hit.on_point => {}
-                        None => notes.push(format!(
+                        Ok(None) if hit.on_point => {}
+                        Ok(None) => notes.push(format!(
                             "the hole's position [{}, {}, {}] is no longer on face `{n}`: it stays where it was placed",
+                            from.x, from.y, from.z
+                        )),
+                        Err(e) => notes.push(format!(
+                            "the hole's axis could not be met with face `{n}` ({e}): it stays at [{}, {}, {}]",
                             from.x, from.y, from.z
                         )),
                     },
@@ -12320,6 +12705,7 @@ fn replay(
             let prefixes: Vec<_> = spots.iter().map(|spot| spot.point.map(hole_point_role)).collect();
             let shown = if named_from.is_some() { targets_as_shown(st, src, &targets)? } else { from };
             let st: &ModelState = &shown;
+            let mesh_scope = hole_mesh_scope(st, if targets.is_empty() { hole_drill_scope(f) } else { &targets });
             // Copies start where the original does (#11538).
             let from_inside = hole_from_inside(doc, src);
             // A hole at sketch points drills into the material, judged at each copy's spots as
@@ -12366,7 +12752,7 @@ fn replay(
                     let to = to.map(|t| crate::apply_point(m, t.0));
                     let depth = hole_depth_to(st, &at, d, &to, depth)?;
                     reach_of.push(depth.as_ref().map_or(Ok(f64::INFINITY), |e| val(vals, e, Kind::Length))?);
-                    let reach = hole_reach(vals, st, &at, d, diameter, &depth, hole, !from_inside)?;
+                    let reach = hole_reach(vals, st, &at, d, diameter, &depth, hole, !from_inside, mesh_scope)?;
                     let tools = match built.as_ref().filter(|b| movable && b.dir == d && b.depth == depth && b.reach.moves_to(&reach)) {
                         Some(b) => {
                             let to_here = translation(at - b.at);
@@ -12837,7 +13223,7 @@ fn level_along(plane: &Plane, q: Vec3) -> f64 {
 
 /// The level along `plane`'s normal of face `(body, face)` when it is a plane square to the
 /// normal, and the face's own tolerance, from solidcore ([`Body::face_square_level`]).
-fn square_face_level(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane) -> Option<solidcore_ops::SquareFaceLevel> {
+fn square_face_level(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane) -> Option<solidcraft_kernel::services::SquareFaceLevel> {
     st.bodies.get(bi)?.body.face_square_level(fi, plane.normal(), plane.origin).ok()?
 }
 
@@ -13219,7 +13605,7 @@ fn tapered_reach(
     // from the start, as the kernel measures it.
     let far_side = |body: &Body| -> Result<f64> {
         let bb = body.exact_bounds().map_err(|e| DocError::Invalid(e.to_string()))?;
-        let [_, far] = solidcore_ops::affine::span_along(bb.min.into(), bb.max.into(), start_plane.origin.into(), travel.into())
+        let [_, far] = solidcraft_kernel::services::affine::span_along(bb.min.into(), bb.max.into(), start_plane.origin.into(), travel.into())
             .map_err(|e| DocError::Invalid(e.to_string()))?;
         Ok(far)
     };
@@ -13831,6 +14217,7 @@ fn eval_feature_kind(
         | FeatureKind::SheetFold { .. }
         | FeatureKind::SheetPath { .. }
         | FeatureKind::SheetTab { .. }
+        | FeatureKind::SheetBead { .. }
         | FeatureKind::SheetUnfold { .. }
         | FeatureKind::SheetConvert { .. }
         | FeatureKind::SheetSurfaceConvert { .. }
@@ -13888,12 +14275,22 @@ fn eval_feature_kind(
                 // same exact volume (the faces it split add up to the faces they were), while a cut
                 // can remove very little of a large body (a 0.005 mm wall between two pockets in a
                 // 1 m cube is 5e-10 of it).
-                let same_volume = |old: &Body, new: &Body| match (old.volume_at(0.0), new.volume_at(0.0)) {
-                    (Some(a), Some(b)) => (a - b).abs() <= 1e-12 * a.abs().max(b.abs()),
-                    _ => false,
+                let same_volume = |old: &Body, new: &Body| {
+                    #[cfg(test)]
+                    cost_tests::count(|c| c.measures += 1);
+                    match (old.volume_at(0.0), new.volume_at(0.0)) {
+                        (Some(a), Some(b)) => (a - b).abs() <= 1e-12 * a.abs().max(b.abs()),
+                        _ => false,
+                    }
                 };
+                // A body every face of which the cut's history traces to the body itself took no
+                // material from the tools: its volume is what it was, without measuring it.
                 let kept = |b: &ModelBody, old: &Body| {
-                    old.same(&b.body) || (!b.body.is_mesh() && !old.is_mesh() && !has_a_new_surface(old, &b.body) && same_volume(old, &b.body))
+                    old.same(&b.body)
+                        || (!b.body.is_mesh()
+                            && !old.is_mesh()
+                            && !has_a_new_surface(old, &b.body)
+                            && (no_face_from_tools(b) || same_volume(old, &b.body)))
                 };
                 if let Some(before) = &before
                     && !before.is_empty()
@@ -14480,8 +14877,7 @@ fn eval_feature_kind(
                 };
                 let mirrored = moved_copy(&mb, copied?, 1);
                 if *combine {
-                    let joined = kernel::boolean(&mb.body, &mirrored.body, BoolOp::Union)?
-                        .ok_or_else(|| DocError::Invalid("the mirror join produced nothing".into()))?;
+                    let joined = crate::flush_join::join_bodies(&mb.body, &mirrored.body, "the mirror join produced nothing")?;
                     let joined = Traced::step(joined, &[&mb.traced(), &mirrored]);
                     let pieces = joined.body.lumps()?;
                     let lineages = crate::lineage::Lineage::lumps(&joined.body, joined.lineage.as_ref(), &pieces);
@@ -15031,7 +15427,7 @@ fn eval_feature_kind(
             // A linked design's bodies left out of the file, and not read back when it opened.
             if records.is_none() && step.is_empty() && doc.links.values().any(|link| link.feature == f.id) {
                 return Err(DocError::Invalid(format!(
-                    "the bodies of the linked design {file} are not in this design: it was saved without them, and they have not been read from the file since; Update Links reads them"
+                    "the bodies of the linked file {file} are not in this design: it was saved without them, and they have not been read from the file since; Update Links reads them"
                 )));
             }
             let (imp, digest) = match records {
@@ -15348,7 +15744,7 @@ fn move_turn_line(
 ) -> Result<(Vec3, Vec3)> {
     let found = construction_state(doc, st, comp).and_then(|cs| crate::construct::model_axis_in(Some(doc), &cs, about, comp));
     match found {
-        Ok((o, d)) => match solidcore_ops::affine::same_sense(d.into(), axis.into()).filter(|_| o.is_finite()) {
+        Ok((o, d)) => match solidcraft_kernel::services::affine::same_sense(d.into(), axis.into()).filter(|_| o.is_finite()) {
             Some(d) => Ok((o, Vec3::from(d))),
             None => lost_turn_line(origin, axis, "it has no direction".into(), warning),
         },
@@ -16914,7 +17310,7 @@ fn split_by_plane_traced(input: &Traced, plane: &Plane) -> Result<Vec<Traced>> {
 /// and leaves a slab a few µm thick under the face (#6762). A plane with nothing to drop stays
 /// as it is.
 fn square_to_axes(plane: &Plane) -> Plane {
-    match solidcore_ops::affine::axis_squared_axes(plane.x.into(), plane.y.into(), 1e-12) {
+    match solidcraft_kernel::services::affine::axis_squared_axes(plane.x.into(), plane.y.into(), 1e-12) {
         Some([x, y]) => Plane { origin: plane.origin, x: Vec3::new(x[0], x[1], x[2]), y: Vec3::new(y[0], y[1], y[2]) },
         None => *plane,
     }

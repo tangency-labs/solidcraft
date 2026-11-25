@@ -169,6 +169,12 @@ fn discovered(app: &mut SolveApp, inventory: Inventory) {
         app.plugin_slots.items = inventory.plugins.iter().flat_map(declared).take(8192).collect();
     }
     let root = inventory.root.clone();
+    // The Plugins menu and the Model tab's ribbon list what this scan found, once, here: no frame
+    // reads the plugin folders itself (#21594).
+    #[cfg(not(target_arch = "wasm32"))]
+    if !app.plugin_menu.loaded {
+        crate::plugin_menu::adopt(app, &inventory.plugins);
+    }
     app.plugin_slots.inventory = Some(inventory);
     app.plugin_slots.scanned = Some((crate::now_ms(), root));
 }
@@ -570,6 +576,7 @@ mod tests {
                 ]}
             ]))
             .unwrap(),
+            shaders: Vec::new(),
         };
         let items = declared(&plugin);
         assert_eq!(items.len(), 3, "unmapped menus and the Model tab are omitted and repeated placements are deduplicated");
@@ -775,5 +782,51 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "timed out");
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+    }
+
+    /// #21228, #21594: once the installed plugins have been read, drawing frames (the Model tab's
+    /// ribbon, the app bar, the viewport) reads and hashes no plugin file. Only a change reads
+    /// them again, once, in the background.
+    #[test]
+    fn steady_state_frames_read_no_plugin_files() {
+        let mut h = crate::scenario::Harness::new();
+        let root = h.dir.join("plugins-steady");
+        let package = root.join("big-importer");
+        std::fs::create_dir_all(&package).unwrap();
+        // A component big enough that hashing it every frame would show in the time of a frame.
+        std::fs::write(package.join("plugin.wasm"), vec![7u8; 8 << 20]).unwrap();
+        let manifest = json!({
+            "id":"big-importer", "name":"Big importer", "version":"1", "capabilities":["commands@0.1"],
+            "runtime":{"module":"plugin.wasm","commands":[],
+                "entries":[{"name":"report","effect":"read","slots":[{"kind":"menu","name":"Help"}]}]}
+        });
+        std::fs::write(package.join("plugin.json"), manifest.to_string()).unwrap();
+        h.app.session.plugin_state.plugins_dir = Some(root.clone());
+        invalidate(&mut h.app);
+        let settle = |h: &mut crate::scenario::Harness| {
+            for _ in 0..2000 {
+                h.frame();
+                let scanned_here = h.app.plugin_slots.scanned.as_ref().is_some_and(|(_, at)| at.as_deref() == Some(root.as_path()));
+                if scanned_here && h.app.plugin_slots.discovery.is_none() {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            panic!("discovery never finished");
+        };
+        settle(&mut h);
+        let reads = plugins::inventory_reads(&root);
+        assert!(reads >= 1, "the first frames read the installed plugins");
+        assert_eq!(h.app.plugin_menu.listed.len(), 1, "the ribbon and menus list what discovery found");
+        assert_eq!(items(&h.app, Slot::Menu("Help")).len(), 1);
+        h.frames(150);
+        assert_eq!(plugins::inventory_reads(&root), reads, "steady-state frames read no plugin file");
+        assert!(h.app.plugin_slots.discovery.is_none());
+
+        // A change reads them again, once.
+        invalidate(&mut h.app);
+        settle(&mut h);
+        h.frames(150);
+        assert_eq!(plugins::inventory_reads(&root), reads + 1);
     }
 }

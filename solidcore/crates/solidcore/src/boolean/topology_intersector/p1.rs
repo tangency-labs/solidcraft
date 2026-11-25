@@ -282,6 +282,7 @@ pub(super) fn split_soft<T>(r: Result<T>) -> Result<core::result::Result<T, Soli
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }),
         ) => Err(e),
