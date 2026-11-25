@@ -681,3 +681,230 @@ fn unchecked_pairs_are_excluded_from_nearest() {
     let a_near_ok: Vec<(&str, f64)> = summary_ok.nearest["A"].iter().map(|n| (n.body.as_str(), n.distance_mm)).collect();
     assert_eq!(a_near_ok, vec![("B", 0.0), ("C", 5.0)]);
 }
+
+/// Exact analytical overlap volume of a flat-faced rib penetrating depth `50 - d` into a
+/// cylinder of radius `r` over height `h` (when the rib spans wider than the chord).
+fn cylinder_rib_segment_volume(r: f64, d: f64, h: f64) -> f64 {
+    (r * r * (d / r).acos() - d * (r * r - d * d).sqrt()) * h
+}
+
+/// Saves a hollow cylinder (`CylBody`, outer radius 50, inner radius 40, z 0..40), a part with a
+/// mounting plate touching z = 40 and a rib penetrating 1.35 mm into the cylinder wall over z
+/// 27..40 (~271 mm³, with no vertex of either solid strictly inside the other), and a touching-only
+/// part without the penetrating rib.
+fn save_linked_cylinder_and_rib_parts(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let cyl_path = dir.join("cyl.sc");
+    let rib_path = dir.join("rib.sc");
+    let touch_path = dir.join("touch.sc");
+
+    let mut cyl = Session::default();
+    run(&mut cyl, "solid.cylinder", json!({"radius": 50, "height": 40, "base": [0, 0, 0], "operation": "new", "body_name": "CylBody"}));
+    run(&mut cyl, "solid.cylinder", json!({"radius": 40, "height": 42, "base": [0, 0, -1], "operation": "cut", "targets": ["CylBody"]}));
+    run(&mut cyl, "file.save", json!({"path": cyl_path.to_string_lossy()}));
+
+    // Under the 90° Z rotation matrix [0, -1, 0, tx,  1, 0, 0, ty,  0, 0, 1, tz]:
+    // local (lx, ly, lz) maps to world (-ly + tx, lx + ty, lz + tz).
+    // Plate: lx -10..10, ly -65..-42, lz 40..46 -> world relative to origin: x 42..65, y -10..10, z 40..46 (touches z = 40 at 0 mm gap).
+    // Rib:   lx -20..20, ly -65..-48.65, lz 27..40 -> world relative: x 48.65..65, y -20..20, z 27..40 (1.35 mm penetration, all corners at r >= 52.6 > 50).
+    let mut rib = Session::default();
+    run(
+        &mut rib,
+        "solid.box",
+        json!({"length": 20, "width": 23, "height": 6, "corner": [-10, -65, 40], "operation": "new", "body_name": "PartBody"}),
+    );
+    run(
+        &mut rib,
+        "solid.box",
+        json!({"length": 40, "width": 16.35, "height": 13, "corner": [-20, -65, 27], "operation": "join", "targets": ["PartBody"]}),
+    );
+    run(&mut rib, "file.save", json!({"path": rib_path.to_string_lossy()}));
+
+    let mut touch = Session::default();
+    run(
+        &mut touch,
+        "solid.box",
+        json!({"length": 20, "width": 23, "height": 6, "corner": [-10, -65, 40], "operation": "new", "body_name": "TouchBody"}),
+    );
+    run(&mut touch, "file.save", json!({"path": touch_path.to_string_lossy()}));
+
+    (cyl_path, rib_path, touch_path)
+}
+
+/// 1-level linked sub-assembly: a cylinder body in a linked component checked against a part
+/// inserted via `component.insert_design` with a non-identity rotation+translation matrix far from
+/// the origin, followed by `timeline.compute_all`. Verifies both the ~271 mm³ rib overlap (where
+/// no vertex of either solid is strictly inside the other) and the 0 mm touching-face contact.
+#[test]
+fn linked_subassembly_with_rotated_part_detects_rib_overlap_and_touching_face() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-clearance-linked-1level-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (cyl_path, rib_path, touch_path) = save_linked_cylinder_and_rib_parts(&dir);
+
+    let tx = -430.5;
+    let ty = -1100.0;
+    let tz = -693.8051;
+    let matrix = json!([0, -1, 0, tx, 1, 0, 0, ty, 0, 0, 1, tz]);
+    let want_vol = cylinder_rib_segment_volume(50.0, 48.65, 13.0);
+
+    // Part A: overlapping rib (1.35 mm penetration, ~271 mm³) + touching mounting face (0 mm gap).
+    let mut sub = Session::default();
+    let cyl_ins = run(&mut sub, "component.insert_design", json!({"path": cyl_path.to_string_lossy(), "name": "CylLink", "translate": [tx, ty, tz]}));
+    let part_ins = run(&mut sub, "component.insert_design", json!({"path": rib_path.to_string_lossy(), "name": "RibLink", "matrix": matrix}));
+    let cyl_body = cyl_ins["bodies"][0].as_str().unwrap().to_string();
+    let part_body = part_ins["bodies"][0].as_str().unwrap().to_string();
+    let rebuilt = run(&mut sub, "timeline.compute_all", json!({}));
+    assert_eq!(rebuilt["errors"], 0, "{rebuilt}");
+
+    // Confirm the test point lies strictly inside both world bodies.
+    let probe = [tx + 49.3, ty, tz + 33.5];
+    for name in [&cyl_body, &part_body] {
+        let cls = run(&mut sub, "inspect.classify_points", json!({"body": name, "points": [probe]}));
+        assert_eq!(cls["results"][0]["class"], "inside", "{name}: {cls}");
+    }
+
+    let r = run(&mut sub, "inspect.clearance", json!({"bodies": [&part_body], "against": [&cyl_body], "clearance": 0.5}));
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+    assert_eq!(overlaps.len(), 1, "{r}");
+    assert_eq!(pair(&overlaps[0]), {
+        let mut expected = [cyl_body.clone(), part_body.clone()];
+        expected.sort();
+        expected
+    });
+    let got_vol = f(&overlaps[0]["volume_mm3"]);
+    assert!((got_vol - want_vol).abs() < 0.02 * want_vol, "got {got_vol} vs expected {want_vol}: {r}");
+    assert!((f(&overlaps[0]["center"][0]) - (tx + 49.2)).abs() < 1.0, "{r}");
+    assert!((f(&overlaps[0]["center"][1]) - ty).abs() < 1.0, "{r}");
+    assert!((f(&overlaps[0]["center"][2]) - (tz + 33.5)).abs() < 1.0, "{r}");
+
+    // Part B: touching-only mounting face (0 mm gap, no rib overlap) must report in `near` at 0 mm.
+    let mut sub_touch = Session::default();
+    let cyl_ins =
+        run(&mut sub_touch, "component.insert_design", json!({"path": cyl_path.to_string_lossy(), "name": "CylLink", "translate": [tx, ty, tz]}));
+    let touch_ins =
+        run(&mut sub_touch, "component.insert_design", json!({"path": touch_path.to_string_lossy(), "name": "TouchLink", "matrix": matrix}));
+    let cyl_body = cyl_ins["bodies"][0].as_str().unwrap().to_string();
+    let touch_body = touch_ins["bodies"][0].as_str().unwrap().to_string();
+    run(&mut sub_touch, "timeline.compute_all", json!({}));
+
+    let r = run(&mut sub_touch, "inspect.clearance", json!({"bodies": [&touch_body], "against": [&cyl_body], "clearance": 0.5}));
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    assert_eq!(r["overlaps"], json!([]), "{r}");
+    let near = r["near"].as_array().cloned().unwrap_or_default();
+    assert_eq!(near.len(), 1, "{r}");
+    assert_eq!(f(&near[0]["distance_mm"]), 0.0, "{r}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 2-level nested linked sub-assembly: tests both inserting the saved sub-assembly into a parent
+/// scene with a second rotation+translation matrix, and placing linked components under a nested
+/// sub-assembly component (2-level occurrence path) with non-identity matrices at both levels.
+#[test]
+fn nested_two_level_linked_subassembly_detects_overlap() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-clearance-linked-2level-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (cyl_path, rib_path, _) = save_linked_cylinder_and_rib_parts(&dir);
+    let sub_path = dir.join("subasm.sc");
+
+    let tx = -430.5;
+    let ty = -1100.0;
+    let tz = -693.8051;
+    let inner_matrix = json!([0, -1, 0, tx, 1, 0, 0, ty, 0, 0, 1, tz]);
+    // Second rigid rotation+translation (+90° about X, plus translation) for the parent scene.
+    let outer_matrix = json!([1, 0, 0, 250.0, 0, 0, -1, 120.0, 0, 1, 0, -80.0]);
+    let want_vol = cylinder_rib_segment_volume(50.0, 48.65, 13.0);
+
+    // Build and save the sub-assembly containing both linked components.
+    let mut sub = Session::default();
+    run(&mut sub, "component.insert_design", json!({"path": cyl_path.to_string_lossy(), "name": "CylLink", "translate": [tx, ty, tz]}));
+    run(&mut sub, "component.insert_design", json!({"path": rib_path.to_string_lossy(), "name": "RibLink", "matrix": inner_matrix}));
+    run(&mut sub, "file.save", json!({"path": sub_path.to_string_lossy()}));
+
+    // Case 2a: saved sub-assembly inserted into a parent scene with a non-identity matrix.
+    let mut scene_linked = Session::default();
+    let ins =
+        run(&mut scene_linked, "component.insert_design", json!({"path": sub_path.to_string_lossy(), "name": "SubAsm", "matrix": outer_matrix}));
+    let bodies: Vec<String> = ins["bodies"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(String::from)).collect();
+    assert_eq!(bodies.len(), 2, "{ins}");
+    run(&mut scene_linked, "timeline.compute_all", json!({}));
+
+    let r = run(&mut scene_linked, "inspect.clearance", json!({"bodies": [&bodies[1]], "against": [&bodies[0]], "clearance": 0.5}));
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+    assert_eq!(overlaps.len(), 1, "{r}");
+    let got_vol = f(&overlaps[0]["volume_mm3"]);
+    assert!((got_vol - want_vol).abs() < 0.02 * want_vol, "2a got {got_vol} vs expected {want_vol}: {r}");
+
+    // Case 2b: true 2-level occurrence hierarchy (Scene -> SubAsm -> CylLink / RibLink), each with
+    // non-identity rotation+translation matrices.
+    let mut scene_nested = Session::default();
+    let sub_comp = run(&mut scene_nested, "component.create", json!({"name": "SubAsm", "activate": false}));
+    let sub_id = sub_comp["component"].as_u64().unwrap();
+    let sub_occ = sub_comp["occurrence"].as_u64().unwrap();
+    run(&mut scene_nested, "occurrence.move", json!({"occurrence": sub_occ, "matrix": outer_matrix, "capture": true, "move_grounded": true}));
+    let cyl_ins = run(
+        &mut scene_nested,
+        "component.insert_design",
+        json!({"path": cyl_path.to_string_lossy(), "name": "CylLink", "parent": sub_id, "translate": [tx, ty, tz]}),
+    );
+    let part_ins = run(
+        &mut scene_nested,
+        "component.insert_design",
+        json!({"path": rib_path.to_string_lossy(), "name": "RibLink", "parent": sub_id, "matrix": inner_matrix}),
+    );
+    let cyl_body = cyl_ins["bodies"][0].as_str().unwrap().to_string();
+    let part_body = part_ins["bodies"][0].as_str().unwrap().to_string();
+    run(&mut scene_nested, "timeline.compute_all", json!({}));
+
+    let r = run(&mut scene_nested, "inspect.clearance", json!({"bodies": [&part_body], "against": [&cyl_body], "clearance": 0.5}));
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+    assert_eq!(overlaps.len(), 1, "{r}");
+    let got_vol = f(&overlaps[0]["volume_mm3"]);
+    assert!((got_vol - want_vol).abs() < 0.02 * want_vol, "2b got {got_vol} vs expected {want_vol}: {r}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `solidcraft_kernel::overlap_witness` detects interior overlap when a rib pierces a cylinder
+/// wall without any vertex of either solid lying inside the other, and returns `None` when two
+/// solids only touch along a planar face (0 mm gap).
+#[test]
+fn overlap_witness_catches_rib_penetrating_cylinder_without_interior_vertices() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 50, "height": 40, "base": [0, 0, 0], "operation": "new", "body_name": "Cyl"}));
+    run(&mut s, "solid.box", json!({"length": 16.35, "width": 40, "height": 13, "corner": [48.65, -20, 27], "operation": "new", "body_name": "Rib"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 6, "corner": [35, -10, 40], "operation": "new", "body_name": "Touch"}));
+    let st = s.world_state().unwrap();
+    let cyl = st.body("Cyl").unwrap();
+    let rib = st.body("Rib").unwrap();
+    let touch = st.body("Touch").unwrap();
+    let (mc, mr, mt) = (cyl.mesh(), rib.mesh(), touch.mesh());
+    let sc = solidcraft_kernel::DistanceShape::new(&cyl.body, &mc, cyl.display_tol());
+    let sr = solidcraft_kernel::DistanceShape::new(&rib.body, &mr, rib.display_tol());
+    let stouch = solidcraft_kernel::DistanceShape::new(&touch.body, &mt, touch.display_tol());
+
+    let witness = solidcraft_kernel::overlap_witness(&sc, &sr).unwrap();
+    assert!(witness.is_some(), "rib penetrating cylinder wall must yield an exact overlap witness");
+    let no_witness = solidcraft_kernel::overlap_witness(&sc, &stouch).unwrap();
+    assert!(no_witness.is_none(), "touching-only solids must not produce an overlap witness: {no_witness:?}");
+}
+
+/// `timeline.compute_all` clears `clearance_cache` so a full recompute measures pairs afresh.
+#[test]
+fn timeline_compute_all_clears_clearance_cache() {
+    let mut s = Session::default();
+    cube(&mut s, "A", 10.0, [0.0, 0.0, 0.0]);
+    cube(&mut s, "B", 10.0, [9.0, 0.0, 0.0]);
+    let first = run(&mut s, "inspect.clearance", json!({}));
+    assert_eq!(first["pairs_reused"], 0, "{first}");
+    let second = run(&mut s, "inspect.clearance", json!({}));
+    assert_eq!(second["pairs_reused"], 1, "{second}");
+    run(&mut s, "timeline.compute_all", json!({}));
+    let after = run(&mut s, "inspect.clearance", json!({}));
+    assert_eq!(after["pairs_reused"], 0, "{after}");
+    assert_eq!(after["overlaps"].as_array().map(Vec::len), Some(1), "{after}");
+}
