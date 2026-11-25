@@ -754,6 +754,111 @@ pub fn parallelogram_point(corner: Point3, u: Vec3, v: Vec3, s: f64, t: f64) -> 
     corner + u * s + v * t
 }
 
+/// Why [`box_extent_along`], [`axis_along_own_axes`] and [`plane_offset_square_to`] refuse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AxisRefusal {
+    /// A number of the map, the axis or the box is not finite.
+    NotFinite,
+    /// The axis has no direction (it is zero, or too short to unitize).
+    ZeroAxis,
+    /// The map flattens space, so it has no inverse.
+    FlatMap,
+}
+
+/// `axis` (a direction in the outer frame) as the placed body's own frame sees it, unit: the
+/// linear part of the inverse of `placement` applied to it, unitized.
+fn own_direction(placement: &Transform, axis: Vec3) -> Result<Vec3, AxisRefusal> {
+    if !placement.m.iter().flatten().all(|v| v.is_finite()) || !finite3(axis) {
+        return Err(AxisRefusal::NotFinite);
+    }
+    let inverse = placement.inverse().map_err(|_| AxisRefusal::FlatMap)?;
+    let own = inverse
+        .transform_vector(axis)
+        .unitize()
+        .map_err(|_| AxisRefusal::ZeroAxis)?;
+    if finite3(own) {
+        Ok(own)
+    } else {
+        Err(AxisRefusal::NotFinite)
+    }
+}
+
+/// Not upstream: how far a body's box `min`..`max` (in the body's own frame), placed in the outer
+/// frame by `placement`, reaches along the outer direction `axis` (any length): the box's
+/// [`crate::geom::extent3d::Extent3d::span_along`] along the unit direction that `axis` is in the
+/// body's own frame, high less low. Tight when `axis` runs along one of the body's own axes
+/// ([`axis_along_own_axes`]).
+///
+/// # Errors
+/// [`AxisRefusal`]: a number not finite (also the box's, or an extent not finite), a zero
+/// `axis`, or a `placement` that flattens space.
+pub fn box_extent_along(
+    min: Point3,
+    max: Point3,
+    placement: &Transform,
+    axis: Vec3,
+) -> Result<f64, AxisRefusal> {
+    let own = own_direction(placement, axis)?;
+    if !finite3(min) || !finite3(max) {
+        return Err(AxisRefusal::NotFinite);
+    }
+    let [low, high] =
+        crate::geom::extent3d::Extent3d::from_bounds(min.x, min.y, min.z, max.x, max.y, max.z)
+            .span_along(Point3::ZERO, own);
+    let extent = high - low;
+    if extent.is_finite() {
+        Ok(extent)
+    } else {
+        Err(AxisRefusal::NotFinite)
+    }
+}
+
+/// Not upstream: whether the outer direction `axis` runs along one of the own axes of a body
+/// placed by `placement` (so a box of the body is tight along it): the unit direction `axis` is
+/// in the body's own frame has a component of at least `1 - 1e-9` in size.
+///
+/// # Errors
+/// [`AxisRefusal`] for a number not finite, a zero `axis`, or a `placement` that flattens space.
+pub fn axis_along_own_axes(placement: &Transform, axis: Vec3) -> Result<bool, AxisRefusal> {
+    let own = own_direction(placement, axis)?;
+    Ok([own.x, own.y, own.z].iter().any(|c| c.abs() >= 1.0 - 1e-9))
+}
+
+/// Not upstream: where a flat face, a plane through `origin` with normal `normal` in a body's own
+/// frame, cuts the outer direction `axis` once the body is placed by `placement`, if it is square
+/// to it: `Some` of the offset of the placed `origin` along the unit `axis` from the outer
+/// origin when the placed normal is parallel to `axis` (the unit vectors' cross product no
+/// longer than `1e-9`), `None` when it is not, or when `origin` or `normal` is not finite or the
+/// placed normal has no direction.
+///
+/// # Errors
+/// [`AxisRefusal`] for a `placement` or `axis` with a number not finite, or a zero `axis`.
+pub fn plane_offset_square_to(
+    placement: &Transform,
+    origin: Point3,
+    normal: Vec3,
+    axis: Vec3,
+) -> Result<Option<f64>, AxisRefusal> {
+    if !placement.m.iter().flatten().all(|v| v.is_finite()) || !finite3(axis) {
+        return Err(AxisRefusal::NotFinite);
+    }
+    let axis = axis.unitize().map_err(|_| AxisRefusal::ZeroAxis)?;
+    if !finite3(origin) || !finite3(normal) {
+        return Ok(None);
+    }
+    let Ok(placed) = placement.transform_vector(normal).unitize() else {
+        return Ok(None);
+    };
+    if placed.cross(axis).length() > 1e-9 {
+        return Ok(None);
+    }
+    Ok(Some(
+        placement
+            .transform_point(origin)
+            .distance_along(Point3::ZERO, axis),
+    ))
+}
+
 /// The operation name of the refusals of [`centroid_and_mean_radius`].
 const OP_CENTROID: &str = "math::centroid_and_mean_radius";
 
@@ -992,6 +1097,201 @@ impl Transform {
             -t,
         ))
     }
+}
+
+// ---- Not upstream: the 2D arithmetic of a sketch's arc snaps -------------------------------
+//
+// Plain `[f64; 2]` points and directions, for the applications' arc tools: the circle through
+// three points, the arc a typed radius or sweep gives, the tangent arc, the perpendicular
+// bisector. Each is written in the order the application wrote it, so a move changes no result.
+
+/// `a - b`.
+fn sub_2d([ax, ay]: [f64; 2], [bx, by]: [f64; 2]) -> [f64; 2] {
+    [ax - bx, ay - by]
+}
+
+/// The dot product.
+fn dot_2d([ax, ay]: [f64; 2], [bx, by]: [f64; 2]) -> f64 {
+    ax * bx + ay * by
+}
+
+/// The length.
+fn length_2d([x, y]: [f64; 2]) -> f64 {
+    x.hypot(y)
+}
+
+/// `v` turned a quarter turn counter-clockwise.
+fn left_2d([x, y]: [f64; 2]) -> [f64; 2] {
+    [-y, x]
+}
+
+/// `at + along * k`.
+fn along_2d([x, y]: [f64; 2], [dx, dy]: [f64; 2], k: f64) -> [f64; 2] {
+    [x + dx * k, y + dy * k]
+}
+
+/// The point halfway between `a` and `b`.
+fn midpoint_2d([ax, ay]: [f64; 2], [bx, by]: [f64; 2]) -> [f64; 2] {
+    [(ax + bx) * 0.5, (ay + by) * 0.5]
+}
+
+/// Not upstream: `v` made unit, `None` for a vector no longer than `1e-9` or not finite.
+#[must_use]
+pub fn unit_2d(v: [f64; 2]) -> Option<[f64; 2]> {
+    let [x, y] = v;
+    let length = length_2d(v);
+    (length > 1e-9 && length.is_finite()).then_some([x / length, y / length])
+}
+
+/// Not upstream: the unit direction from `from` to `to`, `None` where they coincide.
+#[must_use]
+pub fn unit_between_2d(from: [f64; 2], to: [f64; 2]) -> Option<[f64; 2]> {
+    unit_2d(sub_2d(to, from))
+}
+
+/// Not upstream: the unit direction from `from` to `to` turned a quarter turn counter-clockwise,
+/// `None` where they coincide.
+#[must_use]
+pub fn left_normal_between_2d(from: [f64; 2], to: [f64; 2]) -> Option<[f64; 2]> {
+    unit_between_2d(from, to).map(left_2d)
+}
+
+/// Not upstream: the centre and radius of the circle through `from` and `other` that touches the
+/// unit direction `dir` at `from`. `None` when the points are within `1e-9` or `dir` runs along the
+/// chord (no such circle).
+#[must_use]
+pub fn tangent_arc_centre_2d(
+    from: [f64; 2],
+    other: [f64; 2],
+    dir: [f64; 2],
+) -> Option<([f64; 2], f64)> {
+    let w = sub_2d(from, other);
+    let length = length_2d(w);
+    if length <= 1e-9 {
+        return None;
+    }
+    // The centre lies on the normal at `from`, as far from it as it is from `other`:
+    // |from + n t - other|^2 = t^2.
+    let n = left_2d(dir);
+    let k = dot_2d(n, w);
+    if k.abs() <= 1e-9 * length {
+        return None;
+    }
+    let t = -dot_2d(w, w) / (2.0 * k);
+    Some((along_2d(from, n, t), t.abs()))
+}
+
+/// Not upstream: the point of the perpendicular bisector of the chord `start`-`end` nearest `p`
+/// (the centre of the arc through both ends that has it). `None` when the ends coincide.
+#[must_use]
+pub fn bisector_centre_2d(start: [f64; 2], end: [f64; 2], p: [f64; 2]) -> Option<[f64; 2]> {
+    let mid = midpoint_2d(start, end);
+    let n = left_2d(unit_between_2d(start, end)?);
+    Some(along_2d(mid, n, dot_2d(n, sub_2d(p, mid))))
+}
+
+/// Not upstream: whether the unit direction `dir` at `p` is square to the radius from `centre`
+/// (within a millionth). `false` where `p` is on `centre`.
+#[must_use]
+pub fn is_square_to_radius_2d(centre: [f64; 2], p: [f64; 2], dir: [f64; 2]) -> bool {
+    unit_between_2d(centre, p).is_some_and(|radial| dot_2d(dir, radial).abs() <= 1e-6)
+}
+
+/// Not upstream: the centre of the circle through `a`, `b` and `c`. `None` for points on one
+/// line (or not finite).
+#[must_use]
+pub fn circumcentre_2d(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<[f64; 2]> {
+    let [abx, aby] = sub_2d(b, a);
+    let [acx, acy] = sub_2d(c, a);
+    let ab2 = abx * abx + aby * aby;
+    let ac2 = acx * acx + acy * acy;
+    let d = 2.0 * (abx * acy - aby * acx);
+    if !d.is_finite() || d.abs() < 1e-12 {
+        return None;
+    }
+    let [ax, ay] = a;
+    let centre = [
+        ax + (acy * ab2 - aby * ac2) / d,
+        ay + (abx * ac2 - acx * ab2) / d,
+    ];
+    centre.iter().all(|v| v.is_finite()).then_some(centre)
+}
+
+/// Not upstream: the circle through `s`, `e` and `t`: its centre, radius and the sweep (radians)
+/// of the arc from `s` to `e` that passes through `t`. `None` for points on one line, a radius
+/// under `1e-9` or coincident ends.
+#[must_use]
+pub fn three_point_circle_2d(
+    s: [f64; 2],
+    e: [f64; 2],
+    t: [f64; 2],
+) -> Option<([f64; 2], f64, f64)> {
+    let centre = circumcentre_2d(s, t, e)?;
+    let r = length_2d(sub_2d(centre, s));
+    let chord = sub_2d(e, s);
+    let n = left_2d(unit_2d(chord)?);
+    if !r.is_finite() || r <= 1e-9 {
+        return None;
+    }
+    let mid = midpoint_2d(s, e);
+    let minor = 2.0 * (length_2d(chord) / (2.0 * r)).clamp(-1.0, 1.0).asin();
+    // The arc through `t` is the long one when `t` is on the centre's side of the chord.
+    let long = dot_2d(n, sub_2d(t, mid)) * dot_2d(n, sub_2d(centre, mid)) > 0.0;
+    Some((
+        centre,
+        r,
+        if long {
+            core::f64::consts::TAU - minor
+        } else {
+            minor
+        },
+    ))
+}
+
+/// Not upstream: the third point of the arc from `s` to `e` for the cursor `h` with a radius or a
+/// sweep (radians; the sweep wins when both are given): on the arc of that size whose middle is
+/// nearest the cursor. A radius picks among the minor and major arcs on either side of the chord;
+/// a sweep takes the cursor's side. `None`: no such arc (a radius under half the chord, a sweep
+/// outside `(0, 2 pi)`, neither given, or coincident ends).
+#[must_use]
+pub fn arc_third_point_2d(
+    s: [f64; 2],
+    e: [f64; 2],
+    h: [f64; 2],
+    radius: Option<f64>,
+    sweep: Option<f64>,
+) -> Option<[f64; 2]> {
+    let chord = sub_2d(e, s);
+    let len = length_2d(chord);
+    let n = left_2d(unit_2d(chord)?);
+    let mid = midpoint_2d(s, e);
+    if let Some(sweep) = sweep {
+        if !(sweep > 1e-9 && sweep < core::f64::consts::TAU - 1e-9) {
+            return None;
+        }
+        let half = sweep * 0.5;
+        let r = len / (2.0 * half.sin());
+        let side = if dot_2d(n, sub_2d(h, mid)) < 0.0 {
+            -1.0
+        } else {
+            1.0
+        };
+        return Some(along_2d(
+            mid,
+            n,
+            side * r * 2.0 * (half * 0.5).sin().powi(2),
+        ));
+    }
+    let r = radius?;
+    if !r.is_finite() || r * 2.0 < len - 1e-9 {
+        return None;
+    }
+    let k = (r * r - len * len * 0.25).max(0.0).sqrt();
+    [k + r, k - r, r - k, -k - r]
+        .into_iter()
+        .map(|d| along_2d(mid, n, d))
+        .filter(|p| p.iter().all(|v| v.is_finite()))
+        .min_by(|x, y| length_2d(sub_2d(*x, h)).total_cmp(&length_2d(sub_2d(*y, h))))
 }
 
 #[cfg(test)]

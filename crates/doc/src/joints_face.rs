@@ -307,7 +307,10 @@ fn face_name_match(b: &ModelBody, names: &crate::history_names::Names, f: usize,
     if crate::name_lookup::legacy_name(name).is_some() {
         return crate::name_lookup::face_has_name(b, f, name).then_some(Match::Exact);
     }
-    crate::history_names::matches(names, f, name)
+    match crate::history_names::matches(names, f, name) {
+        Some(Match::Stem) if crate::name_lookup::unique_resuffixed_on_body(names, name) == Some(f) => Some(Match::Piece),
+        other => other,
+    }
 }
 
 /// Faces of `b` sharing a B-rep edge with `face` (other than `face` itself), as `(other_face, edge)`.

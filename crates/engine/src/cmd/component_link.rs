@@ -18,12 +18,14 @@ use solidcraft_doc::config::RowKey;
 use solidcraft_doc::{DesignLink, Document, FeatureKind, LinkedBodyProperties, MeshData, UserMaterial};
 
 use super::CommandSpec;
-use super::design_link::{LinkState, absolute, inside_design_folder, link_presence, link_target, read_linked_file, resolve, same_file, stored};
+use super::design_link::{
+    LinkState, absolute, inside_design_folder, link_presence, link_target, read_linked_file, real_file, resolve, same_file, stored,
+};
 use crate::params::{bad, str_, vec3};
 use crate::schema::component_link::{
     BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, ExtractParams, ExtractResult, InsertDesignParams,
-    InsertDesignResult, JointDiagnostic, LinkFailure, LinkInfo, LinksParams, LinksResult, RelinkParams, RelinkResult, ReplaceWithLinkParams,
-    ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
+    InsertDesignResult, JointDiagnostic, LinkFailure, LinkInfo, LinkSource, LinksParams, LinksResult, RelinkParams, RelinkResult,
+    ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -52,7 +54,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&INSERT_DESIGN_CONTRACT)
         .output(output_schema_for::<InsertDesignResult>)
         .params(
-        "path: a .sc design → a new component linked to it, holding its solid bodies as placed in that design, its canvases and decals where the design shows them, and a copy of its design properties; \
+        "path: a .sc design, or a file an installed importer plugin reads (format?: its plugin.entry, default the importer that claims the extension; options?: its declared options) → a new component linked to it, holding its solid bodies as placed in that design, its canvases and decals where the design shows them, and a copy of its design properties; \
          document?: the design itself, as its JSON, for a design open in the session that has no file yet: its bodies come in as they are and the link names no file (not with path); \
          configuration?: a row name or id (null or omitted: the saved source state); name? (default: the design's name); parent?: component id or name (default: the active one); \
          translate?: [x,y,z] in mm from the destination parent's origin (default [0,0,0], also with reuse); \
@@ -72,20 +74,20 @@ pub static COMMANDS: &[CommandSpec] = &[
          files in this design's folder or the linked design's own, and a linked design reaching further is not read) — reads the linked design or STEP files again and replaces \
          their bodies where they changed, and their part properties (part number, revision…) where the design changed them and this \
          design did not, as one undo step; → updated, unchanged, failed ([{component, name, error}]), warnings (also \
-         joints whose faces are gone or that no longer solve)",
+         joints whose faces are gone or that no longer solve); a file an importer plugin read is read again by that plugin when its bytes changed, not when they did not, and not at all, with no plugin run, while it is outside the design's folder and its folder is not allowed (Preferences, General); a plugin that is gone, turned off or not the one named keeps the bodies and is named in failed",
     ),
     CommandSpec::new("component.relink", "Relink Source", crate::checked!("component.relink", relink))
         .icon("update")
         .contract(&RELINK_CONTRACT)
         .output(output_schema_for::<RelinkResult>)
         .params(
-        "component: id or name of a linked component; path: a saved design (.sc or .json); configuration?: row name or id, null to follow the saved source state (omitted: keep the selection for the same file, otherwise follow the new file) — replaces the source and linked bodies for all its occurrences, preserving identities and placements; occurrence?: one of its placements — when it has others, only that placement comes to show the design, as a placement of the component already linked to it or of a new one under the same parent, keeping its position and joints (component is then the one it shows, previous_component the one it showed); returns path, previous_path, warnings, joint_errors and joint_conflicts",
+        "component: id or name of a linked component; path: a saved design (.sc or .json); configuration?: row name or id, null to follow the saved source state (omitted: keep the selection for the same file, otherwise follow the new file) — replaces the source and linked bodies for all its occurrences, preserving identities and placements; names?: \"keep\" (default) leaves the body names as relinking always did (replaced only when the new source has another number of bodies), \"sync\" takes the new source's body names, renames what other features, materials and appearances keep under the old names with them, and gives the linked feature the source design's name when it still has its component's (component and placement names stay yours; only for the whole component, a placement relinked on its own shows a component made from the new source); occurrence?: one of its placements — when it has others, only that placement comes to show the design, as a placement of the component already linked to it or of a new one under the same parent, keeping its position and joints (component is then the one it shows, previous_component the one it showed); returns path, previous_path, warnings, joint_errors and joint_conflicts",
     ),
     CommandSpec::new("component.break_link", "Break Link", crate::checked!("component.break_link", break_link))
         .icon("break")
         .contract(&BREAK_LINK_CONTRACT)
         .output(output_schema_for::<BreakLinkResult>)
-        .params("component: id or name of a linked component — keeps its bodies as they are and forgets the source file"),
+        .params("component: id or name of a linked component — keeps its bodies as they are and forgets the source file, and the importer that read it"),
     CommandSpec::new("component.extract", "Extract to File", crate::checked!("component.extract", extract::extract))
         .icon("export")
         .contract(&EXTRACT_CONTRACT)
@@ -118,7 +120,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LINKS_CONTRACT)
         .output(output_schema_for::<LinksResult>)
         .params(
-        "→ linked components: component, name, path, configuration (selected row id, omitted when following the saved source state), file (resolved), found (null when the file is on a network location not allowed, \
+        "→ linked components: component, name, path, importer? ({format, plugin?, version?}: `step` or the importer plugin that read the file; for a plugin also available (it is installed and on), installed_version (when it differs or it can't be used) and needs (which plugin and version the link needs and why it can't be used)), configuration (selected row id, omitted when following the saved source state), file (resolved), found (null when the file is on a network location not allowed, \
          or names a device: it is not looked for), changed (whether the file is no longer what this design last read: Update Links \
          reads it again; null when not found or the link is older than this record), then host (the network location); state (missing, \
          unreadable, not_allowed: a network location not allowed or outside the folders this agent may use) and reason when the file \
@@ -159,9 +161,11 @@ pub fn resolve_design_links(doc: &mut Document, from: Option<&str>) {
 /// neither STEP text nor records, as a file saved without linked bodies keeps it. That holds
 /// for a linked design and for a linked STEP file (Insert STEP) alike.
 fn left_out(doc: &Document, comp: u64, link: &DesignLink) -> bool {
-    doc.feature(link.feature)
-        .filter(|f| f.component == comp)
-        .is_some_and(|f| matches!(&f.kind, FeatureKind::Import { step, records: None, .. } if step.is_empty()))
+    link.importer.is_none()
+        && doc
+            .feature(link.feature)
+            .filter(|f| f.component == comp)
+            .is_some_and(|f| matches!(&f.kind, FeatureKind::Import { step, records: None, .. } if step.is_empty()))
 }
 
 /// The Mesh Import feature of the linked component `comp` in `doc` that holds the mesh bodies of
@@ -206,9 +210,9 @@ pub(super) fn leave_out_linked_bodies(design: &mut std::borrow::Cow<'_, Document
     let features: Vec<u64> = doc
         .links
         .iter()
-        .filter(|(comp, link)| link_file_problem(doc, **comp, link, from).is_none())
+        .filter(|(comp, link)| link.importer.is_none() && link_file_problem(doc, **comp, link, from).is_none())
         .flat_map(|(comp, l)| {
-            let meshes = if l.step_names.is_none() { mesh_feature_of(doc, *comp, l) } else { None };
+            let meshes = if l.is_design() { mesh_feature_of(doc, *comp, l) } else { None };
             std::iter::once(l.feature).chain(meshes)
         })
         .collect();
@@ -249,7 +253,7 @@ fn link_file_problem(doc: &Document, comp: u64, link: &DesignLink, from: Option<
     let Some(kept) = link.file_sha256.as_ref() else {
         return Some(format!("this design has no record of which {} it read; run Update Links, then save again", file.display()));
     };
-    (file_sha256(&file, from).as_ref() != Some(kept))
+    (file_sha256(&file, from, link.importer.is_some()).as_ref() != Some(kept))
         .then(|| format!("{} changed since this design read it; run Update Links, then save again", file.display()))
 }
 
@@ -260,7 +264,7 @@ pub(super) fn kept_linked_bodies(s: &Session) -> Vec<String> {
     s.doc
         .links
         .iter()
-        .filter(|(comp, link)| !left_out(&s.doc, **comp, link))
+        .filter(|(comp, link)| link.importer.is_none() && !left_out(&s.doc, **comp, link))
         .filter_map(|(comp, link)| {
             let why = link_file_problem(&s.doc, *comp, link, from)?;
             let name = s.doc.components.iter().find(|c| c.id == *comp).map_or_else(|| comp.to_string(), |c| c.name.clone());
@@ -580,7 +584,7 @@ fn left_out_bodies(link: &DesignLink, from: Option<&str>, flat: bool, validation
 /// [`left_out_bodies`] for a linked STEP file at `file`: read again as Update Links reads it
 /// ([`source_bodies`]), with the link's naming rule; `flat` as there.
 fn left_out_step(link: &DesignLink, file: &Path, from: Option<&str>, flat: bool, validation: solidcraft_kernel::Validation) -> Result<LeftOut> {
-    let bytes = read_link(file, from)?;
+    let bytes = read_link(file, from, false)?;
     let ((_, feature, ..), _) = source_bodies(file, &bytes, link, flat, validation)?;
     let changed = link.file_sha256.as_deref().is_some_and(|kept| kept != DesignLink::file_digest(&bytes));
     Ok((feature, Vec::new(), changed, Vec::new()))
@@ -588,7 +592,7 @@ fn left_out_step(link: &DesignLink, file: &Path, from: Option<&str>, flat: bool,
 
 /// [`left_out_bodies`]' read of the design at `file`, for a design opened from `from`.
 fn read_once(file: &Path, from: Option<&str>, configuration: Option<SelectedConfiguration>, validation: solidcraft_kernel::Validation) -> ReadOnce {
-    let bytes = read_link(file, from).map_err(|e| e.to_string())?;
+    let bytes = read_link(file, from, false).map_err(|e| e.to_string())?;
     let ((_, feature, faces, _, _, meshes), _) =
         design_bodies_reusing(&Source::File(file.to_path_buf()), &bytes, configuration, validation, true).map_err(|e| e.to_string())?;
     let solidcraft_io::StepFeature { name, kind, body_names, invisible, warnings, import } = feature;
@@ -708,7 +712,8 @@ fn remember_read(
 }
 
 /// The bytes of the source at `file`, which must not be the design saved at `own`.
-fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
+/// `any`: an importer plugin's file, which may have any name.
+fn read_link(file: &Path, own: Option<&str>, any: bool) -> Result<Vec<u8>> {
     let shown = file.display().to_string();
     // A network location only when its server is allowed, a device never: judged from the text
     // before anything is asked of the disk (on Windows, resolving or reading `\\host\share\x`
@@ -718,7 +723,7 @@ fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
     if reachable && own.is_some_and(|o| same_file(Path::new(o), file)) {
         return Err(EngineError::Other(format!("{shown}: a design can't be linked into itself")));
     }
-    read_linked_file(file, own).map_err(|e| EngineError::Other(e.reason))
+    read_linked_file(file, own, any).map_err(|e| EngineError::Other(e.reason))
 }
 
 /// Read a configuration selector before any I/O. An explicit null follows the saved state.
@@ -749,7 +754,7 @@ const DIGESTS_SIZE: usize = 256;
 /// The digest of the design file at `file` now ([`DesignLink::file_digest`]), `None` when it
 /// can't be read. `component.links` asks each time a tab is shown, so a file is read again only
 /// when its time or size changed since; the browser build keeps no times and reads it each time.
-pub(super) fn file_sha256(file: &Path, own: Option<&str>) -> Option<String> {
+pub(super) fn file_sha256(file: &Path, own: Option<&str>, any: bool) -> Option<String> {
     let file = absolute(file);
     let generation = {
         let digests = DIGESTS.lock().ok()?;
@@ -763,7 +768,7 @@ pub(super) fn file_sha256(file: &Path, own: Option<&str>) -> Option<String> {
         (generation, stamp)
     };
     let (generation, stamp) = generation;
-    let digest = DesignLink::file_digest(&read_link(&file, own).ok()?);
+    let digest = DesignLink::file_digest(&read_link(&file, own, any).ok()?);
     if let (Some(stamp), Ok(mut digests)) = (stamp, DIGESTS.lock())
         && digests.0 == generation
     {
@@ -816,6 +821,76 @@ fn source_bodies(
     Ok(((feature.name.clone(), feature, Vec::new(), Default::default(), Vec::new(), Vec::new()), (Vec::new(), Vec::new())))
 }
 
+/// Read a link's source again by what read it: the importer plugin it names (which writes the design
+/// the bodies come from), else the built-in reader. The link keeps the version of the plugin that
+/// read it last. `bytes` are the source file's own, whose digest decides when it was read last.
+fn linked_bodies(s: &mut Session, comp: u64, file: &Path, bytes: &[u8], link: &DesignLink) -> Result<(Linked, LinkedImages)> {
+    let Some(importer) = &link.importer else { return source_bodies(file, bytes, link, step_import_flat(&s.doc, link), s.validation()) };
+    if let Some(why) = importer_file_refusal(s, file) {
+        return Err(EngineError::Other(why));
+    }
+    let slot = linked_importer(s, importer)?;
+    let options = if importer.options.is_null() { json!({}) } else { importer.options.clone() };
+    // Another version of the plugin that can't read the file says so beside its own words.
+    let other_version = |s: &Session, e: EngineError| {
+        let now = crate::plugin::importer_status(s, &slot.plugin_id, &slot.id).installed_version;
+        match (&importer.version, now) {
+            (Some(was), Some(now)) if *was != now => {
+                EngineError::Other(format!("{e} (this link was read with version {was} of the plugin; version {now} is installed)"))
+            }
+            _ => e,
+        }
+    };
+    let made = crate::plugin::import_design_bytes(s, &slot, &file.to_string_lossy(), &options).map_err(|e| other_version(s, e))?;
+    let (mut read, images) = design_bodies(&Source::File(file.to_path_buf()), &made.design, None, s.validation())?;
+    // What `design_bodies` remembers is keyed by the bytes it read: for this link, the file's.
+    remember_read(file, None, digest(bytes), &read.1, &read.2, &read.4, &read.3, &read.5);
+    read.1.warnings.extend(made.notes);
+    if let Some(kept) = s.doc_mut().links.get_mut(&comp).and_then(|l| l.importer.as_mut()) {
+        kept.version = Some(made.version);
+    }
+    Ok((read, images))
+}
+
+/// The installed, enabled importer a link names, to read its file again: one of the plugin the
+/// record names. A record that names no plugin is not one this build reads, and runs nothing.
+fn linked_importer(s: &Session, importer: &solidcraft_doc::LinkImporter) -> Result<crate::plugin::Importer> {
+    let Some(plugin) = importer.plugin.as_deref() else {
+        return Err(EngineError::Other(format!(
+            "this link's record names no importer plugin for `{}`, so nothing can read its file again; break the link and insert the file again; the component keeps its last bodies",
+            importer.format
+        )));
+    };
+    let status = crate::plugin::importer_status(s, plugin, &importer.format);
+    let needs = importer_needs(importer, &status);
+    crate::plugin::importers(s).into_iter().find(|i| i.id == importer.format && i.plugin_id == plugin && needs.is_none()).ok_or_else(|| {
+        let what = needs.unwrap_or_else(|| format!("the importer `{}` is not offered by plugin `{plugin}`", importer.format));
+        EngineError::Other(format!("{what}; the component keeps its last bodies"))
+    })
+}
+
+/// Why an importer plugin may not read `file` for a link now, judged from its place alone: it is
+/// outside this design's own folder and its folder is not one the user allowed (Preferences,
+/// General), and the caller did not name it to Insert Design in this session. A design received
+/// from someone else names what files it likes, and none of them is read, nor any plugin run on
+/// it, until its folder is allowed. `None`: it may be read.
+fn importer_file_refusal(s: &Session, file: &Path) -> Option<String> {
+    let target = link_target(file);
+    // The file the read opens, every link in its path followed, must be in a consented place too.
+    let real = real_file(file).unwrap_or_else(|| target.clone());
+    let consented = |p: &Path| {
+        inside_design_folder(s.path.as_deref(), p)
+            || s.plugin_state.link_folders.iter().any(|folder| p.starts_with(real_file(folder).unwrap_or_else(|| absolute(folder))))
+    };
+    let allowed = s.plugin_state.linked_files.contains(&target) || (consented(&target) && consented(&real));
+    (!allowed).then(|| {
+        format!(
+            "{}: this file is outside the design's folder and its folder is not allowed yet; allow it (Preferences, General, linked file folders) and SolidCraft reads it with the importer",
+            file.display()
+        )
+    })
+}
+
 /// Where the design a link takes comes from: a file on disk, or a design the caller holds in
 /// memory (one open in this session that has no file yet, #16829). A design in memory has no
 /// file to read, to refuse or to link to: the link that holds it names no file.
@@ -846,7 +921,7 @@ impl Source {
     /// limit as a file is.
     fn bytes(&self, own: Option<&str>) -> Result<Vec<u8>> {
         match self {
-            Source::File(file) => read_link(file, own),
+            Source::File(file) => read_link(file, own, false),
             Source::Session { text, .. } => {
                 let bytes = text.as_bytes().to_vec();
                 let limit = solidcraft_io::limits::max_design_bytes();
@@ -1616,6 +1691,22 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         }
         (None, None) => return Err(bad(cmd, "`path` or `document` is required")),
     };
+    let importer = match given {
+        Some(given) => insert_importer(s, p, given)?,
+        None => None,
+    };
+    if held.is_some() && p.get("format").is_some_and(|f| !f.is_null()) {
+        return Err(bad(cmd, "`format` applies to a file an importer plugin reads, not to `document`"));
+    }
+    if importer.is_some() && selection.is_some() {
+        return Err(bad(cmd, "`configuration` selects a row of a design; a file an importer reads has none"));
+    }
+    let options = match p.get("options") {
+        None | Some(Value::Null) => json!({}),
+        Some(o) if o.is_object() && importer.is_some() => o.clone(),
+        Some(_) if importer.is_none() => return Err(bad(cmd, "`options` applies to a file an importer plugin reads")),
+        Some(_) => return Err(bad(cmd, "`options` must be an object")),
+    };
     let (transform, expressed) = placement_transform(s, p, cmd)?;
     let source = match (given, held) {
         (Some(given), None) => {
@@ -1652,7 +1743,12 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
                 s.doc
                     .links
                     .iter()
-                    .find(|(_, link)| selected_configuration(link) == configuration && link_target(&resolve(s.path.as_deref(), &link.path)) == target)
+                    .find(|(_, link)| {
+                        selected_configuration(link) == configuration
+                            && link_target(&resolve(s.path.as_deref(), &link.path)) == target
+                            && link.importer.as_ref().map(|i| (&i.format, linked_options(&i.options)))
+                                == importer.as_ref().map(|i| (&i.id, linked_options(&options)))
+                    })
                     .map(|(id, _)| *id)
             }
             Source::Session { .. } => None,
@@ -1672,10 +1768,44 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let bytes = match selected_bytes {
         Some(bytes) => bytes,
-        None => source.bytes(s.path.as_deref())?,
+        None => match (&importer, source.file()) {
+            (Some(_), Some(file)) => read_link(file, s.path.as_deref(), true)?,
+            _ => source.bytes(s.path.as_deref())?,
+        },
     };
+    // An importer's file is read by the plugin, which writes the design the bodies come from; the
+    // link keeps what the file's own bytes were, so a changed file is told from an unchanged one.
+    let (record, produced) = match &importer {
+        Some(importer) => {
+            let file = source.file().ok_or_else(|| bad(cmd, "an importer reads a file, not a `document`"))?;
+            // The caller named this file: Update Links may read it again in this session.
+            s.plugin_state.linked_files.insert(link_target(file));
+            let made = crate::plugin::import_design_bytes(s, importer, &file.to_string_lossy(), &options)?;
+            // The plugin read the file itself: what it read is what the link's digest says.
+            let again = read_link(file, s.path.as_deref(), true)?;
+            if DesignLink::file_digest(&again) != DesignLink::file_digest(&bytes) {
+                return Err(bad(cmd, format!("{}: the file changed while it was being read; insert it again", file.display())));
+            }
+            let record = solidcraft_doc::LinkImporter {
+                format: importer.id.clone(),
+                plugin: Some(importer.plugin_id.clone()),
+                version: Some(made.version),
+                options: linked_options(&options).clone(),
+            };
+            (Some(record), Some((made.design, made.notes)))
+        }
+        None => (None, None),
+    };
+    let design_bytes = produced.as_ref().map_or(bytes.as_slice(), |(design, _)| design.as_slice());
     let ((design_name, mut sf, faces, metadata, properties, meshes), (images, image_warnings)) =
-        design_bodies(&source, &bytes, configuration, s.validation())?;
+        design_bodies(&source, design_bytes, configuration, s.validation())?;
+    if let Some((_, notes)) = produced {
+        // What `design_bodies` remembers is keyed by the bytes it read: for this link, the file's.
+        if let Some(file) = source.file() {
+            remember_read(file, None, digest(bytes.as_slice()), &sf, &faces, &properties, &metadata, &meshes);
+        }
+        sf.warnings.extend(notes);
+    }
     sf.warnings.extend(image_warnings);
     let read = DesignLink::file_digest(&bytes);
     let name = str_(p, "name").filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or(design_name);
@@ -1724,6 +1854,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             inherited_metadata: metadata,
             file_sha256: Some(read),
             step_names: None,
+            importer: record,
         },
     );
     s.refresh();
@@ -1746,6 +1877,24 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         warnings: sf.warnings,
     };
     reply(cmd, InsertDesignResult { inserted, param_warnings: Vec::new() })
+}
+
+/// The importer plugin that reads the file `component.insert_design` is given: the one `format`
+/// names, or else the one that claims the file's extension when it is not a design's. `None`: it
+/// is read as a design.
+pub(super) fn insert_importer(s: &Session, p: &Value, given: &str) -> Result<Option<crate::plugin::Importer>> {
+    let format = str_(p, "format");
+    let design =
+        Path::new(given).extension().and_then(|x| x.to_str()).is_some_and(|x| ["sc", "solidcraft", "json"].iter().any(|d| x.eq_ignore_ascii_case(d)));
+    if format.is_none() && design {
+        return Ok(None);
+    }
+    crate::plugin::importer_for(s, given, format)
+}
+
+/// The options a link keeps: none (null) when an importer was given none.
+fn linked_options(options: &Value) -> &Value {
+    if options.as_object().is_some_and(|o| o.is_empty()) { &Value::Null } else { options }
 }
 
 /// The linked design's canvases and decals ([`design_images`]) added to its new component
@@ -1822,10 +1971,16 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         // The link keeps what it read, so opening this design again knows whether the file
         // changed while it was closed (#9739).
         let read = DesignLink::file_digest(&bytes);
-        if link.file_sha256.as_deref() != Some(read.as_str())
-            && let Some(kept) = s.doc_mut().links.get_mut(&comp)
-        {
+        let same_bytes = link.file_sha256.as_deref() == Some(read.as_str());
+        if !same_bytes && let Some(kept) = s.doc_mut().links.get_mut(&comp) {
             kept.file_sha256 = Some(read);
+        }
+        // A file an importer read that is the file it read is not read again: no plugin runs, so a
+        // plugin that is gone or turned off has nothing to fail at.
+        if link.importer.is_some() && same_bytes {
+            unchanged.push(cname);
+            read_components.push(comp);
+            continue;
         }
         // A link that has not recorded the properties it inherited (made before they were) is read again.
         let kept_faces = s
@@ -1850,8 +2005,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             read_components.push(comp);
             continue;
         }
-        let (_, sf, faces, metadata, properties, meshes) = match source_bodies(&file, &bytes, &link, step_import_flat(&s.doc, &link), s.validation())
-        {
+        let (_, sf, faces, metadata, properties, meshes) = match linked_bodies(s, comp, &file, &bytes, &link) {
             Ok((read, _)) => read,
             Err(e) if go_on => {
                 // It keeps its bodies, so it has not taken this file in yet.
@@ -1969,7 +2123,12 @@ fn read_linked(s: &Session, comp: u64, link: &DesignLink) -> std::result::Result
     };
     link_refused(s.path.as_deref(), &link.path).map_err(|e| e.to_string())?;
     let file = resolve(s.path.as_deref(), &link.path);
-    let bytes = read_link(&file, s.path.as_deref()).map_err(|e| e.to_string())?;
+    if link.importer.is_some()
+        && let Some(why) = importer_file_refusal(s, &file)
+    {
+        return Err(why);
+    }
+    let bytes = read_link(&file, s.path.as_deref(), link.importer.is_some()).map_err(|e| e.to_string())?;
     Ok(((old.clone(), records.clone()), file, bytes))
 }
 
@@ -2199,13 +2358,22 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.relink";
     let comp = component_key(s, p, "component", cmd)?;
     let link = s.doc.links.get(&comp).cloned().ok_or_else(|| bad(cmd, "that component is not linked to a design"))?;
-    if link.step_names.is_some() {
-        return Err(bad(cmd, "STEP sources cannot be relinked to a design; break the link and insert the new STEP file"));
+    if !link.is_design() {
+        return Err(bad(
+            cmd,
+            "this is the link of an imported file (STEP or an importer plugin's), not of a design: break the link and insert the new file",
+        ));
     }
     if !matches!(s.doc.feature(link.feature), Some(f) if f.component == comp && matches!(f.kind, FeatureKind::Import { .. })) {
         return Err(bad(cmd, "the linked bodies are gone; break the link or insert the design again"));
     }
     let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
+    let sync = match p.get("names") {
+        None => false,
+        Some(Value::String(n)) if n == "keep" => false,
+        Some(Value::String(n)) if n == "sync" => true,
+        Some(_) => return Err(bad(cmd, "`names` must be \"keep\" or \"sync\"")),
+    };
     let file = absolute(Path::new(given));
     // Any design Insert Design takes: a .sc container (or a legacy one) or a plain JSON design.
     if !solidcraft_io::is_design_path(given) {
@@ -2220,7 +2388,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let same_source = same_link_source(s, &link, &file);
     let selection = configuration_key(p, if same_source { link.configuration } else { None }, cmd)?;
-    let bytes = read_link(&file, s.path.as_deref()).map_err(|e| bad(cmd, e.to_string()))?;
+    let bytes = read_link(&file, s.path.as_deref(), false).map_err(|e| bad(cmd, e.to_string()))?;
     let configuration = configuration_id(&bytes, selection).map_err(|e| bad(cmd, e.to_string()))?;
     if same_source && p.get("configuration").is_none() && configuration != selected_configuration(&link) {
         return Err(bad(cmd, "the selected configuration was replaced; select a configuration again"));
@@ -2230,9 +2398,10 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Read/evaluate the candidate before changing anything. Session::execute owns the single
     // undo step and restores both the document and evaluated state on any later failure.
-    let ((_, sf, faces, metadata, properties, meshes), _) =
+    let ((source_name, sf, faces, metadata, properties, meshes), _) =
         design_bodies(&Source::File(file.clone()), &bytes, configuration, s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
     let read = DesignLink::file_digest(&bytes);
+    let source_names = sf.body_names.clone();
     let geometry_changed = !s.doc.feature(link.feature).is_some_and(|f| same_import_source(&f.kind, &sf.kind))
         || link_meshes(s, comp, link.feature) != meshes.as_slice();
     let path = stored(s.path.as_deref(), &file);
@@ -2249,6 +2418,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     let mut inherited = link.inherited.clone();
     let mut removed = Vec::new();
     if let Some(f) = s.doc_mut().feature_mut(link.feature) {
+        // Both modes start as Relink always did; `sync` renames the bodies below.
         if f.body_names.len() != sf.body_names.len() {
             if f.body_names.is_empty() {
                 f.body_names = sf.body_names;
@@ -2300,6 +2470,9 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(error) = s.model.result(link.feature).and_then(|r| r.error.clone()) {
         return Err(bad(cmd, error));
     }
+    if sync {
+        sync_names(s, comp, link.feature, &source_name, &source_names, &mut warnings);
+    }
     inherit_properties(s, comp, &properties)?;
     let (_, kept) = inherit_metadata(s, comp, &metadata);
     warnings.extend(kept);
@@ -2325,6 +2498,46 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
             param_warnings: Vec::new(),
         },
     )
+}
+
+/// `names: "sync"`: the linked bodies, by position, take the names the new source gives them,
+/// through the rename `body.rename` does, so the materials, appearances and later features that
+/// name a body follow it. A body that cannot take its new name (another body has it) keeps its
+/// name and is reported. The linked feature takes the source design's name when it still has the
+/// component's (the pair Insert Design makes); the component keeps its name.
+fn sync_names(s: &mut Session, comp: u64, feature: u64, source_name: &str, source: &[String], warnings: &mut Vec<String>) {
+    // The feature's own build result names every body it made, in build order, which is what the
+    // stored name slots follow; a later feature may have removed some of them from the model.
+    let made: Vec<String> =
+        s.model.result(feature).map(|r| r.state.bodies.iter().filter(|b| b.feature == feature).map(|b| b.name.clone()).collect()).unwrap_or_default();
+    let slots = s.doc.feature(feature).map(|f| f.body_name_slots(made.len())).unwrap_or_default();
+    let alive: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == feature).map(|b| b.name.clone()).collect();
+    let survivors = made.iter().zip(slots).filter(|(name, _)| alive.contains(name));
+    for (old, slot) in survivors.map(|(n, slot)| (n.clone(), slot)).collect::<Vec<_>>() {
+        let old = &old;
+        let Some(target) = source.get(slot).map(|n| n.trim()).filter(|n| !n.is_empty()) else { continue };
+        if old == target {
+            continue;
+        }
+        let before = s.doc.clone();
+        match super::browser::rename_one(s, "component.relink", old, target) {
+            Ok(_) => s.refresh(),
+            Err(e) => {
+                s.doc = before;
+                s.refresh();
+                warnings.push(format!("body {old} keeps its name instead of {target}: {e}"));
+            }
+        }
+    }
+    let name = source_name.trim();
+    let own = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone());
+    let taken = s.doc.features.iter().any(|f| f.name == name && f.id != feature);
+    if !name.is_empty()
+        && !taken
+        && let Some(f) = s.doc_mut().feature_mut(feature).filter(|f| Some(&f.name) == own.as_ref())
+    {
+        f.name = name.to_string();
+    }
 }
 
 /// The solver's joint errors and conflicts after a relink: added to `warnings`, and as rows.
@@ -2434,6 +2647,50 @@ fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, BreakLinkResult { component: comp, path, param_warnings: Vec::new() })
 }
 
+/// What reads `link`'s file: the built-in STEP reader, an importer, or (for a design) nothing
+/// to name.
+fn link_source(s: &Session, link: &DesignLink) -> Option<LinkSource> {
+    let plain =
+        |format: &str| LinkSource { format: format.into(), plugin: None, version: None, available: None, installed_version: None, needs: None };
+    match (&link.importer, &link.step_names) {
+        (Some(i), _) => {
+            let Some(plugin) = &i.plugin else {
+                return Some(LinkSource {
+                    available: Some(false),
+                    needs: Some("this link's record names no importer plugin, so nothing can read its file again".into()),
+                    ..plain(&i.format)
+                });
+            };
+            let status = crate::plugin::importer_status(s, plugin, &i.format);
+            let needs = importer_needs(i, &status);
+            let differs = status.installed_version.as_ref().is_some_and(|v| Some(v) != i.version.as_ref());
+            Some(LinkSource {
+                format: i.format.clone(),
+                plugin: i.plugin.clone(),
+                version: i.version.clone(),
+                available: Some(status.problem.is_none()),
+                installed_version: status.installed_version.filter(|_| differs || needs.is_some()),
+                needs,
+            })
+        }
+        (None, Some(_)) => Some(plain("step")),
+        (None, None) => None,
+    }
+}
+
+/// What a link needs when the importer plugin it names can't read its file: which plugin and
+/// version, and why it can't. `None` when it can.
+fn importer_needs(importer: &solidcraft_doc::LinkImporter, status: &crate::plugin::ImporterStatus) -> Option<String> {
+    let problem = status.problem?;
+    let plugin = importer.plugin.as_deref().unwrap_or(&importer.format);
+    let version = importer.version.as_deref().map_or_else(String::new, |v| format!(" version {v}"));
+    let installed = match &status.installed_version {
+        Some(v) if Some(v) != importer.version.as_ref() => format!(" (version {v} is installed)"),
+        _ => String::new(),
+    };
+    Some(format!("importer plugin `{plugin}`{version} is needed to read this file again, but it is {problem}{installed}"))
+}
+
 fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
     let mut observations = Vec::new();
     let links: Vec<LinkInfo> = s
@@ -2448,6 +2705,7 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                 return LinkInfo::Looked {
                     component: *c,
                     configuration: l.configuration,
+                    importer: None,
                     name,
                     path: String::new(),
                     file: String::new(),
@@ -2459,15 +2717,35 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
             }
             let path = stored(s.path.as_deref(), &file);
             let shown = file.to_string_lossy().into_owned();
+            let importer = link_source(s, l);
             // A refused path is not looked for at all: on Windows asking whether a file on
             // `\\host\share` exists already connects to the host.
             match link_refusal(s.path.as_deref(), &l.path) {
+                None if l.importer.is_some() && importer_file_refusal(s, &file).is_some() => {
+                    // Not read, not even hashed: an importer's file outside the design's folder
+                    // waits for its folder to be allowed.
+                    LinkInfo::Looked {
+                        component: *c,
+                        configuration: l.configuration,
+                        importer,
+                        name,
+                        path,
+                        file: shown,
+                        found: None,
+                        changed: None,
+                        state: Some(LinkState::NotAllowed),
+                        reason: importer_file_refusal(s, &file),
+                    }
+                }
                 None => {
                     let found = solidcraft_io::vfs::design_path_is_file(&shown, s.path.as_deref());
                     // Whether the file is no longer what this design last read (#9739): `null`
                     // when it isn't found, or the link keeps no digest (made before they were).
-                    let current =
-                        l.file_sha256.as_ref().filter(|_| found == Some(true)).and_then(|_| file_sha256(Path::new(&shown), s.path.as_deref()));
+                    let current = l
+                        .file_sha256
+                        .as_ref()
+                        .filter(|_| found == Some(true))
+                        .and_then(|_| file_sha256(Path::new(&shown), s.path.as_deref(), l.importer.is_some()));
                     let changed = current.as_ref().zip(l.file_sha256.as_ref()).map(|(now, kept)| now != kept);
                     // A link opened without its bodies has read nothing of its file yet.
                     let changed = if found == Some(true) && left_out(&s.doc, *c, l) { Some(true) } else { changed };
@@ -2481,11 +2759,23 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                         Some(why) => (Some(why.state), Some(why.reason)),
                         None => (None, None),
                     };
-                    LinkInfo::Looked { component: *c, configuration: l.configuration, name, path, file: shown, found, changed, state, reason }
+                    LinkInfo::Looked {
+                        component: *c,
+                        configuration: l.configuration,
+                        importer,
+                        name,
+                        path,
+                        file: shown,
+                        found,
+                        changed,
+                        state,
+                        reason,
+                    }
                 }
                 Some(solidcraft_io::vfs::Remote::Network(host)) => LinkInfo::Network {
                     component: *c,
                     configuration: l.configuration,
+                    importer,
                     name,
                     path,
                     file: shown,
@@ -2497,6 +2787,7 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                 Some(solidcraft_io::vfs::Remote::Device) => LinkInfo::Device {
                     component: *c,
                     configuration: l.configuration,
+                    importer,
                     name,
                     path,
                     file: shown,
@@ -2917,6 +3208,120 @@ mod tests {
             assert_eq!(update["updated"], json!(["Plate"]), "{case}: {update}");
             assert_eq!(update["warnings"], json!([]), "{case}: {update}");
             assert_joint_at(&mut s, x, case);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #22047: an unmoved planar face on a linked part (qualified by its neighbouring faces,
+    /// `F<id>:link:<digest>#[…]`) keeps resolving its planar mate joint and leaves the mated
+    /// occurrence in place with zero drift when an adjacent corner cut shortens and drops off its
+    /// boundary.
+    #[test]
+    fn mate_joint_on_a_linked_planar_face_survives_adjacent_cut_shortening() {
+        use solidcraft_doc::joints::{Snap, occurrence_world};
+
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-neighbour-rename-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("side_plate.solidcraft");
+
+        // Linked part: a block whose +x face (x = 100) is split by a lower slot into two pieces so
+        // the upper mating piece carries a neighbour qualifier including its two pin holes and an
+        // adjacent top corner cut.
+        let mut part = Session::default();
+        run(&mut part, "parameters.add", json!({"name": "cut_len", "expression": "52 mm"}));
+        run(&mut part, "solid.box", json!({"length": 100, "width": 40, "height": 60, "corner": [0, 0, 0], "body_name": "SidePlate"}));
+        run(&mut part, "solid.hole", json!({"position": [100, 12, 35], "direction": [-1, 0, 0], "diameter": 6, "depth": 20, "name": "PinHoleA"}));
+        run(&mut part, "solid.hole", json!({"position": [100, 28, 35], "direction": [-1, 0, 0], "diameter": 6, "depth": 20, "name": "PinHoleB"}));
+        run(
+            &mut part,
+            "solid.box",
+            json!({"length": "cut_len", "width": 44, "height": 14, "corner": [50, -2, 50], "operation": "cut", "name": "TopCut"}),
+        );
+        run(
+            &mut part,
+            "solid.box",
+            json!({"length": 20, "width": 44, "height": 10, "corner": [85, -2, 10], "operation": "cut", "name": "LowerSlot"}),
+        );
+        run(&mut part, "file.save", json!({"path": path}));
+
+        // Assembly: link and ground SidePlate, build a Bracket with matching pin holes, and constrain
+        // it with a planar mate on the +x face plus two cylindrical pin joints.
+        let mut s = Session::default();
+        run(&mut s, "component.insert_design", json!({"path": path, "name": "SidePlate"}));
+        run(&mut s, "occurrence.ground", json!({"occurrence": "SidePlate:1", "grounded": true}));
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 10, "width": 40, "height": 30, "corner": [100, 0, 20], "operation": "new", "body_name": "BracketBody"}),
+        );
+        run(&mut s, "solid.hole", json!({"position": [100, 12, 35], "direction": [1, 0, 0], "diameter": 6, "depth": 10, "name": "BracketHoleA"}));
+        run(&mut s, "solid.hole", json!({"position": [100, 28, 35], "direction": [1, 0, 0], "diameter": 6, "depth": 10, "name": "BracketHoleB"}));
+        run(&mut s, "component.create", json!({"name": "Bracket", "parent": "root", "activate": false}));
+        run(&mut s, "component.move_bodies", json!({"bodies": ["BracketBody"], "component": "Bracket"}));
+
+        run(
+            &mut s,
+            "joint.create",
+            json!({
+                "type": "planar",
+                "name": "SideMate",
+                "a": {"occurrence": "SidePlate:1", "face": [100, 20, 35]},
+                "b": {"occurrence": "Bracket:1", "face": [100, 20, 35]},
+            }),
+        );
+        run(
+            &mut s,
+            "joint.create",
+            json!({
+                "type": "cylindrical",
+                "name": "PinA",
+                "a": {"occurrence": "SidePlate:1", "circle": [100, 15, 35]},
+                "b": {"occurrence": "Bracket:1", "circle": [100, 15, 35]},
+            }),
+        );
+        run(
+            &mut s,
+            "joint.create",
+            json!({
+                "type": "cylindrical",
+                "name": "PinB",
+                "a": {"occurrence": "SidePlate:1", "circle": [100, 31, 35]},
+                "b": {"occurrence": "Bracket:1", "circle": [100, 31, 35]},
+            }),
+        );
+
+        let mate_face = match &s.doc.assembly.joints.iter().find(|j| j.name == "SideMate").unwrap().a.snap {
+            Snap::FaceCenter { face: Some(name), .. } => name.clone(),
+            other => panic!("expected named face on SideMate, got {other:?}"),
+        };
+        assert!(mate_face.contains(":link:") && mate_face.contains("#["), "expected linked neighbour-qualified face name, got {mate_face}");
+
+        let list_before = run(&mut s, "joint.list", json!({}));
+        assert_eq!(list_before["errors"], json!([]), "before update: {list_before}");
+        assert_eq!(list_before["conflicts"], json!([]), "before update: {list_before}");
+        let bracket_occ = s.doc.occurrences.iter().find(|o| o.name == "Bracket:1").unwrap().id;
+        let world_before = occurrence_world(&s.doc, bracket_occ);
+
+        // Shorten TopCut in the linked part so it stops at x = 80 and no longer borders x = 100.
+        run(&mut part, "parameters.change", json!({"name": "cut_len", "expression": "30 mm"}));
+        run(&mut part, "file.save", json!({}));
+
+        let update = run(&mut s, "component.update_links", json!({}));
+        assert_eq!(update["updated"], json!(["SidePlate"]), "{update}");
+        assert_eq!(update["warnings"], json!([]), "{update}");
+
+        let list_after = run(&mut s, "joint.list", json!({}));
+        assert_eq!(list_after["errors"], json!([]), "after update: {list_after}");
+        assert_eq!(list_after["conflicts"], json!([]), "after update: {list_after}");
+        let mate_after = list_after["joints"].as_array().unwrap().iter().find(|j| j["name"] == "SideMate").unwrap();
+        assert!(!mate_after["frame_a"].is_null(), "SideMate lost frame_a: {mate_after}");
+        let frame_a_x = mate_after["frame_a"]["origin"][0].as_f64().unwrap();
+        assert!((frame_a_x - 100.0).abs() < 1e-6, "SideMate frame_a moved off x = 100: {mate_after}");
+
+        let world_after = occurrence_world(&s.doc, bracket_occ);
+        for (a, b) in world_before.iter().flatten().zip(world_after.iter().flatten()) {
+            assert!((a - b).abs() < 1e-6, "Bracket drifted after update_links: before={world_before:?}, after={world_after:?}");
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -3388,6 +3793,66 @@ mod tests {
         assert!(meshes(&a).is_empty());
         assert_eq!(run(&mut a, "component.update_links", json!({}))["updated"], json!(["board"]));
         assert_eq!(meshes(&a), chip);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Deleting or updating an early linked component must not re-evaluate later independent
+    /// linked components, either in-session or on the first edit after opening a saved assembly.
+    #[test]
+    fn deleting_or_updating_early_linked_component_keeps_later_links_cached() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-cache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let save_part = |path: &Path, body_name: &str, height: f64| {
+            let mut part = Session::default();
+            run(&mut part, "solid.box", json!({"length": 10, "width": 20, "height": height, "body_name": body_name}));
+            run(&mut part, "file.save", json!({"path": path}));
+        };
+        let (p_a, p_b, p_c, p_d, asm) =
+            (dir.join("PartA.sc"), dir.join("PartB.sc"), dir.join("PartC.sc"), dir.join("PartD.sc"), dir.join("Assembly.sc"));
+        save_part(&p_a, "BlockA", 10.0);
+        save_part(&p_b, "BlockB", 10.0);
+        save_part(&p_c, "BlockC", 10.0);
+        save_part(&p_d, "BlockD", 10.0);
+
+        let mut s = Session::default();
+        run(&mut s, "component.insert_design", json!({"path": p_a}));
+        let comp_b = run(&mut s, "component.insert_design", json!({"path": p_b}))["component"].as_u64().unwrap();
+        run(&mut s, "component.insert_design", json!({"path": p_c}));
+        run(&mut s, "component.insert_design", json!({"path": p_d}));
+        run(&mut s, "file.save", json!({"path": asm}));
+
+        // First edit after opening: deleting PartB recomputes zero later linked components.
+        let mut opened_del = Session::default();
+        run(&mut opened_del, "doc.open", json!({"path": asm}));
+        let before = opened_del.model.recomputed;
+        run(&mut opened_del, "component.delete", json!({"component": comp_b}));
+        assert_eq!(opened_del.model.recomputed - before, 0, "opened delete must not recompute later linked imports");
+        assert!((volume(&mut opened_del) - 6000.0).abs() < 1e-6, "{}", volume(&mut opened_del));
+
+        // In-session delete of PartB also recomputes zero later linked components.
+        let before = s.model.recomputed;
+        run(&mut s, "component.delete", json!({"component": comp_b}));
+        assert_eq!(s.model.recomputed - before, 0, "in-session delete must not recompute later linked imports");
+        assert!((volume(&mut s) - 6000.0).abs() < 1e-6, "{}", volume(&mut s));
+
+        // Save the 3-part assembly, update PartA on disk, and verify Update Links recomputes only
+        // PartA (never PartC or PartD) both in-session and right after opening.
+        run(&mut s, "file.save", json!({"path": asm}));
+        save_part(&p_a, "BlockA", 25.0);
+
+        let mut opened_upd = Session::default();
+        run(&mut opened_upd, "doc.open", json!({"path": asm}));
+        let before = opened_upd.model.recomputed;
+        assert_eq!(run(&mut opened_upd, "component.update_links", json!({}))["updated"], json!(["PartA"]));
+        assert_eq!(opened_upd.model.recomputed - before, 1, "opened update_links must recompute only PartA");
+        assert!((volume(&mut opened_upd) - 9000.0).abs() < 1e-6, "{}", volume(&mut opened_upd));
+
+        let before = s.model.recomputed;
+        assert_eq!(run(&mut s, "component.update_links", json!({}))["updated"], json!(["PartA"]));
+        assert_eq!(s.model.recomputed - before, 1, "in-session update_links must recompute only PartA");
+        assert!((volume(&mut s) - 9000.0).abs() < 1e-6, "{}", volume(&mut s));
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

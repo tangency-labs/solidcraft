@@ -3,9 +3,9 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use super::{
-    Export3mfParams, ExportMeshParams, ExportParams, ExportSdfParams, ExportStepParams, ExportStlParams, ExportUrdfParams, FileExportResult,
-    NewerFileReport, OpenElsewhere, OpenParams, OpenResult, OpenedDesign, RecoverParams, RecoverResult, RecoveryDiscardParams, RecoveryDiscardResult,
-    RecoveryListParams, RecoveryListResult, UsdPurpose,
+    Export3mfParams, ExportMeshParams, ExportMjcfParams, ExportParams, ExportSdfParams, ExportStepParams, ExportStlParams, ExportUrdfParams,
+    FileExportResult, NewerFileReport, OpenElsewhere, OpenParams, OpenResult, OpenedDesign, RecoverParams, RecoverResult, RecoveryDiscardParams,
+    RecoveryDiscardResult, RecoveryListParams, RecoveryListResult, UsdPurpose,
 };
 use crate::Session;
 use crate::recovery::Autosaver;
@@ -20,6 +20,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<Export3mfParams>(), &["bodies", "lay_on_print_faces", "objects", "path", "quality"]);
     assert_keys(input_schema_for::<ExportUrdfParams>(), &["effort", "images", "mesh_prefix", "mimic", "path", "place_meshes", "velocity"]);
     assert_keys(input_schema_for::<ExportSdfParams>(), &["bodies", "model_uris", "name", "path", "quality", "static"]);
+    assert_keys(input_schema_for::<ExportMjcfParams>(), &["path"]);
     assert_keys(
         input_schema_for::<ExportParams>(),
         &[
@@ -267,7 +268,9 @@ fn bad_calls_say_what_is_wrong_and_write_nothing() {
     std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("{e}"));
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap_or_else(|e| panic!("{e}"));
-    for cmd in ["file.export_step", "file.export_stl", "file.export_3mf", "file.export_obj", "file.export_urdf", "file.export_sdf"] {
+    for cmd in
+        ["file.export_step", "file.export_stl", "file.export_3mf", "file.export_obj", "file.export_urdf", "file.export_sdf", "file.export_mjcf"]
+    {
         let e = s.execute(cmd, &json!({})).unwrap_err().to_string();
         assert!(e.contains(cmd) && e.contains("path"), "{cmd}: {e}");
     }
@@ -277,9 +280,16 @@ fn bad_calls_say_what_is_wrong_and_write_nothing() {
     s.param_check = ParamCheck::Strict;
     let e = s.execute("file.export_stl", &json!({"path": at, "objects": "component"})).unwrap_err().to_string();
     assert!(e.contains("objects"), "objects is for 3MF only: {e}");
+    let e = s.execute("file.export_mjcf", &json!({"path": dir.join("r.xml").to_string_lossy(), "effort": 1})).unwrap_err().to_string();
+    assert!(e.contains("effort"), "MJCF takes no effort: {e}");
     s.param_check = ParamCheck::Off;
     let e = s.execute("file.export_urdf", &json!({"path": at, "effort": -1})).unwrap_err().to_string();
     assert!(e.contains("effort"), "{e}");
+    let e = s
+        .execute("file.export", &json!({"path": dir.join("r.xml").to_string_lossy(), "format": "mjcf", "bodies": ["Body1"]}))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("whole assembly"), "{e}");
     let model = dir.join("Model").to_string_lossy().to_string();
     for (key, value) in [("static", json!("yes")), ("model_uris", json!(1)), ("name", json!("a/b")), ("bodies", json!(["Nope"]))] {
         let e = s.execute("file.export_sdf", &json!({"path": model, key: value})).unwrap_err().to_string();

@@ -5554,7 +5554,6 @@
   "sketch_finish.edit": "编辑草图",
   "sketch_finish.finished": "{name} 已完成",
   "sketch_mode.announcement": "{view}，草图模式",
-  "sketch_mode.editing": "正在编辑",
   "sketch_mode.model_card_unavailable": "在此开始草图之前，请先打开模型视图",
   "sketch_mode.view_name": "{view} · {sketch}",
   "sketch_panel.attached": "附着到 {body} / {path}",
