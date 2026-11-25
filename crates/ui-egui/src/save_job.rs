@@ -97,7 +97,9 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
     crate::documents::sync_close_changes(app);
     let (r, cancelled) = match outcome {
         Some((copy, Ok(v), _)) => {
+            let previous = app.session.path.clone();
             app.session.adopt_save(&copy);
+            crate::control::post_design_saved(app, &copy.document_id, previous);
             (Ok(v), false)
         }
         Some((_, Err(e), cancelled)) => (Err(e), cancelled),
@@ -266,6 +268,28 @@ mod tests {
         super::start(&mut h.app, "file.save_as", json!({"path": bad.to_string_lossy()}));
         super::tick(&mut h.app, true);
         assert!(h.app.session.is_dirty() && h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
+    }
+
+    /// A save written on a worker posts exactly one `design.saved` when it is taken up.
+    #[test]
+    fn a_worker_save_posts_one_design_saved() {
+        static WATCH: crate::control::DocumentWatch = crate::control::DocumentWatch::new();
+        let mut h = crate::scenario::Harness::new();
+        h.app.design_watch = &WATCH;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let sub = WATCH.join();
+        let cursor = sub.from();
+        let path = h.dir.join("Worker.solidcraft");
+        assert!(super::start(&mut h.app, "file.save_as", json!({"path": path.to_string_lossy()})), "under way on a worker");
+        h.frame();
+        h.settle();
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let next = WATCH.next(&(String::new(), 0), cursor, &stop, std::time::Duration::ZERO);
+        let saved: Vec<_> = next.events.iter().filter(|e| e["event"] == "design.saved").collect();
+        assert_eq!(saved.len(), 1, "{:?}", next.events);
+        assert_eq!(saved[0]["params"]["path"].as_str(), path.to_str(), "{}", saved[0]);
+        assert!(saved[0]["params"]["previous_path"].is_null(), "{}", saved[0]);
+        drop(sub);
     }
 
     #[test]

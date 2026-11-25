@@ -870,16 +870,36 @@ pub fn action_menu<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) 
 /// use the kit chevron rather than a font-dependent triangle. Tokens: form_close_size,
 /// space_4, control_radius, form_primary/dim/ink, selected_bg, hover, font_label.
 pub fn compact_button(ui: &mut Ui, glyph: &str, tooltip: &str, enabled: bool, selected: bool) -> Response {
+    compact_button_presentation(ui, glyph, tooltip, enabled, selected, false)
+}
+
+/// An ink-only toggle: the selected glyph carries the accent, with a quiet hover surface.
+/// Tokens: compact_button tokens, text (neutral hover), form_primary (focus).
+pub fn compact_toggle(ui: &mut Ui, glyph: &str, tooltip: &str, enabled: bool, selected: bool) -> Response {
+    compact_button_presentation(ui, glyph, tooltip, enabled, selected, true)
+}
+
+fn compact_button_presentation(ui: &mut Ui, glyph: &str, tooltip: &str, enabled: bool, selected: bool, toggle: bool) -> Response {
     let t = Tokens::get();
     let arrow = matches!(glyph, MOVE_UP | MOVE_DOWN);
     let width = if arrow { t.form_close_size - t.space_4 } else { t.form_close_size };
     let response = ui
         .add_enabled_ui(enabled, |ui| {
             let (rect, response) = ui.allocate_exact_size(vec2(width, t.form_close_size), egui::Sense::click());
-            if response.hovered() || selected {
-                ui.painter().rect_filled(rect, t.control_radius, if selected { t.selected_bg } else { t.hover });
+            if response.hovered() || (selected && !toggle) {
+                let fill = if toggle {
+                    t.text.gamma_multiply(0.06)
+                } else if selected {
+                    t.selected_bg
+                } else {
+                    t.hover
+                };
+                ui.painter().rect_filled(rect, t.control_radius, fill);
             }
-            let ink = if !enabled {
+            if toggle && response.has_focus() {
+                ui.painter().rect_stroke(rect, t.control_radius, egui::Stroke::new(1.5, t.form_primary), egui::StrokeKind::Inside);
+            }
+            let ink = if !ui.is_enabled() {
                 t.form_dim.gamma_multiply(0.35)
             } else if selected {
                 t.form_primary
@@ -896,7 +916,13 @@ pub fn compact_button(ui: &mut Ui, glyph: &str, tooltip: &str, enabled: bool, se
             } else {
                 ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(t.font_label), ink);
             }
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), glyph));
+            response.widget_info(|| {
+                if toggle {
+                    egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), selected, solidcraft_ui_text::tr_label(tooltip))
+                } else {
+                    egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), glyph)
+                }
+            });
             response
         })
         .inner;

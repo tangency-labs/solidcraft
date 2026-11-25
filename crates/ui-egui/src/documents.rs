@@ -749,6 +749,9 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     app.session.set_command_check(out.session.command_check());
     app.session.set_single_surface_analysis(app.preferences.single_surface_analysis);
     crate::print_face_ui::sync(&mut app.session, &app.preferences);
+    // The incoming design's plugin panels: the Model tab reads the installed plugins once, not on
+    // every frame, so it no longer syncs them when the design comes to the front (#21594).
+    solidcraft_engine::plugin::sync_panels(&mut app.session);
     // Views cache by revision: the incoming design must not look unchanged.
     let before = app.session.revision;
     if !presenting {
@@ -2067,7 +2070,7 @@ pub(crate) fn same_path(a: &str, b: &str) -> bool {
 
 /// Open `session` in a new tab after the active one, leaving the shown design as it is (a file
 /// opened while the person is busy in another design). Its view is framed when it is shown.
-pub(crate) fn open_tab_behind(app: &mut SolveApp, session: Session) -> Result<(), String> {
+pub(crate) fn open_tab_behind(app: &mut SolveApp, mut session: Session) -> Result<(), String> {
     if app.docs.group.is_some() {
         return Err(app.tr("document.finish_save_prompt").to_owned());
     }
@@ -2078,6 +2081,7 @@ pub(crate) fn open_tab_behind(app: &mut SolveApp, session: Session) -> Result<()
     if app.docs.slots.len() >= MAX_OPEN {
         return Err(format!("at most {MAX_OPEN} designs can be open"));
     }
+    session.plugin_state.publish_user_settings().map_err(|e| e.to_string())?;
     let mut slot = DocSlot::new(session);
     slot.fit = true;
     app.docs.slots.insert(app.docs.active + 1, Some(slot));
@@ -2085,7 +2089,7 @@ pub(crate) fn open_tab_behind(app: &mut SolveApp, session: Session) -> Result<()
 }
 
 /// Open `session` in a new tab after the active one and switch to it (`fit`: frame its model).
-pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
+pub fn open_tab(app: &mut SolveApp, mut session: Session) -> Result<(), String> {
     if app.docs.group.is_some() {
         return Err(app.tr("document.finish_save_prompt").to_owned());
     }
@@ -2096,6 +2100,7 @@ pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
     if app.docs.slots.len() >= MAX_OPEN {
         return Err(format!("at most {MAX_OPEN} designs can be open"));
     }
+    session.plugin_state.publish_user_settings().map_err(|e| e.to_string())?;
     let at = app.docs.active + 1;
     app.docs.slots.insert(at, Some(DocSlot::new(session)));
     crate::agent_chat::follow_new_tab(app, |app| switch(app, at));
@@ -2112,12 +2117,16 @@ pub fn active_is_blank(app: &SolveApp) -> bool {
 
 /// Show `session` (a design built or read elsewhere): in place of a blank active design,
 /// otherwise in a new tab. Whether it is shown (no tab left for it: the status says so).
-pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
+pub fn adopt(app: &mut SolveApp, mut session: Session) -> bool {
     if app.docs.group.is_some() {
         app.set_status(app.tr("document.finish_save_prompt"), true);
         return false;
     }
     if active_is_blank(app) {
+        if let Err(error) = session.plugin_state.publish_user_settings() {
+            app.set_status(error.to_string(), true);
+            return false;
+        }
         let rev = app.session.revision;
         crate::browser::discard_reveals(app);
         crate::semantic_content::leave_document(app);
@@ -3997,20 +4006,6 @@ pub(crate) fn saved_for_close(app: &mut SolveApp) {
     }
     quit_step(app);
     batch_step(app);
-}
-
-/// Snapshots for file guards on a worker; the file-operation lock keeps tabs unchanged.
-pub(crate) fn file_guard_sessions(app: &SolveApp) -> Vec<Session> {
-    std::iter::once(&app.session)
-        .chain(app.docs.slots.iter().flatten().map(|slot| &slot.session))
-        .map(|session| {
-            // The guard reads only paths and links, never model geometry or undo state.
-            let mut copy = Session::default();
-            copy.doc = session.doc.clone();
-            copy.path = session.path.clone();
-            copy
-        })
-        .collect()
 }
 
 /// Files in any open tab, including linked parts, must not disappear underneath it.

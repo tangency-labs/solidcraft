@@ -882,6 +882,37 @@ fn measure_summary_keeps_only_the_check_fields() {
     assert_eq!(raw_tool(&mut s, "measure", json!({"summary": "yes"}))["error"]["code"], -32602);
 }
 
+#[test]
+fn measure_region_filters_bodies_and_totals_in_tools_and_batches() {
+    let mut s = server();
+    for (name, x) in [("Inside", 0), ("Touching", 10), ("Outside", 30)] {
+        tool(&mut s, "execute", json!({"command":"solid.box","params":{"length":10,"width":10,"height":10,"corner":[x,0,0],"body_name":name}}));
+    }
+    let within = json!({"min":[0,0,0],"max":[10,10,10]});
+    let full = tool(&mut s, "measure", json!({}));
+    assert_eq!(full["body_count"], 3);
+    let intersects = tool(&mut s, "measure", json!({"summary":true,"within":within}));
+    assert_eq!(intersects["body_count"], 2, "{intersects}");
+    assert!((intersects["total"]["volume_mm3"].as_f64().unwrap() - 2000.0).abs() < 1e-6);
+    let inside = tool(&mut s, "measure", json!({"summary":true,"within":within,"mode":"inside"}));
+    assert_eq!(inside["body_count"], 1, "{inside}");
+    assert_eq!(inside["bodies"][0]["name"], "Inside");
+    let batch = tool(&mut s, "batch", json!({"commands":[{"command":"measure","params":{"summary":true,"within":within,"mode":"inside"}}]}));
+    assert_eq!(batch["results"][0], inside, "{batch}");
+    let empty = tool(&mut s, "measure", json!({"within":within,"body":"Outside"}));
+    assert_eq!(empty["body_count"], 0, "{empty}");
+    assert_eq!(tool(&mut s, "measure", json!({})), full);
+    for args in [json!({"within":null}), json!({"within":within,"mode":null})] {
+        let direct = raw_tool(&mut s, "measure", args.clone());
+        assert_eq!(direct["result"]["isError"], true, "{direct}");
+        let reply = raw_tool(&mut s, "batch", json!({"commands":[{"command":"measure","params":args}]}));
+        assert_eq!(reply["result"]["isError"], true, "{reply}");
+        let batch: Value = serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(batch["completed"], 0, "{batch}");
+        assert!(batch["failed"].is_object(), "{batch}");
+    }
+}
+
 /// `open` hands `up` and `names` to the STEP import, and the tool's schema refuses other values.
 #[test]
 fn open_stands_a_y_up_step_file_up() {
@@ -3760,6 +3791,16 @@ fn batch_does_not_resend_after_a_transport_error() {
     assert!(body.as_str().is_some_and(|t| t.contains("may have run") && t.contains("timed out")), "{body}");
 }
 
+/// A batch the user declined ran nothing: it is not reported as one that may have run.
+#[test]
+fn batch_declined_by_the_user_says_it_did_not_run() {
+    let (b, body, is_error) =
+        recorded_batch(Err("not run: the user declined this call".into()), json!({"commands": [{"command": "a.one"}, {"command": "a.two"}]}));
+    assert_eq!(methods(&b), ["engine.batch"]);
+    assert!(is_error);
+    assert_eq!(body.as_str(), Some("not run: the user declined this call"), "{body}");
+}
+
 /// A batch longer than one control line goes step by step instead of being refused unrun.
 #[test]
 fn batch_too_large_for_one_control_line_goes_per_step() {
@@ -4671,6 +4712,8 @@ fn a_bridged_server_leaves_the_check_to_an_app_that_makes_it() {
         let level = req["params"]["param_check"].clone();
         match req["method"].as_str() {
             Some("control.capabilities") => json!({"ok": true, "result": {"param_check": ["off", "warn", "strict"]}}),
+            // The server's own question after each call (the selection block), not a tool call.
+            Some("document.selection") => json!({"ok": true, "result": {"selection": null}}),
             // The server's own question, not a tool call: it carries no level.
             Some("mcp.options") => json!({"ok": true, "result": {"compact": false}}),
             Some("engine.batch") => {
@@ -5246,7 +5289,9 @@ fn ordinary_tool_calls_do_not_look_up_plugin_tools() {
     tool(&mut s, "new_design", json!({}));
     let unknown = raw_tool(&mut s, "no_such_tool", json!({}));
     assert_eq!(unknown["error"]["code"], -32602, "{unknown}");
-    assert_eq!(seen.lock().unwrap().1, ["mcp.options", "engine.execute file.save", "engine.execute solid.box", "engine.execute file.new"]);
+    // Each call is followed by the server's own `document.selection` question (the selection block).
+    let asked: Vec<String> = seen.lock().unwrap().1.iter().filter(|m| *m != "document.selection").cloned().collect();
+    assert_eq!(asked, ["mcp.options", "engine.execute file.save", "engine.execute solid.box", "engine.execute file.new"]);
 }
 
 #[test]
@@ -5271,7 +5316,9 @@ fn plugin_listing_without_an_advertised_capability_keeps_the_session_working() {
         tool(&mut s, "new_design", json!({}));
         let seen = seen.lock().unwrap();
         assert_eq!(seen.0, 1, "the same connection remains usable");
-        assert_eq!(seen.1, ["mcp.options", "control.capabilities", "engine.execute file.new"]);
+        // The server's own `document.selection` question after the call is not a plugin lookup.
+        let asked: Vec<String> = seen.1.iter().filter(|m| *m != "document.selection").cloned().collect();
+        assert_eq!(asked, ["mcp.options", "control.capabilities", "engine.execute file.new"]);
     }
 }
 
@@ -5503,4 +5550,58 @@ fn installed_plugins_are_listed_and_called_as_tools_until_removed() {
     assert!(!names.contains(&"gears.make") && names.contains(&"smp.convert"), "{names:?}");
     assert!(call(&mut s, 4, "tools/call", json!({"name":"gears.make","arguments":{}}))["error"].is_object());
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Every reply carries what the user has selected, in the block the chat's Attach selection sends
+/// (faces and edges with the names and indices the tools take); nothing is added when nothing is.
+#[test]
+fn every_reply_carries_the_selection_and_none_when_nothing_is_selected() {
+    let mut s = server();
+    tool(
+        &mut s,
+        "batch",
+        json!({"commands": [
+            {"command": "sketch.create", "params": {"plane": "XY"}},
+            {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [20, 10]}},
+            {"command": "sketch.finish"},
+            {"command": "solid.extrude", "params": {"distance": 5}},
+        ]}),
+    );
+    // Nothing selected: the reply is one block, as before.
+    let r = raw_tool(&mut s, "list_commands", json!({}));
+    assert_eq!(r["result"]["content"].as_array().unwrap().len(), 1, "{r}");
+
+    let faces = tool(&mut s, "execute", json!({"command": "model.faces", "params": {"body": "Body1"}}));
+    let edges = tool(&mut s, "execute", json!({"command": "model.edges", "params": {"body": "Body1"}}));
+    let (face, edge) = (&faces["faces"][0], &edges["edges"][0]);
+    let items = json!([
+        {"type": "face", "body": "Body1", "index": face["index"], "point": face["centroid"]},
+        {"type": "edge", "body": "Body1", "index": edge["index"], "point": edge["mid"]},
+    ]);
+    tool(&mut s, "execute", json!({"command": "select.set", "params": {"items": items}}));
+    let r = raw_tool(&mut s, "list_commands", json!({}));
+    let content = r["result"]["content"].as_array().unwrap();
+    assert_eq!(content.len(), 2, "{r}");
+    let block = content[1]["text"].as_str().unwrap();
+    assert!(block.starts_with("[Selected in SolidCraft right now: 2 item(s)."), "{block}");
+    for want in ["Elements:", "face ", "· Body1", "Edge ", "index "] {
+        assert!(block.contains(want), "{want:?} missing from {block}");
+    }
+    assert!(block.contains(face["name"].as_str().unwrap()), "{block}");
+    assert!(block.contains(edge["name"].as_str().unwrap()), "{block}");
+
+    // Cleared again: back to the one block.
+    tool(&mut s, "execute", json!({"command": "select.set", "params": {"items": []}}));
+    let r = raw_tool(&mut s, "list_commands", json!({}));
+    assert_eq!(r["result"]["content"].as_array().unwrap().len(), 1, "{r}");
+}
+
+/// The server's instructions tell the agent to use the selection it is sent.
+#[test]
+fn the_instructions_tell_the_agent_to_use_the_selection() {
+    let mut s = server();
+    let r =
+        call(&mut s, 1, "initialize", json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}));
+    let text = r["result"]["instructions"].as_str().unwrap();
+    assert!(text.contains("The user's current selection comes with every reply; when they say 'this', 'these' or 'the selected', use it."), "{text}");
 }

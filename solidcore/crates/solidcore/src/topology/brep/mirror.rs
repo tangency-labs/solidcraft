@@ -338,7 +338,7 @@ fn degenerate_low_work_transform(
         fixes: k.fixes,
         memoize_curve_caches: k.memoize_curve_caches,
         cancel: k.cancel.clone(),
-        // (the caller's WR-57 replay seam, test only: the trial calls through it)
+        // (the caller's replay seam, test only: the trial calls through it)
         #[cfg(feature = "wr57-replay")]
         replay: k.replay.clone(),
         ..Kernel::default()
@@ -955,6 +955,71 @@ mod tests {
         mirror(&mut k, &mut b, &plane).unwrap();
         for (&v, p) in vertices.iter().zip(&before) {
             assert!((b.vertex(v).unwrap().point - *p).length() < 1e-12);
+        }
+    }
+
+    /// A cylinder of radius 10 and height 100 at x = 50, mirrored in the plane x = 0: its two
+    /// end circles stay circles of radius 10 (not the rational B-splines of their NURBs,
+    /// WR-21139), and each edge parameter gives the mirror of the point it gave before, so
+    /// the edge intervals stay valid. A second mirror gives the source points back.
+    #[test]
+    fn mirrors_a_cylinder_s_circles_as_circles() {
+        use crate::curve::curve::p2::CurveKind;
+        use crate::primitive::api_primitives::create_cylinder;
+        let mut k = Kernel::default();
+        let mut b = create_cylinder(&mut k, Vec3::new(50.0, 0.0, 0.0), 10.0, 100.0).unwrap();
+        let samples = |k: &Kernel, b: &Brep| -> Vec<Vec<Vec3>> {
+            p1::edges(b, None)
+                .unwrap()
+                .iter()
+                .map(|&e| {
+                    let edge = b.edge(e).unwrap();
+                    let (lo, hi) = (edge.interval.min(), edge.interval.max());
+                    let curve = edge.curve.as_ref().unwrap();
+                    [0.0, 0.2, 0.5, 0.7, 1.0]
+                        .iter()
+                        .map(|f| curve.evaluate_point(k, lo + f * (hi - lo)).unwrap())
+                        .collect()
+                })
+                .collect()
+        };
+        let circles = |b: &Brep| -> usize {
+            p1::edges(b, None)
+                .unwrap()
+                .iter()
+                .filter(
+                    |&&e| match b.edge(e).unwrap().curve.as_ref().unwrap().kind() {
+                        CurveKind::Line(_) => false,
+                        CurveKind::Ellipse(c) => {
+                            assert!(c.is_circle_class() && (c.radius() - 10.0).abs() < 1e-12);
+                            true
+                        }
+                        other => panic!("a curved edge is not a circle: {other:?}"),
+                    },
+                )
+                .count()
+        };
+        assert_eq!(circles(&b), 2);
+        let before = samples(&k, &b);
+        // the plane x = 0 (normal +X)
+        let plane = Axis2Placement::new(Vec3::ZERO, Vec3::Y, Vec3::Z);
+        mirror(&mut k, &mut b, &plane).unwrap();
+        assert_eq!(circles(&b), 2);
+        for (got, want) in samples(&k, &b).iter().zip(&before) {
+            for (q, p) in got.iter().zip(want) {
+                let expected = Vec3::new(-p.x, p.y, p.z);
+                assert!(
+                    (*q - expected).length() < 1e-9,
+                    "{q:?}, expected {expected:?}"
+                );
+            }
+        }
+        mirror(&mut k, &mut b, &plane).unwrap();
+        assert_eq!(circles(&b), 2);
+        for (got, want) in samples(&k, &b).iter().zip(&before) {
+            for (q, p) in got.iter().zip(want) {
+                assert!((*q - *p).length() < 1e-9, "{q:?}, expected {p:?}");
+            }
         }
     }
 
