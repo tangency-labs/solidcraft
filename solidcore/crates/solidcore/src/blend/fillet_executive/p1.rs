@@ -828,12 +828,15 @@ pub struct ExecutiveObjects<O> {
     pub edge_attribute: O,
 }
 
+/// The least radius or chamfer width [`is_radius_supported`] takes, in B-rep tolerances.
+pub(crate) const SUPPORTED_TOLERANCES: f64 = 8.0;
+
 /// `SmFilletExecutive::IsRadiusSupported`: `false` for a radius or chamfer width below
-/// 8 times the B-rep tolerance `brep_tol` (below that, some fillets come out
-/// non-manifold, crash or hang), and for NaN.
+/// [`SUPPORTED_TOLERANCES`] (8) times the B-rep tolerance `brep_tol` (below that, some
+/// fillets come out non-manifold, crash or hang), and for NaN.
 #[must_use]
 pub fn is_radius_supported(radius: f64, brep_tol: f64) -> bool {
-    radius >= 8.0 * brep_tol * (1.0 - EFF_ZERO_SQRT)
+    radius >= SUPPORTED_TOLERANCES * brep_tol * (1.0 - EFF_ZERO_SQRT)
 }
 
 impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
@@ -1859,6 +1862,7 @@ pub(crate) fn remove_topo_edges_with_notifications(
                     if let Err(
                         e @ (SolidError::Unported { .. }
                         | SolidError::Cancelled { .. }
+                        | SolidError::OutOfFuel { .. }
                         | SolidError::InvalidInput { .. }
                         | SolidError::PortInvariant { .. }
                         | SolidError::NotFound { .. }),

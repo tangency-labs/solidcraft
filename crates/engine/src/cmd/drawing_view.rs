@@ -49,9 +49,12 @@ use solidcraft_doc::config::RowKey;
 use solidcraft_doc::display_units::unit_scale;
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::balloon::Balloon;
+use solidcraft_doc::drawing::centre_line::CentreLine;
+use solidcraft_doc::drawing::centre_mark::CentreMark;
 use solidcraft_doc::drawing::cutting_line::CuttingLine;
 use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, reading_label};
 use solidcraft_doc::drawing::fold::{FoldFor, FoldRefusal, FoldSide, auxiliary_side};
+use solidcraft_doc::drawing::measure::{self, AngleFrom, LinearDirection, Measured, Reading};
 use solidcraft_doc::drawing::note::Note;
 use solidcraft_doc::drawing::thread_lines::{ThreadPiece, ThreadStroke};
 use solidcraft_doc::drawing::view::{
@@ -64,14 +67,13 @@ use solidcraft_doc::drawing_view::{
 use solidcraft_doc::ids;
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::cell::Projection;
-use solidcraft_geom::drawing_measure::{self, AngleFrom, LinearDirection, Measured, Reading};
 use solidcraft_geom::drawing_sheet::{DrawingBorderProfile, Sheet};
 use solidcraft_geom::drawing_view::{Invalid, NamedView, PRESETS, ProjectedSide, Scale};
-use solidcraft_geom::hlr::Visibility;
 use solidcraft_geom::paper::{MAX_COORDINATE_MM, MAX_SIDE_MM, Picture};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_io::paper::MAX_PICTURE_DPI;
+use solidcraft_kernel::hlr::Visibility;
 use solidcraft_render::VisualStyle;
 
 use super::CommandSpec;
@@ -161,7 +163,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<InspectResult>)
         .params(concat!(
-            "view: a saved view's id → {view, sheet, kind: base|projected|flat, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), exploded (\"assembled\" or {view: id}), pose (\"designed\", {joints: [...]} as saved, in radians and mm, or {study: {id, step}}; with drawn?, skipped? and study? for a position of its own), configuration (\"active\" or {row: id}, with drawn: {id, name} or null, and errors?), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|exact (a flat pattern view's)|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies, not_placed, nothing_chosen, no_exploded_view, not_posed, no_configuration, not_configured, no_flat or cut_away; a flat pattern view's: flat_pattern)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], choices: {visual_style, scale}}. Read-only; ",
+            "view: a saved view's id → {view, sheet, kind: base|projected|flat, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), exploded (\"assembled\" or {view: id}), pose (\"designed\", {joints: [...]} as saved, in radians and mm, or {study: {id, step}}; with drawn?, skipped? and study? for a position of its own), configuration (\"active\" or {row: id}, with drawn: {id, name} or null, and errors?), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|exact (a flat pattern view's)|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies, not_placed, nothing_chosen, no_exploded_view, not_posed, no_configuration, not_configured, no_flat or cut_away; a flat pattern view's: flat_pattern)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], centre_marks: [its manual marks' ids], centre_lines: [its manual lines' ids], choices: {visual_style, scale}}. Read-only; ",
             "a view of another configuration evaluates a copy of the design; ",
             "the design is unchanged.",
         )),
@@ -212,7 +214,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
             "sheet: id or name; ",
             "position_mm?: [x, y] for the copy's centre (default the sheet's centre); ",
             "with_linked?: the views lined up with it copied too, lined up with the copy (true), or not (false); ",
-            "needed when it has any → {view: the copy, sheet, views: [the copies, its first], outside?: [those whose boundary leaves the sheet's drawing space or lies over its title block]}. A copy follows none of the views it was copied from: a projected view copied alone becomes a base view, looking the way it did, with the settings it had. Each view's dimensions and balloons are copied with it, with ids of their own. One undo step.",
+            "needed when it has any → {view: the copy, sheet, views: [the copies, its first], outside?: [those whose boundary leaves the sheet's drawing space or lies over its title block]}. A copy follows none of the views it was copied from: a projected view copied alone becomes a base view, looking the way it did, with the settings it had. Each view's dimensions, balloons, notes, sketches, centre marks and centre lines are copied with it, with ids of their own. One undo step.",
         )),
     CommandSpec::new(BASE, "Base View", crate::checked!("drawing.view.base", base)).begins_edit()
         .icon("new")
@@ -487,11 +489,11 @@ fn measurements(s: &Session, request: &SnapshotParams, basis: &Plane, scale: Sca
         Ok(match m {
             MeasureParam::Linear { along, from, to } => {
                 let direction = if *along == AlongParam::X { LinearDirection::Horizontal } else { LinearDirection::Vertical };
-                let reading = drawing_measure::linear(basis, from.0, to.0, direction, Reading::Projected).map_err(invalid)?;
+                let reading = measure::linear(basis, from.0, to.0, direction, Reading::Projected).map_err(invalid)?;
                 length("linear", reading, LabelKind::Length)
             }
             MeasureParam::Aligned { from, to } => {
-                let reading = drawing_measure::linear(basis, from.0, to.0, LinearDirection::Aligned, Reading::Projected).map_err(invalid)?;
+                let reading = measure::linear(basis, from.0, to.0, LinearDirection::Aligned, Reading::Projected).map_err(invalid)?;
                 length("aligned", reading, LabelKind::Length)
             }
             MeasureParam::Angle { edge: [a, b], from } => {
@@ -500,7 +502,7 @@ fn measurements(s: &Session, request: &SnapshotParams, basis: &Plane, scale: Sca
                     AngleFromParam::View(ViewLineParam::Vertical) => AngleFrom::Vertical,
                     AngleFromParam::Line([c, d]) => AngleFrom::Edge(c.0, d.0),
                 };
-                let reading = drawing_measure::angle(basis, (a.0, b.0), line, Reading::Projected).map_err(invalid)?;
+                let reading = measure::angle(basis, (a.0, b.0), line, Reading::Projected).map_err(invalid)?;
                 MeasurementResult { value_mm: None, paper_mm: None, value_rad: Some(reading.value), ..length("angle", reading, LabelKind::Angle) }
             }
             MeasureParam::Radius { edge } => {
@@ -562,6 +564,15 @@ fn set_on(set_by: SetBy) -> String {
 /// settings were changed to leave one of them out after it was added: it stays, and says so.
 pub(super) fn drawn_warning<'a>(record: &Drawing, view: u64, paths: impl IntoIterator<Item = &'a [u64]>) -> Vec<String> {
     not_drawn(record, view, paths).map(|why| format!("view {} doesn't draw this part now: {why}", ids::encode(view))).into_iter().collect()
+}
+
+/// Warnings for centre references read from the active design.
+pub(super) fn centre_warning<'a>(record: &Drawing, view: u64, paths: impl IntoIterator<Item = &'a [u64]>) -> Vec<String> {
+    let mut warnings = drawn_warning(record, view, paths);
+    if let Some(apart) = crate::drawing_view::unsupported_centre_view(record, view) {
+        warnings.push(format!("centre annotations are not drawn on {apart}; a held sheet may show its last accepted frame"));
+    }
+    warnings
 }
 
 /// Refused when `view` would show nothing of a design that has bodies to show. One with nothing to
@@ -696,6 +707,8 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         }),
         dimensions: d.dimensions.iter().filter(|dimension| dimension.view == view.id).map(|dimension| ids::encode(dimension.id)).collect(),
         balloons: d.balloons.iter().filter(|balloon| balloon.view == view.id).map(|balloon| ids::encode(balloon.id)).collect(),
+        centre_marks: d.centre_marks.iter().filter(|mark| mark.view == view.id).map(|mark| ids::encode(mark.id)).collect(),
+        centre_lines: d.centre_lines.iter().filter(|line| line.view == view.id).map(|line| ids::encode(line.id)).collect(),
         label: view.label.as_ref().map(|label| LabelResult {
             letter: label.letter.clone(),
             words: label.words.clone(),
@@ -1122,6 +1135,11 @@ fn check_apart(d: &Drawing, views: impl Iterator<Item = u64>, cmd: &str) -> Resu
         if let Some(why) = why {
             return Err(bad(cmd, why));
         }
+        if let Some(apart) = crate::drawing_view::unsupported_centre_view(d, view)
+            && (d.centre_marks.iter().any(|mark| mark.view == view) || d.centre_lines.iter().any(|line| line.view == view))
+        {
+            return Err(bad(cmd, format!("not supported yet: {apart} with centre annotations")));
+        }
     }
     Ok(())
 }
@@ -1211,18 +1229,22 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let originals: Vec<u64> = std::iter::once(id).chain(linked.into_iter().filter(|_| with_linked)).collect();
-    // Each view's dimensions, balloons, notes and sketches are part of what it shows, so they are copied with it.
+    // Each view's dimensions, balloons, notes, centre marks, centre lines and sketches are part of what it shows, so they are copied with it.
     let measured: Vec<u64> = record.dimensions.iter().filter(|d| originals.contains(&d.view)).map(|d| d.id).collect();
     let ballooned: Vec<u64> = record.balloons.iter().filter(|b| originals.contains(&b.view)).map(|b| b.id).collect();
+    let marked: Vec<u64> = record.centre_marks.iter().filter(|m| originals.contains(&m.view)).map(|m| m.id).collect();
+    let lined: Vec<u64> = record.centre_lines.iter().filter(|line| originals.contains(&line.view)).map(|line| line.id).collect();
     let noted: Vec<u64> = record.notes.iter().filter(|n| n.anchor.view().is_some_and(|v| originals.contains(&v))).map(|n| n.id).collect();
     let sketched: Vec<u64> = record.sketches.iter().filter(|k| k.owner.view().is_some_and(|v| originals.contains(&v))).map(|k| k.id).collect();
-    let mut copies = (0..originals.len() + measured.len() + ballooned.len() + noted.len() + sketched.len())
+    let mut copies = (0..originals.len() + measured.len() + ballooned.len() + marked.len() + lined.len() + noted.len() + sketched.len())
         .map(|_| record.allocate_id(&mut s.ids))
         .collect::<solidcraft_doc::Result<Vec<u64>>>()
         .map_err(|e| bad(COPY, e.to_string()))?;
     let mut dimension_copies = copies.split_off(originals.len());
     let mut balloon_copies = dimension_copies.split_off(measured.len());
-    let mut note_copies = balloon_copies.split_off(ballooned.len());
+    let mut mark_copies = balloon_copies.split_off(ballooned.len());
+    let mut line_copies = mark_copies.split_off(marked.len());
+    let mut note_copies = line_copies.split_off(lined.len());
     let sketch_copies = note_copies.split_off(noted.len());
     let copy_of = |old: u64| originals.iter().position(|o| *o == old).and_then(|i| copies.get(i)).copied();
     let sheet = s.edit_drawing(COPY, |d| {
@@ -1311,6 +1333,24 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
             })
             .collect();
         d.notes.add(copied);
+        let copied: Vec<Arc<CentreMark>> = marked
+            .iter()
+            .zip(&mark_copies)
+            .filter_map(|(old, new)| {
+                let original = d.centre_mark(*old)?;
+                Some(Arc::new(CentreMark { id: *new, view: copy_of(original.view)?, ..original.clone() }))
+            })
+            .collect();
+        d.add_centre_marks(copied);
+        let copied: Vec<Arc<CentreLine>> = lined
+            .iter()
+            .zip(&line_copies)
+            .filter_map(|(old, new)| {
+                let original = d.centre_line(*old)?;
+                Some(Arc::new(CentreLine { id: *new, view: copy_of(original.view)?, ..original.clone() }))
+            })
+            .collect();
+        d.add_centre_lines(copied);
         let copied: Vec<Arc<SheetSketch>> = sketched
             .iter()
             .zip(&sketch_copies)

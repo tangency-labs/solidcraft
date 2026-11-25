@@ -22,6 +22,7 @@ pub mod ribbon;
 pub mod start_page;
 pub mod theme_files;
 pub mod theme_options;
+pub mod tint;
 pub mod toast;
 pub mod view_compass;
 pub mod view_layout_menu;
@@ -64,6 +65,7 @@ mod navigation_menu;
 mod navigation_settings;
 pub mod panel;
 mod panel_host;
+mod part_card;
 mod preferences;
 mod preferences_assistant;
 #[allow(dead_code, reason = "composed by the Preferences pages of #9875 to #9883")]
@@ -195,6 +197,7 @@ pub use panel::inspector_header;
 pub use panel::panel_header_hover;
 pub use panel::within;
 pub use panel_host::*;
+pub use part_card::{PartCard, PartCardSize, PartFace, fitted, folder_button, part_card, part_row};
 pub use preferences::*;
 pub use preferences_assistant::*;
 #[allow(unused_imports, reason = "composed by the Preferences pages of #9875 to #9883")]

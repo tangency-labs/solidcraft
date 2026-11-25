@@ -282,6 +282,7 @@ pub(super) fn split_soft<T>(r: Result<T>) -> Result<core::result::Result<T, Soli
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }),
         ) => Err(e),
@@ -2390,8 +2391,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             return Err(refusal);
         }
 
-        // Resolve OverlappingPEs (SE_MSG: the status only warns)
-        if let Some(d) = ignore_soft(mgr.resolve_overlapping_proto_edges(k, brep, approx_tol))? {
+        // Resolve OverlappingPEs (SE_MSG: the status only warns). Not upstream (#18927): a
+        // group that failed part way through its replacement refuses the Boolean.
+        let resolved = mgr.resolve_overlapping_proto_edges(k, brep, approx_tol);
+        if let Some(refusal) = mgr.take_self_loop_refusal() {
+            return Err(refusal);
+        }
+        if let Some(d) = ignore_soft(resolved)? {
             deleted.extend(d);
         }
 
