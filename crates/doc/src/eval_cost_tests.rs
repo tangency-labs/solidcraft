@@ -5057,3 +5057,146 @@ fn multi_target_join_batches_same_target_apart_tools_and_keeps_sheet_identity() 
     assert!((volume(&model, "A") - 4608.0).abs() < 1e-4, "{}", volume(&model, "A"));
     assert!((volume(&model, &sheet_name) - sheet_vol).abs() < 1e-6, "{}", volume(&model, &sheet_name));
 }
+
+/// A hollow rectangular tube (outer `w` x `h`, wall thickness `wall`, length `len`, centred on X
+/// and Y, standing on Z = 0..`h`), open at both X ends.
+fn hollow_tube(doc: &mut Document, len: f64, w: f64, h: f64, wall: f64) {
+    let outer = FeatureKind::Box {
+        corner: point_expr(Vec3::new(-len / 2.0, -w / 2.0, 0.0)),
+        length: len.to_string().into(),
+        width: w.to_string().into(),
+        height: h.to_string().into(),
+        operation: Operation::NewBody,
+        centred: false,
+    };
+    doc.add_feature(outer, Some("Tube")).unwrap();
+    let cavity = FeatureKind::Box {
+        corner: point_expr(Vec3::new(-len / 2.0 - 1.0, -w / 2.0 + wall, wall)),
+        length: (len + 2.0).to_string().into(),
+        width: (w - 2.0 * wall).to_string().into(),
+        height: (h - 2.0 * wall).to_string().into(),
+        operation: Operation::Cut,
+        centred: false,
+    };
+    doc.add_feature(cavity, Some("Cavity")).unwrap();
+}
+
+/// A multi-point hole with 2..7 apart sketch points cuts all of them in one boolean without
+/// tessellating the body's display mesh, and leaves the same volume, faces and names as cutting
+/// them one by one.
+#[test]
+fn a_multi_point_hole_with_fewer_than_eight_points_cuts_at_once() {
+    let run = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("six holes");
+        block(&mut doc, "Plate", Vec3::new(0.0, 0.0, 0.0), [100.0, 40.0, 4.0]);
+        let mut sk = Sketch::new();
+        let ids: Vec<String> = (0..6)
+            .map(|i| {
+                let idx = sk.add_point(Vec2::new(10.0 + 15.0 * i as f64, 20.0), None).unwrap();
+                sk.points[idx].id.clone()
+            })
+            .collect();
+        let top = PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "4 mm".into() };
+        let sketch = doc.add_feature(FeatureKind::Sketch { plane: top, sketch: sk }, Some("Points")).unwrap();
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        let hole_kind: FeatureKind = serde_json::from_value(serde_json::json!({
+            "type": "hole", "position": [0, 0, 0], "direction": [0, 0, -1], "diameter": "5",
+            "points": {"sketch": sketch, "ids": ids},
+        }))
+        .unwrap();
+        doc.add_feature(hole_kind, Some("Holes")).unwrap();
+        let work = counted(|| model.evaluate(&doc));
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+        let st = model.state();
+        let body = &st.bodies[0];
+        let meshed = body.mesh.get().is_some();
+        let mut names = crate::naming::face_names(body).to_vec();
+        names.sort();
+        (disc_volume(&model), body.body.face_count(), names, work, meshed)
+    };
+    let (v_batch, f_batch, n_batch, w_batch, meshed) = run(super::MAX_JOINED_TOOLS);
+    let (v_seq, f_seq, n_seq, _, _) = run(1);
+    assert_eq!((w_batch.cut, w_batch.cut_tools), (1, 1), "{w_batch:?}");
+    assert!(!meshed, "multi-point hole on a planar face should not tessellate the display mesh");
+    let expected = 100.0 * 40.0 * 4.0 - 6.0 * std::f64::consts::PI * 2.5 * 2.5 * 4.0;
+    assert!((v_batch - expected).abs() < 1e-4 * expected, "{v_batch} vs {expected}");
+    assert!((v_batch - v_seq).abs() < 1e-6 * expected, "{v_batch} vs {v_seq}");
+    assert_eq!(f_batch, f_seq);
+    assert_eq!(n_batch, n_seq);
+}
+
+/// Mirroring many disjoint hole features onto the other half of a hollow tube batches all their
+/// mirrored cuts into one `apply_traced` call (one boolean for <= 32 tools) with zero display mesh
+/// tessellation and identical geometry and face names to cutting each hole one by one.
+#[test]
+fn mirroring_many_hole_features_batches_disjoint_cuts_and_keeps_names() {
+    let run = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("mirrored tube holes");
+        hollow_tube(&mut doc, 300.0, 80.0, 100.0, 3.0);
+        let mut holes = Vec::new();
+        for i in 0..12 {
+            let x = 15.0 + 10.0 * i as f64;
+            let y = if i % 2 == 0 { -20.0 } else { 20.0 };
+            holes.push(doc.add_feature(hole(Vec3::new(x, y, 100.0), Vec3::new(0.0, 0.0, -1.0), 5.0), Some(&format!("H{i}"))).unwrap());
+        }
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+        assert!(model.state().bodies[0].mesh.get().is_none(), "single holes on planar faces should not tessellate the display mesh");
+        let mirror = mirror_of(&mut doc, &holes, PlaneRef::Origin { name: "YZ".into() });
+        let work = counted(|| model.evaluate(&doc));
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+        let st = model.state();
+        let body = &st.bodies[0];
+        let meshed = body.mesh.get().is_some();
+        let mut names = crate::naming::face_names(body).to_vec();
+        names.sort();
+        (mirror, disc_volume(&model), body.body.face_count(), names, work, meshed)
+    };
+    let (_, v_batch, f_batch, n_batch, w_batch, meshed) = run(super::MAX_JOINED_TOOLS);
+    let (_, v_seq, f_seq, n_seq, _, _) = run(1);
+    assert_eq!((w_batch.cut, w_batch.cut_tools, w_batch.miss_intersects), (1, 1, 0), "{w_batch:?}");
+    assert!(!meshed, "mirroring planar holes should not tessellate the display mesh");
+    let tube_v = 300.0 * (80.0 * 100.0 - 74.0 * 94.0);
+    let holes_v = 24.0 * std::f64::consts::PI * 2.5 * 2.5 * 6.0;
+    let expected = tube_v - holes_v;
+    assert!((v_batch - expected).abs() < 1e-4 * expected, "{v_batch} vs {expected}");
+    assert!((v_batch - v_seq).abs() < 1e-6 * expected, "{v_batch} vs {v_seq}");
+    assert_eq!(f_batch, f_seq);
+    assert_eq!(n_batch, n_seq);
+}
+
+/// Mirroring overlapping hole features flushes the pending cut batch before any overlapping hole
+/// so the geometry and face names stay identical to sequential execution.
+#[test]
+fn mirroring_overlapping_holes_flushes_and_matches_sequential_cut() {
+    let run = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("overlapping mirror");
+        block(&mut doc, "Plate", Vec3::new(-60.0, -20.0, 0.0), [120.0, 40.0, 6.0]);
+        let h1 = doc.add_feature(hole(Vec3::new(20.0, 0.0, 6.0), Vec3::new(0.0, 0.0, -1.0), 8.0), Some("H1")).unwrap();
+        // Overlaps H1 (centres 4 mm apart, radii 4 mm each).
+        let h2 = doc.add_feature(hole(Vec3::new(24.0, 0.0, 6.0), Vec3::new(0.0, 0.0, -1.0), 8.0), Some("H2")).unwrap();
+        // Disjoint from both H1 and H2.
+        let h3 = doc.add_feature(hole(Vec3::new(45.0, 0.0, 6.0), Vec3::new(0.0, 0.0, -1.0), 6.0), Some("H3")).unwrap();
+        mirror_of(&mut doc, &[h1, h2, h3], PlaneRef::Origin { name: "YZ".into() });
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+        let body = &model.state().bodies[0];
+        let mut names = crate::naming::face_names(body).to_vec();
+        names.sort();
+        (disc_volume(&model), body.body.face_count(), names)
+    };
+    let (v_batch, f_batch, n_batch) = run(super::MAX_JOINED_TOOLS);
+    let (v_seq, f_seq, n_seq) = run(1);
+    assert!((v_batch - v_seq).abs() < 1e-6 * v_seq.max(1.0), "{v_batch} vs {v_seq}");
+    assert_eq!(f_batch, f_seq);
+    assert_eq!(n_batch, n_seq);
+}
