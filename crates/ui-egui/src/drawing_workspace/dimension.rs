@@ -208,7 +208,7 @@ pub(crate) fn kind_for(app: &SolveApp, picks: &[Picked], at: Vec2) -> Option<Val
         [one] => match one.shape {
             Shape::Straight([a, b]) => json!({"length": {"edge": one.edge(), "direction": axis_name(linear_axis(a, b, at))}}),
             Shape::Round(_) => json!({"radial": {"edge": one.edge()}}),
-            Shape::Other => json!({"length": {"edge": one.edge()}}),
+            Shape::Other => return None,
         },
         [first, second] => match (first.shape, second.shape) {
             (Shape::Straight(a), Shape::Straight(b)) => match smaller_angle(a, b) {
@@ -337,6 +337,15 @@ pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen
             }
         } else {
             None
+        };
+        // A curve that is neither a line nor a face-on circle on paper (a fillet junction, a
+        // tilted circle) has no dimension the engine measures: say so rather than pick it.
+        let hit = match hit {
+            Some((_, picked)) if picked.shape == Shape::Other && !picked.is_outline() => {
+                app.set_status(solidcraft_ui_text::tr("ui.drawing_dimension_tool.curve"), true);
+                None
+            }
+            hit => hit,
         };
         match (&mut draft, hit) {
             // A first pick, or another edge of the same view as the first.

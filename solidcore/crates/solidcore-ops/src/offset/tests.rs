@@ -116,6 +116,7 @@ fn a_shell_keeps_its_rounds_as_blends_of_the_moved_radius() {
                     offsets[0].abs()
                 }
                 solidcore_record::brep::blend::RadiusRecord::Law(_)
+                | solidcore_record::brep::blend::RadiusRecord::Edge
                 | solidcore_record::brep::blend::RadiusRecord::EqualSetback => continue,
             },
             solidcore_record::brep::blend::BlendDefinition::ExactRound(d) => d.radius,
