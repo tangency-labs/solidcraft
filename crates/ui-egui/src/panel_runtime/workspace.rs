@@ -1963,7 +1963,7 @@ impl WorkspacePanelHost {
             return false;
         }
         let previous = self.options.geometry.scroll;
-        let next = crate::navigation::panel_scroll_offset(ui.ctx(), egui::vec2(previous.x, previous.y), maximum);
+        let next = ui_kit::panel_scroll_offset(ui.ctx(), egui::vec2(previous.x, previous.y), maximum);
         self.options.geometry.scroll = Point { x: next.x, y: next.y };
         previous != self.options.geometry.scroll
     }

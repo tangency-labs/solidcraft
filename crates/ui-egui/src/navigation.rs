@@ -44,26 +44,7 @@ impl NavCaps {
     }
 }
 
-/// Give a panel the wheel delta left by its children, one movable axis at a time.
-/// Boundary deltas remain available to the panel host's input fallback.
-pub(crate) fn panel_scroll_offset(ctx: &egui::Context, previous: egui::Vec2, maximum: egui::Vec2) -> egui::Vec2 {
-    let mut offset = previous;
-    ctx.input_mut(|input| {
-        if maximum.x > 0.0 && input.smooth_scroll_delta.x != 0.0 {
-            offset.x = (previous.x - input.smooth_scroll_delta.x).clamp(0.0, maximum.x);
-            if offset.x != previous.x {
-                input.smooth_scroll_delta.x = 0.0;
-            }
-        }
-        if maximum.y > 0.0 && input.smooth_scroll_delta.y != 0.0 {
-            offset.y = (previous.y - input.smooth_scroll_delta.y).clamp(0.0, maximum.y);
-            if offset.y != previous.y {
-                input.smooth_scroll_delta.y = 0.0;
-            }
-        }
-    });
-    offset
-}
+pub(crate) use solidcraft_ui_kit::panel_scroll_offset;
 
 /// Supplies the scroll phases browsers omit, before the shared navigation sees input.
 #[derive(Default)]
