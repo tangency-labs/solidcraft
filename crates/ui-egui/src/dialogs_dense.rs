@@ -1325,9 +1325,19 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             });
             extra_options(ui, "feature_options", &mut d.extra, &[("Flip direction", "flip")]);
         }
-        Kind::Pipe { diameter, wall, operation } => {
+        Kind::Pipe { diameter, wall, hollow, operation } => {
             enter |= expr_row(ui, "Diameter", diameter);
-            enter |= hint_row(ui, "Wall", wall, tr("solid"));
+            // A pipe is a solid rod or a hollow tube (#18344). The Type row says which one, and the
+            // Wall row stays where it was: a thickness typed in it makes a tube, as it always did,
+            // so nothing the user typed is ever dropped. Choosing Solid does not empty the Wall row:
+            // the thickness the user typed stays there, and the command carries it.
+            choice_row(ui, "Type", "pipe_type", hollow, &PIPE_TYPES);
+            let was_wall = (*wall).clone();
+            enter |= hint_row(ui, "Wall", wall, if *hollow == 1 { tr("ui.thickness") } else { tr("solid") });
+            if *wall != was_wall {
+                // A thickness in the field is a tube; an empty field is a rod (#18344).
+                *hollow = usize::from(!wall.trim().is_empty());
+            }
             choice_row(ui, "Operation", "pp_op", operation, &OP_LABELS);
         }
         Kind::Stock { margin } => {
