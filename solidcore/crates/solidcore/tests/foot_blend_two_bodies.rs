@@ -10,7 +10,8 @@
 //! on the tee are proved too. A toe in a notch of the base, and a hole in the base between
 //! the stations, are refused with the leg that fits; two plates butted flush, and a face that
 //! leaves the joint away from the corner, meet in no corner; a joint off one of the faces, or
-//! over a hole in it, and the same face twice are refused.
+//! over a hole in it, the same face twice, and a face on a region the kernel is unsure of are
+//! refused.
 //!
 //! The tolerances: a bead's edges lie within [`WELD_FIT_TOLERANCE`] of the exact toes and
 //! root (its section face is fitted to it); the plates' beads are planes, on which the
@@ -499,4 +500,35 @@ fn small_legs_on_the_tee_are_proved_on_the_faces() {
             .toes_on_bodies(&k, [&web, &base], [leg, leg], &[])
             .unwrap_or_else(|e| panic!("leg {leg}: {e}"));
     }
+}
+
+/// The cavity's floor again, with the cavity's region marked unsure (`UNSURE`, 2): the
+/// floor's outer use is on a region the kernel cannot classify, so `of_faces` refuses it
+/// (`UnsureRegion`) rather than reading it as void or as material.
+#[test]
+fn a_face_on_a_region_the_kernel_is_unsure_of_is_refused() {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::topology::brep::p1::regions;
+    let mut k = kernel();
+    let block_ = block(&mut k, [0.0; 3], [100.0, 100.0, 50.0]);
+    let cavity = block(&mut k, [20.0, 20.0, 10.0], [60.0, 60.0, 30.0]);
+    let mut base = boolean_difference(&mut k, block_, cavity).unwrap();
+    let infinite = base.infinite_region();
+    let mut changed = 0;
+    for r in regions(&base, None).unwrap() {
+        if Some(r) != infinite && base.region(r).unwrap().is_void() == 1 {
+            base.region_mut(r).unwrap().set_is_void(2);
+            changed += 1;
+        }
+    }
+    assert_eq!(changed, 1, "the cavity is the one void besides the outside");
+    let web = block(&mut k, [45.0, 20.0, 10.0], [10.0, 60.0, 20.0]);
+    let side = face_at(&k, &web, [45.0, 50.0, 10.0], [45.0, 20.0, 20.0]);
+    let floor = face_at(&k, &base, [50.0, 20.0, 10.0], [20.0, 50.0, 10.0]);
+    let joint = line([45.0, 20.0, 10.0], [45.0, 80.0, 10.0]);
+    let got = FootBlend::of_faces(&k, &web, side, &base, floor, &joint);
+    assert!(
+        matches!(&got, Err(SolidError::UnsureRegion { .. })),
+        "{got:?}"
+    );
 }
