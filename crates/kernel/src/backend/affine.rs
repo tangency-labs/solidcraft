@@ -3,13 +3,23 @@
 
 use solidcore_ops::{affine as ops, prism};
 use solidcore_record::{Loop2, Seg2, Vec2};
-use solidcraft_kernel_api::{Affine, AffineRefused, Matrix, OffsetQuad};
+use solidcraft_kernel_api::{Affine, AffineRefused, AxisRefusal, Matrix, OffsetQuad};
 
 use super::Solidcore;
 
 /// solidcore's refusal, in its words.
 fn refused(e: solidcore_ops::Error) -> AffineRefused {
     AffineRefused(e.to_string())
+}
+
+/// solidcore's refusal of an axis query, by the reason it states. Those queries refuse only with
+/// these three reasons; any other refusal is the numbers' (not finite).
+fn axis_refused(e: solidcore_ops::Error) -> AxisRefusal {
+    match e {
+        solidcore_ops::Error::Refused { reason: ops::REFUSED_ZERO_AXIS, .. } => AxisRefusal::ZeroAxis,
+        solidcore_ops::Error::Refused { reason: ops::REFUSED_FLAT_MAP, .. } => AxisRefusal::FlatMap,
+        _ => AxisRefusal::NotFinite,
+    }
 }
 
 impl Affine for Solidcore {
@@ -117,5 +127,17 @@ impl Affine for Solidcore {
 
     fn loop_circle(&self, lp: &Loop2) -> Option<(Vec2, f64)> {
         prism::loop_circle(lp)
+    }
+
+    fn extent_along(&self, min: [f64; 3], max: [f64; 3], placement: &Matrix, axis: [f64; 3]) -> Result<f64, AxisRefusal> {
+        ops::extent_along(min, max, placement, axis).map_err(axis_refused)
+    }
+
+    fn along_own_axes(&self, placement: &Matrix, axis: [f64; 3]) -> Result<bool, AxisRefusal> {
+        ops::along_own_axes(placement, axis).map_err(axis_refused)
+    }
+
+    fn square_plane_offset(&self, placement: &Matrix, origin: [f64; 3], normal: [f64; 3], axis: [f64; 3]) -> Result<Option<f64>, AxisRefusal> {
+        ops::square_plane_offset(placement, origin, normal, axis).map_err(axis_refused)
     }
 }

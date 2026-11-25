@@ -5,7 +5,7 @@
 use solidcore_record::{Loop2, Seg2, Vec2};
 use solidcraft_kernel_api::{Affine, OpKind};
 
-pub use solidcraft_kernel_api::affine::{AffineRefused, Matrix, OffsetQuad};
+pub use solidcraft_kernel_api::affine::{AffineRefused, AxisRefusal, Matrix, OffsetQuad};
 
 use super::{Which, which};
 use crate::backend::Solidcore;
@@ -211,6 +211,27 @@ pub fn loop_circle(lp: &Loop2) -> Option<(Vec2, f64)> {
     }
 }
 
+/// How far the box from `min` to `max` reaches along `axis` once placed by `placement`.
+pub fn extent_along(min: [f64; 3], max: [f64; 3], placement: &Matrix, axis: [f64; 3]) -> Result<f64, AxisRefusal> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.extent_along(min, max, placement, axis),
+    }
+}
+
+/// Whether `axis` runs along one of the own axes of a body placed by `placement`.
+pub fn along_own_axes(placement: &Matrix, axis: [f64; 3]) -> Result<bool, AxisRefusal> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.along_own_axes(placement, axis),
+    }
+}
+
+/// Where a flat face of a body placed by `placement` cuts the unit `axis`, if square to it.
+pub fn square_plane_offset(placement: &Matrix, origin: [f64; 3], normal: [f64; 3], axis: [f64; 3]) -> Result<Option<f64>, AxisRefusal> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.square_plane_offset(placement, origin, normal, axis),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,5 +256,17 @@ mod tests {
         assert_eq!(rotation([0.0; 3], [0.0; 3], 1.0), Err(AffineRefused(words)));
         let words = ops::chord_coordinates(Vec2::new(0.5, 0.0), 1.0, 1.0).unwrap_err().to_string();
         assert_eq!(chord_coordinates(Vec2::new(0.5, 0.0), 1.0, 1.0), Err(AffineRefused(words)));
+        // the axis queries' refusals keep their kinds
+        let id = ops::translation([0.0; 3]).unwrap();
+        let flat = [[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        let (lo, hi) = ([0.0; 3], [1.0, 2.0, 3.0]);
+        assert_eq!(extent_along(lo, hi, &id, [0.0, 0.0, 1.0]), Ok(ops::extent_along(lo, hi, &id, [0.0, 0.0, 1.0]).unwrap()));
+        assert_eq!(extent_along(lo, hi, &id, [0.0; 3]), Err(AxisRefusal::ZeroAxis));
+        assert_eq!(along_own_axes(&flat, [1.0, 0.0, 0.0]), Err(AxisRefusal::FlatMap));
+        assert_eq!(extent_along([f64::NAN, 0.0, 0.0], hi, &id, [1.0, 0.0, 0.0]), Err(AxisRefusal::NotFinite));
+        assert_eq!(
+            square_plane_offset(&id, [0.0, 0.0, 2.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]),
+            Ok(ops::square_plane_offset(&id, [0.0, 0.0, 2.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]).unwrap())
+        );
     }
 }

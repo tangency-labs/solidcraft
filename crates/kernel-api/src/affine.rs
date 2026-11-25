@@ -22,6 +22,18 @@ pub type OffsetQuad = ([f64; 3], [[f64; 3]; 4], [[f64; 3]; 4]);
 #[error("{0}")]
 pub struct AffineRefused(pub String);
 
+/// Why an axis query on a placed body ([`Affine::extent_along`], [`Affine::along_own_axes`],
+/// [`Affine::square_plane_offset`]) is refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AxisRefusal {
+    /// A number is not finite.
+    NotFinite,
+    /// The axis is zero.
+    ZeroAxis,
+    /// The placement flattens space.
+    FlatMap,
+}
+
 /// A planar face square to a direction ([`crate::OpKind::Affine`]): its level and tolerance.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SquareFaceLevel {
@@ -107,6 +119,17 @@ pub trait Affine: Backend {
     /// Whether the cubic `piece` is a trimmed interval of the cubic `source`, either way round.
     /// Other segment kinds are not.
     fn cubic_contains(&self, source: &Seg2, piece: &Seg2) -> bool;
+    /// How far the box from `min` to `max` (a body's own box) reaches along `axis` (a direction
+    /// of the outer frame, any length) once the body is placed by `placement`. Tight when `axis`
+    /// runs along one of the body's own axes.
+    fn extent_along(&self, min: [f64; 3], max: [f64; 3], placement: &Matrix, axis: [f64; 3]) -> Result<f64, AxisRefusal>;
+    /// Whether `axis`, a direction of the outer frame, runs along one of the own axes of a body
+    /// placed by `placement`.
+    fn along_own_axes(&self, placement: &Matrix, axis: [f64; 3]) -> Result<bool, AxisRefusal>;
+    /// Where a flat face (through `origin`, normal `normal`, in a body's own frame) of a body placed
+    /// by `placement` cuts the unit `axis`, as its offset from the outer origin; `None` when it is
+    /// not square to `axis`.
+    fn square_plane_offset(&self, placement: &Matrix, origin: [f64; 3], normal: [f64; 3], axis: [f64; 3]) -> Result<Option<f64>, AxisRefusal>;
     /// The circle of a loop of arcs making one directed turn on one stored support: its centre
     /// and radius.
     fn loop_circle(&self, lp: &Loop2) -> Option<(Vec2, f64)>;

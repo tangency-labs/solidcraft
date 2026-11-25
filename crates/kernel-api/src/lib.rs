@@ -27,7 +27,7 @@ pub mod cell_grid;
 pub mod exchange;
 pub mod modelling;
 
-pub use affine::{Affine, AffineRefused, Matrix, OffsetQuad, SquareFaceLevel};
+pub use affine::{Affine, AffineRefused, AxisRefusal, Matrix, OffsetQuad, SquareFaceLevel};
 pub use cell_grid::{CellGrid, CellGridLimits};
 pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
