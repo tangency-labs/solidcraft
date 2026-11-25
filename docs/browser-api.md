@@ -38,6 +38,10 @@ the API with the page's browser permissions. File paths refer to the browser's v
 system, not arbitrary files on the user's computer. Native-only operations remain subject to
 the browser host's limitations; this API does not grant desktop filesystem or window access.
 
+Call `file.save` and `file.save_as` with standalone `solidcraft.execute` requests. For a file in
+browser storage or on the computer, the promise settles after the host finishes writing.
+Explicit virtual paths such as `/upload/` stay in memory for the current page.
+
 ## A host page that keeps the designs
 
 `?embed=editor` runs the app as an editing embed: the ribbon, browser, timeline and properties,
@@ -68,7 +72,10 @@ cargo xtask web-api-test --site dist/web
 The test starts a local server and headless Chrome, discovers commands, creates a box in the
 live document, checks undo and redo, and verifies error handling and the pending-request limit.
 It also checks that Ctrl+Tab and Ctrl+Shift+Tab are left to the browser, which switches tabs with them.
-Last, it checks that the app's mouse buttons follow the browser's after chords (two buttons held
+It checks that the app's mouse buttons follow the browser's after chords (two buttons held
 at once), a drag let go outside the window, a release the page never heard of and the window losing focus,
 and that the focus moving inside the page (to a text field's hidden input and back) lets go of none.
+Last, in a tab of its own, it makes the drawing milestone's test plate and its drawing by commands
+(`examples/acceptance/drawing_m2.json`) and exports the sheet as SVG and PNG. It then starts the app
+again with the design put back (`document.export`, `document.import`): the drawing reads and exports the same.
 Set `CHROME` to a Chrome or Chromium executable if it is not installed in a usual location.

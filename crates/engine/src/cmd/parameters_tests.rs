@@ -321,7 +321,7 @@ fn rules_and_canvases_follow_a_renamed_parameter() {
     }
     let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
     png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    run(&mut s, "canvas.insert", json!({"data": solidcraft_doc::canvas::base64_encode(&png), "plane": "XY", "offset": "lift"}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png), "plane": "XY", "offset": "lift"}));
     run(&mut s, "sheet.manage_rules", json!({"name": "Steel", "thickness": "gauge", "active": true}));
     run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 2, "body_name": "Tray"}));
     run(&mut s, "sheet.convert", json!({"body": "Tray", "face": [30, 20, 2], "rule": "Steel"}));
@@ -1247,7 +1247,7 @@ fn any_value_input_can_define_a_parameter() {
     assert_eq!((s.doc.sheet.rules[0].thickness.as_str(), s.doc.param("gauge").map(|p| p.expr.as_str())), ("gauge", Some("2")));
     let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
     png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    run(&mut s, "canvas.insert", json!({"data": solidcraft_doc::canvas::base64_encode(&png), "plane": "XY", "offset": "lift = 15"}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png), "plane": "XY", "offset": "lift = 15"}));
     match &s.doc.canvases[0].plane {
         solidcraft_doc::PlaneRef::Offset { distance, .. } => assert_eq!(distance.as_ref(), "lift"),
         other => panic!("{other:?}"),

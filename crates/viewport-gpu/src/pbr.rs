@@ -28,7 +28,7 @@ fn pbr_encode(c: vec3<f32>) -> vec3<f32> {
 @vertex
 fn vs_pbr(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) base: vec3<f32>, @location(3) parameters: vec3<f32>) -> PbrOut {
     var o: PbrOut;
-    o.pos = u.vp * vec4<f32>(p, 1.0);
+    o.pos = face_pushed(u.vp * vec4<f32>(p, 1.0));
     o.n = n;
     o.base = base;
     o.wp = p;
@@ -75,13 +75,18 @@ fn vs_pbr_inst(
     @location(4) r1: vec4<f32>,
     @location(5) r2: vec4<f32>,
     @location(6) c: u32,
+    @location(9) s: u32,
 ) -> PbrOut {
     let q = vec4<f32>(p, 1.0);
-    let wp = vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q));
+    // Moved with its body, like every other placement (`placed_by` in viewport.wgsl): by its own
+    // motion, else its entry's (read only while something moves).
+    var m = 0u;
+    if (u.screen.z >= 0.5) { m = placement_motion(s, palette_entry(c)); }
+    let wp = placed_by(m, vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
     let at = vec2<u32>(c & 2047u, (c >> 11u) * 2u);
     var o: PbrOut;
-    o.pos = u.vp * vec4<f32>(wp, 1.0);
-    o.n = vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n));
+    o.pos = face_pushed(u.vp * vec4<f32>(wp, 1.0));
+    o.n = turned_by(m, vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n)));
     o.base = textureLoad(pbr_materials, at, 0).xyz;
     o.wp = wp;
     let optics = textureLoad(pbr_materials, at + vec2<u32>(0u, 1u), 0);
@@ -94,11 +99,14 @@ fn vs_pbr_inst(
 @vertex
 fn vs_pbr_palette(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> PbrOut {
     let at = vec2<u32>(c & 2047u, (c >> 11u) * 2u);
+    // Moved with its body, like every other built triangle.
+    let m = motion_at(c);
+    let wp = placed_by(m, p);
     var o: PbrOut;
-    o.pos = u.vp * vec4<f32>(p, 1.0);
-    o.n = n;
+    o.pos = face_pushed(u.vp * vec4<f32>(wp, 1.0));
+    o.n = turned_by(m, n);
     o.base = textureLoad(pbr_materials, at, 0).xyz;
-    o.wp = p;
+    o.wp = wp;
     let optics = textureLoad(pbr_materials, at + vec2<u32>(0u, 1u), 0);
     o.parameters = optics.xyz;
     o.two = optics.w;

@@ -756,6 +756,8 @@ pub enum ParameterUser {
     /// A joint's offset, angle or value, or a motion link's gear, rack or screw length (`input`
     /// says which).
     Joint { joint: u64, name: String, input: String },
+    /// A component's quantity in bills of materials (its `bom_quantity`).
+    Quantity { component: u64, name: String },
     /// A sheet metal or plastic rule's value (`kind` says which, `field` which value).
     Rule { kind: String, name: String, field: String },
     /// The plane a canvas lies on (`input` is its label, e.g. `Offset`).
@@ -772,6 +774,7 @@ impl From<ParamUser> for ParameterUser {
             ParamUser::Dimension { feature, name, constraint } => ParameterUser::Dimension { feature, name, constraint },
             ParamUser::Configuration { row, column } => ParameterUser::Configuration { row, column },
             ParamUser::Joint { joint, name, input } => ParameterUser::Joint { joint, name, input },
+            ParamUser::Quantity { component, name } => ParameterUser::Quantity { component, name },
             ParamUser::Rule { kind, name, field } => ParameterUser::Rule { kind, name, field },
             ParamUser::Canvas { canvas, name, input } => ParameterUser::Canvas { canvas, name, input },
             ParamUser::Occurrence { occurrence, name, input } => ParameterUser::Occurrence { occurrence, name, input },

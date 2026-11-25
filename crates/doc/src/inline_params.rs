@@ -132,7 +132,7 @@ impl Document {
         }
         for f in &mut next.features {
             f.kind.walk_exprs_mut(&mut |(_, e, kind, role)| {
-                let reads = if role == ExprRole::Placement { Reads::Millimetres } else { Reads::Typed(kind) };
+                let reads = if role == ExprRole::Placement && kind == Kind::Length { Reads::Millimetres } else { Reads::Typed(kind) };
                 found.take_expr(e, reads);
             });
             if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {

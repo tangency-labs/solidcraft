@@ -82,6 +82,8 @@ pub(crate) fn snap_hint(painter: &egui::Painter, c: Pos2, kind: SnapKind, col: C
 pub(crate) fn glyph_icon(name: &str) -> Option<&'static str> {
     Some(match name {
         "Coincident" => "c_coincident",
+        "Horizontal" => "c_horizontal",
+        "Vertical" => "c_vertical",
         "Parallel" => "c_parallel",
         "Perpendicular" => "c_perpendicular",
         "Collinear" => "c_collinear",
@@ -92,14 +94,44 @@ pub(crate) fn glyph_icon(name: &str) -> Option<&'static str> {
         "MidPoint" | "PointAlong" => "c_midpoint",
         "Symmetry" => "c_symmetry",
         "Fix" => "c_fix",
+        "Pierce" => "c_pierce",
         _ => return None,
     })
 }
-pub(crate) fn glyph_letter(name: &str) -> &'static str {
-    match name {
-        "Horizontal" => "-",
-        "Vertical" => "|",
-        _ => "?",
+
+/// Constraint icon id for an automatic snap / inference label when one exists.
+pub(crate) fn snap_icon(label: &str) -> Option<&'static str> {
+    Some(match label {
+        "//" => "c_parallel",
+        "\u{22a5}" => "c_perpendicular",
+        "T" => "c_tangent",
+        "Mid" => "c_midpoint",
+        "H" => "c_horizontal",
+        "V" => "c_vertical",
+        "H+V" => "c_hv",
+        "On" | "End" | "Pt" => "c_coincident",
+        _ => return None,
+    })
+}
+/// A dimension arrow with a rim of `rim` around it, so it reads on a bright face (#17575).
+pub(crate) fn dimension_arrow_rimmed(painter: &egui::Painter, t: Pos2, back: Pos2, col: Color32, rim: Color32) {
+    let d = (t - back).normalized();
+    let n = vec2(-d.y, d.x);
+    let tri = [t, t - d * 9.0 + n * 3.0, t - d * 9.0 - n * 3.0];
+    painter.add(egui::Shape::convex_polygon(tri.to_vec(), rim, Stroke::NONE));
+    // The rim is the triangle grown by 1.25 px with ROUND corners (#17575): a stroked polygon would
+    // join the three corners sharply.
+    for i in 0..3 {
+        painter.add(egui::Shape::line_segment([tri[i], tri[(i + 1) % 3]], Stroke::new(2.5, rim)));
+        painter.circle_filled(tri[i], 1.25, rim);
+    }
+    dimension_arrow(painter, t, back, col);
+}
+/// A rim of width `width` under the polyline `pts`, with round ends and joins (#17575).
+pub(crate) fn rounded_rim_line(painter: &egui::Painter, pts: &[Pos2], width: f32, rim: Color32) {
+    painter.add(egui::Shape::line(pts.to_vec(), Stroke::new(width, rim)));
+    for p in pts {
+        painter.circle_filled(*p, width / 2.0, rim);
     }
 }
 pub(crate) fn dimension_arrow(painter: &egui::Painter, t: Pos2, back: Pos2, col: Color32) {

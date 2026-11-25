@@ -940,7 +940,7 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
         OpIn::Collect { fu, threshold } => {
             let mut list = Vec::new();
             eu1::faceuse_collect_adjacent(
-                &Kernel::default(),
+                &crate::runner_kernel(),
                 b,
                 FaceuseId::from_index(*fu as u32),
                 &mut list,
@@ -985,7 +985,7 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
         OpIn::UvLoopGap { eu } => Ok(Output::new().values(
             "gap",
             vec![eu1::start_point_uv_loop_gap(
-                &Kernel::default(),
+                &crate::runner_kernel(),
                 b,
                 eid(*eu),
             )?],
@@ -1063,12 +1063,12 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             let mut vals: Vec<f64> = Vec::new();
             match which {
                 0 => out.push(flag(
-                    eu1::max_edge_face_gap(&Kernel::default(), b, e, *f)?.is_some(),
+                    eu1::max_edge_face_gap(&crate::runner_kernel(), b, e, *f)?.is_some(),
                 )),
                 1 => out.push(flag(
-                    eu1::edge_ccw_edge_gap(&Kernel::default(), b, e, *f)?.is_some(),
+                    eu1::edge_ccw_edge_gap(&crate::runner_kernel(), b, e, *f)?.is_some(),
                 )),
-                2 => match eu1::calc_max_edge_face_gap(&Kernel::default(), b, e, *f) {
+                2 => match eu1::calc_max_edge_face_gap(&crate::runner_kernel(), b, e, *f) {
                     Ok(g) => {
                         out.extend([0.0, flag(*want_out && g.is_init())]);
                         if *want_out && g.is_init() {
@@ -1078,7 +1078,7 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                     Err(x) if x.is_unported() => return Err(x.into()),
                     Err(x) => out.extend([status_of(&x), 0.0]),
                 },
-                _ => match eu1::calc_edge_ccw_edge_gap(&Kernel::default(), b, e, *want_out, *f) {
+                _ => match eu1::calc_edge_ccw_edge_gap(&crate::runner_kernel(), b, e, *want_out, *f) {
                     Ok(g) => {
                         out.extend([0.0, flag(g.is_some_and(|g| g.is_init()))]);
                         if let Some(g) = g.filter(solidcore::heal::gap::EdgeEdgeGap::is_init) {
@@ -1567,7 +1567,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        let k = &mut Kernel::default();
+        let k = &mut crate::runner_kernel();
         run_rust(k, &case.parse::<Inputs>()?)
     }
 
@@ -1619,7 +1619,7 @@ mod tests {
         ] {
             let case = crate::case::regression_case(&Runner, name);
             let inputs: Inputs = case.parse().expect("inputs");
-            let mut k = Kernel::default();
+            let mut k = crate::runner_kernel();
             let row = run_rust(&mut k, &inputs).expect("rust");
             let state = &row.values["state"];
             let [gap, t, u, v] = state[state.len() - 4..] else {

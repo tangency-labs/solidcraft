@@ -11,6 +11,7 @@
 
 #[cfg(target_os = "windows")]
 use std::collections::HashSet;
+use std::sync::Arc;
 
 #[cfg(feature = "accesskit")]
 pub use accesskit_winit;
@@ -840,10 +841,15 @@ impl State {
             return false;
         }
 
-        self.egui_input.events.push(egui::Event::MouseMoved(Vec2 {
+        let event = egui::Event::MouseMoved(Vec2 {
             x: delta.0 as f32,
             y: delta.1 as f32,
-        }));
+        });
+        push_motion(
+            &mut self.egui_input.events,
+            event,
+            self.any_pointer_button_down,
+        );
         true
     }
 
@@ -951,9 +957,11 @@ impl State {
                 });
             }
         } else {
-            self.egui_input
-                .events
-                .push(egui::Event::PointerMoved(pos_in_points));
+            push_motion(
+                &mut self.egui_input.events,
+                egui::Event::PointerMoved(pos_in_points),
+                self.any_pointer_button_down,
+            );
         }
     }
 
@@ -1509,6 +1517,22 @@ pub fn update_viewport_info(
 
     viewport_info.fullscreen = Some(window.fullscreen().is_some());
     viewport_info.focused = Some(window.has_focus());
+    viewport_info.native_window = native_window(window);
+}
+
+/// SolidCraft: the window's native handle for [`ViewportInfo::native_window`]: the `HWND` on
+/// Windows, `None` elsewhere.
+fn native_window(window: &Window) -> Option<u64> {
+    #[cfg(target_os = "windows")]
+    {
+        use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+        if let Ok(RawWindowHandle::Win32(handle)) = window.window_handle().map(|h| h.as_raw()) {
+            return Some(handle.hwnd.get() as u64);
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = window;
+    None
 }
 
 fn open_url_in_browser(_url: &str) {
@@ -1553,6 +1577,36 @@ fn is_paste_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {
         || (cfg!(target_os = "windows") && modifiers.shift && keycode == egui::Key::Insert)
 }
 
+/// Queue pointer motion for the next frame. While no button is held, motion joins the motion of
+/// the same kind in the run of motion events at the end of the queue: a `PointerMoved` takes the
+/// later position, a `MouseMoved` adds the deltas (platforms report the two interleaved). An app
+/// that skips the frames pointer motion asks for (`RawInput::repaint_on_pointer_move`) then holds
+/// at most one of each between two other events, not one per platform report. Every other event
+/// keeps its place between the motions; with a button held every report is kept, so a drag sees
+/// the whole path.
+fn push_motion(events: &mut Vec<egui::Event>, event: egui::Event, button_down: bool) {
+    if !button_down {
+        let run = events
+            .iter_mut()
+            .rev()
+            .take_while(|e| matches!(e, egui::Event::PointerMoved(_) | egui::Event::MouseMoved(_)));
+        for queued in run {
+            match (queued, &event) {
+                (egui::Event::PointerMoved(last), egui::Event::PointerMoved(pos)) => {
+                    *last = *pos;
+                    return;
+                }
+                (egui::Event::MouseMoved(last), egui::Event::MouseMoved(delta)) => {
+                    *last += *delta;
+                    return;
+                }
+                _ => {}
+            }
+        }
+    }
+    events.push(event);
+}
+
 fn translate_mouse_button(button: winit::event::MouseButton) -> Option<egui::PointerButton> {
     match button {
         winit::event::MouseButton::Left => Some(egui::PointerButton::Primary),
@@ -1560,8 +1614,33 @@ fn translate_mouse_button(button: winit::event::MouseButton) -> Option<egui::Poi
         winit::event::MouseButton::Middle => Some(egui::PointerButton::Middle),
         winit::event::MouseButton::Back => Some(egui::PointerButton::Extra1),
         winit::event::MouseButton::Forward => Some(egui::PointerButton::Extra2),
-        winit::event::MouseButton::Other(_) => None,
+        // SolidCraft: further buttons reach egui by their number (button 6 and up) instead of
+        // being dropped.
+        winit::event::MouseButton::Other(code) => {
+            other_button_number(code).and_then(egui::PointerButton::from_number)
+        }
     }
+}
+
+/// SolidCraft: the number of a button winit reports as `MouseButton::Other(code)`, counted as
+/// [`egui::PointerButton::number`] counts them (6 is the first button after Back and Forward).
+/// Each platform passes its own code through:
+/// - Windows: the X button, 1 and 2 being Back and Forward (3 is button 6).
+/// - macOS and the web: `buttonNumber` / `button`, from 0 (5 is button 6).
+/// - X11: the core button, 4 to 7 being the wheel and 8, 9 Back and Forward (10 is button 6).
+/// - Wayland: the evdev code, `BTN_LEFT` (0x110) to `BTN_BACK` (0x116) being the first seven
+///   (`BTN_TASK`, 0x117, is button 6). X11 codes never reach 0x110, so the two don't overlap.
+fn other_button_number(code: u16) -> Option<u16> {
+    let number = if cfg!(target_os = "windows") {
+        code.checked_add(3)?
+    } else if cfg!(any(target_os = "macos", target_os = "ios", target_arch = "wasm32")) {
+        code.checked_add(1)?
+    } else if code >= 0x117 {
+        code - 0x111
+    } else {
+        code.checked_sub(4)?
+    };
+    (number >= 6).then_some(number)
 }
 
 fn key_from_winit_key(key: &winit::keyboard::Key) -> Option<egui::Key> {
@@ -2192,6 +2271,19 @@ pub fn create_window(
     event_loop: &ActiveEventLoop,
     viewport_builder: &ViewportBuilder,
 ) -> Result<Window, winit::error::OsError> {
+    create_window_with_owner(egui_ctx, event_loop, viewport_builder, None)
+}
+
+/// Creates a window with an optional native owner.
+///
+/// # Errors
+/// Returns an error if the native window cannot be created.
+pub fn create_window_with_owner(
+    egui_ctx: &egui::Context,
+    event_loop: &ActiveEventLoop,
+    viewport_builder: &ViewportBuilder,
+    owner: Option<&Arc<Window>>,
+) -> Result<Window, winit::error::OsError> {
     profiling::function_scope!();
 
     let window_attributes = apply_monitor_to_window_attributes(
@@ -2199,6 +2291,11 @@ pub fn create_window(
         viewport_builder,
         event_loop,
     );
+
+    let window_attributes = match owner {
+        Some(owner) => window_attributes.with_owned_by(Arc::clone(owner)),
+        None => window_attributes,
+    };
 
     let window = event_loop.create_window(window_attributes)?;
     apply_viewport_builder_to_window(egui_ctx, &window, viewport_builder);
@@ -2259,6 +2356,7 @@ pub fn create_winit_window_attributes(
         minimize_button,
         maximize_button,
         window_level,
+        native_owner: _, // Applied during creation, with the live owner window.
 
         // macOS:
         fullsize_content_view: _fullsize_content_view,
@@ -2674,5 +2772,84 @@ pub fn short_window_event_description(event: &winit::event::WindowEvent) -> &'st
         WindowEvent::ThemeChanged { .. } => "WindowEvent::ThemeChanged",
         WindowEvent::Occluded { .. } => "WindowEvent::Occluded",
         WindowEvent::PanGesture { .. } => "WindowEvent::PanGesture",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::push_motion;
+
+    /// SolidCraft: a button past Back and Forward reaches egui as button 6 and up, by the code
+    /// this platform's winit backend reports for it; codes for the first five buttons give none.
+    #[test]
+    fn further_mouse_buttons_reach_egui_by_number() {
+        use super::{other_button_number, translate_mouse_button};
+        use winit::event::MouseButton;
+        let first = if cfg!(target_os = "windows") {
+            3
+        } else if cfg!(any(target_os = "macos", target_os = "ios", target_arch = "wasm32")) {
+            5
+        } else {
+            10
+        };
+        assert_eq!(other_button_number(first), Some(6));
+        assert_eq!(other_button_number(first + 10), Some(16));
+        assert_eq!(other_button_number(first - 1), None);
+        assert_eq!(translate_mouse_button(MouseButton::Other(first)), Some(egui::PointerButton::Extra3));
+        assert_eq!(translate_mouse_button(MouseButton::Other(first + 1)), Some(egui::PointerButton::Extra4));
+        assert_eq!(translate_mouse_button(MouseButton::Other(first + 10)), Some(egui::PointerButton::Extra13));
+        assert_eq!(translate_mouse_button(MouseButton::Other(first + 11)), None, "past button 16");
+        assert_eq!(translate_mouse_button(MouseButton::Back), Some(egui::PointerButton::Extra1));
+        assert_eq!(translate_mouse_button(MouseButton::Forward), Some(egui::PointerButton::Extra2));
+        if cfg!(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly")) {
+            // Wayland's evdev codes: BTN_TASK (0x117) is button 6, BTN_TASK + 1 button 7.
+            assert_eq!(other_button_number(0x117), Some(6));
+            assert_eq!(other_button_number(0x118), Some(7));
+        }
+        assert_eq!(translate_mouse_button(MouseButton::Other(u16::MAX)), None);
+    }
+    use egui::{Event, PointerButton, pos2, vec2};
+
+    /// Motion queued between frames collapses to one event of each run while no button is held,
+    /// and keeps its order around the other events; with a button held every report stays.
+    #[test]
+    fn queued_pointer_motion_collapses_between_other_events() {
+        let press = Event::PointerButton {
+            pos: pos2(3.0, 3.0),
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Default::default(),
+        };
+        let mut events = Vec::new();
+        // Window and raw motion come interleaved, one of each per report.
+        for i in 0..1000 {
+            push_motion(&mut events, Event::PointerMoved(pos2(i as f32, 1.0)), false);
+            push_motion(&mut events, Event::MouseMoved(vec2(1.0, 0.5)), false);
+        }
+        assert_eq!(
+            events,
+            [
+                Event::PointerMoved(pos2(999.0, 1.0)),
+                Event::MouseMoved(vec2(1000.0, 500.0))
+            ]
+        );
+        events.push(press.clone());
+        push_motion(&mut events, Event::MouseMoved(vec2(1.0, 2.0)), false);
+        push_motion(&mut events, Event::MouseMoved(vec2(3.0, -1.0)), false);
+        push_motion(&mut events, Event::PointerMoved(pos2(5.0, 5.0)), false);
+        assert_eq!(
+            events,
+            [
+                Event::PointerMoved(pos2(999.0, 1.0)),
+                Event::MouseMoved(vec2(1000.0, 500.0)),
+                press,
+                Event::MouseMoved(vec2(4.0, 1.0)),
+                Event::PointerMoved(pos2(5.0, 5.0)),
+            ]
+        );
+        push_motion(&mut events, Event::PointerMoved(pos2(6.0, 6.0)), true);
+        push_motion(&mut events, Event::MouseMoved(vec2(1.0, 0.0)), true);
+        push_motion(&mut events, Event::MouseMoved(vec2(1.0, 0.0)), true);
+        assert_eq!(events.len(), 8, "a held button keeps the whole path: {events:?}");
     }
 }

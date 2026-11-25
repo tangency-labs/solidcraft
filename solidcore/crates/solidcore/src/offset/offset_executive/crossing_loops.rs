@@ -51,15 +51,22 @@
 //! where it crosses itself and closed into simple loops (`classify_one_loop`); those whose
 //! signed area is negative are regions turned inside out, kept reversed where they are the
 //! cavity's floor and dropped otherwise, by the same rule as fork 1b016ca's.
+//! Source correspondence follows the face builder's input-curve owners, so a
+//! shortened stretch retains its source without a nearest-midpoint selection.
+//!
+//! Not in the fork (solidcore#3329): such a region is the cavity's floor only under an
+//! opening. One that lies within a wall (every stretch round it bounds an offset wall) is
+//! dropped, and the walls across it, which end on its edges, are carried on past it by a
+//! strip on each wall's surface; the merge cuts them where they meet and the rest goes
+//! with the excess faces.
 
 use std::collections::BTreeMap;
 
 use super::p1::{OffsetExecutive, OffsetOperation};
 use super::p2::OffsetNotifications;
-use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::Curve;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::{EntityRef, Result, SolidError, SM_ERR_ASSERT_FAILURE, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::object::NotifyOperation;
@@ -71,17 +78,21 @@ use crate::geom::vector2d::Point2;
 use crate::intersect::point_class::{live_owned_surface_global_point_solve, PointClassType};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
+use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::query::brep::BrepQuery;
 use crate::query::edge::closest_point;
 use crate::query::r#loop::contains_uv_point;
+use crate::surface::surface::exact_pieces::{common_trim_interval, trim_unsnapped};
 use crate::surface::surface::p1::{map_to_2d, zone_tol_3d};
 use crate::surface::surface::p4::NoObject;
 use crate::topology::brep::p1 as bp1;
 use crate::topology::brep::p3::{delete_face_with_body_identity, DeleteFaceOptions};
-use crate::topology::brep::p7::{make_face_with_curves_with_kernel_context, FaceCurvesInput};
+use crate::topology::brep::p7::{
+    make_face_with_curve_owners, make_face_with_curves_with_kernel_context, FaceCurvesInput,
+};
 use crate::topology::brep::p9::make_vertex_split_edge_with_state;
 use crate::topology::edge::{self, NotificationStores, NotifyState};
 use crate::topology::edgeuse::{p1 as eu, p3 as eu3};
@@ -171,7 +182,7 @@ struct LoopContact {
 /// The first derivative of `curve` at `t` (`Evaluate(t, 1, from_left, aEval)`, `aEval[1]`).
 fn curve_tangent(k: &Kernel, curve: &Curve, t: f64, from_left: bool) -> Result<Vec3> {
     let eval = curve.evaluate(k, t, 1, from_left, true)?;
-    Ok(*at(&eval, 1)?)
+    Ok(*present(eval.get(1), EVAL_1ST)?)
 }
 
 /// The directions in which a loop (its edge uses `loop_edgeuses`) leaves the point `p`
@@ -326,7 +337,7 @@ fn cut_at_crossings_refusing_touch(
 
     // Loops that touch without crossing bound no face there, however the rest of it is
     // resolved.
-    let surface = required(b.face(f)?.surface.as_ref())?;
+    let surface = present(b.face(f)?.surface.as_ref(), FACE_NO_SURFACE)?;
     for c in &contacts {
         let (e_a, e_b) = (
             edge_of(b, *at(edgeuses, c.a)?)?,
@@ -445,18 +456,7 @@ fn classify_one_loop(kernel: &Kernel, stretches: &mut [LoopStretch], uvs: &[Curv
         if ss != seed {
             return Err(unresolved(LoopCrossing::StretchUnclassified));
         }
-        let mut pieces = Vec::new();
-        let mut senses = Vec::new();
-        for &tt in &chain {
-            let stretch = at(stretches, tt)?;
-            let mut uv = at(uvs, stretch.uv)?.copy(kernel)?;
-            let mut ivl = Extent1d::from_min_max(stretch.lo, stretch.hi);
-            uv.trim(kernel, &mut ivl, TrimMode::Notify)?;
-            pieces.push(uv);
-            senses.push(stretch.same);
-        }
-        let orientation = uv_loop_orientation(kernel, &pieces, &senses, None)?;
-        let (keep, floor) = match orientation {
+        let (keep, floor) = match chain_orientation(kernel, stretches, uvs, &chain)? {
             OrientType::Same => (true, false),
             OrientType::Opposite => (false, true),
             OrientType::Unknown => return Err(unresolved(LoopCrossing::StretchUnclassified)),
@@ -472,72 +472,220 @@ fn classify_one_loop(kernel: &Kernel, stretches: &mut [LoopStretch], uvs: &[Curv
     Ok(())
 }
 
-/// The UV trim curve of an edge use does not run over its edge's interval
-/// (`SM_ERR_ASSERT_FAILURE`).
+/// The orientation in UV ([`uv_loop_orientation`]) of the loop that `chain`'s stretches close
+/// into, each its UV trim curve trimmed to the stretch.
+fn chain_orientation(
+    kernel: &Kernel,
+    stretches: &[LoopStretch],
+    uvs: &[Curve],
+    chain: &[usize],
+) -> Result<OrientType> {
+    let mut pieces = Vec::new();
+    let mut senses = Vec::new();
+    for &tt in chain {
+        let stretch = at(stretches, tt)?;
+        let mut uv = at(uvs, stretch.uv)?.copy(kernel)?;
+        let mut ivl = Extent1d::from_min_max(stretch.lo, stretch.hi);
+        uv.trim(kernel, &mut ivl, TrimMode::Notify)?;
+        pieces.push(uv);
+        senses.push(stretch.same);
+    }
+    uv_loop_orientation(kernel, &pieces, &senses, None)
+}
+
+/// (solidcraft#18278) Refuses ([`LoopCrossing::ComesApartAroundHole`]) a face whose hole lies
+/// inside one of its islands, `island_faces`, built from one loop each: the hole would be
+/// the island's, and a face of loops on a face is not built (module notes). Each hole is
+/// tested at the middle of its first stretch, which no island's loop passes through.
+#[allow(clippy::too_many_arguments)]
+fn holes_outside_islands(
+    kernel: &Kernel,
+    b: &mut Brep,
+    stretches: &[LoopStretch],
+    uvs: &[Curve],
+    new_loops: &[Vec<usize>],
+    hole_loops: &[usize],
+    island_faces: &[FaceId],
+    zone_tol: f64,
+) -> Result<()> {
+    if island_faces.is_empty() {
+        return Ok(());
+    }
+    for &ll in hole_loops {
+        let stretch = at(stretches, *present(at(new_loops, ll)?.first(), NO_STRETCH)?)?;
+        let uv3 = at(uvs, stretch.uv)?.evaluate_point(kernel, 0.5 * (stretch.lo + stretch.hi))?;
+        let uv = Point2::new(uv3.x, uv3.y);
+        for &island_face in island_faces {
+            let l = face_outer_loop(b, island_face)?;
+            let found = contains_uv_point(kernel, b, l, None, uv, zone_tol)?.containment;
+            if found != PointContainment::Outside {
+                return Err(unresolved(LoopCrossing::ComesApartAroundHole));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The edge loop of `face` (its `SM_OT_SAME` face use's first), for a face of one loop.
+fn face_outer_loop(b: &Brep, face: FaceId) -> Result<LoopId> {
+    let mut fu = present(face::upward_faceuse(b, face)?, FACE_NO_FACEUSE)?;
+    if eu::faceuse_orientation(b, fu)? != OrientType::Same {
+        fu = present(eu::faceuse_mate(b, fu)?, FU_NO_MATE)?;
+    }
+    for lu in eu::faceuse_loopuses(b, fu, false, None)? {
+        if let LoopuseStart::Vertexuse(_) = b.loopuse(lu)?.start {
+            continue;
+        }
+        return present(b.loopuse(lu)?.loop_, LU_NO_LOOP);
+    }
+    Err(defect(FACE_NO_LOOP))
+}
+
+/// The UV trim curve of an edge use does not run over its edge's interval: a defect, with
+/// the status `SM_ERR_ASSERT_FAILURE` of the check it replaces.
+#[track_caller]
 fn trim_interval_mismatch() -> SolidError {
-    SolidError::offset(
+    Failure::new(
         OP,
-        OffsetFailure::Inconsistent(
-            "an edge use's UV trim curve does not span its edge's interval",
-        ),
+        OffsetFailure::Defect {
+            why: "an offset edge use's UV trim curve does not span its edge's interval, though \
+                  the kernel keeps an edge use's trim curve over its edge's interval",
+        },
     )
+    .with_status(SM_ERR_ASSERT_FAILURE)
+    .into_error()
 }
 
-/// `value`, or `SM_ERR_NULL_POINTER` (upstream `NER`) for an entity or curve that is not
-/// there.
-fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::offset_missing(OP, "an entity or curve of the offset face"))
+/// A defect of the offset's own data (`why` says what is missing), with the status
+/// `SM_ERR_NULL_POINTER` of the `NER` it replaces.
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    Failure::new(OP, OffsetFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
 }
 
+/// `value`, or the defect `why` ([`defect`]): a link or entity of the offset B-rep, or of
+/// the routine's own data, that is not there.
+#[track_caller]
+fn present<T>(value: Option<T>, why: &'static str) -> Result<T> {
+    match value {
+        Some(v) => Ok(v),
+        None => Err(defect(why)),
+    }
+}
+
+/// Why an index into the routine's own lists is past their end.
+const INDEX_PAST_END: &str = "an index into the crossings' own lists is past their end, though \
+                              every index is taken from those lists";
+
+/// A wall strip's result: a strip that cannot be made is `None`, as [`crate::error::ignored`]
+/// reads it. A defect (the kernel's fault, [`SolidError::is_defect`]) is passed on with its
+/// reason, never read as a strip that cannot be made
+/// (`solidcore/docs/failure-codes-and-reproduction.md` §6, rule 5).
+fn strip_result<T>(r: Result<T>) -> Result<Option<T>> {
+    match r {
+        Err(e) if e.is_defect() => Err(e),
+        r => crate::error::ignored(r),
+    }
+}
+
+/// Why a curve's evaluation to the first derivative gave no tangent (the words of
+/// `intersect::curve_class::p1`).
+const EVAL_1ST: &str = "the curve's evaluation to the first derivative returned fewer than two \
+                        vectors, though it returns the point and each derivative asked for";
+
+#[track_caller]
 fn at<T>(v: &[T], i: usize) -> Result<&T> {
-    v.get(i)
-        .ok_or_else(|| SolidError::offset_missing(OP, "an entry of the crossings' own lists"))
+    present(v.get(i), INDEX_PAST_END)
 }
 
+#[track_caller]
 fn at_mut<T>(v: &mut [T], i: usize) -> Result<&mut T> {
-    v.get_mut(i)
-        .ok_or_else(|| SolidError::offset_missing(OP, "an entry of the crossings' own lists"))
+    present(v.get_mut(i), INDEX_PAST_END)
 }
 
+#[track_caller]
 fn index_i64(i: usize) -> Result<i64> {
-    i64::try_from(i).map_err(|_| SolidError::offset_missing(OP, "a node number for the edge use"))
+    match i64::try_from(i) {
+        Ok(n) => Ok(n),
+        Err(_) => Err(defect(
+            "an edge use's index does not fit a node number, though a list holds no more \
+             entries than an i64 counts",
+        )),
+    }
 }
+
+/// Why the offset B-rep is not there.
+const NO_OFFSET: &str = "the offset B-rep is not there, though the executive builds it before \
+                         it resolves crossing loops";
+/// Why an offset face has no surface.
+const FACE_NO_SURFACE: &str =
+    "an offset face has no surface, though the offset gives every face it builds one";
+/// Why an offset face has no face use.
+const FACE_NO_FACEUSE: &str =
+    "an offset face has no face use, though the kernel makes every face with its face uses";
+/// Why a face use has no mate.
+const FU_NO_MATE: &str = "a face use has no mate, though the kernel makes face uses in mated pairs";
+/// Why a vertex loop has no vertex use.
+const VLOOP_NO_VU: &str = "a vertex loop use has no vertex use, though the kernel starts every \
+                           vertex loop use with one";
+/// Why a vertex use has no vertex.
+const VU_NO_VERTEX: &str =
+    "a vertex use has no vertex, though the kernel links every vertex use to its vertex";
+/// Why a loop use has no loop.
+const LU_NO_LOOP: &str =
+    "a loop use has no loop, though the kernel links every loop use to its loop";
+/// Why an edge use has no UV trim curve.
+const EU_NO_UV: &str = "an edge use has no UV trim curve right after the curve was made for it \
+                        without an error";
+/// Why an edge use has no edge.
+const EU_NO_EDGE: &str =
+    "an edge use has no edge, though the kernel links every edge use to its edge";
+/// Why an edge use has no mate.
+const EU_NO_MATE: &str =
+    "an edge use has no mate, though the kernel makes edge uses in mated pairs";
+/// Why an edge use has no face use.
+const EU_NO_FU: &str = "an edge use of an offset face has no face use, though the kernel makes \
+                        every edge use of a face in a loop of its face use";
+/// Why an edge has no edge use.
+const EDGE_NO_EU: &str =
+    "an offset edge has no edge use, though the kernel makes every edge with its uses";
+/// Why an offset edge has no curve.
+const EDGE_NO_CURVE: &str =
+    "an offset edge has no curve, though the offset gives every edge it builds one";
+/// Why an edge has no vertex at an end.
+const EDGE_NO_VERTEX: &str =
+    "an offset edge has no vertex at an end, though the kernel bounds every edge by its vertices";
+/// Why a face just built is not returned.
+const NO_NEW_FACE: &str = "the face built from the kept stretches was not returned, though its \
+                           construction succeeded";
+
+/// Why a new loop has no stretch.
+const NO_STRETCH: &str =
+    "a new loop has no stretch, though each is closed from at least one kept stretch";
+/// Why a new face has no edge loop.
+const FACE_NO_LOOP: &str =
+    "a face just built from loops of stretches has no edge loop, though it was built from one";
 
 /// The vertex node of edge use `k`: `-1 - k`.
 fn vertex_node(k: usize) -> Result<i64> {
     Ok(-1 - index_i64(k)?)
 }
 
+#[track_caller]
 fn edge_of(b: &Brep, edgeuse: EdgeuseId) -> Result<EdgeId> {
-    required(eu::edge(b, edgeuse)?)
+    present(eu::edge(b, edgeuse)?, EU_NO_EDGE)
 }
 
+#[track_caller]
 fn edge_curve(b: &Brep, e: EdgeId) -> Result<&Curve> {
-    required(b.edge(e)?.curve.as_ref())
+    present(b.edge(e)?.curve.as_ref(), EDGE_NO_CURVE)
 }
 
+#[track_caller]
 fn vertex_point(b: &Brep, v: Option<crate::topology::VertexId>) -> Result<Point3> {
-    Ok(b.vertex(required(v)?)?.point)
-}
-
-/// `SmEdge::ClosestPoint`: `(found, distance)` of the nearest point of the edge's curve
-/// over its interval (a minimising global point solve at the edge's tolerance).
-fn edge_closest_distance(k: &Kernel, b: &Brep, e: EdgeId, point: Point3) -> Result<Option<f64>> {
-    let record = b.edge(e)?;
-    let curve = required(record.curve.as_ref())?;
-    let solutions = curve.global_point_solve(
-        k,
-        &record.interval,
-        SolverOperation::Minimize,
-        point,
-        record.tolerance,
-        SolutionRequested::All,
-        &GlobalPointSolveOptions::<NoObject>::default(),
-    )?;
-    Ok(solutions
-        .as_slice()
-        .first()
-        .map(|solution| solution.start.solution_value))
+    Ok(b.vertex(present(v, EDGE_NO_VERTEX)?)?.point)
 }
 
 /// (not in the fork, solidcraft#18374) A crossing of the loops of an offset face: where it
@@ -591,6 +739,55 @@ fn crossings_of(
 /// and ends at the same node, a vertex (`< 0`). That is a loop of one edge use that no
 /// crossing cuts, whole and as it was built, whose closed curve's two ends meet. A stretch
 /// that ends at a crossing, or runs between two vertices, is tested as before. A NaN
+/// (not in the fork, solidcore#3329) The parameters `[lo, hi]` of wall edge `wall` over the
+/// stretch from `from` through `mid` to `to` (its points on the face across): each end's
+/// closest parameter, taken at the other end of the edge's interval where it lies at one end
+/// of a closed edge (a seam), so that the interval holds the middle's. `None` where an end
+/// or the middle is not on the edge within `tol_3d`, or no such interval is found.
+fn stretch_on_wall(
+    kernel: &Kernel,
+    b: &Brep,
+    wall: EdgeId,
+    from: Point3,
+    mid: Point3,
+    to: Point3,
+    tol_3d: f64,
+) -> Result<Option<(f64, f64)>> {
+    let mut at = [0.0; 3];
+    for (slot, p) in at.iter_mut().zip([from, mid, to]) {
+        let Some(cp) = closest_point(kernel, b, wall, p)? else {
+            return Ok(None);
+        };
+        if cp.distance.is_nan() || cp.distance > tol_3d {
+            return Ok(None);
+        }
+        *slot = cp.parameter;
+    }
+    let [t0, tm, t1] = at;
+    let ivl = b.edge(wall)?.interval;
+    let closed = edge::start_vertex(b, wall)? == edge::end_vertex(b, wall)?;
+    let eps = 1.0e-9 * (1.0 + ivl.max().abs().max(ivl.min().abs()));
+    let ends = |t: f64| -> Vec<f64> {
+        if closed && (t - ivl.min()).abs() <= eps {
+            vec![t, ivl.max()]
+        } else if closed && (t - ivl.max()).abs() <= eps {
+            vec![t, ivl.min()]
+        } else {
+            vec![t]
+        }
+    };
+    let mut best: Option<(f64, f64)> = None;
+    for a in ends(t0) {
+        for z in ends(t1) {
+            let (lo, hi) = (a.min(z), a.max(z));
+            if lo < tm && tm < hi && best.is_none_or(|(l, h)| hi - lo < h - l) {
+                best = Some((lo, hi));
+            }
+        }
+    }
+    Ok(best)
+}
+
 /// distance or tolerance is too short, the whole loop's included.
 fn stretch_too_short(from: i64, to: i64, distance: f64, tol_3d: f64) -> bool {
     let whole_loop = from < 0 && from == to;
@@ -620,7 +817,7 @@ impl OffsetExecutive {
         original: &mut Brep,
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<()> {
-        let mut offset = required(self.take_offset_brep())?;
+        let mut offset = present(self.take_offset_brep(), NO_OFFSET)?;
         let status = bp1::faces(&offset, None).and_then(|faces| {
             faces.into_iter().try_for_each(|f| {
                 self.resolve_crossing_loops_of_face(kernel, original, &mut offset, f, notifications)
@@ -674,7 +871,7 @@ impl OffsetExecutive {
     /// curve trimmed to it, on a copy of its surface; the new faces, edges and vertices
     /// take the attributes and offset-map places of those they come from.
     #[allow(clippy::too_many_lines)] // one fork routine
-    fn resolve_crossing_loops_of_face(
+    pub(super) fn resolve_crossing_loops_of_face(
         &mut self,
         kernel: &mut Kernel,
         original: &mut Brep,
@@ -684,14 +881,14 @@ impl OffsetExecutive {
     ) -> Result<()> {
         // (the face's tolerance model: SmTol::GetZoneTol3d reads the surface's face)
         let (zone_tol, uv_tol) = {
-            let surface = required(b.face(f)?.surface.as_ref())?;
+            let surface = present(b.face(f)?.surface.as_ref(), FACE_NO_SURFACE)?;
             let zone_tol = zone_tol_3d(kernel, surface)?;
             let uv_mid = surface.natural_uv_domain_with_nurb(kernel)?.mid();
             (zone_tol, map_to_2d(kernel, zone_tol, uv_mid, surface)?)
         };
-        let mut fu = required(face::upward_faceuse(b, f)?)?;
+        let mut fu = present(face::upward_faceuse(b, f)?, FACE_NO_FACEUSE)?;
         if eu::faceuse_orientation(b, fu)? != OrientType::Same {
-            fu = required(eu::faceuse_mate(b, fu)?)?;
+            fu = present(eu::faceuse_mate(b, fu)?, FU_NO_MATE)?;
         }
 
         // The face's edge loops (the outer loop first) and the points of its vertex loops.
@@ -701,11 +898,12 @@ impl OffsetExecutive {
         for lu in eu::faceuse_loopuses(b, fu, false, None)? {
             if let LoopuseStart::Vertexuse(_) = b.loopuse(lu)?.start {
                 let vus = loopuse::vertexuses(b, lu, None)?;
-                let vu = required(vus.first().copied().flatten())?;
-                loop_points.push(vertex_point(b, vertexuse::vertex(b, vu)?)?);
+                let vu = present(vus.first().copied().flatten(), VLOOP_NO_VU)?;
+                let v = present(vertexuse::vertex(b, vu)?, VU_NO_VERTEX)?;
+                loop_points.push(b.vertex(v)?.point);
                 continue;
             }
-            loops.push(required(b.loopuse(lu)?.loop_)?);
+            loops.push(present(b.loopuse(lu)?.loop_, LU_NO_LOOP)?);
             loop_edgeuses.push(eu::loopuse_edgeuses(b, lu)?);
         }
         // (not upstream, solidcraft#16983) a face of one loop: the loop crosses itself, or
@@ -730,7 +928,7 @@ impl OffsetExecutive {
             first_of_loop.push(edgeuses.len());
             for &edgeuse in list {
                 eu3::get_or_create_uv_trim_curve(kernel, b, edgeuse, false, false, true)?.status?;
-                let uv = required(eu::uv_trim_curve(b, edgeuse)?.0.cloned())?;
+                let uv = present(eu::uv_trim_curve(b, edgeuse)?.0.cloned(), EU_NO_UV)?;
                 let e = edge_of(b, edgeuse)?;
                 if !uv.natural_interval().are_equal(&b.edge(e)?.interval, 0.0) {
                     return Err(trim_interval_mismatch());
@@ -1051,7 +1249,11 @@ impl OffsetExecutive {
                 if at(&stretches, tt)?.loop_index == 0 {
                     outer = true;
                 }
-                tt = required(*at(&next, tt)?)?;
+                tt = present(
+                    *at(&next, tt)?,
+                    "a kept stretch has no next stretch, though each kept stretch was given \
+                     one or refused as leaving no way",
+                )?;
             }
             new_loops.push(chain);
             new_loop_is_outer.push(outer);
@@ -1061,37 +1263,81 @@ impl OffsetExecutive {
         let outer_loops: Vec<usize> = (0..new_loops.len())
             .filter(|&ll| new_loop_is_outer.get(ll).copied().unwrap_or(false))
             .collect();
+        // (not in the fork, solidcraft#18278) An island: a new loop of inner loops' stretches
+        // only that winds round the way an outer loop does. Where the offsets of a ring of
+        // holes overlap their neighbours but leave the ring's middle, the stretches of the
+        // holes facing the middle close round it, and that region is a face of its own, not
+        // a hole of the face around the ring (whose loop would wind the wrong way, `SmFace`
+        // loop orientation test). An island stands whether or not a stretch of the outer
+        // loop is left round it.
+        let mut islands: Vec<usize> = Vec::new();
+        if !one_loop {
+            for (ll, chain) in new_loops.iter().enumerate() {
+                if new_loop_is_outer.get(ll).copied().unwrap_or(false) {
+                    continue;
+                }
+                if chain_orientation(kernel, &stretches, &uvs, chain)? == OrientType::Same {
+                    islands.push(ll);
+                }
+            }
+        }
         let hole_loops: Vec<usize> = (0..new_loops.len())
             .filter(|&ll| !new_loop_is_outer.get(ll).copied().unwrap_or(false))
+            .filter(|ll| !islands.contains(ll))
             .collect();
         // (deviation: SmBrep::MakeFaceFromLoopOnFace is not ported, so a face that
-        // comes apart is made one face per outer loop, and only without holes)
+        // comes apart is made one face per outer loop, and only without holes; an island
+        // is made first, a face of its one loop, and the holes go to the face around it
+        // only where none lies inside an island)
         if outer_loops.len() > 1 && !hole_loops.is_empty() {
             return Err(unresolved(LoopCrossing::ComesApartAroundHole));
         }
-        let face_loops: Vec<Vec<usize>> = if outer_loops.len() > 1 {
-            outer_loops.iter().map(|&ll| vec![ll]).collect()
-        } else if outer_loops.is_empty() {
-            Vec::new()
-        } else {
-            vec![outer_loops.iter().chain(&hole_loops).copied().collect()]
-        };
+        let mut face_loops: Vec<(Vec<usize>, bool)> =
+            islands.iter().map(|&ll| (vec![ll], true)).collect();
+        if outer_loops.len() > 1 {
+            face_loops.extend(outer_loops.iter().map(|&ll| (vec![ll], false)));
+        } else if !outer_loops.is_empty() {
+            face_loops.push((
+                outer_loops.iter().chain(&hole_loops).copied().collect(),
+                false,
+            ));
+        }
 
         // The face(s) the old one becomes; none when no stretch of its outer loop bounds
         // it.
         let uv_domain = b.face(f)?.uv_domain;
         let mut new_faces: Vec<FaceId> = Vec::new();
-        for order in &face_loops {
+        let mut island_faces: Vec<FaceId> = Vec::new();
+        let mut points_given = false;
+        let mut edge_sources: BTreeMap<EdgeId, EdgeuseId> = BTreeMap::new();
+        for (order, island) in &face_loops {
+            if !*island && !island_faces.is_empty() {
+                // every hole outside every island, else the face around the ring is not
+                // the hole's (refused as before)
+                holes_outside_islands(
+                    kernel,
+                    b,
+                    &stretches,
+                    &uvs,
+                    &new_loops,
+                    &hole_loops,
+                    &island_faces,
+                    zone_tol,
+                )?;
+                island_faces.clear();
+            }
             let mut input = FaceCurvesInput {
-                loop_points: if new_faces.is_empty() {
-                    loop_points.clone()
-                } else {
+                loop_points: if *island || points_given {
                     Vec::new()
+                } else {
+                    points_given = true;
+                    loop_points.clone()
                 },
                 ..FaceCurvesInput::default()
             };
             let mut curves_3d = Vec::new();
             let mut uv_curves = Vec::new();
+            let mut curve_sources = Vec::new();
             for &ll in order {
                 let chain = at(&new_loops, ll)?;
                 input.loops.push(chain.len());
@@ -1099,12 +1345,17 @@ impl OffsetExecutive {
                     let stretch = at(&stretches, ss)?;
                     let e = edge_of(b, stretch.edgeuse)?;
                     let mut curve_3d = edge_curve(b, e)?.copy(kernel)?;
-                    let mut ivl_3d = Extent1d::from_min_max(stretch.lo, stretch.hi);
-                    curve_3d.trim(kernel, &mut ivl_3d, TrimMode::Notify)?;
-                    curves_3d.push(Some(curve_3d));
                     let mut uv_curve = at(&uvs, stretch.uv)?.copy(kernel)?;
-                    let mut ivl_uv = Extent1d::from_min_max(stretch.lo, stretch.hi);
-                    uv_curve.trim(kernel, &mut ivl_uv, TrimMode::Notify)?;
+                    let interval = common_trim_interval(
+                        kernel,
+                        &[&curve_3d, &uv_curve],
+                        Extent1d::from_min_max(stretch.lo, stretch.hi),
+                        OP,
+                    )?;
+                    trim_unsnapped(kernel, &mut curve_3d, interval, OP)?;
+                    trim_unsnapped(kernel, &mut uv_curve, interval, OP)?;
+                    curves_3d.push(Some(curve_3d));
+                    curve_sources.push(stretch.edgeuse);
                     uv_curves.push(uv_curve);
                     input
                         .orientations
@@ -1113,7 +1364,8 @@ impl OffsetExecutive {
             }
             input.curves_3d = Some(curves_3d);
             input.uv_curves = Some(uv_curves);
-            let new_surface = required(b.face(f)?.surface.as_ref())?.copy(kernel)?;
+            let new_surface =
+                present(b.face(f)?.surface.as_ref(), FACE_NO_SURFACE)?.copy(kernel)?;
             let region = b.infinite_region();
             let key_of = notifications.result_key_of;
             let mut stores = NotificationStores {
@@ -1121,51 +1373,105 @@ impl OffsetExecutive {
                 attributes: &mut *notifications.attributes,
                 key_of,
             };
-            let made = make_face_with_curves_with_kernel_context(
+            let mut owners = Vec::new();
+            let made = NotifyState::from_kernel_stores(&mut stores).with_kernel_env(
                 kernel,
-                b,
-                region,
-                input,
-                new_surface,
-                &uv_domain,
-                OrientType::Same,
-                None,
-                &|face| key_of(EntityRef::Face(face)),
-                &mut stores,
+                |kernel, env| {
+                    make_face_with_curve_owners(
+                        kernel,
+                        b,
+                        region,
+                        input,
+                        new_surface,
+                        &uv_domain,
+                        OrientType::Same,
+                        Some(true),
+                        &|face| key_of(EntityRef::Face(face)),
+                        &mut owners,
+                        env,
+                    )
+                },
             )?;
-            new_faces.push(required(made.face)?);
+            if owners.len() != curve_sources.len() {
+                return Err(unresolved(LoopCrossing::StretchUnclassified));
+            }
+            for (owner, source) in owners.into_iter().zip(curve_sources) {
+                // Discarded degenerate slots own no edge. Every retained edge
+                // is still required to have a source below.
+                let Some(owner) = owner else { continue };
+                if let Some(previous) = edge_sources.insert(owner, source) {
+                    if edge_of(b, previous)? != edge_of(b, source)? {
+                        return Err(unresolved(LoopCrossing::StretchUnclassified));
+                    }
+                }
+            }
+            let made_face = present(made.face, NO_NEW_FACE)?;
+            if *island {
+                island_faces.push(made_face);
+            }
+            new_faces.push(made_face);
         }
+        // islands and no face round them: a hole inside one is still refused
+        holes_outside_islands(
+            kernel,
+            b,
+            &stretches,
+            &uvs,
+            &new_loops,
+            &hole_loops,
+            &island_faces,
+            zone_tol,
+        )?;
 
         // Fork 1b016ca: the regions the loops wind round the other way that are cavity,
         // each a face on the surface turned over (the loop runs round the region the
         // other way).
+        let mut walled: Vec<Vec<usize>> = Vec::new();
         for chain in &floor_loops {
             let mut input = FaceCurvesInput::default();
             input.loops.push(chain.len());
             let mut curves_3d = Vec::new();
             let mut uv_curves = Vec::new();
+            let mut curve_sources = Vec::new();
             for &ss in chain {
                 let stretch = at(&stretches, ss)?;
                 let e = edge_of(b, stretch.edgeuse)?;
                 let mut curve_3d = edge_curve(b, e)?.copy(kernel)?;
-                let mut ivl_3d = Extent1d::from_min_max(stretch.lo, stretch.hi);
-                curve_3d.trim(kernel, &mut ivl_3d, TrimMode::Notify)?;
-                curves_3d.push(Some(curve_3d));
                 let mut uv_curve = at(&uvs, stretch.uv)?.copy(kernel)?;
-                let mut ivl_uv = Extent1d::from_min_max(stretch.lo, stretch.hi);
-                uv_curve.trim(kernel, &mut ivl_uv, TrimMode::Notify)?;
+                let interval = common_trim_interval(
+                    kernel,
+                    &[&curve_3d, &uv_curve],
+                    Extent1d::from_min_max(stretch.lo, stretch.hi),
+                    OP,
+                )?;
+                trim_unsnapped(kernel, &mut curve_3d, interval, OP)?;
+                trim_unsnapped(kernel, &mut uv_curve, interval, OP)?;
+                curves_3d.push(Some(curve_3d));
+                curve_sources.push(stretch.edgeuse);
                 uv_curves.push(uv_curve);
                 input
                     .orientations
                     .push(eu::orientation(b, stretch.edgeuse)?);
             }
-            // a point inside the region, just off it on the side the cavity would lie on
+            // (not in the fork, solidcore#3329) of an offset that opens faces (a shell), only a
+            // region under an opening can be the cavity's floor; then a point inside the
+            // region, just off it on the side the cavity would lie on. An offset that opens
+            // nothing (a draft's local operation, solidcraft#18374) has no opening to ask
+            // about: the point alone says.
+            let opens = !self.shell_faces().is_empty();
+            if opens && !self.under_an_opening(original, b, &stretches, chain)? {
+                // the region lies within a wall: the walls across it are carried on past it so
+                // the merge cuts them where they meet
+                walled.push(chain.clone());
+                continue;
+            }
             if !self.floor_is_cavity(kernel, original, b, f, &stretches, chain)? {
                 continue;
             }
             input.curves_3d = Some(curves_3d);
             input.uv_curves = Some(uv_curves);
-            let new_surface = required(b.face(f)?.surface.as_ref())?.copy(kernel)?;
+            let new_surface =
+                present(b.face(f)?.surface.as_ref(), FACE_NO_SURFACE)?.copy(kernel)?;
             let region = b.infinite_region();
             let key_of = notifications.result_key_of;
             let mut stores = NotificationStores {
@@ -1173,23 +1479,47 @@ impl OffsetExecutive {
                 attributes: &mut *notifications.attributes,
                 key_of,
             };
-            let made = make_face_with_curves_with_kernel_context(
+            let mut owners = Vec::new();
+            let made = NotifyState::from_kernel_stores(&mut stores).with_kernel_env(
                 kernel,
-                b,
-                region,
-                input,
-                new_surface,
-                &uv_domain,
-                OrientType::Opposite,
-                None,
-                &|face| key_of(EntityRef::Face(face)),
-                &mut stores,
+                |kernel, env| {
+                    make_face_with_curve_owners(
+                        kernel,
+                        b,
+                        region,
+                        input,
+                        new_surface,
+                        &uv_domain,
+                        OrientType::Opposite,
+                        Some(true),
+                        &|face| key_of(EntityRef::Face(face)),
+                        &mut owners,
+                        env,
+                    )
+                },
             )?;
-            new_faces.push(required(made.face)?);
+            if owners.len() != curve_sources.len() {
+                return Err(unresolved(LoopCrossing::StretchUnclassified));
+            }
+            for (owner, source) in owners.into_iter().zip(curve_sources) {
+                // Discarded degenerate slots own no edge. Every retained edge
+                // is still required to have a source below.
+                let Some(owner) = owner else { continue };
+                if let Some(previous) = edge_sources.insert(owner, source) {
+                    if edge_of(b, previous)? != edge_of(b, source)? {
+                        return Err(unresolved(LoopCrossing::StretchUnclassified));
+                    }
+                }
+            }
+            new_faces.push(present(made.face, NO_NEW_FACE)?);
             // its edges come from them
             for &ss in chain {
                 at_mut(&mut stretches, ss)?.keep = true;
             }
+        }
+
+        for chain in &walled {
+            self.extend_walls_across(kernel, original, b, f, &stretches, chain, notifications)?;
         }
 
         // The new faces, edges and vertices take the attributes of the face, edges and
@@ -1215,17 +1545,13 @@ impl OffsetExecutive {
                 )
             })?;
             for new_edge in face_edges(b, new_face)? {
-                // the stretch whose middle lies on it
-                let mut from = None;
-                for stretch in stretches.iter().filter(|s| s.keep) {
-                    if let Some(dist) = edge_closest_distance(kernel, b, new_edge, stretch.mid)? {
-                        if dist <= tol_3d {
-                            from = Some(stretch.edgeuse);
-                            break;
-                        }
-                    }
-                }
-                let old_eu = required(from)?;
+                // The builder reports the edge that owns each input curve slot;
+                // provenance is that slot's source, not a nearest midpoint.
+                let old_eu = *present(
+                    edge_sources.get(&new_edge),
+                    "an edge of a rebuilt face has no source edge use, though the face builder \
+                     reports the slot that owns every edge it makes",
+                )?;
                 let old_edge = edge_of(b, old_eu)?;
                 let new_vertices = [
                     edge::start_vertex(b, new_edge)?,
@@ -1238,11 +1564,10 @@ impl OffsetExecutive {
                 let mut pairs = vec![(EntityRef::Edge(old_edge), EntityRef::Edge(new_edge))];
                 for &new_v in &new_vertices {
                     for &old_v in &old_vertices {
-                        if vertex_point(b, new_v)?.distance(vertex_point(b, old_v)?) <= tol_3d {
-                            pairs.push((
-                                EntityRef::Vertex(required(old_v)?),
-                                EntityRef::Vertex(required(new_v)?),
-                            ));
+                        let new_v = present(new_v, EDGE_NO_VERTEX)?;
+                        let old_v = present(old_v, EDGE_NO_VERTEX)?;
+                        if b.vertex(new_v)?.point.distance(b.vertex(old_v)?.point) <= tol_3d {
+                            pairs.push((EntityRef::Vertex(old_v), EntityRef::Vertex(new_v)));
                         }
                     }
                 }
@@ -1271,12 +1596,12 @@ impl OffsetExecutive {
                 )?;
                 let new_eus = b.edge(new_edge)?.edgeuses.clone();
                 for old in [Some(old_eu), eu::mate(b, old_eu)?] {
-                    let old = required(old)?;
+                    let old = present(old, EU_NO_MATE)?;
                     let old_orientation =
-                        eu::faceuse_orientation(b, required(eu::faceuse(b, old)?)?)?;
+                        eu::faceuse_orientation(b, present(eu::faceuse(b, old)?, EU_NO_FU)?)?;
                     let originals = self.edgeuse_to_edgeuses.firsts(old);
                     for &new_eu in &new_eus {
-                        let new_fu = required(eu::faceuse(b, new_eu)?)?;
+                        let new_fu = present(eu::faceuse(b, new_eu)?, EU_NO_FU)?;
                         if eu::faceuse_orientation(b, new_fu)? != old_orientation {
                             continue;
                         }
@@ -1322,7 +1647,7 @@ impl OffsetExecutive {
         }
         for &edgeuse in &edgeuses {
             for old in [Some(edgeuse), eu::mate(b, edgeuse)?] {
-                let old = required(old)?;
+                let old = present(old, EU_NO_MATE)?;
                 for original in self.edgeuse_to_edgeuses.firsts(old) {
                     self.edgeuse_to_edgeuses.remove_pair(original, old)?;
                 }
@@ -1403,7 +1728,7 @@ impl OffsetExecutive {
         tol_3d: f64,
     ) -> Result<bool> {
         for crossing in crossings {
-            let normal = required(b.face(f)?.surface.as_ref())?.evaluate_normal(
+            let normal = present(b.face(f)?.surface.as_ref(), FACE_NO_SURFACE)?.evaluate_normal(
                 kernel,
                 crossing.uv,
                 Side::Left,
@@ -1422,7 +1747,7 @@ impl OffsetExecutive {
                     if !(cp.distance.is_finite() && cp.distance <= tol_3d) {
                         return Ok(false);
                     }
-                    let wall_use = required(b.edge(wall)?.edgeuses.first().copied())?;
+                    let wall_use = present(b.edge(wall)?.edgeuses.first().copied(), EDGE_NO_EU)?;
                     let into = eu3::evaluate_binormal(
                         kernel,
                         b,
@@ -1542,14 +1867,25 @@ impl OffsetExecutive {
         let Some(&fu) = self.faceuse_to_faces.firsts(offset_face).first() else {
             return Ok(None);
         };
-        let orig = required(original.faceuse(fu)?.face)?;
+        let orig = present(
+            original.faceuse(fu)?.face,
+            "a face use of the body has no face, though the kernel links every face use to \
+             its face",
+        )?;
         let Some(shell) = original.faceuse(fu)?.shell else {
             return Ok(None);
         };
         let Some(region) = original.shell(shell)?.region else {
             return Ok(None);
         };
-        let surface = required(face::surface(original, orig)?)?.clone_for_evaluation()?;
+        // the body as the caller gave it
+        let Some(surface) = face::surface(original, orig)? else {
+            return Err(SolidError::offset(
+                OP,
+                OffsetFailure::FaceHasNoSurface { face: orig },
+            ));
+        };
+        let surface = surface.clone_for_evaluation()?;
         let domain = surface.natural_uv_domain_with_nurb(kernel)?;
         let solutions = live_owned_surface_global_point_solve(
             kernel,
@@ -1587,6 +1923,277 @@ impl OffsetExecutive {
         }))
     }
 
+    /// (not in the fork, solidcore#3329) Whether the region of an offset face that the
+    /// stretches `chain` wind round the other way lies under an opening: one of its
+    /// stretches is the offset of an edge of a face the shell opens. Such a stretch does
+    /// not move with the wall across it (there is none: the opening), so the loop it is on
+    /// can run past the other loop's moved side with the cavity reaching through between
+    /// them (fork 1b016ca's floor). Where every stretch bounds an offset wall, the loops
+    /// cross because those walls pass through each other (the merge cuts them where they
+    /// do), and the region they wind round the other way lies within one of the walls: not
+    /// cavity. [`Self::floor_is_cavity`]'s point just off such a region can miss the wall
+    /// it lies within, whose face ends at the region's own level (a concave round's offset
+    /// running past the moved outer wall below it, solidcore#3329), and the region was kept
+    /// as a fold-back sliver of floor. Such a region is dropped and the walls across it
+    /// carried on until they meet ([`Self::extend_walls_across`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology queries.
+    fn under_an_opening(
+        &self,
+        original: &Brep,
+        b: &Brep,
+        stretches: &[LoopStretch],
+        chain: &[usize],
+    ) -> Result<bool> {
+        let open = self.shell_faces();
+        for &ss in chain {
+            let edgeuse = at(stretches, ss)?.edgeuse;
+            for offset_use in [Some(edgeuse), eu::mate(b, edgeuse)?].into_iter().flatten() {
+                for source in self.edgeuse_to_edgeuses.firsts(offset_use) {
+                    let Some(e) = eu::edge(original, source)? else {
+                        continue;
+                    };
+                    for across in edge::edgeuses(original, e, None, None)? {
+                        if eu::face(original, across)?.is_some_and(|g| open.contains(&g)) {
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    /// (not in the fork, solidcore#3329) Carries each wall across a region of offset face
+    /// `f` that its loops wind round the other way and that lies within a wall
+    /// ([`Self::under_an_opening`] false) on past the region: on a copy of the wall's
+    /// surface, a strip beyond the stretch of the wall's edge that bounds the region, as
+    /// wide as the offset's wall. Where every stretch bounds an offset wall, the walls
+    /// end on the region's edges and do not meet; carried on, they pass through each
+    /// other above the region and the merge cuts them there (the strip is related to its
+    /// wall, which it continues, so the two are not intersected). What lies past the cut
+    /// is within the wall of the original and goes with the excess faces.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations, point solves and face construction.
+    #[allow(clippy::too_many_arguments)] // the crossing routine's state
+    fn extend_walls_across(
+        &mut self,
+        kernel: &mut Kernel,
+        original: &Brep,
+        b: &mut Brep,
+        f: FaceId,
+        stretches: &[LoopStretch],
+        chain: &[usize],
+        notifications: &mut OffsetNotifications<'_>,
+    ) -> Result<()> {
+        let reach = self.offset_distance().abs();
+        let tol_3d = self.approximation_tol_3d().max(b.tolerance()) * 10.0;
+        for &ss in chain {
+            let stretch = at(stretches, ss)?;
+            let (from, to) = {
+                let curve = edge_curve(b, edge_of(b, stretch.edgeuse)?)?;
+                (
+                    curve.evaluate_point(kernel, stretch.lo)?,
+                    curve.evaluate_point(kernel, stretch.hi)?,
+                )
+            };
+            for wall in self.walls_across(original, b, f, stretch.edgeuse)? {
+                let Some((lo, hi)) =
+                    stretch_on_wall(kernel, b, wall, from, stretch.mid, to, tol_3d)?
+                else {
+                    continue;
+                };
+                for wf in edge::faces(b, wall, None)? {
+                    // a strip that cannot be made leaves the walls apart, which the
+                    // shell's gate refuses; a defect is passed on
+                    let strip = strip_result(self.wall_strip(
+                        kernel,
+                        b,
+                        wf,
+                        wall,
+                        lo,
+                        hi,
+                        reach,
+                        notifications,
+                    ))?
+                    .flatten();
+                    if let Some(strip) = strip {
+                        for original_use in self.faceuse_to_faces.firsts(wf) {
+                            self.faceuse_to_faces.relate_pair(original_use, strip)?;
+                        }
+                        self.wall_extensions.push((wf, strip));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// (not in the fork, solidcore#3329) The strip that carries wall face `wf` on past
+    /// `[lo, hi]` of its edge `wall`, `reach` wide, on a copy of its surface: in UV, the
+    /// edge use's trim curve over `[lo, hi]`, the same moved off the face by the UV step
+    /// that measures `reach` on the surface at the middle, and the two lines between their
+    /// ends. `None` where the face has no edge use of `wall` or the step is not found.
+    #[allow(clippy::too_many_arguments)] // the crossing routine's state
+    fn wall_strip(
+        &mut self,
+        kernel: &mut Kernel,
+        b: &mut Brep,
+        wf: FaceId,
+        wall: EdgeId,
+        lo: f64,
+        hi: f64,
+        reach: f64,
+        notifications: &mut OffsetNotifications<'_>,
+    ) -> Result<Option<FaceId>> {
+        let mut fu = present(face::upward_faceuse(b, wf)?, FACE_NO_FACEUSE)?;
+        if eu::faceuse_orientation(b, fu)? != OrientType::Same {
+            fu = present(eu::faceuse_mate(b, fu)?, FU_NO_MATE)?;
+        }
+        let Some(edgeuse) = b
+            .edge(wall)?
+            .edgeuses
+            .iter()
+            .copied()
+            .find(|&u| eu::faceuse(b, u).ok().flatten() == Some(fu))
+        else {
+            return Ok(None);
+        };
+        eu3::get_or_create_uv_trim_curve(kernel, b, edgeuse, false, false, true)?.status?;
+        let uv = present(eu::uv_trim_curve(b, edgeuse)?.0.cloned(), EU_NO_UV)?;
+        let same = eu::orientation(b, edgeuse)? == OrientType::Same;
+        // the wall's surface carried on past its sides, its parameters kept (a bounded
+        // surface can end where the wall does)
+        let surface = super::reach::extended_by_margin(
+            kernel,
+            present(b.face(wf)?.surface.as_ref(), FACE_NO_SURFACE)?,
+            2.0 * reach,
+        )?;
+        let uv_at = |t: f64| -> Result<Point2> {
+            let p = uv.evaluate_point(kernel, t)?;
+            Ok(Point2::new(p.x, p.y))
+        };
+        // the edge use runs from `a` to `z` with the face on its left; the strip lies on
+        // its right
+        let (a, z) = if same { (lo, hi) } else { (hi, lo) };
+        let mid = 0.5 * (lo + hi);
+        let dt = 1.0e-3 * (hi - lo);
+        let m = uv_at(mid)?;
+        let ahead = uv_at(if same { mid + dt } else { mid - dt })?;
+        let behind = uv_at(if same { mid - dt } else { mid + dt })?;
+        let (du, dv) = (ahead.x - behind.x, ahead.y - behind.y);
+        let len = (du * du + dv * dv).sqrt();
+        if !(len.is_finite() && len > 0.0) {
+            return Ok(None);
+        }
+        // right of the direction of travel
+        let (nu, nv) = (dv / len, -du / len);
+        let p = surface.evaluate_point(kernel, m)?;
+        let h = 1.0e-6 * (1.0 + m.x.abs().max(m.y.abs()));
+        let q = surface.evaluate_point(kernel, Point2::new(m.x + h * nu, m.y + h * nv))?;
+        let per_uv = p.distance(q) / h;
+        if !(per_uv.is_finite() && per_uv > 0.0) {
+            return Ok(None);
+        }
+        let step = reach / per_uv;
+        let (su, sv) = (nu * step, nv * step);
+        let start = uv_at(a)?;
+        let end = uv_at(z)?;
+        let lift = |p: Point2| Point3::new(p.x + su, p.y + sv, 0.0);
+        let flat = |p: Point2| Point3::new(p.x, p.y, 0.0);
+
+        let mut along = uv.copy(kernel)?;
+        along.trim(
+            kernel,
+            &mut Extent1d::from_min_max(lo, hi),
+            TrimMode::Notify,
+        )?;
+        let mut beyond = along.copy(kernel)?;
+        beyond.transform(
+            kernel,
+            &crate::geom::axis2_placement::Axis2Placement::new(
+                Point3::new(su, sv, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ),
+            None,
+        )?;
+        let mut along_3d = edge_curve(b, wall)?.copy(kernel)?;
+        along_3d.trim(
+            kernel,
+            &mut Extent1d::from_min_max(lo, hi),
+            TrimMode::Notify,
+        )?;
+        let mut rail_out = Curve::from(BSplineCurve::create_line_segment(
+            2,
+            flat(start),
+            lift(start),
+        )?);
+        let mut rail_back =
+            Curve::from(BSplineCurve::create_line_segment(2, lift(end), flat(end))?);
+        let (back, on) = if same {
+            (OrientType::Opposite, OrientType::Same)
+        } else {
+            (OrientType::Same, OrientType::Opposite)
+        };
+        let mut uv_domain = b.face(wf)?.uv_domain;
+        for p in [start, end] {
+            uv_domain.add_point(Point2::new(p.x + su, p.y + sv));
+        }
+        // the new sides on the surface (the stretch keeps its edge's curve)
+        let tol = self.approximation_tol_3d();
+        let mut lifted = Vec::new();
+        for c in [&mut rail_out, &mut beyond, &mut rail_back] {
+            c.convert_to_2d(kernel)?;
+            let ivl = c.natural_interval();
+            let on = surface
+                .lift_curve(
+                    kernel,
+                    &uv_domain,
+                    &c.clone_for_evaluation()?,
+                    &ivl,
+                    tol,
+                    false,
+                )?
+                .curve;
+            lifted.push(Some(on));
+        }
+        let mut curves_3d = vec![Some(along_3d)];
+        curves_3d.extend(lifted);
+        // the edge's stretch run back (z to a), out at a, beyond (a to z), back at z
+        let input = FaceCurvesInput {
+            loops: vec![4],
+            curves_3d: Some(curves_3d),
+            uv_curves: Some(vec![along, rail_out, beyond, rail_back]),
+            orientations: vec![back, OrientType::Same, on, OrientType::Same],
+            loop_points: Vec::new(),
+        };
+        let region = b.infinite_region();
+        let key_of = notifications.result_key_of;
+        let mut stores = NotificationStores {
+            records: &mut *notifications.records,
+            attributes: &mut *notifications.attributes,
+            key_of,
+        };
+        let made = make_face_with_curves_with_kernel_context(
+            kernel,
+            b,
+            region,
+            input,
+            surface,
+            &uv_domain,
+            OrientType::Same,
+            None,
+            &|face| key_of(EntityRef::Face(face)),
+            &mut stores,
+        )?;
+        Ok(made.face)
+    }
+
     /// `sm_FloorIsCavity` (fork 1b016ca): whether the region of offset face `f` that the
     /// stretches `chain` wind round the other way is the cavity's face, reversed. The
     /// cavity would lie on the side of the region the face's own cavity side is not, so
@@ -1605,7 +2212,7 @@ impl OffsetExecutive {
         chain: &[usize],
     ) -> Result<bool> {
         let wall = self.offset_distance();
-        let surface = required(face::surface(b, f)?)?.clone_for_evaluation()?;
+        let surface = present(face::surface(b, f)?, FACE_NO_SURFACE)?.clone_for_evaluation()?;
         // a point of the region: the middle of its stretches' middles, on the surface
         let mut mid = Point3::new(0.0, 0.0, 0.0);
         for &ss in chain {
@@ -1752,5 +2359,70 @@ mod tests {
         // long enough
         assert!(!stretch_too_short(0, 1, 0.02, tol));
         assert!(!stretch_too_short(-2, -3, 0.02, tol));
+    }
+
+    /// The helpers' defects keep the status of the check each replaces and say their own
+    /// reason: the trim interval mismatch `SM_ERR_ASSERT_FAILURE`, a missing link, a list
+    /// index past the end and a missing tangent `SM_ERR_NULL_POINTER`; all are defects of
+    /// this routine with no entity.
+    #[test]
+    fn the_helpers_defects_keep_the_status_they_replace() {
+        use crate::error::ErrorKind;
+        let short = [0_u8];
+        let cases = [
+            (
+                trim_interval_mismatch(),
+                SM_ERR_ASSERT_FAILURE,
+                "an offset edge use's UV trim curve does not span its edge's interval, though \
+                 the kernel keeps an edge use's trim curve over its edge's interval",
+            ),
+            (
+                present(None::<u8>, FU_NO_MATE).unwrap_err(),
+                SM_ERR_NULL_POINTER,
+                FU_NO_MATE,
+            ),
+            (
+                at(&short, 1).unwrap_err(),
+                SM_ERR_NULL_POINTER,
+                INDEX_PAST_END,
+            ),
+            (
+                present(None::<u8>, EVAL_1ST).unwrap_err(),
+                SM_ERR_NULL_POINTER,
+                EVAL_1ST,
+            ),
+        ];
+        for (error, status, why) in cases {
+            assert_eq!(error.upstream_status(), Some(status), "{error:?}");
+            assert_eq!(error.kind(), ErrorKind::StageFailed, "{error:?}");
+            assert!(error.is_defect(), "{error:?}");
+            assert_eq!(error.operation(), OP, "{error:?}");
+            assert_eq!(error.entity(), None, "{error:?}");
+            assert_eq!(
+                error.offset_failure(),
+                Some(&OffsetFailure::Defect { why }),
+                "{error:?}"
+            );
+        }
+        assert_eq!(at(&short, 0).ok(), Some(&0));
+        assert_eq!(present(Some(7_u8), FU_NO_MATE).ok(), Some(7));
+    }
+
+    /// A wall strip's defect reaches the caller with its reason; a strip that cannot be made
+    /// for any other reason is skipped, and a strip that is made is kept.
+    #[test]
+    fn a_wall_strip_defect_is_passed_on_and_other_failures_skip_the_strip() {
+        let defect = strip_result::<u8>(present(None, FACE_NO_FACEUSE)).unwrap_err();
+        assert!(defect.is_defect(), "{defect:?}");
+        assert_eq!(
+            defect.offset_failure(),
+            Some(&OffsetFailure::Defect {
+                why: FACE_NO_FACEUSE
+            })
+        );
+        let failed = SolidError::invalid_input(OP, "no step found");
+        assert!(!failed.is_defect());
+        assert_eq!(strip_result::<u8>(Err(failed)).ok(), Some(None));
+        assert_eq!(strip_result(Ok(7_u8)).ok(), Some(Some(7)));
     }
 }

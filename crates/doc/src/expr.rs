@@ -569,6 +569,17 @@ fn lex_spans(s: &str) -> Result<Vec<(Tok, usize, usize)>, DocError> {
                 i += 1;
             }
             out.push((Tok::Id(s.get(at(st)..at(i)).unwrap_or_default().to_string()), at(st), at(i)));
+            // A name with dots: a point's coordinate (`p1.x`, `l1.start.x`). The dots are part
+            // of the name, so the name is never a parameter's.
+            while cs.get(i).is_some_and(|(_, c)| *c == '.') && cs.get(i + 1).is_some_and(|(_, c)| c.is_alphabetic() || *c == '_') {
+                out.push((Tok::Op('.'), at(i), at(i + 1)));
+                i += 1;
+                let st = i;
+                while cs.get(i).is_some_and(|(_, c)| c.is_alphanumeric() || *c == '_') {
+                    i += 1;
+                }
+                out.push((Tok::Id(s.get(at(st)..at(i)).unwrap_or_default().to_string()), at(st), at(i)));
+            }
         } else if c == '°' {
             out.push((Tok::Id("deg".into()), at(i), at(i + 1)));
             i += 1;
@@ -678,7 +689,13 @@ fn is_call(toks: &[Tok], i: usize) -> bool {
 
 /// Is the identifier token at `i` a reference to a parameter (not a call, unit or constant)?
 fn is_reference(toks: &[Tok], i: usize, id: &str) -> bool {
-    !is_call(toks, i) && unit(id).is_none() && !is_constant(id)
+    !is_call(toks, i) && unit(id).is_none() && !is_constant(id) && !is_member_part(toks, i)
+}
+
+/// Is the identifier token at `i` part of a name with dots (a point's coordinate, `p1.x`)?
+/// Such a name is never a parameter's.
+fn is_member_part(toks: &[Tok], i: usize) -> bool {
+    matches!(toks.get(i + 1), Some(Tok::Op('.'))) || matches!(i.checked_sub(1).and_then(|k| toks.get(k)), Some(Tok::Op('.')))
 }
 
 /// Identifiers an expression refers to (excluding units, constants and functions).
@@ -714,6 +731,60 @@ fn scan_references(s: &str) -> Vec<String> {
         {
             out.push(id.clone());
         }
+    }
+    out
+}
+
+/// The points an expression reads the coordinate of: the point's name and the coordinate
+/// (`x` or `y`), each once. A name with dots is never a parameter's.
+pub fn point_members(s: &str) -> Vec<(String, String)> {
+    // The points are looked up on every solve, over the same expressions: the answers are kept
+    // (per thread, bounded) as [`references`] keeps its.
+    thread_local! {
+        static SEEN: std::cell::RefCell<std::collections::HashMap<String, Vec<(String, String)>>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    if let Some(hit) = SEEN.with(|seen| seen.borrow().get(s).cloned()) {
+        return hit;
+    }
+    let out = scan_point_members(s);
+    SEEN.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        if seen.len() >= 1 << 16 {
+            seen.clear();
+        }
+        seen.insert(s.to_string(), out.clone());
+    });
+    out
+}
+
+/// [`point_members`], worked out.
+fn scan_point_members(s: &str) -> Vec<(String, String)> {
+    let Ok(toks) = lex(s) else { return Vec::new() };
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut i = 0;
+    while i < toks.len() {
+        let Some(Tok::Id(first)) = toks.get(i).cloned() else {
+            i += 1;
+            continue;
+        };
+        let mut segments = vec![first];
+        let mut j = i + 1;
+        while matches!(toks.get(j), Some(Tok::Op('.'))) {
+            let Some(Tok::Id(next)) = toks.get(j + 1).cloned() else { break };
+            segments.push(next);
+            j += 2;
+        }
+        if segments.len() > 1 {
+            let last = segments.len() - 1;
+            let member = segments.get(last).cloned().unwrap_or_default();
+            let point = segments[..last].join(".");
+            if !out.contains(&(point.clone(), member.clone())) {
+                out.push((point, member));
+            }
+            i = j;
+            continue;
+        }
+        i += 1;
     }
     out
 }
@@ -824,6 +895,9 @@ struct Parser<'a> {
     spans: Vec<(usize, usize)>,
     pos: usize,
     lookup: &'a dyn Fn(&str) -> Result<Value, DocError>,
+    /// The coordinates of points a name with dots reads (`p1.x`), when the expression may
+    /// read them (a sketch point's expression may; a parameter's may not).
+    members: Option<&'a dyn Fn(&str, &str) -> Result<Value, DocError>>,
     depth: usize,
     defaults: Defaults,
 }
@@ -1006,6 +1080,11 @@ impl Parser<'_> {
                     }
                     return call(&id, &args, self.defaults);
                 }
+                // A name with dots: the coordinate of a point (`p1.x`). It is read as that
+                // whatever the name is, so a point named `pi` is read like any other.
+                if matches!(self.peek(), Some(Tok::Op('.'))) {
+                    return self.coordinate(id);
+                }
                 match id.as_str() {
                     "pi" | "PI" => return Ok(Value::num(std::f64::consts::PI)),
                     _ => {}
@@ -1018,6 +1097,25 @@ impl Parser<'_> {
             Some(Tok::Op(c)) => Err(DocError::Expr(format!("unexpected `{c}`"))),
             None => Err(DocError::Expr("unexpected end of expression".into())),
         }
+    }
+    /// The coordinate of a point: a name with dots (`p1.x`, `l1.start.x`). The name before the
+    /// last dot is the point; the one after it is the coordinate (`x` or `y`).
+    fn coordinate(&mut self, first: String) -> Result<Value, DocError> {
+        let Some(members) = self.members else {
+            return Err(DocError::Expr("a point's coordinate is only available in a sketch point's expression".into()));
+        };
+        let mut segments = vec![first];
+        while matches!(self.peek(), Some(Tok::Op('.'))) {
+            self.pos += 1;
+            match self.next() {
+                Some(Tok::Id(next)) => segments.push(next),
+                _ => return Err(DocError::Expr("a name with dots names a point's coordinate".into())),
+            }
+        }
+        let last = segments.len().saturating_sub(1);
+        let member = segments.get(last).cloned().unwrap_or_default();
+        let point = segments[..last].join(".");
+        members(&point, &member)
     }
 }
 
@@ -1092,6 +1190,16 @@ fn pow(base: Value, e: Value) -> Result<Value, DocError> {
     Ok(Value::with_dims(base.v.powf(n), combine(base.dims(), [k; 3], i8::checked_mul)?))
 }
 
+/// The whole number of quarter turns an angle in radians is, if it is one up to rounding: `90 deg`
+/// is stored as a rounded pi/2, so its cosine came out 6.1e-17 instead of 0. Within 4 ulps of the
+/// quarter-turn count and below 1e12 quarter turns, where an ulp is still far smaller than a
+/// quarter turn; zero is not matched, as a tiny angle's sine is the angle.
+fn quarter_turns(a: f64) -> Option<i64> {
+    let q = a / std::f64::consts::FRAC_PI_2;
+    let n = q.round();
+    (n != 0.0 && n.abs() < 1e12 && (q - n).abs() <= 4.0 * f64::EPSILON * n.abs()).then_some(n as i64)
+}
+
 fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
     let one = || match args {
         [a] => Ok(*a),
@@ -1115,9 +1223,28 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
     };
     let unit_fn = |x: f64, a: Value| Value { v: x, ..a };
     Ok(match f {
-        "sin" => Value::num(rad(one()?)?.sin()),
-        "cos" => Value::num(rad(one()?)?.cos()),
-        "tan" => Value::num(rad(one()?)?.tan()),
+        "sin" => {
+            let a = rad(one()?)?;
+            Value::num(match quarter_turns(a) {
+                Some(n) => [0.0, 1.0, 0.0, -1.0][n.rem_euclid(4) as usize],
+                None => a.sin(),
+            })
+        }
+        "cos" => {
+            let a = rad(one()?)?;
+            Value::num(match quarter_turns(a) {
+                Some(n) => [1.0, 0.0, -1.0, 0.0][n.rem_euclid(4) as usize],
+                None => a.cos(),
+            })
+        }
+        "tan" => {
+            let a = rad(one()?)?;
+            // Only a half turn is exact: the tangent of an odd quarter turn is not a number.
+            Value::num(match quarter_turns(a) {
+                Some(n) if n % 2 == 0 => 0.0,
+                _ => a.tan(),
+            })
+        }
         "asin" | "acos" => {
             let x = num(one()?)?;
             if !(-1.0..=1.0).contains(&x) {
@@ -1254,8 +1381,28 @@ pub fn eval_with(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>) -> R
     eval_with_defaults(s, lookup, Defaults::default())
 }
 
+/// Evaluate an expression whose names with dots read a point's coordinate (`p1.x`):
+/// `members` resolves the point's name and the coordinate (`x` or `y`) to its value.
+pub fn eval_with_members(
+    s: &str,
+    lookup: &dyn Fn(&str) -> Result<Value, DocError>,
+    members: &dyn Fn(&str, &str) -> Result<Value, DocError>,
+) -> Result<Value, DocError> {
+    eval_with_defaults_members(s, lookup, Some(members), Defaults::default())
+}
+
 /// Evaluate an expression reading bare numbers next to lengths / angles in `defaults`.
 pub fn eval_with_defaults(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>, defaults: Defaults) -> Result<Value, DocError> {
+    eval_with_defaults_members(s, lookup, None, defaults)
+}
+
+/// [`eval_with_defaults`], with the coordinates of points the expression may read.
+pub fn eval_with_defaults_members(
+    s: &str,
+    lookup: &dyn Fn(&str) -> Result<Value, DocError>,
+    members: Option<&dyn Fn(&str, &str) -> Result<Value, DocError>>,
+    defaults: Defaults,
+) -> Result<Value, DocError> {
     let (toks, spans): (Vec<Tok>, Vec<(usize, usize)>) = lex_spans(s)?.into_iter().map(|(t, a, b)| (t, (a, b))).unzip();
     if toks.is_empty() {
         if let Some((name, _)) = definition(s) {
@@ -1263,7 +1410,7 @@ pub fn eval_with_defaults(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocErr
         }
         return Err(DocError::Expr("empty expression".into()));
     }
-    let mut p = Parser { toks, spans, pos: 0, lookup, depth: 0, defaults };
+    let mut p = Parser { toks, spans, pos: 0, lookup, members, depth: 0, defaults };
     let v = p.expr()?;
     if p.pos < p.toks.len() {
         return Err(DocError::Expr(format!("unexpected input in `{s}`")));
@@ -2246,6 +2393,61 @@ mod tests {
         assert_eq!(reported_value(Value::length(50.8)), 50.8);
         assert_eq!(round_reported(reported_value(Value::angle(30f64.to_radians()))), 30.0);
         assert_eq!(reported_value(Value::num(4.0)), 4.0);
+    }
+
+    /// `sin`, `cos` and `tan` at a whole number of quarter turns are exact: a quarter turn as radians
+    /// is a rounded pi/2, so `cos(90 deg)` was 6.1e-17 and `sin(180 deg)` 1.2e-16, and `ceil` of
+    /// either was 1.
+    #[test]
+    fn trig_at_a_quarter_turn_is_exact() {
+        let look = |_: &str| Err(DocError::Expr("no parameters".into()));
+        let val = |e: &str| eval_with(e, &look).unwrap().v;
+        for (e, want) in [
+            ("sin(0 deg)", 0.0),
+            ("sin(90 deg)", 1.0),
+            ("sin(180 deg)", 0.0),
+            ("sin(180°)", 0.0),
+            ("sin(270 deg)", -1.0),
+            ("sin(360 deg)", 0.0),
+            ("sin(-90 deg)", -1.0),
+            ("sin(-180 deg)", 0.0),
+            ("sin(180)", 0.0),
+            ("sin(1 rad * pi)", 0.0),
+            ("cos(0 deg)", 1.0),
+            ("cos(90 deg)", 0.0),
+            ("cos(180 deg)", -1.0),
+            ("cos(270 deg)", 0.0),
+            ("cos(360 deg)", 1.0),
+            ("cos(-90 deg)", 0.0),
+            ("cos(pi / 2 * 1 rad)", 0.0),
+            ("cos(1 rad * pi)", -1.0),
+            ("sin(720 deg)", 0.0),
+            ("sin(450 deg)", 1.0),
+            ("sin(36000 deg)", 0.0),
+            ("tan(0 deg)", 0.0),
+            ("tan(180 deg)", 0.0),
+            ("tan(-360 deg)", 0.0),
+            ("ceil(sin(180 deg))", 0.0),
+            ("ceil(cos(90 deg))", 0.0),
+            ("floor(sin(-180 deg))", 0.0),
+        ] {
+            assert_eq!(val(e), want, "{e}");
+        }
+        // Any other angle keeps the library result, including one a hair off a quarter turn and
+        // an angle too large for a quarter turn to be told from its neighbours.
+        for (e, x) in [
+            ("sin(30 deg)", 30f64.to_radians().sin()),
+            ("cos(60 deg)", 60f64.to_radians().cos()),
+            ("tan(45 deg)", 45f64.to_radians().tan()),
+            ("sin(180.0000001 deg)", 180.0000001f64.to_radians().sin()),
+            ("cos(89.9999 deg)", 89.9999f64.to_radians().cos()),
+            ("sin(1e-20 deg)", 1e-20f64.to_radians().sin()),
+            ("tan(90 deg)", 90f64.to_radians().tan()),
+            ("tan(270 deg)", 270f64.to_radians().tan()),
+            ("sin(1e15 deg)", 1e15f64.to_radians().sin()),
+        ] {
+            assert_eq!(val(e), x, "{e}");
+        }
     }
 
     /// `mod` of a value by a whole-number fraction of itself is 0 even when unit conversion leaves

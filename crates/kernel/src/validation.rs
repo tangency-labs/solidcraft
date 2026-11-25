@@ -1,16 +1,19 @@
-//! How often SMLib's full check runs while a model is evaluated. Every sweep, boolean and blend
-//! checks its result in SMLib before it is decoded ([`Validation::EachStep`]); an evaluation can
-//! instead leave those checks to one check of the bodies each feature keeps
-//! ([`Validation::EachFeature`]), or skip them ([`Validation::Off`]). A body kept straight from
-//! a step is checked at the end as that step would have checked it, on the step's own result
-//! (kept with the body until then): the record a result is decoded to can pass SMLib's check
-//! where the result itself fails it (a surface of revolution's polar curve, rebuilt on import).
+//! How often SMLib's full check runs while a model is evaluated. An evaluation leaves the checks
+//! of the sweeps, booleans and blends a feature runs to one check of each body the feature keeps
+//! ([`Validation::EachFeature`], the default), can check every step's result as it is made
+//! ([`Validation::EachStep`]), or skips them ([`Validation::Off`]). A body kept straight from a
+//! step is checked at the end as that step would have checked it, on the step's own result (kept
+//! with the body until then): the record a result is decoded to can pass SMLib's check where the
+//! result itself fails it (a surface of revolution's polar curve, rebuilt on import).
 //!
 //! The evaluation installs its mode around a feature with [`validating`], as [`crate::watch`]
 //! installs a watch: the operations a feature runs are reached through hundreds of public kernel
 //! functions, and the mode is the evaluation's, not each operation's. Outside [`validating`]
-//! (the kernel called directly, a preview, a test) every step is checked, as it always was. The
-//! worker threads the kernel starts for a step run under the same mode ([`crate::par`]).
+//! (the kernel called directly, a preview, a test) a step does not check its result: the check is
+//! a test of the bodies an evaluation keeps, not part of each operation. A caller that wants every
+//! step checked asks for it with `validating(Validation::EachStep, ..)`, and [`check_kept`] and
+//! [`failing_check`] check a body on request. The worker threads the kernel starts for a step run
+//! under the same mode ([`crate::par`]).
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -102,12 +105,12 @@ pub(crate) fn within<R>(scope: Option<Arc<Scope>>, f: impl FnOnce() -> R) -> R {
 /// What a step does with SMLib's check of its result ([`step`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Step {
-    /// Check it now (outside [`validating`], and under [`Validation::EachStep`]).
+    /// Check it now (under [`Validation::EachStep`]).
     Check,
     /// Leave it to the end of the feature (under [`Validation::EachFeature`]): the body decoded
     /// from the result keeps it ([`Body::left_unchecked`]) for [`check_kept`].
     Defer,
-    /// Never check it (under [`Validation::Off`]).
+    /// Don't check it (outside [`validating`], and under [`Validation::Off`]).
     Skip,
 }
 
@@ -115,13 +118,20 @@ pub(crate) enum Step {
 /// was left for its end.
 pub(crate) fn step() -> Step {
     CURRENT.with(|c| match c.borrow().as_deref() {
-        None | Some(Scope { mode: Validation::EachStep, .. }) => Step::Check,
+        Some(Scope { mode: Validation::EachStep, .. }) => Step::Check,
         Some(s @ Scope { mode: Validation::EachFeature, .. }) => {
             s.deferred.store(true, Ordering::Relaxed);
             Step::Defer
         }
-        Some(Scope { mode: Validation::Off, .. }) => Step::Skip,
+        None | Some(Scope { mode: Validation::Off, .. }) => Step::Skip,
     })
+}
+
+/// Whether the evaluation skips SMLib's checks ([`Validation::Off`]), for a step that checks its
+/// result at once under the other modes. Unlike [`step`], it never leaves a check for the end
+/// of the feature.
+pub(crate) fn skipped() -> bool {
+    CURRENT.with(|c| matches!(c.borrow().as_deref(), Some(Scope { mode: Validation::Off, .. })))
 }
 
 /// How a step's own check takes its result.
@@ -374,15 +384,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_step_is_checked_outside_an_evaluation_and_under_each_step() {
-        assert_eq!(step(), Step::Check);
+    fn a_step_is_checked_only_under_each_step() {
+        assert_eq!(step(), Step::Skip, "outside an evaluation a step does not check its result");
         assert_eq!(validating(Validation::EachStep, step), (Step::Check, false));
         assert_eq!(validating(Validation::EachFeature, step), (Step::Defer, true));
         assert_eq!(validating(Validation::Off, step), (Step::Skip, false));
         // The thread's own mode comes back, also after a nested scope.
         let ((inner, outer), deferred) = validating(Validation::Off, || (validating(Validation::EachStep, step).0, step()));
         assert!(inner == Step::Check && outer == Step::Skip && !deferred);
-        assert_eq!(step(), Step::Check);
+        assert_eq!(step(), Step::Skip);
     }
 
     /// A check detached under a token runs under it on whatever thread runs it (the feature
@@ -481,6 +491,83 @@ mod tests {
         assert!(deferred && e.contains("SMLib fillet: SMLib's check refuses the result (the input already fails it)"), "{e}");
         let (off, deferred) = validating(Validation::Off, || crate::boolean(&bad, &tool, crate::BoolOp::Union));
         assert!(off.is_ok_and(|b| b.is_some()) && !deferred);
+    }
+
+    /// The SMLib steps of shell, offset faces, draft and thicken (`crate::offset_backend::run`)
+    /// follow the mode as a boolean does (#17601). Offset Faces first heals the body through it:
+    /// on a body SMLib's check already refuses, that step is refused there under each_step,
+    /// saying the body failed it before; left to the end under each_feature, where the kept
+    /// body's check refuses it; and built under off.
+    #[test]
+    fn the_offset_steps_on_a_body_the_check_refuses_follow_the_mode() {
+        use solidcore_record::Vec3;
+        let good = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let mut record = good.record().clone();
+        record.vertices[0].point[2] += 0.05;
+        // The side across the box from the moved corner, which stays flat.
+        let far_x = if record.vertices[0].point[0] < 5.0 { 10.0 } else { 0.0 };
+        let bad = Body::from_record(record).unwrap();
+        assert!(check_kept(&bad).is_err());
+        let heal = |b: &Body| crate::heal::heal(b, &[]);
+        let (step, deferred) = validating(Validation::EachStep, || heal(&bad));
+        let e = step.unwrap_err().to_string();
+        assert!(e.contains("SMLib healing: SMLib's check refuses the result (the body already fails it)") && !deferred, "{e}");
+        let (healed, deferred) = validating(Validation::EachFeature, || heal(&bad));
+        assert!(deferred);
+        let e = check_kept(&healed.unwrap()).unwrap_err().to_string();
+        assert!(e.contains("SMLib healing: SMLib's check refuses the result"), "{e}");
+        let (healed, deferred) = validating(Validation::Off, || heal(&bad));
+        assert!(healed.is_ok() && !deferred, "{healed:?}");
+        // Offset Faces under off is no longer refused by the check (SMLib's own operation may
+        // still refuse a body this far off).
+        let side = [Vec3::new(far_x, 5.0, 5.0)];
+        let (off, _) = validating(Validation::Off, || crate::offset_faces(&bad, &side, 1.0));
+        assert!(off.as_ref().err().is_none_or(|e| !e.to_string().contains("SMLib's check refuses")), "{off:?}");
+        // A body the check accepts is moved under every mode, and passes the check kept.
+        for mode in Validation::ALL {
+            let (moved, _) = validating(mode, || crate::offset_faces(&good, &side, 1.0));
+            assert!(moved.as_ref().is_ok_and(|m| check_kept(m).is_ok()), "{mode:?}: {moved:?}");
+        }
+    }
+
+    /// Surface Offset skips SMLib's check of each offset face and of their stitch under off, as
+    /// Offset Faces does (#17601). A box edge stored as a cubic that runs a, b, a, b along its
+    /// line stops half way (zero speed there, as some imported trims nearly do): SMLib's check
+    /// refuses the box, and the offset of a face beside that edge inherits the defect. The offset
+    /// is refused under each_step and each_feature, which still check at the step, and made
+    /// under off.
+    #[test]
+    fn surface_offset_of_a_face_the_check_refuses_is_made_under_off() {
+        use solidcore_record::Vec3;
+        use solidcore_record::brep::Curve;
+        let good = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let mut record = good.record().clone();
+        let edge = &mut record.edges[0];
+        let Curve::Line { start, end } = edge.curve else { panic!("a box edge is a line: {:?}", edge.curve) };
+        let at = |t: f64| std::array::from_fn::<f64, 3, _>(|i| start[i] + t * (end[i] - start[i]));
+        let [t0, t1] = edge.interval;
+        let (a, b) = (at(t0), at(t1));
+        edge.curve = Curve::Spline { knots: vec![t0, t0, t0, t0, t1, t1, t1, t1], points: vec![a, b, a, b] };
+        let face = edge.uses[0].face as usize;
+        let bad = Body::from_record(record).unwrap();
+        let e = check_kept(&bad).unwrap_err().to_string();
+        assert!(e.contains("Bad SpeedPt"), "{e}");
+        let offset = |b: &Body| crate::offset_surface(b, &[face], 1.0, 0.01);
+        for mode in [Validation::EachStep, Validation::EachFeature] {
+            let (refused, deferred) = validating(mode, || offset(&bad));
+            let e = refused.unwrap_err().to_string();
+            assert!(e.contains("SMLib offset: SMLib's check refuses the result") && e.contains("Bad SpeedPt") && !deferred, "{mode:?}: {e}");
+        }
+        let (off, deferred) = validating(Validation::Off, || offset(&bad));
+        let off = off.unwrap();
+        assert!(off.is_surface() && off.face_count() == 1 && !deferred, "{off:?}");
+        let m = crate::measure(&off).unwrap();
+        assert!((m.area - 100.0).abs() < 1e-6, "{m:?}");
+        // A face the check accepts is offset under every mode.
+        for mode in Validation::ALL {
+            let (moved, _) = validating(mode, || offset(&good));
+            assert!(moved.as_ref().is_ok_and(|m| m.face_count() == 1 && check_kept(m).is_ok()), "{mode:?}: {moved:?}");
+        }
     }
 
     #[test]

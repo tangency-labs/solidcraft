@@ -1,0 +1,658 @@
+//! Contracts and result types for the commands in `cmd/drawing_dimension.rs` (#4896, W19d).
+//!
+//! What a dimension measures is given as a command picks it (a point, or an edge's index) and
+//! saved by name ([`solidcraft_doc::Document::edge_reference`]); its kind, direction, reading and
+//! text place are read by the saved record's own types, so the command and a file read the same
+//! words.
+
+use std::borrow::Cow;
+
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::{Map, Value};
+use solidcraft_doc::MAX_PLACEMENT_DEPTH;
+use solidcraft_doc::drawing::dimension::{CornerPick, EdgePick, MAX_CHAIN_POINTS, MAX_SET_TARGETS, TextPlace};
+use solidcraft_doc::drawing::measure::{LinearDirection, Reading, SilhouetteSide};
+
+use super::Point2;
+use super::drawing_view::ViewIdParam;
+use crate::params;
+
+/// The most edges a corner given by its edges may list before it is refused unread.
+const MAX_LISTED_EDGES: usize = 64;
+
+const EDGE: &str = "an edge is a point on it [x, y, z], or {point} or {body, index}, with path?";
+const FACE: &str = "a face is a point on it [x, y, z], or {point} or {body, index}, with path?";
+const CORNER: &str = "a corner is a point [x, y, z], or {point} or {edges: [edges]} or {centre: a circle or an arc}, with path?";
+const PICK: &str = "a pick is {edge: an edge}, {corner: a corner} or {face: a face}; a candidate of the slot's kind passes as it stands";
+const SLOT: &str = "a slot is `a`, `b`, `edge`, `face`, `origin`, or a chain's point or a set's target by its number from 0";
+/// The most numbered slots a dimension has: a chain's points or a set's targets.
+const NUMBERED_SLOTS: usize = if MAX_CHAIN_POINTS > MAX_SET_TARGETS { MAX_CHAIN_POINTS } else { MAX_SET_TARGETS };
+
+/// An edge to measure: what picks it, and the occurrences its body is placed through.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EdgeParam {
+    pub pick: EdgePick,
+    pub path: Vec<u64>,
+}
+
+/// A corner to measure, as [`EdgeParam`] an edge.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CornerParam {
+    pub pick: CornerPick,
+    pub path: Vec<u64>,
+}
+
+/// A face to measure, picked as [`EdgeParam`] picks an edge (its index among the body's faces).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FaceParam {
+    pub pick: EdgePick,
+    pub path: Vec<u64>,
+}
+
+/// What a repair puts into a reference, by the reference's kind: as `drawing.dimension.add` picks
+/// one, without a path (the reference keeps its own), so a candidate inspect lists is a pick as it
+/// stands.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PickParam {
+    Edge(EdgePick),
+    Corner(CornerPick),
+    Face(EdgePick),
+}
+
+/// Which reference of a dimension a repair is for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SlotParam {
+    A,
+    B,
+    Edge,
+    Face,
+    /// A set's origin.
+    Origin,
+    /// A chain's point or a set's target, from 0.
+    Point(usize),
+}
+
+/// One of a cylinder's silhouettes to measure from: a face on the cylinder, and which silhouette.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct SilhouetteParam {
+    pub face: FaceParam,
+    /// `near` (the one nearer the other cylinder on the view) or `far`.
+    #[schemars(with = "String")]
+    pub side: SilhouetteSide,
+}
+
+/// An object's keys, each one of `allowed`.
+fn keys<'a>(v: &'a Value, allowed: &[&str], shape: &str) -> Result<&'a Map<String, Value>, String> {
+    v.as_object().filter(|o| o.keys().all(|k| allowed.contains(&k.as_str()))).ok_or_else(|| shape.to_string())
+}
+
+/// The occurrences a body is placed through, from the top: none when not given.
+fn path(v: Option<&Value>) -> Result<Vec<u64>, String> {
+    let shape = || format!("`path` is the ids of at most {MAX_PLACEMENT_DEPTH} occurrences, from the top");
+    let Some(v) = v else { return Ok(Vec::new()) };
+    let list = v.as_array().filter(|l| l.len() <= MAX_PLACEMENT_DEPTH).ok_or_else(shape)?;
+    list.iter().map(|id| id.as_u64().filter(|id| *id != 0)).collect::<Option<_>>().ok_or_else(shape)
+}
+
+/// An edge or a face (`what`) as a pick, without its path; `shape` says how one is given.
+fn pick(v: &Value, what: &str, shape: &str) -> Result<EdgePick, String> {
+    if let Some(p) = params::vec3(v) {
+        return Ok(EdgePick::Point(p));
+    }
+    let o = keys(v, &["point", "body", "index", "path"], shape)?;
+    match (o.get("point"), o.get("body"), o.get("index")) {
+        (Some(p), None, None) => params::vec3(p).map(EdgePick::Point).ok_or_else(|| shape.to_string()),
+        (None, Some(body), Some(index)) => {
+            let body = body.as_str().ok_or_else(|| format!("{what}'s `body` is its name"))?.to_string();
+            let index = index.as_u64().and_then(|i| usize::try_from(i).ok()).ok_or_else(|| format!("{what}'s `index` is a whole number"))?;
+            Ok(EdgePick::Index { body, index })
+        }
+        _ => Err(shape.to_string()),
+    }
+}
+
+/// An edge as a pick, without its path.
+fn edge_pick(v: &Value) -> Result<EdgePick, String> {
+    pick(v, "an edge", EDGE)
+}
+
+fn edge_param(v: &Value) -> Result<EdgeParam, String> {
+    let path = path(v.get("path"))?;
+    Ok(EdgeParam { pick: edge_pick(v)?, path })
+}
+
+fn corner_param(v: &Value) -> Result<CornerParam, String> {
+    if let Some(p) = params::vec3(v) {
+        return Ok(CornerParam { pick: CornerPick::Point(p), path: Vec::new() });
+    }
+    let o = keys(v, &["point", "edges", "centre", "path"], CORNER)?;
+    let path = path(o.get("path"))?;
+    let pick = match (o.get("point"), o.get("edges"), o.get("centre")) {
+        (Some(p), None, None) => CornerPick::Point(params::vec3(p).ok_or(CORNER)?),
+        // The centre's edge is on the point's body, so it has no path of its own.
+        (None, None, Some(edge)) if edge.get("path").is_none() => CornerPick::Centre(edge_pick(edge)?),
+        (None, Some(edges), None) => {
+            let listed = || format!("a corner's `edges` lists 2 to {MAX_LISTED_EDGES} edges, each without a path of its own");
+            let edges = edges.as_array().filter(|l| l.len() <= MAX_LISTED_EDGES).ok_or_else(listed)?;
+            let own_path = edges.iter().any(|e| e.get("path").is_some());
+            if own_path {
+                return Err(listed());
+            }
+            CornerPick::Edges(edges.iter().map(edge_pick).collect::<Result<_, _>>()?)
+        }
+        _ => return Err(CORNER.to_string()),
+    };
+    Ok(CornerParam { pick, path })
+}
+
+fn pick_param(v: &Value) -> Result<PickParam, String> {
+    let o = keys(v, &["edge", "corner", "face"], PICK)?;
+    let (kind, inner) = o.iter().next().filter(|_| o.len() == 1).ok_or_else(|| PICK.to_string())?;
+    // Another part is another reference: a repair keeps the one it has.
+    if inner.get("path").is_some() {
+        return Err("a repair's pick has no `path`: it keeps the reference's own (for another part, add a new one)".into());
+    }
+    match kind.as_str() {
+        "edge" => edge_pick(inner).map(PickParam::Edge),
+        "corner" => corner_param(inner).map(|c| PickParam::Corner(c.pick)),
+        "face" => pick(inner, "a face", FACE).map(PickParam::Face),
+        _ => Err(PICK.to_string()),
+    }
+}
+
+fn slot_param(v: &Value) -> Result<SlotParam, String> {
+    match v {
+        Value::String(s) => match s.as_str() {
+            "a" => Ok(SlotParam::A),
+            "b" => Ok(SlotParam::B),
+            "edge" => Ok(SlotParam::Edge),
+            "face" => Ok(SlotParam::Face),
+            "origin" => Ok(SlotParam::Origin),
+            _ => Err(SLOT.to_string()),
+        },
+        _ => v.as_u64().and_then(|k| usize::try_from(k).ok()).filter(|k| *k < NUMBERED_SLOTS).map(SlotParam::Point).ok_or_else(|| SLOT.to_string()),
+    }
+}
+
+impl<'de> Deserialize<'de> for PickParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        pick_param(&Value::deserialize(d)?).map_err(D::Error::custom)
+    }
+}
+
+impl<'de> Deserialize<'de> for SlotParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        slot_param(&Value::deserialize(d)?).map_err(D::Error::custom)
+    }
+}
+
+impl<'de> Deserialize<'de> for EdgeParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        edge_param(&Value::deserialize(d)?).map_err(D::Error::custom)
+    }
+}
+
+impl<'de> Deserialize<'de> for CornerParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        corner_param(&Value::deserialize(d)?).map_err(D::Error::custom)
+    }
+}
+
+impl<'de> Deserialize<'de> for FaceParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let path = path(v.get("path")).map_err(D::Error::custom)?;
+        Ok(FaceParam { pick: pick(&v, "a face", FACE).map_err(D::Error::custom)?, path })
+    }
+}
+
+impl JsonSchema for EdgeParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DrawingDimensionEdge".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "An edge: a point on it [x, y, z] in the design's frame, or {point} or {body, index} (its index among the body's edges as the model lists them), with path?: the ids of the occurrences its body is placed through, from the top.",
+            "anyOf": [{"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}, {"type": "object"}]
+        })
+    }
+}
+
+impl JsonSchema for FaceParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DrawingDimensionFace".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A face: a point on it [x, y, z] in the design's frame, or {point} or {body, index} (its index among the body's faces as the model lists them), with path? as an edge's.",
+            "anyOf": [{"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}, {"type": "object"}]
+        })
+    }
+}
+
+impl JsonSchema for CornerParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DrawingDimensionCorner".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A corner: a point [x, y, z] in the design's frame, or {point} or {edges: [2 to 16 edges that meet there]}, or {centre: an edge that is a circle or an arc} for its centre (a hole's), with path? as an edge's.",
+            "anyOf": [{"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}, {"type": "object"}]
+        })
+    }
+}
+
+impl JsonSchema for PickParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DrawingReferencePick".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "What a reference names now: {edge: an edge}, {corner: a corner} or {face: a face}, each as drawing.dimension.add takes it but without path (the reference keeps its own); a candidate inspect lists is one as it stands.",
+            "type": "object"
+        })
+    }
+}
+
+impl JsonSchema for SlotParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DrawingDimensionSlot".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Which of a dimension's references: `a` or `b` (a linear dimension's corners, an angle's edges, or the faces of silhouettes or of faces), `edge` (a length's or a radial dimension's), `face` (a cylinder's or a sphere's), `origin` (a set's), or a chain's point or a set's target by its number from 0.",
+            "anyOf": [{"type": "string", "enum": ["a", "b", "edge", "face", "origin"]}, {"type": "integer", "minimum": 0, "maximum": NUMBERED_SLOTS - 1}]
+        })
+    }
+}
+
+/// A dimension, by its id.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DimensionIdParam(pub u64);
+
+impl<'de> Deserialize<'de> for DimensionIdParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(s) => solidcraft_doc::ids::decode(&s).map(DimensionIdParam).ok_or_else(|| D::Error::custom("must be a dimension's id")),
+            _ => Err(D::Error::custom("must be a dimension's id")),
+        }
+    }
+}
+
+impl JsonSchema for DimensionIdParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DrawingDimensionId".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "A dimension's id: 13 characters of lowercase Crockford base32.", "type": "string", "pattern": "^[0-9a-hjkmnp-tv-z]{13}$"})
+    }
+}
+
+/// What a dimension measures, as `drawing.dimension.add` takes it: the saved record's kinds, with
+/// picks for its names.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum KindParam {
+    /// The distance between two corners.
+    Linear {
+        a: CornerParam,
+        b: CornerParam,
+        /// `aligned` (the default), `horizontal`, `vertical` or `{along: [x, y]}` on the view.
+        // `skip_serializing_if` keeps schemars from writing `default: null`, which these fields' types refuse.
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Value")]
+        direction: Option<LinearDirection>,
+        /// `projected` (the default) or `true` (measured aligned).
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "String")]
+        reading: Option<Reading>,
+    },
+    /// A straight edge's length, or the length of the line a round edge the view sees edge-on draws.
+    Length {
+        edge: EdgeParam,
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Value")]
+        direction: Option<LinearDirection>,
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "String")]
+        reading: Option<Reading>,
+    },
+    /// The angle between two straight edges' lines.
+    Angle {
+        a: EdgeParam,
+        b: EdgeParam,
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "String")]
+        reading: Option<Reading>,
+        /// π minus the smaller angle.
+        #[serde(default)]
+        other_side: bool,
+    },
+    /// A circle's or an arc's radius, on a view that sees it face on.
+    Radial {
+        edge: EdgeParam,
+        /// Its diameter instead. By default, for a whole circle or an arc of half a turn or more.
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "bool")]
+        diameter: Option<bool>,
+    },
+    /// A whole cylinder's diameter between its two silhouettes, on a view that doesn't look along
+    /// its axis.
+    Cylinder {
+        /// A face on the cylinder.
+        face: FaceParam,
+    },
+    /// A sphere's size, on any view: SØ when the body's faces on it are the whole sphere, else SR
+    /// on the arc of its outline in the view that is on them.
+    Sphere {
+        /// A face on the sphere.
+        face: FaceParam,
+    },
+    /// A cone's included angle between its two silhouettes, on a view that doesn't look along its
+    /// axis; foreshortened unless the view's plane holds the axis.
+    Cone {
+        /// A face on the cone.
+        face: FaceParam,
+    },
+    /// The distance between a silhouette of one cylinder and a silhouette of another, as the view
+    /// shows them; two of one cylinder make its `cylinder` dimension.
+    Silhouettes {
+        a: SilhouetteParam,
+        b: SilhouetteParam,
+        /// As a linear dimension's; `aligned` (the default) is square to the silhouettes.
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Value")]
+        direction: Option<LinearDirection>,
+    },
+    /// The distance between two flat, parallel faces, on a view that sees both edge-on.
+    Faces {
+        a: FaceParam,
+        b: FaceParam,
+        /// As a linear dimension's; `aligned` (the default) is square to the faces.
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Value")]
+        direction: Option<LinearDirection>,
+    },
+    /// The distances from each point to the next, in order along one line as the view shows them.
+    Chain {
+        /// 3 to 64 corners.
+        points: Vec<CornerParam>,
+        /// As a linear dimension's; `aligned` (the default) is from the first point to the last.
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Value")]
+        direction: Option<LinearDirection>,
+    },
+    /// The distances from one origin to each target, in any order, along one line as the view shows
+    /// them: a dimension each, stacked.
+    Baseline {
+        /// A corner or a hole's centre to measure from.
+        origin: CornerParam,
+        /// 2 to 64 corners.
+        targets: Vec<CornerParam>,
+        /// As a linear dimension's; `aligned` (the default) is from the origin to the last target.
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Value")]
+        direction: Option<LinearDirection>,
+    },
+    /// A baseline set's distances, each shown at the end of a leader from its target, the origin's
+    /// as 0.
+    Ordinate {
+        /// A corner or a hole's centre to measure from.
+        origin: CornerParam,
+        /// 1 to 64 corners.
+        targets: Vec<CornerParam>,
+        /// As a linear dimension's; `aligned` (the default) is from the origin to the last target.
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Value")]
+        direction: Option<LinearDirection>,
+    },
+}
+
+/// What `drawing.dimension.add` takes.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct AddParams {
+    pub view: ViewIdParam,
+    pub kind: KindParam,
+    /// The dimension line's distance on paper from what it measures, in millimetres; the sign says
+    /// on which side.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "f64")]
+    pub offset_mm: Option<f64>,
+    /// `centred` on the dimension line (the default), or `{at: [x, y]}` on paper from the view's
+    /// centre.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Value")]
+    pub text: Option<TextPlace>,
+    /// 0 to 6.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "u8")]
+    pub decimals: Option<u8>,
+    /// Shown instead of the number, which is still worked out.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub override_text: Option<String>,
+    /// Where its text's centre goes, in paper mm from the sheet's lower-left corner, as edit's drag
+    /// takes it: it sets `offset_mm` and `text`, so the Dimension tool places a new one where the
+    /// pointer is.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub text_to_mm: Option<Point2>,
+    /// A point its dimension line, arc or leader passes through, as `text_to_mm` and as edit's drag
+    /// takes it: it sets `offset_mm`, or a radial one's `text`.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub line_through_mm: Option<Point2>,
+    /// True to answer what it would add, adding nothing: no id is taken and no undo step made.
+    /// Default: false.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub dry_run: Option<bool>,
+}
+
+/// What `drawing.dimension.inspect` takes.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct InspectParams {
+    pub dimension: DimensionIdParam,
+}
+
+/// What `drawing.dimension.edit` takes: the dimension, and what to change.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct EditParams {
+    pub dimension: DimensionIdParam,
+    pub set: DimensionSet,
+}
+
+/// What `drawing.dimension.edit` changes, each only when given. What a dimension measures isn't
+/// one of them, a set's targets aside: to measure something else, add a new one.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct DimensionSet {
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "f64")]
+    pub offset_mm: Option<f64>,
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Value")]
+    pub text: Option<TextPlace>,
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "u8")]
+    pub decimals: Option<u8>,
+    /// Text shown instead of the number, or `null` to show the number again.
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    pub override_text: Option<Option<String>>,
+    /// A linear, length, chain or set dimension's.
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Value")]
+    pub direction: Option<LinearDirection>,
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub reading: Option<Reading>,
+    /// An angle's: π minus the smaller angle.
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub other_side: Option<bool>,
+    /// A radial dimension's: its diameter, or its radius.
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub diameter: Option<bool>,
+    /// A drag: where the text's centre goes, in paper mm from the sheet's lower-left corner. It sets
+    /// `offset_mm` and `text`.
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub text_to_mm: Option<Point2>,
+    /// A drag: a point the dimension line passes through, as `text_to_mm`. It sets `offset_mm`, or a
+    /// radial one's `text`, which turns with its leader.
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub line_through_mm: Option<Point2>,
+    /// A set's targets: some taken out by number, then some added after the rest. It stays the
+    /// one dimension.
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    pub targets: Option<TargetsSet>,
+}
+
+/// The targets a set's edit takes out and adds.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct TargetsSet {
+    /// Targets taken out, by their numbers from 0 in the set as it is; each once.
+    pub remove: Vec<usize>,
+    /// Corners added after the targets that stay.
+    pub add: Vec<CornerParam>,
+}
+
+/// What `drawing.dimension.repair` takes: the dimension, which of its references, and what that
+/// reference names now.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct RepairParams {
+    pub dimension: DimensionIdParam,
+    pub slot: SlotParam,
+    pub pick: PickParam,
+}
+
+/// What `drawing.dimension.edit` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct EditResult {
+    pub dimension: String,
+    /// The fields the edit changed.
+    pub changed: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// One of the things an ambiguous reference's name finds, or a lead a lost one lists: as it stands,
+/// a repair's pick.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CandidateResult {
+    /// An edge, as `{body, index}` names it.
+    Edge { body: String, index: usize },
+    /// A point where the named edges meet, in the design's frame.
+    Corner([f64; 3]),
+    /// A face, as `{body, index}` names it.
+    Face { body: String, index: usize },
+}
+
+/// One of a chain's or a set's members as the model has it now.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MemberResult {
+    /// Model millimetres.
+    pub value: f64,
+    pub text: String,
+}
+
+/// An arrowhead of a dimension on its sheet.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ArrowResult {
+    /// Its tip: paper millimetres from the sheet's lower-left corner.
+    pub tip: [f64; 2],
+    /// The unit direction it points in.
+    pub points: [f64; 2],
+}
+
+/// Where a dimension's parts sit on its view's sheet, in paper millimetres from the sheet's lower-left
+/// corner (the frame of `drawing.scene`): its lines as laid out, before an arrowhead stops one at its
+/// base. The ink, a descender included, is in `drawing.scene`'s `objects[].bounds_mm`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DimensionLayoutResult {
+    /// Each from near what it measures to past the dimension line; a chain's shared one once.
+    pub extension_lines: Vec<Vec<[f64; 2]>>,
+    /// Lines and arcs from arrow tip to arrow tip, with any run-on to a text outside.
+    pub dimension_lines: Vec<Vec<[f64; 2]>>,
+    pub arrows: Vec<ArrowResult>,
+    /// Each set text's box, as the arrows fit by (its cap height and measured width): start and end on
+    /// the line's side, then end and start on the far side, so it reads from its first corner to its
+    /// second. A chain has one for each member, from its first point.
+    pub text_boxes: Vec<[[f64; 2]; 4]>,
+}
+
+/// A dimension as the model has it now.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DimensionResult {
+    pub dimension: String,
+    pub view: String,
+    /// The record, as the drawing saves it.
+    pub record: Value,
+    /// `ok`, `overridden`, `ambiguous`, `suppressed`, `failed`, `lost` or `unmeasurable`.
+    pub status: String,
+    /// Why it failed, is lost or is unmeasurable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+    /// What it reads: model millimetres, or degrees for an angle; a chain's overall, a set's farthest target.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<f64>,
+    /// Whether a measured line leaves the view's plane, so the view shows it shorter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub foreshortened: Option<bool>,
+    /// What it shows: its text with `{value}` filled in, else the number in the drawing's units;
+    /// none for a chain or a set, which show their members'.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Its measured number as it reads with no text of its own, whenever it is measured: what a
+    /// dimension whose text hides it would show again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub measured_text: Option<String>,
+    /// A chain's members, from its first point to its last, or a set's, one for each target in its order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<MemberResult>,
+    /// When it has no value now: the last one it read, kept when the design is saved, as `value` gives it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_good: Option<f64>,
+    /// Every name it measures was found by exact history.
+    pub exact: bool,
+    /// What its name finds when ambiguous, or the leads when lost: never taken but by a repair.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<CandidateResult>,
+    /// Where it sits on its view's sheet now, the model read as it is now; none when it isn't drawn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<DimensionLayoutResult>,
+    /// Why it has no layout, or no box for its text, when `status` doesn't already say it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout_why: Option<String>,
+    /// What to know about it: a view edited since to leave out what it points at.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+    /// `true` for a dry run of `drawing.dimension.add`, which added nothing; left out otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dry_run: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+#[cfg(test)]
+#[path = "drawing_dimension_tests.rs"]
+mod tests;

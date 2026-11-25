@@ -36,9 +36,11 @@ file pickers or permission dialogs. The commands expose input and output schemas
 
 | Command | Input | Output |
 |---|---|---|
-| `plugin.install` | `{path, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?}}` | `{id, name, version, description, capabilities, permissions, limits?, host_limits, commands, entries, entry_points, replaces?, installed, folder}` |
+| `plugin.install` | `{path, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?}}` | `{id, name, version, description, capabilities, permissions, limits?, host_limits, commands, entries, entry_points, themes?, replaces?, installed, folder}` |
 | `plugin.list` | `{}` | `{plugins: [{manifest, commands, disabled}]}` |
-| `plugin.remove` | `{id}` | `{id, removed: true}` |
+| `plugin.remove` | `{id, remove_user_data: false}` | `{id, removed: true}` |
+| `plugin.grants` | `{}` | `{grants: [{id, status, package_hash, command_groups, folders, memory_mib?, input_folder?}]}` |
+| `plugin.revoke` | `{id}` | `{id, revoked}` |
 
 `plugin.install` reads one bounded zip through `solidcraft_io::safe_zip` and publishes it through
 the existing hidden-folder-and-rename pipeline. `dry_run: true` checks and describes the package,
@@ -51,7 +53,9 @@ returns a typed error. Each folder approval contains `name`, an absolute local `
 `memory_mib` approves exactly the manifest's requested memory above the user's ceiling, for that package hash.
 Omitting `approve` grants nothing, including on replacement. Providing `approve` replaces that plugin's
 stored set; stale grants cannot survive replacement. The engine stores grants after publication and
-`plugin.run` checks them against the manifest. Desktop preferences persist the grants per plugin id.
+`plugin.run` checks them against the manifest. Desktop preferences persist the grants per plugin id,
+and the plugins folder's `.grants` store keeps them between command-line and headless MCP sessions
+started with `--keep-plugin-approvals` (`plugin::grant_store`); `plugin.revoke` deletes one plugin's record.
 Removal validates the id, confines deletion to the host's plugin directory and removes its stored
 grants. These operations do not edit the design.
 

@@ -2,7 +2,7 @@
  "issue": "https://github.com/tangency-labs/solidcraft/issues/3655",
  "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
  "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's",
- "summary": "Chamfering all twelve edges of a box was refused or accepted depending on the order the edges were picked, on SolidCraft's truck kernel (#3655). A 40 x 30 x 12.5 box, chamfer 2.5 on every edge, in the issue's failing order and in a plain order. Each corner is closed by a triangular facet through the points d from the corner on its three faces' diagonals ((0,d,d), (d,0,d), (d,d,0) at the origin corner): the box less every edge's triangle, the overlaps at the eight corners added back, less a tetrahedron of d^3/12 at each corner: 15000 - 0.5 d^2 * 330 + 6 d^3 - 8 d^3/12. 26 faces: 6, 12 chamfers and 8 corner triangles.",
+ "summary": "Chamfering all twelve edges of a box was refused or accepted depending on the order the edges were picked, on SolidCraft's truck kernel (#3655). A 40 x 30 x 12.5 box, chamfer 2.5 on every edge, in the issue's failing order and in a plain order. Each corner is the mitre where its three chamfers meet (the box cut by every chamfer's plane): the box less every edge's triangle, the overlaps at the eight corners added back (d^3 - d^3/4 per corner, 6 d^3 in all): 15000 - 0.5 d^2 * 330 + 6 d^3. 18 faces: 6 and 12 chamfers.",
  "cases": [
   {
    "name": "issue_order",
@@ -94,9 +94,9 @@
    "expect": {
     "lumps": 1,
     "volume": {
-     "value": 14052.083333333334,
+     "value": 14062.5,
      "tol": 0.0001,
-     "formula": "40*30*12.5 - 0.5*2.5^2*(4*40 + 4*30 + 4*12.5) + 6*2.5^3 - 8*2.5^3/12 (each corner closed by the triangular facet through (0,d,d), (d,0,d), (d,d,0) from it: the mitred corner less a tetrahedron of d^3/12)"
+     "formula": "40*30*12.5 - 0.5*2.5^2*(4*40 + 4*30 + 4*12.5) + 6*2.5^3 (each corner the mitre of its three chamfers: the box cut by the twelve chamfer planes)"
     }
    }
   },
@@ -190,9 +190,9 @@
    "expect": {
     "lumps": 1,
     "volume": {
-     "value": 14052.083333333334,
+     "value": 14062.5,
      "tol": 0.0001,
-     "formula": "40*30*12.5 - 0.5*2.5^2*(4*40 + 4*30 + 4*12.5) + 6*2.5^3 - 8*2.5^3/12 (each corner closed by the triangular facet through (0,d,d), (d,0,d), (d,d,0) from it: the mitred corner less a tetrahedron of d^3/12)"
+     "formula": "40*30*12.5 - 0.5*2.5^2*(4*40 + 4*30 + 4*12.5) + 6*2.5^3 (each corner the mitre of its three chamfers: the box cut by the twelve chamfer planes)"
     }
    }
   }

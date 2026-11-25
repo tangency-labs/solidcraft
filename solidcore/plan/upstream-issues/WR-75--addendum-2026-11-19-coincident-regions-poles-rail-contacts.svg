@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="900" height="520" viewBox="0 0 900 520">
+  <title>WR-75 retire</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="900" height="520" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 20 36)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">Coincident surfaces at a domain corner</tspan></text>
+    <rect id="domains" x="130" y="90" width="300" height="210" fill="#f0f0f0"/>
+    <line x1="130" y1="90" x2="130" y2="300" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line x1="130" y1="300" x2="430" y2="300" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path d="M30 300 C30 244.772 74.772 200 130 200 C185.228 200 230 244.772 230 300 C230 355.228 185.228 400 130 400 C74.772 400 30 355.228 30 300 Z" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <line x1="130" y1="300" x2="230" y2="300" fill="none" stroke="#1f6fb2" stroke-width="1.5" stroke-miterlimit="10"/>
+    <circle cx="230" cy="300" r="5" fill="#000000"/>
+    <line x1="130" y1="300" x2="226.593" y2="274.118" fill="none" stroke="#1f6fb2" stroke-width="1.5" stroke-miterlimit="10"/>
+    <circle cx="226.593" cy="274.118" r="5" fill="#000000"/>
+    <line x1="130" y1="300" x2="216.603" y2="250" fill="none" stroke="#1f6fb2" stroke-width="1.5" stroke-miterlimit="10"/>
+    <circle cx="216.603" cy="250" r="5" fill="#000000"/>
+    <line x1="130" y1="300" x2="200.711" y2="229.289" fill="none" stroke="#1f6fb2" stroke-width="1.5" stroke-miterlimit="10"/>
+    <circle cx="200.711" cy="229.289" r="5" fill="#000000"/>
+    <line x1="130" y1="300" x2="180" y2="213.397" fill="none" stroke="#1f6fb2" stroke-width="1.5" stroke-miterlimit="10"/>
+    <circle cx="180" cy="213.397" r="5" fill="#000000"/>
+    <line x1="130" y1="300" x2="155.882" y2="203.407" fill="none" stroke="#1f6fb2" stroke-width="1.5" stroke-miterlimit="10"/>
+    <circle cx="155.882" cy="203.407" r="5" fill="#000000"/>
+    <line x1="130" y1="300" x2="130" y2="200" fill="none" stroke="#1f6fb2" stroke-width="1.5" stroke-miterlimit="10"/>
+    <circle cx="130" cy="200" r="5" fill="#000000"/>
+    <circle cx="104.118" cy="203.407" r="3.5" fill="#ffffff" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="80" cy="213.397" r="3.5" fill="#ffffff" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="59.289" cy="229.289" r="3.5" fill="#ffffff" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="43.397" cy="250" r="3.5" fill="#ffffff" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="33.407" cy="274.118" r="3.5" fill="#ffffff" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="30" cy="300" r="3.5" fill="#ffffff" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="33.407" cy="325.882" r="3.5" fill="#ffffff" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="43.397" cy="350" r="3.5" fill="#ffffff" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="59.289" cy="370.711" r="3.5" fill="#ffffff" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="80" cy="386.603" r="3.5" fill="#ffffff" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="104.118" cy="396.593" r="3.5" fill="#ffffff" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="130" cy="400" r="3.5" fill="#ffffff" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="155.882" cy="396.593" r="3.5" fill="#ffffff" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="180" cy="386.603" r="3.5" fill="#ffffff" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="200.711" cy="370.711" r="3.5" fill="#ffffff" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="216.603" cy="350" r="3.5" fill="#ffffff" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="226.593" cy="325.882" r="3.5" fill="#ffffff" stroke="#555555" stroke-miterlimit="10"/>
+    <circle cx="130" cy="300" r="5" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 138 318)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">seed p</tspan></text>
+    <text transform="matrix(1 0 0 1 250 118)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">where the two surfaces coincide</tspan></text>
+    <text transform="matrix(1 0 0 1 255 250)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">7 of 24 probe directions stay</tspan></text>
+    <text transform="matrix(1 0 0 1 255 266)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">in the domains; each finds the</tspan></text>
+    <text transform="matrix(1 0 0 1 255 282)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">contact along itself</tspan></text>
+    <text transform="matrix(1 0 0 1 20 440)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Fork: coincident only with more than 12 directions,</tspan></text>
+    <text transform="matrix(1 0 0 1 20 456)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">or 5 contacts within 0.01 r of the circle point:</tspan></text>
+    <text transform="matrix(1 0 0 1 20 472)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">missed at a corner.</tspan></text>
+    <text transform="matrix(1 0 0 1 20 496)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Now: three neighbouring directions along themselves.</tspan></text>
+    <text transform="matrix(1 0 0 1 470 36)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">A contact on one curve is not a node</tspan></text>
+    <line x1="475" y1="230" x2="685" y2="230" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line x1="700" y1="290" x2="880" y2="170" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line x1="700" y1="170" x2="880" y2="290" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <path d="M505 230 C505 188.579 538.579 155 580 155 C621.421 155 655 188.579 655 230 C655 271.421 621.421 305 580 305 C538.579 305 505 271.421 505 230 Z" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <path d="M715 230 C715 188.579 748.579 155 790 155 C831.421 155 865 188.579 865 230 C865 271.421 831.421 305 790 305 C748.579 305 715 271.421 715 230 Z" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <circle cx="655" cy="230" r="5" fill="#000000"/>
+    <circle cx="505" cy="230" r="5" fill="#000000"/>
+    <circle cx="852.404" cy="188.397" r="5" fill="#000000"/>
+    <circle cx="727.596" cy="188.397" r="5" fill="#000000"/>
+    <circle cx="727.596" cy="271.603" r="5" fill="#000000"/>
+    <circle cx="852.404" cy="271.603" r="5" fill="#000000"/>
+    <circle cx="580" cy="230" r="5" fill="#555555"/>
+    <circle cx="790" cy="230" r="5" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 478 110)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">a round&apos;s rail, touching its face</tspan></text>
+    <text transform="matrix(1 0 0 1 478 126)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">to within the tolerance</tspan></text>
+    <text transform="matrix(1 0 0 1 720 110)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">two crossing branches</tspan></text>
+    <text transform="matrix(1 0 0 1 485 330)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">crossing directions on one line:</tspan></text>
+    <text transform="matrix(1 0 0 1 485 346)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">a point of the curve, no node</tspan></text>
+    <text transform="matrix(1 0 0 1 705 330)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">crossing directions on two lines:</tspan></text>
+    <text transform="matrix(1 0 0 1 705 346)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">a node, reported as touching</tspan></text>
+    <text transform="matrix(1 0 0 1 470 440)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Fork: every contact with 2 or more crossing</tspan></text>
+    <text transform="matrix(1 0 0 1 470 456)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">directions was a node; the bottle&apos;s round got 16</tspan></text>
+    <text transform="matrix(1 0 0 1 470 472)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">and 11 along two rails and failed.</tspan></text>
+    <text transform="matrix(1 0 0 1 470 496)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Now: a node needs directions on more than one line.</tspan></text>
+  </g>
+</svg>

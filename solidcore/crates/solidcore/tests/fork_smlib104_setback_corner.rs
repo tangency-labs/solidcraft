@@ -216,7 +216,7 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, EdgeId, VertexId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity` and `fillet_exact_round_classes`. The pins are
+/// Every fix but `fillet_exact_round_classes`. The pins are
 /// the fork's; `fillet_exact_round_classes` carries a solidcore-native change the fork does
 /// not have (#2419, WR-669 addendum: a line round's cylinder on its exact spine), which moves
 /// the volumes by about 1e-10. `SmFace::SwapUV`'s exact transpose of a swapped face's trims
@@ -225,7 +225,7 @@ fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && name != "fillet_exact_round_classes" {
+        if name != "fillet_exact_round_classes" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -733,4 +733,131 @@ fn concave_corner_is_the_setback_fill() {
     let r = blend_body(&mut k, b, &CONCAVE_AT, &[1.0, 1.5, 2.0], None);
     // Native executive at the new scale: 7015.230424090797.
     built(&mut k, r, (18, 45, 29), 7015.230424090796);
+}
+
+/// [`blend_box`] with the setback `ask` set on the made corner only (`add_set_back_vertex`,
+/// then `set_corner_setback` and `set_corner_ease` once the corners are made: the door
+/// SolidCraft and `solidcore-ops` use), no fill asked (`set_set_back_fill`).
+fn blend_box_on_corner(
+    k: &mut Kernel,
+    dims: [f64; 3],
+    at: &[[f64; 3]],
+    radii: &[f64],
+    ask: &SetbackAsk,
+) -> Blended {
+    let mut b = create_box(k, Point3::new(0.0, 0.0, 0.0), dims[0], dims[1], dims[2]).unwrap();
+    let edges: Vec<EdgeId> = at.iter().map(|&p| pick(k, &b, p)).collect();
+    let xs = vec![FilletSurfaceGeneratorType::Circular; edges.len()];
+    let v = vertex_at(&b, ask.at);
+    let (ok, code, comment, fit) = {
+        let mut s = FilletSession::new(k, &mut b).unwrap();
+        s.prepare_per_edge_constant_radius(k, &edges, radii, &xs, 1, 1.0)
+            .unwrap();
+        s.add_set_back_vertex(v);
+        s.create_corners(k, None).unwrap();
+        let mut set = 0;
+        for c in s.fillet_corners().unwrap() {
+            if s.corner(c).unwrap().vertex == Some(v) {
+                // unequal rounds: the Setback already, before any setback is set on it
+                assert!(s
+                    .corner(c)
+                    .unwrap()
+                    .blend
+                    .is_some_and(solidcore::blend::blend_corner::BlendCorner::is_setback));
+                s.set_corner_setback(c, ask.setback).unwrap();
+                s.set_corner_ease(c, ask.ease).unwrap();
+                set += 1;
+            }
+        }
+        assert_eq!(set, 1);
+        let ok = s.do_filleting(k, None).is_ok();
+        let info = s.error_info();
+        (ok, info.code, info.comment.clone(), s.fit_setback())
+    };
+    if !ok {
+        return Blended {
+            body: None,
+            code,
+            comment,
+            fit,
+        };
+    }
+    stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default()).unwrap();
+    Blended {
+        body: Some(b),
+        code,
+        comment,
+        fit,
+    }
+}
+
+/// #16408: rounds r 2, 3, 4 at a corner, which is the Setback by the rule (no ball touches
+/// all three), with a setback set on the made corner, not asked as a fill. Before, the
+/// Setback read only the asked fills, so it built the rule's setbacks and dropped the one
+/// set. Now it is the setback asked: 4.25, too short for a certified convex fill, is refused
+/// naming 4.7175, as through the fill's door (`asked_setback_too_short_names_what_builds`);
+/// 4.7175 builds the fill door's body, to its volume; and eased (setback 8 over an ease of
+/// 2, an order-2 fill) it builds the fill door's body too, sound, to the same volume.
+#[test]
+fn a_setback_set_on_a_corner_already_the_setback_builds_as_asked() {
+    let mut k = all_fixes();
+    let r = blend_box_on_corner(&mut k, [20.0; 3], &SHORT_AT, &[2.0, 3.0, 4.0], &short(4.25));
+    assert!(r.body.is_none());
+    assert_eq!(r.code, 8);
+    assert_eq!(r.fit.to_bits(), 4.7175f64.to_bits(), "{}", r.fit);
+    assert_eq!(r.comment, "Fillet Error: a setback of 4.25 is too short for the setback corner's fill to stay convex: a setback of 4.7175 builds it");
+    let r = blend_box_on_corner(
+        &mut k,
+        [20.0; 3],
+        &SHORT_AT,
+        &[2.0, 3.0, 4.0],
+        &short(r.fit),
+    );
+    built(&mut k, r, (15, 36, 23), 7879.300574035242);
+
+    let eased = SetbackAsk {
+        ease: 2.0,
+        ..short(8.0)
+    };
+    let mut through_fill = {
+        let r = blend_box(&mut k, [20.0; 3], &SHORT_AT, &[2.0, 3.0, 4.0], Some(&eased));
+        assert_eq!(r.code, 0, "{}", r.comment);
+        let mut b = r.body.unwrap();
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "{lines:?}");
+        b
+    };
+    let want = volume_at(&k, &mut through_fill, PIN_ACCURACY);
+    let r = blend_box_on_corner(&mut k, [20.0; 3], &SHORT_AT, &[2.0, 3.0, 4.0], &eased);
+    built(&mut k, r, counts(&through_fill), want);
+}
+
+/// #16408 (review of #20697): eased setbacks of 6 over 1 and of 6 over 0.5 at the corner of
+/// [`a_setback_set_on_a_corner_already_the_setback_builds_as_asked`]. The G2 fill's interior
+/// map at its least degree left a setback patch whose control net turns back, and was taken:
+/// through the fill's door that body failed `check_brep` (`SmBSplineSurface` test #5), and
+/// through the corner's door, once the setback set there was read, the same body. A net that
+/// turns back is now not taken and the next degree is: both doors build one body, sound (no
+/// check lines), the corner's to the fill's counts and volume (measured on the fill's door).
+#[test]
+fn an_eased_setback_whose_least_degree_net_turns_back_builds_sound() {
+    let mut k = all_fixes();
+    for ease in [1.0, 0.5] {
+        let eased = SetbackAsk { ease, ..short(6.0) };
+        let mut through_fill = {
+            let r = blend_box(&mut k, [20.0; 3], &SHORT_AT, &[2.0, 3.0, 4.0], Some(&eased));
+            assert_eq!(r.code, 0, "{}", r.comment);
+            let mut b = r.body.unwrap();
+            let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+                .unwrap()
+                .lines();
+            assert!(lines.is_empty(), "ease {ease}: {lines:?}");
+            b
+        };
+        let want = volume_at(&k, &mut through_fill, PIN_ACCURACY);
+        let r = blend_box_on_corner(&mut k, [20.0; 3], &SHORT_AT, &[2.0, 3.0, 4.0], &eased);
+        built(&mut k, r, counts(&through_fill), want);
+    }
 }

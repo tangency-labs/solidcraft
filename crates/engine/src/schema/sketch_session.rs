@@ -129,6 +129,10 @@ fn curves<'de, D: Deserializer<'de>>(d: D) -> Result<Option<EntityIds>, D::Error
     entity_ids(d, "curves", "`curves` must list curve ids")
 }
 
+fn construction_points<'de, D: Deserializer<'de>>(d: D) -> Result<Option<EntityIds>, D::Error> {
+    entity_ids(d, "points", "`points` must list point ids")
+}
+
 fn entities<'de, D: Deserializer<'de>>(d: D) -> Result<Option<EntityIds>, D::Error> {
     entity_ids(d, "entities", "`entities` must list sketch entity ids")
 }
@@ -340,6 +344,10 @@ impl JsonSchema for InsidePlane {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CreateKeys {
+    /// Open Model view to edit in; defaults to the focused or most recent Model view.
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 9007199254740992_u64))]
+    pub view: Option<u64>,
     /// The plane to sketch on: XY, XZ or YZ (also Top, Front, Right), a construction plane's
     /// name or id, a picked planar face `{face: [x, y, z], body?, index?, path?, fixed?}`, or an
     /// explicit plane `{origin?, x_dir, y_dir}` in mm. Default: XY. On XY, the sketch's x and y
@@ -447,19 +455,16 @@ impl JsonSchema for CreateParams {
     }
 }
 
-/// How a new sketch is attached to its plane: `exact_face`, `sheet_face`, `internal_legacy_face`
-/// or `fixed`.
+/// How a new sketch is attached to its plane: `exact_face`, `internal_legacy_face` or `fixed`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Attachment {
     // `exact_face`: a planar face of a body, exactly, so the sketch follows the face;
-    // `sheet_face`: the panel of a sheet metal body's flat pattern;
     // `internal_legacy_face`: a face picked by a command that starts a sketch on a face
     // (Extrude, Revolve, Press Pull);
     // `fixed`: where the plane is (an origin, construction or explicit plane, or a face kept
     // with `fixed`).
     ExactFace,
-    SheetFace,
     InternalLegacyFace,
     Fixed,
 }
@@ -476,6 +481,8 @@ pub struct Activated {
 /// What `sketch.create` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct CreateResult {
+    /// The Model view owning this sketch edit. Runtime identity, not a design feature.
+    pub sketching_view: u64,
     /// The new sketch's feature id.
     pub sketch: u64,
     /// Its name.
@@ -502,26 +509,32 @@ pub struct CreateResult {
 // ---------------------------------------------------------------------------------------------
 // sketch.construction, sketch.delete
 
-fn curves_required(schema: &mut Schema) {
-    require(schema, "curves");
+/// `sketch.construction` takes curves, points or both: the handler refuses a call with neither.
+fn curves_or_points(schema: &mut Schema) {
+    schema.insert("anyOf".into(), json!([{"required": ["curves"]}, {"required": ["points"]}]));
 }
 
 fn entities_required(schema: &mut Schema) {
     require(schema, "entities");
 }
 
-/// Switch curves between normal and construction. The selection switches together (a slot or
-/// polygon as a whole): to construction unless all of it already is. Projected curves may
-/// switch too. A centerline that becomes construction stops being a centerline, and a normal
-/// line is a finite one. One undo step.
+/// Switch curves and points between normal and construction. The selection switches together
+/// (a slot or polygon as a whole): to construction unless all of it already is. Projected
+/// curves may switch too. A centerline that becomes construction stops being a centerline, and
+/// a normal line is a finite one. A construction point is reference geometry that features
+/// reading a sketch's points (a Hole from the whole sketch) leave out. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields, transform = curves_required)]
+#[schemars(deny_unknown_fields, transform = curves_or_points)]
 pub struct ConstructionParams {
-    // Optional in the type and required in the schema (`curves_required`).
+    // Optional in the type; the schema asks for curves, points or both (`curves_or_points`).
     /// The curves, by id.
     #[serde(default, deserialize_with = "curves", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "EntityIds")]
+    #[schemars(with = "Option<EntityIds>")]
     pub curves: Option<EntityIds>,
+    /// The points, by id (`p3`, `l1.end`).
+    #[serde(default, deserialize_with = "construction_points", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<EntityIds>")]
+    pub points: Option<EntityIds>,
     /// True makes them construction, false makes them normal. Default: construction unless all of
     /// them already are.
     #[serde(default, deserialize_with = "value", skip_serializing_if = "Option::is_none")]
@@ -551,6 +564,9 @@ pub struct ConstructionResult {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = entities_required)]
 pub struct DeleteParams {
+    /// Keep identifiable surviving projection edges linked. Default: false, break the remaining link.
+    #[serde(default)]
+    pub preserve_projection_link: bool,
     // Optional in the type and required in the schema (`entities_required`).
     /// What to delete: curve, point, constraint, wire or link ids.
     #[serde(default, deserialize_with = "entities", skip_serializing_if = "Option::is_none")]
@@ -568,9 +584,22 @@ pub struct DeleteResult {
     pub deleted: usize,
     /// The sketch's solve; null when it was not solved again.
     pub sketch: Option<SketchSolve>,
+    /// Projections part of which was deleted and whose deleted members could not be recorded:
+    /// what remained of each is normal geometry now.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub broken_links: Vec<BrokenLink>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// A projection `sketch.delete` broke off.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BrokenLink {
+    /// The projection's id.
+    pub link: String,
+    /// Why its deleted members could not be recorded.
+    pub why: String,
 }
 
 // ---------------------------------------------------------------------------------------------

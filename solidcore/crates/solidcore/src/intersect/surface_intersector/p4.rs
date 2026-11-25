@@ -13,7 +13,7 @@
 //! | [`SurfaceIntersector::find_interior_curves`], [`SurfaceIntersector::find_interior_curves_from_node_pairs`], [`InteriorNodePair`] | `FindInteriorCurves` |
 //! | [`SurfaceIntersector::do_point_intersection`], [`PointIntersectionOptions`] | `DoPointIntersection` |
 //! | [`SurfaceIntersector::do_law_intersection`], [`LawIntersectionOptions`] | `DoLawIntersection` |
-//! | `SurfaceIntersector::span_on_found_curve`, `SurfaceIntersector::reaches_found_curve_end`, `stop_at_found_curve_end` (crate/private) | the SolidCraft fork's `bSpanOnFoundCurve`, `bReachesFoundCurveEnd` lambdas of `TraceCurve` and its loop-top stop (opt-in, WR-76) |
+//! | `SurfaceIntersector::span_on_found_curve`, `SurfaceIntersector::reaches_found_curve_end`, `stop_at_found_curve_end` (crate/private) | the SolidCraft fork's `bSpanOnFoundCurve`, `bReachesFoundCurveEnd` lambdas of `TraceCurve` and its loop-top stop (WR-76) |
 //! | [`IntersectionCurve`]                                 | the curve, type and deviation out-params of both drivers |
 //! | [`IntersectorVirtuals`], [`do_point_intersection_with`], [`trace_curve_with`], [`do_law_intersection_with`] | the virtual calls of `DoPointIntersection` / `TraceCurve` / `DoLawIntersection` (`this->ComputePointValues(..)`, ..) on a derived intersector |
 //!
@@ -83,13 +83,19 @@
 //!   the global surface solve's leaf solve that are not ported yet (`surface.surface_p3`,
 //!   `surface.surface_p8`) return [`SolidError::Unported`], which always propagates
 //!   (also where upstream ignores the status).
-//! - **Opt-in fix (WR-76, #392).** With
-//!   [`UpstreamFixes::ssi_trace_tangent_curves_once`](crate::kernel::UpstreamFixes::ssi_trace_tangent_curves_once)
-//!   `TraceCurve` runs its "already traced" test also on a first step that `TestPoint`
-//!   ended (`SurfaceIntersector::span_on_found_curve`), and a near-tangent trace that
-//!   passes a found curve's free end stops there, its last span shortened to that end
-//!   (`SurfaceIntersector::reaches_found_curve_end`); the SolidCraft fork's
-//!   tangency-labs/smlib@0ce09f2. Off by default (upstream behaviour).
+//! - **Fix (WR-76, #392).** `TraceCurve` runs its "already traced" test also on a
+//!   first step that `TestPoint` ended (`SurfaceIntersector::span_on_found_curve`), and
+//!   a near-tangent trace that passes a found curve's free end stops there, its last
+//!   span shortened to that end (`SurfaceIntersector::reaches_found_curve_end`); the
+//!   SolidCraft fork's tangency-labs/smlib@0ce09f2. Upstream runs the test after a
+//!   regular step only and traces on over the found curve. Not in the fork: the
+//!   already-traced test needs each of the span's five points (both ends and three
+//!   Hermite samples) within the tolerance of a found curve (not necessarily the same
+//!   one), where the fork's lets a span that only starts beyond a curve's end through;
+//!   a trace stopped by it at its lone start point flushes no touching point there
+//!   (`SurfaceIntersector::lone_start_on_found_curve`); and the shortened span's step
+//!   gets secant corrections until its end is within the tolerance of the curve end
+//!   along the span (the fork's first-order step can stop short of it by far more).
 //! - **Empty trace (WR-80).** The trace-back of `FindInteriorCurves`,
 //!   `DoIntersection` (part 5) and `SmAdvSurfaceIntersector::FindInteriorCurves` is one
 //!   method, [`SurfaceIntersector::trace_back`], which traces a curve back the other way
@@ -104,10 +110,12 @@
 
 use crate::blend::fillet_standard_solver::p1::FilletLaw;
 use crate::curve::curve::p5::make_curve_cache;
+use crate::curve::curve::p6::DropPointCaches;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::curve_cache::CurveCache;
 use crate::curve::hermite_curve::HermiteCurve;
-use crate::error::{ignored, passed_on, Result, SolidError};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{ignored, Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -471,15 +479,15 @@ impl SurfaceIntersector<'_> {
     fn check_in_domains(&self, next: TsectId, uv_tol: [f64; 2]) -> Result<()> {
         let p = self.point(next)?;
         if !self.uv_domains[0].contains_point(p.uv_pos(SrfIndex::First), uv_tol[0]) {
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP_TRACE,
-                "the traced point lies outside the first surface's domain",
+                IntersectFailure::PointOutsideDomain { surface: 0 },
             ));
         }
         if !self.uv_domains[1].contains_point(p.uv_pos(SrfIndex::Second), uv_tol[1]) {
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP_TRACE,
-                "the traced point lies outside the second surface's domain",
+                IntersectFailure::PointOutsideDomain { surface: 1 },
             ));
         }
         Ok(())
@@ -543,16 +551,25 @@ impl SurfaceIntersector<'_> {
     }
 
     /// True when the span from point `from` to point `to` already lies on a found
-    /// curve: `to` and three points of the span (a Hermite with chord-length
-    /// tangents) are all on `curves_3d` (the fork's `bSpanOnFoundCurve` of
-    /// `TraceCurve`, opt-in fix WR-76, #392; tangency-labs/smlib@0ce09f2). Used for
-    /// the second point of a trace whose first step `TestPoint` ended (snapped onto
-    /// another start point or curve end), which upstream adds without its "already
-    /// traced" test.
+    /// curve: `from`, `to` and three points of the span (a Hermite with chord-length
+    /// tangents) are all within `this_approx_tol_3d` of `curves_3d`
+    /// ([`SurfaceIntersector::is_point_near_found_curve`]) (the fork's
+    /// `bSpanOnFoundCurve` of `TraceCurve`, fix WR-76, #392;
+    /// tangency-labs/smlib@0ce09f2, which tests `to` and the three points with
+    /// `IsPointOnCurve`). Used for the second point of a trace whose first step
+    /// `TestPoint` ended (snapped onto another start point or curve end), which
+    /// upstream adds without its "already traced" test.
+    ///
+    /// The span's start must be on a found curve too, and every point within the
+    /// tolerance itself: `IsPointOnCurve` also accepts a point up to ten times the
+    /// tolerance from a curve end where the surfaces do not part, which along a
+    /// transversal crossing line is any point of the line near the end, so a span
+    /// that starts beyond a found curve and snaps onto it was taken for that curve
+    /// and its new part dropped.
     ///
     /// # Errors
     ///
-    /// As [`SurfaceIntersector::is_point_on_curve`]; an unknown point id is
+    /// As [`SurfaceIntersector::is_point_near_found_curve`]; an unknown point id is
     /// [`SolidError::InvalidInput`].
     pub(crate) fn span_on_found_curve(
         &self,
@@ -565,7 +582,9 @@ impl SurfaceIntersector<'_> {
         if curves_3d.is_empty() || to.point_type == IntersectionPointType::Singularity {
             return Ok(false);
         }
-        if !self.is_point_on_curve(k, to.crv_pos(), curves_3d, None)? {
+        if !self.is_point_near_found_curve(k, to.crv_pos(), curves_3d)?
+            || !self.is_point_near_found_curve(k, from.crv_pos(), curves_3d)?
+        {
             return Ok(false);
         }
         let chord = to.crv_pos().distance(from.crv_pos());
@@ -580,19 +599,63 @@ impl SurfaceIntersector<'_> {
         let span = HermiteCurve::new(from.crv_pos(), t0, to.crv_pos(), t1, 3);
         for i in 1..=3 {
             let mid = span.evaluate_point(0.25 * f64::from(i));
-            if !self.is_point_on_curve(k, mid, curves_3d, None)? {
+            if !self.is_point_near_found_curve(k, mid, curves_3d)? {
                 return Ok(false);
             }
         }
         Ok(true)
     }
 
-    /// The fraction `t` of the span `from -> to` of a near-tangent trace (normals
-    /// within 1 degree at both ends) at which it passes within `max(10 tol,
-    /// sqrt(tol (1 + size)))` of a free end of a non-degenerate found curve, an end
-    /// not at the trace's `start` point and with `t` in `[0, 0.95]` (the fork's
-    /// `bReachesFoundCurveEnd` of `TraceCurve`, opt-in fix WR-76, #392;
-    /// tangency-labs/smlib@0ce09f2).
+    /// True when `point` is within `this_approx_tol_3d` of one of `curves_3d`: of the
+    /// start of a degenerate curve (`IsDegenerate()`, tolerance `SM_EFF_ZERO`), or of
+    /// the drop point of another (`DropPoint`, `SM_SO_INTERSECT` with
+    /// `10 * this_approx_tol_3d`): the first two tests of
+    /// [`SurfaceIntersector::is_point_on_curve`] at the tolerance itself, without its
+    /// ten-times-the-tolerance acceptance (fix WR-76).
+    ///
+    /// # Errors
+    ///
+    /// Those of `IsDegenerate`, `EvaluatePoint` and `DropPoint`.
+    pub(crate) fn is_point_near_found_curve(
+        &self,
+        k: &Kernel,
+        point: Point3,
+        curves_3d: &[Curve],
+    ) -> Result<bool> {
+        let tol = self.this_approx_tol_3d;
+        let mut caches = DropPointCaches::default();
+        for (jj, curve) in curves_3d.iter().enumerate() {
+            let ivl = curve.natural_interval();
+            if curve.is_degenerate(k, EFF_ZERO, None)? {
+                if curve.evaluate_point(k, ivl.min())?.distance(point) < tol {
+                    return Ok(true);
+                }
+                continue;
+            }
+            let drop = curve.drop_point_in(
+                k,
+                &ivl,
+                point,
+                None,
+                tol * 10.0,
+                None,
+                SolverOperation::Intersect,
+                &mut caches,
+                jj,
+            )?;
+            if drop.success && drop.distance < tol {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// `(t, end)`: `end` a free end of a non-degenerate found curve, not at the trace's
+    /// `start` point, that the span `from -> to` of a near-tangent trace (normals within
+    /// 1 degree at both ends) passes within `max(10 tol, sqrt(tol (1 + size)))` of, and
+    /// `t` in `[0, 0.95]` the fraction of the span where it does (the fork's
+    /// `bReachesFoundCurveEnd` of `TraceCurve`, fix WR-76, #392;
+    /// tangency-labs/smlib@0ce09f2, which returns `t` only).
     ///
     /// # Errors
     ///
@@ -605,7 +668,7 @@ impl SurfaceIntersector<'_> {
         from: TsectId,
         to: TsectId,
         curves_3d: &[Curve],
-    ) -> Result<Option<f64>> {
+    ) -> Result<Option<(f64, Point3)>> {
         let (start, from, to) = (self.point(start)?, self.point(from)?, self.point(to)?);
         // tangential contact: near-parallel normals at both span ends
         let one_degree = 1.0 * (PI / 180.0);
@@ -640,7 +703,7 @@ impl SurfaceIntersector<'_> {
                 }
                 let near = from.crv_pos() + t * seg;
                 if near.distance(end) < reach {
-                    return Ok(Some(t));
+                    return Ok(Some((t, end)));
                 }
             }
         }
@@ -662,9 +725,9 @@ impl SurfaceIntersector<'_> {
     pub fn find_interior_curves(&mut self, k: &Kernel, out: &mut TsectCurves) -> Result<()> {
         // The basic intersector does not allow self intersection testing.
         if self.doing_self_intersection {
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP_FIC,
-                "the basic intersector does not test self intersection",
+                IntersectFailure::SelfIntersectionUnsupported,
             ));
         }
 
@@ -716,9 +779,9 @@ impl SurfaceIntersector<'_> {
         out: &mut TsectCurves,
     ) -> Result<()> {
         if self.doing_self_intersection {
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP_FIC,
-                "the basic intersector does not test self intersection",
+                IntersectFailure::SelfIntersectionUnsupported,
             ));
         }
         let mut curve_caches: Vec<Option<CurveCache<()>>> = Vec::new();
@@ -740,13 +803,23 @@ impl SurfaceIntersector<'_> {
                     None => slot.insert(match make_curve_cache::<()>(k, curve, None) {
                         Ok(c) => c,
                         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                        Err(_) => {
-                            return Err(SolidError::intersect_missing(OP_FIC, "the curve's cache"))
+                        Err(e) => {
+                            return Err(Failure::new(OP_FIC, IntersectFailure::CurveCacheNotBuilt)
+                                .caused_by(e)
+                                .into_error())
                         }
                     }),
                 };
                 let tree = cache.tree().ok_or_else(|| {
-                    SolidError::intersect_missing(OP_FIC, "the curve cache's tree")
+                    Failure::new(
+                        OP_FIC,
+                        IntersectFailure::Defect {
+                            why: "a curve cache is returned only once its tessellation built \
+                                  its tree, so a cache without one was handed out unbuilt",
+                        },
+                    )
+                    .with_status(crate::error::SM_ERR_NULL_POINTER)
+                    .into_error()
                 })?;
                 if tree.intersects_box(&int_bbox)? {
                     is_near_curve = true;
@@ -888,9 +961,11 @@ pub fn do_law_intersection_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     law_curve: &mut FilletLaw,
 ) -> Result<IntersectionCurve> {
     let [first, last] = points else {
-        return Err(SolidError::intersect_failed(
+        return Err(SolidError::intersect(
             OP_DLI,
-            "the law intersection needs exactly two points",
+            IntersectFailure::PointCountNotTaken {
+                given: points.len(),
+            },
         ));
     };
     let (first, last) = (*first, *last);
@@ -902,15 +977,15 @@ pub fn do_law_intersection_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 
     // the offset surfaces
     if !is_offset_surface(v.intersector().surface(SrfIndex::First)) {
-        return Err(SolidError::intersect_missing(
+        return Err(SolidError::intersect(
             OP_DLI,
-            "the first surface's offset surface",
+            IntersectFailure::SurfaceNotOffset { surface: 0 },
         ));
     }
     if !is_offset_surface(v.intersector().surface(SrfIndex::Second)) {
-        return Err(SolidError::intersect_missing(
+        return Err(SolidError::intersect(
             OP_DLI,
-            "the second surface's offset surface",
+            IntersectFailure::SurfaceNotOffset { surface: 1 },
         ));
     }
 
@@ -1050,7 +1125,8 @@ pub fn do_law_intersection_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             e @ (SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::Unported { .. }
-            | SolidError::Cancelled { .. }),
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
         ) = v.intersector_mut().add_point_to_curve(id)
         {
             return Err(e);
@@ -1104,6 +1180,10 @@ fn trace_step<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 /// snapped point.
 pub const MAX_APPROACH_POINTS: usize = 16;
 
+/// The points a trace stops at (upstream's 5000): past them the tolerance is too small for
+/// the curve, or a surface is poorly defined.
+pub const MAX_TRACE_POINTS: usize = 5000;
+
 /// Not upstream (#16669): makes the span from the curve's last point `tsp` to `next` one
 /// whose UV images are certified ([`SurfaceIntersector::span_images_certified`]), by
 /// tracing points toward `next` and adding them to the curve. `TestPoint` snaps an
@@ -1136,7 +1216,6 @@ fn approach_certified<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     next: TsectId,
     uv_tol: [f64; 2],
 ) -> Result<()> {
-    let refuse = |why: &'static str| SolidError::intersect_failed(OP_APPROACH, why);
     let certified = |v: &V, from: TsectId| -> Result<bool> {
         let base = v.intersector();
         let (a, b) = (base.point(from)?, base.point(next)?);
@@ -1171,12 +1250,16 @@ fn approach_certified<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             k.check_cancelled(OP_APPROACH)?;
             tries += 1;
             if tries > MAX_STEP_TRIES || step_size < EFF_ZERO * 100.0 {
-                return Err(refuse("no trace step toward the snapped point passes"));
+                return Err(SolidError::intersect(
+                    OP_APPROACH,
+                    IntersectFailure::ApproachStepNotFound { tries: tries - 1 },
+                ));
             }
             let ok = trace_step(v, k, from, step_size, mid, &mut st)?;
             if ok && st.hit_boundary {
-                return Err(refuse(
-                    "a trace step toward the snapped point hit a domain boundary",
+                return Err(SolidError::intersect(
+                    OP_APPROACH,
+                    IntersectFailure::ApproachHitBoundary,
                 ));
             }
             let before = {
@@ -1196,8 +1279,11 @@ fn approach_certified<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     if certified(v, from)? {
         return Ok(());
     }
-    Err(refuse(
-        "the span to the snapped point does not certify within the bound",
+    Err(SolidError::intersect(
+        OP_APPROACH,
+        IntersectFailure::ApproachNotCertified {
+            points: MAX_APPROACH_POINTS,
+        },
     ))
 }
 
@@ -1262,6 +1348,8 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     // when there are no points on the curve: pick a walking direction from the
     // start point
     if v.intersector().curve_points.is_empty() {
+        // a new curve (fix WR-76)
+        v.intersector_mut().lone_start_on_found_curve = None;
         let sp = v.intersector().point(start)?.clone();
 
         // 1. a tangent or coincidence start point: a single point curve
@@ -1304,6 +1392,7 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             {
                 // no curve to add here
                 v.intersector_mut().curve_points.clear();
+                v.intersector_mut().lone_start_on_found_curve = None;
                 return Ok(());
             }
             v.intersector_mut().curve_trace_direction *= -1.0; // Reverse curve tracing direction
@@ -1314,7 +1403,7 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     // Curve is not closed prior to tracing
     v.intersector_mut().curve_is_closed = false;
 
-    let mut point_count: u64 = 0;
+    let mut point_count: usize = 0;
     let mut step_size = 0.0;
     let mut done = false;
     // (dAngleFound is uninitialised upstream; it is only read after a good point,
@@ -1343,13 +1432,11 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             .last()
             .ok_or_else(|| SolidError::invalid_input(OP_TRACE, "no curve point"))?;
 
-        // opt-in fix (WR-76, #392): a tangent curve traced from its other end that
+        // fix (WR-76, #392): a tangent curve traced from its other end that
         // has run onto the free end of an already traced curve is the same tangent
         // curve, whose earlier trace stopped part way; stop here so the two traces
         // meet instead of the second retracing the first
-        if k.fixes.ssi_trace_tangent_curves_once
-            && stop_at_found_curve_end(v, k, start, tsp, curves_3d, uv_tol)?
-        {
+        if stop_at_found_curve_end(v, k, start, tsp, curves_3d, uv_tol)? {
             break;
         }
 
@@ -1412,12 +1499,12 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         let mut last_curve_param = v.intersector().point(next)?.curve_parameter;
         trace_test(v, k, next, &mut done)?;
         if done || v.intersector().point(next)?.curve_parameter != last_curve_param {
-            // opt-in fix (WR-76, #392): don't retrace an already found curve
-            if k.fixes.ssi_trace_tangent_curves_once
-                && point_count == 0
+            // fix (WR-76, #392): don't retrace an already found curve
+            if point_count == 0
                 && v.intersector()
                     .span_on_found_curve(k, tsp, next, curves_3d)?
             {
+                note_lone_start_on_found_curve(v.intersector_mut());
                 break;
             }
             approach_certified(v, k, tsp, next, uv_tol)?;
@@ -1468,13 +1555,12 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
                 trace_test(v, k, next, &mut done)?;
                 if done || v.intersector().point(next)?.curve_parameter != last_curve_param {
                     if done {
-                        // opt-in fix (WR-76, #392): don't retrace an already found
-                        // curve
-                        if k.fixes.ssi_trace_tangent_curves_once
-                            && point_count == 0
+                        // fix (WR-76, #392): don't retrace an already found curve
+                        if point_count == 0
                             && v.intersector()
                                 .span_on_found_curve(k, tsp, next, curves_3d)?
                         {
+                            note_lone_start_on_found_curve(v.intersector_mut());
                             return Ok(());
                         }
                         // an end condition: done tracing
@@ -1575,15 +1661,37 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 
         // 4i. count the points
         point_count += 1;
-        if point_count == 5000 {
+        if point_count == MAX_TRACE_POINTS {
             // the tolerance is too small or a surface is poorly defined
-            return Err(SolidError::intersect_failed(OP_TRACE, "the trace reached 5000 points: the tolerance is too small or a surface is poorly defined"));
+            return Err(SolidError::intersect(
+                OP_TRACE,
+                IntersectFailure::TraceTooLong {
+                    limit: MAX_TRACE_POINTS,
+                },
+            ));
         }
     }
     Ok(())
 }
 
-/// The loop-top test of the opt-in fix WR-76 (#392) in `TraceCurve` (the SolidCraft
+/// Fix WR-76: a trace stopped because its first span from `tsp`, the curve's last point,
+/// lies on a found curve ([`SurfaceIntersector::span_on_found_curve`], which requires
+/// `tsp` within the tolerance of one). When `tsp` is the curve's only point, it is marked
+/// so that [`SurfaceIntersector::flush_curve`] does not flush it as a touching point; a
+/// trace back from it that adds points makes it a curve's end again.
+fn note_lone_start_on_found_curve(si: &mut SurfaceIntersector<'_>) {
+    si.lone_start_on_found_curve = match si.curve_points.as_slice() {
+        [only] => Some(*only),
+        _ => None,
+    };
+}
+
+/// The secant corrections [`stop_at_found_curve_end`] makes to the step that ends a
+/// shortened span at a found curve's end (each a `ComputeNextPoint`; the first-order step
+/// is within a few percent of the end on the spans it sees, so two or three suffice).
+const END_STEP_CORRECTIONS: usize = 4;
+
+/// The loop-top test of the fix WR-76 (#392) in `TraceCurve` (the SolidCraft
 /// fork's tangency-labs/smlib@0ce09f2): when the curve's last span `prev -> last` of a
 /// near-tangent trace has gone past a free end of a found curve
 /// ([`SurfaceIntersector::reaches_found_curve_end`]), the last span is shortened to end
@@ -1605,7 +1713,7 @@ fn stop_at_found_curve_end<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         return Ok(false);
     }
     let first = points.first().copied();
-    let Some(end_t) = v
+    let Some((end_t, curve_end)) = v
         .intersector()
         .reaches_found_curve_end(k, start, prev, last, curves_3d)?
     else {
@@ -1613,11 +1721,12 @@ fn stop_at_found_curve_end<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     };
 
     // shorten the last span so it ends at that curve end rather than overlap it
-    let (prev_uv0, prev_uv_deriv_len) = {
+    let (prev_uv0, prev_uv_deriv_len, prev_pos) = {
         let p = v.intersector().point(prev)?;
         (
             p.uv_pos(SrfIndex::First),
             p.uv_deriv(SrfIndex::First).length(),
+            p.crv_pos(),
         )
     };
     if end_t <= 0.05 && first != Some(prev) {
@@ -1625,28 +1734,59 @@ fn stop_at_found_curve_end<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         v.intersector_mut().curve_points.pop();
     } else if end_t < 0.95 && prev_uv_deriv_len > EFF_ZERO {
         let last_uv0 = v.intersector().point(last)?.uv_pos(SrfIndex::First);
-        let short_step = end_t * last_uv0.distance(prev_uv0) / prev_uv_deriv_len;
+        let mut short_step = end_t * last_uv0.distance(prev_uv0) / prev_uv_deriv_len;
+        let tol = v.intersector().this_approx_tol_3d;
         let mut fresh = TsectPnt::zeroed();
         fresh.point_type = IntersectionPointType::Unknown;
-        let end = v.intersector_mut().alloc_point(fresh);
-        let n = match v.compute_next_point(k, prev, short_step, end) {
-            Ok(n) => Some(n),
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => None,
-        };
-        if let Some(n) = n {
-            let (end_uv0, end_uv1) = {
-                let p = v.intersector().point(end)?;
-                (p.uv_pos(SrfIndex::First), p.uv_pos(SrfIndex::Second))
+        let end = v.intersector_mut().alloc_point(fresh.clone());
+        // The step is the span's fraction of the previous point's uv tangent, a
+        // first-order guess: on a curved span it stops short of or past the curve end
+        // along the trace by much more than the tolerance, leaving a gap or an overlap
+        // between the two traces. Secant corrections rescale the step by the fraction
+        // of the stepped span at which the curve end lies until it is within the
+        // tolerance of the step's end along the span.
+        let mut accepted: Option<TsectPnt> = None;
+        for _ in 0..=END_STEP_CORRECTIONS {
+            *v.intersector_mut().point_mut(end)? = fresh.clone();
+            let n = match v.compute_next_point(k, prev, short_step, end) {
+                Ok(n) => n,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => break,
             };
-            if n.found_good_point
+            let (end_uv0, end_uv1, end_pos) = {
+                let p = v.intersector().point(end)?;
+                (
+                    p.uv_pos(SrfIndex::First),
+                    p.uv_pos(SrfIndex::Second),
+                    p.crv_pos(),
+                )
+            };
+            if !(n.found_good_point
                 && v.intersector().uv_domains[0].contains_point(end_uv0, uv_tol[0])
-                && v.intersector().uv_domains[1].contains_point(end_uv1, uv_tol[1])
+                && v.intersector().uv_domains[1].contains_point(end_uv1, uv_tol[1]))
             {
-                v.intersector_mut().curve_points.pop();
-                v.intersector_mut().point_mut(end)?.deviation = n.deviation_found.unwrap_or(0.0);
-                v.intersector_mut().add_point_to_curve(end)?;
+                break;
             }
+            let mut good = v.intersector().point(end)?.clone();
+            good.deviation = n.deviation_found.unwrap_or(0.0);
+            accepted = Some(good);
+            let span = end_pos - prev_pos;
+            let span_len_sq = span.length_squared();
+            if span_len_sq <= 0.0 {
+                break;
+            }
+            let t = (curve_end - prev_pos).dot(span) / span_len_sq;
+            if (t - 1.0).abs() * sqrt(span_len_sq) <= tol || !(t > 0.0 && t < 2.0) {
+                break;
+            }
+            short_step *= t;
+        }
+        // the last step that gave a good point in both domains (the first-order one
+        // when no correction did)
+        if let Some(good) = accepted {
+            v.intersector_mut().curve_points.pop();
+            *v.intersector_mut().point_mut(end)? = good;
+            v.intersector_mut().add_point_to_curve(end)?;
         }
     }
     Ok(true)
@@ -1809,9 +1949,9 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 
     // no work - no through points specified
     if points.is_empty() {
-        return Err(SolidError::intersect_failed(
+        return Err(SolidError::intersect(
             OP_DPI,
-            "no through points were given",
+            IntersectFailure::PointCountNotTaken { given: 0 },
         ));
     }
 
@@ -1869,11 +2009,12 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         match r {
             Ok(()) => {}
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => {
-                return Err(SolidError::intersect_failed(
-                    OP_DPI,
-                    "the through point's values could not be computed",
-                ))
+            Err(e) => {
+                return Err(
+                    Failure::new(OP_DPI, IntersectFailure::ThroughPointNotEvaluated)
+                        .caused_by(e)
+                        .into_error(),
+                )
             }
         }
 
@@ -1884,9 +2025,9 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
                 tsp.srf_pos(SrfIndex::Second),
             )
         {
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP_DPI,
-                "the first through point is not on both surfaces",
+                IntersectFailure::PointNotOnBothSurfaces,
             ));
         }
 
@@ -1895,12 +2036,8 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             let mut start = TsectPnt::zeroed();
             start.assign(&tsp);
             let start_id = v.intersector_mut().alloc_point(start);
-            // (status ignored; passed on with `ssi_proto_topology_statuses_pass_on`,
-            // fork bcc6f01)
-            ignored(passed_on(
-                v.intersector_mut().add_start_point(k, start_id),
-                k.fixes.ssi_proto_topology_statuses_pass_on,
-            )?)?;
+            // (status ignored upstream; passed on as the fork does, bcc6f01)
+            v.intersector_mut().add_start_point(k, start_id)?;
             v.intersector_mut().point_mut(pid)?.curve_parameter = 0.0;
             if !(opts.start_direction.is_some() && n > 1) {
                 v.intersector_mut().start_point = Some(start_id);
@@ -1909,28 +2046,19 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             // the last point ends the curve
             v.intersector_mut().end_point = Some(pid);
         } else {
-            // the points between are through points (status ignored, but linking
-            // a linked point is undefined upstream; passed on with
-            // `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
-            match v.intersector_mut().add_through_point(pid) {
-                Err(
-                    e @ (SolidError::InvalidInput { .. }
-                    | SolidError::PortInvariant { .. }
-                    | SolidError::Unported { .. }
-                    | SolidError::Cancelled { .. }),
-                ) => return Err(e),
-                Err(e) if k.fixes.ssi_proto_topology_statuses_pass_on => return Err(e),
-                _ => {}
-            }
+            // the points between are through points (status ignored upstream, where
+            // linking a linked point is undefined; passed on as the fork does, bcc6f01)
+            v.intersector_mut().add_through_point(pid)?;
         }
     }
 
-    // trace from the last start point
+    // trace from the last start point (added above; only a caller's override of
+    // `compute_point_values` that re-enters the driver clears it)
     let tsp_id = v
         .intersector_mut()
         .start_points
         .pop()
-        .ok_or_else(|| SolidError::intersect_missing(OP_DPI, "a start point to trace from"))?;
+        .ok_or_else(|| SolidError::intersect(OP_DPI, IntersectFailure::StartPointLost))?;
     v.intersector_mut().curve_trace_direction = 1.0;
 
     // tracing beyond the end: clip the extension
@@ -2087,6 +2215,7 @@ fn join_from_singular_point<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 
     // init the lists for the nested call
     v.intersector_mut().curve_points.clear();
+    v.intersector_mut().lone_start_on_found_curve = None;
     v.intersector_mut().start_points.clear();
     v.intersector_mut().through_points.clear();
 
@@ -2464,6 +2593,83 @@ mod tests {
         assert_eq!(si.point(id).unwrap().curve_parameter, -1.0);
     }
 
+    /// A caller's `IntersectorVirtuals` whose `compute_point_values` re-enters the point
+    /// intersection on its second call: the inner call clears the start points.
+    struct Reentrant<'s> {
+        si: SurfaceIntersector<'s>,
+        calls: usize,
+    }
+
+    impl<'s> IntersectorVirtuals<'s> for Reentrant<'s> {
+        fn intersector(&self) -> &SurfaceIntersector<'s> {
+            &self.si
+        }
+
+        fn intersector_mut(&mut self) -> &mut SurfaceIntersector<'s> {
+            &mut self.si
+        }
+
+        fn compute_point_values(
+            &mut self,
+            k: &Kernel,
+            uv_values: [Point2; 2],
+            point: &mut TsectPnt,
+            previous: Option<&TsectPnt>,
+            step_size: Option<f64>,
+        ) -> Result<()> {
+            self.calls += 1;
+            if self.calls == 2 {
+                let opts = PointIntersectionOptions::default();
+                let inner = self.si.do_point_intersection(k, &[TsectId(99_999)], &opts);
+                assert!(inner.is_err());
+            }
+            self.si
+                .compute_point_values(k, uv_values, point, previous, step_size)
+        }
+
+        fn compute_next_point(
+            &mut self,
+            k: &Kernel,
+            prev: TsectId,
+            step_size: f64,
+            next: TsectId,
+        ) -> Result<NextPoint> {
+            self.si.compute_next_point(k, prev, step_size, next)
+        }
+
+        fn flush_curve(&mut self, k: &Kernel, out: &mut TsectCurves) -> Result<()> {
+            self.si.flush_curve(k, out)
+        }
+    }
+
+    #[test]
+    fn a_reentrant_override_that_loses_the_start_point_is_the_callers() {
+        let k = &Kernel::default();
+        let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let si = SurfaceIntersector::new(k, &a, &unit(), &b, &unit(), false).unwrap();
+        let mut v = Reentrant { si, calls: 0 };
+        // two points on the planes' common line y = 0.5, z = 0
+        let mut ids = Vec::new();
+        for u in [0.3, 0.7] {
+            let mut p = TsectPnt::new();
+            *p.uv_pos_mut(SrfIndex::First) = Point2::new(u, 0.5);
+            *p.uv_pos_mut(SrfIndex::Second) = Point2::new(u, 0.5);
+            ids.push(v.si.alloc_point(p));
+        }
+        let opts = PointIntersectionOptions::default();
+        let e = do_point_intersection_with(&mut v, k, &ids, &opts).unwrap_err();
+        assert_eq!(v.calls, 2);
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::StartPointLost),
+            "{e}"
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert!(!e.is_defect());
+        assert_eq!(e.upstream_status(), Some(1006));
+    }
+
     #[test]
     fn law_intersection_needs_two_offset_surfaces() {
         let k = &Kernel::default();
@@ -2496,10 +2702,9 @@ mod tests {
         assert_eq!(one.upstream_status(), Some(crate::error::SM_ERR), "{one}");
         assert_eq!(
             one.intersect_failure(),
-            Some(&crate::error::intersect::IntersectFailure::Failed(
-                "the law intersection needs exactly two points"
-            ))
+            Some(&IntersectFailure::PointCountNotTaken { given: 1 })
         );
+        assert_eq!(one.kind(), crate::error::ErrorKind::InvalidInput);
         let two = si
             .do_law_intersection(k, &[p, q], &opts, &mut law)
             .unwrap_err();
@@ -2594,10 +2799,15 @@ mod tests {
             bboxes: [far, far],
             ..pair
         };
+        let e = si
+            .find_interior_curves_from_node_pairs(&k, &[pair, far_pair], &mut out)
+            .unwrap_err();
         assert_eq!(
-            si.find_interior_curves_from_node_pairs(&k, &[pair, far_pair], &mut out),
-            Err(SolidError::intersect_missing(OP_FIC, "the curve's cache"))
+            e.intersect_failure(),
+            Some(&IntersectFailure::CurveCacheNotBuilt)
         );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert!(e.cause().is_some(), "{e}");
 
         // Pair validation still precedes even the first curve-cache build.
         let disjoint = InteriorNodePair {
@@ -2614,10 +2824,14 @@ mod tests {
         si.find_interior_curves_from_node_pairs(&k, &[], &mut out)
             .unwrap();
         // No cache from the earlier call may survive replacing its output curve.
+        let e = si
+            .find_interior_curves_from_node_pairs(&k, &[pair], &mut out)
+            .unwrap_err();
         assert_eq!(
-            si.find_interior_curves_from_node_pairs(&k, &[pair], &mut out),
-            Err(SolidError::intersect_missing(OP_FIC, "the curve's cache"))
+            e.intersect_failure(),
+            Some(&IntersectFailure::CurveCacheNotBuilt)
         );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
     }
 
     /// #16669 (`CodeRabbit` on #16670): a point the step-growth loop's `TestPoint` snaps to a
@@ -2711,9 +2925,11 @@ mod tests {
         }
         assert_eq!(
             r,
-            Err(SolidError::intersect_failed(
+            Err(SolidError::intersect(
                 OP_APPROACH,
-                "the span to the snapped point does not certify within the bound",
+                IntersectFailure::ApproachNotCertified {
+                    points: MAX_APPROACH_POINTS,
+                },
             )),
         );
     }

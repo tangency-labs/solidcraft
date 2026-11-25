@@ -32,7 +32,10 @@ impl SolveApp {
     /// Keep the target design and editors unchanged until the picker answers.
     /// (A save being written keeps it unchanged too, see [`crate::save_job`].)
     pub fn file_picker_busy(&self) -> bool {
-        self.file_picker.is_some() || self.saving.is_some() || self.disk_prompt
+        self.file_picker.is_some()
+            || self.saving.is_some()
+            || self.disk_prompt
+            || (crate::documents::saving_to_close(self) && crate::save_job::host_pending(self, self.session.uid))
     }
 
     pub(crate) fn pick_open(&mut self, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
@@ -82,12 +85,15 @@ impl SolveApp {
         self.begin_picker(future, Box::new(complete));
     }
 
-    /// Choose a library folder without blocking the event loop or changing a design.
-    pub(crate) fn pick_folder(&mut self, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
+    /// Ask for a folder, starting in `current` (empty: the folder last used): a plugin field's
+    /// Browse button, the document library's folder, or a folder setting. The plugin dialog shows
+    /// Browse only when this service is set. Without a host dialog, the answer is a cancel and
+    /// nothing is changed.
+    pub(crate) fn pick_folder(&mut self, current: &str, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
         if self.file_picker_busy() {
             return;
         }
-        let future = self.services.pick_folder.as_ref().map(|pick| pick());
+        let future = self.services.pick_folder.as_ref().map(|pick| pick(current));
         self.begin_picker(future, Box::new(complete));
     }
 
@@ -421,8 +427,8 @@ mod tests {
             ("sketch.insert_svg", vec!["svg"]),
             ("sketch.insert_dxf", vec!["dxf"]),
             ("file.insert_step", vec![]),
-            ("canvas.insert", vec!["png", "jpg", "jpeg"]),
-            ("canvas.decal", vec!["png", "jpg", "jpeg"]),
+            ("canvas.insert", vec!["png", "jpg", "jpeg", "svg"]),
+            ("canvas.decal", vec!["png", "jpg", "jpeg", "svg"]),
         ] {
             h.app.start(command);
             tick(&mut h.app, &h.ctx);
@@ -493,7 +499,7 @@ mod tests {
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
         h.app.start("canvas.insert");
         h.frames(2);
-        assert_eq!(*asked.borrow(), [vec!["csv", "json"], vec!["png", "jpg", "jpeg"]]);
+        assert_eq!(*asked.borrow(), [vec!["csv", "json"], vec!["png", "jpg", "jpeg", "svg"]]);
     }
 
     /// #4717: a canvas placed with a click on the origin of a sketch on XY, seen from the top,
