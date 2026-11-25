@@ -3786,6 +3786,24 @@ mod install_zip {
     }
 
     #[test]
+    fn a_panel_shader_installs_and_is_reported_apart_from_backgrounds() {
+        let (mut s, root) = session("panels");
+        let manifest = json!({"id": "frost", "name": "Frost", "version": "1.0.0", "capabilities": ["shaders@0.2"], "shaders": [
+            {"id": "frost", "name": "Frost", "kind": "panel", "source": "frost.wgsl", "blur": 16}
+        ]});
+        let text = serde_json::to_vec(&manifest).unwrap();
+        let wgsl = b"fn panel(px: ScPanel) -> vec4<f32> {
+    return vec4<f32>(sc_blurred(px.position).rgb, 0.9);
+}
+";
+        let path = put(&root, "frost.zip", &zip(&[("plugin.json", &text[..]), ("frost.wgsl", &wgsl[..])]));
+        let reply = s.execute("plugin.install", &json!({"path": path})).unwrap();
+        assert_eq!(reply["panel_shaders"], json!(["frost/frost"]));
+        assert!(reply["shaders"].as_array().is_none_or(Vec::is_empty), "not a background: {reply}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn a_shader_that_cannot_draw_is_refused_at_install() {
         let missing_texture = unpack(&sky(DUSK, &[])).unwrap_err();
         assert_eq!(missing_texture, InstallError::MissingModule("stars.png".into()));

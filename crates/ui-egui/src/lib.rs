@@ -275,6 +275,8 @@ mod plugin_images;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
 #[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod plugin_panels;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod plugin_shaders;
 mod plugin_slots;
 #[cfg(not(target_arch = "wasm32"))]
@@ -921,6 +923,9 @@ pub struct SolveApp {
     /// The ribbon and panel tint a plugin gives (`shaders@0.2`), when one is chosen.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) plugin_tint: plugin_tint::State,
+    /// The panel shader a plugin draws (`shaders@0.2`), when one is chosen.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) plugin_panels: plugin_panels::State,
     /// The bodies of a just-opened Y-up file, offered to be stood up (`stand_up`).
     pub stand_up: Option<Vec<String>>,
     /// The placement of the component that file came in as: the offer turns it.
@@ -1244,6 +1249,8 @@ impl SolveApp {
             plugin_shaders: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             plugin_tint: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            plugin_panels: Default::default(),
             stand_up: None,
             stand_up_occurrence: None,
             stand_up_digest: None,
@@ -1431,6 +1438,8 @@ impl SolveApp {
         self.plugin_shaders.install(rs);
         #[cfg(not(target_arch = "wasm32"))]
         self.plugin_tint.install(rs);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.plugin_panels.install(rs);
         if built.msaa_fallback {
             self.msaa_compatibility = true;
         }
@@ -4672,6 +4681,8 @@ impl SolveApp {
         params_dialog::install_expressions(ui.ctx());
         ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());
         prefs::prepare_blur(self, ui.ctx());
+        #[cfg(not(target_arch = "wasm32"))]
+        plugin_panels::prepare(self, ui.ctx());
         render_workspace::displayed::begin(self);
         let _blur_scope = self.blur.begin(ui.ctx());
         value_step::set_enabled(ui.ctx(), self.preferences.step_values);

@@ -813,6 +813,8 @@ wraps and limits; it needs no runtime. See [plugin shaders](plugin-shaders.md) a
 
 `shaders@0.2` adds tints, which colour the ribbon's icons, its button blocks and the panels each
 frame, and settings sliders for shaders. See [plugin shaders](plugin-shaders.md#tints).
+It also adds panel shaders, which draw every see-through panel's background from what is behind
+it. See [plugin panels](plugin-panels.md).
 
 ## Docked panels
 

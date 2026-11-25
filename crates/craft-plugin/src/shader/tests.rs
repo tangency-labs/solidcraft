@@ -10,6 +10,7 @@ fn background(textures: &[&str]) -> Shader {
         textures: textures.iter().map(|t| ShaderTexture { name: (*t).into(), file: format!("{t}.png") }).collect(),
         animated: false,
         settings: Vec::new(),
+        blur: None,
     }
 }
 
@@ -312,4 +313,74 @@ fn settings_are_checked_and_read_within_their_range() {
     let mut many = background(&[]);
     many.settings = (0..5).map(|i| setting(&format!("s{i}"), 0.0, 1.0, 0.5)).collect();
     assert!(validate(&[many]).is_err());
+}
+
+fn panel(textures: &[&str]) -> Shader {
+    Shader { id: "frost".into(), name: "Frost".into(), kind: ShaderKind::Panel, source: "frost.wgsl".into(), ..background(textures) }
+}
+
+const FROST: &str = "fn panel(px: ScPanel) -> vec4<f32> {\n    let rim = smoothstep(-1.5, 0.0, px.edge);\n    let c = mix(sc_blurred(px.position).rgb, vec3<f32>(1.0), 0.2 * sc.settings.x + 0.3 * rim);\n    return vec4<f32>(mix(c, sc_backdrop(px.position).rgb, px.hovered * 0.1), 1.0);\n}\n";
+
+#[test]
+fn a_panel_shader_compiles_with_the_panel_entry_points_and_binds_what_the_host_lays_out() {
+    let source = FROST.replace("1.0);\n}", "1.0) + 0.0 * textureSampleLevel(grain, sc_repeat, px.uv, 0.0);\n}");
+    let compiled = compile(&panel(&["grain"]), &source).unwrap();
+    assert!(compiled.wgsl.contains("fn sc_fragment") && compiled.wgsl.contains("fn panel"), "{}", compiled.wgsl);
+    naga::front::wgsl::parse_str(&compiled.wgsl).unwrap();
+    assert_eq!(
+        compiled.bindings,
+        vec![
+            (0, Resource::Uniform(HOST_UNIFORM_BYTES as u64)),
+            (1, Resource::Sampler),
+            (2, Resource::Sampler),
+            (FIRST_TEXTURE_BINDING, Resource::Texture),
+            (PANEL_RECT_BINDING, Resource::Uniform(PANEL_RECT_UNIFORM_BYTES as u64)),
+            (PANEL_RECT_BINDING + 1, Resource::Texture),
+            (PANEL_RECT_BINDING + 2, Resource::Texture),
+        ]
+    );
+}
+
+#[test]
+fn a_panel_shader_needs_panel_and_cannot_take_the_hosts_names() {
+    let none = "fn background(px: ScPixel) -> vec4<f32> { return vec4<f32>(1.0); }\n";
+    assert!(reason(compile(&panel(&[]), none).unwrap_err()).contains("fn panel(px: ScPanel)"));
+    let own = format!("{FROST}fn sc_backdrop(p: vec2<f32>) -> vec4<f32> {{ return vec4<f32>(0.0); }}\n");
+    assert!(compile(&panel(&[]), &own).is_err(), "redefining a host helper is refused");
+    let encode = format!("{FROST}fn sc_encode(c: vec3<f32>) -> vec3<f32> {{ return c; }}\n");
+    assert!(reason(compile(&panel(&[]), &encode).unwrap_err()).contains("sc_encode"), "a background's helper is not a panel's");
+    let bound = format!("@group(0) @binding(12) var<uniform> mine: vec4<f32>;\n{FROST}");
+    assert!(reason(compile(&panel(&[]), &bound).unwrap_err()).contains("resource `mine`"));
+    let reserved = ShaderTexture { name: "panel".into(), file: "p.png".into() };
+    assert!(validate(&[Shader { textures: vec![reserved], ..panel(&[]) }]).is_err(), "panel is a reserved texture name");
+}
+
+#[test]
+fn the_panel_uniform_sizes_match_the_prelude() {
+    let module = naga::front::wgsl::parse_str(&format!("{FROST}\n{}", PANEL_PRELUDE.replace("{textures}", ""))).unwrap();
+    let size = |name: &str| {
+        let (_, ty) = module.types.iter().find(|(_, t)| t.name.as_deref() == Some(name)).unwrap();
+        let naga::TypeInner::Struct { span, .. } = ty.inner else { panic!("{name} is a struct") };
+        span as usize
+    };
+    assert_eq!((size("ScHost"), size("ScPanelRect")), (HOST_UNIFORM_BYTES, PANEL_RECT_UNIFORM_BYTES));
+}
+
+#[test]
+fn blur_belongs_to_panel_shaders_within_range() {
+    validate(&[Shader { blur: Some(14.0), ..panel(&[]) }]).unwrap();
+    assert_eq!((Shader { blur: Some(14.0), ..panel(&[]) }.blur_radius(), panel(&[]).blur_radius()), (14.0, DEFAULT_BLUR));
+    for bad in [Shader { blur: Some(0.0), ..panel(&[]) }, Shader { blur: Some(61.0), ..panel(&[]) }, Shader { blur: Some(10.0), ..background(&[]) }] {
+        assert!(validate(std::slice::from_ref(&bad)).is_err(), "{bad:?}");
+    }
+}
+
+#[test]
+fn a_panel_shader_needs_shaders_0_2() {
+    let shaders = json!([{"id": "frost", "name": "Frost", "kind": "panel", "source": "frost.wgsl", "blur": 14,
+        "settings": [{"id": "tint", "name": "Tint", "min": 0, "max": 1, "default": 0.3}]}]);
+    let plugin = manifest(json!({"id": "sky", "name": "Sky", "version": "1", "capabilities": ["shaders@0.2"], "shaders": shaders})).unwrap();
+    assert_eq!((plugin.shaders[0].kind, plugin.shaders[0].blur), (ShaderKind::Panel, Some(14.0)));
+    let old = manifest(json!({"id": "sky", "name": "Sky", "version": "1", "capabilities": ["shaders@0.1"], "shaders": shaders})).unwrap_err();
+    assert!(old.to_string().contains("shaders@0.2"), "{old}");
 }

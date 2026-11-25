@@ -251,6 +251,12 @@ what it colours moves or changes.
 [`plugin-examples/accent-sweep`](plugin-examples/accent-sweep) sweeps a band of the theme's accent
 across the icons and buttons, with its width and speed as settings.
 
+## Panels
+
+`"kind": "panel"` (`shaders@0.2`) draws the background of every see-through panel from what is
+behind it: the 3D view and the panels under it, sharp and blurred. The app draws no look of its own
+there, and with none chosen the panels draw as before. See [plugin panels](plugin-panels.md).
+
 ## Versions
 
 `shaders@0.2` adds tints and settings; `shaders@0.1` plugins install and draw as before.
