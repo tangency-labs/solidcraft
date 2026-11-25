@@ -8,6 +8,10 @@
 macro_rules! assistant_preferences {
     ($next:ident $(, $rest:ident)* ; $($fields:tt)*) => {
         $next! { $($rest),* ; $($fields)*
+            /// Additional folders the built-in Assistant's MCP server may read, write and open
+            /// linked designs from (`--allow-path`, #20326). Empty by default: only the open
+            /// design's folder, the recovery folder and the server's scratch folder are in reach.
+            agent_allowed_paths: Vec<String> = Vec::new(), PAGE_ASSISTANT;
             agent_chat_open_at_start: bool = false, PAGE_ASSISTANT;
             /// Whether the chat is in its own window instead of the side panel, and that window's place
             /// and size as the system last reported them (`[x, y, width, height]`, points; `x` can be

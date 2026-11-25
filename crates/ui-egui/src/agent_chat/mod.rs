@@ -1322,7 +1322,8 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(hint) = entry.problem_hint() {
         chat.notice(hint, true);
     }
-    let bridge = cli.zip(chat.tools_port).map(|(cli, port)| acp::McpBridge { cli, port });
+    let allow_paths = configured_allow_paths(&app.preferences.agent_allowed_paths);
+    let bridge = cli.zip(chat.tools_port).map(|(cli, port)| acp::McpBridge { cli, port, allow_paths });
     chat.tools_available = Some(bridge.is_some());
     chat.tools_bridged = bridge.is_some();
     let wake = ctx.clone();
@@ -1967,13 +1968,20 @@ pub fn new_chat(app: &mut SolveApp) {
     if matches!(chat.state(), State::Ready | State::Busy) {
         chat.restore_mode = Some(chat.mode.clone()).filter(|m| !m.is_empty());
         chat.state = Some(State::Starting);
+        let allow_paths = configured_allow_paths(&app.preferences.agent_allowed_paths);
         if let Some(b) = chat.backend.as_mut() {
-            // Instructions edited since the last session apply from this one on.
+            // Instructions and allowed folders edited since the last session apply from this one on.
             b.set_instructions(&app.preferences.agent_instructions);
+            b.set_allow_paths(&allow_paths);
             b.new_session();
         }
     }
     chat.clear_config();
+}
+
+/// Configured extra folders the assistant's MCP bridge may reach (#20326).
+fn configured_allow_paths(paths: &[String]) -> Vec<std::path::PathBuf> {
+    paths.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).map(std::path::PathBuf::from).collect()
 }
 
 /// Whether New chat would throw something away that the user may want (so it asks first).
@@ -2416,11 +2424,22 @@ fn pump_tools(app: &mut SolveApp) {
         };
         req.chat_turn = Some(Arc::clone(&turn.active));
         turn.requests += 1;
-        // Requests without folders of their own stay inside the chat's working folder.
-        if let Some(o) = req.params.as_object_mut()
-            && !o.contains_key("allow_paths")
-        {
-            o.insert("allow_paths".into(), json!([working_dir().to_string_lossy()]));
+        // Requests without folders of their own stay inside the chat's working folder; folders
+        // configured in Assistant preferences (`agent_allowed_paths`, #20326) apply as well.
+        if let Some(o) = req.params.as_object_mut() {
+            let extra: Vec<Value> =
+                app.preferences.agent_allowed_paths.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).map(|s| json!(s)).collect();
+            if !o.contains_key("allow_paths") {
+                let mut paths = vec![json!(working_dir().to_string_lossy())];
+                paths.extend(extra);
+                o.insert("allow_paths".into(), Value::Array(paths));
+            } else if let Some(arr) = o.get_mut("allow_paths").and_then(Value::as_array_mut) {
+                for path in extra {
+                    if !arr.contains(&path) {
+                        arr.push(path);
+                    }
+                }
+            }
         }
         let undo_left = undo_len.saturating_sub(turn.start_undo.get::<UndoMark>().map_or(0, |m| m.depth));
         // The permission mode (the agent's own, else the global one) and "always allow" answers.
