@@ -299,9 +299,11 @@ pub fn find_coincident_edge(
             tol,
         ) {
             Ok(d) => d,
-            Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                return Err(err)
-            }
+            Err(
+                err @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(err),
             Err(_) => continue,
         };
         if dist > tol {

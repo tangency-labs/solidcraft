@@ -374,16 +374,28 @@ fn dialog_hook_cannot_open_forms_even_when_the_command_can() {
 #[test]
 fn form_import_accepts_patch_capability_versions() {
     let bytes = form_component();
+    for capability in ["forms@0.1", "forms@0.1.0"] {
+        let mut m = manifest();
+        m.capabilities.push(capability.into());
+        let mut app = App { interactive: true, ..Default::default() };
+        assert_eq!(run(&mut app, &m, &bytes, "make", &json!({})).unwrap(), json!({}));
+        assert_eq!(app.forms, vec![("make".into(), json!({}))]);
+    }
+}
+
+#[test]
+fn form_import_refuses_missing_or_unsupported_capabilities() {
+    let bytes = form_component();
     let mut m = manifest();
-    m.capabilities.push("forms@0.1.0".into());
     let mut app = App { interactive: true, ..Default::default() };
-    assert_eq!(run(&mut app, &m, &bytes, "make", &json!({})).unwrap(), json!({}));
-    assert_eq!(app.forms, vec![("make".into(), json!({}))]);
-    let _ = m.capabilities.pop();
     assert!(matches!(run(&mut app, &m, &bytes, "make", &json!({})), Err(HostError::PermissionDenied { .. })));
     m.capabilities.push("forms@0.2".into());
     assert!(matches!(craft_plugin::check_capabilities(&m.capabilities, "Test host"), Err(HostError::UnsupportedCapability { .. })));
-    assert!(run(&mut app, &m, &bytes, "make", &json!({})).is_err());
+    assert!(
+        matches!(run(&mut app, &m, &bytes, "make", &json!({})), Err(HostError::UnsupportedCapability { .. })),
+        "an unsupported forms version is refused"
+    );
+    assert!(app.forms.is_empty(), "refused capabilities cannot open forms");
 }
 
 #[test]
@@ -1219,6 +1231,7 @@ fn a_path_of_more_than_64_components_is_refused_before_any_folder_is_made() {
     );
     assert!(!root.join("e").exists(), "no folder made for a refused path");
     state.discard_writes();
+    drop(state);
     std::fs::remove_dir_all(root).unwrap();
 }
 

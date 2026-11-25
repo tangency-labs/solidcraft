@@ -27,7 +27,7 @@
 use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::eval::{Frame, Surface as Record};
-use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::axis2_placement::{axes_are_orthonormal, Axis2Placement};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::{Point3, Vec3};
@@ -388,11 +388,9 @@ fn given(u: [f64; 2], v: [f64; 2]) -> Extent2d {
 
 /// A frame's origin, x, y and z axes, its x and y checked unit and square to rounding.
 fn axes(f: &Frame) -> Result<(Point3, Vec3, Vec3, Vec3)> {
-    let ulps = 8.0 * f64::EPSILON;
     let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
     let (x, y) = (v(f.x_axis), v(f.y_axis));
-    let unit = |v: Vec3| (v.length() - 1.0).abs() <= ulps;
-    if !(unit(x) && unit(y) && x.dot(y).abs() <= ulps) {
+    if !axes_are_orthonormal(x, y) {
         return Err(SolidError::invalid_input(
             OP,
             "the frame's axes are not unit and square",
