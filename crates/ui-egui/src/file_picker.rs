@@ -333,6 +333,28 @@ mod tests {
     }
 
     #[test]
+    fn a_host_can_refuse_a_nonpersistent_save_before_marking_the_design_saved() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        let original = h.app.session.doc.to_json();
+        h.app.services.can_persist_design = Some(Box::new(|path| path != "/x/part.sc"));
+        for (id, params) in [("file.save_as", json!({"path":"/x/part.sc"})), ("file.save", json!({"path":"/x/part.sc"}))] {
+            let error = h.app.run(id, params).unwrap_err();
+            assert!(error.contains("cannot keep a design"), "{error}");
+            assert_eq!(h.app.session.doc.to_json(), original, "a rejected save leaves the design alone");
+            assert!(h.app.session.path.is_none(), "the rejected path is not recorded as saved");
+            assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "the refusal is reported");
+        }
+        // The host also accepts real file paths; a save without a path keeps that file.
+        let allowed = h.dir.join("part.sc").to_string_lossy().into_owned();
+        h.app.run("file.save_as", json!({"path":allowed.clone()})).unwrap();
+        h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"operation":"new"})).unwrap();
+        h.app.services.can_persist_design = Some(Box::new(|_| false));
+        assert!(h.app.run("file.save", json!({})).is_err(), "a later Save checks its stored path");
+        assert_eq!(h.app.session.path.as_deref(), Some(allowed.as_str()));
+    }
+
+    #[test]
     fn sheet_exports_without_a_sheet_report_an_error_without_a_picker() {
         let mut h = crate::scenario::Harness::new();
         let asked = Rc::new(Cell::new(0));

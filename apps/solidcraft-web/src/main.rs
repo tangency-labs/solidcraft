@@ -1389,7 +1389,7 @@ mod web {
                             files::start(&files);
                         }
                         let (panel, opener, saver, shown) = (files.clone(), files.clone(), files.clone(), files.clone());
-                        let (restorable, restorer) = (files.clone(), files.clone());
+                        let (restorable, restorer, persistable) = (files.clone(), files.clone(), files.clone());
                         let services = if !launch.persists() { Services::default() } else { Services {
                             // Open shows the browser's open dialog for a design where it has one
                             // (the file keeps its handle, so Save writes back to it), else the
@@ -1416,6 +1416,11 @@ mod web {
                                     }
                                     SaveTarget::Download => Box::pin(std::future::ready(Some(format!("{}{name}", files::DOWNLOADS)))),
                                 }
+                            })),
+                            // Programmatic saves cannot persist at arbitrary VFS paths.
+                            // A new file picker handle is ready now; older handles are listed by IndexedDB.
+                            can_persist_design: Some(Box::new(move |path: &str| {
+                                disk::can_keep_design(path, |id| disk::has_handle(id) || persistable.disk_known.borrow().contains(id))
                             })),
                             // A recent design on the disk, from an earlier session, opens by asking
                             // the browser for its remembered file.

@@ -552,6 +552,9 @@ pub struct Services {
     pub agent_http: Option<agent_chat::backend::HttpFn>,
     /// Show the designs the browser keeps for itself; None: the host has no such store.
     pub browser_files: Option<Box<dyn Fn()>>,
+    /// Whether a design save path persists in this host.
+    /// Browser hosts reject temporary paths before reporting a successful save.
+    pub can_persist_design: Option<Box<dyn Fn(&str) -> bool>>,
     /// Whether a recent design that is not in memory can be brought back by the host (the browser
     /// build remembers files it saved to the disk); None: it can't.
     pub can_restore: Option<Box<dyn Fn(&str) -> bool>>,
@@ -1733,6 +1736,18 @@ impl SolveApp {
         }
         if self.file_load_holds() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
+        }
+        // The browser's VFS also holds temporary files. Refuse a design save into one
+        // before the command marks the tab saved or tells the user it was saved (#18522).
+        if matches!(id, "file.save" | "file.save_as") {
+            let path = params.get("path").and_then(Value::as_str).or(self.session.path.as_deref()).map(str::to_owned);
+            if let Some(path) = path
+                && self.services.can_persist_design.as_ref().is_some_and(|keep| !keep(&path))
+            {
+                let result = Err(format!("{path}: this browser cannot keep a design at that path; use Save As to choose a file"));
+                self.finish_command(id, &result);
+                return result;
+            }
         }
         // The window has the design tabs, which the engine does not: it shows the design asked for.
         if id == "document.activate" {

@@ -43,6 +43,17 @@ pub fn route(path: &str) -> WriteTo {
     }
 }
 
+/// A design can be marked saved only if the path is backed by browser storage, a download,
+/// or a file handle that this browser actually remembers. Uploads and other paths are temporary.
+pub fn can_keep_design(path: &str, disk_known: impl FnOnce(&str) -> bool) -> bool {
+    match route(path) {
+        WriteTo::Opfs => path.strip_prefix(OPFS_PREFIX).is_some_and(|name| !name.is_empty() && !name.contains('/')),
+        WriteTo::Download => true,
+        WriteTo::Disk => parse(path).is_some_and(|(id, _)| disk_known(id)),
+        WriteTo::Memory => false,
+    }
+}
+
 /// The engine path of the design `name` kept under handle `id`.
 pub fn path(id: &str, name: &str) -> String {
     format!("{PREFIX}{id}/{name}")
@@ -223,6 +234,11 @@ mod web {
         /// Writes waiting for their turn (a file takes one writer at a time), latest per id.
         static QUEUE: RefCell<VecDeque<(String, Vec<u8>)>> = const { RefCell::new(VecDeque::new()) };
         static BUSY: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// True for a handle picked during this session (which may not be in IndexedDB yet).
+    pub fn has_handle(id: &str) -> bool {
+        HANDLES.with(|handles| handles.borrow().contains_key(id))
     }
 
     /// Why a dialog gave no file.
@@ -646,6 +662,19 @@ mod tests {
         assert_eq!(route("/upload/part.step"), WriteTo::Memory);
         // The temporary folder (a screenshot without a path, #7192) stays in memory.
         assert_eq!(route(&format!("{}/solidcraft-shot.png", solidcraft_engine::io::vfs::BROWSER_TEMP)), WriteTo::Memory);
+    }
+
+    #[test]
+    fn memory_only_and_unknown_disk_paths_cannot_claim_a_durable_save() {
+        for path in ["/x/y.sc", "/upload/part.sc", "/tmp/script.sc", "/disk/unknown/plate.sc", "/opfs/folder/part.sc", "/opfs/"] {
+            assert!(!can_keep_design(path, |_| false), "{path} is not durable");
+        }
+        for path in ["/opfs/plate.sc", "/downloads/part.sc"] {
+            assert!(can_keep_design(path, |_| false), "{path} is a supported save route");
+        }
+        let stored = "/disk/18f-2a/plate.sc";
+        assert!(!can_keep_design(stored, |id| id == "other"), "an invented handle cannot save");
+        assert!(can_keep_design(stored, |id| id == "18f-2a"), "a remembered handle can save");
     }
 
     #[test]
