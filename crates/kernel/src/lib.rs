@@ -100,6 +100,7 @@ mod meshbody;
 #[cfg(test)]
 mod modify_history_tests;
 mod native;
+pub mod network;
 mod numbered;
 mod offset;
 mod offset_backend;
@@ -530,6 +531,7 @@ pub use surface_trim::mutual_trim;
 pub use surface_trim::trim;
 pub use surface_trim::trim_dropped_keep;
 pub use surface_trim::trim_keep;
+pub use surface_trim::trim_sheet_keep;
 pub use surface_untrim::UntrimHoles;
 pub use surface_untrim::untrim;
 pub use surfaces::copy_faces;
@@ -651,6 +653,7 @@ impl Cause for solidcraft_smlib::CheckReport {}
 impl Cause for solidcraft_smlib::export::ExportError {}
 impl Cause for solidcore_record::brep::history::Failed {}
 impl Cause for solidcore_ops::pcurve::Error {}
+impl Cause for solidcraft_geom::brep::eval::Error {}
 impl<T: Cause + ?Sized> Cause for &T {
     fn panic(&self) -> Option<&str> {
         (**self).panic()

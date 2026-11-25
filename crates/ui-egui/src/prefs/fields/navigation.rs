@@ -71,6 +71,8 @@ macro_rules! navigation_preferences {
             navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
             /// The custom view gizmo's colours: the theme's (themed) or the body's own (modeled).
             navigator_texture: NavigatorTexture = NavigatorTexture::default(), PAGE_NAVIGATION;
+            /// Show the axes navigator's half-turn button; disabling it restores the previous layout.
+            navigator_turn_around: bool = true, PAGE_NAVIGATION;
             /// What an orbit turns around.
             orbit_around: OrbitAround = OrbitAround::default(), PAGE_NAVIGATION;
             /// The cursor preference as releases before the origin option saved it (`true` = the point
