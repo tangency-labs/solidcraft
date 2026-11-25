@@ -1371,7 +1371,12 @@ fn trims_domain(trims: &[[f64; 4]], uv_domain: &Extent2d) -> Extent2d {
         return *uv_domain;
     };
     let b = rest.iter().fold(*first, |b, t| {
-        [b[0].min(t[0]), b[1].max(t[1]), b[2].min(t[2]), b[3].max(t[3])]
+        [
+            b[0].min(t[0]),
+            b[1].max(t[1]),
+            b[2].min(t[2]),
+            b[3].max(t[3]),
+        ]
     });
     if !b.iter().all(|x| x.is_finite()) {
         return *uv_domain;
@@ -1454,8 +1459,8 @@ fn net_cell(net: &NetSurface, cell: &Extent2d, dir: Vec3) -> Result<Option<NetCe
     // surface: a bound on the point, none on the partials)
     let top = round_up(along(partials.at(0, 0)).hi + slack);
     let one_sign = |i: Ivl| i.lo > 0.0 || i.hi < 0.0;
-    let monotone = slack == 0.0
-        && (one_sign(along(partials.at(1, 0))) || one_sign(along(partials.at(0, 1))));
+    let monotone =
+        slack == 0.0 && (one_sign(along(partials.at(1, 0))) || one_sign(along(partials.at(0, 1))));
     Ok(top.is_finite().then_some(NetCell { top, monotone }))
 }
 
@@ -3846,7 +3851,10 @@ mod tests {
             (hi.y, want_max.y),
             (hi.z, want_max.z),
         ] {
-            assert!((got - want).abs() <= 1e-9, "box {lo:?} {hi:?}, want {want_min:?} {want_max:?}");
+            assert!(
+                (got - want).abs() <= 1e-9,
+                "box {lo:?} {hi:?}, want {want_min:?} {want_max:?}"
+            );
         }
     }
 
@@ -3896,22 +3904,33 @@ mod tests {
     #[test]
     fn a_cell_the_trims_do_not_meet_is_outside_when_its_middle_is() {
         let (k, b, f) = offset_cylinder_face();
-        let trims = crate::query::contact::trim_boxes(&k, &b, f).unwrap().unwrap();
+        let trims = crate::query::contact::trim_boxes(&k, &b, f)
+            .unwrap()
+            .unwrap();
         let u_lo = trims.iter().map(|t| t[0]).fold(f64::INFINITY, f64::min);
         let u_hi = trims.iter().map(|t| t[1]).fold(f64::NEG_INFINITY, f64::max);
         let domain = b.face(f).unwrap().uv_domain;
         let mut lb: LazyBrep<'_> = (&b).into();
-        let mut outside = |cell: Extent2d| {
-            cell_outside_face(&k, &mut lb, f, &trims, &cell, 1e-6).unwrap()
-        };
+        let mut outside =
+            |cell: Extent2d| cell_outside_face(&k, &mut lb, f, &trims, &cell, 1e-6).unwrap();
         // below the trims in u (angles under 20 degrees), the whole height
         let (d0, d1) = (domain.min(), domain.max());
         assert!(u_lo > d0.x);
-        assert!(outside(Extent2d::from_bounds(d0.x, d0.y, 0.5 * (d0.x + u_lo), d1.y)));
+        assert!(outside(Extent2d::from_bounds(
+            d0.x,
+            d0.y,
+            0.5 * (d0.x + u_lo),
+            d1.y
+        )));
         // the middle of the face, clear of its trims
         let (um, vm) = (0.5 * (u_lo + u_hi), 0.5);
         let h = 0.01 * (u_hi - u_lo);
-        assert!(!outside(Extent2d::from_bounds(um - h, vm - 0.01, um + h, vm + 0.01)));
+        assert!(!outside(Extent2d::from_bounds(
+            um - h,
+            vm - 0.01,
+            um + h,
+            vm + 0.01
+        )));
         // the whole domain, which the trims cross
         assert!(!outside(domain));
     }
