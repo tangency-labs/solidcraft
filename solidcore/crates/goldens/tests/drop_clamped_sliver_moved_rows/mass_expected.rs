@@ -1,7 +1,7 @@
 // Every moved entry of `ROWS` with its class against the certified enclosure. With WR-732's
 // retirement (#18934) the new rows move more entries (the read's classified trims are the
 // implant's); each is EQUAL as well.
-static EXPECTED: [(&str, usize, Side); 93] = [
+static EXPECTED: [(&str, usize, Side); 92] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 0, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 1, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 2, Side::Equal),
@@ -9,6 +9,7 @@ static EXPECTED: [(&str, usize, Side); 93] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 4, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 5, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 6, Side::Equal),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 7, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 9, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 10, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 11, Side::Equal),
@@ -19,6 +20,7 @@ static EXPECTED: [(&str, usize, Side); 93] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 4, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 5, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 6, Side::Equal),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 7, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 9, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 10, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 11, Side::Equal),
@@ -36,7 +38,6 @@ static EXPECTED: [(&str, usize, Side); 93] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", 4, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", 5, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", 6, Side::Equal),
-    ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", 7, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", 9, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", 10, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", 11, Side::Equal),
@@ -45,8 +46,6 @@ static EXPECTED: [(&str, usize, Side); 93] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 4, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 5, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 6, Side::Equal),
-    ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 7, Side::Equal),
-    ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 8, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 9, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 10, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 11, Side::Equal),
