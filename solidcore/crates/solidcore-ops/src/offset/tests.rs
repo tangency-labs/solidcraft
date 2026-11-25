@@ -3042,6 +3042,142 @@ mod drafts {
         let report = b.check(crate::CheckLevel::All).unwrap();
         assert_eq!(report.failures, 0, "{}", report.text);
     }
+
+    /// #1126's body: the prism of the trapezoid (-15, 0) (15, 0) (5, 10) (-5, 10), 20 tall,
+    /// whose slanted sides x = +-(15 - y) converge on the line x = 0, y = 15.
+    fn converging_prism() -> crate::Body {
+        use crate::sweep::Curve;
+        let p = [[-15.0, 0.0], [15.0, 0.0], [5.0, 10.0], [-5.0, 10.0]];
+        let profile: Vec<Curve> = (0..4)
+            .map(|i| Curve::Line {
+                start: [p[i][0], p[i][1], 0.0],
+                end: [p[(i + 1) % 4][0], p[(i + 1) % 4][1], 0.0],
+            })
+            .collect();
+        crate::sweep::extrude(
+            &profile,
+            Z,
+            20.0,
+            0.0,
+            crate::sweep::DraftCorner::Curvature,
+            true,
+        )
+        .unwrap()
+    }
+
+    /// Points rounded to 1e-9 and sorted, to compare vertex sets.
+    fn rounded(points: impl IntoIterator<Item = [f64; 3]>) -> Vec<[i64; 3]> {
+        let mut out: Vec<[i64; 3]> = points
+            .into_iter()
+            .map(|q| q.map(|c| (c * 1e9).round() as i64))
+            .collect();
+        out.sort_unstable();
+        out
+    }
+
+    /// The short wall y = 10 of [`converging_prism`] drafted by `angle` about the top
+    /// (z = 20), pulled up, so that below the hinge it leans out, checked against the closed
+    /// form `volume`, the face, edge and vertex `counts` and the vertices `points`, as a sound
+    /// solid. The outcome, printed, and whether it is as derived.
+    fn draft_the_short_wall(
+        angle: f64,
+        volume_cf: f64,
+        counts: [usize; 3],
+        points: &[[f64; 3]],
+    ) -> bool {
+        let b = converging_prism();
+        let o = order(&b);
+        let wall = face(&b, &o, |bx| {
+            (bx.min().y - 10.0).abs() < 1e-9 && (bx.max().y - 10.0).abs() < 1e-9
+        });
+        let got = draft(&b, &o, &[wall], [0.0, 0.0, 20.0], Z, Z, angle).and_then(|()| {
+            let report = b.check(crate::CheckLevel::All)?;
+            Ok((
+                volume(&b),
+                b.counts()?,
+                b.is_manifold_solid()?,
+                report.failures,
+            ))
+        });
+        println!("#1126 angle {angle}: {got:?} (closed form {volume_cf}, {counts:?})");
+        let Ok((measured, c, manifold, failures)) = got else {
+            return false;
+        };
+        let corners = {
+            let brep = b.lock();
+            rounded(brep.vertex_list().iter().map(|&v| {
+                let q = brep.vertex(v).unwrap().point;
+                [q.x, q.y, q.z]
+            }))
+        };
+        rel(measured, volume_cf) < 1e-9
+            && c == counts
+            && manifold
+            && failures == 0
+            && corners == rounded(points.iter().copied())
+    }
+
+    /// The prism's top corners, which the draft keeps (its hinge is the top edge).
+    const CONVERGING_TOP: [[f64; 3]; 4] = [
+        [-15.0, 0.0, 20.0],
+        [15.0, 0.0, 20.0],
+        [5.0, 10.0, 20.0],
+        [-5.0, 10.0, 20.0],
+    ];
+
+    /// At depth d = 20 - z the drafted wall stands at y = 10 + d t, t = tan(angle), and the
+    /// section at height z is the trapezoid's slab 0 <= y <= Y = min(10 + d t, 15) between
+    /// the sides, of area 30 Y - Y^2. For t = 1/8 the wall's foot, y = 12.5, stays short of
+    /// the sides' meeting line: V = 8 [15 Y^2 - Y^3/3] from 10 to 12.5 = 12625/3, with the
+    /// prism's 6 faces, 12 edges and 8 vertices, the foot's ends at x = +-2.5.
+    #[test]
+    fn a_short_wall_drafted_short_of_where_its_sides_converge() {
+        all_fixes();
+        // atan(1/8), the double nearest it
+        const EIGHTH: f64 = 0.124_354_994_546_761_44;
+        let mut points = CONVERGING_TOP.to_vec();
+        points.extend([
+            [-15.0, 0.0, 0.0],
+            [15.0, 0.0, 0.0],
+            [2.5, 12.5, 0.0],
+            [-2.5, 12.5, 0.0],
+        ]);
+        assert!(draft_the_short_wall(
+            EIGHTH,
+            12625.0 / 3.0,
+            [6, 12, 8],
+            &points
+        ));
+    }
+
+    /// #1126, past the critical angle atan(1/4), where the wall's foot reaches the line
+    /// x = 0, y = 15 the sides meet on:
+    /// - t = 1/4, the foot exactly on the line: the wall's bottom edge closes to the point
+    ///   (0, 15, 0), where four faces meet. V = 4 [15 Y^2 - Y^3/3] from 10 to 15 = 13000/3;
+    ///   6 faces, 11 edges, 7 vertices.
+    /// - t = 1/2, past the line: the wall ends in a point on the line at z = 20 - 5/t = 10
+    ///   (a triangle), and below that point the two sides meet along a new edge on the line,
+    ///   down to the bottom, whose outline becomes the triangle (-15, 0) (15, 0) (0, 15).
+    ///   V = 2 [15 Y^2 - Y^3/3] from 10 to 15, plus 10 (30 15 - 15^2) = 6500/3 + 2250 =
+    ///   13250/3 (for any t >= 1/4, V = 4500 - 125 / (3 t)); 6 faces, 12 edges, 8 vertices.
+    #[test]
+    #[ignore = "fails until #1126 is fixed"]
+    fn a_short_wall_drafted_onto_and_past_where_its_sides_converge() {
+        all_fixes();
+        // atan(1/4), atan(1/2): the doubles nearest them
+        const QUARTER: f64 = 0.244_978_663_126_864_14;
+        const HALF: f64 = 0.463_647_609_000_806_1;
+        let mut onto = CONVERGING_TOP.to_vec();
+        onto.extend([[-15.0, 0.0, 0.0], [15.0, 0.0, 0.0], [0.0, 15.0, 0.0]]);
+        let mut past = onto.clone();
+        past.push([0.0, 15.0, 10.0]);
+        let onto_ok = draft_the_short_wall(QUARTER, 13000.0 / 3.0, [6, 11, 7], &onto);
+        let past_ok = draft_the_short_wall(HALF, 13250.0 / 3.0, [6, 12, 8], &past);
+        assert!(
+            onto_ok && past_ok,
+            "onto the line {onto_ok}, past it {past_ok}"
+        );
+    }
 }
 
 /// Kernel diagnostics cross the application seam here; the app receives only ops
