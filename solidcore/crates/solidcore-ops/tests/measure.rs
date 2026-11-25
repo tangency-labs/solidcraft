@@ -120,6 +120,109 @@ fn a_box_classifies_many_points_as_each_alone() {
     assert!(refused.len() == 2 && refused.iter().all(Result::is_err));
 }
 
+/// Located points are the classified points, each a location where the class names one; an
+/// unsure region never arises on a box, whose regions the kernel knows.
+#[test]
+fn a_box_locates_points_as_it_classifies_them() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    let points = [
+        [0.5, 1.0, 1.5],
+        [f64::INFINITY, 0.0, 0.0],
+        [5.0, 1.0, 1.5],
+        [1.0, 1.0, 1.5],
+    ];
+    let located = b.locate_points(&points).unwrap();
+    let classified = b.classify_points(&points).unwrap();
+    assert_eq!(located.len(), classified.len());
+    for (l, c) in located.iter().zip(&classified) {
+        let as_class = l.as_ref().ok().map(|l| match l {
+            solidcore_ops::PointLocation::OnBoundary => PointClass::OnBoundary,
+            solidcore_ops::PointLocation::Inside => PointClass::Inside,
+            solidcore_ops::PointLocation::Outside => PointClass::Outside,
+            solidcore_ops::PointLocation::Unsure { .. } => panic!("a box has no unsure region"),
+        });
+        assert_eq!(as_class, c.as_ref().ok().copied());
+        assert_eq!(l.is_err(), c.is_err());
+    }
+    assert_eq!(located[1], Err(Error::Argument));
+}
+
+/// A body's own order is its lists as the kernel holds them: a box's 6 faces, 12 edges and 8
+/// vertices, and an edge picked by a point is the one at that index of the own order (the
+/// nearest edge to a point on it is at distance 0).
+#[test]
+fn a_box_own_order_names_its_picked_edges() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    let order = b.own_order();
+    assert_eq!(
+        (order.faces.len(), order.edges.len(), order.vertices.len()),
+        (6, 12, 8)
+    );
+    assert_eq!(order.split_edges, 0);
+    let at = [0.5, 0.0, 0.0];
+    let Ok(picked) = solidcore_ops::pick::edges(&b, &[at], 1e-6).unwrap() else {
+        panic!("a point on an edge picks it")
+    };
+    let p = b
+        .edge_closest_point(&order, picked[0], at)
+        .unwrap()
+        .unwrap();
+    assert!(p.distance <= 1e-12, "{p:?}");
+}
+
+/// The largest gap sample of an edge against each face of a box is the largest of the gap
+/// samples, and an edge lies on the faces it bounds: its largest gap to them is nothing.
+#[test]
+fn a_box_edge_largest_gap_is_its_largest_sample() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    let order = b.own_order();
+    let mut bounded = 0;
+    for face in 0..order.faces.len() {
+        let largest = b.edge_face_largest_gap(&order, 0, face).unwrap();
+        let samples = b.edge_face_gap_samples(&order, 0, face).unwrap();
+        let most = samples
+            .iter()
+            .map(|s| s.distance.value)
+            .fold(0.0_f64, f64::max);
+        assert!(
+            (largest - most).abs() <= 1e-12,
+            "face {face}: {largest} against {most}"
+        );
+        if largest <= 1e-12 {
+            bounded += 1;
+        }
+    }
+    assert!(bounded >= 2, "an edge lies on the two faces it bounds");
+    assert!(b.edge_face_largest_gap(&order, 99, 0).is_err());
+}
+
+/// A check scoped to the whole body is the plain check; a valid box is valid in either scope.
+#[test]
+fn a_box_checks_the_same_in_either_scope() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    let plain = b.check(solidcore_ops::check::CheckLevel::All).unwrap();
+    assert_eq!(
+        b.check_scoped(
+            solidcore_ops::check::CheckLevel::All,
+            solidcore_ops::check::ValidityScope::Body
+        )
+        .unwrap(),
+        plain
+    );
+    assert!(plain.is_valid(), "{plain}");
+    assert!(b
+        .check_scoped(
+            solidcore_ops::check::CheckLevel::All,
+            solidcore_ops::check::ValidityScope::Stitched
+        )
+        .unwrap()
+        .is_valid());
+}
+
 #[test]
 fn a_torus_area_is_its_closed_form() {
     all_fixes();
@@ -1198,4 +1301,29 @@ fn line_helpers_make_unit_choose_the_nearer_meeting_and_measure_across() {
     let plain =
         solidcore_ops::distance_across_surface([0.0; 3], [0.0; 3], [3.0, 4.0, 0.0]).unwrap();
     assert!((plain - 5.0).abs() < 1e-12, "{plain}");
+}
+
+/// A body that names its geometry owners by keys the check cannot know (its naming scheme
+/// `Unknown`) is refused by the check, scoped or not: the check runs on a copy, named afresh,
+/// and the refusal reads the body's own scheme. A body named by its maker is checked.
+#[test]
+fn a_body_of_unknown_naming_is_refused_by_the_check() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    b.kernel()
+        .set_naming(solidcore::topology::NamingScheme::Unknown);
+    assert!(matches!(
+        b.check(solidcore_ops::check::CheckLevel::All),
+        Err(Error::Unsupported(_))
+    ));
+    assert!(matches!(
+        b.check_scoped(
+            solidcore_ops::check::CheckLevel::All,
+            solidcore_ops::check::ValidityScope::Stitched
+        ),
+        Err(Error::Unsupported(_))
+    ));
+    b.kernel()
+        .set_naming(solidcore::topology::NamingScheme::Caller);
+    assert!(b.check(solidcore_ops::check::CheckLevel::All).is_ok());
 }
