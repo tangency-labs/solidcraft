@@ -2341,7 +2341,7 @@ fn hole_direction_rejects_malformed_vectors_without_changing_the_design() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
     let before = (*s.doc).clone();
-    for direction in [json!("sideways"), json!([0, -1]), json!([0, 0, -1, 0]), json!(["1", "0", "0"]), json!({"x": 1}), json!(false), json!(2)] {
+    for direction in [json!("sideways"), json!([0, -1]), json!([0, 0, -1, 0]), json!({"x": 1}), json!(false), json!(2)] {
         let err =
             s.execute("solid.hole", &json!({"position": [10, 10, 10], "diameter": 5, "depth": 5, "direction": direction})).unwrap_err().to_string();
         assert!(err.contains("`direction`"), "{direction}: {err}");

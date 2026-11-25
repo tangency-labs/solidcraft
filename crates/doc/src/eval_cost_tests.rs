@@ -3052,7 +3052,7 @@ fn a_tap_marking_searches_only_the_bodies_near_it() {
     let hole = FeatureKind::Hole {
         position: FacePick(Vec3::new(30.0, 30.0, 12.0)),
         at: None,
-        direction: Dir(-Vec3::Z),
+        direction: crate::dir_expr(-Vec3::Z),
         diameter: "5".into(),
         depth: Some("10".into()),
         hole: HoleKind::default(),
@@ -3196,7 +3196,7 @@ fn a_tapped_hole_reads_the_bodies_along_its_drill_line() {
     let hole = FeatureKind::Hole {
         position: FacePick(Vec3::new(30.0, 30.0, 12.0)),
         at: None,
-        direction: Dir(-Vec3::Z),
+        direction: crate::dir_expr(-Vec3::Z),
         diameter: "5".into(),
         depth: Some("10".into()),
         hole: HoleKind::default(),
