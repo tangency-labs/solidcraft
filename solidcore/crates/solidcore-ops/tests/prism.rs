@@ -1961,3 +1961,43 @@ fn a_face_strays_across_a_direction_by_its_tilt_over_its_own_size() {
     let sin = 1e-3 / (1.0 + 1e-6_f64).sqrt();
     close(tilted, 2.0 * 10.0 * sin, "ruled, tilted");
 }
+
+/// #3384: a prism on a flat segment (an arc of sagitta 1.5e-4 or 5e-4 over a chord of 0.2 or 40,
+/// its centre 33.3 or 4e5 below the chord's middle at the world origin) writes its record, its
+/// two caps, its flat wall and its arc's wall, and reads back. On main its record was refused:
+/// the arc's NURBS was "off its own frame and radii".
+#[test]
+fn a_prism_on_a_flat_segment_writes_its_record() {
+    all_fixes();
+    for (h, cy) in [
+        (0.1_f64, -33.3_f64),
+        (20.0, -(4e5_f64 * 4e5 - 400.0).sqrt()),
+    ] {
+        let r = h.hypot(cy);
+        let start = (-cy).atan2(h);
+        let segment = Region2 {
+            outer: Loop2 {
+                segs: vec![
+                    Seg2::Arc {
+                        center: Vec2::new(0.0, cy),
+                        radius: r,
+                        start,
+                        sweep: (-cy).atan2(-h) - start,
+                    },
+                    Seg2::Line {
+                        a: Vec2::new(-h, 0.0),
+                        b: Vec2::new(h, 0.0),
+                    },
+                ],
+            },
+            holes: vec![],
+        };
+        let body = extrude_planar_regions(&Plane::XY, &[segment], 0.0, 10.0)
+            .unwrap_or_else(|e| panic!("h = {h}: {e:?}"));
+        let (record, _) = body
+            .to_record()
+            .unwrap_or_else(|e| panic!("h = {h}: {e:?}"));
+        assert_eq!(record.faces.len(), 4, "h = {h}: {:?}", record.faces);
+        Body::from_record(&record, true).unwrap_or_else(|e| panic!("h = {h}: {e:?}"));
+    }
+}
