@@ -1787,7 +1787,7 @@ fn numbered_names(s: &Session, olds: &[String], name: &str) -> Vec<String> {
 }
 
 /// Rename the body `given` (or the body a placed copy's name shows) to `name`.
-fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<BodyRenamed> {
+pub(super) fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<BodyRenamed> {
     // A placed copy's name (`KB (K:2)`, the name the browser lists a pasted placement's body by)
     // means the body it shows, as appearance.assign takes it (#9740): renaming it renames that body,
     // in every placement of its component (#10017).
