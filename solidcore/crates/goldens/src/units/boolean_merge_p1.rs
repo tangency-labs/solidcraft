@@ -1191,11 +1191,11 @@ impl UnitDiff for Runner {
                 (i.op == OP_FACE_COINCIDENCE).then_some(&other),
             )),
             Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| {
-                Output::err(format!(
+                Output::kernel(&e, format!(
                     "status_{}",
                     match e {
                         SolidError::Upstream { .. } | SolidError::Failed(_) => {
-                            e.sm_status().unwrap_or(-1)
+                            crate::status::kind_slot(&e, e.sm_status().unwrap_or(-1))
                         }
                         _ => -1,
                     }

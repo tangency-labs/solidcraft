@@ -323,7 +323,7 @@ fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, So
             Ok(Some(v))
         }
         Err(e @ (SolidError::Upstream { .. } | SolidError::Failed(_))) => {
-            o.push(f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR)));
+            o.push(f64::from(crate::status::kind_slot(&e, e.sm_status().unwrap_or(solidcore::error::SM_ERR))));
             Ok(None)
         }
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {

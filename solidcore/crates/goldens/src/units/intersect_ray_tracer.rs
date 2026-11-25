@@ -318,6 +318,11 @@ fn build_poly(
 
 /// The status of a failed Rust operation, as upstream numbers it.
 fn status_of(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status_of(e))
+}
+
+/// [`status_of`] as recorded before kinds.
+fn legacy_status_of(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -1405,7 +1410,7 @@ impl UnitDiff for Runner {
         match run_rust(k, &i, &mut Stats::default()) {
             Ok(rec) => Ok(Output::new().values("rec", rec)),
             Err(e) => Ok(Output::unported(&e)
-                .unwrap_or_else(|| Output::err(format!("rust_error: {e}")))),
+                .unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}")))),
         }
     }
 

@@ -377,7 +377,7 @@ fn rust_records(b: &Brep, pre: [usize; 10]) -> Model {
             // (runner helper without a kernel in scope)
             let d = s.natural_uv_domain_if_built();
             let c = Point2::new((d.min().x + d.max().x) * 0.5, (d.min().y + d.max().y) * 0.5);
-            s.evaluate_point(&Kernel::default(), c).ok()
+            s.evaluate_point(&crate::runner_kernel(), c).ok()
         });
         rec.i(i64::from(point.is_some()));
         let [px, py, pz] = point.map_or([0.0; 3], |p| [p.x, p.y, p.z]);
@@ -591,9 +591,9 @@ fn rust_status(e: &SolidError) -> Output {
         return o;
     }
     match e {
-        e if solidcore::error::upstream_status(e).is_some() => status_output(f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))),
+        e if crate::status::is_kernel(e, solidcore::error::upstream_status(e).is_some()) => status_output(f64::from(crate::status::kind_slot(e, solidcore::error::upstream_status(e).unwrap_or(-1)))),
         // the kernel's refusal of the input (a damaged B-rep it will not walk)
-        other => Output::err(other.to_string()),
+        other => Output::kernel(other, other.to_string()),
     }
 }
 
@@ -703,7 +703,7 @@ impl UnitDiff for Runner {
         if !contract::brep_block(&path, &blk) {
             return Err(err("invalid argument: B-rep block outside the input contract"));
         }
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         // the B-rep built (or read) by the Rust kernel; a read keeps the face surfaces'
         // cache states the Rust read left (the renumbered copy keeps their slots)
         let mut b = match own_brep(&mut k, &i.brep)? {
@@ -789,7 +789,9 @@ impl UnitDiff for Runner {
                 // a failed edit leaves the records it changed (the shim walks the B-rep
                 // after a failed status of the edits as well)
                 let o = rust_status(&e);
-                if edits(i.op) && solidcore::error::upstream_status(&e).is_some() {
+                if edits(i.op)
+                    && crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some())
+                {
                     let counts = record_counts(&b)
                         .iter()
                         .map(|&n| n as i64)
@@ -838,7 +840,7 @@ fn try_generate(rng: &mut Rng) -> Option<Value> {
     if !contract::brep_block(&path, &blk) {
         return None;
     }
-    let b = own_brep(&mut Kernel::default(), &brep).ok()?.ok()?;
+    let b = own_brep(&mut crate::runner_kernel(), &brep).ok()?.ok()?;
     let c = record_counts(&b);
     let n = match op {
         OpIn::DeleteEdge => c[7],

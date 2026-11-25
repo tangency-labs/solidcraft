@@ -194,7 +194,7 @@ fn path_of(brep: &BrepIn) -> Result<String, HarnessError> {
 fn resolve_with(i: &Inputs, c: [usize; 10]) -> Result<Inputs, Box<Output>> {
     let [_, _, _, n_f, _, n_l, ..] = c;
     if n_f == 0 {
-        return Err(Box::new(Output::err("no_face")));
+        return Err(Box::new(Output::harness("no_face")));
     }
     let mut r = i.clone();
     r.face = shared::sel(i.face.max(0), n_f);
@@ -208,13 +208,13 @@ fn resolve_with(i: &Inputs, c: [usize; 10]) -> Result<Inputs, Box<Output>> {
         }
         OpIn::LoopRoundTrip { loop_ } => {
             if n_l == 0 {
-                return Err(Box::new(Output::err("no_loop")));
+                return Err(Box::new(Output::harness("no_loop")));
             }
             *loop_ = shared::sel((*loop_).max(0), n_l);
         }
         OpIn::DeleteInnerLoop { loops, .. } => {
             if n_l == 0 || loops.is_empty() {
-                return Err(Box::new(Output::err("no_loop")));
+                return Err(Box::new(Output::harness("no_loop")));
             }
             // distinct selectors, at most four (a deleted loop cannot be named again)
             let mut kept: Vec<i64> = Vec::new();
@@ -257,7 +257,7 @@ fn fail(e: &SolidError) -> Fail {
 fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
     match r {
         Ok(_) => Ok(0.0),
-        Err(up_err) if solidcore::error::upstream_status(up_err).is_some() => Ok(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
+        Err(up_err) if crate::status::is_kernel(up_err, solidcore::error::upstream_status(up_err).is_some()) => Ok(f64::from(crate::status::kind_slot(up_err, solidcore::error::upstream_status(up_err).unwrap_or(-1)))),
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(SM_ERR_INVALID_INPUT),
         Err(e) => Err(fail(e)),
     }
@@ -1034,8 +1034,8 @@ pub(super) fn own_built(
         // the gap walk may leave size estimates a copy does not carry: read afresh
         return read_as(&mut k, &path, *rebuild, validate_only, init_gaps, conv);
     }
-    if crate::tolsub::active() || crate::refit::active() {
-        // (a tolerance-substitution replay sees every read: no cached copy)
+    if crate::tolsub::active() || crate::refit::active() || crate::replay_active() {
+        // (a substitution replay sees every read: no cached copy)
         return read_as(&mut k, &path, *rebuild, validate_only, false, conv);
     }
     let key = (path, *rebuild, validate_only);

@@ -182,6 +182,11 @@ fn lookup<T: Copy>(table: &[(&str, T)], name: &str) -> Result<T, HarnessError> {
 }
 
 fn status_code(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status_code(e))
+}
+
+/// [`status_code`] as recorded before kinds.
+fn legacy_status_code(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
             f64::from(SM_ERR_INVALID_INPUT)
@@ -490,7 +495,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     match rust_values(i)? {
         Ok(v) => Ok(Output::new().values("r", v)),
         Err(e) => Ok(Output::unported(&e)
-            .unwrap_or_else(|| Output::err(format!("status_{}", status_code(&e) as i64)))),
+            .unwrap_or_else(|| Output::kernel(&e, format!("status_{}", status_code(&e) as i64)))),
     }
 }
 

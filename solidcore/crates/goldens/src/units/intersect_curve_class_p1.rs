@@ -906,6 +906,11 @@ pub(crate) fn build_pool(objects: &[ObjIn]) -> Result<Pool, HarnessError> {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 pub(crate) fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::upstream_status(e).is_some() => {
             f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
@@ -933,7 +938,7 @@ impl From<HarnessError> for Fail {
 
 /// The output of a case refused with status `s`.
 pub(crate) fn refused(s: f64) -> Output {
-    Output::err(format!("refused_{s}"))
+    Output::harness_text(format!("refused_{s}"))
 }
 
 /// `Ok(v)` or the status; `Unported` defers the case.
@@ -1658,7 +1663,7 @@ fn rust(s: &Script) -> Result<Output, HarnessError> {
         Ok(v) => Ok(Output::new().values("out", v)),
         Err(Fail::Deferred(d)) => Ok(*d),
         Err(Fail::Refused(s)) => Ok(refused(s)),
-        Err(Fail::Undefined(why)) => Ok(Output::err(format!("undefined_upstream: {why}"))),
+        Err(Fail::Undefined(why)) => Ok(Output::harness_text(format!("undefined_upstream: {why}"))),
         Err(Fail::Harness(e)) => Err(e),
     }
 }
@@ -3240,7 +3245,7 @@ mod dump {
         let mut unproven = Vec::new();
         for &(name, main) in TARGET_BOUNDED {
             let case = crate::case::regression_case(&Runner, name);
-            let kept = crate::wr57_replay::with_installed(
+            let kept = crate::replay_seam::with_installed(
                 ReplaySeam::target_bound(Box::new(|_| false)),
                 || Runner.run_rust(&case),
             )
@@ -3250,7 +3255,7 @@ mod dump {
             assert_eq!(kept, main, "{name}: with the dropped answers kept the row is not main's");
             let certs = Arc::new(Mutex::new(Vec::<(bool, String)>::new()));
             let c = Arc::clone(&certs);
-            let row = crate::wr57_replay::with_installed(
+            let row = crate::replay_seam::with_installed(
                 ReplaySeam::target_bound(Box::new(move |b| {
                     let want = b.target.abs() + b.tol;
                     let k = Kernel::default();

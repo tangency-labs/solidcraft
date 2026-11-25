@@ -409,8 +409,8 @@ pub(crate) fn put_default_geom(
         match s.surface.evaluate_point(k, uv) {
             Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
             Err(e) if e.is_unported() => return Err(e),
-            Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => {
-                v.extend([f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1)), 0.0, 0.0, 0.0]);
+            Err(e) if crate::status::is_kernel(&e, solidcore::error::nurbs::upstream_status(&e).is_some()) => {
+                v.extend([f64::from(crate::status::kind_slot(&e, solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1))), 0.0, 0.0, 0.0]);
             }
             Err(e) => return Err(e),
         }
@@ -495,6 +495,11 @@ fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 pub(crate) fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } => 1007.0,
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
@@ -1183,7 +1188,7 @@ fn eu_setup(brep: &BrepIn, eu: i64) -> Result<Result<Setup, Output>, HarnessErro
     let n_eu = c.get(6).copied().unwrap_or(0);
     let s = sel(eu, n_eu);
     if s < 0 {
-        return Ok(Err(Output::err("no_entity_of_that_kind")));
+        return Ok(Err(Output::harness("no_entity_of_that_kind")));
     }
     let eu = EdgeuseId::from_index(u32::try_from(s).map_err(|_| harness("index"))?);
     Ok(Ok(Setup { brep, eu, types }))
@@ -1194,7 +1199,7 @@ fn eu_setup(brep: &BrepIn, eu: i64) -> Result<Result<Setup, Output>, HarnessErro
 fn eu_output(body: &[f64]) -> Output {
     let first = body.first().copied().unwrap_or(f64::NAN);
     if first == -2.0 {
-        return Output::err("null_deref");
+        return Output::harness("null_deref");
     }
     Output::new()
         .int("status", first as i64)
@@ -1302,6 +1307,9 @@ fn rust_edgeuse_body(
                 match s.surface.evaluate_point(&k, uv) {
                     Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
                     Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if crate::status::is_kernel(&e, false) => {
+                        v.extend([crate::status::kind_slot(&e, 0.0), 0.0, 0.0, 0.0]);
+                    }
                     Err(e) => {
                         let st = match solidcore::error::nurbs::upstream_status(&e) {
                             Some(code) => f64::from(code),
@@ -1319,7 +1327,7 @@ fn rust_edgeuse_body(
             }
             put_default_geom(&k, &mut v, &fs.solver, id, &pseudo, faces, fu, fv)?;
         }
-        Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => v.push(f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1))),
+        Err(e) if crate::status::is_kernel(&e, solidcore::error::nurbs::upstream_status(&e).is_some()) => v.push(f64::from(crate::status::kind_slot(&e, solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1)))),
         Err(e) => return Err(e),
     }
     put_eu_state(&k, &mut v, b, Some(eu))?;
@@ -1415,7 +1423,7 @@ fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
                 return Ok(o);
             }
             match e {
-                SolidError::InvalidInput { .. } => Ok(Output::err("null_deref")),
+                e @ SolidError::InvalidInput { .. } => Ok(Output::kernel(&e, "null_deref")),
                 e => Err(harness(format!("rust: {e}"))),
             }
         }

@@ -461,8 +461,8 @@ fn put_samples(c: &SmCurve, out: &mut Vec<f64>) -> Result<(), SolidError> {
     for k in 0..=2u8 {
         match c.evaluate_point(&crate::runner_kernel(), ivl.evaluate(f64::from(k) / 2.0)) {
             Ok(p) => out.extend([0.0, p.x, p.y, p.z]),
-            Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-                out.extend([f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)), 0.0, 0.0, 0.0]);
+            Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
+                out.extend([f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))), 0.0, 0.0, 0.0]);
             }
             Err(e) => return Err(e),
         }
@@ -529,7 +529,7 @@ fn status_of(e: SolidError) -> Result<Result<i32, Output>, HarnessError> {
         return Ok(Err(o));
     }
     match e {
-        e if solidcore::error::upstream_status(&e).is_some() => Ok(Ok(solidcore::error::upstream_status(&e).unwrap_or(-1))),
+        e if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => Ok(Ok(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1)))),
         e => Err(harness(format!("rust: {e}"))),
     }
 }
@@ -634,7 +634,7 @@ fn own_brep(i: &Inputs) -> Result<crate::own_builder::RustBrep<(Brep, [usize; 10
             Ok((*b, c))
         }
         Own::Failed(e) => Err(Output::unported(&e).unwrap_or_else(|| {
-            Output::err(format!("brep_build_status_{}", build_status(&e)))
+            Output::kernel(&e, format!("brep_build_status_{}", build_status(&e)))
         })),
     })
 }
@@ -958,7 +958,7 @@ fn run_rust_case(i: &Inputs) -> Result<Output, HarnessError> {
         Err(out) => return Ok(out),
     };
     let Some(a) = args(&i.op, counts, |f| first_loop(&b, f)) else {
-        return Ok(Output::err("no face"));
+        return Ok(Output::harness("no face"));
     };
     let op = op_of(&i.op);
     let f = FaceId::from_index(a[0] as u32);
@@ -1725,14 +1725,13 @@ mod tests {
     use super::*;
     use solidcore::curve::line::Line;
     use solidcore::geom::extent1d::Extent1d;
-    use solidcore::kernel::Kernel;
     use solidcore::math::{Point3, Vec3};
     use solidcore::nurbs::b_spline_curve::BSplineCurve;
     use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 
     #[test]
     fn own_uv_trim_copy_slices_line_to_its_b_spline_base() {
-        let k = Kernel::default();
+        let k = crate::runner_kernel();
         let mut nurb = allocate_nurb_curve(1, 1, 3).unwrap();
         for (point, x) in nurb.cpts_mut().iter_mut().zip([-5.0, 5.0]) {
             point.x = x;

@@ -222,7 +222,7 @@ impl UnitDiff for Runner {
             })
             .map_err(harness)?;
         destination.set_infinite_region_record(Some(infinite));
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let mut marks = Marks::default();
         let mut outer = if i.lock_mask == 0 {
             None
@@ -324,8 +324,13 @@ impl UnitDiff for Runner {
                     }
                     return Ok(output);
                 }
-                if let Some(code) = solidcore::error::upstream_status(&error) {
-                    status = i64::from(code);
+                let code = if crate::status::is_kernel(&error, false) {
+                    Some(crate::status::kind_slot(&error, 0))
+                } else {
+                    solidcore::error::upstream_status(&error).map(i64::from)
+                };
+                if let Some(code) = code {
+                    status = code;
                     if request.op == 2 {
                         body = vec![0, 0, 0];
                     }
@@ -560,8 +565,8 @@ impl W {
                 self.d(p.y);
                 self.d(p.z);
             }
-            Err(ref e) if solidcore::error::upstream_status(e).is_some() => {
-                self.i(i64::from(solidcore::error::upstream_status(e).unwrap_or(-1)));
+            Err(ref e) if crate::status::is_kernel(e, solidcore::error::upstream_status(e).is_some()) => {
+                self.i(i64::from(crate::status::kind_slot(e, solidcore::error::upstream_status(e).unwrap_or(-1))));
             }
             Err(_) => self.i(-1),
         }
@@ -841,7 +846,7 @@ fn build_net(
 /// build's or read's error.
 fn own_fixture(i: &Inputs) -> Result<Option<Result<Brep, SolidError>>, HarnessError> {
     use crate::own_builder::{build_as, finish, in_new_brep, Built};
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let built = if let Some(net) = &i.net {
         let edges = net
             .edges
@@ -899,7 +904,7 @@ fn make_faces_rust(i: &Inputs) -> Result<Output, HarnessError> {
     let resolved = resolve(i, &b)?;
     let mut records = seeded_records(&b);
     let mut attributes = AttributeStore::default();
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut marks = Marks::default();
     let before = MARKS.map(|mt| k.context.current_mark(mt));
     let mut calls = Vec::new();
@@ -960,8 +965,8 @@ fn make_faces_rust(i: &Inputs) -> Result<Output, HarnessError> {
         };
         let status = match &attempt.status {
             Ok(()) => 0,
-            Err(e) if solidcore::error::upstream_status(e).is_some() => {
-                i64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+            Err(e) if crate::status::is_kernel(e, solidcore::error::upstream_status(e).is_some()) => {
+                i64::from(crate::status::kind_slot(e, solidcore::error::upstream_status(e).unwrap_or(-1)))
             }
             Err(error) => return Err(harness(error)),
         };

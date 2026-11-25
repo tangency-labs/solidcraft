@@ -209,7 +209,7 @@ fn domain(d: [f64; 4]) -> Extent2d {
 /// `[status, found, u, v, u2, v2, deviation]` as an output.
 fn output(flat: &[f64]) -> Output {
     match flat {
-        [status, ..] if *status != 0.0 => Output::err("LocalSurfaceIntersect failed"),
+        [status, ..] if *status != 0.0 => Output::harness("LocalSurfaceIntersect failed"),
         [_, found, rest @ ..] => {
             let out = Output::new().int("found", i64::from(*found != 0.0));
             if *found == 0.0 {
@@ -219,7 +219,7 @@ fn output(flat: &[f64]) -> Output {
                     .scalar("deviation", rest.get(4).copied().unwrap_or(f64::NAN))
             }
         }
-        _ => Output::err("short output"),
+        _ => Output::harness("short output"),
     }
 }
 
@@ -227,11 +227,11 @@ fn output(flat: &[f64]) -> Output {
 /// output.
 fn isb_output(flat: &[f64]) -> Output {
     match flat {
-        [status, ..] if *status != 0.0 => Output::err("IntersectSurfaceBoundaries failed"),
+        [status, ..] if *status != 0.0 => Output::harness("IntersectSurfaceBoundaries failed"),
         [_, n, rest @ ..] => Output::new()
             .int("curves", *n as i64)
             .values("data", rest.to_vec()),
-        _ => Output::err("short output"),
+        _ => Output::harness("short output"),
     }
 }
 
@@ -304,13 +304,13 @@ fn bspline_part(c: &Curve) -> Result<std::borrow::Cow<'_, BSplineCurve>, Harness
 /// interval min, max]` as an output.
 fn lift_output(flat: &[f64]) -> Output {
     match flat {
-        [status, ..] if *status != 0.0 => Output::err("LiftCurve failed"),
+        [status, ..] if *status != 0.0 => Output::harness("LiftCurve failed"),
         [_, max_dist, ty, dim, rest @ ..] => Output::new()
             .scalar("max_dist", *max_dist)
             .int("type", *ty as i64)
             .int("dim", *dim as i64)
             .values("curve", rest.to_vec()),
-        _ => Output::err("short output"),
+        _ => Output::harness("short output"),
     }
 }
 

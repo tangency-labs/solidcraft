@@ -88,7 +88,7 @@ fn refusal(i: &Inputs, expected: &str) -> Result<Output, HarnessError> {
         Err(reason) if expected == "UB-190" && reason.starts_with("UB-190:") => {
             // Guard-only check: no operation runs. Recorded as an error with no values,
             // never as a deferral.
-            Ok(Output::err("ffi refusal: UB-190"))
+            Ok(Output::harness("ffi refusal: UB-190"))
         }
         _ => Err(harness("expected the specific UB-190 refusal")),
     }
@@ -302,6 +302,11 @@ fn options(mask: u8) -> MergeOptions {
     )
 }
 fn status(error: &SolidError) -> i64 {
+    crate::status::kind_slot(error, legacy_status(error))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(error: &SolidError) -> i64 {
     match error {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
         SolidError::Upstream { .. } | SolidError::Failed(_) => error.sm_status().map_or(-1, i64::from),
@@ -311,7 +316,7 @@ fn status(error: &SolidError) -> i64 {
 fn output(raw: &[f64], family: u8) -> Result<Output, HarnessError> {
     let (&status, rest) = raw.split_first().ok_or_else(|| harness("empty result"))?;
     if status != 0.0 {
-        return Ok(Output::err(format!("status={status}")));
+        return Ok(Output::harness_text(format!("status={status}")));
     }
     let mut input = rest;
     let mut controls = Vec::new();
@@ -1098,7 +1103,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     match result {
         Ok(()) => output(&values, i.family),
         Err(error) => Ok(Output::unported(&error)
-            .unwrap_or_else(|| Output::err(format!("status={}", status(&error))))),
+            .unwrap_or_else(|| Output::kernel(&error, format!("status={}", status(&error))))),
     }
 }
 impl UnitDiff for Runner {

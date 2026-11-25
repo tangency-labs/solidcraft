@@ -1357,8 +1357,8 @@ fn idx<I: Copy>(o: Option<I>, f: impl Fn(I) -> u32) -> f64 {
 /// An upstream status of a failed op: the `SmStatus` of an upstream error.
 fn status_of(e: SolidError) -> Result<f64, Fail> {
     match e {
-        e if solidcore::error::upstream_status(&e).is_some() => {
-            Ok(f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)))
+        e if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
+            Ok(f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))))
         }
         other => Err(other.into()),
     }
@@ -1491,14 +1491,14 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     if !keeps_contract(Op::Export, &path, &block, None) {
         return Err(harness(format!("export: {CONTRACT}")));
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let (mut b, c) = match own_brep(&mut k, brep, &path, i.validate_only, i.init_gaps)? {
         Ok(x) => x,
         Err(o) => return Ok(o),
     };
     let op = match resolve(&i.op, &counts_of(c)) {
         Ok(op) => op,
-        Err(name) => return Ok(Output::err(name)),
+        Err(name) => return Ok(Output::harness_text(name)),
     };
     let (code, args) = op_args(&op)?;
     let mut input = block;
@@ -1533,7 +1533,7 @@ fn fix_returns_early(dist: f64, dom: &Extent2d) -> bool {
 #[allow(clippy::too_many_lines)]
 fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
     use solidcore::topology::edgeuse::p1 as eu1;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let fid = |x: i64| FaceId::from_index(x as u32);
     let eid = |x: i64| EdgeuseId::from_index(x as u32);
     let mut o = Vec::new();
@@ -1878,7 +1878,7 @@ fn run_rust_geom(op: &OpIn) -> Result<Vec<f64>, Fail> {
             }
             let s = rust_surface(surface)?;
             let l = fp2::PrecisePropertyLayout::new(*flags);
-            let k = Kernel::default();
+            let k = crate::runner_kernel();
             let e = fp2::OdeIsoCurveLength::new(&k, &s, *u, Vec3::new(origin[0], origin[1], origin[2]), *thickness, &l);
             let mut d = vec![7.0; *n];
             let r = e.evaluate(*t, &mut d);
@@ -1904,7 +1904,7 @@ fn run_rust_geom(op: &OpIn) -> Result<Vec<f64>, Fail> {
             let s = rust_surface(surface)?;
             let c = rust_curve(curve)?;
             let l = fp2::PrecisePropertyLayout::new(*flags);
-            let k = Kernel::default();
+            let k = crate::runner_kernel();
             let e = fp2::OdeArea {
                 kernel: &k,
                 surface: &s,
@@ -2173,7 +2173,7 @@ fn lacks_kind(i: &Inputs) -> bool {
     let (Some(brep), Ok(path)) = (&i.brep, path_of(i)) else {
         return false;
     };
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     own_brep(&mut k, brep, &path, i.validate_only, i.init_gaps)
         .is_ok_and(|b| b.is_ok_and(|(_, c)| resolve(&i.op, &counts_of(c)).is_err()))
 }
@@ -2307,7 +2307,7 @@ mod tests {
             let Some(row) = out.values.get("state").cloned() else {
                 continue;
             };
-            let mut k = Kernel::default();
+            let mut k = crate::runner_kernel();
             let brep = i.brep.as_ref().unwrap();
             let path = path_of(&i).unwrap();
             let (mut b, c) = own_brep(&mut k, brep, &path, i.validate_only, i.init_gaps)
@@ -2327,7 +2327,7 @@ mod tests {
             if face.rectangular_trim != 1 || row.first().copied() != Some(0.0) || count == 0 {
                 continue;
             }
-            let mut k = Kernel::default();
+            let mut k = crate::runner_kernel();
             let r = fp2::points_in_face(&mut k, &mut b, fid, count).unwrap();
             assert_eq!(r.uv.len() as u64, count, "{name}: point count");
             let (u_ivl, v_ivl) = (face.uv_domain.u_interval(), face.uv_domain.v_interval());
@@ -2417,7 +2417,7 @@ mod tests {
         );
         let main = Vec3::new(8.501_171_443_409_645e-5, 1.955_087_294_908_429e-4, -2.533_443_274_855_833e-4);
 
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let path = path_of(&i).unwrap();
         let (b, _) = own_brep(&mut k, i.brep.as_ref().unwrap(), &path, i.validate_only, i.init_gaps)
             .unwrap()

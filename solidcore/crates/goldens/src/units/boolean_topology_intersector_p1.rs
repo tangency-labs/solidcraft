@@ -2277,7 +2277,7 @@ impl TopologyObjects<H> for Two {
         let bi = brep.b;
         let mut cache = BrepCache::new(BREP_TYPE)?;
         cache.build_trees(
-            &Kernel::default(),
+            &crate::runner_kernel(),
             CacheSource::Brep(b),
             |o| match o {
                 CacheObject::Vertex(v) => hd(bi, K_VERTEX, v.index()),
@@ -3065,7 +3065,7 @@ trait NormalOrZero {
 
 impl NormalOrZero for Surface {
     fn evaluate_normal_or_zero(&self, uv: Point2) -> Vec3 {
-        let k = &Kernel::default();
+        let k = &crate::runner_kernel();
         // a small finite-difference normal: enough to offset a test point off the surface
         let h = 1e-3;
         let (Ok(p), Ok(pu), Ok(pv)) = (
@@ -3106,7 +3106,7 @@ fn put_cut(o: &mut Vec<f64>, cut: Option<&(usize, String)>) {
 /// `target->MergeBrep(other, NULL, NULL, FALSE)`: `topology::brep::p3::merge_brep`.
 fn merge_primary(target: &mut Brep, other: &mut Brep) -> Result<(), HarnessError> {
     use solidcore::topology::brep::p3 as bp3;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let serial = bp3::notify_serial(&mut k.context, other)
         .map_err(|e| harness(format!("merge: {e}")))?;
     let source_key = move |e| bp3::topology_ref(serial, e);
@@ -3132,7 +3132,7 @@ pub(super) fn own_breps(
     b: Option<&BrepIn>,
 ) -> Result<Result<BrepPair, Output>, HarnessError> {
     use crate::own_builder::{build_any, build_status, Built, Conventions};
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut one = |src: &BrepIn, which: &str| -> Result<Result<Brep, Output>, HarnessError> {
         let src: super::topology_edgeuse_p1::BrepIn = serde_json::to_value(src)
             .and_then(serde_json::from_value)
@@ -3141,7 +3141,7 @@ pub(super) fn own_breps(
             match build_any(&mut k, &src, false, false, &Conventions::TOPOLOGY_FIXTURE)? {
                 Built::Brep(b) => Ok(*b),
                 Built::Failed(e) => Err(Output::unported(&e).unwrap_or_else(|| {
-                    Output::err(format!("brep_build_{which}_status_{}", build_status(&e)))
+                    Output::kernel(&e, format!("brep_build_{which}_status_{}", build_status(&e)))
                 })),
             },
         )
@@ -3199,7 +3199,7 @@ pub(super) fn prepare(k: &Kernel, i: &Inputs) -> Result<Prepared, Box<Result<Out
     // counted as both-errored, not as a pass)
     if ops.is_empty() {
         if let Some((_, name)) = cut {
-            return Err(Box::new(Ok(Output::err(name))));
+            return Err(Box::new(Ok(Output::harness_text(name))));
         }
     }
     Ok(Prepared { two, ops, cut })
@@ -3235,7 +3235,7 @@ fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, Fa
             Ok(Some(v))
         }
         Err(e @ (SolidError::Upstream { .. } | SolidError::Failed(_))) => {
-            o.push(f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR)));
+            o.push(f64::from(crate::status::kind_slot(&e, e.sm_status().unwrap_or(solidcore::error::SM_ERR))));
             Ok(None)
         }
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
@@ -3304,7 +3304,7 @@ pub(super) fn run_rust_script_counted(
     p: Prepared,
 ) -> Result<(Vec<f64>, Vec<usize>, u64), Fail> {
     let Prepared { mut two, ops, cut } = p;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let hb = two.breps[1].as_ref().map(|_| brep_h(1));
     let mut ti: TopologyIntersector<H> = if i.ctor == 0 {
         TopologyIntersector::new(Some(brep_h(0)), hb, i.approx, i.ang)
@@ -3491,7 +3491,7 @@ pub(super) fn run_rust_script_counted(
                     o.pop();
                     o.push(match e {
                         SolidError::Upstream { .. } | SolidError::Failed(_) => {
-                            f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR))
+                            f64::from(crate::status::kind_slot(e, e.sm_status().unwrap_or(solidcore::error::SM_ERR)))
                         }
                         _ => NULL_DEREF,
                     });
@@ -4234,7 +4234,7 @@ pub(super) fn run_rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
 /// case. For coverage censuses.
 #[cfg(test)]
 pub(super) fn rust_op_statuses(i: &Inputs) -> Option<Vec<(f64, f64, f64)>> {
-    let k = &Kernel::default();
+    let k = &crate::runner_kernel();
     let p = prepare(k, i).ok()?;
     let (o, marks) = run_rust_script(i, p).ok()?;
     Some(
@@ -4728,7 +4728,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        let k = &Kernel::default();
+        let k = &crate::runner_kernel();
         let i: Inputs = case.parse()?;
         run_rust(k, &i)
     }
@@ -5484,7 +5484,7 @@ mod glue_tests {
     use solidcore::topology::proto_topology::p3::BrepGlue;
 
     fn two_boxes() -> (Kernel, Two) {
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let a = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0, 1.0, 1.0).unwrap();
         let b = create_box(&mut k, Point3::new(5.0, 0.0, 0.0), 1.0, 1.0, 1.0).unwrap();
         (k, Two::new(a, Some(b)))

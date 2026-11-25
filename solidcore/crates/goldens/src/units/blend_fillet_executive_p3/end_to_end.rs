@@ -587,6 +587,9 @@ fn point(out: &mut Vec<f64>, p: Vec3) {
     out.extend([p.x, p.y, p.z]);
 }
 pub(super) fn status(error: SolidError) -> SolidResult<f64> {
+    if crate::status::is_kernel(&error, false) {
+        return Ok(crate::status::kind_slot(&error, 0.0));
+    }
     match error {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(1007.0),
         // every error carrying its exact C++ status (an upstream status, a typed refusal of

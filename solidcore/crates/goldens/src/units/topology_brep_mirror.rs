@@ -108,9 +108,9 @@ pub(super) fn status(r: SolidResult<()>) -> SolidResult<f64> {
     match r {
         Ok(()) => Ok(0.),
         Err(e) if e.is_unported() => Err(e),
-        Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => Ok(f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1))),
+        Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => Ok(f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1)))),
         // a failure in solidcore's terms (#2615): its C++ comparison status
-        Err(e @ SolidError::Failed(_)) => Ok(f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR))),
+        Err(e @ SolidError::Failed(_)) => Ok(f64::from(crate::status::kind_slot(&e, e.sm_status().unwrap_or(solidcore::error::SM_ERR)))),
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(1007.),
         Err(e) => Err(e),
     }
@@ -216,7 +216,7 @@ impl Runner {
         #[cfg(test)] log: &mut CertificateLog,
     ) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         // the Rust reader's B-rep of the same file, its geometry owners named by the
         // Rust reader (no C++ export or owner reaches the Rust side)
         let mut b = match crate::own_reader::read_file_rebuild(&mut k, &path(&i)?, i.rebuild)? {
@@ -653,7 +653,7 @@ mod tests {
             }
         };
         let read = || {
-            let mut kernel = Kernel::default();
+            let mut kernel = crate::runner_kernel();
             let body = crate::own_reader::read_file_rebuild(&mut kernel, &file, input.rebuild)
                 .unwrap()
                 .unwrap();

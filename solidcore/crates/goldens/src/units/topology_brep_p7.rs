@@ -459,7 +459,7 @@ fn rust_inputs(
         }
         Inputs::MergeSelf { face, .. } => {
             if n_f == 0 {
-                return Ok(Err(Output::err("no_face")));
+                return Ok(Err(Output::harness("no_face")));
             }
             *face = shared::sel((*face).max(0), n_f);
         }
@@ -935,7 +935,7 @@ fn cpp_null_deref(label: &str, symbol: &str) -> Fail {
 fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
     match r {
         Ok(_) => Ok(0.0),
-        Err(e) if solidcore::error::upstream_status(e).is_some() => Ok(f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))),
+        Err(e) if crate::status::is_kernel(e, solidcore::error::upstream_status(e).is_some()) => Ok(f64::from(crate::status::kind_slot(e, solidcore::error::upstream_status(e).unwrap_or(-1)))),
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(SM_ERR_INVALID_INPUT),
         Err(e) => Err(match Output::unported(e) {
             Some(o) => Fail::Deferred(Box::new(o)),
@@ -1701,7 +1701,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     if let Inputs::Read { file, damage, .. } = i {
         let bytes = read_bytes(file, *damage)?;
         if !stream_accepted(&bytes, read_bytes(file, None)? == bytes) {
-            return Ok(Output::err("guard"));
+            return Ok(Output::harness("guard"));
         }
     }
     let mut k = Kernel::default();

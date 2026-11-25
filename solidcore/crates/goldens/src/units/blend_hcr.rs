@@ -401,21 +401,21 @@ fn rust_hcr(k: &mut Kernel, i: &Inputs) -> Result<Result<Hcr, Output>, HarnessEr
     // the reference wrapper's scene input checks
     let (brep, hcr) = (brep_block(&i.brep)?, hcr_block(i)?);
     if let Err(m) = check_magnitudes(&brep).and_then(|()| check_magnitudes(&hcr)) {
-        return Ok(Err(Output::err(m)));
+        return Ok(Err(Output::harness_text(m)));
     }
     // the fixture's block contract (`topology.vertexuse`'s, ported in `cases::contract`)
     if let Err(e) = vertexuse_block::check(&path_of(&i.brep)?, &brep) {
-        return Ok(Err(Output::err(format!("rejected: {e}"))));
+        return Ok(Err(Output::harness_text(format!("rejected: {e}"))));
     }
     // the reference wrapper admits the extra curve through a wire fixture too.
     if let Some(x) = &i.extra {
         let wire = brep_block(&BrepIn::Wire { curve: x.curve.clone(), t0: x.t0, t1: x.t1 })?;
         if let Err(e) = vertexuse_block::check("", &wire) {
-            return Ok(Err(Output::err(format!("rejected: {e}"))));
+            return Ok(Err(Output::harness_text(format!("rejected: {e}"))));
         }
     }
     if let Err(m) = check_view(i) {
-        return Ok(Err(Output::err(m)));
+        return Ok(Err(Output::harness_text(m)));
     }
     // the shim's `build` (`sc_topology_fixture.h`, no validate-only, no gap walk)
     let built = match &i.brep {
@@ -442,7 +442,7 @@ fn rust_hcr(k: &mut Kernel, i: &Inputs) -> Result<Result<Hcr, Output>, HarnessEr
             Extent1d::from_min_max(x.t0, x.t1),
         ) {
             return Ok(Err(Output::unported(&e)
-                .unwrap_or_else(|| Output::err(format!("extra_wire_failed: {e}")))));
+                .unwrap_or_else(|| Output::kernel(&e, format!("extra_wire_failed: {e}")))));
         }
     }
     let opts = HcrOptions {
@@ -475,7 +475,7 @@ fn rust_hcr(k: &mut Kernel, i: &Inputs) -> Result<Result<Hcr, Output>, HarnessEr
         Ok(h) => h,
         Err(e) => {
             return Ok(Err(Output::unported(&e)
-                .unwrap_or_else(|| Output::err(format!("hcr_construct_failed: {e}")))))
+                .unwrap_or_else(|| Output::kernel(&e, format!("hcr_construct_failed: {e}")))))
         }
     };
     // the shim's `walk(scene, g)` order: the scene's arena ids renumbered to it (nothing
@@ -511,11 +511,11 @@ impl UnitDiff for Runner {
         };
         let b = h.scene_brep();
         let Some(r) = resolve(&i, b.edges().len(), b.vertices().len()) else {
-            return Ok(Output::err("no_edge"));
+            return Ok(Output::harness("no_edge"));
         };
         let (op, ops) = ops_block(&r);
         if let Err(m) = validate_rust(op, &h, &ops) {
-            return Ok(Output::err(m));
+            return Ok(Output::harness_text(m));
         }
         match run_rust(&mut k, h, &r) {
             Ok((status, record)) => Ok(output(status, record)),
@@ -524,10 +524,10 @@ impl UnitDiff for Runner {
                     operation: "blend::hcr",
                     ..
                 } => output(-2.0, vec![]),
-                e if crate::output::blend_status(&e).is_some() => {
-                    output(crate::output::blend_status(&e).map_or(-1.0, f64::from), vec![])
+                e if crate::status::is_kernel(&e, crate::output::blend_status(&e).is_some()) => {
+                    output(crate::status::kind_slot(&e, crate::output::blend_status(&e).map_or(-1.0, f64::from)), vec![])
                 }
-                other => Output::err(format!("rust_error: {other}")),
+                other => Output::kernel(&other, format!("rust_error: {other}")),
             })),
         }
     }
@@ -595,7 +595,7 @@ fn put_piece(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
         match c.evaluate_point(k, n.evaluate(f64::from(i) / 4.0)) {
             Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
             Err(e) => o.extend([
-                crate::output::blend_status(&e).map_or(-1.0, f64::from),
+                crate::status::kind_slot(&e, crate::output::blend_status(&e).map_or(-1.0, f64::from)),
                 0.0,
                 0.0,
                 0.0,
@@ -651,8 +651,8 @@ fn put_silhouettes(k: &Kernel, o: &mut Vec<f64>, h: &Hcr, n_e: usize) -> Result<
             let t = ivl.evaluate(f64::from(j) / 4.0);
             match curve.map(|c| c.evaluate_point(k, t)) {
                 Some(Ok(p)) => r.extend([0.0, p.x, p.y, p.z]),
-                Some(Err(e)) if crate::output::blend_status(&e).is_some() => {
-                    r.extend([crate::output::blend_status(&e).map_or(-1.0, f64::from), 0.0, 0.0, 0.0]);
+                Some(Err(e)) if crate::status::is_kernel(&e, crate::output::blend_status(&e).is_some()) => {
+                    r.extend([crate::status::kind_slot(&e, crate::output::blend_status(&e).map_or(-1.0, f64::from)), 0.0, 0.0, 0.0]);
                 }
                 Some(Err(_)) => r.extend([-1.0, 0.0, 0.0, 0.0]),
                 // `SM_ERR`
@@ -705,7 +705,7 @@ fn run_rust(k: &mut Kernel, mut h: Hcr, r: &Resolved) -> Result<(f64, Vec<f64>),
             match res {
                 Ok(()) => {}
                 Err(e) if e.is_unported() || matches!(e, SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => return Err(e),
-                Err(e) if crate::output::blend_status(&e).is_some() => status = crate::output::blend_status(&e).map_or(-1.0, f64::from),
+                Err(e) if crate::status::is_kernel(&e, crate::output::blend_status(&e).is_some()) => status = crate::status::kind_slot(&e, crate::output::blend_status(&e).map_or(-1.0, f64::from)),
                 Err(e) => return Err(e),
             }
             put_cc(&mut rec, &cc);
@@ -718,7 +718,7 @@ fn run_rust(k: &mut Kernel, mut h: Hcr, r: &Resolved) -> Result<(f64, Vec<f64>),
             let v = (vertex >= 0).then(|| VertexId::from_index(vertex as u32));
             match h.compute_edge_visibility(k, eid(edge), v, visible, &mut marked) {
                 Ok(()) => {}
-                Err(e) if crate::output::blend_status(&e).is_some() => status = crate::output::blend_status(&e).map_or(-1.0, f64::from),
+                Err(e) if crate::status::is_kernel(&e, crate::output::blend_status(&e).is_some()) => status = crate::status::kind_slot(&e, crate::output::blend_status(&e).map_or(-1.0, f64::from)),
                 Err(e) => return Err(e),
             }
             rec.push(h.visible_curves().len() as f64);
@@ -744,7 +744,7 @@ fn run_rust(k: &mut Kernel, mut h: Hcr, r: &Resolved) -> Result<(f64, Vec<f64>),
             }
             match h.compute_global_visibility(k) {
                 Ok(()) => {}
-                Err(e) if crate::output::blend_status(&e).is_some() => status = crate::output::blend_status(&e).map_or(-1.0, f64::from),
+                Err(e) if crate::status::is_kernel(&e, crate::output::blend_status(&e).is_some()) => status = crate::status::kind_slot(&e, crate::output::blend_status(&e).map_or(-1.0, f64::from)),
                 Err(e) => return Err(e),
             }
             rec.push(h.visible_curves().len() as f64);
@@ -760,7 +760,7 @@ fn run_rust(k: &mut Kernel, mut h: Hcr, r: &Resolved) -> Result<(f64, Vec<f64>),
             let n_e = h.scene_brep().edges().len();
             match h.compute_silhouettes(k) {
                 Ok(()) => {}
-                Err(e) if crate::output::blend_status(&e).is_some() => status = crate::output::blend_status(&e).map_or(-1.0, f64::from),
+                Err(e) if crate::status::is_kernel(&e, crate::output::blend_status(&e).is_some()) => status = crate::status::kind_slot(&e, crate::output::blend_status(&e).map_or(-1.0, f64::from)),
                 Err(e) => return Err(e),
             }
             put_silhouettes(k, &mut rec, &h, n_e)?;

@@ -154,7 +154,7 @@ fn rust(rel: &str) -> Result<Output, HarnessError> {
         .and_then(|part| dump(&mut k, &part));
     Ok(match result {
         Ok(v) => Output::new().values("out", v),
-        Err(e) => Output::unported(&e).unwrap_or_else(|| Output::err(READ_FAILED)),
+        Err(e) => Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, READ_FAILED)),
     })
 }
 

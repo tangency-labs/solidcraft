@@ -55,7 +55,7 @@ fn fixture(k: &mut Kernel, brep: &BrepIn) -> Result<crate::own_builder::Built, H
 
 pub(super) fn rust(i: &TopoIn) -> Result<Output, HarnessError> {
     use crate::own_builder::Built;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut b = match fixture(&mut k, &i.brep)? {
         Built::Brep(b) => *b,
         // the C++ side reports a fixture that does not build as rejected
@@ -75,15 +75,15 @@ pub(super) fn rust(i: &TopoIn) -> Result<Output, HarnessError> {
                 return Ok(o);
             }
             match e {
-                e if solidcore::error::upstream_status(&e).is_some() => {
-                    f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1))
+                e if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
+                    f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1)))
                 }
                 other => return Err(err(&format!("rust: {other}"))),
             }
         }
     };
     let editing = b.editing_enabled();
-    let snapshot = topology_brep_p10::snapshot(&Kernel::default(), &b)?;
+    let snapshot = topology_brep_p10::snapshot(&crate::runner_kernel(), &b)?;
     Ok(with_status(status, editing, snapshot))
 }
 
@@ -92,7 +92,7 @@ pub(super) fn rust(i: &TopoIn) -> Result<Output, HarnessError> {
 fn try_generate(rng: &mut Rng) -> Option<TopoIn> {
     let brep = shared::gen_brep(rng);
     // a fixture that does not build is redrawn
-    let Ok(crate::own_builder::Built::Brep(b)) = fixture(&mut Kernel::default(), &brep) else {
+    let Ok(crate::own_builder::Built::Brep(b)) = fixture(&mut crate::runner_kernel(), &brep) else {
         return None;
     };
     let n_edges = b.edges().len();

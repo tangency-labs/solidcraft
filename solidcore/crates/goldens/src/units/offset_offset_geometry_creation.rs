@@ -1263,7 +1263,7 @@ impl OffsetBrep<H> for Two {
         e2: H,
         ang_tol_deg: f64,
     ) -> solidcore::Result<bool> {
-        let k = &Kernel::default();
+        let k = &crate::runner_kernel();
         if e1.b != vertex.b || e2.b != vertex.b {
             return Err(invalid("edges of another B-rep"));
         }
@@ -1589,6 +1589,11 @@ fn put_curve(out: &mut Vec<f64>, c: Option<&SmCurve>) -> Result<(), HarnessError
 
 /// The upstream status code of an error the surface samples report.
 fn status_code(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status_code(e))
+}
+
+/// [`status_code`] as recorded before kinds.
+fn legacy_status_code(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
             f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
@@ -2087,7 +2092,7 @@ fn native_face(k: &mut Kernel, b: &BrepIn) -> Result<Result<Brep, SolidError>, H
 /// A failed Rust build of B-rep `which` (`a` / `b`) as the shim reports a failed build.
 fn own_failure(which: &str, e: &SolidError) -> Output {
     Output::unported(e).unwrap_or_else(|| {
-        Output::err(format!(
+        Output::kernel(e, format!(
             "brep_build_{which}_status_{}",
             crate::own_builder::build_status(e)
         ))
@@ -2097,7 +2102,7 @@ fn own_failure(which: &str, e: &SolidError) -> Output {
 /// Builds the B-reps ([`side`]) and resolves the script; `Err(Ok(output))` is the output
 /// reported when the B-reps cannot be built or something cannot be resolved.
 fn prepare(i: &Inputs) -> Result<Prepared, Early> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let side_a = side(&mut k, &i.brep_a).map_err(|e| Box::new(Err(e)))?;
     let side_b = match &i.brep_b {
         Some(b) => Some(side(&mut k, b).map_err(|e| Box::new(Err(e)))?),
@@ -2134,7 +2139,7 @@ fn prepare(i: &Inputs) -> Result<Prepared, Early> {
     let two = Two::new(brep_a, brep_b, [exact_a, exact_b]);
     let (hdr, ops) = match resolve(i, &mut counts, &two) {
         Ok(r) => r,
-        Err(name) => return Err(Box::new(Ok(Output::err(name)))),
+        Err(name) => return Err(Box::new(Ok(Output::harness_text(name)))),
     };
     Ok(Prepared { two, hdr, ops })
 }
@@ -2171,8 +2176,8 @@ fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, Fa
             o.push(0.0);
             Ok(Some(v))
         }
-        Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => {
-            o.push(f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1)));
+        Err(e) if crate::status::is_kernel(&e, solidcore::error::nurbs::upstream_status(&e).is_some()) => {
+            o.push(f64::from(crate::status::kind_slot(&e, solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1))));
             Ok(None)
         }
         Err(SolidError::InvalidInput {
@@ -2334,7 +2339,7 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<Vec<f64>, Fail> {
 
 /// [`run_rust_script`] with the two B-reps as the script leaves them.
 fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let Prepared {
         mut two, hdr, ops, ..
     } = p;
@@ -2996,7 +3001,7 @@ pub fn result_breps(case: &Case) -> Result<super::surface_surface_p2::Drawn, Har
     let mut drawn = Vec::new();
     drawn.extend(a.map(|a| ("a", a)));
     drawn.extend(b.map(|b| ("b", b)));
-    Ok((Kernel::default(), drawn))
+    Ok((crate::runner_kernel(), drawn))
 }
 
 // ---- generation -----------------------------------------------------------------------------
@@ -4607,7 +4612,7 @@ mod tests {
         input.brep_a = fixture.clone();
         input.brep_b = Some(fixture);
         let mut prepared = prepare(&input).unwrap();
-        let k = Kernel::default();
+        let k = crate::runner_kernel();
         for (arena, tolerance) in [(0, 0.003), (1, 0.007)] {
             let handle = hd(arena, K_FACE_SURFACE, 0);
             let brep = prepared.two.brep_m(handle).unwrap();
@@ -4694,7 +4699,7 @@ mod tests {
             else {
                 panic!("{name}: not a TrimExtendedEdge");
             };
-            let k = Kernel::default();
+            let k = crate::runner_kernel();
             let same_tol = 10.0 * OffsetGeometryCreation::new(i.dist, i.approx).this_approx_tol_3d();
             let base = triple_to_h(*base).unwrap();
             let edge = two.edgeuse_edge(base).unwrap().unwrap();

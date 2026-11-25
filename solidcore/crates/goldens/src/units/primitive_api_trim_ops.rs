@@ -175,6 +175,11 @@ fn v3(p: &P3) -> Vec3 {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -332,7 +337,7 @@ macro_rules! input {
 }
 
 fn rust(i: &In) -> Result<Output, HarnessError> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     match i {
         In::Trim3d {
             surface,

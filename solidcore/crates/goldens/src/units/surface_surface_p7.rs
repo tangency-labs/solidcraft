@@ -365,6 +365,11 @@ pub(crate) fn req_of(v: u8) -> Result<SolutionRequested, HarnessError> {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 pub(crate) fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
@@ -1966,8 +1971,7 @@ mod tests {
         ("gen2997", &[1001.0, 1.0, 0.9984474015655054], &[0.0, 1.0, 0.9984474015655054]),
     ];
 
-    /// The enclosed alignment at `uv` ([`crate::certify::alignment`], shared with the
-    /// goldens' WR-57 substitution replay).
+    /// The enclosed alignment at `uv` ([`crate::certify::alignment`]).
     fn wr57_alignment(k: &Kernel, s: &Surface, uv: Point2, dir: Vec3, singular_u: bool) -> Option<(f64, f64)> {
         crate::certify::alignment(k, s, uv, dir, singular_u)
     }

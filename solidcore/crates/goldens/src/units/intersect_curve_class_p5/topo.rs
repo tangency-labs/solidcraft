@@ -643,6 +643,11 @@ fn op_args(k: &Kernel, r: &Resolved, op: &TopoOpIn) -> Result<Op, HarnessError> 
 // ---- the Rust side ----------------------------------------------------------------------
 
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::Upstream { code, .. } => f64::from(*code),
         _ => -9.0,
@@ -760,7 +765,7 @@ pub(super) fn rust(i: &TopoIn) -> Result<Output, HarnessError> {
         Err(o) => return Ok(o),
     };
     if !r.exact {
-        return Ok(Output::err("inexact_geometry"));
+        return Ok(Output::harness("inexact_geometry"));
     }
     let op = op_args(&k, &r, &i.op)?;
     let mates = r.mates.clone();
@@ -1028,7 +1033,7 @@ fn diagnostics(o: Output, before: &Snapshot, after: &Snapshot, cc: &CurveClassif
 }
 
 fn rust_err(e: &SolidError) -> Output {
-    Output::unported(e).unwrap_or_else(|| Output::err(format!("rust_error: {e}")))
+    Output::unported(e).unwrap_or_else(|| Output::kernel(e, format!("rust_error: {e}")))
 }
 
 // ---- generation -------------------------------------------------------------------------

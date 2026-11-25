@@ -423,6 +423,11 @@ fn to_output(i: &Inputs, c: &InlineCrv, flat: &[f64]) -> Result<Output, HarnessE
 /// (recursion limits of the extensions and the Bezier arc length, the size check of
 /// `ST_curxcrr`), `-1` for anything else.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
         SolidError::NotConverged { operation, .. }

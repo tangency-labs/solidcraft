@@ -99,7 +99,7 @@ fn p3([x, y, z]: [f64; 3]) -> Point3 {
 }
 
 fn rust_err(e: &SolidError) -> Output {
-    Output::unported(e).unwrap_or_else(|| Output::err(format!("rust_error: {e}")))
+    Output::unported(e).unwrap_or_else(|| Output::kernel(e, format!("rust_error: {e}")))
 }
 
 fn index_i64(i: usize) -> Result<i64, HarnessError> {

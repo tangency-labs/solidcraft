@@ -245,7 +245,7 @@ fn rust_model(k: &mut Kernel, i: &Inputs) -> Result<Result<Model, Output>, Harne
         Built::Brep(b) => *b,
         Built::Failed(e) => {
             return Ok(Err(Output::unported(&e).unwrap_or_else(|| {
-                Output::err(format!("brep_build_status_{}", build_status(&e)))
+                Output::kernel(&e, format!("brep_build_status_{}", build_status(&e)))
             })))
         }
     };
@@ -567,10 +567,10 @@ fn unclassified(op: Op, args: &[f64]) -> Option<Output> {
         Op::CurveOnClassify => (at(2..8), Some((at(2..5), at(5..8)))),
     };
     if !points.iter().all(|&x| in_range(x)) {
-        return Some(Output::err("point_out_of_range"));
+        return Some(Output::harness("point_out_of_range"));
     }
     if line.is_some_and(|(p, q)| p == q) {
-        return Some(Output::err("degenerate_line"));
+        return Some(Output::harness("degenerate_line"));
     }
     None
 }
@@ -589,7 +589,7 @@ fn pc_block(pc: &PointClassification<EntityRef>) -> Vec<f64> {
         f64::from(pc.point_class().code()),
         kind,
         index,
-        pc.gap_3d(&Kernel::default(), &NoGeometry, None)
+        pc.gap_3d(&crate::runner_kernel(), &NoGeometry, None)
             .unwrap_or(f64::NAN),
         pc.src_zone_tol_3d(),
         pc.pre_snap_param(),
@@ -779,7 +779,7 @@ impl solidcore::intersect::point_class::ClassGeometry<H> for Objects<'_> {
 /// A Rust error as the case outcome: deferred for [`SolidError::Unported`], else an
 /// error no C++ output has (a visible failure).
 fn rust_err(e: &SolidError) -> Output {
-    Output::unported(e).unwrap_or_else(|| Output::err(format!("rust_error: {e}")))
+    Output::unported(e).unwrap_or_else(|| Output::kernel(e, format!("rust_error: {e}")))
 }
 
 /// The replayed model of a `point_classify` case whose point is on a UV trim (`at.mode`
@@ -798,7 +798,7 @@ pub fn scene(case: &Case) -> Result<Option<(Brep, FaceId, EdgeuseId)>, HarnessEr
     if at.mode != "trim" {
         return Ok(None);
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let Ok(m) = rust_model(&mut k, &i)? else {
         return Ok(None);
     };
@@ -814,7 +814,7 @@ pub fn scene(case: &Case) -> Result<Option<(Brep, FaceId, EdgeuseId)>, HarnessEr
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     if let OpIn::ProtoVertex {
         approx,
         capture,
@@ -925,7 +925,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 };
                 let status = match qf::point_classify(&k, b, f, uv, &mut pc, opts) {
                     Ok(()) => 0.0,
-                    Err(e) if solidcore::error::upstream_status(&e).is_some() => f64::from(solidcore::error::upstream_status(&e).unwrap_or_default()),
+                    Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or_default())),
                     Err(e) => return Ok(rust_err(&e)),
                 };
                 last = put_pc(
@@ -992,11 +992,16 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             // SmBSplineCurve::CreateLineSegment, as the shim
             let line = match BSplineCurve::create_line_segment(u64::from(*dim), p, q) {
                 Ok(line) => line,
-                Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-                    let code = solidcore::error::upstream_status(&e).unwrap_or_default();
-                    return Ok(
-                        Output::new().values("curve_classification", vec![-3.0, f64::from(code)])
-                    )
+                // (before kinds: only an error with a status, as `[-3, status]`)
+                Err(e)
+                    if crate::status::typed()
+                        || solidcore::error::upstream_status(&e).is_some() =>
+                {
+                    let record = crate::status::legacy_or(
+                        vec![-3.0, f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or_default()))],
+                        || vec![crate::status::kind_slot(&e, 0.0)],
+                    );
+                    return Ok(Output::new().values("curve_classification", record));
                 }
                 Err(e) => return Ok(rust_err(&e)),
             };
@@ -1011,7 +1016,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 &k, b, f, &objects, *do_pc, &mut cc, *big_gaps, *check3d, true,
             ) {
                 Ok(modified) => (0.0, modified),
-                Err(e) if solidcore::error::upstream_status(&e).is_some() => (f64::from(solidcore::error::upstream_status(&e).unwrap_or_default()), false),
+                Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => (f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or_default())), false),
                 Err(e) => return Ok(rust_err(&e)),
             };
             let mut o = vec![status, flag(modified), cc.size() as f64];

@@ -236,7 +236,7 @@ fn own_brep(i: &Inputs) -> Result<Result<Brep, Output>, HarnessError> {
         }
         Built::Failed(e) => Err(Output::unported(&e).unwrap_or_else(|| {
             if file {
-                Output::err(format!("rust read failed: {e}"))
+                Output::kernel(&e, format!("rust read failed: {e}"))
             } else {
                 Output::rejected("native fixture construction failed")
             }
@@ -460,7 +460,7 @@ impl UnitDiff for Runner {
             validation::validate_pointers(&kernel, &mut b, Some(&mut reports), i.level, i.walk, &key);
         let status = match run {
             Ok(x) => x,
-            Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+            Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),
         };
         output(&rust_protocol(&b, status, &reports)?)
     }

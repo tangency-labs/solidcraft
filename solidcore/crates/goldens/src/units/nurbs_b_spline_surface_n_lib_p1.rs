@@ -545,6 +545,11 @@ fn dump_curve(o: &mut Vec<f64>, c: &BSplineCurve) {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
@@ -626,8 +631,8 @@ fn rust_member(this: &mut BSplineSurface, op: &OpIn) -> Result<Result<Vec<f64>, 
                     dump_state(&mut o, this);
                     Ok(())
                 }
-                Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => {
-                    let mut f = vec![f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1))];
+                Err(e) if crate::status::is_kernel(&e, solidcore::error::nurbs::upstream_status(&e).is_some()) => {
+                    let mut f = vec![f64::from(crate::status::kind_slot(&e, solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1)))];
                     dump_state(&mut f, this);
                     return Ok(Ok(f));
                 }

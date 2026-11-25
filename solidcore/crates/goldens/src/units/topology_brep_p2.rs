@@ -490,7 +490,7 @@ fn status<T>(r: Result<T, SolidError>) -> Result<(f64, Option<T>), Fail> {
         Err(e) => match Output::unported(&e) {
             Some(o) => Err(Fail::Deferred(Box::new(o))),
             None => match e {
-                e if solidcore::error::upstream_status(&e).is_some() => Ok((f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)), None)),
+                e if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => Ok((f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))), None)),
                 other => Err(Fail::Harness(harness(format!("rust: {other}")))),
             },
         },
@@ -1010,13 +1010,13 @@ fn own_brep(
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let (mut b, c) = match own_brep(&mut k, i)? {
         Ok(x) => x,
         Err(o) => return Ok(o),
     };
     let Some((op, args)) = op_args(&i.op, &c)? else {
-        return Ok(Output::err("no target"));
+        return Ok(Output::harness("no target"));
     };
     if let OpIn::Merge { curves, tol, .. } = &i.op {
         let face = FaceId::from_index(args.first().copied().unwrap_or(0.0) as u32);
@@ -1080,8 +1080,8 @@ fn merge_rust(
         Err(e) => match Output::unported(&e) {
             Some(o) => Ok(o),
             None => match e {
-                e if solidcore::error::upstream_status(&e).is_some() => {
-                    let code = solidcore::error::upstream_status(&e).unwrap_or(-1);
+                e if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
+                    let code = crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1));
                     Ok(Output::new().values("out", vec![0.0, f64::from(code), 0.0, 0.0]))
                 }
                 other => Err(harness(format!("rust: {other}"))),
@@ -1145,7 +1145,7 @@ fn merge_ssi_rust(
         Err(e) => match Output::unported(&e) {
             Some(o) => return Ok(o),
             None => match e {
-                e if solidcore::error::upstream_status(&e).is_some() => (f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)), 0, 0),
+                e if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => (f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))), 0, 0),
                 other => return Err(harness(format!("rust: {other}"))),
             },
         },

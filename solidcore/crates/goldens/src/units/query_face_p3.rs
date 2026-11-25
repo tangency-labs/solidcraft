@@ -198,7 +198,7 @@ fn face_frac(b: &Brep, f: FaceId, a: f64, c: f64) -> solidcore::Result<Point2> {
 /// state reaches it. `Err(output)` for a rejected case (`rejected`, as the shim's) or
 /// an error of the Rust setup (an unported callee defers the case).
 fn resolve(k: &Kernel, b: &mut Brep, i: &Inputs) -> Result<Result<Resolved, Output>, HarnessError> {
-    let rejected = || Ok(Err(Output::err("rejected")));
+    let rejected = || Ok(Err(Output::harness("rejected")));
     let n_faces = b.faces().len();
     if n_faces == 0 {
         return rejected();
@@ -233,12 +233,12 @@ fn bisector_setup(
         Err(e) => return Err(Box::new(setup_error(&e))),
     };
     if loops.is_empty() || !surface {
-        return Err(Box::new(Output::err("rejected")));
+        return Err(Box::new(Output::harness("rejected")));
     }
     let target = target as usize % loops.len();
     // the pole points are read at their four slots
     if props.poles != 0 && props.pole_points.len() < 4 {
-        return Err(Box::new(Output::err("rejected")));
+        return Err(Box::new(Output::harness("rejected")));
     }
     Ok(Resolved::Bisector(Box::new(BisectorCase {
         face,
@@ -280,7 +280,7 @@ fn sector_setup(
     else {
         return Err(harness("not a sector case"));
     };
-    let rejected = || Ok(Err(Output::err("rejected")));
+    let rejected = || Ok(Err(Output::harness("rejected")));
     let fail = |e: &SolidError| Ok(Err(setup_error(e)));
     macro_rules! r {
         ($e:expr) => {
@@ -431,7 +431,7 @@ fn sector_setup(
 }
 
 fn status_err(status: f64) -> Output {
-    Output::err(format!("status_{status}"))
+    Output::harness_text(format!("status_{status}"))
 }
 
 fn box_output(min: Point3, max: Point3) -> Output {
@@ -465,8 +465,8 @@ fn rust_err(e: &SolidError) -> Output {
         return d;
     }
     match solidcore::error::upstream_status(e) {
-        Some(code) => status_err(f64::from(code)),
-        None => Output::err(format!("rust_error: {e}")),
+        Some(code) if !crate::status::typed() => status_err(f64::from(code)),
+        _ => Output::kernel(e, format!("rust_error: {e}")),
     }
 }
 
@@ -577,7 +577,7 @@ fn point_class_pair(pc: &PointClassification<H>) -> [i64; 2] {
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     // the B-rep: the Rust kernel's own build of the source (no C++ state)
     let (mut b, _) = match own_brep(&i.brep, i.validate_only, i.init_gaps)? {
         Ok(x) => x,
@@ -1392,7 +1392,7 @@ mod tight_box_certificate {
                     report.push(format!("{unit_id} {name}: no copy"));
                     continue;
                 };
-                let k = Kernel::default();
+                let k = crate::runner_kernel();
                 let faces = solidcore::topology::brep::p1::faces(body, None).expect("faces");
                 for f in faces {
                     let mut b = body.clone_standing_for_self().expect("copy");
@@ -1444,7 +1444,7 @@ mod tight_box_certificate {
                                         ));
                                     }
                                 }
-                                let mut kk = Kernel::default();
+                                let mut kk = crate::runner_kernel();
                                 let mut bb = body.clone_standing_for_self().expect("copy");
                                 let check = solidcore::topology::brep::validation::check_brep(
                                     &mut kk,

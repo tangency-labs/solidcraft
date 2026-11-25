@@ -329,8 +329,9 @@ pub(crate) fn build_as<T: serde::Serialize>(
 /// The output of a failed build as the graph runners report the shim's NULL build:
 /// the deferral of an unported callee, else `brep_build_status_<status>`.
 pub(crate) fn failed_output(e: &SolidError) -> crate::Output {
-    crate::Output::unported(e)
-        .unwrap_or_else(|| crate::Output::err(format!("brep_build_status_{}", build_status(e))))
+    crate::Output::unported(e).unwrap_or_else(|| {
+        crate::Output::kernel(e, format!("brep_build_status_{}", build_status(e)))
+    })
 }
 
 /// Builds the B-rep of `src` as the shim's `build` (`sc_edgeuse_graph.h`) does, with
@@ -1854,10 +1855,18 @@ pub(crate) fn counts(b: &Brep) -> [usize; 10] {
 /// The `SmStatus` the shim reports for a failed build of the port's error `e`: an
 /// upstream code as is, `SM_ERR` otherwise.
 pub(crate) fn build_status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_build_status(e))
+}
+
+/// [`build_status`] as recorded before kinds.
+fn legacy_build_status(e: &SolidError) -> f64 {
     match e {
         SolidError::Upstream { code, .. } => f64::from(*code),
         // a failure in solidcore's terms (#2615): its C++ comparison status
-        e @ SolidError::Failed(_) => f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e @ SolidError::Failed(_) => f64::from(crate::status::kind_slot(
+            e,
+            e.sm_status().unwrap_or(solidcore::error::SM_ERR),
+        )),
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
             f64::from(solidcore::error::SM_ERR_INVALID_INPUT)
         }

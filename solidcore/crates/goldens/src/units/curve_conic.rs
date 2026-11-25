@@ -117,6 +117,11 @@ fn lookup(name: &str) -> Result<(Op, bool), HarnessError> {
 }
 
 fn status_code(e: &SolidError) -> i64 {
+    crate::status::kind_slot(e, legacy_status_code(e))
+}
+
+/// [`status_code`] as recorded before kinds.
+fn legacy_status_code(e: &SolidError) -> i64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => i64::from(SM_ERR_INVALID_INPUT),
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -306,7 +311,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     match rust_values(i)? {
         Ok(v) => Ok(Output::new().values("r", v)),
         Err(e) => Ok(Output::unported(&e)
-            .unwrap_or_else(|| Output::err(format!("status_{}", status_code(&e))))),
+            .unwrap_or_else(|| Output::kernel(&e, format!("status_{}", status_code(&e))))),
     }
 }
 

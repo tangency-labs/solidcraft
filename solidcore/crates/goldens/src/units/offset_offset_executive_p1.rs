@@ -1249,7 +1249,7 @@ fn operation<T>(result: solidcore::Result<T>) -> RResult<(i64, Option<T>)> {
         Ok(value) => Ok((i64::from(NATIVE_SUCCESS), Some(value))),
         Err(SolidError::Upstream { code, .. }) => Ok((i64::from(code), None)),
         // a failure in solidcore's terms (#2615): its C++ comparison status
-        Err(e @ SolidError::Failed(_)) => Ok((i64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR)), None)),
+        Err(e @ SolidError::Failed(_)) => Ok((i64::from(crate::status::kind_slot(&e, e.sm_status().unwrap_or(solidcore::error::SM_ERR))), None)),
         Err(error) => Err(RunError::Kernel(error)),
     }
 }
@@ -2894,7 +2894,7 @@ impl UnitDiff for Runner {
             Ok(output) => normalize_sync_ties(output),
             Err(RunError::Harness(error)) => Err(error),
             Err(RunError::Kernel(error)) => Ok(Output::unported(&error)
-                .unwrap_or_else(|| Output::err(format!("Rust operation: {error}")))),
+                .unwrap_or_else(|| Output::kernel(&error, format!("Rust operation: {error}")))),
         }
     }
     fn cases(&self, context: &CaseContext) -> HResult<Vec<Case>> {
@@ -4194,7 +4194,7 @@ mod tests {
         missing.values.remove("edgeuse.1.geometry");
         assert!(normalize_sync_ties(missing).is_err());
         for output in [
-            Output::err("operation failure"),
+            Output::harness("operation failure"),
             Output::deferred("topology.brep_p2", "SmBrep::Notify"),
             Output::rejected("native fixture constructor status_1007"),
         ] {

@@ -322,6 +322,11 @@ fn push_v(o: &mut Vec<f64>, v: Vec3) {
 /// The `SmStatus` of a Rust error (`InvalidInput` is `SM_ERR_INVALID_INPUT`); `-1` for
 /// one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
             f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
@@ -332,6 +337,16 @@ fn status(e: &SolidError) -> f64 {
 }
 
 /// Builds the cone (the `surface.cone_p1` constructions).
+/// The cone a `surface.cone_p2` case's `inputs` builds (before its op), for replay tests.
+///
+/// # Errors
+///
+/// A [`HarnessError`] when `inputs` is not a case of this unit.
+pub fn case_cone(k: &Kernel, inputs: &Value) -> Result<solidcore::Result<Cone>, HarnessError> {
+    let i: Inputs = serde_json::from_value(inputs.clone()).map_err(|e| harness(e.to_string()))?;
+    Ok(rust_cone(k, &i.cone))
+}
+
 fn rust_cone(k: &Kernel, c: &ConeIn) -> solidcore::Result<Cone> {
     let (o, x, y) = (v3(c.origin), v3(c.x), v3(c.y));
     let a2p = Axis2Placement::new(o, x, y);
@@ -751,7 +766,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut o = Vec::new();
     match rust_cone(&k, &i.cone) {
         Err(e) if e.is_unported() => {
-            return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())));
+            return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())));
         }
         Err(e) => {
             o.push(status(&e));
@@ -760,7 +775,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(mut s) => {
             o.push(SUCCESS);
             if let Err(e) = rust_op(&k, &mut s, &i.op, &mut o) {
-                return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())));
+                return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())));
             }
         }
     }

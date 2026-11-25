@@ -110,8 +110,6 @@ pub const MIN_GENERATED: usize = 400;
 
 /// "Upstream would dereference null": the shim refused the input.
 const REFUSED: f64 = -2.0;
-/// The shim did not run upstream (the Rust side defers).
-const NOT_RUN: f64 = -3.0;
 /// The corner id the shim exports the corner under test (`this`) as.
 const THIS_CORNER: u32 = 1_000_000;
 
@@ -337,12 +335,12 @@ fn create_setup(
     let n_eu = c.get(6).copied().unwrap_or(0);
     let s = sel(eu, n_eu);
     if s < 0 {
-        return Ok(Err(Output::err("no_edge_use")));
+        return Ok(Err(Output::harness("no_edge_use")));
     }
     let types = ImportTypes::default();
     let start = EdgeuseId::from_index(u32::try_from(s).map_err(|_| harness("index"))?);
     let Some(vertex) = eu_vertex(&b, start) else {
-        return Ok(Err(Output::err("start_edge_use_without_vertex")));
+        return Ok(Err(Output::harness("start_edge_use_without_vertex")));
     };
     // the other edge uses starting at the vertex, in export order
     let ring: Vec<EdgeuseId> = b
@@ -385,9 +383,6 @@ fn create_output(rec: &[f64]) -> Result<Output, HarnessError> {
         .ok_or_else(|| harness("empty record"))?;
     if first == REFUSED {
         return Ok(Output::rejected("upstream would dereference null"));
-    }
-    if first == NOT_RUN {
-        return Ok(Output::err("not_run_by_cpp"));
     }
     let mut out = Output::new().int("corner", first as i64);
     if first == 0.0 {
@@ -571,7 +566,7 @@ fn create_rust(
         Ok(c) => c,
         Err(e) => {
             return Ok(Output::unported(&e)
-                .unwrap_or_else(|| Output::err(format!("rust_error_{}", status(&e)))))
+                .unwrap_or_else(|| Output::kernel(&e, format!("rust_error_{}", status(&e)))))
         }
     };
     let Some(c) = c else {
@@ -693,9 +688,6 @@ fn corner_output(rec: &[f64]) -> Result<Output, HarnessError> {
         .ok_or_else(|| harness("empty record"))?;
     if first == REFUSED {
         return Ok(Output::rejected("upstream would dereference null"));
-    }
-    if first == NOT_RUN {
-        return Ok(Output::err("not_run_by_cpp"));
     }
     let get = |i: usize| {
         rec.get(i)
@@ -1093,7 +1085,7 @@ fn corner_rust_status_gs(
     let st = match r {
         Ok(v) => v,
         Err(e) if e.is_unported() => {
-            return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())))
+            return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())))
         }
         Err(e) => status(&e),
     };

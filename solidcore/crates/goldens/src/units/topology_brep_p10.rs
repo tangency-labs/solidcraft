@@ -235,6 +235,11 @@ fn operation_output(items: &[Item], i: &Inputs) -> Result<Output, HarnessError> 
 
 /// Upstream status of a Rust error: the guard's `-2` for `InvalidInput`.
 fn status(e: &SolidError) -> i64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> i64 {
     match e {
         e if solidcore::error::upstream_status(e).is_some() => {
             i64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
@@ -419,7 +424,7 @@ type Dump = Result<Vec<Item>, SolidError>;
 fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
     let path = path_of(i)?;
     let bytes = std::fs::read(&path).map_err(|e| harness(format!("{path}: {e}")))?;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut data = match BrepData::read_from_file(&k, bytes, FileType::Ascii) {
         Ok(d) => d,
         Err(e @ SolidError::Unported { .. }) => return Ok(Err(e)),
@@ -926,7 +931,7 @@ impl Out<'_> {
         self.d(ivl.max());
         for k in 0..=4 {
             let t = ivl.min() + 0.25 * f64::from(k) * (ivl.max() - ivl.min());
-            self.point(c.evaluate_point(&Kernel::default(), t));
+            self.point(c.evaluate_point(&crate::runner_kernel(), t));
         }
         let matches = c.owner().is_some_and(|actual| {
             actual == (self.key_of)(owner)
@@ -1279,7 +1284,7 @@ impl UnitDiff for Runner {
         let inputs: Inputs = case.parse()?;
         match rust(&inputs)? {
             Ok(items) => operation_output(&items, &inputs),
-            Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+            Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),
         }
     }
 

@@ -194,7 +194,12 @@ fn build(s: &InlineSrf) -> Result<Surface, Fail> {
         s: used[3],
     };
     Surface::with_indices(net, s.u.clone(), s.v.clone(), idx)
-        .map_err(|e| Fail::Refused(format!("rust surface: {e}")))
+        .map_err(|e| {
+            Fail::Refused(format!(
+                "rust surface: {}",
+                crate::status::kernel_text(&e, e.to_string())
+            ))
+        })
 }
 
 // ---- output layout ----------------------------------------------------------------

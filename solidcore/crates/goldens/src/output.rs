@@ -97,6 +97,52 @@ impl Output {
         }
     }
 
+    /// A kernel failure: `error` is `kind_<code>` (see [`crate::status`]), with the largest
+    /// size that works as `values["largest_size"]` for a refused extension that names one;
+    /// an unported callee defers the case. `legacy` is the text recorded before kinds,
+    /// returned unless `GOLDENS_TYPED=1`.
+    pub fn kernel(e: &SolidError, legacy: impl Into<String>) -> Self {
+        if !crate::status::typed() {
+            return Self::err(legacy);
+        }
+        if let Some(deferred) = Self::unported(e) {
+            return deferred;
+        }
+        let out = Self::err(crate::status::kernel_text(e, String::new()));
+        match crate::status::largest_size(e) {
+            Some(d) => out.values("largest_size", vec![d]),
+            None => out,
+        }
+    }
+
+    /// A harness outcome: a fixed label the runner chose, never built from a kernel error.
+    pub fn harness(label: &'static str) -> Self {
+        Self::err(label)
+    }
+
+    /// A harness outcome whose text the runner composes from its own checks (a fixture
+    /// contract, a scene limit, an unresolved name): never built from a kernel error.
+    pub fn harness_text(text: impl Into<String>) -> Self {
+        Self::err(text)
+    }
+
+    /// A rejection whose reason is a kernel failure: `<prefix>: kind_<code>`. `legacy` is the
+    /// reason recorded before kinds, returned unless `GOLDENS_TYPED=1`.
+    pub fn rejected_kernel(
+        prefix: &'static str,
+        e: &SolidError,
+        legacy: impl Into<String>,
+    ) -> Self {
+        if crate::status::typed() {
+            Self::rejected(format!(
+                "{prefix}: {}",
+                crate::status::kernel_text(e, String::new())
+            ))
+        } else {
+            Self::rejected(legacy)
+        }
+    }
+
     /// Output representing a failed operation.
     pub fn err(msg: impl Into<String>) -> Self {
         Self {

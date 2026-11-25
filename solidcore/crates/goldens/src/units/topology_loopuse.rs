@@ -52,8 +52,6 @@ pub struct Runner;
 
 /// "Upstream would dereference null" in an output slot.
 const NULL_DEREF: f64 = -2.0;
-/// The shim did not run the op (deferred on the Rust side).
-const NOT_RUN: f64 = -3.0;
 
 /// The `IsKindOf` type codes the shim asks about (its `KIND_TYPES`).
 const KIND_TYPES: [i64; 8] = [16004, 16003, 16001, 16005, 16010, 12060, 11001, 16999];
@@ -302,7 +300,7 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
     };
     let c = crate::own_builder::counts(&brep);
     let Some(op) = resolve(&i.op, c, &brep) else {
-        return Ok(Err(Output::err("no_entity_of_that_kind")));
+        return Ok(Err(Output::harness("no_entity_of_that_kind")));
     };
     Ok(Ok(Setup {
         brep,
@@ -313,10 +311,6 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
 
 /// The output of an op body.
 fn output_of(op: &Resolved, body: &[f64]) -> Output {
-    if body.first() == Some(&NOT_RUN) && body.len() == 1 {
-        // only on paths the Rust side defers; compared, it fails the case
-        return Output::err("not_run_by_cpp");
-    }
     let ints = |v: &[f64]| -> Vec<i64> { v.iter().map(|&x| x as i64).collect() };
     match op {
         Resolved::Closed3d(..) if body.len() == 4 => Output::new()
@@ -500,7 +494,7 @@ fn put_use_state(o: &mut Vec<f64>, b: &Brep) {
 fn status(r: Result<(), SolidError>) -> Result<Option<f64>, Fail> {
     match r {
         Ok(()) => Ok(Some(0.0)),
-        Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => Ok(Some(f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1)))),
+        Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => Ok(Some(f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1))))),
         Err(e) => slot(Err(e)).map(|_: Option<()>| None),
     }
 }

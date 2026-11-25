@@ -403,7 +403,7 @@ fn rust_brep(
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let k = Kernel::default();
     let Some(surface) = rust_surface(&k, &i.surface)? else {
-        return Ok(Output::err("surface"));
+        return Ok(Output::harness("surface"));
     };
     let curves = i
         .edges
@@ -435,7 +435,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             r.edge_param,
             orient_code(r.orientation),
         )),
-        Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(format!("rust: {e}")))),
+        Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, format!("rust: {e}")))),
     }
 }
 

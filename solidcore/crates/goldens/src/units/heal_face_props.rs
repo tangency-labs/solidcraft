@@ -734,7 +734,7 @@ fn tree_contract(
 /// (upstream crashes on these scripts).
 fn rejection(face: &FaceIn, ops: &[[f64; 5]]) -> Result<Output, HarnessError> {
     match script_contract(face, ops) {
-        Err(_) => Ok(Output::err("rejected")),
+        Err(_) => Ok(Output::harness("rejected")),
         Ok(()) => Err(harness("expected the input contract to reject the script")),
     }
 }
@@ -1186,7 +1186,7 @@ fn status(r: solidcore::Result<()>) -> Result<f64, solidcore::SolidError> {
     match r {
         Ok(()) => Ok(1000.0),
         Err(e) if e.is_unported() => Err(e),
-        Err(err) if solidcore::error::upstream_status(&err).is_some() => Ok(f64::from(solidcore::error::upstream_status(&err).unwrap_or(-1))),
+        Err(err) if crate::status::is_kernel(&err, solidcore::error::upstream_status(&err).is_some()) => Ok(f64::from(crate::status::kind_slot(&err, solidcore::error::upstream_status(&err).unwrap_or(-1)))),
         Err(e) => Err(e),
     }
 }
@@ -1434,7 +1434,7 @@ fn rust_props(f: &FaceIn, ops: &[[f64; 5]]) -> Result<Output, HarnessError> {
                 out.extend(snapshot(&p, face));
             }
             Err(e) => {
-                return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())));
+                return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())));
             }
         }
     }

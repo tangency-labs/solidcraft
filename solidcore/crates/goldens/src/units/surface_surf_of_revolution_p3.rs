@@ -204,6 +204,11 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
 /// for `InvalidInput` (e.g. `SmBSplineCurve::Trim` of an interval shorter than
 /// `SM_EFF_ZERO`, reached by `UpdateAnalyticalDomain`), else `-1`.
 fn status(e: &solidcore::SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &solidcore::SolidError) -> f64 {
     match e {
         solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. } => 1007.0,
         _ => super::surface_surf_of_revolution_p1::status(e),

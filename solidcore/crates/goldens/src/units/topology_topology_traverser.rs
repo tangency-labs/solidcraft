@@ -171,7 +171,7 @@ impl UnitDiff for Runner {
         };
         let r = request(&i, c);
         if !available(r) {
-            return Ok(Output::err("no seed of requested kind"));
+            return Ok(Output::harness("no seed of requested kind"));
         }
         let lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, r.mask)
             .map_err(|e| HarnessError::new(e.to_string()))?;
@@ -280,7 +280,7 @@ impl UnitDiff for Runner {
                     return Ok(out);
                 }
                 match e {
-                    up_err if solidcore::error::upstream_status(&up_err).is_some() => status = solidcore::error::upstream_status(&up_err).unwrap_or(-1),
+                    up_err if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => status = crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1)),
                     _ => return Err(HarnessError::new(e.to_string())),
                 }
                 break;

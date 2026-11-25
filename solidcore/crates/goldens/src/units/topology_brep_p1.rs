@@ -551,7 +551,7 @@ fn brep_block(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
 /// the case counts as `both_errored`, not as a value comparison.
 fn guarded_output(o: Vec<f64>) -> Output {
     if o.first() == Some(&NULL_DEREF) {
-        Output::err("null_dereference_guard")
+        Output::harness("null_dereference_guard")
     } else {
         Output::new().values("out", o)
     }
@@ -652,6 +652,11 @@ const SM_ERR_INVALID_INPUT: f64 = 1007.0;
 /// unit itself marks a null dereference upstream (`-2`), from a callee it is that
 /// callee's `SM_ERR_INVALID_INPUT`.
 fn status_of(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status_of(e))
+}
+
+/// [`status_of`] as recorded before kinds.
+fn legacy_status_of(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
             f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
@@ -1786,7 +1791,7 @@ fn run_rust_op(
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    run_rust_on(&mut Kernel::default(), i)
+    run_rust_on(&mut crate::runner_kernel(), i)
 }
 
 /// The unit's Rust run of `case` on the caller's kernel `k` (a fresh default kernel in
@@ -1855,7 +1860,7 @@ fn rust_brep(
         }
         Some(Built::Failed(e)) => match Output::unported(&e) {
             Some(o) => Ok(Err(o)),
-            None => Ok(Err(Output::err(format!(
+            None => Ok(Err(Output::kernel(&e, format!(
                 "brep_build_status_{}",
                 build_status(&e)
             )))),
@@ -1873,7 +1878,7 @@ fn rust_brep(
                 }
                 Built::Failed(e) => match Output::unported(&e) {
                     Some(o) => Ok(Err(o)),
-                    None => Ok(Err(Output::err(format!(
+                    None => Ok(Err(Output::kernel(&e, format!(
                         "brep_build_status_{}",
                         build_status(&e)
                     )))),
@@ -1980,7 +1985,7 @@ fn run_rust_intersection(
 ) -> Result<Output, HarnessError> {
     cross_body_input(i, other)?; // same input-kind check, no native construction/import
     let run = || -> Result<Output, Fail> {
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let first = i
             .brep
             .as_ref()

@@ -977,9 +977,9 @@ impl RustRun {
                         out.push(self.cache_index(c));
                         Ok(Step::Status(0))
                     }
-                    Err(err) if solidcore::error::upstream_status(&err).is_some() => {
+                    Err(err) if crate::status::is_kernel(&err, solidcore::error::upstream_status(&err).is_some()) => {
                         out.push(-1);
-                        Ok(Step::Status(i64::from(solidcore::error::upstream_status(&err).unwrap_or(-1))))
+                        Ok(Step::Status(i64::from(crate::status::kind_slot(&err, solidcore::error::upstream_status(&err).unwrap_or(-1)))))
                     }
                     Err(e) => fail(e),
                 }

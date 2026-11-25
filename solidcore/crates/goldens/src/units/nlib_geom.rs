@@ -479,7 +479,7 @@ fn rust_flat(i: &Inputs) -> SolidResult<Vec<f64>> {
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     match rust_flat(i) {
         Ok(flat) => split(i, &flat),
-        Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(format!("rust: {e}")))),
+        Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, format!("rust: {e}")))),
     }
 }
 

@@ -1199,6 +1199,11 @@ fn uv(p: [f64; 2]) -> Point2 {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 pub(crate) fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
@@ -3526,7 +3531,7 @@ impl UnitDiff for Runner {
         // in the guarded hang regimes (HANG-20), so it must not run them (fuzz mutations
         // of the flagged fixtures reach them unflagged)
         if !contract(i.op(), &program(&i)?) {
-            return Ok(Output::err("outside the input contract"));
+            return Ok(Output::harness("outside the input contract"));
         }
         let rec = match &i {
             Inputs::Fb { model, query } => rust_pseudo(model, query)?,
@@ -3535,7 +3540,7 @@ impl UnitDiff for Runner {
         match rec {
             Rec::Flat(flat) => to_output(&i, &flat),
             Rec::Deferred(e) => {
-                Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())))
+                Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())))
             }
         }
     }

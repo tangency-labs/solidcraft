@@ -546,7 +546,7 @@ fn slot<T>(r: Result<T, SolidError>, f: impl FnOnce(T) -> i64) -> Result<i64, So
 /// An upstream status: `0` for success, the `SmStatus` of an upstream error.
 fn status_of(e: &SolidError) -> Result<f64, SolidError> {
     match e {
-        up_err if solidcore::error::upstream_status(up_err).is_some() => Ok(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
+        up_err if crate::status::is_kernel(up_err, solidcore::error::upstream_status(up_err).is_some()) => Ok(f64::from(crate::status::kind_slot(up_err, solidcore::error::upstream_status(up_err).unwrap_or(-1)))),
         other => Err(other.clone()),
     }
 }
@@ -647,7 +647,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         Err(o) => return Ok(o),
     };
     let Some(op) = resolve(&i.op, c) else {
-        return Ok(Output::err("no_vertexuse"));
+        return Ok(Output::harness("no_vertexuse"));
     };
     // The ops read the cached gaps (`IsOnPole`: the vertex/face gap's face UV), so a
     // gap that cannot be refilled is reported, not left at its placeholder.
@@ -861,7 +861,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                     .map(|g| vec![0.0, g.map_or(-1.0, |g| flag(g.is_init()))]),
                 3 => match vu1::calc_vertex_face_gap(&k, b, v, *want_out, *f) {
                     Ok(g) => Ok(vec![0.0, g.map_or(-1.0, |g| flag(g.is_init()))]),
-                    Err(e) if solidcore::error::upstream_status(&e).is_some() => {
+                    Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
                         // the output was reset before the failing step
                         Ok(vec![status_of(&e)?, if *want_out { 0.0 } else { -1.0 }])
                     }

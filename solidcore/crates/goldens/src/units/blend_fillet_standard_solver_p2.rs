@@ -365,7 +365,7 @@ fn eu_setup(brep: &BrepIn, eu: i64) -> Result<Result<Setup, Output>, HarnessErro
     let n_eu = c.get(6).copied().unwrap_or(0);
     let s = sel(eu, n_eu);
     if s < 0 {
-        return Ok(Err(Output::err("no_entity_of_that_kind")));
+        return Ok(Err(Output::harness("no_entity_of_that_kind")));
     }
     let eu = EdgeuseId::from_index(u32::try_from(s).map_err(|_| harness("index"))?);
     Ok(Ok(Setup { brep, eu, types }))
@@ -376,7 +376,7 @@ fn eu_setup(brep: &BrepIn, eu: i64) -> Result<Result<Setup, Output>, HarnessErro
 fn eu_output(body: &[f64]) -> Output {
     let first = body.first().copied().unwrap_or(f64::NAN);
     if first == -2.0 {
-        return Output::err("null_deref");
+        return Output::harness("null_deref");
     }
     Output::new()
         .int("status", first as i64)
@@ -447,7 +447,7 @@ fn rust_edgeuse_body(
     fu: f64,
     fv: f64,
 ) -> Result<Vec<f64>, SolidError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let radial = if has_prim(b, eu)? {
         eu1::radial(b, eu)?
     } else {
@@ -551,7 +551,9 @@ fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
                 return Ok(o);
             }
             match e {
-                SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(Output::err("null_deref")),
+                e @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
+                    Ok(Output::kernel(&e, "null_deref"))
+                }
                 e => Err(harness(format!("rust: {e}"))),
             }
         }
@@ -574,7 +576,7 @@ fn rust_cr_eu_body(
     fv: f64,
     ext: f64,
 ) -> Result<Vec<f64>, SolidError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let radial = if has_prim(b, eu)? {
         eu1::radial(b, eu)?
     } else {
@@ -591,8 +593,8 @@ fn rust_cr_eu_body(
         Ok(fs) => fs,
         Err(e) if e.is_unported() => return Err(e),
         // the tangent-surface exits (SM_ERR only signalled upstream)
-        Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-            return Ok(vec![f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1))]);
+        Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
+            return Ok(vec![f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1)))]);
         }
         Err(e) => return Err(e),
     };
@@ -817,6 +819,11 @@ fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e => solidcore::error::upstream_status(e).map_or(-1.0, f64::from),
@@ -1004,7 +1011,7 @@ fn rust_record_seen(
     i: &Inputs,
     seen: &mut dyn FnMut(&Kernel, &OffsetSurface),
 ) -> Result<Rec, HarnessError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let mut o = Vec::new();
     match i {
         Inputs::CrInit {
@@ -1311,7 +1318,7 @@ fn rust_recalc_seen(
         *tp.uv_pos_mut(SrfIndex::First) = p2(t.uv0);
         *tp.uv_pos_mut(SrfIndex::Second) = p2(t.uv1);
     }
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let a = gp1_surface_of(&ri.a)?;
     let b = gp1_surface_of(&ri.b)?;
     let center = Curve::from(curve_of(&ri.center)?);
@@ -1412,7 +1419,7 @@ fn rust_rollover(ri: &RolloverIn) -> Result<Output, HarnessError> {
             .and_then(IntersectionPointType::from_code)
             .ok_or_else(|| harness("point type"))?;
     }
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let bases = [gp1_surface_of(&ri.a)?, gp1_surface_of(&ri.b)?];
     let ids = [SurfaceId::Free(0), SurfaceId::Free(1)];
     let [a, b] = bases.clone();
@@ -2314,7 +2321,7 @@ mod tests {
         let Inputs::Guess { solver, plane } = input else {
             panic!("guess case");
         };
-        let k = Kernel::default();
+        let k = crate::runner_kernel();
         let built = solver_of(&k, &solver).unwrap();
         let Solver::Cr(mut fs) = built.solver else {
             panic!("assisted solver");

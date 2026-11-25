@@ -283,7 +283,7 @@ pub(crate) fn own_brep(
             Ok(Ok(b))
         }
         Built::Failed(e) => Ok(Err(Output::unported(&e).unwrap_or_else(|| {
-            Output::err(format!("brep_build_status_{}", build_status(&e)))
+            Output::kernel(&e, format!("brep_build_status_{}", build_status(&e)))
         }))),
     }
 }
@@ -295,7 +295,7 @@ pub(crate) fn own_brep(
 ///
 /// As [`own_brep`], and when the box cannot be built.
 pub(crate) fn own_unit_box(origin: [f64; 3]) -> Result<Brep, HarnessError> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     own_brep(
         &mut k,
         &StitchBrep::Box {
@@ -619,7 +619,7 @@ fn push_ids<I: solidcore::topology::ArenaId + Copy>(v: &mut Vec<f64>, ids: &[I])
 
 fn guarded_output(o: Vec<f64>) -> Output {
     if o.first() == Some(&NULL_DEREF) {
-        Output::err("null_dereference_guard")
+        Output::harness("null_dereference_guard")
     } else {
         Output::new().values("out", o)
     }
@@ -631,6 +631,11 @@ fn guarded_output(o: Vec<f64>) -> Output {
 /// port itself marks a null dereference upstream (`-2`), from the API entry points or a
 /// callee it is `SM_ERR_INVALID_INPUT`.
 fn status_of(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status_of(e))
+}
+
+/// [`status_of`] as recorded before kinds.
+fn legacy_status_of(e: &SolidError) -> f64 {
     match e {
         err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
         SolidError::InvalidInput { operation, .. } | SolidError::PortInvariant { operation, .. } if *operation == "heal::stitch::p1" => {
@@ -1028,7 +1033,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     // one context for the build, the resolution and the op, as the shim's
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut b = match own_brep(&mut k, &i.brep)? {
         Ok(b) => b,
         Err(o) => return Ok(o),
@@ -1262,7 +1267,6 @@ impl UnitDiff for Runner {
 /// reports nothing. Each moved tolerance is located and set against what its entity needs.
 #[cfg(test)]
 mod wr56_certificates {
-    use solidcore::kernel::Kernel;
     use solidcore::topology::brep::validation;
 
     fn stitched(runner: &dyn crate::UnitDiff, name: &str, moved: &[(f64, f64)]) -> Vec<String> {
@@ -1270,7 +1274,7 @@ mod wr56_certificates {
         let _ = crate::certify::take_kept();
         runner.run_rust(&case).expect("rust");
         let mut b = crate::certify::take_kept().expect("the op's B-rep");
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let (edges, vertices) = crate::certify::tolerance_covers(&k, &b);
         let mut failures = Vec::new();
         for e in &edges {

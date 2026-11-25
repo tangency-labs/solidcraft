@@ -310,7 +310,12 @@ fn build_srf(s: &InlineSrf) -> Result<Surface, Fail> {
         s: used[3],
     };
     Surface::with_indices(to_net(&s.net), s.u.clone(), s.v.clone(), idx)
-        .map_err(|e| Fail::Refused(format!("rust surface: {e}")))
+        .map_err(|e| {
+            Fail::Refused(format!(
+                "rust surface: {}",
+                crate::status::kernel_text(&e, e.to_string())
+            ))
+        })
 }
 
 fn to_cpts(v: &[[f64; 4]]) -> Vec<CPoint> {

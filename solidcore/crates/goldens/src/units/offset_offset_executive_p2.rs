@@ -593,9 +593,10 @@ impl From<SolidError> for RunError {
 fn operation<T>(result: solidcore::Result<T>) -> RResult<(i32, Option<T>)> {
     match result {
         Ok(value) => Ok((NATIVE_SUCCESS, Some(value))),
+        Err(e) if crate::status::is_kernel(&e, false) => Ok((crate::status::kind_slot(&e, 0), None)),
         Err(SolidError::Upstream { code, .. }) => Ok((code, None)),
         // a failure in solidcore's terms (#2615): its C++ comparison status
-        Err(e @ SolidError::Failed(_)) => Ok((e.sm_status().unwrap_or(solidcore::error::SM_ERR), None)),
+        Err(e @ SolidError::Failed(_)) => Ok((crate::status::kind_slot(&e, e.sm_status().unwrap_or(solidcore::error::SM_ERR)), None)),
         Err(error) => Err(RunError::Kernel(error)),
     }
 }
@@ -929,8 +930,11 @@ fn box_refusal(input: &Inputs) -> HResult<Option<Output>> {
             let code = solidcore::error::upstream_status(&error)
                 .ok_or_else(|| bad(format!("{side} box refused without a status: {error}")))?;
             return Ok(Some(
-                Output::rejected(format!("{side} box refused by its constructor (status {code})"))
-                    .int("status", i64::from(code)),
+                Output::rejected(format!(
+                    "{side} box refused by its constructor ({})",
+                    crate::status::kernel_text(&error, format!("status {code}"))
+                ))
+                .int("status", crate::status::kind_slot(&error, i64::from(code))),
             ));
         }
     }
@@ -1655,6 +1659,19 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         .as_ref()
         .map(|fixture| build(&mut kernel, fixture, input.tolerance, NAMESPACE_FOREIGN))
         .transpose()?;
+    // (a probe's input, for the result's soundness: capture off, nothing). Named only where
+    // the call promises a finished solid of a solid: a shell, or a merged and stitched
+    // offset of the whole body (no shell faces kept); a member call left unmerged, unstitched
+    // or keeping shell faces hands back pieces, not a solid (#13685)
+    let promises_solid = match input.operation {
+        Operation::StaticShell | Operation::ApiShell => true,
+        _ => {
+            input.config.merge_results
+                && !input.config.skip_stitch_merge
+                && input.faces.is_empty()
+        }
+    };
+    crate::soundness::input(source.as_ref().filter(|_| promises_solid));
     let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     if let Some(brep) = source.as_mut() {
@@ -1883,7 +1900,7 @@ impl UnitDiff for Runner {
             Ok(output) => Ok(output),
             Err(RunError::Harness(error)) => Err(error),
             Err(RunError::Kernel(error)) => Ok(Output::unported(&error)
-                .unwrap_or_else(|| Output::err(format!("Rust operation: {error}")))),
+                .unwrap_or_else(|| Output::kernel(&error, format!("Rust operation: {error}")))),
         }
     }
     fn cases(&self, context: &CaseContext) -> HResult<Vec<Case>> {

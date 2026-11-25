@@ -533,6 +533,11 @@ fn put(o: &mut Vec<f64>, v: Vec3) {
 
 /// The upstream status a Rust error stands for.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
         _ => 1007.0,

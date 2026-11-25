@@ -793,7 +793,7 @@ fn ix<I: Copy>(o: Option<I>, f: impl Fn(I) -> u32) -> f64 {
 fn status_of(r: &Result<(), SolidError>) -> Result<Option<f64>, SolidError> {
     match r {
         Ok(()) => Ok(Some(0.0)),
-        Err(up_err) if solidcore::error::upstream_status(up_err).is_some() => Ok(Some(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1)))),
+        Err(up_err) if crate::status::is_kernel(up_err, solidcore::error::upstream_status(up_err).is_some()) => Ok(Some(f64::from(crate::status::kind_slot(up_err, solidcore::error::upstream_status(up_err).unwrap_or(-1))))),
         Err(SolidError::InvalidInput { .. }) => Ok(None),
         Err(e) => Err(e.clone()),
     }
@@ -947,7 +947,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         Err(o) => return Ok(o),
     };
     let Some(op) = resolve(&i.op, c, &b) else {
-        return Ok(Output::err("no_edge"));
+        return Ok(Output::harness("no_edge"));
     };
     match run_rust_op(&mut b, &op) {
         Ok(o) => Ok(o),
@@ -999,7 +999,7 @@ fn edge_owner(e: EdgeId) -> (ObjectRef, ObjectRef) {
 /// side.
 fn own_brep(i: &Inputs) -> Result<Result<(Brep, [usize; 10]), Output>, HarnessError> {
     use crate::own_builder::{build_as, counts, failed_output, finish, in_new_brep, read_as, Built};
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let (vo, ig) = (i.validate_only, i.init_gaps);
     let built = match &i.brep {
         BrepIn::File { rebuild, .. } => {
@@ -1118,7 +1118,7 @@ fn ellipse_wire(k: &mut Kernel, b: &mut Brep, src: &BrepIn) -> Result<(), SolidE
 }
 
 fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let eid = |x: i64| EdgeId::from_index(x as u32);
     let mut out: Vec<f64> = Vec::new();
     match op {
@@ -1429,7 +1429,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                     ix(r.radial_edgeuse, EdgeuseId::index),
                     ix(r.coincident_faceuse, FaceuseId::index),
                 ]),
-                Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => out.extend([f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1)), -1.0, -1.0]),
+                Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => out.extend([f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1))), -1.0, -1.0]),
                 Err(SolidError::InvalidInput { .. }) => out.push(NULL_DEREF),
                 Err(err) => return Err(err.into()),
             }
