@@ -3667,15 +3667,20 @@ mod found_sphere_certificates {
     ///   the face, the [`TRIM_EDGEUSES`];
     /// * with those five trims taken off, the body's record is the run's with exactly those
     ///   five trim counts lowered from 2 to 1 and nothing else changed, bit for bit;
-    /// * one face classification (`point_classify` at the face's middle) makes the five again,
-    ///   bit for bit the same, and the record is the run's again: they are what the
-    ///   classification makes, not another change;
+    /// * the five are bit for bit the trims the file's read holds on the same edge uses, so the
+    ///   fillet keeps them as the read makes them; and with them taken off the read, one B-rep
+    ///   ray classification while it is edited makes them again, bit for bit (since WR-732's
+    ///   retirement, #18934, the ray builds the cone face's tree against its current trims, and
+    ///   the implant makes them): they are what the implant makes, not another change;
     /// * each trim's same-parameter gap to its edge is certified (`curve_uv_gap_bound`,
     ///   interval Taylor models, every rounding included) within the edge's tolerance.
+    ///
+    /// (A face classification on the finished body, as this test asked before #18934, makes
+    /// edge 20's trim with control points up to 2.7e-9 off the implant's in UV, as #18934
+    /// measured; that is not how the read makes them, so it is not asked.)
     #[test]
     fn classified_trims_are_the_only_change_and_within_tolerance() {
         use solidcore::curve::curve::CurveKind;
-        use solidcore::geom::vector2d::Point2;
         use solidcore::query::curve_surface_gap::curve_uv_gap_bound;
         use solidcore::surface::surface::SurfaceKind;
         use solidcore::topology::edgeuse::p1 as eu1;
@@ -3689,6 +3694,49 @@ mod found_sphere_certificates {
             let mut enc = Vec::new();
             crate::util::trim_curve::put_trim_curve(k, &mut enc, Some(c)).unwrap();
             enc.iter().map(|x| x.to_bits()).collect::<Vec<u64>>()
+        };
+        // the file's read, as the runner reads it
+        let read = {
+            let path = crate::case::repo_root()
+                .join(crate::fixtures::UPSTREAM_TEST_FILES)
+                .join("Fillet/sphere_diff_3cylinders.smb");
+            let mut k = crate::runner_kernel();
+            crate::own_reader::read_file(&mut k, path.to_str().unwrap())
+                .unwrap()
+                .unwrap()
+        };
+        // the read with its five classified trims taken off, and one B-rep ray classification
+        // while it is edited: the ray builds the cone face's tree against its current trims,
+        // and the implant makes the five (from 20 off the read's box middle along y, whose rays
+        // cross the cone face; from the middle itself they do not reach it)
+        let remade = {
+            use solidcore::query::brep::BrepQuery;
+            let k = crate::runner_kernel();
+            // (the box on a copy of the read: building it leaves caches on the B-rep it measures)
+            let mid = {
+                let mut c = read.clone_standing_for_self().unwrap();
+                solidcore::query::brep::calculate_tight_bounding_box(&k, &mut c)
+                    .unwrap()
+                    .mid()
+            };
+            let mut b = read.clone_standing_for_self().unwrap();
+            let ids: Vec<_> = b
+                .edgeuses()
+                .iter()
+                .filter(|(id, _)| TRIM_EDGEUSES.contains(&id.index()))
+                .map(|(id, _)| id)
+                .collect();
+            assert_eq!(ids.len(), 5, "the read's classified edge uses");
+            for id in ids {
+                assert!(b.edgeuse_mut(id).unwrap().uv_trim_curve.take().is_some());
+            }
+            let p = solidcore::math::Point3::new(mid.x, mid.y + 20.0, mid.z);
+            b.set_editing_enabled(true);
+            BrepQuery::of_brep(&b)
+                .point_3d_classify(&k, &mut b, p, 1e-6, false)
+                .unwrap();
+            b.set_editing_enabled(false);
+            b
         };
         let runner = crate::units::blend_fillet_executive_p3::Runner;
         let at = |i: usize| 4 * TRIM_VERTICES + 18 * i + TRIM_COUNT;
@@ -3770,25 +3818,19 @@ mod found_sphere_certificates {
             let mut ids: Vec<u32> = taken.iter().map(|t| t.1.index()).collect();
             ids.sort_unstable();
             assert_eq!(ids, TRIM_EDGEUSES, "{case}: not the read's classified trims");
-            // one classification on the face makes them again, bit for bit
-            let d = body.face(f).unwrap().uv_domain;
-            let uv = Point2::new(0.5 * (d.min().x + d.max().x), 0.5 * (d.min().y + d.max().y));
-            let mut pc = solidcore::intersect::point_class::PointClassification::new(0.0);
-            solidcore::query::face::p2::point_classify(
-                &k,
-                &mut body,
-                f,
-                uv,
-                &mut pc,
-                solidcore::query::face::p2::PointClassifyOptions::default(),
-            )
-            .unwrap();
+            // the five are the read's own trims, bit for bit: the fillet keeps them as the read
+            // of the file makes them (`read`), and the ray's implant makes them (`remade`)
             for (i, eu, bits) in &taken {
-                let again = body.edgeuse(*eu).unwrap().uv_trim_curve.as_ref();
-                let again = again.unwrap_or_else(|| panic!("{case}: edge {i}: not made again"));
-                assert_eq!(&encoding(&k, again), bits, "{case}: edge {i}: another trim");
+                for (what, b) in [("the read", &read), ("the ray's implant", &remade)] {
+                    let made = b.edgeuse(*eu).unwrap().uv_trim_curve.as_ref();
+                    let made = made.unwrap_or_else(|| panic!("{case}: edge {i}: not on {what}"));
+                    assert_eq!(
+                        &encoding(&k, made),
+                        bits,
+                        "{case}: edge {i}: another trim on {what}"
+                    );
+                }
             }
-            assert_eq!(record(&k, &body), now, "{case}: the record after the classification");
         }
     }
 }
