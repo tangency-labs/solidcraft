@@ -1,0 +1,13 @@
+{
+  "description": "Issue #10: fuzzer seed 158. Box, chamfer, join/cut cylinders, join box, join cylinder, then shell. The shell step fails with \"SMLib shell: operation: SMLib failed (status 1001)\". Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a regression test that fails without the fix.",
+  "commands": [
+    {"command": "solid.box", "params": {"height": 10.0, "length": 27.5, "width": 57.5}},
+    {"command": "solid.chamfer", "params": {"distance": 0.5, "edges": [[27.5, 0.0, 5.0]]}},
+    {"command": "solid.cylinder", "params": {"axis": [0.0, 1.0, 0.0], "base": [10.0, 0.0, 0.0], "height": 25.0, "operation": "join", "radius": 2.5}},
+    {"command": "solid.cylinder", "params": {"axis": [0.0, 1.0, 0.0], "base": [22.5, 57.5, 2.5], "height": 7.5, "operation": "cut", "radius": 2.5}},
+    {"command": "solid.cylinder", "params": {"axis": [1.0, 0.0, 0.0], "base": [25.0, 0.0, -2.500000000000001], "height": 17.5, "operation": "cut", "radius": 5.0}},
+    {"command": "solid.box", "params": {"corner": [12.5, 25.0, 0.0], "height": 25.0, "length": 7.5, "operation": "join", "width": 22.5}},
+    {"command": "solid.cylinder", "params": {"axis": [0.0, 1.0, 0.0], "base": [27.5, 0.0, -2.500000000000001], "height": 17.5, "operation": "join", "radius": 3.75}},
+    {"command": "solid.shell", "params": {"faces": [[13.653748681830892, 30.888458557425444, 9.756088079553565e-17]], "thickness": 1.5}}
+  ]
+}

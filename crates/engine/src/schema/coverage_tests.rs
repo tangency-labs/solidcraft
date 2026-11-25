@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::Session;
 use crate::cmd::command_specs;
@@ -103,4 +103,45 @@ fn the_unconverted_list_is_sorted_and_names_real_commands() {
     let registered: BTreeSet<&str> = command_specs().iter().map(|c| c.id).collect();
     let stale: Vec<&str> = ids.into_iter().filter(|id| !registered.contains(id)).collect();
     assert!(stale.is_empty(), "unconverted.txt names commands that don't exist (remove their lines): {stale:?}");
+}
+
+/// The opening of the note `created_doc!()` (crates/engine/src/cmd/mod.rs) adds to a command's
+/// parameter text.
+const CREATED_PROMISE: &str = "Returns created: {points, curves, constraints, dimensions}";
+
+/// A command that documents `created` must describe it in its output schema: `Session::with_created`
+/// puts the key in every sketch command's reply, so a caller that plans its next command from the
+/// published schema would not find the ids the parameter text promises it (#15372). The reply and
+/// its schema come from one type, so the field to add is the one the drawing commands' result types
+/// already have: `created: Option<Created>`, `#[serde(default, skip_serializing_if = "Option::is_none")]`.
+/// A command with no output schema is left to `every_command_has_input_and_output_schemas`.
+#[test]
+fn a_command_that_promises_created_describes_it() {
+    let mut missing = Vec::new();
+    for c in command_specs() {
+        if !c.params.contains(CREATED_PROMISE) {
+            continue;
+        }
+        let Some(output) = c.output else { continue };
+        if !describes_property(&output().to_value(), "created", 0) {
+            missing.push(c.id);
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "{} command(s) document `created` in their parameter text but publish an output schema without it: {}",
+        missing.len(),
+        missing.join(", ")
+    );
+}
+
+/// Whether a schema describes the property `key` at any depth: a reply type that flattens or nests
+/// another result type describes it there.
+fn describes_property(schema: &Value, key: &str, depth: usize) -> bool {
+    if depth > 6 {
+        return false;
+    }
+    let Some(object) = schema.as_object() else { return false };
+    object.get("properties").and_then(Value::as_object).is_some_and(|p| p.contains_key(key))
+        || object.values().any(|v| describes_property(v, key, depth + 1))
 }

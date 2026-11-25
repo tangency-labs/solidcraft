@@ -334,7 +334,7 @@ fn groups(t: &Tokens) -> Vec<Group> {
         group("validation status", &[("form_success", t.form_success), ("error", t.error)], &[("panel", t.panel)]),
         group("validation surfaces", &[("form_success_fill", t.form_success_fill), ("form_error_fill", t.form_error_fill)], &[]),
         group("UI text", &[("error", t.error), ("warning", t.warning), ("text", t.text)], &[("panel", t.panel)]),
-        // Every axis drawn: origin, view triad, navigation cube, Move gizmo… (one set, #976).
+        // Every axis drawn: origin, view triad, navigator, Move gizmo… (one set, #976).
         group("axes", &[("axis_x", t.axis_x), ("axis_y", t.axis_y), ("axis_z", t.axis_z)], &[("viewport_top", t.viewport_top)]),
         group(
             "assembly Move",
@@ -480,6 +480,15 @@ const SHADED: [&str; 2] = ["analysis.draft", "analysis.access"];
 /// Tokens no colour vision mode needs to keep apart, and why. A new token fails
 /// `every_token_is_measured_or_carries_no_meaning` until it is in a group above or here.
 const NO_MEANING: &[(&str, &str)] = &[
+    ("paper_white", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
+    ("paper_blueprint", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
+    ("paper_blueprint_ink", "the drawing's one ink on a blueprint sheet; no category is told by its colour"),
+    ("paper_prussian_blue", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
+    ("paper_prussian_blue_ink", "the drawing's one ink on a Prussian blue sheet; no category is told by its colour"),
+    ("paper_dark", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
+    ("paper_ink", "the drawing's one ink on a light sheet, as printed; no category is told by its colour"),
+    ("paper_dark_ink", "the drawing's one ink on a dark sheet; no category is told by its colour"),
+    ("library_highlights", "user-assigned named labels, not application status; menu/tooltip name each colour and library tests guard card contrast"),
     ("figure_white", "neutral axis label and highlight ink; letters identify the axes"),
     ("figure_black", "neutral hatching and shadows; pattern and geometry carry the meaning"),
     ("pref_well", "neutral well behind a labelled control or illustration"),
@@ -633,17 +642,18 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("origin_point", "the origin, alone"),
     ("construction_plane", "a plane"),
     ("body_edge", "the model's edges"),
+    ("isoparm", "a surface's flow lines: a lighter shade of its edges, told apart by width"),
     ("sketch_halo", "neutral rim beneath sketch curves; the curves carry the state colours"),
     ("grid", "the grid"),
     ("grid_major", "the grid"),
     ("profile_fill", "a closed profile's tint"),
     ("glyph_bg", "a constraint glyph's ground"),
     ("glyph_edge", "a constraint glyph's edge"),
-    // The navigation cube: labelled faces.
-    ("cube_face", "labelled"),
-    ("cube_border", "labelled"),
-    ("cube_text", "labelled"),
-    ("cube_hover", "hover highlight"),
+    // The navigator: labelled faces.
+    ("navigator_face", "labelled"),
+    ("navigator_border", "labelled"),
+    ("navigator_text", "labelled"),
+    ("navigator_hover", "hover highlight"),
     // Not a colour.
     ("analysis.hatch", "a flag: stripes on the failing faces"),
     // Icon colours that are a shade of a measured one, or one mark alone.

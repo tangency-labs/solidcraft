@@ -13,17 +13,18 @@
 //!
 //! Deviations: the variable-radius cast (`SM_CAST_PTR(SmVariableRadiusFS, pFS)`) is a
 //! match on the session's concrete solver. A failed law evaluation in
-//! `SmVariableRadiusFS::GetFilletRadius` yields its status code as the radius, as the
-//! fork's `SER` inside that `double` function does (an `Unported` callee propagates),
-//! except a station where the law's continuation gives no usable radius
-//! (`RoundRefusal::LawRadiusUnusable`, solidcore's, #2706), which sets no reach.
+//! `SmVariableRadiusFS::GetFilletRadius` is returned as its error, where the fork's `SER`
+//! inside that `double` function yields its status code (1001, 1007) as the radius
+//! (#21908); a station where the law's continuation gives no usable radius
+//! (`RoundRefusal::LawRadiusUnusable`, solidcore's, #2706) sets no reach.
 //! A failed `GetOrCreateUVTrimCurve` skips that surface's across test, as the fork
 //! does, but an `Unported` one propagates. There is no recursion and no unbounded
 //! loop (7 and 65 fixed samples).
 
 use crate::blend::fillet_executive::session::SolverObject;
 use crate::blend::round_room::RoundRefusal;
-use crate::error::{Result, SolidError, SM_ERR, SM_ERR_INVALID_INPUT};
+use crate::error::blend::BlendFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
@@ -57,17 +58,6 @@ fn smos_min(a: f64, b: f64) -> f64 {
     }
 }
 
-/// The `SmStatus` the fork's `SER` returns for a failed callee.
-fn status_of(e: &SolidError) -> i32 {
-    if let Some(code) = e.upstream_status() {
-        return code;
-    }
-    match e {
-        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
-        _ => SM_ERR,
-    }
-}
-
 /// `sm_ExtendTraceToItsRails(pFS)` (fork, WR-609/WR-610): sets the solver's trace reach
 /// ([`crate::blend::fillet_solver::p1::FilletSolver::set_trace_reach`]) when the default
 /// extension does not reach as far as its rails can lie from the filleted edge.
@@ -83,7 +73,8 @@ fn status_of(e: &SolidError) -> i32 {
 ///
 /// # Errors
 ///
-/// `SM_ERR_NULL_POINTER` for a solver without its first edge use's edge or curve; those
+/// A [`BlendFailure::Defect`] (`SM_ERR_NULL_POINTER`) for a solver without its first edge
+/// use or its edge, [`BlendFailure::EdgeWithoutCurve`] for an edge without its curve; those
 /// of the curve and surface evaluations and the drops.
 pub(crate) fn extend_trace_to_its_rails(
     k: &Kernel,
@@ -96,12 +87,27 @@ pub(crate) fn extend_trace_to_its_rails(
     };
     let offsets = [first.surface.clone(), second.surface.clone()];
     let bases: [&Surface; 2] = [offsets[0].base_surface(), offsets[1].base_surface()];
-    let edgeuse = base
-        .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let null_defect = |why| {
+        Failure::new(OP, BlendFailure::Defect { why })
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+    };
+    let edgeuse = base.edgeuse(0)?.ok_or_else(|| {
+        null_defect(
+            "a round's solver with both offset surfaces has no first edge use: the solver is \
+             set up on the filleted edge's edge uses",
+        )
+    })?;
+    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| {
+        null_defect(
+            "a round's solver's first edge use has no edge: the solver was set up on that edge \
+             use of the filleted edge",
+        )
+    })?;
     let curve = edge::curve(target, edge_id)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| {
+            SolidError::blend_at(OP, BlendFailure::EdgeWithoutCurve, EntityRef::Edge(edge_id))
+        })?
         .clone();
     let interval = edge::interval(target, edge_id)?;
 
@@ -146,17 +152,17 @@ pub(crate) fn extend_trace_to_its_rails(
         let traced = Extent1d::from_min_max(law_ivl.min() - past, law_ivl.max() + past);
         for i in 0..=64 {
             let t = traced.evaluate(f64::from(i) / 64.0);
-            // SmVariableRadiusFS::GetFilletRadius: SER inside a `double` function
+            // SmVariableRadiusFS::GetFilletRadius; a failed evaluation is its error, not
+            // its status number as a radius (#21908)
             let r = match vr.law.evaluate(t, &law_ivl, vr.law_orientation) {
                 Ok(values) => values.first().copied().unwrap_or(0.0),
-                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 // a station past the law's ends where its continuation gives no usable
                 // radius (#2706): the trace does not run there, so it sets no reach
                 Err(SolidError::RoundRefused {
                     refusal: RoundRefusal::LawRadiusUnusable { .. },
                     ..
                 }) => continue,
-                Err(e) => f64::from(status_of(&e)),
+                Err(e) => return Err(e),
             };
             radius = smos_max(radius, r.abs());
         }
@@ -224,4 +230,67 @@ pub(crate) fn extend_trace_to_its_rails(
         solver.base_mut().set_trace_reach(reach, across);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blend::fillet_executive::session::{FilletObject, FilletSession};
+    use crate::blend::fillet_executive::{FilletLaw, FilletLawKind};
+    use crate::primitive::api_primitives::create_box;
+
+    /// #21908: a law evaluation that fails is the error, not its status number (1001)
+    /// taken as the radius, which set a reach of `(2 / tan(45 deg) + 1) * 1001` across the
+    /// edge. The solver's construction refuses a law with no radius at its middle, so the
+    /// law is swapped after it; no public path reaches the failing branch, so this calls
+    /// the crate function on a live session's solver.
+    #[test]
+    fn a_failed_law_evaluation_is_its_error_not_a_reach() {
+        let mut k = Kernel::default();
+        k.fixes.fillet_trace_reaches_rails = true;
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0, 30.0).unwrap();
+        // the top edge at x = 0, 20 long
+        let e = b
+            .edges()
+            .ids()
+            .find(|&e| {
+                let ivl = edge::interval(&b, e).unwrap();
+                let c = edge::curve(&b, e).unwrap().unwrap();
+                [ivl.min(), ivl.max()].into_iter().all(|t| {
+                    let p = c.evaluate_point(&k, t).unwrap();
+                    p.z == 30.0 && p.x == 0.0
+                })
+            })
+            .unwrap();
+        let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+        session
+            .prepare_variable_radius_edges(
+                &mut k,
+                &[e],
+                2.0,
+                FilletLaw::linear(2.0, 10.0, None),
+                1,
+                1,
+            )
+            .unwrap();
+        let Some(&FilletObject::Solver(id)) = session.executive().solvers.first() else {
+            panic!("no solver");
+        };
+        let objects = &mut session.objects;
+        let solver = objects.solvers[id.0 as usize].as_mut().unwrap();
+        let SolverObject::VariableRadius(vr) = &mut *solver else {
+            panic!("not a variable-radius solver");
+        };
+        // a base law has no value anywhere (LawHasNoValue, SM_ERR = 1001)
+        vr.law = FilletLaw::new(FilletLawKind::Base);
+        let result = extend_trace_to_its_rails(&k, objects.target, solver);
+        assert!(
+            matches!(
+                result.as_ref().map_err(SolidError::blend_failure),
+                Err(Some(BlendFailure::LawHasNoValue))
+            ),
+            "{result:?}"
+        );
+        assert_eq!(solver.base().trace_reach, 0.0);
+    }
 }

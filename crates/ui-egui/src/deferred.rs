@@ -11,7 +11,8 @@
 //! the features it evaluated ([`solidcraft_engine::Session::prime`]) rather than computing them
 //! again. Commands asked for meanwhile wait their turn; a marker moved again
 //! replaces the move still waiting, so a drag computes where it ends rather than every slot it
-//! crossed.
+//! crossed. A parameter changed in the Parameters dialog and a configuration activated in the
+//! configurations table compute the same way (#6777).
 //!
 //! A delete first checks what it takes with it and what it would make fail (#2678): the
 //! timeline's Delete asks `timeline.dependents`, Delete on the selection runs `selection.delete`
@@ -101,7 +102,7 @@ impl Deferred {
 pub struct DocJobs {
     deferred: Option<Deferred>,
     queue: Vec<(String, Value, u64)>,
-    start_after_roll: Option<(String, u64)>,
+    start_after_roll: Option<(String, Option<u64>)>,
     delete_check: Option<DeleteCheck>,
 }
 
@@ -181,6 +182,18 @@ impl AfterCheck {
     }
 }
 
+/// The reply a worker sends on `done`, when it comes within `wait`. As with the history's
+/// commands, a wait of zero always leaves the reply for a later frame, and then `done` is not
+/// read at all: a reply that is already in stays in it for that frame. (Read here and not used,
+/// it left the frame nothing to receive but the worker's end, and the delete it was for was
+/// dropped as one that could not be checked.)
+pub(crate) fn reply_within<T>(done: &std::sync::mpsc::Receiver<T>, wait: std::time::Duration) -> Option<T> {
+    if wait.is_zero() {
+        return None;
+    }
+    done.recv_timeout(wait).ok()
+}
+
 /// Commands a later one of the same kind replaces while they wait: where the marker ends is all
 /// that counts.
 fn replaced_by_a_later_one(id: &str) -> bool {
@@ -236,6 +249,8 @@ impl SolveApp {
 
     /// [`Self::run_heavy`], as the operation `serial` (the operations panel's row).
     fn run_heavy_as(&mut self, id: &str, params: Value, serial: u64) -> Result<Value, String> {
+        crate::sketch_view::sync(self)?;
+        crate::workspace::command_receiver(self, id, &params)?;
         if id == "timeline.play" {
             return self.run(id, params);
         }
@@ -257,7 +272,16 @@ impl SolveApp {
                 self.deferred = Some(job);
                 Ok(Value::Null)
             }
-            Start::Now(evaluated, kept) => self.run_evaluated(id, params, evaluated.as_ref(), kept),
+            Start::Now(evaluated, kept) => {
+                let r = self.run_evaluated(id, params, evaluated.as_ref(), kept);
+                // One that waited its turn (a row) and then ran at once ends here.
+                let outcome = match &r {
+                    Ok(_) => crate::operations::Outcome::Done,
+                    Err(e) => crate::operations::Outcome::Failed(crate::friendly_error(id, e)),
+                };
+                crate::operations::ended(self, &format!("history:{serial}"), outcome);
+                r
+            }
         }
     }
 
@@ -285,6 +309,8 @@ impl SolveApp {
             self.deferred.as_ref().map(|d| d.started),
             self.delete_check.as_ref().map(|c| c.started),
             self.pending_feature_edit.as_ref().map(|edit| edit.started),
+            self.sketch_refreshes.get(&self.session.uid).map(|job| job.started),
+            self.start_after_roll.as_ref().and_then(|_| self.sketch_refreshes.values().map(|job| job.started).reduce(f64::min)),
         ];
         started.into_iter().flatten().reduce(f64::min)
     }
@@ -293,7 +319,10 @@ impl SolveApp {
     /// delete's check computing off the window thread. A feature edit applying has its own
     /// dialog, with its own Cancel.
     pub fn can_cancel_computing(&self) -> bool {
-        self.deferred.is_some() || self.delete_check.is_some()
+        self.deferred.is_some()
+            || self.delete_check.is_some()
+            || self.start_after_roll.is_some()
+            || self.sketch_refreshes.get(&self.session.uid).is_some_and(|job| !job.progress.is_cancelled())
     }
 
     /// Stop waiting for the history command, and the delete check, computing off the window thread
@@ -302,10 +331,10 @@ impl SolveApp {
     /// to the end of what they evaluate and their results are dropped (the same as Cancel while a
     /// feature is applying).
     pub fn cancel_computing(&mut self) {
+        crate::sketch_view::cancel_refresh(self);
         self.deferred = None;
         self.deferred_queue.clear();
         self.delete_check = None;
-        self.start_after_roll = None;
     }
 
     /// Run a delete's check `commands` and carry on with `then` once their replies are in: off
@@ -317,7 +346,7 @@ impl SolveApp {
         }
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(wait) = self.apply_off_thread
-            && !self.file_load.busy()
+            && !self.file_load_holds()
             && self.file_picker.is_none()
         {
             let ahead = self.session.ahead();
@@ -332,10 +361,9 @@ impl SolveApp {
             });
             if spawned.is_ok() {
                 let check = DeleteCheck { done: rx, started: crate::now_ms(), then, revision: self.session.revision, kept, progress };
-                // As with the history's commands, zero always leaves it for a later frame.
-                match (wait.is_zero(), check.done.recv_timeout(wait)) {
-                    (false, Ok(replies)) => check.then.finish(self, replies, Some(check.kept.clone())),
-                    _ => self.delete_check = Some(check),
+                match reply_within(&check.done, wait) {
+                    Some(replies) => check.then.finish(self, replies, Some(check.kept.clone())),
+                    None => self.delete_check = Some(check),
                 }
                 return;
             }
@@ -357,15 +385,23 @@ impl SolveApp {
             Ok(replies) => Some(replies),
         };
         let Some(check) = self.delete_check.take() else { return };
+        use crate::operations::{Outcome, ended};
         match replies {
-            None => self.set_status("the delete could not be checked", true),
+            None => {
+                ended(self, "delete_check", Outcome::Failed("the delete could not be checked".into()));
+                self.set_status("the delete could not be checked", true);
+            }
             Some(_) if check.revision != self.session.revision => check.then.restart(self),
-            Some(replies) => check.then.finish(self, replies, Some(check.kept)),
+            Some(replies) => {
+                ended(self, "delete_check", Outcome::Done);
+                check.then.finish(self, replies, Some(check.kept));
+            }
         }
     }
 
     /// Each frame: a command whose evaluation is in runs, then the next one waiting starts.
     pub(crate) fn poll_deferred(&mut self, ctx: &egui::Context) {
+        crate::sketch_view::poll_refreshes(self, ctx);
         if let Some(job) = &mut self.deferred {
             if !job.finished() {
                 ctx.request_repaint_after(std::time::Duration::from_millis(100));
@@ -374,14 +410,28 @@ impl SolveApp {
             if let Some(mut job) = self.deferred.take() {
                 let (id, params) = std::mem::take(&mut job.command);
                 let superseded = replaced_by_a_later_one(&id) && self.deferred_queue.first().is_some_and(|(q, _, _)| *q == id);
+                let key = format!("history:{}", job.serial);
                 if job.revision != self.session.revision {
                     // The design changed meanwhile: computed again for the design as it is now.
                     let _ = self.run_heavy_as(&id, params, job.serial);
                 } else if !superseded {
                     // This is playback's own completed step, not a manual history edit.
                     let playback = self.timeline_playback.take();
-                    let _ = self.run_evaluated(&id, params, job.evaluated.take().flatten().as_ref(), job.kept.take());
+                    let r = self.run_evaluated(&id, params, job.evaluated.take().flatten().as_ref(), job.kept.take());
                     self.timeline_playback = playback;
+                    if let Ok(out) = &r
+                        && id == "body.remove_history"
+                    {
+                        crate::context_menu::remove_history_report(self, out);
+                    }
+                    let outcome = match r {
+                        Ok(_) => crate::operations::Outcome::Done,
+                        Err(e) => crate::operations::Outcome::Failed(crate::friendly_error(&id, &e)),
+                    };
+                    crate::operations::ended(self, &key, outcome);
+                } else {
+                    // A later one of the same kind does it (where the marker ends is all that counts).
+                    crate::operations::ended(self, &key, crate::operations::Outcome::Done);
                 }
             }
         }
@@ -390,12 +440,14 @@ impl SolveApp {
             let _ = self.run_heavy_as(&id, params, serial);
         }
         if self.deferred.is_none()
+            && !self.session.needs_sketch_finish_evaluation()
             && self.deferred_queue.is_empty()
             && let Some((id, sketch)) = self.start_after_roll.take()
             && self.dialog.is_none()
             && self.tool.is_none()
+            && self.prepared_edit_starts.get(&self.session.uid).is_some_and(|prepared| prepared == &id)
         {
-            self.start_interactive(&id, Some(sketch));
+            self.start_interactive(&id, sketch);
         }
     }
 
@@ -405,7 +457,7 @@ impl SolveApp {
     #[cfg(not(target_arch = "wasm32"))]
     fn begin_deferred(&self, id: &str, params: &Value, serial: u64) -> Start {
         let Some(wait) = self.apply_off_thread else { return Start::Now(None, None) };
-        if self.file_load.busy() || self.file_picker.is_some() {
+        if self.file_load_holds() || self.file_picker.is_some() {
             return Start::Now(None, None);
         }
         let ahead = self.session.ahead();
@@ -415,9 +467,19 @@ impl SolveApp {
         let (tx, rx) = std::sync::mpsc::channel();
         let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
         let watching = progress.clone();
+        // Tests hold the result until let go (`apply_gate`), so a window thread held up under load
+        // cannot find the work already in where the command should still be computing.
+        #[cfg(test)]
+        let gate = self.apply_gate.clone();
         let spawned = std::thread::Builder::new().name("history".into()).spawn(move || {
             let cancelled = watching.clone();
             let evaluated = solidcraft_engine::doc::progress::watch(watching, || ahead.evaluate(&commands).ok());
+            #[cfg(test)]
+            if let Some(gate) = gate
+                && let Ok(gate) = gate.lock()
+            {
+                let _ = gate.recv();
+            }
             // A cancelled evaluation skipped features: what it holds is not the design's.
             let _ = tx.send(evaluated.filter(|_| !cancelled.is_cancelled()));
         });

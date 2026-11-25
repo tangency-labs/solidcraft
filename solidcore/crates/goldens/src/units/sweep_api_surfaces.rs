@@ -45,6 +45,59 @@ pub const MIN_GENERATED: usize = 800;
 /// `sweep.api_surfaces` runner.
 pub struct Runner;
 
+/// The skin `create_skin_primitive_with_sources` makes is the one `create_skin_primitive`
+/// makes, bit for bit (faces, their roles, and each face's surface, whose `Debug` prints every
+/// f64 exactly), each on a fresh kernel; or both refuse alike. A difference is a harness error,
+/// so a case whose trace changed its skin fails rather than passes.
+fn traced_is_plain(
+    counts: &[usize],
+    refs: &[Option<&SmCurve>],
+    degree: usize,
+    cap: bool,
+) -> Result<(), HarnessError> {
+    use solidcore::topology::brep::p1::faces;
+    use solidcore::topology::face::p2::surface;
+    let plain = api::create_skin_primitive(&mut Kernel::default(), counts, refs, degree, cap);
+    let traced =
+        api::create_skin_primitive_with_sources(&mut Kernel::default(), counts, refs, degree, cap);
+    let (plain, traced) = match (plain, traced) {
+        (Ok(p), Ok((t, _))) => (p, t),
+        (Err(a), Err(b)) if format!("{a:?}") == format!("{b:?}") => return Ok(()),
+        (a, b) => {
+            return Err(harness(format!(
+                "the traced skin differs: {:?} vs {:?}",
+                a.err(),
+                b.err()
+            )))
+        }
+    };
+    let roles = |s: &api::SkinPrimitive| {
+        (
+            s.start_faces.clone(),
+            s.side_faces.clone(),
+            s.end_faces.clone(),
+        )
+    };
+    if roles(&plain) != roles(&traced) {
+        return Err(harness("the traced skin's face roles differ"));
+    }
+    let fp = faces(&plain.brep, None).map_err(|e| harness(format!("faces: {e}")))?;
+    let ft = faces(&traced.brep, None).map_err(|e| harness(format!("faces: {e}")))?;
+    if fp != ft {
+        return Err(harness("the traced skin's faces differ"));
+    }
+    for f in fp {
+        let a = format!("{:?}", surface(&plain.brep, f));
+        let b = format!("{:?}", surface(&traced.brep, f));
+        if a != b {
+            return Err(harness(format!(
+                "the traced skin's face {f:?} surface differs"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
 }
@@ -422,7 +475,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             ) {
                 Ok(surface) => {
                     o.extend([0.0, 1.0, flag(surface.owner().is_none())]);
-                    let domain = surface.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?;
+                    let domain = surface
+                        .natural_uv_domain_with_nurb(&k)
+                        .map_err(|e| HarnessError::new(e.to_string()))?;
                     o.extend([
                         domain.min().x,
                         domain.min().y,
@@ -483,6 +538,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 .map(|&c| usize::try_from(c).map_err(|_| harness("count too large")))
                 .collect::<Result<Vec<_>, _>>()?;
             let degree = usize::try_from(*degree).map_err(|_| harness("degree too large"))?;
+            // the traced skin is the plain one, bit for bit (tangency-labs/solidcraft#13632)
+            traced_is_plain(&counts, &refs, degree, *cap_ends)?;
             match api::create_skin_primitive(&mut k, &counts, &refs, degree, *cap_ends) {
                 Ok(r) => {
                     o.extend([
@@ -989,7 +1046,10 @@ mod tests {
             surface.values.get("revolution_owner_clear"),
             Some(&vec![1.0])
         );
-        assert_eq!(surface.values.get("revolution_status"), Some(&vec![0.0; 25]));
+        assert_eq!(
+            surface.values.get("revolution_status"),
+            Some(&vec![0.0; 25])
+        );
         let points = surface.values.get("revolution_points").unwrap();
         assert_eq!(points.len(), 75);
         assert!(points.iter().any(|value| *value != 0.0));
@@ -1033,5 +1093,57 @@ mod tests {
             .map(|(_, v)| v)
             .sum();
         assert!(compared * 10 >= 800 * 8, "only {compared} compared cases");
+    }
+}
+
+/// #14246 G1 (WR-662 retired): the skin-from-faces rows whose success became a refusal.
+/// Each skins through a single section (one disc). A skin surface runs from one section to
+/// the next, so through one section it has no extent across the sections: its knot vector
+/// in that direction has fewer than two unique knots, and the face main made on it had no
+/// area. The refusal names exactly that.
+#[cfg(test)]
+mod moved_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::*;
+
+    const ROWS: [&str; 10] = [
+        "gen0067", "gen0089", "gen0243", "gen0321", "gen0415", "gen0453", "gen0631",
+        "gen0671", "gen0690", "gen0740",
+    ];
+
+    #[test]
+    fn each_moved_skin_of_one_section_is_refused() {
+        for name in ROWS {
+            let case = crate::case::regression_case(&Runner, name);
+            let i: Inputs = case.parse().unwrap();
+            let Inputs::SkinFromFaces { circles, degree } = &i else {
+                panic!("{name}");
+            };
+            assert_eq!(circles.len(), 1, "{name}: one section");
+            let mut k = Kernel::default();
+            let discs: Vec<_> = circles
+                .iter()
+                .map(|(c, r)| {
+                    solidcore::primitive::api_primitives::create_planar_circle(&mut k, pt(c), *r)
+                        .unwrap()
+                })
+                .collect();
+            let faces: Vec<_> = discs
+                .iter()
+                .map(|b| (b, solidcore::topology::brep::p1::faces(b, None).unwrap()[0]))
+                .collect();
+            let error = api::create_skin_from_faces(&mut k, &faces, usize::try_from(*degree).unwrap())
+                .map(|_| ())
+                .expect_err(name);
+            assert_eq!(
+                error.operation(),
+                "surface::surface::p6::Surface::calculate_continuities",
+                "{name}: {error:?}"
+            );
+            assert!(
+                error.to_string().contains("fewer than two unique knots"),
+                "{name}: {error}"
+            );
+        }
     }
 }

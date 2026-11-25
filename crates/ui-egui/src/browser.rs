@@ -2,12 +2,11 @@
 //! construction planes, plus document settings and the origin.
 //!
 //! Rows are drawn in code (icons from [`icons`]) and act through commands. A click selects
-//! (Ctrl adds, Shift extends over the visible rows), hovering a body row lights it up in the
-//! viewport, a double-click on a sketch edits it, and a right-click opens the item's menu
-//! ([`crate::context_menu`]).
+//! (Ctrl adds, Shift extends over the visible rows), a slower second click on a name starts
+//! renaming it, hovering a body row lights it up in the viewport, a double-click on a sketch
+//! edits it, and a right-click opens the item's menu ([`crate::context_menu`]).
 
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::ui_kit::{Container, Surface};
 use solidcraft_engine::geom::prelude::*;
 
 #[path = "browser_cache.rs"]
@@ -28,7 +27,9 @@ mod point_clouds;
 pub use point_clouds::CloudPanel;
 pub(crate) use point_clouds::point_cloud_tracks;
 
+/// Find for a feature shows the whole tree, so it ends a search (#1413).
 pub(crate) fn reveal_feature(app: &mut SolveApp, id: u64, body: &str) {
+    app.tree.search.clear();
     features::reveal(app, id, body);
 }
 
@@ -47,11 +48,62 @@ fn follows_view(app: &SolveApp) -> bool {
     rows_start_open(app)
 }
 
-/// Find in Browser for a body: show the Browser and find the body there ([`find_in_tree`]).
+/// Whether the Browser tree panel is open now. The panel layout holds the effective state (a
+/// panel closed from its host menu keeps its instance with `requested_open` false), and the
+/// window's flag is the fallback for a layout that has no Browser instance yet.
+pub(crate) fn panel_open(app: &SolveApp) -> bool {
+    app.panel_runtime()
+        .and_then(|runtime| runtime.layout().layout().instances.iter().find(|panel| panel.id.0 == "browser").map(|panel| panel.requested_open))
+        .unwrap_or(app.ui.show_browser)
+}
+
+/// Reveal a production panel and its tab so an explicit Find can reach the real rows.
+pub(crate) fn reveal_shared_panel(app: &mut SolveApp, name: &str) {
+    use solidcraft_engine::panels::{LayoutAction, Mutation};
+
+    let Some(layout) = app.panel_runtime().map(|runtime| runtime.layout().layout()) else { return };
+    let Some(panel) = layout.instances.iter().find(|panel| panel.id.0 == name) else { return };
+    let id = panel.id.clone();
+    if !panel.requested_open {
+        let mutation = Mutation::Open { kind: panel.kind.clone(), instance: id.clone(), destination: None };
+        if app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![mutation] }).is_err() {
+            return;
+        }
+    }
+    let Some(section) = app.panel_runtime().and_then(|runtime| runtime.layout().layout().containing(&id).ok()) else { return };
+    let mut mutations = Vec::new();
+    if section.collapsed {
+        mutations.push(Mutation::Collapse { section: section.id.clone(), collapsed: false });
+    }
+    if section.active != id {
+        mutations.push(Mutation::Activate { instance: id });
+    }
+    if !mutations.is_empty() {
+        let _ = app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations });
+    }
+}
+
+/// Close a production panel in the layout, so the panel state follows the window's flag (#16058).
+/// A layout without that panel keeps the flag alone.
+pub(crate) fn close_shared_panel(app: &mut SolveApp, name: &str) {
+    use solidcraft_engine::panels::{LayoutAction, Mutation};
+
+    let Some(layout) = app.panel_runtime().map(|runtime| runtime.layout().layout()) else { return };
+    let Some(panel) = layout.instances.iter().find(|panel| panel.id.0 == name) else { return };
+    if !panel.requested_open {
+        return;
+    }
+    let mutation = Mutation::Close { instance: panel.id.clone() };
+    let _ = app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![mutation] });
+}
+
+/// Find in Browser for a body: show the Browser and find the body there ([`find_in_tree`]). It
+/// shows the whole tree, so it ends a search; a pick in the view keeps one ([`reveal_pick`], #1413).
 pub(crate) fn reveal_body(app: &mut SolveApp, body: &str) {
     sync_reveals(app);
+    app.tree.search.clear();
     app.ui.show_browser = true;
-    app.preferences.timeline_left_browser_collapsed = false;
+    reveal_shared_panel(app, "browser");
     find_in_tree(app, body);
 }
 
@@ -133,6 +185,7 @@ pub(crate) fn placement_named(app: &SolveApp, source: &str, component: u64, body
 }
 
 pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
+    app.tree.search.clear();
     features::reveal_in_history(app, id);
 }
 
@@ -148,7 +201,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{BrowserEntry, Document, FeatureKind};
 
-use crate::context_menu::Target;
+use crate::context_menu::{Target, isolate_bodies_item};
 use crate::ui_kit::Item;
 use solidcraft_theme::Tokens;
 
@@ -158,10 +211,7 @@ use crate::SolveApp;
 /// Other presentations expose their geometry through `semantic_content::output`.
 pub fn drawn_rows() -> Vec<crate::semantic_content::DrawnRow> {
     use crate::semantic_content::{ContentOwner, output};
-    // The design tree over the view (`dialog_tree`) shows these rows while the browser makes way.
-    let mut rows = output(ContentOwner::BROWSER).rows;
-    rows.extend(output(ContentOwner::DESIGN_TREE).rows);
-    rows
+    output(ContentOwner::BROWSER).rows
 }
 
 pub fn drawn_occurrences() -> Vec<crate::semantic_content::DrawnOccurrence> {
@@ -193,11 +243,13 @@ pub struct TreeState {
     found: Option<Found>,
     /// A native feature to reveal in its placed component's Features folder (Find in Timeline).
     pub(super) reveal_feature: Option<features::Reveal>,
-    /// The Move/Copy panel of an occurrence.
-    pub occurrence_move: Option<OccMove>,
+    /// The search above the tree (#1413).
+    pub search: crate::browser_search::BrowserSearch,
     /// The Redefine Sketch Plane panel (sketch id).
     pub redefine: Option<u64>,
     pub redefine_draft: Option<crate::sketch_attachment_ui::Draft>,
+    /// What the rows of linked components show about their files.
+    pub(crate) links: crate::browser_links::LinkBadges,
     /// Components picked in the tree (they have no viewport selection).
     pub picked_components: Vec<u64>,
     /// The last folder label clicked, for V; independent of the geometry selection.
@@ -206,6 +258,8 @@ pub struct TreeState {
     pub picked_canvases: Vec<u64>,
     /// Joints picked in the tree (a hidden one shows highlighted while it is picked).
     pub picked_joints: Vec<u64>,
+    /// Motion links picked in the tree, as `joint.list` numbers them (#6825).
+    pub picked_links: Vec<usize>,
     /// Folders picked in the feature history (features use the engine selection).
     pub picked_timeline_groups: Vec<u64>,
     /// Last feature-history item clicked, for Shift ranges (`f:<id>` or `g:<id>`).
@@ -233,15 +287,8 @@ pub struct TreeState {
     pub canvas_panel: Option<CanvasPanel>,
     /// The Edit Point Cloud panel.
     pub cloud_panel: Option<CloudPanel>,
-    /// A Section Analysis hidden with its eye in the Analysis folder: its plane (origin,
-    /// normal), so the eye can bring it back (#822).
-    pub hidden_section: Option<(solidcore_record::Vec3, solidcore_record::Vec3)>,
-    /// What the Section Analysis dialog's OK last made, for Edit to start from.
-    pub section_dialog: Option<crate::dialogs::SectionDraft>,
-    /// The Analysis folder hidden with its own eye, and the Section Analysis hidden with its
-    /// own: the section shows only while neither is, and each eye keeps its state.
-    pub analysis_hidden: bool,
-    pub section_hidden: bool,
+    /// What the Section Analysis dialog's OK made, per plane of the section, for Edit to start from.
+    pub section_dialog: Vec<crate::dialogs::SectionDraft>,
     /// What waits for the Capture Position question: a command id, or [`SAVE`].
     pub capture_prompt: Option<String>,
     /// The design, undo depth and visibility when the button last went down: a drag over the eyes
@@ -249,6 +296,8 @@ pub struct TreeState {
     eye_press: Option<(u64, Arc<Document>, usize, solidcraft_engine::Visibility)>,
     pub(crate) content: crate::semantic_content::Frame,
     cache: Option<cache::Cache>,
+    /// The tree key of each item row the panel has seen, by its id: a Shift range comes back as ids.
+    node_keys: std::collections::HashMap<NodeId, String>,
 }
 
 struct FolderPick {
@@ -358,30 +407,7 @@ impl TreeState {
 
     fn remember(&mut self, key: &str) {
         self.content.current_mut().remember(key);
-    }
-}
-
-/// Moving an occurrence: the offsets typed so far (pending until Capture Position).
-#[derive(Clone, Debug)]
-pub struct OccMove {
-    pub occurrence: u64,
-    /// Exact assembly placement used for world-space movement and the pivot.
-    pub path: Vec<u64>,
-    /// Effective local placement at dialog opening, including its pre-existing pending move.
-    pub baseline: Option<solidcraft_engine::doc::Mat>,
-    pub had_pending: bool,
-    /// Distances along X, Y, Z (mm) and turns about X, Y, Z (degrees) from where it was.
-    pub translate: [f64; 3],
-    pub angles: [f64; 3],
-    /// The occurrence's origin when the move began: what it turns about.
-    pub pivot: Option<solidcore_record::Vec3>,
-    /// The values when the current triad drag began.
-    drag0: Option<([f64; 3], [f64; 3])>,
-}
-
-impl OccMove {
-    pub fn new(occurrence: u64) -> Self {
-        OccMove { occurrence, path: Vec::new(), baseline: None, had_pending: false, translate: [0.0; 3], angles: [0.0; 3], pivot: None, drag0: None }
+        self.node_keys.entry(node_id(key)).or_insert_with(|| key.to_owned());
     }
 }
 
@@ -437,6 +463,55 @@ pub(crate) fn bodies_of_component(app: &SolveApp, id: u64) -> Vec<String> {
         }
     }
     kept
+}
+
+/// A component row's visibility control acts on the whole Browser multi-selection if the
+/// clicked row is in it. A row outside the selection acts on that row alone (#18716).
+pub(crate) fn selected_component_bodies(app: &SolveApp, clicked: u64) -> Vec<String> {
+    let selected = &app.tree.picked_components;
+    let ids = if clicked != 0 && selected.contains(&clicked) && selected.len() > 1 { selected.clone() } else { vec![clicked] };
+    let mut bodies = Vec::new();
+    for id in ids {
+        for name in bodies_of_component(app, id) {
+            if !bodies.contains(&name) {
+                bodies.push(name);
+            }
+        }
+    }
+    bodies
+}
+
+/// A placement row's visibility control also acts on the selected occurrences when the
+/// clicked row belongs to that selection. Paths distinguish independent copies (#18716).
+pub(crate) fn selected_occurrence_paths(app: &SolveApp, clicked: &[u64]) -> Vec<Vec<u64>> {
+    let selected: Vec<Vec<u64>> = app
+        .session
+        .selection
+        .iter()
+        .filter_map(|s| match s {
+            Sel::Occurrence { path } => Some(path.clone()),
+            _ => None,
+        })
+        .collect();
+    if selected.iter().any(|path| path.as_slice() == clicked) { selected } else { vec![clicked.to_vec()] }
+}
+
+/// A drag over eye controls has one target visibility for the entire gesture.
+/// Without a drag, use the current state of the selected batch (#18716).
+fn selected_eye_visible(ctx: &egui::Context, fallback: bool) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(crate::ui_kit::eye_drag_id())).unwrap_or(fallback)
+}
+
+#[cfg(test)]
+#[test]
+fn selected_eye_drag_reuses_its_first_visibility_target() {
+    let ctx = egui::Context::default();
+    assert!(selected_eye_visible(&ctx, true));
+    assert!(!selected_eye_visible(&ctx, false));
+    ctx.data_mut(|d| d.insert_temp(crate::ui_kit::eye_drag_id(), false));
+    assert!(!selected_eye_visible(&ctx, true), "later selected rows keep the drag's hide target");
+    ctx.data_mut(|d| d.insert_temp(crate::ui_kit::eye_drag_id(), true));
+    assert!(selected_eye_visible(&ctx, false), "later selected rows keep the drag's show target");
 }
 
 /// How a browser click changes a dialog input that takes bodies.
@@ -537,7 +612,7 @@ pub fn group_items(app: &SolveApp, id: u64, scope: &str) -> Vec<Item> {
         Item::action("ui.folderVisible", "Show/Hide", "eye").key("V").with(json!({ "key": format!("{scope}/g{id}") })),
     ]);
     if g.folder == "bodies" {
-        v.push(Item::action("ui.isolate", "Isolate", "body").with(json!({ "bodies": group_bodies(app, id) })));
+        v.push(isolate_bodies_item(app, &group_bodies(app, id)));
     }
     v
 }
@@ -645,12 +720,12 @@ pub(crate) fn eye_drag_frame(app: &mut SolveApp, ctx: &egui::Context) {
 pub(crate) fn end_eye_drag(app: &mut SolveApp, ctx: &egui::Context) {
     let capture = crate::semantic_content::release_eye(ctx);
     let dragged = ctx.data_mut(|d| d.remove_temp::<bool>(crate::ui_kit::eye_drag_id())).is_some();
-    let Some((_, doc, depth, visibility)) = app
-        .tree
-        .eye_press
-        .take()
-        .filter(|(session, ..)| dragged && *session == app.session.uid && capture.is_none_or(|source| source.session == *session))
-    else {
+    merge_eye_drag(app, dragged && capture.is_none_or(|source| source.session == app.session.uid));
+}
+
+/// An eye drag ended (`dragged`): the steps it made since the button went down become one.
+pub(crate) fn merge_eye_drag(app: &mut SolveApp, dragged: bool) {
+    let Some((_, doc, depth, visibility)) = app.tree.eye_press.take().filter(|(session, ..)| dragged && *session == app.session.uid) else {
         return;
     };
     // shortcut: once the history is full (200 steps) its length stops growing, so the drag is left as
@@ -698,7 +773,11 @@ pub(crate) fn picked_group(app: &SolveApp) -> Option<u64> {
 pub(crate) fn toggle_picked_folder(app: &mut SolveApp) -> bool {
     let Some(pick) = app.tree.picked_folder.as_ref().filter(|pick| pick.current(app)) else { return false };
     let key = pick.key.clone();
-    toggle_folder(app, &key);
+    if key == "origin" {
+        app.set_origin_shown(!app.origin_shown());
+    } else {
+        toggle_folder(app, &key);
+    }
     true
 }
 
@@ -753,9 +832,6 @@ pub fn group_action(app: &mut SolveApp, action: &str, p: &Value) {
                 let _ = app.run("browser.ungroup", json!({ "group": g }));
             }
         }
-        "ui.renameGroup" => {
-            let _ = app.run("browser.rename_group", p.clone());
-        }
         _ => {}
     }
 }
@@ -766,17 +842,15 @@ pub fn group_action(app: &mut SolveApp, action: &str, p: &Value) {
 
 /// The floating card's inner margin: the header highlight sits this far from the card's top, left
 /// and right edges, so its corners are concentric with the card's.
-const CARD_INSET: f32 = 4.0;
-const HEADER_H: f32 = 26.0;
 const INDENT: f32 = 14.0;
-use crate::ui_kit::RowResp;
+use crate::ui_kit::browser::{self as panel, Dragged, How, NodeId, Payload, Rows, Selectable, Zone};
 
 fn row_rect(ui: &egui::Ui) -> Rect {
     crate::ui_kit::tree_row_rect(ui, &Row { compact: compact_tree(ui), ..Default::default() })
 }
 
 /// One row's look.
-pub(crate) use crate::ui_kit::{Mark, Row};
+pub(crate) use crate::ui_kit::{Mark, Row, Status};
 
 fn compact_tree(ui: &egui::Ui) -> bool {
     ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_compact_tree"))).unwrap_or(false)
@@ -784,53 +858,234 @@ fn compact_tree(ui: &egui::Ui) -> bool {
 
 /// Where tree rows put their eye this frame (Preferences › Interface, #8718).
 pub(crate) fn publish_row_prefs(app: &SolveApp, ctx: &egui::Context) {
-    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_tree_eye_left"), app.preferences.browser_eye_left));
+    ctx.data_mut(|d| {
+        d.insert_temp(egui::Id::unique("sc_tree_eye_left"), app.preferences.browser_eye_left);
+        d.insert_temp(egui::Id::unique("sc_tree_dialog_open"), app.dialog.is_some());
+    });
+}
+
+/// With a dialog open a second click on a row picks again, so it never waits to rename.
+fn dialog_open(ui: &egui::Ui) -> bool {
+    ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tree_dialog_open"))).unwrap_or(false)
 }
 
 fn eye_left(ui: &egui::Ui) -> bool {
     ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tree_eye_left"))).unwrap_or(false)
 }
 
-pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row<'_>) -> RowResp {
-    let compact = compact_tree(ui);
-    let mut out = crate::ui_kit::tree_row(ui, id, &Row { compact, eye_left: eye_left(ui), ..*row });
-    crate::semantic_content::route_response(ui, id, &mut out);
-    if let Some(r) = out.rect.filter(|r| ui.is_rect_visible(*r)) {
-        let x = r.left() + if compact { Tokens::get().space_8 } else { 2.0 } + row.depth as f32 * INDENT;
-        let fold = row.fold.map(|_| Rect::from_min_max(pos2(x - 4.0, r.top()), pos2(x + 15.0, r.bottom())));
-        crate::semantic_content::record_row(ui, (row.label.to_string(), r, fold, row.fold), &out);
-    }
-    out
+/// A Browser row's identity in the panel: its tree key, hashed the same way every frame. Tree keys
+/// are unique in the Browser, so the hash is too.
+pub(crate) fn node_id(key: &str) -> NodeId {
+    egui::Id::unique(("sc_browser_row", key)).value()
 }
 
-/// A Ctrl/Shift-aware click on a selectable row.
-fn click_select(app: &mut SolveApp, ui: &egui::Ui, key: String, sel: Option<Sel>) {
-    let mods = ui.input(|i| i.modifiers);
-    let rows = app.tree.content.current_mut();
-    if mods.shift
-        && let Some(a) = rows.anchor.as_deref()
-    {
-        let items = shift_range(&rows.previous, a, &key).or_else(|| shift_range(rows.current_order(), a, &key));
-        if let Some(items) = items {
-            // Move/Copy (and any open command whose active input takes bodies) gets every body
-            // in the range. Otherwise the range is an ordinary selection.
-            let names: Vec<String> = items
-                .iter()
-                .filter_map(|s| match s {
-                    Sel::Body { name } => Some(name.clone()),
-                    _ => None,
-                })
-                .collect();
-            if offer_bodies(app, &names, Take::Add) {
-                return;
+/// The kinds of rows the Browser drags: a folder's items or groups, and placements.
+const DRAG_ITEMS: u32 = 0;
+const DRAG_PLACEMENTS: u32 = 1;
+
+/// What a Browser row is beyond its look: its tree key, whether it is an item of the selection
+/// (in the order a Shift range spans), the kind it drags as, the drops it takes and its rule for
+/// them.
+#[derive(Default)]
+pub(crate) struct Spec<'a> {
+    pub(crate) key: &'a str,
+    pub(crate) item: bool,
+    pub(crate) drag: Option<u32>,
+    pub(crate) drops: panel::Drops,
+    pub(crate) accept: Option<&'a dyn Fn(&Dragged, Zone) -> bool>,
+}
+
+/// Rows dropped on a row: where they land on it, the presentation they were dragged in and what
+/// they are.
+pub(crate) struct Dropped {
+    pub(crate) zone: Zone,
+    pub(crate) source: panel::Source,
+    pub(crate) data: Option<Payload>,
+}
+
+/// A row's response as the Browser's handlers read it: the panel's events for the row.
+#[derive(Default)]
+pub(crate) struct Hit {
+    pub(crate) rect: Option<Rect>,
+    pub(crate) label_rect: Option<Rect>,
+    pub(crate) row_id: Option<egui::Id>,
+    /// A click on the row: the selection's (`how`), a plain one, the second of a double-click, or
+    /// the slower second click that renames.
+    pub(crate) clicked: bool,
+    pub(crate) how: Option<How>,
+    pub(crate) double: bool,
+    pub(crate) slow_rename: bool,
+    pub(crate) secondary: Option<Pos2>,
+    pub(crate) fold: bool,
+    pub(crate) eye: bool,
+    pub(crate) radio: bool,
+    pub(crate) action: bool,
+    pub(crate) hovered: bool,
+    pub(crate) resp: Option<egui::Response>,
+    pub(crate) on_control: bool,
+    pub(crate) drag_started: bool,
+    pub(crate) fold_at: Option<Pos2>,
+    pub(crate) eye_at: Option<Pos2>,
+    pub(crate) eye_rect: Option<Rect>,
+    pub(crate) radio_at: Option<Pos2>,
+    /// The trailing actions clicked, by target.
+    pub(crate) actions: Vec<String>,
+    pub(crate) dropped: Option<Dropped>,
+}
+
+/// Where a row's name is edited in place.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct NameAt {
+    pub(crate) row_id: Option<egui::Id>,
+    pub(crate) rect: Option<Rect>,
+    pub(crate) label_rect: Option<Rect>,
+}
+
+impl Hit {
+    pub(crate) fn name_at(&self) -> NameAt {
+        NameAt { row_id: self.row_id, rect: self.rect, label_rect: self.label_rect }
+    }
+
+    /// The host data of what was dropped on the row, when it is a `T`.
+    fn dropped_as<T: std::any::Any>(&self) -> Option<(&T, Zone, crate::semantic_content::ContentSource)> {
+        let dropped = self.dropped.as_ref()?;
+        let data = dropped.data.as_ref()?.get::<T>()?;
+        Some((data, dropped.zone, crate::semantic_content::content_source(dropped.source)))
+    }
+}
+
+/// Draw a Browser row through the panel and read its events. A renamable row asks to be renamed
+/// (the host's editor, `context_menu`), unless a dialog is open: then a second click picks again.
+pub(crate) fn node_row(rows: &mut Rows<'_>, spec: Spec<'_>, row: Row<'_>) -> Hit {
+    let Spec { key, item, drag, drops, accept } = spec;
+    let rename = if row.rename && !dialog_open(rows.ui()) { panel::Rename::Host } else { panel::Rename::Never };
+    let out = rows.row(panel::Node {
+        id: node_id(key),
+        key,
+        row,
+        select: if item { Selectable::Yes(0) } else { Selectable::No },
+        rename,
+        drag,
+        drops,
+        menu: panel::NodeMenu::Host,
+        accept,
+        ..Default::default()
+    });
+    let mut hit = Hit {
+        rect: out.rect,
+        label_rect: out.label_rect,
+        row_id: out.widget,
+        hovered: out.hovered,
+        resp: out.response,
+        on_control: out.on_control,
+        drag_started: out.drag_started,
+        fold_at: out.fold_at,
+        eye_at: out.eye_at,
+        eye_rect: out.eye_rect,
+        radio_at: out.radio_at,
+        ..Default::default()
+    };
+    for event in out.events {
+        match event {
+            panel::Event::Select { how, .. } => {
+                hit.clicked = true;
+                hit.how = Some(how);
             }
-            let _ = app.run("select.set", json!({ "items": items, "add": mods.command || mods.ctrl }));
-            return;
+            panel::Event::Click(_) => hit.clicked = true,
+            // The second click of a double-click is a plain click too.
+            panel::Event::Open(_) => {
+                hit.clicked = true;
+                hit.double = true;
+                hit.how = item.then_some(How::Only);
+            }
+            // The slower second click, held back until the double-click delay passed.
+            panel::Event::RenameRequested(_) => {
+                hit.clicked = true;
+                hit.slow_rename = true;
+                hit.how = item.then_some(How::Only);
+            }
+            panel::Event::Fold { .. } => hit.fold = true,
+            panel::Event::Eye { .. } => hit.eye = true,
+            panel::Event::Activate(_) => hit.radio = true,
+            panel::Event::NameAction(_) => hit.action = true,
+            panel::Event::Menu { at, .. } => hit.secondary = Some(at),
+            panel::Event::Move { zone, source, data, .. } => hit.dropped = Some(Dropped { zone, source, data }),
+            panel::Event::Action { action, .. } => hit.actions.push(action),
+            panel::Event::Rename { .. } | panel::Event::Revealed(_) | panel::Event::EyeGesture(_) => {}
         }
     }
-    app.tree.content.current_mut().anchor = Some(key);
+    hit
+}
+
+/// The Browser's rows for the presentation being drawn, through the panel: in a scroll area
+/// (`scroll`) or in `ui`'s own layout, each row's events handled as it is drawn. The rows drawn are
+/// recorded for the presentation.
+pub(crate) fn present(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    acts: &mut Actions,
+    (scroll, shrink): (bool, bool),
+    draw: impl FnOnce(&mut SolveApp, &mut Rows<'_>, &mut Actions),
+) -> panel::Output {
+    let owner = app.tree.content.active_owner();
+    let mut state = std::mem::take(&mut app.tree.content.current_mut().browser);
+    let style = panel::Style { compact: compact_tree(ui), eye_left: eye_left(ui) };
+    let output = panel::Browser::new(&mut state, style, app.session.uid)
+        .presentation(owner.0)
+        .active(crate::semantic_content::presented(ui))
+        .scroll(scroll)
+        .shrink(shrink)
+        .events_per_row(true)
+        // Not while the app's own name editor is open: it needs Enter, F2 and the arrows itself.
+        .keyboard(app.preferences.browser_arrow_keys && app.menu.rename.is_none())
+        .show(ui, |rows| draw(app, rows, acts));
+    app.tree.content.current_mut().browser = state;
+    crate::semantic_content::record_drawn(ui, &output);
+    for event in &output.events {
+        if let panel::Event::EyeGesture(gesture) = event {
+            crate::semantic_content::eye_gesture(ui, *gesture);
+        }
+    }
+    output
+}
+
+/// Whether rows dragged in the panel come from this document.
+fn same_document(app: &SolveApp, dragged: &Dragged) -> bool {
+    dragged.source.scope == app.session.uid
+}
+
+/// A folder's items dragged, as the panel carries them.
+fn item_drag(dragged: &Dragged) -> Option<&ItemDrag> {
+    dragged.data.as_ref()?.get::<ItemDrag>()
+}
+
+/// A placement dragged, as the panel carries it.
+fn placement_drag(dragged: &Dragged) -> Option<&PlacementDrag> {
+    dragged.data.as_ref()?.get::<PlacementDrag>()
+}
+
+/// A click on a selectable row, as the panel read its modifiers: the row alone, toggled, or the
+/// rows from the anchor (Shift), added with Ctrl.
+fn click_select(app: &mut SolveApp, how: Option<&How>, sel: Option<Sel>) {
+    if let Some(How::Range(ids) | How::RangeAdd(ids)) = how {
+        let items: Vec<Sel> = ids.iter().filter_map(|id| app.tree.node_keys.get(id)).filter_map(|key| sel_of_key(key)).collect();
+        // Move/Copy (and any open command whose active input takes bodies) gets every body
+        // in the range. Otherwise the range is an ordinary selection.
+        let names: Vec<String> = items
+            .iter()
+            .filter_map(|s| match s {
+                Sel::Body { name } => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        if offer_bodies(app, &names, Take::Add) {
+            return;
+        }
+        let _ = app.run("select.set", json!({ "items": items, "add": matches!(how, Some(How::RangeAdd(_))) }));
+        return;
+    }
     let Some(sel) = sel else { return };
-    if mods.command || mods.ctrl {
+    if matches!(how, Some(How::Toggle)) {
         if app.session.selection.contains(&sel) {
             let rest: Vec<Sel> = app.session.selection.iter().filter(|x| **x != sel).cloned().collect();
             let _ = app.run("select.set", json!({ "items": rest }));
@@ -844,18 +1099,25 @@ fn click_select(app: &mut SolveApp, ui: &egui::Ui, key: String, sel: Option<Sel>
     }
 }
 
-/// The selectable rows from `anchor` to `key` (either way round) in a row order, or `None`
-/// when the order lacks either of them.
-fn shift_range(order: &[String], anchor: &str, key: &str) -> Option<Vec<Sel>> {
-    let i = order.iter().position(|k| k == anchor)?;
-    let j = order.iter().position(|k| k == key)?;
-    let rows = order.get(i.min(j)..=i.max(j))?;
-    Some(rows.iter().filter_map(|k| sel_of_key(k)).collect())
-}
-
 fn sel_of_key(k: &str) -> Option<Sel> {
     if let Some((_, id)) = k.rsplit_once("/s:") {
         return id.parse().ok().map(|id| Sel::Feature { id });
+    }
+    if let Some(name) = k.strip_prefix("origin:") {
+        return match name {
+            "O" => Some(Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }),
+            "X" | "Y" | "Z" => Some(Sel::Axis { name: name.to_string() }),
+            "XY" | "XZ" | "YZ" => Some(Sel::Plane { name: name.to_string() }),
+            _ => None,
+        };
+    }
+    if let Some((_, item)) = solidcraft_engine::origins::item(k) {
+        return match item {
+            "O" => Some(Sel::ConstructionPoint { name: k.to_string() }),
+            "X" | "Y" | "Z" => Some(Sel::Axis { name: k.to_string() }),
+            "XY" | "XZ" | "YZ" => Some(Sel::Plane { name: k.to_string() }),
+            _ => None,
+        };
     }
     if let Some(p) = k.strip_prefix("o:") {
         let path: Option<Vec<u64>> = p.split('/').map(|id| id.parse().ok()).collect();
@@ -881,12 +1143,14 @@ pub(crate) fn picked_body(sel: &Sel) -> Option<&str> {
 }
 
 /// A pick in the viewport, while the Browser is shown and follows the 3D view ([`follows_view`]):
-/// the Browser finds the body of the last item picked, as Find in Browser does (#3005).
+/// the Browser finds the body of the last item picked, as Find in Browser does (#3005). A search
+/// stays (#1413): a body it found opens in it, and one it didn't leaves the tree as it is.
 pub(crate) fn reveal_pick(app: &mut SolveApp) {
     sync_reveals(app);
     if follows_view(app)
         && app.ui.show_browser
         && let Some(body) = app.session.selection.last().and_then(picked_body).map(str::to_string)
+        && app.tree.search.hits().is_none_or(|hits| hits.found_body(&body))
     {
         find_in_tree(app, &body);
     }
@@ -921,17 +1185,30 @@ pub(crate) fn placement_open(app: &SolveApp, key: &str) -> bool {
     !app.tree.collapsed.contains(key) && ((app.preferences.browser_components_open && rows_start_open(app)) || app.tree.expanded.contains(key))
 }
 
+/// Is the row with this fold key open? During a search every row is, unless it was closed in
+/// the search; the tree's own folds come back when it ends.
 pub(crate) fn is_open(app: &SolveApp, key: &str, default: bool) -> bool {
+    if app.tree.search.on() {
+        return !app.tree.search.closed(key);
+    }
+    fold_open(app, key, default)
+}
+
+/// Whether a row is open in the tree's own folds, whatever a search shows. The History, beside the
+/// Browser or as the bar, reads its folds here: a search filters the Browser's rows, not the History's.
+pub(crate) fn fold_open(app: &SolveApp, key: &str, default: bool) -> bool {
     if is_placement_key(key) {
         return placement_open(app, key);
     }
     if default { !app.tree.collapsed.contains(key) } else { app.tree.expanded.contains(key) }
 }
 
-/// Open or close a row, whichever way it starts; whether that changed it.
+/// Open or close a row in the tree's own folds, whichever way it starts; whether that changed it.
+/// Opening it also lifts a close made during a search, so a revealed row shows either way.
 fn set_open(app: &mut SolveApp, key: &str, default: bool, open: bool) -> bool {
-    let was = is_open(app, key, default);
+    let was = fold_open(app, key, default);
     if open {
+        app.tree.search.open(key);
         app.tree.collapsed.remove(key);
         app.tree.expanded.insert(key.to_string());
     } else {
@@ -941,10 +1218,21 @@ fn set_open(app: &mut SolveApp, key: &str, default: bool, open: bool) -> bool {
     was != open
 }
 
-/// A row opened or closed by hand: the next Find in Browser leaves it as it is.
+/// A row opened or closed by hand: the next Find in Browser leaves it as it is. During a search it
+/// folds in the search only, and the tree's own folds come back when the search ends.
 pub(crate) fn toggle(app: &mut SolveApp, key: &str, default: bool) {
+    if app.tree.search.on() {
+        app.tree.search.toggle_closed(key);
+        return;
+    }
+    toggle_fold(app, key, default);
+}
+
+/// A row opened or closed by hand in the tree's own folds, whatever a search shows: the History's
+/// folds, which a search leaves alone. The next Find in Browser leaves it as it is.
+pub(crate) fn toggle_fold(app: &mut SolveApp, key: &str, default: bool) {
     app.tree.found_rows.retain(|(row, _)| row != key);
-    let open = is_open(app, key, default);
+    let open = fold_open(app, key, default);
     set_open(app, key, default, !open);
 }
 
@@ -966,6 +1254,8 @@ pub(crate) struct Actions {
     pub(crate) hovered: bool,
     /// The plane whose row is under the pointer, lit in the view (#6975).
     pub(crate) hover_plane: Option<String>,
+    /// The Origin item whose row is under the pointer, shown in the view (#15658).
+    pub(crate) hover_origin: Option<String>,
     /// The feature or sketch whose row is under the pointer (#14263).
     pub(crate) hover_feature: Option<u64>,
     pub(crate) hover_joint: Option<u64>,
@@ -975,6 +1265,11 @@ pub(crate) struct Actions {
 }
 
 impl Actions {
+    /// The menu a row asked for, taken so it is opened once.
+    pub(crate) fn take_menu(&mut self) -> Option<(Pos2, Target)> {
+        self.menu.take()
+    }
+
     fn drop_from(&mut self, source: crate::semantic_content::ContentSource, action: DropAction) {
         self.drop = Some((source, action));
     }
@@ -1010,9 +1305,30 @@ struct Lit {
     /// The placements holding a lit body, and the components holding a lit sketch or plane.
     paths: Vec<Vec<u64>>,
     components: Vec<u64>,
+    /// The feature of what is under the pointer in the 3D view, and of the face or edge picked
+    /// there ([`Lit::features_from_view`]), once worked out this frame.
+    from_view: Option<[Option<u64>; 2]>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How often the features lit from the 3D view were worked out (the tests count them).
+    static FROM_VIEW_WORKED_OUT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl Lit {
+    /// The feature that made what is under the pointer in the 3D view, and the one that made the
+    /// face or edge picked there, as the history lights them. Worked out for the first feature row
+    /// that asks in a frame: every row and folder looked them up again, the pick naming every face
+    /// of its body each time (#14850).
+    fn features_from_view(&mut self, app: &SolveApp) -> [Option<u64>; 2] {
+        *self.from_view.get_or_insert_with(|| {
+            #[cfg(test)]
+            FROM_VIEW_WORKED_OUT.with(|n| n.set(n.get() + 1));
+            [crate::timeline::hovered_feature(app).or(app.viewport.hover_feature), crate::timeline::picked_feature(app)]
+        })
+    }
+
     fn of(app: &mut SolveApp) -> Lit {
         use crate::viewport::Hit;
         let mut selected = std::collections::HashSet::new();
@@ -1033,9 +1349,10 @@ impl Lit {
                     continue;
                 }
                 Sel::Feature { id } => Thing::Sketch(*id),
-                Sel::Profile { sketch, .. } | Sel::ExternalSketchCurve { sketch, .. } | Sel::ExternalSketchPoint { sketch, .. } => {
-                    Thing::Sketch(*sketch)
-                }
+                Sel::Profile { sketch, .. }
+                | Sel::ExternalSketchCurve { sketch, .. }
+                | Sel::ExternalSketchPoint { sketch, .. }
+                | Sel::PlacedSketchPoint { sketch, .. } => Thing::Sketch(*sketch),
                 Sel::SketchCurve { .. } | Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } => {
                     match app.session.active_sketch {
                         Some(id) => Thing::Sketch(id),
@@ -1045,7 +1362,7 @@ impl Lit {
                 Sel::Plane { name } => Thing::Plane(name.clone()),
                 Sel::Axis { name } => Thing::Axis(name.clone()),
                 Sel::ConstructionPoint { name } => Thing::Point(name.clone()),
-                Sel::Occurrence { .. } => continue,
+                Sel::Occurrence { .. } | Sel::Drawing { .. } | Sel::PointCloudPoint { .. } => continue,
             };
             selected.insert(thing);
         }
@@ -1053,6 +1370,7 @@ impl Lit {
             Some(Hit::Face { body, .. } | Hit::Edge { body, .. } | Hit::Vertex { body, .. }) => Some(Thing::Body(body.clone())),
             Some(
                 Hit::SketchPoint { sketch, .. }
+                | Hit::PlacedSketchPoint { sketch, .. }
                 | Hit::SketchPoint3d { sketch, .. }
                 | Hit::SketchMidpoint { sketch, .. }
                 | Hit::SketchCurve { sketch, .. }
@@ -1061,7 +1379,17 @@ impl Lit {
             Some(Hit::Plane { name, .. }) => Some(Thing::Plane(name.clone())),
             Some(Hit::Axis { name }) => Some(Thing::Axis(name.clone())),
             Some(Hit::ConstructionPoint { name }) => Some(Thing::Point(name.clone())),
-            None => None,
+            Some(Hit::PointCloudPoint { .. }) => None,
+            Some(Hit::MemberEnd { .. } | Hit::Centreline { .. }) => None,
+            None => app.viewport.hover_feature.and_then(|id| {
+                app.session.doc.feature(id).and_then(|f| match &f.kind {
+                    FeatureKind::Sketch { .. } => Some(Thing::Sketch(id)),
+                    FeatureKind::ConstructionPlane { .. } => Some(Thing::Plane(f.name.clone())),
+                    FeatureKind::ConstructionAxis { .. } => Some(Thing::Axis(f.name.clone())),
+                    FeatureKind::ConstructionPoint { .. } => Some(Thing::Point(f.name.clone())),
+                    _ => None,
+                })
+            }),
         };
         // Unless the Browser follows the 3D view, a body's placement is not looked up for the rows
         // above it (that names every placement again after each edit): only the one Find in
@@ -1104,7 +1432,7 @@ impl Lit {
         // A body both holding the selection and under the pointer leads to its placement once.
         paths.sort_unstable();
         paths.dedup();
-        Lit { selected, holding, hovered, paths, components }
+        Lit { selected, holding, hovered, paths, components, from_view: None }
     }
 
     fn any(&self) -> bool {
@@ -1168,399 +1496,86 @@ impl Actions {
     }
 }
 
-/// How narrow the browser sidebar may be dragged, and how wide (the viewport keeps the rest).
-const MIN_BROWSER_WIDTH: f32 = 170.0;
-const MAX_BROWSER_WIDTH: f32 = 620.0;
-/// How wide a grip the sidebar's right edge offers, counted inwards from the edge.
-const BROWSER_RAIL: f32 = 6.0;
-/// How opaque the floating browser's card is; the workspace shows through the rest.
-pub(crate) const BROWSER_FLOAT_ALPHA: f32 = 0.4;
-
-pub(crate) fn browser_width(remembered: f32) -> f32 {
-    if remembered.is_finite() { remembered.clamp(MIN_BROWSER_WIDTH, MAX_BROWSER_WIDTH) } else { crate::prefs::DEFAULT_BROWSER_WIDTH }
-}
-
-/// Either card in a stacked column changes the same remembered width.
-pub(crate) fn resize_column(app: &mut SolveApp, ui: &egui::Ui, rect: Rect, width: f32, handle: &'static str) {
-    let rail = Rect::from_x_y_ranges(rect.right() - BROWSER_RAIL..=rect.right(), rect.y_range());
-    let response =
-        ui.interact(rail, egui::Id::unique(("sc_shared_column_rail", handle)), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
-    if response.dragged() {
-        let delta = ui.input(|input| input.pointer.delta().x);
-        if delta.is_finite() {
-            app.preferences.browser_width = (width + delta).clamp(MIN_BROWSER_WIDTH, MAX_BROWSER_WIDTH);
-        }
-    }
-    crate::scenario::publish_handle(handle, pos2(rect.right() - BROWSER_RAIL / 2.0, rect.center().y));
-}
-
-/// The width of the browser folded to its rail beside a left History.
-pub(crate) fn collapsed_width() -> f32 {
-    let t = Tokens::get();
-    t.space_24 + t.space_10
-}
-
-/// How the browser card shows (Preferences › Interface › Layout, #8692).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BrowserShow {
-    /// Always on screen (folded to its header when the user folds it).
-    #[default]
-    Shown,
-    /// Out of sight until the pointer comes over its place or the strip at its left edge, as the
-    /// navigation bar's "Hide until hovered"; never folded, so the whole card is the target.
-    Hover,
-}
-
-/// Does the browser hide until hovered? Only its own card does: not the one sharing its column
-/// with History, nor the Render page's.
-pub(crate) fn reveals(app: &SolveApp) -> bool {
-    app.preferences.browser_show == BrowserShow::Hover && !crate::timeline_left::stacked(app) && !crate::render_workspace::active(app)
-}
-
-/// How much of the browser set to reveal on hover shows this frame (0 hidden, 1 shown). The
-/// pointer over last frame's card or the strip at its left edge shows it; a menu, popup, drag or
-/// text edit started while it showed keeps it shown. A drag started elsewhere (orbiting the view)
-/// passes over it without showing it.
-fn reveal_opacity(app: &SolveApp, ctx: &egui::Context, previous: Option<Rect>, edge: Rect) -> f32 {
-    let card = egui::Id::unique("sc_browser_card");
-    let memory = card.with("reveal");
-    let was = ctx.data(|d| d.get_temp::<bool>(memory)).unwrap_or(false);
-    let over = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| {
-        let layer = ctx.layer_id_at(p);
-        let on_card = previous.is_some_and(|r| r.contains(p)) && layer.is_some_and(|l| l.id == card);
-        let on_edge = edge.contains(p) && layer.is_none_or(|l| l.order == egui::Order::Background);
-        on_card || on_edge
-    });
-    let dragging = ctx.dragged_id().is_some();
-    let busy = app.viewport.context_menu.is_some() || egui::Popup::is_any_open(ctx) || dragging || ctx.egui_wants_keyboard_input();
-    let shown = (over && (was || !dragging)) || (was && busy);
-    ctx.data_mut(|d| d.insert_temp(memory, shown));
-    ctx.animate_value_with_time(memory.with("opacity"), f32::from(u8::from(shown)), crate::ui_kit::NAV_FADE_SECONDS)
-}
-
-/// The thin tab at the hidden browser's left edge that says where it is.
-fn reveal_tab(ui: &egui::Ui, card: Rect, opacity: f32) {
-    let t = Tokens::get();
-    let x = card.left() + t.space_3;
-    let tab = Rect::from_min_max(pos2(x, card.top() + t.space_8), pos2(x + t.space_3, card.top() + t.space_8 + t.space_24 * 2.0));
-    ui.painter().rect_filled(tab, t.space_3 / 2.0, t.text_dim.gamma_multiply(opacity));
-}
-
-/// One content-hugging browser; the shared container supplies floating or flush compact chrome.
-pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
-    sync_reveals(app);
-    let available = ui.available_rect_before_wrap();
-    let t = Tokens::get();
-    if crate::render_workspace::active(app) {
-        render_card(app, ui);
-        return;
-    }
-    let stacked = crate::timeline_left::stacked(app);
-    let container =
-        Container::new(ui.ctx(), Surface::Panel).joined(crate::ui_kit::DockEdges { left: true, top: true, bottom: stacked, ..Default::default() });
-    let gap = container.gap();
-    let width = browser_width(app.preferences.browser_width);
-    let vertical = app.ui.show_timeline && app.preferences.timeline_left;
-    let mut available = available;
-    if !stacked {
-        available.min.x += crate::agent_chat::left_inset(app, available);
-    }
-    if vertical
-        && !stacked
-        && let Some(history) = app.shell.history
-    {
-        available.min.x = (history.right() + gap).min(available.right()) - gap;
-    }
-    let reveals = reveals(app);
-    let collapsed = vertical && !stacked && !reveals && app.preferences.timeline_left_browser_collapsed;
-    let bounds = if stacked {
-        crate::timeline_left::stacked_rects(app, available).0
-    } else {
-        panel_bounds(available, if vertical { None } else { app.shell.history }, if collapsed { collapsed_width() } else { width }, gap)
-    };
-    let opacity = if reveals {
-        let edge = Rect::from_min_max(pos2(available.left(), bounds.top()), pos2(bounds.left() + t.space_10, bounds.bottom()));
-        crate::scenario::publish_target("browser:edge", edge);
-        reveal_opacity(app, ui.ctx(), app.shell.browser, edge)
-    } else {
-        1.0
-    };
-    app.shell.browser_hidden = reveals && opacity < 0.5;
-    app.shell.browser = None;
-    let min_height = HEADER_H + 2.0 * (CARD_INSET + 1.0);
-    // A dialog in the left column holds the browser's place (`dialog_column`).
-    if !crate::dialog_column::holds(app) && bounds.is_positive() && bounds.height() >= min_height {
-        let fill = if container.floating() && app.preferences.browser_float { t.panel.gamma_multiply(BROWSER_FLOAT_ALPHA) } else { t.panel };
-        let frame = container.frame(ui.ctx(), fill, crate::frame::Side::Left).inner_margin(CARD_INSET as i8);
-        let inner_width = (bounds.width() - frame.total_margin().sum().x).max(0.0);
-        let inner_height = (bounds.height() - frame.total_margin().sum().y).max(0.0);
-        let card = Container::new(ui.ctx(), Surface::Panel).area(egui::Id::unique("sc_browser_card")).fixed_pos(bounds.min).show(ui.ctx(), |ui| {
-            let limits = Rect::from_min_max(available.min, pos2(available.right(), bounds.bottom()));
-            let response = ui
-                .scope(|ui| {
-                    ui.set_opacity(opacity);
-                    container.show_frame(ui, frame, limits, |ui| {
-                        ui.set_width(inner_width);
-                        ui.set_max_height(inner_height);
-                        if stacked {
-                            ui.set_min_height(inner_height);
-                            ui.set_clip_rect(ui.clip_rect().intersect(Rect::from_min_size(ui.max_rect().min, vec2(inner_width, inner_height))));
-                        }
-                        if collapsed {
-                            browser_collapsed_rail(app, ui);
-                        } else {
-                            browser_contents(app, ui, true);
-                        }
-                    })
-                })
-                .inner;
-            if reveals && opacity < 1.0 {
-                reveal_tab(ui, response.response.rect, 1.0 - opacity);
-            }
-            if !collapsed {
-                resize_column(app, ui, response.response.rect, width, "left-browser-rail");
-            }
-        });
-        let rect = card.response.rect;
-        app.shell.browser = Some(rect);
-        crate::scenario::publish_rect("browser:card", rect);
-        // Preserve the overlay handle used by main's automation.
-        if app.preferences.browser_float {
-            crate::scenario::publish_rect("browser:float", rect);
-        }
-    }
-}
-
-fn render_card(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let bounds = crate::shell::panel_bounds(app, ui.available_rect_before_wrap());
-    let narrow = bounds.width() < 800.0;
-    crate::shell::register_panel(app, "render:browser:show", None, None);
-    if narrow && !app.shell.render_browser_open {
-        app.shell.browser = None;
-        crate::shell::register_panel(app, "render:browser", None, None);
-        crate::shell::register_panel(app, "render:appearances", None, None);
-        crate::render_ui::dock_chip(app, ui, "render:browser:show", "ui.browser_title", "view.render_browser", json!({"open":true}));
-        return;
-    }
-    let mut side = app.preferences.render_browser_side.clone();
-    let mut width = app.preferences.render_browser_width;
-    let title = app.tr("render.page_scene").to_string();
-    let labels = [app.tr("render.tree_by_object").to_string(), app.tr("render.tree_by_look").to_string()];
-    let search_label = app.tr("render.tree_search").to_string();
-    let mut lens = usize::from(app.render_workspace.view.by_look);
-    let mut search_clicked = false;
-    let content = crate::ui_kit::Panel::workspace_with_header(
-        ui,
-        crate::ui_kit::WorkspaceOptions {
-            id: "render:browser",
-            title: &title,
-            icon: "list",
-            bounds: crate::ui_kit::Panel::stack_first_bounds(bounds),
-            fill_height: true,
-            compact: crate::render_ui::compact(app, bounds.width()),
-            editor: false,
-            enabled: true,
-            header_actions: None,
-            move_command: "view.render_dock",
-        },
-        &mut side,
-        &mut width,
-        true,
-        |ui, options| {
-            search_clicked =
-                crate::ui_kit::tree_header(ui, options.title, &mut lens, &labels.iter().map(String::as_str).collect::<Vec<_>>(), &search_label);
-        },
-        |ui| {
-            if narrow {
-                let hide = crate::ui_kit::button(ui, app.tr("render.fold_browser"), crate::ui_kit::Button::Normal);
-                crate::scenario::publish_target("render:browser:hide", hide.rect);
-                if hide.clicked() {
-                    let _ = app.run("view.render_browser", json!({"open":false}));
-                }
-            }
-            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_compact_tree"), true));
-            browser_contents(app, ui, true);
-            ui.ctx().data_mut(|d| d.remove::<bool>(egui::Id::unique("sc_compact_tree")));
-        },
-    );
-    if (lens == 1) != app.render_workspace.view.by_look {
-        let _ = app.run("view.render_browser", json!({"by_look":lens == 1}));
-    }
-    if search_clicked {
-        let _ = app.run("view.render_browser", json!({"search":!app.render_workspace.view.search_objects}));
-    }
-    app.preferences.render_browser_width = width;
-    let requested =
-        content.as_ref().and_then(|c| c.inner.1).map(str::to_string).or_else(|| (app.preferences.render_browser_side != side).then(|| side.clone()));
-    if let Some(side) = requested {
-        let _ = app.run("view.render_dock", serde_json::json!({"panel":"browser","side":side}));
-    }
-    let rect = content.map(|c| c.response.rect);
-    app.shell.browser = rect;
-    crate::shell::register_panel(
-        app,
-        "render:browser",
-        rect,
-        if narrow { None } else { Some(if side == "left" { crate::ui_kit::Edge::Left } else { crate::ui_kit::Edge::Right }) },
-    );
-    if let Some(rect) = rect {
-        crate::scenario::publish_rect("browser:card", rect);
-    }
-    render_appearances(app, ui, rect);
-}
-
-/// Keep the existing appearances companion below either Browser host.
-pub(crate) fn render_appearances(app: &mut SolveApp, ui: &mut egui::Ui, browser: Option<Rect>) {
-    if let Some(rect) = browser {
-        let bounds = crate::shell::panel_bounds(app, ui.available_rect_before_wrap());
-        crate::render_workspace::appearances_card(app, ui, crate::ui_kit::Panel::stack_next_bounds(bounds, rect));
-    } else {
-        crate::shell::register_panel(app, "render:appearances", None, None);
-    }
-}
-
-fn browser_collapsed_rail(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let t = Tokens::get();
-    let title_top = t.space_24 + ui.spacing().item_spacing.y;
-    let height = title_top + t.space_24 * 4.0 + t.space_8;
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-    // Include the card margin in the hit target; keep the tint inside that margin.
-    let response = ui
-        .interact(rect.expand(CARD_INSET + 1.0), ui.scope_id().with("browser_header"), Sense::click())
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
-    if response.hovered() || response.has_focus() {
-        crate::ui_kit::panel_header_hover(ui.painter(), rect);
-    }
-    let disclosure = Rect::from_min_size(rect.min, vec2(rect.width(), t.space_24));
-    crate::ui_kit::disclosure(ui.painter(), disclosure.center(), false, t.text_dim);
-    crate::scenario::publish_handle("left-browser-toggle", disclosure.center());
-    crate::scenario::publish_target("browser:header", disclosure);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), solidcraft_ui_text::tr("ui.browser_title")));
-    if response.backing_on_hover_text(solidcraft_ui_text::tr("ui.browser_expand")).clicked() {
-        app.preferences.timeline_left_browser_collapsed = false;
-    }
-    let galley =
-        ui.painter().layout_no_wrap(solidcraft_ui_text::tr("ui.browser_title").to_owned(), crate::ui_kit::type_face::semibold(t.font_body), t.text);
-    let title = Rect::from_min_max(rect.min + vec2(0.0, title_top), rect.max);
-    ui.painter().add(
-        egui::epaint::TextShape::new(title.center() - galley.size() / 2.0, galley, t.text)
-            .with_angle_and_anchor(std::f32::consts::FRAC_PI_2, egui::Align2::CENTER_CENTER),
-    );
-}
-
-pub(crate) fn panel_bounds(available: Rect, history: Option<Rect>, width: f32, gap: f32) -> Rect {
-    let min = available.min + vec2(gap, 0.0);
-    let right = (available.right() - gap).max(min.x);
-    let bottom = history.map_or(available.bottom() - gap, |r| r.top() - gap).max(min.y);
-    Rect::from_min_max(min, pos2((min.x + width).min(right), bottom))
-}
-
-fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
-    let t = Tokens::get();
-    // Only the floating card folds; the docked column keeps its full height.
-    let render = crate::render_workspace::active(app);
-    if !render {
-        browser_header(app, ui, collapsible);
-    }
-    let stacked = !render && crate::timeline_left::stacked(app);
-    if !render
-        && collapsible
-        && (if stacked {
-            (app.preferences.timeline_left_browser_collapsed && app.shell.history_folding.is_none_or(|p| p[0] >= 1.0))
-                || ui.available_height() <= t.space_3
-        } else {
-            app.preferences.browser_collapsed && !reveals(app) && !(app.ui.show_timeline && app.preferences.timeline_left)
-        })
-    {
-        return;
-    }
-    if crate::render_workspace::browser_mode(app, ui) {
-        return;
-    }
-    if !render {
-        t.secondary_hline(ui.painter(), ui.max_rect().x_range(), ui.cursor().top() + 1.0, t.toolbar.lerp_to_gamma(t.border, 0.5));
-        ui.add_space(t.space_3);
-    }
-    rows_contents(app, ui, collapsible && !stacked);
-}
-
 /// Existing Browser content without placement, title or collapse chrome.
 pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     sync_reveals(app);
+    // The rows above a hovered or selected body are marked from its placement's path: a large
+    // assembly names its placements beside the window, so the first hover never waits for them.
+    if follows_view(app) {
+        prepare_body_paths_with(app, Some(ui.ctx()));
+    }
     let render = crate::render_workspace::active(app);
     if render {
+        // Render has its own search, and its tree never filters by this one.
+        app.tree.search.clear();
         ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("sc_compact_tree"), true));
+    } else if ui.rect_contains_pointer(ui.max_rect())
+        && !ui.ctx().text_edit_focused()
+        && ui.input(|i| i.modifiers.command_only() && i.key_pressed(egui::Key::F))
+        && crate::keymap::commands_for(app, &crate::keymap::key_name(egui::Key::F, egui::Modifiers::COMMAND)).is_empty()
+    {
+        // A field being typed in keeps the keyboard, and a command given this key keeps it: the
+        // magnifier opens the search then.
+        show_search(app);
     }
     if !crate::render_workspace::browser_mode(app, ui) {
-        rows_contents(app, ui, true);
+        crate::edit_in_place::browser_strip(app, ui);
+        browser_rows(app, ui, !holds_compact_history(app));
     }
     if render {
         ui.ctx().data_mut(|data| data.remove::<bool>(egui::Id::unique("sc_compact_tree")));
     }
 }
 
-fn rows_contents(app: &mut SolveApp, ui: &mut egui::Ui, shrink_height: bool) {
-    crate::edit_in_place::browser_strip(app, ui);
-    if shrink_height {
-        browser_rows_hugging(app, ui);
+/// Gives the search's field the keyboard, showing its bar and opening and unfolding the Browser's
+/// panel ([`reveal_shared_panel`]).
+fn show_search(app: &mut SolveApp) {
+    reveal_shared_panel(app, "browser");
+    app.tree.search.show();
+}
+
+/// The panel header's magnifier: ends the search when its bar is shown, otherwise shows the bar.
+pub(crate) fn magnifier(app: &mut SolveApp) {
+    if crate::browser_search::bar_shown(app) {
+        app.tree.search.clear();
     } else {
-        browser_rows(app, ui);
+        show_search(app);
     }
 }
 
-/// The header: the title, the body count and (on the floating card) a chevron that folds the
-/// card to just this row. The whole row is the button. A browser that reveals on hover never
-/// folds: the whole card is what the pointer finds.
-fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
-    let collapsible = collapsible && !reveals(app);
-    let t = Tokens::get();
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), HEADER_H), Sense::hover());
-    let response = ui.interact(rect, ui.scope_id().with("browser_header"), if collapsible { Sense::click() } else { Sense::hover() });
-    crate::scenario::publish_target("browser:header", rect);
-    let vertical = app.ui.show_timeline && app.preferences.timeline_left;
-    let stacked = crate::timeline_left::stacked(app);
-    let collapsed =
-        collapsible && if stacked { app.preferences.timeline_left_browser_collapsed } else { !vertical && app.preferences.browser_collapsed };
-    if vertical {
-        crate::scenario::publish_handle("left-browser-toggle", rect.center());
-    }
-    if collapsible && (response.hovered() || response.has_focus()) {
-        crate::ui_kit::panel_header_hover(ui.painter(), rect);
-    }
-    let title = solidcraft_ui_text::tr("ui.browser_title").to_string();
-    let kind = if collapsible { egui::Role::Button } else { egui::Role::Label };
-    response.widget_info(|| egui::WidgetInfo::labeled(kind, true, &title));
-    let galley = ui.painter().layout_no_wrap(title, crate::ui_kit::type_face::semibold(t.font_heading), t.text);
-    ui.painter().galley(pos2(rect.left() + t.space_6, rect.center().y - galley.size().y / 2.0), galley, t.text);
-    let mut right = rect.right() - t.space_6;
-    if collapsible {
-        crate::ui_kit::disclosure(ui.painter(), pos2(right - t.form_section_icon_size / 2.0, rect.center().y), !collapsed, t.text_dim);
-        right -= 18.0;
-    }
-    let bodies = app.session.model.state().bodies.len();
-    let key = if bodies == 1 { "ui.browser_bodies_one" } else { "ui.browser_bodies_other" };
-    let count = solidcraft_ui_text::format(key, &[("count", &bodies.to_string())]);
-    let galley = ui.painter().layout_no_wrap(count, FontId::proportional(t.font_body), t.text_dim);
-    ui.painter().galley(pos2(right - galley.size().x, rect.center().y - galley.size().y / 2.0), galley, t.text_dim);
-    if collapsible {
-        let tip = solidcraft_ui_text::tr(if collapsed { "ui.browser_expand" } else { "ui.browser_collapse" });
-        if response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(tip).clicked() {
-            if stacked {
-                app.preferences.timeline_left_browser_collapsed = !app.preferences.timeline_left_browser_collapsed;
-            } else if vertical {
-                app.preferences.timeline_left_browser_collapsed = true;
-            } else {
-                app.preferences.browser_collapsed = !app.preferences.browser_collapsed;
-            }
-        }
-    }
+/// In the compact layout with the History shown in the Browser, the Browser is the only side panel
+/// and holds the whole History, so it fills the window's height instead of hugging its rows (#14566).
+/// The panel host still folds it to its header when the user folds it.
+pub(crate) fn holds_compact_history(app: &SolveApp) -> bool {
+    app.ui.layout == crate::ui_kit::LayoutMode::Docked && app.preferences.history_in_browser && !crate::render_workspace::active(app)
 }
 
 fn prepare_model(app: &mut SolveApp) {
     if app.tree.model.as_ref().is_none_or(|model| !model.matches(&app.session)) {
         app.tree.model = Some(model::Model::new(&app.session));
     }
+}
+
+/// Walk the placements once for this model, so [`placed_body_path`] can answer without `&mut`
+/// (the Parts and Components selection modes pick while the view draws).
+pub(crate) fn prepare_body_paths(app: &mut SolveApp) {
+    prepare_body_paths_with(app, None);
+}
+
+/// [`prepare_body_paths`] with the window to wake when a large design's names land: naming a
+/// 100-printer assembly's placements took 14 s, so a large design names them on a worker.
+pub(crate) fn prepare_body_paths_with(app: &mut SolveApp, ctx: Option<&egui::Context>) {
+    prepare_model(app);
+    if let Some(model) = app.tree.model.as_mut() {
+        model.start_body_paths(&app.session, ctx);
+        model.poll_body_paths();
+    }
+}
+
+/// The placement a placed body (by its world name) belongs to, after [`prepare_body_paths`]; None
+/// for a body of the top-level design.
+pub(crate) fn placed_body_path(app: &SolveApp, body: &str) -> Option<Vec<u64>> {
+    app.tree.model.as_ref().filter(|model| model.matches(&app.session))?.placed_path(body)
 }
 
 fn model_placement(app: &mut SolveApp, path: &[u64]) -> Option<std::sync::Arc<solidcraft_engine::occurrences::OccurrencePlacement>> {
@@ -1603,14 +1618,7 @@ fn model_feature_indices(app: &SolveApp, component: u64, sketches: bool) -> Vec<
             .take(app.session.doc.marker.unwrap_or(app.session.doc.features.len()))
             .enumerate()
             .filter_map(|(i, f)| {
-                let kind = if sketches {
-                    matches!(f.kind, FeatureKind::Sketch { .. })
-                } else {
-                    matches!(
-                        f.kind,
-                        FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. }
-                    )
-                };
+                let kind = if sketches { matches!(f.kind, FeatureKind::Sketch { .. }) } else { f.kind.is_construction() };
                 (f.component == component && kind).then_some(i)
             })
             .collect(),
@@ -1620,78 +1628,96 @@ fn model_feature_indices(app: &SolveApp, component: u64, sketches: bool) -> Vec<
 /// The design's Origin, Bodies and Construction rows as the browser draws them (a click picks
 /// for an open dialog as there), for the design tree over the view while a dialog holds the left
 /// column (`dialog_tree`, #6710).
-fn design_tree(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions) {
-    prepare_model(app);
-    // The root's folders as the browser draws them (`browser_cache`).
-    let mut cache = app.tree.cache.take().unwrap_or_default();
-    cache.prepare(app);
-    let folders = ["bodies", "construction"].map(|folder| cache.folder(app, 0, None, folder));
-    app.tree.cache = Some(cache);
-    ui.scope(|ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        origin_rows(app, ui, 0, acts);
-        for (folder, data) in ["bodies", "construction"].into_iter().zip(&folders) {
-            folder_rows_at(app, ui, 0, None, folder, 0, acts, data);
-        }
-    });
-}
-
-fn browser_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
+/// `shrink_height` hugs the rows; otherwise they take the whole height they're given.
+fn browser_rows(app: &mut SolveApp, ui: &mut egui::Ui, shrink_height: bool) {
     crate::semantic_content::show(
         app,
         ui,
         crate::semantic_content::ContentOwner::BROWSER,
-        crate::semantic_content::ContentRequest::Browser { shrink_height: false },
-    );
-}
-
-/// As [browser_rows], but the area hugs the rows it drew (the floating card), up to the height
-/// the caller allowed.
-fn browser_rows_hugging(app: &mut SolveApp, ui: &mut egui::Ui) {
-    crate::semantic_content::show(
-        app,
-        ui,
-        crate::semantic_content::ContentOwner::BROWSER,
-        crate::semantic_content::ContentRequest::Browser { shrink_height: true },
+        crate::semantic_content::ContentRequest::Browser { shrink_height },
     );
 }
 
 fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shrink_height: bool) {
+    if crate::drawing_workspace::active(app) {
+        let top = ui.cursor().top();
+        let inset = egui::Margin::symmetric(Tokens::get().space_8 as i8, 0);
+        let output = egui::Frame::NONE
+            .inner_margin(inset)
+            .show(ui, |ui| {
+                present(app, ui, acts, (true, shrink_height), |app, rows, _| {
+                    crate::drawing_workspace::browser::show(app, rows);
+                })
+            })
+            .inner;
+        crate::panel_runtime::report_content_extent(ui, top, output.content_height, true);
+        return;
+    }
     prepare_model(app);
+    if crate::browser_search::bar_shown(app) && !crate::browser_search::in_header(ui.ctx()) {
+        // The field is in the panel's header, in the title's place (#1634); a Browser grouped with
+        // other panels has tabs there, so the field is the first row under them.
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), crate::ui_kit::row_height() + Tokens::get().space_8), Sense::hover());
+        crate::browser_search::field_row(app, ui, rect);
+    }
+    if app.tree.search.on() {
+        // Under the header and never scrolled with the rows, but clipped to the card's height, so it
+        // folds away with the card as the rows do.
+        ui.spacing_mut().item_spacing.y = 0.0;
+        egui::ScrollArea::vertical()
+            .id_salt("browser_search_results")
+            .max_height(ui.available_height())
+            .min_scrolled_height(0.0)
+            .auto_shrink([false, true])
+            .scroll_source(egui::scroll_area::ScrollSource::NONE)
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .show(ui, |ui| crate::browser_search::results(app, ui));
+        if app.tree.search.hits().is_some_and(|h| h.total() == 0) {
+            return;
+        }
+    }
     let mut cache = app.tree.cache.take().unwrap_or_default();
     cache.prepare(app);
     let top = ui.cursor().top();
-    let output = egui::ScrollArea::vertical()
-        // The card may animate all the way down to its header.
-        .min_scrolled_height(0.0)
-        .auto_shrink([false, shrink_height])
-        .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: true, mouse_wheel: true, ..egui::scroll_area::ScrollSource::NONE })
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            if crate::render_workspace::active(app) {
-                crate::render_workspace::scene::sections(app, ui);
-                if !crate::render_workspace::scene::objects(app, ui, &mut acts.hover_bodies, &mut acts.hovered) {
-                    component_rows(app, ui, 0, 1, acts, &mut cache);
-                }
-                crate::render_workspace::scene::output(app, ui);
-            } else {
-                component_rows(app, ui, 0, 0, acts, &mut cache);
+    // The rows are the kit panel's (#15942), with the panel's own search off: this search is the
+    // engine's (`browser_find`, also `browser.find`), and the rows leave out what it doesn't list
+    // before they reach the panel, so a search costs only the rows it shows.
+    // The card may animate all the way down to its header: the panel's scroll area shrinks to none.
+    let output = present(app, ui, acts, (true, shrink_height), |app, rows, acts| {
+        if crate::render_workspace::active(app) {
+            crate::render_workspace::scene::sections(app, rows);
+            if !crate::render_workspace::scene::objects(app, rows, &mut acts.hover_bodies, &mut acts.hovered) {
+                component_rows(app, rows, 0, 1, acts, &mut cache);
             }
-        });
-    crate::panel_runtime::report_content_extent(ui, top, output.content_size.y, true);
+            crate::render_workspace::scene::output(app, rows);
+        } else {
+            component_rows(app, rows, 0, 0, acts, &mut cache);
+        }
+    });
+    crate::panel_runtime::report_content_extent(ui, top, output.content_height, true);
     app.tree.cache = Some(cache);
 }
 
 /// Existing semantic rows, reusable by either presentation without a panel host.
 pub(crate) fn render_content(app: &mut SolveApp, ui: &mut egui::Ui, request: crate::semantic_content::ContentRequest) -> Actions {
     crate::semantic_content::ensure_session(app, ui.ctx());
+    if follows_view(app) {
+        prepare_body_paths_with(app, Some(ui.ctx()));
+    }
     let mut acts = Actions { session: Some(app.session.uid), lit: Lit::of(app), ..Default::default() };
     match request {
         crate::semantic_content::ContentRequest::Browser { shrink_height } => rows_scrolling(app, ui, &mut acts, shrink_height),
-        crate::semantic_content::ContentRequest::ActiveBodiesOrigin => active_bodies_origin(app, ui, &mut acts),
-        crate::semantic_content::ContentRequest::DesignTree => design_tree(app, ui, &mut acts),
+        // History's rows are never filtered by the Browser's search.
+        crate::semantic_content::ContentRequest::ActiveBodiesOrigin => unsearched(app, |app| active_bodies_origin(app, ui, &mut acts)),
     }
     acts
+}
+
+/// `draw` with the Browser's search set aside, for rows outside the Browser that it never filters.
+fn unsearched(app: &mut SolveApp, draw: impl FnOnce(&mut SolveApp)) {
+    let search = std::mem::take(&mut app.tree.search);
+    draw(app);
+    app.tree.search = search;
 }
 
 /// History's optional prefix shares the Browser's cache, folds, row renderers and commands.
@@ -1715,10 +1741,10 @@ fn active_bodies_origin(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Action
     cache.prepare(app);
     let bodies = cache.folder(app, component, path.as_deref(), "bodies");
     app.tree.cache = Some(cache);
-    ui.scope(|ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        folder_rows_at(app, ui, component, path.as_deref(), "bodies", 0, acts, &bodies);
-        origin_rows(app, ui, 0, acts);
+    // In the History's own layout, with no scroll area of their own.
+    present(app, ui, acts, (false, true), |app, rows, acts| {
+        folder_rows_at(app, rows, component, path.as_deref(), "bodies", 0, acts, &bodies);
+        origin_rows(app, rows, 0, acts);
     });
 }
 
@@ -1737,16 +1763,11 @@ pub(crate) fn apply_content_actions(app: &mut SolveApp, acts: Actions) {
 }
 
 pub(crate) fn cancel_content_drag(ctx: &egui::Context, session: u64) {
-    if egui::DragAndDrop::payload::<Drag>(ctx).is_some_and(|payload| payload.source.session == session)
-        || egui::DragAndDrop::payload::<OccurrenceDrag>(ctx).is_some_and(|payload| payload.source.session == session)
-    {
-        egui::DragAndDrop::clear_payload(ctx);
-    }
+    panel::cancel_drag(ctx, session);
 }
 
 /// App-owned editor lifecycle; these windows do not depend on any tree being presented.
 pub(crate) fn editors(app: &mut SolveApp, ui: &mut egui::Ui) {
-    crate::browser_prompts::occurrence_panel(app, ui);
     crate::browser_prompts::capture_prompt(app, ui.ctx());
     crate::browser_canvas::panel(app, ui.ctx());
     point_clouds::panel(app, ui.ctx());
@@ -1792,7 +1813,8 @@ pub(crate) fn prune_reveals(app: &mut SolveApp) {
 
 fn component_name(app: &SolveApp, id: u64) -> String {
     if id == 0 {
-        return app.session.doc.name.clone();
+        // The design's top row names it the way its tab does: after the file (#7267).
+        return crate::documents::tab_name(app, &app.session);
     }
     let doc = &app.session.doc;
     let name = doc.components.iter().find(|c| c.id == id).map(|c| c.name.clone()).unwrap_or_default();
@@ -1801,15 +1823,15 @@ fn component_name(app: &SolveApp, id: u64) -> String {
     crate::dialogs_part_size::browser_label(app, id, &name)
 }
 
-fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, acts: &mut Actions, cache: &mut cache::Cache) {
+fn component_rows(app: &mut SolveApp, rows: &mut Rows<'_>, id: u64, depth: usize, acts: &mut Actions, cache: &mut cache::Cache) {
     let mut root = std::mem::take(&mut cache.root);
-    component_rows_inner(app, ui, id, depth, acts, cache, &mut root);
+    component_rows_inner(app, rows, id, depth, acts, cache, &mut root);
     cache.root = root;
 }
 
 fn component_rows_inner(
     app: &mut SolveApp,
-    ui: &mut egui::Ui,
+    rows: &mut Rows<'_>,
     id: u64,
     depth: usize,
     acts: &mut Actions,
@@ -1819,9 +1841,9 @@ fn component_rows_inner(
     if id == 0 && crate::render_workspace::active(app) {
         let Some(slot) = root.folders.first_mut() else { return };
         let data = slot.get_or_insert_with(|| cache.folder(app, id, None, "bodies"));
-        folder_rows_at(app, ui, id, None, "bodies", depth.saturating_sub(1), acts, data);
+        folder_rows_at(app, rows, id, None, "bodies", depth.saturating_sub(1), acts, data);
         for path in &root.children {
-            occurrence_rows(app, ui, path, depth, acts, cache);
+            occurrence_rows(app, rows, path, depth, acts, cache);
         }
         return;
     }
@@ -1832,8 +1854,11 @@ fn component_rows_inner(
     let visible = id == 0 || bodies.is_empty() || bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b));
     let faded = app.session.active_component != 0 && !app.session.doc.component_within(id, app.session.active_component) && !active;
     let name = &root.name;
+    let link = app.tree.links.get(id).cloned();
     let badges: &[&str] = if root.grounded { &["pin"] } else { &[] };
     let appearance = crate::render_workspace::scene::decoration(app, bodies);
+    // A search never matches the design itself: it is the matches' parent, dimmed.
+    let searching = app.tree.search.on();
     let row = Row {
         depth,
         fold: Some(open),
@@ -1841,18 +1866,35 @@ fn component_rows_inner(
         icon: "component",
         label: name,
         name: true,
+        rename: true,
         selected: app.tree.picked_components.contains(&id),
-        dim: faded,
+        dim: faded || searching,
         radio: Some(active),
         badges,
+        icon_badge: link.as_ref().map(|link| link.icon_badge()),
         swatch: appearance.swatch,
         secondary: &appearance.name,
         count: &appearance.count,
         // The design holds everything the tree lists.
         mark: if id == 0 && acts.lit.any() { Mark::Branch } else { Mark::None },
+        status: cache.defects.get(&id).map(|_| Status::Warning),
+        status_tip: cache.defects.get(&id),
         ..Default::default()
     };
-    let r = draw_row(ui, ui.scope_id().with(("comp", id)), &row);
+    // Bodies and sketches dropped on a component move into it; a placement dropped on it moves
+    // into it (the design row: out to the design).
+    let accept = |d: &Dragged, zone: Zone| {
+        zone == Zone::Into
+            && same_document(app, d)
+            && (item_drag(d).is_some_and(|d| d.comp != id && d.folder != "construction" && d.groups.is_empty())
+                || placement_drag(d).is_some_and(|d| occurrence_can_land(app, d, id)))
+    };
+    let r = node_row(rows, Spec { key, drops: panel::Drops { before: false, into: true }, accept: Some(&accept), ..Default::default() }, row);
+    if let (Some(resp), Some(link)) = (&r.resp, &link) {
+        resp.clone().backing_on_hover_ui(|ui| {
+            ui.label(link.tooltip());
+        });
+    }
     if r.fold {
         toggle(app, key, true);
     }
@@ -1860,19 +1902,18 @@ fn component_rows_inner(
         let _ = app.run("component.activate", json!({ "component": id }));
     }
     if r.eye {
-        if visible {
-            app.session
-                .visibility
-                .hidden_bodies
-                .extend(bodies.iter().filter(|b| !app.session.visibility.hidden_bodies.contains(b)).cloned().collect::<Vec<_>>());
-        } else {
-            app.session.visibility.hidden_bodies.retain(|b| !bodies.contains(b));
+        let bodies = selected_component_bodies(app, id);
+        if !bodies.is_empty() {
+            let show = selected_eye_visible(rows.ui().ctx(), bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b)));
+            let _ = app.run("browser.visibility", json!({"items": bodies, "visible": show}));
         }
     }
-    if r.clicked && !r.double {
+    // With a dialog open a second click picks again: the dialog takes the component's bodies.
+    let rename_here = r.slow_rename && app.dialog.is_none();
+    if r.clicked && !r.double && !rename_here {
         let names = bodies_of_component(app, id);
         if !offer_bodies(app, &names, Take::Toggle) {
-            let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+            let ctrl = rows.ui().input(|i| i.modifiers.command || i.modifiers.ctrl);
             if !ctrl {
                 app.tree.picked_components.clear();
                 let _ = app.run("select.clear", json!({}));
@@ -1884,44 +1925,39 @@ fn component_rows_inner(
             }
         }
     }
-    if r.double {
+    if rename_here {
+        start_inline_rename(app, crate::context_menu::RenameWhat::Component(id), r.name_at());
+    } else if r.double {
         if app.session.doc.parts.contains_key(&id) {
             crate::dialogs_part_size::open(app, id);
         } else {
             crate::edit_in_place::double_click_component(app, json!({ "component": id }));
         }
     }
+    inline_rename(app, rows.ui(), r.name_at(), name);
     if r.hovered {
         acts.hover(bodies.iter());
     }
     if let Some(p) = r.secondary {
         acts.menu = Some((p, Target::Component { id }));
     }
-    // Bodies and sketches dropped on a component move into it.
-    if let Some(resp) = &r.resp
-        && let Some(d) = drop_target(ui, resp, |d: &Drag| d.comp != id && d.folder != "construction" && d.groups.is_empty(), DropMark::Box)
-    {
-        acts.drop_from(d.source, DropAction::Component { to: id, folder: d.folder, keys: d.keys.clone() });
-    }
-
-    // A placement row dropped on the design row moves out to the design.
-    if let Some(resp) = &r.resp
-        && let Some(d) = occurrence_drop_target(ui, resp, |d| occurrence_can_land(app, d, id))
-    {
+    if let Some((d, _, source)) = r.dropped_as::<ItemDrag>() {
+        acts.drop_from(source, DropAction::Component { to: id, folder: d.folder, keys: d.keys.clone() });
+    } else if let Some((d, _, source)) = r.dropped_as::<PlacementDrag>() {
         let occurrence = d.path.last().copied().unwrap_or(0);
-        acts.drop_from(d.source, DropAction::Reparent { occurrence, path: d.path.clone(), parent: id, parent_path: None });
+        acts.drop_from(source, DropAction::Reparent { occurrence, path: d.path.clone(), parent: id, parent_path: None });
     }
     if !open {
         return;
     }
     let d = depth + 1;
-    if id == 0 && !crate::render_workspace::active(app) {
-        doc_settings(app, ui, d);
-        named_view_rows(app, ui, d, acts);
-        origin_rows(app, ui, d, acts);
-        canvas_rows(app, ui, d, acts);
-        point_clouds::rows(app, ui, d, acts);
-        analysis_rows(app, ui, d, acts);
+    if id == 0 && !crate::render_workspace::active(app) && !searching {
+        doc_settings(app, rows, d);
+        named_view_rows(app, rows, d, acts);
+        origin_rows(app, rows, d, acts);
+        canvas_rows(app, rows, d, acts);
+        point_clouds::rows(app, rows, d, acts);
+        analysis_rows(app, rows, d, acts);
     }
     let render = crate::render_workspace::active(app);
     for (slot, folder) in root.folders.iter_mut().zip(["bodies", "sketches", "construction"]) {
@@ -1929,16 +1965,16 @@ fn component_rows_inner(
             continue;
         }
         let data = slot.get_or_insert_with(|| cache.folder(app, id, None, folder));
-        folder_rows_at(app, ui, id, None, folder, d, acts, data);
+        folder_rows_at(app, rows, id, None, folder, d, acts, data);
     }
     if !render {
-        features::rows(app, ui, id, &[], d, acts);
+        features::rows(app, rows, id, &[], d, acts);
     }
     if id == 0 && !render {
-        acts.hover_joint = crate::dialogs_assembly::browser_joints(app, ui, d);
+        acts.hover_joint = crate::dialogs_assembly::browser_joints(app, rows, d);
     }
     for path in &root.children {
-        occurrence_rows(app, ui, path, d, acts, cache);
+        occurrence_rows(app, rows, path, d, acts, cache);
     }
 }
 
@@ -1962,34 +1998,43 @@ pub(crate) fn close_placement(app: &mut SolveApp, path: &[u64]) {
 
 /// A placement, rather than a component definition: repeated child IDs remain distinct
 /// because their complete paths are the selection and row identity.
-fn occurrence_rows(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], depth: usize, acts: &mut Actions, cache: &mut cache::Cache) {
+fn occurrence_rows(app: &mut SolveApp, rows: &mut Rows<'_>, path: &[u64], depth: usize, acts: &mut Actions, cache: &mut cache::Cache) {
     // Own this cached row while drawing: children can populate the cache without copying it.
     let Some((path, mut placement)) = cache.take_occurrence(app, path) else { return };
-    occurrence_rows_inner(app, ui, &path, depth, acts, cache, &mut placement);
+    occurrence_rows_inner(app, rows, &path, depth, acts, cache, &mut placement);
     cache.occurrences.insert(path, placement);
 }
 
 fn occurrence_rows_inner(
     app: &mut SolveApp,
-    ui: &mut egui::Ui,
+    rows: &mut Rows<'_>,
     path: &[u64],
     depth: usize,
     acts: &mut Actions,
     cache: &mut cache::Cache,
     placement: &mut cache::Node,
 ) {
+    // A search lists the placements that match, and dimmed, those that hold a match.
+    let (listed, matches, folds) = app.tree.search.hits().map_or((true, true, true), |h| (h.lists(path), h.matches(path), h.holds(path)));
+    if !listed {
+        return;
+    }
     let key = &placement.key;
     let open = is_open(app, key, true);
-    let on_screen = ui.is_rect_visible(row_rect(ui));
+    let on_screen = rows.next_visible();
     let active = app.session.active_occurrence_path.as_deref() == Some(path)
         || (app.session.active_occurrence_path.is_none() && app.session.active_component == placement.component && placement.first);
     let visible = !on_screen || app.session.occurrence_visible(path);
     let own_visible = !on_screen || !app.session.occurrence_hidden(path);
-    let selected = on_screen && app.session.selection.iter().any(|s| matches!(s, Sel::Occurrence { path: selected } if selected == path));
+    let selected = on_screen
+        && (app.session.selection.iter().any(|s| matches!(s, Sel::Occurrence { path: selected } if selected == path))
+            || crate::dialogs_move::picked(app, &Sel::Occurrence { path: path.to_vec() }));
     let faded = app.session.active_occurrence_path.as_ref().is_some_and(|p| !path.starts_with(p) && !p.starts_with(path));
     // A cut component has a dashed outline until Paste moves it.
     let cut = app.cut.placements.iter().any(|p| p.as_slice() == path);
+    let link = app.tree.links.get(placement.component).cloned();
     let badges: &[&str] = if placement.grounded { &["pin"] } else { &[] };
+    let emphasis = app.tree.search.hits().filter(|_| matches).and_then(|h| h.span(&placement.label));
     app.tree.remember(key);
     let appearance = if crate::render_workspace::active(app) {
         let bodies = placement.hover_bodies.get_or_insert_with(|| app.session.occurrence_bodies(path, true).unwrap_or_default());
@@ -1997,30 +2042,50 @@ fn occurrence_rows_inner(
     } else {
         crate::render_workspace::scene::Decoration::default()
     };
-    let r = draw_row(
-        ui,
-        ui.scope_id().with(key),
-        &Row {
-            depth,
-            fold: Some(open),
-            eye: Some(own_visible),
-            icon: "component",
-            label: &placement.label,
-            swatch: appearance.swatch,
-            secondary: &appearance.name,
-            count: &appearance.count,
-            name: true,
-            selected,
-            dim: faded || !visible,
-            cut,
-            radio: Some(active),
-            badges,
-            mark: acts.lit.placement(&app.session.doc, path, placement.component),
-            ..Default::default()
-        },
+    let row = Row {
+        depth,
+        fold: folds.then_some(open),
+        eye: Some(own_visible),
+        icon: "component",
+        label: &placement.label,
+        swatch: appearance.swatch,
+        secondary: &appearance.name,
+        count: &appearance.count,
+        name: true,
+        rename: true,
+        selected,
+        dim: faded || !visible || !matches,
+        cut,
+        radio: Some(active),
+        badges,
+        icon_badge: link.as_ref().map(|link| link.icon_badge()),
+        emphasis,
+        mark: acts.lit.placement(&app.session.doc, path, placement.component),
+        status: cache.defects.get(&placement.component).map(|_| Status::Warning),
+        status_tip: cache.defects.get(&placement.component),
+        ..Default::default()
+    };
+    // The top of a sibling's row puts the dragged placement before it; the rest of the row, and
+    // any other row, moves the placement into this row's component. Bodies and sketches dropped on
+    // it move into its component.
+    let (component, occurrence) = (placement.component, placement.occurrence);
+    let accept = |d: &Dragged, zone: Zone| {
+        same_document(app, d)
+            && match zone {
+                Zone::Before => placement_drag(d).is_some_and(|d| occurrence_sibling(app, d, occurrence).is_some()),
+                Zone::Into => {
+                    item_drag(d).is_some_and(|d| d.comp != component && d.folder != "construction" && d.groups.is_empty())
+                        || placement_drag(d).is_some_and(|d| occurrence_can_land(app, d, component))
+                }
+            }
+    };
+    let r = node_row(
+        rows,
+        Spec { key, item: true, drag: Some(DRAG_PLACEMENTS), drops: panel::Drops { before: true, into: true }, accept: Some(&accept) },
+        row,
     );
     if let Some(rect) = r.rect.filter(|_| r.resp.is_some()) {
-        crate::semantic_content::record_occurrence(ui, (path.to_vec(), placement.name.clone(), rect, open));
+        crate::semantic_content::record_occurrence(rows.ui(), (path.to_vec(), placement.name.clone(), rect, open));
         // Near the row's end, clear of an eye there.
         let end = r.eye_at.filter(|e| e.x > rect.center().x).map_or(rect.right() - 12.0, |e| e.x - 24.0);
         crate::scenario::publish_handle(&format!("row:occurrence:{}", key.trim_start_matches("o:")), pos2(end, rect.center().y));
@@ -2034,24 +2099,26 @@ fn occurrence_rows_inner(
         let inherited = if own_visible && !visible { "\nHidden by a parent placement. Show the parent to reveal this instance." } else { "" };
         resp.clone().backing_on_hover_ui(|ui| {
             ui.label(&placement.tooltip);
+            if let Some(link) = &link {
+                ui.label(link.tooltip());
+            }
             if !inherited.is_empty() {
                 ui.label(inherited.trim_start());
             }
         });
-        // Dragging the row moves the placement it stands for. A press on its fold arrow, eye or
-        // radio is not a drag of the row, so those controls keep their own jobs.
-        if resp.drag_started()
-            && !r.on_control
-            && let Some(source) = crate::semantic_content::current_source(app)
-        {
-            resp.dnd_set_drag_payload(OccurrenceDrag { source, path: path.to_vec(), component: placement.component });
-        }
+    }
+    // Dragging the row moves the placement it stands for. A press on its fold arrow, eye or radio
+    // is not a drag of the row, so those controls keep their own jobs.
+    if r.drag_started {
+        rows.drag_with(vec![node_id(key)], Some(Payload::new(PlacementDrag { path: path.to_vec(), component: placement.component })));
     }
     if r.fold {
         toggle(app, key, true);
     }
     if r.eye {
-        let _ = app.run("browser.visibility", json!({"visible": app.session.occurrence_hidden(path), "paths": [path]}));
+        let paths = selected_occurrence_paths(app, path);
+        let show = selected_eye_visible(rows.ui().ctx(), paths.iter().all(|p| app.session.occurrence_hidden(p)));
+        let _ = app.run("browser.visibility", json!({"visible": show, "paths": paths}));
     }
     let takes_components = app.dialog.as_ref().is_some_and(|d| d.takes_components());
     let params = json!({"component": placement.component, "occurrence": placement.occurrence, "path": path});
@@ -2063,17 +2130,22 @@ fn occurrence_rows_inner(
     if r.double && !takes_components && app.session.doc.parts.contains_key(&placement.component) {
         crate::dialogs_part_size::open(app, placement.component);
     }
+    let rename_here = r.slow_rename && app.dialog.is_none();
     if r.clicked && (takes_components || crate::dialogs_move::picks_components(app)) {
         if let Some(mut d) = app.dialog.take() {
             d.pick(&app.session, Sel::Occurrence { path: path.to_vec() });
             app.dialog = Some(d);
         }
-    } else if r.clicked && !r.double {
+    } else if r.clicked && !r.double && !rename_here {
         let names = app.session.occurrence_bodies(path, true).unwrap_or_default();
         if !offer_bodies(app, &names, Take::Toggle) {
-            click_select(app, ui, key.clone(), Some(Sel::Occurrence { path: path.to_vec() }));
+            click_select(app, r.how.as_ref(), Some(Sel::Occurrence { path: path.to_vec() }));
         }
     }
+    if rename_here {
+        start_inline_rename(app, crate::context_menu::RenameWhat::Component(placement.component), r.name_at());
+    }
+    inline_rename(app, rows.ui(), r.name_at(), &placement.label);
     if r.hovered {
         let bodies = placement.hover_bodies.get_or_insert_with(|| app.session.occurrence_bodies(path, true).unwrap_or_default());
         acts.hover(bodies.iter());
@@ -2084,75 +2156,63 @@ fn occurrence_rows_inner(
         }
         acts.menu = Some((p, Target::Occurrence { path: path.to_vec() }));
     }
-    if let Some(resp) = &r.resp
-        && let Some(d) =
-            drop_target(ui, resp, |d: &Drag| d.comp != placement.component && d.folder != "construction" && d.groups.is_empty(), DropMark::Box)
-    {
-        acts.drop_from(d.source, DropAction::Component { to: placement.component, folder: d.folder, keys: d.keys.clone() });
-    }
-
-    // The top of a sibling's row puts the dragged placement before it; the rest of the row, and
-    // any other row, moves the placement into this row's component.
-    let top = r.resp.as_ref().is_some_and(|resp| pointer_in_top(ui, resp.rect));
-    if let Some(resp) = &r.resp
-        && top
-        && let Some(d) = occurrence_reorder_target(ui, resp, |d| occurrence_sibling(app, d, placement.occurrence).is_some())
-        && let Some(parent) = occurrence_sibling(app, &d, placement.occurrence)
-    {
+    if let Some((d, _, source)) = r.dropped_as::<ItemDrag>() {
+        acts.drop_from(source, DropAction::Component { to: placement.component, folder: d.folder, keys: d.keys.clone() });
+    } else if let Some((d, zone, source)) = r.dropped_as::<PlacementDrag>() {
         let dragged = d.path.last().copied().unwrap_or(0);
-        let mut order: Vec<u64> = app.session.doc.occurrences.iter().filter(|o| o.parent == parent && o.id != dragged).map(|o| o.id).collect();
-        app.session.doc.sort_placements(parent, &mut order);
-        let at = order.iter().position(|o| *o == placement.occurrence).unwrap_or(order.len());
-        order.insert(at, dragged);
-        acts.drop_from(d.source, DropAction::OccurrenceOrder { parent, order });
+        match (zone, occurrence_sibling(app, d, placement.occurrence)) {
+            (Zone::Before, Some(parent)) => {
+                let mut order: Vec<u64> =
+                    app.session.doc.occurrences.iter().filter(|o| o.parent == parent && o.id != dragged).map(|o| o.id).collect();
+                app.session.doc.sort_placements(parent, &mut order);
+                let at = order.iter().position(|o| *o == placement.occurrence).unwrap_or(order.len());
+                order.insert(at, dragged);
+                acts.drop_from(source, DropAction::OccurrenceOrder { parent, order });
+            }
+            _ => acts.drop_from(
+                source,
+                DropAction::Reparent { occurrence: dragged, path: d.path.clone(), parent: placement.component, parent_path: Some(path.to_vec()) },
+            ),
+        }
     }
-    // A placement row dropped on this one moves into this row's component.
-    if let Some(resp) = &r.resp
-        && let Some(d) = occurrence_drop_target(ui, resp, |d| {
-            occurrence_can_land(app, d, placement.component) && !(top && occurrence_sibling(app, d, placement.occurrence).is_some())
-        })
-    {
-        let occurrence = d.path.last().copied().unwrap_or(0);
-        acts.drop_from(
-            d.source,
-            DropAction::Reparent { occurrence, path: d.path.clone(), parent: placement.component, parent_path: Some(path.to_vec()) },
-        );
-    }
-    if !open {
+    if !open || !folds {
         return;
     }
     let render = crate::render_workspace::active(app);
     if !render {
-        origin_rows_at(app, ui, depth + 1, acts, path);
+        origin_rows_at(app, rows, depth + 1, acts, path);
     }
     for (slot, folder) in placement.folders.iter_mut().zip(["bodies", "sketches", "construction"]) {
         if render && folder != "bodies" {
             continue;
         }
         let data = slot.get_or_insert_with(|| cache.folder(app, placement.component, Some(path), folder));
-        folder_rows_at(app, ui, placement.component, Some(path), folder, depth + 1, acts, data);
+        folder_rows_at(app, rows, placement.component, Some(path), folder, depth + 1, acts, data);
     }
     if !render {
-        features::rows(app, ui, placement.component, path, depth + 1, acts);
+        features::rows(app, rows, placement.component, path, depth + 1, acts);
         // The joints that attach this placement, as the root's Joints folder lists them (#9130).
-        if let Some(joint) = crate::dialogs_assembly::component_joints(app, ui, path, key, depth + 1) {
+        if let Some(joint) = crate::dialogs_assembly::component_joints(app, rows, path, key, depth + 1) {
             acts.hover_joint = Some(joint);
         }
     }
     if path.len() < 64 {
         for child in &placement.children {
-            occurrence_rows(app, ui, child, depth + 1, acts, cache);
+            occurrence_rows(app, rows, child, depth + 1, acts, cache);
         }
     }
 }
 
 /// The Document Settings group. A second click on an entry closes the window it opened, the way
 /// that window's own × does (#4150).
-fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
+fn doc_settings(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize) {
     let key = "docsettings";
     let open = is_open(app, key, false);
-    let r =
-        draw_row(ui, ui.scope_id().with(key), &Row { depth, fold: Some(open), icon: "settings", label: "Document Settings", ..Default::default() });
+    let r = node_row(
+        rows,
+        Spec { key, ..Default::default() },
+        Row { depth, fold: Some(open), icon: "settings", label: "Document Settings", ..Default::default() },
+    );
     if r.fold || r.clicked {
         toggle(app, key, false);
     }
@@ -2160,7 +2220,8 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         return;
     }
     let units = format!("Units: {}", app.session.doc.units);
-    let r = draw_row(ui, ui.scope_id().with("units"), &Row { depth: depth + 1, icon: "settings", label: &units, ..Default::default() });
+    let r =
+        node_row(rows, Spec { key: "units", ..Default::default() }, Row { depth: depth + 1, icon: "settings", label: &units, ..Default::default() });
     if let Some(p) = r.secondary {
         crate::context_menu::open_for(app, p, Target::Units);
     } else if r.clicked
@@ -2174,7 +2235,9 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         crate::prefs::unit_scale(&app.session.doc.units).1,
         format_args!("{:.*}", usize::from(app.preferences.angle_decimals), 0.0)
     );
-    if draw_row(ui, ui.scope_id().with("precision"), &Row { depth: depth + 1, icon: "settings", label: &prec, ..Default::default() }).clicked {
+    if node_row(rows, Spec { key: "precision", ..Default::default() }, Row { depth: depth + 1, icon: "settings", label: &prec, ..Default::default() })
+        .clicked
+    {
         if app.prefs_window.shell.open {
             crate::prefs_window::close(app, true);
         } else {
@@ -2182,17 +2245,19 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         }
     }
     let params = format!("Parameters ({})", app.session.doc.params.len());
-    if draw_row(ui, ui.scope_id().with("params"), &Row { depth: depth + 1, icon: "params", label: &params, ..Default::default() }).clicked {
+    if node_row(rows, Spec { key: "params", ..Default::default() }, Row { depth: depth + 1, icon: "params", label: &params, ..Default::default() })
+        .clicked
+    {
         if app.params.is_some() {
             app.params = None;
         } else {
             app.start("parameters.change");
         }
     }
-    if draw_row(
-        ui,
-        ui.scope_id().with("design_properties"),
-        &Row { depth: depth + 1, icon: "settings", label: "Design Properties", ..Default::default() },
+    if node_row(
+        rows,
+        Spec { key: "design_properties", ..Default::default() },
+        Row { depth: depth + 1, icon: "settings", label: "Design Properties", ..Default::default() },
     )
     .clicked
     {
@@ -2206,9 +2271,10 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
 
 /// The origin point, axes and planes, as `(key, icon, thing lit for it)`.
 fn origin_things() -> [(&'static str, &'static str, Option<Thing>); 7] {
-    let (axis, plane) = (|k: &str| Some(Thing::Axis(k.into())), |k: &str| Some(Thing::Plane(k.into())));
+    let (point, axis, plane) =
+        (|k: &str| Some(Thing::Point(k.into())), |k: &str| Some(Thing::Axis(k.into())), |k: &str| Some(Thing::Plane(k.into())));
     [
-        ("O", "point", None),
+        ("O", "point", point("O")),
         ("X", "axis", axis("X")),
         ("Y", "axis", axis("Y")),
         ("Z", "axis", axis("Z")),
@@ -2222,13 +2288,17 @@ fn origin_things() -> [(&'static str, &'static str, Option<Thing>); 7] {
 /// X/Y/Z axes and the XY/XZ/YZ planes at the placement's own origin, each with its own eye
 /// and selection reuse. The design's own Origin is the `id == 0` case and keeps its bare
 /// names (#7313).
-fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
-    origin_rows_at(app, ui, depth, acts, &[]);
+fn origin_rows(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &mut Actions) {
+    origin_rows_at(app, rows, depth, acts, &[]);
 }
 
 /// The Origin rows of one component placement, under its row: [`origin_rows`] keyed by the
 /// complete occurrence path, so repeated and nested placements each get their own folder
-fn origin_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions, path: &[u64]) {
+fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &mut Actions, path: &[u64]) {
+    // A search never looks at the Origin rows, the design's or a placement's, so it lists none of them.
+    if app.tree.search.on() {
+        return;
+    }
     let component = !path.is_empty();
     let folder = solidcraft_engine::origins::folder(path);
     let key = if component { folder.as_str() } else { "origin" };
@@ -2252,10 +2322,10 @@ fn origin_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mu
             (k, name, icon, thing)
         })
         .collect();
-    let r = draw_row(
-        ui,
-        ui.scope_id().with(key),
-        &Row {
+    let r = node_row(
+        rows,
+        Spec { key, ..Default::default() },
+        Row {
             depth,
             fold: Some(open),
             eye: Some(shown),
@@ -2267,6 +2337,10 @@ fn origin_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mu
             ..Default::default()
         },
     );
+    if r.clicked && !r.fold {
+        // The clicked Origin row is what V shows or hides, as for a folder (#14554).
+        pick_folder(app, key);
+    }
     if r.fold || r.clicked {
         toggle(app, key, false);
         if component && r.clicked {
@@ -2306,17 +2380,18 @@ fn origin_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mu
             _ => Some(Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }),
         };
         let (selected, mark) = lit_row(lit(&thing));
-        let r = draw_row(
-            ui,
-            ui.scope_id().with(("o", &name)),
+        let item_key = if component { name.clone() } else { format!("origin:{name}") };
+        let r = node_row(
+            rows,
+            Spec { key: &item_key, item: true, ..Default::default() },
             // Faded when hidden itself or with the whole Origin. A renamed plane's label is already
             // in the interface's language (`name`).
-            &Row {
+            Row {
                 depth: depth + 1,
                 eye: Some(visible),
                 icon,
                 label,
-                handle: component.then_some(name.as_str()),
+                handle: Some(name.as_str()),
                 name: label != k,
                 selected,
                 dim: !visible || faded,
@@ -2332,19 +2407,30 @@ fn origin_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mu
             let target = match icon {
                 "plane" => Some(Target::OriginPlane { name: name.clone() }),
                 "axis" => Some(Target::OriginAxis { name: name.clone() }),
+                "point" => Some(Target::OriginPoint { name: name.clone() }),
                 _ => None,
             };
             if let Some(target) = target {
                 acts.menu = Some((p, target));
             }
         }
+        // A plane row lights its plane. With the preference on, any Origin row also names its
+        // item as an Origin row's, so the view shows it, hidden or not, even where a feature has
+        // the same name (#15658). The view draws it; nothing here changes visibility.
         if r.hovered && icon == "plane" {
-            acts.hover_plane = Some(name);
+            acts.hover_plane = Some(name.clone());
         }
-        if r.clicked
-            && let Some(x) = sel
-        {
-            pick_from_browser(app, x);
+        if r.hovered && app.preferences.browser_hover_shows_origin {
+            acts.hover_origin = Some(name);
+        }
+        if r.clicked {
+            if app.dialog.is_some() {
+                if let Some(x) = sel {
+                    pick_from_browser(app, x);
+                }
+            } else {
+                click_select(app, r.how.as_ref(), sel);
+            }
         }
     }
 }
@@ -2353,11 +2439,15 @@ fn origin_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mu
 pub const STANDARD_VIEWS: [(&str, &str); 4] = [("Top", "top"), ("Front", "front"), ("Right", "right"), ("Home", "home")];
 
 /// Named Views: the standard views, then the design's saved cameras. A double-click restores
-/// one (animated).
-fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
+/// one (animated); a slower second click renames a saved view.
+fn named_view_rows(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &mut Actions) {
     let key = "namedviews";
     let open = is_open(app, key, false);
-    let r = draw_row(ui, ui.scope_id().with(key), &Row { depth, fold: Some(open), icon: "folder", label: "Named Views", ..Default::default() });
+    let r = node_row(
+        rows,
+        Spec { key, ..Default::default() },
+        Row { depth, fold: Some(open), icon: "folder", label: "Named Views", ..Default::default() },
+    );
     if r.fold || r.clicked {
         toggle(app, key, false);
     }
@@ -2368,7 +2458,8 @@ fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
         return;
     }
     for (label, view) in STANDARD_VIEWS {
-        let r = draw_row(ui, ui.scope_id().with(("stdview", view)), &Row { depth: depth + 1, icon: "home", label, ..Default::default() });
+        let view_key = format!("stdview:{view}");
+        let r = node_row(rows, Spec { key: &view_key, ..Default::default() }, Row { depth: depth + 1, icon: "home", label, ..Default::default() });
         if r.double {
             app.animate_view(view);
         }
@@ -2378,14 +2469,18 @@ fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
     }
     let names: Vec<String> = app.session.doc.named_views.iter().map(|v| v.name.clone()).collect();
     for name in names {
-        let r = draw_row(
-            ui,
-            ui.scope_id().with(("view", &name)),
-            &Row { depth: depth + 1, icon: "perspective", label: &name, name: true, ..Default::default() },
+        let view_key = format!("view:{name}");
+        let r = node_row(
+            rows,
+            Spec { key: &view_key, ..Default::default() },
+            Row { depth: depth + 1, icon: "perspective", label: &name, name: true, rename: true, ..Default::default() },
         );
-        if r.double {
+        if r.slow_rename {
+            start_inline_rename(app, crate::context_menu::RenameWhat::View(name.clone()), r.name_at());
+        } else if r.double {
             restore_view(app, &name);
         }
+        inline_rename(app, rows.ui(), r.name_at(), &name);
         if let Some(p) = r.secondary {
             acts.menu = Some((p, Target::NamedView { name }));
         }
@@ -2424,101 +2519,100 @@ pub fn view_items(app: &SolveApp, name: &str) -> Vec<Item> {
     ]
 }
 
-/// The Analysis folder: the Section Analysis, while there is one (shown or hidden), with an eye
-/// to hide and show it, a double-click to edit it and a menu to delete it (#822).
-fn analysis_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
-    if app.session.section.is_some() {
-        // A section made (or remade) while an older one was hidden replaces it, shown.
-        app.tree.hidden_section = None;
-        app.tree.analysis_hidden = false;
-        app.tree.section_hidden = false;
-    }
-    if app.session.section.is_none() && app.tree.hidden_section.is_none() {
-        app.tree.analysis_hidden = false;
-        app.tree.section_hidden = false;
+/// The Analysis folder: a row per plane of the Section Analysis while it has any (shown or
+/// hidden), each with an eye to hide and show it, a double-click to edit it and a menu to delete
+/// it (#822).
+fn analysis_rows(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &mut Actions) {
+    let mut planes: Vec<(u64, bool)> =
+        app.session.section.iter().map(|c| (c.id, true)).chain(app.session.section_hidden.iter().map(|c| (c.id, false))).collect();
+    planes.sort_unstable();
+    if planes.is_empty() {
         return;
     }
-    // Each eye is its own: the folder's never follows the section's, nor the other way round.
-    let (folder_shown, section_shown) = (!app.tree.analysis_hidden, !app.tree.section_hidden);
+    let folder_shown = app.session.section_folder.is_none();
     let key = "analysis";
     let start_open = rows_start_open(app);
     let open = is_open(app, key, start_open);
-    let r = draw_row(
-        ui,
-        ui.scope_id().with(key),
-        &Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label: "Analysis", dim: !folder_shown, ..Default::default() },
+    let r = node_row(
+        rows,
+        Spec { key, ..Default::default() },
+        Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label: "Analysis", dim: !folder_shown, ..Default::default() },
     );
     if r.fold || r.clicked {
         toggle(app, key, start_open);
     }
     if r.eye {
-        app.tree.analysis_hidden = folder_shown;
-        sync_section(app);
+        set_analysis_shown(app, !folder_shown);
+    }
+    if let Some(p) = r.secondary {
+        acts.menu = Some((p, Target::Analysis));
     }
     if !open {
         return;
     }
-    let r = draw_row(
-        ui,
-        ui.scope_id().with("section_analysis"),
-        &Row {
-            depth: depth + 1,
-            eye: Some(section_shown),
-            icon: "section",
-            label: "Section Analysis",
-            dim: !section_shown || !folder_shown,
-            ..Default::default()
-        },
-    );
-    if r.eye {
-        set_section_shown(app, !section_shown);
-    }
-    if r.double {
-        crate::dialogs::edit_section(app);
-    }
-    if let Some(p) = r.secondary {
-        acts.menu = Some((p, Target::Section));
-    }
-}
-
-/// Show or hide the Section Analysis itself (its eye): a hidden Analysis folder still keeps it
-/// off.
-pub fn set_section_shown(app: &mut SolveApp, shown: bool) {
-    app.tree.section_hidden = !shown;
-    sync_section(app);
-}
-
-/// The section is on while both the Analysis folder and the section itself are shown.
-fn sync_section(app: &mut SolveApp) {
-    let on = !app.tree.analysis_hidden && !app.tree.section_hidden;
-    set_section_visible(app, on);
-}
-
-/// Hide the Section Analysis (keeping its plane to show it again) or show the hidden one.
-pub fn set_section_visible(app: &mut SolveApp, visible: bool) {
-    if visible {
-        if let Some((origin, normal)) = app.tree.hidden_section {
-            let plane = json!({"origin": [origin.x, origin.y, origin.z], "normal": [normal.x, normal.y, normal.z]});
-            if app.run("inspect.section", json!({"plane": plane, "hatch": app.session.section_hatch})).is_ok() {
-                app.tree.hidden_section = None;
-            }
+    for (id, cutting) in planes {
+        let shown = section_plane_shown(app, id, cutting);
+        let label = section_row_label(id);
+        let plane_key = format!("section_plane:{id}");
+        let r = node_row(
+            rows,
+            Spec { key: &plane_key, ..Default::default() },
+            Row { depth: depth + 1, eye: Some(shown), icon: "section", label: &label, dim: !shown || !folder_shown, ..Default::default() },
+        );
+        if r.eye {
+            set_section_shown(app, id, !shown);
         }
-    } else if let Some(section) = app.session.section
-        && app.run("inspect.section", json!({"clear": true})).is_ok()
-    {
-        app.tree.hidden_section = Some(section);
+        if r.double {
+            crate::dialogs::edit_section_plane(app, Some(id));
+        }
+        if let Some(p) = r.secondary {
+            acts.menu = Some((p, Target::Section { plane: id }));
+        }
     }
 }
 
-/// The menu of the Section Analysis row.
-pub fn section_items(app: &SolveApp) -> Vec<Item> {
-    let visible = !app.tree.section_hidden;
+/// A section plane's row in the Analysis folder (`row:Section 2`; shown translated).
+pub fn section_row_label(id: u64) -> String {
+    format!("Section {id}")
+}
+
+/// Whether a section plane's own eye is open: it cuts, or it comes back with the hidden Analysis
+/// folder.
+fn section_plane_shown(app: &SolveApp, id: u64, cutting: bool) -> bool {
+    cutting || app.session.section_folder.as_ref().is_some_and(|back| back.contains(&id))
+}
+
+/// Show or hide one section plane (its eye); while the Analysis folder is hidden, whether it
+/// comes back with it.
+pub fn set_section_shown(app: &mut SolveApp, id: u64, shown: bool) {
+    drop(app.run("inspect.section", if shown { json!({ "show": id }) } else { json!({ "hide": id }) }));
+}
+
+/// Hide the Analysis folder (the planes on show) or show it again (the planes it hid).
+pub fn set_analysis_shown(app: &mut SolveApp, shown: bool) {
+    drop(app.run("inspect.section", json!({ "folder": shown })));
+}
+
+/// The Analysis folder's menu: its eye, and turning the whole section off, hidden planes too.
+pub fn analysis_items(app: &SolveApp) -> Vec<Item> {
+    let any = !app.session.section.is_empty() || !app.session.section_hidden.is_empty();
     vec![
-        Item::action("ui.editSection", "Edit Section Analysis", "section"),
+        Item::action("ui.analysisVisible", "Show/Hide", "eye").on_if(any),
         Item::sep(),
-        Item::action("ui.unsection", "Delete", "delete"),
+        Item::action("ui.unsection", "Turn Off Section View", "section").on_if(any),
+    ]
+}
+
+/// The menu of a section plane's row.
+pub fn section_items(app: &SolveApp, plane: u64) -> Vec<Item> {
+    let cutting = app.session.section.iter().any(|c| c.id == plane);
+    let visible = section_plane_shown(app, plane, cutting);
+    vec![
+        Item::action("ui.editSection", "Edit Section Analysis", "section").with(json!({ "plane": plane })),
         Item::sep(),
-        Item::action("ui.sectionVisible", "Show/Hide", "eye").key("V").with(json!({ "visible": !visible })),
+        Item::action("ui.removeSectionPlane", "Delete", "delete").with(json!({ "plane": plane })),
+        Item::sep(),
+        Item::action("ui.sectionVisible", "Show/Hide", "eye").key("V").with(json!({ "plane": plane, "visible": !visible })),
     ]
 }
 
@@ -2526,7 +2620,7 @@ pub fn section_items(app: &SolveApp) -> Vec<Item> {
 pub const CANVASES: &str = "c0/canvases";
 
 /// The Canvases folder (reference images) with an eye per canvas.
-fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
+fn canvas_rows(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &mut Actions) {
     let canvases: Vec<(u64, String, bool, bool)> = app.session.doc.canvases.iter().map(|c| (c.id, c.name.clone(), c.visible, c.locked)).collect();
     if canvases.is_empty() {
         return;
@@ -2536,10 +2630,10 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
     let open = is_open(app, key, start_open);
     // The folder's eye is its own: each canvas keeps its eye while the folder hides them all.
     let shown = !app.session.folder_hidden(CANVASES);
-    let r = draw_row(
-        ui,
-        ui.scope_id().with(key),
-        &Row { depth, fold: Some(open), eye: Some(shown), icon: "folder", label: "Canvases", dim: !shown, ..Default::default() },
+    let r = node_row(
+        rows,
+        Spec { key, ..Default::default() },
+        Row { depth, fold: Some(open), eye: Some(shown), icon: "folder", label: "Canvases", dim: !shown, ..Default::default() },
     );
     if r.fold || r.clicked {
         toggle(app, key, start_open);
@@ -2553,15 +2647,17 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
     for (id, name, visible, locked) in canvases {
         let selected = app.tree.picked_canvases.contains(&id);
         let badges: &[&str] = if locked { &["lock"] } else { &[] };
-        let r = draw_row(
-            ui,
-            ui.scope_id().with(("canvas", id)),
-            &Row {
+        let canvas_key = format!("canvas:{id}");
+        let r = node_row(
+            rows,
+            Spec { key: &canvas_key, ..Default::default() },
+            Row {
                 depth: depth + 1,
                 eye: Some(visible),
                 icon: "canvas",
                 label: &name,
                 name: true,
+                rename: true,
                 selected,
                 dim: !visible || !shown,
                 badges,
@@ -2572,23 +2668,30 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
             let _ = app.run("canvas.edit", json!({ "canvas": id, "visible": !visible }));
         }
         if r.clicked {
-            if !ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
-                app.tree.picked_canvases.clear();
-                app.tree.picked_components.clear();
-                app.tree.picked_joints.clear();
-                let _ = app.run("select.clear", json!({}));
-            }
-            if selected {
-                app.tree.picked_canvases.retain(|c| *c != id);
+            if r.slow_rename {
+                app.tree.picked_canvases = vec![id];
             } else {
-                app.tree.picked_canvases.push(id);
+                if !rows.ui().input(|i| i.modifiers.command || i.modifiers.ctrl) {
+                    app.tree.picked_canvases.clear();
+                    app.tree.picked_components.clear();
+                    app.tree.picked_joints.clear();
+                    let _ = app.run("select.clear", json!({}));
+                }
+                if selected {
+                    app.tree.picked_canvases.retain(|c| *c != id);
+                } else {
+                    app.tree.picked_canvases.push(id);
+                }
             }
         }
-        if r.double && locked {
+        if r.slow_rename {
+            start_inline_rename(app, crate::context_menu::RenameWhat::Canvas(id), r.name_at());
+        } else if r.double && locked {
             app.set_status(solidcraft_ui_text::tr("browser.canvas_locked"), true);
         } else if r.double {
             app.tree.canvas_panel = Some(CanvasPanel::new(app, id, false));
         }
+        inline_rename(app, rows.ui(), r.name_at(), &name);
         if let Some(p) = r.secondary {
             if !selected {
                 app.tree.picked_canvases = vec![id];
@@ -2610,10 +2713,14 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
     // A locked canvas (#12310) is not moved, calibrated or deleted until it is unlocked.
     let locked = canvas.is_some_and(|c| c.locked);
     let why = locked.then(|| solidcraft_ui_text::tr("browser.canvas_locked").to_string());
+    // An anchored canvas is placed by its sketch's points: change the sketch instead.
+    let follows = canvas.is_some_and(|c| c.anchor.is_some()).then(|| solidcraft_ui_text::tr("browser.canvas_anchored").to_string());
+    let placed = why.clone().or(follows);
     vec![
         Item::action("ui.editCanvas", "Edit Canvas", "canvas").with(json!({ "canvas": id })).off_because(why.clone()),
-        Item::action("ui.calibrateCanvas", "Calibrate", "measure").with(json!({ "canvas": id })).off_because(why.clone()),
-        Item::action("ui.straightenCanvas", "Straighten", "canvas").with(json!({ "canvas": id })).off_because(why.clone()),
+        Item::action("ui.calibrateCanvas", "Calibrate", "measure").with(json!({ "canvas": id })).off_because(placed.clone()),
+        Item::action("ui.straightenCanvas", "Straighten", "canvas").with(json!({ "canvas": id })).off_because(placed.clone()),
+        Item::action("canvas.frame_sketch", "Frame Sketch", "canvas").with(json!({ "canvas": id })).off_because(placed),
         Item::action("canvas.to_sketch", "Canvas to Sketch", "canvas").with(json!({ "canvas": id })),
         Item::sep(),
         Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })).off_because(why),
@@ -2745,8 +2852,7 @@ fn pick_from_browser(app: &mut SolveApp, x: Sel) {
         Sel::Plane { name } => crate::viewport::Hit::Plane { name: name.clone(), point: solidcore_record::Vec3::ZERO },
         Sel::Axis { name } => crate::viewport::Hit::Axis { name: name.clone() },
         Sel::ConstructionPoint { name } => crate::viewport::Hit::ConstructionPoint { name: name.clone() },
-        // The origin point goes only into a dialog input that takes it.
-        Sel::Vertex { body, point } if body.is_empty() && app.dialog.is_some() => crate::viewport::Hit::Vertex { body: String::new(), point: *point },
+        Sel::Vertex { body, point } if body.is_empty() => crate::viewport::Hit::Vertex { body: String::new(), point: *point },
         _ => return,
     };
     if let Some(mut d) = app.dialog.take() {
@@ -2782,6 +2888,8 @@ struct Entry {
     target: Option<Target>,
     /// Bodies lit when the row is hovered.
     bodies: Vec<String>,
+    /// A body whose import found flaws in its part: the row's warning mark says what they are.
+    defect: Option<crate::ui_kit::StatusTip>,
 }
 
 impl Entry {
@@ -2816,6 +2924,7 @@ impl Entry {
             sel: Some(Sel::Body { name: world.clone() }),
             target: Some(Target::Body { name: world.clone() }),
             bodies: vec![world],
+            defect: crate::browser_defects::body_tip(&app.session.model, b),
         }
     }
 
@@ -2829,7 +2938,9 @@ impl Entry {
             key: f.id.to_string(),
             row_key: format!("s:{}", f.id),
             thing: Thing::Sketch(f.id),
-            patterns: crate::sketch_pattern_tree::has_patterns(app, f.id).then(|| format!("s:{}/patterns", f.id)),
+            // A sketch's patterns and projections fold under it.
+            patterns: (crate::sketch_pattern_tree::has_patterns(app, f.id) || crate::sketch_link_tree::has_links(app, f.id))
+                .then(|| format!("s:{}/patterns", f.id)),
             label: if lost {
                 solidcraft_ui_text::format("browser.sketch_attachment_lost", &[("name", &crate::i18n::tr_name(&f.name))])
             } else if active {
@@ -2847,11 +2958,12 @@ impl Entry {
             sel: Some(Sel::Feature { id: f.id }),
             target: Some(Target::Sketch { id: f.id }),
             bodies: Vec::new(),
+            defect: None,
         }
     }
 
     fn plane(app: &SolveApp, f: &solidcraft_engine::doc::Feature) -> Self {
-        let sel = construction_sel(f);
+        let sel = solidcraft_engine::browser_find::construction_sel(f);
         let thing = match &sel {
             Sel::Axis { name } => Thing::Axis(name.clone()),
             Sel::ConstructionPoint { name } => Thing::Point(name.clone()),
@@ -2873,6 +2985,7 @@ impl Entry {
             sel: Some(sel),
             target: Some(Target::Plane { id: f.id }),
             bodies: Vec::new(),
+            defect: None,
         }
     }
 
@@ -2880,22 +2993,27 @@ impl Entry {
         match &self.sel {
             Some(Sel::Body { name }) => !app.session.visibility.hidden_bodies.contains(name),
             Some(Sel::Feature { id }) => sketch_visible(app, *id),
-            Some(Sel::Plane { name }) => !app.session.visibility.hidden_origin.contains(name),
+            // Construction planes, axes and points alike: the rows are cached per evaluation, and a
+            // visibility change (an eye, Show/Hide Reference Geometry) evaluates nothing.
+            Some(Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name }) => !app.session.visibility.hidden_origin.contains(name),
             _ => self.visible,
         }
     }
 
     fn is_selected(&self, app: &SolveApp) -> bool {
-        self.sel
-            .as_ref()
-            .is_some_and(|s| app.session.selection.contains(s) || matches!(s, Sel::Feature { id } if app.session.active_sketch == Some(*id)))
+        // What Move/Copy moves shows selected too: a click on it takes it out of the move.
+        self.sel.as_ref().is_some_and(|s| {
+            app.session.selection.contains(s)
+                || matches!(s, Sel::Feature { id } if app.session.active_sketch == Some(*id))
+                || crate::dialogs_move::picked(app, s)
+        })
     }
 }
 
-/// What is being dragged in the tree: items of one component folder.
+/// What a drag of a component folder's rows carries in the panel: the folder, and its items or
+/// groups.
 #[derive(Clone, Debug)]
-struct Drag {
-    source: crate::semantic_content::ContentSource,
+struct ItemDrag {
     comp: u64,
     folder: &'static str,
     keys: Vec<String>,
@@ -2903,17 +3021,17 @@ struct Drag {
     groups: Vec<u64>,
 }
 
-impl Drag {
+impl ItemDrag {
     /// What is dragged, as the browser commands name it.
     fn entries(&self) -> Vec<BrowserEntry> {
         self.keys.iter().map(|k| BrowserEntry::item(k)).chain(self.groups.iter().map(|g| BrowserEntry::Group(*g))).collect()
     }
 }
 
-/// A placement row dragged in the tree: the exact path it sits at, and the component it places.
+/// What a drag of a placement row carries in the panel: the exact path it sits at, and the
+/// component it places.
 #[derive(Clone, Debug)]
-struct OccurrenceDrag {
-    source: crate::semantic_content::ContentSource,
+struct PlacementDrag {
     /// The placement's path from the design root (its own occurrence id last).
     path: Vec<u64>,
     /// The component the placement is an instance of.
@@ -2933,15 +3051,6 @@ fn entries(app: &SolveApp, comp: u64, folder: &str) -> Vec<Entry> {
             .collect(),
         "sketches" => model_feature_indices(app, comp, true).into_iter().filter_map(|i| doc.features.get(i)).map(|f| Entry::sketch(app, f)).collect(),
         _ => model_feature_indices(app, comp, false).into_iter().filter_map(|i| doc.features.get(i)).map(|f| Entry::plane(app, f)).collect(),
-    }
-}
-
-fn construction_sel(f: &solidcraft_engine::doc::Feature) -> Sel {
-    let name = f.name.clone();
-    match f.kind {
-        FeatureKind::ConstructionPoint { .. } => Sel::ConstructionPoint { name },
-        FeatureKind::ConstructionAxis { .. } => Sel::Axis { name },
-        _ => Sel::Plane { name },
     }
 }
 
@@ -3055,7 +3164,7 @@ fn bodies_folded(app: &SolveApp, comp: u64, scope: &str, bodies: usize) -> bool 
 #[allow(clippy::too_many_arguments)]
 fn folder_rows_at(
     app: &mut SolveApp,
-    ui: &mut egui::Ui,
+    rows: &mut Rows<'_>,
     comp: u64,
     path: Option<&[u64]>,
     folder: &str,
@@ -3064,6 +3173,11 @@ fn folder_rows_at(
     data: &cache::Folder,
 ) {
     if data.key.is_empty() {
+        return;
+    }
+    // A search lists the folders that hold a match (`folder_level` lists the matches).
+    let searching = app.tree.search.on();
+    if app.tree.search.hits().is_some_and(|h| !h.folder(path.unwrap_or(&[]), folder)) {
         return;
     }
     let fstatic = folder_static(folder);
@@ -3084,19 +3198,27 @@ fn folder_rows_at(
     let shown = !app.session.folder_hidden(key);
     let folder_faded = !shown || path.is_some_and(|p| !app.session.occurrence_visible(p));
     if !render {
+        // Dropping on the folder row takes items out of their groups, to the end. Bodies or sketches
+        // from another component's folder move into this component, as a drop on its row does
+        // (#3270: the Bodies folder looked like the place to drop a body, and took nothing).
+        let accept = |d: &Dragged, zone: Zone| {
+            zone == Zone::Into
+                && same_document(app, d)
+                && item_drag(d).is_some_and(|d| d.folder == fstatic && (d.comp == comp || (d.folder != "construction" && d.groups.is_empty())))
+        };
         let r = if folded {
-            RowResp::default()
+            Hit::default()
         } else {
-            draw_row(
-                ui,
-                ui.scope_id().with(key),
-                &Row {
+            node_row(
+                rows,
+                Spec { key, drops: panel::Drops { before: false, into: true }, accept: Some(&accept), ..Default::default() },
+                Row {
                     depth,
                     fold: Some(open),
                     eye: Some(shown),
                     icon: "folder",
                     label: folder_label(folder),
-                    dim: folder_faded,
+                    dim: folder_faded || searching,
                     mark: if acts.lit.any() { acts.lit.branch(app, data.entries()) } else { Mark::None },
                     ..Default::default()
                 },
@@ -3122,19 +3244,9 @@ fn folder_rows_at(
         if let Some(p) = r.secondary {
             acts.menu = Some((p, Target::Folder { component: comp, folder: fstatic.to_string(), scope: prefix.to_owned() }));
         }
-        // Dropping on the folder row takes items out of their groups, to the end. Bodies or sketches
-        // from another component's folder move into this component, as a drop on its row does
-        // (#3270: the Bodies folder looked like the place to drop a body, and took nothing).
-        if let Some(resp) = &r.resp
-            && let Some(d) = drop_target(
-                ui,
-                resp,
-                |d: &Drag| d.folder == fstatic && (d.comp == comp || (d.folder != "construction" && d.groups.is_empty())),
-                DropMark::Box,
-            )
-        {
+        if let Some((d, _, source)) = r.dropped_as::<ItemDrag>() {
             acts.drop_from(
-                d.source,
+                source,
                 if d.comp == comp {
                     DropAction::Order {
                         comp,
@@ -3152,7 +3264,7 @@ fn folder_rows_at(
             return;
         }
     }
-    folder_level(app, ui, comp, path, fstatic, prefix, &data.rows, None, inner, &data.top_order, folder_faded, acts);
+    folder_level(app, rows, comp, path, fstatic, prefix, &data.rows, None, inner, &data.top_order, folder_faded, acts);
 }
 
 /// The rows of a folder's top level, or of one group (`holder`), at `depth`; groups draw their
@@ -3160,12 +3272,12 @@ fn folder_rows_at(
 #[allow(clippy::too_many_arguments)]
 fn folder_level(
     app: &mut SolveApp,
-    ui: &mut egui::Ui,
+    rows: &mut Rows<'_>,
     comp: u64,
     path: Option<&[u64]>,
     fstatic: &'static str,
     prefix: &str,
-    rows: &[cache::Row],
+    level: &[cache::Row],
     holder: Option<u64>,
     depth: usize,
     top: &[BrowserEntry],
@@ -3174,20 +3286,27 @@ fn folder_level(
 ) {
     let render = crate::render_workspace::active(app);
     let start_open = rows_start_open(app);
+    let searching = app.tree.search.on();
+    let at = path.unwrap_or(&[]);
     // The render workspace has always listed a folder's loose items above its groups.
     let items_first = render && holder.is_none();
-    let rows = rows
+    let ordered = level
         .iter()
         .filter(|r| items_first && matches!(r, cache::Row::Item(_)))
-        .chain(rows.iter().filter(|r| !items_first || matches!(r, cache::Row::Group(_))));
-    for row in rows {
+        .chain(level.iter().filter(|r| !items_first || matches!(r, cache::Row::Group(_))));
+    for row in ordered {
         let group = match row {
             cache::Row::Item(e) => {
-                entry_row(app, ui, comp, path, fstatic, e, depth, holder, top, faded, acts);
+                if app.tree.search.hits().is_none_or(|h| h.row(at, fstatic, &e.key)) {
+                    entry_row(app, rows, comp, path, fstatic, e, depth, holder, top, faded, acts);
+                }
                 continue;
             }
             cache::Row::Group(g) => g,
         };
+        if app.tree.search.hits().is_some_and(|h| !group.any_entry(&|e| h.row(at, fstatic, &e.key))) {
+            continue;
+        }
         let (id, gkey) = (group.id, &group.key);
         let gopen = is_open(app, gkey, start_open);
         let gshown = !app.session.folder_hidden(gkey);
@@ -3199,23 +3318,49 @@ fn folder_level(
         };
         let count =
             if render && !gopen { solidcraft_ui_text::format("render.tree_more", &[("count", &group.count.to_string())]) } else { String::new() };
-        let r = draw_row(
-            ui,
-            ui.scope_id().with(gkey),
-            &Row {
+        // The top of the row puts the drop before the group; the rest puts it inside.
+        let level_of = app.session.doc.group_level(id);
+        let fits = |d: &ItemDrag, parent_level: usize| {
+            let doc = &app.session.doc;
+            d.groups.iter().all(|g| !doc.group_within(id, *g) && parent_level + doc.group_height(*g) <= solidcraft_engine::doc::MAX_GROUP_NESTING)
+        };
+        let accept = |d: &Dragged, zone: Zone| {
+            same_document(app, d)
+                && item_drag(d)
+                    .is_some_and(|d| d.comp == comp && d.folder == fstatic && fits(d, if zone == Zone::Before { level_of - 1 } else { level_of }))
+        };
+        let r = node_row(
+            rows,
+            // Groups don't drag during a search: it shows only part of a folder, and a new order needs every item.
+            Spec {
+                key: gkey,
+                drag: (!searching).then_some(DRAG_ITEMS),
+                drops: panel::Drops { before: true, into: true },
+                accept: Some(&accept),
+                ..Default::default()
+            },
+            Row {
                 depth,
                 fold: Some(gopen),
                 eye: (!render || gopen).then_some(gshown),
                 icon: if render { "" } else { "folder" },
                 label,
                 name: true,
-                dim: group_faded || (render && !gopen),
+                rename: true,
+                dim: group_faded || (render && !gopen) || searching,
                 count: &count,
                 mark: if acts.lit.any() { acts.lit.branch(app, group.entries()) } else { Mark::None },
                 ..Default::default()
             },
         );
-        if r.fold {
+        // Dragging a group row moves the group; a press on its arrow or eye is not a drag.
+        if r.drag_started {
+            rows.drag_with(vec![node_id(gkey)], Some(Payload::new(ItemDrag { comp, folder: fstatic, keys: Vec::new(), groups: vec![id] })));
+        }
+        // With a dialog open a second click picks again: the dialog takes the group's bodies.
+        if r.slow_rename && app.dialog.is_none() {
+            start_inline_rename(app, crate::context_menu::RenameWhat::Group(id), r.name_at());
+        } else if r.fold {
             toggle(app, gkey, start_open);
         } else if r.clicked {
             let names: Vec<String> = group.entries().into_iter().flat_map(|e| e.bodies.clone()).collect();
@@ -3224,6 +3369,7 @@ fn folder_level(
                 toggle(app, gkey, start_open);
             }
         }
+        inline_rename(app, rows.ui(), r.name_at(), &group.label);
         if r.eye {
             toggle_folder(app, gkey);
         }
@@ -3233,51 +3379,34 @@ fn folder_level(
         if let Some(p) = r.secondary {
             acts.menu = Some((p, Target::Group { id, scope: prefix.to_owned() }));
         }
-        if let Some(resp) = &r.resp {
-            // Dragging a group row moves the group; a press on its arrow or eye is not a drag.
-            if resp.drag_started()
-                && !r.on_control
-                && let Some(source) = crate::semantic_content::current_source(app)
-            {
-                resp.dnd_set_drag_payload(Drag { source, comp, folder: fstatic, keys: Vec::new(), groups: vec![id] });
-            }
-            // The top of the row puts the drop before the group; the rest puts it inside.
-            let level = app.session.doc.group_level(id);
-            let fits = |d: &Drag, parent_level: usize| {
-                let doc = &app.session.doc;
-                d.groups.iter().all(|g| !doc.group_within(id, *g) && parent_level + doc.group_height(*g) <= solidcraft_engine::doc::MAX_GROUP_NESTING)
-            };
-            if let Some((d, zone)) = drop_target_zone(ui, resp, |d: &Drag, zone| {
-                d.comp == comp && d.folder == fstatic && fits(d, if zone == DropMark::Above { level - 1 } else { level })
-            }) {
-                let before = BrowserEntry::Group(id);
-                acts.drop_from(
-                    d.source,
-                    match (zone, holder) {
-                        (DropMark::Box, _) => {
-                            DropAction::Move { comp, folder: fstatic, keys: d.keys.clone(), groups: d.groups.clone(), group: Some(id), before: None }
-                        }
-                        (DropMark::Above, Some(h)) => DropAction::Move {
-                            comp,
-                            folder: fstatic,
-                            keys: d.keys.clone(),
-                            groups: d.groups.clone(),
-                            group: Some(h),
-                            before: Some(before),
-                        },
-                        (DropMark::Above, None) => DropAction::Order {
-                            comp,
-                            folder: fstatic,
-                            order: order_before(top, &d.entries(), Some(&before)),
-                            keys: d.keys.clone(),
-                            groups: d.groups.clone(),
-                        },
+        if let Some((d, zone, source)) = r.dropped_as::<ItemDrag>() {
+            let before = BrowserEntry::Group(id);
+            acts.drop_from(
+                source,
+                match (zone, holder) {
+                    (Zone::Into, _) => {
+                        DropAction::Move { comp, folder: fstatic, keys: d.keys.clone(), groups: d.groups.clone(), group: Some(id), before: None }
+                    }
+                    (Zone::Before, Some(h)) => DropAction::Move {
+                        comp,
+                        folder: fstatic,
+                        keys: d.keys.clone(),
+                        groups: d.groups.clone(),
+                        group: Some(h),
+                        before: Some(before),
                     },
-                );
-            }
+                    (Zone::Before, None) => DropAction::Order {
+                        comp,
+                        folder: fstatic,
+                        order: order_before(top, &d.entries(), Some(&before)),
+                        keys: d.keys.clone(),
+                        groups: d.groups.clone(),
+                    },
+                },
+            );
         }
         if gopen {
-            folder_level(app, ui, comp, path, fstatic, prefix, &group.rows, Some(id), depth + 1, top, group_faded, acts);
+            folder_level(app, rows, comp, path, fstatic, prefix, &group.rows, Some(id), depth + 1, top, group_faded, acts);
         }
     }
 }
@@ -3292,20 +3421,25 @@ fn order_before(top: &[BrowserEntry], dragged: &[BrowserEntry], before: Option<&
     order
 }
 
-/// The body's name edited in its row (started by a double-click): Enter or leaving the box keeps
-/// the name, Escape cancels.
-fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, label_left: f32, e: &Entry) {
-    let editing = app.menu.rename.as_ref().is_some_and(|r| r.inline && matches!(&r.what, crate::context_menu::RenameWhat::Body(b) if *b == e.key));
+pub(crate) fn start_inline_rename(app: &mut SolveApp, what: crate::context_menu::RenameWhat, row: NameAt) {
+    if let Some(row_id) = row.row_id {
+        crate::context_menu::start_inline_rename(app, what, row.rect.map(|rect| rect.left_bottom()).unwrap_or_default(), row_id);
+    }
+}
+
+/// Edit a browser name in its row: Enter or leaving the box keeps the name, Escape cancels.
+pub(crate) fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: NameAt, label: &str) {
+    let (Some(edit_rect), Some(row_id)) = (row.label_rect, row.row_id) else { return };
+    let editing = app.menu.rename.as_ref().is_some_and(|rename| rename.inline && rename.inline_id == Some(row_id));
     if !editing {
         return;
     }
     let Some(mut rename) = app.menu.rename.take() else { return };
-    let edit_rect = Rect::from_min_max(pos2(label_left, row.top() + 1.0), pos2(row.right() - 3.0, row.bottom() - 1.0));
     ui.painter().rect_filled(edit_rect, 3.0, Tokens::get().field);
-    let id = ui.scope_id().with(("browser_rename", &e.row_key));
+    let id = ui.scope_id().with(("browser_rename", row_id));
     let response = crate::ui_kit::inline_name(ui, edit_rect, id, &mut rename.text);
     crate::panel_runtime::register_content_focus(ui.ctx(), &response);
-    crate::scenario::publish_handle(&format!("rename:{}", e.key), edit_rect.center());
+    crate::scenario::publish_handle(&format!("rename:{label}"), edit_rect.center());
     let was_focused = rename.focused;
     if !rename.focused {
         if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
@@ -3321,7 +3455,9 @@ fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, label_left: f
     if escape {
         // Dropping the state cancels the edit.
     } else if commit {
+        // A refused name keeps the editor open, focused with the name selected.
         if crate::context_menu::commit_rename(app, &rename).is_err() {
+            rename.focused = false;
             app.menu.rename = Some(rename);
         }
     } else {
@@ -3333,7 +3469,7 @@ fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, label_left: f
 #[allow(clippy::too_many_arguments)]
 fn entry_row(
     app: &mut SolveApp,
-    ui: &mut egui::Ui,
+    rows: &mut Rows<'_>,
     comp: u64,
     path: Option<&[u64]>,
     folder: &'static str,
@@ -3350,20 +3486,24 @@ fn entry_row(
         return;
     }
     app.tree.remember(&e.row_key);
-    let pattern_key = e.patterns.as_deref();
+    // A search lists what it found and what holds it. The rows a row folds open on that aren't
+    // searched (a sketch's patterns, a body's features) show neither them nor their fold until the
+    // search ends.
+    let unsearched = !app.tree.search.on();
+    let pattern_key = e.patterns.as_deref().filter(|_| unsearched);
     let start_open = rows_start_open(app);
     let patterns_open = pattern_key.is_some_and(|key| is_open(app, key, start_open));
-    let rect = row_rect(ui);
     let revealed = folder == "bodies" && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b));
     // Features under bodies (#11945): the body row folds open on the features that built it.
     let built_key = (folder == "bodies"
+        && unsearched
         && app.preferences.browser_body_features
         && !crate::render_workspace::active(app)
         && matches!(e.sel, Some(Sel::Body { .. })))
     .then(|| format!("{}/features", e.row_key));
     let built_open = built_key.as_deref().is_some_and(|key| is_open(app, key, false));
-    if !ui.is_rect_visible(rect) && !patterns_open && !revealed && !built_open {
-        ui.allocate_space(rect.size());
+    if !rows.next_visible() && !patterns_open && !revealed && !built_open {
+        rows.skip(node_id(&e.row_key), Selectable::Yes(0));
         return;
     }
     let built: Vec<u64> = match &built_key {
@@ -3388,10 +3528,33 @@ fn entry_row(
     // Cached with the evaluated model; the preference is read as the row is drawn.
     let sketch_state = e.sketch_state.filter(|_| app.preferences.sketch_state_icons);
     let state_tip = sketch_state.map(crate::sketch_state::SketchState::text);
-    let r = draw_row(
-        ui,
-        ui.scope_id().with(("item", &e.row_key)),
-        &Row {
+    let ink = sketch_state.and_then(|state| state.ink(&Tokens::get()));
+    // Items of this folder dropped on the row go before it (in its group, or the folder's order).
+    let fits = |d: &ItemDrag| {
+        let doc = &app.session.doc;
+        let level = group.map_or(0, |g| doc.group_level(g));
+        d.groups
+            .iter()
+            .all(|g| group.is_none_or(|h| !doc.group_within(h, *g)) && level + doc.group_height(*g) <= solidcraft_engine::doc::MAX_GROUP_NESTING)
+    };
+    let accept = |d: &Dragged, zone: Zone| {
+        zone == Zone::Before
+            && same_document(app, d)
+            && item_drag(d).is_some_and(|d| d.comp == comp && d.folder == folder && !d.keys.contains(&e.key) && fits(d))
+    };
+    // A row listed in a search is a match: the matched part of its name is drawn strong.
+    let emphasis = app.tree.search.hits().and_then(|h| h.span(&e.label));
+    let r = node_row(
+        rows,
+        // Items don't drag during a search, as groups don't (`folder_level`).
+        Spec {
+            key: &e.row_key,
+            item: true,
+            drag: unsearched.then_some(DRAG_ITEMS),
+            drops: panel::Drops { before: true, into: false },
+            accept: Some(&accept),
+        },
+        Row {
             depth,
             fold: pattern_key.map(|_| patterns_open).or(built_key.as_ref().map(|_| built_open)),
             eye: Some(visible),
@@ -3399,6 +3562,7 @@ fn entry_row(
             kind_tip: e.tip,
             label: &e.label,
             name: true,
+            rename: true,
             selected,
             dim: !visible || parent_hidden,
             cut,
@@ -3406,13 +3570,22 @@ fn entry_row(
             swatch: appearance.swatch,
             secondary: &appearance.name,
             count: &appearance.count,
-            icon_ink: sketch_state.and_then(|state| state.ink(&Tokens::get())),
+            icon_ink: ink,
             tip: state_tip.as_deref(),
             badges,
             mark,
+            emphasis,
+            status: e.defect.as_ref().map(|_| Status::Warning),
+            status_tip: e.defect.as_ref(),
             ..Default::default()
         },
     );
+    // Drag: the selected items of this folder when this one is selected (in closed groups too),
+    // else just this one.
+    if r.drag_started {
+        let keys: Vec<String> = if selected { selected_keys(app, comp, folder) } else { vec![e.key.clone()] };
+        rows.drag_with(vec![node_id(&e.row_key)], Some(Payload::new(ItemDrag { comp, folder, keys, groups: Vec::new() })));
+    }
     // A part that needs repair, under the pointer: its refused face is ringed in the view.
     if r.hovered
         && folder == "bodies"
@@ -3433,54 +3606,55 @@ fn entry_row(
     if folder == "bodies"
         && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b))
         && let Some(rect) = r.rect
-        && crate::semantic_content::scroll_acknowledged(ui, rect)
+        && crate::semantic_content::scroll_acknowledged(rows.ui(), rect)
     {
         app.tree.reveal = None;
     }
     if r.eye {
         set_visible(app, folder, &[e], !visible);
     }
-    if r.double && folder == "sketches" {
-        if let Ok(id) = e.key.parse() {
-            app.edit_sketch_in(id, path.map(|path| (comp, path)));
-        }
-    } else if r.clicked {
-        let shift = ui.input(|i| i.modifiers.shift);
+    if r.double
+        && folder == "sketches"
+        && let Ok(id) = e.key.parse()
+    {
+        app.edit_sketch_in(id, path.map(|path| (comp, path)));
+    }
+    // A click a dialog takes as a pick (below) leaves the selection as it was: nothing to rename.
+    // With no dialog open, a construction row is selected like any other and renames.
+    let shift = rows.ui().input(|i| i.modifiers.shift);
+    let mut dialog_pick = r.clicked && app.dialog.is_some() && (folder == "construction" || (folder == "bodies" && !shift));
+    if r.clicked && !(r.double && folder == "sketches") {
         // A body row with a dialog open is a pick, as Combine does (#4452), unless Shift is
         // asking for the rows between this one and the anchor.
         if folder == "construction" || (folder == "bodies" && !shift && app.dialog.is_some()) {
             if let Some(s) = e.sel.clone() {
-                if matches!(s, Sel::Body { .. }) {
-                    app.tree.content.current_mut().anchor = Some(e.row_key.clone());
-                }
                 pick_from_browser(app, s);
             }
         } else if folder == "sketches"
-            && !ui.input(|i| i.modifiers.any())
+            && !rows.ui().input(|i| i.modifiers.any())
             && let Some(Sel::Feature { id }) = e.sel
             && pick_sketch_into_dialog(app, id)
         {
             // Extrude, Revolve or Emboss took all the sketch's profiles (#6106).
+            dialog_pick = true;
         } else {
-            click_select(app, ui, e.row_key.clone(), e.sel.clone());
+            click_select(app, r.how.as_ref(), e.sel.clone());
         }
-        // A double-click renames the row (sketch rows open for editing instead), like F2. A body
-        // is edited in its own row.
-        if r.double {
-            crate::context_menu::rename_selection(app, r.rect.map(|x| x.left_bottom()).unwrap_or_default());
-            if folder == "bodies"
-                && let Some(rename) = app.menu.rename.as_mut()
-                && matches!(&rename.what, crate::context_menu::RenameWhat::Body(b) if *b == e.key)
-            {
-                rename.inline = true;
-            }
+        // A double-click or a slower second click renames the row (sketch double-clicks edit
+        // instead), like F2.
+        // Only a rename this click started is edited in the row: a refused one still open belongs
+        // to its own row.
+        if (r.double || r.slow_rename)
+            && !dialog_pick
+            && crate::context_menu::rename_selection(app, r.rect.map(|x| x.left_bottom()).unwrap_or_default())
+            && let Some(rename) = app.menu.rename.as_mut()
+            && let Some(row_id) = r.row_id
+        {
+            rename.inline = true;
+            rename.inline_id = Some(row_id);
         }
     }
-    if folder == "bodies"
-        && let (Some(rect), Some(label_left)) = (r.rect, r.label_left)
-    {
-        inline_rename(app, ui, rect, label_left, e);
-    }
+    inline_rename(app, rows.ui(), r.name_at(), &e.label);
     if r.hovered && !e.bodies.is_empty() {
         acts.hover(e.bodies.iter());
     }
@@ -3504,31 +3678,17 @@ fn entry_row(
         acts.menu = Some((p, t));
     }
     if patterns_open && let Some(Sel::Feature { id }) = &e.sel {
-        crate::sketch_pattern_tree::rows(app, ui, *id, depth + 1, "browser", path.map(|path| (comp, path)), !visible || parent_hidden);
+        let dim = !visible || parent_hidden;
+        crate::sketch_pattern_tree::browser_rows(app, rows, *id, depth + 1, path.map(|path| (comp, path)), dim);
+        crate::sketch_link_tree::browser_rows(app, rows, *id, depth + 1, dim);
     }
     if built_open && built_key.is_some() {
-        features::body_rows(app, ui, acts, comp, path.unwrap_or_default(), &e.row_key, &built, depth + 1);
+        features::body_rows(app, rows, acts, comp, path.unwrap_or_default(), &e.row_key, &built, depth + 1);
     }
-    let Some(resp) = &r.resp else { return };
-    // Drag: the selected items of this folder when this one is selected, else just this one.
-    if resp.drag_started()
-        && !r.on_control
-        && let Some(source) = crate::semantic_content::current_source(app)
-    {
-        let keys: Vec<String> = if selected { selected_keys(app, comp, folder) } else { vec![e.key.clone()] };
-        resp.dnd_set_drag_payload(Drag { source, comp, folder, keys, groups: Vec::new() });
-    }
-    let fits = |d: &Drag| {
-        let doc = &app.session.doc;
-        let level = group.map_or(0, |g| doc.group_level(g));
-        d.groups
-            .iter()
-            .all(|g| group.is_none_or(|h| !doc.group_within(h, *g)) && level + doc.group_height(*g) <= solidcraft_engine::doc::MAX_GROUP_NESTING)
-    };
-    if let Some(d) = drop_target(ui, resp, |d: &Drag| d.comp == comp && d.folder == folder && !d.keys.contains(&e.key) && fits(d), DropMark::Above) {
+    if let Some((d, _, source)) = r.dropped_as::<ItemDrag>() {
         let before = BrowserEntry::item(&e.key);
         acts.drop_from(
-            d.source,
+            source,
             match group {
                 Some(g) => DropAction::Move { comp, folder, keys: d.keys.clone(), groups: d.groups.clone(), group: Some(g), before: Some(before) },
                 None => DropAction::Order {
@@ -3548,60 +3708,10 @@ fn selected_keys(app: &SolveApp, comp: u64, folder: &str) -> Vec<String> {
     entries(app, comp, folder).into_iter().filter(|e| e.selected).map(|e| e.key).collect()
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum DropMark {
-    /// A line above the row: the items go before it.
-    Above,
-    /// A box around the row: the items go into it.
-    Box,
-}
-
-/// While a matching payload hovers the row, mark where it would land; on release, the payload.
-fn drop_target(ui: &egui::Ui, resp: &egui::Response, accept: impl Fn(&Drag) -> bool, mark: DropMark) -> Option<std::sync::Arc<Drag>> {
-    let accept = |drag: &Drag| crate::semantic_content::same_document(ui, drag.source) && accept(drag);
-    let t = Tokens::get();
-    let hovering = resp.dnd_hover_payload::<Drag>().filter(|d| accept(d));
-    if hovering.is_some() {
-        let r = resp.rect;
-        match mark {
-            DropMark::Above => ui.painter().hline(r.x_range(), r.top(), Stroke::new(2.0, t.accent)),
-            DropMark::Box => {
-                ui.painter().rect_stroke(r.shrink(0.5), t.radius_sm.saturating_sub(1), Stroke::new(1.5, t.accent), egui::StrokeKind::Inside)
-            }
-        };
-    }
-    // Taking a payload takes it whatever its type: leave other drags (appearance swatches) be.
-    if !egui::DragAndDrop::has_payload_of_type::<Drag>(ui.ctx()) {
-        return None;
-    }
-    resp.dnd_release_payload::<Drag>().filter(|d| accept(d))
-}
-
-/// Like [`drop_target`] for a row that takes a drop above it (its top part) or inside it.
-fn drop_target_zone(ui: &egui::Ui, resp: &egui::Response, accept: impl Fn(&Drag, DropMark) -> bool) -> Option<(std::sync::Arc<Drag>, DropMark)> {
-    let accept = |drag: &Drag, zone| crate::semantic_content::same_document(ui, drag.source) && accept(drag, zone);
-    let t = Tokens::get();
-    let r = resp.rect;
-    let at = ui.input(|i| i.pointer.hover_pos().or(i.pointer.latest_pos()));
-    let zone = if at.is_some_and(|p| p.y < r.top() + r.height() * 0.3) { DropMark::Above } else { DropMark::Box };
-    if resp.dnd_hover_payload::<Drag>().is_some_and(|d| accept(&d, zone)) {
-        match zone {
-            DropMark::Above => ui.painter().hline(r.x_range(), r.top(), Stroke::new(2.0, t.accent)),
-            DropMark::Box => {
-                ui.painter().rect_stroke(r.shrink(0.5), t.radius_sm.saturating_sub(1), Stroke::new(1.5, t.accent), egui::StrokeKind::Inside)
-            }
-        };
-    }
-    if !egui::DragAndDrop::has_payload_of_type::<Drag>(ui.ctx()) {
-        return None;
-    }
-    resp.dnd_release_payload::<Drag>().filter(|d| accept(d, zone)).map(|d| (d, zone))
-}
-
 /// Whether a placement dragged from `d` may land in component `parent`: not where it already is,
 /// and not in itself or a component it holds. The command refuses those too; this keeps the row
 /// from showing a drop mark it would refuse.
-fn occurrence_can_land(app: &SolveApp, d: &OccurrenceDrag, parent: u64) -> bool {
+fn occurrence_can_land(app: &SolveApp, d: &PlacementDrag, parent: u64) -> bool {
     let Some(id) = d.path.last().copied() else { return false };
     let Some(o) = app.session.doc.occurrences.iter().find(|o| o.id == id) else { return false };
     if parent == 0 {
@@ -3612,50 +3722,13 @@ fn occurrence_can_land(app: &SolveApp, d: &OccurrenceDrag, parent: u64) -> bool 
     o.parent != parent && !app.session.doc.inside_component(parent, d.component)
 }
 
-/// Whether the pointer is over the top part of a row (where a drop goes before it).
-fn pointer_in_top(ui: &egui::Ui, row: Rect) -> bool {
-    ui.input(|i| i.pointer.hover_pos().or(i.pointer.latest_pos())).is_some_and(|p| p.y < row.top() + row.height() * 0.3)
-}
-
 /// The component a placement shares with the placement under it, when both sit in the same one
 /// (and are two placements): the parent whose sub-components they are ordered among.
-fn occurrence_sibling(app: &SolveApp, d: &OccurrenceDrag, target: u64) -> Option<u64> {
+fn occurrence_sibling(app: &SolveApp, d: &PlacementDrag, target: u64) -> Option<u64> {
     let dragged = d.path.last().copied().filter(|o| *o != target)?;
     let occurrences = &app.session.doc.occurrences;
     let parent = occurrences.iter().find(|o| o.id == dragged)?.parent;
     occurrences.iter().any(|o| o.id == target && o.parent == parent).then_some(parent)
-}
-
-/// While a matching placement drag hovers the row, mark a drop before it; on release, the payload.
-fn occurrence_reorder_target(
-    ui: &egui::Ui,
-    resp: &egui::Response,
-    accept: impl Fn(&OccurrenceDrag) -> bool,
-) -> Option<std::sync::Arc<OccurrenceDrag>> {
-    let accept = |drag: &OccurrenceDrag| crate::semantic_content::same_document(ui, drag.source) && accept(drag);
-    if resp.dnd_hover_payload::<OccurrenceDrag>().is_some_and(|d| accept(&d)) {
-        ui.painter().hline(resp.rect.x_range(), resp.rect.top(), Stroke::new(2.0, Tokens::get().accent));
-    }
-    if !egui::DragAndDrop::has_payload_of_type::<OccurrenceDrag>(ui.ctx()) {
-        return None;
-    }
-    resp.dnd_release_payload::<OccurrenceDrag>().filter(|d| accept(d))
-}
-
-/// While a matching placement drag hovers the row, mark where it would land; on release, the payload.
-fn occurrence_drop_target(ui: &egui::Ui, resp: &egui::Response, accept: impl Fn(&OccurrenceDrag) -> bool) -> Option<std::sync::Arc<OccurrenceDrag>> {
-    let accept = |drag: &OccurrenceDrag| crate::semantic_content::same_document(ui, drag.source) && accept(drag);
-    let t = Tokens::get();
-    let hovering = resp.dnd_hover_payload::<OccurrenceDrag>().filter(|d| accept(d));
-    if hovering.is_some() {
-        let r = resp.rect;
-        ui.painter().rect_stroke(r.shrink(0.5), t.radius_sm.saturating_sub(1), Stroke::new(1.5, t.accent), egui::StrokeKind::Inside);
-    }
-    // Taking a payload takes it whatever its type: leave other drags (appearance swatches) be.
-    if !egui::DragAndDrop::has_payload_of_type::<OccurrenceDrag>(ui.ctx()) {
-        return None;
-    }
-    resp.dnd_release_payload::<OccurrenceDrag>().filter(|d| accept(d))
 }
 
 /// A drop, applied after the tree is drawn.
@@ -3761,85 +3834,21 @@ fn apply_drop(app: &mut SolveApp, d: DropAction) {
 // Panels opened from the menus
 // ---------------------------------------------------------------------------------------------
 
-pub(crate) fn revert_occurrence_dialog(app: &mut SolveApp, m: &OccMove) {
-    if m.had_pending {
-        let _ = app.run("occurrence.move", json!({"occurrence":m.occurrence,"base_transform":m.baseline,"capture":false}));
-    } else {
-        let _ = app.run("component.revert_position", json!({"occurrences":[m.occurrence]}));
-    }
-}
-
-/// The pending move: turned about X, then Y, then Z through the starting origin, then moved.
-pub fn apply_occurrence_move(app: &mut SolveApp, m: &OccMove) {
-    use crate::gizmo;
-    use solidcore_record::Vec3;
-    let a = m.angles.map(f64::to_radians);
-    let r = gizmo::mul(&gizmo::mul(&gizmo::rotation(Vec3::Z, a[2]), &gizmo::rotation(Vec3::Y, a[1])), &gizmo::rotation(Vec3::X, a[0]));
-    let (axis, angle) = gizmo::axis_angle(&r);
-    let o = m.pivot.unwrap_or(Vec3::ZERO);
-    let baseline = m.baseline.or_else(|| app.session.doc.occurrences.iter().find(|o| o.id == m.occurrence).map(|o| o.transform));
-    let _ = app.run(
-        "occurrence.move",
-        if m.path.is_empty() {
-            json!({ "occurrence": m.occurrence, "base_transform": baseline, "translate": m.translate, "axis": [axis.x, axis.y, axis.z], "angle": angle, "origin": [o.x, o.y, o.z], "capture": false })
-        } else {
-            json!({ "occurrence": m.occurrence, "path": m.path, "space": "world", "base_transform": baseline, "translate": m.translate, "axis": [axis.x, axis.y, axis.z], "angle": angle, "origin": [o.x, o.y, o.z], "capture": false })
-        },
-    );
-}
-
-/// The shared move triad at the occurrence's origin: arrows and squares move it, rings turn it.
-pub(crate) fn occurrence_triad_model(app: &SolveApp) -> Option<crate::gizmo::Triad> {
-    let movement = app.tree.occurrence_move.as_ref()?;
-    let center = movement.pivot? + solidcore_record::Vec3::new(movement.translate[0], movement.translate[1], movement.translate[2]);
-    Some(crate::gizmo::Triad { center, translate: true, rotate: true })
-}
-
-/// Occurrence handles belong to the viewport, not the clipped Move panel's child UI.
-pub(crate) fn occurrence_triad(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &crate::viewport::Proj) {
-    use crate::gizmo::{self, Change};
-    let Some(mut m) = app.tree.occurrence_move.clone() else { return };
-    let before = (m.translate, m.angles);
-    let Some(t) = occurrence_triad_model(app) else { return };
-    let step = crate::canvas::snap_step(app.cam.half_height());
-    let Some(g) = gizmo::show(ui, painter, proj, egui::Id::unique("sc_occ_triad"), &t, step) else { return };
-    if g.started || m.drag0.is_none() {
-        m.drag0 = Some((m.translate, m.angles));
-    }
-    let (t0, a0) = m.drag0.unwrap_or((m.translate, m.angles));
-    match g.change {
-        Change::Translate(v) => m.translate = [t0[0] + v.x, t0[1] + v.y, t0[2] + v.z],
-        Change::Rotate { axis, angle } => {
-            if let Some(slot) = m.angles.get_mut(axis) {
-                *slot = a0.get(axis).copied().unwrap_or(0.0) + angle.to_degrees();
-            }
-        }
-    }
-    if g.done {
-        m.drag0 = None;
-    }
-    if (m.translate, m.angles) != before {
-        apply_occurrence_move(app, &m);
-    }
-    app.tree.occurrence_move = Some(m);
-}
-
-/// Dimensions of finished sketches whose dimensions are shown (Show Dimensions), drawn over the
-/// viewport like the sketch being edited draws its own (`crate::dim_view`). A double-click on a
-/// value edits it in place without editing the sketch (`crate::dim_view::model_double_click`).
-pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
+/// Dimensions of finished sketches whose dimensions are shown (Show Dimensions), drawn with the
+/// viewport's own `painter` like the sketch being edited draws its own (`crate::dim_view`), so
+/// panels and the ribbon over the viewport cover them (#16846). A double-click on a value edits
+/// it in place without editing the sketch (`crate::dim_view::model_double_click`).
+pub fn dims_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewport::Proj) {
     use solidcore_record::Vec2;
     use solidcraft_engine::sketch::{DimFrame, chain_centres, default_text, dim_layout_reaching, dim_reach};
     crate::dim_view::set_model_drawn(Vec::new());
-    let Some(rect) = app.viewport.rect else { return };
     if app.session.visibility.shown_dimensions.is_empty() {
         return;
     }
+    let rect = painter.clip_rect();
     let mut drawn = Vec::new();
     let tk = Tokens::get();
-    let proj = crate::viewport::projection(app, rect);
-    let painter = ctx.layer_painter(egui::LayerId::background()).with_clip_rect(rect);
-    let st = crate::open_meshing::session_world(&app.session);
+    let st = crate::open_meshing::still_world(app);
     for id in app
         .session
         .visibility
@@ -3855,22 +3864,30 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
         let n = centres.len().max(1) as f64;
         let middle = centres.iter().fold(Vec2::ZERO, |a, p| a + *p) * (1.0 / n);
         for c in &sk.constraints {
-            let Some(frame) = crate::dim_view::shown_frame(app.preferences.ellipse_axes, sk, &c.kind) else { continue };
+            let Some(frame) = crate::dim_view::shown_frame(app.preferences.ellipse_axes, sk, &c.kind, c.text) else { continue };
             let anchor = match frame {
                 DimFrame::Linear { p0, p1, .. } => (p0 + p1) * 0.5,
                 DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } | DimFrame::HalfAxis { center, .. } => center,
                 DimFrame::Angular { vertex, .. } => vertex,
             };
-            let (Some(a), Some(b)) = (to(anchor), to(anchor + Vec2::X)) else { continue };
-            let px = 1.0 / f64::from(a.distance(b)).max(1e-9);
-            if !px.is_finite() {
-                continue;
-            }
+            let Some(px) = crate::dim_view::mm_per_pixel(to, anchor) else { continue };
             let expr = c.param.as_ref().and_then(|p| app.session.doc.param(p)).map(|p| p.expr.as_str());
-            let col = if c.driven { tk.dimension_driven } else { tk.dimension };
+            let col = if ss.report.failing.contains(&c.id) {
+                crate::viewport::Conflict::glyph_colour(app, &tk)
+            } else {
+                crate::prefs::dimension_colour(&app.preferences, c.driven)
+            };
             let galley = painter.layout_no_wrap(
-                crate::dim_view::frame_label(&frame, &c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals),
-                FontId::proportional(tk.font_caption),
+                crate::dim_view::frame_label(
+                    &frame,
+                    &c.kind,
+                    expr,
+                    c.driven,
+                    &app.session.doc.units,
+                    app.preferences.length_decimals,
+                    app.preferences.angle_decimals,
+                ),
+                FontId::proportional(tk.font_caption * crate::prefs::dimension_text_scale(&app.preferences)),
                 col,
             );
             let size = galley.size() + vec2(6.0, 2.0);
@@ -3881,7 +3898,7 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
             }
             for (tip, dir) in &lay.arrows {
                 if let (Some(t), Some(back)) = (to(*tip), to(*tip - *dir * px)) {
-                    crate::icons::markers::dimension_arrow(&painter, t, back, col);
+                    crate::icons::markers::dimension_arrow(painter, t, back, col);
                 }
             }
             let Some(tc) = to(lay.text) else { continue };
@@ -3894,14 +3911,6 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
         }
     }
     crate::dim_view::set_model_drawn(drawn);
-}
-
-/// Keep browser panels beside the browser and below the ribbon, including the floating shell.
-pub(crate) fn panel_pos(app: &SolveApp) -> Pos2 {
-    app.viewport
-        .rect
-        .map(|r| crate::shell::content_rect(app, r).left_top() + vec2(Tokens::get().space_16, Tokens::get().space_16))
-        .unwrap_or(pos2(270.0, 140.0))
 }
 
 /// The Capture Position question stands for saving.
@@ -3953,7 +3962,6 @@ pub fn answer_capture(app: &mut SolveApp, action: &str) -> Result<(), String> {
         other => return Err(format!("unknown answer `{other}` (capture, revert, cancel)")),
     }
     app.tree.capture_prompt = None;
-    app.tree.occurrence_move = None;
     if what == SAVE {
         crate::toolbar::save(app);
     } else if let Some((extension, name)) = what.strip_prefix(SAVE_AS).and_then(|rest| rest.split_once(':')) {
@@ -3969,14 +3977,6 @@ pub fn answer_capture(app: &mut SolveApp, action: &str) -> Result<(), String> {
         crate::documents::saved_for_close(app);
     }
     Ok(())
-}
-
-/// Where an occurrence's origin is now (with its pending move).
-pub(crate) fn occurrence_origin(app: &SolveApp, occurrence: u64) -> Option<solidcore_record::Vec3> {
-    let o = app.session.doc.occurrences.iter().find(|o| o.id == occurrence)?;
-    let parent = app.session.doc.component_transform(o.parent);
-    let own = app.session.pending_moves.get(&occurrence).copied().unwrap_or(o.transform);
-    Some(solidcraft_engine::doc::apply_point(&solidcraft_engine::doc::mat_mul(&parent, &own), solidcore_record::Vec3::ZERO))
 }
 
 /// The names the Bodies folder lists at the top level, for tests.

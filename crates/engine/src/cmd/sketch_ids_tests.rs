@@ -45,7 +45,11 @@ fn check(s: &mut Session, cmd: &str, r: &Value, before: &Sketch) -> Value {
         assert_ne!(id, "origin", "{cmd}");
     }
     for id in strs(&c["constraints"]).iter().chain(&strs(&c["dimensions"])) {
-        assert!(sk.constraints.iter().any(|k| &k.id == id), "{cmd}: constraint {id} not in the sketch");
+        // 3D constraints (#10608) are constraints too.
+        assert!(
+            sk.constraints.iter().any(|k| &k.id == id) || sk.wire_constraints.iter().any(|k| &k.id == id),
+            "{cmd}: constraint {id} not in the sketch"
+        );
     }
     for id in strs(&c["dimensions"]) {
         assert!(sk.constraints.iter().any(|k| k.id == id && k.kind.is_dimension()), "{cmd}: {id} is not a dimension");

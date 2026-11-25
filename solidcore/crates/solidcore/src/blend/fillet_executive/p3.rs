@@ -27,24 +27,28 @@
 //! ownership are restored explicitly after fallible bodies, including on deferral.
 //! The upstream `cbi_MAP_TOPO_EDGES=0` experiments remain disabled. Parent-linked
 //! stage hooks borrow this live executive, never an adapter-owned duplicate.
-//! Opt-in, not upstream: with `Kernel::fixes.fillet_refuse_non_manifold_result`
-//! (WR-212, tangency-labs/solidcore#422) `do_fillet` ends with a closed-manifold
-//! check of the target (`check_closed_manifold`). A target with an edge that is
-//! not `SmEdge::IsManifold` is then refused with error code `SM_FILERR_BAD_MERGE`,
-//! the edge in the error info and in the error, where upstream (the default)
-//! returns success. `do_filleting` alone is unchanged.
+//! `do_fillet` returns the filleting's status, as upstream: whether a solid stayed one
+//! is decided on the stitched body by the three public edge-list wrappers
+//! (`fillet_edges`, `fillet_edges_per_edge`, `variable_radius_fillet` in `api`) and by
+//! the offset's put-back of its blends (`OffsetFacesExecutive::reblend`), WR-212.
 //! Not upstream: [`ExecutiveAccess::shrink_face`] shrinks the new fillet faces with
 //! knot snapping of rounding errors (tangency-labs/solidcore#472).
+//! Not upstream (solidcore-native, #15767): `trim_solver_rails` refuses a blend, as a rail
+//! leaving its face ([`NoRoomReason::RailLeavesFace`]), where a rail rolled over a smooth far
+//! edge of its face before the trace is not proved on the face beyond as trimmed
+//! ([`RailTrimAccess::rails_rolled_on_their_faces`]).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use crate::blend::fillet_corner::p1::keeping_cause;
 use crate::blend::fillet_executive::p1::ExecutiveObjects;
 use crate::blend::fillet_executive::session::ball_regular::{BallCheck, BallStation};
 use crate::blend::fillet_geom::p1::{FilStatus, FilletCornerType, FilletEdgeType, FilletErrorType};
 use crate::blend::fillet_solver::p1::FilletSurfaceGenerator;
 use crate::blend::fillet_solver::p5::RailsFit;
 use crate::boolean::topology_intersector::p1::TopologyIntersector;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::assert_array::c_general;
 use crate::geom::object::NotifyOperation;
 use crate::geom::solution_array::SolutionObject;
@@ -65,12 +69,17 @@ fn smos_max(a: f64, b: f64) -> f64 {
     }
 }
 
+/// `FILEXEC_ERR` (`SM_ERR`): a step of the executive failed; the executive's error info
+/// says which.
 fn failure() -> SolidError {
-    SolidError::Upstream {
-        operation: OP,
-        code: 1001,
-        entity: None,
-    }
+    SolidError::blend(OP, BlendFailure::ExecutiveStepFailed)
+}
+
+/// `SM_ERR_NULL_POINTER` (upstream's `NER`): the executive is run with no target body.
+fn no_target() -> SolidError {
+    Failure::new(OP, BlendFailure::TargetNotGiven)
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
 }
 
 fn invalid(reason: &'static str) -> SolidError {
@@ -80,12 +89,52 @@ fn invalid(reason: &'static str) -> SolidError {
     }
 }
 
+/// Whether `e` is the closed-solid orientation's "face uses gathered from both sides"
+/// failure ([`crate::error::topology::TopologyFailure::GatheredBothSides`]).
+fn gathered_both_sides(e: &SolidError) -> bool {
+    matches!(
+        e.topology_failure(),
+        Some(crate::error::topology::TopologyFailure::GatheredBothSides)
+    )
+}
+
 fn ignore<T>(result: Result<T>) -> Result<Option<T>> {
     match result {
         Ok(value) => Ok(Some(value)),
         Err(error) if error.is_unported_or_cancelled() => Err(error),
         Err(_) => Ok(None),
     }
+}
+
+/// [`ignore`] of a stage whose failure the executive reports with a failure of its own,
+/// keeping the stage's error for that failure's cause ([`failure_after`], #13790): an
+/// unported call, a cancellation, unavailable face trims or a certificate past its budget
+/// ([`SolidError::is_unported_or_cancelled`], of the stage's error itself, never of its
+/// causes) is passed on; any other error is the inner `Err` where [`ignore`] gives `None`.
+pub(super) fn caught<T>(result: Result<T>) -> Result<Result<T>> {
+    match result {
+        Ok(value) => Ok(Ok(value)),
+        Err(error) if error.is_unported_or_cancelled() => Err(error),
+        Err(error) => Ok(Err(error)),
+    }
+}
+
+/// [`caught`] of a corner's vertex geometry, except that a refusal the corner made, with
+/// its typed cause ([`crate::error::blend::BlendFailure::NoRoom`], its error info and fit
+/// noted by the corner), is passed on as it is, as a corner refused at its topology keeps
+/// its reason (not the fork's, #17224). Only the stage's error itself is matched: a refusal
+/// among its causes is kept as the cause of the corner's failure, not passed on.
+fn caught_but_refusal(result: Result<()>) -> Result<Result<()>> {
+    match result {
+        Err(error) if matches!(error.blend_failure(), Some(BlendFailure::NoRoom(_))) => Err(error),
+        result => caught(result),
+    }
+}
+
+/// [`failure`] keeping `cause`, the error of the stage that failed (guide rule 6, #13790):
+/// the same operation, phrase and status.
+fn failure_after(cause: SolidError) -> SolidError {
+    keeping_cause(failure(), cause)
 }
 
 /// Which of the port's blend-too-large refusals noted [`FilletErrorType::NoRoom`] (not
@@ -100,16 +149,20 @@ pub enum NoRoomReason {
     /// fork's 410dfe1, WR-696).
     BallDoesNotFit,
     /// A rail leaves the face it rolls on between its ends (the fork's
-    /// `RailsFitTheirFaces`; `fixes.fillet_refuse_rails_leaving_faces`, WR-302).
+    /// `RailsFitTheirFaces`; WR-302) where no cliff cuts the face off: a closed rail that
+    /// leaves past one end of the filleted edge and comes back past the other
+    /// (`RailsFit::wraps_past_both_ends`, tangency-labs/solidcore#2175). A rail that leaves
+    /// across a cliff is built as a cliff overflow or refused with the overflow's own reason
+    /// ([`Self::ConcaveOverflow`] and the others).
     RailLeavesFace,
     /// The blends take the whole of a face they roll on, some at an angle to it (the fork's
-    /// `FacesOutlastTheirBlends`; `fixes.fillet_refuse_face_consuming_blends`, WR-320).
+    /// `FacesOutlastTheirBlends`; WR-320).
     FaceConsumed,
     /// A blend's rail runs inside the band another blend takes off a face they share (the
-    /// fork's `BandsClearOtherRails`; `fixes.fillet_refuse_overlapping_bands`, WR-542).
+    /// fork's `BandsClearOtherRails`; WR-542).
     BandsOverlap,
     /// A concave blend (one that adds material) whose rail leaves its face (the fork's cliff
-    /// overflow choice; `fixes.fillet_cliff_overflow`, WR-631).
+    /// overflow choice; WR-631).
     ConcaveOverflow,
     /// A round or curvature-continuous blend whose rail leaves its face into the body's
     /// material, beyond a wall (WR-631).
@@ -140,8 +193,7 @@ pub enum NoRoomReason {
     CutsThePart,
     /// A convex blend's section would leave the part between its rails and come back into
     /// it through an inner face: the blend would break through a wall into the hollow
-    /// behind (a round on a wall thinner than it reaches; not the fork's,
-    /// `fixes.fillet_refuse_rounds_breaking_through`, WR-707, #2299).
+    /// behind (a round on a wall thinner than it reaches; not the fork's, WR-707, #2299).
     BreaksThrough,
     /// A cliff overflow runs past a fillet end whose end face is not planar (WR-631).
     CliffEndFaceNotPlanar,
@@ -165,11 +217,11 @@ pub enum NoRoomReason {
     CliffSubtractionLeavesNoSolid,
     /// A round that ends where its edge runs on tangentially is built only alone, with both
     /// its ends such ends, and with its faces' sections at the ends straight (not the fork's,
-    /// WR-674, `fixes.fillet_round_ends_at_tangent_continuation`).
+    /// WR-674).
     TangentContinuationEndUnsupported,
     /// A blend past its faces creases a face that runs on tangentially from a face it rolls
     /// on: the rail would roll over onto it, no cliff (the fork's `TrimAtCreases`,
-    /// tangency-labs/smlib@bacd0bb; `fixes.fillet_overflow_trim_at_creases`, WR-695).
+    /// tangency-labs/smlib@bacd0bb; WR-695).
     CreaseAcrossTangentEdge,
     /// A blend past its faces keeps no length of its edge: its corners take the whole of it
     /// (the fork's `TrimAtCreases`, tangency-labs/smlib@8832ead; WR-695).
@@ -181,7 +233,10 @@ pub enum NoRoomReason {
     /// A constant ball as wide as a face it rolls on (a cylinder or sphere of its radius,
     /// the ball inside): its offset of that face collapses onto the axis or the centre, so
     /// its centre does not move along the edge, and the zone it sweeps has no section of the
-    /// ball at an end of the edge, so no round ends there (not the fork's, #2401).
+    /// ball at an end of the edge, so no round ends there (not the fork's, #2401). Also a
+    /// constant ball as wide as a face it rolls on by the face's definition (a cylinder,
+    /// sphere, torus or round of its radius), whose regularity judges no station along the
+    /// edge (#16768).
     OffsetCollapses,
     /// A rail of a constant ball's round or chamfer along an arc would have its ends
     /// within the part's resolution of each other (two vertex tolerances) without closing
@@ -199,11 +254,63 @@ pub enum NoRoomReason {
     /// Join ends them on. The fit is the smaller offset, on the edge of the larger (not the
     /// fork's, #2905).
     JoinOffsetsDiffer,
+    /// Two rounds running on into each other across an edge between their faces, tangent
+    /// along it, end on the section where their contact lines cross that edge, and a
+    /// constant round's contact line never reaches it: the largest ball touching the round's
+    /// face on that edge and its other face is smaller than the round, so no ball of its
+    /// radius fits there. Noted only after the Join's vertex geometry failed. The fit is that
+    /// largest ball, less the fit margin, on the first round's edge (not the fork's, #17224).
+    JoinRailMissesSideEdge,
     /// A blend past its faces would leave a strip of the body, along an edge of the body,
     /// thinner than the part resolves: the edge lies off the blend by less than the trim's
     /// tolerance and the body's together, within which the strip's vertices are one. The
     /// fit is the blend's size less the fit margin (not the fork's, #2404).
     StripBelowResolution,
+    /// An End's rail runs past its side edge's far end, onto the faces beyond (the fork's
+    /// `RefuseEndPastSideEdge`). Named for the typed failure record
+    /// ([`crate::error::ErrorKind::EndPastSideEdge`]); its refusal notes it once it moves onto
+    /// the record.
+    EndPastSideEdge,
+    /// An End of mixed convexity whose rail misses the side edge of the other convexity.
+    /// Named for the typed failure record ([`crate::error::ErrorKind::EndOverflowsSideEdge`]);
+    /// its refusal notes it once it moves onto the record.
+    EndOverflowsSideEdge,
+    /// An End on its end face whose rail passes over that face: the face falls away under
+    /// the round (a ridge between the round's other face and it), so the rail on a face of
+    /// the blended edge never reaches its surface and no section of it ends the round. Noted
+    /// only after the End's vertices or edges failed. The fit is the largest ball whose rail
+    /// still ends on the end face, less the fit margin, on the blended edge (not the fork's,
+    /// SolidCraft #19454).
+    EndPassesOverEndFace,
+    /// An End's rail rolls over its face's tangent edge where the round ends at a smooth
+    /// vertex. Named for the typed failure record
+    /// ([`crate::error::ErrorKind::EndRollsIntoSmoothEnd`]); its refusal notes it once it moves
+    /// onto the record.
+    EndRollsIntoSmoothEnd,
+    /// A round's edge runs on across a seam's vertex into an edge that is not blended. Named
+    /// for the typed failure record ([`crate::error::ErrorKind::EndAtSeamVertex`]); its refusal
+    /// notes it once it moves onto the record.
+    EndAtSeamVertex,
+    /// A blend past its faces keeps no length of its edge and no corner takes any of it: the
+    /// trim takes the whole of it, as a knife edge's chamfer wider than the body does (not
+    /// the fork's, #15250). The fit, where the kernel computes one, is the size beyond which
+    /// the blend keeps nothing (a knife edge's chamfer between a plane and a cylinder tangent
+    /// to it) or where its rails stay on their faces, less the fit margin.
+    OverflowKeepsNothing,
+    /// A weld bead's toe at its leg lies off its face (#15129): the face ends nearer the joint
+    /// line than the leg. The fit is the largest leg on that side whose toe stays on the face
+    /// at the stations checked.
+    LegPastFace,
+    /// A weld bead's face has no point at the leg's distance from the joint line on its side
+    /// in a station's plane (#15129): the face turns away or back within the leg, so no toe
+    /// leaves the joint line along it. The fit is the largest leg on that side that finds its
+    /// toe at the stations checked.
+    NoToeAtLeg,
+    /// A weld bead's arc would cut into a face at a station (#15129): its sagitta is past the
+    /// open bound `(c / 2) tan(min(beta_i) / 2)` there (concave; convex `(c / 2) tan((pi -
+    /// max(beta_i)) / 2)`), `c` the chord and `beta_i` the angles at which it leaves the faces.
+    /// The fit is the least of those bounds over the stations checked.
+    BeadCutsFace,
 }
 
 /// The initialized error-info members p3 reads or writes. Corner kinds use the
@@ -246,6 +353,19 @@ pub struct ErrorInfo<O> {
     /// Not upstream: the refusal that noted [`FilletErrorType::NoRoom`], set with that code
     /// (read it with [`ErrorInfo::no_room_reason`], which ignores it under any other code).
     pub no_room: Option<NoRoomReason>,
+    /// Not upstream: the [`FilletErrorType::NoRoom`] code was noted by the generic
+    /// `NoteError(code, comment)` overload, which names no site, so the vertex, edge,
+    /// faces and location left in the record are an earlier failure's (e.g. a corner noted
+    /// unsupported before). A note that names a site clears it. Read only under that code
+    /// (`FilletSession::error_site`).
+    pub no_room_without_site: bool,
+    /// Not upstream: the error of the classification that failed at the vertex noted with
+    /// [`FilletErrorType::CornerUnsupported`], which is why no corner was made there (read
+    /// it with [`ErrorInfo::unsupported_corner_cause`], which ignores it under any other
+    /// code). Every note clears it, so a later note under the same code (a corner's own
+    /// refusal, a setback not built) never reads as caused by an earlier classification;
+    /// only the executive's note of the unsupported corner sets it, after its note.
+    pub corner_cause: Option<SolidError>,
 }
 
 impl<O> Default for ErrorInfo<O> {
@@ -268,6 +388,8 @@ impl<O> Default for ErrorInfo<O> {
             comment: "<no comment>\n".into(),
             entity_name: "\n".into(),
             no_room: None,
+            no_room_without_site: false,
+            corner_cause: None,
         }
     }
 }
@@ -286,6 +408,8 @@ impl<O: Copy> ErrorInfo<O> {
         self.edges.clone_from(&source.edges);
         // (not upstream: the refusal goes with the code it explains)
         self.no_room = source.no_room;
+        self.no_room_without_site = source.no_room_without_site;
+        self.corner_cause.clone_from(&source.corner_cause);
     }
 }
 
@@ -296,6 +420,18 @@ impl<O> ErrorInfo<O> {
     pub fn no_room_reason(&self) -> Option<NoRoomReason> {
         if self.code == FilletErrorType::NoRoom as i32 {
             self.no_room
+        } else {
+            None
+        }
+    }
+
+    /// The error that left the noted vertex without a corner, where its classification
+    /// failed (not upstream); `None` under any code but
+    /// [`FilletErrorType::CornerUnsupported`].
+    #[must_use]
+    pub fn unsupported_corner_cause(&self) -> Option<&SolidError> {
+        if self.code == FilletErrorType::CornerUnsupported as i32 {
+            self.corner_cause.as_ref()
         } else {
             None
         }
@@ -495,6 +631,26 @@ pub trait FilletFinishAccess<O: ClassObject + SolutionObject + Ord> {
         data2: Option<O>,
         data3: Option<O>,
     ) -> Result<()>;
+    /// `SmFace::Notify(PreEdit)` of every face of `brep`, in `SmBrep::GetFaces` order, as
+    /// the tail of `DoFilleting` sends it. A face's ordinary notification failure is
+    /// ignored as upstream; an unported or cancelled one stops the walk.
+    ///
+    /// # Errors
+    /// Lookup failures; an unported or cancelled notification.
+    fn finish_pre_edit_faces(&mut self, k: &mut Kernel, brep: O) -> Result<()> {
+        for face in self.finish_faces(brep)? {
+            // SmTypes.h:659: SM_NO_GET_BREP(face) expands to a null object.
+            ignore(self.finish_notify_face(
+                k,
+                face,
+                NotifyOperation::PreEdit,
+                Some(face),
+                None,
+                None,
+            ))?;
+        }
+        Ok(())
+    }
     /// `SmBrep::OrientTrimmedSurfaces`.
     ///
     /// # Errors
@@ -507,9 +663,32 @@ pub trait FilletFinishAccess<O: ClassObject + SolutionObject + Ord> {
         maybe_not_solid: &mut bool,
         just_unify: bool,
     ) -> Result<()>;
+    /// (not upstream, WR-661) Whether `brep`, which the stitch left open and whose
+    /// closed-solid orientation failed with `error` (face uses gathered from both
+    /// sides), is kept: its input was open and its boundary is the input's cut back where
+    /// a fillet meets it (the live session's `OpenInput::keeps_open_result`). A kept body
+    /// must still pass the level-2 check once the filleting is done, or the session
+    /// returns `error` then.
+    ///
+    /// # Errors
+    /// Lookup failures; unported or cancelled steps.
+    fn finish_keeps_open_result(
+        &mut self,
+        k: &mut Kernel,
+        brep: O,
+        error: &SolidError,
+    ) -> Result<bool>;
 }
 
 impl<O: ClassObject + SolutionObject + Ord, A: ExecutiveAccess<O>> FilletFinishAccess<O> for A {
+    fn finish_keeps_open_result(
+        &mut self,
+        k: &mut Kernel,
+        brep: O,
+        error: &SolidError,
+    ) -> Result<bool> {
+        self.keeps_open_result(k, brep, error)
+    }
     fn finish_delete_brep(&mut self, _k: &mut Kernel, brep: O) -> Result<()> {
         self.delete_brep(brep)
     }
@@ -653,9 +832,11 @@ pub struct FilletExecutive<O> {
     /// `m_bCliffOverflow` (the fork's, WR-631, tangency-labs/smlib@8ba4667; `FALSE` from
     /// the constructor and `SetFilletParameters`): a convex blend's rail leaves its face
     /// across a cliff; the blend is built on its faces' continuations and the material it
-    /// removes is subtracted from the target. Set only with
-    /// `fixes.fillet_cliff_overflow`.
+    /// removes is subtracted from the target.
     pub cliff_overflow: bool,
+    /// Rail crossings on continued walls, retained with the solver that supplied them.
+    pub(crate) continued_cliffs:
+        BTreeMap<O, Vec<(crate::topology::EdgeId, crate::topology::FaceId)>>,
     /// `m_vOpenEnds` (the fork's, WR-631): the fillet's ends the Nx1 corner there left
     /// uncut, in a cliff overflow.
     pub open_ends: Vec<OpenEnd<O>>,
@@ -664,9 +845,7 @@ pub struct FilletExecutive<O> {
     /// overflow across cliffs (and none of the cliff overflow's refusals applies),
     /// `CreateFilletBrep` stops after classifying the rails, building nothing, with
     /// `FilletErrorType::OverflowFirst` and [`Self::overflow_edges`]: the caller blends
-    /// the edges that overflow on their own first, then what is left of the others. Acts
-    /// only with `fixes.fillet_refuse_rails_leaving_faces` and `fixes.fillet_cliff_overflow`
-    /// (the fork's rail classification).
+    /// the edges that overflow on their own first, then what is left of the others.
     pub overflow_first: bool,
     /// `m_bClassifyOnly` (the fork's, WR-634; `FALSE` from the constructor, kept by
     /// `SetFilletParameters`): `CreateFilletBrep` always stops after classifying the
@@ -674,6 +853,11 @@ pub struct FilletExecutive<O> {
     /// [`Self::overflow_edges`] the edges whose blends overflow (possibly none). Acts only
     /// with the flags of [`Self::overflow_first`].
     pub classify_only: bool,
+    /// Not upstream (#10876; `false` from the constructor): the session is the blend
+    /// corner's Roll-over's second pass, the concave chain
+    /// ([`crate::blend::blend_corner::rollover`]): its concave overflow across the cliff is
+    /// accepted (`choose_cliff_overflow`) and built as a cliff overflow.
+    pub roll_over_pass: bool,
     /// `m_vOverflowEdges` (the fork's, WR-634; cleared by `SetFilletParameters`): the
     /// edges of the blends that overflow, in solver order, when stopped so.
     pub overflow_edges: Vec<O>,
@@ -684,9 +868,10 @@ pub struct FilletExecutive<O> {
     /// corner order.
     pub mitred_edges: Vec<O>,
     /// `m_vFanSplitPoints` (the fork's, WR-665, tangency-labs/smlib@e418750; cleared by
-    /// `SetFilletParameters`): where a blended edge's vertex the body touches itself at
-    /// was split into one vertex per fan (`SplitBlendedVertexFans`, with
-    /// `fixes.fillet_corner_per_vertex_fan`), for `JoinBlendedVertexFans`.
+    /// `JoinBlendedVertexFans` and when `SetFilletParameters` changes the target, kept
+    /// across another preparation of the same target, which the fork clears): where a blended edge's vertex the body touches itself at
+    /// was split into one vertex per fan (`SplitBlendedVertexFans`), for
+    /// `JoinBlendedVertexFans`.
     pub fan_split_points: Vec<Point3>,
     /// `m_vEarlierPassFaces` (the fork's, tangency-labs/smlib@9822462, smlib#130; empty
     /// from the constructor, kept by `SetFilletParameters`): the faces an earlier pass of
@@ -708,6 +893,11 @@ pub struct FilletExecutive<O> {
     /// the least setback that builds one: `> 0`, `0` when none does, `< 0` when not that
     /// cause (`NoteFitSetBack`).
     pub fit_setback: f64,
+    /// Not upstream (#15906): set while the rails' classification recomputes the edges of
+    /// the corners it adjusted (`classify_solver_rails_with_adjusted`), the pass an End at a
+    /// smooth vertex that waited for the rails' rollover is built in. An End that would wait
+    /// again then has no later pass to build its edges, so it fails instead.
+    pub rollover_adjusting: bool,
 }
 
 /// What a refusal's fit sizes (the fork's `SM_FIT_RADIUS`, `SM_FIT_SCALE`, `SM_FIT_CHORD`).
@@ -766,7 +956,7 @@ pub struct OpenEnd<O> {
     pub vertex: O,
     /// `m_pEndFace`: the face whose surface's continuation cuts the fillet off there.
     pub end_face: O,
-    /// Not the fork's (WR-674, `fixes.fillet_round_ends_at_tangent_continuation`): the
+    /// Not the fork's (WR-674): the
     /// fillet is cut off by its section through the vertex, the plane normal to the
     /// filleted edge there, not by `end_face` (then one of the filleted edge's faces).
     pub section: bool,
@@ -936,6 +1126,56 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     fn solver_geom(&self, solver: O, index: usize) -> Result<Option<O>>;
     /// `SmFilletSolver::GetEdgeuse(0)->GetEdge()`.
     fn solver_edge(&self, solver: O) -> Result<O>;
+    /// The fork's `RailsFitTheirFaces(rbFit, rbRollsOver, rbIntoMaterial)` for `solver`
+    /// ([`SolverGeometryAccess::geometry_rails_fit_judged`]). Only an accessor with a live
+    /// pseudo-B-rep can judge it.
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] without live context.
+    fn solver_rails_fit_judged(&mut self, k: &mut Kernel, solver: O) -> Result<RailsFit> {
+        let _ = (k, solver);
+        Err(SolidError::unported(
+            "SmFilletSolver::RailsFitTheirFaces (fork)",
+            "blend.fillet_executive_p3",
+        ))
+    }
+    /// The fork's `EndSectionsFitTheirFaces` for `solver`
+    /// ([`SolverGeometryAccess::geometry_end_sections_fit`]). Only an accessor with a live
+    /// pseudo-B-rep can judge it.
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] without live context.
+    fn solver_end_sections_fit(&mut self, k: &mut Kernel, solver: O) -> Result<bool> {
+        let _ = (k, solver);
+        Err(SolidError::unported(
+            "SmFilletSolver::EndSectionsFitTheirFaces (fork)",
+            "blend.fillet_executive_p3",
+        ))
+    }
+    /// The fork's `FacesOutlastTheirBlends` over `solvers`
+    /// ([`SolverGeometryAccess::geometry_faces_outlast`]).
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] without live context.
+    fn solvers_faces_outlast(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<bool> {
+        let _ = (k, solvers);
+        Err(SolidError::unported(
+            "SmFilletExecutive::FacesOutlastTheirBlends (fork)",
+            "blend.fillet_executive_p3",
+        ))
+    }
+    /// The fork's `BandsClearOtherRails` over `solvers`
+    /// ([`SolverGeometryAccess::geometry_bands_clear_other_rails`]).
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] without live context.
+    fn solvers_bands_clear_other_rails(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<bool> {
+        let _ = (k, solvers);
+        Err(SolidError::unported(
+            "SmFilletExecutive::BandsClearOtherRails (fork)",
+            "blend.fillet_executive_p3",
+        ))
+    }
     /// `SmFilletSolver::GetThisApproxTol3d`.
     fn solver_approx_tolerance(&self, solver: O) -> Result<f64>;
     /// `SmFilletGeom::m_pFilletSurface->GetOwner()`, cast to face.
@@ -960,13 +1200,6 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     fn set_editing_enabled(&mut self, brep: O, enabled: bool) -> Result<()>;
     /// `SmBrep::GetEdges`, preserving list order.
     fn edges(&self, brep: O) -> Result<Vec<O>>;
-    /// `SmEdge::IsManifold` (`topology::edge::is_manifold`): four edge uses, the
-    /// first a loop edge use. Used only by the closed-manifold result check.
-    fn edge_is_manifold(&self, edge: O) -> Result<bool>;
-    /// The typed id of `edge` for error context, when the handle has one.
-    fn edge_entity(&self, _edge: O) -> Option<EntityRef> {
-        None
-    }
     /// `SmBrep::GetVertices`, preserving list order.
     fn vertices(&self, brep: O) -> Result<Vec<O>>;
     /// `SmBrep::GetFaces`, preserving list order.
@@ -1199,6 +1432,25 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         faces: Option<&[O]>,
         allow_spine_edges: bool,
     ) -> Result<StitchAttempt>;
+    /// [`Self::stitch_faces`] of every face of `brep` keeping a fillet's own edge where a
+    /// patch of `corners` meets it
+    /// ([`FaceStitchAccess::stitch_body_keeping_fillet_edges`]).
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] without live context; as [`Self::stitch_faces`].
+    fn stitch_faces_keeping_fillet_edges(
+        &mut self,
+        k: &mut Kernel,
+        brep: O,
+        tolerance: f64,
+        corners: &[O],
+    ) -> Result<StitchAttempt> {
+        let _ = (k, brep, tolerance, corners);
+        Err(SolidError::unported(
+            "SmFilletPatchStitchCallback",
+            "blend.fillet_executive_p3",
+        ))
+    }
 
     /// `SmFilletExecutive::DoPiecewiseMerge` on the implementor's bodies (the live
     /// session's port is `FilletSession`'s piecewise merge).
@@ -1361,6 +1613,13 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         just_unify: bool,
         faces_to_swap_uv: Option<&mut Vec<O>>,
     ) -> Result<()>;
+
+    /// (not upstream, WR-661) [`FilletFinishAccess::finish_keeps_open_result`]: whether
+    /// `brep`, left open by the stitch, is kept by the orientation's pass-over.
+    ///
+    /// # Errors
+    /// Lookup failures; unported or cancelled steps.
+    fn keeps_open_result(&mut self, k: &mut Kernel, brep: O, error: &SolidError) -> Result<bool>;
 
     // ---- added by blend.fillet_executive_p2 (PR #267) --------------------------------
 
@@ -1937,6 +2196,22 @@ pub trait RailTrimAccess<O: ClassObject + SolutionObject + Ord>: SolverGeometryA
         solver: O,
         executive: &mut FilletExecutive<O>,
     ) -> Result<()>;
+
+    /// Not upstream (solidcore-native, #15767): whether every rail of `solver` rolled over a
+    /// smooth far edge of its face before the trace, on the evidence of the ball's sections
+    /// only, is proved to lie on the face beyond as trimmed. `true` where none rolled so (the
+    /// default, for an access without that rollover).
+    ///
+    /// # Errors
+    /// A missing dependency or a cancellation from the proof; actual lookup errors.
+    fn rails_rolled_on_their_faces(
+        &mut self,
+        _k: &mut Kernel,
+        _solver: O,
+        _executive: &mut FilletExecutive<O>,
+    ) -> Result<bool> {
+        Ok(true)
+    }
 }
 
 impl<O, A> RailTrimAccess<O> for A
@@ -2111,6 +2386,24 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
         only: Option<O>,
     ) -> Result<Option<(f64, FitKind)>>;
 
+    /// Not the fork's (#20314): the radius at which the corner `corner` of the constant balls
+    /// of solvers `a` and `b`, which roll on one face, leaves that face
+    /// (`session::fit_size::corner_leaves_face`). `None` by default, and where no size is
+    /// found.
+    ///
+    /// # Errors
+    /// The sizing's own errors.
+    fn creation_corner_leaves_face(
+        &mut self,
+        k: &mut Kernel,
+        corner: O,
+        a: O,
+        b: O,
+    ) -> Result<Option<f64>> {
+        let _ = (k, corner, a, b);
+        Ok(None)
+    }
+
     /// `NoteFitOfPolygonsTakenWhole`'s per-face sizes (the fork's, 49f393d): for each face
     /// the blends of `solvers` (constant balls) roll on, in face order, where it is a
     /// polygon with every edge blended, the radius that leaves some of it, the first
@@ -2152,6 +2445,22 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
         radius: Option<f64>,
     ) -> Result<Option<crate::blend::fillet_exact::CollapsedOffset>>;
 
+    /// Not the fork's (#14846): for a constant ball (of `radius`, `None`: the solver's own),
+    /// the end of its edge that every ball on the edge's faces lies past, so that the round
+    /// has no section between the edge's ends, and the largest radius that has one
+    /// ([`ball_past_an_end`](crate::blend::fillet_exact::ball_past_an_end)); `None` otherwise,
+    /// for a solver that rolls no constant ball, and from the adapter over
+    /// [`ExecutiveAccess`], which holds no solvers.
+    ///
+    /// # Errors
+    /// The judging's own errors.
+    fn creation_ball_past_an_end(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        radius: Option<f64>,
+    ) -> Result<Option<crate::blend::fillet_exact::PastAnEnd>>;
+
     /// Not the fork's (#2546): for a constant ball, its rail whose ends lie within the
     /// part's resolution of each other without closing to a point
     /// (`blend::fillet_exact::rail_below_resolution`); `None` otherwise, for a solver
@@ -2166,23 +2475,29 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
         solver: O,
     ) -> Result<Option<crate::blend::fillet_exact::RailBelowResolution>>;
 
-    /// `SmFilletSolver::BandsMeetAt` (the fork's, a3d6d81) over the executive's pairs of
-    /// `solvers` sharing a face, in its loop order (`a`, `b`, then each's face index): the
-    /// radius where their bands meet, with the first solver's edge, for each pair that
-    /// has one. None from the adapter over [`ExecutiveAccess`], which holds no solvers.
+    /// The contact size of each pair of blends sharing a face, with the size's kind,
+    /// limiting edge and face. Planar constant-width chamfer bands use their exact
+    /// bounded-curve separation, including endpoint contacts; the other constant-ball
+    /// classes use `SmFilletSolver::BandsMeetAt`.
     ///
     /// # Errors
-    /// The sizing's own errors.
-    fn creation_bands_meet(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<Vec<(f64, O)>>;
+    /// Those of the sizing and the face's interior-point query.
+    fn creation_bands_meet(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<Vec<BandFit<O>>>;
+}
 
-    /// Not the fork's (#3190's finding): the band refusal's fit as a scale of both blends,
-    /// from the band check's own quantities, where that is exact (two chamfers on a plane
-    /// face between parallel lines), with the first blend's edge; `None` elsewhere. The
-    /// session's `band_scale` says how.
-    ///
-    /// # Errors
-    /// Those of the topology and geometry lookups.
-    fn creation_band_scale(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<Option<(f64, O)>>;
+/// A band contact's limiting size and the target entities that locate it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BandFit<O> {
+    /// The radius or common scale at which the bands meet.
+    pub size: f64,
+    /// What `size` measures.
+    pub kind: FitKind,
+    /// The first blend's target edge.
+    pub edge: O,
+    /// The shared target face, when the contact locates it.
+    pub face: Option<O>,
+    /// An interior point of the shared face, when it is named.
+    pub at: Option<Point3>,
 }
 
 /// Where a solver's convex blend would cut the part
@@ -2293,6 +2608,15 @@ where
         Ok(None)
     }
 
+    fn creation_ball_past_an_end(
+        &mut self,
+        _k: &mut Kernel,
+        _solver: O,
+        _radius: Option<f64>,
+    ) -> Result<Option<crate::blend::fillet_exact::PastAnEnd>> {
+        Ok(None)
+    }
+
     fn creation_rail_below_resolution(
         &mut self,
         _k: &mut Kernel,
@@ -2306,13 +2630,8 @@ where
         Ok(Vec::new())
     }
 
-    fn creation_bands_meet(&mut self, _k: &mut Kernel, _solvers: &[O]) -> Result<Vec<(f64, O)>> {
+    fn creation_bands_meet(&mut self, _k: &mut Kernel, _solvers: &[O]) -> Result<Vec<BandFit<O>>> {
         Ok(Vec::new())
-    }
-
-    fn creation_band_scale(&mut self, _k: &mut Kernel, _solvers: &[O]) -> Result<Option<(f64, O)>> {
-        // the adapter over ExecutiveAccess holds no solver geometry: no chamfer to judge
-        Ok(None)
     }
 }
 
@@ -2393,6 +2712,15 @@ where
     fn stitch_body(&mut self, k: &mut Kernel, body: O, tolerance: f64) -> Result<StitchAttempt> {
         ExecutiveAccess::stitch_faces(self, k, body, tolerance, None, false)
     }
+    fn stitch_body_keeping_fillet_edges(
+        &mut self,
+        k: &mut Kernel,
+        body: O,
+        tolerance: f64,
+        corners: &[O],
+    ) -> Result<StitchAttempt> {
+        ExecutiveAccess::stitch_faces_keeping_fillet_edges(self, k, body, tolerance, corners)
+    }
 }
 
 /// Actual construction operations for the intermediate fillet faces.
@@ -2450,6 +2778,18 @@ pub trait FaceConstructionAccess<O: ClassObject + SolutionObject + Ord>:
         body: O,
         executive: &mut FilletExecutive<O>,
     ) -> Result<()>;
+    /// Bound open-ended native sheets before their first stitch. Abstract adapters
+    /// have no live open-end geometry; the session supplies that construction.
+    ///
+    /// # Errors
+    /// The boundary construction's errors, preserving its refusal and fit metadata.
+    fn faces_bound_open_ends(
+        &mut self,
+        _k: &mut Kernel,
+        _executive: &mut FilletExecutive<O>,
+    ) -> Result<()> {
+        Ok(())
+    }
 }
 impl<O, A> FaceConstructionAccess<O> for A
 where
@@ -2519,6 +2859,49 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
     fn geometry_overflow_edge(&self, solver: O) -> Result<Option<O>> {
         self.geometry_edge(solver).map(Some)
     }
+    /// Not upstream (#10876): whether `solver`'s overflow is the blend corner's Roll-over's
+    /// (its second pass): its edge ends at a vertex V where the concave chain meets the
+    /// cliff, and every run of its rails off their faces leaves across an edge of the
+    /// cliff's rim at that V (`left_across`, from the judged rails fit; at least one).
+    /// `false` by default (no second pass).
+    ///
+    /// # Errors
+    /// Missing actual solver topology; those of the rim's tests.
+    fn geometry_overflows_at_roll_over(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        left_across: &[Option<crate::topology::EdgeId>],
+    ) -> Result<bool> {
+        let _ = (k, solver, left_across);
+        Ok(false)
+    }
+    /// Whether a fixed-offset solver's every off-face rail run enters material across
+    /// classified concave exit and return seams. Unknown boundaries, varying offsets
+    /// and rails wholly off their support cannot establish this. A wrapped run also
+    /// requires a topologically closed filleted edge.
+    ///
+    /// # Errors
+    /// Those of the manifold/material-side tests.
+    fn geometry_overflows_into_material(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        left_across: &[Option<crate::topology::EdgeId>],
+        return_across: &[Option<crate::topology::EdgeId>],
+        wraps: bool,
+        boundaries_into_material: bool,
+    ) -> Result<bool> {
+        let _ = (
+            k,
+            solver,
+            left_across,
+            return_across,
+            wraps,
+            boundaries_into_material,
+        );
+        Ok(false)
+    }
     /// The fork's mitred-pair test of the overflow-first stop (WR-634,
     /// tangency-labs/smlib@9ba2b12): for an Nx2 corner whose `IsMitre` is set, the edges
     /// of its two filleted edge uses (`GetFilletedEdgeuses`), in order; `None` for any
@@ -2531,28 +2914,20 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
         let _ = corner;
         Ok(None)
     }
-    /// The fork's `SmFilletSolver::RailsFitTheirFaces` for `solver` (not upstream; opt-in
-    /// `fixes.fillet_refuse_rails_leaving_faces`, WR-302): whether every rail of its
-    /// untrimmed fillet stays on the face it rolls on. Only an accessor with a live
-    /// pseudo-B-rep can tell.
+    /// Not upstream (#20314): the target edges `corner` blends (those of its filleted edge
+    /// uses, `m_pSolverEUs`), each once. Only an accessor with live corners can tell; the
+    /// default finds none.
     ///
     /// # Errors
-    /// [`SolidError::Unported`] without live context; the classification's errors.
-    fn geometry_rails_fit(
-        &mut self,
-        k: &mut Kernel,
-        solver: O,
-        executive: &FilletExecutive<O>,
-    ) -> Result<bool> {
-        let _ = (k, solver, executive);
-        Err(SolidError::unported(
-            "SmFilletSolver::RailsFitTheirFaces (fork)",
-            "blend.fillet_executive_p3",
-        ))
+    /// Those of the edge lookups.
+    fn geometry_corner_blended_edges(&self, corner: O) -> Result<Vec<O>> {
+        let _ = corner;
+        Ok(Vec::new())
     }
     /// The fork's `RailsFitTheirFaces(rbFit, rbRollsOver, rbIntoMaterial)` for `solver`
-    /// (WR-631, `fixes.fillet_cliff_overflow`): as [`Self::geometry_rails_fit`], and
-    /// whether a rail rolls over a tangent edge or runs on into the body's material.
+    /// (not upstream; WR-302, WR-631): whether every rail of its untrimmed fillet stays on
+    /// the face it rolls on, whether a rail rolls over a tangent edge, and whether one runs
+    /// on into the body's material. Only an accessor with a live pseudo-B-rep can tell.
     ///
     /// # Errors
     /// [`SolidError::Unported`] without live context; the classification's errors.
@@ -2569,7 +2944,7 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
         ))
     }
     /// The fork's `SmFilletSolver::EndSectionsFitTheirFaces` for `solver` (WR-631,
-    /// `fixes.fillet_cliff_overflow`; tangency-labs/smlib `a307480`): whether its fillet's
+    /// tangency-labs/smlib `a307480`): whether its fillet's
     /// end section at each Nx1 end lies on its end face.
     ///
     /// # Errors
@@ -2611,7 +2986,7 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
         ))
     }
     /// The fork's `SmFilletExecutive::FacesOutlastTheirBlends` over `solvers` (not
-    /// upstream; opt-in `fixes.fillet_refuse_face_consuming_blends`, WR-320): `false`
+    /// upstream; WR-320): `false`
     /// when the blends take the whole of a face they roll on, some at an angle to it.
     ///
     /// # Errors
@@ -2624,7 +2999,7 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
         ))
     }
     /// The fork's `SmFilletExecutive::BandsClearOtherRails` over `solvers` (not upstream;
-    /// opt-in `fixes.fillet_refuse_overlapping_bands`, WR-542): `false` when a blend's
+    /// WR-542): `false` when a blend's
     /// rail runs inside the band another blend takes off a face they share, away from a
     /// corner that trims them.
     ///
@@ -2667,6 +3042,28 @@ where
     }
     fn geometry_edge(&self, solver: O) -> Result<O> {
         ExecutiveAccess::solver_edge(self, solver)
+    }
+    fn geometry_rails_fit_judged(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        _executive: &FilletExecutive<O>,
+    ) -> Result<RailsFit> {
+        ExecutiveAccess::solver_rails_fit_judged(self, k, solver)
+    }
+    fn geometry_end_sections_fit(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        _executive: &FilletExecutive<O>,
+    ) -> Result<bool> {
+        ExecutiveAccess::solver_end_sections_fit(self, k, solver)
+    }
+    fn geometry_faces_outlast(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<bool> {
+        ExecutiveAccess::solvers_faces_outlast(self, k, solvers)
+    }
+    fn geometry_bands_clear_other_rails(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<bool> {
+        ExecutiveAccess::solvers_bands_clear_other_rails(self, k, solvers)
     }
 }
 
@@ -2723,42 +3120,17 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             return Err(invalid("fillet parameters not set up"));
         }
         access.create_corners(k, self, None)?;
-        self.do_filleting(k, access, None)?;
-        if !k.fixes.fillet_refuse_non_manifold_result {
-            return Ok(());
-        }
-        self.check_closed_manifold(access)
+        self.do_filleting(k, access, None)
     }
 
-    /// Refuse a filleted target that is not a closed manifold solid (not upstream;
-    /// opt-in `fixes.fillet_refuse_non_manifold_result`, WR-212,
-    /// tangency-labs/solidcore#422). Upstream ignores the `bMaybeNotSolid` that
-    /// `OrientTrimmedSurfaces` reports and returns success, so a round whose
-    /// trimming breaks the shell came back as a valid body. The first edge of the
-    /// target, in `GetEdges` order, that is not `SmEdge::IsManifold` is recorded in
-    /// the error info and named in the error. The target keeps the merged
-    /// topology, as on upstream's other merge failures.
-    fn check_closed_manifold(&mut self, access: &impl ExecutiveAccess<O>) -> Result<()> {
-        let target = self.target.ok_or_else(|| invalid("missing target B-rep"))?;
-        for edge in access.edges(target)? {
-            if access.edge_is_manifold(edge)? {
-                continue;
-            }
-            self.error.code = 7; // SM_FILERR_BAD_MERGE
-            self.error.status = 2; // SM_FIL_FAILURE
-            self.error.edge = Some(edge);
-            self.error.comment =
-                "Fillet Merge Failure: Result Is Not A Closed Manifold Solid".into();
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: 1001,
-                entity: access.edge_entity(edge),
-            });
-        }
-        Ok(())
-    }
-
-    fn record_corner_failure(&mut self, view: CornerView<O>, comment: &str) -> Result<()> {
+    /// Notes a corner's failure (`SM_FILERR_VERTEX_PROBLEM`) and returns the executive's
+    /// failure, keeping `cause`, the error of the corner's stage that failed.
+    fn record_corner_failure(
+        &mut self,
+        view: CornerView<O>,
+        comment: &str,
+        cause: SolidError,
+    ) -> Result<()> {
         self.error.code = 3; // SM_FILERR_VERTEX_PROBLEM
         self.error.status = 2; // SM_FIL_FAILURE
         self.error.corner_type = view.corner_type;
@@ -2769,15 +3141,23 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         self.error.fillet_vertices = [None, None];
         self.error.comment = comment.into();
         self.error.entity_name = view.name;
-        Err(failure())
+        Err(failure_after(cause))
     }
 
-    fn record_solver_failure(&mut self, edge: O, status: i32, comment: &str) -> Result<()> {
+    /// Notes a solver's failure (`SM_FILERR_EDGE_PROBLEM`) and returns the executive's
+    /// failure, keeping `cause`, the error of the solver's stage that failed.
+    fn record_solver_failure(
+        &mut self,
+        edge: O,
+        status: i32,
+        comment: &str,
+        cause: SolidError,
+    ) -> Result<()> {
         self.error.edge = Some(edge);
         self.error.code = 4; // SM_FILERR_EDGE_PROBLEM
         self.error.status = status;
         self.error.comment = comment.into();
-        Err(failure())
+        Err(failure_after(cause))
     }
 
     /// Build topology and then vertex geometry for each corner in native order.
@@ -2798,7 +3178,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         while let Some(corner) = self.corners.get(index).copied() {
             k.check_cancelled(OP)?;
             let topology_noted_before = self.error.code;
-            if ignore(access.vertices_make_topology(k, corner, self))?.is_none() {
+            if let Err(stage) = caught(access.vertices_make_topology(k, corner, self))? {
                 // SolidCraft change (the fork's, smlib#124, fdff996, 61547af, WR-697): a
                 // corner refused as one the blends cannot pass (SM_FILERR_NO_ROOM, noted by
                 // the corner), or one it does not build with its reason, keeps that reason
@@ -2806,12 +3186,13 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     || (self.error.code == FilletErrorType::CornerUnsupported as i32
                         && topology_noted_before != FilletErrorType::CornerUnsupported as i32)
                 {
-                    return Err(failure());
+                    return Err(failure_after(stage));
                 }
                 return self.corner_vertex_failure(
                     access,
                     corner,
                     "Fillet Corner Error: Unable to Make Topology",
+                    stage,
                 );
             }
             let mut as_constant = access.vertices_is_blending(corner)?;
@@ -2837,11 +3218,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 }
             }
             access.vertices_set_constant(corner, as_constant)?;
-            if ignore(access.vertices_calculate(k, corner, self))?.is_none() {
+            if let Err(stage) = caught_but_refusal(access.vertices_calculate(k, corner, self))? {
                 return self.corner_vertex_failure(
                     access,
                     corner,
                     "Fillet Corner Error: Unable to Compute Geometry",
+                    stage,
                 );
             }
             index += 1;
@@ -2849,14 +3231,16 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         Ok(())
     }
 
+    /// [`Self::record_corner_failure`] of `corner`, keeping `cause`.
     fn corner_vertex_failure(
         &mut self,
         access: &impl CornerVertexAccess<O>,
         corner: O,
         comment: &str,
+        cause: SolidError,
     ) -> Result<()> {
         let view = access.vertices_error_info(corner, self)?;
-        self.record_corner_failure(view, comment)
+        self.record_corner_failure(view, comment, cause)
     }
 
     /// Adjust every corner's topology after all corner vertices are calculated.
@@ -2872,14 +3256,15 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
             k.check_cancelled(OP)?;
-            if !access.adjustment_check_degeneracy(k, corner, self)?
-                && ignore(access.adjustment_topology(k, corner, self))?.is_none()
-            {
-                return self.corner_vertex_failure(
-                    access,
-                    corner,
-                    "Fillet Corner Error: Topology Adjustment Failure",
-                );
+            if !access.adjustment_check_degeneracy(k, corner, self)? {
+                if let Err(stage) = caught(access.adjustment_topology(k, corner, self))? {
+                    return self.corner_vertex_failure(
+                        access,
+                        corner,
+                        "Fillet Corner Error: Topology Adjustment Failure",
+                        stage,
+                    );
+                }
             }
             index += 1;
         }
@@ -2899,11 +3284,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
             k.check_cancelled(OP)?;
-            if ignore(access.geometry_calculate(k, solver, self))?.is_none() {
+            if let Err(stage) = caught(access.geometry_calculate(k, solver, self))? {
                 return self.record_solver_failure(
                     access.geometry_edge(solver)?,
                     10,
                     "Fillet Surface Computation Failure",
+                    stage,
                 );
             }
             index += 1;
@@ -2911,12 +3297,13 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         Ok(())
     }
 
-    /// Refuse blends whose rails leave the faces they roll on, after every solver's fillet
-    /// geometry exists (not upstream; the fork's check in `CreateFilletBrep`, opt-in
-    /// `fixes.fillet_refuse_rails_leaving_faces`, WR-302, tangency-labs/solidcore#841 and
-    /// #1024): a solver whose rail leaves the face it rolls on between its ends
-    /// (`SmFilletSolver::RailsFitTheirFaces`). Fails with `FilletErrorType::NoRoom` (8, not
-    /// an upstream code).
+    /// Judge blends whose rails leave the faces they roll on, after every solver's fillet
+    /// geometry exists (not upstream; the fork's check in `CreateFilletBrep`, WR-302,
+    /// tangency-labs/solidcore#841 and #1024, and its cliff-overflow choice, WR-631): a
+    /// solver whose rail leaves the face it rolls on between its ends
+    /// (`SmFilletSolver::RailsFitTheirFaces`) is built as a cliff overflow or refused with
+    /// `FilletErrorType::NoRoom` (8, not an upstream code), as `choose_cliff_overflow`
+    /// decides.
     ///
     /// # Errors
     /// The refusal as `SM_ERR`, noted in the error info; those of the check.
@@ -2926,26 +3313,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::executive::refuse_blends_larger_than_faces");
-        if k.fixes.fillet_refuse_rails_leaving_faces && k.fixes.fillet_cliff_overflow {
-            return self.choose_cliff_overflow(k, access);
-        }
-        if k.fixes.fillet_refuse_rails_leaving_faces {
-            let mut index = 0;
-            while let Some(solver) = self.solvers.get(index).copied() {
-                if !access.geometry_rails_fit(k, solver, self)? {
-                    return self.record_no_room(
-                        NoRoomReason::RailLeavesFace,
-                        "Fillet Error: a rail leaves the face it rolls on (the blend is larger than the faces allow)",
-                    );
-                }
-                index += 1;
-            }
-        }
-        Ok(())
+        self.choose_cliff_overflow(k, access)
     }
 
-    /// The fork's choice in `CreateFilletBrep` (WR-631, tangency-labs/smlib@8ba4667; opt-in
-    /// `fixes.fillet_cliff_overflow` with `fixes.fillet_refuse_rails_leaving_faces`): a
+    /// The fork's choice in `CreateFilletBrep` (WR-631, tangency-labs/smlib@8ba4667): a
     /// blend whose rails leave the faces they roll on between its ends is larger than
     /// those faces. A convex blend (one that removes material) whose rails leave them
     /// across cliffs is a cliff overflow ([`FilletExecutive::cliff_overflow`]). Refused
@@ -2955,8 +3326,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// together with a rail rolling over a tangent edge; an overflow with the global
     /// merge on (a fillet end on more than one face).
     ///
-    /// An accepted overflow is built by the session's `DoFilleting`, which subtracts the
-    /// region the blends remove (`SubtractRemovalRegion`).
+    /// A fixed-offset concave round entering an adjoining concave wall is accepted
+    /// when all exits have that classification and its end sections fit. Accepted
+    /// overflows use the session's crease trim on the original blend sheet.
     ///
     /// # Errors
     /// The refusal as `SM_ERR`, noted in the error info; those of the checks.
@@ -2968,20 +3340,37 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut overflow = false;
         let mut concave = false;
         let mut concave_overflow = false;
+        // The Roll-over's second pass is one concave chain (#10876).
+        let mut rolled_overflow = false;
+        let mut concave_crash = false;
+        let mut takes_overflow = false;
+        // A continued cliff only bounds the overflow of the solver that crosses it.
+        let mut bounded_cliffs = BTreeSet::new();
         let mut round_into_material = false;
         let mut rolls_over = false;
+        let mut wraps = false;
+        let mut touches_rim = false;
         let mut overflowing = Vec::new();
+        // #20314: the overflowing rounds that are plain cliffs (they take material off, their
+        // overflow neither bounded by a continued cliff nor a concave crash)
+        let mut cliff_rounds = Vec::new();
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
             index += 1;
             let judged = access.geometry_rails_fit_judged(k, solver, self)?;
+            touches_rim |= judged.touches_rim;
+            let continued = !judged.continued_cliffs.is_empty();
+            if continued {
+                self.continued_cliffs
+                    .insert(solver, judged.continued_cliffs);
+            }
             if judged.rolls_over {
                 rolls_over = true;
             }
             // the fork's tangency-labs/smlib@a307480: an end section that runs off its end
             // face overflows it the same way
-            let fit = judged.fit && access.geometry_end_sections_fit(k, solver, self)?;
-            if fit {
+            let mut end_fit = judged.fit && access.geometry_end_sections_fit(k, solver, self)?;
+            if judged.fit && end_fit && !continued {
                 continue;
             }
             overflow = true;
@@ -2989,21 +3378,80 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             if let Some(edge) = access.geometry_overflow_edge(solver)? {
                 overflowing.push(edge);
             }
-            if access.geometry_blend_adds_material(k, solver)? {
-                concave_overflow = true;
+            let adds_material = access.geometry_blend_adds_material(k, solver)?;
+            takes_overflow |= !adds_material;
+            if adds_material && !judged.fit {
+                end_fit = access.geometry_end_sections_fit(k, solver, self)?;
             }
-            if judged.into_material && !access.geometry_generator_is_linear(solver)? {
+            let bounded_cliff = continued && judged.fit && end_fit;
+            let crashes = !bounded_cliff
+                && adds_material
+                && judged.into_material
+                && !judged.rolls_over
+                && end_fit
+                && access.geometry_overflows_into_material(
+                    k,
+                    solver,
+                    &judged.left_across,
+                    &judged.return_across,
+                    judged.wraps_past_both_ends,
+                    judged.boundaries_into_material,
+                )?;
+            wraps |= judged.wraps_past_both_ends && !crashes;
+            if !bounded_cliff && !adds_material && !access.geometry_generator_is_linear(solver)? {
+                cliff_rounds.push(solver);
+            }
+            if bounded_cliff {
+                bounded_cliffs.insert(solver);
+            } else if crashes {
+                // The original sheet intersects each adjoining concave face: trim that
+                // sheet at the creases, rather than retracing it as a tangent rollover.
+                concave_crash = true;
+            } else if adds_material {
+                // the event's only where its rails leave across the cliff's rim at V and its
+                // end sections stay on their end faces (an end section's overflow is not
+                // located, so it is never taken for the event's)
+                if self.roll_over_pass
+                    && access.geometry_overflows_at_roll_over(k, solver, &judged.left_across)?
+                    && end_fit
+                {
+                    rolled_overflow = true;
+                } else {
+                    concave_overflow = true;
+                }
+            }
+            if judged.into_material && !crashes && !access.geometry_generator_is_linear(solver)? {
                 round_into_material = true;
             }
         }
+        // A supported concave crash does not authorize an unrelated convex overflow.
+        if concave_crash && takes_overflow {
+            concave = true;
+        }
+        if touches_rim {
+            // At the open fit bound a closed rail touches the rim without leaving
+            // its face (#20282). Judge every solver before refusing: another selected
+            // edge may need a smaller radius, even when its rail crosses the rim.
+            let mut index = 0;
+            while let Some(solver) = self.solvers.get(index).copied() {
+                index += 1;
+                self.note_fit_on_its_faces(k, access, solver)?;
+            }
+            return self.record_no_room(
+                NoRoomReason::RailLeavesFace,
+                "Fillet Error: a closed rail touches the boundary of the face it rolls on (the blend is as large as the faces allow)",
+            );
+        }
         // whether the other blends add material (concave), when one overflows
         let mut index = 0;
-        while overflow && !concave_overflow && !concave {
+        while overflow && !concave_overflow && !rolled_overflow && !concave_crash && !concave {
             let Some(solver) = self.solvers.get(index).copied() else {
                 break;
             };
             index += 1;
-            concave = access.geometry_blend_adds_material(k, solver)?;
+            if !bounded_cliffs.contains(&solver) {
+                concave = access.geometry_blend_adds_material(k, solver)?;
+            }
         }
         // The fork's overflow-first stop (WR-634, tangency-labs/smlib@241f7ba): with
         // `SetOverflowFirst`, when blends of several edges overflow, nothing is built; with
@@ -3013,6 +3461,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 && overflow
                 && self.solvers.len() > 1
                 && !concave_overflow
+                && !rolled_overflow
+                && bounded_cliffs.is_empty()
                 && !concave
                 && !round_into_material)
         {
@@ -3037,19 +3487,65 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             return Err(failure());
         }
         if overflow {
-            let why = if concave_overflow {
-                Some((NoRoomReason::ConcaveOverflow, "Fillet Error: a rail leaves the face it rolls on (the blend is larger than the faces allow, and adds material)"))
+            // Known cliffs, the Roll-over's concave chain and certified fixed-offset
+            // concave crashes are trimmed at their creases. A rail leaving its support
+            // elsewhere still needs its own construction.
+            let why = if wraps {
+                // not the fork's (tangency-labs/solidcore#2175): no cliff cuts the face off;
+                // it is smaller than the blend beyond both ends of the edge
+                Some((
+                    NoRoomReason::RailLeavesFace,
+                    "Fillet Error: a rail leaves the face it rolls on (the blend is larger than the faces allow)",
+                ))
+            } else if concave_overflow {
+                Some((
+                    NoRoomReason::ConcaveOverflow,
+                    "Fillet Error: a rail leaves the face it rolls on (the blend is larger than the faces allow, and adds material)",
+                ))
             } else if round_into_material {
-                Some((NoRoomReason::RoundIntoMaterial, "Fillet Error: a round's rail leaves the face it rolls on into the body's material (beyond a wall)"))
+                Some((
+                    NoRoomReason::RoundIntoMaterial,
+                    "Fillet Error: a round's rail leaves the face it rolls on into the body's material (beyond a wall)",
+                ))
             } else if concave {
-                Some((NoRoomReason::OverflowWithConcaveBlend, "Fillet Error: a rail leaves the face it rolls on while another blend adds material (not supported together)"))
+                Some((
+                    NoRoomReason::OverflowWithConcaveBlend,
+                    "Fillet Error: a rail leaves the face it rolls on while another blend adds material (not supported together)",
+                ))
             } else if rolls_over {
-                Some((NoRoomReason::OverflowWithRollover, "Fillet Error: a rail leaves the face it rolls on while a rail rolls over a tangent edge (not supported together)"))
+                Some((
+                    NoRoomReason::OverflowWithRollover,
+                    "Fillet Error: a rail leaves the face it rolls on while a rail rolls over a tangent edge (not supported together)",
+                ))
             } else if self.options.global_merge {
-                Some((NoRoomReason::OverflowWithGlobalMerge, "Fillet Error: a rail leaves the face it rolls on, and the fillet ends on more than one face (not supported together)"))
+                Some((
+                    NoRoomReason::OverflowWithGlobalMerge,
+                    "Fillet Error: a rail leaves the face it rolls on, and the fillet ends on more than one face (not supported together)",
+                ))
             } else {
                 None
             };
+            // not the fork's (#20314): a plain cliff overflow is built round by round, each
+            // trimmed at its crease (none of the trims above, a bounded cliff, the Roll-over's
+            // chain or a concave crash, is in play); where two overflowing rounds meet at a
+            // corner of three blended edges, the corner's ball touching the three faces has its
+            // contact on the face the two rounds leave past that face's boundary, which no
+            // crease trims and which is not built yet. Refused naming the largest radius at
+            // which that contact stays on the face (the corner of the two balls placed on its
+            // boundary): open, so less the fit margin.
+            if why.is_none() && bounded_cliffs.is_empty() && !rolled_overflow && !concave_crash {
+                if let Some((corner, a, b)) =
+                    self.overflows_meet_at_a_corner(access, &cliff_rounds)?
+                {
+                    if let Some(fit) = access.creation_corner_leaves_face(k, corner, a, b)? {
+                        self.note_open_fit(access, true, fit, FitKind::Radius, a)?;
+                        return self.record_no_room(
+                            NoRoomReason::RailLeavesFace,
+                            "Fillet Error: two rounds whose rails leave the face they roll on meet at a corner (not supported together)",
+                        );
+                    }
+                }
+            }
             if let Some((reason, why)) = why {
                 // the fork's 49f393d (WR-696): the largest radius at which the overflowing
                 // blends' rails stay on their faces (where a boundary of a face first meets a
@@ -3071,8 +3567,44 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         Ok(())
     }
 
+    /// The first of the executive's vertex corners (three or more blended edges) where two of
+    /// the overflowing plain-cliff rounds `cliff_rounds` meet, with two of them (#20314): the
+    /// cliff overflow trims each round at its crease, and where two such rounds meet edge to
+    /// edge (a corner of two blended edges) the crease trims both; but the patch of a corner of
+    /// three is the ball touching three faces, whose contact with the face the two rounds leave
+    /// leaves it too, and no crease trims it.
+    ///
+    /// # Errors
+    /// Those of the corners' edge lookups.
+    fn overflows_meet_at_a_corner(
+        &self,
+        access: &impl BrepCreationAccess<O>,
+        cliff_rounds: &[O],
+    ) -> Result<Option<(O, O, O)>> {
+        let mut index = 0;
+        while let Some(corner) = self.corners.get(index).copied() {
+            index += 1;
+            let blended = access.geometry_corner_blended_edges(corner)?;
+            if blended.len() < 3 {
+                continue;
+            }
+            let mut met = Vec::new();
+            for &solver in cliff_rounds {
+                if let Some(edge) = access.geometry_overflow_edge(solver)? {
+                    if blended.contains(&edge) {
+                        met.push(solver);
+                    }
+                }
+            }
+            if let [first, second, ..] = met.as_slice() {
+                return Ok(Some((corner, *first, *second)));
+            }
+        }
+        Ok(None)
+    }
+
     /// Refuse blends that take the whole of a face they roll on, some meeting it at an angle
-    /// (not upstream; opt-in `fixes.fillet_refuse_face_consuming_blends`, WR-320, #879:
+    /// (not upstream; WR-320, #879:
     /// `SmFilletExecutive::FacesOutlastTheirBlends`). The fork calls it in `CreateFilletBrep`
     /// after the fillet faces are built and before they are stitched (the diff in #879),
     /// on the trimmed rails; here it runs once the geometry exists, which is earlier. The
@@ -3088,9 +3620,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
-        if k.fixes.fillet_refuse_face_consuming_blends
-            && !access.geometry_faces_outlast(k, &self.solvers)?
-        {
+        if !access.geometry_faces_outlast(k, &self.solvers)? {
             // the fork's 49f393d, a3d6d81 and 5e8c9c1 (WR-696): the largest radius that leaves
             // some of the face, for a polygon with every edge blended
             // (NoteFitOfPolygonsTakenWhole) and a plane bounded by one blended circle (the ball
@@ -3114,9 +3644,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         Ok(())
     }
 
-    /// Not the fork's (#2401, with `fixes.fillet_refuse_face_consuming_blends`): a plane face bounded by straight edges,
-    /// each blended with a constant ball, is taken whole once the least of its balls reaches
-    /// the radius that leaves some of it (`NoteFitOfPolygonsTakenWhole`'s bound, the deepest
+    /// Not the fork's (#2401, with WR-320's refusal): a plane face bounded by straight
+    /// edges, each blended with a constant ball, is taken whole once the least of its balls
+    /// reaches the radius that leaves some of it (`NoteFitOfPolygonsTakenWhole`'s bound, the deepest
     /// point of the face in the balls' terms), to within the blended edge's tolerance (a face
     /// of no extent). That is the face's own event, judged from its geometry before the
     /// corners and the trace, whose rails would have no length there; the refusal is
@@ -3170,8 +3700,83 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         self.note_open_fit(access, size.is_some(), limit, kind, solver)
     }
 
+    /// Not the fork's (#15767): a constant round whose rail rolled over a smooth edge of its
+    /// face partway along and could not be rolled (the rollover recovery failed, `failed`) is
+    /// refused as larger than its faces where it is: where its radius exceeds the largest at
+    /// which its rails stay on their own faces, rolling over no edge
+    /// ([`Self::note_fit_on_its_faces`], `LargestSizeOnItsFaces`), which it names, as the
+    /// refusal before the rollover named it. Any other failure, or one of a blend within that
+    /// size, stays the solver's failure.
+    ///
+    /// # Errors
+    /// The refusal, or `failed`; those of the sizing.
+    fn refuse_rollover_past_its_fit(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl BrepCreationAccess<O>,
+        failed: SolidError,
+    ) -> Result<()> {
+        // `classify_solver_rails` notes a rollover failure as the solver's edge problem with
+        // status 7 on that solver's edge
+        let edge = match self.error.edge {
+            Some(edge)
+                if !failed.is_cancelled()
+                    && self.error.code == FilletErrorType::EdgeProblem as i32
+                    && self.error.status == 7 =>
+            {
+                edge
+            }
+            _ => return Err(failed),
+        };
+        let mut index = 0;
+        while let Some(solver) = self.solvers.get(index).copied() {
+            index += 1;
+            if access.geometry_edge(solver)? != edge {
+                continue;
+            }
+            let Some(fit) = access.creation_solver_fit(solver)? else {
+                break;
+            };
+            let Some([d0, d1]) = fit.offsets else {
+                break;
+            };
+            let Some((limit, FitKind::Radius)) =
+                access.creation_largest_size_on_its_faces(k, solver, None)?
+            else {
+                break;
+            };
+            // a ball: both offsets its radius; within the edge's tolerance of the bound, the
+            // blend is at it, not past it
+            let radius = smos_max(d0.abs(), d1.abs());
+            // a NaN radius or bound refuses nothing: the failure stays the solver's
+            if radius.partial_cmp(&(limit + fit.tolerance)) != Some(std::cmp::Ordering::Greater) {
+                break;
+            }
+            let (code, status, comment) = (
+                self.error.code,
+                self.error.status,
+                self.error.comment.clone(),
+            );
+            self.note_open_fit(access, true, limit, FitKind::Radius, solver)?;
+            if self.fit_radius < 0.0 {
+                // nothing noted: the failure stays the solver's
+                self.error.code = code;
+                self.error.status = status;
+                self.error.comment = comment;
+                break;
+            }
+            let refused = self.record_no_room(
+                NoRoomReason::RailLeavesFace,
+                "Fillet Error: a rail rolled over a smooth edge of its face leaves the face beyond (the blend is larger than the faces allow)",
+            );
+            self.error.edge = Some(edge);
+            return refused;
+        }
+        Err(failed)
+    }
+
     /// Refuse blends whose bands on a face they share overlap, away from any corner that
-    /// trims them (not upstream; opt-in `fixes.fillet_refuse_overlapping_bands`, WR-542:
+    /// trims them (not upstream; WR-542, where upstream builds a body that is not closed:
     /// the fork's tangency-labs/smlib@c0d74ee, `SmFilletExecutive::BandsClearOtherRails`,
     /// called right after `FacesOutlastTheirBlends`). Fails with `FilletErrorType::NoRoom`.
     ///
@@ -3182,29 +3787,28 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
-        if k.fixes.fillet_refuse_overlapping_bands
-            && !access.geometry_bands_clear_other_rails(k, &self.solvers)?
-        {
-            // the fork's a3d6d81 (WR-696): the largest common radius at which the bands stay
-            // apart, where they meet (closed), the least over the pairs
+        if !access.geometry_bands_clear_other_rails(k, &self.solvers)? {
             let solvers = self.solvers.clone();
-            for (meet, edge) in access.creation_bands_meet(k, &solvers)? {
-                if self.fit_radius < 0.0 || meet < self.fit_radius {
-                    self.note_fit_radius(meet, Some(edge), FitKind::Radius);
+            let mut site = None;
+            for fit in access.creation_bands_meet(k, &solvers)? {
+                if self.fit_radius < 0.0 || fit.size < self.fit_radius {
+                    self.note_fit_radius(fit.size, Some(fit.edge), fit.kind);
+                    site = Some(fit);
                 }
             }
-            // (not the fork's, #3190's finding) where no radius is common to both, the scale
-            // of both that leaves the face the fit margin, where that is exact
-            if self.fit_radius < 0.0 {
-                let solvers = self.solvers.clone();
-                if let Some((scale, edge)) = access.creation_band_scale(k, &solvers)? {
-                    self.note_fit_radius(scale, Some(edge), FitKind::Scale);
-                }
-            }
-            return self.record_no_room(
+            let refused = self.record_no_room(
                 NoRoomReason::BandsOverlap,
                 "Fillet Error: a blend's rail runs inside the band another blend takes off a face they share (the blends are larger than the face allows)",
             );
+            if let Some(fit) = site {
+                self.error.edge = Some(fit.edge);
+                self.error.vertex = None;
+                self.error.end_face = None;
+                self.error.side_face = fit.face;
+                self.error.location = fit.at;
+                self.error.no_room_without_site = false;
+            }
+            return refused;
         }
         Ok(())
     }
@@ -3226,22 +3830,23 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         access: &mut impl SolverGeometryAccess<O>,
     ) -> Result<()> {
         let corners = self.corners.clone();
-        if ignore(access.geometry_ease_set_back_sections(k, &corners))?.is_none() {
+        if let Err(stage) = caught(access.geometry_ease_set_back_sections(k, &corners))? {
             // The generic NoteError overload changes exactly these two members.
             self.error.code = FilletErrorType::EdgeProblem as i32;
             self.error.comment = "Fillet Error: unable to ease a round into its curvature-continuous section before a setback".into();
-            return Err(failure());
+            return Err(failure_after(stage));
         }
         Ok(())
     }
 
     /// `NoteError(NoRoom, comment)` (`NoRoom` is not an upstream code), then `SM_ERR`; the
     /// error info also names the refusal (`reason`, not upstream).
-    fn record_no_room(&mut self, reason: NoRoomReason, comment: &str) -> Result<()> {
+    pub(super) fn record_no_room(&mut self, reason: NoRoomReason, comment: &str) -> Result<()> {
         // The generic NoteError overload changes exactly these two members.
         self.error.code = FilletErrorType::NoRoom as i32;
         self.error.comment = comment.into();
         self.error.no_room = Some(reason);
+        self.error.no_room_without_site = true;
         Err(failure())
     }
 
@@ -3258,34 +3863,37 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
             k.check_cancelled(OP)?;
-            if ignore(access.edges_adjust_tangent(k, corner, self))?.is_none() {
+            if let Err(stage) = caught(access.edges_adjust_tangent(k, corner, self))? {
                 return self.corner_vertex_failure(
                     access,
                     corner,
                     "Fillet Corner Error: Topology Adjustment Failure",
+                    stage,
                 );
             }
-            if ignore(access.vertices_calculate(k, corner, self))?.is_none() {
+            if let Err(stage) = caught_but_refusal(access.vertices_calculate(k, corner, self))? {
                 return self.corner_vertex_failure(
                     access,
                     corner,
                     "Fillet Corner Error: Vertex Computation Failure",
+                    stage,
                 );
             }
             let noted_before = self.error.code;
-            if ignore(access.edges_calculate(k, corner, self))?.is_none() {
+            if let Err(stage) = caught(access.edges_calculate(k, corner, self))? {
                 // SolidCraft change (the fork's, 41a39ec): a corner that noted why it refused,
                 // or one refused as one the blends cannot pass (SM_FILERR_NO_ROOM, noted by
                 // the corner), keeps that reason
                 if self.error.code != noted_before
                     || self.error.code == FilletErrorType::NoRoom as i32
                 {
-                    return Err(failure());
+                    return Err(failure_after(stage));
                 }
                 return self.corner_vertex_failure(
                     access,
                     corner,
                     "Fillet Corner Error: Corner Edge Computation Failure",
+                    stage,
                 );
             }
             index += 1;
@@ -3306,11 +3914,21 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
             k.check_cancelled(OP)?;
-            if ignore(access.rails_trim(k, solver, self))?.is_none() {
+            if let Err(stage) = caught(access.rails_trim(k, solver, self))? {
                 return self.record_solver_failure(
                     access.geometry_edge(solver)?,
                     7,
                     "Fillet Surface Computation Failure: Unable to Trim Rail Curve",
+                    stage,
+                );
+            }
+            // Not upstream (solidcore-native, #15767): a rail rolled over a smooth far edge of
+            // its face before the trace, which the ball's sections only proposed, is accepted
+            // once proved on the face beyond as trimmed; otherwise the blend is refused
+            if !access.rails_rolled_on_their_faces(k, solver, self)? {
+                return self.record_no_room(
+                    NoRoomReason::RailLeavesFace,
+                    "Fillet Error: a rail rolled over a smooth edge of its face, the whole length, is not proved to lie on the face beyond",
                 );
             }
             index += 1;
@@ -3333,33 +3951,31 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         A: CornerAdjustmentAccess<O> + RailTrimAccess<O>,
     {
         // NER: upstream returns SM_ERR_NULL_POINTER, not invalid input.
-        self.target.ok_or(SolidError::Upstream {
-            operation: OP,
-            code: 1006,
-            entity: None,
-        })?;
+        self.target.ok_or_else(no_target)?;
         // Process corners by calculating the vertices first.
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
             k.check_cancelled(OP)?;
-            if ignore(access.vertices_make_topology(k, corner, self))?.is_none() {
+            if let Err(stage) = caught(access.vertices_make_topology(k, corner, self))? {
                 // SolidCraft change (the fork's, smlib#124, fdff996, 61547af, WR-697): a corner
                 // refused as one the blends cannot pass (SM_FILERR_NO_ROOM, noted by the
                 // corner) keeps that reason
                 if self.error.code == FilletErrorType::NoRoom as i32 {
-                    return Err(failure());
+                    return Err(failure_after(stage));
                 }
                 return self.corner_vertex_failure(
                     access,
                     corner,
                     "Fillet Corner Error: Unable to Make Topology",
+                    stage,
                 );
             }
-            if ignore(access.vertices_calculate(k, corner, self))?.is_none() {
+            if let Err(stage) = caught_but_refusal(access.vertices_calculate(k, corner, self))? {
                 return self.corner_vertex_failure(
                     access,
                     corner,
                     "Fillet Corner Error: Unable to Compute Geometry",
+                    stage,
                 );
             }
             index += 1;
@@ -3369,7 +3985,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // bTrimRails: always
         self.trim_solver_rails(k, access)?;
         if self.solvers.is_empty() {
-            return Err(SolidError::sm_err(OP));
+            // solvers are only added (by setting up edges), so none were set up
+            return Err(Failure::new(OP, BlendFailure::NoEdgesGiven)
+                .with_status(SM_ERR)
+                .into_error());
         }
         Ok(())
     }
@@ -3408,22 +4027,32 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             let mut index = 0;
             while let Some(solver) = self.solvers.get(index).copied() {
                 k.check_cancelled(OP)?;
-                if ignore(access.rails_classify(k, solver, &mut adjusted, self))?.is_none() {
+                if let Err(stage) = caught(access.rails_classify(k, solver, &mut adjusted, self))? {
                     self.record_solver_failure(
                         access.geometry_edge(solver)?,
                         7,
                         "Fillet Solver Error: Unable to Process Rollover",
+                        stage,
                     )?;
                 }
                 index += 1;
             }
             for corner in adjusted.iter().copied() {
                 ignore(access.rails_reinitialize_corner(k, corner, self))?;
-                if ignore(access.edges_calculate(k, corner, self))?.is_none() {
+                self.rollover_adjusting = true;
+                let edges = caught(access.edges_calculate(k, corner, self));
+                self.rollover_adjusting = false;
+                if let Err(stage) = edges? {
+                    // an End refused as passing over its end face keeps that reason and
+                    // its fit (noted by the corner's edges)
+                    if self.error.no_room_reason() == Some(NoRoomReason::EndPassesOverEndFace) {
+                        return Err(failure_after(stage));
+                    }
                     self.corner_vertex_failure(
                         access,
                         corner,
                         "Fillet Corner Error: Edge Computation Failure After Rollover Adjustment",
+                        stage,
                     )?;
                 }
             }
@@ -3442,11 +4071,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         access: &mut impl FaceConstructionAccess<O>,
     ) -> Result<O> {
         crate::profile::profile_scope!(k, "blend::executive::build_faces");
-        let target = self.target.ok_or(SolidError::Upstream {
-            operation: OP,
-            code: 1006,
-            entity: None,
-        })?;
+        let target = self.target.ok_or_else(no_target)?;
         let fillet = access.faces_new_brep(k)?;
         self.fillet = Some(fillet);
         let tolerance = access.faces_tolerance(k, target)?;
@@ -3455,11 +4080,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
             k.check_cancelled(OP)?;
-            if ignore(access.faces_corner_geometry(k, corner, self))?.is_none() {
+            if let Err(stage) = caught(access.faces_corner_geometry(k, corner, self))? {
                 self.corner_vertex_failure(
                     access,
                     corner,
                     "Fillet Corner Error: Corner Geometry Computation Failure",
+                    stage,
                 )?;
             }
             index += 1;
@@ -3478,17 +4104,24 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             }
             let mut geom_index = 0;
             while let Some(geom) = access.faces_solver_geom(solver, geom_index)? {
-                if ignore(access.faces_make_face(k, geom, fillet, self))?.is_none() {
+                if let Err(stage) = caught(access.faces_make_face(k, geom, fillet, self))? {
+                    // an End refused as passing over its end face keeps that reason and
+                    // its fit (noted by the face's blend's corner)
+                    if self.error.no_room_reason() == Some(NoRoomReason::EndPassesOverEndFace) {
+                        return Err(failure_after(stage));
+                    }
                     self.record_solver_failure(
                         access.geometry_edge(solver)?,
                         2,
                         "Fillet Surface Computation Failure: Fillet Face Creation Error",
+                        stage,
                     )?;
                 }
                 geom_index += 1;
             }
             index += 1;
         }
+        access.faces_bound_open_ends(k, self)?;
         Ok(fillet)
     }
 
@@ -3524,7 +4157,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             self.error.code = 7; // SM_FILERR_BAD_MERGE
             self.error.comment =
                 "Fillet Stitching Failure: Error Stitching Fillets Together".into();
-            return Err(failure());
+            return Err(failure_after(error));
         }
         Ok(attempt)
     }
@@ -3552,7 +4185,17 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         };
         let mut per_unit = 1.0;
         if kind == FitKind::Scale {
-            let [d0, d1] = fit.offsets.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let [d0, d1] = fit.offsets.ok_or_else(|| {
+                Failure::new(
+                    OP,
+                    BlendFailure::Defect {
+                        why: "a loaded solver's fit has no offsets: loading a solver checks \
+                                  both its rail surfaces, and its fit carries their offsets",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })?;
             per_unit = smos_max(d0.abs(), d1.abs());
             if per_unit.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
                 return Ok(());
@@ -3565,7 +4208,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         Ok(())
     }
 
-    /// Not the fork's (WR-707, #2299; `fixes.fillet_refuse_rounds_breaking_through`): after
+    /// Not the fork's (WR-707, #2299): after
     /// `BandCutsThePart`, a convex blend whose section between its rails leaves the part and
     /// comes back into it through an inner face would break through a wall into the hollow
     /// behind; the one whose largest size that does not is least is refused with
@@ -3594,11 +4237,18 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let g = |x: f64| c_general(x, 0, 7);
         self.error.code = FilletErrorType::NoRoom as i32;
         self.error.comment = if cut.chamfer {
-            format!("Fillet Error: the chamfer would break through the part's boundary between its sides along the edge: a chamfer set back less than {} stays inside the part", g(cut.setback))
+            format!(
+                "Fillet Error: the chamfer would break through the part's boundary between its sides along the edge: a chamfer set back less than {} stays inside the part",
+                g(cut.setback)
+            )
         } else {
-            format!("Fillet Error: the round would break through the part's boundary between its rails along the edge: a radius below {} stays inside the part", g(cut.radius))
+            format!(
+                "Fillet Error: the round would break through the part's boundary between its rails along the edge: a radius below {} stays inside the part",
+                g(cut.radius)
+            )
         };
         self.error.no_room = Some(NoRoomReason::BreaksThrough);
+        self.error.no_room_without_site = true;
         if cut.edge.is_some() {
             if let Some(fit) = access.creation_solver_fit(solver)? {
                 let size = if cut.radius > 0.0 {
@@ -3652,7 +4302,17 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut worst_solver: Option<(O, bool)> = None;
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
-            let (first, const_radius) = access.creation_ball_is_regular(k, solver)?;
+            let (mut first, const_radius) = access.creation_ball_is_regular(k, solver)?;
+            // (#16768) a collapsed offset whose ball zone is open at an end of the edge is the
+            // collapsed-offset refusal's (#2401, `refuse_collapsed_offsets`), which names the
+            // size that builds: left to it
+            if matches!(
+                first.check,
+                BallCheck::Collapsed | BallCheck::CollapsedUnjudged
+            ) && access.creation_ball_zone_open(k, solver, None)?.is_some()
+            {
+                first.check = BallCheck::Regular;
+            }
             if first.check != BallCheck::Regular
                 && (worst.check == BallCheck::Regular || first.works < worst.works)
             {
@@ -3672,33 +4332,66 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         };
         let (why, reason) = if !worst.ball {
             (
-                format!("Fillet Error: a face curves tighter than the blend's offset of {} along it, which folds there: an offset below {} fits", g(worst.radius), g(worst.works)),
+                format!(
+                    "Fillet Error: a face curves tighter than the blend's offset of {} along it, which folds there: an offset below {} fits",
+                    g(worst.radius),
+                    g(worst.works)
+                ),
                 NoRoomReason::OffsetFolds,
             )
         } else if worst.law && worst.check == BallCheck::Regressive {
             (
-                format!("Fillet Error: the round's balls fold over one another where its radius is {}: the radius changes faster there than a rolling ball can follow", g(worst.works)),
+                format!(
+                    "Fillet Error: the round's balls fold over one another where its radius is {}: the radius changes faster there than a rolling ball can follow",
+                    g(worst.works)
+                ),
                 NoRoomReason::BallsFold,
             )
         } else if worst.law {
             (
-                format!("Fillet Error: a face curves tighter than the round's ball where its radius reaches {}: the ball does not fit the face past there", g(worst.works)),
+                format!(
+                    "Fillet Error: a face curves tighter than the round's ball where its radius reaches {}: the ball does not fit the face past there",
+                    g(worst.works)
+                ),
                 NoRoomReason::BallDoesNotFit,
+            )
+        } else if worst.check == BallCheck::Collapsed {
+            (
+                format!(
+                    "Fillet Error: the rolling ball of radius {} is as wide as a face it rolls on (a cylinder, sphere, torus or round of that radius), so the offset its centre rolls on collapses, and no section of the ball is found at any station along the edge",
+                    g(worst.radius)
+                ),
+                NoRoomReason::OffsetCollapses,
+            )
+        } else if worst.check == BallCheck::CollapsedUnjudged {
+            (
+                format!(
+                    "Fillet Error: the rolling ball of radius {} is as wide as a face it rolls on (a cylinder, sphere, torus or round of that radius), so the offset its centre rolls on collapses; sections of the ball were found along the edge but none could be judged",
+                    g(worst.radius)
+                ),
+                NoRoomReason::OffsetCollapses,
             )
         } else if worst.check == BallCheck::NotEnclosed {
             (
-                format!("Fillet Error: a face curves tighter than the rolling ball of radius {}, which does not fit it{works}", g(worst.radius)),
+                format!(
+                    "Fillet Error: a face curves tighter than the rolling ball of radius {}, which does not fit it{works}",
+                    g(worst.radius)
+                ),
                 NoRoomReason::BallDoesNotFit,
             )
         } else {
             (
-                format!("Fillet Error: the rolling ball of radius {} folds over itself along the edge (its touch circles move back){works}", g(worst.radius)),
+                format!(
+                    "Fillet Error: the rolling ball of radius {} folds over itself along the edge (its touch circles move back){works}",
+                    g(worst.radius)
+                ),
                 NoRoomReason::BallsFold,
             )
         };
         self.error.code = FilletErrorType::NoRoom as i32;
         self.error.comment = why;
         self.error.no_room = Some(reason);
+        self.error.no_room_without_site = true;
         // the largest radius that builds, for a constant ball: where h(r) reaches 0 (closed),
         // or where f_tt first reaches 0 (open: less the fit margin); none where no radius is
         // regular there
@@ -3740,6 +4433,56 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     FitKind::Scale,
                     solver,
                 )?;
+            }
+        }
+        // Not the fork's (#16156): at the radius named, the refused solver's ball may have
+        // every position on its edge's faces past an end of the edge, which
+        // `refuse_balls_past_an_end` refuses at that radius: the refusal names the radius at
+        // which it first has a section between the ends where that is smaller and not refused
+        // too; where it has no such size, none is named, since the irregular ball's own is
+        // refused past the end (`note_past_end_fit`: no size is named that a refusal would
+        // refuse). The refusal stands whatever this finds: an ordinary failure judging it
+        // leaves the irregular ball's size named (port defects and cancellation propagate).
+        if let Some((solver, _)) = worst_solver {
+            if self.fit_radius > 0.0 && self.fit_kind == FitKind::Radius {
+                let named = self.fit_radius;
+                let past = crate::error::native_failure(access.creation_ball_past_an_end(
+                    k,
+                    solver,
+                    Some(named),
+                ))?
+                .flatten();
+                if let Some(past) = past {
+                    let noted = past.radius < named
+                        && crate::error::native_failure(self.note_past_end_fit(
+                            k,
+                            access,
+                            solver,
+                            past.radius,
+                        ))?
+                        .unwrap_or(false);
+                    if noted {
+                        self.error.comment = format!(
+                            "{}; but at that radius every position of the rolling ball on the edge's faces lies past an end of the edge (at ({}, {}, {})): a radius below {} has a section between the edge's ends",
+                            self.error.comment,
+                            g(past.at.x),
+                            g(past.at.y),
+                            g(past.at.z),
+                            g(past.radius)
+                        );
+                    } else {
+                        // the irregular ball's size is refused past the end, and no smaller
+                        // size is known that is not
+                        self.note_fit_radius(-1.0, None, FitKind::Radius);
+                        self.error.comment = format!(
+                            "{}; but at that radius every position of the rolling ball on the edge's faces lies past an end of the edge (at ({}, {}, {})), and no size is known that has a section between the edge's ends",
+                            self.error.comment,
+                            g(past.at.x),
+                            g(past.at.y),
+                            g(past.at.z)
+                        );
+                    }
+                }
             }
         }
         // An End's rail that runs past its side edge's far end is a second cause, which
@@ -3845,16 +4588,122 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             }
         }
         if let Some((open, solver)) = least {
-            let radius = open.radius;
             let g = |x: f64| c_general(x, 0, 7);
+            // (#14846) just below the face's radius the ball rolls, but its round may still have
+            // no section between the edge's ends: then the size that builds is the one at which
+            // it first has one
+            let past = if open.partial {
+                None
+            } else {
+                access
+                    .creation_ball_past_an_end(k, solver, Some(open.radius))?
+                    .filter(|p| p.radius < open.radius)
+            };
+            let radius = past.map_or(open.radius, |p| p.radius);
             self.error.code = FilletErrorType::NoRoom as i32;
             self.error.comment = if open.partial {
-                format!("Fillet Error: the rolling ball is as wide as a face it rolls on along part of the edge only (the face's radius across the edge reaches {}): a radius below {} rolls", g(radius), g(radius))
+                format!(
+                    "Fillet Error: the rolling ball is as wide as a face it rolls on along part of the edge only (the face's radius across the edge reaches {}): a radius below {} rolls",
+                    g(radius),
+                    g(radius)
+                )
+            } else if past.is_some() {
+                format!(
+                    "Fillet Error: the rolling ball is as wide as a face it rolls on (radius {}): its centre does not move along the edge, and at an end of the edge it has no section, so no round ends there; below that radius every ball on the edge's faces still lies past an end of the edge down to radius {}: a radius below {} has a section between the edge's ends",
+                    g(open.radius),
+                    g(radius),
+                    g(radius)
+                )
             } else {
-                format!("Fillet Error: the rolling ball is as wide as a face it rolls on (radius {}): its centre does not move along the edge, and at an end of the edge it has no section, so no round ends there: a radius below {} rolls", g(radius), g(radius))
+                format!(
+                    "Fillet Error: the rolling ball is as wide as a face it rolls on (radius {}): its centre does not move along the edge, and at an end of the edge it has no section, so no round ends there: a radius below {} rolls",
+                    g(radius),
+                    g(radius)
+                )
             };
             self.error.no_room = Some(NoRoomReason::OffsetCollapses);
-            self.note_open_fit(access, true, radius, FitKind::Radius, solver)?;
+            self.error.no_room_without_site = true;
+            if let Some(p) = past {
+                self.note_past_end_fit(k, access, solver, p.radius)?;
+            } else {
+                self.note_open_fit(access, true, radius, FitKind::Radius, solver)?;
+            }
+            return Err(failure());
+        }
+        Ok(())
+    }
+
+    /// Not the fork's (#16156): notes the size the past-an-end refusal names for `solver`,
+    /// `radius` less the fit margin (open: at `radius` the far ball's section is the end's),
+    /// where it is the least noted so far and that refusal does not refuse it too
+    /// ([`ball_past_an_end`](crate::blend::fillet_exact::ball_past_an_end) judged at that
+    /// size). Otherwise nothing is noted, so no size is named that the refusal itself would
+    /// refuse. Returns whether it was noted.
+    ///
+    /// # Errors
+    /// Those of the fit lookup and the judging.
+    fn note_past_end_fit(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl BrepCreationAccess<O>,
+        solver: O,
+        radius: f64,
+    ) -> Result<bool> {
+        let Some(fit) = access.creation_solver_fit(solver)? else {
+            return Ok(false);
+        };
+        let size = smos_max(0.0, radius - fit.fit_margin);
+        if !crate::geom::certified::above(size, 0.0)
+            || (self.fit_radius >= 0.0 && size >= self.fit_radius)
+        {
+            return Ok(false);
+        }
+        if access
+            .creation_ball_past_an_end(k, solver, Some(size))?
+            .is_some()
+        {
+            return Ok(false);
+        }
+        self.note_fit_radius(size, Some(fit.edge), FitKind::Radius);
+        Ok(true)
+    }
+
+    /// Not the fork's (#14846): after the collapsed offsets, a constant ball every one of whose
+    /// positions on the edge's two faces lies past the plane through an end of the edge square
+    /// to it ([`ball_past_an_end`](crate::blend::fillet_exact::ball_past_an_end)): the round
+    /// has no section between the edge's ends, its rail leaving the face it rolls on before
+    /// either end. Refused with [`FilletErrorType::NoRoom`] ([`NoRoomReason::EndRollsIntoSmoothEnd`]),
+    /// naming the radius at which the round first has a section there less the fit margin
+    /// (open: at it the section is the end's), the least of the solvers'.
+    fn refuse_balls_past_an_end(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl BrepCreationAccess<O>,
+    ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::executive::refuse_balls_past_an_end");
+        let mut least: Option<(crate::blend::fillet_exact::PastAnEnd, O)> = None;
+        let mut index = 0;
+        while let Some(solver) = self.solvers.get(index).copied() {
+            index += 1;
+            if let Some(past) = access.creation_ball_past_an_end(k, solver, None)? {
+                if least.is_none_or(|(l, _)| past.radius < l.radius) {
+                    least = Some((past, solver));
+                }
+            }
+        }
+        if let Some((past, solver)) = least {
+            let g = |x: f64| c_general(x, 0, 7);
+            self.error.code = FilletErrorType::NoRoom as i32;
+            self.error.comment = format!(
+                "Fillet Error: every position of the rolling ball on the edge's faces lies past an end of the edge (its rail leaves the face it rolls on before either end, at ({}, {}, {})): a radius below {} has a section between the edge's ends",
+                g(past.at.x),
+                g(past.at.y),
+                g(past.at.z),
+                g(past.radius)
+            );
+            self.error.no_room = Some(NoRoomReason::EndRollsIntoSmoothEnd);
+            self.error.no_room_without_site = true;
+            self.note_past_end_fit(k, access, solver, past.radius)?;
             return Err(failure());
         }
         Ok(())
@@ -3890,11 +4739,18 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let g = |x: f64| c_general(x, 0, 7);
         self.error.code = FilletErrorType::NoRoom as i32;
         self.error.comment = if cut.chamfer {
-            format!("Fillet Error: the chamfer would take all of the part between its sides along the edge and cut it into pieces: a chamfer set back less than {} keeps it whole", g(cut.setback))
+            format!(
+                "Fillet Error: the chamfer would take all of the part between its sides along the edge and cut it into pieces: a chamfer set back less than {} keeps it whole",
+                g(cut.setback)
+            )
         } else {
-            format!("Fillet Error: the round would take all of the part between its rails along the edge and cut it into pieces: a radius below {} keeps it whole", g(cut.radius))
+            format!(
+                "Fillet Error: the round would take all of the part between its rails along the edge and cut it into pieces: a radius below {} keeps it whole",
+                g(cut.radius)
+            )
         };
         self.error.no_room = Some(NoRoomReason::CutsThePart);
+        self.error.no_room_without_site = true;
         // the largest radius that keeps it whole: the bound is open (at it the part is joined at a
         // line or a point), so less the fit margin (FitMargin)
         if cut.edge.is_some() {
@@ -3920,11 +4776,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     ) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::executive::create_fillet_brep");
         // NER: upstream returns SM_ERR_NULL_POINTER, not invalid input.
-        self.target.ok_or(SolidError::Upstream {
-            operation: OP,
-            code: 1006,
-            entity: None,
-        })?;
+        self.target.ok_or_else(no_target)?;
         ignore(access.creation_smooth(k, self))?;
 
         // Opt-in, not upstream (`fixes.fillet_trace_reaches_rails`, WR-609/WR-610; the
@@ -3947,19 +4799,19 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // not the fork's (#2401): a ball as wide as a face, whose zone has no section at an
         // end of its edge
         self.refuse_collapsed_offsets(k, access)?;
+        // not the fork's (#14846): a ball whose every position on the edge's faces lies past
+        // an end of its edge
+        self.refuse_balls_past_an_end(k, access)?;
         // the fork's 862971f, e568e45 and aac4288: a convex blend that would cut the part
         // into pieces, refused naming the largest size that keeps it whole
         self.refuse_blends_cutting_the_part(k, access)?;
         // not the fork's (WR-707, #2299): a convex blend whose section would break through a
-        // wall into the hollow behind, refused naming the largest size that does not
-        if k.fixes.fillet_refuse_rounds_breaking_through {
-            self.refuse_blends_breaking_through(k, access)?;
-        }
+        // wall into the hollow behind, refused naming the largest size that does not (a
+        // hollow that a concave round of the same blend fills is no break-through)
+        self.refuse_blends_breaking_through(k, access)?;
         // not the fork's (#2401): a polygon face its blends take whole, refused before the
         // trace that its rails of no length would fail
-        if k.fixes.fillet_refuse_face_consuming_blends {
-            self.refuse_polygons_taken_whole(k, access)?;
-        }
+        self.refuse_polygons_taken_whole(k, access)?;
 
         // Not the fork's (#2546, WR-739): a rail whose ends would be one vertex, or that
         // lies past its arc's axis
@@ -3974,7 +4826,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         self.ease_set_back_sections(k, access)?;
         self.calculate_corner_edges(k, access)?;
         self.trim_solver_rails(k, access)?;
-        self.classify_solver_rails(k, access)?;
+        if let Err(failed) = self.classify_solver_rails(k, access) {
+            return self.refuse_rollover_past_its_fit(k, access, failed);
+        }
         let fillet = self.build_fillet_faces(k, access)?;
         self.stitch_fillet_faces(k, access, fillet)?;
         if let Some(output) = error_out {
@@ -4018,8 +4872,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k.context.set_doing_boolean(true);
         self.intersector.doing_fillets = true;
         let result = (|| {
-            if ignore(self.create_fillet_brep(k, access, error_out.as_deref_mut()))?.is_none() {
-                return Err(failure());
+            if let Err(stage) =
+                caught(self.create_fillet_brep(k, access, error_out.as_deref_mut()))?
+            {
+                return Err(failure_after(stage));
             }
             let fillet = self
                 .fillet
@@ -4228,9 +5084,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         access.finish_delete_brep(k, fillet)?;
         self.fillet = None;
         let mut tolerance = access.finish_tolerance(k, target)?;
+        let mut lamina = 0;
         for attempt in 0..5 {
             let stitch =
                 access.finish_do_stitching(k, target, tolerance, StitchSettings::default())?;
+            lamina = stitch.lamina;
             if stitch.status.is_none() && stitch.lamina == 0 {
                 break;
             }
@@ -4242,7 +5100,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     self.error.code = 7; // SM_FILERR_BAD_MERGE
                     self.error.comment =
                         "Fillet Stitching Failure: Error Stitching Fillets To Original Brep".into();
-                    return Err(failure());
+                    return Err(failure_after(error.clone()));
                 }
             }
             tolerance *= 2.0;
@@ -4257,25 +5115,46 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // Upstream cbi_MAP_TOPO_EDGES=0: do not collect mapped intersections.
         access.finish_remove_topo_edges(k, self)?;
         access.finish_boolean_post_process(k, self, true)?;
-        for face in access.finish_faces(target)? {
-            // SmTypes.h:659: SM_NO_GET_BREP(face) expands to a null object.
-            ignore(access.finish_notify_face(
-                k,
-                face,
-                NotifyOperation::PreEdit,
-                Some(face),
-                None,
-                None,
-            ))?;
-        }
+        access.finish_pre_edit_faces(k, target)?;
         let mut maybe_not_solid = false;
         // fork 873c7c9 passes this on (SER)
         let oriented =
             access.finish_orient_trimmed_surfaces(k, target, true, &mut maybe_not_solid, false);
-        ignore(crate::error::passed_on(
-            oriented,
-            k.fixes.fillet_statuses_pass_on,
-        )?)?;
+        match oriented {
+            // (not upstream, which ignores this status for every body; WR-661) A result
+            // left open by the stitch (lamina edges) is not a closed shell: walking a
+            // face use's neighbours crosses its boundary edges to the other side, so the
+            // "both sides gathered" check of the closed-solid orientation fires without
+            // the body being non-orientable. Such a result is kept only when
+            // `finish_keeps_open_result` says so (the input was open, the result's
+            // boundary is the input's cut back where a fillet meets it, and no seam is
+            // left unjoined), and when the open body's own orientation then succeeds: the
+            // one `StitchAndOrient` runs for a body with lamina edges (outward, just
+            // unifying the normals). That orientation may flip faces, so the kept body's
+            // normals agree whatever the failed closed-solid pass left; it runs here for
+            // every caller of this finish, `chamfer_fillet` included. The session then
+            // checks the finished body at level 2 and returns this failure if it is not
+            // clean. Anything else (a closed input left open, a gap the stitch left, a
+            // failed unify, an invalid body) returns the orientation's failure.
+            Err(e) if lamina > 0 && gathered_both_sides(&e) => {
+                if !access.finish_keeps_open_result(k, target, &e)? {
+                    return Err(e);
+                }
+                let mut unified_not_solid = false;
+                match access.finish_orient_trimmed_surfaces(
+                    k,
+                    target,
+                    true,
+                    &mut unified_not_solid,
+                    true,
+                ) {
+                    Ok(()) => {}
+                    Err(unify) if unify.is_unported_or_cancelled() => return Err(unify),
+                    Err(_) => return Err(e),
+                }
+            }
+            other => other?,
+        }
         Ok(())
     }
 

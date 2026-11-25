@@ -1,7 +1,7 @@
 //! Contracts and result types for the commands in `cmd/sketch_modify.rs`: `sketch.trim`,
 //! `sketch.trim.path`, `sketch.break`, `sketch.extend`, `sketch.fillet`, the three
 //! `sketch.chamfer.*`, `sketch.offset`, `sketch.offset.break`, `sketch.mirror`, `sketch.move`,
-//! `sketch.scale` and the two `sketch.pattern.*` (#12551).
+//! `sketch.scale`, `sketch.transform` and the two `sketch.pattern.*` (#12551).
 //!
 //! The handlers read their parameters from the raw JSON, so each type here reads its keys by
 //! calling the helpers the handlers call (`params::req_vec2`, `params::vec2_list`,
@@ -42,6 +42,7 @@ use solidcraft_sketch::PatternAlignment;
 use super::check::whole;
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
+use super::sketch_shapes::Created;
 use super::types::{LengthExpr, Point2, StringList};
 use crate::params::{self, expr, num, str_};
 
@@ -292,10 +293,10 @@ fn corner_forms(schema: &mut Schema) {
 // ---------------------------------------------------------------------------------------------
 // Trim, break, extend
 
-/// Remove the piece of a curve between the nearest crossings around a point (a curve nothing
-/// crosses goes whole). The cut ends are joined to the curve that cut them. Trimming a line that
-/// has single-line offsets, or one that is such an offset, releases their linked extents into
-/// the dimensions that held them. One undo step.
+/// Remove the piece between the nearest boundaries around the pick. Crossings with other curves
+/// and points constrained onto the curve are boundaries. With no boundaries the whole curve goes.
+/// Trimming a curve that has offsets, or a piece of an offset's copy, releases the offset into
+/// the dimensions that held it (#8074). One undo step.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = trim_required)]
 pub struct TrimParams {
@@ -367,7 +368,7 @@ impl TrimPathParams {
     }
 }
 
-/// Split a curve in two or more, at the places other curves cross it (`at`) or at given
+/// Split a curve in two or more, at the boundaries around the pick (`at`) or at given
 /// positions (`points`). At a point where the curve ends and another curve meets, the curve
 /// gets its own end there and the two are no longer joined. One undo step.
 #[derive(Debug, JsonSchema)]
@@ -377,8 +378,8 @@ pub struct BreakParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub curve: Option<String>,
-    /// A point near the place to break, in mm: the curve is split at the crossings either side
-    /// of it. Used when `points` is not given.
+    /// A point on the piece to split out, in mm. Each side ends at the nearest crossing
+    /// or point constrained onto the curve. Used when `points` is not given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Point2")]
     pub at: Option<Vec2>,
@@ -902,6 +903,11 @@ pub struct MoveParams {
     /// unchanged. Default: true. Not used with `copy`.
     #[serde(default)]
     pub rotate_constraints: Option<bool>,
+    /// How far along the sketch's normal, in mm, within 1 km: in a 3D sketch the moved lines
+    /// and fit-point splines (or their copies) become drawn 3D curves that far off the plane.
+    /// Default: 0.
+    #[serde(default)]
+    pub z: Option<f64>,
     /// The sketch (default: the one being edited).
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
@@ -920,7 +926,8 @@ impl MoveParams {
         let entities = names(p, "entities")?;
         let sketch = sketch_of(p)?;
         let center = point_or_id(p, "center")?;
-        Ok(MoveParams { entities, translate, angle, center, copy, rotate_constraints, sketch })
+        let z = number(p, "z", "`z` must be a distance in mm")?;
+        Ok(MoveParams { entities, translate, angle, center, copy, rotate_constraints, z, sketch })
     }
 }
 
@@ -964,6 +971,59 @@ impl ScaleParams {
         let entities = names(p, "entities")?;
         let base = point_or_id(p, "base")?;
         Ok(ScaleParams { entities, base, factor, sketch })
+    }
+}
+
+/// Scale, turn and move sketch curves and points in one step: the selection is scaled about
+/// `center`, then turned about it, then moved by `translate`. Circles and arcs scale their radii,
+/// an ellipse takes its axis lines along, and a fixed or projected point cannot move. The
+/// constraints tied to the sketch axes turn with the geometry, and the driving lengths wholly
+/// inside the selection scale with it. One undo step.
+#[derive(Debug, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = transform_required)]
+pub struct TransformParams {
+    /// The curves and points to transform, by id (one id is taken as a list of one).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "StringList")]
+    pub entities: Option<Vec<String>>,
+    /// The factor, a number above 1e-9 and below 1e6. Default: 1, which leaves every size as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "factor_schema")]
+    pub factor: Option<f64>,
+    /// The turn, in degrees (a number). Default: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "angle_schema")]
+    pub angle: Option<f64>,
+    /// What the scale and the turn keep in place: a point [x, y] in mm or a point's id.
+    /// Default: the sketch origin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PointOrId")]
+    pub center: Option<PointOrId>,
+    /// The move, `[dx, dy]` in mm, applied after the scale and the turn. Default: none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub translate: Option<Vec2>,
+    /// The sketch (default: the one being edited).
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+fn transform_required(schema: &mut Schema) {
+    require(schema, "entities");
+}
+
+impl TransformParams {
+    fn read(p: &Value) -> Read<Self> {
+        let factor = match p.get("factor") {
+            None => None,
+            Some(_) => Some(num(p, "factor").filter(|k| *k > 1e-9 && *k < 1e6).ok_or_else(|| "`factor` must be a positive number".to_string())?),
+        };
+        let angle = number(p, "angle", "`angle` must be a number (degrees)")?;
+        let translate = point(p, "translate", "`translate` must be a point [x, y]")?;
+        let entities = names(p, "entities")?;
+        let center = point_or_id(p, "center")?;
+        let sketch = sketch_of(p)?;
+        Ok(TransformParams { entities, factor, angle, center, translate, sketch })
     }
 }
 
@@ -1252,6 +1312,7 @@ read_params!(
     MirrorParams,
     MoveParams,
     ScaleParams,
+    TransformParams,
     CircularPatternParams,
     RectangularPatternParams,
 );
@@ -1312,6 +1373,9 @@ pub struct TrimResult {
     pub result: TrimOutcome,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1331,6 +1395,9 @@ pub struct TrimPathResult {
     /// `true` for a `dry_run`, which changed nothing; left out otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dry_run: Option<bool>,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1343,6 +1410,9 @@ pub struct BreakResult {
     pub curves: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1370,13 +1440,22 @@ pub struct FilletResult {
     /// others equal to it.
     pub constraints: Vec<String>,
     /// The parameter that holds the radius.
-    pub param: String,
+    pub param: Option<String>,
+    /// A sheet sketch keeps its radius expression without making a model parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expression: Option<String>,
     /// The points of corners kept as virtual sharp corners.
     pub virtual_corners: Vec<String>,
     /// The constraints and dimensions that moved to a virtual corner.
     pub moved_to_virtual_corner: Vec<String>,
+    /// The offsets whose corners were cut, released into ordinary curves: their curve ids.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub offset_released: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1391,8 +1470,14 @@ pub struct ChamferResult {
     pub virtual_corners: Vec<String>,
     /// The constraints and dimensions that moved to a virtual corner.
     pub moved_to_virtual_corner: Vec<String>,
+    /// The offsets whose corners were cut, released into ordinary curves: their curve ids.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub offset_released: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1405,8 +1490,7 @@ pub struct OffsetSide {
     pub distance: f64,
     /// The curves it made.
     pub curves: Vec<String>,
-    /// The parameter that drives it; `null` for a trimmed offset, which is not linked to its
-    /// source and has no distance to drive.
+    /// The parameter that drives it; `null` when this side has no distance of its own.
     pub param: Option<String>,
     /// Which instance it belongs to, counting from 1.
     pub instance: usize,
@@ -1426,8 +1510,8 @@ pub struct OffsetResult {
     pub sketch: Value,
     /// Each side of each instance.
     pub sides: Vec<OffsetSide>,
-    /// The parameter that drives the primary distance; `null` when only trimmed offsets were
-    /// made.
+    /// The parameter that drives the primary distance; `null` when the offset made no
+    /// distance of its own.
     pub param: Option<String>,
     /// How many instances were made.
     pub instances: usize,
@@ -1438,10 +1522,9 @@ pub struct OffsetResult {
     /// or several instances each side of `sides` has its own.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub association: Option<String>,
-    /// Set when a distance that names a parameter drives nothing, because the offset was trimmed
-    /// and so is not linked to its source (#12294).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub warning: Option<String>,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1472,6 +1555,9 @@ pub struct MirrorResult {
     pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1482,8 +1568,18 @@ pub struct MirrorResult {
 pub struct MoveResult {
     /// The curves moved, or with `copy` the copies made, by id.
     pub curves: Vec<String>,
+    /// The constraints tying the moved geometry to what stays that the move let go, as
+    /// `{id, kind}`.
+    pub released: Vec<Value>,
+    /// The parallel and perpendicular relations a rotation put in place of the horizontal and
+    /// vertical ones it could not keep, as `{id, kind}`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub added: Vec<Value>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1494,6 +1590,21 @@ pub struct MoveResult {
 pub struct ScaleResult {
     /// The curves scaled, by id (an ellipse's axes come with it).
     pub curves: Vec<String>,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `sketch.transform` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct TransformResult {
+    /// The curves that moved, by id (an ellipse's axes come with it).
+    pub curves: Vec<String>,
+    /// The constraints tying the transformed geometry to what stays that the transform let go,
+    /// as `{id, kind}`.
+    pub released: Vec<Value>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
@@ -1514,6 +1625,9 @@ pub struct PatternResult {
     pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

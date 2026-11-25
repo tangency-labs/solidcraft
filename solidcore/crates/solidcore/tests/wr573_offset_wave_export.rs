@@ -8,14 +8,15 @@
 //! approximation tolerance, 3 subdivisions and no copy, the flat export (#1441) with 5
 //! subdivisions and B-splines copied. The starter is the root B-spline of the swept surface,
 //! with simple inner knots; its cubic Bezier patches run past its control points, and
-//! upstream returns success with no surface. `Kernel::fixes.approximate_surface_bezier_starter`
-//! (the fork's tangency-labs/smlib@eae96cb) raises the starter's inner knots to full
-//! multiplicity first.
+//! upstream returns success with no surface. solidcore raises the starter's inner knots to
+//! full multiplicity first (WR-573, as the fork's tangency-labs/smlib@eae96cb), and checks
+//! every row of patches of a pass against the tolerance (WR-726).
 //!
 //! Reference: the pinned C++ (v1.0.1) through `SmApiCreateLinearSweep`,
 //! `SmApiOffsetBrepFull` and `ApproximateSurface` gives success with no surface for both
 //! calls; with eae96cb's `SmSurface.cpp` linked in, both give a 33 x 4 surface with an
-//! achieved tolerance of 1.1245747026548022e-05.
+//! achieved tolerance of 1.1245747026548022e-05, above the requested 5e-6: its last row of
+//! patches is within the tolerance, an earlier one is not (WR-726).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -35,9 +36,6 @@ use solidcore::surface::surface::SurfaceKind;
 use solidcore::sweep::api_brep as sweeps;
 use solidcore::topology::brep_data_write::bspline_surface_part;
 use solidcore::{Brep, Kernel};
-
-/// The achieved tolerance of the pinned C++ with eae96cb's fix, for both calls.
-const CPP_FIXED_ACHIEVED_TOL: f64 = 1.124_574_702_654_802_2e-5;
 
 /// (subdivisions, copy B-splines): `SmBrepData`'s writer, then the flat export.
 const CALLS: [(usize, bool); 2] = [(3, false), (5, true)];
@@ -81,78 +79,13 @@ fn offset_wave(k: &mut Kernel) -> Brep {
     moved
 }
 
-/// The defect WR-573 is about, pinned while the fix is opt-in: without the flag the
-/// writer's call succeeds with nothing to write. This test goes away when the flag becomes
-/// the default.
-#[test]
-fn without_the_flag_the_writer_succeeds_with_nothing_wr573() {
-    let mut k = Kernel::default();
-    assert!(!k.fixes.approximate_surface_bezier_starter);
-    let moved = offset_wave(&mut k);
-    let face = moved.face(moved.face_list()[0]).unwrap();
-    let surface = face.surface.as_ref().unwrap();
-    let tol = brep_approx_tol_3d(&k, &moved, SmallTopoType::NormalSize);
-    for (subdivisions, copy) in CALLS {
-        // as the pinned C++: success, no surface, nothing tested
-        let r = surface
-            .approximate_surface(&k, tol, subdivisions, copy)
-            .unwrap();
-        assert!(r.surface.is_none(), "({subdivisions}, {copy})");
-        assert_eq!(r.achieved_tol, -1.0, "({subdivisions}, {copy})");
-    }
-}
-
-#[test]
-fn the_flag_approximates_the_offset_face() {
-    let mut k = Kernel::default();
-    k.fixes.approximate_surface_bezier_starter = true;
-    let moved = offset_wave(&mut k);
-    let face = moved.face(moved.face_list()[0]).unwrap();
-    let surface = face.surface.as_ref().unwrap();
-    let tol = brep_approx_tol_3d(&k, &moved, SmallTopoType::NormalSize);
-    for (subdivisions, copy) in CALLS {
-        let r = surface
-            .approximate_surface(&k, tol, subdivisions, copy)
-            .unwrap();
-        let nurbs = r.surface.expect("an approximating B-spline surface");
-        let SurfaceKind::BSpline(b) = nurbs.kind() else {
-            panic!("({subdivisions}, {copy}): not a B-spline");
-        };
-        assert_eq!(b.number_control_points(SurfParamType::U), 33);
-        assert_eq!(b.number_control_points(SurfParamType::V), 4);
-        // The C++ with the fix gives the same. It is above `tol` (5e-6): upstream accepts a
-        // pass when its last row of patches is within `tol`, and the achieved tolerance is
-        // the largest deviation over the whole pass (as the record says for its 1e-3 case).
-        assert!(
-            (r.achieved_tol - CPP_FIXED_ACHIEVED_TOL).abs() <= 1e-9 * CPP_FIXED_ACHIEVED_TOL,
-            "({subdivisions}, {copy}): {}",
-            r.achieved_tol
-        );
-        // over the face's domain the NURBS stays near the offset surface (upstream samples
-        // other points than this grid, hence the extra `tol`)
-        let bound = r.achieved_tol + tol;
-        let domain = face.uv_domain;
-        for i in 0..=20 {
-            for j in 0..=20 {
-                let uv = domain.evaluate(f64::from(i) / 20.0, f64::from(j) / 20.0);
-                let a = surface.evaluate_point(&k, uv).unwrap();
-                let p = nurbs.evaluate_point(&k, uv).unwrap();
-                let gap = a.distance(p);
-                assert!(gap <= bound, "({i}, {j}): gap {gap} > {bound}");
-                assert!((-bound..=10.0 + bound).contains(&p.y), "({i}, {j}): {p:?}");
-            }
-        }
-    }
-}
-
-/// #2507 (WR-726): a pass whose earlier rows of patches miss the tolerance is not accepted.
-/// With `approximate_surface_checks_every_row` the pass the test above pins (33 x 4 at 2.25
-/// times the tolerance) is subdivided once more, and the result is within the tolerance.
+/// WR-573: the writer's calls give an approximating B-spline surface. #2507 (WR-726): a
+/// pass whose earlier rows of patches miss the tolerance is not accepted, so the pass the
+/// C++ with eae96cb accepts (33 x 4 at 2.25 times the tolerance) is subdivided once more,
+/// and the result is within the tolerance.
 #[test]
 fn with_every_row_checked_the_fit_is_within_the_tolerance_2507() {
     let mut k = Kernel::default();
-    k.fixes.approximate_surface_bezier_starter = true;
-    k.fixes.approximate_surface_checks_every_row = true;
     let moved = offset_wave(&mut k);
     let face = moved.face(moved.face_list()[0]).unwrap();
     let surface = face.surface.as_ref().unwrap();
@@ -188,6 +121,7 @@ fn with_every_row_checked_the_fit_is_within_the_tolerance_2507() {
                 let p = nurbs.evaluate_point(&k, uv).unwrap();
                 let gap = a.distance(p);
                 assert!(gap <= bound, "({i}, {j}): gap {gap} > {bound}");
+                assert!((-bound..=10.0 + bound).contains(&p.y), "({i}, {j}): {p:?}");
             }
         }
     }

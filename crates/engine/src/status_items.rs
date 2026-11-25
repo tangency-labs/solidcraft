@@ -14,6 +14,8 @@ pub enum StatusId {
     /// Independent Continuity slot when the compatibility policy is enabled.
     Continuity,
     Section,
+    /// An Isolate is in effect (#8120): what Unisolate brings back is hidden.
+    Isolate,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -54,6 +56,10 @@ pub enum StatusSetting {
         /// Normalised world-space plane normal.
         normal: [f64; 3],
         hatch: bool,
+    },
+    Isolate {
+        /// Bodies and placements hidden now.
+        hidden: usize,
     },
 }
 
@@ -123,11 +129,13 @@ impl Session {
         self.single_surface_analysis = single;
         let shading = self.analysis.is_some();
         let continuity = !self.continuity.is_empty();
-        let section = self.section.is_some();
+        let section = !self.section.is_empty();
+        let isolate = self.visibility.before_isolate.is_some();
         self.status_activation.retain(|source| match source {
             StatusId::SurfaceAnalysis => shading,
             StatusId::Continuity => continuity,
             StatusId::Section => section,
+            StatusId::Isolate => isolate,
         });
         self.status_order.clear();
         for item in &before {
@@ -139,7 +147,8 @@ impl Session {
             let active = match id {
                 StatusId::SurfaceAnalysis => self.analysis.is_some() || (single && !self.continuity.is_empty()),
                 StatusId::Continuity => !self.continuity.is_empty(),
-                StatusId::Section => self.section.is_some(),
+                StatusId::Section => !self.section.is_empty(),
+                StatusId::Isolate => self.visibility.before_isolate.is_some(),
             };
             self.status_slot(id, active);
         }
@@ -157,7 +166,7 @@ impl Session {
             match source {
                 StatusId::SurfaceAnalysis => self.continuity.clear(),
                 StatusId::Continuity => self.analysis = None,
-                StatusId::Section => {}
+                StatusId::Section | StatusId::Isolate => {}
             }
         }
         // A successful Continuity measurement may find only open boundaries and no seams.
@@ -167,7 +176,7 @@ impl Session {
         let active = |source: &StatusId| match source {
             StatusId::SurfaceAnalysis => shading,
             StatusId::Continuity => continuity,
-            StatusId::Section => false,
+            StatusId::Section | StatusId::Isolate => false,
         };
         let remaining = if shading {
             Some(StatusId::SurfaceAnalysis)
@@ -176,7 +185,7 @@ impl Session {
         } else {
             None
         };
-        self.status_activation.retain(|id| *id == StatusId::Section || active(id));
+        self.status_activation.retain(|id| matches!(id, StatusId::Section | StatusId::Isolate) || active(id));
         if let Some(id) = activated.filter(active) {
             self.status_activated(id);
         }
@@ -206,22 +215,28 @@ impl Session {
         let analysis = analysis.map(|(command, setting, has_key)| item(StatusId::SurfaceAnalysis, command, setting, has_key));
         let continuity = (!self.single_surface_analysis && !self.continuity.is_empty())
             .then(|| item(StatusId::Continuity, "inspect.continuity", StatusSetting::Continuity { edge_count: self.continuity.len() }, false));
-        let section = self.section.map(|(origin, normal)| {
+        let section = self.section.first().map(|plane| {
             item(
                 StatusId::Section,
                 "inspect.section",
-                StatusSetting::Section { origin_mm: origin.into(), normal: normal.into(), hatch: self.section_hatch },
+                StatusSetting::Section { origin_mm: plane.origin.into(), normal: plane.normal.into(), hatch: self.section_hatch },
                 false,
             )
+        });
+        // Ended by browser.isolate {clear: true}, as the analyses end by their own command (#8120).
+        let isolate = self.visibility.before_isolate.as_ref().map(|_| {
+            let hidden = self.visibility.hidden_bodies.len() + self.visibility.hidden_occurrences.len();
+            item(StatusId::Isolate, "browser.isolate", StatusSetting::Isolate { hidden }, false)
         });
         // Public effect fields can also be populated by embedders without command chronology.
         // Include those effects after recorded slots, without inventing or storing timestamps.
         let mut items = Vec::new();
-        for id in self.status_order.iter().chain([StatusId::SurfaceAnalysis, StatusId::Continuity, StatusId::Section].iter()) {
+        for id in self.status_order.iter().chain([StatusId::SurfaceAnalysis, StatusId::Continuity, StatusId::Section, StatusId::Isolate].iter()) {
             let effect = match id {
                 StatusId::SurfaceAnalysis => &analysis,
                 StatusId::Continuity => &continuity,
                 StatusId::Section => &section,
+                StatusId::Isolate => &isolate,
             };
             if let Some(effect) = effect
                 && !items.iter().any(|item: &StatusItem| item.id == *id)
@@ -247,6 +262,7 @@ impl Session {
                             StatusId::SurfaceAnalysis => item.id == StatusId::SurfaceAnalysis && item.command != "inspect.continuity",
                             StatusId::Continuity => item.command == "inspect.continuity",
                             StatusId::Section => item.id == StatusId::Section,
+                            StatusId::Isolate => item.id == StatusId::Isolate,
                         }
                 })
                 .cloned()

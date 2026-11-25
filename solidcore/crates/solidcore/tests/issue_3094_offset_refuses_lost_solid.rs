@@ -162,7 +162,7 @@ fn an_offset_that_is_no_solid_is_refused() {
                 panic!("not an edge-vanishing refusal: {cause:?}");
             };
             assert!(part.edge(*edge).is_ok(), "the refusal names an input edge");
-            assert_eq!(failure.entity, Some(solidcore::EntityRef::Edge(*edge)));
+            assert_eq!(failure.entity(), Some(solidcore::EntityRef::Edge(*edge)));
         }
         Ok(body) => assert!(
             brep_is_manifold_solid(&body).unwrap(),

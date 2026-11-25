@@ -59,6 +59,23 @@ pub struct NurbsSurfaceRecord {
     pub weights: Option<Vec<f64>>,
 }
 
+/// A cone or cylinder the NURBS form was built from: the placement's origin and axes,
+/// the radius at the origin, and the semi-angle in degrees (0 for a cylinder). The axis
+/// is `x_axis × y_axis`. A reader uses it only where the form lies on that cone.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct RevolutionRecord {
+    /// A point of the axis, where [`Self::radius`] is measured.
+    pub origin: [f64; 3],
+    /// The placement's unit X axis, the sweep's 0° direction.
+    pub x_axis: [f64; 3],
+    /// The placement's unit Y axis, square to [`Self::x_axis`].
+    pub y_axis: [f64; 3],
+    /// The radius at [`Self::origin`].
+    pub radius: f64,
+    /// The semi-angle, degrees. 0 is a cylinder.
+    pub semi_angle_deg: f64,
+}
+
 /// The analytic kind of a support, a label beside its NURBS form, which is the support's
 /// one geometric truth: the kernel derives the analytic surface from the form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +96,7 @@ pub enum SupportKindRecord {
 
 /// A surface the ball rolls on: a NURBS form (what the stations are solved on) with its
 /// analytic kind, or itself a blend by its definition.
+#[allow(clippy::large_enum_variant)] // boxing the NURBS form would allocate every support
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SupportRecord {
     /// A surface by its NURBS form, and its analytic kind.
@@ -87,6 +105,9 @@ pub enum SupportRecord {
         kind: SupportKindRecord,
         /// The NURBS form.
         form: NurbsSurfaceRecord,
+        /// The cone or cylinder the form was built from. None for any other surface.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        revolution: Option<RevolutionRecord>,
     },
     /// A procedural blend (nested, at most [`RECORD_MAX_DEPTH`] deep in all).
     Blend(Box<ProceduralBlendRecord>),
@@ -102,6 +123,12 @@ pub enum RadiusRecord {
     },
     /// A ball whose radius is the x of a curve over the leader's parameter.
     Law(NurbsCurveRecord),
+    /// No ball: a chamfer whose setbacks hold at every station
+    /// ([`ChamferKindRecord::Setbacks`]). The leader is the edge itself, extended past its
+    /// ends and stored as written; the seeds are the feet's (u, v) on each support.
+    Edge,
+    /// The rolling radius is set by the chamfer's equal setbacks at each pair of feet.
+    EqualSetback,
 }
 
 /// How a chamfer's size was asked for (#2486).
@@ -120,13 +147,85 @@ pub enum ChamferSizeRecord {
     Chord(f64),
 }
 
-/// A chamfer's sizes and the wedge angle they were converted to offsets at (#2486).
+/// How a chamfer's sizes hold along its edge.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ChamferKindRecord {
+    /// Converted to the constant offsets of a ball's centre at the wedge angle `wedge`: the
+    /// sizes hold where that wedge was measured (every record written before the kind).
+    #[default]
+    Offsets,
+    /// Setbacks held at every station: each foot a straight line of its size from the edge, in
+    /// the plane square to the edge (`blend::fillet_section::setback_station`). Its radius is
+    /// [`RadiusRecord::Edge`] and its `wedge` is 0, which no chamfer of offsets has: a reader
+    /// that does not know the kind refuses the wedge rather than read offsets. Its sizes are
+    /// two distances or a chord; a distance and an angle under it is reserved, not defined
+    /// yet (the angle's reference is undecided), and refused. Nothing builds one yet: the
+    /// kernel refuses it when read.
+    Setbacks,
+}
+
+impl ChamferKindRecord {
+    /// Whether it is [`Self::Offsets`], the kind a record without one has.
+    #[must_use]
+    pub fn is_offsets(&self) -> bool {
+        *self == Self::Offsets
+    }
+}
+
+/// A chamfer's sizes and the wedge angle they were converted to offsets at (#2486), or
+/// setbacks held at every station.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ChamferRecord {
     /// The sizes as asked.
     pub size: ChamferSizeRecord,
-    /// The angle between the supports the sizes were converted at.
+    /// The angle between the supports the sizes were converted at; 0 for
+    /// [`ChamferKindRecord::Setbacks`].
     pub wedge: f64,
+    /// How the sizes hold; absent (and not written) for [`ChamferKindRecord::Offsets`], so a
+    /// record of offsets reads and writes as it did before the kind.
+    #[serde(default, skip_serializing_if = "ChamferKindRecord::is_offsets")]
+    pub kind: ChamferKindRecord,
+}
+
+impl ChamferRecord {
+    /// The structural check of a chamfer's numbers: finite; a chamfer of setbacks of two
+    /// distances or a chord, positive, its wedge 0.
+    ///
+    /// # Errors
+    ///
+    /// The [`RecordError`] for `field`.
+    pub fn validate(&self, field: &'static str) -> Result<(), RecordError> {
+        let sizes = match self.size {
+            ChamferSizeRecord::Distances([a, b]) => [a, b, self.wedge],
+            ChamferSizeRecord::DistanceAngle { distance, angle } => [distance, angle, self.wedge],
+            ChamferSizeRecord::Chord(l) => [l, l, self.wedge],
+        };
+        if !all_finite(&sizes) {
+            return Err(refuse(field, "a definition's numbers are finite"));
+        }
+        if self.kind == ChamferKindRecord::Setbacks {
+            let [a, b, _] = sizes;
+            if !(a > 0.0 && b > 0.0) {
+                return Err(refuse(field, "a chamfer of setbacks has positive sizes"));
+            }
+            if self.wedge != 0.0 {
+                return Err(refuse(field, "a chamfer of setbacks has no wedge: it is 0"));
+            }
+            if matches!(self.size, ChamferSizeRecord::DistanceAngle { .. }) {
+                return Err(refuse(
+                    field,
+                    "a chamfer of setbacks by a distance and an angle is not defined yet",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether its sizes are setbacks held at every station.
+    #[must_use]
+    pub fn is_setbacks(&self) -> bool {
+        self.kind == ChamferKindRecord::Setbacks
+    }
 }
 
 /// The affine map from the net's (u, v) to the definition's (s, t):
@@ -205,6 +304,24 @@ fn all_finite(values: &[f64]) -> bool {
 
 fn points_finite(points: &[[f64; 3]]) -> bool {
     points.iter().all(|p| all_finite(p))
+}
+
+fn revolution_finite(r: &RevolutionRecord) -> bool {
+    points_finite(&[r.origin, r.x_axis, r.y_axis])
+        && r.radius.is_finite()
+        && r.semi_angle_deg.is_finite()
+}
+
+fn validate_support_form(
+    form: &NurbsSurfaceRecord,
+    revolution: Option<&RevolutionRecord>,
+    field: &'static str,
+) -> Result<(), RecordError> {
+    form.validate(field)?;
+    if revolution.is_some_and(|r| !revolution_finite(r)) {
+        return Err(refuse(field, "a cone or cylinder's numbers are finite"));
+    }
+    Ok(())
 }
 
 /// `count + degree + 1`, or `None` past `usize`.
@@ -320,7 +437,9 @@ impl ProceduralBlendRecord {
         let d = &self.definition;
         for support in &d.supports {
             match support {
-                SupportRecord::Nurbs { form, .. } => form.validate("definition.supports")?,
+                SupportRecord::Nurbs {
+                    form, revolution, ..
+                } => validate_support_form(form, revolution.as_ref(), "definition.supports")?,
                 SupportRecord::Blend(b) => b.validate_at(depth + 1)?,
             }
         }
@@ -338,17 +457,15 @@ impl ProceduralBlendRecord {
             return Err(refuse("definition", "a definition's numbers are finite"));
         }
         if let Some(c) = &d.chamfer {
-            let sizes = match c.size {
-                ChamferSizeRecord::Distances([a, b]) => [a, b, c.wedge],
-                ChamferSizeRecord::DistanceAngle { distance, angle } => [distance, angle, c.wedge],
-                ChamferSizeRecord::Chord(l) => [l, l, c.wedge],
-            };
-            if !all_finite(&sizes) {
-                return Err(refuse(
-                    "definition.chamfer",
-                    "a definition's numbers are finite",
-                ));
-            }
+            c.validate("definition.chamfer")?;
+        }
+        // a chamfer of setbacks has no ball, and only it has none
+        let setbacks = d.chamfer.is_some_and(|c| c.is_setbacks());
+        if setbacks != matches!(d.radius, RadiusRecord::Edge) || (setbacks && d.order != 0) {
+            return Err(refuse(
+                "definition.radius",
+                "a chamfer of setbacks, of order 0, has the edge for its radius, and only it has",
+            ));
         }
         match &d.radius {
             RadiusRecord::Constant { offsets } => {
@@ -360,6 +477,19 @@ impl ProceduralBlendRecord {
                 }
             }
             RadiusRecord::Law(law) => law.validate("definition.radius")?,
+            RadiusRecord::Edge => {}
+            RadiusRecord::EqualSetback => {
+                if d.order != 0
+                    || !matches!(d.chamfer.as_ref().map(|c| (c.size, c.kind)),
+                    Some((ChamferSizeRecord::Distances([a, b]), ChamferKindRecord::Offsets))
+                        if a == b && a > 0.0)
+                {
+                    return Err(refuse(
+                        "definition.radius",
+                        "a local wedge needs an equal-setback chamfer",
+                    ));
+                }
+            }
         }
         d.leader.validate("definition.leader")?;
         for seed in &d.seeds {
@@ -504,7 +634,9 @@ impl ExactRoundRecord {
     pub fn validate(&self) -> Result<(), RecordError> {
         for support in &self.supports {
             match support {
-                SupportRecord::Nurbs { form, .. } => form.validate("supports")?,
+                SupportRecord::Nurbs {
+                    form, revolution, ..
+                } => validate_support_form(form, revolution.as_ref(), "supports")?,
                 SupportRecord::Blend(_) => {
                     return Err(refuse("supports", "an exact round's supports are faces"))
                 }
@@ -551,6 +683,12 @@ impl ExactRoundRecord {
             if !all_finite(&sizes) {
                 return Err(refuse("chamfer", "an exact round's numbers are finite"));
             }
+            if c.is_setbacks() {
+                return Err(refuse(
+                    "chamfer",
+                    "an exact round's chamfer is of offsets: one of setbacks has no exact class yet",
+                ));
+            }
         } else {
             if self.radius <= 0.0 {
                 return Err(refuse("radius", "the ball's radius is positive"));
@@ -567,6 +705,44 @@ impl ExactRoundRecord {
         }
         self.net.form.validate("net.form")
     }
+}
+
+/// A face's blend definition without its net, which is the face's surface: what a body's
+/// record keeps of a procedural blend's face or of a round of an exact class's
+/// (`solidcore-record`'s `brep::blend::BlendDefinition` holds the same fields, and
+/// `solidcore-convert` copies them). [`super::convert::face_definition`] reads one off a face,
+/// [`super::convert::adopt_definitions`] gives it back, rebuilt and re-certified.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum FaceDefinition {
+    /// A procedural blend's definition S.
+    Procedural(Box<BlendDefinitionRecord>),
+    /// A round of an exact class's definition.
+    ExactRound(Box<ExactRoundDefinition>),
+}
+
+/// An [`ExactRoundRecord`] without its net's form, which is the face's surface: the definition
+/// and the net's analytic kind.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExactRoundDefinition {
+    /// The class.
+    pub class: ExactClassRecord,
+    /// The supports S1, S2, by value.
+    pub supports: [SupportRecord; 2],
+    /// The ball's radius (0 for the chord).
+    pub radius: f64,
+    /// The section's order: 1, the ball's circle; 0, the chord.
+    pub order: u32,
+    /// The leader (the centre line), where the class's construction makes one.
+    pub leader: Option<NurbsCurveRecord>,
+    /// What the class is read with beside the supports.
+    pub inputs: ClassInputsRecord,
+    /// A chamfer's sizes (the chord, #2486).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chamfer: Option<ChamferRecord>,
+    /// How the net's parameter runs along the leader.
+    pub leader_map: LeaderMapRecord,
+    /// The net's analytic kind.
+    pub net_kind: ExactNetKindRecord,
 }
 
 /// A face of a blend corner's (#2488): its corner kind's definition and its net.
@@ -686,6 +862,10 @@ pub struct SetbackCornerRecord {
     pub convex: bool,
     /// The most the fill stands past a face, certified (at most `tol`).
     pub containment: f64,
+    /// Whether the fill was built with the convexity certificate (#13775). Defaults in
+    /// records saved before the field: their fills were not certified.
+    #[serde(default)]
+    pub certified: bool,
     /// The patch's index: setback patches first, then the interior parts.
     pub patch: u32,
     /// The net, the patch.
@@ -726,8 +906,8 @@ pub struct MixedSideRecord {
     pub has_t: bool,
 }
 
-/// A Mixed corner's face (#2488): its rule (the Coons patch of its four sides, bilinear for
-/// chamfers, turned or not), its supports (the two trimmed blends and T), its trimline's
+/// A Mixed corner's face (#2488): its rule (the Coons patch of its four sides, the chamfer's
+/// for chamfers, turned or not), its supports (the two trimmed blends and T), its trimline's
 /// blend, side and uv, its conic's side, the construction's tolerance and its net.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MixedCornerRecord {
@@ -737,7 +917,8 @@ pub struct MixedCornerRecord {
     pub common: SupportRecord,
     /// The four sides c0, c1, d0, d1.
     pub sides: Vec<MixedSideRecord>,
-    /// Whether the rule is the bilinear Coons patch.
+    /// Whether the rule is the chamfer's Coons patch (bilinear unless two sides lie in a
+    /// plane wall).
     pub bilinear: bool,
     /// Whether the patch is turned.
     pub transposed: bool,
@@ -762,6 +943,9 @@ impl BezierCurveRecord {
             return Err(refuse(field, "a curve has one break more than segments"));
         }
         let degree = self.seg.first().map_or(0, Vec::len);
+        if self.seg.first().is_some_and(Vec::is_empty) {
+            return Err(refuse(field, "a curve's segments have control points"));
+        }
         if self.seg.iter().any(|s| s.len() != degree)
             || !all_finite(&self.brk)
             || self.seg.iter().flatten().any(|q| !all_finite(q))
@@ -773,12 +957,70 @@ impl BezierCurveRecord {
         }
         Ok(())
     }
+
+    /// [`BezierCurveRecord::validate`], and a curve the rule reads: one segment or more
+    /// (an empty curve is refused where the rule reads the field), its breaks strictly
+    /// increasing from 0 to 1, no two closer than the rounding the algebra's union of breaks
+    /// merges (`algebra::breaks_merge`). The kernel makes every Mixed side and trim curve on
+    /// `[0, 1]` (the rule reads the sides' ends at 0 and 1), and its algebra refines two curves
+    /// to the union of their breaks, so a curve over another range, or with breaks out of
+    /// order, would leave the two with different segment counts.
+    fn validate_read(&self, field: &'static str) -> Result<(), RecordError> {
+        self.validate(field)?;
+        if self.seg.is_empty() {
+            return Err(refuse(field, "a curve the rule reads has a segment"));
+        }
+        if !self.brk.windows(2).all(|w| matches!(w, [a, b] if a < b)) {
+            return Err(refuse(field, "a curve's breaks strictly increase"));
+        }
+        if self
+            .brk
+            .windows(2)
+            .any(|w| matches!(w, [a, b] if crate::blend::blend_corner::mixed::algebra::breaks_merge(*a, *b)))
+        {
+            return Err(refuse(
+                field,
+                "a curve's breaks lie farther apart than the rounding its algebra merges",
+            ));
+        }
+        if self.brk.first() != Some(&0.0) || self.brk.last() != Some(&1.0) {
+            return Err(refuse(field, "a curve the rule reads runs from 0 to 1"));
+        }
+        Ok(())
+    }
+}
+
+/// Whether two of the sorted `breaks` lie within the rounding the Mixed algebra's union
+/// merges (`algebra::breaks_merge`) but are not one break to its refinement
+/// (`algebra::breaks_coincide`).
+///
+/// The check is conservative: it may refuse a record the algebra would combine soundly, in
+/// two cases. It pools the trim curve's breaks, though the rule only evaluates that curve and
+/// never combines it with another; and it tests every pair within merging distance, though
+/// `union` compares a break only with the last break it kept (with `x`, `y` coinciding,
+/// `y`, `z` merging and `x`, `z` not merging, `union` drops `y`, keeps `z`, and never
+/// compares `y` with `z`). Both need two breaks that merge but do not coincide: on `[0, 1]`
+/// their gap `y - x` exceeds `1e-14·(1 + |y|) >= 1e-14` and is at most
+/// `1e-13·(1 + |y|) <= 2e-13`. So only a record holding two breaks `1e-14` to `2e-13` apart
+/// can be over-refused; the records the kernel writes for its own Mixed faces pass (the
+/// round-trip tests rebuild each of them).
+fn mixed_breaks_split(breaks: &[f64]) -> bool {
+    use crate::blend::blend_corner::mixed::algebra::{breaks_coincide, breaks_merge};
+    breaks.iter().enumerate().any(|(i, &x)| {
+        breaks
+            .iter()
+            .skip(i + 1)
+            .take_while(|&&y| breaks_merge(x, y))
+            .any(|&y| y != x && !breaks_coincide(x, y))
+    })
 }
 
 /// A support or net of a corner's: a NURBS form (corners' faces are not blends here).
 fn corner_surface(s: &SupportRecord, field: &'static str) -> Result<(), RecordError> {
     match s {
-        SupportRecord::Nurbs { form, .. } => form.validate(field),
+        SupportRecord::Nurbs {
+            form, revolution, ..
+        } => validate_support_form(form, revolution.as_ref(), field),
         SupportRecord::Blend(_) => Err(refuse(field, "a corner's face is a NURBS form")),
     }
 }
@@ -840,7 +1082,9 @@ impl CornerRecord {
                 }
                 for round in &r.rounds {
                     match &round.surface {
-                        SupportRecord::Nurbs { form, .. } => form.validate("rounds")?,
+                        SupportRecord::Nurbs {
+                            form, revolution, ..
+                        } => validate_support_form(form, revolution.as_ref(), "rounds")?,
                         SupportRecord::Blend(b) => b.validate()?,
                     }
                     if !round.end.is_finite() {
@@ -891,7 +1135,9 @@ impl CornerRecord {
             Self::Mixed(r) => {
                 for b in &r.blends {
                     match b {
-                        SupportRecord::Nurbs { form, .. } => form.validate("blends")?,
+                        SupportRecord::Nurbs {
+                            form, revolution, ..
+                        } => validate_support_form(form, revolution.as_ref(), "blends")?,
                         SupportRecord::Blend(b) => b.validate()?,
                     }
                 }
@@ -899,10 +1145,20 @@ impl CornerRecord {
                 if r.sides.len() != 4 || r.blend > 1 || r.trim_side > 3 || r.conic_side > 3 {
                     return Err(refuse("sides", "a mixed face has four sides on two blends"));
                 }
+                // the rule reads every side, and the Coons rule (not the chamfer's) its
+                // field and, where it has one, its cross field too
                 for side in &r.sides {
-                    side.c.validate("sides")?;
-                    side.dir.validate("sides")?;
-                    side.t.validate("sides")?;
+                    side.c.validate_read("sides")?;
+                    if r.bilinear {
+                        side.dir.validate("sides")?;
+                    } else {
+                        side.dir.validate_read("sides")?;
+                    }
+                    if side.has_t && !r.bilinear {
+                        side.t.validate_read("sides")?;
+                    } else {
+                        side.t.validate("sides")?;
+                    }
                     let numbers = side.val.iter().chain(&side.der).flatten();
                     let fields = side
                         .dir_val
@@ -914,7 +1170,27 @@ impl CornerRecord {
                         return Err(refuse("sides", "a side's numbers are finite"));
                     }
                 }
-                r.trim_uv.validate("trim_uv")?;
+                r.trim_uv.validate_read("trim_uv")?;
+                // the algebra refines the curves it combines to the union of their breaks:
+                // two breaks of different curves the union merges must be one break to the
+                // refinement too, or the two curves keep different segment counts
+                let mut breaks: Vec<f64> = r.trim_uv.brk.clone();
+                for side in &r.sides {
+                    breaks.extend_from_slice(&side.c.brk);
+                    if !r.bilinear {
+                        breaks.extend_from_slice(&side.dir.brk);
+                        if side.has_t {
+                            breaks.extend_from_slice(&side.t.brk);
+                        }
+                    }
+                }
+                breaks.sort_by(f64::total_cmp);
+                if mixed_breaks_split(&breaks) {
+                    return Err(refuse(
+                        "sides",
+                        "breaks of two curves the algebra merges are one break to its refinement",
+                    ));
+                }
                 if !(r.tol.is_finite() && r.tol > 0.0) {
                     return Err(refuse(
                         "tol",

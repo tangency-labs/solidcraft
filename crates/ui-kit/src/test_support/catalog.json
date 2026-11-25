@@ -1,5 +1,18 @@
 {
+  "ui.close": "Close",
   "ui.expand": "Expand",
   "ui.view_compass_tip": "View from {axis}. Click again to reverse. Drag to orbit.",
-  "ui.view_compass_tip_snap": "View from {axis}. Click again to reverse. Drag to orbit; hold Shift to snap."
+  "ui.view_compass_tip_snap": "View from {axis}. Click again to reverse. Drag to orbit; hold Shift to snap.",
+  "ui.window_about": "About {title}",
+  "ui.window_hide": "Hide {title}",
+  "ui.window_maximize": "Maximize",
+  "ui.window_minimize": "Minimize",
+  "ui.window_restore": "Restore",
+  "ui.save": "Save",
+  "ui.cancel": "Cancel",
+  "ui.don_t_save": "Don't Save",
+  "ui.table.gallery.configurations": "Configurations",
+  "ui.table.gallery.parameters": "Parameters",
+  "prefs.sketch.state_icons": "State icons",
+  "prefs.sketch_state_icons": "Sketch icons in the color of their state"
 }

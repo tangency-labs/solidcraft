@@ -15,6 +15,7 @@
 //! | [`p6`]    | see the module                                                  |
 //! | [`p7`]    | see the module                                                  |
 //! | [`planar_section`] | `CreatePlanarSectionCurves` (unit `topology.brep_planar_section`) |
+//! | [`primitive_outward`] | (not upstream) a primitive's volume sign from its closed form |
 //! | [`p8`]    | making faces from surfaces and from loops of curves              |
 //! | [`vertex_fans`] | `SplitVertexByFans`, `JoinVertexFans` (the fork's, `4ecfbab`) |
 //! | [`p10`]   | `MakeTopologyFromData`, `ProjectAndTrim`, `RemoveAllTopology`, `TestClosureSplitRegion` (edge version) |
@@ -23,9 +24,11 @@
 //! Deviations: the B-rep records are the arenas of [`crate::topology::Brep`].
 
 pub mod cutting;
+pub mod dome;
 pub mod enclosing;
 pub mod local_operation;
 pub mod mirror;
+pub mod outer_shells;
 pub mod p1;
 pub mod p10;
 pub mod p2;
@@ -37,7 +40,11 @@ pub mod p7;
 pub mod p8;
 pub mod p9;
 pub mod planar_section;
+pub mod primitive_outward;
+pub mod seam_turn;
 pub mod sheet;
+pub mod side_extend;
+pub mod trim_extend;
 pub mod validation;
 pub mod vertex_fans;
 
@@ -47,7 +54,9 @@ pub use p10::{
     make_topology_from_data, merge_curves_on_surface_through_surface, MakeTopologyOptions,
     TopologyEnv, HEALER_VERSION,
 };
-pub use p2::{is_manifold_solid, is_sheet, shell_vertices, ArenaNotifyState};
+pub use p2::{
+    create_missing_uv_trim_curves, is_manifold_solid, is_sheet, shell_vertices, ArenaNotifyState,
+};
 pub use p3::{
     api_brep_copy, delete_face, new_brep, orient_trimmed_surfaces, topology_ref,
     with_kernel_callbacks, DeleteFaceOptions,
@@ -62,7 +71,7 @@ pub use p8::{
     create_face_from_surface, create_faces_with_curves, create_planar_face_with_3d_curves,
     create_planar_faces_with_3d_curves, FaceBuildEnv,
 };
-pub use p9::{make_vertex_loop, orient_sheet_surfaces};
+pub use p9::{make_vertex_loop, orient_sheet_surfaces, OrientSheetNote};
 
 /// Whether `b` is a valid closed solid facing out (not upstream): one closed manifold solid
 /// ([`is_manifold_solid`]), passed by the kernel's validity check (its pointer check and
@@ -78,7 +87,8 @@ pub use p9::{make_vertex_loop, orient_sheet_surfaces};
 ///
 /// A sign the enclosure leaves undecided (its interval still holds 0 when refinement ends:
 /// a gap between faces as large as the volume, or the cell budget spent) is "not a solid" on
-/// purpose: a solid is what is proved one, so ops' `finish` refuses the body as `NotSolid`.
+/// purpose: a solid is what is proved one, so ops' `finish` refuses the body as
+/// `NotSolidBecause(VolumeUndecided)`.
 /// A body the enclosure cannot read at all is an error, not `false`: a face with no NURBS form
 /// (an offset surface, as the offset of a round keeps; a curve-bounded or in-volume surface),
 /// a face without trim loops, or weights not proved positive.
@@ -95,10 +105,73 @@ pub fn is_outward_solid(
     k: &mut crate::kernel::Kernel,
     b: &mut crate::topology::Brep,
 ) -> crate::Result<bool> {
-    if !is_manifold_solid(b)? {
-        return Ok(false);
+    Ok(outward_solid_failure(k, b)?.is_none())
+}
+
+/// Which test a body fails to be a closed solid facing out ([`outward_solid_failure`] and its
+/// siblings), in the order the tests run: the first one that fails is the one named. More tests
+/// may be named, so a caller outside the kernel matches it with a wildcard or says it by its
+/// `Display`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SolidTest {
+    /// The body is not one closed manifold solid ([`is_manifold_solid`]).
+    NotManifold,
+    /// The body is neither one closed manifold solid nor closed solids touching along edges or
+    /// at vertices ([`crate::query::api_queries::brep_is_closed_touching_solids`]): the test of
+    /// [`is_outward_touching_solids`].
+    NotClosedSolids,
+    /// The validity check's pointer check failed ([`validation::check_brep`] at `Level0`: its
+    /// status, or a report that leaves `AssertValid` unrun): a body with every face flipped
+    /// (`FlipFaceOrientation`), or a vertex whose tolerance is 1000 times the body's.
+    PointersInvalid,
+    /// The pointer check passed but the validity check's `AssertValid` did not: a B-spline
+    /// face whose surface has an internal pole, for one.
+    Invalid,
+    /// A loop's certified area leaves its orientation undecided. No test of the solid check
+    /// decides a loop's orientation by its area yet, so none of the checks here returns it;
+    /// it is named so a caller's match already covers it when one does.
+    LoopOrientationUndecided,
+    /// The volume's certified enclosure lies below 0: the body is proved inside out.
+    VolumeNegative,
+    /// The volume's certified enclosure still holds 0 when refinement ends: its sign is not
+    /// proved ([`crate::mass::enclosure::VolumeSign::Undecided`]).
+    VolumeUndecided,
+}
+
+impl core::fmt::Display for SolidTest {
+    /// What the body fails, as a clause: "it is inside out".
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            SolidTest::NotManifold => "it is not one closed manifold solid",
+            SolidTest::NotClosedSolids => {
+                "it is not closed solids, even ones touching along edges or at vertices"
+            }
+            SolidTest::PointersInvalid => "its pointer check fails",
+            SolidTest::Invalid => "its validity check fails",
+            SolidTest::LoopOrientationUndecided => "a loop's orientation is undecided",
+            SolidTest::VolumeNegative => "it is inside out",
+            SolidTest::VolumeUndecided => "its volume's sign is undecided",
+        })
     }
-    is_valid_and_outward(k, b)
+}
+
+/// As [`is_outward_solid`], naming the test the body fails: `None` where it is a valid closed
+/// solid facing out, else the first test that fails ([`SolidTest::NotManifold`],
+/// [`SolidTest::PointersInvalid`], [`SolidTest::Invalid`], [`SolidTest::VolumeNegative`],
+/// [`SolidTest::VolumeUndecided`]). The tests and their order are [`is_outward_solid`]'s.
+///
+/// # Errors
+///
+/// As [`is_outward_solid`].
+pub fn outward_solid_failure(
+    k: &mut crate::kernel::Kernel,
+    b: &mut crate::topology::Brep,
+) -> crate::Result<Option<SolidTest>> {
+    if !is_manifold_solid(b)? {
+        return Ok(Some(SolidTest::NotManifold));
+    }
+    valid_and_outward_failure(k, b)
 }
 
 /// As [`is_outward_solid`], the body allowed to be closed solids touching along edges or at
@@ -112,26 +185,67 @@ pub fn is_outward_touching_solids(
     k: &mut crate::kernel::Kernel,
     b: &mut crate::topology::Brep,
 ) -> crate::Result<bool> {
-    if !is_manifold_solid(b)? && !crate::query::api_queries::brep_is_closed_touching_solids(b)? {
-        return Ok(false);
-    }
-    is_valid_and_outward(k, b)
+    Ok(outward_touching_solids_failure(k, b)?.is_none())
 }
 
-/// The validity check, no unsure region, and the volume's sign, for a closed body.
-fn is_valid_and_outward(
+/// As [`is_outward_touching_solids`], naming the test the body fails:
+/// [`SolidTest::NotClosedSolids`] for its topology test, else as [`outward_solid_failure`].
+///
+/// # Errors
+///
+/// As [`is_outward_touching_solids`].
+pub fn outward_touching_solids_failure(
+    k: &mut crate::kernel::Kernel,
+    b: &mut crate::topology::Brep,
+) -> crate::Result<Option<SolidTest>> {
+    if !is_manifold_solid(b)? && !crate::query::api_queries::brep_is_closed_touching_solids(b)? {
+        return Ok(Some(SolidTest::NotClosedSolids));
+    }
+    valid_and_outward_failure(k, b)
+}
+
+/// The validity check, no unsure region, and the volume's sign, for a closed body: the part
+/// of [`is_outward_solid`] and [`is_outward_touching_solids`] after their topology tests,
+/// which both share. `true` only where the check passes (pointers and `AssertValid`, at
+/// `Level0`), no region is unsure, and the volume is proved positive. A caller that holds
+/// this proof for a body it has not changed since may take it for the body again under the
+/// same kernel settings (solidcore-ops' proof reuse, #14830).
+///
+/// # Errors
+///
+/// As [`is_outward_solid`]'s, after its manifold test.
+pub fn is_valid_and_outward(
     k: &mut crate::kernel::Kernel,
     b: &mut crate::topology::Brep,
 ) -> crate::Result<bool> {
+    Ok(valid_and_outward_failure(k, b)?.is_none())
+}
+
+/// As [`is_valid_and_outward`], naming the test the body fails: [`SolidTest::PointersInvalid`],
+/// [`SolidTest::Invalid`], [`SolidTest::VolumeNegative`] or [`SolidTest::VolumeUndecided`], in
+/// that order; `None` where every one passes.
+///
+/// # Errors
+///
+/// As [`is_valid_and_outward`].
+pub fn valid_and_outward_failure(
+    k: &mut crate::kernel::Kernel,
+    b: &mut crate::topology::Brep,
+) -> crate::Result<Option<SolidTest>> {
     let c = validation::check_brep(k, b, validation::CheckLevel::Level0)?;
-    if c.pointers_status != crate::error::SM_SUCCESS || c.assert_valid != Some(true) {
-        return Ok(false);
+    // `AssertValid` does not run (`None`) where a pointer report failed
+    if !c.pointers.is_passed() || c.assert_valid.is_none() {
+        return Ok(Some(SolidTest::PointersInvalid));
+    }
+    if c.assert_valid != Some(true) {
+        return Ok(Some(SolidTest::Invalid));
     }
     crate::mass::integrator::properties::no_unsure_region(b)?;
-    Ok(matches!(
-        crate::mass::enclosure::volume_sign(k, b)?,
-        crate::mass::enclosure::VolumeSign::Positive(_)
-    ))
+    Ok(match crate::mass::enclosure::volume_sign(k, b)? {
+        crate::mass::enclosure::VolumeSign::Positive(_) => None,
+        crate::mass::enclosure::VolumeSign::Negative(_) => Some(SolidTest::VolumeNegative),
+        crate::mass::enclosure::VolumeSign::Undecided(_) => Some(SolidTest::VolumeUndecided),
+    })
 }
 
 #[cfg(test)]

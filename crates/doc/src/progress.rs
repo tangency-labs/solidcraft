@@ -157,7 +157,17 @@ pub fn watch<R>(progress: Arc<Progress>, f: impl FnOnce() -> R) -> R {
         }
     }
     let _restore = Restore(Some(previous));
-    stop.within(|| solidcraft_kernel::watch::watching(kernel, f))
+    // The sketch solves of the watched work stop on Cancel too, those a command runs itself as
+    // well as an evaluation's.
+    stop.within(|| match solidcraft_kernel::stop_token() {
+        Some(token) => solidcraft_sketch::cancel::within(&token, || solidcraft_kernel::watch::watching(kernel, f)),
+        None => solidcraft_kernel::watch::watching(kernel, f),
+    })
+}
+
+/// The progress watching this thread, to watch work this thread hands to another one.
+pub fn current() -> Option<Arc<Progress>> {
+    CURRENT.with(|c| c.borrow().as_ref().map(|cur| cur.progress.clone()))
 }
 
 /// Whether the watch over this thread's evaluations asked them to stop. Work done after that may
@@ -306,6 +316,40 @@ mod tests {
         assert!(union().is_ok_and(|u| u.is_some()), "and so does its work outside the watch");
     }
 
+    /// Cancel reaches the sketch solves of the watched work too: a solve asked for after it does
+    /// no iteration and fails, the sketch as it was; outside the watch it iterates.
+    #[test]
+    fn cancel_stops_a_sketch_solve_under_the_watch() {
+        use solidcraft_sketch::{ConstraintKind, Sketch, SolveStatus};
+        let mut sk = Sketch::new();
+        let l = sk.add_line(solidcore_record::Vec2::new(0.0, 0.0), solidcore_record::Vec2::new(10.0, 1.0), None, None, None).unwrap();
+        sk.add_constraint(ConstraintKind::Horizontal { l }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Vertical { l }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Length { l, value: 10.0 }, None).unwrap();
+        let doc = crate::Document::new("cancel");
+        let stored = sk.driving_values();
+        let solve = || {
+            let mut s = sk.clone();
+            let report = doc.solve_sketch(&Default::default(), &mut s, &stored, None).unwrap();
+            (report, s)
+        };
+        let p = Arc::new(Progress::default());
+        p.cancel();
+        let (stopped, after) = watch(p, solve);
+        assert_eq!(stopped.status, SolveStatus::Failed, "{stopped:?}");
+        assert_eq!(stopped.iterations, 0, "{stopped:?}");
+        assert_eq!(after.points, sk.points);
+        let (free, _) = solve();
+        assert!(free.iterations > 0, "{free:?}");
+        // A solve a command runs itself, outside an evaluation, stops too.
+        let p = Arc::new(Progress::default());
+        p.cancel();
+        let mut direct = sk.clone();
+        let report = watch(p, || solidcraft_sketch::solve(&mut direct));
+        assert_eq!((report.status, report.iterations), (SolveStatus::Failed, 0), "{report:?}");
+        assert_eq!(direct.points, sk.points);
+    }
+
     /// The item a command is on reaches its watcher, and only a watcher.
     #[test]
     fn items_go_to_the_watcher() {
@@ -333,6 +377,7 @@ mod tests {
             width: "3 mm".into(),
             height: "4 mm".into(),
             operation: crate::Operation::NewBody,
+            centred: false,
         };
         doc.add_feature(block, Some("Block")).unwrap();
         let mut model = crate::Model::default();

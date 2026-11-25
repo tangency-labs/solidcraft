@@ -374,3 +374,22 @@ fn the_cornered_block_s_rim_at_its_corners_radius_builds() {
     let removed = 754.0 * 25.0 * (1.0 - PI / 4.0) + 4.0 * (PI / 2.0) * (62.5 - 125.0 / 3.0);
     assert_one_sound_solid(&mut k, &mut b, before - removed, 1e-7);
 }
+
+// ---- an overflow the trim keeps nothing of, no corner taking any of its edge ----------
+
+/// A 10 cube's lone top edge x = 10, z = 10 chamfered 30: the chord runs past both faces,
+/// the edge's ends are open ends (no other edge is blended there, so no corner takes any of
+/// it) and the trim keeps none of it. Refused as an overflow that keeps nothing (class 129;
+/// before, under corners taking the whole edge, 110), naming the overflow's own bound, where
+/// the rails stay on their faces, unchanged: the faces' width 10 (open) less the margin.
+#[test]
+fn a_chamfer_the_trim_keeps_nothing_of_names_where_it_stays_on_its_faces() {
+    let at = Point3::new(10.0, 5.0, 10.0);
+    let mut k = kernel();
+    let mut b = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
+    let m = margin(&k, &b, at);
+    let got = blend(&mut k, &mut b, &[at], 30.0, 0);
+    assert_refused(got, NoRoomReason::OverflowKeepsNothing, 10.0 - m);
+    let class = solidcore::error::blend::no_room_class(NoRoomReason::OverflowKeepsNothing);
+    assert_eq!(class as u16, 129);
+}

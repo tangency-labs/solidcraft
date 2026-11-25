@@ -9,22 +9,37 @@ use solidcraft_doc::naming::legacy_name;
 use solidcraft_doc::persistent_name::{Base, EdgeName, FaceName, Role};
 use solidcraft_doc::{Document, MAX_PLACEMENT_DEPTH, ModelState};
 
-use super::{component_of, joint_id, link_info, named_value_list, occurrence_name, reply};
+use super::filter::{Row, RowFilter, contents_groups, omit};
+use super::{active_joint_values, component_of, joint_id, link_info, named_value_list, occurrence_name, reply};
 use crate::schema::joints::{
-    EdgeReference, FaceReference, InspectJointResult, InspectedJoint, JointLink, JointSide, LinkRole, MadeBy, Reference, ReferenceRole, Referent,
-    SweptFrom, WorldFrame,
+    EdgeReference, FaceReference, InspectJointResult, InspectedJoint, JointLink, JointSide, LinkRole, MadeBy, Omitted, Reference, ReferenceRole,
+    Referent, SweptFrom, WorldFrame,
 };
 use crate::{Result, Session};
 
 pub(super) fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.inspect";
+    let mut omitted = Omitted::default();
     let ids: Vec<u64> = match p.get("joint") {
-        None | Some(Value::Null) => s.doc.assembly.joints.iter().map(|j| j.id).collect(),
+        None | Some(Value::Null) => {
+            let rows = RowFilter::read(s, p, cmd)?;
+            let groups = if rows.needs_groups() { contents_groups(&s.doc) } else { Default::default() };
+            let mut ids = Vec::new();
+            for j in &s.doc.assembly.joints {
+                let ends = super::filter::ends(j);
+                if rows.keeps(&Row { kind: j.kind, suppressed: j.suppressed, ends: &ends, holds_contents: groups.contains_key(&j.id) }) {
+                    ids.push(j.id);
+                } else {
+                    omit(&mut omitted, j.kind);
+                }
+            }
+            ids
+        }
         v => vec![joint_id(s, v, cmd)?],
     };
     let st = s.model.state();
     let sol = joints::solve(&s.doc, &st);
-    let vals = joints::joint_values(&s.doc.assembly);
+    let vals = active_joint_values(&s.doc);
     let out: Vec<InspectedJoint> = ids
         .iter()
         .filter_map(|id| s.doc.assembly.joints.iter().find(|j| j.id == *id))
@@ -33,7 +48,7 @@ pub(super) fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             joint_json(s, &st, &sol, j, q)
         })
         .collect();
-    reply(cmd, InspectJointResult { joints: out, param_warnings: Vec::new() })
+    reply(cmd, InspectJointResult { joints: out, omitted: omitted.some(), param_warnings: Vec::new() })
 }
 
 fn joint_json(s: &Session, st: &ModelState, sol: &joints::Solution, j: &Joint, q: &[f64]) -> InspectedJoint {
@@ -55,20 +70,22 @@ fn joint_json(s: &Session, st: &ModelState, sol: &joints::Solution, j: &Joint, q
         visible: s.joint_visible(j.id),
         flip: j.flip,
         offset: j.offset,
+        offset_xy: j.offset_xy,
         angle: j.angle.to_degrees(),
         values: named_value_list(j, q),
         dofs: j.kind.dofs().iter().map(|d| (*d).to_string()).collect(),
-        a: side_json(s, st, &j.a),
-        b: side_json(s, st, &j.b),
+        a: side_json(s, st, &j.a, Some(j)),
+        b: side_json(s, st, &j.b, None),
         links,
         errors: why(&sol.errors),
         conflicts: why(&sol.conflicts),
         expressions: (!j.exprs.is_empty()).then(|| j.exprs.clone()),
+        constraint: j.constraint,
     }
 }
 
 /// One of a joint's origins: what it sits on, what it refers to, and where it is now.
-fn side_json(s: &Session, st: &ModelState, o: &JointOrigin) -> JointSide {
+fn side_json(s: &Session, st: &ModelState, o: &JointOrigin, joint: Option<&Joint>) -> JointSide {
     let component = component_of(s, o.occurrence);
     let component_name = if component == 0 {
         "root".to_string()
@@ -91,6 +108,7 @@ fn side_json(s: &Session, st: &ModelState, o: &JointOrigin) -> JointSide {
     };
     match s.doc.origin_world(st, o) {
         Ok(m) => {
+            let m = joint.map_or(m, |j| j.offset_frame_a(m));
             v.resolves = true;
             v.frame = Some(WorldFrame { origin: [m[3][0], m[3][1], m[3][2]], z: [m[2][0], m[2][1], m[2][2]], x: [m[0][0], m[0][1], m[0][2]] });
         }
@@ -153,6 +171,25 @@ fn references(doc: &Document, snap: &Snap) -> Vec<Reference> {
             }
         }
         Snap::Frame { .. } | Snap::Point { .. } => {}
+    }
+    let x = match snap {
+        Snap::FaceCenter { x, .. } | Snap::CircleCenter { x, .. } | Snap::Plane { x, .. } | Snap::Axis { x, .. } => x.as_ref(),
+        _ => None,
+    };
+    use joints::AlignmentRef;
+    match x {
+        Some(XRef::Planar { planar_face: name, .. } | XRef::Reference { reference: AlignmentRef::Cylinder { name }, .. }) => {
+            out.push(Reference { role: ReferenceRole::X, to: Referent::Face(face_ref(doc, name)) });
+        }
+        Some(XRef::Reference { reference: AlignmentRef::Edge { name }, .. }) => {
+            out.push(Reference { role: ReferenceRole::X, to: Referent::Edge(edge_ref(doc, name)) });
+        }
+        Some(XRef::Reference { reference: AlignmentRef::CircleCenter(rim), .. }) => {
+            for name in [&rim.name, &rim.end] {
+                out.push(Reference { role: ReferenceRole::X, to: Referent::Face(face_ref(doc, name)) });
+            }
+        }
+        _ => {}
     }
     out
 }

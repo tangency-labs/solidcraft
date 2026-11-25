@@ -19,10 +19,6 @@ use crate::body::Body;
 use crate::point_path::{MAX_CURVE_POINTS, curve_path};
 use crate::{KernelError, Result};
 
-/// Samples per knot span (and at least this many per pcurve) where the iso curves look for the
-/// crossings of a face's loops and classify the face's inside.
-const ISO_SAMPLES: usize = 64;
-
 /// Most iso curves each way [`iso_grid`] draws across one face.
 pub const MAX_ISO_COUNT: usize = 100;
 
@@ -48,11 +44,78 @@ struct FaceTrims<'a> {
     surface: &'a brep::Surface,
     eval: SurfaceEval,
     domain: [[f64; 2]; 2],
-    /// Each edge loop's pcurves, each with its samples ([`pcurve_samples`]) and whether the loop
-    /// runs along it (from its interval's start to its end).
-    loops: Vec<Vec<(&'a brep::Curve2, Vec<(f64, [f64; 2])>, bool)>>,
-    /// Each edge loop as a closed polygon in (u, v), for telling the face's inside.
-    polygons: Vec<Vec<[f64; 2]>>,
+    spans: Vec<TrimSpan<'a>>,
+}
+
+type Station = (f64, [f64; 2]);
+
+/// A pcurve between successive coordinate turns or knots. A gap between consecutive
+/// edge uses (e.g. on a pole) is the straight UV segment closing the loop there.
+struct TrimSpan<'a> {
+    curve: Option<&'a brep::Curve2>,
+    start: Station,
+    end: Station,
+}
+
+impl TrimSpan<'_> {
+    /// A full boundary span also belongs to the closed face. Test the active controls:
+    /// a tangent point alone has no length even if two evaluations round to the same value.
+    fn lies_on(&self, held: usize, fixed: f64) -> bool {
+        if self.start.1[held] != fixed || self.end.1[held] != fixed {
+            return false;
+        }
+        let Some(curve) = self.curve else { return true };
+        let (knots, count) = match curve {
+            brep::Curve2::Spline { knots, points } => (knots, points.len()),
+            brep::Curve2::RationalSpline { knots, homogeneous } => (knots, homogeneous.len()),
+        };
+        let Some(degree) = knots.len().checked_sub(count + 1) else { return false };
+        let end = knots.partition_point(|t| *t <= self.start.0.min(self.end.0));
+        let Some(start) = end.checked_sub(degree + 1) else { return false };
+        match curve {
+            brep::Curve2::Spline { points, .. } => points.get(start..end).is_some_and(|ps| ps.iter().all(|p| p[held] == fixed)),
+            brep::Curve2::RationalSpline { homogeneous, .. } => {
+                homogeneous.get(start..end).is_some_and(|ps| ps.iter().all(|p| p[held] / p[2] == fixed))
+            }
+        }
+    }
+
+    fn crossing(&self, held: usize, fixed: f64) -> Result<Option<f64>> {
+        let ((mut a, p), (mut b, q)) = (self.start, self.end);
+        let along = 1 - held;
+        // Half-open so a shared vertex is counted once on a crossing and twice or
+        // zero times on a touch. Keep multiplicities until inside spans are paired.
+        if (p[held] > fixed) == (q[held] > fixed) {
+            return Ok(None);
+        }
+        if p[held] == fixed {
+            return Ok(Some(p[along]));
+        }
+        if q[held] == fixed {
+            return Ok(Some(q[along]));
+        }
+        let Some(curve) = self.curve else {
+            let f = (fixed - p[held]) / (q[held] - p[held]);
+            return Ok(Some(p[along] + f * (q[along] - p[along])));
+        };
+        let eval = |t| solidcore_ops::pcurve::eval(curve, t).ok_or_else(|| KernelError::Invalid("iso curve: invalid trim curve".into()));
+        for _ in 0..80 {
+            let m = 0.5 * a + 0.5 * b;
+            if m == a || m == b {
+                break;
+            }
+            let point = eval(m)?;
+            if point[held] == fixed {
+                return Ok(Some(point[along]));
+            }
+            if (point[held] > fixed) == (p[held] > fixed) {
+                a = m;
+            } else {
+                b = m;
+            }
+        }
+        Ok(Some(eval(0.5 * a + 0.5 * b)?[along]))
+    }
 }
 
 impl<'a> FaceTrims<'a> {
@@ -60,109 +123,92 @@ impl<'a> FaceTrims<'a> {
         let f = body.record().faces.get(face).ok_or_else(|| KernelError::Invalid(format!("the body has no face {face}")))?;
         let surface = f.parameters();
         let eval = SurfaceEval::new(surface).map_err(|e| KernelError::Failed(format!("iso curve: {e}")))?;
-        let loops: Vec<Vec<(&brep::Curve2, Vec<(f64, [f64; 2])>, bool)>> = f
-            .loops
-            .iter()
-            .filter_map(|l| match l {
-                brep::Loop::Edges { edges } => Some(edges.iter().map(|e| (&e.pcurve, pcurve_samples(&e.pcurve), e.forward)).collect()),
-                // A pole: the outer loop's polygon closes along the box's side there.
-                brep::Loop::Vertex { .. } => None,
-            })
-            .collect();
-        let polygons = loops
-            .iter()
-            .map(|l| {
-                // In the loop's order: a pcurve runs along its edge's interval whichever way the
-                // loop does, so one the loop runs against is walked backwards.
-                let mut poly: Vec<[f64; 2]> = Vec::new();
-                for (_, samples, forward) in l {
-                    let pts = samples.iter().map(|(_, q)| *q);
-                    if *forward { poly.extend(pts) } else { poly.extend(pts.rev()) }
+        let mut spans = Vec::new();
+        for wire in &f.loops {
+            let brep::Loop::Edges { edges } = wire else { continue };
+            let (mut first, mut last) = (None, None);
+            for edge in edges {
+                let curve = &edge.pcurve;
+                let mut stations = solidcore_ops::pcurve::monotone_breaks(curve).map_err(|e| KernelError::Failed(format!("iso curve: {e}")))?;
+                if !edge.forward {
+                    stations.reverse();
                 }
-                // Closed: a loop whose pcurves leave a side of the box out (a sphere's poles, as
-                // vertex loops) has that side as its closing edge.
-                if let Some(first) = poly.first().copied() {
-                    poly.push(first);
+                let mut previous = None;
+                for t in stations {
+                    let uv = solidcore_ops::pcurve::eval(curve, t).ok_or_else(|| KernelError::Invalid("iso curve: invalid trim curve".into()))?;
+                    let end = (t, uv);
+                    if let Some(start) = previous {
+                        spans.push(TrimSpan { curve: Some(curve), start, end });
+                    } else if let Some(start) = last.filter(|start| *start != uv) {
+                        spans.push(TrimSpan { curve: None, start: (0.0, start), end });
+                    }
+                    first.get_or_insert(uv);
+                    previous = Some(end);
+                    last = Some(uv);
                 }
-                poly
-            })
-            .collect();
-        Ok(FaceTrims { surface, eval, domain: f.domain, loops, polygons })
-    }
-
-    /// The face's own extent in (u, v): the box around its loops, within the surface's box.
-    fn extent(&self) -> [[f64; 2]; 2] {
-        let mut b = [[f64::INFINITY, f64::NEG_INFINITY]; 2];
-        for q in self.polygons.iter().flatten() {
-            for (k, x) in q.iter().enumerate() {
-                b[k] = [b[k][0].min(*x), b[k][1].max(*x)];
+            }
+            if let Some((p, q)) = last.zip(first).filter(|(p, q)| p != q) {
+                spans.push(TrimSpan { curve: None, start: (0.0, p), end: (1.0, q) });
             }
         }
-        let [[u0, u1], [v0, v1]] = self.domain;
-        [[b[0][0].max(u0), b[0][1].min(u1)], [b[1][0].max(v0), b[1][1].min(v1)]]
+        Ok(FaceTrims { surface, eval, domain: f.domain, spans })
     }
 
-    /// Whether `q` is inside the face: inside its outer loop and outside its holes.
-    fn inside(&self, q: [f64; 2]) -> bool {
-        self.polygons.iter().filter(|l| crosses_right(q, l)).count() % 2 == 1
+    /// The face's own extent in (u, v), including the trims' interior turns.
+    fn extent(&self) -> [[f64; 2]; 2] {
+        let mut bounds = [[f64::INFINITY, f64::NEG_INFINITY]; 2];
+        for span in &self.spans {
+            for q in [span.start.1, span.end.1] {
+                for (b, x) in bounds.iter_mut().zip(q) {
+                    *b = [b[0].min(x), b[1].max(x)];
+                }
+            }
+        }
+        std::array::from_fn(|i| [bounds[i][0].max(self.domain[i][0]), bounds[i][1].min(self.domain[i][1])])
     }
 
-    /// The iso line of the surface at `fixed` (v when `along_u`, else u) across the face's box,
-    /// cut to the face: the pieces inside it, each as its exact record curve on its interval and
-    /// the running parameter's span, in the order the line runs (none when the line misses the
-    /// face).
+    /// Pair crossings of all loops along the same line, starting outside at minus infinity.
     fn clip(&self, along_u: bool, fixed: f64) -> Result<Vec<(brep::Curve, [f64; 2], [f64; 2])>> {
-        let [[u0, u1], [v0, v1]] = self.domain;
-        let (lo, hi) = if along_u { (u0, u1) } else { (v0, v1) };
-        let at_t = |t: f64| if along_u { [t, fixed] } else { [fixed, t] };
-        // Where the line crosses the loops' pcurves (along it), each crossing solved on the
-        // pcurve itself, with the box's ends.
-        let across = |q: [f64; 2]| if along_u { q[1] - fixed } else { q[0] - fixed };
-        let along = |q: [f64; 2]| if along_u { q[0] } else { q[1] };
-        let mut cuts = vec![lo, hi];
-        for (c, samples, _) in self.loops.iter().flatten() {
-            for w in samples.windows(2) {
-                let ((ta, qa), (tb, qb)) = (w[0], w[1]);
-                let (ka, kb) = (across(qa), across(qb));
-                if (ka < 0.0) == (kb < 0.0) || ka == kb {
-                    continue;
-                }
-                let (mut x, mut y) = (ta, tb);
-                for _ in 0..80 {
-                    let m = 0.5 * (x + y);
-                    match solidcore_ops::pcurve::eval(c, m).map(across) {
-                        Some(k) if (k < 0.0) == (ka < 0.0) => x = m,
-                        Some(_) => y = m,
-                        None => break,
-                    }
-                }
-                if let Some(t) = solidcore_ops::pcurve::eval(c, 0.5 * (x + y)).map(along).filter(|t| *t > lo && *t < hi) {
-                    cuts.push(t);
-                }
+        let held = usize::from(along_u);
+        let [lo, hi] = self.domain[1 - held];
+        let along = 1 - held;
+        let mut cuts = Vec::new();
+        let mut intervals = Vec::new();
+        for span in &self.spans {
+            if let Some(at) = span.crossing(held, fixed)? {
+                cuts.push(at);
+            } else if span.lies_on(held, fixed) {
+                let (a, b) = (span.start.1[along], span.end.1[along]);
+                intervals.push((a.min(b), a.max(b)));
             }
         }
         cuts.sort_by(f64::total_cmp);
-        cuts.dedup_by(|a, b| (*a - *b).abs() <= 1e-9 * (1.0 + b.abs()));
-        let mut out = Vec::new();
-        // Neighbouring inside pieces are one piece.
-        let mut run: Option<(f64, f64)> = None;
-        for w in cuts.windows(2) {
-            let (a, b) = (w[0], w[1]);
-            if !(b - a > 1e-12) {
-                continue;
-            }
-            if self.inside(at_t(0.5 * (a + b))) {
-                run = Some(run.map_or((a, b), |(s, _)| (s, b)));
-            } else if let Some(r) = run.take() {
-                let (curve, interval) = iso_record(self.surface, along_u, fixed, r)?;
-                out.push((curve, interval, [r.0, r.1]));
+        let (pairs, leftover) = cuts.as_chunks::<2>();
+        if !leftover.is_empty() {
+            return Err(KernelError::Invalid("iso curve: trim loop has an unpaired crossing".into()));
+        }
+        intervals.extend(pairs.iter().map(|&[a, b]| (a, b)));
+        intervals.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut ranges: Vec<(f64, f64)> = Vec::new();
+        for (a, b) in intervals {
+            let (a, b) = (a.max(lo), b.min(hi));
+            if a < b {
+                // The two pcurves at one STEP vertex can evaluate its UV a few ulps apart.
+                // Join such adjacent pieces after pairing so a double crossing keeps its parity.
+                if let Some(last) = ranges.last_mut().filter(|last| a - last.1 <= 8.0 * f64::EPSILON * a.abs().max(last.1.abs())) {
+                    last.1 = last.1.max(b);
+                } else {
+                    ranges.push((a, b));
+                }
             }
         }
-        if let Some(r) = run {
-            let (curve, interval) = iso_record(self.surface, along_u, fixed, r)?;
-            out.push((curve, interval, [r.0, r.1]));
-        }
-        Ok(out)
+        ranges
+            .into_iter()
+            .map(|(a, b)| {
+                let (curve, interval) = iso_record(self.surface, along_u, fixed, (a, b))?;
+                Ok((curve, interval, [a, b]))
+            })
+            .collect()
     }
 }
 
@@ -251,33 +297,6 @@ fn shared_extent(body: &Body, face: usize, trims: &FaceTrims) -> Result<[[f64; 2
     Ok(b)
 }
 
-/// A pcurve's parameters and points at [`ISO_SAMPLES`] per knot span, in its direction.
-fn pcurve_samples(c: &brep::Curve2) -> Vec<(f64, [f64; 2])> {
-    let Some([a, b]) = c.interval() else { return Vec::new() };
-    let spans = match c {
-        brep::Curve2::Spline { knots, .. } | brep::Curve2::RationalSpline { knots, .. } => knots.windows(2).filter(|w| w[1] > w[0]).count().max(1),
-    };
-    let n = (spans * ISO_SAMPLES).min(1 << 16);
-    (0..=n)
-        .filter_map(|i| {
-            let t = a + (b - a) * i as f64 / n as f64;
-            solidcore_ops::pcurve::eval(c, t).map(|q| (t, q))
-        })
-        .collect()
-}
-
-/// Whether the ray from `q` along +u crosses the closed polygon `l` an odd number of times.
-fn crosses_right(q: [f64; 2], l: &[[f64; 2]]) -> bool {
-    let mut odd = false;
-    for w in l.windows(2) {
-        let (a, b) = (w[0], w[1]);
-        if (a[1] > q[1]) != (b[1] > q[1]) && q[0] < a[0] + (b[0] - a[0]) * (q[1] - a[1]) / (b[1] - a[1]) {
-            odd = !odd;
-        }
-    }
-    odd
-}
-
 /// The iso curve of `surface` at `fixed` (the other parameter) as a record curve on `[a, b]` of
 /// its own parameter: the surface's own line or circle, or its B-spline row.
 fn iso_record(surface: &brep::Surface, along_u: bool, fixed: f64, (a, b): (f64, f64)) -> Result<(brep::Curve, [f64; 2])> {
@@ -347,6 +366,7 @@ fn iso_record(surface: &brep::Surface, along_u: bool, fixed: f64, (a, b): (f64, 
         }
         // A label: the face's (u, v) are its NURBS form's, whose rows are its iso curves.
         Surface::BallPatch { .. } => return Err(KernelError::Invalid("an iso curve of a ball patch's label (take its NURBS form's)".into())),
+        Surface::Blend { .. } => return Err(KernelError::Invalid("an iso curve of a blend's label (take its NURBS form's)".into())),
     })
 }
 

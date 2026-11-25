@@ -49,18 +49,23 @@
 //! | [`law_series_tm`]          | [`super::certificate::law_series_over`] |
 //!
 //! Deviations: not the fork's (no counterpart); every loop has a fixed count (8 tube steps,
-//! 4 polynomial steps per order), no recursion.
+//! 4 polynomial steps per order), no recursion. `I - Y J`, `-Y G` and the sums `D + C R`,
+//! `b + C P` are the crate's one Krawczyk operator's pieces ([`crate::geom::krawczyk`]'s
+//! `contraction`, `start_minus_y` and `plus_c_times`, over [`Ft`]), in the order this
+//! module's own copies had (tangency-labs/solidcraft#15140).
 
 use super::certificate::{inverse4, Enclosure, GnLaw, NurbsCurve, SpanAt};
 use super::form::binom;
 use super::interval::{cmax, round_down, round_up, Ivl};
 use super::series::{Ser, Trunc, VSer, MAX_S, V3};
 use super::station::{
-    ders_basis, gn_evaluate, gn_evaluate_vn, gn_jacobian, gn_top_jets, knot, span, GnSystem, Nurbs,
+    ders_basis, gn_evaluate, gn_jacobian, gn_top_jets, knot, span, GnIncremental, GnSystem, Nurbs,
     Partials,
 };
 use super::taylor_model::TmN;
+use crate::error::blend::{BlendFailure, SectionDegeneracy, SectionProof};
 use crate::error::{Result, SolidError};
+use crate::geom::krawczyk::{contraction, plus_c_times, start_minus_y};
 use crate::kernel::Kernel;
 
 const OP: &str = "blend::fillet_section::feet_tm";
@@ -83,7 +88,7 @@ macro_rules! tm_try {
     ($e:expr) => {
         match $e {
             Ok(v) => v,
-            Err(e @ SolidError::Cancelled { .. }) => return Err(e),
+            Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => return Err(e),
             Err(_) => return Ok(None),
         }
     };
@@ -139,7 +144,10 @@ pub fn nurbs_partials_tm(
     let um = u.c.first().map_or(f64::NAN, |c| c.mid());
     let vm = v.c.first().map_or(f64::NAN, |c| c.mid());
     if !(um.is_finite() && vm.is_finite()) {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::SectionNotProved(SectionProof::BoundFinite),
+        ));
     }
     let nu = ders_basis(&cn.u, ku, cn.p, Ivl::from(um), cn.p);
     let nv = ders_basis(&cn.v, kv, cn.q, Ivl::from(vm), cn.q);
@@ -230,7 +238,10 @@ pub fn nurbs_partials_tm(
     let w00 = hat(0, 0, 3);
     if !w00.range().is_positive() {
         // "SmGnSectionFSG: a face's weights are not positive over a box"
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::SectionNotProved(SectionProof::FaceWeightPositive),
+        ));
     }
     let inv_w = w00.recip();
     let mut out = Partials::<Ft>::default();
@@ -285,7 +296,10 @@ pub fn curve_derivs_tm(
     let p = cn.p;
     let has_span = knot(&cn.u, piece as isize) < knot(&cn.u, piece as isize + 1);
     if !has_span || piece < p {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::SectionDegenerate(SectionDegeneracy::NoSpanCoversInterval),
+        ));
     }
     let nb = ders_basis(&cn.u, piece, p, Ivl::from(m), p);
     let mut am = vec![[IZ; 4]; p + 1];
@@ -332,7 +346,10 @@ pub fn curve_derivs_tm(
     }
     let w0 = hd.first().map_or_else(Ft::whole, |&[_, _, _, w]| w);
     if !w0.range().is_positive() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::SectionNotProved(SectionProof::CurveWeightPositive),
+        ));
     }
     let inv_w = w0.recip();
     let mut out: Vec<V3<Ft>> = vec![zero_v(); ld + 1];
@@ -380,7 +397,7 @@ pub fn leader_series_tm(
     let piece = piece.unwrap_or_else(|| span(&leader.u, leader.p, leader.n, m));
     let d = curve_derivs_tm(leader, m, delta, tr.s() + 1, piece)?;
     let mut l = VSer::constant(zero_v());
-    let mut d1 = l;
+    let mut d1 = l.clone();
     let mut fact = 1.0_f64;
     for j in 0..=tr.s() {
         if j > 0 {
@@ -408,19 +425,28 @@ pub fn leader_series_tm(
 ///
 /// Those of [`curve_derivs_tm`]; `SM_ERR` where r is not proved positive.
 pub fn law_series_tm(law: &GnLaw<'_>, m: f64, delta: f64, order: usize) -> Result<Ser<Ft>> {
+    let GnLaw::Curve { n: law, .. } = law else {
+        return Err(SolidError::invalid_input(
+            OP,
+            "equal setbacks use the local support normals",
+        ));
+    };
     let mut r = Ser::constant(Ft::constant(IZ));
-    let piece = span(&law.n.u, law.n.p, law.n.n, m);
-    let d = curve_derivs_tm(&law.n, m, delta, order, piece)?;
+    let piece = span(&law.u, law.p, law.n, m);
+    let d = curve_derivs_tm(law, m, delta, order, piece)?;
     let mut fact = 1.0_f64;
-    for i in 0..=order {
+    // (`curve_derivs_tm` returns the orders 0 to `order`, each one)
+    for (i, di) in d.iter().take(order + 1).enumerate() {
         if i > 0 {
             fact *= i as f64;
         }
-        let di = d.get(i).ok_or_else(|| SolidError::sm_err(OP))?;
         r.set(i, 0, di.x.scale(Ivl::from(1.0) / Ivl::from(fact)));
     }
     if !r.at(0, 0).range().is_positive() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::SectionNotProved(SectionProof::RadiusPositive),
+        ));
     }
     Ok(r)
 }
@@ -433,52 +459,31 @@ fn system_tm<'a>(
     r: [f64; 2],
     side: [f64; 2],
     law: Option<&'a Ser<Ft>>,
+    equal_setback: Option<f64>,
 ) -> GnSystem<'a, Ft> {
     let [p0, p1] = p;
     GnSystem {
         p: [p0, p1],
-        leader: *leader,
-        tangent: *tangent,
+        leader: leader.clone(),
+        tangent: tangent.clone(),
         r,
         side,
         hold: false,
         law,
+        equal_setback,
     }
 }
 
-/// `I - Y J` and its row sums' largest magnitude over the models' ranges (`q`).
-fn contraction(y: &[[f64; 4]; 4], jac: &[[Ft; 4]; 4]) -> ([[Ft; 4]; 4], [[Ivl; 4]; 4], f64) {
-    let mut cm = [[Ft::constant(IZ); 4]; 4];
-    let mut cr = [[IZ; 4]; 4];
-    let mut q = 0.0_f64;
-    for (i, (yi, (ci, cri))) in y.iter().zip(cm.iter_mut().zip(cr.iter_mut())).enumerate() {
-        let mut row = 0.0_f64;
-        for (j, (cij, crij)) in ci.iter_mut().zip(cri.iter_mut()).enumerate() {
-            let mut c = Ft::constant(Ivl::from(if i == j { 1.0 } else { 0.0 }));
-            for (&yik, jk) in yi.iter().zip(jac) {
-                let jkj = jk.get(j).copied().unwrap_or_else(Ft::whole);
-                c = c - jkj.scale(Ivl::from(yik));
-            }
-            *cij = c;
-            *crij = c.range();
-            row = round_up(row + crij.mag());
-        }
-        q = cmax(q, row);
-    }
-    (cm, cr, q)
+/// `I - Y J` ([`contraction`] over models), its models' ranges, and its row sums' largest
+/// magnitude over those ranges (`q`).
+fn contraction_ranges(y: &[[f64; 4]; 4], jac: &[[Ft; 4]; 4]) -> ([[Ft; 4]; 4], [[Ivl; 4]; 4], f64) {
+    let (cm, q) = contraction(y, jac);
+    (cm, cm.map(|row| row.map(|c| c.range())), q)
 }
 
-/// `-Y g` as models.
+/// `-Y g` as models ([`start_minus_y`] from 0).
 fn minus_y_times(y: &[[f64; 4]; 4], g: &[Ft; 4]) -> [Ft; 4] {
-    let mut out = [Ft::constant(IZ); 4];
-    for (o, yi) in out.iter_mut().zip(y) {
-        let mut v = Ft::constant(IZ);
-        for (&yij, gj) in yi.iter().zip(g) {
-            v = v - gj.scale(Ivl::from(yij));
-        }
-        *o = v;
-    }
-    out
+    start_minus_y([Ft::constant(IZ); 4], y, g)
 }
 
 /// The feet's series over `at.s`, to order `order_s` in s and `n` in tau, enclosed by
@@ -514,9 +519,10 @@ pub fn gn_enclose_tm(
     if !(delta.is_finite() && delta >= 0.0 && mid.is_finite()) {
         return Ok(None);
     }
+    let equal_setback = law.and_then(GnLaw::equal_setback);
     let law_r = match law {
-        Some(l) => Some(tm_try!(law_series_tm(l, mid, delta, order_s))),
-        None => None,
+        Some(law @ GnLaw::Curve { .. }) => Some(tm_try!(law_series_tm(law, mid, delta, order_s))),
+        _ => None,
     };
     let law_r = law_r.as_ref();
     let (leader, tangent) = tm_try!(leader_series_tm(leader_n, mid, delta, tr, at.leader));
@@ -552,7 +558,7 @@ pub fn gn_enclose_tm(
     // Jacobian there at t = 0
     let pz = tm_try!(partials(&p0, 2));
     let sx0 = p0.map(Ser::constant);
-    let sys0 = system_tm(&pz, &leader, &tangent, r, side, law_r);
+    let sys0 = system_tm(&pz, &leader, &tangent, r, side, law_r, equal_setback);
     let jac0 = tm_try!(gn_jacobian(&sys0, &sx0));
     let jm = jac0.map(|row| row.map(|j| j.c.first().map_or(f64::NAN, |c| c.mid())));
     let y = tm_try!(inverse4(&jm));
@@ -560,7 +566,7 @@ pub fn gn_enclose_tm(
     let dm = minus_y_times(&y, &g0.map(|g| g.at(0, 0)));
     let dr = dm.map(|d| d.range());
     // the tube: a box R about the polynomial whose Krawczyk image lies inside it
-    let (_, cr0, q0) = contraction(&y, &jac0);
+    let (_, cr0, q0) = contraction_ranges(&y, &jac0);
     let next_radii = |cr: &[[Ivl; 4]; 4], q: f64| -> Option<[f64; 4]> {
         let contracts = q < 1.0;
         if !contracts {
@@ -597,26 +603,16 @@ pub fn gn_enclose_tm(
             *tc = tc.with_rem(Ivl::new(-ri, ri));
         }
         let pt = tm_try!(partials(&tube, 2));
-        let sys_t = system_tm(&pt, &leader, &tangent, r, side, law_r);
+        let sys_t = system_tm(&pt, &leader, &tangent, r, side, law_r, equal_setback);
         let jac = tm_try!(gn_jacobian(&sys_t, &tube.map(Ser::constant)));
-        let (_, cr, q) = contraction(&y, &jac);
+        let (_, cr, q) = contraction_ranges(&y, &jac);
         let contracts = q < 1.0;
         if !contracts {
             return Ok(None);
         }
-        let mut kk = [IZ; 4];
-        let mut inside = true;
-        for (i, (ki, cri)) in kk.iter_mut().zip(&cr).enumerate() {
-            let mut v = dr.get(i).copied().unwrap_or_else(Ivl::whole);
-            for (&cij, &rj) in cri.iter().zip(&rr) {
-                v = v + cij * Ivl::new(-rj, rj);
-            }
-            *ki = v;
-            let ri = rr.get(i).copied().unwrap_or(0.0);
-            if !(v.lo > -ri && v.hi < ri) {
-                inside = false;
-            }
-        }
+        // K's remainder about the polynomial: D + C R
+        let kk = plus_c_times(dr, &cr, &rr.map(|rj| Ivl::new(-rj, rj)));
+        let inside = kk.iter().zip(&rr).all(|(v, &ri)| v.lo > -ri && v.hi < ri);
         if inside {
             proved = Some(kk);
             break;
@@ -652,49 +648,48 @@ pub fn gn_enclose_tm(
     // the coefficients, order by order: x = b + C x, b = -Y R, C over the root's tube
     let lk = tr.s() + tr.e() + 1;
     let pk = tm_try!(partials(&x0, lk.max(2)));
-    let sysk = system_tm(&pk, &leader, &tangent, r, side, law_r);
+    let sysk = system_tm(&pk, &leader, &tangent, r, side, law_r, equal_setback);
     let jk = tm_try!(gn_jacobian(&sysk, &x0.map(Ser::constant)));
-    let (cm, cr, q) = contraction(&y, &jk);
+    let (cm, cr, q) = contraction_ranges(&y, &jk);
     // 1 - q rounded down: the quotient rounded up is then at least the exact one
     let gap = round_down(1.0 - q);
     if !(gap.is_finite() && gap > 0.0) {
         return Ok(None);
     }
     let mut sx = x0.map(Ser::constant);
+    // each order's G takes the lower orders' series as the last one left them: they are
+    // kept, and only the coefficients x's new ones reach are computed (bit for bit a
+    // whole evaluation's)
+    let mut series = GnIncremental::new(&sysk);
     let eps_solved = if n >= 1 { tr.e().min(n - 1) } else { tr.e() };
     for tot in 1..=(tr.s() + tr.e()) {
         let eps = eps_solved.min(tot);
         if tot > tr.s() + eps {
             continue;
         }
-        let (sg, _) = tm_try!(gn_evaluate(&sysk, &sx, tr.computing(tot, eps)));
+        let before = series.computed();
+        let evaluated = series.evaluate(&sx, tr.computing(tot, eps));
+        k.work_counters
+            .add_feet_tm_coefficients(series.computed().saturating_sub(before));
+        let (sg, _, _, _) = tm_try!(evaluated);
         for i in 0..=tr.s().min(tot) {
             let kk = tot - i;
             // the section's jets of order n are the face curve's
             if kk > tr.e() || (n >= 1 && kk >= n) {
                 continue;
             }
-            let b = minus_y_times(&y, &sg.map(|g| g.at(i, kk)));
+            let b = minus_y_times(&y, &sg.each_ref().map(|g| g.at(i, kk)));
             // P: close to the root, b + C P iterated on the middles
             let mut pp = b.map(|x| x.mid_poly());
             for _ in 0..4 {
-                let mut next = b;
-                for (nx, ci) in next.iter_mut().zip(&cm) {
-                    for (&cij, &pj) in ci.iter().zip(&pp) {
-                        *nx = *nx + cij * pj;
-                    }
-                }
-                pp = next.map(|x| x.mid_poly());
+                pp = plus_c_times(b, &cm, &pp).map(|x| x.mid_poly());
             }
             // the defect D = b + C P - P, and |x - P| <= |D| / (1 - q)
-            let mut dd = [IZ; 4];
-            for ((ddi, (&bi, ci)), &pi) in dd.iter_mut().zip(b.iter().zip(&cm)).zip(&pp) {
-                let mut v = bi - pi;
-                for (&cij, &pj) in ci.iter().zip(&pp) {
-                    v = v + cij * pj;
-                }
-                *ddi = v.range();
+            let mut b_minus_p = b;
+            for (bp, &pi) in b_minus_p.iter_mut().zip(&pp) {
+                *bp = *bp - pi;
             }
+            let dd = plus_c_times(b_minus_p, &cm, &pp).map(|v| v.range());
             let mut e = 0.0_f64;
             for di in &dd {
                 e = cmax(e, di.mag());
@@ -703,16 +698,17 @@ pub fn gn_enclose_tm(
             if !e.is_finite() {
                 return Ok(None);
             }
-            for (((sxc, &pc), &dc), crc) in sx.iter_mut().zip(&pp).zip(&dd).zip(&cr) {
-                let mut rem = dc;
-                for &crj in crc {
-                    rem = rem + crj * Ivl::new(-e, e);
-                }
+            let rems = plus_c_times(dd, &cr, &[Ivl::new(-e, e); 4]);
+            for ((sxc, &pc), &rem) in sx.iter_mut().zip(&pp).zip(&rems) {
                 sxc.set(i, kk, pc.with_rem(rem));
             }
         }
     }
-    let (_, mut f, v, nrm) = tm_try!(gn_evaluate_vn(&sysk, &sx, tr));
+    let before = series.computed();
+    let evaluated = series.evaluate(&sx, tr);
+    k.work_counters
+        .add_feet_tm_coefficients(series.computed().saturating_sub(before));
+    let (_, mut f, v, nrm) = tm_try!(evaluated);
     gn_top_jets(n, tr, &nrm, &mut f);
     let range_ser = |s: &Ser<Ft>| {
         let mut o = Ser::constant(IZ);

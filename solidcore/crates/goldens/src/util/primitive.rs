@@ -4,7 +4,7 @@ use solidcore::kernel::Kernel;
 use solidcore::math::{Point2, Vec3};
 use solidcore::topology::brep::p1;
 use solidcore::topology::Brep;
-use solidcore::{Result, SolidError};
+use solidcore::Result;
 
 fn point(out: &mut Vec<f64>, value: Vec3) {
     out.extend([value.x, value.y, value.z]);
@@ -17,7 +17,9 @@ fn sample(out: &mut Vec<f64>, value: Result<Vec3>) -> Result<()> {
             point(out, p);
         }
         Err(e) if e.is_unported() => return Err(e),
-        Err(SolidError::Upstream { code, .. }) => out.push(f64::from(code)),
+        Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => out.push(f64::from(
+            solidcore::error::upstream_status(&up_err).unwrap_or(-1),
+        )),
         Err(_) => out.push(-1.0),
     }
     Ok(())
@@ -27,6 +29,8 @@ fn sample(out: &mut Vec<f64>, value: Result<Vec3>) -> Result<()> {
 /// domains/tolerances and surface samples, in native owning-list order. The reference
 /// shims' primitive record layout.
 pub fn append(k: &Kernel, brep: &Brep, out: &mut Vec<f64>) -> Result<()> {
+    #[cfg(test)]
+    crate::certify::written(brep);
     for id in p1::vertices(brep, None)? {
         let vertex = brep.vertex(id)?;
         point(out, vertex.point);
@@ -143,7 +147,9 @@ pub fn append_pyramid_rays(k: &mut Kernel, brep: &mut Brep, out: &mut Vec<f64>) 
         let status = match attempt.status {
             Ok(()) => 0.0,
             Err(e) if e.is_unported() => return Err(e),
-            Err(SolidError::Upstream { code, .. }) => f64::from(code),
+            Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => {
+                f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1))
+            }
             Err(e) => return Err(e),
         };
         let mut trims = 0;

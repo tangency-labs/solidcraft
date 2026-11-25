@@ -305,7 +305,9 @@ impl UnitDiff for Runner {
                 Output::err(format!(
                     "status_{}",
                     match e {
-                        SolidError::Upstream { code, .. } => code,
+                        ref e if solidcore::error::upstream_status(e).is_some() => {
+                            solidcore::error::upstream_status(e).unwrap_or(-1)
+                        }
                         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
                         _ => -1,
                     }

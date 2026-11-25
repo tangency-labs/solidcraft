@@ -1,4 +1,4 @@
-"""Fast failure-path checks for the desktop Flatpak and snap process probes."""
+"""Flatpak bundle permissions and failure paths for desktop package probes."""
 import importlib.util
 import itertools
 import json
@@ -71,6 +71,17 @@ class Control:
         if index == 0:
             reply["result"]["viewport"] = next(self.viewports)
         return json.dumps(reply) + "\n"
+
+
+class BundlePermissions(unittest.TestCase):
+    def test_hosted_ai_can_connect_and_store_api_keys(self):
+        manifest = ROOT / "packaging/linux/flatpak/io.tangencylabs.solidcraft.bundle.yml"
+        finish_args = manifest.read_text().split("finish-args:\n", 1)[1].split("\nmodules:", 1)[0]
+        permissions = {line.strip()[2:] for line in finish_args.splitlines()
+                       if line.strip().startswith("- ")}
+        for permission in ("--share=network", "--talk-name=org.freedesktop.secrets"):
+            with self.subTest(permission=permission):
+                self.assertIn(permission, permissions)
 
 
 class SnapStartup(unittest.TestCase):

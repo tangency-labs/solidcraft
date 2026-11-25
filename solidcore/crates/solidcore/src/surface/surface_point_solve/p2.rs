@@ -56,9 +56,15 @@
 //!   evaluate a procedural blend as its certified net
 //!   ([`crate::surface::procedural_blend::NetScope::new`]), the local solve as the
 //!   scope around the solve asks.
+//! - **Triangle guess kept (WR-444, #1164).** `FindPolygonGuess` keeps a suspicious
+//!   control-net triangle guess as a candidate against the nearest control point's and
+//!   returns whichever is nearer on the surface itself; upstream drops it, so a rational
+//!   surface whose control points are farther apart than its neighbouring parts can
+//!   lose a good guess.
 //! - The stepper's `IsLocalMin` / `IsLocalMax` are not used upstream and are not
 //!   ported. Debug-only drawing and `SM_ASSERT`s are omitted.
 
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::{line_closest_point, vec_lin_comb_two_vectors};
@@ -67,12 +73,13 @@ use crate::geom::local_solve_nd::TerminationReason;
 use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, SortKey};
 use crate::geom::tol::is_zero;
 use crate::geom::vector2d::{Point2, Vec2};
-use crate::geom::vector3d::Point3;
+use crate::geom::vector3d::{sqrt, Point3};
 use crate::kernel::Kernel;
 use crate::math::{min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQ, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::surface::procedural_blend::NetScope;
 use crate::surface::surface::p2::SurfaceEval;
+use crate::surface::surface::p7::chained;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 use super::p1::{control_point, ErrorNormType, SurfPtGlobalSolver, SurfPtSolveStepper};
@@ -175,7 +182,6 @@ impl SurfPtGlobalSolver<'_> {
 
         let mut sub_domain = domain;
         let mut grid_uv_guess = Point2::UNDEF;
-        let mut grid_ok = false;
 
         let mut best_func_val = BIG_DOUBLE;
 
@@ -190,7 +196,6 @@ impl SurfPtGlobalSolver<'_> {
                 &mut grid_uv_guess,
                 &mut best_func_val,
             )?;
-            grid_ok = true;
             if grid_size_u < 2 || grid_size_v < 2 {
                 break; // Just to be safe.
             }
@@ -220,25 +225,24 @@ impl SurfPtGlobalSolver<'_> {
         }
 
         // If guesses from both FindPolygonGuess() and RefinePatchByGrid(), pick the
-        // better one.
-        if poly_ok && grid_ok {
+        // better one. (The grid loop above always runs, and its refinement returns on
+        // failure, so the grid guess is always made: upstream's "both failed" branch
+        // cannot be taken and is not ported.)
+        if poly_ok {
             let poly_dist = self.calc_func_val(k, uv)?;
             let grid_dist = self.calc_func_val(k, grid_uv_guess)?;
 
             // when either guess is uninitialized - quit
             if poly_dist >= BIG_DOUBLE && grid_dist >= BIG_DOUBLE {
-                return Err(SolidError::sm_err(OP_ROUGH));
+                return Err(SolidError::surface(OP_ROUGH, SurfaceFailure::NoRoughGuess));
             }
 
             // when the GridGuess is better than the PolyGuess, use it
             if grid_dist < poly_dist {
                 uv = grid_uv_guess;
             }
-        } else if grid_ok {
-            uv = grid_uv_guess;
         } else {
-            // both failed
-            return Err(SolidError::sm_err(OP_ROUGH));
+            uv = grid_uv_guess;
         }
 
         Ok(RoughGuess {
@@ -264,7 +268,10 @@ impl SurfPtGlobalSolver<'_> {
         let b = &self.base;
         // We need a SmBSplineSurface to work with control points.
         let Some(bspl) = b.b_spline() else {
-            return Err(SolidError::sm_err(OP_POLY));
+            return Err(SolidError::surface(
+                OP_POLY,
+                SurfaceFailure::SolverSurfaceNotBSpline,
+            ));
         };
         let op = b.solver_op();
         let test_pt = b.test_point();
@@ -272,8 +279,8 @@ impl SurfPtGlobalSolver<'_> {
         let (mut best_idx_u, mut best_idx_v) = best_idx;
         let mut uv = Point2::UNDEF;
 
-        // The suspicious triangle guess, kept as a candidate with `fixes.point_solve_keeps_triangle_guess`
-        // (WR-444, #1164): the nearest control point found below can be worse.
+        // The suspicious triangle guess, kept as a candidate (WR-444, #1164): the nearest
+        // control point found below can be worse.
         let mut triangle: Option<(Point2, usize, usize)> = None;
 
         // find closest ControlPoint triangle with point closest to target
@@ -297,10 +304,7 @@ impl SurfPtGlobalSolver<'_> {
                         }
                     }
                 }
-                if suspicious
-                    && k.fixes.point_solve_keeps_triangle_guess
-                    && op != SolverOperation::Signed3dDirectedMaximize
-                {
+                if suspicious && op != SolverOperation::Signed3dDirectedMaximize {
                     triangle = Some((b.domain().clamp_point(uv), best_idx_u, best_idx_v));
                 }
                 suspicious
@@ -324,7 +328,7 @@ impl SurfPtGlobalSolver<'_> {
         let rational = bspl.is_rational();
         let (num_u, num_v, cpts) = bspl
             .control_points()
-            .map_err(|_| SolidError::sm_err(OP_POLY))?;
+            .map_err(|e| chained(OP_POLY, SurfaceFailure::NoControlPoints, e))?;
 
         let mut tied: Option<(usize, usize)> = None;
         let mut num_ties: usize = 0;
@@ -441,7 +445,7 @@ impl SurfPtGlobalSolver<'_> {
         let uv = b.domain().clamp_point(uv);
 
         // Return the better of the triangle guess and the control-point guess, judged on
-        // the surface itself (`fixes.point_solve_keeps_triangle_guess`, WR-444, #1164).
+        // the surface itself (WR-444, #1164).
         if let Some((tri_uv, tri_u, tri_v)) = triangle {
             let on_surface = |guess: Point2| match self.calc_func_val(k, guess) {
                 Ok(v) => Ok(Some(v)),
@@ -992,7 +996,10 @@ impl SurfPtGlobalSolver<'_> {
     /// off upstream); a result that is the wrong kind of extremum (or not on the
     /// surface for intersect, or pushing a boundary for normalise) is retried from a
     /// grid-refined guess; the best solution is returned with its across-seam
-    /// partners. Out-of-bounds evaluation is enabled for the solve. `surface_obj` is
+    /// partners, unless a target distance bounds it out (a minimum farther than the
+    /// target, or a maximum nearer, by more than the tolerance: #20438). Every request
+    /// is answered with that one candidate (`eSolutionRequested` is `NotUsed`
+    /// upstream). Out-of-bounds evaluation is enabled for the solve. `surface_obj` is
     /// the caller's handle for the surface.
     ///
     /// # Errors
@@ -1016,6 +1023,7 @@ impl SurfPtGlobalSolver<'_> {
         k: &Kernel,
         surface_obj: Option<O>,
     ) -> Result<SolutionArray<O>> {
+        self.set_dropped_beyond_target(false);
         let mut solutions = SolutionArray::new();
 
         // First find a rough guess.
@@ -1027,7 +1035,7 @@ impl SurfPtGlobalSolver<'_> {
         let rough = match NetScope::with_net(k, || self.find_rough_guess(k)) {
             Ok(r) => r,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(SolidError::sm_err(OP_SOLVE)),
+            Err(e) => return Err(chained(OP_SOLVE, SurfaceFailure::NoRoughGuess, e)),
         };
         let (best_idx_u, best_idx_v) = (rough.best_idx_u, rough.best_idx_v);
 
@@ -1202,6 +1210,50 @@ impl SurfPtGlobalSolver<'_> {
                 sol = *s;
                 best_sol_value = sol.start.solution_value;
                 found_answer = true;
+            }
+        }
+
+        // Not upstream (#20438; `cpdOptTargetDistance` is `NotUsed` there): a target
+        // distance bounds the answer as it bounds the tree solve's, which seeds its
+        // best answer so far with the target's square (`GlobalPointSolve_0`) and culls
+        // a solution neither better than it nor within the tolerance of it
+        // (`AddSortedSolution`, the same expressions): a minimum farther than the
+        // target by more than the tolerance is not reported. Only a minimise is
+        // bounded here: the sort-out above keeps the nearest candidate for every
+        // operation, so for a maximise it is not the farthest (#13684) and a bound
+        // on it would drop answers the farther candidates honour; the kernel sends
+        // a maximise to the tree solve, which bounds every candidate. The tree solve
+        // culls only a minimum and a maximum by it.
+        if found_answer {
+            if let Some(target) = self.base.target_distance() {
+                let value = sol.start.solution_value;
+                let value_sq = value * value;
+                let best_sq = target * target;
+                let best = sqrt(best_sq.abs());
+                let (better, far) = match op {
+                    SolverOperation::Minimize => (value_sq < best_sq, value > best + loose_tol),
+                    _ => (true, false),
+                };
+                let beyond = !better && far;
+                // (test only: the goldens' certificate of each dropped answer)
+                #[cfg(feature = "wr57-replay")]
+                let beyond = beyond
+                    && crate::surface::surface::replay::wrap_target_bound(
+                        crate::surface::surface::replay::TargetBound {
+                            kernel: k,
+                            surface,
+                            domain: self.base.domain(),
+                            point: self.base.test_point(),
+                            operation: op,
+                            value,
+                            target,
+                            tol: loose_tol,
+                        },
+                    );
+                if beyond {
+                    found_answer = false;
+                    self.set_dropped_beyond_target(true);
+                }
             }
         }
 
@@ -1396,7 +1448,10 @@ impl SurfPtSolveStepper<'_> {
                 return Ok((adjusted, scale));
             }
             self.set_uv(domain.clamp_point(self.uv()));
-            return Err(SolidError::sm_err(OP_ADJUST));
+            return Err(SolidError::surface(
+                OP_ADJUST,
+                SurfaceFailure::ZeroStepOutsideDomain,
+            ));
         }
 
         // Never take too big a step.
@@ -1608,7 +1663,8 @@ impl SurfPtSolveStepper<'_> {
     /// (a step of 5% of the domain). Near a singularity the point is inverted there.
     /// Returns [`TerminationReason::StillIterating`] (a step was taken),
     /// [`TerminationReason::FoundAnswerConverged`] (inverted at a singularity) or
-    /// [`TerminationReason::UnableToConverge`] (no step).
+    /// [`TerminationReason::UnableToConverge`] (no step, or, not upstream, a maximize
+    /// whose singular inversion kept its guess).
     ///
     /// # Errors
     ///
@@ -1652,16 +1708,20 @@ impl SurfPtSolveStepper<'_> {
             let surface = self.base.surface();
             let srf_domain = surface.natural_uv_domain_with_nurb(k)?;
 
-            match surface.invert_point_near_singularity(
+            // (not upstream: a maximize keeps the farthest drop, or its guess reported
+            // unconverged, WR-57)
+            match surface.invert_point_near_singularity_for(
                 k,
                 self.base.test_point(),
                 &srf_domain,
                 prev.uv(),
                 self.base.tight_tol(),
+                op == SolverOperation::Maximize,
             ) {
                 Ok(inverted) => {
                     self.set_uv(inverted.uv);
-                    return Ok(TerminationReason::FoundAnswerConverged); // end iteration.
+                    // end iteration (upstream: always `FoundAnswerConverged`)
+                    return Ok(inverted.reason);
                 }
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => {}
@@ -1884,14 +1944,20 @@ impl SurfPtSolveStepper<'_> {
                 | ErrorNormType::MaxAbs
                 | ErrorNormType::Gap
         ) {
-            return Err(SolidError::sm_err(OP_LINE_B));
+            return Err(SolidError::surface(
+                OP_LINE_B,
+                SurfaceFailure::LineSearchNormUnsigned,
+            ));
         }
 
         let mut y0 = prev.error_norm(norm_type)?;
         let mut y1 = self.error_norm(norm_type)?;
 
         if y0 * y1 > 0.0 {
-            return Err(SolidError::sm_err(OP_LINE_B));
+            return Err(SolidError::surface(
+                OP_LINE_B,
+                SurfaceFailure::LineSearchNotBracketed,
+            ));
         }
 
         let best_input_y = min2(y0.abs(), y1.abs());
@@ -2281,13 +2347,13 @@ mod tests {
     /// #1164: on a rational surface whose control points are farther apart than its neighbouring
     /// parts, the nearest control point is on the wrong run. Upstream drops the control-net
     /// triangle guess for it, and from what is left (that control point's guess and the grid
-    /// search's) the solve finds nothing; with the fix the triangle guess is kept and the point is found.
+    /// search's) the solve finds nothing at u = 0.8395; the triangle guess is kept and the point
+    /// is found.
     #[test]
-    fn a_point_solve_finds_the_point_on_stacked_runs_with_the_fix() {
+    fn a_point_solve_finds_the_point_on_stacked_runs() {
         let (s, dom) = stacked_runs_strip(4);
-        let solve = |fixed: bool, target: Point3| {
-            let mut k = Kernel::default();
-            k.fixes.point_solve_keeps_triangle_guess = fixed;
+        let k = Kernel::default();
+        let solve = |target: Point3| {
             s.global_point_solve(
                 &k,
                 Some(Srf),
@@ -2300,35 +2366,30 @@ mod tests {
             )
             .unwrap()
         };
-        let at = |u: f64| {
-            eval_point(&Kernel::default(), &s, Point2::new(u, 0.5), Point3::UNDEF).unwrap()
+        let at = |u: f64| eval_point(&k, &s, Point2::new(u, 0.5), Point3::UNDEF).unwrap();
+        let on_surface = |sol: &Solution<Srf>, target: Point3| {
+            let uv = Point2::new(sol.start.param(0).unwrap(), sol.start.param(1).unwrap());
+            let d = eval_point(&k, &s, uv, Point3::UNDEF)
+                .unwrap()
+                .distance(target);
+            assert!(d < 1e-6, "{uv:?} is {d} from {target:?}");
         };
 
         // a point on the first run, inside the second span
         let target = at(0.8395);
-        assert_eq!(solve(false, target).len(), 0, "upstream finds the point");
-        let found = solve(true, target);
+        let found = solve(target);
         assert_eq!(found.len(), 1);
-        let sol = found.get(0).unwrap();
-        let uv = Point2::new(sol.start.param(0).unwrap(), sol.start.param(1).unwrap());
-        assert!(
-            eval_point(&Kernel::default(), &s, uv, Point3::UNDEF)
-                .unwrap()
-                .distance(target)
-                < 1e-6,
-            "{uv:?}"
-        );
+        on_surface(found.get(0).unwrap(), target);
 
-        // over the whole strip the fix never loses a point upstream finds, and finds some it
-        // misses
-        let mut gained = 0;
+        // every point along the strip is found, on the surface
         for i in 0..400 {
             let target = at(dom.u_interval().max() * (f64::from(i) + 0.5) / 400.0);
-            let (before, after) = (solve(false, target).len(), solve(true, target).len());
-            assert!(after >= before, "lost the point at {target:?}");
-            gained += usize::from(after > before);
+            let found = solve(target);
+            assert_ne!(found.len(), 0, "lost the point at {target:?}");
+            for j in 0..found.len() {
+                on_surface(found.get(j).unwrap(), target);
+            }
         }
-        assert!(gained > 0);
     }
 
     #[test]

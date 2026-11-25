@@ -372,3 +372,33 @@ fn curvature_rounds_meet_at_a_g2_corner() {
     let (a, b) = (measure(&g2).unwrap().volume, measure(&smlib_corner).unwrap().volume);
     assert!((a - b).abs() < 7.5f64.powi(3), "{a} vs {b}");
 }
+
+/// fillets/every-box-corner-three-edges-r3-curvature-setback-3-5 (tangency-labs/solidcraft#13913):
+/// the 40 x 30 x 20 box's corner (40, 30, 20), its three edges rounded r3, set back 3.5. The
+/// refusal carries the same fill setback as the plain path, but the G2 patch replaces that
+/// fill, so it must not claim that the setback builds the G2 corner (#14427). Keep the
+/// existing non-Windows 3.5595 regression pin; Windows checks the discrete search/message
+/// contract (#14813), not a continuous geometric minimum or a successful G2 build.
+#[test]
+fn a_setback_too_short_for_the_fill_names_what_solidcores_corner_needs() {
+    let body = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+    let edges = [Vec3::new(20.0, 30.0, 20.0), Vec3::new(40.0, 15.0, 20.0), Vec3::new(40.0, 30.0, 10.0)];
+    let corner = Vec3::new(40.0, 30.0, 20.0);
+    let short = fillet_g2_corners(&body, &edges, 3.0, &[(corner, 3.5)]).unwrap_err().to_string();
+    #[cfg(not(target_os = "windows"))]
+    assert!(short.contains("is too short for its corner's fill: solidcore's corner needs a setback of at least 3.5595 mm"), "{short}");
+    #[cfg(target_os = "windows")]
+    {
+        let plain = match fillet_setback(&body, &edges, 3.0, &[(corner, 3.5)]) {
+            Err(KernelError::Invalid(why)) => why,
+            other => panic!("plain setback 3.5: {:?}", other.map(|b| b.face_count())),
+        };
+        let least = crate::fillet_setback_tests::named_fill_setback_on_search_grid(&plain, SETBACK_AT_LEAST);
+        let g2_least = crate::fillet_setback_tests::named_fill_setback_on_search_grid(
+            &short,
+            "is too short for its corner's fill: solidcore's corner needs a setback of at least ",
+        );
+        assert_eq!(g2_least, least, "G2 must carry the plain fill's bound: {short}; plain: {plain}");
+    }
+    assert!(!short.contains("builds"), "{short}");
+}

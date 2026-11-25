@@ -16,7 +16,7 @@ use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::geom::prelude::*;
 
-use crate::selection::{EDGES, EXTERNAL_POINTS, FACES, ORIGIN, POINTS, SelInput, VERTICES};
+use crate::selection::{EDGES, EXTERNAL_POINTS, FACES, ORIGIN, POINTS, SNAP_POINTS, SelInput, VERTICES};
 use crate::ui_kit::{self, choice_row, expr_row};
 use solidcraft_engine::Sel;
 use solidcraft_ui_text::tr;
@@ -36,11 +36,15 @@ const BOX_PLACEMENTS: [&str; 2] = ["Corner", "Center"];
 
 /// The selection inputs of a primitive's dialog: the Box takes a point for its corner or centre,
 /// the Sphere and Torus for their centre. It takes the points of every shown sketch, each with
-/// its sketch (#9403).
+/// its sketch (#9403), and hovering an edge or face wakes its snap points (a hole's centre, an
+/// edge's middle, a face's centre) to pick (#11230).
 pub(crate) fn inputs(cmd: &str) -> Vec<SelInput> {
     match cmd {
         "solid.box" | "solid.sphere" | "solid.torus" => {
-            vec![SelInput::new("Point", VERTICES | EDGES | FACES | ORIGIN | POINTS | EXTERNAL_POINTS, false).tip("dialog.primitive_point_tip")]
+            vec![
+                SelInput::new("Point", VERTICES | EDGES | FACES | ORIGIN | POINTS | EXTERNAL_POINTS | SNAP_POINTS, false)
+                    .tip("dialog.primitive_point_tip"),
+            ]
         }
         _ => Vec::new(),
     }
@@ -184,8 +188,9 @@ pub(crate) fn dropped(s: &Session, extra: &mut Map<String, Value>, p: Vec3, n: V
     Some(json!(coords))
 }
 
-/// The typed placement into the command's parameters: a bare number typed into a field is in the
-/// design's units (as in the size fields), an empty field is 0, and a stored number is kept.
+/// The typed placement into the command's parameters, read as the size fields read it
+/// (`length_input::expression`): a bare number, a decimal comma or a unitless expression typed
+/// into a field is in the design's units, an empty field is 0, and a stored number is kept.
 pub(crate) fn params(s: &Session, cmd: &str, extra: &Map<String, Value>, p: &mut Map<String, Value>) {
     for key in keys(cmd) {
         let Some(Value::Array(point)) = extra.get(*key) else { continue };
@@ -193,7 +198,7 @@ pub(crate) fn params(s: &Session, cmd: &str, extra: &Map<String, Value>, p: &mut
             .iter()
             .map(|c| match c {
                 Value::String(t) if t.trim().is_empty() => json!(0),
-                Value::String(t) => json!(s.doc.with_design_unit(t, ValueKind::Length)),
+                Value::String(t) => json!(crate::length_input::expression(&s.doc, t, ValueKind::Length)),
                 other => other.clone(),
             })
             .collect();

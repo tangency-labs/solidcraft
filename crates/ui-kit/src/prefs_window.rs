@@ -35,7 +35,9 @@ pub struct HostPage<S> {
     pub defaults: fn(&mut S),
 }
 
-/// The window's words, already in the user's language.
+/// The window's words the host gives, already in the user's language. The search field, its
+/// empty result and Restore Defaults are the kit's own (`prefs.search`, `prefs.search_empty`,
+/// `prefs.restore_page_defaults`).
 pub struct Labels<'a> {
     pub title: &'a str,
     /// The kit icon in the title bar.
@@ -43,9 +45,6 @@ pub struct Labels<'a> {
     pub ok: &'a str,
     pub cancel: &'a str,
     pub apply: &'a str,
-    pub search: &'a str,
-    pub no_results: &'a str,
-    pub restore_defaults: &'a str,
     pub restore_defaults_hint: &'a str,
 }
 
@@ -84,6 +83,10 @@ pub trait Host: Sized {
     /// Put the settings back (Cancel). An error keeps the window open with the snapshot, and the
     /// next close tries again.
     fn restore(&mut self, snapshot: &Self::Snapshot) -> Result<(), String>;
+    /// Validate and commit draft fields for OK or Apply. Failure keeps the window editable.
+    fn confirm(&mut self) -> Result<(), String> {
+        Ok(())
+    }
     /// What Apply does before the settings become the new snapshot, for a setting a running part
     /// of the host takes up only on Apply. An error keeps the old snapshot.
     fn apply(&mut self) -> Result<(), String> {
@@ -116,6 +119,7 @@ pub struct State<H> {
     snapshot: Option<H>,
     /// Why the last Cancel could not put the settings back; Apply waits until one succeeds.
     restore_error: Option<String>,
+    confirmation_error: Option<String>,
 }
 
 impl<H> State<H> {
@@ -130,7 +134,16 @@ impl<H> State<H> {
 
 impl<H> Default for State<H> {
     fn default() -> Self {
-        State { open: false, section: 0, filter: String::new(), search_from: None, reveal: None, snapshot: None, restore_error: None }
+        State {
+            open: false,
+            section: 0,
+            filter: String::new(),
+            search_from: None,
+            reveal: None,
+            snapshot: None,
+            restore_error: None,
+            confirmation_error: None,
+        }
     }
 }
 
@@ -177,8 +190,16 @@ pub fn apply_pending<S: Host>(host: &S) -> bool {
     host.window_ref().snapshot.as_ref().is_some_and(|snapshot| !host.matches(snapshot))
 }
 
-/// Do what `button` does, from the footer or from a command. Returns why [`Host::apply`] failed.
+/// Do what `button` does, from the footer or from a command. Returns a draft or Apply error.
 pub fn press<S: Host>(host: &mut S, pages: &[Page<S>], button: Button) -> Result<(), String> {
+    host.window().confirmation_error = None;
+    if matches!(button, Button::Ok | Button::Apply)
+        && host.window_ref().restore_error.is_none()
+        && let Err(reason) = host.confirm()
+    {
+        host.window().confirmation_error = Some(reason.clone());
+        return Err(reason);
+    }
     match button {
         Button::Ok => close(host, false),
         Button::Cancel => close(host, true),
@@ -215,6 +236,7 @@ pub fn close<S: Host>(host: &mut S, revert: bool) {
     }
     let window = host.window();
     window.restore_error = None;
+    window.confirmation_error = None;
     window.open = false;
     window.clear_search();
     host.closed();
@@ -231,8 +253,19 @@ pub fn show<S: Host>(ctx: &egui::Context, host: &mut S, pages: &[Page<S>], optio
         return None;
     }
     hold(host);
-    if host.window_ref().reveal.as_ref().is_some_and(settings_search::Reveal::expired) {
-        host.window().reveal = None;
+    // The window's copy carries the outline's time: it is set into the context every frame. The
+    // time starts when the row first draws ([`settings_search::follow`]), so it is taken from the
+    // context's copy then and kept until the next reveal.
+    let now = ctx.input(|i| i.time) * 1000.0;
+    if let Some(reveal) = host.window().reveal.as_mut() {
+        if reveal.until.is_nan()
+            && let Some(drawn) = settings_search::current_reveal(ctx).filter(|d| d.page == reveal.page && d.label == reveal.label)
+        {
+            reveal.until = drawn.until;
+        }
+        if reveal.expired(now) {
+            host.window().reveal = None;
+        }
     }
     let sink = settings_search::shift_key_sink(ctx);
     settings_search::set_key_sink_prev(ctx, sink);
@@ -277,7 +310,8 @@ pub fn show<S: Host>(ctx: &egui::Context, host: &mut S, pages: &[Page<S>], optio
     let mut selected = host.window_ref().section;
     let mut defaults = false;
     let (closed, action) = window.show_pages_with_header(ctx, &mut selected, &list, host, &hooks, |ui| {
-        let button = crate::button(ui, labels.restore_defaults, crate::Button::Ghost).backing_on_hover_text(labels.restore_defaults_hint);
+        let button = crate::button(ui, solidcraft_ui_text::tr("prefs.restore_page_defaults"), crate::Button::Normal)
+            .backing_on_hover_text(labels.restore_defaults_hint);
         solidcraft_ui_registry::publish_target(&format!("{}:defaults", options.prefix), button.rect);
         defaults = button.clicked();
     });
@@ -304,6 +338,7 @@ pub fn show<S: Host>(ctx: &egui::Context, host: &mut S, pages: &[Page<S>], optio
     // A failed Apply shows on the window like a failed restore: Apply waits and a close reverts.
     if let Some(button) = button
         && let Err(reason) = press(host, pages, button)
+        && host.window_ref().confirmation_error.is_none()
     {
         host.window().restore_error = Some(reason);
     }
@@ -328,7 +363,7 @@ fn page_path<S>(pages: &[Page<S>], index: usize) -> String {
 fn search_header<S: Host>(ui: &mut Ui, host: &mut S, options: &Options<'_, S>) {
     let id = search_id(options.id);
     let typed = drive_search(ui, host, id, options.prefix);
-    let field = crate::preferences_search_field(ui, id, &mut host.window().filter, options.labels.search, options.prefix);
+    let field = crate::preferences_search_field(ui, id, &mut host.window().filter, solidcraft_ui_text::tr("prefs.search"), options.prefix);
     if typed {
         place_search_cursor(ui.ctx(), id, host.window_ref().filter.chars().count());
     }
@@ -464,7 +499,7 @@ fn page_body<S: Host>(ui: &mut Ui, host: &mut S, pages: &[Page<S>], options: &Op
         }
         if settings_search::hits(ui) == 0 {
             let t = Tokens::get();
-            ui.label(egui::RichText::new(options.labels.no_results).size(t.font_body).color(t.form_dim));
+            ui.label(egui::RichText::new(solidcraft_ui_text::tr("prefs.search_empty")).size(t.font_body).color(t.form_dim));
         }
     } else {
         let section = host.window_ref().section;

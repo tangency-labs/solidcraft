@@ -115,7 +115,14 @@ impl Body {
             }
             let (sb, ob) = crate::native::smlib_body_ordered(&self)?;
             let ob = ob.ok_or_else(|| failed("SMLib numbers the body's edges unlike its record"))?;
-            let r = sb.tagged(0).map_err(failed)?.merge_faces(&keep, (self.size() * 1e-6).max(1e-9)).map_err(failed)?;
+            let r = match sb.tagged(0).map_err(failed)?.merge_faces(&keep, (self.size() * 1e-6).max(1e-9)) {
+                // A kept edge's middle is as near to a second edge as to its own: another edge
+                // meets or lies on it there, such as a surface's edge on the split where it
+                // crosses a face of the solid it was joined to (#15570). The points cannot name
+                // the kept edges, so nothing is merged and the body stays as the operation made it.
+                Err(solidcraft_smlib::Error::Ambiguous { .. }) => return Ok(None),
+                r => r.map_err(failed)?,
+            };
             if r.counts().map_err(failed)?.first() == Some(&self.face_count()) {
                 return Ok(None);
             }

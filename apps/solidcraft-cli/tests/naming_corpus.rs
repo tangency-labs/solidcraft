@@ -7,6 +7,10 @@
 //! edge's name with where it is (its area and centre, its length and middle); the second build
 //! must give the same, and its stored names must find the same faces and edges.
 //!
+//! Every design saved as JSON, opened and saved again, is also the same bytes, so a design kept in
+//! Git changes only where the design changed (#626). A design that holds binary data saves only as
+//! a container and is left out of that check.
+//!
 //! Face and edge indices are left out: they are the kernel's order, which a rebuild need not
 //! keep (a fillet's or a boolean's faces come out in another order from one build to the next).
 //! How many faces a body has and what each is called is the kernel's business, not this test's.
@@ -54,8 +58,8 @@ fn designs() -> Vec<(String, Source)> {
     add("regressions", root.join("examples/regressions"), "json");
     add("demo", root.join("examples/demo"), "json");
     add("typical", root.join("tests/action_matrix/designs"), "json");
-    add("demo", root.join("tests/action_matrix/designs"), "solidcraft");
-    add("fixtures", root.join("crates/engine/src/tests/fixtures"), "solidcraft");
+    add("demo", root.join("tests/action_matrix/designs"), solidcraft_engine::io::DESIGN_EXT);
+    add("fixtures", root.join("crates/engine/src/tests/fixtures"), solidcraft_engine::io::DESIGN_EXT);
     add("hole_matrix", root.join("tests/hole_matrix/old-0.9"), "json");
     add("taper", root.join("tests/taper/before-1014"), "json");
     add("projection", root.join("tests/projection/before-1508"), "json");
@@ -72,12 +76,13 @@ fn designs() -> Vec<(String, Source)> {
     out
 }
 
-/// Build a design: a design file (also a design saved as JSON) is opened, a script is run.
+/// Builds a design. A design file (also a design saved as JSON) is opened, and a script is run. A
+/// `.sc` file (or one of an older extension) is opened whether it holds a container or JSON.
 fn load(source: &Source) -> Result<Session, String> {
     let mut s = Session::default();
     let script = match source {
         Source::Sample(script) => script(),
-        Source::File(path) if path.extension().is_some_and(|x| x == "solidcraft") => {
+        Source::File(path) if solidcraft_engine::io::is_design_container_path(path) => {
             s.execute("doc.open", &json!({"path": path.to_string_lossy()})).map_err(|e| e.to_string())?;
             return Ok(s);
         }
@@ -226,16 +231,22 @@ fn record_refs(out: &mut Vec<(String, bool)>, s: &Session, f: &Feature) {
                 }
                 None => out.push((format!("{who} bends: body `{body}` gone"), false)),
             },
-            // Sheet metal edges are named by the sheet's panels, and found on its sheets.
+            // Sheet metal edges are named as every body's edges are, by the model's name
+            // (`<face A>|<face B>`, #7990). A name is found on a sheet when the edge it finds on
+            // the sheet's body is a free edge of the sheet, as the feature finds it.
             FeatureKind::SheetFlange { .. } | FeatureKind::SheetHem { .. } => {
                 let pts: Vec<Vec3> = match &f.kind {
                     FeatureKind::SheetFlange { edges, .. } => edges.iter().map(|e| e.point.0).collect(),
                     FeatureKind::SheetHem { edges, .. } => solidcraft_engine::doc::plain(edges),
                     _ => Vec::new(),
                 };
+                let finds = |sh: &solidcraft_engine::doc::SurfaceSheet, n: &str, p: Vec3| {
+                    let hit = before.body(&sh.body).and_then(|b| naming::locate_edge(b, n, p).ok());
+                    hit.is_some_and(|hit| matches!(sh.free_edge_at(hit.point), Ok(Some(_))))
+                };
                 for (k, p) in pts.iter().enumerate() {
                     let Some(n) = named(k) else { continue };
-                    let on: Vec<&str> = before.sheets.iter().filter(|sh| sh.edge_by_name(n, *p).is_some()).map(|sh| sh.body.as_str()).collect();
+                    let on: Vec<&str> = before.surface_sheets.iter().filter(|sh| finds(sh, n.as_str(), *p)).map(|sh| sh.body.as_str()).collect();
                     let found = if on.is_empty() { "gone".to_string() } else { format!("sheet edge on {}", on.join(", ")) };
                     out.push((format!("{who} sheet edge {k} `{n}` -> {found}"), !on.is_empty()));
                 }
@@ -290,7 +301,6 @@ fn record_refs(out: &mut Vec<(String, bool)>, s: &Session, f: &Feature) {
                 }
                 None => "by its pick".into(),
             },
-            FaceAttachmentStatus::Sheet { .. } => "sheet face".into(),
             FaceAttachmentStatus::Fixed { .. } => "fixed".into(),
         };
         let stored = match (anchor, name) {
@@ -311,6 +321,31 @@ fn record_refs(out: &mut Vec<(String, bool)>, s: &Session, f: &Feature) {
 struct Build {
     names: Vec<(String, [f64; 4])>,
     refs: Vec<(String, bool)>,
+    /// Whether the design, saved as JSON, opened and saved again, is the same bytes.
+    saves_alike: Result<(), String>,
+}
+
+/// Save the design as JSON, open the file and save it again. The two files must be the same
+/// bytes. When they are not, or a step fails, this says what went wrong in a whole sentence.
+fn saves_alike(s: &Session) -> Result<(), String> {
+    if !s.doc.binary_data().is_empty() {
+        return Ok(());
+    }
+    let saved = solidcraft_engine::io::write_design(&s.doc).map_err(|e| format!("it does not save as JSON ({e})"))?;
+    let opened = solidcraft_engine::io::read_design(&saved).map_err(|e| format!("the JSON it saves does not open again ({e})"))?;
+    let again = solidcraft_engine::io::write_design(&opened).map_err(|e| format!("opened again, it does not save ({e})"))?;
+    if again == saved {
+        return Ok(());
+    }
+    let (first, second) = (String::from_utf8_lossy(&saved), String::from_utf8_lossy(&again));
+    let line = first.lines().zip(second.lines()).position(|(a, b)| a != b).unwrap_or_else(|| first.lines().count().min(second.lines().count()));
+    let at = |text: &str| text.lines().nth(line).unwrap_or("(no line)").trim().to_string();
+    Err(format!(
+        "saved as JSON, opened and saved again, it is not the same bytes (line {} was `{}` and is `{}`)",
+        line + 1,
+        at(first.as_ref()),
+        at(second.as_ref())
+    ))
 }
 
 fn build(s: &Session) -> Build {
@@ -325,7 +360,7 @@ fn build(s: &Session) -> Build {
             refs.iter_mut().skip(from).for_each(|(_, ok)| *ok = true);
         }
     }
-    Build { names, refs }
+    Build { names, refs, saves_alike: saves_alike(s) }
 }
 
 /// Where two builds name their faces and edges apart (at most `cap` of them): a name only one
@@ -361,23 +396,73 @@ const UNSTABLE: [(&str, &str); 1] = [(
     "the halves of each swept wall lie level along every axis, so which is `#1` and which `#2` follows the order the kernel gives the faces in, which changes from one build to the next",
 )];
 
+/// The designs that take longest to build, heaviest first, with one build's time (ci profile,
+/// `load` and `build` of this test with one worker, 2026-11-21). Each of the 38 designs that took
+/// over 5 s in a full parallel run was timed this way, and the list keeps the 23 that took over
+/// 3.5 s. The slowest design left off took 2.9 s. The test hands them out first, and each design's
+/// two builds go to two workers, so a heavy design is never built twice in a row on one worker
+/// while the rest wait. Only the order of the work depends on this list. A stale entry makes the
+/// test slower, never wrong. Re-measure when a design here gets much faster, or one not listed
+/// takes over 5 s.
+const HEAVIEST: [&str; 23] = [
+    "oracle/81-fillet-spline-radius",                  // 29.6 s
+    "regressions/fins_joined_into_their_hub",          // 24.8 s
+    "oracle/83-boundary-loop-thicken",                 // 17.4 s
+    "regressions/round_pieces_swept_under_a_degree",   // 15.9 s
+    "fixtures/revolve-360-cut",                        // 12.1 s
+    "demo/enclosure_steps",                            // 11.0 s
+    "regressions/battery_case_pleats",                 // 10.4 s
+    "regressions/fuzz_seed_141_boolean_cut",           // 8.7 s
+    "fixtures/battery-tpu-case-v2",                    // 8.2 s
+    "examples/sensor_enclosure",                       // 7.4 s
+    "regressions/closed_sweep_torus_cut",              // 7.3 s
+    "demo/pi-case-0.8",                                // 6.8 s
+    "oracle/35-fillet-curved-curved",                  // 6.6 s
+    "regressions/oblique_cuts_through_chamfered_ring", // 6.2 s
+    "oracle/47-draft-curved-pocket",                   // 5.9 s
+    "oracle/59-enclosure-base",                        // 5.5 s
+    "fixtures/battery-tpu-case",                       // 5.0 s
+    "demo/pi-case",                                    // 4.9 s
+    "oracle/41-tube-radial-holes",                     // 4.6 s
+    "typical/filleted-shelled-box",                    // 4.1 s
+    "regressions/front_triangle_hull_triangle",        // 3.9 s
+    "oracle/42-overlapping-patterns",                  // 3.9 s
+    "oracle/60-pipe-flange",                           // 3.7 s
+];
+
 #[test]
 fn corpus_designs_name_alike_every_build_and_fail_where_a_reference_is_gone() {
     let designs = designs();
+    // Every design is built twice, as two jobs: (design, which build). The heaviest go first.
+    for heavy in HEAVIEST {
+        assert!(designs.iter().any(|(name, _)| name == heavy), "HEAVIEST lists `{heavy}`, which is not in the corpus any more");
+    }
+    let rank = |name: &str| HEAVIEST.iter().position(|h| *h == name).unwrap_or(HEAVIEST.len());
+    let mut jobs: Vec<(usize, usize)> = (0..designs.len()).flat_map(|d| [(d, 0), (d, 1)]).collect();
+    jobs.sort_by_key(|&(d, build)| (rank(&designs[d].0), d, build));
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let results = std::sync::Mutex::new(Vec::new());
-    let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).min(designs.len().max(1));
+    let builds = std::sync::Mutex::new(std::collections::BTreeMap::new());
+    let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).min(jobs.len().max(1));
     std::thread::scope(|scope| {
         for _ in 0..workers {
             scope.spawn(|| {
-                while let Some((name, source)) = designs.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
-                    let got = load(source).and_then(|first| Ok((build(&first), build(&load(source)?))));
-                    results.lock().unwrap_or_else(|e| e.into_inner()).push((name.clone(), got));
+                while let Some(&(d, which)) = jobs.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
+                    let got = load(&designs[d].1).map(|s| build(&s));
+                    builds.lock().unwrap_or_else(|e| e.into_inner()).insert((d, which), got);
                 }
             });
         }
     });
-    let mut results = results.into_inner().unwrap_or_else(|e| e.into_inner());
+    let mut builds = builds.into_inner().unwrap_or_else(|e| e.into_inner());
+    let mut results: Vec<(String, Result<(Build, Build), String>)> = designs
+        .iter()
+        .enumerate()
+        .map(|(d, (name, _))| {
+            let first = builds.remove(&(d, 0)).unwrap();
+            let second = builds.remove(&(d, 1)).unwrap();
+            (name.clone(), first.and_then(|first| Ok((first, second?))))
+        })
+        .collect();
     results.sort_by(|a, b| a.0.cmp(&b.0));
     let mut problems = Vec::new();
     for (name, got) in &results {
@@ -388,6 +473,10 @@ fn corpus_designs_name_alike_every_build_and_fail_where_a_reference_is_gone() {
                 continue;
             }
         };
+        // Both builds save, open and save again. One problem is enough, from either of them.
+        if let Some(e) = first.saves_alike.as_ref().err().or(second.saves_alike.as_ref().err()) {
+            problems.push(format!("{name}: {e}"));
+        }
         let lost: Vec<&str> = first.refs.iter().filter(|(_, ok)| !ok).map(|(r, _)| r.as_str()).collect();
         if !lost.is_empty() {
             problems.push(format!("{name}: stored names that find nothing, in features that build:\n  {}", lost.join("\n  ")));

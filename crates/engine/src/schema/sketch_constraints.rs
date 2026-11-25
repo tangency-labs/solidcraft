@@ -24,11 +24,12 @@ use super::sketch_ends::SketchTarget;
 use super::types::{Point2, SketchRef, present};
 use crate::params;
 
-/// Switch a circle's or an arc's dimension between its radius and its diameter.
+/// Switch a circle's or an arc's dimension between its radius and its diameter, or a distance from
+/// a construction line, centreline or axis between the distance and the diameter (twice it).
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ToggleDiameterParams {
-    /// The radius or diameter dimension's constraint id.
+    /// The radius, diameter or distance dimension's constraint id.
     #[serde(deserialize_with = "dimension_id")]
     pub constraint: String,
     /// `true` for a diameter, `false` for a radius (default: the other one).
@@ -464,6 +465,8 @@ pub struct GlyphsResult {
     pub glyphs: Vec<Glyph>,
     /// The degrees of freedom left.
     pub dof: usize,
+    /// The planar sketch's own degrees of freedom, its drawn 3D curves' left out (#10608).
+    pub planar_dof: usize,
     /// Whether nothing is left free.
     pub fully_constrained: bool,
     /// The ids of the constraints that fail.

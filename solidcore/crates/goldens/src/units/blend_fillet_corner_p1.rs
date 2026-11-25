@@ -384,12 +384,15 @@ fn v3(a: [f64; 3]) -> Vec3 {
     Vec3::from_array(a)
 }
 
-/// The `SmStatus` of a Rust error: the upstream code, `SM_ERR_INVALID_INPUT` (1007) for
+/// The `SmStatus` of a Rust error: the upstream code (or a typed blend failure's status,
+/// [`crate::output::blend_status`]), `SM_ERR_INVALID_INPUT` (1007) for
 /// [`SolidError::InvalidInput`]; `None` for a null dereference (refused) or an error
 /// with no upstream status.
 fn status_of(e: &SolidError) -> Option<f64> {
+    if let Some(code) = crate::output::blend_status(e) {
+        return Some(f64::from(code));
+    }
     match e {
-        SolidError::Upstream { code, .. } => Some(f64::from(*code)),
         SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. } if *reason != NULL_DEREF => Some(1007.0),
         _ => None,
     }

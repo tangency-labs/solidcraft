@@ -31,14 +31,19 @@ use solidcraft_engine::geom::prelude::*;
 
 use solidcraft_engine::Sel;
 
-use super::{PlaceSource, Spec, circle, face_pick, rect, vec3_of};
+use super::{PlaceSource, Spec, circle, face_pick, rect};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::viewport::Hit;
 
 pub(super) static SPEC: Spec = Spec {
     name: "primitive",
-    serves: |app, d| super::on(app) && matches!(d.kind, Kind::Primitive { .. }) && !coil_with_profile(d),
+    serves: |app, d| {
+        super::on(app)
+            && matches!(d.kind, Kind::Primitive { .. })
+            && !coil_with_profile(d)
+            && !(matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && d.active == 1)
+    },
     snap_commands: &[],
     move_tip: "Drag to place it on another face.",
     many: false,
@@ -91,7 +96,7 @@ fn planes(app: &SolveApp) -> Arc<Vec<FacePlane>> {
 
 /// Is this a Coil whose section comes from a sketch (its Profile input holds something)?
 fn coil_with_profile(d: &Dialog) -> bool {
-    matches!(&d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && d.inputs.iter().any(|i| !i.items.is_empty())
+    matches!(&d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && d.inputs.first().is_some_and(|i| !i.items.is_empty())
 }
 
 /// A size field's value (mm), zero when it is missing or does not evaluate, read as OK reads it
@@ -120,16 +125,15 @@ fn box_size(app: &SolveApp, d: &Dialog) -> Vec3 {
 }
 
 /// A stored or typed point of expressions (numbers, or strings in the design's terms); an empty
-/// field is 0, as OK sends it.
+/// field is 0, as OK sends it. Text is read as the model reads it (`length_input::eval`): a bare
+/// number or a unitless expression such as `2 * 1` is in the design's unit.
 fn expr_point(app: &SolveApp, v: &Value) -> Option<Vec3> {
     let c = |i: usize| -> Option<f64> {
         let x = v.as_array()?.get(i)?;
         if x.as_str().is_some_and(|t| t.trim().is_empty()) {
             return Some(0.0);
         }
-        x.as_f64()
-            .or_else(|| app.session.doc.eval(&app.session.doc.with_design_unit(x.as_str()?, ValueKind::Length), ValueKind::Length).ok())
-            .filter(|v| v.is_finite())
+        x.as_f64().or_else(|| crate::length_input::eval(&app.session.doc, x.as_str()?, ValueKind::Length).ok()).filter(|v| v.is_finite())
     };
     Some(Vec3::new(c(0)?, c(1)?, c(2)?))
 }
@@ -172,9 +176,60 @@ fn box_frame(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
     Some((side(n), n))
 }
 
+fn coil_reference_frame(app: &SolveApp, value: &Value) -> Option<(Vec3, Vec3)> {
+    use solidcraft_engine::doc::{AxisRef, construct};
+    let s = &app.session;
+    let reference = solidcraft_engine::view::coil_axis_reference(s, value)?;
+    match &reference {
+        AxisRef::Line { origin, .. } => {
+            let origin = s.doc.eval_point(origin).ok()?;
+            let direction = serde_json::from_value::<solidcraft_engine::schema::AxisDir>(value.get("dir")?.clone()).ok()?;
+            Some((origin, direction.0))
+        }
+        // A dialog pick of a placement's edge: the marker stands where a fresh pick of it would.
+        AxisRef::Model { geo: geo @ construct::GeoRef::PlacedEdge { .. } } => {
+            let (body, index, point) = construct::placed_edge_pick(&s.placed_document(), &s.model.state(), geo)?;
+            crate::dialogs::coil_axis_preview(app, &Sel::Edge { body, index, point })
+        }
+        AxisRef::Model { geo } => construct::model_axis_in(Some(&s.doc), &crate::open_meshing::session_world(s), geo, 0).ok(),
+        AxisRef::Construction { name } => {
+            let geo = construct::GeoRef::Axis { name: name.clone() };
+            construct::model_axis_in(Some(&s.doc), &crate::open_meshing::session_world(s), &geo, 0).ok()
+        }
+        _ => crate::dialogs::axis_of(app, &crate::dialogs::axis_reference_pick(s, &reference, None)?),
+    }
+}
+
 fn frame(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
     let Kind::Primitive { cmd, at, .. } = &d.kind else { return None };
-    let axis = || d.extra.get("axis").and_then(vec3_of).and_then(|a| a.normalized()).unwrap_or(Vec3::Z);
+    let axis = || {
+        d.extra
+            .get("axis")
+            .and_then(|v| serde_json::from_value::<solidcraft_engine::schema::AxisDir>(v.get("dir").unwrap_or(v).clone()).ok())
+            .map(|a| a.0)
+            .unwrap_or(Vec3::Z)
+    };
+    if *cmd == "solid.coil" {
+        let picked = d
+            .inputs
+            .get(1)
+            .and_then(|input| input.items.first())
+            .and_then(|sel| crate::dialogs::coil_axis_preview(app, sel))
+            .or_else(|| d.extra.get("axis").and_then(|axis| coil_reference_frame(app, axis)));
+        let (origin, direction) = picked.unwrap_or_else(|| {
+            let origin = d
+                .extra
+                .get("axis")
+                .and_then(|v| v.get("origin"))
+                .and_then(|v| expr_point(app, v))
+                .or_else(|| at.map(|(p, _)| p))
+                .unwrap_or_else(|| d.extra.get("base").and_then(|v| expr_point(app, v)).unwrap_or(Vec3::ZERO));
+            let direction = if d.extra.contains_key("axis") { axis() } else { at.and_then(|(_, n)| n).unwrap_or(Vec3::Z) };
+            (origin, direction)
+        });
+        let reversed = d.extra.get("reversed").and_then(Value::as_bool).unwrap_or(false);
+        return Some((origin, if reversed { -direction } else { direction }));
+    }
     match (*cmd, at) {
         (_, Some((p, Some(n)))) => return Some((*p, *n)),
         // A box at a vertex or on a curved face is centred on the point: the marker at its bottom.
@@ -235,6 +290,13 @@ fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], _: usize) -> bool {
         _ => String::new(),
     });
     let Kind::Primitive { cmd, at, .. } = &mut d.kind else { return false };
+    if *cmd == "solid.coil" && n.is_some() {
+        // A new placement face sets the axis; the field can override it afterwards.
+        d.extra.remove("axis");
+        if let Some(input) = d.inputs.get_mut(1) {
+            input.items.clear();
+        }
+    }
     match *cmd {
         "solid.cone" | "solid.coil" if n.is_none() => return false,
         "solid.box" => {

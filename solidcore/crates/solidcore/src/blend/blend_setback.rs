@@ -104,11 +104,15 @@
 //! operation; their statuses are unchanged. Not the fork's (tangency-labs/solidcore#2697):
 //! `round_jets` puts its rows in the section's standard form across and returns no
 //! `rdDtDs`; the G2 fill's spokes are measured on the rows the patch takes, not on the round's own
-//! evaluation at the middle of its parameter across. No recursion.
+//! evaluation at the middle of its parameter across. Not the fork's (#16408): a G2 fill's
+//! interior map is taken at the least degree that meets its conditions and leaves no patch
+//! whose control net turns back (`check_brep`'s `SmBSplineSurface` test #5), and is refused
+//! with [`SETBACK_G2_NET_TURNS_BACK`] where no degree up to 9 does. No recursion.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-safe tests
 
-use crate::error::{Result, SolidError};
+use crate::error::blend::{BlendFailure, CornerInput, CornerStep, EaseStop};
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::sqrt;
@@ -118,17 +122,21 @@ use crate::nurbs::b_spline_curve::KnotType;
 use crate::nurbs::b_spline_surface::{
     BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData, SurfParamType,
 };
+use crate::surface::surface::assert_valid::grid_has_non_monotonic_points_to_rounding;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 mod certify;
 mod convexity;
 mod curved;
+mod face_plane;
 mod graph;
 mod qp;
+mod saddle;
 mod scale;
 mod spring;
 
 pub use curved::{no_more_concave, round_end_curvature};
+pub(crate) use face_plane::{FacePlane, Hom2};
 pub use spring::{spring_curve, SpringCurve, SpringHalf};
 
 pub(crate) use scale::bisect_thousandths;
@@ -136,10 +144,80 @@ pub use scale::{certified_scale, CertifiedScale};
 
 const OP: &str = "blend::blend_setback";
 
-/// `SM_ERR`.
-fn sm_err() -> SolidError {
-    SolidError::sm_err(OP)
+/// An index or size past a table of the setback fill ([`WHY_TABLE`], status `SM_ERR`): one
+/// condition at every index helper and size step of the fill and its child modules.
+#[track_caller]
+fn past_table() -> SolidError {
+    defect(WHY_TABLE)
 }
+
+/// The setback fill's tables (its jets, nets, Bernstein and tensor coefficients, programme
+/// rows and the per-round and per-face lists) are built at the sizes its order, degrees
+/// and round count give, from the canonical B-spline data of its rounds and patches. The
+/// indices a caller passes into a list are checked on entry: an edge's faces
+/// ([`distances`], `model_rounds`), a fill's faces ([`containment_kept`]). A caller's fill
+/// patch need not hold the points a one-span net of its degrees has (a NURBS net built as
+/// given does not bound a knot's multiplicity by the degree): where its points are read into
+/// such a net ([`containment`]'s plane bound, the curved containment, `first` and `comps`)
+/// a count past it is [`CornerInput::FillNotFromSetbackSplit`] instead.
+const WHY_TABLE: &str = "an index or size is past a table of the setback fill, though every table is built at the size its order, degrees and round count give, from the canonical B-spline data of its rounds and patches, the indices a caller passes (an edge's faces, a fill's faces) checked on entry and a caller's fill patches' point counts checked where they are read";
+
+/// `round_jets` inserts the round's end parameter to the round's degree (`raise_knot`,
+/// which takes a knot within `param_tol` as that knot) once the end is checked inside the
+/// rails' interval, so a knot within `param_tol` of it is there, with one before it when
+/// the corner lies above the end.
+const WHY_END_KNOT: &str = "a round's end parameter is a knot of its rails once raise_knot has inserted it to the round's degree, with a knot before it when the corner lies above it, the end checked inside the rails' interval just before";
+
+/// The setback corner's construction has no result at `step` for its geometry
+/// ([`BlendFailure::CornerUnbuildable`], status `SM_ERR`), with no reason given.
+#[track_caller]
+fn corner_step(step: CornerStep) -> SolidError {
+    SolidError::blend(OP, BlendFailure::CornerUnbuildable(step))
+}
+
+/// A defect of the setback corner (`why`: why no caller reaches it), status `SM_ERR`.
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    SolidError::blend(OP, BlendFailure::Defect { why })
+}
+
+/// [`defect`] with the `SM_ERR_NULL_POINTER` status of the `NER` it replaces.
+#[track_caller]
+fn missing_defect(why: &'static str) -> SolidError {
+    Failure::new(OP, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// A fill given to [`containment`] or [`containment_kept`] that is not one [`fill_hole`]
+/// builds ([`CornerInput::FillNotFromSetbackSplit`], status `SM_ERR`): the functions are
+/// public and take the fill as it is.
+#[track_caller]
+fn fill_not_from_split() -> SolidError {
+    SolidError::blend(
+        OP,
+        BlendFailure::CornerInputInvalid {
+            input: CornerInput::FillNotFromSetbackSplit,
+            entity: None,
+        },
+    )
+}
+
+/// An ease of the setback corner that stops at `stop` ([`BlendFailure::EaseNotBuilt`],
+/// status `SM_ERR`).
+#[track_caller]
+fn ease_stop(stop: EaseStop) -> SolidError {
+    SolidError::blend(OP, BlendFailure::EaseNotBuilt(stop))
+}
+
+/// [`fill_hole_counted`] refuses an order other than 1 or 2, and its rounds' jets are taken
+/// to at most 2 and hold a row per order.
+const WHY_ORDER: &str =
+    "the setback fill's order, checked on entry, is 1 or 2, and its jets are taken to it";
+/// [`affine_solutions`]'s one caller sizes `b` with a row per row of `A`, and the pivot row
+/// is one of them.
+const WHY_PIVOT: &str =
+    "the setback fill's conditions give b one entry per row of A, and the pivot row is one of those rows";
 
 // ---- the ease of a round into another section before its setback ----------------------
 
@@ -156,18 +234,18 @@ pub struct EaseRamp {
 }
 
 fn at(v: &[f64], i: usize) -> Result<f64> {
-    v.get(i).copied().ok_or_else(sm_err)
+    v.get(i).copied().ok_or_else(past_table)
 }
 
 fn put(v: &mut [f64], i: usize, x: f64) -> Result<()> {
-    *v.get_mut(i).ok_or_else(sm_err)? = x;
+    *v.get_mut(i).ok_or_else(past_table)? = x;
     Ok(())
 }
 
 /// `sm_SplitBezier`: the Bezier coefficients `coef` (degree `coef.len() - 1`) split at `t`
 /// by de Casteljau: the left part on `[0, t]`, the right on `[t, 1]`.
 fn split_bezier(coef: &[f64], t: f64) -> Result<(Vec<f64>, Vec<f64>)> {
-    let n = coef.len().checked_sub(1).ok_or_else(sm_err)?;
+    let n = coef.len().checked_sub(1).ok_or_else(past_table)?;
     let mut work = coef.to_vec();
     let mut left = coef.to_vec();
     let mut right = coef.to_vec();
@@ -210,7 +288,7 @@ fn ease_law_on_span(ramps: &[EaseRamp], a: f64, b: f64) -> Result<Vec<f64>> {
         let rising = ramp.from < ramp.to;
         if m > lo && m < hi {
             if easing {
-                return Err(sm_err()); // two ramps over one span
+                return Err(ease_stop(EaseStop::RampsOverlap)); // two ramps over one span
             }
             easing = true;
             let mut ramp_coef: Vec<f64> = (0..6)
@@ -227,7 +305,8 @@ fn ease_law_on_span(ramps: &[EaseRamp], a: f64, b: f64) -> Result<Vec<f64>> {
     }
     if easing {
         if constant != 0.0 {
-            return Err(sm_err()); // a ramp easing where another is already through
+            // a ramp easing where another is already through
+            return Err(ease_stop(EaseStop::RampsOverlap));
         }
         return Ok(coef);
     }
@@ -239,7 +318,7 @@ fn ease_law_on_span(ramps: &[EaseRamp], a: f64, b: f64) -> Result<Vec<f64>> {
 fn binomial(n: usize, k: usize) -> Result<f64> {
     let mut d = 1.0;
     for i in 1..=k {
-        let top = (n + i).checked_sub(k).ok_or_else(sm_err)?;
+        let top = (n + i).checked_sub(k).ok_or_else(past_table)?;
         d = d * top as f64 / i as f64;
     }
     Ok(d)
@@ -264,7 +343,7 @@ fn raise_knot(
     let mut knot = knot;
     for (i, &existing) in knots.iter().enumerate() {
         if (existing - knot).abs() <= tol {
-            have = mults.get(i).copied().ok_or_else(sm_err)?;
+            have = mults.get(i).copied().ok_or_else(past_table)?;
             knot = existing;
         }
     }
@@ -304,7 +383,8 @@ pub(crate) fn uv_at(dir: SurfParamType, along: f64, across: f64) -> Point2 {
 /// the new degree's multiplicity.
 ///
 /// # Errors
-/// `SM_ERR` where the fork `SER(SM_ERR)`s: other rail intervals, a turned `to` that does not
+/// `SM_ERR` where the fork `SER(SM_ERR)`s, each an [`EaseStop`]
+/// ([`BlendFailure::EaseNotBuilt`]): other rail intervals, a turned `to` that does not
 /// turn, a ramp end outside the surface, nets that do not match, an interior knot below full
 /// multiplicity, two ramps over one span or a weight not above `SM_EFF_ZERO`; those of the
 /// surface operations.
@@ -330,7 +410,7 @@ pub fn ease_surface(
 }
 
 /// [`ease_surface`] of two fillet surfaces that may be the fork's procedural blends
-/// (`SmProceduralBlend`, opt-in `fillet_round_as_definition`): the fork's `EaseSurface`
+/// (`SmProceduralBlend`): the fork's `EaseSurface`
 /// takes them as `SmBSplineSurface`s, and its copies' `Reparameterize`, `Reverse` and
 /// `EvaluatePoint` are a blend's own (its map follows, its points are its
 /// definition's); the ease itself is made of the nets. Surfaces that are not blends go
@@ -348,7 +428,14 @@ pub fn ease_surface_of(
 ) -> Result<BSplineSurface> {
     let part = |s: &Surface| -> Result<BSplineSurface> {
         Ok(crate::topology::brep::p3::with_nurb(k, s)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| {
+                SolidError::blend(
+                    OP,
+                    BlendFailure::EaseGeometryNotBSpline(
+                        crate::error::blend::EaseGeometry::RoundSurface,
+                    ),
+                )
+            })?
             .into_owned())
     };
     let blend = |s: &Surface| matches!(s.kind(), SurfaceKind::ProceduralBlend(_));
@@ -416,7 +503,9 @@ impl EaseSide<'_> {
             Self::Net(b) => Ok(*b),
             Self::Blend(_, s) => match s.into_kind() {
                 SurfaceKind::ProceduralBlend(pb) => Ok(pb.net),
-                _ => Err(SolidError::null_pointer(OP)),
+                _ => Err(missing_defect(
+                    "a blend side is made only of a procedural blend, and its copy keeps its kind",
+                )),
             },
         }
     }
@@ -439,7 +528,7 @@ fn ease_prologue(
     if (along_a.min() - along_b.min()).abs() > param_tol
         || (along_a.max() - along_b.max()).abs() > param_tol
     {
-        return Err(sm_err());
+        return Err(ease_stop(EaseStop::RailIntervalsDiffer));
     }
     let across_a = interval_in(&dom_a, across);
     let new_b = Extent2d::from_points(
@@ -461,7 +550,7 @@ fn ease_prologue(
             b.reparameterize(&new_b)?;
             let now = b.evaluate_point(at0)?;
             if now.distance(b1) > 1.0e-9 * (1.0 + b0.distance(b1)) {
-                return Err(sm_err());
+                return Err(ease_stop(EaseStop::TurnedSurfaceNotTurned));
             }
         }
     }
@@ -505,12 +594,20 @@ fn ease_nets(
         let inner = |n: usize| 1..n.saturating_sub(1);
         for i in inner(other.u_knots.len()) {
             let knot = at(&other.u_knots, i)?;
-            let mult = other.u_multiplicities.get(i).copied().ok_or_else(sm_err)?;
+            let mult = other
+                .u_multiplicities
+                .get(i)
+                .copied()
+                .ok_or_else(past_table)?;
             raise_knot(s, SurfParamType::U, knot, mult, param_tol)?;
         }
         for i in inner(other.v_knots.len()) {
             let knot = at(&other.v_knots, i)?;
-            let mult = other.v_multiplicities.get(i).copied().ok_or_else(sm_err)?;
+            let mult = other
+                .v_multiplicities
+                .get(i)
+                .copied()
+                .ok_or_else(past_table)?;
             raise_knot(s, SurfParamType::V, knot, mult, param_tol)?;
         }
     }
@@ -520,7 +617,7 @@ fn ease_nets(
                 // a ramp ends inside the surface or on its end (the setback, where the trace
                 // stopped)
                 if d < along_a.min() - param_tol || d > along_a.max() + param_tol {
-                    return Err(sm_err());
+                    return Err(ease_stop(EaseStop::RampPastSurface));
                 }
                 if d > along_a.min() + param_tol && d < along_a.max() - param_tol {
                     raise_knot(s, along, d, along_deg, param_tol)?;
@@ -549,16 +646,16 @@ fn ease_nets(
         || ca.u_knots.len() != cb.u_knots.len()
         || ca.v_knots.len() != cb.v_knots.len()
     {
-        return Err(sm_err());
+        return Err(ease_stop(EaseStop::NetsNotOneStructure));
     }
     for (i, (&ka, &kb)) in ca.u_knots.iter().zip(&cb.u_knots).enumerate() {
         if ca.u_multiplicities.get(i) != cb.u_multiplicities.get(i) || (ka - kb).abs() > param_tol {
-            return Err(sm_err());
+            return Err(ease_stop(EaseStop::NetsNotOneStructure));
         }
     }
     for (i, (&ka, &kb)) in ca.v_knots.iter().zip(&cb.v_knots).enumerate() {
         if ca.v_multiplicities.get(i) != cb.v_multiplicities.get(i) || (ka - kb).abs() > param_tol {
-            return Err(sm_err());
+            return Err(ease_stop(EaseStop::NetsNotOneStructure));
         }
     }
     let rational = !ca.weights.is_empty() || !cb.weights.is_empty();
@@ -577,19 +674,19 @@ fn ease_nets(
             &ca.u_multiplicities,
         )
     };
-    let spans = along_knots.len().checked_sub(1).ok_or_else(sm_err)?;
+    let spans = along_knots.len().checked_sub(1).ok_or_else(past_table)?;
     let across_count = across_mult
         .iter()
         .sum::<usize>()
         .checked_sub(across_deg + 1)
-        .ok_or_else(sm_err)?;
+        .ok_or_else(past_table)?;
     let along_count = spans * along_deg + 1;
     if along_count * across_count != ca.control_points.len() {
-        return Err(sm_err());
+        return Err(ease_stop(EaseStop::NetsNotOneStructure));
     }
     for i in 1..spans {
         if along_mult.get(i).copied() != Some(along_deg) {
-            return Err(sm_err());
+            return Err(ease_stop(EaseStop::NetsNotOneStructure));
         }
     }
     // the homogeneous control point [along i][across j] of a net (U-major lists)
@@ -600,7 +697,7 @@ fn ease_nets(
             j * along_count + i
         };
         let w = if w.is_empty() { 1.0 } else { at(w, k)? };
-        let p = pts.get(k).copied().ok_or_else(sm_err)?;
+        let p = pts.get(k).copied().ok_or_else(past_table)?;
         Ok([p.x * w, p.y * w, p.z * w, w])
     };
 
@@ -624,10 +721,10 @@ fn ease_nets(
                     let wl = at(&w, l)?;
                     for c in 0..4 {
                         let (ha_c, hb_c) = (
-                            ha.get(c).copied().ok_or_else(sm_err)?,
-                            hb.get(c).copied().ok_or_else(sm_err)?,
+                            ha.get(c).copied().ok_or_else(past_table)?,
+                            hb.get(c).copied().ok_or_else(past_table)?,
                         );
-                        let hc = h.get_mut(c).ok_or_else(sm_err)?;
+                        let hc = h.get_mut(c).ok_or_else(past_table)?;
                         *hc += beta * ((1.0 - wl) * ha_c + wl * hb_c);
                     }
                 }
@@ -656,14 +753,14 @@ fn ease_nets(
                 at(&net, base + 3)?,
             ];
             if !(h[3] > EFF_ZERO) {
-                return Err(sm_err());
+                return Err(ease_stop(EaseStop::EasedWeightNotPositive));
             }
             let k = if along == SurfParamType::U {
                 i * across_count + j
             } else {
                 j * new_along_count + i
             };
-            *new_pts.get_mut(k).ok_or_else(sm_err)? =
+            *new_pts.get_mut(k).ok_or_else(past_table)? =
                 Point3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]);
             if rational {
                 put(&mut new_weights, k, h[3])?;
@@ -745,19 +842,19 @@ fn smin(a: f64, b: f64) -> f64 {
     }
 }
 
-/// An element of a slice, `SM_ERR` past its end.
+/// An element of a slice, [`past_table`] past its end.
 fn el<T: Copy>(v: &[T], i: usize) -> Result<T> {
-    v.get(i).copied().ok_or_else(sm_err)
+    v.get(i).copied().ok_or_else(past_table)
 }
 
-/// A reference to an element of a slice, `SM_ERR` past its end.
+/// A reference to an element of a slice, [`past_table`] past its end.
 fn el_ref<T>(v: &[T], i: usize) -> Result<&T> {
-    v.get(i).ok_or_else(sm_err)
+    v.get(i).ok_or_else(past_table)
 }
 
-/// A mutable reference to an element of a slice, `SM_ERR` past its end.
+/// A mutable reference to an element of a slice, [`past_table`] past its end.
 fn el_mut<T>(v: &mut [T], i: usize) -> Result<&mut T> {
-    v.get_mut(i).ok_or_else(sm_err)
+    v.get_mut(i).ok_or_else(past_table)
 }
 
 /// Why the setback corner refused, or the failure of a call it made (`SM_SB_FAIL`: the
@@ -789,10 +886,11 @@ impl Refusal {
         }
     }
 
-    /// `SM_SB_FAIL(.., SM_ERR, reason)`.
-    fn sm_err(reason: &'static str) -> Self {
+    /// `SM_SB_FAIL(.., SM_ERR, reason)` where the corner's construction has no result for
+    /// its geometry (`step`, [`BlendFailure::CornerUnbuildable`]); the reason is kept.
+    fn unbuildable(step: CornerStep, reason: &'static str) -> Self {
         Self {
-            error: sm_err(),
+            error: SolidError::blend(OP, BlendFailure::CornerUnbuildable(step)),
             reason: Some(reason),
         }
     }
@@ -1021,8 +1119,8 @@ type Bern = Vec<f64>;
 
 /// `sm_SbMul`: the product of two Bernstein polynomials.
 fn bern_mul(a: &[f64], b: &[f64]) -> Result<Bern> {
-    let p = a.len().checked_sub(1).ok_or_else(sm_err)?;
-    let q = b.len().checked_sub(1).ok_or_else(sm_err)?;
+    let p = a.len().checked_sub(1).ok_or_else(past_table)?;
+    let q = b.len().checked_sub(1).ok_or_else(past_table)?;
     let mut c = vec![0.0; p + q + 1];
     for (i, &ai) in a.iter().enumerate() {
         for (j, &bj) in b.iter().enumerate() {
@@ -1037,7 +1135,7 @@ fn bern_mul(a: &[f64], b: &[f64]) -> Result<Bern> {
 fn bern_elevate(a: &[f64], deg: usize) -> Result<Bern> {
     let mut a = a.to_vec();
     loop {
-        let p = a.len().checked_sub(1).ok_or_else(sm_err)?;
+        let p = a.len().checked_sub(1).ok_or_else(past_table)?;
         if p >= deg {
             return Ok(a);
         }
@@ -1098,7 +1196,7 @@ fn tensor_elevate(a: &Tensor, lp: usize, lq: usize) -> Result<Tensor> {
     for i in 0..=lp {
         let row = sa
             .get(i * (a.q + 1)..(i + 1) * (a.q + 1))
-            .ok_or_else(sm_err)?;
+            .ok_or_else(past_table)?;
         let row = bern_elevate(row, lq)?;
         for j in 0..=lq {
             *el_mut(&mut c, i * (lq + 1) + j)? = el(&row, j)?;
@@ -1204,13 +1302,19 @@ fn second(net: &Net, u: f64, v: f64) -> Result<[Vec3; 3]> {
 }
 
 /// `sm_SbFirst`: the point and its first derivatives (Euclidean) at `(u, v)`.
+/// [`CornerInput::FillNotFromSetbackSplit`] for a net with fewer points than its degrees
+/// give: only a caller's fill patch ([`containment_kept`]) can be one, the kernel's nets
+/// being built at their size.
 fn first(net: &Net, u: f64, v: f64) -> Result<(Vec3, Vec3, Vec3)> {
     let (u0, u1, _) = basis(net.p, u)?;
     let (v0, v1, _) = basis(net.q, v)?;
     let mut h = [HOM_ZERO; 3];
     for i in 0..=net.p {
         for j in 0..=net.q {
-            let a = el_ref(&net.pts, i * (net.q + 1) + j)?;
+            let a = net
+                .pts
+                .get(i * (net.q + 1) + j)
+                .ok_or_else(fill_not_from_split)?;
             let (ui0, ui1, vj0, vj1) = (el(&u0, i)?, el(&u1, i)?, el(&v0, j)?, el(&v1, j)?);
             let [ha, hb, hc] = &mut h;
             for (c, &ac) in a.iter().enumerate() {
@@ -1259,7 +1363,16 @@ fn round_jets(
     // Copy, then SM_CAST_PTR(SmBSplineSurface, pCopy) (NER): an analytic round's NURB, a
     // procedural blend's net
     let mut s = crate::topology::brep::p3::with_nurb(kernel, round.surface)?
-        .ok_or_else(|| Refusal::from(SolidError::null_pointer(OP)))?
+        .ok_or_else(|| {
+            Refusal::from(
+                Failure::new(
+                    OP,
+                    BlendFailure::CornerUnbuildable(CornerStep::RoundSurfaceNotBSpline),
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error(),
+            )
+        })?
         .into_owned();
     let p = s.degree(along);
     let dom = s.natural_uv_domain();
@@ -1287,10 +1400,10 @@ fn round_jets(
         } else {
             &canonical.v_knots
         };
-        let ia = find_end(knots).ok_or_else(sm_err)?;
+        let ia = find_end(knots).ok_or_else(|| defect(WHY_END_KNOT))?;
         // the span on the round's side, raised to Bezier form at its other end
         let ib = if round.corner_above {
-            ia.checked_sub(1).ok_or_else(sm_err)?
+            ia.checked_sub(1).ok_or_else(|| defect(WHY_END_KNOT))?
         } else {
             ia + 1
         };
@@ -1316,13 +1429,13 @@ fn round_jets(
             "SmBlendSetback: a round must be one Bezier span across its rails",
         ));
     }
-    let ia = find_end(knots).ok_or_else(sm_err)?;
+    let ia = find_end(knots).ok_or_else(|| defect(WHY_END_KNOT))?;
     let row_of = |knot: usize| -> Result<usize> {
         if knot == 0 {
             return Ok(0);
         }
-        let s: usize = mults.get(..knot).ok_or_else(sm_err)?.iter().sum();
-        s.checked_sub(1).ok_or_else(sm_err)
+        let s: usize = mults.get(..knot).ok_or_else(past_table)?.iter().sum();
+        s.checked_sub(1).ok_or_else(past_table)
     };
     let lq = s.degree(across);
     let pts = &canonical.control_points;
@@ -1344,16 +1457,26 @@ fn round_jets(
     };
     let row = row_of(ia)?;
     let delta = if round.corner_above {
-        el(knots, ia)? - el(knots, ia.checked_sub(1).ok_or_else(sm_err)?)?
+        el(knots, ia)?
+            - el(
+                knots,
+                ia.checked_sub(1).ok_or_else(|| defect(WHY_END_KNOT))?,
+            )?
     } else {
         el(knots, ia + 1)? - el(knots, ia)?
     };
+    let not_bezier = || {
+        SolidError::blend(
+            OP,
+            BlendFailure::CornerUnbuildable(CornerStep::RoundEndSpanNotBezier),
+        )
+    };
     if !(delta > 0.0) {
-        return Err(sm_err().into());
+        return Err(not_bezier().into());
     }
     // the span's rows in increasing rail parameter, Q[0 ..= p]
     let first_row = if round.corner_above {
-        row.checked_sub(p).ok_or_else(sm_err)?
+        row.checked_sub(p).ok_or_else(past_table)?
     } else {
         row
     };
@@ -1361,7 +1484,7 @@ fn round_jets(
     for (i, qi) in rows.iter_mut().enumerate() {
         for (j, qij) in qi.iter_mut().enumerate() {
             if first_row + i >= along_count {
-                return Err(sm_err().into());
+                return Err(not_bezier().into());
             }
             *qij = at_net(first_row + i, j)?;
         }
@@ -1395,7 +1518,8 @@ fn round_jets(
     // the weights' share: G = H / W, W the rails' mean weight (the fork's d1de555), once the
     // section is in its standard form across (tangency-labs/solidcore#2697)
     if k > 2 {
-        return Err(sm_err().into()); // the jets are taken to second order
+        // the jets are taken to second order
+        return Err(defect(WHY_ORDER).into());
     }
     standard_form_across(&mut h, lq, k)?;
     let mut sw = [0.0; 3];
@@ -1500,15 +1624,28 @@ fn round_jets(
 /// same rows. Where the end weights are equal to order k the rows are kept as they are.
 ///
 /// # Errors
-/// [`Refusal`] with `SM_ERR_INVALID_INPUT` for an end weight that is not positive; `SM_ERR`
-/// for a section of degree 0 or jets past the second order.
+/// [`Refusal`] with `SM_ERR_INVALID_INPUT` for an end weight that is not positive;
+/// [`CornerInput::RoundOfDegreeZeroAcross`] (`SM_ERR`) for a section of degree 0; a
+/// `Defect` (`SM_ERR`) for jets past the second order.
 fn standard_form_across(
     h: &mut [Vec<Hom>],
     q: usize,
     k: usize,
 ) -> core::result::Result<(), Refusal> {
-    if q == 0 || k > 2 || h.len() <= k {
-        return Err(sm_err().into());
+    if q == 0 {
+        // the caller's round: a B-spline surface made from data keeps the degree it is given
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::CornerInputInvalid {
+                input: CornerInput::RoundOfDegreeZeroAcross,
+                entity: None,
+            },
+        )
+        .into());
+    }
+    if k > 2 || h.len() <= k {
+        // its jets are taken to k, one row per order
+        return Err(defect(WHY_ORDER).into());
     }
     // the end weights W_0, W_q and their derivatives along (0 past the jets' order)
     let mut w0 = [0.0; 3];
@@ -1560,7 +1697,7 @@ fn standard_form_across(
 /// A row's homogeneous point at the middle of its parameter across: its Bernstein mean,
 /// `sum_j C(q, j) / 2^q H_j`.
 fn row_middle(row: &[Hom]) -> Result<Hom> {
-    let q = row.len().checked_sub(1).ok_or_else(sm_err)?;
+    let q = row.len().checked_sub(1).ok_or_else(past_table)?;
     let mut m = HOM_ZERO;
     for (j, h) in row.iter().enumerate() {
         m = axpy(&m, binomial(q, j)? / 2.0_f64.powf(q as f64), h);
@@ -1591,7 +1728,7 @@ fn geometric_rows(
     k: usize,
 ) -> core::result::Result<(Vec<Vec<Hom>>, usize), Refusal> {
     if k == 0 || k > 2 {
-        return Err(sm_err().into());
+        return Err(defect(WHY_ORDER).into());
     }
     let row0 = el_ref(jets, 0)?;
     let row1 = el_ref(jets, 1)?;
@@ -1691,7 +1828,7 @@ fn geometric_rows(
         let i = if e == 0 {
             0
         } else {
-            lv.checked_sub(1).ok_or_else(sm_err)?
+            lv.checked_sub(1).ok_or_else(past_table)?
         };
         let v0 = Vec3::new(el(vx, i)?, el(vy, i)?, el(vz, i)?);
         let along = d1.dot(t);
@@ -1866,25 +2003,16 @@ fn affine_solutions(
         }
         if pi != r {
             for j in 0..n {
-                if a.get(pi * n + j).is_none() || a.get(r * n + j).is_none() {
-                    return Err(sm_err());
-                }
                 a.swap(pi * n + j, r * n + j);
             }
             if b.get(pi).is_none() || b.get(r).is_none() {
-                return Err(sm_err());
+                return Err(defect(WHY_PIVOT));
             }
             b.swap(pi, r);
         }
         if pj != r {
             for i in 0..m {
-                if a.get(i * n + pj).is_none() || a.get(i * n + r).is_none() {
-                    return Err(sm_err());
-                }
                 a.swap(i * n + pj, i * n + r);
-            }
-            if col.get(pj).is_none() || col.get(r).is_none() {
-                return Err(sm_err());
             }
             col.swap(pj, r);
         }
@@ -2130,6 +2258,7 @@ pub fn fill_hole_to(
         orders,
         tol,
         None,
+        true,
         &mut FillStats::default(),
     )
 }
@@ -2145,13 +2274,23 @@ pub fn fill_hole_counted(
     rounds: &[Round<'_>],
     order: usize,
     tol: f64,
+    certify_convexity: bool,
     stats: &mut FillStats,
 ) -> core::result::Result<Fill, Refusal> {
     let orders = FillOrders {
         rounds: order,
         faces: order,
     };
-    fill_hole_with(kernel, faces, rounds, orders, tol, None, stats)
+    fill_hole_with(
+        kernel,
+        faces,
+        rounds,
+        orders,
+        tol,
+        None,
+        certify_convexity,
+        stats,
+    )
 }
 
 /// `SmBlendSetback::Probe` (the fork's 250cb3f, f1d81f4): [`certified_scale`]'s probe of a
@@ -2231,7 +2370,21 @@ pub fn fill_hole_probe(
         rounds: 1,
         faces: 1,
     };
-    fill_hole_with(kernel, faces, rounds, g1, tol, Some(probe), stats)
+    fill_hole_probe_orders(kernel, faces, rounds, g1, tol, probe, stats)
+}
+
+/// [`fill_hole_probe`] to `orders` (a corner's growth tries its own fill's order, not only
+/// the G1's, #13775).
+pub fn fill_hole_probe_orders(
+    kernel: &Kernel,
+    faces: &[Face],
+    rounds: &[Round<'_>],
+    orders: FillOrders,
+    tol: f64,
+    probe: &mut Probe,
+    stats: &mut FillStats,
+) -> core::result::Result<Fill, Refusal> {
+    fill_hole_with(kernel, faces, rounds, orders, tol, Some(probe), true, stats)
 }
 
 /// `sm_SbFillHole`: [`fill_hole`] with the probe and the statistics.
@@ -2242,6 +2395,7 @@ fn fill_hole_with(
     orders: FillOrders,
     tol: f64,
     probe: Option<&mut Probe>,
+    certify_convexity: bool,
     stats: &mut FillStats,
 ) -> core::result::Result<Fill, Refusal> {
     *stats = FillStats::default();
@@ -2499,7 +2653,7 @@ fn fill_hole_with(
                         let col = if e == 0 {
                             c
                         } else {
-                            q.checked_sub(c).ok_or_else(sm_err)?
+                            q.checked_sub(c).ok_or_else(past_table)?
                         };
                         let h = el_ref(row, col)?;
                         let face = face_of(m + e)?;
@@ -2520,7 +2674,43 @@ fn fill_hole_with(
         }
     }
 
+    // the corner's convexity and the certificate's axis e (the graph fill's rule): each
+    // round's section midpoint against its faces, e into the material at a convex corner
+    // and out of it at a concave one; a corner of mixed convexity has its own ruling (the
+    // lifted normal field) and is not certified here
+    let mut sum_axis = Vec3::ZERO;
+    let mut convex = 0i32;
+    for m in 0..n {
+        let face = face_of(m)?;
+        sum_axis += face.normal;
+        let rows_m = el_ref(&round_rows, m)?;
+        let h0 = el_ref(rows_m, 0)?;
+        let q = h0.len() - 1;
+        let mut mh = HOM_ZERO;
+        for (c, hc) in h0.iter().enumerate() {
+            mh = axpy(&mh, binomial(q, c)? / 2.0_f64.powf(q as f64), hc);
+        }
+        let mid = Point3::new(mh[0] / mh[3], mh[1] / mh[3], mh[2] / mh[3]);
+        let side = if (mid - face.point).dot(face.normal) < 0.0 {
+            1i32
+        } else {
+            -1i32
+        };
+        if convex != 0 && side != convex {
+            convex = 0;
+            break;
+        }
+        convex = side;
+    }
+    let cert_axis = if convex != 0 {
+        Some((sum_axis * if convex > 0 { -1.0 } else { 1.0 }).unitize()?)
+    } else {
+        None
+    };
+
     // the interior map's degree: the least from 2k + 1 at which its conditions can be met
+    // and no patch's control net turns back
+    let mut turned_back = false;
     for d in big_n..=9 {
         let mono = monomials(d);
         let mc = mono.len();
@@ -2720,7 +2910,7 @@ fn fill_hole_with(
                             let col = if e == 0 {
                                 c
                             } else {
-                                net.q.checked_sub(c).ok_or_else(sm_err)?
+                                net.q.checked_sub(c).ok_or_else(past_table)?
                             };
                             let h = el_ref(&net.pts, i * (net.q + 1) + col)?;
                             let face = face_of(m + e)?;
@@ -2829,27 +3019,55 @@ fn fill_hole_with(
             continue;
         }
 
-        // no fold: every patch's normal keeps to one side, and each setback patch's agrees
-        // with its round's side's interior part where they meet
-        for net in &fill_nets {
-            let (_, su, sv) = first(net, 0.5, 0.5)?;
-            let mid = su.cross(sv);
-            for a in 0..=8 {
-                for b in 0..=8 {
-                    let (_, su, sv) = first(net, f64::from(a) / 8.0, f64::from(b) / 8.0)?;
-                    if !(su.cross(sv).dot(mid) > 0.0) {
-                        return Err(Refusal::sm_err("SmBlendSetback: the fill folds"));
-                    }
-                }
+        // no fold, at any convexity mix (owner, 2026-11-13): every patch's normal certified
+        // regular and one-signed against the outward normal of its round (a setback patch:
+        // the round's at its section's middle, the bisector of its faces' outward normals)
+        // or of the corner (an interior part: the faces' outward normals summed), and of one
+        // sign over the whole fill, so that its parts face one way (saddle::certified_side)
+        let mut outward = Vec3::ZERO;
+        for m in 0..n {
+            outward += face_of(m)?.normal;
+        }
+        let outward = outward.unitize()?;
+        let mut facing = 0.0;
+        for (i, net) in fill_nets.iter().enumerate() {
+            let d = if i < n {
+                (face_of(i)?.normal + face_of(i + 1)?.normal).unitize()?
+            } else {
+                outward
+            };
+            let side = saddle::certified_side(net, d)?;
+            if side == 0.0 || (facing != 0.0 && side != facing) {
+                return Err(Refusal::unbuildable(
+                    CornerStep::SetbackFillMayFold,
+                    "SmBlendSetback: the fill's normal is not certified regular and to one side of its rounds' (the fill may fold)",
+                ));
             }
+            facing = side;
         }
         for m in 0..n {
-            let (sp, su, sv) = first(el_ref(&fill_nets, m)?, 1.0, 0.25)?;
-            let (qp, qu, qv) = first(el_ref(&fill_nets, n + m)?, 1.0, 0.5)?;
-            if !(su.cross(sv).dot(qu.cross(qv)) > 0.0) || !((sp - qp).length() <= tol) {
-                return Err(Refusal::sm_err(
-                    "SmBlendSetback: the fill folds where a setback patch meets the interior",
+            let (sp, _, _) = first(el_ref(&fill_nets, m)?, 1.0, 0.25)?;
+            let (qp, _, _) = first(el_ref(&fill_nets, n + m)?, 1.0, 0.5)?;
+            if !((sp - qp).length() <= tol) {
+                return Err(Refusal::unbuildable(
+                    CornerStep::SetbackPatchMissesInterior,
+                    "SmBlendSetback: a setback patch does not meet the interior",
                 ));
+            }
+        }
+
+        // the fill's convexity certified (the issue's ask), as the G1 fill's is: every
+        // patch's curvature forms positive semidefinite to the certificate's tolerance.
+        // A degree that does not certify leaves the next to try; none does and the
+        // refusal below names it. A corner of mixed convexity keeps the fold certificate
+        // above (its ruling is the lifted normal field's, not this one).
+        if let Some(e_axis) = cert_axis
+            .filter(|_| certify_convexity && order == 2 && faces.iter().all(|f| !f.is_curved()))
+        {
+            let marks = certify::sides_on_planes(&fill_nets, n, faces, &cycle_face);
+            if certify::certified_convex(&fill_nets, &marks, e_axis, 6)?.is_err() {
+                stats.uncertified = true;
+                continue;
             }
         }
 
@@ -2861,7 +3079,11 @@ fn fill_hole_with(
             let mut rational = false;
             for h in &net.pts {
                 if !(h[3] > 0.0) {
-                    return Err(sm_err().into());
+                    return Err(SolidError::blend(
+                        OP,
+                        BlendFailure::CornerUnbuildable(CornerStep::SetbackPatchWeightNotPositive),
+                    )
+                    .into());
                 }
                 pts.push(euclid(h));
                 ws.push(h[3]);
@@ -2886,6 +3108,14 @@ fn fill_hole_with(
                 uv_domain: None,
             })?);
         }
+        // a patch whose control net turns back is not taken (#16408): `check_brep` refuses
+        // the body it makes (its `SmBSplineSurface` test #5), so the next degree is tried, as
+        // the G1 fill beside a curved face holds its nets to the same test
+        // (`curved::net_monotone`)
+        if !nets_never_turn_back(&patches)? {
+            turned_back = true;
+            continue;
+        }
         return Ok(Fill {
             patches,
             round: cycle_round,
@@ -2894,9 +3124,37 @@ fn fill_hole_with(
             degree: d,
         });
     }
-    Err(Refusal::sm_err(
-        "SmBlendSetback: no interior map up to degree 9 meets the setback patches' conditions",
-    ))
+    Err(if turned_back {
+        Refusal::unbuildable(CornerStep::SetbackG2NetTurnsBack, SETBACK_G2_NET_TURNS_BACK)
+    } else if stats.uncertified {
+        Refusal::unbuildable(
+            CornerStep::SetbackNoInteriorMap,
+            "SmBlendSetback: no G2 fill up to degree 9 is certified convex at these setbacks",
+        )
+    } else {
+        Refusal::unbuildable(
+            CornerStep::SetbackNoInteriorMap,
+            "SmBlendSetback: no interior map up to degree 9 meets the setback patches' conditions",
+        )
+    })
+}
+
+/// The refusal of a G2 fill whose every interior map up to degree 9 that meets the setback
+/// patches' conditions leaves a patch whose control net turns back (#16408).
+pub const SETBACK_G2_NET_TURNS_BACK: &str =
+    "SmBlendSetback: every G2 fill up to degree 9 has a patch whose control net turns back";
+
+/// Whether no patch has a control net whose rows or columns turn back: the predicate of
+/// `check_brep`'s `SmBSplineSurface` test #5
+/// ([`grid_has_non_monotonic_points_to_rounding`]), each patch open both ways.
+fn nets_never_turn_back(patches: &[BSplineSurface]) -> Result<bool> {
+    for patch in patches {
+        let net = patch.control_point_net()?;
+        if grid_has_non_monotonic_points_to_rounding(&net.points, net.v_count, false, false)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// `SmBlendSetback::Containment`: the most any patch of `fill` stands past a face out of the
@@ -2909,9 +3167,10 @@ fn fill_hole_with(
 /// by the faces' implicit forms, else `f64::INFINITY` (the fork's `HUGE_VAL`, 37c9e1d).
 ///
 /// # Errors
-/// `SM_ERR_INVALID_INPUT` for an empty fill; `SM_ERR` for a patch with a weight not positive
-/// (beside a curved face also: of more than one span, or of degree below 2 across a face it
-/// lies on).
+/// `SM_ERR_INVALID_INPUT` for an empty fill; [`CornerInput::FillNotFromSetbackSplit`]
+/// (`SM_ERR`) for a patch with a weight not positive or with more control points than a
+/// one-span net holds (beside a curved face also: of more than one span, with fewer control
+/// points than that net, or of degree below 2 across a face it lies on).
 pub fn containment(k: &Kernel, fill: &Fill, faces: &[Face], convex: bool, tol: f64) -> Result<f64> {
     if fill.patches.is_empty() {
         return Err(SolidError::invalid_input(
@@ -2927,7 +3186,7 @@ pub fn containment(k: &Kernel, fill: &Fill, faces: &[Face], convex: bool, tol: f
     for patch in &fill.patches {
         let canonical = patch.canonical()?;
         if canonical.weights.iter().any(|&w| !(w > 0.0)) {
-            return Err(sm_err()); // a patch with a weight not positive
+            return Err(fill_not_from_split()); // a patch with a weight not positive
         }
         let one_span = canonical.u_knots.len() == 2 && canonical.v_knots.len() == 2;
         for face in faces {
@@ -2942,6 +3201,104 @@ pub fn containment(k: &Kernel, fill: &Fill, faces: &[Face], convex: bool, tol: f
         }
     }
     Ok(worst)
+}
+
+/// Not the fork's (owner, 2026-11-13): [`containment`] at a corner of any convexity mix, each
+/// round's convexity read from the fill (its setback patch's end section's middle on the
+/// material's side of its first face: convex). Where every round has one convexity, it is
+/// [`containment`]'s. Else each face is held by the rounds beside it: past its plane on
+/// their side ([`containment`]'s bound) where they agree; where a convex and a concave round
+/// meet on it the fill has no side of it to keep to, and is certified off its kept part
+/// instead (`saddle::clear_of_kept_face`), 0 where it is and `f64::INFINITY` where not. A
+/// corner of mixed convexity beside a curved face is not taken (`f64::INFINITY`): its kept
+/// parts have no test yet.
+///
+/// # Errors
+/// As [`containment`]'s; [`CornerInput::FillNotFromSetbackSplit`] for a fill that is not the
+/// setback split's (`2n` patches of one span, its faces among those given),
+/// [`CornerStep::SetbackFacesMeetInNoPoint`] (`SM_ERR`) for faces that meet in no one point.
+pub fn containment_kept(k: &Kernel, fill: &Fill, faces: &[Face], tol: f64) -> Result<f64> {
+    let n = fill.round.len();
+    if n < 3
+        || fill.patches.len() != 2 * n
+        || fill.face.len() != n
+        || fill.face.iter().any(|&f| f >= faces.len())
+    {
+        return Err(fill_not_from_split());
+    }
+    let mut convex = Vec::new();
+    for m in 0..n {
+        let patch = el_ref(&fill.patches, m)?;
+        let face = el_ref(faces, el(&fill.face, m)?)?;
+        let middle = patch.evaluate_point(Point2::new(0.0, 0.5))?;
+        convex.push(face.distance(middle).0 < 0.0);
+    }
+    let first_convex = el(&convex, 0)?;
+    if convex.iter().all(|&c| c == first_convex) {
+        return containment(k, fill, faces, first_convex, tol);
+    }
+    if faces.iter().any(Face::is_curved) {
+        return Ok(f64::INFINITY);
+    }
+    let vertex = graph::faces_common_point(faces)
+        .ok_or_else(|| corner_step(CornerStep::SetbackFacesMeetInNoPoint))?;
+    let mut nets = Vec::new();
+    for patch in &fill.patches {
+        nets.push(net_of(patch)?);
+    }
+    let mut worst = f64::NEG_INFINITY;
+    for m in 0..n {
+        let face = el_ref(faces, el(&fill.face, m)?)?;
+        // the round before face m in the cycle (n >= 3)
+        let prev = if m == 0 { n - 1 } else { m - 1 };
+        let (before, after) = (el(&convex, prev)?, el(&convex, m)?);
+        if before == after {
+            let side = if after { 1.0 } else { -1.0 };
+            for patch in &fill.patches {
+                let canonical = patch.canonical()?;
+                let mut hull = f64::NEG_INFINITY;
+                for &pt in &canonical.control_points {
+                    hull = smax(hull, side * (pt - face.point).dot(face.normal));
+                }
+                if hull > tol {
+                    hull = plane_bound(k, &canonical, face, side, tol)?;
+                }
+                worst = smax(worst, hull);
+            }
+        } else if saddle::clear_of_kept_face(k, &nets, m, face, vertex, tol)? {
+            worst = smax(worst, 0.0);
+        } else {
+            return Ok(f64::INFINITY);
+        }
+    }
+    Ok(worst)
+}
+
+/// A one-span patch's homogeneous net (a stage failure for more than one span or a weight
+/// not positive).
+fn net_of(patch: &BSplineSurface) -> Result<Net> {
+    let canonical = patch.canonical()?;
+    if canonical.u_knots.len() != 2 || canonical.v_knots.len() != 2 {
+        return Err(fill_not_from_split());
+    }
+    let rational = canonical.weights.len() == canonical.control_points.len();
+    let mut pts = Vec::new();
+    for (i, &pt) in canonical.control_points.iter().enumerate() {
+        let w = if rational {
+            el(&canonical.weights, i)?
+        } else {
+            1.0
+        };
+        if !(w > 0.0) {
+            return Err(fill_not_from_split());
+        }
+        pts.push([pt.x * w, pt.y * w, pt.z * w, w]);
+    }
+    Ok(Net {
+        p: canonical.u_degree,
+        q: canonical.v_degree,
+        pts,
+    })
 }
 
 /// A certified bound of how far a one-span patch (`canonical`, weights positive) stands past
@@ -2985,7 +3342,9 @@ fn plane_bound(
             + d.z.abs() * face.normal.z.abs();
         most = smax(most, wi * terms);
         w_min = smin(w_min, wi);
-        *el_mut(&mut w.c, i)? = wi;
+        // more control points than a one-span net of degrees (p, q) holds: the caller's fill
+        // (a NURBS net built as given does not bound a knot's multiplicity by the degree)
+        *w.c.get_mut(i).ok_or_else(fill_not_from_split)? = wi;
         *el_mut(&mut f.c, i)? = wi * side * d.dot(face.normal);
     }
     let ops = 8 + graph::GRAPH_DEPTH * (p + q);
@@ -3139,6 +3498,274 @@ mod tests {
         assert!(ease_law_on_span(&ramps, 2.5, 3.0).is_err());
     }
 
+    /// Two ramps over one span are a typed `Failed`, with the `SM_ERR` status the bare
+    /// status had; a refusal's error carries its reason.
+    #[test]
+    fn a_round_of_degree_zero_across_is_invalid_input() {
+        let mut h = vec![vec![[0.0, 0.0, 0.0, 1.0]; 1]; 2];
+        let refusal = standard_form_across(&mut h, 0, 1).unwrap_err();
+        assert_eq!(
+            refusal.error.blend_failure(),
+            Some(&BlendFailure::CornerInputInvalid {
+                input: CornerInput::RoundOfDegreeZeroAcross,
+                entity: None,
+            })
+        );
+        assert_eq!(refusal.error.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(
+            crate::error::upstream_status(&refusal.error),
+            Some(crate::error::SM_ERR)
+        );
+    }
+
+    #[test]
+    fn two_ramps_over_one_span_overlap() {
+        let ramps = [
+            EaseRamp { from: 0.0, to: 4.0 },
+            EaseRamp { from: 1.0, to: 5.0 },
+        ];
+        let err = ease_law_on_span(&ramps, 2.0, 3.0).unwrap_err();
+        assert!(matches!(
+            err.blend_failure(),
+            Some(BlendFailure::EaseNotBuilt(EaseStop::RampsOverlap))
+        ));
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+        let refusal = Refusal::unbuildable(CornerStep::SetbackFillNotCertified, "why");
+        assert_eq!(refusal.reason, Some("why"));
+        assert_eq!(
+            refusal.error.blend_failure(),
+            Some(&BlendFailure::CornerUnbuildable(
+                CornerStep::SetbackFillNotCertified
+            ))
+        );
+        assert_eq!(
+            crate::error::upstream_status(&refusal.error),
+            Some(crate::error::SM_ERR)
+        );
+    }
+
+    /// The setback corner's geometric stops are named steps of its construction, refusals
+    /// of the geometry, each with the `SM_ERR` status the bare status had.
+    #[test]
+    fn the_setback_stops_are_named_steps_with_their_status() {
+        use crate::error::ErrorKind;
+        for (step, kind) in [
+            (CornerStep::RoundEndCurvatureUnbounded, ErrorKind::NotFound),
+            (CornerStep::SetbackBasePointsCoincide, ErrorKind::Degenerate),
+            (CornerStep::SetbackBaseSidesParallel, ErrorKind::Degenerate),
+            (
+                CornerStep::SetbackFacePointOffFace,
+                ErrorKind::NotWithinTolerance,
+            ),
+            (CornerStep::SetbackFacesMeetInNoPoint, ErrorKind::Degenerate),
+            (CornerStep::SetbackFillNotCertified, ErrorKind::NotFound),
+            (CornerStep::SetbackMarginInfeasible, ErrorKind::NotFound),
+            (CornerStep::SetbackMarginUnresolved, ErrorKind::NotFound),
+            (CornerStep::SetbackRailEndsCoincide, ErrorKind::Degenerate),
+            (
+                CornerStep::SetbackSpringEndsHalfTurnApart,
+                ErrorKind::Unsupported,
+            ),
+            (CornerStep::SetbackSpringPointAtPole, ErrorKind::Degenerate),
+            (CornerStep::SetbackSpringPointOnAxis, ErrorKind::Degenerate),
+        ] {
+            let err = corner_step(step);
+            assert_eq!(
+                err.blend_failure(),
+                Some(&BlendFailure::CornerUnbuildable(step))
+            );
+            assert_eq!(err.kind(), kind, "{step:?}");
+            assert!(!err.is_defect(), "{step:?}");
+            assert_eq!(
+                crate::error::upstream_status(&err),
+                Some(crate::error::SM_ERR),
+                "{step:?}"
+            );
+            // a refusal from a step keeps no reason, as the bare status's did
+            assert_eq!(Refusal::from(err).reason, None);
+        }
+    }
+
+    /// An index past one of the fill's tables is a `Defect` with the `SM_ERR` status the
+    /// bare status had.
+    #[test]
+    fn an_index_past_a_table_is_a_defect() {
+        let err = el(&[1.0, 2.0], 2).unwrap_err();
+        assert_eq!(err, past_table());
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::Defect { why: WHY_TABLE })
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+    }
+
+    /// A fill whose face indices are past the faces given is not the setback split's: the
+    /// caller's input, checked on entry, not an index past a table.
+    #[test]
+    fn a_kept_containment_with_a_face_past_the_faces_is_invalid_input() {
+        let fill = Fill {
+            patches: vec![quarter_cylinder(); 6],
+            round: vec![0, 1, 2],
+            face: vec![0, 0, 1],
+            reversed: vec![false; 3],
+            degree: 2,
+        };
+        let plane = [Face::plane(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        )];
+        let err = containment_kept(&Kernel::default(), &fill, &plane, 1e-6).unwrap_err();
+        assert_eq!(err, fill_not_from_split());
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+    }
+
+    /// A patch whose knots repeat past its degree has more control points than a one-span
+    /// net of its degrees holds: the caller's fill, invalid input with `SM_ERR`, not an index
+    /// past a table.
+    #[test]
+    fn a_patch_with_more_points_than_its_net_is_invalid_input() {
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+        // knots 0^4 1^4 at degree 2: one span with 5 points in u, where (p+1) is 3 (the
+        // NLib net takes them as given; create_canonical would clamp them away)
+        let net = (0..5)
+            .map(|i| {
+                [0.0, 1.0]
+                    .into_iter()
+                    .map(|z| CPoint::new(f64::from(i), 1.0, z, NOW))
+                    .collect()
+            })
+            .collect();
+        let u = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let v = vec![0.0, 0.0, 1.0, 1.0];
+        let patch = BSplineSurface::from_gw_nurb(&NurbSurface::new(net, 2, 1, u, v).unwrap());
+        let canonical = patch.canonical().unwrap();
+        assert_eq!(canonical.u_multiplicities, vec![4, 4]);
+        assert_eq!(canonical.control_points.len(), 10);
+        let fill = Fill {
+            patches: vec![patch],
+            round: Vec::new(),
+            face: Vec::new(),
+            reversed: Vec::new(),
+            degree: 2,
+        };
+        let plane = [Face::plane(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        )];
+        // the hull stands 1 past the plane, past the tolerance: the bound is taken on the net
+        let err = containment(&Kernel::default(), &fill, &plane, true, 0.5).unwrap_err();
+        assert_eq!(err, fill_not_from_split());
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+    }
+
+    /// Faces whose planes are parallel meet in no one point: a degenerate corner, with the
+    /// `SM_ERR` status the bare status had.
+    #[test]
+    fn faces_meeting_in_no_point_are_degenerate() {
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let faces = [
+            Face::plane(Point3::new(0.0, 0.0, 0.0), z),
+            Face::plane(Point3::new(0.0, 0.0, 1.0), z),
+            Face::plane(Point3::new(0.0, 0.0, 2.0), z),
+        ];
+        assert_eq!(graph::faces_common_point(&faces), None);
+        let err = corner_step(CornerStep::SetbackFacesMeetInNoPoint);
+        assert_eq!(err.kind(), crate::error::ErrorKind::Degenerate);
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+    }
+
+    /// A bilinear patch over the unit square in the plane through `c` square to z; its
+    /// `(0, 0.5)` is `c + (0, 0.5, 0)`.
+    fn flat_patch(c: Point3) -> BSplineSurface {
+        let mut pts = Vec::new();
+        for x in [0.0, 1.0] {
+            for y in [0.0, 1.0] {
+                pts.push(Point3::new(c.x + x, c.y + y, c.z));
+            }
+        }
+        BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &pts,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            uv_domain: None,
+        })
+        .unwrap()
+    }
+
+    /// A fill of three rounds whose first and third setback patches lie behind their faces
+    /// (convex) and whose second lies in front (concave): a corner of mixed convexity, so
+    /// [`containment_kept`] looks for the faces' common point. With the faces of a box corner
+    /// it has one and the saddle test runs; with three parallel planes it has none, and the
+    /// stop is the degenerate step [`CornerStep::SetbackFacesMeetInNoPoint`].
+    #[test]
+    fn a_mixed_convexity_fill_on_faces_with_no_common_point_is_a_degenerate_step() {
+        let mixed = |c: [Point3; 3]| Fill {
+            patches: (0..6).map(|m| flat_patch(c[m % 3])).collect(),
+            round: vec![0, 1, 2],
+            face: vec![0, 1, 2],
+            reversed: vec![false; 3],
+            degree: 2,
+        };
+        let k = Kernel::default();
+        let origin = Point3::new(0.0, 0.0, 0.0);
+
+        let corner = [
+            Face::plane(origin, Vec3::new(1.0, 0.0, 0.0)),
+            Face::plane(origin, Vec3::new(0.0, 1.0, 0.0)),
+            Face::plane(origin, Vec3::new(0.0, 0.0, 1.0)),
+        ];
+        let fill = mixed([
+            Point3::new(-1.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(0.0, 0.0, -1.0),
+        ]);
+        // the control: a common point exists, so the stop is not taken
+        assert!(containment_kept(&k, &fill, &corner, 1e-9).is_ok());
+
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let parallel = [
+            Face::plane(Point3::new(0.0, 0.0, 0.0), z),
+            Face::plane(Point3::new(0.0, 0.0, 1.0), z),
+            Face::plane(Point3::new(0.0, 0.0, 2.0), z),
+        ];
+        let fill = mixed([
+            Point3::new(0.0, 0.0, -1.0),
+            Point3::new(0.0, 0.0, 2.0),
+            Point3::new(0.0, 0.0, 1.0),
+        ]);
+        let err = containment_kept(&k, &fill, &parallel, 1e-9).unwrap_err();
+        assert_eq!(err, corner_step(CornerStep::SetbackFacesMeetInNoPoint));
+        assert_eq!(err.kind(), crate::error::ErrorKind::Degenerate);
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+    }
+
     /// The round of radius r along axis a of the box corner `x, y, z >= 0` over `[s, s + len]`,
     /// u along it, v across from its rail on face `(a + 1) % 3` to its rail on face
     /// `(a + 2) % 3`. Order 1: the ball's circle, the rational quadratic arc (`along` 1: linear
@@ -3254,6 +3881,30 @@ mod tests {
                     .scale;
                 for x in &mut setbacks {
                     *x *= scale;
+                }
+            } else {
+                // the G2 fill is certified convex only past the least scale of the
+                // setbacks that certifies it (about five radii, #13775): the first on
+                // this grid that does
+                for scale in [4.0f64, 5.0, 5.5, 6.0, 8.0, 12.0] {
+                    let grown: Vec<f64> = setbacks.iter().map(|&x| x * scale).collect();
+                    let probe_rounds: Vec<Surface> = (0..3)
+                        .map(|a| box_corner_round(a, r, grown[a], 10.0, order, 1, 1.0))
+                        .collect();
+                    let input: Vec<Round<'_>> = probe_rounds
+                        .iter()
+                        .zip(&grown)
+                        .map(|(surface, &end)| Round {
+                            surface,
+                            along: SurfParamType::U,
+                            end,
+                            corner_above: false,
+                        })
+                        .collect();
+                    if fill_hole(&k, &faces, &input, order, 1e-9).is_ok() {
+                        setbacks = grown;
+                        break;
+                    }
                 }
             }
             let rounds: Vec<Surface> = (0..3)
@@ -3386,6 +4037,42 @@ mod tests {
         };
         let jets = round_jets(&k, &round, 1).unwrap();
         assert!(geometric_rows(&jets.h, jets.q, 1).is_err());
+    }
+
+    /// A certified fill's definition, refilled with its own certificate, rebuilds the
+    /// fill's own patches (the certified degree is kept, not a lower one the certificate
+    /// would have skipped past, #13775).
+    #[test]
+    fn a_certified_fill_s_refill_keeps_its_degree() {
+        let k = Kernel::default();
+        let faces = box_corner_faces();
+        let r = 2.0;
+        // the least setback whose fill certifies convex (bisection, the fork's harness)
+        let setback = 10.347_656_25;
+        let rounds: Vec<Surface> = (0..3)
+            .map(|a| box_corner_round(a, r, setback, 10.0, 2, 1, 1.0))
+            .collect();
+        let input: Vec<Round<'_>> = rounds
+            .iter()
+            .zip([setback; 3])
+            .map(|(surface, end)| Round {
+                surface,
+                along: SurfParamType::U,
+                end,
+                corner_above: false,
+            })
+            .collect();
+        let fill = fill_hole(&k, &faces, &input, 2, 1e-9).unwrap();
+        assert!(!fill.patches.is_empty());
+        let definition = crate::surface::procedural_blend::corner::SetbackFill::create(
+            &k, &faces, &input, 2, 1e-9, true, 0.0, true,
+        )
+        .unwrap();
+        // the refill with the certificate the definition carries rebuilds the same patches
+        assert!(
+            definition.is_fill(&definition.refill(&k, true).unwrap(), &fill.patches),
+            "the certified refill must keep the fill's own degree"
+        );
     }
 
     #[test]

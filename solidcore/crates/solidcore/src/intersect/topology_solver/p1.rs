@@ -107,7 +107,8 @@ use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::p9::CurveSolveOptions;
-use crate::error::{Result, SolidError};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::{Extent3d, LineHit};
@@ -151,6 +152,12 @@ const OP_FACE_SIL: &str = "intersect::topology_solver::p1::face_silhouettes";
 /// Error for a pointer upstream would dereference while null.
 const fn null_deref(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
+}
+
+/// Error for a null object a solve checks for (upstream's `NER`, `SM_ERR_NULL_POINTER`):
+/// a null object of the caller's trees, or a null handle the caller passed.
+pub(super) fn no_object(operation: &'static str) -> SolidError {
+    SolidError::intersect(operation, IntersectFailure::NoObjectToSolve)
 }
 
 /// The objects a topology solve works on, as seen through their handles: the
@@ -210,10 +217,12 @@ pub trait TopologyObjects<O> {
     fn brep_trees(&self, brep: O) -> Result<super::p2::TopologyTrees<'_, O>> {
         const OP: &str = "intersect::topology_solver::p1::TopologyObjects::brep_trees";
         let cache = self.brep_cache(brep)?;
+        // the caller's cache has no trees until its `build_trees` runs
+        let not_built = || SolidError::intersect(OP, IntersectFailure::NotSetUp);
         Ok(super::p2::TopologyTrees {
-            vertices: cache.vertex_tree().ok_or(SolidError::null_pointer(OP))?,
-            curves: cache.curve_tree().ok_or(SolidError::null_pointer(OP))?,
-            surfaces: cache.surface_tree().ok_or(SolidError::null_pointer(OP))?,
+            vertices: cache.vertex_tree().ok_or_else(not_built)?,
+            curves: cache.curve_tree().ok_or_else(not_built)?,
+            surfaces: cache.surface_tree().ok_or_else(not_built)?,
         })
     }
 
@@ -234,9 +243,12 @@ pub trait TopologyObjects<O> {
         let object = self.shape_member_object(member)?;
         match member {
             ShapeMember::Vertex(_) => Ok(object),
-            ShapeMember::Edge(_) => self.edge_curve(object)?.ok_or(SolidError::null_pointer(
-                "intersect::topology_solver::p2::shape_geometry_object",
-            )),
+            ShapeMember::Edge(_) => self.edge_curve(object)?.ok_or_else(|| {
+                SolidError::intersect(
+                    "intersect::topology_solver::p2::shape_geometry_object",
+                    IntersectFailure::EdgeWithoutCurve,
+                )
+            }),
             ShapeMember::Face(_) => self.face_surface(object),
             ShapeMember::Other => Err(SolidError::invalid_input(
                 "intersect::topology_solver::p2::shape_geometry_object",
@@ -292,6 +304,18 @@ pub trait TopologyObjects<O> {
     /// adapter cannot resolve: a gap in the caller's adapter, which the caller reports.
     fn face_entity(&self, face: O) -> Option<(&crate::topology::Brep, crate::topology::FaceId)> {
         let _ = face;
+        None
+    }
+
+    /// Optional live lend of the B-rep and face record a face handle names, for the face
+    /// members whose lazy queries edit the B-rep as upstream's do (`SmFace::CurveOnClassify`
+    /// makes UV trim curves): `f` runs on the adapter's own B-rep, mutably. `None` (the
+    /// default) leaves the caller to [`TopologyObjects::face_entity`].
+    fn with_face_entity_mut(
+        &self,
+        _face: O,
+        _f: &mut dyn FnMut(&mut crate::topology::Brep, crate::topology::FaceId) -> Result<()>,
+    ) -> Option<Result<()>> {
         None
     }
 
@@ -1059,9 +1083,9 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         object2: Option<O>,
     ) -> Result<()> {
         match self.kind {
-            LocalSolverKind::Base | LocalSolverKind::Point | LocalSolverKind::Curve => {
-                Err(SolidError::sm_err(OP_BASE))
-            }
+            LocalSolverKind::Base | LocalSolverKind::Point | LocalSolverKind::Curve => Err(
+                SolidError::intersect(OP_BASE, IntersectFailure::AbstractLocalSolver),
+            ),
             LocalSolverKind::PointVertex => self.solve_point_vertex(ts, object1, object2),
             LocalSolverKind::VertexVertex => self.solve_vertex_vertex(ts, object1, object2),
             LocalSolverKind::PointCurve => self.solve_point_curve(k, ts, object1, object2),
@@ -1113,14 +1137,14 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         let mut count = 0;
         let vertex;
         if self.swap_order {
-            vertex = object1.ok_or(SolidError::null_pointer(OP_PV))?;
+            vertex = object1.ok_or_else(|| no_object(OP_PV))?;
             push_object(&mut sol.objects, &mut count, Some(vertex));
             if self.point_vertex.is_some() {
                 // If the point represents a vertex then save it in list
                 push_object(&mut sol.objects, &mut count, self.point_vertex);
             }
         } else {
-            vertex = object2.ok_or(SolidError::null_pointer(OP_PV))?;
+            vertex = object2.ok_or_else(|| no_object(OP_PV))?;
             if self.point_vertex.is_some() {
                 // If the point represents a vertex then save it in list
                 push_object(&mut sol.objects, &mut count, self.point_vertex);
@@ -1518,14 +1542,14 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         // we want we can switch the order.
         let surface;
         if self.swap_order {
-            surface = object1.ok_or(SolidError::null_pointer(OP_PF))?;
+            surface = object1.ok_or_else(|| no_object(OP_PF))?;
             push_object(&mut sol_objects, &mut count, Some(surface));
             if self.point_vertex.is_some() {
                 // If the point represents a vertex then save it in list
                 push_object(&mut sol_objects, &mut count, self.point_vertex);
             }
         } else {
-            surface = object2.ok_or(SolidError::null_pointer(OP_PF))?;
+            surface = object2.ok_or_else(|| no_object(OP_PF))?;
             if self.point_vertex.is_some() {
                 // If the point represents a vertex then save it in list
                 push_object(&mut sol_objects, &mut count, self.point_vertex);
@@ -1804,7 +1828,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
     ) -> Result<()> {
         let objects = ts.objects;
         let handle = if self.swap_order { object1 } else { object2 };
-        let handle = handle.ok_or(SolidError::null_pointer(OP_CE))?;
+        let handle = handle.ok_or_else(|| no_object(OP_CE))?;
 
         // Remove Composites - replaced Edge array with single curve Edge
         let edge = objects.curve_edge(handle)?;
@@ -2100,7 +2124,8 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
 /// `CreateCurvesByTrimming` leaves on it; an adapter that resolves none returns
 /// [`SolidError::Unported`] for `SmFace::CreateCurvesByTrimming`. A trimmed UV curve
 /// that is not a B-spline (upstream caches it as NULL and `GetCopyOfCurves` fails
-/// on it) is `SM_ERR_NULL_POINTER`.
+/// on it) is a reviewed `Defect` that keeps upstream's `SM_ERR_NULL_POINTER`: the
+/// kernel builds every silhouette UV curve it trims as a B-spline.
 pub(super) fn face_silhouettes<O: SolutionObject>(
     k: &Kernel,
     objects: &dyn TopologyObjects<O>,
@@ -2202,7 +2227,17 @@ fn face_silhouettes_at_tolerance<O: SolutionObject>(
         .unwrap_or_default()
         .into_iter()
         .collect::<Option<Vec<Curve>>>()
-        .ok_or(SolidError::null_pointer(OP_FACE_SIL))?;
+        .ok_or_else(|| {
+            Failure::new(
+                OP_FACE_SIL,
+                IntersectFailure::Defect {
+                    why: "trimming the face's silhouettes left a piece with no B-spline UV \
+                          curve, though the kernel built every silhouette UV curve it trims",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
 
     // Register trimmed curves and create copy by getting them again
     cache.add_curves_to_cache(
@@ -2227,7 +2262,13 @@ fn face_silhouettes_at_tolerance<O: SolutionObject>(
             copies.curves_3d.unwrap_or_default(),
             copies.curves_uv.unwrap_or_default(),
         )),
-        None => Err(SolidError::sm_err(OP_FACE_SIL)),
+        None => Err(SolidError::intersect(
+            OP_FACE_SIL,
+            IntersectFailure::Defect {
+                why: "the trimmed silhouettes are not in the face's cache, though they were \
+                      just added under the same tolerances and key",
+            },
+        )),
     }
 }
 
@@ -2446,6 +2487,7 @@ pub(super) fn face_point_classify<O: Copy>(
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::PreparationRequired { .. }),
@@ -2500,7 +2542,11 @@ fn face_classifies_on_face<O: Copy>(
             Point3dClassifyOptions::default(),
         ) {
             Ok(()) => Ok(true),
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => Err(e),
             Err(_) => Ok(false),
         }
     };
@@ -2892,15 +2938,23 @@ pub(crate) mod tests {
             &[],
         );
         let mut ls = LocalSolver::new(LocalSolverKind::Curve, false, None);
-        assert!(ls.solve_it(&k, &mut ts, None, None).is_err());
+        let e = ls.solve_it(&k, &mut ts, None, None).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e}");
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::AbstractLocalSolver),
+            "{e}"
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported, "{e}");
         let mut ls = LocalSolver::new(LocalSolverKind::FaceFace, false, None);
-        assert!(matches!(
-            ls.solve_it(&k, &mut ts, None, None),
-            Err(SolidError::Upstream {
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let e = ls.solve_it(&k, &mut ts, None, None).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{e}");
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::NoObjectToSolve),
+            "{e}"
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e}");
     }
 
     #[test]

@@ -236,7 +236,9 @@ fn operation_output(items: &[Item], i: &Inputs) -> Result<Output, HarnessError> 
 /// Upstream status of a Rust error: the guard's `-2` for `InvalidInput`.
 fn status(e: &SolidError) -> i64 {
     match e {
-        SolidError::Upstream { code, .. } => i64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            i64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => -2,
         _ => -1,
     }
@@ -417,7 +419,7 @@ type Dump = Result<Vec<Item>, SolidError>;
 fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
     let path = path_of(i)?;
     let bytes = std::fs::read(&path).map_err(|e| harness(format!("{path}: {e}")))?;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut data = match BrepData::read_from_file(&k, bytes, FileType::Ascii) {
         Ok(d) => d,
         Err(e @ SolidError::Unported { .. }) => return Ok(Err(e)),
@@ -446,8 +448,12 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
         always_heal,
         healer_enabled,
     };
+    crate::refit::before_topology(&k, &mut data, add_analytics);
     match make_topology_from_data(&mut k, &mut b, &mut data, &mut env, options) {
-        Ok(()) => out.push(Item::Int(0)),
+        Ok(()) => {
+            crate::tolsub::after_read(&mut b);
+            out.push(Item::Int(0));
+        }
         Err(e @ SolidError::Unported { .. }) => return Ok(Err(e)),
         Err(e) => {
             out.push(Item::Int(status(&e)));
@@ -633,6 +639,7 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
                     Vec::new()
                 }
             };
+            crate::trim_hook::observe(&mut b);
             let g2 = Graph::walk(&b).map_err(|e| harness(e.to_string()))?;
             out.push(Item::Int(faces.len() as i64));
             for f in faces {
@@ -919,7 +926,7 @@ impl Out<'_> {
         self.d(ivl.max());
         for k in 0..=4 {
             let t = ivl.min() + 0.25 * f64::from(k) * (ivl.max() - ivl.min());
-            self.point(c.evaluate_point(&Kernel::default(), t));
+            self.point(c.evaluate_point(&crate::runner_kernel(), t));
         }
         let matches = c.owner().is_some_and(|actual| {
             actual == (self.key_of)(owner)
@@ -976,6 +983,8 @@ fn export_with_identity(
     uv_owner_matches: Option<&dyn Fn(EdgeuseId, ObjectRef) -> bool>,
     o: &mut Vec<Item>,
 ) -> Result<(), SolidError> {
+    #[cfg(test)]
+    crate::certify::written(b);
     let mut w = Out {
         o,
         records,

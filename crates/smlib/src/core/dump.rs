@@ -9,8 +9,13 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
+use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::Kernel;
-use solidcore::topology::Brep;
+use solidcore::topology::brep_data_write::FromBrepEnv;
+use solidcore::topology::topology::NotifyRecords;
+use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId};
+
+use super::convert::key_of;
 
 use super::Body;
 use crate::{Error, Result};
@@ -36,7 +41,24 @@ pub(crate) fn set_dir(dir: Option<PathBuf>) {
 fn serialise(k: &Kernel, b: &Brep) -> std::result::Result<Vec<u8>, String> {
     #[cfg(test)]
     SERIALISED.with(|n| n.set(n.get() + 1));
-    super::file::bytes(k, b, false).map_err(|e| e.to_string())
+    bytes(k, b).map_err(|e| e.to_string())
+}
+
+/// `b` as the contents of a binary `.smb` file, the bytes [`solidcore_ops::Body::to_smb`] writes.
+/// Kept on the kernel the failed call ran on, with the session: a body a panic left unfinished is
+/// still written, where solidcore-ops refuses to read it.
+fn bytes(k: &Kernel, b: &Brep) -> solidcore::Result<Vec<u8>> {
+    let store = AttributeStore::default();
+    let records = NotifyRecords::new();
+    let env = FromBrepEnv {
+        attributes: &store,
+        key_of: &key_of,
+        records: &records,
+        curve_key: &|_: EdgeId| ObjectKey(0),
+        uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
+        surface_key: &|_: FaceId| ObjectKey(0),
+    };
+    solidcore::topology::api_files::write_brep_to_file(k, Some(b), &env, false)
 }
 
 fn safe(call: &str) -> String {
@@ -46,12 +68,39 @@ fn safe(call: &str) -> String {
 /// The running call failed: its `inputs` go to the folder, as they are now (a call that edits a
 /// body in place, a query's caches, leaves it edited). Failing to write them fails nothing else.
 pub(super) fn failed(k: &Kernel, call: &str, why: &str, inputs: Inputs<'_>) {
+    if DIR.lock().unwrap_or_else(PoisonError::into_inner).is_none() {
+        return;
+    }
+    let inputs: Vec<_> = inputs.iter().map(|&(what, body)| (what, serialise(k, &body.kernel()))).collect();
+    written(call, why, &inputs);
+}
+
+/// A solidcore-ops call failed ([`super::call::ops_on`]): its `inputs`, the caller's own bodies
+/// (the call was handed copies where it consumes its operands), go to the folder as they are.
+/// They are serialised only now, so a call that answers costs nothing more than with no folder.
+pub(super) fn failed_ops(call: &str, why: &str, inputs: Inputs<'_>) {
+    if DIR.lock().unwrap_or_else(PoisonError::into_inner).is_none() {
+        return;
+    }
+    let inputs: Vec<_> = inputs
+        .iter()
+        .map(|&(what, body)| {
+            #[cfg(test)]
+            SERIALISED.with(|n| n.set(n.get() + 1));
+            (what, body.to_smb(false).map_err(|e| e.to_string()))
+        })
+        .collect();
+    written(call, why, &inputs);
+}
+
+/// A failed call's inputs, each already a binary `.smb` (or why it could not be written), go to
+/// the folder.
+fn written(call: &str, why: &str, inputs: &[(&'static str, std::result::Result<Vec<u8>, String>)]) {
     let Some(dir) = DIR.lock().unwrap_or_else(PoisonError::into_inner).clone() else { return };
     let n = SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let stem = format!("{n:06}-{}", safe(call));
     let mut text = format!("{call} -> {why}\nnumeric arguments are not recorded\n");
-    for &(what, body) in inputs {
-        let bytes = serialise(k, &body.0.lock().unwrap_or_else(PoisonError::into_inner));
+    for (what, bytes) in inputs {
         match bytes {
             Ok(b) => {
                 let name = format!("{stem}-{what}.smb");
@@ -103,6 +152,13 @@ plain!(
 );
 
 impl<T> Answer for Option<T> {}
+
+/// Points classified one by one ([`super::classify_points`]): the first point's refusal is the call's.
+impl Answer for Vec<Result<crate::PointClass>> {
+    fn refusal(&self) -> Option<String> {
+        self.iter().find_map(|r| r.as_ref().err().map(Error::to_string))
+    }
+}
 
 /// The calls running now, in the order they started.
 static IN_FLIGHT: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());

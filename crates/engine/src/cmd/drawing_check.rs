@@ -1,0 +1,306 @@
+//! `drawing.check` (#13054): what makes the open drawing wrong or incomplete, as data that a person
+//! or a script acts on. Each finding comes from the rule that already says it: each sheet as an
+//! export reads it ([`crate::drawing_scene::as_shown`]), each view's place there ([`crate::drawing_view::Room`]),
+//! the balloons' and notes' references as the model has them now, the title blocks' text as the
+//! sheet shows it ([`title_block_text::shown`]), and each parts list's balloon counts as
+//! `drawing.inspect` gives them. Beside the findings, each feature's coverage: whether a dimension
+//! or note points at a face it made, by the saved names ([`Timeline::covers`]), and whether a view
+//! draws one. Nothing is changed.
+
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use serde_json::Value;
+use solidcore_record::Vec2;
+use solidcraft_doc::bom::Tree;
+use solidcraft_doc::drawing::Drawing;
+use solidcraft_doc::drawing::coverage;
+use solidcraft_doc::drawing::dimension::Status;
+use solidcraft_doc::{ModelState, ids};
+use solidcraft_geom::paper::{Item, ObjectKind};
+use solidcraft_geom::{Aabb2, EPS};
+
+use super::CommandSpec;
+use crate::drawing_scene::{SheetScene, Status as ViewStatus, ViewState};
+use crate::drawing_view::Room;
+use crate::params::bad;
+use crate::schema::drawing_check::{
+    CheckParams, CheckResult, CheckedKind, CheckedObject, Coverage, CoverageState, Finding, FindingKind, KindCount, StateCount,
+};
+use crate::schema::{TypedContract, output_schema_for};
+use crate::title_block_text;
+use crate::{EngineError, Result, Session};
+
+const CHECK: &str = "drawing.check";
+const CONTRACT: TypedContract<CheckParams> = TypedContract::new();
+
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CHECK, "Check Drawing", crate::checked!("drawing.check", check))
+    .icon("inspect")
+    .in_drawing()
+    .noundo()
+    .doc_only()
+    .contract(&CONTRACT)
+    .output(output_schema_for::<CheckResult>)
+    .params("sheet?: id or name (default: every sheet) → {sheet?, findings: [{kind, sheet, object: {kind: view|sketch|fill|dimension|centre_line|centre_mark|balloon|note|table|image|title_block|view_label|revision_tag, id}, cell?, field?, item?, why}], counts: [{kind, count}], coverage: [{feature, name, state, by?: [{kind: dimension|note, id}], why?}], coverage_counts: [{state, count}]}: what makes the drawing wrong or incomplete, in sheet order, then by the record each names. kind is one of a closed list: lost, ambiguous, unmeasurable, suppressed, failed (a dimension, balloon or note whose reference isn't found as one thing, can't be measured, or depends on a suppressed or failed feature; failed is also a view or centre annotation that can't be drawn), overridden (a dimension whose text is typed over its value, or a title block cell whose typed text hides a value), out_of_date (a view, a dimension, balloon or note on a view, or a sketch or fill on the sheet, that a deferred drawing shows as it last was), nothing_shown (a view with nothing to measure), empty_field (a title block field with no value, as source.key; a revision field only once the drawing has a revision row; a cell whose typed text fills it is none), not_ballooned (a row of a parts list on the sheet that no balloon points at, by item), outside_sheet (a view outside its sheet's drawing space or over its title block; a dimension, centre annotation, balloon, image or table off the paper). coverage lists each feature of the design in timeline order, apart from the findings: covered (a dimension or note points at a face it made: an edge covers the latest feature among the faces it separates, a corner the latest among its edges' faces, a pattern's copy the pattern; by lists them), not_covered (a view draws a face it made, named from exact history, and nothing points at it), unknown (the faces a view draws of it aren't named from exact history), not_applicable (it is suppressed or rolled back, only reference parts draw it, or no view draws a face it made: a sketch, a plane). Coverage says a dimension or a note points at a feature, not that it is fully dimensioned. With sheet, the findings and the coverage are of that sheet only, and sheet echoes its id. The sheet is read as an export reads it: a deferred drawing is checked as it shows the model, with what it shows as it last was listed. Read-only: nothing is drawn or saved, and the same drawing always gives the same answer.")];
+
+fn check(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: CheckParams = crate::schema::read(CHECK, p)?;
+    let d = s.drawing(CHECK)?.clone();
+    let sheets: Vec<u64> = match &request.sheet {
+        Some(named) => vec![crate::drawing_scene::sheet_id(&d, named, CHECK)?],
+        None => d.sheets.iter().map(|sheet| sheet.id).collect(),
+    };
+    // Each sheet read once, as it shows the model: for its findings, for what its views draw, and for
+    // what a held sheet shows as it last was, which is out of date and nothing more until Update.
+    let mut findings = Vec::new();
+    let (mut drawn, mut seen, mut held) = (coverage::Drawn::default(), Vec::new(), HashSet::new());
+    for &sheet in &sheets {
+        let shown = crate::drawing_scene::as_shown(s, &d, sheet)?;
+        add_drawn(&mut drawn, &mut seen, &shown);
+        held.extend(shown.out_of_date.iter().copied());
+        findings.extend(on_sheet(&d, sheet, shown)?);
+    }
+    findings.extend(references(s, &d, &sheets, &held)?);
+    findings.extend(fields_and_rows(s, &d, &sheets));
+    // In sheet order, then by the record each names: ids decode, as every finding's came from one.
+    let at = |id: &str| ids::decode(id).and_then(|id| d.sheets.iter().position(|sheet| sheet.id == id));
+    let key = |f: &Finding| (at(&f.sheet), ids::decode(&f.object.id), f.kind, f.cell.clone(), f.field.clone(), f.item.clone());
+    findings.sort_by_cached_key(key);
+    let counts = FindingKind::ALL
+        .iter()
+        .copied()
+        .map(|kind| KindCount { kind, count: findings.iter().filter(|f| f.kind == kind).count() })
+        .filter(|count| count.count > 0)
+        .collect();
+    let coverage = feature_coverage(s, &d, &sheets, &drawn);
+    let coverage_counts = CoverageState::ALL
+        .into_iter()
+        .map(|state| StateCount { state, count: coverage.iter().filter(|c| c.state == state).count() })
+        .filter(|count| count.count > 0)
+        .collect();
+    let sheet = request.sheet.as_ref().and(sheets.first()).map(|&id| ids::encode(id));
+    let result = CheckResult { sheet, findings, counts, coverage, coverage_counts, param_warnings: Vec::new() };
+    serde_json::to_value(result).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn finding(kind: FindingKind, sheet: u64, object: CheckedObject, why: String) -> Finding {
+    Finding { kind, sheet: ids::encode(sheet), object, cell: None, field: None, item: None, why }
+}
+
+fn object(kind: CheckedKind, id: u64) -> CheckedObject {
+    CheckedObject { kind, id: ids::encode(id) }
+}
+
+/// What sheet `sheet` shows (`shown`): its views that draw nothing, its dimensions that don't stand
+/// with the model, what it shows as it last was, and what lies outside it.
+fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> {
+    let mut out: Vec<Finding> = shown.views.iter().filter_map(|view| view_finding(sheet, view)).collect();
+    let dimensions =
+        shown.dimensions.into_iter().filter_map(|state| status_finding(sheet, object(CheckedKind::Dimension, state.dimension), state.status));
+    out.extend(dimensions);
+    // These failures belong to the accepted sheet, including a deferred sheet's held frame.
+    // Keep the annotation's own kind and reason instead of attributing it to the view.
+    out.extend(shown.annotation_failures.into_iter().filter_map(|failure| {
+        let kind = match failure.kind {
+            ObjectKind::CentreLine => CheckedKind::CentreLine,
+            ObjectKind::CentreMark => CheckedKind::CentreMark,
+            _ => return None,
+        };
+        Some(finding(FindingKind::Failed, sheet, object(kind, failure.object), failure.reason))
+    }));
+    // Out of date as a deferred drawing shows it as it last was, by the kind the scene listed it as.
+    let last = "the sheet shows it as it last was: drawing.update draws it from the model as it is now";
+    for (id, kind) in shown.out_of_date {
+        if let Some(kind) = checked_kind(kind) {
+            out.push(finding(FindingKind::OutOfDate, sheet, object(kind, id), last.into()));
+        }
+    }
+    // A view belongs where its sheet's Room says, by its boundary as the sheet shows it. Anything
+    // else is held to the paper, whose box is display data, as the scene's boxes are: it decides
+    // nothing in the model.
+    let record = crate::drawing_view::sheet(d, sheet, CHECK)?;
+    let room = Room::on(record, CHECK)?;
+    let size = record.sheet.size_mm().map_err(|e| bad(CHECK, e.to_string()))?;
+    let paper = Aabb2 { min: Vec2::ZERO, max: size }.inflated(EPS);
+    let off = |bounds: Aabb2| !(paper.contains(bounds.min) && paper.contains(bounds.max));
+    let off_paper = |kind, id| finding(FindingKind::OutsideSheet, sheet, object(kind, id), "it lies off the paper".into());
+    for placed in &shown.objects {
+        if placed.kind == ObjectKind::View {
+            if placed.boundary_mm.is_some_and(|boundary| !room.holds(&boundary)) {
+                let why = "it lies outside its sheet's drawing space or over its title block".into();
+                out.push(finding(FindingKind::OutsideSheet, sheet, object(CheckedKind::View, placed.object), why));
+            }
+            continue;
+        }
+        if let Some(kind) = checked_kind(placed.kind)
+            && off(placed.bounds_mm)
+        {
+            out.push(off_paper(kind, placed.object));
+        }
+    }
+    // Each image's box is the picture the sheet paints for it.
+    for group in crate::drawing_pictures::groups(d, sheet) {
+        if group.items.iter().any(|item| matches!(item, Item::Picture(picture) if off(picture.rect))) {
+            out.push(off_paper(CheckedKind::Image, group.object));
+        }
+    }
+    Ok(out)
+}
+
+/// How a finding names a sheet object of `kind`: the one map for every finding on the objects a sheet
+/// lists, so a kind added to the sheet is a compile error here, not a refusal at run time. None for
+/// what is painted with the sheet's border (the border, the title block and the images on it), which
+/// a finding names by its sheet or reads on its own.
+fn checked_kind(kind: ObjectKind) -> Option<CheckedKind> {
+    match kind {
+        ObjectKind::View => Some(CheckedKind::View),
+        ObjectKind::Dimension => Some(CheckedKind::Dimension),
+        ObjectKind::CentreLine => Some(CheckedKind::CentreLine),
+        ObjectKind::CentreMark => Some(CheckedKind::CentreMark),
+        ObjectKind::Sketch => Some(CheckedKind::Sketch),
+        ObjectKind::Fill => Some(CheckedKind::Fill),
+        ObjectKind::Note => Some(CheckedKind::Note),
+        ObjectKind::ViewLabel => Some(CheckedKind::ViewLabel),
+        ObjectKind::Balloon => Some(CheckedKind::Balloon),
+        ObjectKind::RevisionTag => Some(CheckedKind::RevisionTag),
+        ObjectKind::PartsList | ObjectKind::RevisionTable => Some(CheckedKind::Table),
+        // Images are painted with the border and aren't among the objects: read on their own.
+        ObjectKind::SheetImage | ObjectKind::SheetBorder | ObjectKind::DrawingBorder | ObjectKind::TitleBlock => None,
+    }
+}
+
+/// A view's finding: one that draws nothing, with why.
+fn view_finding(sheet: u64, view: &ViewState) -> Option<Finding> {
+    let kind = match view.status {
+        ViewStatus::Drawn => return None,
+        ViewStatus::Placeholder(_) => FindingKind::NothingShown,
+        ViewStatus::Failed(_) => FindingKind::Failed,
+    };
+    Some(finding(kind, sheet, object(CheckedKind::View, view.view), view.status.reason().unwrap_or_default()))
+}
+
+/// A reference's finding, by where it stands with the model: none when it is found and measured.
+fn status_finding(sheet: u64, object: CheckedObject, status: Status) -> Option<Finding> {
+    let (kind, why) = match status {
+        Status::Ok => return None,
+        Status::Overridden => (FindingKind::Overridden, "its text is typed over its measured value".into()),
+        Status::Ambiguous(_) => (FindingKind::Ambiguous, "its reference finds more than one thing, and none is chosen".into()),
+        Status::Suppressed => (FindingKind::Suppressed, "a feature it depends on is suppressed or rolled back".into()),
+        Status::Failed(why) => (FindingKind::Failed, why),
+        Status::Lost(why, _) => (FindingKind::Lost, why),
+        Status::Unmeasurable(why) => (FindingKind::Unmeasurable, why),
+    };
+    Some(finding(kind, sheet, object, why))
+}
+
+/// The balloons and notes in views on `sheets` whose references don't stand with the model: one
+/// read of each kind for each state of the assembly the views draw, each body's names worked out
+/// once per state. A note on a sheet reads no model, so it is never read here, and nor is what a
+/// held sheet lists out of date (`held`, by id and kind): the sheet shows it as it last was.
+fn references(s: &Session, d: &Drawing, sheets: &[u64], held: &HashSet<(u64, ObjectKind)>) -> Result<Vec<Finding>> {
+    let on = |view: u64| d.view(view).map(|v| v.sheet).filter(|sheet| sheets.contains(sheet));
+    let read = |id: u64, kind: ObjectKind| !held.contains(&(id, kind));
+    let balloons = d.balloons.iter().filter(|b| read(b.id, ObjectKind::Balloon));
+    let balloons: Vec<(u64, u64, u64)> = balloons.filter_map(|b| Some((b.id, b.view, on(b.view)?))).collect();
+    let notes = d.notes.iter().filter(|n| read(n.id, ObjectKind::Note));
+    let notes: Vec<(u64, u64, u64)> = notes.filter_map(|n| Some((n.id, n.anchor.view()?, on(n.anchor.view()?)?))).collect();
+    let wanted = |records: &[(u64, u64, u64)]| records.iter().map(|(id, view, _)| (*id, *view)).collect::<Vec<_>>();
+    // Each on the session its view draws from (#13048), as the sheet reads its dimensions.
+    let mut sessions = crate::drawing_view::ViewSessions::new(s);
+    let read_balloons = sessions.read_on(d, &wanted(&balloons), solidcraft_doc::Document::resolve_balloons).map_err(|e| bad(CHECK, e.to_string()))?;
+    let read_notes = sessions.read_on(d, &wanted(&notes), solidcraft_doc::Document::resolve_notes).map_err(|e| bad(CHECK, e.to_string()))?;
+    let balloons = balloons.iter().zip(read_balloons).map(|((id, _, sheet), r)| (*sheet, object(CheckedKind::Balloon, *id), r.status));
+    let mut out: Vec<Finding> = balloons.filter_map(|(sheet, object, status)| status_finding(sheet, object, status)).collect();
+    // A note's anchor stands as a reference does; each branch that doesn't is a finding of its own, by
+    // its number, as a lost branch loses only itself.
+    for ((id, _, sheet), r) in notes.iter().zip(read_notes) {
+        out.extend(status_finding(*sheet, object(CheckedKind::Note, *id), r.anchor.status));
+        for (n, end) in (1..).zip(r.branches) {
+            let branch = status_finding(*sheet, object(CheckedKind::Note, *id), end.status);
+            out.extend(branch.map(|f| Finding { why: format!("branch {n}: {}", f.why), ..f }));
+        }
+    }
+    Ok(out)
+}
+
+/// The title block fields on `sheets` with no value, the cells whose typed text hides one, and the
+/// rows of their parts lists that no balloon points at: one tree for the drawing, so each
+/// component is weighed and listed once.
+fn fields_and_rows(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Finding> {
+    let state = s.model.state();
+    let mut tree = Tree::new(&s.doc, &state);
+    let mut out = Vec::new();
+    for (at, sheet) in d.sheets.iter().enumerate().filter(|(_, sheet)| sheets.contains(&sheet.id)) {
+        title_block_text::shown_with(s, &mut tree, d, at, |cell, content, values| {
+            let block = object(CheckedKind::TitleBlock, sheet.id);
+            match cell.replaced {
+                // Typed text over an empty value fills the cell: nothing is hidden.
+                Some(hidden) if !hidden.is_empty() => {
+                    let why = format!("its typed text \"{}\" hides its value \"{hidden}\"", cell.text);
+                    out.push(Finding { cell: Some(cell.name), ..finding(FindingKind::Overridden, sheet.id, block, why) });
+                }
+                Some(_) => {}
+                // Read only here: the sheet itself never needs them.
+                None => out.extend(values.empty_fields(content).into_iter().map(|field| {
+                    let why = format!("{field} has no value");
+                    Finding { cell: Some(cell.name.clone()), field: Some(field), ..finding(FindingKind::EmptyField, sheet.id, block.clone(), why) }
+                })),
+            }
+        });
+    }
+    // A parts list that can't be made has no rows to count.
+    for (table, rows) in super::drawing::ballooned(s, d, &mut tree) {
+        let Some(sheet) = d.tables.by_id(table).map(|t| t.sheet).filter(|sheet| sheets.contains(sheet)) else { continue };
+        for (item, _) in rows.into_iter().flatten().filter(|(_, balloons)| *balloons == 0) {
+            let why = format!("no balloon points at row {item}");
+            out.push(Finding { item: Some(item), ..finding(FindingKind::NotBallooned, sheet, object(CheckedKind::Table, table), why) });
+        }
+    }
+    out
+}
+
+/// Each feature of the design, in timeline order, and whether the dimensions and notes on `sheets`
+/// point at a face it made ([`coverage::of`]), with what the views on them draw (`drawn`).
+fn feature_coverage(s: &Session, d: &Drawing, sheets: &[u64], drawn: &coverage::Drawn) -> Vec<Coverage> {
+    let on = |view: u64| d.view(view).is_some_and(|v| sheets.contains(&v.sheet));
+    let dimensions = d.dimensions.iter().filter(|dim| on(dim.view));
+    let dimensions = dimensions.map(|dim| (object(CheckedKind::Dimension, dim.id), dim.kind.references()));
+    let notes = d.notes.iter().filter(|n| n.anchor.view().is_some_and(on));
+    let notes = notes.map(|n| (object(CheckedKind::Note, n.id), n.references().collect()));
+    let state = |state: coverage::State| match state {
+        coverage::State::Covered => CoverageState::Covered,
+        coverage::State::NotCovered => CoverageState::NotCovered,
+        coverage::State::Unknown => CoverageState::Unknown,
+        coverage::State::NotApplicable => CoverageState::NotApplicable,
+    };
+    let features = coverage::of(&s.doc, dimensions.chain(notes), drawn).into_iter();
+    features.map(|f| Coverage { feature: f.feature, name: f.name, state: state(f.state), by: f.by, why: f.why.map(str::to_string) }).collect()
+}
+
+/// What the views in `shown` draw, as the sheet shows it, each body once however many views and
+/// sheets draw it ([`first_read`]). A view that draws no lines draws nothing here; its finding says
+/// why.
+fn add_drawn(drawn: &mut coverage::Drawn, seen: &mut Vec<(Arc<ModelState>, HashSet<usize>)>, shown: &SheetScene) {
+    for (state, shown) in shown.bodies_drawn() {
+        if first_read(seen, state, shown.index)
+            && let Some(body) = state.bodies.get(shown.index)
+        {
+            drawn.body(body, shown.reference);
+        }
+    }
+}
+
+/// Whether body `index` of `state` is read for the first time, by the bodies `seen` read of each
+/// world state. A state is told by its identity, so each is held here: none freed while it is
+/// compared can lend its address to another. What is read never depends on this, only how often.
+fn first_read(seen: &mut Vec<(Arc<ModelState>, HashSet<usize>)>, state: &Arc<ModelState>, index: usize) -> bool {
+    let at = seen.iter().position(|(held, _)| Arc::ptr_eq(held, state)).unwrap_or_else(|| {
+        seen.push((state.clone(), HashSet::new()));
+        seen.len() - 1
+    });
+    seen.get_mut(at).is_some_and(|(_, read)| read.insert(index))
+}
+
+#[cfg(test)]
+#[path = "drawing_check_tests.rs"]
+mod tests;

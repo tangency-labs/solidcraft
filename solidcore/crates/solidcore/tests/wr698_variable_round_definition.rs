@@ -1,5 +1,5 @@
-//! WR-698 (smlib#79 step 7, the fork's 0d43b4c and b8e3594): with
-//! `fixes.fillet_round_as_definition` a variable round between NURBS faces is its definition: the order-1 section's `Build` takes the
+//! WR-698 (smlib#79 step 7, the fork's 0d43b4c and b8e3594):
+//! a variable round between NURBS faces is its definition: the order-1 section's `Build` takes the
 //! variable radius solver's law (`GnLawRound`), its stations the solver's own, its arcs the
 //! circles the balls' envelope touches each ball along, certified span by span with the
 //! law in the certificate; the rails and the centre line then run over the edge's t.
@@ -20,6 +20,7 @@ use solidcore::blend::fillet_executive::p1::FilletLaw;
 use solidcore::blend::fillet_section::section::{ArcSection, GnLawRound, GnSectionFsg};
 use solidcore::blend::fillet_solver::p1::{FilletSolverType, FilletSurfaceGenerator};
 use solidcore::blend::fillet_standard_solver::p2::{law_in_parameter, CircleBall, LawBall};
+use solidcore::error::{blend::BlendFailure, Reason, Result};
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::vector3d::Point3;
 use solidcore::intersect::surface_intersector::p1::TsectPnt;
@@ -36,10 +37,8 @@ const TOL: f64 = 1e-3;
 /// The law's x control values (degree 2 over [0, L]).
 const LAW: [f64; 3] = [1.0, 2.5, 1.5];
 
-fn kernel(definition: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = definition;
-    k
+fn kernel() -> Kernel {
+    Kernel::default()
 }
 
 /// r(t) and r'(t), the quadratic Bezier law.
@@ -162,40 +161,41 @@ struct Round {
 }
 
 /// `Build` with the law, as the circle generator calls it.
-fn build(k: &Kernel) -> Round {
+fn build_with_law(k: &Kernel, law: &BSplineCurve, pts: &[TsectPnt]) -> Result<Round> {
     let [mut r1, mut r2, mut w1, mut w2, mut c] = inputs();
     let (a, b) = (plane_y0(), plane_z0());
-    let (lead, law) = (leader(), law_curve());
-    let pts = points();
+    let lead = leader();
     let mut g = GnSectionFsg::circle(ArcSection {
         approximate_arcs: false,
         ..ArcSection::default()
     });
     let lr = GnLawRound {
         leader: &lead,
-        law: &law,
-        points: &pts,
+        law,
+        points: pts,
         range: None,
     };
-    let s = g
-        .build_given_ball(
-            k,
-            &mut c,
-            [&mut r1, &mut r2],
-            TOL,
-            [&a, &b],
-            [&mut w1, &mut w2],
-            0.0,
-            Some(&lr),
-        )
-        .unwrap();
-    Round {
+    let s = g.build_given_ball(
+        k,
+        &mut c,
+        [&mut r1, &mut r2],
+        TOL,
+        [&a, &b],
+        [&mut w1, &mut w2],
+        0.0,
+        Some(&lr),
+    )?;
+    Ok(Round {
         surface: s,
         bound: g.certified_bound,
         spans: g.certified_spans,
         rail1: r1,
         centre: c,
-    }
+    })
+}
+
+fn build(k: &Kernel) -> Round {
+    build_with_law(k, &law_curve(), &points()).unwrap()
 }
 
 /// How far `p` is off the touch circle at t: (|p - m| - r, (p - m) . m' + r r').
@@ -208,8 +208,32 @@ fn off_circle(t: f64, p: Point3) -> (f64, f64) {
 }
 
 #[test]
+fn a_radius_law_reaching_zero_at_the_last_station_reports_its_radius() {
+    let law = canonical(
+        3,
+        1,
+        &[Point3::new(LAW[0], 0.0, 0.0), Point3::default()],
+        &[2, 2],
+        &[0.0, L],
+    );
+    let pts = points();
+    let ends = [pts[0].clone(), pts[STATIONS].clone()];
+    let error = build_with_law(&kernel(), &law, &ends)
+        .err()
+        .expect("a zero radius is an error even when the rails are being checked");
+    assert!(
+        matches!(
+            error.failure().map(|f| &f.reason),
+            Some(Reason::Blend(BlendFailure::RadiusLawNotPositive { s, radius }))
+                if *s == L && *radius == 0.0
+        ),
+        "{error}"
+    );
+}
+
+#[test]
 fn a_variable_round_is_its_definition_on_the_touch_circles() {
-    let k = kernel(true);
+    let k = kernel();
     let round = build(&k);
     let s = round
         .surface
@@ -300,8 +324,8 @@ fn generator_round(k: &Kernel, has_edgeuse: bool) -> Surface {
 
 #[test]
 fn the_circle_generator_builds_an_edge_s_variable_round_as_its_definition() {
-    // flag on: the definition (before 0d43b4c a varying ball was never one)
-    let k = kernel(true);
+    // the definition (before 0d43b4c a varying ball was never one)
+    let k = kernel();
     let s = generator_round(&k, true);
     assert!(
         matches!(s.kind(), SurfaceKind::ProceduralBlend(_)),
@@ -317,13 +341,6 @@ fn the_circle_generator_builds_an_edge_s_variable_round_as_its_definition() {
         matches!(corner.kind(), SurfaceKind::BSpline(_)),
         "{:?}",
         corner.kind()
-    );
-    // flag off: the skinned circles, as upstream
-    let off = generator_round(&kernel(false), true);
-    assert!(
-        matches!(off.kind(), SurfaceKind::BSpline(_)),
-        "{:?}",
-        off.kind()
     );
 }
 
@@ -369,7 +386,7 @@ fn the_law_in_the_edge_s_parameter_is_the_solver_s() {
 fn a_variable_round_rebuilt_from_its_record_is_its_definition() {
     use solidcore::surface::procedural_blend::convert::{rebuild, to_record};
     use solidcore::surface::procedural_blend::record::{ProceduralBlendRecord, RadiusRecord};
-    let k = kernel(true);
+    let k = kernel();
     let round = build(&k);
     let s = round.surface.expect("the definition");
     let SurfaceKind::ProceduralBlend(pb) = s.kind() else {

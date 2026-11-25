@@ -10,10 +10,11 @@
 //! | Rust                                              | Upstream                                         |
 //! |---------------------------------------------------|--------------------------------------------------|
 //! | [`Surface::calculate_continuities`]               | `SmSurface::CalculateContinuities` (virtual; no surface kind overrides it) |
+//! | [`Surface::continuities`], [`SurfaceContinuities`] | not upstream: the continuity arrays `SmSurfaceCache::BuildTreeBase` stores, as a memo on the surface |
 //! | [`Surface::create_natural_uv_trim_curves`], [`NaturalUvTrimCurves`] | `SmSurface::CreateNaturalUVTrimCurves` |
 //! | [`DerivSurfDefinition::sample_values`], [`SampleOptions`], [`DerivSampleValues`] | `SmDerivSurfDefinition::GetSampleValues` (from a surface boundary curve) |
 //! | [`Surface::local_curve_intersect`], [`CurveIntersection`] | `SmSurface::LocalCurveIntersect` (virtual; not overridden) |
-//! | [`Surface::simple_coincidence_checker`]           | `SmSurface::SimpleCoincidenceChecker` (virtual; not overridden) |
+//! | [`Surface::simple_coincidence_checker`], [`Surface::simple_coincidence_checker_with_context`], [`Surface::simple_coincidence_checker_face_tested`] | `SmSurface::SimpleCoincidenceChecker` (virtual; not overridden) |
 //! | [`Surface::classify_intersecting_range_solution`], [`RangeTangentPoint`] | `SmSurface::ClassifyIntersectingRangeSolution` |
 //! | [`SsGlobalSolver::solutions_identical`]           | `SmSSGlobalSolver::IdenticalSolutions`           |
 //! | [`sc_local_solve`], [`ScLocalSolveNodes`]         | `sm_SCLocalSolve` (static)                       |
@@ -43,7 +44,11 @@
 //! - **Ignored statuses.** Where upstream ignores an evaluation's status, its outputs
 //!   keep their previous values (their initial values: zero vectors for
 //!   `SmVector2d`/`SmVector3d` outputs it clears first, [`Vec3::UNDEF`] for default
-//!   constructed points); [`SolidError::Unported`] is still propagated.
+//!   constructed points); [`SolidError::Unported`] is still propagated. Where the fork
+//!   passes the status on (WR-663, tangency-labs/smlib 21dcf69: the coincidence
+//!   check's boxes, points, normals and drops, the iso knots, the boundary sampler's
+//!   parameter directions, unitizations and directional derivatives) the port returns
+//!   it, and points that cannot be evaluated are not shown the same solution.
 //! - **Iso curves.** `CreateIsoParametricCurve` is the B-spline, plane and surface of
 //!   revolution and cone overrides (units `nurbs.b_spline_surface_p2`, `surface.plane_p1`,
 //!   `surface.surf_of_revolution_p1`, `surface.cone_p1`); the base body (other kinds) belongs to
@@ -62,12 +67,25 @@
 //!   builder honor upstream's ignored sampling status without inventing values.
 //!   Counts are checked and capped at [`MAX_BOUNDARY_SAMPLES`] before any allocation;
 //!   outputs otherwise grow as samples are computed. No function here recurses.
+//! - **[`LOCAL_CURVE_INTERSECT_STEPS`]** (not upstream) names the 20 iterations of
+//!   `LocalCurveIntersect`'s solve, for callers that report them.
+//! - **Continuity arrays.** Upstream's surface cache fills its U and V continuity arrays
+//!   only when its tree is built (`BuildTreeBase`), so a cache made during a Boolean
+//!   operation answers empty arrays to a reader that calls no `GetTree`
+//!   (`GetDomainWithContinuity`, `LiftCurve`) until something builds it. The arrays are
+//!   a function of the surface alone, so here every cache answers them the same, built
+//!   or not, whatever ran before: [`Surface::continuities`] computes them on first use
+//!   and keeps them in the surface's [`ContinuityMemo`].
+
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::curve::curve::p3::PointSolveOptions;
+use crate::curve::curve::p5::CurveMemoKey;
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
 use crate::curve::line::Line;
-use crate::error::{ignored, ignored_or_pass_on, passed_on, Result, SolidError};
+use crate::error::surface::{SolveInput, SurfaceFailure};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::assert_array::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::{Extent1d, ExtentNd};
@@ -104,13 +122,116 @@ const OP_SAMPLE: &str = "surface::surface::p6::DerivSurfDefinition::sample_value
 /// zero-filled partial arrays retained after a sampling failure. Upstream fixtures
 /// use at most hundreds of samples; this allows 65,536 intervals.
 pub const MAX_BOUNDARY_SAMPLES: u64 = 65_536;
+
+/// The sine of the angle to a surface below which `SimpleCoincidenceChecker` takes a curve for
+/// tangent to it at a point (about one degree; upstream's literal): a curve within tolerance
+/// and tangent there runs in the surface, one at a steeper angle crosses it.
+pub const COINCIDENT_TANGENT_SINE: f64 = 0.017;
 const OP_SS: &str = "surface::surface::p6::SsGlobalSolver::solutions_identical";
 const OP_CS_INTERSECT: &str = "surface::surface::p6::cs_intersect_local_solve";
+/// The most Newton steps the solve of [`Surface::local_curve_intersect`] takes (upstream's
+/// `SetMaximumIterations(20)` in `LocalCurveIntersect`). From a guess near a crossing, Newton
+/// reaches its desired accuracy in a few; the rest is room for its step cuts and boundary hits.
+/// Named for the callers that report it when the solve finds nothing.
+pub const LOCAL_CURVE_INTERSECT_STEPS: u32 = 20;
 const OP_SC: &str = "surface::surface::p6::sc_local_solve";
 
 /// `SM_CONTINUITY_ANGLE` (`SM_ANG_TOL_DEG`, degrees): the default angle tolerance of
 /// `SmCurve::CalculateContinuities`.
 const CONTINUITY_ANGLE: f64 = 0.5;
+
+/// A surface's continuity at each of its unique knots, in each direction
+/// ([`Surface::calculate_continuities`] in U and in V): the arrays a surface cache
+/// stores (`GetUContinuitiesArray`, `GetVContinuitiesArray`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SurfaceContinuities {
+    /// The continuity across each unique U knot.
+    pub u: Vec<ContinuityType>,
+    /// The continuity across each unique V knot.
+    pub v: Vec<ContinuityType>,
+}
+
+/// The memo of a surface's [`SurfaceContinuities`] (not upstream): computed on first use
+/// through `&self` and kept with the kernel inputs it was computed under
+/// ([`CurveMemoKey::of_kernel`]). The arrays are a function of the surface's value, so an
+/// exact copy (an evaluation copy, [`Surface::clone_exact_bounded`]) shares the memo, a
+/// [`Clone`] (the copy constructor, which may fix the knot vectors up) starts an empty
+/// one, and an edit through `&mut` replaces it with an empty one. A hit gives what a
+/// fresh computation gives, so no result depends on the memo or on who filled it.
+#[derive(Default)]
+pub(crate) struct ContinuityMemo(OnceLock<Arc<Mutex<Option<ContinuityMemoEntry>>>>);
+
+/// One memoised computation: its key and its arrays.
+#[derive(Debug)]
+struct ContinuityMemoEntry {
+    key: CurveMemoKey,
+    continuities: Arc<SurfaceContinuities>,
+}
+
+impl core::fmt::Debug for ContinuityMemo {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // the memo is not part of the surface's observable state
+        f.write_str("ContinuityMemo")
+    }
+}
+
+impl ContinuityMemo {
+    /// An empty memo of its own.
+    pub(crate) const fn new() -> Self {
+        Self(OnceLock::new())
+    }
+
+    /// A memo shared with this one (for an exact copy of the surface).
+    pub(crate) fn share(&self) -> Self {
+        let slot = Arc::clone(self.0.get_or_init(Arc::default));
+        let shared = OnceLock::new();
+        let _ = shared.set(slot);
+        Self(shared)
+    }
+
+    fn get(&self, key: &CurveMemoKey) -> Option<Arc<SurfaceContinuities>> {
+        let slot = self.0.get()?;
+        let entry = slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        entry
+            .as_ref()
+            .filter(|e| e.key == *key)
+            .map(|e| Arc::clone(&e.continuities))
+    }
+
+    fn put(&self, key: &CurveMemoKey, continuities: &Arc<SurfaceContinuities>) {
+        let slot = self.0.get_or_init(Arc::default);
+        let mut entry = slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *entry = Some(ContinuityMemoEntry {
+            key: *key,
+            continuities: Arc::clone(continuities),
+        });
+    }
+}
+
+/// The key of a memoised [`Surface::continuities`], or `None` when it must not be
+/// memoised: the memo is off ([`Kernel::memoize_curve_caches`]), or the surface is not a
+/// pure value. B-spline, plane, cone, sphere and torus surfaces are computed on their own
+/// value only (the kinds the singularities memo takes too); the other kinds hold curves,
+/// other surfaces or volumes with state of their own, and are computed each time.
+fn continuity_memo_key(k: &Kernel, surface: &Surface) -> Option<CurveMemoKey> {
+    let pure_kind = matches!(
+        surface.kind(),
+        SurfaceKind::BSpline(_)
+            | SurfaceKind::Plane(_)
+            | SurfaceKind::Cone(_)
+            | SurfaceKind::Sphere(_)
+            | SurfaceKind::Torus(_)
+    );
+    if pure_kind {
+        CurveMemoKey::of_kernel(k)
+    } else {
+        None
+    }
+}
 
 /// `SM_DEG2RAD`.
 fn deg2rad(adeg: f64) -> f64 {
@@ -204,6 +325,31 @@ pub struct ScLocalSolveNodes<'a> {
 // ---- SmSurface members -------------------------------------------------------------------
 
 impl Surface {
+    /// The surface's continuity arrays ([`Surface::calculate_continuities`] in U and in
+    /// V), the ones a cache of the surface stores when its tree is built
+    /// (`BuildTreeBase`). A function of the surface alone: every reader gets the same
+    /// arrays, whether a cache of the surface has its tree or not and whatever ran
+    /// before. Computed on first use and kept in the surface's memo
+    /// ([`ContinuityMemo`]); a failure is not kept.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::calculate_continuities`].
+    pub(crate) fn continuities(&self, k: &Kernel) -> Result<Arc<SurfaceContinuities>> {
+        let key = continuity_memo_key(k, self);
+        if let Some(hit) = key.as_ref().and_then(|key| self.continuity_memo().get(key)) {
+            return Ok(hit);
+        }
+        let continuities = Arc::new(SurfaceContinuities {
+            u: self.calculate_continuities(k, SurfParamType::U)?.1,
+            v: self.calculate_continuities(k, SurfParamType::V)?.1,
+        });
+        if let Some(key) = key {
+            self.continuity_memo().put(&key, &continuities);
+        }
+        Ok(continuities)
+    }
+
     /// The continuity of the surface across its unique knots in `surf_param`'s
     /// direction (`CalculateContinuities`): the iso-parametric curves in that direction
     /// at up to five sample values of the other direction's knots (a single span is
@@ -246,7 +392,10 @@ impl Surface {
 
         // check state
         if other_knots.len() <= 1 {
-            return Err(SolidError::sm_err(OP_CONT));
+            return Err(SolidError::surface(
+                OP_CONT,
+                SurfaceFailure::TooFewUniqueKnots,
+            ));
         }
 
         // init output continuities to [Discontinuous, G1, ... G1, Discontinuous]
@@ -278,7 +427,12 @@ impl Surface {
         // when reduce knot count to 5 sample points (don't need more)
         if knots.len() > 5 {
             let (Some(&first), Some(&last)) = (knots.first(), knots.last()) else {
-                return Err(SolidError::sm_err(OP_CONT));
+                return Err(SolidError::surface(
+                    OP_CONT,
+                    SurfaceFailure::Defect {
+                        why: "the sample knots are empty, but more than five were just counted",
+                    },
+                ));
             };
             let k4 = last;
             let k3 = first + 0.845 * (k4 - first);
@@ -294,8 +448,9 @@ impl Surface {
 
             // make temp isoParameter curve for this knot sample value
             let mut iso = create_iso_parametric_curve(k, self, get_sp, parameter, None)?.0;
-            // (status ignored)
-            let iso_knots = iso_knots_of(k, &iso)?;
+            // (status ignored upstream; passed on as the fork does, WR-663,
+            // tangency-labs/smlib 21dcf69)
+            let (iso_knots, _) = iso.knots(k, None)?;
 
             // When curve is degenerate - try another knot sample value
             if iso.is_degenerate(k, EFF_ZERO, None)? {
@@ -321,15 +476,19 @@ impl Surface {
 
             // For each interior knot:
             for jj in 1..tmp_conts.len().saturating_sub(1) {
-                let cont = tmp_conts
-                    .get_mut(jj)
-                    .ok_or_else(|| SolidError::sm_err(OP_CONT))?;
+                let cont = tmp_conts.get_mut(jj).ok_or_else(|| {
+                    SolidError::surface(
+                        OP_CONT,
+                        SurfaceFailure::Defect {
+                            why: "an interior continuity index is past the iso curve's continuities, but it ranges over their interior indices",
+                        },
+                    )
+                })?;
                 if code(*cont) < code(ContinuityType::G1) {
                     // A C0 or worse discontinuity in the isocurve.
-                    let iso_knot = iso_knots
-                        .get(jj)
-                        .copied()
-                        .ok_or_else(|| SolidError::sm_err(OP_CONT))?;
+                    let iso_knot = iso_knots.get(jj).copied().ok_or_else(|| {
+                        SolidError::surface(OP_CONT, SurfaceFailure::Defect { why: "an iso curve continuity has no knot: the iso curve was replaced at the middle sample while the first curve's knots were kept, as upstream keeps them, so their counts can differ" })
+                    })?;
                     let uv = if surf_param == SurfParamType::U {
                         Point2::new(iso_knot, parameter)
                     } else {
@@ -369,10 +528,12 @@ impl Surface {
                     // SM_CT_UNDEFINED, the zeroed memory of SetSize)
                     conts_at_knots = vec![ContinuityType::Undefined; surface_knot_cnt];
                     for (jj, cont) in tmp_conts.iter().enumerate() {
-                        let iso_knot = iso_knots
-                            .get(jj)
-                            .copied()
-                            .ok_or_else(|| SolidError::sm_err(OP_CONT))?;
+                        let iso_knot = iso_knots.get(jj).copied().ok_or_else(|| {
+                            SolidError::surface(
+                                OP_CONT,
+                                SurfaceFailure::Defect { why: "an iso curve continuity has no knot: the iso curve was replaced at the middle sample while the first curve's knots were kept, as upstream keeps them, so their counts can differ" },
+                            )
+                        })?;
                         if let Some(index) = find_element(&other_knots, iso_knot) {
                             if let Some(c) = conts_at_knots.get_mut(index) {
                                 *c = *cont;
@@ -394,10 +555,12 @@ impl Surface {
                     let index = if same_knots {
                         Some(jj)
                     } else {
-                        let iso_knot = iso_knots
-                            .get(jj)
-                            .copied()
-                            .ok_or_else(|| SolidError::sm_err(OP_CONT))?;
+                        let iso_knot = iso_knots.get(jj).copied().ok_or_else(|| {
+                            SolidError::surface(
+                                OP_CONT,
+                                SurfaceFailure::Defect { why: "an iso curve continuity has no knot: the iso curve was replaced at the middle sample while the first curve's knots were kept, as upstream keeps them, so their counts can differ" },
+                            )
+                        })?;
                         find_element(&other_knots, iso_knot)
                     };
                     if let Some(c) = index.and_then(|i| conts_at_knots.get_mut(i)) {
@@ -648,6 +811,44 @@ impl Surface {
             objects,
             None,
             None,
+            false,
+            None,
+        )
+    }
+
+    /// [`Surface::simple_coincidence_checker`] of a face's surface by a caller that holds
+    /// the face but no solve context: the initial global point solve's fast-drop trim test
+    /// (`pFace->PointClassify(uv, tol, TRUE, FALSE, ..)`, upstream reached through the
+    /// surface's `GetFace`) is `classify`, as in [`Surface::global_point_solve_face_tested`],
+    /// instead of the face's trimmed cache the bare surface cannot build. All boxing and
+    /// sample tests are shared.
+    ///
+    /// # Errors
+    /// Those of the coincidence check and of `classify`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn simple_coincidence_checker_face_tested<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        curve: &Curve,
+        interval: &Extent1d,
+        tol_3d: f64,
+        partial_coincidence_ok: bool,
+        objects: [Option<O>; 2],
+        classify: &mut dyn FnMut(&Kernel, Point2, f64) -> Result<bool>,
+    ) -> Result<Option<Solution<O>>> {
+        self.simple_coincidence_checker_from(
+            k,
+            uv_domain,
+            curve,
+            interval,
+            tol_3d,
+            partial_coincidence_ok,
+            objects,
+            None,
+            None,
+            false,
+            Some(classify),
         )
     }
 
@@ -679,11 +880,17 @@ impl Surface {
             objects,
             cache,
             Some(context),
+            false,
+            None,
         )
     }
 
+    /// The body of [`Surface::simple_coincidence_checker_with_context`] (with a
+    /// `context`) or [`Surface::simple_coincidence_checker`]; `point_test_off` runs
+    /// the initial point solve with the solve's point testing off (its fast drop keeps
+    /// every solution).
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
-    fn simple_coincidence_checker_from<O: SolutionObject>(
+    pub(super) fn simple_coincidence_checker_from<O: SolutionObject>(
         &self,
         k: &Kernel,
         uv_domain: &Extent2d,
@@ -694,25 +901,24 @@ impl Surface {
         objects: [Option<O>; 2],
         cache: Option<&crate::surface::surface_cache::SurfaceCache<O>>,
         context: Option<&mut dyn super::p1::SurfaceSolveContext<O>>,
+        point_test_off: bool,
+        face_test: super::p4::FaceTest<'_>,
     ) -> Result<Option<Solution<O>>> {
-        // First try boxing (statuses ignored; passed on with the opt-in fix, WR-663,
-        // tangency-labs/smlib 21dcf69).
-        let pass = k.fixes.query_statuses_pass_on;
-        let this_box = ignored_or_pass_on(
-            self.calculate_bounding_box(k, uv_domain, [true, false, false], true),
-            pass,
-        )?
-        .and_then(|b| b.normal_box)
-        .unwrap_or_default();
+        // First try boxing (statuses ignored upstream; passed on as the fork does,
+        // WR-663, tangency-labs/smlib 21dcf69).
+        let this_box = self
+            .calculate_bounding_box(k, uv_domain, [true, false, false], true)?
+            .normal_box
+            .unwrap_or_default();
         let req = CurveBoxRequest {
             normal: true,
             pseudo: false,
             polar: false,
         };
-        let curv_box =
-            ignored_or_pass_on(curve.calculate_bounding_box(k, interval, req, true), pass)?
-                .and_then(|b| b.normal)
-                .unwrap_or_default();
+        let curv_box = curve
+            .calculate_bounding_box(k, interval, req, true)?
+            .normal
+            .unwrap_or_default();
         if this_box.are_disjoint(&curv_box, tol_3d) {
             return Ok(None);
         }
@@ -721,8 +927,8 @@ impl Surface {
         // the complete range of coincidence)
         let mut sampled_ivl = Extent1d::new();
         let mut num_hits: u64 = 0;
-        // sNorm: one variable for every (status ignored) normal evaluation
-        let mut norm = Vec3::UNDEF;
+        // sNorm: every normal evaluation's status is ignored upstream and passed on as
+        // the fork does (WR-663, tangency-labs/smlib 21dcf69)
 
         // First drop the Curve MidPoint to Surface. Use a Global point solve, because
         // we have no guess uv.
@@ -732,20 +938,52 @@ impl Surface {
         let mut mid_pt1 = vec_at(&mid_pt, 1)?;
         let solutions = if let Some(context) = context {
             let mut found = SolutionArray::<O>::new();
-            self.global_point_solve_into_with_context(
+            if point_test_off {
+                self.global_point_solve_into_with_context_point_test_off(
+                    k,
+                    objects[1],
+                    cache,
+                    context,
+                    uv_domain,
+                    SolverOperation::Minimize,
+                    mid_pt0,
+                    tol_3d,
+                    None,
+                    SolutionRequested::Single,
+                    &mut found,
+                )?;
+            } else {
+                self.global_point_solve_into_with_context(
+                    k,
+                    objects[1],
+                    cache,
+                    context,
+                    uv_domain,
+                    SolverOperation::Minimize,
+                    mid_pt0,
+                    tol_3d,
+                    None,
+                    SolutionRequested::Single,
+                    &mut found,
+                )?;
+            }
+            found.as_slice().iter().map(|s| s.start).collect()
+        } else if let Some(classify) = face_test {
+            self.global_point_solve_face_tested::<NoObject>(
                 k,
-                objects[1],
-                cache,
-                context,
+                Some(NoObject),
                 uv_domain,
                 SolverOperation::Minimize,
                 mid_pt0,
                 tol_3d,
                 None,
                 SolutionRequested::Single,
-                &mut found,
-            )?;
-            found.as_slice().iter().map(|s| s.start).collect()
+                Some(classify),
+            )?
+            .as_slice()
+            .iter()
+            .map(|s| s.start)
+            .collect()
         } else {
             global_point_solve_single(k, self, uv_domain, mid_pt0, tol_3d)?
         };
@@ -770,10 +1008,10 @@ impl Surface {
             if mag > EFF_ZERO {
                 mid_pt1 /= mag;
             }
-            norm = normal_ignored(k, self, mid_uv, norm)?;
+            let norm = self.evaluate_normal(k, mid_uv, Side::Right, Side::Right)?;
             let dot = mid_pt1.dot(norm);
 
-            found = dot.abs() < 0.017; // about 1 degree
+            found = dot.abs() < COINCIDENT_TANGENT_SINE;
         }
 
         if found {
@@ -836,10 +1074,10 @@ impl Surface {
                     st_pnt1 /= mag;
                 }
                 let uv = Point2::new(sol.start.param(0)?, sol.start.param(1)?);
-                norm = normal_ignored(k, self, uv, norm)?;
+                let norm = self.evaluate_normal(k, uv, Side::Right, Side::Right)?;
                 let dot = st_pnt1.dot(norm);
 
-                found_start = dot.abs() < 0.017; // about 1 degree
+                found_start = dot.abs() < COINCIDENT_TANGENT_SINE;
             }
 
             // this CrvStartPt is coincident and tangent to surface
@@ -891,10 +1129,10 @@ impl Surface {
                     en_pnt1 /= mag;
                 }
                 let uv = Point2::new(sol.start.param(0)?, sol.start.param(1)?);
-                norm = normal_ignored(k, self, uv, norm)?;
+                let norm = self.evaluate_normal(k, uv, Side::Right, Side::Right)?;
                 let dot = en_pnt1.dot(norm);
 
-                found_end = dot.abs() < 0.017; // about 1 degree
+                found_end = dot.abs() < COINCIDENT_TANGENT_SINE;
             }
 
             // this CrvEndPt is coincident and tangent to surface
@@ -1029,9 +1267,10 @@ impl Surface {
         let [sp0, sp1, sp2] = start_par;
         let [dp0, dp1, dp2] = delta_par;
 
-        // get Solution segment start points and gapVector (statuses ignored)
-        let point0 = curve_point_ignored(k, curve, sp0, Vec3::UNDEF)?;
-        let point1 = point_ignored(k, self, Point2::new(sp1, sp2), Vec3::UNDEF)?;
+        // get Solution segment start points and gapVector (statuses ignored upstream;
+        // passed on as the fork does, WR-663, tangency-labs/smlib 21dcf69)
+        let point0 = curve.evaluate_point(k, sp0)?;
+        let point1 = self.evaluate_point(k, Point2::new(sp1, sp2))?;
         let xsect_gap = point1 - point0;
 
         // scale zero to current intersection point location
@@ -1072,38 +1311,25 @@ impl Surface {
             let t2 = sp1 + delta * dp1;
             let t3 = sp2 + delta * dp2;
 
-            // get Curve sample point (status ignored)
-            let prev = slot(&curve_point, tgt)?;
-            set_slot(
-                &mut curve_point,
-                tgt,
-                curve_point_ignored(k, curve, t1, prev)?,
-            )?;
+            // get Curve sample point (status ignored upstream; passed on as the fork
+            // does)
+            set_slot(&mut curve_point, tgt, curve.evaluate_point(k, t1)?)?;
 
-            // Find the surface point nearest the curve point (status ignored; passed on
-            // with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-            let (found, solution) = ignored_or_pass_on(
-                local_point_solve::<O>(
-                    k,
-                    self,
-                    &reg,
-                    SolverOperation::Normalize,
-                    slot(&curve_point, tgt)?,
-                    Point2::new(t2, t3),
-                ),
-                k.fixes.query_statuses_pass_on,
-            )?
-            .unwrap_or_default();
+            // Find the surface point nearest the curve point (status ignored upstream;
+            // passed on as the fork does, WR-663, tangency-labs/smlib 21dcf69)
+            let (found, solution) = local_point_solve::<O>(
+                k,
+                self,
+                &reg,
+                SolverOperation::Normalize,
+                slot(&curve_point, tgt)?,
+                Point2::new(t2, t3),
+            )?;
 
             if found {
                 // evaluate the nearest surface point
                 let drop_point = Point2::new(solution.start.param(0)?, solution.start.param(1)?);
-                let prev = slot(&surface_point, tgt)?;
-                set_slot(
-                    &mut surface_point,
-                    tgt,
-                    point_ignored(k, self, drop_point, prev)?,
-                )?;
+                set_slot(&mut surface_point, tgt, self.evaluate_point(k, drop_point)?)?;
 
                 // get the Curve/Surface gapVector: subtract the StartPoint gap from
                 // every gap SamplePoint to keep tolerance problems from creating
@@ -1267,12 +1493,18 @@ impl DerivSurfDefinition<'_> {
                 || tt == T::MatchNeighbors
                 || tt == T::DirToReferenceCurve)
             {
-                return Err(SolidError::sm_err(OP_SAMPLE));
+                return Err(SolidError::surface(
+                    OP_SAMPLE,
+                    SurfaceFailure::UnsupportedTangencyType,
+                ));
             }
 
             // check state
             if !self.assert_valid(None, ObjectKey(0))? {
-                return Err(SolidError::sm_err(OP_SAMPLE));
+                return Err(SolidError::surface(
+                    OP_SAMPLE,
+                    SurfaceFailure::InvalidDerivativeSurface,
+                ));
             }
 
             // the outputs grow sample by sample (upstream sizes them first)
@@ -1316,7 +1548,10 @@ impl DerivSurfDefinition<'_> {
                 // insist on non-degenerate curves
                 let scaled_zero = EFF_ZERO * (1.0 + boundary_interval.length());
                 if crv_tan.length_squared() <= scaled_zero {
-                    return Err(SolidError::sm_err(OP_SAMPLE));
+                    return Err(SolidError::surface(
+                        OP_SAMPLE,
+                        SurfaceFailure::ZeroLengthTangent,
+                    ));
                 }
 
                 // project CurvePoint to Surface
@@ -1329,14 +1564,17 @@ impl DerivSurfDefinition<'_> {
                     guess,
                 )?;
                 if !success {
-                    return Err(SolidError::sm_err(OP_SAMPLE));
+                    return Err(SolidError::surface(
+                        OP_SAMPLE,
+                        SurfaceFailure::PointDoesNotDrop,
+                    ));
                 }
                 uv_guess = surface_uv0;
 
                 // Surface Normal
                 let mut normal = surface.evaluate_normal(k, surface_uv0, Side::Left, Side::Left)?;
                 if normal.length_squared() <= EFF_ZERO {
-                    return Err(SolidError::sm_err(OP_SAMPLE));
+                    return Err(SolidError::surface(OP_SAMPLE, SurfaceFailure::NoNormal));
                 }
                 normal = normal.unitize_or_z();
 
@@ -1349,7 +1587,10 @@ impl DerivSurfDefinition<'_> {
                 let bi_length = binormal.length();
                 let scaled_zero = EFF_ZERO * (1.0 + crv_tan.max_dimension());
                 if bi_length <= scaled_zero {
-                    return Err(SolidError::sm_err(OP_SAMPLE));
+                    return Err(SolidError::surface(
+                        OP_SAMPLE,
+                        SurfaceFailure::TangentAlongNormal,
+                    ));
                 }
                 binormal /= bi_length;
 
@@ -1357,9 +1598,11 @@ impl DerivSurfDefinition<'_> {
                 let surface_uv1 = match tt {
                     T::NoTangency => {
                         // 2d dir = projection of 3d binormal into surface UV space (status
-                        // ignored)
-                        let dir = param_direction_ignored(k, surface, surface_uv0, binormal)?;
-                        unitize_2d_ignored(k, dir)?
+                        // ignored upstream; passed on as the fork does, WR-663,
+                        // tangency-labs/smlib 21dcf69)
+                        surface
+                            .compute_param_direction(k, surface_uv0, binormal)?
+                            .unitize()?
                     }
                     T::TanToEdges | T::MatchNeighbors => {
                         // dir = linear interp between the start and end angles
@@ -1374,10 +1617,15 @@ impl DerivSurfDefinition<'_> {
                                 if e.is_unported_or_cancelled() {
                                     e
                                 } else {
-                                    SolidError::sm_err(OP_SAMPLE)
+                                    super::p7::chained(
+                                        OP_SAMPLE,
+                                        SurfaceFailure::NoParameterDirection,
+                                        e,
+                                    )
                                 }
                             })?;
-                        let uv_binormal = unitize_2d_ignored(k, uv_binormal)?;
+                        // (status ignored upstream; passed on as the fork does)
+                        let uv_binormal = uv_binormal.unitize()?;
 
                         // linearly interp the dir rotation angle
                         let ang_rad = deg2rad(
@@ -1390,15 +1638,23 @@ impl DerivSurfDefinition<'_> {
                     }
                     T::DirToReferenceCurve => {
                         // reference point
-                        let reference = self
-                            .tangent_reference
-                            .ok_or_else(|| SolidError::null_pointer(OP_SAMPLE))?;
+                        let reference = self.tangent_reference.ok_or_else(|| {
+                            SolidError::surface(
+                                OP_SAMPLE,
+                                SurfaceFailure::InputNotGiven {
+                                    what: SolveInput::TangentReference,
+                                },
+                            )
+                        })?;
                         let mut reference_pnt = reference.evaluate_point(k, crv_param)?;
                         let mut reference_gap = reference_pnt - crv_pos;
                         reference_gap_len = reference_gap.length();
                         let scaled_zero = EFF_ZERO * (1.0 + reference_pnt.max_dimension());
                         if reference_gap_len <= scaled_zero {
-                            return Err(SolidError::sm_err(OP_SAMPLE));
+                            return Err(SolidError::surface(
+                                OP_SAMPLE,
+                                SurfaceFailure::ReferencePointOnBoundary,
+                            ));
                         }
 
                         // Positive Dist = reference gap in same direction as 1st cross-deriv
@@ -1420,31 +1676,36 @@ impl DerivSurfDefinition<'_> {
                             reference_gap = crv_pos - reference_pnt;
                         }
 
-                        // Project sGap into Surface UV plane (status ignored)
-                        let dir = param_direction_ignored(k, surface, surface_uv0, reference_gap)?;
-                        unitize_2d_ignored(k, dir)?
+                        // Project sGap into Surface UV plane (status ignored upstream;
+                        // passed on as the fork does)
+                        surface
+                            .compute_param_direction(k, surface_uv0, reference_gap)?
+                            .unitize()?
                     }
-                    _ => return Err(SolidError::sm_err(OP_SAMPLE)),
+                    _ => {
+                        return Err(SolidError::surface(
+                            OP_SAMPLE,
+                            SurfaceFailure::Defect {
+                                why: "the tangency type has no derivative surface, but the types without one were refused on entry",
+                            },
+                        ))
+                    }
                 };
 
                 // Surface directional derivatives up to the num of derivs being stored
-                // (status ignored: the outputs stay zero; passed on with the opt-in fix,
-                // WR-663, tangency-labs/smlib 21dcf69)
+                // (status ignored upstream, leaving the outputs zero; passed on as the
+                // fork does, WR-663, tangency-labs/smlib 21dcf69)
                 let mut tgt_values = [Vec3::new(0.0, 0.0, 0.0); 4];
-                if let Some(d) = ignored_or_pass_on(
-                    surface.evaluate_directional_derivs(
-                        k,
-                        surface_uv0,
-                        surface_uv1,
-                        num_derivatives,
-                        true,
-                        true,
-                    ),
-                    k.fixes.query_statuses_pass_on,
-                )? {
-                    for (dst, src) in tgt_values.iter_mut().zip(d) {
-                        *dst = src;
-                    }
+                let d = surface.evaluate_directional_derivs(
+                    k,
+                    surface_uv0,
+                    surface_uv1,
+                    num_derivatives,
+                    true,
+                    true,
+                )?;
+                for (dst, src) in tgt_values.iter_mut().zip(d) {
+                    *dst = src;
                 }
                 let [tgt0, mut tgt1, tgt2, tgt3] = tgt_values;
 
@@ -1452,7 +1713,10 @@ impl DerivSurfDefinition<'_> {
                 let tgt_1st_len = tgt1.length();
                 let scaled_zero = EFF_ZERO * (1.0 * tgt0.max_dimension());
                 if tgt_1st_len <= scaled_zero {
-                    return Err(SolidError::sm_err(OP_SAMPLE));
+                    return Err(SolidError::surface(
+                        OP_SAMPLE,
+                        SurfaceFailure::ZeroLengthTangent,
+                    ));
                 }
 
                 // let positions = Curve Positions
@@ -1565,12 +1829,22 @@ impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {
             && sol1.solution_type == SolutionType::SingleValue
             && sol2.solution_type == SolutionType::SingleValue
         {
-            let surf1 = self
-                .surface1
-                .ok_or_else(|| SolidError::null_pointer(OP_SS))?;
-            let surf2 = self
-                .surface2
-                .ok_or_else(|| SolidError::null_pointer(OP_SS))?;
+            let surf1 = self.surface1.ok_or_else(|| {
+                SolidError::surface(
+                    OP_SS,
+                    SurfaceFailure::InputNotGiven {
+                        what: SolveInput::FirstSurface,
+                    },
+                )
+            })?;
+            let surf2 = self.surface2.ok_or_else(|| {
+                SolidError::surface(
+                    OP_SS,
+                    SurfaceFailure::InputNotGiven {
+                        what: SolveInput::SecondSurface,
+                    },
+                )
+            })?;
 
             // At a singularity, the same 3d point can have different uv values.
             let uv1a = Point2::new(sol1.start.param(1)?, sol1.start.param(2)?);
@@ -1578,15 +1852,14 @@ impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {
             let uv2a = Point2::new(sol1.start.param(3)?, sol1.start.param(4)?);
             let uv2b = Point2::new(sol2.start.param(3)?, sol2.start.param(4)?);
 
-            // Check positions (statuses ignored; with the opt-in fix points that cannot be
-            // evaluated are not shown the same, WR-663, tangency-labs/smlib 21dcf69).
-            let undef = (!k.fixes.query_statuses_pass_on).then_some(Vec3::UNDEF);
+            // Check positions (points that cannot be evaluated are not shown the same, as
+            // the fork, WR-663, tangency-labs/smlib 21dcf69).
             let mut pts = [Vec3::UNDEF; 4];
             for (slot, (surf, uv)) in
                 pts.iter_mut()
                     .zip([(surf1, uv1a), (surf1, uv1b), (surf2, uv2a), (surf2, uv2b)])
             {
-                let Some(p) = ignored(surf.evaluate_point(k, uv))?.or(undef) else {
+                let Some(p) = ignored(surf.evaluate_point(k, uv))? else {
                     return Ok((SolutionPairType::DiffParameters, None));
                 };
                 *slot = p;
@@ -1957,7 +2230,14 @@ fn knot(knots: &[f64], i: usize) -> Result<f64> {
     knots
         .get(i)
         .copied()
-        .ok_or_else(|| SolidError::sm_err(OP_CONT))
+        .ok_or_else(|| {
+            SolidError::surface(
+                OP_CONT,
+                SurfaceFailure::Defect {
+                    why: "a sample knot index is past the knots, but the samples index only their own knots",
+                },
+            )
+        })
 }
 
 /// `SmTArray::FindElement`: the first index of an exactly equal value.
@@ -1965,23 +2245,16 @@ fn find_element(values: &[f64], target: f64) -> Option<usize> {
     values.iter().position(|&v| v == target)
 }
 
-/// `pIsoCrv->GetKnots(sIsoKnots)` with its status ignored (no knots on failure); passed
-/// on with the opt-in `Kernel::fixes.query_statuses_pass_on` (WR-663,
-/// tangency-labs/smlib 21dcf69).
-fn iso_knots_of(k: &Kernel, curve: &Curve) -> Result<Vec<f64>> {
-    Ok(
-        ignored_or_pass_on(curve.knots(k, None), k.fixes.query_statuses_pass_on)?
-            .map(|(k, _)| k)
-            .unwrap_or_default(),
-    )
-}
-
 /// `aeConts[j]`.
 fn cont_at(conts: [ContinuityType; 2], j: usize) -> Result<ContinuityType> {
-    conts
-        .get(j)
-        .copied()
-        .ok_or_else(|| SolidError::sm_err(OP_SC))
+    conts.get(j).copied().ok_or_else(|| {
+        SolidError::surface(
+            OP_SC,
+            SurfaceFailure::Defect {
+                why: "a continuity index is past the two end continuities, but it ranges over the two ends",
+            },
+        )
+    })
 }
 
 /// Entry `i` of an evaluation result.
@@ -2011,56 +2284,6 @@ fn set_slot<T>(a: &mut [T; 3], i: usize, v: T) -> Result<()> {
     })?;
     *s = v;
     Ok(())
-}
-
-// The helpers below are the fork's `SER` sites (tangency-labs/smlib 21dcf69): with the
-// opt-in `Kernel::fixes.query_statuses_pass_on` (WR-663) the failure is returned.
-
-/// `EvaluatePoint(uv, pt)` with its status ignored: `prev` on failure.
-fn point_ignored(k: &Kernel, surface: &Surface, uv: Point2, prev: Point3) -> Result<Point3> {
-    Ok(ignored_or_pass_on(
-        surface.evaluate_point(k, uv),
-        k.fixes.query_statuses_pass_on,
-    )?
-    .unwrap_or(prev))
-}
-
-/// `crCurve.EvaluatePoint(t, pt)` with its status ignored: `prev` on failure.
-fn curve_point_ignored(k: &Kernel, curve: &Curve, t: f64, prev: Point3) -> Result<Point3> {
-    Ok(
-        ignored_or_pass_on(curve.evaluate_point(k, t), k.fixes.query_statuses_pass_on)?
-            .unwrap_or(prev),
-    )
-}
-
-/// `EvaluateNormal(uv, FALSE, FALSE, n)` with its status ignored: `prev` on failure.
-fn normal_ignored(k: &Kernel, surface: &Surface, uv: Point2, prev: Vec3) -> Result<Vec3> {
-    Ok(ignored_or_pass_on(
-        surface.evaluate_normal(k, uv, Side::Right, Side::Right),
-        k.fixes.query_statuses_pass_on,
-    )?
-    .unwrap_or(prev))
-}
-
-/// `ComputeParamDirection(uv, vec, dir)` with its status ignored: the cleared output
-/// `(0, 0)` on failure.
-fn param_direction_ignored(k: &Kernel, surface: &Surface, uv: Point2, vec: Vec3) -> Result<Vec2> {
-    Ok(ignored_or_pass_on(
-        surface.compute_param_direction(k, uv, vec),
-        k.fixes.query_statuses_pass_on,
-    )?
-    .unwrap_or(Vec2::new(0.0, 0.0)))
-}
-
-/// `Unitize()` of a 2D direction with its status ignored (the vector is left as it was);
-/// passed on with the opt-in fix.
-fn unitize_2d_ignored(k: &Kernel, v: Vec2) -> Result<Vec2> {
-    Ok(
-        match passed_on(v.unitize(), k.fixes.query_statuses_pass_on)? {
-            Ok(u) => u,
-            Err(_) => v,
-        },
-    )
 }
 
 /// `SmIsoCurve(*pSrfEval, dir, value, bFromLeft)` (input clamped) as a curve.
@@ -2331,11 +2554,10 @@ fn cs_intersect_local_solve(
     let periodicities = [false; 3];
     let mut equations = CsIntersectEnfo::new(k, curve, surface, squared_tol);
     let mut solver = LocalSolveNd::new(&mut equations, Some(&bounds), Some(&periodicities));
-    solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
     solver.set_desired_accuracy(EFF_ZERO / 10.0);
     solver.set_step_cutting_enabled(true);
     solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 6);
-    solver.set_maximum_iterations(20);
+    solver.set_maximum_iterations(u64::from(LOCAL_CURVE_INTERSECT_STEPS));
 
     // Solve it
     let solution = solver.solve_it(guess, solve_tol)?;
@@ -2344,7 +2566,12 @@ fn cs_intersect_local_solve(
     }
     match solution.x.as_slice() {
         [t, u, v, ..] => Ok(Some([*t, *u, *v])),
-        _ => Err(SolidError::sm_err(OP_CS_INTERSECT)),
+        _ => Err(SolidError::surface(
+            OP_CS_INTERSECT,
+            SurfaceFailure::Defect {
+                why: "the local solver returned fewer than three values, but it solves the three variables of its guess",
+            },
+        )),
     }
 }
 
@@ -2640,5 +2867,132 @@ mod tests {
             singular_end(&Extent1d::from_min_max(0.2, 0.6), &all, 0.5),
             0.6
         );
+    }
+
+    /// The continuity and sampling failures keep the operation, status, kind and entity of the bare
+    /// `Upstream` statuses they replace (a sample).
+    #[test]
+    fn typed_surface_failures_keep_their_upstream_answers() {
+        use crate::error::surface::{SolveInput, SurfaceFailure};
+        use crate::error::ErrorKind;
+        let samples: [(&'static str, SurfaceFailure, i32, ErrorKind); 4] = [
+            (
+                OP_CONT,
+                SurfaceFailure::TooFewUniqueKnots,
+                crate::error::SM_ERR,
+                ErrorKind::Degenerate,
+            ),
+            (
+                OP_SAMPLE,
+                SurfaceFailure::InputNotGiven {
+                    what: SolveInput::TangentReference,
+                },
+                crate::error::SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                OP_CS_INTERSECT,
+                SurfaceFailure::Defect {
+                    why: "the local solver returned fewer than three values",
+                },
+                crate::error::SM_ERR,
+                ErrorKind::StageFailed,
+            ),
+            (
+                OP_SAMPLE,
+                SurfaceFailure::UnsupportedTangencyType,
+                crate::error::SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+        ];
+        for (operation, failure, code, kind) in samples {
+            let typed = SolidError::surface(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.kind(), kind, "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(typed.surface_failure(), Some(&failure));
+        }
+    }
+
+    /// The roof `S(u, v) = (2u, v, 1 - |2u - 1|)`: degree 1, a C0 crease at u = 1/2.
+    fn roof() -> Surface {
+        let row = |x: f64, z: f64| vec![CPoint::new(x, 0.0, z, 1.0), CPoint::new(x, 1.0, z, 1.0)];
+        Surface::from(
+            BSplineSurface::from_data(
+                2,
+                1,
+                1,
+                1,
+                4,
+                3,
+                &[row(0.0, 0.0), row(1.0, 1.0), row(2.0, 0.0)],
+                &[0.0, 0.0, 0.5, 1.0, 1.0],
+                &[0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+        )
+    }
+
+    /// [`Surface::continuities`] is `CalculateContinuities` in U and in V, the arrays a
+    /// cache's tree build stores, and the same answer from every route: computed fresh,
+    /// from the memo, through an evaluation copy (which shares the memo), after a copy
+    /// constructor or an edit (which start their own), and during a Boolean operation,
+    /// while a cache of the surface made then has no tree and empty arrays (#20054).
+    #[test]
+    fn continuities_are_a_function_of_the_surface() {
+        use crate::surface::surface::p1::get_surface_cache;
+        let mut k = Kernel::default();
+        let s = roof();
+        let want = SurfaceContinuities {
+            u: s.calculate_continuities(&k, SurfParamType::U).unwrap().1,
+            v: s.calculate_continuities(&k, SurfParamType::V).unwrap().1,
+        };
+        assert_eq!(
+            want.u,
+            [
+                ContinuityType::Discontinuous,
+                ContinuityType::C0,
+                ContinuityType::Discontinuous
+            ]
+        );
+        let first = s.continuities(&k).unwrap();
+        assert_eq!(*first, want);
+        // a second request is the memo's (the same arrays, not computed again)
+        assert!(Arc::ptr_eq(&first, &s.continuities(&k).unwrap()));
+        let copy = s.clone_for_evaluation().unwrap();
+        assert!(Arc::ptr_eq(&first, &copy.continuities(&k).unwrap()));
+        assert_eq!(*s.clone().continuities(&k).unwrap(), want);
+
+        // a cache whose tree is built stores them; one made without tree has none, and
+        // the surface's answer is unchanged
+        let built = get_surface_cache::<()>(&k, &s, None).unwrap();
+        assert!(built.tree().is_some());
+        assert_eq!(built.u_continuities(), want.u.as_slice());
+        assert_eq!(built.v_continuities(), want.v.as_slice());
+        k.context.set_doing_boolean(true);
+        let fresh = roof();
+        let unbuilt = get_surface_cache::<()>(&k, &fresh, None).unwrap();
+        assert!(unbuilt.tree().is_none());
+        assert!(unbuilt.u_continuities().is_empty() && unbuilt.v_continuities().is_empty());
+        assert_eq!(*fresh.continuities(&k).unwrap(), want);
+
+        // an edit starts a memo of its own: a reversed roof's arrays are its own
+        k.context.set_doing_boolean(false);
+        let mut edited = s.clone_for_evaluation().unwrap();
+        edited.detach_for_edit();
+        edited.reverse(&k, SurfParamType::V).unwrap();
+        let after = edited.continuities(&k).unwrap();
+        assert!(!Arc::ptr_eq(&first, &after));
+        assert_eq!(*after, want);
+        assert!(Arc::ptr_eq(&first, &s.continuities(&k).unwrap()));
     }
 }

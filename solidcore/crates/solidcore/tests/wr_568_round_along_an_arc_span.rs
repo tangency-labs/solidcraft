@@ -5,8 +5,8 @@
 //! whose span `CalcTorusFilletGeom` took as the turn from the start section to the end
 //! one less `IsArc`'s start angle, which for the boolean's circle is measured from the
 //! circle's own frame: the torus came out short and the end rib, where the round
-//! crosses the top, found no fillet surface (1001). With
-//! `fillet_torus_span_from_start_section` the round is built: removed volume
+//! crosses the top, found no fillet surface (1001). Taking the span from the start
+//! section, the round is built: removed volume
 //! pi + 2 asin(4 / rho) integrated over the section's corner, 1.8160502 (the fork
 //! measures 1.8161426: the end ribs are fitted within the solver's 4e-5).
 
@@ -66,9 +66,8 @@ fn grooved(k: &mut Kernel) -> (Brep, EdgeId) {
 
 /// The grooved box rounded r 0.5 along the arc: the result, whether it is a solid and
 /// the volume the round removed.
-fn round(fixed: bool) -> (Result<()>, bool, f64) {
+fn round() -> (Result<()>, bool, f64) {
     let mut k = Kernel::default();
-    k.fixes.fillet_torus_span_from_start_section = fixed;
     let (mut b, arc) = grooved(&mut k);
     let before = volume(&k, &mut b);
     let result = fillet_edges(&mut k, &mut b, &[arc], 0.5, 1, 1, 1.0);
@@ -83,14 +82,8 @@ fn round(fixed: bool) -> (Result<()>, bool, f64) {
 
 #[test]
 fn wr_568_round_along_the_groove_arc_is_built() {
-    let (result, solid, removed) = round(true);
+    let (result, solid, removed) = round();
     result.unwrap();
     assert!(solid);
     assert!((removed - 1.816_050_2).abs() < 1e-3, "{removed}");
-}
-
-#[test]
-fn wr_568_without_the_opt_in_the_round_fails() {
-    let (result, solid, _) = round(false);
-    assert!(result.is_err() || !solid, "{result:?}");
 }

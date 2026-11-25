@@ -74,7 +74,8 @@
 //! still holds (upstream would splice it into a second list), or for a face use
 //! going into a shell whose head is a wire or vertex use.
 
-use crate::error::{Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::context::{with_mark_lock, ALL_MARKS};
 use crate::geom::object::Shape;
 use crate::kernel::Kernel;
@@ -484,7 +485,18 @@ pub fn wire_edges(kernel: &mut Kernel, brep: &Brep, id: ShellId) -> Result<Vec<E
                 for vertex in crate::topology::edge::vertices(brep, edge, None)? {
                     // Upstream marks every listed vertex: a NULL start vertex is a
                     // NULL dereference.
-                    let vertex = vertex.ok_or_else(|| SolidError::null_pointer(WIRE_OP))?;
+                    let vertex = vertex.ok_or_else(|| {
+                        Failure::new(
+                            WIRE_OP,
+                            TopologyFailure::Defect {
+                                why: "an edge of the wire shell has no vertex at one of its ends; \
+                                    the kernel makes every edge with a vertex use on a vertex at \
+                                    each end",
+                            },
+                        )
+                        .with_status(SM_ERR_NULL_POINTER)
+                        .into_error()
+                    })?;
                     if marks.is_marked(kernel, Entity::Vertex(vertex), mark) {
                         continue;
                     }
@@ -606,21 +618,38 @@ pub fn region_post_insert_shell(brep: &mut Brep, region: RegionId, shell: ShellI
 pub fn shell_remove_faceuse(brep: &mut Brep, shell: ShellId, faceuse: FaceuseId) -> Result<()> {
     const OP: &str = "topology::shell::shell_remove_faceuse";
     if brep.faceuse(faceuse)?.shell != Some(shell) {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology(OP, TopologyFailure::FaceUseNotInShell));
     }
     let members = &mut brep.shell_mut(shell)?.members;
     match members {
         ShellMembers::Faceuses(list) => {
-            let index = list
-                .iter()
-                .position(|id| *id == faceuse)
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+            let index = list.iter().position(|id| *id == faceuse).ok_or_else(|| {
+                Failure::new(
+                    OP,
+                    TopologyFailure::Defect {
+                        why: "the face use names this shell as its owner but is not in the \
+                            shell's list of face uses; the kernel sets a face use's owner \
+                            and its list entry together",
+                    },
+                )
+                .into_error()
+            })?;
             list.remove(index);
             if list.is_empty() {
                 *members = ShellMembers::Empty;
             }
         }
-        ShellMembers::Empty => return Err(SolidError::sm_err(OP)),
+        ShellMembers::Empty => {
+            return Err(Failure::new(
+                OP,
+                TopologyFailure::Defect {
+                    why: "the face use names this shell as its owner but the shell's \
+                        member list is empty; the kernel sets a face use's owner and \
+                        its list entry together",
+                },
+            )
+            .into_error())
+        }
         _ => return Err(invalid_members()),
     }
     let record = brep.faceuse_mut(faceuse)?;
@@ -698,11 +727,17 @@ pub fn transfer_children(
             return if shell_list_size(brep, source)? == 0 {
                 Ok(())
             } else {
-                Err(SolidError::sm_err(OP))
+                Err(SolidError::topology(
+                    OP,
+                    TopologyFailure::RecipientIsVertexShell,
+                ))
             };
         }
         if brep.shell(source)?.is_vertex_shell() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology(
+                OP,
+                TopologyFailure::SourceIsVertexShell,
+            ));
         }
     }
 
@@ -803,10 +838,13 @@ fn remove_and_post_insert(
 /// from its shell's face-use list, a recipient holding wire/vertex members, or
 /// dangling ids.
 pub fn move_faceuse(brep: &mut Brep, faceuse: FaceuseId, recipient: ShellId) -> Result<()> {
-    let source = brep
-        .faceuse(faceuse)?
-        .shell
-        .ok_or_else(|| SolidError::null_pointer("topology::shell::move_faceuse"))?;
+    // a face use taken out of its shell has none to move from: the caller's face use
+    let source = brep.faceuse(faceuse)?.shell.ok_or_else(|| {
+        SolidError::topology(
+            "topology::shell::move_faceuse",
+            TopologyFailure::FaceUseWithoutShell,
+        )
+    })?;
     brep.shell(recipient)?;
     remove_and_post_insert(brep, faceuse, source, recipient)?;
     refresh_faceuse_sibling_links(brep, source)?;
@@ -1188,7 +1226,18 @@ where
         let radius = if let Some(radius) = input.sphere_bound {
             radius
         } else {
-            shell_brep(brep, shell_id)?.ok_or(SolidError::null_pointer(OP))?;
+            shell_brep(brep, shell_id)?.ok_or_else(|| {
+                Failure::new(
+                    OP,
+                    TopologyFailure::Defect {
+                        why: "the shell the ray is fired at is in no region of the B-rep \
+                            that stores it; the kernel makes a shell inside a region of \
+                            its B-rep and deletes the shell when it leaves the region",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })?;
             // pBrep->CalculateBoundingBox(sBBox) (unit `query.brep`, default arguments)
             qbrep::calculate_bounding_box(kernel, &mut *brep, BoundingBoxOptions::default())?
                 .sphere_bound()
@@ -1197,10 +1246,11 @@ where
         let end = input.start + input.direction * (3.01 * radius);
         let direction = (end - input.start)
             .unitize()
-            .map_err(|_| SolidError::Upstream {
-                operation: OP,
-                code: 1007, // SmVector3d::Unitize returns SM_ERR_INVALID_INPUT.
-                entity: None,
+            // SmVector3d::Unitize returns SM_ERR_INVALID_INPUT.
+            .map_err(|e| {
+                Failure::new(OP, TopologyFailure::ZeroLengthVector)
+                    .caused_by(e)
+                    .into_error()
             })?;
         // `SmNewMarkAndLock` with the default (all marks) mask, released on every path.
         let faces = with_mark_lock(kernel, ALL_MARKS, |kernel, mark| {
@@ -1208,12 +1258,33 @@ where
             let mut faces = Vec::new();
             for id in brep.shell(shell_id)?.get_faceuses()? {
                 let faceuse = brep.faceuse(id)?;
-                let face = faceuse.face.ok_or(SolidError::null_pointer(OP))?;
+                let face = faceuse.face.ok_or_else(|| {
+                    Failure::new(
+                        OP,
+                        TopologyFailure::Defect {
+                            why: "a face use of the shell names no face; the kernel makes a \
+                                face's two face uses with the face and never unlinks one from \
+                                it",
+                        },
+                    )
+                    .with_status(SM_ERR_NULL_POINTER)
+                    .into_error()
+                })?;
                 if marks.is_marked(kernel, Entity::Face(face), mark) {
                     continue;
                 }
                 marks.mark(kernel, Entity::Face(face), mark);
-                let mate = brep.faceuse(faceuse.mate.ok_or(SolidError::null_pointer(OP))?)?;
+                let mate = brep.faceuse(faceuse.mate.ok_or_else(|| {
+                    Failure::new(
+                        OP,
+                        TopologyFailure::Defect {
+                            why: "a face use of the shell has no mate; the kernel makes a face's \
+                                two face uses as a mated pair",
+                        },
+                    )
+                    .with_status(SM_ERR_NULL_POINTER)
+                    .into_error()
+                })?)?;
                 if mate.shell != Some(shell_id) {
                     faces.push((brep_id, face));
                 }
@@ -1269,14 +1340,20 @@ where
                 .set_class_object(PointClassType::Unknown, None);
         }
         if parameter < EFF_ZERO * (1.0 + input.start.max_dimension()) {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology(OP, TopologyFailure::RayHitsAtStart));
         }
-        let object = chosen
-            .objects
-            .first()
-            .copied()
-            .flatten()
-            .ok_or(SolidError::null_pointer(OP))?;
+        let object = chosen.objects.first().copied().flatten().ok_or_else(|| {
+            Failure::new(
+                OP,
+                TopologyFailure::Defect {
+                    why: "the nearest hit of the ray names no face; the ray solve is \
+                        given the shell's faces as its objects and records the face of \
+                        every hit it returns",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         state.classification.load_from_intersection(
             input.zone_tolerance,
             object,
@@ -1285,7 +1362,18 @@ where
             parameter,
         )?;
         let endpoint = input.start + direction * parameter;
-        shell_brep(brep, shell_id)?.ok_or(SolidError::null_pointer(OP))?;
+        shell_brep(brep, shell_id)?.ok_or_else(|| {
+            Failure::new(
+                OP,
+                TopologyFailure::Defect {
+                    why: "the shell the ray hit is in no region of the B-rep that stores \
+                        it; the kernel makes a shell inside a region of its B-rep and \
+                        deletes the shell when it leaves the region",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         let curve = BSplineCurve::create_line_segment(3, input.start, endpoint)?;
         let sector = world.shell_ray_sector(
             &*kernel,
@@ -1541,9 +1629,16 @@ pub fn is_inner_shell_of_tri(
 /// shell (`ClosureTraversal` of its first face use; else [`SM_FALSE`]). Rays are cast
 /// from three sample points of each face use of the shell (along its normal), or from
 /// a wire shell's first edge or a vertex shell's vertex in random directions
-/// (`kernel.rng`, ND-1), against the whole B-rep; the first ray whose crossings are
+/// (ND-1), against the whole B-rep; the first ray whose crossings are
 /// all simple face crossings decides, by the stack of shells it exits and enters.
 /// Returns [`SM_TRUE`], [`SM_FALSE`] or [`SM_UNSURE`] (no ray decided).
+///
+/// The random directions and the face samples' dithers come from one generator the call
+/// makes from the kernel's seed ([`Kernel::seeded_rng`]); the face uses draw from it in
+/// the shell's face-use order, each taking the next draws, so two face uses are not
+/// sampled at the same relative places. So the rays, and with them the answer, are a
+/// function of the B-rep, the two shells and the seed: the same call on the same body
+/// gives the same answer whatever the kernel ran before.
 ///
 /// Upstream ignores the statuses of the closure traversal, the bounding box, the
 /// sample points, the ray solve, the classification insert and the crossing face's
@@ -1595,7 +1690,11 @@ pub fn is_inner_shell_of(
                 Some(fu) => crate::topology::topology_traverser::closure_traversal(
                     k, b, &mut marks, fu, &lock, None,
                 ),
-                None => Err(SolidError::null_pointer(OP_ISO)),
+                // a face-use shell that lists no face use: the caller's outer shell is empty
+                None => Err(SolidError::topology(
+                    OP_ISO,
+                    TopologyFailure::ShellHasNoFaceUses,
+                )),
             };
             let mut lock = lock;
             lock.release(std::slice::from_mut(&mut k.context))?;
@@ -1628,6 +1727,9 @@ pub fn is_inner_shell_of(
 
     // search the faceuses of the shells for likely ray casts (those that hit only faces)
     let smp_cnt = 3u64;
+    // this call's own draws, from the start of the seed's sequence: the face uses' sample
+    // dithers in face-use order, or a wire or vertex shell's ray directions
+    let mut rng = k.seeded_rng();
     let shell = b.shell(id)?.clone();
     let inner_vertex = shell.vertex(b)?;
     let inner_faceuses = shell.get_faceuses()?;
@@ -1654,7 +1756,7 @@ pub fn is_inner_shell_of(
             );
             // SmFaceuse::GetPointsInFace (which resets its outputs first; a failure
             // here leaves them empty)
-            let r = crate::topology::face::p2::points_in_face(k, b, f, smp_cnt);
+            let r = crate::topology::face::p2::points_in_face_drawing(k, b, f, smp_cnt, &mut rng);
             match checked(r)? {
                 Checked::Value(points) => {
                     let mut pv = points.pv;
@@ -1686,9 +1788,9 @@ pub fn is_inner_shell_of(
                     Checked::Decides => return Ok(SM_UNSURE),
                 };
                 let mut dir = Vec3::new(
-                    k.rng.next_signed_unit(),
-                    k.rng.next_signed_unit(),
-                    k.rng.next_signed_unit(),
+                    rng.next_signed_unit(),
+                    rng.next_signed_unit(),
+                    rng.next_signed_unit(),
                 );
                 dir = dir.unitize_or_z();
                 smp_pv.push(point);
@@ -1700,9 +1802,9 @@ pub fn is_inner_shell_of(
             for _ in 0..smp_cnt {
                 // pick varying directions for the vector
                 let mut dir = Vec3::new(
-                    k.rng.next_signed_unit(),
-                    k.rng.next_signed_unit(),
-                    k.rng.next_signed_unit(),
+                    rng.next_signed_unit(),
+                    rng.next_signed_unit(),
+                    rng.next_signed_unit(),
                 );
                 dir = dir.unitize_or_z();
                 smp_pv.push(point);
@@ -2081,7 +2183,7 @@ mod tests {
         assert_eq!(faceuse_sibling_links(&brep, b).unwrap(), (Some(c), Some(c)));
         // Remove of a member that is not in the list is upstream's SM_ERR status
         let e = shell_remove_faceuse(&mut brep, s, a).unwrap_err();
-        assert!(matches!(e, SolidError::Upstream { .. }));
+        assert!(e.upstream_status().is_some());
         // PostInsert into an empty shell makes its head; the type is not touched
         shell_post_insert_faceuse(&mut brep, t, a).unwrap();
         assert_eq!(
@@ -2118,5 +2220,111 @@ mod tests {
         region_post_insert_shell(&mut brep, q, s1).unwrap();
         assert_eq!(brep.region(r).unwrap().shells, vec![s2]);
         assert_eq!(brep.region(q).unwrap().shells, vec![s1]);
+    }
+
+    /// `IsInnerShellOf`'s ray (`ray_brep_solve`) along a face of a hollow box: the
+    /// overlap on the cavity's floor is classified on the live B-rep, where it was
+    /// "unported: `SmFace::CurveOnClassify`" (tangency-labs/solidcraft#15895, STEP solids
+    /// with voids).
+    #[test]
+    fn ray_along_a_cavity_floor_classifies_its_overlap() {
+        use crate::boolean::api_brep::boolean_difference;
+        use crate::curve::curve::Curve;
+        use crate::curve::line::{BoundedLineOptions, Line};
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::geom::extent1d::Extent1d;
+        use crate::geom::solution_array::SolutionType;
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+        use crate::math::{Point3, Vec3};
+        use crate::primitive::api_primitives::create_box;
+        use crate::query::api_queries::{edge_bounding_box, face_bounding_box};
+        use crate::topology::brep::p1;
+        use crate::topology::brep_cache::CacheObject;
+
+        let mut k = Kernel::default();
+        let outer = create_box(&mut k, Point3::ZERO, 20.0, 20.0, 20.0).unwrap();
+        let cavity = create_box(&mut k, Point3::new(5.0, 5.0, 5.0), 10.0, 10.0, 10.0).unwrap();
+        let mut b = boolean_difference(&mut k, outer, cavity).unwrap();
+        assert_eq!(p1::faces(&b, None).unwrap().len(), 12);
+        assert_eq!(p1::edges(&b, None).unwrap().len(), 24);
+        assert_eq!(p1::vertices(&b, None).unwrap().len(), 16);
+        assert_eq!(p1::regions(&b, None).unwrap().len(), 3);
+        assert_eq!(p1::shells(&mut k, &b, None).unwrap().len(), 4);
+        let store = AttributeStore::default();
+        let key_of = |_: crate::EntityRef| ObjectKey(0);
+        let attributes = PropertyAttributes {
+            store: &store,
+            key_of: &key_of,
+        };
+        let volume = brep_volume(&k, &mut b, 1e-9, &attributes).unwrap();
+        assert!((volume - 7000.0).abs() < 1e-6, "volume {volume}");
+
+        // from x = -1 along +x in the floor's plane z = 5, through the cavity's middle
+        let line = Curve::from(Line::bounded(
+            Point3::new(-1.0, 10.0, 5.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            &Extent1d::from_min_max(0.0, 22.0),
+            &BoundedLineOptions {
+                scale: 1.0,
+                dim: 3,
+                ..BoundedLineOptions::default()
+            },
+        ));
+        let solutions = ray_brep_solve(&k, &mut b, &line, 1e-6).unwrap();
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        let ranges: Vec<_> = solutions
+            .as_slice()
+            .iter()
+            .filter(|s| s.solution_type == SolutionType::RangeOfValues)
+            .collect();
+        assert_eq!(ranges.len(), 1, "{solutions:?}");
+        let range = ranges[0];
+        // x from 5 to 15, on the cavity's floor
+        assert!(near(range.start.param(0).unwrap(), 6.0), "{range:?}");
+        assert!(near(range.end.param(0).unwrap(), 16.0), "{range:?}");
+        let Some(CacheObject::Face(floor)) = range.objects[1] else {
+            panic!("the range names no face: {range:?}");
+        };
+        let floor_box = face_bounding_box(&k, &b, floor, true).unwrap();
+        assert!(near(floor_box.min.z, 5.0) && near(floor_box.max.z, 5.0));
+        assert!(near(floor_box.min.x, 5.0) && near(floor_box.max.x, 15.0));
+        // the single crossings: the outer box's walls x = 0 and x = 20 at t = 1 and 21,
+        // and at t = 6 and 16 the cavity's walls x = 5 and x = 15 and their edges on
+        // the floor, where the ray enters and leaves the floor
+        assert_eq!(solutions.len(), 7, "{solutions:?}");
+        let mut crossings: Vec<(f64, &str)> = Vec::new();
+        for s in solutions.as_slice() {
+            if s.solution_type == SolutionType::RangeOfValues {
+                continue;
+            }
+            assert_eq!(s.solution_type, SolutionType::SingleValue, "{s:?}");
+            let t = s.start.param(0).unwrap();
+            let (kind, extent) = match s.objects[1] {
+                Some(CacheObject::Face(f)) => ("face", face_bounding_box(&k, &b, f, true).unwrap()),
+                Some(CacheObject::Edge(e)) => ("edge", edge_bounding_box(&k, &b, e, true).unwrap()),
+                _ => panic!("a crossing names no face or edge: {s:?}"),
+            };
+            // each lies in the plane x = t - 1 the ray crosses there
+            assert!(
+                near(extent.min.x, t - 1.0) && near(extent.max.x, t - 1.0),
+                "{s:?}"
+            );
+            if kind == "edge" {
+                assert!(near(extent.min.z, 5.0) && near(extent.max.z, 5.0), "{s:?}");
+            }
+            crossings.push((t, kind));
+        }
+        crossings.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(b.1)));
+        assert_eq!(
+            crossings,
+            [
+                (1.0, "face"),
+                (6.0, "edge"),
+                (6.0, "face"),
+                (16.0, "edge"),
+                (16.0, "face"),
+                (21.0, "face")
+            ]
+        );
     }
 }

@@ -40,9 +40,8 @@ fn precise_sphere_properties_scale_and_translate() {
     // that distinguish the two properties and their different scaling laws.
     for (center, radius) in [(Vec3::ZERO, 2.0), (Vec3::new(1.0, -2.0, 0.5), 5.0)] {
         for no_pole in [false, true] {
-            let mut k = Kernel::default();
             // 1.0.1's error scales cannot converge at 1e-10 on a sphere (WR-472)
-            k.fixes.precise_properties_body_length_scale = true;
+            let mut k = Kernel::default();
             let mut b = if no_pole {
                 create_sphere_no_pole_with_tolerance(&mut k, center, radius, 1e-9)
             } else {
@@ -68,57 +67,6 @@ fn precise_sphere_properties_scale_and_translate() {
             let volume = area * radius / 3.0;
             assert!((properties.area - area).abs() <= checks::REL_TOL * area);
             assert!((properties.volume - volume).abs() <= checks::REL_TOL * volume);
-        }
-    }
-}
-
-/// SMLib 1.0.1's default (WR-472): `SmFace::ComputePreciseProperties` holds the volume
-/// and moments of a sphere of radius 3 below roundoff at 1e-10, and the integration fails
-/// with `SM_ERR`. The opt-in `precise_properties_body_length_scale` measures it.
-#[test]
-fn default_sphere_precise_properties_fail_at_tight_accuracy() {
-    use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-    use solidcore::mass::integrator::properties::{
-        brep_properties, MassPropertyBehavior, PropertyAttributes,
-    };
-    use solidcore::primitive::api_primitives::create_sphere;
-    use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
-    use solidcore::{math::Vec3, Kernel};
-
-    let store = AttributeStore::default();
-    let key_of = |_| ObjectKey(0);
-    let attributes = PropertyAttributes {
-        store: &store,
-        key_of: &key_of,
-    };
-    for fixed in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes.precise_properties_body_length_scale = fixed;
-        let mut b = create_sphere(&mut k, Vec3::ZERO, 3.0).unwrap();
-        let mid = calculate_bounding_box(&k, &b, BoundingBoxOptions::default())
-            .unwrap()
-            .mid();
-        let result = brep_properties(
-            &k,
-            &mut b,
-            1e-10,
-            mid,
-            MassPropertyBehavior::default(),
-            &attributes,
-        );
-        if fixed {
-            assert!(result.is_ok(), "{result:?}");
-        } else {
-            assert!(
-                matches!(
-                    &result,
-                    // the step control failing: upstream's SM_ERR, named by its cause
-                    Err(e) if e.operation() == "mass::integrator::step_control"
-                        && solidcore::error::upstream_status(e) == Some(solidcore::error::SM_ERR)
-                        && e.mass_failure() == Some(&solidcore::error::mass::MassFailure::StepControl)
-                ),
-                "{result:?}"
-            );
         }
     }
 }
@@ -182,4 +130,117 @@ fn pole_free_sphere_tolerance_is_explicit_and_validated() {
     }
     let next_default = create_sphere_no_pole(&mut k, center, 3.0).unwrap();
     assert_eq!(next_default.tolerance(), default.tolerance());
+}
+
+/// tangency-labs/solidcraft#18634: a box is judged by its size, not by its distance from
+/// the origin. Each cube here is many times the B-rep tolerance (1e-5) on every side and
+/// its far corner is exact in f64 (`c + s` rounds to within 1e-6 of the true sum at every
+/// offset below), so it exists; before the fix `create_box` refused the rows at about
+/// 1e-9 times the offset and below ("surface degenerates to a curve/point", whose floors
+/// scaled with `1 + |coord|`), and built the rows between that and about
+/// `sqrt(1e-12 * offset)` with faces the level-2 check reported as crossing or missing a
+/// seam (`is_periodic`'s position test scaled the same way).
+#[test]
+fn boxes_far_from_the_origin_build_closed_and_valid() {
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_primitives::{create_box, create_cylindrical_box};
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use solidcore::Kernel;
+
+    // sides from 2e-4 (above the level-2 check's degenerate-point tolerance, 1e-4, as at
+    // the origin) to the 5e3 cube at 1e12 of the issue
+    let rows: [(f64, &[f64]); 7] = [
+        (1e3, &[2e-4, 1e-2, 1.0]),
+        (1e4, &[2e-4, 1e-3]),
+        (1e5, &[2e-4, 3e-4, 1e-2]),
+        (1e6, &[2e-4, 1e-3, 1.5e-3]),
+        (1e7, &[1e-3, 1e-2]),
+        (1e8, &[1e-3, 1e-2, 1e-1]),
+        (1e12, &[5e3]),
+    ];
+    let mut failures = Vec::new();
+    for (c, sides) in rows {
+        for &s in sides {
+            let at = Point3::new(c, c, c);
+            // the exact rounding error of the far corner `c + s` (Knuth's TwoSum)
+            let sum = c + s;
+            let back = sum - c;
+            assert!(
+                ((c - (sum - back)) + (s - back)).abs() < 1e-6,
+                "{s:e} at {c:e}"
+            );
+            let k = &mut Kernel::default();
+            match create_box(k, at, s, s, s) {
+                Err(e) => failures.push(format!("box {s:e} at {c:e}: {e}")),
+                Ok(mut b) => {
+                    let counts = (
+                        b.face_list().len(),
+                        b.edge_list().len(),
+                        b.vertex_list().len(),
+                    );
+                    let check = check_brep(k, &mut b, CheckLevel::Level2).unwrap();
+                    if counts != (6, 12, 8) || !check.is_valid() {
+                        failures.push(format!(
+                            "box {s:e} at {c:e}: {counts:?} {:?}",
+                            check.lines()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    // quarter cylindrical boxes (length, inner and outer radius) at the same offsets: their
+    // cylinder faces' tangent test scaled with the corner's position too
+    for c in [1e3, 1e6, 1e8] {
+        for (length, inner, outer) in [(1.0, 1.0, 2.0), (1e-3, 1.0, 2.0), (1.0, 1e-3, 2e-3)] {
+            let at = Point3::new(c, c, c);
+            let k = &mut Kernel::default();
+            let row = format!("cylindrical box {length:e} x {inner:e}..{outer:e} at {c:e}");
+            match create_cylindrical_box(k, at, length, inner, outer, 0.0, 90.0) {
+                Err(e) => failures.push(format!("{row}: {e}")),
+                Ok(mut b) => {
+                    let faces = b.face_list().len();
+                    let check = check_brep(k, &mut b, CheckLevel::Level2).unwrap();
+                    if faces != 6 || !check.is_valid() {
+                        failures.push(format!("{row}: {faces} {:?}", check.lines()));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// tangency-labs/solidcraft#18634, the issue's second table: cubes of 1e-4 and 5e-5 at
+/// (1e4, 1e4, 1e4), at or below the level-2 check's degenerate-point tolerance (1e-4).
+/// Their answer is the one the same cube gets at the origin (the same face, edge and
+/// vertex counts and level-2 verdict, or the same refusal), so where the cube is does not
+/// decide it.
+#[test]
+fn small_boxes_at_1e4_answer_as_at_the_origin() {
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_primitives::create_box;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use solidcore::Kernel;
+
+    let answer = |at: Point3, s: f64| -> Result<((usize, usize, usize), bool), String> {
+        let k = &mut Kernel::default();
+        let mut b = create_box(k, at, s, s, s).map_err(|e| e.to_string())?;
+        let counts = (
+            b.face_list().len(),
+            b.edge_list().len(),
+            b.vertex_list().len(),
+        );
+        Ok((
+            counts,
+            check_brep(k, &mut b, CheckLevel::Level2)
+                .unwrap()
+                .is_valid(),
+        ))
+    };
+    for s in [1e-4, 5e-5] {
+        let near = answer(Point3::new(0.0, 0.0, 0.0), s);
+        let far = answer(Point3::new(1e4, 1e4, 1e4), s);
+        assert_eq!(far, near, "{s:e}");
+    }
 }

@@ -5,8 +5,9 @@
 //! `step_export` writes, so an engine B-rep can be exported without being
 //! tessellated.
 //!
-//! The initial bridge writes one `MANIFOLD_SOLID_BREP` per B-rep, with all live faces
-//! in one closed shell. Curves and surfaces are written as their exact analytic or
+//! It writes a solid per material region: a `MANIFOLD_SOLID_BREP` of its outer shell,
+//! or a `BREP_WITH_VOIDS` when the region has inner shells (voids), every face pointing
+//! out of the material as ISO 10303-42 directs. Curves and surfaces are written as their exact analytic or
 //! NURBS entities. Curved faces carry one pcurve per actual edge use, so a seam edge
 //! used twice carries the two pcurves the writer joins into one `SEAM_CURVE`; a closed
 //! edge used once (a cap circle) is no seam.
@@ -20,6 +21,7 @@ use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::tol::ZONE_TOL_3D;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
+use solidcore::topology::brep::outer_shells::outer_shells;
 use solidcore::topology::brep::p2::is_sheet;
 use solidcore::topology::edgeuse::p1 as eu;
 use solidcore::topology::{Brep, VertexId};
@@ -265,6 +267,27 @@ fn step_angles(surface: &solidcore::surface::surface::Surface) -> (bool, bool) {
     }
 }
 
+/// Whether `surface`'s STEP parameterisation (ISO 10303-42, the one [`surface`] writes)
+/// turns its normal over against the kernel's, ∂S/∂u × ∂S/∂v in its NURB parameters. The
+/// written axis, radii and generator are the same either way; what differs is how the NURB
+/// parameters run: swapped (the NURB's u is STEP's v), or one of them running against
+/// STEP's (an inside-out cone's height from the top, sphere's latitude from the +90 pole,
+/// torus's minor angle backwards). Each such reversal turns the normal over once.
+fn reverses_normal(surface: &solidcore::surface::surface::Surface) -> bool {
+    use solidcore::surface::surface::p2::SurfaceKind;
+    match surface.kind() {
+        SurfaceKind::Cone(cone) => {
+            let canonical = cone.canonical();
+            canonical.swap_uv ^ canonical.inside_out
+        }
+        SurfaceKind::Sphere(sphere) => sphere.base().swap_uv() ^ sphere.inside_out(),
+        SurfaceKind::Torus(torus) => torus.base().swap_uv() ^ torus.inside_out(),
+        SurfaceKind::SurfOfRevolution(revolution) => revolution.swap_uv(),
+        SurfaceKind::SurfOfExtrusion(extrusion) => extrusion.swap_uv(),
+        _ => false,
+    }
+}
+
 /// Maps one B-rep to the neutral STEP model.
 pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
     let vertex_ids = brep.vertex_list().to_vec();
@@ -326,25 +349,53 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
     let mut face_by_id = BTreeMap::new();
     let mut pcurves = BTreeMap::new();
     let pcurve_kernel = &kernel;
-    let mut material_faceuses = BTreeMap::new();
-    for shell_id in brep.shells().ids() {
-        let shell = brep.shell(shell_id).map_err(|e| err(e.to_string()))?;
-        let Some(region_id) = shell.region else {
-            continue;
-        };
-        if brep
-            .region(region_id)
-            .map_err(|e| err(e.to_string()))?
-            .is_void()
-            != 0
-        {
+    // ISO 10303-42 wants a solid's faces written from outside its material: each face's
+    // normal (the surface's, reversed where `same_sense` is false) pointing out of the
+    // material, and its loops anticlockwise about that normal. A faceuse in a shell of a
+    // material region faces into that region. A region's outer shell (`outer_shells`, the one
+    // mated to the region enclosing it; the kernel's list order says nothing here):
+    // each face of it is written from its mate, the faceuse on the outer side. Its other shells bound voids, each written as a BREP_WITH_VOIDS void: a
+    // closed shell whose faces point out of the void's own volume (the material faceuses
+    // themselves, pointing into the material), under an ORIENTED_CLOSED_SHELL of
+    // orientation .F., which turns them out of the material.
+    let mut written_faceuses = BTreeMap::new();
+    let outer_of = outer_shells(brep).map_err(|e| err(e.to_string()))?;
+    // each material region's shells, outer first
+    let mut solids: Vec<Vec<solidcore::topology::ShellId>> = Vec::new();
+    for region_id in brep.regions().ids() {
+        let region = brep.region(region_id).map_err(|e| err(e.to_string()))?;
+        if region.is_void() != 0 {
             continue;
         }
-        for faceuse in shell.get_faceuses().map_err(|e| err(e.to_string()))? {
-            if let Some(face) = brep.faceuse(faceuse).map_err(|e| err(e.to_string()))?.face {
-                material_faceuses.insert(face, faceuse);
+        let mut shells = region.shells.clone();
+        if shells.len() > 1 {
+            let outer = *outer_of.get(&region_id).ok_or_else(|| {
+                err("a solid region with voids is not reached from the infinite region")
+            })?;
+            if !shells.contains(&outer) {
+                return Err(err("a region's outer shell is not one of its shells"));
+            }
+            shells = std::iter::once(outer)
+                .chain(shells.into_iter().filter(|s| *s != outer))
+                .collect();
+        }
+        for (position, shell_id) in shells.iter().enumerate() {
+            let shell = brep.shell(*shell_id).map_err(|e| err(e.to_string()))?;
+            for faceuse_id in shell.get_faceuses().map_err(|e| err(e.to_string()))? {
+                let faceuse = brep.faceuse(faceuse_id).map_err(|e| err(e.to_string()))?;
+                if let Some(face) = faceuse.face {
+                    let written = if position == 0 {
+                        faceuse
+                            .mate
+                            .ok_or_else(|| err("a material faceuse has no mate"))?
+                    } else {
+                        faceuse_id
+                    };
+                    written_faceuses.insert(face, written);
+                }
             }
         }
+        solids.push(shells);
     }
     for id in brep.face_list() {
         let face = brep.face(*id).map_err(|e| err(e.to_string()))?;
@@ -352,7 +403,7 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
             .surface
             .as_ref()
             .ok_or_else(|| err("face has no surface"))?;
-        let faceuse = material_faceuses
+        let faceuse = written_faceuses
             .get(id)
             .copied()
             .or(face.faceuse)
@@ -376,7 +427,7 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
                 if !planar_face {
                     // The UV trim only enriches this face's boundary: without one the
                     // edge use still contributes its oriented edge below.
-                    if let Ok((Some(uv_curve), _)) = eu::uv_trim_curve(brep, edgeuse) {
+                    if let Ok((Some(uv_curve), owner)) = eu::uv_trim_curve(brep, edgeuse) {
                         let interval = uv_curve.natural_interval();
                         let (low, high) = (interval.min(), interval.max());
                         // The UV trim curve is in the surface's NURB parameters; a STEP pcurve
@@ -401,11 +452,14 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
                             uv.clear();
                         }
                         if uv.len() >= 2 {
-                            let opposite =
-                                eu::orientation(brep, edgeuse).is_ok_and(|orientation| {
-                                    orientation
-                                != solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType::Same
-                                });
+                            // A UV trim curve runs along the edge use that holds it, which
+                            // is this use's mate when this use holds none: the pcurve runs
+                            // along the edge.
+                            let holder = owner.unwrap_or(edgeuse);
+                            let opposite = eu::orientation(brep, holder).is_ok_and(|orientation| {
+                                orientation
+                                    != solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType::Same
+                            });
                             if opposite {
                                 uv.reverse();
                             }
@@ -445,19 +499,15 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
                 bound: Bound::Edges(oriented),
             });
         }
-        let mut same_sense = brep
+        // The faceuse's side is the kernel surface's normal (its NURB parameters'), or its
+        // reverse; `same_sense` states it against the STEP surface's normal
+        // ([`reverses_normal`]). The loops stay as the faceuse directs them.
+        let same_sense = (brep
             .faceuse(faceuse)
             .map_err(|e| err(e.to_string()))?
             .orientation
-            == solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType::Same;
-        // STEP cones/cylinders use the canonical outward parameterisation. The
-        // kernel also permits swapped UV directions and inside-out cones; each
-        // reverses its normal without changing the exported axis and radius.
-        // Keep the directed boundary and express that reversal in ADVANCED_FACE.
-        if let solidcore::surface::surface::SurfaceKind::Cone(cone) = surf.kind() {
-            let canonical = cone.canonical();
-            same_sense ^= canonical.swap_uv ^ canonical.inside_out;
-        }
+            == solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType::Same)
+            ^ reverses_normal(surf);
         face_indices.push(faces.len());
         face_by_id.insert(*id, faces.len());
         faces.push(Face {
@@ -472,67 +522,104 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
     }
     let mut kernel = Kernel::default();
     let sheet = is_sheet(&mut kernel, brep).map_err(|e| err(e.to_string()))?;
-    let mut shell_records = Vec::new();
-    let mut seen_shell_faces: Vec<Vec<usize>> = Vec::new();
-    for (shell_position, shell_id) in brep.shells().ids().enumerate() {
-        let mut shell_faces = Vec::new();
-        for faceuse in brep
-            .shell(shell_id)
-            .map_err(|e| err(e.to_string()))?
-            .get_faceuses()
-            .map_err(|e| err(e.to_string()))?
-        {
-            let face_id = brep.faceuse(faceuse).map_err(|e| err(e.to_string()))?.face;
-            if let Some(face_id) = face_id {
-                if let Some(index) = face_by_id.get(&face_id) {
-                    shell_faces.push(*index);
+    // the faces of a shell, as indices into `faces`
+    let shell_faces =
+        |shell_id: solidcore::topology::ShellId| -> Result<Vec<usize>, ExportModelError> {
+            let mut out = Vec::new();
+            for faceuse in brep
+                .shell(shell_id)
+                .map_err(|e| err(e.to_string()))?
+                .get_faceuses()
+                .map_err(|e| err(e.to_string()))?
+            {
+                let face_id = brep.faceuse(faceuse).map_err(|e| err(e.to_string()))?.face;
+                if let Some(index) = face_id.and_then(|face_id| face_by_id.get(&face_id)) {
+                    out.push(*index);
                 }
             }
+            Ok(out)
+        };
+    let body = |index: usize, kind: BodyKind, shells: Vec<Shell>| Body {
+        step_id: index as u64 + 1,
+        name: None,
+        kind,
+        unit_mm: 1.0,
+        uncertainty_mm: None,
+        shells,
+        faces: faces.clone(),
+        edges: edges.clone(),
+        vertices: vertices.clone(),
+    };
+    let mut bodies = Vec::new();
+    if !sheet {
+        // a solid per material region: its outer shell, and its voids
+        for shells in &solids {
+            let mut records = Vec::new();
+            for (position, shell_id) in shells.iter().enumerate() {
+                let faces_of = shell_faces(*shell_id)?;
+                if faces_of.is_empty() {
+                    continue;
+                }
+                records.push(Shell {
+                    step_id: u64::from(shell_id.index()) + 1,
+                    closed: true,
+                    orientation: position == 0,
+                    faces: faces_of,
+                });
+            }
+            if records.first().is_some_and(|outer| outer.orientation) {
+                let kind = if records.len() > 1 {
+                    BodyKind::SolidWithVoids
+                } else {
+                    BodyKind::ManifoldSolid
+                };
+                bodies.push(body(bodies.len(), kind, records));
+            }
         }
-        if shell_faces.is_empty() {
-            continue;
-        }
-        let mut canonical = shell_faces.clone();
-        canonical.sort_unstable();
-        if seen_shell_faces.contains(&canonical) {
-            continue;
-        }
-        seen_shell_faces.push(canonical);
-        shell_records.push(Shell {
-            step_id: shell_position as u64 + 1,
-            closed: !sheet,
-            orientation: true,
-            faces: shell_faces,
-        });
     }
-    if shell_records.is_empty() {
-        // No region/shell: fall back to every live face in one body.
-        shell_records.push(Shell {
+    if bodies.is_empty() {
+        // No material region (a sheet, or no regions): a body per distinct face shell.
+        let mut seen_shell_faces: Vec<Vec<usize>> = Vec::new();
+        let kind = if sheet {
+            BodyKind::ShellModel
+        } else {
+            BodyKind::ManifoldSolid
+        };
+        for shell_id in brep.shells().ids() {
+            let faces_of = shell_faces(shell_id)?;
+            if faces_of.is_empty() {
+                continue;
+            }
+            let mut canonical = faces_of.clone();
+            canonical.sort_unstable();
+            if seen_shell_faces.contains(&canonical) {
+                continue;
+            }
+            seen_shell_faces.push(canonical);
+            let shell = Shell {
+                step_id: u64::from(shell_id.index()) + 1,
+                closed: !sheet,
+                orientation: true,
+                faces: faces_of,
+            };
+            bodies.push(body(bodies.len(), kind, vec![shell]));
+        }
+    }
+    if bodies.is_empty() {
+        // No shell: every live face in one body.
+        let shell = Shell {
             step_id: 1,
             closed: !sheet,
             orientation: true,
-            faces: face_indices,
-        });
+            faces: face_indices.clone(),
+        };
+        let kind = if sheet {
+            BodyKind::ShellModel
+        } else {
+            BodyKind::ManifoldSolid
+        };
+        bodies.push(body(0, kind, vec![shell]));
     }
-    let bodies = shell_records
-        .into_iter()
-        .enumerate()
-        .map(|(index, shell)| Body {
-            step_id: index as u64 + 1,
-            name: None,
-            kind: if sheet {
-                BodyKind::ShellModel
-            } else {
-                BodyKind::ManifoldSolid
-            },
-            unit_mm: 1.0,
-            uncertainty_mm: None,
-            shells: vec![shell],
-            faces: faces.clone(),
-            edges: edges.clone(),
-            vertices: vertices.clone(),
-        })
-        .collect();
     Ok(Model {
         bodies,
         pcurves,
@@ -741,10 +828,21 @@ mod tests {
     /// in STEP parameters (converted from the kernel's NURB ones), angles in radians.
     #[test]
     fn exported_pcurves_lie_on_their_edges() {
+        use solidcore::curve::ellipse::p2::EllipseOptions;
+        use solidcore::curve::ellipse::Ellipse;
+        use solidcore::curve::line::Line;
+        use solidcore::geom::extent2d::Extent2d;
         use solidcore::geom::global_solver::SolverOperation;
+        use solidcore::math::Vec3;
+        use solidcore::surface::surf_of_extrusion::SurfOfExtrusion;
+        use solidcore::surface::surf_of_revolution::SurfOfRevolution;
+        use solidcore::surface::surface::Surface;
+        use solidcore::topology::brep::p2::edgeuses;
+        use solidcore::topology::brep::sheet::sheet_on;
+        use solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve;
         let mut kernel = Kernel::default();
         let origin = Point3::new(0.0, 0.0, 0.0);
-        let breps = vec![
+        let mut breps = vec![
             (
                 "cylinder",
                 api::create_cylinder(&mut kernel, Point3::new(0.0, 0.0, -2.0), 2.0, 4.0).unwrap(),
@@ -762,6 +860,74 @@ mod tests {
                 api::create_torus(&mut kernel, origin, 5.0, 1.5).unwrap(),
             ),
         ];
+        // A surface of revolution of a line and an extrusion of a circle (u an angle
+        // on both), each a one-face sheet: 20 mm tall at radius 10 about the z axis.
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        let y = Vec3::new(0.0, 1.0, 0.0);
+        let mut line =
+            Line::from_points(Point3::new(10.0, 0.0, 0.0), Point3::new(10.0, 0.0, 20.0), 3);
+        // SurfOfRevolution::new revolves the generator's NURB form
+        line.make_nurb().unwrap();
+        let revolved_line = SurfOfRevolution::new(
+            &kernel,
+            Curve::from(line),
+            origin,
+            x,
+            y,
+            Extent2d::from_bounds(0.0, 0.0, 360.0, 1.0),
+            false,
+        )
+        .unwrap();
+        let circle = Ellipse::new_circle(
+            &kernel,
+            origin,
+            x,
+            y,
+            Extent1d::from_min_max(0.0, 360.0),
+            10.0,
+            &EllipseOptions {
+                dim: 3,
+                ..EllipseOptions::default()
+            },
+        )
+        .unwrap();
+        let extruded_circle = SurfOfExtrusion::new(
+            &kernel,
+            Curve::from(circle),
+            origin,
+            Vec3::new(0.0, 0.0, 20.0),
+            Extent2d::from_bounds(0.0, 0.0, 360.0, 1.0),
+            false,
+        )
+        .unwrap();
+        let sheets = [
+            ("revolved line", Surface::from(revolved_line)),
+            ("extruded circle", Surface::from(extruded_circle)),
+        ];
+        for (name, surface) in sheets {
+            let (mut brep, _) =
+                sheet_on(&mut kernel, surface, 1e-6).unwrap_or_else(|e| panic!("{name}: {e}"));
+            // the sheet's sides have no UV curves yet: each edge use gets its own
+            // (no distance or deviation wanted, a UV-space curve is fine)
+            for edgeuse in edgeuses(&brep, None).unwrap() {
+                get_or_create_uv_trim_curve(&kernel, &mut brep, edgeuse, false, false, true)
+                    .unwrap()
+                    .status
+                    .unwrap_or_else(|e| panic!("{name}: {e}"));
+            }
+            // the face keeps its kind, so the checks below go through its branch
+            let model = brep_to_model(&brep).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(
+                model.bodies[0].faces.iter().all(|face| matches!(
+                    (name, &face.surface),
+                    ("revolved line", ModelSurface::Revolution { .. })
+                        | ("extruded circle", ModelSurface::Extrusion { .. })
+                )),
+                "{name}: exported as {:?}",
+                model.bodies[0].faces
+            );
+            breps.push((name, brep));
+        }
         for (name, brep) in &breps {
             let model = brep_to_model(brep).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert!(!model.pcurves.is_empty(), "{name}: no pcurves");

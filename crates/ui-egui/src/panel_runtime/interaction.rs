@@ -25,12 +25,35 @@ pub enum HostResizeEdge {
     Right,
     Top,
     Bottom,
+    TopLeft,
+    TopRight,
+    BottomLeft,
     BottomRight,
 }
 
 impl HostResizeEdge {
+    pub(super) fn is_corner(self) -> bool {
+        matches!(self, Self::TopLeft | Self::TopRight | Self::BottomLeft | Self::BottomRight)
+    }
+
+    fn moves_west(self) -> bool {
+        matches!(self, Self::Left | Self::TopLeft | Self::BottomLeft)
+    }
+
+    fn moves_east(self) -> bool {
+        matches!(self, Self::Right | Self::TopRight | Self::BottomRight)
+    }
+
+    pub(super) fn moves_north(self) -> bool {
+        matches!(self, Self::Top | Self::TopLeft | Self::TopRight)
+    }
+
+    fn moves_south(self) -> bool {
+        matches!(self, Self::Bottom | Self::BottomLeft | Self::BottomRight)
+    }
+
     /// Dock targets retain their logical identity when the workspace mirrors.
-    /// Floating corners remain physical because floating rects do not mirror.
+    /// Floating edges and corners remain physical because floating rects do not mirror.
     pub(super) fn physical(self, zone: Zone, direction: Direction) -> Self {
         if zone.docked() && direction == Direction::Rtl {
             match self {
@@ -179,11 +202,31 @@ pub enum HostPointerEvent {
     },
 }
 
+/// `Window` is everywhere outside the app window: the panel pops out to a
+/// desktop window there.
 #[derive(Clone, Debug, PartialEq)]
 pub enum HostDropTargetId {
     Dock { zone: Zone, before: Option<SectionId> },
     Tab { section: SectionId, before: Option<InstanceId> },
     Relative { section: SectionId, placement: RelativePlacement },
+    Window,
+}
+
+/// The app window, for a drag that may leave it. Only a desktop host with
+/// native panel windows sets it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HostDragOut {
+    /// The window's content area, in host coordinates.
+    pub window: LogicalRect,
+    /// The screen position of the host origin, in the same logical points.
+    pub screen_origin: Point,
+}
+
+impl HostDragOut {
+    pub fn validate(&self) -> PanelResult<()> {
+        self.window.validate()?;
+        self.screen_origin.validate()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -209,11 +252,24 @@ pub struct HostPreview {
     pub target: Option<HostDropTargetId>,
     pub targets: Vec<HostDropTarget>,
     pub tab_marker: Option<LogicalRect>,
+    /// For the Window target: the screen point, in logical points, where the
+    /// desktop window's corner lands. The host shows it before release.
+    pub window: Option<Point>,
 }
 
 impl HostPreview {
     fn empty(bounds: LogicalRect) -> Self {
-        Self { action: None, bounds, destination: None, rejection: None, projected: None, target: None, targets: Vec::new(), tab_marker: None }
+        Self {
+            action: None,
+            bounds,
+            destination: None,
+            rejection: None,
+            projected: None,
+            target: None,
+            targets: Vec::new(),
+            tab_marker: None,
+            window: None,
+        }
     }
 }
 
@@ -275,6 +331,9 @@ pub struct PreparedHostLayout {
     layout: HostLayout,
     reference: HostLayout,
     scope: LocalScope,
+    /// A drag past the edge of the app: the panel and the screen rectangle its
+    /// desktop window was shown at before release.
+    window: Option<(InstanceId, LogicalRect)>,
 }
 impl std::fmt::Debug for PreparedHostLayout {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -284,6 +343,10 @@ impl std::fmt::Debug for PreparedHostLayout {
 impl PreparedHostLayout {
     pub fn layout(&self) -> &HostLayout {
         &self.layout
+    }
+    /// The panel and the screen rectangle its desktop window opens at.
+    pub fn window_landing(&self) -> Option<&(InstanceId, LogicalRect)> {
+        self.window.as_ref()
     }
     pub fn prepared(&self) -> &PreparedLayout {
         &self.prepared
@@ -321,6 +384,38 @@ impl PreparedHostLayout {
         self.validate_current(service, scope, reference)?;
         Ok(self.prepared)
     }
+}
+
+/// Resolve the display while a dragged tab is outside every admitted target.
+/// The private topology keeps the committed layout and capture untouched. A
+/// contextual panel can be detached for display even when it cannot be closed.
+pub(super) fn detached_drag_layout(
+    service: &LayoutService,
+    scope: &LocalScope,
+    reference: &HostLayout,
+    instance: &InstanceId,
+) -> PanelResult<HostLayout> {
+    validate_context(service, scope, reference)?;
+    service.availability(instance).require()?;
+    let section_id = &service.layout().containing(instance)?.id;
+    let mut detached = service.layout().clone();
+    let panel =
+        detached.instances.iter_mut().find(|panel| &panel.id == instance).ok_or_else(|| error(Rule::MissingTarget, "detached panel missing"))?;
+    panel.requested_open = false;
+    detached.sections.retain_mut(|section| {
+        if &section.id != section_id {
+            return true;
+        }
+        section.tabs.retain(|tab| tab != instance);
+        let Some(first) = section.tabs.first() else {
+            return false;
+        };
+        if &section.active == instance {
+            section.active = first.clone();
+        }
+        true
+    });
+    resolve_host_projected(service, &detached, reference)
 }
 
 /// Every command and gesture calls this admission path before runtime lifecycle
@@ -417,7 +512,7 @@ pub fn prepare_host_layout_with_snapshot(
     if overflow && !exempt && !improves {
         return Err(error(Rule::NoSpace, "candidate does not strictly improve existing overflow"));
     }
-    Ok(PreparedHostLayout { prepared, snapshot, action, layout, reference: reference.clone(), scope: scope.clone() })
+    Ok(PreparedHostLayout { prepared, snapshot, action, layout, reference: reference.clone(), scope: scope.clone(), window: None })
 }
 
 fn project_reserved(service: &LayoutService, reference: &HostLayout, action: LayoutAction) -> PanelResult<Layout> {
@@ -834,7 +929,7 @@ pub fn project_host_action(service: &LayoutService, reference: &HostLayout, acti
 
 #[derive(Clone, Debug)]
 enum GestureKind {
-    Move { instance: InstanceId, section: SectionId, click_activates: bool, targets: Vec<HostDropTarget> },
+    Move { instance: InstanceId, section: SectionId, click_activates: bool, targets: Vec<HostDropTarget>, detached: Option<Box<HostLayout>> },
     Resize { section: SectionId, edge: HostResizeEdge, size: Size, outer: LogicalRect },
     Pair { first: SectionId, second: SectionId, first_size: Size, second_size: Size, zone: Zone, outer: LogicalRect },
 }
@@ -860,11 +955,57 @@ struct Gesture {
 pub struct HostInteraction {
     candidate: Option<PreparedHostLayout>,
     last_position: Option<Point>,
+    live_drag: bool,
+    drag_out: Option<HostDragOut>,
+    /// The screen rectangle the host last showed the Window target's desktop
+    /// window at. Release commits only a landing that was shown.
+    window_shown: Option<LogicalRect>,
     capture: Option<Gesture>,
     preview: Option<HostPreview>,
 }
 
 impl HostInteraction {
+    pub(super) fn set_live_drag(&mut self, enabled: bool) {
+        if self.live_drag != enabled {
+            self.cancel();
+            self.live_drag = enabled;
+        }
+    }
+
+    /// None turns the Window target off. A change during a drag (the app
+    /// window moved) cancels it.
+    pub(super) fn set_drag_out(&mut self, drag_out: Option<HostDragOut>) {
+        let drag_out = drag_out.filter(|value| value.validate().is_ok());
+        if self.drag_out != drag_out {
+            self.cancel();
+            self.drag_out = drag_out;
+        }
+    }
+
+    /// The panel and the screen point where its desktop window would open.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn window_landing(&self) -> Option<(&InstanceId, Point)> {
+        let preview = self.preview.as_ref().filter(|preview| preview.rejection.is_none() && self.candidate.is_some())?;
+        Some((self.move_source()?, preview.window?))
+    }
+
+    /// The host showed the desktop window for the landing at `requested`, at
+    /// `shown`, kept on its monitor. Ignored unless `requested` is the current
+    /// Window landing.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn confirm_window_shown(&mut self, requested: Point, shown: LogicalRect) {
+        if self.window_landing().is_some_and(|(_, origin)| origin == requested) && shown.validate().is_ok() {
+            self.window_shown = Some(shown);
+        }
+    }
+
+    pub(super) fn detached_layout(&self) -> Option<&HostLayout> {
+        match &self.capture {
+            Some(Gesture { kind: GestureKind::Move { detached, .. }, dragging: true, .. }) => detached.as_deref(),
+            _ => None,
+        }
+    }
+
     pub fn is_captured(&self) -> bool {
         self.capture.is_some()
     }
@@ -898,6 +1039,7 @@ impl HostInteraction {
         self.preview = None;
         self.candidate = None;
         self.last_position = None;
+        self.window_shown = None;
     }
 
     /// Independent commands invalidate even a preview whose command refuses.
@@ -966,7 +1108,7 @@ impl HostInteraction {
                 let Some(target) = target else {
                     return HostInteractionUpdate::default();
                 };
-                let kind = match begin_gesture(service, layout, &target) {
+                let kind = match begin_gesture(service, layout, &target, self.live_drag.then_some(scope)) {
                     Ok(kind) => kind,
                     Err(reason) => return rejected(reason, true),
                 };
@@ -996,9 +1138,13 @@ impl HostInteraction {
                     self.cancel();
                     return rejected(reason, captured);
                 }
+                // A moved panel dragged out of the app window targets a desktop window.
+                let outside = self
+                    .drag_out
+                    .filter(|out| !out.window.contains(at) && matches!(&self.capture, Some(Gesture { kind: GestureKind::Move { .. }, .. })));
                 // Native capture can report bounded negative/outside positions
                 // before PointerGone. Neither may destroy a valid gesture.
-                if !layout.render_domain.contains(at) {
+                if !layout.render_domain.contains(at) && outside.is_none() {
                     if let Some(capture) = &mut self.capture {
                         capture.dragging |= distance_squared(capture.start, at) >= HOST_DRAG_THRESHOLD * HOST_DRAG_THRESHOLD;
                     }
@@ -1011,7 +1157,10 @@ impl HostInteraction {
                 self.last_position = Some(at);
                 capture.dragging |= distance_squared(capture.start, at) >= HOST_DRAG_THRESHOLD * HOST_DRAG_THRESHOLD;
                 if capture.dragging {
-                    let (preview, candidate) = preview_gesture(capture, service, layout, at);
+                    let (preview, candidate) = preview_gesture(capture, service, layout, at, outside);
+                    if preview.window.is_none() || candidate.is_none() {
+                        self.window_shown = None;
+                    }
                     self.preview = Some(preview);
                     self.candidate = candidate;
                 }
@@ -1022,14 +1171,17 @@ impl HostInteraction {
                 let shown = self.preview.take();
                 let candidate = self.candidate.take();
                 let last_position = self.last_position.take();
+                let window_shown = self.window_shown.take();
                 let Some(capture) = capture else {
                     return HostInteractionUpdate::default();
                 };
                 if let Err(reason) = at.validate() {
                     return rejected(reason, true);
                 }
+                let to_window = shown.as_ref().is_some_and(|preview| preview.target == Some(HostDropTargetId::Window));
+                let outside = self.drag_out.is_some_and(|out| !out.window.contains(at));
                 let release_domain = if matches!(&capture.kind, GestureKind::Move { .. }) { layout.render_domain } else { layout.capacity };
-                if !release_domain.contains(at) {
+                if !release_domain.contains(at) && !(to_window && outside) {
                     return rejected(error(Rule::Placement, "release outside placement capacity"), true);
                 }
                 if last_position.is_none() {
@@ -1051,19 +1203,29 @@ impl HostInteraction {
                     }
                     return HostInteractionUpdate { consumed: true, ..Default::default() };
                 }
-                let Some(candidate) = candidate else {
+                let Some(mut candidate) = candidate else {
                     return HostInteractionUpdate { consumed: true, ..Default::default() };
                 };
                 // Resolve only the hit identity at release. Never allocate a new
                 // candidate at a position that was not shown to the user.
                 let still_inside = match &capture.kind {
-                    GestureKind::Move { targets, .. } => {
-                        selected_target(targets, layout, at).map(|target| &target.id) == shown.as_ref().and_then(|preview| preview.target.as_ref())
+                    _ if to_window => outside,
+                    GestureKind::Move { targets, detached, .. } => {
+                        selected_target(targets, detached.as_deref().unwrap_or(layout), at).map(|target| &target.id)
+                            == shown.as_ref().and_then(|preview| preview.target.as_ref())
                     }
                     _ => last_position == Some(at),
                 };
                 if !still_inside {
                     return rejected(error(Rule::Placement, "release left the shown candidate"), true);
+                }
+                if to_window {
+                    // The window opens where it was last shown, never at a
+                    // landing computed from this release.
+                    let (GestureKind::Move { instance, .. }, Some(rect)) = (&capture.kind, window_shown) else {
+                        return rejected(error(Rule::Placement, "release before the desktop window was shown"), true);
+                    };
+                    candidate.window = Some((instance.clone(), rect));
                 }
                 if let Err(reason) = candidate.validate_current(service, scope, layout) {
                     return rejected(reason, true);
@@ -1161,7 +1323,12 @@ fn validate_capture(capture: &Gesture, service: &LayoutService, scope: &LocalSco
     Ok(())
 }
 
-fn begin_gesture(service: &LayoutService, layout: &HostLayout, target: &HostPointerTarget) -> PanelResult<Option<GestureKind>> {
+fn begin_gesture(
+    service: &LayoutService,
+    layout: &HostLayout,
+    target: &HostPointerTarget,
+    live_drag_scope: Option<&LocalScope>,
+) -> PanelResult<Option<GestureKind>> {
     match target {
         HostPointerTarget::Header { instance } | HostPointerTarget::Tab { instance } => {
             service.availability(instance).require()?;
@@ -1171,11 +1338,13 @@ fn begin_gesture(service: &LayoutService, layout: &HostLayout, target: &HostPoin
                 .iter()
                 .find(|geometry| geometry.section == section.id)
                 .ok_or_else(|| error(Rule::MissingTarget, "drag source is not presented"))?;
+            let detached = live_drag_scope.and_then(|scope| detached_drag_layout(service, scope, layout, instance).ok().map(Box::new));
             Ok(Some(GestureKind::Move {
                 instance: instance.clone(),
                 section: section.id.clone(),
                 click_activates: matches!(target, HostPointerTarget::Tab { .. }),
-                targets: host_drop_targets(service, layout, instance)?,
+                targets: host_drop_targets(service, detached.as_deref().unwrap_or(layout), instance)?,
+                detached,
             }))
         }
         HostPointerTarget::Resize { section, edge } => {
@@ -1249,12 +1418,31 @@ pub(crate) fn keyboard_resize_action(
         ResizeDown => (0.0, step),
         _ => return Err(error(Rule::Availability, "action is not a resize")),
     };
-    let preview = match begin_gesture(service, layout, target)? {
+    let preview = match begin_gesture(service, layout, target, None)? {
         Some(GestureKind::Resize { section, edge, size, outer }) => {
             let horizontal = matches!(edge, HostResizeEdge::Left | HostResizeEdge::Right);
-            if edge != HostResizeEdge::BottomRight && ((horizontal && dx == 0.0) || (!horizontal && dy == 0.0)) {
+            if !edge.is_corner() && ((horizontal && dx == 0.0) || (!horizontal && dy == 0.0)) {
                 return Err(error(Rule::Availability, "resize key is perpendicular to focused edge"));
             }
+            let source = service.layout().section(&section)?;
+            let dx = if horizontal && let Some(column) = &source.column {
+                let direction = if edge == HostResizeEdge::Left { -1.0 } else { 1.0 };
+                let width = outer.size.width;
+                let requested = (width + dx * direction).max(1.0);
+                if resolve_column_width(service.layout(), service.registry(), column, requested)? == width {
+                    let ranges = column_widths(service.layout(), service.registry(), column)?;
+                    let next = if dx * direction > 0.0 {
+                        ranges.iter().map(|range| range.0).find(|min| *min > width)
+                    } else {
+                        ranges.iter().rev().map(|range| range.1).find(|max| *max < width)
+                    };
+                    next.map_or(dx, |next| (next - width) * direction)
+                } else {
+                    dx
+                }
+            } else {
+                dx
+            };
             resize_preview(service, layout, &section, edge, size, outer, dx, dy)
         }
         Some(GestureKind::Pair { first, second, first_size, second_size, zone, outer }) => {
@@ -1273,9 +1461,22 @@ pub(crate) fn keyboard_resize_action(
     preview.action.ok_or_else(|| error(Rule::Bounds, "focused resize has reached its bound"))
 }
 
-fn preview_gesture(capture: &Gesture, service: &LayoutService, layout: &HostLayout, at: Point) -> (HostPreview, Option<PreparedHostLayout>) {
+fn preview_gesture(
+    capture: &Gesture,
+    service: &LayoutService,
+    layout: &HostLayout,
+    at: Point,
+    outside: Option<HostDragOut>,
+) -> (HostPreview, Option<PreparedHostLayout>) {
     let mut preview = match &capture.kind {
-        GestureKind::Move { instance, section, targets, .. } => move_preview(service, layout, instance, section, at, targets),
+        GestureKind::Move { instance, section, targets, detached, .. } => {
+            let window = outside.map(|out| {
+                // Keep the grabbed point of the header under the pointer.
+                let corner = layout.sections.iter().find(|card| card.section == *section).map_or(capture.start, |card| card.outer.origin);
+                Point { x: out.screen_origin.x + at.x - (capture.start.x - corner.x), y: out.screen_origin.y + at.y - (capture.start.y - corner.y) }
+            });
+            move_preview(service, layout, detached.as_deref(), instance, section, at, targets, window)
+        }
         GestureKind::Resize { section, edge, size, outer } => {
             resize_preview(service, layout, section, *edge, *size, *outer, at.x - capture.start.x, at.y - capture.start.y)
         }
@@ -1292,9 +1493,17 @@ fn preview_gesture(capture: &Gesture, service: &LayoutService, layout: &HostLayo
         match prepare_host_layout(service, &capture.scope, layout, action.clone()) {
             Ok(candidate) => {
                 let shown_bounds = match &capture.kind {
-                    GestureKind::Move { instance, .. } => {
-                        candidate.layout().sections.iter().find(|card| card.instance == *instance).map(|card| card.outer)
-                    }
+                    GestureKind::Move { instance, .. } => candidate
+                        .layout()
+                        .sections
+                        .iter()
+                        .find(|card| {
+                            card.instance == *instance
+                                || matches!(&preview.destination, Some(Destination::JoinTab { section, .. }) if card.section == *section)
+                        })
+                        .map(|card| card.outer)
+                        // A panel popping out leaves this host's layout.
+                        .or_else(|| preview.window.map(|_| preview.bounds)),
                     GestureKind::Resize { section, .. } => {
                         candidate.layout().sections.iter().find(|card| card.section == *section).map(|card| card.outer)
                     }
@@ -1339,14 +1548,17 @@ fn preview_gesture(capture: &Gesture, service: &LayoutService, layout: &HostLayo
 fn move_preview(
     service: &LayoutService,
     layout: &HostLayout,
+    detached: Option<&HostLayout>,
     instance: &InstanceId,
     source: &SectionId,
     at: Point,
     targets: &[HostDropTarget],
+    window: Option<Point>,
 ) -> HostPreview {
     let fallback = layout.sections.iter().find(|section| section.section == *source).map_or(layout.capacity, |section| section.outer);
     let result = (|| -> PanelResult<HostPreview> {
-        let Some(target) = selected_target(targets, layout, at) else {
+        let window_target = window.map(|_| window_drop_target(service, layout, instance)).transpose()?;
+        let Some(target) = window_target.as_ref().or_else(|| selected_target(targets, detached.unwrap_or(layout), at)) else {
             return Ok(HostPreview {
                 rejection: Some(error(Rule::Placement, "no explicit docking target")),
                 targets: Vec::new(),
@@ -1361,36 +1573,48 @@ fn move_preview(
                 ..HostPreview::empty(fallback)
             });
         }
-        let candidate = move_action(service, layout, instance, &target.destination)?;
+        let live = detached.is_some();
+        let candidate = move_action(service, layout, instance, &target.destination, live)?;
         let proposed = project_reserved(service, layout, candidate.clone())?;
         let projected = resolve_host_projected(service, &proposed, layout)?;
         let target_section = proposed.containing(instance)?;
-        let card = projected
-            .sections
-            .iter()
-            .find(|card| card.section == target_section.id)
-            .ok_or_else(|| error(Rule::Bounds, "docking candidate cannot be presented"))?;
-        let tab_marker = if matches!(target.destination, Destination::JoinTab { .. }) {
-            let bounds = card.tabs.iter().find(|tab| tab.instance == *instance).map_or(card.header, |tab| tab.bounds);
+        let card = projected.sections.iter().find(|card| card.section == target_section.id);
+        // A desktop window is not in this host; its preview is outside the app.
+        let bounds = match (card, window) {
+            (Some(card), None) => card.outer,
+            (None, Some(_)) => fallback,
+            _ => return Err(error(Rule::Bounds, "docking candidate cannot be presented")),
+        };
+        let tab_marker = if let Some(card) = card
+            && matches!(target.destination, Destination::JoinTab { .. })
+        {
+            let rtl = layout.direction == Direction::Rtl;
+            let (bounds, trailing, offset) = if live
+                && let HostDropTargetId::Tab { section, before } = &target.id
+                && let Some(receiver) = layout.sections.iter().find(|old| old.section == *section)
+            {
+                let next = before.as_ref().and_then(|id| receiver.tabs.iter().find(|tab| tab.instance == *id));
+                let bounds = next.or_else(|| receiver.tabs.last()).map(|tab| tab.bounds).or(receiver.title).unwrap_or(receiver.header);
+                (bounds, next.is_none(), Point { x: card.outer.origin.x - receiver.outer.origin.x, y: card.outer.origin.y - receiver.outer.origin.y })
+            } else {
+                (card.tabs.iter().find(|tab| tab.instance == *instance).map_or(card.header, |tab| tab.bounds), false, Point { x: 0.0, y: 0.0 })
+            };
             let width = layout.metrics.sash_width.min(bounds.size.width);
-            Some(rect(
-                if layout.direction == Direction::Rtl { right(bounds) - width } else { bounds.origin.x },
-                bounds.origin.y,
-                width,
-                bounds.size.height,
-            ))
+            let x = if rtl != trailing { right(bounds) - width } else { bounds.origin.x };
+            Some(rect(x + offset.x, bounds.origin.y + offset.y, width, bounds.size.height))
         } else {
             None
         };
         Ok(HostPreview {
             action: Some(candidate),
-            bounds: card.outer,
+            bounds,
             destination: Some(target.destination.clone()),
             rejection: None,
             projected: Some(projected),
             target: Some(target.id.clone()),
             targets: vec![target.clone()],
             tab_marker,
+            window,
         })
     })();
     match result {
@@ -1399,12 +1623,38 @@ fn move_preview(
     }
 }
 
-fn move_action(service: &LayoutService, layout: &HostLayout, instance: &InstanceId, destination: &Destination) -> PanelResult<LayoutAction> {
+/// Everywhere outside the app window: the panel pops out there, through the
+/// same destination as Pop out to window.
+fn window_drop_target(service: &LayoutService, layout: &HostLayout, instance: &InstanceId) -> PanelResult<HostDropTarget> {
+    if !service.registry().get(&service.layout().instance(instance)?.kind)?.features.popout {
+        return Err(error(Rule::FeatureDisabled, "panel cannot pop out"));
+    }
+    let reservations = &layout.geometry_policy.identity_reservations;
+    Ok(HostDropTarget {
+        id: HostDropTargetId::Window,
+        bounds: layout.capacity,
+        destination: super::workspace::popout_destination(service, instance, layout.capacity.origin, reservations)?,
+        rejection: None,
+        priority: 0,
+        edge: None,
+        stable_key: "window".into(),
+    })
+}
+
+fn move_action(
+    service: &LayoutService,
+    layout: &HostLayout,
+    instance: &InstanceId,
+    destination: &Destination,
+    live: bool,
+) -> PanelResult<LayoutAction> {
     let mut mutations = vec![Mutation::Move { instance: instance.clone(), destination: destination.clone() }];
-    // The selected instance is the landing tab, including when the source tab
-    // was inactive. Activation is part of the same guarded transaction.
-    if let Destination::JoinTab { .. } = destination {
-        mutations.push(Mutation::Activate { instance: instance.clone() });
+    if let Destination::JoinTab { section, .. } = destination {
+        // Keep the receiving tab visible. When reordering its active tab,
+        // restore that activation after the move removes and reinserts it.
+        if !live || service.layout().section(section)?.active == *instance {
+            mutations.push(Mutation::Activate { instance: instance.clone() });
+        }
     }
     service.layout().instance(instance)?;
     Ok(action(layout.revision, mutations))
@@ -1461,6 +1711,7 @@ pub fn host_drop_targets(service: &LayoutService, layout: &HostLayout, instance:
         let side = matches!(card.zone, Zone::Left | Zone::Right);
         let inward = 64.0_f32.min(card.outer.size.width * 0.28);
         let vertical = 56.0_f32.min(card.outer.size.height * 0.25);
+        let below = card.outer.size.height / 3.0;
         if side {
             let physical = layout.direction.edge(card.zone)?;
             for left in [true, false] {
@@ -1492,13 +1743,14 @@ pub fn host_drop_targets(service: &LayoutService, layout: &HostLayout, instance:
             for above in [true, false] {
                 let at = if above { card.outer.origin.y } else { bottom(card.outer) };
                 let placement = if above { RelativePlacement::Above } else { RelativePlacement::Below };
+                let band = if above { vertical } else { below };
                 add(
                     HostDropTargetId::Relative { section: card.section.clone(), placement },
                     rect(
                         card.outer.origin.x,
-                        if above { at } else { at - vertical },
+                        if above { at } else { at - band },
                         card.outer.size.width,
-                        vertical + if above { 0.0 } else { clear_below_end(layout, card.outer) - at },
+                        band + if above { 0.0 } else { clear_below_end(layout, card.outer) - at },
                     ),
                     Destination::Relative {
                         section: card.section.clone(),
@@ -1519,51 +1771,42 @@ pub fn host_drop_targets(service: &LayoutService, layout: &HostLayout, instance:
                 card.outer.origin.x + if side { inward } else { 0.0 },
                 card.outer.origin.y + if side { vertical } else { 0.0 },
                 card.outer.size.width - if side { 2.0 * inward } else { 0.0 },
-                card.outer.size.height - if side { 2.0 * vertical } else { 0.0 },
+                card.outer.size.height - if side { vertical + below } else { 0.0 },
             ),
             Destination::JoinTab { section: card.section.clone(), index: tabs.len() },
             4,
             None,
             format!("tab:{}:end", card.section.0),
         );
-        for tab in &card.tabs {
-            // Only the leading half selects insertion before this measured tab.
-            // Keep the dragged tab's own slot, indexing after its removal; a
-            // trailing half on every tab would steal the natural edge regions.
-            let index = target.tabs.iter().take_while(|id| **id != tab.instance).filter(|id| *id != instance).count();
-            let before = tabs.get(index).map(|id| (*id).clone());
-            let bounds = rect(
-                tab.bounds.origin.x + if layout.direction == Direction::Rtl { tab.bounds.size.width / 2.0 } else { 0.0 },
-                tab.bounds.origin.y + 9.0,
-                tab.bounds.size.width / 2.0,
-                (tab.bounds.size.height - 18.0).max(1.0),
-            );
-            add(
-                HostDropTargetId::Tab { section: card.section.clone(), before },
-                bounds,
-                Destination::JoinTab { section: card.section.clone(), index },
-                // A measured own-group slot stays reorderable even when a
-                // short Bottom header lies wholly inside the docking band.
-                if card.zone == Zone::Bottom && source.id == target.id { 0 } else { 2 },
-                None,
-                format!("tab:{}:{index}", card.section.0),
-            );
-        }
-        if let Some(last) = card.tabs.last() {
-            let bounds = rect(
-                last.bounds.origin.x + if layout.direction == Direction::Ltr { last.bounds.size.width / 2.0 } else { 0.0 },
-                last.bounds.origin.y + 9.0,
-                last.bounds.size.width / 2.0,
-                (last.bounds.size.height - 18.0).max(1.0),
-            );
-            add(
-                HostDropTargetId::Tab { section: card.section.clone(), before: None },
-                bounds,
-                Destination::JoinTab { section: card.section.clone(), index: tabs.len() },
-                if card.zone == Zone::Bottom && source.id == target.id { 0 } else { 2 },
-                None,
-                format!("tab:{}:{}:end", card.section.0, tabs.len()),
-            );
+        let tab_priority = if card.zone == Zone::Bottom && source.id == target.id { 0 } else { 2 };
+        for (visible_index, tab) in card.tabs.iter().enumerate() {
+            for leading in [true, false] {
+                let next = card.tabs.get(visible_index + usize::from(!leading));
+                if !leading && next.is_some() && source.id != target.id {
+                    // Cross-group drops keep the natural docking edge here.
+                    continue;
+                }
+                // The two halves adjacent to a slot resolve to the same
+                // insertion identity, with the dragged tab already removed.
+                let index =
+                    next.map_or(tabs.len(), |next| target.tabs.iter().take_while(|id| **id != next.instance).filter(|id| *id != instance).count());
+                let before = tabs.get(index).map(|id| (*id).clone());
+                let half_width = tab.bounds.size.width / 2.0;
+                let right_half = leading == (layout.direction == Direction::Rtl);
+                add(
+                    HostDropTargetId::Tab { section: card.section.clone(), before },
+                    rect(
+                        tab.bounds.origin.x + if right_half { half_width } else { 0.0 },
+                        tab.bounds.origin.y + 9.0,
+                        half_width,
+                        (tab.bounds.size.height - 18.0).max(1.0),
+                    ),
+                    Destination::JoinTab { section: card.section.clone(), index },
+                    tab_priority,
+                    None,
+                    if leading { format!("tab:{}:{index}", card.section.0) } else { format!("tab:{}:{index}:after", card.section.0) },
+                );
+            }
         }
     }
     // Capacity excludes shell insets and reserved bottom chrome. Perimeter
@@ -1729,9 +1972,19 @@ fn selected_target<'a>(targets: &'a [HostDropTarget], layout: &HostLayout, at: P
             .map_or(0.0, |card| (64.0_f32.min(card.outer.size.width * 0.28) + COLUMN_OUTWARD) * card.outer.size.height),
         _ => target.bounds.size.width * target.bounds.size.height,
     };
+    // Inside the lower third, stacking wins over the adjacent-column bands.
+    // The workspace's perimeter targets still take priority.
+    let priority = |target: &HostDropTarget| match &target.id {
+        HostDropTargetId::Relative { section, placement: RelativePlacement::Below }
+            if layout.sections.iter().any(|card| card.section == *section && card.outer.contains(at)) =>
+        {
+            2
+        }
+        _ => target.priority,
+    };
     targets.iter().filter(|target| target.bounds.contains(at) && visible(target)).min_by(|a, b| {
-        a.priority
-            .cmp(&b.priority)
+        priority(a)
+            .cmp(&priority(b))
             .then_with(|| distance(a).total_cmp(&distance(b)))
             .then_with(|| area(a).total_cmp(&area(b)))
             .then_with(|| a.stable_key.cmp(&b.stable_key))
@@ -1764,12 +2017,23 @@ fn resize_preview(
             if width_cap < min.width || height_cap < min.height {
                 return Err(error(Rule::Bounds, "visible floating anchor cannot fit panel minimum"));
             }
-            if edge != HostResizeEdge::BottomRight {
-                return Err(error(Rule::Placement, "floating resize requires its free corner"));
+            let mut origin = outer.origin;
+            let mut size = outer.size;
+            if edge.moves_west() {
+                let cap = max.width.min(right(outer) - layout.capacity.origin.x);
+                size.width = (outer.size.width - dx).clamp(min.width, cap.max(min.width));
+                origin.x = right(outer) - size.width;
+            } else if edge.moves_east() {
+                size.width = (outer.size.width + dx).clamp(min.width, width_cap);
             }
-            let size =
-                Size { width: (outer.size.width + dx).clamp(min.width, width_cap), height: (outer.size.height + dy).clamp(min.height, height_cap) };
-            let candidate = action(layout.revision, vec![Mutation::SetFloatingRect { section: section.clone(), origin: outer.origin, size }]);
+            if edge.moves_north() {
+                let cap = max.height.min(bottom(outer) - layout.capacity.origin.y);
+                size.height = (outer.size.height - dy).clamp(min.height, cap.max(min.height));
+                origin.y = bottom(outer) - size.height;
+            } else if edge.moves_south() {
+                size.height = (outer.size.height + dy).clamp(min.height, height_cap);
+            }
+            let candidate = action(layout.revision, vec![Mutation::SetFloatingRect { section: section.clone(), origin, size }]);
             let projected = project_resize(service, layout, &candidate)?;
             let bounds = projected
                 .sections
@@ -1777,7 +2041,7 @@ fn resize_preview(
                 .find(|card| card.section == *section)
                 .ok_or_else(|| error(Rule::Bounds, "floating resize cannot be presented"))?
                 .outer;
-            if bounds.origin != outer.origin || bounds.size != size {
+            if bounds.origin != origin || bounds.size != size {
                 return Err(error(Rule::Bounds, "floating resize cannot retain its visible anchor"));
             }
             return Ok((candidate, bounds));
@@ -1791,7 +2055,7 @@ fn resize_preview(
             }
             HostResizeEdge::Top => size.height = (outer.size.height - dy).clamp(min.height, max.height),
             HostResizeEdge::Bottom => size.height = (outer.size.height + dy).clamp(min.height, max.height),
-            HostResizeEdge::BottomRight => {
+            HostResizeEdge::TopLeft | HostResizeEdge::TopRight | HostResizeEdge::BottomLeft | HostResizeEdge::BottomRight => {
                 return Err(error(Rule::Placement, "dock resize requires a dock edge"));
             }
         }
@@ -1831,7 +2095,7 @@ fn resize_preview(
         Ok((candidate, bounds))
     })();
     match result {
-        Ok((candidate, bounds)) => resized_preview(candidate, bounds, outer),
+        Ok((candidate, bounds)) => resized_preview(layout, candidate, bounds, outer),
         Err(reason) => HostPreview { rejection: Some(reason), ..HostPreview::empty(outer) },
     }
 }
@@ -1841,8 +2105,14 @@ fn project_resize(service: &LayoutService, reference: &HostLayout, candidate: &L
     resolve_host_projected(service, &proposed, reference)
 }
 
-fn resized_preview(candidate: LayoutAction, bounds: LogicalRect, original: LogicalRect) -> HostPreview {
-    HostPreview { action: if bounds == original { None } else { Some(candidate) }, ..HostPreview::empty(bounds) }
+fn resized_preview(layout: &HostLayout, candidate: LayoutAction, bounds: LogicalRect, original: LogicalRect) -> HostPreview {
+    // The pointer may resolve back onto the current width across a whole gap.
+    // Keep showing that valid landing without committing a no-op resize.
+    if bounds == original {
+        HostPreview { projected: Some(layout.clone()), ..HostPreview::empty(bounds) }
+    } else {
+        HostPreview { action: Some(candidate), ..HostPreview::empty(bounds) }
+    }
 }
 
 fn pair_preview(
@@ -1885,7 +2155,7 @@ fn pair_preview(
         Ok((original, bounds))
     })();
     match result {
-        Ok((candidate, bounds)) => resized_preview(candidate, bounds, outer),
+        Ok((candidate, bounds)) => resized_preview(layout, candidate, bounds, outer),
         Err(reason) => HostPreview { rejection: Some(reason), ..HostPreview::empty(outer) },
     }
 }

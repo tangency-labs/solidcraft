@@ -25,6 +25,17 @@
 //! | `nodal_quartic`, `NodalArc` (private)  | `sm_NodalQuartic` (its out-params)                |
 //! | `bil` (private)                       | `sm_NodalQuartic`'s `bil` lambda                  |
 //!
+//! Failures (#15034): [`BlendFailure::SectionNotConic`],
+//! [`BlendFailure::NodalArcUnavailable`], [`BlendFailure::CurveProjectionEmpty`],
+//! [`BlendFailure::RationalWeightsUnavailable`] and
+//! [`BlendFailure::RationalRoundOutOfTolerance`] carry their measurements;
+//! [`BlendFailure::InputMissing`] names caller inputs. Defects explain a zero nodal
+//! gradient excluded by classification, the
+//! rejection of a pure cross-term tangent cone with two real branches, or a successful
+//! order-1 evaluation missing its promised derivative. Impossible checks are deleted:
+//! branch choices have two values, builders supply nonempty positive-degree rows,
+//! segment spans iterate consecutive knots, and the two rails are built as an array.
+//!
 //! Deviations:
 //! - **A chamfer's two offsets (not the fork, #2950).** `round_rows` takes the spine's offset
 //!   from each face: the fork takes one, so an unequal chamfer's rail missed its face.
@@ -39,6 +50,15 @@
 //!   [`MAX_SPINE_SEGMENTS`] segments, is `SM_ERR` (the fork's `ULONG` conversion of a
 //!   non-finite count is undefined and a huge one exhausts memory); geometry never gets
 //!   near it (a hyperbola's parameter is an `asinh`).
+//! - **Where the edge's middle lies on an ellipse (not the fork's, #18824).** The spine
+//!   runs from the trace's first centre to its last the way round an ellipse that passes the
+//!   edge's middle. The fork read the middle off the ellipse by its angle about the
+//!   ellipse's centre, in the ellipse's plane; here it is read by its angle round the
+//!   cylinder's or cone's axis (`ellipse_param_about_axis`), which the edge and the spine
+//!   share. A chamfer whose ball nearly fills a 1 mm round has a spine ellipse 0.07 mm
+//!   across, its plane 0.97 mm off the edge along a tilted axis: the fork's reading put the
+//!   middle outside the short arc, and the round ran the long way round, its rails off
+//!   their faces.
 //! - No recursion: the weight-positivity halving is the fork's work list (left half
 //!   first), at most 6 levels deep, as the fork bounds it.
 //! - **Nodal arithmetic.** The nodal quartic is constructed directly in Bernstein form
@@ -55,6 +75,9 @@ use crate::blend::fillet_solver::p1::{FilletSolverOps, FilletSurfaceGeneratorTyp
 use crate::blend::fillet_solver::p2::{eval_offset, store_parts, FilletGeomParts};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
+use crate::error::blend::{
+    BlendFailure, BlendInput, NodalArc as NodalArcReason, SectionShape, WeightStep,
+};
 use crate::error::{Result, SolidError};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::vector2d::Point2;
@@ -73,10 +96,6 @@ const OP: &str = "blend::fillet_exact::rational";
 
 /// The most spine segments a conic is cut into before the weights are made positive.
 pub const MAX_SPINE_SEGMENTS: f64 = 1.0e5;
-
-fn sm_err() -> SolidError {
-    SolidError::sm_err(OP)
-}
 
 /// `sm_Poly`: a polynomial by its Bernstein coefficients on `[0, 1]`.
 type Poly = Vec<f64>;
@@ -448,15 +467,34 @@ fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic>
     let b1 = g.dot(u);
     let b2 = g.dot(v);
     let c2 = quad(point, point) + 2.0 * s_bv.dot(point) + dc;
-    // principal axes of A2
-    let tr = a11 + a22;
-    let det = a11 * a22 - a12 * a12;
-    let disc = max2(0.0, 0.25 * tr * tr - det).sqrt();
-    let adl = [0.5 * tr + disc, 0.5 * tr - disc];
+    // principal axes of A2: the eigenvalues m +- hypot(h, a12), h = (a11 - a22) / 2, and
+    // each axis in the form whose terms add (not upstream, which takes the eigenvalues from
+    // sqrt(tr^2 / 4 - det) and the axes from (a12, lambda - a11): both cancel as the section
+    // nears a circle, and the conic then misses the quadric by about eps / a^2,
+    // tangency-labs/solidcraft#15037). The axes are those upstream's give in exact
+    // arithmetic, signs included: (a12, lambda_0 - a11) = (a12, r - h) is a12 / |a12| times
+    // (r + h, a12) scaled by |a12| / (r + h), and (a12, lambda_1 - a11) = (a12, -(r + h)) is
+    // a12 / |a12| times (r - h, -a12) scaled by |a12| / (r - h).
+    let m = 0.5 * (a11 + a22);
+    let h = 0.5 * (a11 - a22);
+    let r = h.hypot(a12);
+    let adl = [m + r, m - r];
+    let sg = if a12 < 0.0 { -1.0 } else { 1.0 };
+    let axes = [
+        if h >= 0.0 {
+            [sg * (r + h), sg * a12]
+        } else {
+            [a12, r - h]
+        },
+        if h <= 0.0 {
+            [sg * (r - h), -sg * a12]
+        } else {
+            [a12, -(r + h)]
+        },
+    ];
     let mut ade = [[0.0; 2]; 2];
-    for (kk, (row, &lk)) in ade.iter_mut().zip(adl.iter()).enumerate() {
-        let mut ex = a12;
-        let mut ey = lk - a11;
+    for (kk, (row, &[x, y])) in ade.iter_mut().zip(axes.iter()).enumerate() {
+        let (mut ex, mut ey) = (x, y);
         if ex.abs() + ey.abs() < EFF_ZERO * (a11.abs() + a22.abs() + 1.0) {
             ex = if (kk == 0) == (a11 >= a22) { 1.0 } else { 0.0 };
             ey = 1.0 - ex;
@@ -470,8 +508,15 @@ fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic>
     let [l0, l1] = adl;
     let dscale = max2(l0.abs(), l1.abs());
     if dscale <= 0.0 {
-        // the plane meets the quadric in no conic
-        return Err(sm_err());
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::SectionNotConic {
+                reason: SectionShape::NoQuadraticForm,
+                quadratic_scale: dscale,
+                discriminant: None,
+                centered_value: None,
+            },
+        ));
     }
     let pick = |a: [f64; 2], k: usize| if k == 0 { a[0] } else { a[1] };
     let pick_v = |a: [Vec3; 2], k: usize| if k == 0 { a[0] } else { a[1] };
@@ -481,8 +526,22 @@ fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic>
             // L t^2 + 2 beta_k s + 2 beta_o t + c2 = 0 along e_k (s) and the other (t)
             let o = 1 - kk;
             if pick(beta, kk).abs() <= EFF_ZERO * dscale {
-                // the plane meets the quadric in lines
-                return Err(sm_err());
+                // L t^2 + 2 beta_o t + c2 = 0: no real roots, or one/two lines.
+                let (lo, bo) = (pick(adl, o), pick(beta, o));
+                let discriminant = (2.0 * bo) * (2.0 * bo) - 4.0 * lo * c2;
+                return Err(SolidError::blend(
+                    OP,
+                    BlendFailure::SectionNotConic {
+                        reason: if discriminant < 0.0 {
+                            SectionShape::Empty
+                        } else {
+                            SectionShape::Lines
+                        },
+                        quadratic_scale: dscale,
+                        discriminant: Some(discriminant),
+                        centered_value: None,
+                    },
+                ));
             }
             // s = -(L t^2 + 2 beta_o t + c2) / (2 beta_k): about t0 = -beta_o / L
             let (lo, bo, bk) = (pick(adl, o), pick(beta, o), pick(beta, kk));
@@ -517,8 +576,25 @@ fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic>
             pick_v(ae, 1 - kk) * (-pick(adq, 1 - kk)).sqrt(),
         )
     } else {
-        // the plane misses the quadric
-        return Err(sm_err());
+        // At q0 = 0 a definite form is a point; an indefinite form is two lines.
+        let reason = if q0 == 0.0 {
+            if (l0 > 0.0) == (l1 > 0.0) {
+                SectionShape::Point
+            } else {
+                SectionShape::Lines
+            }
+        } else {
+            SectionShape::Empty
+        };
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::SectionNotConic {
+                reason,
+                quadratic_scale: dscale,
+                discriminant: None,
+                centered_value: Some(q0),
+            },
+        ));
     };
     Ok(Conic {
         kind,
@@ -548,6 +624,82 @@ fn conic_param(k: &Conic, x: Point3) -> f64 {
         ConicKind::Hyperbola => (py * k.branch).asinh(),
         ConicKind::Parabola => py,
     }
+}
+
+/// The parameter of an ellipse `k` on the plane through `at` with unit normal `normal`, a
+/// section of `q`, the offset of `face`, that `x` stands at round `q`'s axis: `x` moved
+/// along a cylinder's or cone's axis onto the plane, and the conic's point on the half-line
+/// to it from where the axis crosses the plane (both keep the angle about the axis, which
+/// the conic's points, the faces' and their edges' share). A cylinder offset past its axis
+/// (a ball larger than a convex face's radius) lies the other way round it, its `side`
+/// turned: there the ball's centre is half a turn from its contact, and `x` is read on the
+/// half-line the other way. Not the fork's, which read `x` off the conic about
+/// its centre: a point of the edge, far from a small conic against its size, reads there at
+/// an angle that has nothing to do with where it lies round the axis. Of another quadric,
+/// and of an axis along the plane, `x` is read about the conic's centre
+/// ([`conic_param`]).
+///
+/// # Errors
+/// [`BlendFailure::ExactBlendAxisCannotPlaceEdge`], a check of the caller's input with status
+/// `SM_ERR`, when the half-line has no direction (`x` on the axis) or does not cross the
+/// conic ahead of the axis (the axis crosses the plane outside it, which a plane section of
+/// the axis's own cylinder or cone never does): the exact blend given is then not the one of
+/// the edge, the way round is unknown, and is not read about the conic's centre instead.
+fn ellipse_param_about_axis(
+    k: &Conic,
+    at: Point3,
+    normal: Vec3,
+    q: &BlendQuadric,
+    face: &BlendQuadric,
+    x: Point3,
+) -> Result<f64> {
+    let along = q.dir.dot(normal);
+    if !matches!(q.kind, QuadricKind::Cylinder | QuadricKind::Cone) || along.abs() <= EFF_ZERO {
+        return Ok(conic_param(k, x));
+    }
+    let axis_at = q.point + q.dir * ((at - q.point).dot(normal) / along);
+    let moved = x - q.dir * ((x - at).dot(normal) / along);
+    // in the ellipse's own coordinates, where it is the unit circle
+    let coords = |p: Point3| {
+        let d = p - k.c;
+        (d.dot(k.a1) / k.a1.dot(k.a1), d.dot(k.a2) / k.a2.dot(k.a2))
+    };
+    let (a0, a1) = coords(axis_at);
+    let (m0, m1) = coords(moved);
+    let turned = q.kind == QuadricKind::Cylinder
+        && face.kind == QuadricKind::Cylinder
+        && q.side != face.side;
+    let way = if turned { -1.0 } else { 1.0 };
+    let (w0, w1) = (way * (m0 - a0), way * (m1 - a1));
+    let ww = w0 * w0 + w1 * w1;
+    let aw = a0 * w0 + a1 * w1;
+    let disc = aw * aw - ww * (a0 * a0 + a1 * a1 - 1.0);
+    // in the conic's unit-circle coordinates, a half-line shorter than the kernel's zero
+    // has no direction
+    let length = ww.sqrt();
+    if length <= EFF_ZERO || disc < 0.0 {
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::ExactBlendAxisCannotPlaceEdge {
+                length,
+                discriminant: disc,
+                crossing: None,
+            },
+        ));
+    }
+    // the half-line's own crossing, ahead of the axis
+    let mu = (disc.sqrt() - aw) / ww;
+    if !positive(mu) {
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::ExactBlendAxisCannotPlaceEdge {
+                length,
+                discriminant: disc,
+                crossing: Some(mu),
+            },
+        ));
+    }
+    Ok((a1 + mu * w1).atan2(a0 + mu * w0))
 }
 
 /// `sm_ConicSegment`: one rational quadratic segment of the conic from `t0` to `t1`.
@@ -679,8 +831,8 @@ impl NodalArc {
 /// `sm_NodalQuartic(crO1, crO2, crNode, crFrom, crTo, iBase, aBranch, aX, rW, rG)`: the
 /// nodal quartic two offsets meet in, through `node` where they touch, from the direction
 /// `from` (from the node) to `to`: the second point of the line from the node along each
-/// direction of the cone of directions the two quadrics share there. `base` picks the branch whose
-/// tangent is the sweep's base ray.
+/// direction of the cone of directions the two quadrics share there. `second_base` picks
+/// the second branch as the sweep's base ray instead of the first.
 ///
 /// `Q1(q + s v) = 2 s g1.v + s^2 v.A1.v` and `Q2` likewise with `g2 = k g1` at the node:
 /// they meet again where `v.(A2 - k A1).v = 0`, a cone, swept rationally by the second
@@ -693,7 +845,7 @@ fn nodal_quartic(
     node: Point3,
     from: Vec3,
     to: Vec3,
-    base: usize,
+    second_base: bool,
 ) -> Result<NodalArc> {
     let (a1, b1, _c1) = o1.implicit();
     let (a2, b2, _c2) = o2.implicit();
@@ -717,8 +869,14 @@ fn nodal_quartic(
     let [g2x, g2y, g2z] = g2;
     let g11 = g1x * g1x + g1y * g1y + g1z * g1z;
     if g11 <= 0.0 {
-        // no normal at the node
-        return Err(sm_err());
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::Defect {
+                why: "forming the nodal quartic's tangent cone found a zero gradient on its first \
+                      offset, though the nodal classification excludes collapsed sphere and \
+                      cylinder offsets and a cone's apex",
+            },
+        ));
     }
     let kk = (g1x * g2x + g1y * g2y + g1z * g2z) / g11;
     let mut c = [[0.0; 3]; 3];
@@ -744,9 +902,34 @@ fn nodal_quartic(
     let c22 = bil(&c, &t2, &t2);
     // c11 cos^2 + 2 c12 cos sin + c22 sin^2 = 0: the two branches' tangents
     let d = c12 * c12 - c11 * c22;
-    if d < 0.0 || (c11 == 0.0 && c22 == 0.0) {
-        // the node is isolated
-        return Err(sm_err());
+    if d < 0.0 {
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::NodalArcUnavailable {
+                reason: NodalArcReason::IsolatedNode,
+                discriminant: Some(d),
+                candidates: 0,
+            },
+        ));
+    }
+    if c11 == 0.0 && c22 == 0.0 {
+        if c12 == 0.0 {
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::NodalArcUnavailable {
+                    reason: NodalArcReason::HigherOrderContact,
+                    discriminant: Some(d),
+                    candidates: 0,
+                },
+            ));
+        }
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::Defect {
+                why: "forming the nodal branch tangents rejected a pure cross-term form, whose \
+                      positive discriminant gives two real branch tangents",
+            },
+        ));
     }
     let mut branch = [Vec3::ZERO; 2];
     for (kb, bk) in branch.iter_mut().enumerate() {
@@ -759,12 +942,13 @@ fn nodal_quartic(
         };
         *bk = sb.unitize()?;
     }
+    let [branch0, branch1] = branch;
     Ok(NodalArc {
         quadric: a1,
         cone: c,
         node,
         gradient: Vec3::new(g1x, g1y, g1z),
-        ray: *branch.get(base).ok_or_else(sm_err)?,
+        ray: if second_base { branch1 } else { branch0 },
         from,
         to,
         branch,
@@ -782,10 +966,10 @@ fn nodal_quartic(
 ///
 /// # Errors
 ///
-/// `SM_ERR` when the plane misses the quadric or meets it in lines, the nodal quartic has
-/// no normal or an isolated node, the trace starts and ends at the node or its arc runs
-/// through it, a spine segment's end weight or the round's weights do not stay positive,
-/// the weights range too far for a NURBS, or the round is not the ball's;
+/// Named [`BlendFailure`] causes with `SM_ERR` for unusable sections or nodal arcs,
+/// an empty closest-point solve, unavailable rational weights or a round outside tolerance;
+/// [`BlendFailure::Defect`] for violated nodal or evaluator invariants;
+/// [`BlendFailure::InputMissing`] with `SM_ERR_NULL_POINTER` for absent caller inputs;
 /// [`SolidError::InvalidInput`] for a class other than conic, conic pair or nodal quartic; those of `SetupOffsetValues`, the solves, evaluations and constructors.
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)] // one fork routine
 pub fn calc_rational_spine_fillet_geom(
@@ -800,21 +984,33 @@ pub fn calc_rational_spine_fillet_geom(
     let (Some(first), Some(last)) = (tsects.first(), tsects.last()) else {
         return Err(SolidError::invalid_input(OP, "no points"));
     };
-    let eu0 = ops
-        .solver()
-        .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let e = eu::edge(b, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
-    let curve: Curve = edge::curve(b, e)?
-        .cloned()
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+    let eu0 = ops.solver().edgeuse(0)?.ok_or_else(|| {
+        SolidError::blend(
+            OP,
+            BlendFailure::InputMissing(BlendInput::SolverEdgeuse { rail: 0 }),
+        )
+    })?;
+    let e = eu::edge(b, eu0)?.ok_or_else(|| {
+        SolidError::blend(
+            OP,
+            BlendFailure::InputMissing(BlendInput::EdgeuseEdge { edgeuse: eu0 }),
+        )
+    })?;
+    let curve: Curve = edge::curve(b, e)?.cloned().ok_or_else(|| {
+        SolidError::blend(
+            OP,
+            BlendFailure::InputMissing(BlendInput::EdgeCurve { edge: e }),
+        )
+    })?;
     let ivl = edge::interval(b, e)?;
     let tol = b.tolerance();
     let arc = ops
         .solver()
         .fsg
         .as_ref()
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| {
+            SolidError::blend(OP, BlendFailure::InputMissing(BlendInput::SurfaceGenerator))
+        })?
         .fillet_surface_generator_type()
         == FilletSurfaceGeneratorType::Circular;
 
@@ -837,9 +1033,30 @@ pub fn calc_rational_spine_fillet_geom(
             SolutionRequested::Single,
             &GlobalPointSolveOptions::<crate::topology::ObjectHandle>::default(),
         )?;
-        let t = sols.get(0).ok_or_else(sm_err)?.start.param(0)?;
+        let t = sols
+            .get(0)
+            .ok_or_else(|| {
+                SolidError::blend(
+                    OP,
+                    BlendFailure::CurveProjectionEmpty {
+                        x: start.x,
+                        y: start.y,
+                        z: start.z,
+                    },
+                )
+            })?
+            .start
+            .param(0)?;
         let pv = curve.evaluate(k, t, 1, true, false)?;
-        pv.get(1).copied().ok_or_else(sm_err)?
+        pv.get(1).copied().ok_or_else(|| {
+            SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "the edge curve's evaluation succeeded but returned no first derivative, \
+                          which the evaluator promises for the orders asked",
+                },
+            )
+        })?
     };
 
     let s = ops.solver();
@@ -847,10 +1064,10 @@ pub fn calc_rational_spine_fillet_geom(
     let mut segs: Vec<Segment> = Vec::new();
     if matches!(blend.spine, BlendSpine::Conic | BlendSpine::ConicPair) {
         // the conic: the plane's section of the other quadric (either, for a pair)
-        let q = if o0.kind == QuadricKind::Plane {
-            o1
+        let (q, q_face) = if o0.kind == QuadricKind::Plane {
+            (o1, blend.faces[1])
         } else {
-            o0
+            (o0, blend.faces[0])
         };
         let mut kc = plane_section(blend.point, blend.dir, &q)?;
         if kc.kind == ConicKind::Hyperbola && (start - kc.c).dot(kc.a1) < 0.0 {
@@ -860,7 +1077,7 @@ pub fn calc_rational_spine_fillet_geom(
         let t1 = conic_param(&kc, end);
         // from the first point to the last: round the loop the way the edge runs on a
         // closed edge, else the way along an ellipse that passes the edge's middle
-        // (tangency-labs/smlib@dda3b5d)
+        // (tangency-labs/smlib@dda3b5d), read round the quadric's axis (not the fork's)
         let mut span = t1 - t0;
         let mut dir = if span >= 0.0 { 1.0 } else { -1.0 };
         if kc.kind == ConicKind::Ellipse {
@@ -871,7 +1088,9 @@ pub fn calc_rational_spine_fillet_geom(
                 span = dir * 2.0 * PI;
             } else {
                 // the arc t0 -> t1 one way or the other, by where the edge's middle lies
-                let mid = conic_param(&kc, edge_mid);
+                // round the quadric's axis
+                let mid =
+                    ellipse_param_about_axis(&kc, blend.point, blend.dir, &q, &q_face, edge_mid)?;
                 let within = |a: f64, span: f64, t: f64| {
                     let mut d = (t - a) * if span >= 0.0 { 1.0 } else { -1.0 };
                     d -= 2.0 * PI * (d / (2.0 * PI)).floor();
@@ -910,7 +1129,14 @@ pub fn calc_rational_spine_fillet_geom(
         };
         let nf = (span.abs() / dmax).ceil();
         if !nf.is_finite() || nf > MAX_SPINE_SEGMENTS {
-            return Err(sm_err());
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::RationalWeightsUnavailable {
+                    step: WeightStep::SegmentPartition,
+                    observed: nf,
+                    limit: MAX_SPINE_SEGMENTS,
+                },
+            ));
         }
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let mut n = nf as usize;
@@ -935,31 +1161,37 @@ pub fn calc_rational_spine_fillet_geom(
         let from_node = from_pt.length() <= tol;
         let to_node = to_pt.length() <= tol;
         if from_node && to_node {
-            // the trace starts and ends at the node
-            return Err(sm_err());
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::NodalArcUnavailable {
+                    reason: NodalArcReason::BothEndsAtNode,
+                    discriminant: None,
+                    candidates: 0,
+                },
+            ));
         }
-        let mut arc_q = nodal_quartic(&o0, &o1, blend.point, from_pt, to_pt, 0)?;
+        let mut arc_q = nodal_quartic(&o0, &o1, blend.point, from_pt, to_pt, false)?;
         // the arc from start to end that keeps off the node: G (g1.v) is not zero inside
         // it, nor W
         let mut found = false;
         let mut cand = 0;
+        let mut tried = 0;
         while cand < 4 && !found {
             let end_branch = cand / 2;
             let sign = if cand % 2 == 0 { 1.0 } else { -1.0 };
             cand += 1;
-            let eb = *arc_q.branch.get(end_branch).ok_or_else(sm_err)?;
+            let [branch0, branch1] = arc_q.branch;
+            // cand < 4 makes end_branch 0 or 1.
+            let eb = if end_branch == 0 { branch0 } else { branch1 };
             let from = if from_node { eb } else { from_pt } * sign;
             let to = if to_node { eb } else { to_pt };
             if !from_node && !to_node && end_branch == 1 {
                 continue;
             }
             // the base ray: the branch no end leaves along
-            let base = if from_node || to_node {
-                1 - end_branch
-            } else {
-                0
-            };
-            arc_q = nodal_quartic(&o0, &o1, blend.point, from, to, base)?;
+            let second_base = (from_node || to_node) && end_branch == 0;
+            arc_q = nodal_quartic(&o0, &o1, blend.point, from, to, second_base)?;
+            tried += 1;
             let mut ok = true;
             let (g, w) = arc_q.gw(0.5);
             let mut kk = 1;
@@ -977,8 +1209,15 @@ pub fn calc_rational_spine_fillet_geom(
             found = ok;
         }
         if !found {
-            // the quartic's arc between the trace's ends runs through its node
-            return Err(sm_err());
+            // The candidates run through the node or infinity, or fail the endpoint checks.
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::NodalArcUnavailable {
+                    reason: NodalArcReason::NoFiniteRegularArc,
+                    discriminant: None,
+                    candidates: tried,
+                },
+            ));
         }
         // s runs from the trace's first point to its last
         let mut s0 = 0.0;
@@ -1042,8 +1281,14 @@ fn rational_spine_parts(
             let d = degree(&sg.w);
             let (w0, wd) = (at(&sg.w, 0), at(&sg.w, d));
             if !positive(w0) || !positive(wd) {
-                // a spine segment's end weight is not positive
-                return Err(sm_err());
+                return Err(SolidError::blend(
+                    OP,
+                    BlendFailure::RationalWeightsUnavailable {
+                        step: WeightStep::EndpointWeights,
+                        observed: if w0.is_nan() { w0 } else { min2(w0, wd) },
+                        limit: 0.0,
+                    },
+                ));
             }
             let c = (w0 / wd).powf(1.0 / d as f64);
             let mut ci = prev / w0;
@@ -1108,8 +1353,24 @@ fn rational_spine_parts(
             }
             if !all_positive {
                 if depth >= 6 {
-                    // the round's weights do not keep positive
-                    return Err(sm_err());
+                    let least = swr.iter().flatten().chain(ss.w.iter()).fold(
+                        f64::INFINITY,
+                        |least, &coefficient| {
+                            if least.is_nan() {
+                                least
+                            } else {
+                                min2(least, coefficient)
+                            }
+                        },
+                    );
+                    return Err(SolidError::blend(
+                        OP,
+                        BlendFailure::RationalWeightsUnavailable {
+                            step: WeightStep::PositiveWeights,
+                            observed: least,
+                            limit: f64::from(depth),
+                        },
+                    ));
                 }
                 let mut l = Segment::default();
                 let mut rr = Segment::default();
@@ -1147,11 +1408,10 @@ fn rational_spine_parts(
             }
         }
     }
-    let nv = rows_w.first().map_or(0, Vec::len);
+    // Conics supply at least two quadratic segments, nodal arcs sixteen quartics;
+    // subdivision preserves positive degree and round_rows makes exactly 2 or 3 rows.
+    let nv = if arc { 3 } else { 2 };
     let nseg = rows_w.len();
-    if nv < 2 || nseg == 0 || deg == 0 {
-        return Err(sm_err());
-    }
     let nu = nseg * deg + 1;
     let mut cps = vec![Point3::ZERO; nu * nv];
     let mut wts = vec![1.0; nu * nv];
@@ -1200,8 +1460,14 @@ fn rational_spine_parts(
             wmax = max2(wmax, w);
         }
         if !positive(wmin) || wmax > 1e4 * wmin {
-            // the round's weights range too far for a NURBS
-            return Err(sm_err());
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::RationalWeightsUnavailable {
+                    step: WeightStep::WeightRange,
+                    observed: if positive(wmin) { wmax / wmin } else { wmin },
+                    limit: 1e4,
+                },
+            ));
         }
         let sc = 1.0 / (wmin * wmax).sqrt();
         for w in &mut wts {
@@ -1224,10 +1490,8 @@ fn rational_spine_parts(
     let round = Surface::from(round);
 
     // the round is the ball's: its rails on their faces, every point at r from the spine
-    for (kk, sd) in done.iter().enumerate() {
-        let (Some(&ua), Some(&ub)) = (u_knots.get(kk), u_knots.get(kk + 1)) else {
-            return Err(sm_err());
-        };
+    // One first knot and one per done segment give each segment exactly one span.
+    for (sd, (&ua, &ub)) in done.iter().zip(u_knots.iter().zip(u_knots.iter().skip(1))) {
         for a in 0..=4 {
             let t = f64::from(a) / 4.0;
             let w = eval(&sd.w, t);
@@ -1244,8 +1508,14 @@ fn rational_spine_parts(
                     0.0
                 };
                 if off > tol || on_face > tol {
-                    // the round built is not the ball's
-                    return Err(sm_err());
+                    return Err(SolidError::blend(
+                        OP,
+                        BlendFailure::RationalRoundOutOfTolerance {
+                            radius_error: off,
+                            support_error: on_face,
+                            tolerance: tol,
+                        },
+                    ));
                 }
             }
         }
@@ -1253,19 +1523,13 @@ fn rational_spine_parts(
 
     // its rails the v = min and v = max isoparameter curves, and the spine
     let uv = round.natural_uv_domain_with_nurb(k)?;
-    let mut rails = Vec::with_capacity(2);
-    let mut rail_ivls = [None, None];
-    for (v, slot) in [uv.min().y, uv.max().y]
-        .into_iter()
-        .zip(rail_ivls.iter_mut())
-    {
-        let c = round
+    let rail = |v| -> Result<Curve> {
+        Ok(round
             .create_iso_parametric_curve(k, SurfParamType::V, v, 0.0, None, false)?
-            .curve;
-        *slot = Some(c.natural_interval());
-        rails.push(c);
-    }
-    let [rail0, rail1]: [Curve; 2] = rails.try_into().map_err(|_| sm_err())?;
+            .curve)
+    };
+    let rails = [rail(uv.min().y)?, rail(uv.max().y)?];
+    let rail_ivls = rails.each_ref().map(|c| Some(c.natural_interval()));
     let spine = {
         let sdeg = done.first().map_or(0, |d| degree(&d.w));
         let mut sp: Vec<Point3> = Vec::new();
@@ -1295,7 +1559,7 @@ fn rational_spine_parts(
     };
     Ok(FilletGeomParts {
         surface: round,
-        rails: [rail0, rail1],
+        rails,
         rail_intervals: rail_ivls,
         center_line: Some(Curve::from(spine)),
     })
@@ -1380,6 +1644,314 @@ mod tests {
         }
     }
 
+    /// A point of a tilted convex cylinder, far along the axis from the plane of the spine
+    /// ellipse, reads at the spine parameter of the ball's centre for that point: the same
+    /// angle round the axis where the ball is smaller than the cylinder's radius, half a turn
+    /// on where it is larger and the offset lies past the axis (#18824).
+    #[test]
+    fn a_point_of_the_face_reads_where_its_balls_centre_lies_on_the_spine_ellipse() {
+        let tau = 0.7f64;
+        let axis = Vec3::new(0.0, tau.sin(), tau.cos());
+        let e1 = Vec3::new(1.0, 0.0, 0.0);
+        let e2 = axis.cross(e1);
+        let face = BlendQuadric {
+            kind: QuadricKind::Cylinder,
+            point: Point3::ZERO,
+            dir: axis,
+            radius: 1.0,
+            angle: 0.0,
+            side: 1.0,
+            tube: 0.0,
+        };
+        let normal = Vec3::new(0.0, 1.0, 0.0);
+        for ball in [0.3, 0.966, 1.4] {
+            let q = face.offset(-ball, 1e-12);
+            assert_eq!(q.side < 0.0, ball > 1.0);
+            let at = Point3::new(0.0, 0.5, 0.0);
+            let kc = plane_section(at, normal, &q).unwrap();
+            assert_eq!(kc.kind, ConicKind::Ellipse);
+            for i in 0..12 {
+                let phi = 0.3 + 0.5 * f64::from(i);
+                let radial = e1 * phi.cos() + e2 * phi.sin();
+                // a point of the face 3 along the axis from the plane, and its ball's centre
+                // moved along the axis onto the plane
+                let x = axis * 3.0 + radial;
+                let centre = x - radial * ball;
+                let on_plane = centre - axis * ((centre - at).dot(normal) / axis.dot(normal));
+                let truth = conic_param(&kc, on_plane);
+                let read = ellipse_param_about_axis(&kc, at, normal, &q, &face, x).unwrap();
+                let off = (read - truth).sin().abs() + (1.0 - (read - truth).cos());
+                assert!(
+                    off < 1e-12,
+                    "ball {ball} phi {phi}: read {read} truth {truth}"
+                );
+            }
+        }
+    }
+
+    /// A point the axis reading cannot place is refused as the caller's input, with status
+    /// `SM_ERR`, not read about the conic's centre: one on the axis (the half-line from the
+    /// axis has no direction) and one read against a cylinder whose axis crosses the plane
+    /// outside the conic (the half-line misses it, or crosses it behind the axis).
+    #[test]
+    fn a_point_the_axis_reading_cannot_place_is_refused() {
+        let face = BlendQuadric {
+            kind: QuadricKind::Cylinder,
+            point: Point3::ZERO,
+            dir: Vec3::new(0.0, 0.6, 0.8),
+            radius: 1.0,
+            angle: 0.0,
+            side: 1.0,
+            tube: 0.0,
+        };
+        let q = face.offset(-0.3, 1e-12);
+        let (at, normal) = (Point3::new(0.0, 0.5, 0.0), Vec3::new(0.0, 1.0, 0.0));
+        let kc = plane_section(at, normal, &q).unwrap();
+        // the refusal's numbers: (length, discriminant, crossing)
+        let refused = |r: Result<f64>| -> (f64, f64, Option<f64>) {
+            let e = r.unwrap_err();
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e:?}");
+            assert_eq!(e.sm_status(), Some(crate::error::SM_ERR), "{e:?}");
+            match e.blend_failure() {
+                Some(BlendFailure::ExactBlendAxisCannotPlaceEdge {
+                    length,
+                    discriminant,
+                    crossing,
+                }) => (*length, *discriminant, *crossing),
+                other => panic!("{other:?}"),
+            }
+        };
+        // on the axis, 3 along it from the origin: no direction, no crossing computed
+        let (length, _, crossing) = refused(ellipse_param_about_axis(
+            &kc,
+            at,
+            normal,
+            &q,
+            &face,
+            face.dir * 3.0,
+        ));
+        assert!(length <= EFF_ZERO, "{length}");
+        assert_eq!(crossing, None);
+        // a cylinder 10 off to the side: its axis crosses the plane outside the conic; a
+        // point further out reads along a half-line pointing away from the conic (its line
+        // crosses the conic behind the axis), and one off sideways along a half-line that
+        // passes the conic by
+        let mut far = q;
+        far.point = Point3::new(10.0, 0.0, 0.0);
+        let read = |x: Point3| {
+            refused(ellipse_param_about_axis(
+                &kc,
+                at,
+                normal,
+                &far,
+                &face,
+                x + face.dir * 3.0,
+            ))
+        };
+        let (_, discriminant, crossing) = read(Point3::new(12.0, 0.0, 0.0));
+        assert!(discriminant >= 0.0, "{discriminant}");
+        assert!(crossing.is_some_and(|mu| mu <= 0.0), "{crossing:?}");
+        let (_, discriminant, crossing) = read(Point3::new(10.0, 0.0, 5.0));
+        assert!(discriminant < 0.0, "{discriminant}");
+        assert_eq!(crossing, None);
+    }
+
+    /// A plane that meets the quadric in no conic says how it fails, with status `SM_ERR`.
+    #[test]
+    fn planes_missing_a_sphere_or_an_axial_cylinder_report_empty_sections() {
+        let quadric = |kind: QuadricKind| BlendQuadric {
+            kind,
+            point: Point3::ZERO,
+            dir: Vec3::new(0.0, 0.0, 1.0),
+            radius: 4.0,
+            angle: 0.0,
+            side: 1.0,
+            tube: 0.0,
+        };
+        let missed = plane_section(
+            Point3::new(0.0, 0.0, 10.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            &quadric(QuadricKind::Sphere),
+        )
+        .unwrap_err();
+        assert_eq!(
+            missed.blend_failure(),
+            Some(&BlendFailure::SectionNotConic {
+                reason: SectionShape::Empty,
+                quadratic_scale: 1.0,
+                discriminant: None,
+                centered_value: Some(84.0),
+            })
+        );
+        assert_eq!(missed.sm_status(), Some(crate::error::SM_ERR));
+        // a plane along the cylinder's axis, outside it
+        let missed_cylinder = plane_section(
+            Point3::new(10.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            &quadric(QuadricKind::Cylinder),
+        )
+        .unwrap_err();
+        // y^2 + 84 = 0 has discriminant -336: this is empty, not lines.
+        assert_eq!(
+            missed_cylinder.blend_failure(),
+            Some(&BlendFailure::SectionNotConic {
+                reason: SectionShape::Empty,
+                quadratic_scale: 1.0,
+                discriminant: Some(-336.0),
+                centered_value: None,
+            })
+        );
+        assert_eq!(missed_cylinder.sm_status(), Some(crate::error::SM_ERR));
+    }
+
+    /// Closed forms distinguish unsupported sections, real lines, and a tangent point.
+    #[test]
+    fn unusable_sections_distinguish_lines_a_point_and_no_quadratic_form() {
+        let sphere = BlendQuadric {
+            kind: QuadricKind::Sphere,
+            point: Point3::ZERO,
+            dir: Vec3::Z,
+            radius: 4.0,
+            ..BlendQuadric::default()
+        };
+        let cylinder = BlendQuadric {
+            kind: QuadricKind::Cylinder,
+            ..sphere
+        };
+        let cone = BlendQuadric {
+            kind: QuadricKind::Cone,
+            angle: PI / 4.0,
+            ..sphere
+        };
+        let plane = BlendQuadric {
+            kind: QuadricKind::Plane,
+            ..sphere
+        };
+        for (q, point, normal, reason, discriminant, centered_value) in [
+            // y^2 - 16 = 0 gives two axial lines, discriminant 64.
+            (
+                cylinder,
+                Point3::ZERO,
+                Vec3::X,
+                SectionShape::Lines,
+                Some(64.0),
+                None,
+            ),
+            // y^2 = 0 gives the cylinder's one tangent line.
+            (
+                cylinder,
+                Vec3::X * 4.0,
+                Vec3::X,
+                SectionShape::Lines,
+                Some(0.0),
+                None,
+            ),
+            // x^2 + y^2 = 0 at the sphere's north pole is a point.
+            (
+                sphere,
+                Vec3::Z * 4.0,
+                Vec3::Z,
+                SectionShape::Point,
+                None,
+                Some(0.0),
+            ),
+            (
+                plane,
+                Point3::ZERO,
+                Vec3::Z,
+                SectionShape::NoQuadraticForm,
+                None,
+                None,
+            ),
+            // A cone through its apex cut by an axial plane is two lines, not a point.
+            (
+                cone,
+                Point3::ZERO,
+                Vec3::X,
+                SectionShape::Lines,
+                None,
+                Some(0.0),
+            ),
+        ] {
+            let result = plane_section(point, normal, &q);
+            assert!(result.is_err());
+            if let Err(e) = result {
+                assert!(
+                    matches!(
+                        e.blend_failure(),
+                        Some(BlendFailure::SectionNotConic {
+                            reason: actual,
+                            discriminant: actual_discriminant,
+                            centered_value: actual_centered,
+                            ..
+                        }) if *actual == reason && *actual_discriminant == discriminant
+                            && *actual_centered == centered_value
+                    ),
+                    "{e:?}"
+                );
+                assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+            }
+        }
+    }
+
+    /// The three tangent-cone stops stay failures, but no longer share an isolated-node phrase.
+    #[test]
+    fn nodal_tangent_cones_distinguish_isolated_higher_order_and_pure_cross_terms() {
+        let sphere = BlendQuadric {
+            kind: QuadricKind::Sphere,
+            point: Point3::ZERO,
+            radius: 1.0,
+            ..BlendQuadric::default()
+        };
+        let other_sphere = BlendQuadric {
+            point: Vec3::Z * 2.0,
+            ..sphere
+        };
+        let diagonal = std::f64::consts::FRAC_1_SQRT_2;
+        let cylinder = BlendQuadric {
+            kind: QuadricKind::Cylinder,
+            dir: Vec3::new(diagonal, diagonal, 0.0),
+            ..sphere
+        };
+        let other_cylinder = BlendQuadric {
+            dir: Vec3::new(diagonal, -diagonal, 0.0),
+            ..cylinder
+        };
+        let cases = [
+            // At z=1 the spheres' gradients oppose, C=2I and d=-4.
+            (sphere, other_sphere, Vec3::Z, BlendFailure::NodalArcUnavailable {
+                reason: NodalArcReason::IsolatedNode,
+                discriminant: Some(-4.0),
+                candidates: 0,
+            }),
+            // Identical quadrics have C=0 on the tangent plane.
+            (sphere, sphere, Vec3::Z, BlendFailure::NodalArcUnavailable {
+                reason: NodalArcReason::HigherOrderContact,
+                discriminant: Some(0.0),
+                candidates: 0,
+            }),
+            // Equal diagonal terms cancel exactly; the xy terms have opposite signs.
+            (cylinder, other_cylinder, Vec3::Z, BlendFailure::Defect {
+                why: "forming the nodal branch tangents rejected a pure cross-term form, whose \
+                      positive discriminant gives two real branch tangents",
+            }),
+            (sphere, sphere, Point3::ZERO, BlendFailure::Defect {
+                why: "forming the nodal quartic's tangent cone found a zero gradient on its first \
+                      offset, though the nodal classification excludes collapsed sphere and \
+                      cylinder offsets and a cone's apex",
+            }),
+        ];
+        for (a, b, node, cause) in cases {
+            let result = nodal_quartic(&a, &b, node, Vec3::X, Vec3::Y, false);
+            assert!(result.is_err());
+            if let Err(e) = result {
+                assert_eq!(e.blend_failure(), Some(&cause));
+                assert_eq!(e.kind(), cause.class());
+                assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+            }
+        }
+    }
+
     /// The original nodal pair satisfies both offset equations, including its last end.
     #[test]
     fn two_touching_cylinders_meet_in_a_nodal_quartic_its_segments_on_both() {
@@ -1400,8 +1972,15 @@ mod tests {
             let y = 2.0 + 1.5 * phi.cos();
             Point3::new((3.5f64 * 3.5 - y * y).sqrt(), y, 1.5 * phi.sin())
         };
-        let arc =
-            nodal_quartic(&a, &b, node, on(0.3) - node, on(2.0 * PI - 0.3) - node, 0).unwrap();
+        let arc = nodal_quartic(
+            &a,
+            &b,
+            node,
+            on(0.3) - node,
+            on(2.0 * PI - 0.3) - node,
+            false,
+        )
+        .unwrap();
         // the ends where they were asked for, every point on both
         let end = |s: f64| {
             let point = arc.segment(s, s);
@@ -1476,7 +2055,7 @@ mod tests {
                             } else {
                                 (from_node(0.3), from_node(2.0 * PI - 0.3))
                             };
-                            for base in 0..2 {
+                            for base in [false, true] {
                                 let arc =
                                     nodal_quartic(&first, &second, node, from, to, base).unwrap();
                                 for i in 0..16 {
@@ -1484,11 +2063,7 @@ mod tests {
                                     let hi = f64::from(i + 1) / 16.0;
                                     let curve = segment_curve(&arc.segment(lo, hi));
                                     assert!(
-                                        crate::surface::implicit::curve_on_quadrics(
-                                            &curve,
-                                            &[first.implicit(), second.implicit()]
-                                        )
-                                        .unwrap(),
+                                        crate::surface::implicit::curve_on_quadrics(&curve, &[first.implicit(), second.implicit()]).unwrap(),
                                         "size {size}, angle {angle}, radii {r}/{rho}, reversed {reversed}, base {base}, segment {i}"
                                     );
                                 }
@@ -1615,7 +2190,7 @@ mod tests {
                 super::super::classify_blend_spine(ends[0], 1e-7, &mut blend);
                 assert_eq!(blend.spine, BlendSpine::NodalQuartic, "{a:?}, {b:?}");
                 assert!(blend.point.distance(node) < 1e-14);
-                for base in 0..2 {
+                for base in [false, true] {
                     for [from, to] in [ends, [ends[1], ends[0]]] {
                         let arc =
                             nodal_quartic(&a, &b, node, from - node, to - node, base).unwrap();
@@ -1753,7 +2328,7 @@ mod tests {
                             blend.point,
                             from - blend.point,
                             to - blend.point,
-                            0,
+                            false,
                         )
                         .unwrap();
                         let parts = rational_spine_parts(

@@ -73,9 +73,10 @@
 //!   undefined behaviour upstream) the two agree.
 //! - **`ValidatePatch`'s intersection test.** Upstream compares
 //!   `sPtClass.GetClassType()` (the static class id) with `SM_PC_FACE`, so the test never
-//!   rejects a patch (WR-640); the port keeps that: it runs the
-//!   face intersections (their status and edits count) and the classifications, and
-//!   accepts.
+//!   rejects a patch (WR-640). The port keeps this except when two independently
+//!   closed patches intersect. Their joint reconstruction checks the trimmed
+//!   intersection intervals on both faces and rejects isolated contacts with
+//!   retained faces away from the original rims.
 //! - **Open base.** Upstream's `DoDefeature` returns success when a feature's base patch
 //!   could not be built, with the feature's faces cut out of the base and the hole open
 //!   (WR-656), for the caller to put back with `RestoreFeatures`.
@@ -93,8 +94,12 @@
 
 use crate::boolean::merge::p3::BooleanDriver;
 use crate::curve::curve::Curve;
+use crate::error::blend::BlendFailure;
 use crate::error::defeature::DefeatureFailure;
-use crate::error::{ignore_status, EntityRef, Failure, Reason, Result, SolidError, SM_ERR};
+use crate::error::{
+    ignore_status, EntityRef, Failure, Reason, Result, SolidError, SM_ERR, SM_ERR_ASSERT_FAILURE,
+    SM_ERR_NULL_POINTER,
+};
 use crate::geom::a_object::BooleanOperation;
 use crate::geom::context::{with_mark_lock, MarkType, ALL_MARKS};
 use crate::geom::extent1d::Extent1d;
@@ -105,29 +110,70 @@ use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
 use crate::math::Point3;
 use crate::topology::brep::p1 as bp1;
-use crate::topology::face::p3::{FaceBreps, FaceIntersectOptions, IntersectObjects};
+use crate::topology::face::p3::{
+    FaceBreps, FaceIntersectOptions, FaceIntersection, IntersectObjects,
+};
 use crate::topology::topology_traverser::{self as traverser, Entity, Marks};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, LoopId, VertexId};
 
+mod annular;
+
 const OP: &str = "blend::feature_executive";
 
-// `SM_ERR_ASSERT_FAILURE`.
-use crate::error::SM_ERR_ASSERT_FAILURE;
-
-/// `SM_ERR_ASSERT_FAILURE` (`AERN`).
-fn assert_failure(reason: &'static str) -> SolidError {
-    // (upstream logs `reason`)
-    let _ = reason;
-    SolidError::Upstream {
-        code: SM_ERR_ASSERT_FAILURE,
-        operation: OP,
-        entity: None,
-    }
+/// A defect ([`BlendFailure::Defect`]) of the executive, with the status `SM_ERR` of the
+/// `SE(SM_ERR)` it replaces.
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    SolidError::blend(OP, BlendFailure::Defect { why })
 }
 
-fn sm_err() -> SolidError {
-    SolidError::sm_err(OP)
+/// A defect ([`BlendFailure::Defect`]) of an object the kernel built that is not there, with
+/// the status `SM_ERR_NULL_POINTER` of the `NER` it replaces.
+#[track_caller]
+fn broken_link(why: &'static str) -> SolidError {
+    Failure::new(OP, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
 }
+
+/// A cause about the caller's input, keeping the status `status` of the site it replaces.
+#[track_caller]
+fn input_error(cause: BlendFailure, status: i32) -> SolidError {
+    Failure::new(OP, cause).with_status(status).into_error()
+}
+
+/// Why a chain start is past the sorted loop edges.
+const CHAIN_START_PAST_EDGES: &str = "a chain start is past the sorted loop edges, though \
+     the edge chaining records each start as the index where a chain begins in that list";
+/// Why a loop index is past the feature's loops.
+const LOOP_INDEX_PAST_LOOPS: &str = "a loop index is past the feature's loops, though every \
+     index runs over that list and nothing removes a loop while its patches are built";
+/// Why the feature has no first loop where its patches are joined.
+const NO_FIRST_LOOP: &str = "the feature has no first loop, though its patches are joined \
+     only when it has more than one loop";
+/// Why the feature B-rep is gone.
+const FEATURE_BREP_GONE: &str = "the feature B-rep is gone, though partitioning makes it \
+     before any step that reads it, and only putting the feature back takes it";
+/// Why a patch the loops recorded is not in the executive's list.
+const PATCH_GONE: &str = "a patch id a loop recorded has no patch in the executive's list, \
+     though a patch is added before its id is recorded and is taken out only while it is \
+     validated";
+/// Why a rebuilt loop has no base patch during the crossing check.
+const LOOP_BASE_PATCH_GONE: &str = "a rebuilt loop has no base patch, though extending \
+     each loop records its patch before the closed pair is compared";
+/// Why a chain start of the chained loop curves is past them.
+const CURVE_CHAIN_PAST_CURVES: &str = "a chain start of the chained loop curves is past \
+     them, though the chaining records each start as the index where a chain begins in its \
+     own list";
+/// Why the boolean's primary B-rep is gone.
+const PRIMARY_GONE: &str = "the exclusive-or boolean returned no result and its primary \
+     B-rep is gone, though the boolean hands the primary back when it builds no new result";
+/// Why the first loop has no joined base patch.
+const JOINED_PATCH_GONE: &str = "the first loop has no base patch, though joining the \
+     loops' base patches made it hold the joined patch";
+/// Why a base loop edge has no copy in the feature B-rep.
+const LOOP_EDGE_NOT_COPIED: &str = "a base loop edge has no edge of the same curve in the \
+     feature B-rep, though that B-rep was copied from the faces along the edge, curves and all";
 
 /// How the void a feature leaves is filled (`SmRebuildBrepType`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -179,6 +225,9 @@ pub struct FeatureLoop {
     /// Not upstream (#3218): why the loop's base patch was not built, when its construction
     /// said ([`DefeatureFailure`]).
     pub limit: Option<DefeatureFailure>,
+    /// Not upstream: the error the loop's base patch's construction failed with, kept as the
+    /// cause of [`BlendFailure::KeptFeatureLeavesBaseOpen`].
+    pub cause: Option<SolidError>,
 }
 
 impl FeatureLoop {
@@ -204,6 +253,7 @@ impl FeatureLoop {
             base_ext_dist: -1.,
             feat_ext_dist: -1.,
             limit: None,
+            cause: None,
         }
     }
 
@@ -264,6 +314,8 @@ pub struct Feature {
     pub can_restore: bool,
     /// `m_bJoinedPatches`.
     pub joined_patches: bool,
+    /// Two independently closed base patches crossed and were trimmed to their shared edge.
+    pub trimmed_crossing_base_patches: bool,
     /// `m_bUseBPatchForF`.
     pub use_b_patch_for_f: bool,
 }
@@ -416,6 +468,21 @@ impl<'a> FeatureExecutive<'a> {
         &self.features
     }
 
+    /// The two retained supports whose surfaces can span a feature's circular
+    /// boundary loops. Call after adding the feature, before partitioning the base.
+    /// [`Self::do_defeature`] checks the extension lengths and the other retained faces.
+    ///
+    /// # Errors
+    ///
+    /// An invalid feature index, or failure to read its boundary geometry.
+    pub fn annular_supports(&self, k: &Kernel, feature: usize) -> Result<Option<[FaceId; 2]>> {
+        let feature = self
+            .features
+            .get(feature)
+            .ok_or_else(|| SolidError::invalid_input(OP, "the feature index is out of range"))?;
+        Ok(annular::Closure::of(k, self.base, feature)?.map(|c| c.supports()))
+    }
+
     /// `GetFeatures`, mutably (for the per-feature setters).
     pub fn features_mut(&mut self) -> &mut [Feature] {
         &mut self.features
@@ -538,10 +605,17 @@ impl<'a> FeatureExecutive<'a> {
                     let end = if ii + 1 == n_chains {
                         sorted.len()
                     } else {
-                        *chain_start.get(ii + 1).ok_or_else(sm_err)?
+                        *chain_start
+                            .get(ii + 1)
+                            .ok_or_else(|| defect(CHAIN_START_PAST_EDGES))?
                     };
-                    let start = *chain_start.get(ii).ok_or_else(sm_err)?;
-                    let edges = sorted.get(start..end).ok_or_else(sm_err)?.to_vec();
+                    let start = *chain_start
+                        .get(ii)
+                        .ok_or_else(|| defect(CHAIN_START_PAST_EDGES))?;
+                    let edges = sorted
+                        .get(start..end)
+                        .ok_or_else(|| defect(CHAIN_START_PAST_EDGES))?
+                        .to_vec();
                     floops.push(FeatureLoop::new(edges, base_rb_type, feature_rb_type));
                 }
             }
@@ -605,8 +679,9 @@ impl<'a> FeatureExecutive<'a> {
     ///
     /// Not upstream (WR-656): a feature that was not partitioned, or whose base patch could
     /// not be built, is not taken off. Upstream leaves its hole open, with success, for the
-    /// caller to put back with `RestoreFeatures`; here it is put back at once
-    /// (`RestoreFeature`), so no base is handed back open. The features kept are returned,
+    /// caller to put back with `RestoreFeatures`. A batch containing an annular closure
+    /// puts a refused partition back immediately so subsequent closures see a closed
+    /// body. Other batches restore their kept features at the end. The kept features are returned,
     /// each naming the base loop edge of its open hole and, when its patch's construction
     /// said, why it was not built ([`KeptFeature::limit`], #3218), and the executive drops
     /// them, as `RestoreFeatures` does. When no feature comes off, the call is refused at the
@@ -650,28 +725,94 @@ impl<'a> FeatureExecutive<'a> {
     /// [`Self::do_defeature`]'s work on the base, which the caller puts back on any error.
     fn take_off(&mut self, k: &mut Kernel) -> Result<Vec<KeptFeature>> {
         let mut kept: Vec<KeptFeature> = Vec::new();
+        let mut untouched = Vec::new();
         let mut off = 0;
+        // A joint patch needs a closed base. Find out before any partition can open
+        // it, but compute each closure on the current body when its turn comes.
+        let mut batch_has_annular_closure = false;
+        if self.features.len() > 1 {
+            for feature in &self.features {
+                if annular::Closure::of(k, self.base, feature)?.is_some() {
+                    batch_has_annular_closure = true;
+                    break;
+                }
+            }
+        }
         for i in 0..self.features.len() {
             let Some(feature) = self.features.get_mut(i) else {
                 continue;
             };
+            // The base already carries its cut and no extracted patch is
+            // pending. Its old rims were coalesced on the first execution.
+            if feature.trimmed_crossing_base_patches
+                && feature.base_was_applied
+                && (feature.feat_was_applied || !feature.feat_rebuilt)
+            {
+                off += 1;
+                continue;
+            }
+            if let Some(closure) = annular::Closure::of(k, self.base, feature)? {
+                if let Some(limit) = closure.remove(k, self.base, feature, &mut self.patches)? {
+                    untouched.push(i);
+                    kept.push(KeptFeature {
+                        feature: i,
+                        open_loop: open_loop_edge(feature),
+                        limit: Some(limit),
+                    });
+                } else {
+                    off += 1;
+                }
+                continue;
+            }
+            // Partition cuts the selected faces out even when no patch can be built.
+            // Only a batch with a joint patch needs the original arena ids put back here.
+            let before = if batch_has_annular_closure {
+                Some(self.base.snapshot()?)
+            } else {
+                None
+            };
+            let first_patch = self.patches.len();
+            let material_faces = retained_material_faces(self.base, feature);
             keep_unported(partition_feature(k, self.base, feature))?;
-            keep_unported(build_patches(k, self.base, feature, &mut self.patches))?;
+            build_patches(k, self.base, feature, &mut self.patches)?;
             // `build_patches` marks the feature rebuilt before it refuses an unpartitioned
             // one, so both are read
             if feature.is_partitioned && feature.base_rebuilt {
-                keep_unported(apply_patches(k, self.base, feature, &mut self.patches))?;
-                off += 1;
-            } else {
-                // its hole stays open until it is put back, after the others, as upstream's
-                // caller's RestoreFeatures would
-                kept.push(KeptFeature {
-                    feature: i,
-                    open_loop: open_loop_edge(feature),
-                    limit: open_loop(feature)
-                        .and_then(|l| l.limit)
-                        .or_else(|| feature.loops.iter().find_map(|l| l.limit)),
-                });
+                // Only a proved joint reconstruction needs the original material
+                // boundary. Independent caps use their established rebuild path.
+                let material_faces = if feature.trimmed_crossing_base_patches {
+                    material_faces?
+                } else {
+                    Vec::new()
+                };
+                let applied =
+                    apply_patches(k, self.base, feature, &mut self.patches, &material_faces);
+                if feature.trimmed_crossing_base_patches {
+                    applied?;
+                } else {
+                    keep_unported(applied)?;
+                }
+                if feature.base_rebuilt {
+                    off += 1;
+                    continue;
+                }
+            }
+            // Its unfilled hole stays open until RestoreFeature puts it back below.
+            kept.push(KeptFeature {
+                feature: i,
+                open_loop: open_loop_edge(feature),
+                limit: open_loop(feature)
+                    .and_then(|l| l.limit)
+                    .or_else(|| feature.loops.iter().find_map(|l| l.limit)),
+            });
+            // Only a completed partition with the separated body could have been
+            // restored. A failure during partition still refuses the batch below.
+            if let Some(before) = before.filter(|_| {
+                feature.is_partitioned && feature.can_restore && feature.fbrep.is_some()
+            }) {
+                self.base.restore(before);
+                self.patches.truncate(first_patch);
+                untouched.push(i);
             }
         }
         if kept.is_empty() {
@@ -679,16 +820,31 @@ impl<'a> FeatureExecutive<'a> {
         }
         let first = kept.first();
         let at = first.and_then(|f| f.open_loop).map(EntityRef::Edge);
-        let refusal = match (first.and_then(|f| f.limit), at) {
-            // the kept feature's limit (#3218), at its open loop edge
-            (Some(limit), Some(at)) => Failure::new(OP, Reason::Defeature(limit))
-                .at(at)
-                .into_error(),
-            _ => SolidError::Upstream {
-                code: SM_ERR,
-                operation: OP,
-                entity: at,
-            },
+        let refusal = if let (Some(limit), Some(at)) = (first.and_then(|f| f.limit), at) {
+            // the kept feature's limit (#3218), at its open loop edge, keeping the error the
+            // construction that named it failed with (the loop the limit was read from)
+            let cause = first
+                .and_then(|f| self.features.get(f.feature))
+                .and_then(|feature| {
+                    open_loop(feature)
+                        .filter(|l| l.limit.is_some())
+                        .or_else(|| feature.loops.iter().find(|l| l.limit.is_some()))
+                })
+                .and_then(|l| l.cause.clone());
+            let f = Failure::new(OP, Reason::Defeature(limit)).at(at);
+            match cause {
+                Some(c) => f.caused_by(c).into_error(),
+                None => f.into_error(),
+            }
+        } else {
+            let cause = first
+                .and_then(|f| self.features.get(f.feature))
+                .and_then(|feature| {
+                    open_loop(feature)
+                        .and_then(|l| l.cause.clone())
+                        .or_else(|| feature.loops.iter().find_map(|l| l.cause.clone()))
+                });
+            kept_feature_refusal(at, cause)
         };
         if off == 0 {
             return Err(refusal);
@@ -698,13 +854,15 @@ impl<'a> FeatureExecutive<'a> {
             let Some(feature) = self.features.get_mut(f.feature) else {
                 return Err(refusal);
             };
-            match restore_feature(k, self.base, feature) {
-                Ok(()) => {
-                    self.features.remove(f.feature);
+            // A refused joint patch or a rolled-back partition left the feature intact.
+            if !untouched.contains(&f.feature) {
+                match restore_feature(k, self.base, feature) {
+                    Ok(true) => {}
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                    Ok(false) | Err(_) => return Err(refusal),
                 }
-                Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => return Err(refusal),
             }
+            self.features.remove(f.feature);
         }
         Ok(kept)
     }
@@ -722,11 +880,11 @@ impl<'a> FeatureExecutive<'a> {
                 break;
             };
             match restore_feature(k, self.base, feature) {
-                Ok(()) => {
+                Ok(true) => {
                     self.features.remove(ii);
                 }
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => ii += 1,
+                Ok(false) | Err(_) => ii += 1,
             }
         }
         Ok(())
@@ -752,7 +910,10 @@ pub fn defeature_and_rebuild_with_edges(
     let mut ex = FeatureExecutive::new(k, original)?;
     let made = ex.add_feature_with_edges(k, face, loop_edges, base_rb_type, feature_rb_type)?;
     if made.is_none() {
-        return Err(assert_failure("Feature not built"));
+        return Err(input_error(
+            BlendFailure::NoFeatureMade,
+            SM_ERR_ASSERT_FAILURE,
+        ));
     }
     ex.do_defeature(k)?;
     Ok(ex.into_feature_breps().into_iter().next().flatten())
@@ -775,7 +936,10 @@ pub fn defeature_and_rebuild(
     let mut ex = FeatureExecutive::new(k, original)?;
     let made = ex.add_feature(k, faces, base_rb_type, feature_rb_type)?;
     if made.is_none() {
-        return Err(assert_failure("Feature not built"));
+        return Err(input_error(
+            BlendFailure::NoFeatureMade,
+            SM_ERR_ASSERT_FAILURE,
+        ));
     }
     ex.do_defeature(k)?;
     Ok(ex.into_feature_breps().into_iter().next().flatten())
@@ -822,17 +986,32 @@ fn open_loop_edge(feature: &Feature) -> Option<EdgeId> {
 /// (#3218), else `SM_ERR`, at its open loop edge.
 pub(crate) fn is_open_base_refusal(error: &SolidError) -> bool {
     match error {
-        SolidError::Upstream {
-            operation: OP,
-            code: SM_ERR,
-            entity: Some(EntityRef::Edge(_)),
-        } => true,
+        // the status, not the variant: a typed failure that replaced the `Upstream` (#13790)
+        e if e.upstream_status() == Some(SM_ERR)
+            && e.operation() == OP
+            && matches!(e.entity(), Some(EntityRef::Edge(_))) =>
+        {
+            true
+        }
         SolidError::Failed(f) => {
             f.operation == OP
                 && matches!(f.reason, Reason::Defeature(_))
                 && matches!(f.entity, Some(EntityRef::Edge(_)))
         }
         _ => false,
+    }
+}
+
+/// Not upstream (WR-656): the open-base refusal when no construction named a limit, at `at`,
+/// keeping `cause`, the error a base patch's construction failed with.
+fn kept_feature_refusal(at: Option<EntityRef>, cause: Option<SolidError>) -> SolidError {
+    let mut f = Failure::new(OP, BlendFailure::KeptFeatureLeavesBaseOpen);
+    if let Some(at) = at {
+        f = f.at(at);
+    }
+    match cause {
+        Some(c) => f.caused_by(c).into_error(),
+        None => f.into_error(),
     }
 }
 
@@ -886,13 +1065,19 @@ fn collect_faces(
         for &e in &l.base_edges {
             let edge_faces = edge::faces(base, e, None)?;
             let [f0, f1] = edge_faces.as_slice() else {
-                return Err(assert_failure("All loop edges must have exactly 2 faces"));
+                return Err(input_error(
+                    BlendFailure::LoopDoesNotSplitBody { edge: e },
+                    SM_ERR_ASSERT_FAILURE,
+                ));
             };
             let m0 = marks.is_marked(k, Entity::Face(*f0), mark);
             let m1 = marks.is_marked(k, Entity::Face(*f1), mark);
             let is_bisection = (m0 && !m1) || (!m0 && m1);
             if !is_bisection {
-                return Err(assert_failure("Loop does not bisect the brep."));
+                return Err(input_error(
+                    BlendFailure::LoopDoesNotSplitBody { edge: e },
+                    SM_ERR_ASSERT_FAILURE,
+                ));
             }
         }
     }
@@ -903,7 +1088,10 @@ fn collect_faces(
 /// `SmFeature::CollectFeatureLoopEdges`: for each base loop edge, the first unused
 /// feature B-rep edge whose curve equals its curve.
 fn collect_feature_loop_edges(k: &Kernel, base: &Brep, feature: &mut Feature) -> Result<()> {
-    let fbrep = feature.fbrep.as_ref().ok_or_else(sm_err)?;
+    let fbrep = feature
+        .fbrep
+        .as_ref()
+        .ok_or_else(|| defect(FEATURE_BREP_GONE))?;
     let mut feature_edges = bp1::edges(fbrep, None)?;
     for l in &mut feature.loops {
         for &be in &l.base_edges {
@@ -913,7 +1101,11 @@ fn collect_feature_loop_edges(k: &Kernel, base: &Brep, feature: &mut Feature) ->
                 let feat_curve = fbrep.edge(fe)?.curve.as_ref();
                 // *pBaseCurve == *pFeatCurve (upstream dereferences both)
                 let (Some(bc), Some(fc)) = (base_curve, feat_curve) else {
-                    return Err(SolidError::null_pointer(OP));
+                    let edge = if base_curve.is_none() { be } else { fe };
+                    return Err(input_error(
+                        BlendFailure::BodyEdgeWithoutCurve { edge },
+                        SM_ERR_NULL_POINTER,
+                    ));
                 };
                 if bc.approx_eq(k, fc)? {
                     found = Some(kk);
@@ -925,7 +1117,14 @@ fn collect_feature_loop_edges(k: &Kernel, base: &Brep, feature: &mut Feature) ->
             }
         }
         if l.feat_edges.len() != l.base_edges.len() {
-            return Err(assert_failure("CollectFeatureLoopEdges"));
+            return Err(Failure::new(
+                OP,
+                BlendFailure::Defect {
+                    why: LOOP_EDGE_NOT_COPIED,
+                },
+            )
+            .with_status(SM_ERR_ASSERT_FAILURE)
+            .into_error());
         }
     }
     Ok(())
@@ -938,8 +1137,11 @@ fn partition_feature(k: &mut Kernel, base: &mut Brep, feature: &mut Feature) -> 
     if feature.is_partitioned {
         return Ok(());
     }
+    // "Cannot partition Feature from Base": a caller may clear `defeature_ready` through
+    // `features_mut`; the feature stays unpartitioned, and the caller reads `is_partitioned`
+    // and passes on only unported or cancelled errors, so this is control flow
     if !feature.defeature_ready {
-        return Err(assert_failure("Cannot partition Feature from Base"));
+        return Ok(());
     }
     let fbrep = feature.fbrep.insert(new_brep(k)?);
     let save_base = base.editing_enabled();
@@ -948,10 +1150,16 @@ fn partition_feature(k: &mut Kernel, base: &mut Brep, feature: &mut Feature) -> 
     fbrep.set_editing_enabled(true);
     let r = (|| -> Result<()> {
         // Copy faces from BaseBrep to FeatureBrep
-        let fbrep = feature.fbrep.as_mut().ok_or_else(sm_err)?;
+        let fbrep = feature
+            .fbrep
+            .as_mut()
+            .ok_or_else(|| defect(FEATURE_BREP_GONE))?;
         let (_, copied) = copy_faces_carrying(k, base, &feature.faces, fbrep, true)?;
         if !copied {
-            return Err(sm_err());
+            return Err(defect(
+                "copying the feature's faces into the new feature B-rep left some out, though \
+                 they are faces of the base the copy reads and the merge keeps them together",
+            ));
         }
         // Collect the loop edges on the Feature Brep
         keep_unported(collect_feature_loop_edges(k, base, feature))?;
@@ -965,7 +1173,10 @@ fn partition_feature(k: &mut Kernel, base: &mut Brep, feature: &mut Feature) -> 
     }
     r?;
     // Update rFeature Faces
-    let fbrep = feature.fbrep.as_ref().ok_or_else(sm_err)?;
+    let fbrep = feature
+        .fbrep
+        .as_ref()
+        .ok_or_else(|| defect(FEATURE_BREP_GONE))?;
     feature.faces = bp1::faces(fbrep, None)?;
     feature.is_partitioned = true;
     feature.can_restore = true;
@@ -981,34 +1192,67 @@ fn build_patches(
     feature: &mut Feature,
     patches: &mut Vec<Option<Brep>>,
 ) -> Result<()> {
+    if let Err(e) = build_base_patches(k, base, feature, patches) {
+        return keep_unported(Err(e));
+    }
+    if !feature.is_partitioned {
+        return Ok(());
+    }
+    // A successful empty face/face intersection leaves the individual caps in
+    // place. A failure to classify the sheets is a solver error, not an empty
+    // intersection. Only old patch-building statuses are handled as upstream.
+    let crossing = feature.base_rebuilt && closed_patches_cross(k, &feature.loops, patches)?;
+    match finish_patches(k, base, feature, patches, crossing) {
+        Err(e) if crossing => {
+            let Some(limit) = limit_of(&e) else {
+                return Err(e);
+            };
+            feature.base_rebuilt = false;
+            feature.trimmed_crossing_base_patches = false;
+            for l in &mut feature.loops {
+                l.limit.get_or_insert(limit);
+            }
+            Ok(())
+        }
+        status => keep_unported(status),
+    }
+}
+
+fn build_base_patches(
+    k: &mut Kernel,
+    base: &mut Brep,
+    feature: &mut Feature,
+    patches: &mut Vec<Option<Brep>>,
+) -> Result<()> {
     feature.base_rebuilt = true;
     feature.feat_rebuilt = true;
 
-    // Feature must have been partitioned
+    // Feature must have been partitioned (the caller reads `is_partitioned`, and passes on
+    // only an unported or cancelled error from here)
     if !feature.is_partitioned {
-        return Err(assert_failure(
-            "Trying to build patch for feature that wasn't partitioned.",
-        ));
+        return Ok(());
     }
-    let n_loops = feature.loops.len();
-
     // Rebuild for the base
-    for ii in 0..n_loops {
+    for ii in 0..feature.loops.len() {
         let has_patch = feature
             .loops
             .get(ii)
-            .ok_or_else(sm_err)?
+            .ok_or_else(|| defect(LOOP_INDEX_PAST_LOOPS))?
             .base_patch
             .is_some();
         // Skip loops that already have patches
         let stat = if has_patch {
-            Ok(())
+            Ok(true)
         } else {
             build_patch(k, base, feature, patches, true, ii)
         };
-        keep_unported(stat.clone())?;
-        let ok = stat.is_ok();
-        let l = feature.loops.get_mut(ii).ok_or_else(sm_err)?;
+        keep_unported(stat.clone().map(drop))?;
+        let ok = matches!(stat, Ok(true));
+        let l = feature
+            .loops
+            .get_mut(ii)
+            .ok_or_else(|| defect(LOOP_INDEX_PAST_LOOPS))?;
+        l.cause = stat.err();
         if ok {
             l.use_b_patch = true;
         } else {
@@ -1017,9 +1261,23 @@ fn build_patches(
         }
     }
 
-    // Try joining loop patches (fillets run through here, since 2 loops make 1 patch)
-    if !feature.base_rebuilt && n_loops > 1 {
-        keep_unported(join_patches(k, base, feature, patches, true))?;
+    Ok(())
+}
+
+fn finish_patches(
+    k: &mut Kernel,
+    base: &mut Brep,
+    feature: &mut Feature,
+    patches: &mut Vec<Option<Brep>>,
+    crossing: bool,
+) -> Result<()> {
+    let n_loops = feature.loops.len();
+    if crossing {
+        feature.base_rebuilt = false;
+        join_patches(k, base, feature, patches, Side::Base, true)?;
+        feature.trimmed_crossing_base_patches = true;
+    } else if !feature.base_rebuilt && n_loops > 1 {
+        keep_unported(join_patches(k, base, feature, patches, Side::Base, false))?;
     }
 
     // Check if we are using the base patch for the feature
@@ -1039,14 +1297,24 @@ fn build_patches(
         for l in &feature.loops {
             edges.extend_from_slice(&l.feat_edges);
         }
-        let first = feature.loops.first().ok_or_else(sm_err)?;
+        let first = feature.loops.first().ok_or_else(|| defect(NO_FIRST_LOOP))?;
         let base_patch = first.base_patch;
         // Use merged patch if it will work for feature
-        let fbrep = feature.fbrep.as_mut().ok_or_else(sm_err)?;
+        let fbrep = feature
+            .fbrep
+            .as_mut()
+            .ok_or_else(|| defect(FEATURE_BREP_GONE))?;
         let curves = edge_curves(fbrep, &edges)?;
-        let pid = base_patch.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let pid = base_patch.ok_or_else(|| broken_link(JOINED_PATCH_GONE))?;
         let mut patch = take_patch(patches, pid)?;
-        let r = validate_patch(k, fbrep, &mut patch, &curves, None);
+        let r = validate_patch(
+            k,
+            fbrep,
+            &mut patch,
+            &curves,
+            None,
+            feature.trimmed_crossing_base_patches,
+        );
         put_patch(patches, pid, patch)?;
         match r {
             Ok(()) => {
@@ -1054,7 +1322,7 @@ fn build_patches(
                     first.feat_patch = first.base_patch;
                 }
             }
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(e) if crossing || e.is_unported_or_cancelled() => return Err(e),
             // SE_MSG(SM_ERR, "Patch does not fill Feature void manifold-ly")
             Err(_) => {}
         }
@@ -1064,17 +1332,20 @@ fn build_patches(
             let has_patch = feature
                 .loops
                 .get(ii)
-                .ok_or_else(sm_err)?
+                .ok_or_else(|| defect(LOOP_INDEX_PAST_LOOPS))?
                 .feat_patch
                 .is_some();
             let stat = if has_patch {
-                Ok(())
+                Ok(true)
             } else {
                 build_patch(k, base, feature, patches, false, ii)
             };
-            keep_unported(stat.clone())?;
-            let ok = stat.is_ok();
-            let l = feature.loops.get_mut(ii).ok_or_else(sm_err)?;
+            keep_unported(stat.clone().map(drop))?;
+            let ok = matches!(stat, Ok(true));
+            let l = feature
+                .loops
+                .get_mut(ii)
+                .ok_or_else(|| defect(LOOP_INDEX_PAST_LOOPS))?;
             if ok {
                 l.use_f_patch = true;
             } else {
@@ -1083,7 +1354,14 @@ fn build_patches(
             }
         }
         if !feature.feat_rebuilt && n_loops > 1 {
-            keep_unported(join_patches(k, base, feature, patches, false))?;
+            keep_unported(join_patches(
+                k,
+                base,
+                feature,
+                patches,
+                Side::Feature,
+                false,
+            ))?;
         }
     }
     Ok(())
@@ -1103,7 +1381,7 @@ fn side_brep<'b>(base: &'b Brep, feature: &'b Feature, side: Side) -> Result<&'b
         Side::Feature => feature
             .fbrep
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(OP)),
+            .ok_or_else(|| broken_link(FEATURE_BREP_GONE)),
     }
 }
 
@@ -1118,7 +1396,7 @@ fn side_brep_mut<'b>(
         Side::Feature => feature
             .fbrep
             .as_mut()
-            .ok_or_else(|| SolidError::null_pointer(OP)),
+            .ok_or_else(|| broken_link(FEATURE_BREP_GONE)),
     }
 }
 
@@ -1126,7 +1404,9 @@ fn side_brep_mut<'b>(
 /// feature B-rep: an empty one for [`RebuildBrepType::None`], else the cached patch of
 /// the source B-rep (itself, or a copy when the base patch is not reused for the
 /// feature), else a new one ([`rebuild_brep`]); it is saved, then validated against the
-/// target (the validation's status is returned).
+/// target (the validation's status is returned). False, with nothing built, where a
+/// rebuild with extended surfaces already failed for the loop (upstream `SM_ERR`, which
+/// every caller turns into "not rebuilt").
 fn build_patch(
     k: &mut Kernel,
     base: &mut Brep,
@@ -1134,8 +1414,11 @@ fn build_patch(
     patches: &mut Vec<Option<Brep>>,
     base_brep: bool,
     li: usize,
-) -> Result<()> {
-    let l = feature.loops.get(li).ok_or_else(sm_err)?;
+) -> Result<bool> {
+    let l = feature
+        .loops
+        .get(li)
+        .ok_or_else(|| defect(LOOP_INDEX_PAST_LOOPS))?;
     let base_edges = l.base_edges.clone();
     let feature_edges = l.feat_edges.clone();
     let base_ext_dist = l.base_ext_dist;
@@ -1147,13 +1430,6 @@ fn build_patch(
     } else {
         l.feat_rb_type
     };
-
-    // Confirm we have bisected the brep
-    if !feature.is_partitioned {
-        return Err(assert_failure(
-            "Cannot rebuild the brep before partitioning",
-        ));
-    }
 
     // Get the pointer to the brep we are operating on
     let target = if base_brep { Side::Base } else { Side::Feature };
@@ -1179,13 +1455,16 @@ fn build_patch(
         // Save empty patch
         let patch = new_brep(k)?;
         let pid = add_patch(patches, patch);
-        let l = feature.loops.get_mut(li).ok_or_else(sm_err)?;
+        let l = feature
+            .loops
+            .get_mut(li)
+            .ok_or_else(|| defect(LOOP_INDEX_PAST_LOOPS))?;
         if base_brep {
             l.base_patch = Some(pid);
         } else {
             l.feat_patch = Some(pid);
         }
-        return Ok(());
+        return Ok(true);
     }
 
     // Translate from the LoopEdges to the edges in the SourceBrep
@@ -1198,35 +1477,45 @@ fn build_patch(
         let all = bp1::edges(src, None)?;
         let mut edges = Vec::new();
         for i in ids {
-            edges.push(*all.get(i).ok_or_else(|| SolidError::null_pointer(OP))?);
+            edges.push(*all.get(i).ok_or_else(|| {
+                broken_link(
+                    "an edge's index in its B-rep is past that B-rep's edges, though the \
+                     index was read from the same list",
+                )
+            })?);
         }
         edges
     };
 
     // Have we already built and cached this patch?
-    let l = feature.loops.get(li).ok_or_else(sm_err)?;
+    let l = feature
+        .loops
+        .get(li)
+        .ok_or_else(|| defect(LOOP_INDEX_PAST_LOOPS))?;
     let ext_rebuild = rebuild_type == RebuildBrepType::FromOtherBrep
         || rebuild_type == RebuildBrepType::ExtendSurface;
     let use_b_patch = base_is_source && l.base_patch.is_some() && ext_rebuild;
     let use_f_patch = !base_is_source && l.feat_patch.is_some() && ext_rebuild;
+    // (some exactly when one of the two is used)
     let cached = if use_b_patch {
         l.base_patch
-    } else {
+    } else if use_f_patch {
         l.feat_patch
+    } else {
+        None
     };
 
     let mut extended_by = None;
-    let pid = if (use_b_patch || use_f_patch) && feature.use_b_patch_for_f {
+    let pid = if let (Some(pid), true) = (cached, feature.use_b_patch_for_f) {
         // If the patch we want has already been built.
-        cached.ok_or_else(sm_err)?
-    } else if use_b_patch || use_f_patch {
-        let to_copy = cached.ok_or_else(sm_err)?;
+        pid
+    } else if let Some(to_copy) = cached {
         let copy = copy_patch(k, patches, to_copy)?;
         add_patch(patches, copy)
     } else if ext_rebuild && l.tried_ext_surf {
         // We already tried this and it didn't work.
         // SER_MSG(SM_ERR, "Trying to rebuild with extended surfaces, known to fail. Skipping")
-        return Err(sm_err());
+        return Ok(false);
     } else {
         // (the distance the faces were extended by, when they were: `extended_by`)
         // Attempt to build the patch
@@ -1264,14 +1553,30 @@ fn build_patch(
         let curves = edge_curves(side_brep(base, feature, source)?, &edges)?;
         let mut patch = take_patch(patches, pid)?;
         let tgt = side_brep_mut(base, feature, target)?;
-        let r = validate_patch(k, tgt, &mut patch, &curves, extended_by);
+        let r = validate_patch(k, tgt, &mut patch, &curves, extended_by, false);
         put_patch(patches, pid, patch)?;
-        r
+        match r {
+            Err(e) => Err(extension_within_tolerance(
+                k,
+                side_brep(base, feature, source)?,
+                &edges,
+                tol::brep_zone_tol_3d(
+                    k,
+                    side_brep(base, feature, target)?,
+                    SmallTopoType::default(),
+                ),
+                e,
+            )?),
+            ok => ok,
+        }
     };
     keep_unported(stat.clone())?;
 
     // Save patch
-    let l = feature.loops.get_mut(li).ok_or_else(sm_err)?;
+    let l = feature
+        .loops
+        .get_mut(li)
+        .ok_or_else(|| defect(LOOP_INDEX_PAST_LOOPS))?;
     if base_brep {
         l.base_patch = Some(pid);
     } else {
@@ -1280,7 +1585,57 @@ fn build_patch(
     if let (true, Err(e)) = (base_brep, &stat) {
         l.limit = limit_of(e);
     }
-    stat
+    stat.map(|()| true)
+}
+
+/// Not upstream (#15718): a patch that does not enclose its loop after the faces along it
+/// were extended by `d`, no farther than the identity radius at the loop's vertices (the
+/// largest, over the vertices of the loop `edges` in `src`, of the vertex's zone tolerance
+/// summed with the patch's, `patch_zone`), is refused as
+/// [`DefeatureFailure::ExtensionWithinTolerance`] naming that radius, keeping `error` as the
+/// cause. Within it, a vertex of the extended boundary and the loop's vertex are one point,
+/// so the extension cannot be resolved (the merged vertex's tolerance covers it). Any other
+/// error is returned as it is.
+///
+/// # Errors
+///
+/// Those of the topology reads.
+fn extension_within_tolerance(
+    k: &Kernel,
+    src: &Brep,
+    edges: &[EdgeId],
+    patch_zone: f64,
+    error: SolidError,
+) -> Result<SolidError> {
+    let Some(DefeatureFailure::NotEnclosed {
+        extended_by: Some(d),
+    }) = limit_of(&error)
+    else {
+        return Ok(error);
+    };
+    let mut widest: Option<f64> = None;
+    for &e in edges {
+        for v in edge::vertices(src, e, None)?.into_iter().flatten() {
+            let zone = tol::zone_tol3d(k, src.vertex(v)?.tolerance);
+            widest = Some(widest.map_or(zone, |w| w.max(zone)));
+        }
+    }
+    let Some(widest) = widest else {
+        return Ok(error);
+    };
+    let identity_radius = tol::xsect_tol_3d_from_zones(k, widest, patch_zone);
+    // (a NaN radius or distance passes no test: the error is kept as it is)
+    let within = d <= identity_radius;
+    if !within {
+        return Ok(error);
+    }
+    Ok(limit_error(
+        DefeatureFailure::ExtensionWithinTolerance {
+            extended_by: d,
+            identity_radius,
+        },
+        Some(error),
+    ))
 }
 
 /// Not upstream (#3218): why a patch with a lamina edge off the loop does not close it. A
@@ -1340,8 +1695,23 @@ fn apply_patches(
     base: &mut Brep,
     feature: &mut Feature,
     patches: &mut [Option<Brep>],
+    material_faces: &[FaceId],
 ) -> Result<()> {
     if feature.base_rebuilt && !feature.base_was_applied {
+        let before = if feature.trimmed_crossing_base_patches && !material_faces.is_empty() {
+            Some(base.snapshot()?)
+        } else {
+            None
+        };
+        let mut rim_supports = Vec::new();
+        if feature.trimmed_crossing_base_patches {
+            for l in &feature.loops {
+                for &e in &l.base_edges {
+                    rim_supports.extend(edge::faces(base, e, None)?);
+                }
+            }
+        }
+        let mut patch_faces = Vec::new();
         for l in &feature.loops {
             let Some(pid) = l.base_patch else {
                 continue;
@@ -1352,13 +1722,36 @@ fn apply_patches(
             let patch = patches
                 .get_mut(pid.0)
                 .and_then(Option::as_mut)
-                .ok_or_else(sm_err)?;
-            let faces = bp1::faces(patch, None)?;
-            if !faces.is_empty() {
-                keep_unported(copy_faces_carrying(k, patch, &faces, base, true).map(drop))?;
-            }
+                .ok_or_else(|| defect(PATCH_GONE))?;
+            patch_faces.extend(apply_patch_faces(
+                k,
+                patch,
+                base,
+                feature.trimmed_crossing_base_patches,
+            )?);
         }
-        ignore_status(stitch_and_orient(k, base))?;
+        let stitched = stitch_and_orient(k, base);
+        if feature.trimmed_crossing_base_patches {
+            stitched?;
+            remove_crossing_patch_rims(k, base, &rim_supports, &patch_faces)?;
+            if let Some(before) = before {
+                for &face in material_faces {
+                    if !bounds_material(base, face)? {
+                        base.restore(before);
+                        feature.base_rebuilt = false;
+                        feature.trimmed_crossing_base_patches = false;
+                        let first = feature
+                            .loops
+                            .first_mut()
+                            .ok_or_else(|| defect(NO_FIRST_LOOP))?;
+                        first.limit = Some(DefeatureFailure::PatchEnclosesFace { face });
+                        return Ok(());
+                    }
+                }
+            }
+        } else {
+            ignore_status(stitched)?;
+        }
         feature.can_restore = false;
         feature.base_was_applied = true;
     }
@@ -1367,7 +1760,7 @@ fn apply_patches(
         let fbrep = feature
             .fbrep
             .as_mut()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| broken_link(FEATURE_BREP_GONE))?;
         for l in &feature.loops {
             let Some(pid) = l.feat_patch else {
                 continue;
@@ -1378,27 +1771,117 @@ fn apply_patches(
             let patch = patches
                 .get_mut(pid.0)
                 .and_then(Option::as_mut)
-                .ok_or_else(sm_err)?;
-            let faces = bp1::faces(patch, None)?;
-            if !faces.is_empty() {
-                keep_unported(copy_faces_carrying(k, patch, &faces, fbrep, true).map(drop))?;
-            }
+                .ok_or_else(|| defect(PATCH_GONE))?;
+            apply_patch_faces(k, patch, fbrep, feature.trimmed_crossing_base_patches)?;
         }
-        ignore_status(stitch_and_orient(k, fbrep))?;
+        let stitched = stitch_and_orient(k, fbrep);
+        if feature.trimmed_crossing_base_patches {
+            stitched?;
+        } else {
+            ignore_status(stitched)?;
+        }
         feature.can_restore = false;
         feature.feat_was_applied = true;
     }
     Ok(())
 }
 
+fn apply_patch_faces(
+    k: &mut Kernel,
+    patch: &mut Brep,
+    target: &mut Brep,
+    crossing: bool,
+) -> Result<Vec<FaceId>> {
+    let faces = bp1::faces(patch, None)?;
+    if faces.is_empty() {
+        return Ok(Vec::new());
+    }
+    if !crossing {
+        keep_unported(copy_faces_carrying(k, patch, &faces, target, true).map(drop))?;
+        return Ok(Vec::new());
+    }
+    let copies = crate::topology::brep::p7::copy_faces_carrying_checked(
+        k,
+        patch,
+        &faces,
+        target,
+        |face, cause| limit_error(DefeatureFailure::PatchFaceNotCopied { face }, Some(cause)),
+    )?;
+    copied_patch_faces(target, &faces, copies)
+}
+
+/// The merge may skip a face or split another. Each patch face must be
+/// represented and all its pieces must survive.
+fn copied_patch_faces(
+    target: &Brep,
+    faces: &[FaceId],
+    copies: Vec<(FaceId, FaceId)>,
+) -> Result<Vec<FaceId>> {
+    let represented: std::collections::HashSet<_> = copies.iter().map(|&(from, _)| from).collect();
+    let skipped = faces.iter().copied().find(|f| !represented.contains(f));
+    if let Some(face) = skipped.or_else(|| {
+        copies
+            .iter()
+            .find_map(|&(from, made)| target.face(made).is_err().then_some(from))
+    }) {
+        return Err(limit_error(
+            DefeatureFailure::PatchFaceNotCopied { face },
+            None,
+        ));
+    }
+    Ok(copies.into_iter().map(|(_, made)| made).collect())
+}
+
+/// Stitching can keep either edge of a rim, or split it. Each rim now bounds
+/// one of the copied patch faces and its original support. A seam or the shared
+/// cut between the two patches has no such pair of incident faces.
+fn remove_crossing_patch_rims(
+    k: &mut Kernel,
+    base: &mut Brep,
+    supports: &[FaceId],
+    patch_faces: &[FaceId],
+) -> Result<()> {
+    let mut rims = Vec::new();
+    for &face in patch_faces {
+        if base.face(face).is_ok() {
+            for e in face_edges(base, face, false)? {
+                if edge::faces(base, e, None)?
+                    .iter()
+                    .any(|f| supports.contains(f))
+                {
+                    rims.push(e);
+                }
+            }
+        }
+    }
+    rims.sort_unstable();
+    rims.dedup();
+    let mut vertices = Vec::new();
+    for &e in &rims {
+        let (a, z) = edge_vertices(base, e)?;
+        vertices.extend([a, z]);
+    }
+    vertices.sort_unstable();
+    vertices.dedup();
+    crate::topology::brep::p5::remove_topological_joins(k, base, &rims, &vertices)?;
+    base.refresh_cached_topology();
+    let naming = base.naming();
+    crate::topology::brep::p3::rebind_geometry_owners(
+        base,
+        crate::topology::loopuse::notify_ref,
+        |e| crate::topology::scheme_owner_identity(naming, e),
+    )
+}
+
 /// `SmFeature::RestoreFeature`: copies the feature B-rep's faces back into the base,
-/// stitches it and deletes the feature B-rep; `SM_ERR` unless restorable.
-fn restore_feature(k: &mut Kernel, base: &mut Brep, feature: &mut Feature) -> Result<()> {
+/// stitches it and deletes the feature B-rep; false (upstream `SM_ERR`, which every caller
+/// turns into another path) unless restorable.
+fn restore_feature(k: &mut Kernel, base: &mut Brep, feature: &mut Feature) -> Result<bool> {
     if feature.can_restore {
         let mut fbrep = feature
             .fbrep
             .take()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| broken_link(FEATURE_BREP_GONE))?;
         let faces = bp1::faces(&fbrep, None)?;
         keep_unported(copy_faces_carrying(k, &mut fbrep, &faces, base, true).map(drop))?;
         ignore_status(stitch_and_orient(k, base))?;
@@ -1407,9 +1890,128 @@ fn restore_feature(k: &mut Kernel, base: &mut Brep, feature: &mut Feature) -> Re
         feature.can_restore = false;
         feature.base_was_applied = true;
         feature.feat_was_applied = true;
-        return Ok(());
+        return Ok(true);
     }
-    Err(sm_err())
+    Ok(false)
+}
+
+fn extension_pair(loops: &[FeatureLoop]) -> Option<(&FeatureLoop, &FeatureLoop)> {
+    let [a, b] = loops else { return None };
+    (a.base_rb_type == RebuildBrepType::ExtendSurface
+        && b.base_rb_type == RebuildBrepType::ExtendSurface)
+        .then_some((a, b))
+}
+
+fn bounds_material(b: &Brep, f: FaceId) -> Result<bool> {
+    use crate::mass::integrator::properties::{partition_face, sheet_face};
+    Ok(!partition_face(b, f)? && !sheet_face(b, f)?)
+}
+
+/// A separate cavity or component can fall wholly on the wrong side of a joint
+/// patch without intersecting it. Remember its material boundary before the
+/// partition opens the base. The support faces themselves will be extended.
+fn retained_material_faces(base: &Brep, feature: &Feature) -> Result<Vec<FaceId>> {
+    if extension_pair(&feature.loops).is_none() || base.regions().len() <= 2 {
+        return Ok(Vec::new());
+    }
+    let mut feature_and_supports = feature.faces.clone();
+    for l in &feature.loops {
+        for &e in &l.base_edges {
+            feature_and_supports.extend(edge::faces(base, e, None)?);
+        }
+    }
+    let mut retained = Vec::new();
+    for face in bp1::faces(base, None)? {
+        if !feature_and_supports.contains(&face) && bounds_material(base, face)? {
+            retained.push(face);
+        }
+    }
+    Ok(retained)
+}
+
+/// Whether distinct loop patches intersect along a curve inside both sheets. The
+/// intersector classifies each homogeneous interval on the two trimmed faces. A
+/// shared boundary or an isolated touch cannot enclose a piece to be trimmed off.
+fn closed_patches_cross(
+    k: &Kernel,
+    loops: &[FeatureLoop],
+    patches: &[Option<Brep>],
+) -> Result<bool> {
+    let Some((left, right)) = extension_pair(loops) else {
+        return Ok(false);
+    };
+    let trial = |l: &FeatureLoop| {
+        // The intersector constructs trims and updates tolerances on its operands.
+        // An independent patch must keep the original trims it will apply.
+        let id = l.base_patch.ok_or_else(|| defect(LOOP_BASE_PATCH_GONE))?;
+        patches
+            .get(id.0)
+            .and_then(Option::as_ref)
+            .ok_or_else(|| defect(PATCH_GONE))?
+            .clone_for_trial()
+    };
+    let mut a = trial(left)?;
+    let mut b = trial(right)?;
+    let zone = tol::brep_zone_tol_3d(k, &a, SmallTopoType::default()).max(tol::brep_zone_tol_3d(
+        k,
+        &b,
+        SmallTopoType::default(),
+    ));
+    // Bounds are only an early rejection: an unavailable or empty box says
+    // nothing about the two sheets. Classify them in that case as well.
+    let bounds = |body: &Brep, face| {
+        crate::query::face::p1::calculate_bounding_box(k, body, face, false)
+            .ok()
+            .filter(|extent| !extent.has_negative_volume())
+    };
+    let other_faces: Vec<_> = bp1::faces(&b, None)?
+        .into_iter()
+        .map(|g| (g, bounds(&b, g)))
+        .collect();
+    for f in bp1::faces(&a, None)? {
+        let extent = bounds(&a, f);
+        for &(g, other) in &other_faces {
+            if extent
+                .zip(other)
+                .is_some_and(|(x, y)| x.are_disjoint(&y, zone))
+            {
+                continue;
+            }
+            let intersection = crate::topology::face::p3::face_intersect_breps(
+                k,
+                FaceBreps::Two(&mut a, &mut b),
+                f,
+                g,
+                tol::approx_tol3d(k, zone),
+                20.0,
+                &FaceIntersectOptions {
+                    want_this_classes: true,
+                    want_other_classes: true,
+                    ..Default::default()
+                },
+            )?;
+            if intersects_both_interiors(&intersection) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Whether one SSI curve contains an interval in the relative interior of both faces.
+fn intersects_both_interiors(intersection: &FaceIntersection) -> bool {
+    let first = intersection.this_classes.iter().flatten();
+    let second = intersection.other_classes.iter().flatten();
+    first.zip(second).any(|(x, y)| {
+        x.intervals().iter().any(|u| {
+            u.mid.point_class() == PointClassType::Face
+                && y.intervals().iter().any(|v| {
+                    v.mid.point_class() == PointClassType::Face
+                        && u.interval.min().max(v.interval.min())
+                            < u.interval.max().min(v.interval.max())
+                })
+        })
+    })
 }
 
 /// `SmFeature::JoinPatches`: piecewise-merges the loops' patches (of the base or of the
@@ -1419,8 +2021,10 @@ fn join_patches(
     base: &mut Brep,
     feature: &mut Feature,
     patches: &mut Vec<Option<Brep>>,
-    base_loops: bool,
+    target: Side,
+    crossing: bool,
 ) -> Result<()> {
+    let base_loops = target == Side::Base;
     let mut loop_edges: Vec<EdgeId> = Vec::new();
     let mut faces: Vec<FaceId> = Vec::new();
     let mut patch = new_brep(k)?;
@@ -1447,7 +2051,10 @@ fn join_patches(
         let (merged, this, stat) = piecewise_merge(k, patch, this, tol)?;
         patch = merged;
         put_patch(patches, tid, this)?;
-        if stat.is_err() {
+        if let Err(e) = stat {
+            if crossing {
+                return Err(e);
+            }
             continue;
         }
         // Save edges
@@ -1464,22 +2071,21 @@ fn join_patches(
         }
     }
 
-    // Get the pointer to the brep we are operating on
-    let target = if base_loops {
-        Side::Base
-    } else {
-        Side::Feature
-    };
     let curves = edge_curves(side_brep(base, feature, target)?, &loop_edges)?;
     {
         let tgt = side_brep_mut(base, feature, target)?;
-        keep_unported(trim_patches(k, &mut patch, &curves, tgt, &faces))?;
+        let trimmed = trim_patches(k, &mut patch, &curves, tgt, &faces);
+        if crossing {
+            trimmed?;
+        } else {
+            keep_unported(trimmed)?;
+        }
     }
 
     // Check that the patch successfully fills the void, save if good result
     let stat = {
         let tgt = side_brep_mut(base, feature, target)?;
-        validate_patch(k, tgt, &mut patch, &curves, None)
+        validate_patch(k, tgt, &mut patch, &curves, None, crossing)
     };
     keep_unported(stat.clone())?;
     // not upstream (#3218): the joined patch's limit, for the base loops that have none
@@ -1493,7 +2099,10 @@ fn join_patches(
     }
     if stat.is_ok() {
         let pid = add_patch(patches, patch);
-        let first = feature.loops.first_mut().ok_or_else(sm_err)?;
+        let first = feature
+            .loops
+            .first_mut()
+            .ok_or_else(|| defect(NO_FIRST_LOOP))?;
         // the replaced patch is deleted (a shared one stays with its other user here)
         if base_loops {
             first.base_patch = Some(pid);
@@ -1518,10 +2127,12 @@ fn edge_curves(b: &Brep, edges: &[EdgeId]) -> Result<Vec<LoopCurve>> {
     let mut out = Vec::new();
     for &e in edges {
         let r = b.edge(e)?;
-        let c = r
-            .curve
-            .clone()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        let c = r.curve.clone().ok_or_else(|| {
+            input_error(
+                BlendFailure::BodyEdgeWithoutCurve { edge: e },
+                SM_ERR_NULL_POINTER,
+            )
+        })?;
         out.push((c, r.interval));
     }
     Ok(out)
@@ -1531,13 +2142,19 @@ fn edge_curves(b: &Brep, edges: &[EdgeId]) -> Result<Vec<LoopCurve>> {
 /// (`DropPoint(.., SM_SO_INTERSECT)` within `tol`).
 fn on_loop_curve(k: &Kernel, b: &Brep, e: EdgeId, curves: &[LoopCurve], tol: f64) -> Result<bool> {
     let r = b.edge(e)?;
-    let curve = r
-        .curve
-        .as_ref()
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let crv_pt = curve.evaluate_point(k, r.interval.mid())?;
+    let curve = r.curve.as_ref().ok_or_else(|| {
+        broken_link(
+            "a lamina edge of the patch has no curve, though the patch's edges are cut \
+                 along surfaces and copied from edges that have curves",
+        )
+    })?;
+    on_loop_point(k, curve.evaluate_point(k, r.interval.mid())?, curves, tol)
+}
+
+/// Whether `point` lies on one of the original rim's trimmed edge curves.
+fn on_loop_point(k: &Kernel, point: Point3, curves: &[LoopCurve], tol: f64) -> Result<bool> {
     for (orig, ivl) in curves {
-        let drop = orig.drop_point(k, ivl, crv_pt, None, tol, None, SolverOperation::Intersect)?;
+        let drop = orig.drop_point(k, ivl, point, None, tol, None, SolverOperation::Intersect)?;
         if drop.success {
             return Ok(true);
         }
@@ -1554,6 +2171,7 @@ fn validate_patch(
     patch: &mut Brep,
     loop_curves: &[LoopCurve],
     extended_by: Option<f64>,
+    crossing: bool,
 ) -> Result<()> {
     let patch_faces = bp1::faces(patch, None)?;
     let tol = tol::brep_zone_tol_3d(k, target, SmallTopoType::default());
@@ -1564,9 +2182,7 @@ fn validate_patch(
         // not upstream (#3218): nothing of the faces along the loop, extended, is left on it
         return Err(limit_error(
             DefeatureFailure::NotEnclosed { extended_by },
-            Some(assert_failure(
-                "No Surfaces available to connect Loop Edges",
-            )),
+            None,
         ));
     }
 
@@ -1588,12 +2204,7 @@ fn validate_patch(
         // not upstream (#3218): a piece on the loop runs on to the end of its extension;
         // what bounds it, or does not, is the limit
         let limit = open_piece_limit(k, patch, loop_curves, tol, extended_by)?;
-        return Err(limit_error(
-            limit,
-            Some(assert_failure(
-                "Patch has unexpected lamina edges. Could be too small or trimmed incorrectly.",
-            )),
-        ));
+        return Err(limit_error(limit, None));
     }
 
     // Get bounding boxes of Faces in sFaces
@@ -1609,12 +2220,17 @@ fn validate_patch(
         for (jj, &f) in faces.iter().enumerate() {
             // Quick check via bounding boxes
             let face_bbox = boxes.get(jj).copied().unwrap_or_else(Extent3d::new);
-            if patch_box.are_disjoint(&face_bbox, 0.0) {
+            let usable = !patch_box.has_negative_volume() && !face_bbox.has_negative_volume();
+            if (!crossing || usable)
+                && patch_box.are_disjoint(&face_bbox, if crossing { tol } else { 0.0 })
+            {
                 continue;
             }
             // intersect the faces (Method shouldn't force ApproxTol3d)
             let options = FaceIntersectOptions {
+                want_points: crossing,
                 want_this_classes: true,
+                want_other_classes: crossing,
                 want_cc_curves: true,
                 ..FaceIntersectOptions::default()
             };
@@ -1628,6 +2244,12 @@ fn validate_patch(
                 20.0,
                 &options,
             )?;
+            if crossing && patch_meets_face(k, &out, loop_curves, tol)? {
+                return Err(limit_error(
+                    DefeatureFailure::PatchIntersectsFace { face: f },
+                    None,
+                ));
+            }
             let cc_curves = out.cc_curves_3d.unwrap_or_default();
             let uv1 = out.cc_this_uv_curves.unwrap_or_default();
             let geometry = IntersectObjects {
@@ -1655,6 +2277,26 @@ fn validate_patch(
         }
     }
     Ok(())
+}
+
+/// Whether the new patch meets a retained face away from its original rim.
+fn patch_meets_face(
+    k: &Kernel,
+    intersection: &FaceIntersection,
+    rim: &[LoopCurve],
+    tol: f64,
+) -> Result<bool> {
+    if intersects_both_interiors(intersection) {
+        return Ok(true);
+    }
+    // FaceIntersect classified these points on both trimmed faces, including
+    // poles and seam vertices. A new point contact would pinch the solid.
+    for &point in intersection.points_3d.as_deref().unwrap_or_default() {
+        if !on_loop_point(k, point, rim, tol)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// `SmFeatureExecutive::RebuildBrep`: dispatches on the rebuild type
@@ -1704,31 +2346,42 @@ fn planar_cap_rebuild(k: &mut Kernel, patch: &mut Brep, loop_curves: &[LoopCurve
     let chained = crate::curve::curve::p4::fix_chain_curves_list(k, curves, tol, false)?;
     let n_chains = chained.chain_starts.len();
     for ii in 0..n_chains {
-        let start = *chained.chain_starts.get(ii).ok_or_else(sm_err)?;
+        let start = *chained
+            .chain_starts
+            .get(ii)
+            .ok_or_else(|| defect(CURVE_CHAIN_PAST_CURVES))?;
         let end = if ii + 1 < n_chains {
-            *chained.chain_starts.get(ii + 1).ok_or_else(sm_err)?
+            *chained
+                .chain_starts
+                .get(ii + 1)
+                .ok_or_else(|| defect(CURVE_CHAIN_PAST_CURVES))?
         } else {
             chained.curves.len()
         };
         // do { .. } while (sIndexStart < sIndexEnd): at least one curve
         let end = end.max(start + 1);
-        let lp = chained.curves.get(start..end).ok_or_else(sm_err)?;
-        // Create planar face
-        planar_face(k, patch, lp, tol).map_err(|e| {
-            if e.is_unported_or_cancelled() {
-                e
-            } else {
-                // SER_MSG(.., "Couldn't make a planar cap. Loop edges non-planar?")
-                let code = e.upstream_status().unwrap_or(SM_ERR);
-                SolidError::Upstream {
-                    code,
-                    operation: OP,
-                    entity: None,
-                }
-            }
-        })?;
+        let lp = chained
+            .curves
+            .get(start..end)
+            .ok_or_else(|| defect(CURVE_CHAIN_PAST_CURVES))?;
+        // Create planar face (SER_MSG(.., "Couldn't make a planar cap. Loop edges
+        // non-planar?"): the caller keeps its error as the cause of the loop's limit)
+        planar_face(k, patch, lp, tol)?;
     }
     Ok(())
+}
+
+/// The requested extension, or twice the loop's box size for the automatic distance.
+fn extension_distance(k: &Kernel, source: &Brep, loop_edges: &[EdgeId], requested: f64) -> f64 {
+    if requested < 0.0 {
+        let mut bounds = Extent3d::new();
+        for &e in loop_edges {
+            bounds = edge_box(k, source, e).union(&bounds);
+        }
+        2.0 * bounds.max_length()
+    } else {
+        requested
+    }
 }
 
 /// `SmFeatureExecutive::ExtSurfaceRebuild`: for each source face along the loop edges
@@ -1745,6 +2398,8 @@ fn ext_surface_rebuild(
 ) -> Result<f64> {
     let tol = source.tolerance();
     let mut faces: Vec<FaceId> = Vec::new();
+    // the first loop edge each face uses, in `loop_edges`' order
+    let mut face_loop_edge: Vec<EdgeId> = Vec::new();
     let mut test_merge_at_end = false;
     let mut temp_patch = new_brep(k)?;
 
@@ -1753,24 +2408,15 @@ fn ext_surface_rebuild(
         for f in edge::faces(source, e, None)? {
             if !faces.contains(&f) {
                 faces.push(f);
+                face_loop_edge.push(e);
             }
         }
     }
 
     // Set the distance to extend surfaces
-    let ext = if ext_dist < 0.0 {
-        // Estimate void size to set surface extensions.
-        let mut void_box = Extent3d::new();
-        for &e in loop_edges {
-            let this_box = edge_box(k, source, e);
-            void_box = this_box.union(&void_box);
-        }
-        2. * void_box.max_length()
-    } else {
-        ext_dist
-    };
+    let ext = extension_distance(k, source, loop_edges, ext_dist);
 
-    for &face in &faces {
+    for (&face, &pe) in faces.iter().zip(&face_loop_edge) {
         // make a brep for the new face
         let mut face_brep = new_brep(k)?;
         crate::topology::brep::p2::set_tolerance(k, &mut face_brep, tol, true, true)?;
@@ -1785,14 +2431,8 @@ fn ext_surface_rebuild(
             .collect();
 
         if common.is_empty() {
-            // Get an edge on this face that is part of crLoopEdges
-            let f_edges = face_edges(source, face, false)?;
-            let common: Vec<EdgeId> = loop_edges
-                .iter()
-                .copied()
-                .filter(|e| f_edges.contains(e))
-                .collect();
-            let pe = *common.first().ok_or_else(|| SolidError::null_pointer(OP))?;
+            // Get an edge on this face that is part of crLoopEdges: `pe`, the first loop
+            // edge the face was collected from
 
             // Get the loops of the face to copy
             let loops = crate::topology::face::p2::loops(source, face, false, None)?;
@@ -1814,7 +2454,12 @@ fn ext_surface_rebuild(
             keep_unported(copy_faces_carrying(k, source, &[face], &mut face_brep, true).map(drop))?;
 
             // Put the face back together for subsequent testing
-            let this_loop = this_loop.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let this_loop = this_loop.ok_or_else(|| {
+                broken_link(
+                    "no loop of the face holds the loop edge it was collected from, though \
+                     that edge is one of the face's edges",
+                )
+            })?;
             crate::topology::loopuse::flip_loop_orientation(source, this_loop)?;
             crate::topology::face::p1::remove_loop(source, face, this_loop)?;
             for &lp in &loops {
@@ -1822,11 +2467,12 @@ fn ext_surface_rebuild(
             }
         } else {
             // Extend the surface (status ignored; upstream dereferences the NULL result)
-            let surface = source
-                .face(face)?
-                .surface
-                .clone()
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            let surface = source.face(face)?.surface.clone().ok_or_else(|| {
+                input_error(
+                    BlendFailure::FaceWithoutSurface { face },
+                    SM_ERR_NULL_POINTER,
+                )
+            })?;
             let new_surf = surface
                 .extended_sides(
                     k,
@@ -2008,12 +2654,12 @@ pub fn fix_edge_chain_list(
     chain_start: &mut Vec<usize>,
 ) -> Result<()> {
     // No work
-    if edges.is_empty() {
+    let Some(&first) = edges.first() else {
         chain_start.clear();
         return Ok(());
-    }
+    };
     // SER_MSG(SM_ERR, "Edge chains cannot intersect (e.g., no figure-8 allowed)")
-    let figure8 = sm_err;
+    let figure8 = |vertex| SolidError::blend(OP, BlendFailure::LoopEdgesBranch { vertex });
     let common = |unused: &[EdgeId], local: &[EdgeId]| -> Vec<EdgeId> {
         local
             .iter()
@@ -2024,7 +2670,7 @@ pub fn fix_edge_chain_list(
 
     let mut chain_start_count = 0usize;
     let mut unused = edges.clone();
-    let mut e = *unused.first().ok_or_else(sm_err)?; // Arbitrary starting edge
+    let mut e = first; // Arbitrary starting edge
     let (start_vertex, mut v) = edge_vertices(b, e)?;
 
     // Reset input
@@ -2035,7 +2681,7 @@ pub fn fix_edge_chain_list(
     // Check the StartVertex for too many chain Edges
     let local = vertex::edges(b, start_vertex, None)?;
     if common(&unused, &local).len() > 2 {
-        return Err(figure8());
+        return Err(figure8(start_vertex));
     }
 
     // Work through edges until none are left
@@ -2053,7 +2699,7 @@ pub fn fix_edge_chain_list(
         // Find Edges to be chained that connect to pVertex
         let connected = common(&unused, &local);
         if connected.len() > 1 {
-            return Err(figure8());
+            return Err(figure8(v));
         }
 
         // Remove Edge from list sUnusedEdges
@@ -2068,7 +2714,12 @@ pub fn fix_edge_chain_list(
         // Update edge and vertex for the next iteration
         if let [next] = connected.as_slice() {
             e = *next;
-            v = edge::other_vertex(b, e, Some(v))?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            v = edge::other_vertex(b, e, Some(v))?.ok_or_else(|| {
+                input_error(
+                    BlendFailure::EdgeWithoutVertices { edge: e },
+                    SM_ERR_NULL_POINTER,
+                )
+            })?;
             continue;
         }
 
@@ -2082,7 +2733,7 @@ pub fn fix_edge_chain_list(
             // Check the StartVertex for too many chain Edges
             let local = vertex::edges(b, sv, None)?;
             if common(&unused, &local).len() > 2 {
-                return Err(figure8());
+                return Err(figure8(sv));
             }
         }
     }
@@ -2106,7 +2757,10 @@ pub fn edge_number_in_brep(b: &Brep, e: EdgeId) -> Result<usize> {
 fn edge_vertices(b: &Brep, e: EdgeId) -> Result<(VertexId, VertexId)> {
     match edge::start_end_vertices(b, e)? {
         (Some(a), Some(z)) => Ok((a, z)),
-        _ => Err(SolidError::null_pointer(OP)),
+        _ => Err(input_error(
+            BlendFailure::EdgeWithoutVertices { edge: e },
+            SM_ERR_NULL_POINTER,
+        )),
     }
 }
 
@@ -2126,11 +2780,11 @@ fn take_patch(patches: &mut [Option<Brep>], id: PatchId) -> Result<Brep> {
     patches
         .get_mut(id.0)
         .and_then(Option::take)
-        .ok_or_else(|| SolidError::null_pointer(OP))
+        .ok_or_else(|| broken_link(PATCH_GONE))
 }
 
 fn put_patch(patches: &mut [Option<Brep>], id: PatchId, patch: Brep) -> Result<()> {
-    let slot = patches.get_mut(id.0).ok_or_else(sm_err)?;
+    let slot = patches.get_mut(id.0).ok_or_else(|| defect(PATCH_GONE))?;
     *slot = Some(patch);
     Ok(())
 }
@@ -2186,10 +2840,18 @@ fn cc_curve<'c>(
     >,
 ) -> Result<&'c Curve> {
     use crate::intersect::point_class::ClassGeometry;
-    let handle = cc.curve().ok_or_else(|| SolidError::null_pointer(OP))?;
-    geometry
-        .curve(handle)
-        .ok_or_else(|| SolidError::null_pointer(OP))
+    let handle = cc.curve().ok_or_else(|| {
+        broken_link(
+            "a curve classification of the face intersection names no curve, though the \
+             intersection classifies each of its curves",
+        )
+    })?;
+    geometry.curve(handle).ok_or_else(|| {
+        broken_link(
+            "the face intersection's geometry does not hold a curve its classification names, \
+             though the classification was made of that geometry's curves",
+        )
+    })
 }
 
 /// `CopyFaces` from one B-rep into another with both B-reps' own attributes
@@ -2271,7 +2933,10 @@ fn piecewise_merge(k: &mut Kernel, a: Brep, b: Brep, tol: f64) -> Result<(Brep, 
     model.delete_merge(merge);
     let stat = match merged {
         Ok(id) if id == PrimitiveModel::MAIN => Ok(()),
-        Ok(_) => Err(sm_err()),
+        Ok(_) => Err(defect(
+            "the piecewise merge kept its result in a B-rep other than the one it merges \
+             into, though a merge without a result B-rep of its own keeps it there",
+        )),
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(e) => Err(e),
     };
@@ -2302,9 +2967,9 @@ fn manifold_xor(k: &mut Kernel, a: Brep, b: Brep) -> Result<Brep> {
     );
     let result = match r {
         Ok(Some(b)) => b,
-        Ok(None) => primary.take().ok_or_else(|| SolidError::null_pointer(OP))?,
+        Ok(None) => primary.take().ok_or_else(|| broken_link(PRIMARY_GONE))?,
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(_) => primary.take().ok_or_else(|| SolidError::null_pointer(OP))?,
+        Err(_) => primary.take().ok_or_else(|| broken_link(PRIMARY_GONE))?,
     };
     let mut result = result;
     result.refresh_cached_topology();
@@ -2315,6 +2980,55 @@ fn manifold_xor(k: &mut Kernel, a: Brep, b: Brep) -> Result<Brep> {
 mod tests {
     use super::*;
     use crate::primitive::api_primitives::{create_box, create_cylinder};
+
+    #[test]
+    fn a_failed_crossing_patch_copy_names_its_face_and_preserves_the_merge_error() {
+        let mut k = Kernel::default();
+        let mut patch = create_box(&mut k, Point3::ZERO, 20.0, 20.0, 20.0).unwrap();
+        let face = bp1::faces(&patch, None).unwrap()[0];
+        patch.face_mut(face).unwrap().surface = None;
+        let mut target = new_brep(&mut k).unwrap();
+        let error = apply_patch_faces(&mut k, &mut patch, &mut target, true).unwrap_err();
+        assert_eq!(
+            limit_of(&error),
+            Some(DefeatureFailure::PatchFaceNotCopied { face })
+        );
+        assert!(matches!(
+            error.cause(),
+            Some(SolidError::InvalidInput {
+                operation: "boolean::merge::p2::make_faceuse",
+                reason: "face without surface",
+            })
+        ));
+        assert!(error.is_defect());
+        assert_eq!(error.sm_status(), Some(SM_ERR));
+    }
+
+    #[test]
+    fn a_split_patch_face_does_not_hide_a_missing_neighbour() {
+        let mut k = Kernel::default();
+        let target = create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0).unwrap();
+        let faces = bp1::faces(&target, None).unwrap();
+        let sources = [faces[4], faces[5]];
+        let split = vec![(sources[0], faces[0]), (sources[0], faces[1])];
+        let error = copied_patch_faces(&target, &sources, split.clone()).unwrap_err();
+        assert_eq!(
+            limit_of(&error),
+            Some(DefeatureFailure::PatchFaceNotCopied { face: sources[1] })
+        );
+        let mut complete = split;
+        complete.push((sources[1], faces[2]));
+        assert_eq!(
+            copied_patch_faces(&target, &sources, complete.clone()).unwrap(),
+            faces[..3]
+        );
+        complete[1].1 = FaceId::from_index(99);
+        let error = copied_patch_faces(&target, &sources, complete).unwrap_err();
+        assert_eq!(
+            limit_of(&error),
+            Some(DefeatureFailure::PatchFaceNotCopied { face: sources[0] })
+        );
+    }
 
     fn shares_vertex(b: &Brep, a: EdgeId, z: EdgeId) -> bool {
         let (a0, a1) = edge_vertices(b, a).unwrap();
@@ -2491,6 +3205,28 @@ mod tests {
         assert!(b.find_attribute(EntityRef::Face(other), 20003).is_some());
     }
 
+    /// #13790: defeaturing no faces builds no feature, a check of the caller's input that
+    /// keeps the `SM_ERR_ASSERT_FAILURE` status of the bare `Upstream` it replaced.
+    #[test]
+    fn no_feature_built_is_an_input_check_with_its_status() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0).unwrap();
+        let e = defeature_and_rebuild(
+            &mut k,
+            &mut b,
+            &[],
+            RebuildBrepType::ExtendSurface,
+            RebuildBrepType::FromOtherBrep,
+        )
+        .unwrap_err();
+        assert_eq!(e.blend_failure(), Some(&BlendFailure::NoFeatureMade));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(e.sm_status(), Some(SM_ERR_ASSERT_FAILURE));
+        assert_eq!(e.upstream_status(), e.sm_status());
+        assert_eq!(e.operation(), OP);
+        assert_eq!(e.entity(), None);
+    }
+
     #[test]
     fn add_feature_without_faces_makes_none() {
         let mut k = Kernel::default();
@@ -2506,5 +3242,52 @@ mod tests {
             .unwrap();
         assert!(made.is_none());
         assert!(ex.features().is_empty());
+    }
+
+    /// #13790: a typed `SM_ERR` at an edge that replaced the open-base refusal's `Upstream`
+    /// is the same refusal.
+    #[test]
+    fn open_base_refusal_reads_the_status_of_a_typed_failure() {
+        use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
+        use crate::topology::EdgeId;
+        let edge = Some(EntityRef::Edge(EdgeId::from_index(5)));
+        let upstream = SolidError::Upstream {
+            operation: OP,
+            code: SM_ERR,
+            entity: edge,
+        };
+        assert!(is_open_base_refusal(&upstream));
+        for typed in replaced_upstream(OP, SM_ERR, edge) {
+            assert!(is_open_base_refusal(&typed), "{typed:?}");
+        }
+        for other in replaced_upstream(OP, SM_ERR, None)
+            .into_iter()
+            .chain(replaced_upstream(OP, 1006, edge))
+            .chain(native_failures(OP, SM_ERR))
+        {
+            assert!(!is_open_base_refusal(&other), "{other:?}");
+        }
+    }
+
+    /// The refusal of a kept feature whose base patch failed without a limit keeps that
+    /// failure as its cause, and is still the open-base refusal.
+    #[test]
+    fn a_kept_feature_refusal_keeps_its_patch_failure() {
+        use crate::topology::{EdgeId, FaceId};
+        let at = Some(EntityRef::Edge(EdgeId::from_index(5)));
+        let patch = SolidError::blend(
+            OP,
+            BlendFailure::FaceWithoutSurface {
+                face: FaceId::from_index(3),
+            },
+        );
+        let refusal = kept_feature_refusal(at, Some(patch.clone()));
+        assert!(is_open_base_refusal(&refusal), "{refusal:?}");
+        assert_eq!(
+            refusal.blend_failure(),
+            Some(&BlendFailure::KeptFeatureLeavesBaseOpen)
+        );
+        assert_eq!(refusal.cause(), Some(&patch));
+        assert_eq!(kept_feature_refusal(at, None).cause(), None);
     }
 }

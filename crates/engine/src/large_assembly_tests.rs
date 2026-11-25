@@ -29,12 +29,19 @@ fn generated_assembly(parts: usize) -> Document {
     let mut made = Vec::new();
     for i in 0..parts {
         let o = Vec3::new(30.0 * (i % 20) as f64, 30.0 * (i / 20) as f64, 0.0);
-        let block = FeatureKind::Box { corner: point_expr(o), length: mm(20.0), width: mm(12.0), height: mm(6.0), operation: Operation::NewBody };
+        let block = FeatureKind::Box {
+            corner: point_expr(o),
+            length: mm(20.0),
+            width: mm(12.0),
+            height: mm(6.0),
+            operation: Operation::NewBody,
+            centred: false,
+        };
         made.push((i, doc.add_feature(block, Some(&format!("Plate {i}"))).unwrap()));
         for (k, x) in [2.0, 9.0, 16.0].into_iter().enumerate() {
             let pin = FeatureKind::Cylinder {
                 base: point_expr(o + Vec3::new(x, 20.0, 0.0)),
-                axis: solidcraft_doc::Dir(Vec3::Z),
+                axis: solidcraft_doc::dir_expr(Vec3::Z),
                 radius: mm(1.5),
                 height: mm(4.0 + k as f64),
                 operation: Operation::NewBody,
@@ -91,7 +98,7 @@ fn generated_assembly_opens_with_every_body_in_place() {
         }
     }
     // A saved copy opens to the same model.
-    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design(&doc)).unwrap();
+    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design(&doc).unwrap()).unwrap();
     assert_eq!(measured(&mut Session::new(reopened)), after);
 }
 
@@ -100,7 +107,7 @@ fn generated_assembly_opens_with_every_body_in_place() {
 #[ignore = "benchmark: run with --release --ignored --nocapture"]
 fn bench_generated_assembly() {
     let parts = std::env::var("SOLIDCRAFT_BENCH_PARTS").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
-    let bytes = solidcraft_io::write_design(&generated_assembly(parts));
+    let bytes = solidcraft_io::write_design(&generated_assembly(parts)).unwrap();
     let ms = |t: std::time::Instant| t.elapsed().as_secs_f64() * 1000.0;
     let t = std::time::Instant::now();
     let doc = solidcraft_io::read_design(&bytes).unwrap();

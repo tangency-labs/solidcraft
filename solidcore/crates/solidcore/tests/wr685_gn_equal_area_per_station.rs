@@ -35,6 +35,7 @@ use solidcore::nurbs::b_spline_curve::ControlPointForm;
 use solidcore::nurbs::b_spline_surface::SurfParamType;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::edge_closest_point;
+use solidcore::surface::procedural_blend::BlendNet;
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::EdgeId;
 use solidcore::{Brep, Kernel};
@@ -82,7 +83,10 @@ fn blend_nets(b: &Brep, vdeg: usize) -> Vec<Net> {
         let Some(s) = b.face(f).unwrap().surface.clone() else {
             continue;
         };
-        let SurfaceKind::BSpline(bs) = s.kind() else {
+        // a blend face is its definition; the fork's driver prints its net
+        let ((Some(BlendNet::Approx(bs)), _) | (None, SurfaceKind::BSpline(bs))) =
+            (s.procedural_blend().map(|d| d.net()), s.kind())
+        else {
             continue;
         };
         if bs.degree(SurfParamType::V) != vdeg {
@@ -525,6 +529,10 @@ fn pipe_root_rounds_are_the_fork_s() {
 /// evaluations: box edge 7 roots and 2 sums, boss root 13 and 680 (before smlib#109, 4720
 /// and 14215 roots, 10389 sums on the boss root). Before this port the same blends solved
 /// to the same bits (face nets and volume compared against #2274's head, 7ad58eb).
+///
+/// Every round is its definition: the box edge solves 2 roots, one for the net's stations
+/// (u from the radii's cosine) and one for the definition's (u from its station's wedge
+/// jet), the same pi/4 rounded two ways; each is solved once (roots solved = roots kept).
 #[test]
 fn equal_area_roots_and_sums_are_solved_once_each() {
     fn box_edge(k: &mut Kernel) -> solidcore::Result<Brep> {
@@ -550,7 +558,7 @@ fn equal_area_roots_and_sums_are_solved_once_each() {
             build: box_edge,
             pick: [20.0, 30.0, 20.0],
             r: 3.0,
-            most_roots: 1,
+            most_roots: 2,
             most_sums: 1,
         },
         Case {
@@ -576,6 +584,13 @@ fn equal_area_roots_and_sums_are_solved_once_each() {
         let e = pick(&k, &b, p);
         fillet_edges(&mut k, &mut b, &[e], r, 2, 2, GN_DEFAULT_THUMBWEIGHT).unwrap();
         let c = k.blend_counts.get();
+        // each key (order and u) is solved once: the operation's one memo, never cleared
+        // below its cap, holds every root solved
+        assert_eq!(
+            c.area_roots,
+            u64::try_from(k.blend_w_memo.borrow().len()).unwrap(),
+            "{name}: roots solved against roots kept"
+        );
         assert!(
             (1..=most_roots).contains(&c.area_roots),
             "{name}: {} roots",

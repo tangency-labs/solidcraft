@@ -17,13 +17,13 @@
 //! notification is sent for it (the fork's vertex is not on the B-rep's lists when it is
 //! given its point), and none for the joined vertex's deletion, which the fork deletes
 //! directly. Behaviour belongs to callers: on its own neither function is reached by an
-//! upstream path; the fillet executive calls them only with
-//! `fixes.fillet_corner_per_vertex_fan` (WR-665). No recursion; each fan walk is bounded
+//! upstream path; the fillet executive calls them (WR-665). No recursion; each fan walk is bounded
 //! by the vertex's use count, as the fork's.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::error::{Result, SolidError, SM_ERR_INVALID_INPUT};
+use crate::error::topology::TopologyFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::{vertex, vertexuse, Brep, EdgeId, Vertex, VertexId, VertexuseId};
 
@@ -33,14 +33,27 @@ const OP_JOIN: &str = "topology::brep::vertex_fans::join_vertex_fans";
 /// `pVertex->Remove(pVU)`.
 fn remove_vertexuse(b: &mut Brep, v: VertexId, vu: VertexuseId, op: &'static str) -> Result<()> {
     if b.vertexuse(vu)?.vertex != Some(v) {
-        return Err(SolidError::sm_err(op));
+        return Err(SolidError::topology(
+            op,
+            TopologyFailure::Defect {
+                why: "the vertex use to move is not on the vertex, though it is read from the \
+                      vertex's uses",
+            },
+        ));
     }
     let index = b
         .vertex(v)?
         .vertexuses
         .iter()
         .position(|&id| id == vu)
-        .ok_or_else(|| SolidError::sm_err(op))?;
+        .ok_or_else(|| {
+            SolidError::topology(
+                op,
+                TopologyFailure::Defect {
+                    why: "the vertex use is not in its vertex's uses, though it names that vertex",
+                },
+            )
+        })?;
     b.vertex_mut(v)?.vertexuses.remove(index);
     b.vertexuse_mut(vu)?.vertex = None;
     Ok(())
@@ -55,7 +68,13 @@ fn post_insert_vertexuse(
 ) -> Result<()> {
     b.vertex(v)?;
     if b.vertexuse(vu)?.vertex.is_some() {
-        return Err(SolidError::sm_err(op));
+        return Err(SolidError::topology(
+            op,
+            TopologyFailure::Defect {
+                why: "the vertex use to insert is already on a vertex, though it was just taken \
+                      off its own",
+            },
+        ));
     }
     b.vertex_mut(v)?.vertexuses.push(vu);
     b.vertexuse_mut(vu)?.vertex = Some(v);
@@ -72,11 +91,21 @@ fn post_insert_vertexuse(
 ///
 /// # Errors
 ///
-/// `SM_ERR` ([`SolidError::Upstream`]) when a fan walk takes more steps than the vertex
+/// `SM_ERR` (a [`TopologyFailure`](crate::error::topology::TopologyFailure)) when a fan walk takes more steps than the vertex
 /// has uses; [`SolidError::null_pointer`] for an edge use without loop neighbour,
 /// radial or edge; [`SolidError::NotFound`] for a dangling id.
 pub fn split_vertex_by_fans(b: &mut Brep, v: VertexId) -> Result<Vec<VertexId>> {
-    let null = || SolidError::null_pointer(OP_SPLIT);
+    let null = || {
+        Failure::new(
+            OP_SPLIT,
+            TopologyFailure::Defect {
+                why: "a loop edge use has no loop neighbour, radial or edge, though the kernel \
+                      links every loop edge use to them",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    };
     let uses = vertex::vertexuses(b, v)?;
     let mut starts = Vec::new();
     for &vu in &uses {
@@ -107,7 +136,13 @@ pub fn split_vertex_by_fans(b: &mut Brep, v: VertexId) -> Result<Vec<VertexId>> 
             // every step takes two vertex uses' edges: a fan is no longer than the
             // vertex's uses
             if steps > uses.len() {
-                return Err(SolidError::sm_err(OP_SPLIT));
+                return Err(SolidError::topology(
+                    OP_SPLIT,
+                    TopologyFailure::Defect {
+                        why: "a fan walk takes more steps than the vertex has uses, though each \
+                              step passes two of its uses",
+                    },
+                ));
             }
             // the edge use before, ending at the vertex
             let incoming = eu1::cw_edgeuse(b, eu)?.ok_or_else(null)?;
@@ -163,15 +198,11 @@ pub fn split_vertex_by_fans(b: &mut Brep, v: VertexId) -> Result<Vec<VertexId>> 
 ///
 /// # Errors
 ///
-/// `SM_ERR_INVALID_INPUT` ([`SolidError::Upstream`]) for the same vertex twice, a vertex
+/// `SM_ERR_INVALID_INPUT` (a [`TopologyFailure`](crate::error::topology::TopologyFailure)) for the same vertex twice, a vertex
 /// not in `b`, vertices apart or sharing an edge; [`SolidError::NotFound`] for a
 /// dangling id.
 pub fn join_vertex_fans(b: &mut Brep, survivor: VertexId, other: VertexId) -> Result<()> {
-    let invalid = || SolidError::Upstream {
-        operation: OP_JOIN,
-        code: SM_ERR_INVALID_INPUT,
-        entity: None,
-    };
+    let invalid = || SolidError::topology(OP_JOIN, TopologyFailure::VerticesNotJoinable);
     if survivor == other || b.vertex(survivor).is_err() || b.vertex(other).is_err() {
         return Err(invalid());
     }

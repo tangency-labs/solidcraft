@@ -1,7 +1,7 @@
 //! #2091 (WR-670): each iso-u integral of `SmODEAreaIFEO` runs knot span by knot span
 //! (WR-494), but every piece's last point was evaluated in the knot span above it (upstream's
 //! `bVFromLeft = TRUE`). Where the surface's derivatives jump at a v knot (a G2 but
-//! not C2 section, merged into one face under `geometric_g2_continuity`), the integrand
+//! not C2 section, merged into one face by the geometric G2 test), the integrand
 //! jumped at each piece's end and the Runge-Kutta steps shrank toward every knot; at the
 //! C0 double knot of #1435's multi-span patch they underflowed at accuracies 1e-9 and
 //! tighter. Each piece's end is now evaluated from the piece's own span (the one-sided
@@ -10,10 +10,14 @@
 use solidcore::blend::fillet_executive::api::create_face_from_surface;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::extent2d::Extent2d;
+use solidcore::geom::extent3d::Extent3d;
 use solidcore::geom::tol;
-use solidcore::mass::integrator::properties::{brep_volume, face_properties, PropertyAttributes};
+use solidcore::mass::integrator::properties::{
+    boundary_properties, brep_volume, face_properties, PropertyAttributes,
+};
 use solidcore::mass::integrator::{OdeIntegrator, OdeOptions, StepCounts};
-use solidcore::math::Vec3;
+use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -60,13 +64,11 @@ fn section(z: f64) -> Vec<Curve> {
 }
 
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.geometric_g2_continuity = true;
-    k
+    Kernel::default()
 }
 
 /// The capped prism lofted between the two sections: one side face across all six
-/// spans under `geometric_g2_continuity`.
+/// spans.
 fn prism(k: &mut Kernel) -> Brep {
     let curves: Vec<Curve> = section(0.0).into_iter().chain(section(HEIGHT)).collect();
     let refs: Vec<_> = curves.iter().map(Some).collect();
@@ -362,4 +364,628 @@ fn multispan_face_holds_tight_accuracies() {
             );
         }
     }
+}
+
+/// A strip `[0, 1] x [0, n]`, quadratic across (one span in u) and cubic along (`n` unit
+/// knot spans in v), rational and wavy, as a screw wall is long in v.
+fn long_strip(n: usize) -> Surface {
+    let cp: Vec<Vec<_>> = (0..3)
+        .map(|i: i32| {
+            (0..n + 3)
+                .map(|j| {
+                    let (x, y) = (0.5 * f64::from(i), j as f64);
+                    let z = 0.3 * (0.7 * y).sin() + 0.1 * x * x + 0.05 * x * y.cos();
+                    let w = if i == 1 { 0.9 } else { 1.0 };
+                    CPoint::new(x * w, y * w, z * w, w)
+                })
+                .collect()
+        })
+        .collect();
+    let mut v = vec![0.0; 4];
+    v.extend((1..n).map(|j| j as f64));
+    v.extend([n as f64; 4]);
+    Surface::from(
+        BSplineSurface::from_data(2, n + 2, 2, 3, 5, n + 6, &cp, &[0., 0., 0., 1., 1., 1.], &v)
+            .unwrap(),
+    )
+}
+
+/// The strip's slanted parallelogram: u in `[l(v), l(v) + 0.5]`, `l(v) = 0.2 + 0.05 v / n`,
+/// v in `[0.3, n - 0.3]`.
+fn strip_left(v: f64, n: usize) -> f64 {
+    0.2 + 0.05 * v / n as f64
+}
+
+/// The parallelogram's four sides, counterclockwise in uv. The long sides are polylines
+/// with a corner (collinear) at every half-integer v, so they have a knot in every span of
+/// the strip, as a screw wall's long trims do.
+fn strip_trims(n: usize) -> Vec<Curve> {
+    let (v0, v1) = (0.3, n as f64 - 0.3);
+    let side = |du: f64, up: bool| {
+        let mut vs = vec![v0];
+        vs.extend((0..n).map(|j| j as f64 + 0.5));
+        vs.push(v1);
+        if !up {
+            vs.reverse();
+        }
+        let m = vs.len();
+        let cp: Vec<CPoint> = vs
+            .iter()
+            .map(|&v| CPoint::new(strip_left(v, n) + du, v, 0.0, 1.0))
+            .collect();
+        // chord-length knots of the polyline: its parameter is v (or -v) itself
+        let mut knots = vec![vs[0].abs()];
+        knots.extend(vs.iter().map(|v| if up { *v } else { -*v }));
+        knots.push(*knots.last().unwrap());
+        knots[0] = knots[1];
+        Curve::from(BSplineCurve::from_data(3, m - 1, m + 1, 1, &cp, &knots).unwrap())
+    };
+    let line = |a: (f64, f64), b: (f64, f64)| {
+        Curve::from(
+            solidcore::primitive::api_curves::create_line_segment(
+                Point3::new(a.0, a.1, 0.0),
+                Point3::new(b.0, b.1, 0.0),
+            )
+            .unwrap(),
+        )
+    };
+    vec![
+        line((strip_left(v0, n), v0), (strip_left(v0, n) + 0.5, v0)),
+        side(0.5, true),
+        line((strip_left(v1, n) + 0.5, v1), (strip_left(v1, n), v1)),
+        side(0.0, false),
+    ]
+}
+
+/// Every precise-property component over the parallelogram by Gauss-Legendre with `g`
+/// points a unit of v (each knot span on its own, the ends' partial spans included) and
+/// `g` across u (one span): the integrand is analytic in each piece.
+fn strip_reference(
+    k: &Kernel,
+    surface: &Surface,
+    n: usize,
+    origin: Vec3,
+    layout: &PrecisePropertyLayout,
+    g: usize,
+) -> Vec<f64> {
+    let gl = gauss_legendre(g);
+    let mut total = vec![0.0; layout.num_components + 1];
+    let mut dydx = vec![0.0; layout.num_components + 1];
+    for j in 0..n {
+        let (v0, v1) = ((j as f64).max(0.3), ((j + 1) as f64).min(n as f64 - 0.3));
+        let hv = (v1 - v0) / 2.0;
+        for &(xv, wv) in &gl {
+            let v = v0 + hv * (xv + 1.0);
+            let (u0, hu) = (strip_left(v, n), 0.25);
+            for &(xu, wu) in &gl {
+                let eval =
+                    OdeIsoCurveLength::new(k, surface, u0 + hu * (xu + 1.0), origin, 0.0, layout);
+                eval.evaluate(v, &mut dydx).unwrap();
+                for (t, d) in total.iter_mut().zip(dydx.iter()) {
+                    *t += wu * hu * wv * hv * d;
+                }
+            }
+        }
+    }
+    total
+}
+
+/// #14460: a face long in v (a thread flank over every turn) was integrated with every
+/// trim sample's iso-u line running from the trims' lowest v up to the sample, span by
+/// span, so its cost grew with the square of the spans it crosses. Banded at its v knots,
+/// the iso-curve integrand's evaluations per span stay flat as the strip grows (they
+/// grew 1.9x from 8 to 64 spans before), and every property still holds its accuracy
+/// against an independent quadrature.
+#[test]
+fn a_long_face_costs_linearly_in_its_knot_spans() {
+    let k = Kernel::default();
+    let origin = Vec3::new(0.3, -0.2, -1.0);
+    let layout = PrecisePropertyLayout::new(PPF_ALL);
+    let accuracy = 1e-9;
+    let mut per_span = Vec::new();
+    for n in [16_usize, 64] {
+        let surface = long_strip(n);
+        let reference = strip_reference(&k, &surface, n, origin, &layout, 16);
+        let check = strip_reference(&k, &surface, n, origin, &layout, 24);
+        for (r, c) in reference.iter().zip(check.iter()) {
+            assert!((r - c).abs() <= 1e-13 * r.abs().max(1.0), "{r} vs {c}");
+        }
+        let trims = strip_trims(n);
+        let face_box = Extent3d::from_points(
+            Point3::new(-1.0, -1.0, -1.0),
+            Point3::new(2.0, n as f64 + 1.0, 1.0),
+        );
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, n as f64);
+        k.work_counters.reset();
+        let p = boundary_properties(
+            &k,
+            &surface,
+            &trims,
+            &domain,
+            &face_box,
+            OrientType::Opposite,
+            accuracy,
+            origin,
+            0.5 * n as f64 / 10.0,
+            0.0,
+            PPF_ALL,
+        )
+        .unwrap();
+        let evaluations = k.work_counters.mass_iso_evaluations();
+        per_span.push(evaluations as f64 / n as f64);
+        let r = |i: usize| reference[i];
+        let mut groups = vec![(vec![p.area], vec![r(layout.area)])];
+        groups.push((vec![p.volume], vec![r(layout.volume)]));
+        let moments = |m: &[Vec3], idx: &[usize]| {
+            let got: Vec<f64> = m.iter().flat_map(|v| [v.x, v.y, v.z]).collect();
+            let want: Vec<f64> = idx
+                .iter()
+                .flat_map(|&i| [r(i), r(i + 1), r(i + 2)])
+                .collect();
+            (got, want)
+        };
+        groups.push(moments(&p.moments[0..1], &layout.moments[0..1]));
+        groups.push(moments(&p.moments[1..4], &layout.moments[1..4]));
+        groups.push(moments(&p.moments[4..5], &layout.moments[4..5]));
+        groups.push(moments(&p.moments[5..8], &layout.moments[5..8]));
+        for (gi, (got, want)) in groups.iter().enumerate() {
+            let size = want.iter().fold(0.0_f64, |m, w| m.max(w.abs()));
+            let err = got
+                .iter()
+                .zip(want.iter())
+                .fold(0.0_f64, |m, (g, w)| m.max((g - w).abs()))
+                / size;
+            eprintln!("{n} spans, group {gi}: {err:e}");
+            assert!(err <= accuracy, "{n} spans, group {gi}: {err:e} off");
+        }
+        eprintln!("{n} spans: {evaluations} iso evaluations");
+    }
+    assert!(
+        per_span[1] <= 1.3 * per_span[0],
+        "iso evaluations per span {per_span:?} grow with the spans"
+    );
+}
+
+/// Each property group's error against `reference` (indexed by `layout`), over the
+/// largest reference value of the group: area, volume, then the moment groups.
+fn group_errors(
+    p: &solidcore::mass::integrator::properties::PreciseProperties,
+    reference: &[f64],
+    layout: &PrecisePropertyLayout,
+) -> Vec<f64> {
+    let r = |i: usize| reference[i];
+    let mut groups = vec![(vec![p.area], vec![r(layout.area)])];
+    groups.push((vec![p.volume], vec![r(layout.volume)]));
+    let moments = |m: &[Vec3], idx: &[usize]| {
+        let got: Vec<f64> = m.iter().flat_map(|v| [v.x, v.y, v.z]).collect();
+        let want: Vec<f64> = idx
+            .iter()
+            .flat_map(|&i| [r(i), r(i + 1), r(i + 2)])
+            .collect();
+        (got, want)
+    };
+    for range in [0..1, 1..4, 4..5, 5..8] {
+        groups.push(moments(&p.moments[range.clone()], &layout.moments[range]));
+    }
+    groups
+        .iter()
+        .map(|(got, want)| {
+            let size = want.iter().fold(0.0_f64, |m, w| m.max(w.abs()));
+            got.iter()
+                .zip(want.iter())
+                .fold(0.0_f64, |m, (g, w)| m.max((g - w).abs()))
+                / size
+        })
+        .collect()
+}
+
+/// #14460: a face whose trims cross fewer knot lines than banding needs keeps one iso-u
+/// base, so each trim sample's iso-u line runs the face's height in v, span by span (a
+/// thread's run-out cylinder, whose iso-u lines are quarter turns). Its trim pieces were
+/// integrated by nested Runge-Kutta, at least 144 iso-curve evaluations a piece and many
+/// steps a line: this 8-span strip cost 964,934 evaluations at accuracy 1e-9, with errors
+/// up to 3.5e-12 against an independent Gauss-Legendre quadrature. With nested 7-point
+/// Gauss-Kronrod, as the bands are, it costs 534,807, and every error is below 3e-15.
+#[test]
+fn an_unbanded_long_face_integrates_its_trim_pieces_by_gauss_kronrod() {
+    let k = Kernel::default();
+    let origin = Vec3::new(0.3, -0.2, -1.0);
+    let layout = PrecisePropertyLayout::new(PPF_ALL);
+    let n = 8_usize;
+    let surface = long_strip(n);
+    let reference = strip_reference(&k, &surface, n, origin, &layout, 16);
+    let check = strip_reference(&k, &surface, n, origin, &layout, 24);
+    for (r, c) in reference.iter().zip(check.iter()) {
+        assert!((r - c).abs() <= 1e-13 * r.abs().max(1.0), "{r} vs {c}");
+    }
+    let face_box = Extent3d::from_points(
+        Point3::new(-1.0, -1.0, -1.0),
+        Point3::new(2.0, n as f64 + 1.0, 1.0),
+    );
+    let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, n as f64);
+    for accuracy in [1e-9, 1e-11] {
+        k.work_counters.reset();
+        let p = boundary_properties(
+            &k,
+            &surface,
+            &strip_trims(n),
+            &domain,
+            &face_box,
+            OrientType::Opposite,
+            accuracy,
+            origin,
+            0.5 * n as f64 / 10.0,
+            0.0,
+            PPF_ALL,
+        )
+        .unwrap();
+        let evaluations = k.work_counters.mass_iso_evaluations();
+        let errors = group_errors(&p, &reference, &layout);
+        eprintln!("accuracy {accuracy:e}: {evaluations} iso evaluations, errors {errors:?}");
+        for (gi, err) in errors.iter().enumerate() {
+            assert!(
+                *err <= 1e-13,
+                "accuracy {accuracy:e}, group {gi}: {err:e} off"
+            );
+        }
+        if accuracy == 1e-9 {
+            assert!(evaluations <= 700_000, "{evaluations} iso evaluations");
+        }
+    }
+}
+
+/// A trim along the trims' lowest v, the base of every iso-u integral, adds nothing: each
+/// of its points' iso-u integrals runs from the base to itself. It evaluates nothing
+/// either; before, each of its trim samples took the inner quadrature's seven samples of
+/// that zero-width line, at least 49 iso evaluations a piece.
+#[test]
+fn a_trim_along_the_base_evaluates_no_iso_line() {
+    let k = Kernel::default();
+    let n = 1_usize;
+    let surface = long_strip(n);
+    let base_trim = strip_trims(n).into_iter().next().unwrap();
+    let face_box = Extent3d::from_points(Point3::new(-1.0, -1.0, -1.0), Point3::new(2.0, 2.0, 1.0));
+    let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, n as f64);
+    k.work_counters.reset();
+    let p = boundary_properties(
+        &k,
+        &surface,
+        &[base_trim],
+        &domain,
+        &face_box,
+        OrientType::Opposite,
+        1e-9,
+        Vec3::new(0.3, -0.2, -1.0),
+        0.05,
+        0.0,
+        PPF_ALL,
+    )
+    .unwrap();
+    assert_eq!(k.work_counters.mass_iso_evaluations(), 0);
+    assert_eq!(p.area, 0.0, "{p:?}");
+    assert_eq!(p.volume, 0.0, "{p:?}");
+}
+
+/// A non-finite accuracy is refused, typed, before any integration: a NaN one passed
+/// every quadrature piece's error test (`estimate > NaN` is false), so a trimmed face's
+/// properties came back unchecked, and an infinite one holds no piece to any accuracy.
+#[test]
+fn a_non_finite_accuracy_is_refused() {
+    let k = Kernel::default();
+    let n = 2_usize;
+    let surface = long_strip(n);
+    let trims = strip_trims(n);
+    let face_box = Extent3d::from_points(
+        Point3::new(-1.0, -1.0, -1.0),
+        Point3::new(2.0, n as f64 + 1.0, 1.0),
+    );
+    let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, n as f64);
+    for accuracy in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let r = boundary_properties(
+            &k,
+            &surface,
+            &trims,
+            &domain,
+            &face_box,
+            OrientType::Opposite,
+            accuracy,
+            Vec3::new(0.3, -0.2, -1.0),
+            0.5 * n as f64 / 10.0,
+            0.0,
+            PPF_ALL,
+        );
+        assert!(
+            matches!(r, Err(solidcore::SolidError::InvalidInput { .. })),
+            "accuracy {accuracy}: {r:?}"
+        );
+    }
+    let mut k = Kernel::default();
+    let mut b = solidcore::topology::brep::p3::new_brep(&mut k, tol::USE_DEFAULT, tol::USE_DEFAULT)
+        .unwrap();
+    let f = create_face_from_surface(&mut k, &mut b, &multispan_surface()).unwrap();
+    for accuracy in [f64::NAN, f64::INFINITY] {
+        let r = face_properties(
+            &k,
+            &mut b,
+            f,
+            OrientType::Opposite,
+            accuracy,
+            Point3::new(0.0, 0.0, 0.0),
+            1.0,
+            0.0,
+            PPF_ALL,
+        );
+        assert!(
+            matches!(r, Err(solidcore::SolidError::InvalidInput { .. })),
+            "face_properties, accuracy {accuracy}: {r:?}"
+        );
+    }
+}
+
+/// A bicubic patch `[0, n]²` with `n` unit knot spans each way, wavy, as a G2 corner patch
+/// is a dense spline grid in both directions.
+fn dense_grid(n: usize) -> Surface {
+    let cp: Vec<Vec<_>> = (0..n + 3)
+        .map(|i| {
+            (0..n + 3)
+                .map(|j| {
+                    let (x, y) = (i as f64, j as f64);
+                    let z = 3.0 * (x / 8.0).sin() * (y / 10.0).cos() + 0.02 * x * y;
+                    CPoint::new(x, y, z, 1.0)
+                })
+                .collect()
+        })
+        .collect();
+    let mut kv = vec![0.0; 4];
+    kv.extend((1..n).map(|j| j as f64));
+    kv.extend([n as f64; 4]);
+    Surface::from(
+        BSplineSurface::from_data(n + 2, n + 2, 3, 3, n + 6, n + 6, &cp, &kv, &kv).unwrap(),
+    )
+}
+
+/// The square `[m, n - m]²`, counterclockwise in uv.
+fn grid_trims(n: usize, m: f64) -> Vec<Curve> {
+    let (lo, hi) = (m, n as f64 - m);
+    let line = |a: (f64, f64), b: (f64, f64)| {
+        Curve::from(
+            solidcore::primitive::api_curves::create_line_segment(
+                Point3::new(a.0, a.1, 0.0),
+                Point3::new(b.0, b.1, 0.0),
+            )
+            .unwrap(),
+        )
+    };
+    vec![
+        line((lo, lo), (hi, lo)),
+        line((hi, lo), (hi, hi)),
+        line((hi, hi), (lo, hi)),
+        line((lo, hi), (lo, lo)),
+    ]
+}
+
+/// Every component over the square by tensor Gauss-Legendre with `g` points a knot span
+/// (or partial span) each way.
+fn grid_reference(
+    k: &Kernel,
+    surface: &Surface,
+    n: usize,
+    m: f64,
+    origin: Vec3,
+    layout: &PrecisePropertyLayout,
+    g: usize,
+) -> Vec<f64> {
+    let gl = gauss_legendre(g);
+    let mut total = vec![0.0; layout.num_components + 1];
+    let mut dydx = vec![0.0; layout.num_components + 1];
+    let span = |j: usize| ((j as f64).max(m), ((j + 1) as f64).min(n as f64 - m));
+    for i in 0..n {
+        let (u0, u1) = span(i);
+        let hu = (u1 - u0) / 2.0;
+        for &(xu, wu) in &gl {
+            let eval =
+                OdeIsoCurveLength::new(k, surface, u0 + hu * (xu + 1.0), origin, 0.0, layout);
+            for j in 0..n {
+                let (v0, v1) = span(j);
+                let hv = (v1 - v0) / 2.0;
+                for &(xv, wv) in &gl {
+                    eval.evaluate(v0 + hv * (xv + 1.0), &mut dydx).unwrap();
+                    for (t, d) in total.iter_mut().zip(dydx.iter()) {
+                        *t += wu * hu * wv * hv * d;
+                    }
+                }
+            }
+        }
+    }
+    total
+}
+
+/// #14460: a G2 corner patch is a dense spline grid in both directions, so its banded
+/// integral has a cell per band and u knot span, each integrated along u and, at each u
+/// sample, along v. With nested Runge-Kutta steps (two of six samples each at the least)
+/// this grid cost 826 iso-curve evaluations a cell at the app's accuracy 1e-8; with
+/// nested 7-point Gauss-Kronrod (49 a cell when no piece is halved) it costs 321, and 258
+/// with its trim pieces integrated the same way. Every
+/// property still holds its accuracy against an independent tensor Gauss-Legendre
+/// quadrature, more tightly than before.
+#[test]
+fn a_dense_grid_face_costs_few_evaluations_per_cell() {
+    let k = Kernel::default();
+    let origin = Vec3::new(0.3, -0.2, -1.0);
+    let layout = PrecisePropertyLayout::new(PPF_ALL);
+    let n = 24_usize;
+    let m = 0.3;
+    let surface = dense_grid(n);
+    let reference = grid_reference(&k, &surface, n, m, origin, &layout, 8);
+    let check = grid_reference(&k, &surface, n, m, origin, &layout, 12);
+    for (r, c) in reference.iter().zip(check.iter()) {
+        assert!((r - c).abs() <= 1e-13 * r.abs().max(1.0), "{r} vs {c}");
+    }
+    let trims = grid_trims(n, m);
+    let face_box = Extent3d::from_points(
+        Point3::new(-1.0, -1.0, -4.0),
+        Point3::new(n as f64 + 1.0, n as f64 + 1.0, 4.0 + 0.02 * (n * n) as f64),
+    );
+    let domain = Extent2d::from_bounds(0.0, 0.0, n as f64, n as f64);
+    // (`brep_properties`' estimate: the box's largest side squared over 100)
+    let size = face_box.size();
+    let d = size.z.max(size.x.max(size.y));
+    let mut per_cell = Vec::new();
+    for accuracy in [1e-8, 1e-11] {
+        k.work_counters.reset();
+        let p = boundary_properties(
+            &k,
+            &surface,
+            &trims,
+            &domain,
+            &face_box,
+            OrientType::Opposite,
+            accuracy,
+            origin,
+            d * d / 100.0,
+            0.0,
+            PPF_ALL,
+        )
+        .unwrap();
+        let evaluations = k.work_counters.mass_iso_evaluations();
+        per_cell.push(evaluations as f64 / (n * n) as f64);
+        let r = |i: usize| reference[i];
+        let mut groups = vec![(vec![p.area], vec![r(layout.area)])];
+        groups.push((vec![p.volume], vec![r(layout.volume)]));
+        let moments = |m: &[Vec3], idx: &[usize]| {
+            let got: Vec<f64> = m.iter().flat_map(|v| [v.x, v.y, v.z]).collect();
+            let want: Vec<f64> = idx
+                .iter()
+                .flat_map(|&i| [r(i), r(i + 1), r(i + 2)])
+                .collect();
+            (got, want)
+        };
+        groups.push(moments(&p.moments[0..1], &layout.moments[0..1]));
+        groups.push(moments(&p.moments[1..4], &layout.moments[1..4]));
+        groups.push(moments(&p.moments[4..5], &layout.moments[4..5]));
+        groups.push(moments(&p.moments[5..8], &layout.moments[5..8]));
+        for (gi, (got, want)) in groups.iter().enumerate() {
+            let size = want.iter().fold(0.0_f64, |m, w| m.max(w.abs()));
+            let err = got
+                .iter()
+                .zip(want.iter())
+                .fold(0.0_f64, |m, (g, w)| m.max((g - w).abs()))
+                / size;
+            eprintln!("accuracy {accuracy:e}, group {gi}: {err:e}");
+            assert!(
+                err <= accuracy,
+                "accuracy {accuracy:e}, group {gi}: {err:e} off"
+            );
+        }
+        eprintln!(
+            "accuracy {accuracy:e}: {evaluations} iso evaluations, {:.1} a cell",
+            per_cell.last().unwrap()
+        );
+    }
+    assert!(per_cell[0] <= 450.0, "iso evaluations a cell {per_cell:?}");
+}
+
+/// A latitude-longitude rectangle on a sphere about the origin, between longitudes `lon` and
+/// latitudes `lat` (degrees), as the sphere and its four trims (iso lines of its NURBS
+/// parameters, run counter-clockwise in them), with its domain.
+fn sphere_rectangle(
+    k: &Kernel,
+    r: f64,
+    lon: (f64, f64),
+    lat: (f64, f64),
+) -> (Surface, Vec<Curve>, Extent2d) {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::geom::vector2d::Point2;
+    use solidcore::surface::sphere::Sphere;
+    let frame = Axis2Placement::new(
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, 1.0),
+        Vec3::new(1.0, 0.0, 0.0),
+    );
+    let surface = Surface::from(Sphere::create_canonical(k, &frame, r).unwrap());
+    let at = |u: f64, v: f64| {
+        let p = surface
+            .convert_uv_from_step_to_nurbs(k, Point2::new(u, v))
+            .unwrap();
+        (p.x, p.y)
+    };
+    let corners = [
+        at(lon.0, lat.0),
+        at(lon.1, lat.0),
+        at(lon.1, lat.1),
+        at(lon.0, lat.1),
+    ];
+    let line = |a: (f64, f64), b: (f64, f64)| {
+        Curve::from(
+            solidcore::primitive::api_curves::create_line_segment(
+                Point3::new(a.0, a.1, 0.0),
+                Point3::new(b.0, b.1, 0.0),
+            )
+            .unwrap(),
+        )
+    };
+    let trims = (0..4)
+        .map(|i| line(corners[i], corners[(i + 1) % 4]))
+        .collect();
+    let domain = surface.natural_uv_domain_with_nurb(k).unwrap();
+    (surface, trims, domain)
+}
+
+/// A sphere face's precise properties, integrated along its trims: at each trim point an
+/// iso-u integral up the sphere's rational form, a smooth integrand that is no polynomial.
+/// A latitude-longitude rectangle's area is `r² Δλ (sin φ₁ − sin φ₀)`, and its volume
+/// component, `∫ x nₓ dA` (x = r cos φ cos λ, nₓ = x / r, dA = r² cos φ dφ dλ), is
+/// `r³ [Δλ/2 + (sin 2λ₁ − sin 2λ₀)/4] [sin φ − sin³φ / 3]` from φ₀ to φ₁, both held to the
+/// accuracy asked (their sign is the face's orientation); and the iso-curve evaluations it
+/// costs are bounded.
+#[test]
+fn a_sphere_faces_trim_integrals_cost_few_evaluations() {
+    let k = Kernel::default();
+    let r = 2.0;
+    let (lon, lat) = ((20.0_f64, 110.0_f64), (-30.0_f64, 50.0_f64));
+    let (surface, trims, domain) = sphere_rectangle(&k, r, lon, lat);
+    let area = r
+        * r
+        * (lon.1 - lon.0).to_radians()
+        * (lat.1.to_radians().sin() - lat.0.to_radians().sin());
+    let face_box = Extent3d::from_points(Point3::new(-r, -r, -r), Point3::new(r, r, r));
+    let accuracy = 1e-8;
+    k.work_counters.reset();
+    let p = boundary_properties(
+        &k,
+        &surface,
+        &trims,
+        &domain,
+        &face_box,
+        OrientType::Same,
+        accuracy,
+        Point3::new(0.0, 0.0, 0.0),
+        area,
+        0.0,
+        PPF_ALL,
+    )
+    .unwrap();
+    let evaluations = k.work_counters.mass_iso_evaluations();
+    eprintln!(
+        "area {} vs {area}, volume {}, {evaluations} iso evaluations",
+        p.area, p.volume
+    );
+    assert!(
+        (p.area.abs() - area).abs() <= accuracy * area,
+        "{} vs {area}",
+        p.area
+    );
+    let (l0, l1) = (lon.0.to_radians(), lon.1.to_radians());
+    let g = |phi: f64| phi.to_radians().sin() - phi.to_radians().sin().powi(3) / 3.0;
+    let volume = r.powi(3)
+        * ((l1 - l0) / 2.0 + ((2.0 * l1).sin() - (2.0 * l0).sin()) / 4.0)
+        * (g(lat.1) - g(lat.0));
+    assert!(
+        (p.volume.abs() - volume).abs() <= accuracy * volume,
+        "{} vs {volume}",
+        p.volume
+    );
+    // each trim point's iso line by the 15-point rule: 3 780 (the 7-point rule took 19 404,
+    // upstream's Runge-Kutta pair 23 244)
+    assert!(evaluations <= 8_000, "{evaluations} iso evaluations");
 }

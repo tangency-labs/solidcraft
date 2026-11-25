@@ -5,8 +5,18 @@ use crate::{
 };
 use solidcraft_engine::status_items::{StatusId, StatusItem as Effect, StatusSetting};
 
+/// An Isolate is in effect and no navigation bar shows an Isolate slot for it (the bar has none,
+/// or the bar is hidden), so a status pill does (#8120).
+pub(crate) fn isolate_pill(app: &SolveApp) -> bool {
+    let on_bar = app.ui.show_navigation_bar && app.preferences.navigation_bar.slots.iter().any(|id| id == "isolate");
+    app.session.visibility.before_isolate.is_some() && !on_bar
+}
+
 fn allowed(app: &SolveApp) -> Vec<StatusId> {
     let mut ids = Vec::new();
+    if isolate_pill(app) {
+        ids.push(StatusId::Isolate);
+    }
     if app.preferences.viewport_analysis_status {
         ids.extend([StatusId::SurfaceAnalysis, StatusId::Continuity]);
     }
@@ -16,8 +26,14 @@ fn allowed(app: &SolveApp) -> Vec<StatusId> {
     ids
 }
 
+/// The effects Escape may end: an Isolate never ends by Escape.
 fn eligible(app: &SolveApp) -> Vec<StatusId> {
-    app.session.status_items().iter().filter(|effect| presentation(app, effect).is_some()).map(|effect| effect.id).collect()
+    app.session
+        .status_items()
+        .iter()
+        .filter(|effect| effect.id != StatusId::Isolate && presentation(app, effect).is_some())
+        .map(|effect| effect.id)
+        .collect()
 }
 
 pub(crate) fn enabled(app: &SolveApp) -> bool {
@@ -89,14 +105,18 @@ pub(crate) fn presentation(app: &SolveApp, effect: &Effect) -> Option<StatusItem
         StatusSetting::Curvature { radius_mm } => format!("R {}", crate::prefs::show_mm(app, radius_mm, 1)),
         StatusSetting::Continuity { edge_count } => solidcraft_ui_text::format("ui.viewport_status_edges", &[("count", &edge_count.to_string())]),
         StatusSetting::Section { origin_mm, normal, hatch } => section_setting(app, origin_mm, normal, hatch)?,
+        StatusSetting::Isolate { hidden } => solidcraft_ui_text::format("ui.viewport_status_hidden", &[("count", &hidden.to_string())]),
     };
     Some(StatusItem {
         id: identity(effect),
         kind: StatusKind::Mode,
-        name: crate::toolbar::persistent_button_name(app, command),
+        // The pill names the state, "Isolation", rather than the command (#8120).
+        name: if effect.id == StatusId::Isolate { app.tr("ui.isolation").to_owned() } else { crate::toolbar::persistent_button_name(app, command) },
         setting,
         has_key: if app.preferences.viewport_status_details { effect.has_details() } else { effect.has_key },
         editable: if app.preferences.viewport_status_details { effect.has_details() } else { effect.id == StatusId::Section },
+        // Escape never ends an isolation; its own key does (#8120).
+        clear_key: (effect.id == StatusId::Isolate).then(|| crate::keymap::display_for(app, "browser.unisolate")).flatten(),
     })
 }
 
@@ -110,16 +130,25 @@ pub(crate) fn has_effect(app: &SolveApp) -> bool {
     app.session.newest_status_item(&eligible(app)).is_some()
 }
 
+/// Whether an idle Escape is this row's: an open key card always is; an analysis or section
+/// only with the `escape_closes_analyses` preference (off by default, so Escape keeps them).
+pub(crate) fn owns_escape(app: &SolveApp) -> bool {
+    app.viewport_status.open_key.is_some() || (app.preferences.escape_closes_analyses && has_effect(app))
+}
+
 /// Called only after existing Escape owners have yielded. A repeat cannot cascade clears.
 pub(crate) fn escape(app: &mut SolveApp, repeat: bool) -> bool {
     if repeat {
-        return app.viewport_status.open_key.is_some() || has_effect(app);
+        return owns_escape(app);
     }
     if let Some(open) = app.viewport_status.open_key.clone()
         && app.session.status_items().iter().any(|effect| presentation(app, effect).is_some_and(|item| item.has_key && item.id == open))
     {
         app.viewport_status.close_details();
         return true;
+    }
+    if !app.preferences.escape_closes_analyses {
+        return false;
     }
     if let Some(effect) = app.session.newest_status_item(&eligible(app)) {
         clear(app, &effect);
@@ -177,12 +206,14 @@ pub(crate) fn reconcile(app: &mut SolveApp, ctx: &egui::Context) {
 
 pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, viewport: egui::Rect) {
     reconcile(app, ctx);
-    if !enabled(app) {
+    // The Isolate pill shows with the analysis and section statuses off too; only it then.
+    if !enabled(app) && !isolate_pill(app) {
         app.viewport_status.open_key = None;
         return;
     }
     let effects = app.session.status_items();
-    if !app.preferences.viewport_analysis_status && !app.preferences.viewport_section_status {
+    // With the analysis and section statuses off only the Isolation pill shows: its card may stay open.
+    if !app.preferences.viewport_analysis_status && !app.preferences.viewport_section_status && !isolate_pill(app) {
         app.viewport_status.open_key = None;
     }
     let items: Vec<_> = effects.iter().filter_map(|effect| presentation(app, effect)).collect();
@@ -271,7 +302,9 @@ pub(crate) fn dispatch(app: &mut SolveApp, actions: Vec<StatusAction>) {
                         app.viewport_status.open_key = Some(id);
                     }
                 } else if effects.iter().any(|effect| effect.id == StatusId::Section && identity(effect) == id) {
-                    crate::dialogs::edit_section(app);
+                    // The plane the setting shows: the first on show.
+                    let shown = app.session.section.first().map(|c| c.id);
+                    crate::dialogs::edit_section_plane(app, shown);
                 }
             }
         }

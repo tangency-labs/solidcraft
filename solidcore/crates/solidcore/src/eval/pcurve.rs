@@ -22,16 +22,18 @@
 //! Origin: SolidCraft's `crates/geom/src/brep/pcurve.rs` (MIT OR Apache-2.0), moved here with its
 //! history (RFC 0003, 1.5 and 1.8). It takes the kernel's evaluation types ([`super::geometry`]);
 //! the structural checks of a record (counts, budgets, a use's interval in its curve's natural
-//! range) are the caller's, before it converts the record (`solidcore-ops`' `pcurve`).
+//! range) are the caller's, before it converts the record (`solidcore-ops`' `pcurve`). The pieces
+//! a face's flux is integrated over along each pcurve ([`flux_pieces`]) come from SolidCraft's
+//! `face_flux` (`crates/geom/src/brep/eval.rs`), which calls them through `solidcore-ops`.
 //!
-//! Deviations: the pole test is the evaluator's speed test this routine has always used
-//! ([`pole_by_speed`]), not [`super::collapse`]'s exact one; the B-spline cut and the knot span
-//! search are kept here ([`segment`], [`find_span`]) as the routine had them.
+//! Deviations: the B-spline cut and the knot span search are kept here ([`segment`],
+//! [`find_span`]) as the routine had them.
 use super::spline::EvalSurface;
 use super::uv::{self, Domain};
 use super::vec::{v3, VecExt};
 use super::{Axes, Curve, Curve2, CurveEval, EvalError, Surface, SurfaceEval};
 use crate::math::Vec3;
+use crate::SolidError;
 
 /// Why no pcurves: the records are malformed or out of bounds (`Invalid`), no pcurve within
 /// the tolerance was found or the geometry is not supported (`Failed`), or the fit would exceed
@@ -51,14 +53,32 @@ pub enum Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
+/// Whether a stored trim's control hull leaves a periodic direction's base range.
+/// This is a topology-edit request, not permission to clamp or discard a piece of a trim.
+/// A billionth of a period at the ends allows only parameter rounding.
+pub fn leaves_base_period(domain: Domain, trim: &Curve2) -> bool {
+    points(trim).iter().any(|p| {
+        p.iter()
+            .zip(domain.range)
+            .zip(domain.period)
+            .any(|((x, range), period)| match (range, period) {
+                (Some((lo, hi)), Some(period)) => {
+                    !x.is_finite() || *x < lo - 1e-9 * period || *x > hi + 1e-9 * period
+                }
+                _ => false,
+            })
+    })
+}
+
 impl From<EvalError> for Error {
     fn from(e: EvalError) -> Self {
         match e {
             EvalError::Invalid(_) => Error::Invalid(e.to_string()),
             EvalError::TooLarge(_) => Error::TooLarge(e.to_string()),
-            EvalError::Unsupported(_) | EvalError::Unevaluable(_) | EvalError::Degenerate(_) => {
-                Error::Failed(e.to_string())
-            }
+            EvalError::Unsupported(_)
+            | EvalError::Unevaluable(_)
+            | EvalError::Degenerate(_)
+            | EvalError::OffRange(_) => Error::Failed(e.to_string()),
         }
     }
 }
@@ -84,6 +104,162 @@ pub struct EdgeUse<'a> {
     pub tolerance: f64,
     /// The use's exact pcurve where the producer holds one.
     pub given: Option<&'a Curve2>,
+}
+
+/// One face leaving an edge, with its pcurve on the edge's own parameter interval.
+/// The loop direction is relative to the surface's natural normal.
+#[derive(Clone, Copy, Debug)]
+pub struct RadialFace<'a> {
+    /// The face's surface in the pcurve's parameters.
+    pub surface: &'a Surface,
+    /// The edge's curve in the face's surface parameters.
+    pub pcurve: &'a Curve2,
+    /// Whether the face's loop follows the edge's positive curve direction.
+    pub forward: bool,
+}
+
+/// Orders faces counter-clockwise about an edge's positive tangent, starting at the
+/// first face. This is the radial-edge construction (Weiler, 1988): at an interior
+/// point, each face leaves the edge along `(S_u × S_v) × tangent`, reversed when
+/// its loop runs backwards. The pcurve selects that point on the surface; a face's
+/// extent beyond the edge has no part in its order.
+/// The caller supplies a valid edge with regular, distinct inward directions along
+/// its interior: their cyclic order cannot change without a coincidence or a
+/// singularity. This computes that order; it does not certify the whole edge.
+///
+/// With the first inward ray `b` as reference, the polar coordinates are
+/// `x = b.dot(ray)` and `y = tangent.dot(b.cross(ray))`. Omitting normalization
+/// scales every y coordinate by the same positive factor, preserving cyclic order.
+/// The surface derivatives are evaluated directly, with no stepped probes or
+/// geometric angular tolerance. Faces sharing a ray (up to [`RAY_ROUNDING`]) are ordered
+/// by [`bend`], and refused only where that is equal too.
+///
+/// # Errors
+/// Malformed or unevaluable geometry, a vanishing tangent or inward ray, or faces
+/// whose radial directions and bends cannot be distinguished.
+pub fn radial_order(
+    curve: &Curve,
+    interval: [f64; 2],
+    faces: &[RadialFace<'_>],
+) -> Result<Vec<usize>> {
+    let [lo, hi] = interval;
+    if !(lo.is_finite() && hi.is_finite() && lo < hi) {
+        return Err(Error::Invalid("invalid radial edge interval".into()));
+    }
+    let t = lo.midpoint(hi);
+    let (_, tangent) = CurveEval::new(curve)?
+        .derivs(t)
+        .ok_or_else(|| Error::Failed("cannot evaluate the radial edge tangent".into()))?;
+    if !tangent.is_finite() || tangent.len2() == 0.0 {
+        return Err(Error::Failed("the radial edge tangent vanishes".into()));
+    }
+    let mut reference = None;
+    let mut angles = Vec::new();
+    for (i, face) in faces.iter().enumerate() {
+        let [u, v] = face
+            .pcurve
+            .eval(t)
+            .ok_or_else(|| Error::Failed("cannot evaluate a radial face's pcurve".into()))?;
+        let surface = SurfaceEval::new(face.surface)?;
+        let (_, du, dv) = surface
+            .derivs(u, v)
+            .ok_or_else(|| Error::Failed("cannot evaluate a radial face's normal".into()))?;
+        let ray = du.cross(dv).cross(tangent);
+        let ray = if face.forward { ray } else { -ray };
+        let b = *reference.get_or_insert(ray);
+        let (x, y) = (b.dot(ray), tangent.dot(b.cross(ray)));
+        if !(x.is_finite() && y.is_finite() && (x != 0.0 || y != 0.0)) {
+            return Err(Error::Failed(
+                "a radial face's inward direction is undefined".into(),
+            ));
+        }
+        let angle = y.atan2(x);
+        let angle = if angle < 0.0 {
+            angle + std::f64::consts::TAU
+        } else {
+            angle
+        };
+        let angle = if std::f64::consts::TAU - angle <= RAY_ROUNDING {
+            0.0
+        } else {
+            angle
+        };
+        angles.push((i, angle, 0.0, (surface, [u, v], du, dv, ray)));
+    }
+    let snapped: Vec<f64> = angles
+        .iter()
+        .map(|a| {
+            angles
+                .iter()
+                .map(|b| b.1)
+                .filter(|b| (a.1 - b).abs() <= RAY_ROUNDING)
+                .fold(a.1, f64::min)
+        })
+        .collect();
+    for (entry, angle) in angles.iter_mut().zip(snapped) {
+        entry.1 = angle;
+    }
+    let tangent_faces = || {
+        Error::Failed(
+            "tangent faces do not determine a radial order from their inward directions or bends"
+                .into(),
+        )
+    };
+    let tied: Vec<f64> = angles
+        .iter()
+        .filter(|a| angles.iter().filter(|b| b.1 == a.1).count() > 1)
+        .map(|a| a.1)
+        .collect();
+    let same_bend = |a: f64, b: f64| (a - b).abs() <= RAY_ROUNDING * a.abs().max(b.abs());
+    let mut reference_bend = None;
+    for entry in &mut angles {
+        if !tied.contains(&entry.1) {
+            continue;
+        }
+        let (surface, [u, v], du, dv, ray) = &entry.3;
+        entry.2 = bend(surface, *u, *v, *du, *dv, *ray, tangent).ok_or_else(tangent_faces)?;
+        // A face sharing the reference ray that bends back from it lies just short of a full turn.
+        if entry.1 == 0.0 {
+            let reference = *reference_bend.get_or_insert(entry.2);
+            if reference > entry.2 && !same_bend(reference, entry.2) {
+                entry.1 = std::f64::consts::TAU;
+            }
+        }
+    }
+    angles.sort_unstable_by(|a, b| a.1.total_cmp(&b.1).then(a.2.total_cmp(&b.2)));
+    for pair in angles.windows(2) {
+        if matches!(pair, [a, b] if a.1 == b.1 && same_bend(a.2, b.2)) {
+            return Err(tangent_faces());
+        }
+    }
+    Ok(angles.into_iter().map(|(i, ..)| i).collect())
+}
+
+/// Rays this close in angle (radians) are one ray, and bends this close (relative) one bend: the
+/// rounding of this function's own arithmetic (S0332: 8.7e-17), far below any geometric gap.
+const RAY_ROUNDING: f64 = 64.0 * f64::EPSILON;
+
+/// How fast a face turns about the edge tangent, counter-clockwise, as it leaves the edge along
+/// `ray`: `t̂ · (r̂ × κ)`, with `κ` the surface's second derivative along the unit ray. A face
+/// leaving at angle θ is at θ + bend·s/2 a distance s out, so faces sharing a ray are ordered by it.
+fn bend(
+    surface: &SurfaceEval,
+    u: f64,
+    v: f64,
+    du: Vec3,
+    dv: Vec3,
+    ray: Vec3,
+    tangent: Vec3,
+) -> Option<f64> {
+    let (uu, uv, vv) = surface.second(u, v)?;
+    let (g11, g12, g22) = (du.dot(du), du.dot(dv), dv.dot(dv));
+    let det = g11 * g22 - g12 * g12;
+    let (p, q) = (du.dot(ray), dv.dot(ray));
+    let (a, b) = ((g22 * p - g12 * q) / det, (g11 * q - g12 * p) / det);
+    let curl = uu * (a * a) + uv * (2.0 * a * b) + vv * (b * b);
+    let scale = ray.len2() * ray.len2().sqrt() * tangent.len2().sqrt();
+    let bend = tangent.dot(ray.cross(curl)) / scale;
+    (det != 0.0 && bend.is_finite()).then_some(bend)
 }
 
 /// Knot spans a fitted pcurve may have (the schema takes 4096 control points).
@@ -603,13 +779,29 @@ impl On {
             points: vec![a, b],
         };
         let mut candidates = Vec::new();
-        let ends = (self.project_in(p0, exact), self.project_in(p1, exact));
+        let middle = self.project_in(pm, exact);
+        // Each end on the sheet of the edge's middle: an end on the seam of a closed form projects
+        // to either side of it, and on the far side the segment between the ends runs the wrong
+        // way round. A segment that missed for that left the ones below, whose ends are placed
+        // from the middle, to fit the edge within the tolerance with ends off its vertices.
+        let sheet = |mut q: [f64; 2]| {
+            if let Some(m) = middle {
+                for ((x, near), period) in q.iter_mut().zip(m).zip(self.dom.period) {
+                    *x = uv::unwrap(*x, near, period);
+                }
+            }
+            q
+        };
+        let ends = (
+            self.project_in(p0, exact).map(sheet),
+            self.project_in(p1, exact).map(sheet),
+        );
         if let (Some(a), Some(b)) = ends {
             candidates.push(line(a, b));
         }
         // One parameter fixed where the edge's middle is (an end on a seam or at an apex may
         // project anywhere along it), the other from the ends.
-        if let (Some(a), Some(b), Some(m)) = (ends.0, ends.1, self.project_in(pm, exact)) {
+        if let (Some(a), Some(b), Some(m)) = (ends.0, ends.1, middle) {
             candidates.push(line([m[0], a[1]], [m[0], b[1]]));
             candidates.push(line([a[0], m[1]], [b[0], m[1]]));
         }
@@ -697,19 +889,25 @@ impl On {
         Some(q)
     }
 
-    /// Whether `uv` is at a pole along each direction, or within `reach` of one: moving that
-    /// parameter by half its period (or across its range) moves the point by no more than `reach`
-    /// at its speed there. There the parameter is as free as at the pole itself.
-    fn pole(&self, uv: [f64; 2], reach: f64) -> [bool; 2] {
-        pole_by_speed(&self.surface, &self.dom, uv, reach)
+    /// Whether `uv` is at a pole along each direction, or within `reach` mm of one
+    /// ([`SurfaceEval::pole_within`]): there the parameter is as free as at the pole itself.
+    fn pole(&self, uv: [f64; 2], reach: f64) -> Result<[bool; 2]> {
+        Ok(self.surface.pole_within(uv, reach)?)
     }
 
     /// The loop's uses moved by whole periods so each starts where the one before it ends (in
-    /// loop order and direction), then all together into the surface's base period where the
-    /// loop's lowest point allows. Where uses meet at a pole (within `tol`) the periodic
-    /// parameter is free: there the offsets that turn the loop counter-clockwise in (u, v) (a
-    /// face boundary seen from the natural normal) by more than rounding are taken, else the
-    /// nearest. A seam used twice from pole to pole thus encloses its face, never nothing.
+    /// loop order and direction), then all together into the surface's base period. Which
+    /// translate depends on whether the loop's control hull fits in the surface's range, to
+    /// within how far its uses miss each other at its vertices away from a pole and a billionth
+    /// of the period at each end. A loop that fits goes where its lowest point allows; one that
+    /// lies outside the range there but within it a period lower, to that rounding, goes there
+    /// (and may start below the range by that). A loop wider than that, which no translate puts
+    /// in the range, goes where its hull's midpoint allows: a small overrun at either seam must
+    /// not move the rest of a full-period loop one whole period outside the patch.
+    /// Where uses meet at a pole (within `tol`) the periodic parameter is free: there the offsets
+    /// that turn the loop counter-clockwise in (u, v) (a face boundary seen from the natural
+    /// normal) by more than rounding are taken, else the nearest. A seam used twice from pole to
+    /// pole thus encloses its face, never nothing.
     fn close(&self, uses: &mut [(Curve2, bool)], tol: f64) -> Result<()> {
         let n = uses.len();
         let mut ends = Vec::new();
@@ -737,8 +935,8 @@ impl On {
             // offsets up to the next pole.
             let at_pole: Vec<bool> = ends
                 .iter()
-                .map(|(s, _)| self.pole(*s, tol).get(d).copied().unwrap_or(false))
-                .collect();
+                .map(|(s, _)| Ok(self.pole(*s, tol)?.get(d).copied().unwrap_or(false)))
+                .collect::<Result<_>>()?;
             let first = at_pole.iter().position(|&p| p).unwrap_or(0);
             let order: Vec<usize> = (first..n).chain(0..first).collect();
             let mut shift = vec![0.0; n];
@@ -827,16 +1025,88 @@ impl On {
                 .copied()
                 .flatten()
                 .map_or(0.0, |(a, b)| a.min(b));
-            let low = uses
+            let (low, high) = uses
                 .iter()
                 .zip(&shift)
                 .flat_map(|((c, _), s)| points(c).into_iter().map(move |q| at(q, d) + s))
-                .fold(f64::INFINITY, f64::min);
-            let base = if low.is_finite() {
-                ((low - lo) / period + 1e-9).floor() * period
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| {
+                    (a.min(x), b.max(x))
+                });
+            // Its uses meet at its vertices only to within their rounding: how far apart they
+            // are there, short of whole periods, but at a pole, where the parameter is free.
+            let slack = (0..n)
+                .filter(|&k| !at_pole.get(k).copied().unwrap_or(true))
+                .filter_map(|k| {
+                    let before = k.checked_sub(1).or_else(|| n.checked_sub(1))?;
+                    let (start, _) = ends.get(k)?;
+                    let (_, end) = ends.get(before)?;
+                    let gap = at(*start, d) + shift.get(k)? - at(*end, d) - shift.get(before)?;
+                    Some((gap - (gap / period).round() * period).abs())
+                })
+                .fold(0.0, f64::max);
+            let hi = self
+                .dom
+                .range
+                .get(d)
+                .copied()
+                .flatten()
+                .map_or(lo + period, |(a, b)| a.max(b));
+            let room = slack + 1e-9 * period;
+            // A loop that fits in the range to that rounding is placed by its lowest point; one
+            // wider, which no translate puts in the range, by its midpoint, so an overrun at
+            // either seam leaves the rest of it in the range (#19560).
+            let anchor = if high - low <= hi - lo + 2.0 * room {
+                low
+            } else {
+                0.5 * low + 0.5 * high
+            };
+            let mut base = if anchor.is_finite() {
+                ((anchor - lo) / period + 1e-9).floor() * period
             } else {
                 0.0
             };
+            // A loop that lies outside the range where its lowest point puts it, but within it a
+            // period lower to that rounding and the base's own (above), lies there: its lowest
+            // point is a rounding short of a period's start (#19315).
+            let inside = |by: f64| low - by >= lo - room && high - by <= hi + room;
+            if low.is_finite() && !inside(base) && inside(base + period) {
+                base += period;
+            } else if low.is_finite() && high.is_finite() && !inside(base) {
+                // Within neither: a period lower, where the loop runs past the range by less than
+                // where its lowest point puts it, and by a step that moves the surface within
+                // `tol`: each point past an end moves along `d` by at most that end's overrun,
+                // within the strip from the end to the overrun and across the loop's span, which
+                // a certified bound on the surface's speed there encloses
+                // (`SurfaceEval::strip_shift_bound`); where no bound is decided it stays. A loop
+                // that starts on the range's start, its lowest point a writer's rounding below
+                // it, stays on the range rather than moving a whole period on; one farther below
+                // stays where its lowest point puts it.
+                let spill = |by: f64| (lo - (low - by)).max(0.0) + ((high - by) - hi).max(0.0);
+                let lower = base + period;
+                if spill(lower) < spill(base) {
+                    let (below, above) = (
+                        (lo - (low - lower)).max(0.0),
+                        ((high - lower) - hi).max(0.0),
+                    );
+                    let across = uses
+                        .iter()
+                        .flat_map(|(c, _)| points(c).into_iter().map(|q| at(q, 1 - d)))
+                        .fold([f64::INFINITY, f64::NEG_INFINITY], |[a, b], x| {
+                            [a.min(x), b.max(x)]
+                        });
+                    let shift = |along: [f64; 2], o: f64| -> Option<f64> {
+                        if o > 0.0 {
+                            self.surface.strip_shift_bound(d, along, across, o).ok()
+                        } else {
+                            Some(0.0)
+                        }
+                    };
+                    let moved = shift([lo - below, lo], below).zip(shift([hi, hi + above], above));
+                    if moved.is_some_and(|(x, y)| x.max(y) <= tol) {
+                        base = lower;
+                    }
+                }
+            }
             for (((c, _), s), (st, en)) in uses.iter_mut().zip(&shift).zip(ends.iter_mut()) {
                 let by = s - base;
                 if by != 0.0 {
@@ -933,6 +1203,85 @@ pub fn eval(c: &Curve2, t: f64) -> Option<[f64; 2]> {
     (s[2].abs() > 0.0).then(|| [s[0] / s[2], s[1] / s[2]])
 }
 
+/// The point of pcurve `c` at `t` and its first derivative (`None` outside its interval, for a
+/// malformed record, or where either is not finite).
+pub fn eval_d1(c: &Curve2, t: f64) -> Option<([f64; 2], [f64; 2])> {
+    let (knots, count) = match c {
+        Curve2::Spline { knots, points } => (knots, points.len()),
+        Curve2::RationalSpline { knots, homogeneous } => (knots, homogeneous.len()),
+    };
+    let p = knots.len().checked_sub(count + 1)?;
+    // Outside its interval, past the rounding `eval` allows at its ends, it has no point.
+    find_span(knots, p, count, t)?;
+    let (first, ders) = super::plan::basis::basis_derivatives(knots, p, count, t, 1)?;
+    // The homogeneous point and its derivative, then the quotient rule: C' = (A' − w′C) / w.
+    let (mut a, mut d) = ([0.0; 3], [0.0; 3]);
+    for (j, n) in ders.iter().enumerate() {
+        let q = match c {
+            Curve2::Spline { points, .. } => points.get(first + j).map(|&[u, v]| [u, v, 1.0])?,
+            Curve2::RationalSpline { homogeneous, .. } => *homogeneous.get(first + j)?,
+        };
+        let (n0, n1) = (*n.first()?, n.get(1).copied().unwrap_or(0.0));
+        for ((ak, dk), qk) in a.iter_mut().zip(d.iter_mut()).zip(q) {
+            *ak += n0 * qk;
+            *dk += n1 * qk;
+        }
+    }
+    let ([x, y, w], [dx, dy, dw]) = (a, d);
+    let (u, v) = (x / w, y / w);
+    let (du, dv) = ((dx - dw * u) / w, (dy - dw * v) / w);
+    // A weight of 0, or a point or a derivative that is not finite, has no answer.
+    [u, v, du, dv]
+        .into_iter()
+        .all(f64::is_finite)
+        .then_some(([u, v], [du, dv]))
+}
+
+/// Gauss pieces to each knot span of a pcurve in [`flux_pieces`]: one for a straight one (on a
+/// plane, with a field linear in space as a volume's `p / 3`, the integrand is then a polynomial
+/// the Gauss rule takes exactly), two for a curved one.
+const FLUX_SPAN_PIECES: [usize; 2] = [1, 2];
+/// The most pieces [`flux_pieces`] cuts one pcurve into, past which they are spread evenly over
+/// it.
+const FLUX_MAX_PIECES: usize = 64;
+
+/// The pieces of pcurve `c`'s interval that the flux of a field through its face is integrated
+/// over, a Gauss rule on each. By Green's theorem the flux `∫∫ F(S)·(S_u × S_v) du dv` over the
+/// (u, v) region a face's loops bound is `∮ −G du` round them, `G(u, v)` the integral of
+/// `F(S)·(S_u × S_v)` across v; these pieces cut one use's share of that loop integral. Each
+/// knot span inside the interval is cut evenly, into one piece for a straight pcurve (degree 1,
+/// not rational) and two for a curved one; where that makes more than 64 pieces, or no span
+/// lies inside, the whole interval is cut into 64 even pieces instead. In order along `c`.
+/// `None` for a malformed record.
+pub fn flux_pieces(c: &Curve2) -> Option<Vec<[f64; 2]>> {
+    let [t0, t1] = c.interval()?;
+    let (knots, count, rational) = match c {
+        Curve2::Spline { knots, points } => (knots, points.len(), false),
+        Curve2::RationalSpline { knots, homogeneous } => (knots, homogeneous.len(), true),
+    };
+    let straight = !rational && knots.len().checked_sub(count + 1)? == 1;
+    let [line, curved] = FLUX_SPAN_PIECES;
+    let each = if straight { line } else { curved };
+    let spans: Vec<[f64; 2]> = knots
+        .windows(2)
+        .filter_map(|w| match *w {
+            [a, b] if b > a && a >= t0 && b <= t1 => Some([a, b]),
+            _ => None,
+        })
+        .collect();
+    if spans.is_empty() || spans.len().saturating_mul(each) > FLUX_MAX_PIECES {
+        return Some(even_pieces(FLUX_MAX_PIECES, [t0, t1]).collect());
+    }
+    let pieces = spans.into_iter().flat_map(|s| even_pieces(each, s));
+    Some(pieces.collect())
+}
+
+/// `[a, b]` cut into `n` even pieces, in order.
+fn even_pieces(n: usize, [a, b]: [f64; 2]) -> impl Iterator<Item = [f64; 2]> {
+    let at = move |k: usize| a + (b - a) * k as f64 / n as f64;
+    (0..n).map(move |k| [at(k), at(k + 1)])
+}
+
 /// The `p + 1` basis functions non-zero on knot span `span` at `t`, of any degree (NURBS Book
 /// A2.2).
 fn basis(knots: &[f64], p: usize, span: usize, t: f64) -> Option<Vec<f64>> {
@@ -957,31 +1306,6 @@ fn basis(knots: &[f64], p: usize, span: usize, t: f64) -> Option<Vec<f64>> {
         *n.get_mut(j)? = saved;
     }
     Some(n)
-}
-
-/// Whether `uv` is at a pole along each direction, or within `reach` of one, by the surface's
-/// speeds there: a speed below 10⁻⁹ of the other's, or one that moves the point no more than
-/// `reach` over half the period (or the whole range) of its parameter.
-pub fn pole_by_speed(s: &SurfaceEval, dom: &Domain, uv: [f64; 2], reach: f64) -> [bool; 2] {
-    let Some((_, su, sv)) = s.derivs(uv[0], uv[1]) else {
-        return [false; 2];
-    };
-    let speed = [su.len(), sv.len()];
-    let [a, b] = speed;
-    let mut out = [a <= 1e-9 * b.max(1e-12), b <= 1e-9 * a.max(1e-12)];
-    for ((flag, sp), (period, range)) in out
-        .iter_mut()
-        .zip(speed)
-        .zip(dom.period.iter().zip(dom.range.iter()))
-    {
-        let span = match (period, range) {
-            (Some(period), _) => 0.5 * period,
-            (None, Some((lo, hi))) => (hi - lo).abs(),
-            (None, None) => continue,
-        };
-        *flag |= sp * span <= reach;
-    }
-    out
 }
 
 /// Rounding allowed at the ends of a knot domain, in units of `f64::EPSILON` times its size.
@@ -1014,26 +1338,60 @@ fn find_span(knots: &[f64], p: usize, n: usize, u: f64) -> Option<usize> {
     Some(k)
 }
 
+/// A typed cut failure shared by the legacy text API and the kernel restart.
+#[derive(Debug, thiserror::Error)]
+enum SegmentError {
+    #[error("{0}")]
+    Input(&'static str),
+    #[error("{0}")]
+    Invariant(&'static str),
+    #[error("too many knots")]
+    TooManyKnots,
+    #[error("[{a}, {b}] is not a piece of the domain [{lo}, {hi}]")]
+    Interval { a: f64, b: f64, lo: f64, hi: f64 },
+    #[error("knot {0} is outside the domain")]
+    Knot(f64),
+}
+
+impl SegmentError {
+    fn into_solid(self, operation: &'static str) -> SolidError {
+        match self {
+            Self::Input(reason) => SolidError::invalid_input(operation, reason),
+            Self::Invariant(reason) => SolidError::port_invariant(operation, reason),
+            Self::TooManyKnots => SolidError::Unsupported {
+                operation,
+                reason: "too many knots",
+            },
+            Self::Interval { .. } => {
+                SolidError::invalid_input(operation, "segment interval outside the spline domain")
+            }
+            Self::Knot(_) => SolidError::invalid_input(operation, "knot outside the spline domain"),
+        }
+    }
+}
+
 /// One Boehm insertion of `u` into a B-spline of degree `p` with homogeneous control points.
 fn insert_knot(
     p: usize,
     knots: &[f64],
     ctrl: &[[f64; 4]],
     u: f64,
-) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), String> {
+) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), SegmentError> {
     let n = ctrl.len();
     if n <= p || knots.len() != n + p + 1 {
-        return Err("knot and control point counts do not match the degree".into());
+        return Err(SegmentError::Input(
+            "knot and control point counts do not match the degree",
+        ));
     }
     if knots.len() >= MAX_KNOTS {
-        return Err("too many knots".into());
+        return Err(SegmentError::TooManyKnots);
     }
     if knots.iter().any(|k| !k.is_finite())
         || knots.windows(2).any(|w| matches!(w, [a, b] if b < a))
     {
-        return Err("knots must be finite and not decrease".into());
+        return Err(SegmentError::Input("knots must be finite and not decrease"));
     }
-    let k = find_span(knots, p, n, u).ok_or_else(|| format!("knot {u} is outside the domain"))?;
+    let k = find_span(knots, p, n, u).ok_or(SegmentError::Knot(u))?;
     let kn = |i: usize| knots.get(i).copied().unwrap_or(0.0);
     let pt = |i: usize| ctrl.get(i).copied().unwrap_or([0.0; 4]);
     let mut q = Vec::new();
@@ -1072,18 +1430,28 @@ pub fn segment(
     a: f64,
     b: f64,
 ) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), String> {
+    segment_data(p, knots, ctrl, a, b).map_err(|e| e.to_string())
+}
+
+fn segment_data(
+    p: usize,
+    knots: &[f64],
+    ctrl: &[[f64; 4]],
+    a: f64,
+    b: f64,
+) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), SegmentError> {
     let n = ctrl.len();
     if n <= p || knots.len() != n + p + 1 {
-        return Err("knot and control point counts do not match the degree".into());
+        return Err(SegmentError::Input(
+            "knot and control point counts do not match the degree",
+        ));
     }
     let (lo, hi) = (
         knots.get(p).copied().unwrap_or(f64::NAN),
         knots.get(n).copied().unwrap_or(f64::NAN),
     );
     if !(lo <= a && a < b && b <= hi) {
-        return Err(format!(
-            "[{a}, {b}] is not a piece of the domain [{lo}, {hi}]"
-        ));
+        return Err(SegmentError::Interval { a, b, lo, hi });
     }
     let (mut k, mut c) = (knots.to_vec(), ctrl.to_vec());
     for t in [a, b] {
@@ -1098,22 +1466,152 @@ pub fn segment(
         .iter()
         .rposition(|&x| x == a)
         .filter(|&j| j >= p)
-        .ok_or("segment start")?;
+        .ok_or(SegmentError::Invariant("segment start"))?;
     let j1 = k
         .iter()
         .position(|&x| x == b)
         .filter(|&j| j > j0)
-        .ok_or("segment end")?;
-    let points = c.get(j0 - p..j1).ok_or("segment control points")?.to_vec();
-    let inner = k.get(j0 + 1..j1).ok_or("segment knots")?;
+        .ok_or(SegmentError::Invariant("segment end"))?;
+    let points = c
+        .get(j0 - p..j1)
+        .ok_or(SegmentError::Invariant("segment control points"))?
+        .to_vec();
+    let inner = k
+        .get(j0 + 1..j1)
+        .ok_or(SegmentError::Invariant("segment knots"))?;
     let mut out = Vec::new();
     out.extend(std::iter::repeat_n(a, p + 1));
     out.extend_from_slice(inner);
     out.extend(std::iter::repeat_n(b, p + 1));
     if out.len() != points.len() + p + 1 {
-        return Err("segment counts".into());
+        return Err(SegmentError::Invariant("segment counts"));
     }
     Ok((out, points))
+}
+
+/// Start a closed spline or polyline at `start` inside its natural domain `[a, b]`.
+/// The result has domain `[start, start + b - a]`. Parameters before `start` move
+/// forward by `b - a`; all other parameters keep their points.
+///
+/// Uses [`segment`]'s exact homogeneous knot insertion, then a knot-vector shift.
+/// The old seam has multiplicity degree. A common homogeneous scale on the
+/// second piece matches unequal seam weights without changing its geometry.
+/// The seam endpoints must coincide within the outward rounding enclosure of
+/// forming and dividing their homogeneous coordinates. Gaps outside that
+/// enclosure are refused; no model tolerance is used.
+///
+/// # Errors
+/// An unsupported curve, invalid spline, start outside the open domain, or size
+/// beyond the evaluator's limits.
+pub fn restart_curve(curve: &Curve, start: f64) -> crate::Result<Curve> {
+    const OP: &str = "eval::pcurve::restart_curve";
+    let invalid = |reason| SolidError::invalid_input(OP, reason);
+    let (knots, ctrl, rational) = match curve {
+        Curve::Spline { knots, points } => (
+            knots.clone(),
+            points
+                .iter()
+                .map(|&[x, y, z]| [x, y, z, 1.0])
+                .collect::<Vec<_>>(),
+            false,
+        ),
+        Curve::RationalSpline { knots, homogeneous } => (knots.clone(), homogeneous.clone(), true),
+        Curve::Polyline { points } => {
+            let end = points.len().saturating_sub(1) as f64;
+            let knots = std::iter::once(0.0)
+                .chain((0..points.len()).map(|i| i as f64))
+                .chain(std::iter::once(end))
+                .collect();
+            (
+                knots,
+                points.iter().map(|&[x, y, z]| [x, y, z, 1.0]).collect(),
+                false,
+            )
+        }
+        _ => {
+            return Err(SolidError::Unsupported {
+                operation: OP,
+                reason: "only splines and polylines can be restarted",
+            })
+        }
+    };
+    let p = knots
+        .len()
+        .checked_sub(ctrl.len() + 1)
+        .ok_or_else(|| invalid("spline degree"))?;
+    if !(1..=super::spline::MAX_SPLINE_DEGREE).contains(&p)
+        || knots.len() > MAX_KNOTS
+        || knots.iter().any(|t| !t.is_finite())
+        || knots.windows(2).any(|w| w.first() > w.get(1))
+        || ctrl
+            .iter()
+            .any(|h| h.iter().any(|x| !x.is_finite()) || h.get(3).is_none_or(|w| *w <= 0.0))
+    {
+        return Err(invalid("invalid spline to restart"));
+    }
+    let (a, b) = (
+        *knots.get(p).ok_or_else(|| invalid("spline start"))?,
+        *knots.get(ctrl.len()).ok_or_else(|| invalid("spline end"))?,
+    );
+    if !(a < start && start < b) {
+        return Err(invalid("spline restart outside the open domain"));
+    }
+    let (mut tail_knots, mut tail) =
+        segment_data(p, &knots, &ctrl, start, b).map_err(|e| e.into_solid(OP))?;
+    let (head_knots, head) =
+        segment_data(p, &knots, &ctrl, a, start).map_err(|e| e.into_solid(OP))?;
+    let &[tx, ty, tz, tw] = tail
+        .last()
+        .ok_or_else(|| SolidError::port_invariant(OP, "spline seam end"))?;
+    let &[hx, hy, hz, hw] = head
+        .first()
+        .ok_or_else(|| SolidError::port_invariant(OP, "spline seam start"))?;
+    let tail_end = [tx / tw, ty / tw, tz / tw];
+    let head_start = [hx / hw, hy / hw, hz / hw];
+    if tail_end.iter().chain(&head_start).any(|x| !x.is_finite()) {
+        return Err(invalid("spline seam endpoints do not coincide"));
+    }
+    // Each homogeneous coordinate may carry one rounded multiplication x*w.
+    // If h = fl(p*w), the exact p*w is between down(h) and up(h). Division by
+    // positive w preserves that enclosure; outward rounding of the two divisions
+    // therefore encloses p. Compare each coordinate
+    // separately: neither model tolerances nor another axis can widen this bound.
+    let up = crate::geom::certified::next_up;
+    let down = |x: f64| -up(-x);
+    let enclosure = |x: f64, w: f64| [down(down(x) / w), up(up(x) / w)];
+    for (t, h) in [tx, ty, tz].into_iter().zip([hx, hy, hz]) {
+        let [tlo, thi] = enclosure(t, tw);
+        let [hlo, hhi] = enclosure(h, hw);
+        if [tlo, thi, hlo, hhi].iter().any(|x| !x.is_finite()) || tlo > hhi || hlo > thi {
+            return Err(invalid("spline seam endpoints do not coincide"));
+        }
+    }
+    // Sharing the endpoint needs p seam knots. Scale the entire head, not only
+    // its endpoint: a common projective scale preserves every rational span.
+    tail_knots.pop();
+    tail_knots.extend(head_knots.iter().skip(p + 1).map(|t| t + (b - a)));
+    tail.extend(head.into_iter().skip(1).map(|h| h.map(|x| x * (tw / hw))));
+    if tail_knots.len() > MAX_KNOTS
+        || tail_knots.iter().any(|t| !t.is_finite())
+        || tail_knots.windows(2).any(|w| w.first() > w.get(1))
+        || tail
+            .iter()
+            .any(|h| h.iter().any(|x| !x.is_finite()) || h.get(3).is_none_or(|w| *w <= 0.0))
+    {
+        return Err(invalid("restarted spline exceeds evaluation limits"));
+    }
+    let restarted = if rational {
+        Curve::RationalSpline {
+            knots: tail_knots,
+            homogeneous: tail,
+        }
+    } else {
+        Curve::Spline {
+            knots: tail_knots,
+            points: tail.into_iter().map(|[x, y, z, _]| [x, y, z]).collect(),
+        }
+    };
+    Ok(restarted)
 }
 
 #[cfg(test)]

@@ -524,7 +524,9 @@ impl UnitDiff for Runner {
                     operation: "blend::hcr",
                     ..
                 } => output(-2.0, vec![]),
-                SolidError::Upstream { code, .. } => output(f64::from(code), vec![]),
+                e if crate::output::blend_status(&e).is_some() => {
+                    output(crate::output::blend_status(&e).map_or(-1.0, f64::from), vec![])
+                }
                 other => Output::err(format!("rust_error: {other}")),
             })),
         }
@@ -593,10 +595,7 @@ fn put_piece(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
         match c.evaluate_point(k, n.evaluate(f64::from(i) / 4.0)) {
             Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
             Err(e) => o.extend([
-                match e {
-                    SolidError::Upstream { code, .. } => f64::from(code),
-                    _ => -1.0,
-                },
+                crate::output::blend_status(&e).map_or(-1.0, f64::from),
                 0.0,
                 0.0,
                 0.0,
@@ -652,8 +651,8 @@ fn put_silhouettes(k: &Kernel, o: &mut Vec<f64>, h: &Hcr, n_e: usize) -> Result<
             let t = ivl.evaluate(f64::from(j) / 4.0);
             match curve.map(|c| c.evaluate_point(k, t)) {
                 Some(Ok(p)) => r.extend([0.0, p.x, p.y, p.z]),
-                Some(Err(SolidError::Upstream { code, .. })) => {
-                    r.extend([f64::from(code), 0.0, 0.0, 0.0]);
+                Some(Err(e)) if crate::output::blend_status(&e).is_some() => {
+                    r.extend([crate::output::blend_status(&e).map_or(-1.0, f64::from), 0.0, 0.0, 0.0]);
                 }
                 Some(Err(_)) => r.extend([-1.0, 0.0, 0.0, 0.0]),
                 // `SM_ERR`
@@ -706,7 +705,7 @@ fn run_rust(k: &mut Kernel, mut h: Hcr, r: &Resolved) -> Result<(f64, Vec<f64>),
             match res {
                 Ok(()) => {}
                 Err(e) if e.is_unported() || matches!(e, SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => return Err(e),
-                Err(SolidError::Upstream { code, .. }) => status = f64::from(code),
+                Err(e) if crate::output::blend_status(&e).is_some() => status = crate::output::blend_status(&e).map_or(-1.0, f64::from),
                 Err(e) => return Err(e),
             }
             put_cc(&mut rec, &cc);
@@ -719,7 +718,7 @@ fn run_rust(k: &mut Kernel, mut h: Hcr, r: &Resolved) -> Result<(f64, Vec<f64>),
             let v = (vertex >= 0).then(|| VertexId::from_index(vertex as u32));
             match h.compute_edge_visibility(k, eid(edge), v, visible, &mut marked) {
                 Ok(()) => {}
-                Err(SolidError::Upstream { code, .. }) => status = f64::from(code),
+                Err(e) if crate::output::blend_status(&e).is_some() => status = crate::output::blend_status(&e).map_or(-1.0, f64::from),
                 Err(e) => return Err(e),
             }
             rec.push(h.visible_curves().len() as f64);
@@ -745,7 +744,7 @@ fn run_rust(k: &mut Kernel, mut h: Hcr, r: &Resolved) -> Result<(f64, Vec<f64>),
             }
             match h.compute_global_visibility(k) {
                 Ok(()) => {}
-                Err(SolidError::Upstream { code, .. }) => status = f64::from(code),
+                Err(e) if crate::output::blend_status(&e).is_some() => status = crate::output::blend_status(&e).map_or(-1.0, f64::from),
                 Err(e) => return Err(e),
             }
             rec.push(h.visible_curves().len() as f64);
@@ -761,7 +760,7 @@ fn run_rust(k: &mut Kernel, mut h: Hcr, r: &Resolved) -> Result<(f64, Vec<f64>),
             let n_e = h.scene_brep().edges().len();
             match h.compute_silhouettes(k) {
                 Ok(()) => {}
-                Err(SolidError::Upstream { code, .. }) => status = f64::from(code),
+                Err(e) if crate::output::blend_status(&e).is_some() => status = crate::output::blend_status(&e).map_or(-1.0, f64::from),
                 Err(e) => return Err(e),
             }
             put_silhouettes(k, &mut rec, &h, n_e)?;

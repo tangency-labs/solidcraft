@@ -1,0 +1,452 @@
+package craft:plugin@0.1.0;
+
+/// Shared types. Command arguments and results stay JSON text: commands are
+/// data (RFC 0002), so one WIT serves every Craft app.
+interface types {
+  /// JSON text.
+  type json = string;
+
+  enum log-level { trace, debug, info, warn, error }
+
+  /// Typed errors every plugin entry and host call can return.
+  variant plugin-error {
+    /// The command or entry is not known.
+    unknown-entry(string),
+    /// Arguments failed the declared schema.
+    invalid-args(string),
+    /// The permission or capability was not granted.
+    denied(string),
+    /// A host limit was hit; nothing was applied.
+    limit-exceeded(string),
+    /// The user or the host cancelled the call.
+    cancelled,
+    /// The deadline or fuel ran out.
+    deadline,
+    /// The design changed under a job; the result is not adopted.
+    stale,
+    /// Anything else, with a message for the user.
+    failed(string),
+  }
+
+  /// A scalar the host can show, edit and store.
+  variant value {
+    none,
+    flag(bool),
+    integer(s64),
+    number(f64),
+    text(string),
+    /// A reference to a face, edge or body, stable across edits.
+    geometry-ref(string),
+  }
+
+  /// One entry in a panel's data, addressed by a slash path such as
+  /// "/tools/3/dia". Stored values are always mm and degrees.
+  record datum {
+    path: string,
+    value: value,
+  }
+
+  /// Colour roles. Plugins never send RGB.
+  enum color-role { accent, ok, warn, danger, dim, series-1, series-2, series-3, series-4, series-5, series-6, series-7, series-8 }
+}
+
+/// Bulk data. Millions of points do not go through JSON.
+interface buffers {
+  use types.{plugin-error};
+
+  enum element-type { bytes, index32, scalar32, vec2f, vec3f, vec4f }
+
+  /// An immutable block owned by the host. Created once, then handed to
+  /// viewport, formats or storage calls.
+  resource buffer {
+    constructor(kind: element-type, bytes: list<u8>);
+    kind: func() -> element-type;
+    /// Number of elements, not bytes.
+    length: func() -> u64;
+    /// Copy a range out, for example the bytes of an imported file.
+    read: func(offset: u64, count: u64) -> result<list<u8>, plugin-error>;
+  }
+
+  /// Start a buffer that is filled in pieces, for large output.
+  resource buffer-builder {
+    constructor(kind: element-type);
+    append: func(bytes: list<u8>) -> result<_, plugin-error>;
+    finish: func() -> result<buffer, plugin-error>;
+  }
+}
+
+/// Entries, host commands, logging and jobs. Every plugin imports this.
+interface commands {
+  use types.{json, log-level, plugin-error};
+
+  /// Run an engine command, for example "model.faces". Same surface as MCP.
+  execute: func(command: string, args: json) -> result<json, plugin-error>;
+  log: func(level: log-level, message: string);
+  /// Jobs only: report progress from 0.0 to 1.0.
+  progress: func(fraction: f32, message: string);
+  /// Jobs only: true once the user cancelled or the design changed.
+  cancelled: func() -> bool;
+  /// Milliseconds since the Unix epoch. Needs the "clock" permission.
+  now-ms: func() -> result<u64, plugin-error>;
+}
+
+/// The entry point every plugin exports.
+interface entries {
+  use types.{json, plugin-error};
+
+  /// Called for every manifest entry, as "<plugin>.<entry>". Ordinary
+  /// commands: journaled, undoable, bound by the entry's effect.
+  run: func(entry: string, args: json) -> result<json, plugin-error>;
+}
+
+/// Panels and workspaces. Host-drawn; a plugin ships no UI code.
+interface ui {
+  use types.{value, datum, color-role, plugin-error};
+
+  enum dock-zone { left, right, bottom }
+
+  /// Layouts are flat: nodes refer to children by index. WIT has no
+  /// recursive types, and the flat form is easy to validate and limit.
+  record layout {
+    /// Index of the root node.
+    root: u32,
+    nodes: list<node>,
+  }
+
+  record node {
+    widget: widget,
+  }
+
+  enum field-kind { number, length, angle, text, toggle, choice, selection }
+
+  record field {
+    key: string,
+    label: string,
+    kind: field-kind,
+    /// For choice fields.
+    choices: list<string>,
+    /// Entry called when the value changes. Absent: read-only.
+    on-change: option<string>,
+  }
+
+  record column {
+    key: string,
+    label: string,
+    /// "length", "angle" and so on; shown in the user's units.
+    unit: option<string>,
+  }
+
+  enum selection-mode { none, single, multi }
+
+  record table-spec {
+    /// Data path of the rows, for example "/tools".
+    bind: string,
+    row-id: string,
+    columns: list<column>,
+    select: selection-mode,
+    on-select: option<string>,
+    on-edit: option<string>,
+  }
+
+  record button-spec {
+    label: string,
+    icon: option<string>,
+    entry: string,
+  }
+
+  record chart-series {
+    label: string,
+    role: color-role,
+    /// Data path of the x and y lists.
+    x: string,
+    y: string,
+  }
+
+  enum chart-kind { line, bar, scatter }
+
+  variant widget {
+    /// Children are indexes into layout.nodes.
+    group(list<u32>),
+    tabs(list<tab>),
+    split(split-spec),
+    toolbar(list<button-spec>),
+    button(button-spec),
+    form(form-spec),
+    item-list(list-spec),
+    item-tree(tree-spec),
+    table(table-spec),
+    chart(chart-spec),
+    text(string),
+    progress(string),
+    empty-state(string),
+  }
+
+  record tab { label: string, child: u32 }
+  record split-spec { vertical: bool, first: u32, second: u32 }
+  record form-spec { bind: string, fields: list<field> }
+  record list-spec { bind: string, on-select: option<string> }
+  record tree-spec { bind: string, on-select: option<string> }
+  record chart-spec { kind: chart-kind, series: list<chart-series> }
+
+  record panel-spec {
+    id: string,
+    title: string,
+    zones: list<dock-zone>,
+    layout: layout,
+  }
+
+  record ribbon-group { name: string, entries: list<string> }
+  record ribbon-tab { name: string, groups: list<ribbon-group> }
+
+  enum design-kind { part, assembly, sketch, drawing }
+
+  record workspace-spec {
+    id: string,
+    name: string,
+    /// Name from the app icon registry.
+    icon: string,
+    applies-to: list<design-kind>,
+    ribbon: list<ribbon-tab>,
+    /// Panel ids per zone.
+    panels: list<tuple<dock-zone, list<string>>>,
+    /// Host panels kept, for example "browser".
+    builtin-panels: list<string>,
+    /// Read-only entries with a 1 s deadline.
+    on-enter: option<string>,
+    on-exit: option<string>,
+  }
+
+  record declarations {
+    /// Bump when widget kinds are added; unknown kinds draw a placeholder.
+    ui-version: u32,
+    panels: list<panel-spec>,
+    workspaces: list<workspace-spec>,
+  }
+
+  enum event-kind { press, select, edit, change, enter, exit }
+
+  record ui-event {
+    panel: string,
+    event: event-kind,
+    path: string,
+    row: option<string>,
+    value: option<value>,
+  }
+
+  /// Host calls, available to a plugin that declares the "ui" capability.
+  /// Replace some or all of a panel's data. Merged once per frame.
+  set-data: func(panel: string, updates: list<datum>) -> result<_, plugin-error>;
+  clear-data: func(panel: string) -> result<_, plugin-error>;
+  /// Show or hide a panel in the current workspace.
+  show-panel: func(panel: string, visible: bool) -> result<_, plugin-error>;
+}
+
+/// What a UI plugin exports. Static declarations are read at install time,
+/// so the approval screen can list them without running any entry.
+interface ui-provider {
+  use types.{plugin-error};
+  use ui.{declarations, ui-event};
+
+  describe: func() -> declarations;
+  /// The host turns user actions into events. They run as ordinary commands.
+  on-event: func(event: ui-event) -> result<_, plugin-error>;
+  /// Called when a plugin workspace is entered or left, if declared.
+  on-enter: func(workspace: string) -> result<_, plugin-error>;
+  on-exit: func(workspace: string) -> result<_, plugin-error>;
+}
+
+/// Overlay layers in the 3D view. Data only; nothing runs per frame.
+interface viewport {
+  use types.{color-role, plugin-error};
+  use buffers.{buffer};
+
+  type point3 = tuple<f32, f32, f32>;
+
+  enum line-style { solid, dashed, dotted }
+  enum frame { world-mm, design-local }
+
+  /// How an item is coloured: a role, or a scalar per vertex mapped through
+  /// the theme ramp.
+  variant paint {
+    role(color-role),
+    ramp(buffer),
+  }
+
+  record polyline {
+    id: string,
+    /// vec3f buffer.
+    points: buffer,
+    /// Optional scalar32 buffer: time of each vertex, for the scrubber.
+    times: option<buffer>,
+    paint: paint,
+    style: line-style,
+  }
+
+  record point-set {
+    id: string,
+    points: list<point3>,
+    role: color-role,
+  }
+
+  record label {
+    id: string,
+    at: point3,
+    text: string,
+  }
+
+  /// A mesh that can move with the scrubber.
+  record mesh {
+    id: string,
+    /// vec3f and index32 buffers.
+    positions: buffer,
+    triangles: buffer,
+    ghosted: bool,
+    track: option<track>,
+  }
+
+  record track {
+    t-start: f32,
+    t-end: f32,
+    /// vec3f buffer: one translation per time step.
+    translate: buffer,
+  }
+
+  record face-tint {
+    id: string,
+    faces: list<string>,
+    role: color-role,
+  }
+
+  variant item {
+    polyline(polyline),
+    points(point-set),
+    label(label),
+    mesh(mesh),
+    face-tint(face-tint),
+  }
+
+  record layer {
+    name: string,
+    frame: frame,
+    pickable: bool,
+    items: list<item>,
+  }
+
+  record marker { t: f32, label: string }
+  record timeline { duration: f32, unit: string, markers: list<marker> }
+
+  /// What the host sends back when a pickable layer is clicked.
+  record pick {
+    layer: string,
+    item: string,
+    /// Segment or vertex index.
+    index: u32,
+    point: point3,
+    t: option<f32>,
+  }
+
+  /// Replace a layer. Over the limit: limit-exceeded, nothing drawn.
+  set-layer: func(layer: layer) -> result<_, plugin-error>;
+  remove-layer: func(name: string) -> result<_, plugin-error>;
+  set-timeline: func(timeline: timeline) -> result<_, plugin-error>;
+}
+
+interface viewport-provider {
+  use types.{plugin-error};
+  use viewport.{pick};
+
+  on-pick: func(hit: pick) -> result<_, plugin-error>;
+}
+
+/// Import and export slots, shown in the app's Import and Export menus.
+interface formats {
+  use types.{plugin-error};
+  use ui.{field};
+
+  enum slot-kind { import-slot, export-slot }
+
+  record format-slot {
+    id: string,
+    kind: slot-kind,
+    extensions: list<string>,
+    label: string,
+    /// Option fields drawn as a form before an export.
+    options: list<field>,
+    /// Export only: also reads the design's plugin data.
+    needs-plugin-data: bool,
+  }
+
+  record loss-item { what: string, detail: string }
+
+  /// An import becomes a new unsaved design, with a loss report.
+  record import-result {
+    commands: list<string>,
+    losses: list<loss-item>,
+  }
+}
+
+interface formats-provider {
+  use types.{datum, plugin-error};
+  use buffers.{buffer};
+  use formats.{format-slot, import-result};
+
+  slots: func() -> list<format-slot>;
+  /// Bytes of the one file the user picked, plus its name.
+  import-file: func(slot: string, name: string, data: buffer) -> result<import-result, plugin-error>;
+  /// Returns bytes; the host writes them to the path the user picked.
+  export-file: func(slot: string, options: list<datum>) -> result<buffer, plugin-error>;
+}
+
+/// Per-design plugin data, stored in the .sc container under the plugin's
+/// own namespace. A plugin cannot reach another plugin's data.
+interface storage {
+  use types.{json, plugin-error};
+  use buffers.{buffer};
+
+  /// The data's own format number, so the plugin can migrate.
+  format-version: func() -> u32;
+
+  /// The main document. `set` and `patch` are edits: one undo step.
+  get: func() -> result<option<json>, plugin-error>;
+  set: func(document: json) -> result<_, plugin-error>;
+  /// RFC 7396 merge patch.
+  patch: func(merge-patch: json) -> result<_, plugin-error>;
+
+  record blob-options {
+    /// Cache blobs may be dropped by "save without caches" and rebuilt.
+    cache: bool,
+  }
+
+  put-blob: func(name: string, data: buffer, options: blob-options) -> result<_, plugin-error>;
+  get-blob: func(name: string) -> result<option<buffer>, plugin-error>;
+  delete-blob: func(name: string) -> result<_, plugin-error>;
+  list-blobs: func() -> result<list<string>, plugin-error>;
+}
+
+interface storage-provider {
+  use types.{plugin-error};
+
+  /// First call after an update, told the previous format. One undoable edit.
+  migrate: func(from-format: u32) -> result<_, plugin-error>;
+}
+
+/// A plugin that only runs commands. Phase 1.
+world command-plugin {
+  import commands;
+  import buffers;
+  export entries;
+}
+
+/// A plugin with panels, workspaces, overlays, file formats and design data.
+/// Which parts the host wires up follows the manifest's `capabilities`.
+world workbench-plugin {
+  include command-plugin;
+  import ui;
+  import viewport;
+  import formats;
+  import storage;
+  export ui-provider;
+  export viewport-provider;
+  export formats-provider;
+  export storage-provider;
+}

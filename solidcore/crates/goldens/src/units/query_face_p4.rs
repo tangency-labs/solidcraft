@@ -546,11 +546,11 @@ fn curves_face(
                 let ctr = at_frac(&dom, *a, *b);
                 let side = (dom.max().x - dom.min().x).min(dom.max().y - dom.min().y);
                 let mut frame = Axis2Placement::default();
-                // SetCanonical's status is ignored, as there
+                // UV curves lie in XY: SetCanonical takes the frame's X and Y axes.
                 let _ = frame.set_canonical(
                     Point3::new(ctr.x, ctr.y, 0.0),
-                    Point3::new(0.0, 0.0, 1.0),
                     Point3::new(1.0, 0.0, 0.0),
+                    Point3::new(0.0, 1.0, 0.0),
                 );
                 (
                     BSplineCurve::create_circle_segment(
@@ -656,7 +656,7 @@ pub(super) fn own_brep(
     init_gaps: bool,
 ) -> Result<Result<(Brep, [usize; 10]), Output>, HarnessError> {
     use super::topology_face_p2::{own_output, CONVENTIONS};
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let built = match brep {
         BrepIn::File { .. } | BrepIn::Face { .. } => {
             return Ok(super::topology_face_p2::own_brep(
@@ -740,7 +740,7 @@ pub(super) fn setup_error(e: &SolidError) -> Output {
 /// an upstream status. An unported callee or any other Rust error (an invalid input
 /// included: it can be a limitation of the runner's handles) is not ignored.
 fn ignored_status(e: &SolidError) -> bool {
-    matches!(e, SolidError::Upstream { .. })
+    solidcore::error::upstream_status(e).is_some()
 }
 
 /// The face props `SetProps_Stage3` has built when it calls `ClassifyLoops`, and its
@@ -967,7 +967,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 {
                     SM_ERR_INVALID_INPUT
                 }
-                SolidError::Upstream { code, .. } if *code == SM_ERR => f64::from(SM_ERR),
+                e if solidcore::error::upstream_status(e) == Some(SM_ERR) => f64::from(SM_ERR),
                 _ => return Ok(Output::err(format!("rust_error: {e}"))),
             }
         }
@@ -1354,6 +1354,368 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    /// #18342: the loops of a natural cylinder face 3.5e-3 tall (scale 1e-3) classify.
+    /// Its complete seams send `ClassifyLoops` through the bisector, an axial line over
+    /// the ±1234567 sentinel range; its two circle crossings, 1.43e-9 apart in the
+    /// bisector's parameter, were merged into one boundary, so the touches were only
+    /// [In, Out] and the loop tree had no root (`classifiable` 3, `NoLoopTreeRoot`).
+    #[test]
+    fn short_natural_cylinder_classifies_through_both_circle_crossings() {
+        let i = Inputs {
+            brep: BrepIn::Natural {
+                surface: AnySrf::Cylinder {
+                    scale: 1e-3,
+                    a: 0.6278941237582317,
+                    c: 3.538075172749348,
+                    swap: false,
+                },
+            },
+            validate_only: false,
+            init_gaps: true,
+            face: 32,
+            props: 1,
+            loops: 2,
+        };
+        let out = rust(&i).unwrap();
+        assert_eq!(out.error, None);
+        assert_eq!(out.ints.get("classifiable"), Some(&vec![0]));
+        assert_eq!(
+            out.ints.get("looptree").and_then(|t| t.first()),
+            Some(&1),
+            "{:?}",
+            out.ints.get("looptree")
+        );
+    }
+
+    /// `i` with its cylinder or cone `scale` multiplied by `f`.
+    fn scaled(i: &Inputs, f: f64) -> Inputs {
+        let mut i = i.clone();
+        if let BrepIn::Curves { surface, .. } | BrepIn::Natural { surface } = &mut i.brep {
+            if let AnySrf::Cylinder { scale, .. } | AnySrf::Cone { scale, .. } = surface {
+                *scale *= f;
+            }
+        }
+        i
+    }
+
+    /// `ClassifyLoops` of `i` gives the same answer as the same face 1000 times larger:
+    /// there no two crossings lie within the parameter snap band of the bisector or of
+    /// its ends, so the larger face is an independent reference.
+    fn assert_same_as_scaled_up(i: &Inputs) -> Output {
+        let out = rust(i).unwrap();
+        let big = rust(&scaled(i, 1e3)).unwrap();
+        assert_eq!(out.error, None);
+        assert_eq!(big.error, None);
+        assert_eq!(out.ints, big.ints, "scale {:?}", i.brep);
+        assert_eq!(out.values, big.values, "scale {:?}", i.brep);
+        out
+    }
+
+    /// #18342: `cyl_natural_1e-3_gen0157` itself (`swap: true`). Its bisector's ends leave
+    /// the face across no seam image an edge use could bound, so their type is `None`
+    /// (1), as for the same face at scale 1. Before the fix the two circle crossings
+    /// merged into the bisector's ends and both were typed `SeamNoEdgeuse` (9).
+    #[test]
+    fn short_natural_cylinder_gen0157_bisector_ends_are_none() {
+        let i = Inputs {
+            brep: BrepIn::Natural {
+                surface: AnySrf::Cylinder {
+                    scale: 1e-3,
+                    a: 0.6278941237582317,
+                    c: 3.538075172749348,
+                    swap: true,
+                },
+            },
+            validate_only: false,
+            init_gaps: true,
+            face: 32,
+            props: 1,
+            loops: 2,
+        };
+        let out = assert_same_as_scaled_up(&i);
+        assert_eq!(out.ints.get("classifiable"), Some(&vec![0]));
+        assert_eq!(out.ints.get("start_stop"), Some(&vec![1, 1]));
+    }
+
+    /// #18342: two opposite u-isolines 1e-6 apart in normalized v on a cylinder (the
+    /// faces of generated cases 84 and 331 with every loop as target), 3.1e-6 and 2.6e-6
+    /// apart in 3D against a classification pair tolerance of 2e-7, are a no-area pair:
+    /// each crossing keeps its own point of the bisector.
+    #[test]
+    fn close_opposite_isolines_classify_as_a_no_area_pair() {
+        for (a, c, v0, v1, face) in [
+            (0.7503165792421282, 3.1025197902685333, 0.08420134538839802, 0.08420234538839802, 50),
+            (1.7416486248859733, 2.5778465526264056, 0.3680146569383668, 0.3680156569383668, 30),
+        ] {
+            let line = |a: f64, b: f64, c: f64, d: f64| {
+                serde_json::json!({"t": "line", "a": a, "b": b, "c": c, "d": d, "rev": false})
+            };
+            let i: Inputs = serde_json::from_value(serde_json::json!({
+                "brep": {
+                    "kind": "curves",
+                    "copies": 1,
+                    "surface": {"kind": "cylinder", "scale": 1.0, "a": a, "c": c, "swap": false},
+                    "loops": [[line(0.0, v0, 1.0, v0)], [line(1.0, v1, 0.0, v1)]],
+                    "points": []
+                },
+                "init_gaps": false,
+                "face": face,
+                "props": 1,
+                "loops": 1
+            }))
+            .unwrap();
+            let out = assert_same_as_scaled_up(&i);
+            assert_eq!(out.ints.get("classifiable"), Some(&vec![0]));
+            assert_eq!(out.ints.get("ordered_no_area"), Some(&vec![0, 1]));
+            assert_eq!(out.ints.get("start_stop"), Some(&vec![1, 1]));
+        }
+    }
+
+    /// #18342: four parallel circles on a cone at scale 1e-3 (generated case 73) nest as
+    /// they do on the same cone at scale 1. The seam classification's crossings lie
+    /// 2.0e-9 to 2.1e-9 from its start in the curve's parameter but about 5e-3 from it
+    /// in 3D; compared with the face's UV tolerance they were taken as touches on the
+    /// curve's start (`Lamina`), so loop 3 dropped out of the tree.
+    #[test]
+    fn cone_parallel_circles_at_small_scale_nest_as_at_scale_one() {
+        let mut rng = Rng::new(CaseContext::seed_for("query.face_p4", 73));
+        let i = gen_case(&mut rng);
+        let out = assert_same_as_scaled_up(&i);
+        assert_eq!(out.ints.get("ordered_no_area"), Some(&vec![3, 2, 1, 0]));
+    }
+
+    /// #18342: a cone face at scale 1e-3 (generated case 381) gives the answer of the
+    /// same face at scale 1. Loops 0 and 1 are opposite u-isolines 1e-9 apart in
+    /// normalized v, each with one vertex on the U seam; the two vertices coincide to the
+    /// scaled zero (gaps 2.2e-19 and 0, seam parameters 1.0e-18 apart). The seam
+    /// classification used to keep the vertex with the smaller gap, rounding noise that
+    /// gave the crossing to loop 1 at this scale and to loop 0 at scale 1; with loop 1
+    /// crossed once, its seam walk had no entry and `ClassifyLoops` returned `SM_ERR`.
+    /// Now the first vertex (loop 0's) is kept at both scales: loop 0 is the seam pass's
+    /// no-area loop, the bisector meets loop 1 at no crossing (`NoClassifyZeroCrosscnt`),
+    /// and the ends are the pole without a vertex and none. Stage 3 reads that as not yet
+    /// healable (1040) at both scales, base's answer.
+    #[test]
+    fn coincident_seam_vertices_on_a_small_cone_classify_as_at_scale_one() {
+        use solidcore::error::heal::HealFailure;
+        use solidcore::heal::face_props::HealerOpType;
+        let mut rng = Rng::new(CaseContext::seed_for("query.face_p4", 381));
+        let i = gen_case(&mut rng);
+        let out = assert_same_as_scaled_up(&i);
+        assert_eq!(out.values.get("status"), Some(&vec![0.0]));
+        assert_eq!(
+            out.ints.get("classifiable"),
+            Some(&vec![HealNotYetFaceType::NoClassifyZeroCrosscnt.code()])
+        );
+        assert_eq!(
+            out.ints.get("start_stop"),
+            Some(&vec![
+                CrvDirOnFaceType::PoleNoVertex as i64,
+                CrvDirOnFaceType::None as i64
+            ])
+        );
+        assert_eq!(out.ints.get("ordered_no_area"), Some(&vec![0]));
+
+        // the healer's view: Stage 3 of the same face, all its loops, at both scales
+        for i in [i.clone(), scaled(&i, 1e3)] {
+            let k = Kernel::default();
+            let (mut b, _) = own_brep(&i.brep, i.validate_only, i.init_gaps)
+                .unwrap()
+                .unwrap();
+            let fi = i.face as usize % b.faces().len();
+            let face = FaceId::from_index(u32::try_from(fi).unwrap());
+            let mut props: FaceProps<H> = FaceProps::for_face(face, fi as u64);
+            let r = props.set_props_stage3_mut(&k, &mut b, face, fi as u64, HealerOpType::All);
+            let e = r.unwrap_err();
+            assert!(
+                matches!(e.heal_failure(), Some(HealFailure::NotYetHealable)),
+                "{e:?}"
+            );
+            assert!(props.has_not_yet_problems());
+        }
+    }
+
+    /// Closed-form bounds on the distance between edges 0 and 1 of `i`'s B-rep, two full
+    /// circles: `(lower, upper, zone_tol_3d)`. Every point of edge 0 is at least `lower`
+    /// from edge 1, and each point of either lies within `upper` of the other.
+    ///
+    /// For circles `c_i + r_i u_i(θ)`, `u_i = cos θ x_i + sin θ y_i`, the points at the
+    /// same angle θ differ by `Δc + Δr u_0 + r1 (u_0 - u_1)` (`Δc = c0 - c1`,
+    /// `Δr = r0 - r1`). As `|u_0| = 1` and `Δc·u_0 = Δc_⊥0·u_0` (`Δc_⊥0` the part of `Δc`
+    /// in circle 0's plane), `|Δc + Δr u_0|² <= |Δc|² + Δr² + 2 |Δr| |Δc_⊥0|`, and
+    /// `|u_0 - u_1| <= |x0 - x1| + |y0 - y1|`: the root of the first plus `r1` times the
+    /// second bounds the distance. With `n` the unit axis of circle 1 and
+    /// `e = |x0·n| + |y0·n|` (circle 0's tilt to it), a point `p` of circle 0 lies
+    /// `|(p - c1)·n| >= |(c0 - c1)·n| - r0 e` off circle 1's plane and at a distance from
+    /// its axis within `|r0 - r1| - |(c0 - c1)_⊥| - r0 e` of `r1`; either is a lower
+    /// bound on its distance to circle 1. The rounding of these few products and sums is
+    /// a few ulps (1e-16 relative) of the largest term, far below the closest margin
+    /// asserted: at ×10 the upper bound is 9.945e-9 against 1e-8, 0.55% below it.
+    ///
+    /// Premises asserted: both edge curves are ellipses with equal radii (circles), and
+    /// each edge is the whole circle: a positive interval whose ends evaluate to the same
+    /// point, on a 360-degree domain.
+    fn circle_gap_bounds(i: &Inputs) -> (f64, f64, f64) {
+        use solidcore::curve::curve::p2::CurveKind;
+        use solidcore::topology::edge as topo_edge;
+        let k = Kernel::default();
+        let (mut b, _) = own_brep(&i.brep, i.validate_only, i.init_gaps).unwrap().unwrap();
+        let (_face, props, _loops) = setup(&k, &mut b, i).unwrap().unwrap();
+        let edges = solidcore::topology::brep::p1::edges(&b, None).unwrap();
+        let circles: Vec<(Point3, Point3, Point3, f64)> = edges
+            .iter()
+            .take(2)
+            .map(|&e| {
+                let c = topo_edge::evaluation_curve(&b, e).unwrap().unwrap();
+                let iv = topo_edge::interval(&b, e).unwrap();
+                let CurveKind::Ellipse(el) = c.kind() else { panic!("edge {e:?} is no ellipse") };
+                let can = el.canonical();
+                assert_eq!(can.radius_x, can.radius_y, "edge {e:?} is no circle");
+                assert_eq!(can.domain.max() - can.domain.min(), 360.0, "edge {e:?}");
+                assert!(iv.max() > iv.min(), "edge {e:?}");
+                let (a, z) = (c.evaluate_point(&k, iv.min()).unwrap(), c.evaluate_point(&k, iv.max()).unwrap());
+                assert!(a.distance(z) <= 1e-12 * can.radius_x, "edge {e:?} is no whole circle");
+                let pos = can.position;
+                (pos.origin(), pos.x_axis(), pos.y_axis(), can.radius_x)
+            })
+            .collect();
+        let [(c0, x0, y0, r0), (c1, x1, y1, r1)] = circles[..] else { panic!("two edges") };
+        let dc = c0 - c1;
+        let n0 = x0.cross(y0);
+        let n0 = n0 * (1.0 / n0.length());
+        let dr = (r0 - r1).abs();
+        let in_plane0 = (dc - n0 * dc.dot(n0)).length();
+        let upper = (dc.dot(dc) + dr * dr + 2.0 * dr * in_plane0).sqrt()
+            + r1 * ((x0 - x1).length() + (y0 - y1).length());
+        let n = x1.cross(y1);
+        let n = n * (1.0 / n.length());
+        let tilt = x0.dot(n).abs() + y0.dot(n).abs();
+        let axial = dc.dot(n).abs();
+        let radial = (dc - n * dc.dot(n)).length();
+        let lower = (axial - r0 * tilt).max((r0 - r1).abs() - radial - r0 * tilt);
+        (lower, upper, props.zone_tol_3d)
+    }
+
+    /// #18342: generated case 309, a cone at scale 1e-3 whose loops 0 and 1 are two
+    /// circles 9.9e-10 apart (a hundredth of the face's 1e-7 zone tolerance). It gives
+    /// the answer of the same face 3 and 10 times larger, where the circles are still
+    /// within a tenth of the tolerance: `NotYet` with both bisector ends typed as at every
+    /// larger scale ([8, 1]). The face 1000 times larger is no reference here: its
+    /// circles are 9.9e-7 apart, ten times the tolerance, and classify as distinct loops.
+    /// Before the fix the coincident seam vertices of loops 0 and 1 picked the classified
+    /// vertex by rounding noise, and the face at scales 1 and 3 was refused (`SM_ERR`).
+    #[test]
+    fn coincident_circles_on_a_small_cone_gen0309_classify_as_at_three_and_ten_times() {
+        let mut rng = Rng::new(CaseContext::seed_for("query.face_p4", 309));
+        let i = gen_case(&mut rng);
+        let out = rust(&i).unwrap();
+        assert_eq!(out.error, None);
+        assert_eq!(out.values.get("status"), Some(&vec![0.0]));
+        assert_eq!(out.ints.get("classifiable"), Some(&vec![HealNotYetFaceType::NoClassifyZeroCrosscnt.code()]));
+        assert_eq!(
+            out.ints.get("start_stop"),
+            Some(&vec![CrvDirOnFaceType::PoleNoVertex as i64, CrvDirOnFaceType::None as i64])
+        );
+        for f in [1.0, 3.0, 10.0] {
+            let (_, gap, tol) = circle_gap_bounds(&scaled(&i, f));
+            assert!(gap < 0.1 * tol, "x{f}: {gap:e} {tol:e}");
+            if f > 1.0 {
+                let o = rust(&scaled(&i, f)).unwrap();
+                assert_eq!(o.error, None);
+                assert_eq!(o.ints, out.ints, "x{f}");
+            }
+        }
+        let (gap, _, tol) = circle_gap_bounds(&scaled(&i, 1e3));
+        assert!(gap > 5.0 * tol, "x1e3: {gap:e} {tol:e}");
+    }
+
+    /// #18342: generated case 22 (a cone at scale 1e-3) gives the answer of the same face
+    /// at scale 1: its start is the pole without a vertex (`PoleNoVertex`, 8), not the
+    /// `Pole` (7) of a loop vertex that the parameter snap merged into the start.
+    #[test]
+    fn small_cone_gen0022_start_is_the_pole_without_a_vertex_as_at_scale_one() {
+        let mut rng = Rng::new(CaseContext::seed_for("query.face_p4", 22));
+        let out = assert_same_as_scaled_up(&gen_case(&mut rng));
+        assert_eq!(
+            out.ints.get("start_stop").and_then(|s| s.first()),
+            Some(&(CrvDirOnFaceType::PoleNoVertex as i64))
+        );
+    }
+
+    /// #18342: generated case 247 (a natural cylinder at scale 1e-3) gives the answer of
+    /// the same face at scale 1, `scratch_size` included: its boundary loop crosses no v
+    /// seam, so `ClassifyLoops` builds the bisector, whose final reset leaves one
+    /// interval. Before the fix two snapped crossings sent it down the seam path (0).
+    #[test]
+    fn natural_cylinder_gen0247_uses_the_bisector_as_at_scale_one() {
+        let mut rng = Rng::new(CaseContext::seed_for("query.face_p4", 247));
+        let out = assert_same_as_scaled_up(&gen_case(&mut rng));
+        assert_eq!(out.ints.get("scratch_size"), Some(&vec![1]));
+        assert_eq!(out.ints.get("classifiable"), Some(&vec![0]));
+    }
+
+    /// A circular UV trim spans both axes and winds in the requested direction.
+    #[test]
+    fn circular_trims_keep_their_uv_bounds_and_orientation() {
+        use super::super::topology_edgeuse_p1::BssIn;
+        use solidcore::topology::face::p2::loops;
+        use solidcore::topology::face::p3::compute_loop_orientation;
+
+        for rev in [false, true] {
+            let mut k = Kernel::default();
+            let mut b = Brep::new_with_infinite_region().unwrap();
+            let surface = AnySrf::Bspline {
+                surface: SrfIn::Bspline(BssIn {
+                    oob: false,
+                    form: 0,
+                    net: vec![
+                        vec![[0.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0]],
+                        vec![[1.0, 0.0, 0.0, 1.0], [1.0, 1.0, 0.0, 1.0]],
+                    ],
+                    p: 1,
+                    q: 1,
+                    u: vec![0.0, 0.0, 1.0, 1.0],
+                    v: vec![0.0, 0.0, 1.0, 1.0],
+                }),
+            };
+            // A unit square's UV domain: centre (0.3, 0.5), radius 0.1.
+            let trims = vec![vec![CurveIn::Circle {
+                a: 0.3,
+                b: 0.5,
+                r: 0.1,
+                rev,
+            }]];
+            curves_face(&mut k, &mut b, &surface, &trims, &[])
+                .unwrap()
+                .unwrap();
+            assert_eq!(b.faces().len(), 1);
+            let face = FaceId::from_index(0);
+            let loops = loops(&b, face, false, None).unwrap();
+            assert_eq!(loops.len(), 1);
+            let mut bounds = Extent2d::new();
+            let orientation = compute_loop_orientation(
+                &k,
+                &mut b,
+                face,
+                loops[0],
+                Some(&mut bounds),
+                false,
+            )
+            .unwrap();
+            assert!(
+                (bounds.min().x - 0.2).abs() < 1e-12
+                    && (bounds.max().x - 0.4).abs() < 1e-12
+                    && (bounds.min().y - 0.4).abs() < 1e-12
+                    && (bounds.max().y - 0.6).abs() < 1e-12,
+                "rev={rev}: circular trim bounds {bounds:?}"
+            );
+            assert_eq!(
+                orientation,
+                if rev { OrientType::Opposite } else { OrientType::Same }
+            );
+        }
+    }
 
     /// Most generated cases reach a real classification (not a build failure or a
     /// rejection).

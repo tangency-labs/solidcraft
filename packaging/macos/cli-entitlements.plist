@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Plugins run as WebAssembly compiled to machine code when they load (wasmtime with Cranelift,
+	     crates/craft-plugin-wasm). The hardened runtime kills a process that makes such memory
+	     executable unless it has this entitlement; allow-jit alone is not enough, because wasmtime does
+	     not map its code with MAP_JIT. Without it, Run Plugin ends the app at once (#16141). -->
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+</dict>
+</plist>

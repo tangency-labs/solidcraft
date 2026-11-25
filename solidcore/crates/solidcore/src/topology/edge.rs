@@ -57,13 +57,19 @@
 //! - **UB-290** (unconditional, the fork's tangency-labs/smlib@8d0fbff): [`is_topological`]
 //!   refuses an edge with one face on both sides whose primary edge use and its radial
 //!   are in two loop uses, which `SmBrep::DeleteEdge` would merge into itself.
+//! - **A clear point first** (not upstream). [`find_radial_sector_between`] looks first for a
+//!   point of the edge where every candidate classifies from the faces' binormals at the
+//!   edge (`query::edge::radial_sector_classify_at_edge`), in upstream's order of points,
+//!   and steps the faces off the edge, as upstream, only where the edge has no such point.
+//!   Where the first point decides at the edge, as it does unless the faces are within 10
+//!   degrees of each other there, the answer is upstream's.
 //! - **Surface identity.** Upstream compares `SmSurface*` pointers (the target of
 //!   `GetUVTrimCurveOfSurface`, `IsSeam(const SmSurface&)`, `IsTopological`'s two
 //!   surfaces). A port face owns its surface, so a surface is named by the face holding
 //!   it: two surfaces are the same when their faces are.
 //! - **Null pointers.** Where upstream dereferences a null pointer (no primary edge
 //!   use, vertex use, mate, shell, face, curve, ...) the port returns
-//!   [`SolidError::InvalidInput`]. Statuses are [`SolidError::Upstream`] with the
+//!   [`SolidError::InvalidInput`]. Statuses are a [`TopologyFailure`](crate::error::topology::TopologyFailure) with the
 //!   upstream code (`SM_ERR`, `SM_ERR_INVALID_INPUT`). A collection upstream fills with
 //!   null entries (`GetShells`, `GetRegions`, `GetVertices`, `GetVertexuses`) holds
 //!   `None`s.
@@ -108,7 +114,7 @@
 //! - **Recursion.** `sm_CoverOtherCoincidentFace` recurses once (its second call has
 //!   `bRefineDomains` set); no other recursion.
 //! - **Not upstream: a stored-domain cover stays within one period** (the fork's
-//!   tangency-labs/smlib@b518bbe, under `Kernel::fixes.cover_wraps_across_closed_seam`):
+//!   tangency-labs/smlib@b518bbe, with WR-599's cover across a wrapped seam):
 //!   `sm_CoverOtherCoincidentFace` passes `bRefineDomains` as the cover's
 //!   `bAcrossWrappedSeams`, so only its trim-derived attempt crosses a wrapped seam.
 //! - **Unported callees** return [`SolidError::Unported`]: `SmBrep::GetInfiniteRegion`
@@ -121,7 +127,8 @@
 pub mod edge_form;
 
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignore_status, EntityRef, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{ignore_status, EntityRef, Failure, Result, SolidError};
 use crate::geom::a_object;
 use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::context::Context;
@@ -129,14 +136,17 @@ use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::tol::{are_same_to_tol, scaled_zero2};
-use crate::heal::gap::{EdgeFaceGap, VertexEdgeGap};
+use crate::heal::gap::{EdgeEdgeGap, EdgeFaceGap, VertexEdgeGap};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
-use crate::query::edge::{radial_sector_of_curve_classify, CurveSectorClass, RadialSectorClass};
+use crate::query::edge::{
+    radial_sector_classify_at_edge, radial_sector_of_curve_classify, CurveSectorClass,
+    RadialSectorClass,
+};
 use crate::surface::surface::p2::PLANE_TYPE;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p2::{self as brep_p2, NotifyArg as BrepNotifyArg};
@@ -170,8 +180,6 @@ pub const CLASS_STRING: &str = "SmEdge";
 
 /// `SmBrep_TYPE` (the `SM_CAST_PTR(SmBrep, ..)` of `Notify`).
 const BREP_TYPE: i64 = 16011;
-// `SM_ERR_INVALID_INPUT`.
-use crate::error::SM_ERR_INVALID_INPUT;
 
 /// `SmEdge::IsKindOf`: `SmEdge_TYPE` or a base class type.
 #[must_use]
@@ -181,14 +189,6 @@ pub const fn is_kind_of(t: i64) -> bool {
 
 fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
-}
-
-fn status(code: i32) -> SolidError {
-    SolidError::Upstream {
-        operation: OP,
-        code,
-        entity: None,
-    }
 }
 
 impl Edge {
@@ -355,12 +355,9 @@ fn cover_other_coincident_surface(
                 "covered surface owned by another face",
             ));
         };
-        // (passed on with the opt-in fix: the fork's `SER` in CoverCoincidentSurface,
-        // WR-663, tangency-labs/smlib 21dcf69)
-        crate::error::ignore_or_pass_on(
-            crate::topology::face::p1::remove_uv_trim_curves(b, face),
-            k.fixes.query_statuses_pass_on,
-        )?;
+        // (passed on: the fork's `SER` in CoverCoincidentSurface, WR-663,
+        // tangency-labs/smlib 21dcf69)
+        crate::topology::face::p1::remove_uv_trim_curves(b, face)?;
     }
     Ok(Cover {
         max_dist: r.max_dist,
@@ -397,9 +394,24 @@ pub fn interval(b: &Brep, e: EdgeId) -> Result<Extent1d> {
     Ok(b.edge(e)?.interval)
 }
 
-/// `SetInterval`.
+/// `SetInterval`. The cached gaps measured over the old interval go with it: each edge
+/// use's largest edge/face gap and its gap to the counter-clockwise edge use, the
+/// clockwise neighbour's gap to it (measured at this edge's start), and each vertex use's
+/// vertex/edge gap. Upstream assigns the interval and keeps them (#20939).
 pub fn set_interval(b: &mut Brep, e: EdgeId, new_interval: &Extent1d) -> Result<()> {
     b.edge_mut(e)?.interval = *new_interval;
+    for eu in b.edge(e)?.edgeuses.clone() {
+        let use_ = b.edgeuse_mut(eu)?;
+        use_.max_edge_face_gap = EdgeFaceGap::new();
+        use_.edge_ccw_edge_gap = EdgeEdgeGap::new();
+        let (cw, vu) = (use_.cw, use_.vertexuse);
+        if let Some(cw) = cw {
+            b.edgeuse_mut(cw)?.edge_ccw_edge_gap = EdgeEdgeGap::new();
+        }
+        if let Some(vu) = vu {
+            b.vertexuse_mut(vu)?.vertex_edge_gap = VertexEdgeGap::new();
+        }
+    }
     Ok(())
 }
 
@@ -507,14 +519,14 @@ impl<'c> OdeEdgeLength<'c> {
 
         let pv = self.curve.evaluate(k, t, 1, true, true)?;
         let (Some(&p0), Some(&p1)) = (pv.first(), pv.get(1)) else {
-            return Err(null("SmODEEdgeLengthIFEO::Evaluate: short evaluation"));
+            return Err(null("edge length integrand: short evaluation"));
         };
         let p0 = p0 - self.origin_of_computation;
 
         let ipnt = p0; // Point to integrate
         let Some(out) = dydx.get_mut(..28) else {
             return Err(null(
-                "SmODEEdgeLengthIFEO::Evaluate: derivative array shorter than 28",
+                "edge length integrand: derivative array shorter than 28",
             ));
         };
         let mut put = |i: usize, v: f64| {
@@ -720,6 +732,25 @@ pub fn upward_edgeuse_of_face(
     Ok(None)
 }
 
+/// Not upstream: whether `face` lies on both sides of the edge, two of the edge's uses on
+/// the face's upward face use (a seam: the face closing on itself across the edge). Such an
+/// edge bounds no material; it is where the surface's parametrisation ends
+/// (docs/booleans.md, "Seams and poles").
+///
+/// # Errors
+///
+/// Those of the face use and edge use queries.
+pub fn face_on_both_sides(b: &Brep, e: EdgeId, face: FaceId) -> Result<bool> {
+    let upward = face2::upward_faceuse(b, face)?;
+    let mut count = 0usize;
+    for eu in edgeuses(b, e, None, None)? {
+        if eu1::face(b, eu)? == Some(face) && eu1::faceuse(b, eu)? == upward {
+            count += 1;
+        }
+    }
+    Ok(count >= 2)
+}
+
 // ---- radial sectors ---------------------------------------------------------------------
 
 /// The answer of [`find_radial_sector`] / [`find_radial_sector_of_curve`].
@@ -749,7 +780,9 @@ fn failed(e: SolidError) -> Result<()> {
 /// `FindRadialSector`: the radial sector of this edge containing the face of
 /// `classify_eu`, among the edge uses of `region` (all regions when `None`) with
 /// orientation `required_orientation`. Up to ten edge points are tried until a
-/// classification is unique. `inside_faceuses` is passed on unused, as upstream.
+/// classification is unique: first one where the faces' binormals at the edge decide (not
+/// upstream), then, as upstream, with the faces stepped off the edge. `inside_faceuses` is
+/// passed on unused, as upstream.
 ///
 /// # Errors
 ///
@@ -810,7 +843,7 @@ pub fn find_radial_sector_between(
 
     // no work - no candidate edgeuses after culling
     if cands.is_empty() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology(OP, TopologyFailure::NoRadialCandidate));
     }
 
     // Special case: one possible answer and a region
@@ -830,6 +863,48 @@ pub fn find_radial_sector_between(
         eu1::faceuse(b, eu)
     };
 
+    // (not upstream) First a point where every candidate's faces leave the edge at a clear
+    // angle, read at the edge alone; only where the edge has none are the faces stepped off
+    // it. Near tangent, the steps read the faces where they part, and a stretch of face that
+    // runs within the tolerance of the other can lead them past the face to where the
+    // surfaces cross back: where two equal holes cross a hair off each other's axes, the
+    // midpoint of an edge round the tip of one hole's lens in the other's wall sits in a
+    // neck 0.018 mm wide, the walls within 1e-5 of each other, and the steps that ran on past
+    // the next tip put the face in the holes' space.
+    for ii in 0u32..10 {
+        let param = if ii == 0 { 0.5 } else { f64::from(ii) / 11.0 };
+        let mut inside = None;
+        let mut clear = true;
+        for &eu in &cands {
+            match radial_sector_classify_at_edge(
+                k,
+                b,
+                e,
+                param,
+                eu,
+                other.as_deref_mut(),
+                classify_eu,
+            ) {
+                Ok(Some(RadialSectorClass::Inside)) => {
+                    inside = Some(eu);
+                    break;
+                }
+                Ok(Some(_)) => {}
+                Err(err) if err.is_unported_or_cancelled() => return Err(err),
+                // a point that does not classify at the edge is left to the steps below,
+                // which report its failure where they reach it
+                Ok(None) | Err(_) => {
+                    clear = false;
+                    break;
+                }
+            }
+        }
+        if let (true, Some(eu)) = (clear, inside) {
+            out.radial_edgeuse = Some(eu);
+            return Ok(out);
+        }
+    }
+
     // for 10 points along the edge until one classifies uniquely
     for ii in 0u32..10 {
         let param = if ii == 0 { 0.5 } else { f64::from(ii) / 11.0 };
@@ -847,9 +922,11 @@ pub fn find_radial_sector_between(
                 classify_eu,
             ) {
                 Ok(c) => c,
+                Err(err) if err.is_unported_or_cancelled() => return Err(err),
                 Err(err) => {
-                    failed(err)?;
-                    return Err(SolidError::sm_err(OP));
+                    return Err(Failure::new(OP, TopologyFailure::EdgeUseNotClassified)
+                        .caused_by(err)
+                        .into_error());
                 }
             };
 
@@ -902,7 +979,10 @@ pub fn find_radial_sector_between(
     }
 
     // No valid answers found is a valid case.
-    Err(SolidError::sm_err(OP))
+    Err(SolidError::topology(
+        OP,
+        TopologyFailure::NoRadialSectorBetween,
+    ))
 }
 
 /// `FindRadialSectorOfCurve`: the radial sector of this edge containing `curve` (over
@@ -1001,7 +1081,10 @@ pub fn reset_primary_edgeuse(
     // Given EU must be one of ours.
     let pos = new_primary.and_then(|p| list.iter().position(|&x| x == p));
     let (Some(pos), Some(new_primary)) = (pos, new_primary) else {
-        return Err(status(SM_ERR_INVALID_INPUT));
+        return Err(SolidError::topology(
+            OP,
+            TopologyFailure::NewPrimaryNotOnEdge,
+        ));
     };
 
     // Do the update.
@@ -1117,7 +1200,10 @@ pub fn insert_manifold_edge_end(
 
     // check state: ThisEdge expected to be a manifold edge with 4 Edgeuses
     let [a0, a1, a2, a3] = list.as_slice() else {
-        return Err(status(SM_ERR_INVALID_INPUT));
+        return Err(SolidError::topology(
+            OP,
+            TopologyFailure::NotFourEdgeUses { found: list.len() },
+        ));
     };
     let (top1, bot1, bot2, top2) = if is_start_vertex {
         (*a0, *a1, *a2, *a3)
@@ -1841,8 +1927,8 @@ fn cover_other_coincident_face(
         }
     }
 
-    // SolidCraft fork (tangency-labs/smlib@b518bbe), under
-    // `Kernel::fixes.cover_wraps_across_closed_seam`: across a seam the covering surface
+    // SolidCraft fork (tangency-labs/smlib@b518bbe), with WR-599's cover across a
+    // wrapped seam: across a seam the covering surface
     // wraps only on the trim-derived bounds. The stored domains are conservative and may
     // be the faces' whole surfaces: across the seam they cover too, and the merged face
     // took them as its domain (360 x 208 for half-turn faces whose trims span 180 x 3).
@@ -1892,6 +1978,61 @@ pub fn is_topological(
     b: &mut Brep,
     e: EdgeId,
     approx_tol_3d_gain: f64,
+) -> Result<Topological> {
+    is_topological_with(k, b, e, CoverTolerance::Gain(approx_tol_3d_gain))
+}
+
+/// Not upstream (#15418): [`is_topological`] where two faces on different surfaces merge only
+/// where neither face's tolerance has to grow: one surface covers the other face within a
+/// tenth of the smaller face tolerance `t`, the distance under which `boolean_post_process`
+/// raises no tolerance upstream. A plane covers within upstream's own plane tolerance (gain
+/// 10, `5 t / 10000`), already below `t / 10`; anything else within `t / 10` (gain 0.2), which
+/// also scales the planarity test of a non-analytic face. Upstream's gain of 10 lets a curved
+/// face cover within `5 t` and the caller raises only the kept face's tolerance, leaving the
+/// other face's vertices and edges off the merged face.
+///
+/// # Errors
+///
+/// Those of [`is_topological`].
+pub fn is_topological_without_growth(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<Topological> {
+    is_topological_with(k, b, e, CoverTolerance::NoGrowth)
+}
+
+/// How [`is_topological_with`] sizes its cover tolerance from half the smaller face tolerance.
+#[derive(Debug, Clone, Copy)]
+enum CoverTolerance {
+    /// Upstream's `approx_tol_3d_gain`: that gain times half the smaller face tolerance, a
+    /// ten-thousandth of it for a plane.
+    Gain(f64),
+    /// [`is_topological_without_growth`]: a tenth of the smaller face tolerance (gain 0.2), and
+    /// for a plane upstream's gain of 10 over 10000.
+    NoGrowth,
+}
+
+impl CoverTolerance {
+    /// The tolerance of the cover and of the planarity test, from half the smaller face
+    /// tolerance.
+    fn approx(self, half_min: f64) -> f64 {
+        match self {
+            Self::Gain(g) => g * half_min,
+            Self::NoGrowth => 0.2 * half_min,
+        }
+    }
+
+    /// The cover tolerance where the first face's surface is a plane.
+    fn plane(self, half_min: f64) -> f64 {
+        match self {
+            Self::Gain(g) => g * half_min / 10000.0,
+            Self::NoGrowth => 10.0 * half_min / 10000.0,
+        }
+    }
+}
+
+fn is_topological_with(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    gain: CoverTolerance,
 ) -> Result<Topological> {
     let mut out = Topological {
         is_topological: false,
@@ -2095,8 +2236,8 @@ pub fn is_topological(
             Some(face2::uv_domain(b, face1)?.union(&face2::uv_domain(b, face2_)?));
     } else {
         // Get tolerance.
-        let mut approx_tol = approx_tol_3d_gain
-            * (0.5 * face2::tolerance(b, face1)?).min(0.5 * face2::tolerance(b, face2_)?);
+        let half_min = (0.5 * face2::tolerance(b, face1)?).min(0.5 * face2::tolerance(b, face2_)?);
+        let mut approx_tol = gain.approx(half_min);
 
         // Do this only for Analytic surfaces, because they are extendable.
         if !(surf1.is_analytic()? || surf1.is_planar(k, approx_tol)?.is_planar) {
@@ -2108,18 +2249,26 @@ pub fn is_topological(
 
         // If we have planes use a much tighter coincidence check tolerance
         if surf1.is_kind_of(PLANE_TYPE)? {
-            approx_tol /= 10000.0;
+            approx_tol = gain.plane(half_min);
         }
 
-        // See if this surface can 'cover' the part of the other surface that its face uses
-        let (dist, keep, merged) =
-            match cover_other_coincident_face(k, b, face1, face2_, approx_tol, false) {
-                Ok(r) => r,
-                Err(err) => {
-                    failed(err)?;
-                    return Ok(out);
-                }
-            };
+        // See if this surface can 'cover' the part of the other surface that its face uses.
+        // Not upstream (tangency-labs/solidcore#3399): a test that grows no tolerance fits the
+        // trims it builds for the faces' domains tightly where a loose fit would raise an edge
+        // (`Caches::refit_raising_trims`).
+        let refit = k
+            .caches
+            .refit_raising_trims
+            .replace(matches!(gain, CoverTolerance::NoGrowth));
+        let covered = cover_other_coincident_face(k, b, face1, face2_, approx_tol, false);
+        k.caches.refit_raising_trims.set(refit);
+        let (dist, keep, merged) = match covered {
+            Ok(r) => r,
+            Err(err) => {
+                failed(err)?;
+                return Ok(out);
+            }
+        };
         out.dist_between = dist;
         out.surf_to_keep = keep;
         if keep.is_none() {
@@ -2270,35 +2419,26 @@ pub fn set_orientation(b: &mut Brep, e: EdgeId, orientation: OrientType) -> Resu
 
 /// `ReverseOrientation`: reverses the curve's parameterisation, then installs the
 /// reversed interval, flips every edge use's orientation and deletes its UV trim.
-/// By default a failed curve reversal's status is ignored, as upstream: the edge
-/// gets the default interval and its uses are still flipped. With the opt-in
-/// [`crate::kernel::UpstreamFixes::edge_reversal_keeps_failed_edge`] (WR-260) a
-/// failed reversal returns before changing the interval or edge uses, and an edge
-/// without curve keeps its interval (upstream installs the default one; fork
-/// tangency-labs/smlib 47507b6).
+/// A failed curve reversal returns before changing the interval or edge uses, and an
+/// edge without curve keeps its interval (WR-260; fork tangency-labs/smlib 47507b6).
+/// Upstream ignores the failed reversal's status, installs the default interval and
+/// still flips the uses, and gives an edge without curve the default interval.
 ///
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] without edge uses (upstream walks a null list) and
-/// those of [`eu1::set_uv_trim_curve`]; [`SolidError::Unported`] from the curve (with
-/// the opt-in fix, every error of the curve reversal).
+/// those of [`eu1::set_uv_trim_curve`]; every error of the curve reversal.
 pub fn reverse_orientation(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
     // locals
     let old_ivl = b.edge(e)?.interval;
-    let mut new_ivl = Extent1d::new();
 
-    // reverse Curve Parameterization
-    if let Some(c) = b.edge_mut(e)?.curve.as_mut() {
-        match c.reverse_parameterization(k, &old_ivl) {
-            Ok(n) => new_ivl = n,
-            Err(err) if k.fixes.edge_reversal_keeps_failed_edge => return Err(err),
-            Err(err) => failed(err)?,
-        }
-    } else if k.fixes.edge_reversal_keeps_failed_edge {
-        // nothing reversed the interval: the edge keeps it (WR-260 addendum)
-        new_ivl = old_ivl;
-    }
-    b.edge_mut(e)?.interval = new_ivl;
+    // reverse Curve Parameterization; nothing reversed the interval without a curve,
+    // so the edge keeps it (WR-260 addendum)
+    let new_ivl = match b.edge_mut(e)?.curve.as_mut() {
+        Some(c) => c.reverse_parameterization(k, &old_ivl)?,
+        None => old_ivl,
+    };
+    set_interval(b, e, &new_ivl)?;
 
     // invert EU orientations, and any uv trim curves.
     let list = b.edge(e)?.edgeuses.clone();
@@ -2362,11 +2502,14 @@ pub fn orient_edge_sequence(k: &Kernel, b: &mut Brep, edges: &[EdgeId]) -> Resul
     } else if v11 == v01 {
         reverse_orientation(k, b, e1)?;
     } else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology(
+            OP,
+            TopologyFailure::EdgesNotChained { index: 1 },
+        ));
     }
 
     // Now the rest of them.
-    for pair in edges.windows(2).skip(1) {
+    for (at, pair) in edges.windows(2).enumerate().skip(1) {
         let [a, c] = pair else {
             continue;
         };
@@ -2378,7 +2521,10 @@ pub fn orient_edge_sequence(k: &Kernel, b: &mut Brep, edges: &[EdgeId]) -> Resul
         } else if v01 == v11 {
             reverse_orientation(k, b, *c)?;
         } else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology(
+                OP,
+                TopologyFailure::EdgesNotChained { index: at + 1 },
+            ));
         }
     }
     Ok(())
@@ -2908,7 +3054,7 @@ fn set_curve_with_identity(
 /// `GetBlendEdgeuse`: the edge use bounding the sector to fillet (an
 /// [`OrientType::Same`] edge use of an interior region for a solid, of the concave
 /// side for a shell); `None` for a lamina edge, an edge between tangent faces (within
-/// 2 degrees; half a degree with `fixes.fillet_half_degree_crease`, WR-621) or an
+/// half a degree, `CREASE_ANGLE`; upstream 2 degrees, WR-621) or an
 /// inconsistent edge use.
 ///
 /// # Errors
@@ -2956,7 +3102,7 @@ pub fn blend_edgeuse_or_why(
 ) -> Result<core::result::Result<EdgeuseId, NotBlendable>> {
     Ok(match blend_edgeuse_unless(k, b, e)? {
         // smooth where the faces are tangent all along it, at the same angle
-        Err(NotBlendable::Tangent) if is_tangent_edge(k, b, e, 90.0 - crease_angle(k), false)? => {
+        Err(NotBlendable::Tangent) if is_tangent_edge(k, b, e, 90.0 - CREASE_ANGLE, false)? => {
             Err(NotBlendable::Smooth)
         }
         r => r,
@@ -2964,18 +3110,11 @@ pub fn blend_edgeuse_or_why(
 }
 
 /// The largest angle (degrees) between the binormal of one face and the normal of the
-/// other at which [`blend_edgeuse`] takes the faces as tangent: 88 degrees, 89.5 with
-/// `fixes.fillet_half_degree_crease`.
-pub(crate) fn crease_angle(k: &Kernel) -> f64 {
-    // set max nonTangent angle to 88 degrees. With `fillet_half_degree_crease` (WR-621,
-    // fork 2e8758b) 89.5 degrees: faces within half a degree of each other are tangent, a
-    // crease of 0.5 to 2 degrees is an edge the model means and is filleted
-    if k.fixes.fillet_half_degree_crease {
-        89.5
-    } else {
-        88.0
-    }
-}
+/// other at which [`blend_edgeuse`] takes the faces as tangent: 89.5 degrees, so faces
+/// within half a degree of each other are tangent and a crease of 0.5 to 2 degrees is an
+/// edge the model means and is filleted (WR-621, the fork's 2e8758b; upstream's 88
+/// degrees refuses such a crease as tangent).
+pub(crate) const CREASE_ANGLE: f64 = 89.5;
 
 /// A shell step-off keeps partial output only for an ordinary numerical failure.
 fn shell_step_off_status(status: Result<()>) -> Result<()> {
@@ -3056,7 +3195,7 @@ fn blend_edgeuse_unless(
     };
     let mut cur1 = eu1::radial(b, cur0)?.ok_or_else(|| null("GetBlendEdgeuse: no radial"))?;
 
-    // test for smooth edge - don't fillet edges within 2 degrees of tangent
+    // test for smooth edge - don't fillet edges within half a degree of tangent (WR-621)
     let test_param = b.edge(e)?.interval.evaluate(0.34);
 
     // get normalized normal and binormals from the two edgeuses at a common point
@@ -3071,7 +3210,7 @@ fn blend_edgeuse_unless(
     let (fu_normal, fu_normal2) = (ev0.face_normal, ev1.face_normal);
     let (bin_vec, bin_vec2) = (ev0.binormal, ev1.binormal);
 
-    let max_dot = (crease_angle(k) * PI / 180.0).cos();
+    let max_dot = (CREASE_ANGLE * PI / 180.0).cos();
 
     // the faces are tangent and can't be filleted. With `fillet_knife_edge_rounds`
     // (WR-570, fork b7ec55b) only when their binormals point away from each other (the
@@ -3708,8 +3847,7 @@ mod tests {
 
     #[test]
     fn issue_521_failed_reversal_preserves_edge_interval_uses_and_trims() {
-        let mut k = Kernel::default();
-        k.fixes.edge_reversal_keeps_failed_edge = true;
+        let k = Kernel::default();
         let (mut b, e, eus, _) = wire();
         let hermite = crate::curve::hermite_curve::HermiteCurve::new(
             Vec3::ZERO,
@@ -3742,45 +3880,15 @@ mod tests {
         assert_eq!(format!("{b:?}"), before);
     }
 
-    #[test]
-    fn failed_reversal_installs_default_interval_by_default() {
-        // WR-260: upstream ignores the failed reversal's status.
-        let k = Kernel::default();
-        let (mut b, e, eus, _) = wire();
-        b.edge_mut(e).unwrap().curve =
-            Some(C::from(crate::curve::hermite_curve::HermiteCurve::new(
-                Vec3::ZERO,
-                Vec3::X,
-                Vec3::X,
-                Vec3::Y,
-                3,
-            )));
-        for &eu in &eus {
-            b.edgeuse_mut(eu).unwrap().uv_trim_curve = b.edge(e).unwrap().curve.clone();
-        }
-        reverse_orientation(&k, &mut b, e).unwrap();
-        assert_eq!(b.edge(e).unwrap().interval, Extent1d::new());
-        for eu in eus {
-            assert!(b.edgeuse(eu).unwrap().uv_trim_curve.is_none());
-        }
-    }
-
     /// WR-260 addendum (fork tangency-labs/smlib 47507b6): reversing an edge without
-    /// curve installs the default interval upstream; with
-    /// `edge_reversal_keeps_failed_edge` the edge keeps its own.
+    /// curve keeps its interval, where upstream installs the default one.
     #[test]
-    fn reversing_an_edge_without_curve_keeps_its_interval_with_the_opt_in() {
-        let mut k = Kernel::default();
+    fn reversing_an_edge_without_curve_keeps_its_interval() {
+        let k = Kernel::default();
         let (mut b, e, _, _) = wire();
         b.edge_mut(e).unwrap().curve = None;
         let ivl = b.edge(e).unwrap().interval;
         assert_ne!(ivl, Extent1d::new());
-        reverse_orientation(&k, &mut b, e).unwrap();
-        assert_eq!(b.edge(e).unwrap().interval, Extent1d::new());
-
-        k.fixes.edge_reversal_keeps_failed_edge = true;
-        let (mut b, e, _, _) = wire();
-        b.edge_mut(e).unwrap().curve = None;
         reverse_orientation(&k, &mut b, e).unwrap();
         assert_eq!(b.edge(e).unwrap().interval, ivl);
     }

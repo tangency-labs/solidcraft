@@ -2645,6 +2645,96 @@
     "props": 1,
     "validate_only": false
    }
+  },
+  {
+   "name": "cyl_close_bands_all_loops_gen0084",
+   "upstream_ref": "generated gen0084 with every loop as target (loops 1; the generated row drops the last loop and the shim's loop-index guard rejects it): two opposite u-isolines 1e-6 apart in normalized v on an SmCylinder, 3.1e-6 apart in 3D against a pair tolerance of 2e-7",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 0.7503165792421282,
+      "c": 3.1025197902685333,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.0,
+        "b": 0.08420134538839802,
+        "c": 1.0,
+        "d": 0.08420134538839802,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1.0,
+        "b": 0.08420234538839802,
+        "c": 0.0,
+        "d": 0.08420234538839802,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "validate_only": false,
+    "init_gaps": false,
+    "face": 50,
+    "props": 1,
+    "loops": 1
+   }
+  },
+  {
+   "name": "cyl_close_bands_all_loops_gen0331",
+   "upstream_ref": "generated gen0331 with every loop as target (loops 1; the generated row drops the last loop and the shim's loop-index guard rejects it): two opposite u-isolines 1e-6 apart in normalized v on an SmCylinder, 2.6e-6 apart in 3D against a pair tolerance of 2e-7",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.7416486248859733,
+      "c": 2.5778465526264056,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.0,
+        "b": 0.3680146569383668,
+        "c": 1.0,
+        "d": 0.3680146569383668,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1.0,
+        "b": 0.3680156569383668,
+        "c": 0.0,
+        "d": 0.3680156569383668,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "validate_only": false,
+    "init_gaps": false,
+    "face": 30,
+    "props": 1,
+    "loops": 1
+   }
   }
  ]
 }

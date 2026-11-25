@@ -240,7 +240,7 @@ fn output(open_status: i64, recs: &[Rec]) -> Output {
 fn status_of(e: &SolidError) -> Result<i64, HarnessError> {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(ST_SHORT),
-        SolidError::Upstream { code, .. } => Ok(i64::from(*code)),
+        up_err if solidcore::error::upstream_status(up_err).is_some() => Ok(i64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
         other => Err(HarnessError::new(format!("unexpected error {other}"))),
     }
 }
@@ -633,5 +633,44 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         run_rust_script(&case.parse()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// WR-47: `ReadBoolean` reads a 4-byte boolean as `ReadBooleans` reads one (upstream's
+    /// own byte-swapping path, `SmDatabaseIO.cpp:547`). Every case of the unit that reads
+    /// a boolean records the same output with each `read_boolean` step replaced by
+    /// `read_booleans 1`: status, stream state, position and value, byte-swapped streams
+    /// included.
+    #[test]
+    fn read_boolean_reads_as_read_booleans_of_one() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: MIN_GENERATED,
+        };
+        let mut replaced = 0usize;
+        let mut swapped_cases = 0usize;
+        for case in Runner.cases(&ctx).unwrap() {
+            let mut i: Inputs = case.parse().unwrap();
+            if !i.ops.iter().any(|(o, _)| o == "read_boolean") {
+                continue;
+            }
+            let want = run_rust_script(&i).unwrap();
+            for step in &mut i.ops {
+                if step.0 == "read_boolean" {
+                    *step = ("read_booleans".to_string(), 1);
+                    replaced += 1;
+                }
+            }
+            if i.file_type == 2 || i.ops.iter().any(|(o, a)| o == "set_byte_swap" && *a != 0) {
+                swapped_cases += 1;
+            }
+            let got = run_rust_script(&i).unwrap();
+            assert_eq!(got, want, "{}", case.name);
+        }
+        assert!(replaced > 0 && swapped_cases > 0, "{replaced} {swapped_cases}");
     }
 }

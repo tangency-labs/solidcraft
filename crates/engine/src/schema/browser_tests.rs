@@ -3,12 +3,13 @@ use serde_json::{Value, json};
 use super::{
     BodyRenameParams, BodyRenamed, BrowserFoldParams, BrowserFoldResult, BrowserGroupMade, BrowserGroupParams, BrowserGroupRenamed,
     BrowserMoveParams, BrowserMoved, BrowserOrderParams, BrowserOrdered, BrowserRenameGroupParams, BrowserUngroupParams, BrowserUngrouped,
-    BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, RedefineSketchParams, RedefineSketchResult,
-    RepairParams, RepairResult, ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult, ViewRenameParams, ViewRenamed,
-    ViewSaveParams, ViewSaved, VisibilityState,
+    BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, FindParams, FindResult, RedefineSketchParams,
+    RedefineSketchResult, RepairParams, RepairResult, ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult,
+    ViewRenameParams, ViewRenamed, ViewSaveParams, ViewSaved, VisibilityState,
 };
 use crate::Session;
-use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
+use crate::browser_find::MAX_PATTERN_CHARS;
+use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms, sketch_rectangle};
 use crate::schema::view_navigation::CameraReply;
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
@@ -75,8 +76,72 @@ fn the_reply_names_the_parameters_kept_in_the_old_unit() {
 }
 
 #[test]
+fn find_schemas_and_the_key_check_agree() {
+    assert_keys(input_schema_for::<FindParams>(), &["kinds", "text"]);
+}
+
+#[test]
+fn find_strict_keeps_todays_errors() {
+    assert_strict_keeps_todays_errors(&[
+        ("browser.find", json!({})),
+        ("browser.find", json!({"text": "   "})),
+        ("browser.find", json!({"text": "   ", "kinds": []})),
+        ("browser.find", json!({"text": null, "kinds": null})),
+        ("browser.find", json!({"text": 5})),
+        ("browser.find", json!({"text": ["bolt"]})),
+        ("browser.find", json!({"text": "a".repeat(MAX_PATTERN_CHARS + 1)})),
+        ("browser.find", json!({"kinds": "body"})),
+        ("browser.find", json!({"kinds": ["bodies"]})),
+        ("browser.find", json!({"kinds": [1]})),
+        ("browser.find", json!({"kinds": [null]})),
+        ("browser.find", json!({"kinds": ["body", "body", "body", "body", "body", "body"]})),
+    ]);
+}
+
+#[test]
+fn find_replies_match_the_output_schema() {
+    let schema = output_schema_for::<FindResult>();
+    let schema = schema.as_value();
+    let mut s = Session::default();
+    sketch_rectangle(&mut s);
+    s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap_or_else(|e| panic!("{e}"));
+    s.param_check = ParamCheck::Warn;
+    let forms = [
+        json!({"text": "sketch"}),
+        json!({"kinds": ["body"]}),
+        json!({"text": "*1", "kinds": ["sketch", "body", "component", "construction", "joint"]}),
+        json!({"text": "  box  ", "kinds": []}),
+        json!({"text": "nothing is called this"}),
+        json!({"text": "a".repeat(MAX_PATTERN_CHARS), "kinds": null}),
+    ];
+    for p in forms {
+        let r = s.execute("browser.find", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(r.get("param_warnings").is_none(), "{p}: {r}");
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    }
+    // A reply carrying warnings still matches.
+    let r = s.execute("browser.find", &json!({"text": "box", "kind": "body"})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(r.get("param_warnings").is_some(), "{r}");
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    // The check itself catches a wrong type, a wrong item type and a missing key.
+    let ok = json!({"found": [{"kind": "body", "name": "Box1", "key": "Box1", "path": [], "item": {"type": "body", "name": "Box1"}}], "total": 1, "incomplete": false});
+    assert!(conforms(schema, schema, &ok));
+    for (k, v) in [("total", json!("1")), ("found", json!([1])), ("incomplete", json!(0))] {
+        let mut bad = ok.clone();
+        bad[k] = v;
+        assert!(!conforms(schema, schema, &bad), "{bad}");
+    }
+    let mut bad = ok.clone();
+    bad["found"][0]["item"] = Value::from("Box1");
+    assert!(!conforms(schema, schema, &bad), "{bad}");
+    bad = ok.clone();
+    bad.as_object_mut().map(|o| o.remove("total"));
+    assert!(!conforms(schema, schema, &bad), "{bad}");
+}
+
+#[test]
 fn browser_schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<BodyRenameParams>(), &["body", "name"]);
+    assert_keys(input_schema_for::<BodyRenameParams>(), &["bodies", "body", "name"]);
     assert_keys(input_schema_for::<BrowserGroupParams>(), &["component", "folder", "items", "name", "parent"]);
     assert_keys(input_schema_for::<BrowserUngroupParams>(), &["group"]);
     assert_keys(input_schema_for::<BrowserRenameGroupParams>(), &["group", "name"]);
@@ -84,7 +149,7 @@ fn browser_schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<BrowserOrderParams>(), &["component", "folder", "order"]);
     assert_keys(
         input_schema_for::<BrowserVisibilityParams>(),
-        &["features", "folder", "isolate", "items", "joints", "path", "paths", "tree_folders", "visible"],
+        &["features", "folder", "isolate", "items", "joints", "path", "paths", "tree_folders", "unisolate", "visible"],
     );
     assert_keys(input_schema_for::<BrowserFoldParams>(), &["component", "path"]);
 }
@@ -99,6 +164,9 @@ fn browser_strict_keeps_todays_errors() {
         ("body.rename", json!({})),
         ("body.rename", json!({"body": 5, "name": "X"})),
         ("body.rename", json!({"body": null, "name": "X"})),
+        ("body.rename", json!({"bodies": [], "name": "X"})),
+        ("body.rename", json!({"bodies": ["Box", 5], "name": "X"})),
+        ("body.rename", json!({"bodies": "Box", "name": "X"})),
         ("browser.group", json!({})),
         ("browser.group", json!({"folder": "components"})),
         ("browser.group", json!({"folder": null})),
@@ -142,6 +210,8 @@ fn browser_strict_keeps_todays_errors() {
         ("browser.visibility", json!({"visible": true, "paths": [[]]})),
         ("browser.visibility", json!({"visible": true, "paths": [["a"]]})),
         ("browser.visibility", json!({"visible": true, "paths": [deep]})),
+        ("browser.visibility", json!({"visible": false, "unisolate": true})),
+        ("browser.visibility", json!({"visible": true, "unisolate": true, "items": ["A"]})),
         ("browser.visibility", json!({"visible": true, "joints": []})),
         ("browser.visibility", json!({"visible": true, "joints": [true]})),
         ("browser.visibility", json!({"visible": true, "folder": "nowhere"})),
@@ -206,7 +276,9 @@ fn the_browser_schemas_take_what_the_handlers_read() {
         r.sort();
         r
     };
-    assert_eq!(required(input_schema_for::<BodyRenameParams>()), ["body", "name"]);
+    assert_eq!(required(input_schema_for::<BodyRenameParams>()), ["name"]);
+    // And one body or a list of them (#12341).
+    assert_eq!(input_schema_for::<BodyRenameParams>().as_value()["anyOf"], json!([{"required": ["body"]}, {"required": ["bodies"]}]));
     assert_eq!(required(input_schema_for::<BrowserGroupParams>()), Vec::<String>::new());
     assert_eq!(required(input_schema_for::<BrowserUngroupParams>()), ["group"]);
     assert_eq!(required(input_schema_for::<BrowserRenameGroupParams>()), ["group", "name"]);
@@ -245,6 +317,8 @@ fn the_visibility_reply_type_matches_the_design_s() {
         shown_dimensions: vec![8],
         locked_bodies: vec!["B".into()],
         hidden_folders: vec!["c0/bodies".into()],
+        // Never saved, so the reply leaves it out too.
+        before_isolate: Some(solidcraft_doc::BeforeIsolate::default()),
     };
     assert_eq!(serde_json::to_value(VisibilityState::from(&v)).unwrap(), serde_json::to_value(&v).unwrap());
     let empty = solidcraft_doc::Visibility::default();
@@ -346,7 +420,7 @@ fn view_schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ViewDeleteParams>(), &["view"]);
     assert_keys(input_schema_for::<ViewListParams>(), &[]);
     assert_keys(input_schema_for::<ViewApplyParams>(), &["camera", "view"]);
-    assert_keys(input_schema_for::<RedefineSketchParams>(), &["author_path", "frame", "offset", "plane", "sketch"]);
+    assert_keys(input_schema_for::<RedefineSketchParams>(), &["author_path", "flip", "frame", "offset", "plane", "sketch"]);
 }
 
 /// Each call has one problem the handler already refuses: strict gives its message. The session
@@ -486,6 +560,8 @@ fn the_check_reads_each_key_as_the_handler_does() {
     assert_eq!(issues("view.apply", json!({})), none);
     // view.save.
     assert_eq!(issues("view.save", json!({"camera": CAMERA()})), none);
+    assert_eq!(issues("view.save", json!({"camera": cam(json!({"roll": 0.6, "up": "y"}))})), none);
+    assert_eq!(issues("view.save", json!({"camera": cam(json!({"up": "x"}))})).len(), 1);
     assert_eq!(issues("view.save", json!({"camera": CAMERA(), "name": "  "})), none);
     assert_eq!(issues("view.save", json!({"camera": CAMERA(), "name": null})), none);
     // Not text: the handler reads it as left out; the check reports it.

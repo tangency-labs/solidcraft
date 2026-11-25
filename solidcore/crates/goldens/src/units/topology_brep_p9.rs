@@ -382,7 +382,7 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
                     id(split.edges.map(|v| v[1])),
                     id(split.vertex),
                 ]);
-                Ok(split.status())
+                Ok(crate::output::split_edge_status(split))
             }
             5 => {
                 let face = if i.variant == 1 {
@@ -553,6 +553,7 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
         Ok(code) => {
             record.insert(0, f64::from(code));
             canon_record(&b, i.op, &mut record);
+            crate::trim_hook::observe(&mut b);
             skeleton_caches(&mut b);
             Ok(graph_reachable(&b, record))
         }
@@ -596,7 +597,10 @@ fn rust_orient(i: &Inputs, mut b: Brep, k: &mut Kernel) -> Result<Output, Harnes
             context: Some(ctx),
             key_of: &p3::tracked_key_of,
         };
-        result = ordinary(port::orient_sheet_surfaces(k, b, face, i.same, &mut env));
+        // (the note is recorded as the status 1 upstream returns for it)
+        result = ordinary(solidcore::topology::brep::p9::OrientSheetNote::stop_on_note(
+            port::orient_sheet_surfaces(k, b, face, i.same, &mut env),
+        ));
         Ok(Vec::new())
     });
     let run = match run {
