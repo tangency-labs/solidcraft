@@ -25,10 +25,10 @@ fn mark(v: &mut Value) {
             // A sketch's constraints: the Tangents among them.
             if let Some(constraints) = o.get_mut("constraints").and_then(Value::as_array_mut) {
                 for constraint in constraints {
-                    if is_tangent(constraint) {
-                        if let Some(constraint) = constraint.as_object_mut() {
-                            constraint.insert("old_join".into(), Value::Bool(true));
-                        }
+                    if is_tangent(constraint)
+                        && let Some(constraint) = constraint.as_object_mut()
+                    {
+                        constraint.insert("old_join".into(), Value::Bool(true));
                     }
                 }
             }
