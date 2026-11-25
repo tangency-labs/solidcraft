@@ -472,7 +472,6 @@ impl WorkCounters {
     #[must_use]
     pub fn split_face_classifications(&self) -> u64 {
         self.split_face_classifications.get()
-
     }
 
     /// Intersections of a convex blend's section with a face of the part, run to learn whether
