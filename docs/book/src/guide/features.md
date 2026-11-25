@@ -387,6 +387,13 @@ plane ids, `folder: false` and `folder: true` hide and show the Analysis folder,
 removes them all. `offset` moves the cut against the plane's normal,
 so a positive offset cuts more away; `at` is a world coordinate on a named plane's axis.
 
+A design can keep several named sections and switch between them. In the Section Analysis
+dialog, **Saved sections** lists them: click one to show it in place of the section on show,
+type a name and press **Save as…** to keep the section on show, **Rename** or **×** to rename or
+delete one. They are saved with the design. Scripts use `inspect.section.save` (`name`),
+`inspect.section.show` and `inspect.section.delete` (each by `section`),
+`inspect.section.rename` (`section` and the new `name`) and `inspect.section.list`.
+
 ## Comparing two bodies
 
 **Compare Bodies** (`inspect.compare`) lays two versions of one part over each other, such as a

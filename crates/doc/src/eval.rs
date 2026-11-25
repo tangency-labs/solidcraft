@@ -2927,6 +2927,36 @@ struct EvalKey {
     relative: Option<u64>,
 }
 
+/// A straight extrusion of an exact whole boundary uses the selected regions for its solid,
+/// and every non-construction curve for its face names and certificates. Projected construction
+/// geometry can move without changing any of these. The curve count still limits certification.
+fn whole_extrude_sketch_key(f: &Feature, st: &ModelState) -> Option<(u64, u64)> {
+    let FeatureKind::Extrude { sketch, profiles: profiles @ ProfileSel::WholeBoundaries { .. }, thin: None, .. } = &f.kind else {
+        return None;
+    };
+    let ss = st.sketch(sketch.0)?;
+    if !ss.sketch.curves.iter().any(|c| c.construction) {
+        return None;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    "whole extrusion profile".hash(&mut h);
+    serde_json::to_vec(&ss.plane).ok()?.hash(&mut h);
+    ss.report.ok().hash(&mut h);
+    let indices = crate::profile_selection_indices(ss, profiles).ok()?;
+    for index in indices {
+        serde_json::to_vec(&ss.profiles.get(index)?.region).ok()?.hash(&mut h);
+    }
+    ss.sketch.curves.len().hash(&mut h);
+    for curve in ss.sketch.curves.iter().filter(|c| !c.construction) {
+        serde_json::to_vec(curve).ok()?.hash(&mut h);
+        for point in curve.kind.point_ids() {
+            let pos = ss.sketch.point(point)?;
+            (pos.x.to_bits(), pos.y.to_bits()).hash(&mut h);
+        }
+    }
+    Some((sketch.0, h.finish()))
+}
+
 impl EvalKey {
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -2946,7 +2976,10 @@ impl EvalKey {
             ^ turns_digest(doc, vals, f).unwrap_or(0)
             ^ depth_digest(st);
         let whole = cache_key(f, fp, local, ctx, st);
-        let reads = f.reads(doc, st).map(|read| {
+        let read = f.reads(doc, st);
+        let profile_key = read.as_ref().and_then(|_| whole_extrude_sketch_key(f, st));
+        let sketch_key = |id: &u64| profile_key.filter(|(s, _)| s == id).map(|(_, key)| key).or_else(|| st.sketch_keys.get(id).copied());
+        let reads = read.map(|read| {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             if read.import {
                 // An import reads only the file or records it holds (`local`), the context
@@ -2973,7 +3006,7 @@ impl EvalKey {
             }
             for id in &read.sketches {
                 id.hash(&mut h);
-                st.sketch_keys.get(id).hash(&mut h);
+                sketch_key(id).hash(&mut h);
             }
             st.body_counter.hash(&mut h);
             // A body numbered from the counter skips the numbers reserved past it.
@@ -3012,7 +3045,7 @@ impl EvalKey {
             }
             for id in &read.sketches {
                 id.hash(&mut h);
-                st.sketch_keys.get(id).hash(&mut h);
+                sketch_key(id).hash(&mut h);
             }
             // A body takes the name the feature stores for it only while no other body has it.
             for n in &f.body_names {
@@ -3862,14 +3895,22 @@ fn copy_frames_digest(doc: &Document, f: &Feature, features: &[FeatureId], st: &
 /// part together with what it mirrors leaves it, bit for bit, as it was (#14271). A plane read from
 /// model geometry, or a component origin datum, can lie in another part, so its own component's
 /// world frame counts then too.
-fn mirror_placements_digest(doc: &Document, f: &Feature, plane: &PlaneRef, placements: &[Vec<u64>], bodies: &[crate::BodyName]) -> u64 {
+fn mirror_placements_digest(
+    doc: &Document,
+    f: &Feature,
+    st: Option<&ModelState>,
+    plane: &PlaneRef,
+    placements: &[Vec<u64>],
+    bodies: &[crate::BodyName],
+) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     if !placement_reuse::local_plane(plane, 0) {
         doc.component_transform(f.component).iter().flatten().for_each(|x| x.to_bits().hash(&mut h));
     }
     // A feature added after the mirror that builds on its copies needs them made for that.
     placement_reuse::copies_only_shown(doc, f).hash(&mut h);
-    for placed in placements.iter().map(|path| mirror_copy_frame(doc, f.component, path)) {
+    for (i, path) in placements.iter().enumerate() {
+        let placed = resolve_migrated_placement(doc, st, bodies.get(i), path).and_then(|effective| mirror_copy_frame(doc, f.component, &effective));
         placed.is_some().hash(&mut h);
         if let Some((component, frame, picked)) = placed {
             component.hash(&mut h);
@@ -3884,9 +3925,10 @@ fn mirror_placements_digest(doc: &Document, f: &Feature, plane: &PlaneRef, place
 
 /// What a body pattern's picked placements read: each placement's frame and the component its
 /// copies join, both in the feature's component, and each body's offset.
-fn pattern_placements_digest(doc: &Document, f: &Feature, placements: &[Vec<u64>], bodies: &[crate::BodyName]) -> u64 {
+fn pattern_placements_digest(doc: &Document, f: &Feature, st: Option<&ModelState>, placements: &[Vec<u64>], bodies: &[crate::BodyName]) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    for placed in placements.iter().map(|path| mirror_copy_frame(doc, f.component, path)) {
+    for (i, path) in placements.iter().enumerate() {
+        let placed = resolve_migrated_placement(doc, st, bodies.get(i), path).and_then(|effective| mirror_copy_frame(doc, f.component, &effective));
         placed.is_some().hash(&mut h);
         if let Some((component, frame, picked)) = placed {
             component.hash(&mut h);
@@ -3897,6 +3939,23 @@ fn pattern_placements_digest(doc: &Document, f: &Feature, placements: &[Vec<u64>
         serde_json::to_string(&doc.body_offsets.get(&b.0)).unwrap_or_default().hash(&mut h);
     }
     h.finish()
+}
+
+fn resolve_migrated_placement<'a>(
+    doc: &Document,
+    st: Option<&ModelState>,
+    body: Option<&crate::BodyName>,
+    path: &'a [u64],
+) -> Option<std::borrow::Cow<'a, [u64]>> {
+    let Some(mb) = body.and_then(|b| st?.body(&b.0)) else {
+        return Some(std::borrow::Cow::Borrowed(path));
+    };
+    let (at, _) = doc.path_placement(path)?;
+    if placement_shows(doc, mb, at) {
+        Some(std::borrow::Cow::Borrowed(path))
+    } else {
+        migrated_copy_placement(doc, mb, path, at).map(std::borrow::Cow::Owned)
+    }
 }
 
 /// Whether only the bodies `f` makes follow where parts are placed: a mirror of placed bodies
@@ -4218,7 +4277,7 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             // too, or moving the component serves a stale mirror from the cache (#7313 review).
             // The shared read loop below never runs for picked placements, so the datum frames
             // fold in here, each relative to the reading component, as `reads.paths` does.
-            return mirror_placements_digest(doc, f, plane, placements, bodies) ^ datum_paths_digest(doc, f, &datums);
+            return mirror_placements_digest(doc, f, st, plane, placements, bodies) ^ datum_paths_digest(doc, f, &datums);
         }
         FeatureKind::MeshReduce { body, .. } => {
             reads.placed_body(st, body);
@@ -4263,7 +4322,7 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         FeatureKind::Pattern { bodies, placements, .. } if !bodies.is_empty() => {
             // Bodies picked where a placement shows them follow those placements, as a mirror's.
             if !placements.is_empty() {
-                pattern_placements_digest(doc, f, placements, bodies).hash(&mut h);
+                pattern_placements_digest(doc, f, st, placements, bodies).hash(&mut h);
             }
             for b in bodies {
                 reads.placed_body(st, &b.0);
@@ -7417,6 +7476,22 @@ fn named_pieces_of(
     out
 }
 
+/// Through All's signed distance: the `reach` on the side the kept Distance's sign picks
+/// (#10415). The extrude and the arrow in its window both take the side from here (#21844).
+pub fn through_all_side(reach: f64, kept_distance: Option<f64>) -> f64 {
+    if kept_distance.is_some_and(|d| d < 0.0) { -reach } else { reach }
+}
+
+/// Two Sides: the side of the sketch Distance 2 goes to, 1 along the normal or -1 against it.
+/// After an entered first distance the sides are the ones Direction gives (`negative`), whatever
+/// its sign; after a first side reached from the model (`follows_first`: To Object, Through All)
+/// the second goes the other way from where `first` went. The extrude and the second arrow in
+/// its window both take the side from here (#21844).
+pub fn second_side(first: f64, negative: bool, follows_first: bool) -> f64 {
+    let along = if follows_first { first < 0.0 } else { negative };
+    if along { 1.0 } else { -1.0 }
+}
+
 /// Distance that reaches through every target body from the plane `start` along the normal from
 /// the sketch plane (the From Object level plus any start offset), on either side.
 pub fn through_all_distance(st: &ModelState, plane: &Plane, start: f64, targets: &[String]) -> Result<f64> {
@@ -9921,7 +9996,7 @@ fn feature_tools_with_constructor(
                     // Measured from where the extrude starts, so an offset leaves no side short (#16556).
                     let start = from + extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
                     let reach = through_all_distance(st, &ss.plane, start, &crate::plain(targets))?;
-                    if val(vals, &extent.distance, Kind::Length).is_ok_and(|saved| saved < 0.0) { -reach } else { reach }
+                    through_all_side(reach, val(vals, &extent.distance, Kind::Length).ok())
                 }
                 (None, _) => val(vals, &extent.distance, Kind::Length)?,
             };
@@ -10040,7 +10115,7 @@ fn feature_tools_with_constructor(
                 // A flat face at a slant: where its plane, extended past the face, lies over the
                 // profiles too, so a profile that overhangs the face still reaches it.
                 if let Some(slope) = to_face.and_then(|face| slanted_plane(&tst, face, n)) {
-                    let (rise_lo, rise_hi) = slope_rise(&slope, &ss.plane, &regions, off);
+                    let (rise_lo, rise_hi) = slope_rise(&slope, &ss.plane, &regions, off)?;
                     hs.extend([rise_lo, rise_hi]);
                 }
                 let margin = tb.body.size() * 0.05 + 1.0 + to_offset.abs();
@@ -10095,8 +10170,8 @@ fn feature_tools_with_constructor(
                     // From a slanted face To a flat one: over both planes' whole rise across the
                     // profiles, then cut at each.
                     (Some((fp, tp, _)), _) => {
-                        let (from_lo, from_hi) = slope_rise(fp, &ss.plane, &regions, off);
-                        let (to_lo, to_hi) = slope_rise(tp, &ss.plane, &regions, off);
+                        let (from_lo, from_hi) = slope_rise(fp, &ss.plane, &regions, off)?;
+                        let (to_lo, to_hi) = slope_rise(tp, &ss.plane, &regions, off)?;
                         let (rise_lo, rise_hi) = (from_lo.min(to_lo), from_hi.max(to_hi));
                         let margin = (rise_hi - rise_lo) * 0.05 + 1.0;
                         (rise_lo - margin, rise_hi + margin)
@@ -10104,7 +10179,7 @@ fn feature_tools_with_constructor(
                     (None, Some(fp)) => {
                         // The rise is measured over sampled outlines, so the prism runs a margin
                         // past it: its own caps must never reach the result.
-                        let (rise_lo, rise_hi) = slope_rise(fp, &ss.plane, &regions, from);
+                        let (rise_lo, rise_hi) = slope_rise(fp, &ss.plane, &regions, from)?;
                         let margin = (rise_hi - rise_lo) * 0.05 + 1.0;
                         (lo + rise_lo - margin, hi + rise_hi + margin)
                     }
@@ -11417,13 +11492,7 @@ pub(crate) fn extent_sides(vals: &BTreeMap<String, Value>, extent: &crate::Exten
             // and a sign only turns its own side over. A reach computed from the model (To
             // Object, Through All) has the sign of where the object is, so the other side
             // follows it.
-            let second = if extent.second_follows_first || extent.to.is_some() || extent.through_all {
-                if first < 0.0 { d2 } else { -d2 }
-            } else if negative {
-                d2
-            } else {
-                -d2
-            };
+            let second = d2 * second_side(first, negative, extent.second_follows_first || extent.to.is_some() || extent.through_all);
             (second, first)
         }
         (None, crate::Direction::Positive) => (0.0, d),
@@ -11588,13 +11657,66 @@ fn mirrored_placement(doc: &Document, own: u64, mb: &ModelBody, path: Option<&[u
     let lost = || DocError::Invalid(format!("the placement `{}` was copied from no longer shows it", mb.name));
     // A stale or edited path that leads to another component no longer shows the body.
     let (at, _) = doc.path_placement(path).ok_or_else(lost)?;
-    if !placement_shows(doc, mb, at) {
+    let effective: std::borrow::Cow<'_, [u64]> = if placement_shows(doc, mb, at) {
+        std::borrow::Cow::Borrowed(path)
+    } else if let Some(migrated) = migrated_copy_placement(doc, mb, path, at) {
+        std::borrow::Cow::Owned(migrated)
+    } else {
         return Err(lost());
-    }
+    };
     let singular = || DocError::Invalid(format!("the placement `{}` was copied from is singular", mb.name));
-    let (component, frame, picked) = mirror_copy_frame(doc, own, path).ok_or_else(singular)?;
+    let (component, frame, picked) = mirror_copy_frame(doc, own, &effective).ok_or_else(singular)?;
     let source = doc.model_body_offset(mb).map(|offset| crate::mat_mul(&picked, offset)).unwrap_or(picked);
     Ok(Some((component, frame, source)))
+}
+
+/// Follow a pattern or mirror copy whose owning component shifted between an ancestor and a
+/// single-placed descendant when sibling occurrences were removed or added (#21548).
+///
+/// [`mirror_copy_frame`] places a copy in its component when that component has one occurrence,
+/// and in the innermost single-placed ancestor (often the root) while it has several. Deleting
+/// sibling occurrences migrates the copy down into that now-unique component; adding another
+/// occurrence migrates it back up to the ancestor. In both cases the copy stays at the same world
+/// position and its placement path is uniquely determined.
+fn migrated_copy_placement(doc: &Document, mb: &ModelBody, path: &[u64], at: u64) -> Option<Vec<u64>> {
+    if !doc.feature(mb.feature).is_some_and(|f| matches!(f.kind, FeatureKind::Pattern { .. } | FeatureKind::Mirror { .. })) {
+        return None;
+    }
+    let owner = doc.model_body_component(mb);
+    // Downward migration (e.g. 3 -> 1 occurrences): `owner` is strictly inside `at` and every
+    // occurrence along the chain from `at` to `owner` is active and placed once.
+    if mb.transferred && owner != at {
+        let inactive = doc.inactive_pattern_occurrences();
+        let mut tail = Vec::new();
+        let mut c = owner;
+        for _ in 0..=doc.components.len() {
+            if c == at {
+                tail.reverse();
+                let mut resolved = path.to_vec();
+                resolved.extend(tail);
+                if doc.path_placement(&resolved).is_some_and(|(comp, _)| comp == owner) {
+                    return Some(resolved);
+                }
+                break;
+            }
+            let mut matches = doc.occurrences.iter().filter(|o| o.component == c && !inactive.contains(&o.id));
+            let Some(occ) = matches.next() else { break };
+            if matches.next().is_some() {
+                break;
+            }
+            tail.push(occ.id);
+            c = occ.parent;
+        }
+    }
+    // Upward migration (e.g. 1 -> 2 occurrences): `owner` is now an ancestor along `path` (a strict
+    // prefix of `path`) because a sibling occurrence was added to `at`.
+    for k in (0..path.len()).rev() {
+        let prefix = &path[..k];
+        if doc.path_placement(prefix).is_some_and(|(comp, _)| comp == owner) && placement_shows(doc, mb, owner) {
+            return Some(prefix.to_vec());
+        }
+    }
+    None
 }
 
 /// Whether a placement of component `at` shows body `mb`: `at` is the body's component. That is
@@ -13736,8 +13858,7 @@ pub fn from_slope_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3, 
     if level_start_reason(&slope, n, &ends).is_some() {
         return None;
     }
-    let m = slope.normal();
-    Some(level_along(plane, centre + n * ((slope.origin - centre).dot(m) / n.dot(m))))
+    kernel::level_on_plane(plane, centre, &slope).ok()
 }
 
 /// The plane a To Object end `face` (found as the build finds it, `None` for a point or an edge
@@ -14290,18 +14411,11 @@ fn slanted_plane(st: &ModelState, (bi, fi): (usize, usize), n: Vec3) -> Option<P
 }
 
 /// How far `slope` lies along `plane`'s normal over the profiles, measured from `level`: the
-/// least and the most, over every point of the regions' outer loops.
-fn slope_rise(slope: &Plane, plane: &Plane, regions: &[Region2], level: f64) -> (f64, f64) {
-    let n = plane.normal();
-    let m = slope.normal();
-    let across = n.dot(m);
-    let mut rise = (0.0_f64, 0.0_f64);
-    for q in regions.iter().flat_map(|r| r.outer.polyline(1e-2)) {
-        let q = plane.to_world(q);
-        let t = (slope.origin - q).dot(m) / across - level;
-        rise = (rise.0.min(t), rise.1.max(t));
-    }
-    rise
+/// least and the most over the regions' outer loops ([`kernel::plane_rise`]), widened to hold 0
+/// as the sampled fold before the move did, since the prism it sizes runs from `level` too.
+fn slope_rise(slope: &Plane, plane: &Plane, regions: &[Region2], level: f64) -> Result<(f64, f64)> {
+    let (lo, hi) = kernel::plane_rise(plane, slope, regions)?;
+    Ok(((lo - level).min(0.0), (hi - level).max(0.0)))
 }
 
 /// Each tool's part between `slope` moved `lo` and `hi` along `n` (the extrusion direction).
@@ -14344,61 +14458,21 @@ fn trim_between_planes(tools: Vec<Traced>, from: &Plane, to: &Plane, n: Vec3, si
     Ok(out)
 }
 
-/// Whether `to` lies before `from` along the extrusion (`n` times the sign of `d`, `n` the
-/// normal of `plane`) somewhere over the profiles' outer loops: the two planes cross over them.
-/// The gap between the planes changes linearly across the sketch, so its least value over a
-/// loop lies at a line's end or at an arc's end or its point farthest the gap's way down,
-/// found exactly; a Bézier or conic piece is sampled to 1e-6 mm. A crossing on a loop's edge,
-/// within a hair, does not count.
+/// Whether `to` lies before `from` along the extrusion (`plane`'s normal times the sign of `d`)
+/// somewhere over the profiles' outer loops: the gap between the planes ([`kernel::plane_gap`])
+/// turns negative over them. A crossing within a hair of a loop, `1e-9` of the gap's largest
+/// size (plus 1e-9 mm), does not count: the planes only touch there.
 fn planes_cross_over(from: &Plane, to: &Plane, plane: &Plane, regions: &[Region2], d: f64) -> Result<bool> {
-    let gap = |q: Vec2| -> Result<f64> {
-        let q = plane.to_world(q);
-        Ok((level_on(plane, q, to)? - level_on(plane, q, from)?) * d.signum())
-    };
-    // The gap's slope across the sketch: it falls fastest along `down`.
-    let at0 = gap(Vec2::new(0.0, 0.0))?;
-    let slope = Vec2::new(gap(Vec2::new(1.0, 0.0))? - at0, gap(Vec2::new(0.0, 1.0))? - at0);
-    let down = (slope * -1.0).normalized();
-    let mut points = Vec::new();
-    for seg in regions.iter().flat_map(|r| &r.outer.segs) {
-        match *seg {
-            solidcore_record::Seg2::Line { a, b } => points.extend([a, b]),
-            solidcore_record::Seg2::Arc { center, radius, start, sweep } => {
-                points.extend([center + Vec2::from_angle(start) * radius, center + Vec2::from_angle(start + sweep) * radius]);
-                if let Some(down) = down {
-                    // The arc's point at angle `t` is `center + from_angle(t) * radius`, as at its
-                    // ends, so with a negative radius its lowest point lies at the angle opposite
-                    // `down`. Whether the arc passes that angle, going from `start` by `sweep`:
-                    let toward = if radius < 0.0 { down * -1.0 } else { down };
-                    let turn = (toward.y.atan2(toward.x) - start) * sweep.signum();
-                    if turn.rem_euclid(std::f64::consts::TAU) <= sweep.abs() {
-                        points.push(center + toward * radius);
-                    }
-                }
-            }
-            _ => points.extend(seg.polyline(1e-6)),
-        }
-    }
-    let mut least = f64::INFINITY;
-    let mut reach = 0.0_f64;
-    for q in points {
-        let g = gap(q)?;
-        least = least.min(g);
-        reach = reach.max(g.abs());
-    }
-    Ok(least < -1e-9 * (1.0 + reach))
+    let (lo, hi) = kernel::plane_gap(plane, from, to, regions)?;
+    let (least, most) = if d < 0.0 { (-hi, -lo) } else { (lo, hi) };
+    Ok(least < -1e-9 * (1.0 + least.abs().max(most.abs())))
 }
 
 /// Where the line along `plane`'s normal through `centre` meets `face_plane`, as a level along
-/// that normal. Refused for a face plane that runs along the normal, which the line never meets.
+/// that normal ([`kernel::level_on_plane`]). Refused for a face plane that runs along the
+/// normal, which the line never meets.
 fn level_on(plane: &Plane, centre: Vec3, face_plane: &Plane) -> Result<f64> {
-    let n = plane.normal();
-    let m = face_plane.normal();
-    let across = n.dot(m);
-    if across.abs() < 1e-9 {
-        return Err(DocError::Invalid("the From or To face runs along the extrusion".into()));
-    }
-    Ok(level_along(plane, centre + n * ((face_plane.origin - centre).dot(m) / across)))
+    Ok(kernel::level_on_plane(plane, centre, face_plane)?)
 }
 
 /// `input`'s part on one side of `plane` ([`kernel::half_space`]), its history carried through
@@ -18337,5 +18411,62 @@ mod path_station_tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod migrated_placement_digest_tests {
+    use super::*;
+
+    /// When a migrated placement stops resolving (for instance because a sibling occurrence becomes
+    /// active while the body is still owned by its component), the mirror and pattern placement
+    /// digests must change even if the previously unique occurrence had an identity transform, so
+    /// a cached success is never reused in place of the missing-placement error.
+    #[test]
+    fn unresolved_migration_changes_placement_digests_for_identity_occurrence() {
+        let mut doc = Document::default();
+        let comp = doc.add_component(Some("Part"), 0).unwrap();
+        let occ1 = doc.occurrence_of(comp).unwrap().id;
+        let plane = PlaneRef::Origin { name: "XY".into() };
+        let producer = doc
+            .add_feature(
+                FeatureKind::Mirror { features: Vec::new(), plane: plane.clone(), bodies: Vec::new(), combine: false, placements: Vec::new() },
+                Some("CopySource"),
+            )
+            .unwrap();
+        let copy_name = crate::BodyName("Copy".into());
+        let consumer_id = doc
+            .add_feature(
+                FeatureKind::Mirror {
+                    features: Vec::new(),
+                    plane: plane.clone(),
+                    bodies: vec![copy_name.clone()],
+                    combine: false,
+                    placements: vec![Vec::new()],
+                },
+                Some("MirrorConsumer"),
+            )
+            .unwrap();
+        let consumer = doc.feature(consumer_id).unwrap().clone();
+        let mut mb = ModelBody::new("Copy".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap(), producer);
+        mb.component = comp;
+        mb.transferred = true;
+        let mut st = ModelState::default();
+        st.bodies.push(mb);
+
+        let placements = vec![Vec::new()];
+        let bodies = vec![copy_name.clone()];
+        assert_eq!(resolve_migrated_placement(&doc, Some(&st), Some(&copy_name), &[]).as_deref(), Some([occ1].as_slice()));
+        let mirror_ok = mirror_placements_digest(&doc, &consumer, Some(&st), &plane, &placements, &bodies);
+        let pattern_ok = pattern_placements_digest(&doc, &consumer, Some(&st), &placements, &bodies);
+
+        // Activating a second occurrence of `comp` breaks unique downward resolution.
+        doc.add_occurrence(comp, 0, crate::IDENTITY).unwrap();
+        assert_eq!(resolve_migrated_placement(&doc, Some(&st), Some(&copy_name), &[]), None);
+        let mirror_lost = mirror_placements_digest(&doc, &consumer, Some(&st), &plane, &placements, &bodies);
+        let pattern_lost = pattern_placements_digest(&doc, &consumer, Some(&st), &placements, &bodies);
+
+        assert_ne!(mirror_lost, mirror_ok, "mirror digest must invalidate when migration stops resolving");
+        assert_ne!(pattern_lost, pattern_ok, "pattern digest must invalidate when migration stops resolving");
     }
 }

@@ -693,6 +693,16 @@ pub struct WgpuBuilt {
     msaa_fallback: bool,
 }
 
+/// The portable preferences last built for a save ([`SolveApp::try_prefs`]), with what they
+/// were built from.
+pub(crate) struct PortablePrefs {
+    layout: Option<Value>,
+    inputs: panel_runtime::PortableInputs,
+    portable: Option<Value>,
+    /// How many times they have been built (a reused build does not count).
+    pub(crate) builds: u64,
+}
+
 pub struct SolveApp {
     /// Common panel foundation, internal opt-in; stays on the app across document tabs.
     pub(crate) panel_runtime: Option<panel_runtime::AppPanelRuntime>,
@@ -1070,6 +1080,10 @@ pub struct SolveApp {
     pub(crate) open_meshing_next: bool,
     /// How long each frame takes on the window thread, by phase.
     pub(crate) frame_watch: frame_watch::Watch,
+    /// The panel layout the last portable preferences were built from, and that result: the
+    /// host's auto-save (eframe's 30 s `App::save`) otherwise decodes every retained command
+    /// record again on the window thread, which took ~0.9 s on a large design.
+    pub(crate) portable_prefs: std::sync::Mutex<Option<PortablePrefs>>,
     /// The other open designs (tabs).
     pub docs: documents::Documents,
     /// Where the control channel's design events go ([`control::publish_design`]): the shared
@@ -1305,6 +1319,7 @@ impl SolveApp {
             safe_graphics_next: false,
             frame_ms: 0.0,
             frame_rate: frame_rate::FrameRate::default(),
+            portable_prefs: std::sync::Mutex::new(None),
             operations: operations::Panel::default(),
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
@@ -1534,7 +1549,23 @@ impl SolveApp {
     /// Portable preferences for storage. On refusal the host retains its stored panel record.
     pub fn try_prefs(&self) -> Result<String, String> {
         let layout = prefs::held_panel_layout(self).unwrap_or_else(|| panel_runtime::preferences_value(self));
-        let portable = panel_runtime::portable_preferences_value(self, layout).map_err(solidcraft_engine::panels::commands::error_text)?;
+        // Rebuilding decodes every retained command record in the layout, which is expensive and
+        // only necessary when the layout changed: an auto-save with the same layout reuses it.
+        // Keyed on every input of the conversion (recovery can keep a saved record, and panels
+        // can register), so a reused build is the one a fresh conversion would make.
+        let inputs = panel_runtime::portable_inputs(self);
+        let mut cache = self.portable_prefs.lock().unwrap_or_else(|e| e.into_inner());
+        let portable = match cache.as_ref().filter(|c| c.layout == layout && c.inputs == inputs) {
+            Some(c) => c.portable.clone(),
+            None => {
+                let portable =
+                    panel_runtime::portable_preferences_value(self, layout.clone()).map_err(solidcraft_engine::panels::commands::error_text)?;
+                let builds = cache.as_ref().map_or(0, |c| c.builds) + 1;
+                *cache = Some(PortablePrefs { layout, inputs, portable: portable.clone(), builds });
+                portable
+            }
+        };
+        drop(cache);
         Ok(self.prefs_with_panel_layout(portable))
     }
 
@@ -4831,6 +4862,13 @@ impl SolveApp {
         let host = self.view_windows.current_window();
         let opening_host = self.view_windows.opening_host(Some(host));
         plugins::tick(self, ui.ctx(), false);
+        // The folders the user allowed linked files to be read from (Preferences, General): an importer
+        // plugin's link outside its design's folder is read only from one of them. The user's own
+        // setting, never the design's.
+        let allowed: Vec<std::path::PathBuf> = self.preferences.linked_file_folders.iter().map(std::path::PathBuf::from).collect();
+        if self.session.plugin_state.link_folders != allowed {
+            self.session.plugin_state.link_folders = allowed;
+        }
         documents::give_up_renames_of_other_designs(self);
         params_dialog::install_expressions(ui.ctx());
         ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());

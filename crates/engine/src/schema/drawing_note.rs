@@ -189,6 +189,20 @@ pub struct BranchesSet {
     pub add: Vec<BranchParam>,
 }
 
+/// What `drawing.note.delete` takes.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct DeleteParams {
+    pub note: NoteIdParam,
+}
+
+/// What `drawing.note.delete` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DeleteResult {
+    pub note: String,
+}
+
 /// What `drawing.note.edit` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct EditResult {
