@@ -2875,6 +2875,9 @@ impl SolveApp {
             sketch_palette::toggle_construction(self);
             return;
         }
+        if id == "doc.open" {
+            self.file_load.home_at_start = self.home.open;
+        }
         dim_view::cancel();
         self.tool = None;
         self.home.open = false;
@@ -3910,6 +3913,7 @@ impl SolveApp {
     /// Open `path` as [`Self::open_path_async`] does, for a caller that has more to do once the
     /// design is in (the web app's design links, #10198): the receiver gets `{"ok": true, ...}`
     /// when it is, or `{"ok": false, "error"}`; it is dropped unanswered when the load is.
+    /// Importer refusals also include `plugin_error` with `kind`, `plugin` and `reason`.
     pub fn open_path_answered(&mut self, path: &str) -> std::sync::mpsc::Receiver<Value> {
         let (tx, rx) = std::sync::mpsc::channel();
         let mut request = file_load::Request::new(path, file_load::Kind::Open);
@@ -3934,6 +3938,8 @@ impl SolveApp {
         self.pick_open(|app, path| {
             if let Some(path) = path {
                 app.open_chosen_file(&path);
+            } else {
+                app.file_load.home_at_start = false;
             }
         });
     }
@@ -4886,6 +4892,7 @@ impl SolveApp {
                 // The unit of an imported mesh is asked on the screen the import starts: the
                 // start page asks it too, or the file would wait for an answer nobody sees (#15598).
                 mesh_units::show(self, ui.ctx());
+                file_load::show_refusal(self, ui.ctx());
                 return;
             }
         }
@@ -4916,6 +4923,7 @@ impl SolveApp {
         plugin_menu::show(self, ui.ctx());
         stand_up::show(self, ui.ctx());
         prefs_notice::show(self, ui.ctx());
+        file_load::show_refusal(self, ui.ctx());
         context_menu::show(self, ui.ctx());
         mouse_gesture::show(self, ui.ctx());
         delete::show(self, ui.ctx());
