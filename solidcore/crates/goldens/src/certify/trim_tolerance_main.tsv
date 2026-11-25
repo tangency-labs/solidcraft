@@ -33,7 +33,9 @@
 # intersect.surface_intersector_p2, intersect.surface_intersector_p3, offset.offset_executive_p2, topology.proto_topology_p1, topology.proto_topology_p2, topology.proto_topology_p3: this branch's files (the proto-topology statuses passed on and WR-73's misses answering false, #18927): 604 lines moved, none a ROWS case (offset_executive_p2's digest is main's file with its 5 k0.35 overlap lines this branch's, its 3 ROWS cases put back by the ledger as before); each proved by its unit's replay tests (status_proof_replays, moved_rows_return_their_failed_steps, k035_overlap_offsets_are_refused)
 # boolean.topology_intersector_p3, topology.brep_p9: the point merge grows its vertex to cover its certified edge ends (tangency-labs/solidcraft#21340): the digest is this branch's file (written by main_expected_digests, which gives main's digests from main's files). 7 p3 rows and brep_p9 point_merge_7_new_center move vertex tolerances only, each new value twice the certified reach and covering every end the old one left past its half; merged_vertex_rows replays each row and puts it back to main's line bit for bit; no ROWS case is in these units
 # blend.fillet_executive_p3, offset.offset_executive_p2, topology.brep_local_operation: the offset's mate is the exact line or conic of its two analytic surfaces (WR-495's flag retired, tangency-labs/solidcraft#21301): the digests are this branch's files with the rows put back. Lines moved against this main: 2 fillet_executive_p3 rows (real-box-fillet1v-r3-shell-closed and real-box-fillet4v-r3-shell-closed), 109 offset_executive_p2 rows and 56 brep_local_operation rows, each replayed against main's facts by wr495_rows. This supersedes the entry above that keeps offset_executive_p2's 3 ROWS cases: the ledger's three offset_executive_p2 rows (the shelled cylinders' vertex boxes) are WR-495's moves now and are removed, with the vertex-box class; gen0051's vertex 12 and gen0055's vertex 19 (raised 2.1e-16 and 7e-18 by the exact mate), fc0025's edge 67 (now the exact mate's tolerance alone) and the 4v fillet shell's vertex rounding entry 78 (in trim_tolerance_other.tsv; the exact edges drop it) leave the ledger the same way. The UV line trim's raise bound (line_trim_bound) lowers trim tolerances by 1e-5 each (from about 2e-5) in 13 brep_local_operation rows, each in the ledger and certified on its edge or vertex: gen0004, gen0025, gen0043, gen0065 and gen0079 (geometry blocks' sum and abs_sum 2e-5 to 6e-5 lower, blessed) and fc0008, fc0025, gen0000, gen0021, gen0031, gen0041, gen0059 and gen0070 (within the compare's tolerance, written again from the run). It also lowers 15 values in gen0068, which its blocks (abs_sum 7e21) hide, so its line does not move; its operand-trim row certifies them and it has no ledger row
+# surface.cone_p2: the cone rebuild's EFF_ZERO branch certifies its cylinder net and records the cylinder about the axis the net's end circles are coaxial about (#17228, #21628): the digest is this branch's file (no ROWS case in the unit). Two rows move against this main, both proved in goldens/tests/issue_17228_cone_rebuild_moves.rs: adv_reb_cylarc_s1i0_id_tw rebuild status 1000 -> 1001 (a net turned 1e-4 degrees about its own axis is 2 r sin^2(a/4) = 3.8e-13 inside every cylinder the rebuild tries, 192 times gamma_8 of its size and about ten times implicit::lies_on's allowance, so the refusal NetOffCylinder is right) and gen0152 1001 -> 1000 (both end circles coaxial about the centre line, each tilted 1.43e-7 rad, so the net is within 2.9e-14 of that cylinder, under one ulp (2.2e-10) of its coordinates near 1e6; the net moves 1.6e-10)
 # intersect.surface_drop_lib_p1: main's file with trim0351 and trim0384 dropping cleanly across a closed U-seam (#20836): both move from 0 curves ([0.0, 0.0, 0.0, 0.0]) to 2 UV pieces meeting on opposite U-seam sides (n=182 and n=196); no tolerance moves
+# offset.offset_executive_p2: a rounded offset's tube that folds over itself is refused (#13685): this branch's file, 20 lines moved, none a ROWS case. 4 move from status 1000 to 1001 (extrude_holes1_face0_outset24_7_rounded and _unstitched, extrude_holes1_face3_outset24_7_rounded, fill_gap_extrudeHoles1_face0_round_d13, each unsound on main), and 16 refused on main stay 1001 with the smaller partial offset an earlier refusal records; proved by tests/issue_13685_tube_folds.rs and the unit's soundness probe
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -207,7 +209,7 @@ nurbs.b_spline_surface_p2	f6eae99ab71257f5
 nurbs.nurbs_crv	c78af304772ea823
 nurbs.nurbs_srf	5ea987b73e360223
 offset.offset_executive_p1	369d6f853189d32e
-offset.offset_executive_p2	bfef3e402897cd02
+offset.offset_executive_p2	e22c3e324b02a3ab
 offset.offset_geometry_creation	e8c98d82f6680670
 primitive.api_curve_ops	631989d29fe6f1dc
 primitive.api_curves	b384f5e70c20e9db
@@ -233,7 +235,7 @@ surface.b_spline_volume	a84045e0af965e76
 surface.b_spline_volume_n_lib	9b66552d807f80e1
 surface.bend_volume	4ed4f969a11b67a8
 surface.cone_p1	f919b20fa0fedb98
-surface.cone_p2	e45d5bc9b7336f39
+surface.cone_p2	6cd245e2759d098d
 surface.cone_p3	a5fb6323191885b2
 surface.curve_bounded_surface	f1010cd243b40745
 surface.offset_surface	bcb31e3779792b46

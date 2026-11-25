@@ -50,6 +50,7 @@ impl Answer for Vec<Option<f64>> {}
 impl Answer for Vec<Vec<Option<f64>>> {}
 impl Answer for Vec<Result<PointClass>> {}
 impl Answer for Vec<f64> {}
+impl Answer for Vec<solidcore::query::FaceLineHit> {}
 
 /// A kernel measure that has a read-only form, under one lock of the body
 /// ([`read_else_edit`]): `read`, which leaves the body (and its proof) as it is; where the
@@ -399,6 +400,17 @@ pub struct FaceRayHit {
     pub uv: [f64; 2],
     /// The distance from the ray's origin to the point, along the ray.
     pub distance: f64,
+}
+
+/// A place where a line meets a face ([`Body::face_line_hits`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FaceLineHit {
+    /// The point on the line, at `parameter`.
+    pub point: [f64; 3],
+    /// The face's (u, v) there, as [`crate::face_surface::FaceSurface`] evaluates them.
+    pub uv: [f64; 2],
+    /// The signed distance along the line's unit direction from its given point.
+    pub parameter: f64,
 }
 
 /// An edge's curve over the edge's own interval, copied out of its body ([`Body::edge_curve`]) to
@@ -925,6 +937,67 @@ impl Body {
         // ties (one point, one distance) in the record's face order
         hits.sort_by(|p, q| p.distance.total_cmp(&q.distance).then(p.face.cmp(&q.face)));
         Ok(hits)
+    }
+
+    /// Where the whole line through `through` along `direction` (both ways) meets record face
+    /// `face` within its trim, ordered along the line: the kernel's
+    /// (`solidcore::query::face_line_hits`) on the face's exact surface, whatever its kind
+    /// (plane, cylinder, cone, sphere, torus, B-spline), each place once (a place on a periodic
+    /// surface's seam too). A stretch of the line lying on the face is no single place and is
+    /// left out. The kernel's solve may add UV trim curves to the body, as a point
+    /// classification does.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces, a coordinate that is not finite or a
+    /// direction of no length; the kernel's refusal of a face without a surface; any other
+    /// kernel error.
+    pub fn face_line_hits(
+        &self,
+        order: &Order,
+        face: usize,
+        through: [f64; 3],
+        direction: [f64; 3],
+    ) -> Result<Vec<FaceLineHit>> {
+        let f = order::face(order, face)?;
+        let (through, direction) = (point(through)?, point(direction)?);
+        // A direction the ray refuses is the caller's, not the kernel's.
+        Ray::new(through, direction).map_err(|_| Error::Argument)?;
+        let hits = with_body("face_line_hits", self, |k, b| {
+            solidcore::query::face_line_hits(k, b, f, through, direction)
+        })?;
+        Ok(hits
+            .into_iter()
+            .map(|h| FaceLineHit {
+                point: array(h.point),
+                uv: [h.uv.x, h.uv.y],
+                parameter: h.parameter,
+            })
+            .collect())
+    }
+
+    /// Where the line through `through` along `direction` meets record face `face`, of its
+    /// meetings ([`Body::face_line_hits`]) the nearest `through` on either side. Meetings as near
+    /// as each other within `tie` are a tie, which goes to the one furthest along `direction`:
+    /// ahead of `through` rather than behind it (a line through a cylinder's axis meets its side
+    /// ahead). `None` where the line misses the face or only runs along it.
+    ///
+    /// # Errors
+    /// As [`Body::face_line_hits`].
+    pub fn face_line_nearest(
+        &self,
+        order: &Order,
+        face: usize,
+        through: [f64; 3],
+        direction: [f64; 3],
+        tie: f64,
+    ) -> Result<Option<[f64; 3]>> {
+        let f = order::face(order, face)?;
+        let (through, direction) = (point(through)?, point(direction)?);
+        Ray::new(through, direction).map_err(|_| Error::Argument)?;
+        let hits = with_body("face_line_nearest", self, |k, b| {
+            solidcore::query::face_line_hits(k, b, f, through, direction)
+        })?;
+        Ok(solidcore::query::nearest_line_hit(&hits, tie).map(|h| array(h.point)))
     }
 
     /// Record edge `edge`'s curve over the edge's own interval, copied out of the body to measure
@@ -1952,6 +2025,45 @@ fn across(b: &Brep, e: EdgeId, set: &[FaceId]) -> solidcore::Result<Result<FaceI
             "a rim edge without exactly one face across it",
         )),
     })
+}
+
+/// `direction` made unit at any finite length, `None` for a coordinate that is not finite or a
+/// direction of no length (`solidcore::query::line_unit_direction`).
+#[must_use]
+pub fn unit_direction(direction: [f64; 3]) -> Option<[f64; 3]> {
+    let direction = point(direction).ok()?;
+    solidcore::query::line_unit_direction(direction).map(array)
+}
+
+/// Of a line's two nearest meetings with something, `ahead` along its unit direction and `behind`
+/// it (each a distance, not negative), the nearer as a signed distance along the direction
+/// (behind negative); the one ahead on a tie (`solidcore::query::nearer_line_meeting`).
+#[must_use]
+pub fn nearer_line_meeting(ahead: Option<f64>, behind: Option<f64>) -> Option<f64> {
+    solidcore::query::nearer_line_meeting(ahead, behind)
+}
+
+/// The point `parameter` along the line from `through` along its unit `direction`
+/// (`solidcore::query::point_along_line`); `None` for a coordinate that is not finite.
+#[must_use]
+pub fn point_along_line(
+    through: [f64; 3],
+    direction: [f64; 3],
+    parameter: f64,
+) -> Option<[f64; 3]> {
+    let (through, direction) = (point(through).ok()?, point(direction).ok()?);
+    Some(array(solidcore::query::point_along_line(
+        through, direction, parameter,
+    )))
+}
+
+/// How far `q` lies from `point`, measured across a surface whose nearest point to `point` is
+/// `foot` (`solidcore::query::distance_across_surface`); `None` for a coordinate that is not
+/// finite.
+#[must_use]
+pub fn distance_across_surface(point_: [f64; 3], foot: [f64; 3], q: [f64; 3]) -> Option<f64> {
+    let (p, f, q) = (point(point_).ok()?, point(foot).ok()?, point(q).ok()?);
+    Some(solidcore::query::distance_across_surface(p, f, q))
 }
 
 #[cfg(test)]
