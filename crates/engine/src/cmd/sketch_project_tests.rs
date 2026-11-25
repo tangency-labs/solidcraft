@@ -2807,8 +2807,9 @@ fn a_saved_offset_of_a_shelled_major_arc_reopens_with_its_sources() {
     use solidcraft_doc::{Document, FeatureKind, ProfileSel, WholeProfileBoundary};
     use solidcraft_sketch::{CurveKind, LinkKind, LinkSource, OffsetChain};
 
-    // The shelled arc of more than half a turn (through 55) does not reopen yet: #21018.
-    for through in [25.0_f64] {
+    // Both a shelled arc of less than half a turn (through 25) and one of more (through 55, whose
+    // inner rim the kernel gives back as a spline on reopen: #21018).
+    for through in [25.0_f64, 55.0] {
         for spline in [false, true] {
             let (mut s, id, mut legacy, inner) = saved_shelled_cap_projection(through, spline);
             let source_ids = [if spline { "s1" } else { "a2" }, "l4", "l5", "l6"];
@@ -2855,7 +2856,14 @@ fn a_saved_offset_of_a_shelled_major_arc_reopens_with_its_sources() {
             let sk = &rebuilt.sketch(id).unwrap().sketch;
             let sources = if spline { &sk.freeform_chain_offsets[0].sources } else { &sk.offsets[0].sources };
             assert_eq!(sources, &expected);
-            assert!(matches!(sk.curves[sk.curve_index(source_ids[0]).unwrap()].kind, CurveKind::Arc { .. }));
+            // The inner rim reopens as an arc, except where it was saved as the spline a fresh
+            // projection of the major arc also gives.
+            let rim = &sk.curves[sk.curve_index(source_ids[0]).unwrap()].kind;
+            if spline && through == 55. {
+                assert!(matches!(rim, CurveKind::Spline { .. }), "{rim:?}");
+            } else {
+                assert!(matches!(rim, CurveKind::Arc { .. }), "through={through}, spline={spline}: {rim:?}");
+            }
             assert!(outputs.iter().all(|id| sk.curve_index(id).is_some()));
             assert!(
                 rebuilt.sketch(id).unwrap().profiles.iter().any(|p| {
@@ -2863,9 +2871,11 @@ fn a_saved_offset_of_a_shelled_major_arc_reopens_with_its_sources() {
                 }),
                 "Sketch2's offset outputs form a profile boundary"
             );
-            // A fresh design still uses the restored arc directly.
+            // A fresh design still offsets its own projection of the inner rim (a spline when the
+            // shelled arc is more than half a turn).
+            let fresh = if through == 55. { "s1" } else { "a2" };
             run(&mut s, "sketch.edit", json!({"sketch":"Sketch2"}));
-            run(&mut s, "sketch.offset", json!({"curves":["a2"],"distance":0.8}));
+            run(&mut s, "sketch.offset", json!({"curves":[fresh],"distance":0.8}));
             run(&mut s, "sketch.finish", json!({}));
             assert!(s.model.results.iter().all(|r| r.error.is_none()));
         }
