@@ -1917,8 +1917,40 @@ fn new_component_whose_move_is_refused_leaves_nothing_behind() {
     assert_eq!(app.session.active_component, 0);
 }
 
-/// As-built joints and rigid groups take components from body picks; New Component makes one
-/// from bodies when bodies are picked.
+/// A refused move inside an active component, with a body selected and a step to redo, leaves
+/// the design, the undo and redo steps, the active component and the selection as they were.
+#[test]
+fn new_component_refused_inside_a_component_keeps_redo_the_active_component_and_the_selection() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("component.create", json!({"name": "Inner", "activate": true})).unwrap();
+    app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "operation": "new"})).unwrap();
+    app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [40, 0, 0], "operation": "new"})).unwrap();
+    app.run("edit.undo", json!({})).unwrap();
+    app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+    app.start("component.create");
+    let mut d = app.dialog.take().unwrap();
+    d.inputs[0].items.push(Sel::Body { name: "Nope".into() });
+    let labels = |steps: &[solidcraft_engine::Snapshot]| steps.iter().map(|step| step.label.clone()).collect::<Vec<_>>();
+    let state = |app: &SolveApp| {
+        let s = &app.session;
+        (s.doc.to_json(), labels(&s.undo), labels(&s.redo), s.active_component, s.active_occurrence_path.clone(), s.selection.clone())
+    };
+    let before = state(&app);
+    assert!(!before.2.is_empty(), "a step to redo");
+    assert_ne!(before.3, 0, "inside Inner");
+    assert!(crate::dialogs::run_dialog(&mut app, &d).is_err());
+    let after = state(&app);
+    assert!(after.0 == before.0, "the design is as it was");
+    assert_eq!(after.1, before.1, "the undo steps");
+    assert_eq!(after.2, before.2, "the redo steps");
+    assert_eq!((after.3, &after.4), (before.3, &before.4), "the active component");
+    assert_eq!(after.5, before.5, "the selection");
+    app.run("edit.redo", json!({})).unwrap();
+    assert!(app.session.model.state().body("Body2").is_some(), "Redo still brings the second box back");
+}
+
+/// As-built joints and rigid groups take components from body picks; New Component with no
+/// bodies picked makes an empty component (with bodies it moves them into the one it makes).
 #[test]
 fn component_picks_become_occurrences() {
     let mut app = two_boxes();

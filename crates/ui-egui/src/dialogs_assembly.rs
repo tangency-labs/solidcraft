@@ -846,11 +846,11 @@ pub struct SnapPt {
     pub param: Value,
 }
 
-/// The occurrence placing a world body (0: the root design), the instance its name says.
 /// New Component with bodies picked: makes the component, then moves the bodies into it as
 /// part of the same undo step, with the moves in one History folder named after the component
 /// when there are two or more (#21840). `None` when the window has no bodies picked, so it runs
-/// as any other window. A refused move takes the new component back out.
+/// as any other window. A refused move takes the new component back out and leaves the undo and
+/// redo steps, the active component and the selection as they were before OK.
 pub(crate) fn run_new_component(app: &mut SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<Result<(), String>> {
     if !matches!(k, Asm::NewComponent { .. }) {
         return None;
@@ -858,6 +858,12 @@ pub(crate) fn run_new_component(app: &mut SolveApp, k: &Asm, inputs: &[SelInput]
     let commands = commands(app, k, inputs).ok()?;
     let [(create, create_params), (moving, move_params)] = commands.as_slice() else { return None };
     Some((|| {
+        // What a refused move puts back: the create drops redo steps (and at the undo limit the
+        // oldest undo step), and taking the component out again leaves the root active.
+        let s = &app.session;
+        let (undo, redo) = (s.undo.clone(), s.redo.clone());
+        let (active, path) = (s.active_component, s.active_occurrence_path.clone());
+        let (selection, all_bodies) = (s.selection.clone(), s.selection_all_bodies);
         let made = app.run(create, create_params.clone())?;
         let mut move_params = move_params.clone();
         if let Some(id) = made.get("component") {
@@ -868,9 +874,13 @@ pub(crate) fn run_new_component(app: &mut SolveApp, k: &Asm, inputs: &[SelInput]
             Ok(moved) => moved,
             Err(error) => {
                 app.session.undo = history;
-                if app.run("edit.undo", json!({})).is_ok() {
-                    app.session.redo.pop();
+                if let Err(why) = app.run("edit.undo", json!({})) {
+                    return Err(format!("{error}; the new component could not be taken back out: {why}"));
                 }
+                let s = &mut app.session;
+                (s.undo, s.redo) = (undo, redo);
+                (s.active_component, s.active_occurrence_path) = (active, path);
+                (s.selection, s.selection_all_bodies) = (selection, all_bodies);
                 return Err(error);
             }
         };
@@ -885,6 +895,7 @@ pub(crate) fn run_new_component(app: &mut SolveApp, k: &Asm, inputs: &[SelInput]
     })())
 }
 
+/// The occurrence placing a world body (0: the root design), the instance its name says.
 pub(crate) fn occurrence_of_body(s: &Session, body: &str) -> Option<u64> {
     placement_of_body(s, body).map(|path| path.last().copied().unwrap_or(0))
 }
