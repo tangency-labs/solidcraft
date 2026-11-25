@@ -466,7 +466,7 @@ fn brep_vertices(brep: &Brep) -> Result<Vec<VertexId>> {
 /// SM_SR_ALL, tolerance, SM_BIG_DOUBLE, NULL)` through the caller's objects: every
 /// solution's start parameter, and its end parameter for a range of values, in solution
 /// order.
-fn target_curve_crossings<O: SolutionObject>(
+pub(super) fn target_curve_crossings<O: SolutionObject>(
     k: &Kernel,
     objects: &dyn TopologyObjects<O>,
     target: O,

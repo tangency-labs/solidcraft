@@ -639,6 +639,15 @@ impl Cause for solidcraft_smlib::Error {
     }
 }
 
+impl Cause for solidcore_ops::Error {
+    fn panic(&self) -> Option<&str> {
+        match self {
+            solidcore_ops::Error::Internal(message) => Some(message),
+            _ => None,
+        }
+    }
+}
+
 impl Cause for str {}
 impl Cause for String {}
 impl Cause for solidcraft_smlib::CheckReport {}

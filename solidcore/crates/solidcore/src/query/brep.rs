@@ -94,11 +94,12 @@ pub use ray::{
 use core::cell::OnceCell;
 
 use crate::curve::curve::Curve;
+use crate::curve::line::Line;
 use crate::error::intersect::IntersectFailure;
 use crate::error::query::QueryFailure;
 use crate::error::{native_failure, EntityRef, Result, SolidError};
-use crate::geom::attribute::{Attribute, AttributeValue, Behavior};
-use crate::geom::extent3d::Extent3d;
+use crate::geom::attribute::{Attribute, AttributeValue, Behavior, ObjectKey};
+use crate::geom::extent3d::{Extent3d, LineHit};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::object::ObjectRef;
 use crate::geom::solution_array::Solution;
@@ -107,13 +108,15 @@ use crate::intersect::api_intersectors::{
     intersect_curve_face, intersect_curve_face_within, CurveHits,
 };
 use crate::intersect::point_class::{PointClassType, PointClassification};
-use crate::intersect::topology_solver::p1::TopologySolver;
+use crate::intersect::topology_solver::p1::{CurveRef, TopologySolver};
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
 use crate::kernel::Kernel;
+use crate::mass::integrator::properties::region_material;
 use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::knots::Side;
 use crate::primitive::api_curves::create_line_segment;
+use crate::query::api_queries::target_curve_crossings;
 use crate::query::edge as qe;
 use crate::query::face::{p1 as qf1, p3 as qf3};
 use crate::surface::surface::Surface;
@@ -997,6 +1000,112 @@ impl<'a> BrepQuery<'a> {
             point: surface.evaluate_point(k, uv)?,
             distance: solution.start.solution_value.max(0.0),
         }))
+    }
+
+    /// The first material interval along a ray limited to `clip`, as distances from its
+    /// origin. For a sheet, returns its first trimmed boundary hit as a point interval.
+    /// A tangent hit on a solid does not enclose any material.
+    ///
+    /// # Errors
+    ///
+    /// An invalid clip interval, or errors from the box, the trimmed line intersections or
+    /// the point classifications.
+    pub fn first_ray_interval(
+        &self,
+        k: &Kernel,
+        b: &mut Brep,
+        ray: Ray,
+        clip: (f64, f64),
+        sheet: bool,
+    ) -> Result<Option<(f64, f64)>> {
+        if !(clip.0.is_finite() && clip.0 >= 0.0 && clip.0 <= clip.1) {
+            return Err(SolidError::invalid_input(
+                "query::brep::BrepQuery::first_ray_interval",
+                "an invalid clipping interval",
+            ));
+        }
+        let tolerance = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
+        let mut bounds = self.bounding_box(k, b)?;
+        bounds.expand_absolute(tolerance);
+        let LineHit::Through { enter, exit } = bounds.intersect_line(ray.origin, ray.direction)?
+        else {
+            return Ok(None);
+        };
+        let enter = enter.max(0.0);
+        if exit <= enter || exit < clip.0 || enter > clip.1 {
+            return Ok(None);
+        }
+        let at = |distance| ray.origin + distance * ray.direction;
+        let line = Curve::from(Line::from_points(at(enter), at(exit), 3));
+        let domain = line.natural_interval();
+        if domain.length() <= 0.0 {
+            return Ok(None);
+        }
+        let crossings = {
+            let identity = self.effective_identity();
+            let cache = self.cache(k, b)?;
+            let objects = LiveBrepObjects::new(b, &identity, Some(cache))?;
+            let handle = CacheObject::Other(ObjectRef {
+                type_code: Line::TYPE,
+                key: ObjectKey(0),
+            });
+            target_curve_crossings(
+                k,
+                &objects,
+                CacheObject::Brep,
+                CurveRef {
+                    curve: &line,
+                    handle,
+                },
+                &domain,
+                tolerance,
+            )?
+        };
+        let distance = |parameter: f64| {
+            let fraction = (domain.clamp_value(parameter) - domain.min()) / domain.length();
+            fraction.mul_add(exit - enter, enter)
+        };
+        let hits = crossings.into_iter().map(distance);
+        if sheet {
+            let first = hits
+                .filter(|t| (clip.0..=clip.1).contains(t))
+                .min_by(f64::total_cmp);
+            return Ok(first.map(|t| (t, t)));
+        }
+
+        // Trimmed crossings partition the line into intervals of constant material class.
+        // Several topological entities at one crossing may report it within the zone tolerance.
+        let mut hits: Vec<_> = hits.collect();
+        hits.sort_by(f64::total_cmp);
+        hits.dedup_by(|a, b| (*a - *b).abs() <= tolerance);
+        // Include the ray start when it is inside material. The padded far end is outside
+        // the body, so a material interval always ends at a crossing before that end.
+        let mut previous = enter;
+        let mut first = None;
+        for far in hits {
+            let near = previous;
+            previous = far;
+            if near >= clip.1 {
+                break;
+            }
+            if far <= clip.0 || near >= far {
+                continue;
+            }
+            // Classify before clipping, even where the section keeps only a thin sliver.
+            let midpoint = at(near + (far - near) * 0.5);
+            let class = self.point_3d_classify(k, b, midpoint, tolerance, true)?;
+            let material = match class.object() {
+                Some(EntityRef::Region(region)) => region_material(b, region)?,
+                _ => false,
+            };
+            if material {
+                let start = first.map_or_else(|| near.max(clip.0), |(start, _)| start);
+                first = Some((start, far.min(clip.1)));
+            } else if first.is_some() {
+                break;
+            }
+        }
+        Ok(first)
     }
 
     /// (Not upstream) The lowest dimensional vertex, edge or face of `b` within `tolerance`
@@ -1918,6 +2027,79 @@ mod tests {
             Point3::ZERO,
             Vec3::new(0.0, f64::INFINITY, 0.0)
         )));
+    }
+
+    #[test]
+    fn first_ray_interval_solves_both_curved_crossings_and_clips_material() {
+        let mut k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let mut body =
+            crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 5.0, 20.0)
+                .unwrap();
+        let query = BrepQuery::of_brep(&body);
+        let mut interval = |x, y, clip| {
+            let ray = Ray::new(Point3::new(x, y, 10.0), Vec3::new(4.0, 0.0, 0.0)).unwrap();
+            query
+                .first_ray_interval(&k, &mut body, ray, clip, false)
+                .unwrap()
+        };
+        let full = (0.0, f64::INFINITY);
+        // At y = 3 the cylinder walls are at x = ±4. The answers are distances, even
+        // though the input direction and the line's natural parameter are not distances.
+        for (x, clip, expected) in [
+            (-20.0, full, (16.0, 24.0)),
+            (-20.0, (17.0, 23.0), (17.0, 23.0)),
+            (0.0, full, (0.0, 4.0)),
+        ] {
+            let found = interval(x, 3.0, clip).unwrap();
+            assert!(
+                (found.0 - expected.0).abs() < 1e-7 && (found.1 - expected.1).abs() < 1e-7,
+                "{found:?}, expected {expected:?}"
+            );
+        }
+        assert_eq!(
+            interval(-20.0, 3.0, (25.0, 30.0)),
+            None,
+            "the section removes all material"
+        );
+        assert_eq!(
+            interval(-20.0, 5.0, full),
+            None,
+            "tangency encloses no material"
+        );
+    }
+
+    #[test]
+    fn first_ray_interval_on_a_sheet_is_a_clipped_surface_hit() {
+        let mut k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let mut sheet = crate::primitive::api_primitives::create_plane(
+            &mut k,
+            Point3::new(0.0, 0.0, 3.0),
+            2.0,
+            2.0,
+        )
+        .unwrap();
+        let query = BrepQuery::of_brep(&sheet);
+        let ray = Ray::new(Point3::new(1.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)).unwrap();
+        let found = query
+            .first_ray_interval(&k, &mut sheet, ray, (1.0, 4.0), true)
+            .unwrap()
+            .unwrap();
+        assert!(
+            (found.0 - 3.0).abs() < 1e-7 && found.0 == found.1,
+            "{found:?}"
+        );
+        assert_eq!(
+            query
+                .first_ray_interval(&k, &mut sheet, ray, (4.0, 7.0), true)
+                .unwrap(),
+            None
+        );
     }
 
     /// Every face a ray meets, nearest first: along +x at y = 3, z = 10 from x = -20 the

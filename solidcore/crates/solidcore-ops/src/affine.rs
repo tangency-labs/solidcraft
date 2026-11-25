@@ -7,12 +7,15 @@
 //! [`solidcore::Transform::concat`], [`solidcore::Transform::inverse`]); ops checks the
 //! numbers and passes them on. Beside them, how far a point or a box reaches along a direction
 //! ([`distance_along`], [`span_along`]), as the kernel measures it, a point under a map
-//! ([`apply_point`]), parallelograms on a plane ([`rect_of_aspect`], [`fit_aspect`],
-//! [`offset_quad`], [`parallelogram_point`]), and a direction turned to the sense of another
+//! ([`apply_point`]), where a line meets a plane ([`line_plane_parameter`], [`line_point_at`]),
+//! parallelograms on a plane ([`rect_of_aspect`], [`fit_aspect`], [`offset_quad`],
+//! [`parallelogram_point`]), and a direction turned to the sense of another
 //! ([`same_sense`]).
 
 use solidcore::geom::certified::Verdict;
+use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent3d::Extent3d;
+use solidcore::geom::geom_utility::p1 as geom;
 use solidcore::{Transform, Vec3};
 
 use crate::body::REGULAR_RATIO;
@@ -165,6 +168,81 @@ pub fn inverse(matrix: &Matrix) -> Result<Matrix> {
 /// the distance itself). Negative behind `origin`.
 pub fn distance_along(origin: [f64; 3], direction: [f64; 3], point: [f64; 3]) -> f64 {
     Vec3::from(point).distance_along(Vec3::from(origin), Vec3::from(direction))
+}
+
+/// The signed parameter where a line meets a plane, through the kernel.
+/// A line is parallel when the absolute projection of its direction onto the normal is
+/// less than the caller's positive `min_abs_dot`.
+#[must_use]
+pub fn line_plane_parameter(
+    origin: [f64; 3],
+    direction: [f64; 3],
+    plane_origin: [f64; 3],
+    normal: [f64; 3],
+    min_abs_dot: f64,
+) -> Option<f64> {
+    geom::line_plane_parameter(
+        vec3(origin),
+        vec3(direction),
+        vec3(plane_origin),
+        vec3(normal),
+        min_abs_dot,
+    )
+}
+
+/// The parameters of a line kept on the non-positive side of a plane, through
+/// [`geom::line_halfspace_interval`]. An unbounded end is represented as signed infinity.
+#[must_use]
+pub fn line_halfspace_interval(
+    origin: [f64; 3],
+    direction: [f64; 3],
+    plane_origin: [f64; 3],
+    normal: [f64; 3],
+    min_abs_dot: f64,
+) -> Option<(f64, f64)> {
+    geom::line_halfspace_interval(
+        vec3(origin),
+        vec3(direction),
+        vec3(plane_origin),
+        vec3(normal),
+        min_abs_dot,
+    )
+}
+
+/// The kernel's point at a signed parameter along a line.
+#[must_use]
+pub fn line_point_at(origin: [f64; 3], direction: [f64; 3], parameter: f64) -> [f64; 3] {
+    let p = geom::line_point_at(vec3(origin), vec3(direction), parameter);
+    [p.x, p.y, p.z]
+}
+
+/// The closed portion of a line's parameter window in the padded box, through
+/// [`Extent3d::clipped_line_interval`]. Padding is a fraction of the diagonal plus
+/// an absolute distance. Signed parameters and grazing endpoints are retained.
+#[must_use]
+pub fn clipped_line_box_interval(
+    bounds: [[f64; 3]; 2],
+    origin: [f64; 3],
+    direction: [f64; 3],
+    window: (f64, f64),
+    padding: (f64, f64),
+    parallel_cutoff: f64,
+) -> Option<(f64, f64)> {
+    let [[x0, y0, z0], [x1, y1, z1]] = bounds;
+    Extent3d::from_bounds(x0, y0, z0, x1, y1, z1).clipped_line_interval(
+        vec3(origin),
+        vec3(direction),
+        window,
+        padding,
+        parallel_cutoff,
+    )
+}
+
+/// The parameter on the original line of a hit measured from `window.0`, if kept by
+/// the closed window. The shifted line and the original line use the same direction.
+#[must_use]
+pub fn line_parameter_from_start(window: (f64, f64), relative: f64) -> Option<f64> {
+    Extent1d::from_raw(window.0, window.1).parameter_from_start(relative)
 }
 
 /// `point` under `matrix` (the row-vector convention above: `p·A + t`), through

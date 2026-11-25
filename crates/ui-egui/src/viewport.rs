@@ -181,6 +181,8 @@ pub struct ViewportState {
     pick_bounds: std::sync::Mutex<Option<BodyBounds>>,
     /// The boxes in `pick_bounds` as a whole ([`body_tree`]), held with them.
     body_tree: std::sync::Mutex<Option<(BodyBoxes, std::sync::Arc<BodyTree>)>>,
+    /// The conservative geometry boxes used by orbit depth queries, held with their world.
+    orbit_body_bounds: std::sync::Mutex<Option<OrbitBodyBounds>>,
     /// What the refinement reads of each body of one world state that does not change with the
     /// view ([`lod_bodies`]), held with the state as `pick_bounds` is.
     lod_bodies: std::sync::Mutex<Option<(std::sync::Arc<solidcraft_engine::doc::ModelState>, std::sync::Arc<LodBodies>)>>,
@@ -447,6 +449,8 @@ pub struct ViewportState {
     /// The model point the 3D mouse turns the view around: chosen when the cap leaves rest and
     /// kept until it comes back (`navigation::device`, `space_mouse::navigate_frame`).
     pub device_pivot: Option<Vec3>,
+    /// The Classic centre depth held during one run of pure device turns.
+    pub(crate) device_centre_orbit: Option<crate::navigation::DeviceCentreOrbit>,
     /// After immediate zoom, ignore egui's outstanding smoothing until the gesture ends.
     pub(crate) wheel_zoom_raw_until_idle: bool,
     /// While trackpad scrolling runs, ignore egui's smoothing tail for zoom so
@@ -4421,6 +4425,7 @@ fn known_body_bounds(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc:
 type BodyBounds = (std::sync::Arc<solidcraft_engine::doc::ModelState>, BodyBoxes);
 
 type BodyBoxes = std::sync::Arc<Vec<(String, solidcraft_engine::geom::Aabb3)>>;
+type OrbitBodyBounds = (std::sync::Arc<solidcraft_engine::doc::ModelState>, BodyBoxes, std::sync::Arc<BodyTree>);
 
 /// The bodies' boxes of one world state taken together: the box around them all, and a
 /// hierarchy over them for rays. Every frame asks for the model's extent several times and casts
@@ -4475,6 +4480,38 @@ pub(crate) fn body_tree(app: &SolveApp, boxes: &BodyBoxes) -> std::sync::Arc<Bod
         return t;
     }
     std::sync::Arc::new(BodyTree::new(boxes))
+}
+
+/// A hierarchy of conservative body boxes for exact orbit depth. Keep it with the world so
+/// holding a device's cap does not rebuild it. An unknown box stays in the hierarchy's loose list.
+pub(crate) fn orbit_body_bounds(app: &SolveApp, state: &std::sync::Arc<solidcraft_engine::doc::ModelState>) -> (BodyBoxes, std::sync::Arc<BodyTree>) {
+    let build = || {
+        let boxes: BodyBoxes = std::sync::Arc::new(
+            state
+                .bodies
+                .iter()
+                .map(|b| {
+                    let bounds = if b.body.is_mesh() {
+                        b.mesh_bounds()
+                    } else {
+                        solidcraft_engine::kernel::guard("orbit bounds", || b.body.loose_bounds()).unwrap_or(solidcraft_engine::geom::Aabb3::EMPTY)
+                    };
+                    (b.name.clone(), bounds)
+                })
+                .collect(),
+        );
+        let tree = std::sync::Arc::new(BodyTree::new(&boxes));
+        (boxes, tree)
+    };
+    let Ok(mut cache) = app.viewport.orbit_body_bounds.lock() else { return build() };
+    if let Some((world, boxes, tree)) = cache.as_ref()
+        && std::sync::Arc::ptr_eq(world, state)
+    {
+        return (boxes.clone(), tree.clone());
+    }
+    let (boxes, tree) = build();
+    *cache = Some((state.clone(), boxes.clone(), tree.clone()));
+    (boxes, tree)
 }
 
 /// The model's extent: bodies (from the cached boxes) and sketches.

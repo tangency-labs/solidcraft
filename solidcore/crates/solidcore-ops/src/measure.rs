@@ -102,6 +102,15 @@ pub struct SquareFaceLevel {
     pub tolerance: f64,
 }
 
+fn box_corners(x: Extent3d) -> Result<([f64; 3], [f64; 3])> {
+    let (lo, hi) = (array(x.min()), array(x.max()));
+    let finite = lo.iter().chain(&hi).all(|v| v.is_finite());
+    if !finite || lo.iter().zip(&hi).any(|(a, b)| a > b) {
+        return Err(Error::Status(crate::error::INVALID_INPUT));
+    }
+    Ok((lo, hi))
+}
+
 fn array(v: Vec3) -> [f64; 3] {
     [v.x, v.y, v.z]
 }
@@ -742,13 +751,20 @@ impl Body {
     /// The kernel's error; [`Error::Status`] `SM_ERR_INVALID_INPUT` for no box (not finite, or
     /// its corners out of order).
     pub fn bounds(&self) -> Result<([f64; 3], [f64; 3])> {
-        let x = read_body("bounds", self, |k, b| brep_bounding_box(k, b, true))?;
-        let (lo, hi) = (array(x.min()), array(x.max()));
-        let finite = lo.iter().chain(&hi).all(|v| v.is_finite());
-        if !finite || lo.iter().zip(&hi).any(|(a, b)| a > b) {
-            return Err(Error::Status(crate::error::INVALID_INPUT));
-        }
-        Ok((lo, hi))
+        box_corners(read_body("bounds", self, |k, b| {
+            brep_bounding_box(k, b, true)
+        })?)
+    }
+
+    /// A conservative axis-aligned box of the vertices, edges and faces with their modeling
+    /// tolerances. Uses the kernel's non-tight box without solving the exact extrema.
+    ///
+    /// # Errors
+    /// The kernel's error, or an undefined or non-finite box.
+    pub fn loose_bounds(&self) -> Result<([f64; 3], [f64; 3])> {
+        box_corners(read_body("loose_bounds", self, |k, b| {
+            brep_bounding_box(k, b, false)
+        })?)
     }
 
     /// How far the body reaches along the normal of the plane through `origin` with axes `x`
@@ -1023,6 +1039,24 @@ impl Body {
             uv: [hit.uv.x, hit.uv.y],
             distance: hit.distance,
         }))
+    }
+
+    /// The first material interval, or the first trimmed sheet hit, along a unit ray
+    /// restricted to `clip`. Both endpoints are distances from the ray's origin.
+    ///
+    /// # Errors
+    /// Invalid ray or clipping interval, or the kernel's query error.
+    pub fn first_ray_interval(
+        &self,
+        origin: [f64; 3],
+        direction: [f64; 3],
+        clip: (f64, f64),
+        sheet: bool,
+    ) -> Result<Option<(f64, f64)>> {
+        let ray = Ray::new(point(origin)?, point(direction)?).map_err(|_| Error::Argument)?;
+        with_body("first_ray_interval", self, |k, b| {
+            BrepQuery::of_brep(b).first_ray_interval(k, b, ray, clip, sheet)
+        })
     }
 
     /// Every point where the ray from `origin` along `direction` meets a face, nearest first

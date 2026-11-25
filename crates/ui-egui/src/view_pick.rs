@@ -21,7 +21,8 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_engine::SectionPlane;
 use solidcraft_engine::doc::{apply_point, is_identity};
-use solidcraft_engine::geom::Mesh;
+use solidcraft_engine::geom::{Mesh, RaycastStart};
+use solidcraft_kernel::services::affine::{clipped_line_box_interval, line_halfspace_interval, line_parameter_from_start, line_point_at};
 
 use crate::SolveApp;
 
@@ -274,6 +275,119 @@ fn face_candidates(
     out
 }
 
+/// What the orbit ray can meet. Independent of camera movement and display refinement.
+pub(crate) fn orbit_scene_key(app: &SolveApp) -> u64 {
+    use std::hash::{Hash, Hasher};
+
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let s = &app.session;
+    s.revision.hash(&mut h);
+    std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)).hash(&mut h);
+    s.visibility.hidden_bodies.hash(&mut h);
+    s.visibility.hidden_occurrences.hash(&mut h);
+    s.visibility.hidden_folders.hash(&mut h);
+    s.active_sketch.hash(&mut h);
+    app.dialog.as_ref().map(|d| &d.edit_source_bodies).hash(&mut h);
+    app.preview.effective_replaced().hash(&mut h);
+    crate::viewport::frame_ghosting(app).hash(&mut h);
+    for plane in crate::viewport::section_planes(app) {
+        [plane.origin.x, plane.origin.y, plane.origin.z, plane.normal.x, plane.normal.y, plane.normal.z].map(f64::to_bits).hash(&mut h);
+    }
+    h.finish()
+}
+
+/// The orbit's window ray and its first visible material interval (distances from the origin).
+/// The orthographic ray starts in front of the conservative bounds, including any curved
+/// surface that reaches past the display mesh.
+pub(crate) fn orbit_ray(app: &SolveApp, proj: &crate::viewport::Proj, at: egui::Pos2) -> (Vec3, Vec3, Option<(f64, f64)>) {
+    let state = crate::open_meshing::shown_world(app);
+    let (boxes, tree) = crate::viewport::orbit_body_bounds(app, &state);
+    let scene = tree.union;
+    let bounds = if !scene.is_empty() && scene.min.is_finite() && scene.max.is_finite() {
+        Some(proj.bounds.map_or(scene, |b| b.union(&scene)))
+    } else {
+        proj.bounds
+    };
+    let (origin, dir) = crate::viewport::Proj { bounds, ..*proj }.ray(at);
+    (origin, dir, visible_body_interval(app, &state, &boxes, &tree, origin, dir))
+}
+
+/// The hierarchy only rules out candidates. Each solid answers from its trimmed B-rep,
+/// and a mesh body from its own triangles.
+fn visible_body_interval(
+    app: &SolveApp,
+    state: &solidcraft_engine::doc::ModelState,
+    boxes: &[(String, solidcraft_engine::geom::Aabb3)],
+    tree: &crate::viewport::BodyTree,
+    origin: Vec3,
+    dir: Vec3,
+) -> Option<(f64, f64)> {
+    use crate::viewport::{frame_ghosted, section_planes};
+
+    let ((near, far), _) = section_ray_interval(&section_planes(app), origin, dir)?;
+    let clip = (near.max(0.0), far);
+    if clip.0 >= clip.1 {
+        return None;
+    }
+    let entry = |bounds: &solidcraft_engine::geom::Aabb3| {
+        if bounds.is_empty() || !bounds.min.is_finite() || !bounds.max.is_finite() {
+            return Some(clip.0);
+        }
+        let (near, _) = clipped_line_box_interval([bounds.min.into(), bounds.max.into()], origin.into(), dir.into(), clip, (1e-6, 1e-9), 1e-15)?;
+        near.is_finite().then_some(near)
+    };
+    let replaced = app.preview.effective_replaced();
+    let mut candidates: Vec<_> = tree
+        .candidates(boxes, |bounds| entry(bounds).is_some())
+        .into_iter()
+        .filter_map(|i| {
+            let body = state.bodies.get(i)?;
+            if !app.body_visible(&body.name) || replaced.contains(&body.name) || frame_ghosted(app, body) {
+                return None;
+            }
+            Some((entry(&boxes.get(i)?.1)?, body))
+        })
+        .collect();
+    candidates.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut closest = None;
+    for (lower_bound, body) in candidates {
+        if closest.is_some_and(|(near, _)| lower_bound > near) {
+            break;
+        }
+        let interval = if body.body.is_mesh() {
+            let mesh_hit = mesh_hit_in_clip(app, body, origin, dir, clip);
+            mesh_hit.map(|t| (t, t))
+        } else {
+            let Ok(interval) = solidcraft_engine::kernel::guard("orbit depth", || body.body.first_ray_interval(origin, dir, clip, body.is_surface()))
+            else {
+                continue;
+            };
+            interval
+        };
+        if let Some(interval) = interval
+            && closest.is_none_or(|(near, _)| interval.0 < near)
+        {
+            closest = Some(interval);
+        }
+    }
+    closest
+}
+
+/// The nearest displayed triangle in the kept part of the ray, using the mesh's own index.
+fn mesh_hit_in_clip(app: &SolveApp, body: &solidcraft_engine::doc::ModelBody, origin: Vec3, dir: Vec3, clip: (f64, f64)) -> Option<f64> {
+    let (mesh, place) = body.mesh_in_place();
+    let clipped_origin = Vec3::from(line_point_at(origin.into(), dir.into(), clip.0));
+    let (local_origin, local_dir) = crate::viewport::local_ray(&place, clipped_origin, dir)?;
+    let (t, _) = crate::pick_index::raycast_with_start(
+        app.viewport.pick_index.of(&mesh).as_deref(),
+        &mesh,
+        local_origin,
+        local_dir,
+        RaycastStart::IncludeOrigin,
+    )?;
+    line_parameter_from_start(clip, t)
+}
+
 /// The hit point and outward surface normal in world space. A flat face (constant mesh
 /// normals) is solved exactly against its plane, so a box picks to the last digit; a curved
 /// face keeps the mesh hit (within the display tolerance) and takes its normal interpolated
@@ -336,22 +450,21 @@ pub(crate) fn section_keeps(planes: &[SectionPlane], p: Vec3) -> bool {
 /// Where the ray `o + d·t` comes into what the section keeps (inside every plane) ahead of `o`:
 /// `t` and the index of the plane it comes in through, where its cut face is.
 pub(crate) fn section_entry(planes: &[SectionPlane], o: Vec3, d: Vec3) -> Option<(f64, usize)> {
+    let ((lo, hi), entry_plane) = section_ray_interval(planes, o, d)?;
+    (lo > 0.0 && lo < hi).then_some((lo, entry_plane?))
+}
+
+/// Where the section keeps the ray, and which plane it enters through if there is one.
+fn section_ray_interval(planes: &[SectionPlane], o: Vec3, d: Vec3) -> Option<((f64, f64), Option<usize>)> {
     let (mut lo, mut hi, mut through) = (f64::NEG_INFINITY, f64::INFINITY, None);
     for (i, c) in planes.iter().enumerate() {
-        // n·(o + d·t) <= n·origin: t·dn <= s.
-        let (dn, s) = (c.normal.dot(d), c.normal.dot(c.origin - o));
-        if dn.abs() < 1e-12 {
-            if s < 0.0 {
-                return None;
-            }
-        } else if dn > 0.0 {
-            hi = hi.min(s / dn);
-        } else if s / dn > lo {
-            (lo, through) = (s / dn, Some(i));
+        let (near, far) = line_halfspace_interval(o.into(), d.into(), c.origin.into(), c.normal.into(), 1e-12)?;
+        hi = hi.min(far);
+        if near > lo {
+            (lo, through) = (near, Some(i));
         }
     }
-    let i = through?;
-    (lo > 0.0 && lo < hi).then_some((lo, i))
+    (lo <= hi).then_some(((lo, hi), through))
 }
 
 /// A cut cap under a pick: where, in which body, and the plane it is a cut face of.

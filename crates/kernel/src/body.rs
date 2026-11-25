@@ -22,8 +22,41 @@ pub(crate) mod shell_groups;
 /// a hundred times took tens of gigabytes. Reads as the record either way.
 #[derive(Clone, Debug)]
 pub(crate) enum RecordCell {
-    Ready(std::sync::Arc<Brep>),
+    Ready(std::sync::Arc<SharedRecord>),
     Moved(std::sync::Arc<LazyMove>),
+}
+
+/// The immutable record and its conservative bounds, shared by its pending placements.
+/// A transformed record gets its own box even when the topology is unchanged.
+#[derive(Debug)]
+pub(crate) struct SharedRecord {
+    brep: std::sync::Arc<Brep>,
+    loose_bounds: std::sync::OnceLock<Aabb3>,
+}
+
+impl SharedRecord {
+    fn new(brep: std::sync::Arc<Brep>) -> Self {
+        Self { brep, loose_bounds: std::sync::OnceLock::new() }
+    }
+
+    fn loose_bounds(&self, prepared: Option<&solidcore_ops::Body>) -> Result<Aabb3> {
+        if let Some(bounds) = self.loose_bounds.get() {
+            return Ok(*bounds);
+        }
+        // Work outside the cell: a failed kernel conversion may invoke diagnostic callbacks.
+        // Only the box is kept when the geometry was not already prepared.
+        let (lo, hi) = match prepared {
+            Some(body) => body.loose_bounds(),
+            None => {
+                solidcraft_smlib::start();
+                let (body, _) = solidcraft_smlib::stop::unstoppable(|| solidcore_ops::Body::from_record(&self.brep, true))
+                    .map_err(|e| KernelError::smlib("body bounds", e))?;
+                body.loose_bounds()
+            }
+        }
+        .map_err(|e| KernelError::smlib("body bounds", e))?;
+        Ok(*self.loose_bounds.get_or_init(|| Aabb3 { min: v3(lo), max: v3(hi) }))
+    }
 }
 
 /// How a record moves by a rigid motion ([`solidcraft_geom::brep::placement::moved`]).
@@ -60,25 +93,25 @@ pub(crate) struct Placing {
 /// A record moved by a rigid motion when first read ([`RecordCell::Moved`]).
 #[derive(Debug)]
 pub(crate) struct LazyMove {
-    source: std::sync::Arc<Brep>,
+    source: std::sync::Arc<SharedRecord>,
     motion: solidcraft_geom::brep::placement::Rigid,
     matrix: [[f64; 4]; 4],
-    made: std::sync::OnceLock<std::sync::Arc<Brep>>,
+    made: std::sync::OnceLock<std::sync::Arc<SharedRecord>>,
 }
 
 impl LazyMove {
-    pub(crate) fn new(source: std::sync::Arc<Brep>, motion: solidcraft_geom::brep::placement::Rigid, matrix: [[f64; 4]; 4]) -> LazyMove {
+    fn new(source: std::sync::Arc<SharedRecord>, motion: solidcraft_geom::brep::placement::Rigid, matrix: [[f64; 4]; 4]) -> LazyMove {
         LazyMove { source, motion, matrix, made: std::sync::OnceLock::new() }
     }
 
-    fn record(&self) -> &std::sync::Arc<Brep> {
+    fn record(&self) -> &std::sync::Arc<SharedRecord> {
         self.made.get_or_init(|| {
             // The record was checked to move exactly before it was placed this way; should that
             // fail after all, it is mapped, and as a last resort kept where it is (logged).
-            let moved = solidcraft_geom::brep::placement::moved(&self.source, &self.motion)
-                .or_else(|| solidcraft_geom::brep::placement::mapped(&self.source, &self.matrix));
+            let moved = solidcraft_geom::brep::placement::moved(self.source(), &self.motion)
+                .or_else(|| solidcraft_geom::brep::placement::mapped(self.source(), &self.matrix));
             match moved {
-                Some(r) => std::sync::Arc::new(r),
+                Some(r) => std::sync::Arc::new(SharedRecord::new(std::sync::Arc::new(r))),
                 None => {
                     log::error!("a lazily placed record could not be moved; it is drawn where its part is");
                     self.source.clone()
@@ -90,13 +123,17 @@ impl LazyMove {
     /// The record it moves (the part's), for what a rigid motion leaves as it is: its topology,
     /// its counts, its size.
     pub(crate) fn source(&self) -> &std::sync::Arc<Brep> {
-        &self.source
+        &self.source.brep
     }
 }
 
 impl RecordCell {
     /// The record as an `Arc` (moved first, when it is moved lazily).
     pub(crate) fn arc(&self) -> &std::sync::Arc<Brep> {
+        &self.resolved().brep
+    }
+
+    fn resolved(&self) -> &std::sync::Arc<SharedRecord> {
         match self {
             RecordCell::Ready(r) => r,
             RecordCell::Moved(m) => m.record(),
@@ -108,7 +145,7 @@ impl RecordCell {
     /// the same; positions are not.
     pub(crate) fn topology(&self) -> &Brep {
         match self {
-            RecordCell::Ready(r) => r,
+            RecordCell::Ready(r) => &r.brep,
             RecordCell::Moved(m) => m.source(),
         }
     }
@@ -117,12 +154,12 @@ impl RecordCell {
     /// decided without moving either.
     pub(crate) fn same(&self, other: &RecordCell) -> bool {
         match (self, other) {
-            (RecordCell::Ready(a), RecordCell::Ready(b)) => std::sync::Arc::ptr_eq(a, b),
+            (RecordCell::Ready(a), RecordCell::Ready(b)) => std::sync::Arc::ptr_eq(&a.brep, &b.brep),
             (RecordCell::Moved(a), RecordCell::Moved(b)) => {
-                std::sync::Arc::ptr_eq(a, b) || (std::sync::Arc::ptr_eq(&a.source, &b.source) && a.motion == b.motion)
+                std::sync::Arc::ptr_eq(a, b) || (std::sync::Arc::ptr_eq(a.source(), b.source()) && a.motion == b.motion)
             }
             (RecordCell::Moved(m), RecordCell::Ready(r)) | (RecordCell::Ready(r), RecordCell::Moved(m)) => {
-                m.made.get().is_some_and(|made| std::sync::Arc::ptr_eq(made, r))
+                m.made.get().is_some_and(|made| std::sync::Arc::ptr_eq(&made.brep, &r.brep))
             }
         }
     }
@@ -130,7 +167,7 @@ impl RecordCell {
     /// An address naming the record while it lives, without moving it.
     pub(crate) fn key(&self) -> usize {
         match self {
-            RecordCell::Ready(r) => std::sync::Arc::as_ptr(r) as usize,
+            RecordCell::Ready(r) => std::sync::Arc::as_ptr(&r.brep) as usize,
             RecordCell::Moved(m) => std::sync::Arc::as_ptr(m) as *const u8 as usize,
         }
     }
@@ -158,7 +195,7 @@ impl std::ops::Deref for RecordCell {
 
 impl From<std::sync::Arc<Brep>> for RecordCell {
     fn from(r: std::sync::Arc<Brep>) -> RecordCell {
-        RecordCell::Ready(r)
+        RecordCell::Ready(std::sync::Arc::new(SharedRecord::new(r)))
     }
 }
 
@@ -1492,8 +1529,8 @@ impl Body {
             None => None,
         };
         let (source, matrix) = match self.record.lazy().filter(|_| self.record.pending()) {
-            Some(inner) => (inner.source().clone(), solidcore_ops::affine::then(&inner.matrix, &matrix).ok()?),
-            None => (self.record.arc().clone(), matrix),
+            Some(inner) => (inner.source.clone(), solidcore_ops::affine::then(&inner.matrix, &matrix).ok()?),
+            None => (self.record.resolved().clone(), matrix),
         };
         let motion = solidcraft_geom::brep::placement::Rigid::of_matrix(&matrix).filter(|m| movable.by(m))?;
         Some(Body {
@@ -1619,6 +1656,26 @@ impl Body {
             }
         }
         record_outline(&self.record)
+    }
+
+    /// A box enclosing the body's exact faces, edges and vertices, using the kernel's
+    /// non-tight bounds. A pending placement moves the corners of its shared source box.
+    /// A mesh body's box comes from its triangles.
+    pub fn loose_bounds(&self) -> Result<Aabb3> {
+        if self.is_mesh() {
+            return Ok(self.outline_bounds());
+        }
+        if let Some(bounds) = *self.bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner) {
+            return Ok(bounds);
+        }
+        if let Some(lazy) = self.record.lazy().filter(|_| self.record.pending()) {
+            let bounds = lazy.source.loose_bounds(None)?;
+            let (lo, hi) = solidcore_ops::affine::transformed_box(&lazy.matrix, bounds.min.into(), bounds.max.into())
+                .map_err(|e| KernelError::smlib("placed body bounds", e))?;
+            return Ok(Aabb3 { min: v3(lo), max: v3(hi) });
+        }
+        let prepared = self.ops.get();
+        self.record.resolved().loose_bounds(prepared.as_deref().map(|(body, _)| body))
     }
 
     /// The exact box of the body's faces, edges and vertices (SMLib's tight box); a mesh body's
@@ -2371,6 +2428,14 @@ impl Body {
             .min_by(|(_, a), (_, b)| a.dot(d).total_cmp(&b.dot(d)));
         let (face, normal) = best.ok_or_else(|| KernelError::Failed("ray: no outward normal of the face it meets".into()))?;
         Ok(Some(RayPick { face, edge, vertex, point, normal, depth: hit.distance }))
+    }
+
+    /// The first occupied B-rep interval along the unit ray within `clip`. A sheet's
+    /// nearest actual hit is a point interval. The distances are measured from `origin`.
+    pub fn first_ray_interval(&self, origin: Vec3, direction: Vec3, clip: (f64, f64), sheet: bool) -> Result<Option<(f64, f64)>> {
+        let form = self.ops_body().ok_or_else(|| KernelError::Invalid("ray interval needs an exact body".into()))?;
+        let (body, _) = &*form;
+        body.first_ray_interval(origin.into(), direction.into(), clip, sheet).map_err(|e| KernelError::smlib("ray interval", e))
     }
 
     /// B-rep faces (a mesh body is one face; [`crate::measure`] counts its triangles).

@@ -154,6 +154,7 @@ pub use profile::Seg2Geom;
 pub use profile::Similarity2;
 pub use profile::bezier;
 pub use profile::regions_apart;
+pub use solidcore_tess::RaycastStart;
 pub use unit_vec3::UnitVec3;
 pub use vec::Vec2Geom;
 pub use vec::Vec3Geom;

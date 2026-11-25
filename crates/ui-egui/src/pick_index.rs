@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use egui::{Pos2, vec2};
 use solidcore_record::Vec3;
-use solidcraft_engine::geom::{Mesh, MeshIndex, PointCloudIndex};
+use solidcraft_engine::geom::{Mesh, MeshIndex, PointCloudIndex, RaycastStart};
 
 use crate::viewport::Proj;
 
@@ -181,9 +181,14 @@ pub(crate) fn segments_near(index: Option<&MeshIndex>, mesh: &Mesh, o: Vec3, d: 
 
 /// The nearest triangle of `mesh` along the ray, through its index.
 pub(crate) fn raycast(index: Option<&MeshIndex>, mesh: &Mesh, o: Vec3, d: Vec3) -> Option<(f64, usize)> {
+    raycast_with_start(index, mesh, o, d, RaycastStart::SkipSelfHit)
+}
+
+/// Choose how a pick treats the start of the ray, including when no index is available.
+pub(crate) fn raycast_with_start(index: Option<&MeshIndex>, mesh: &Mesh, o: Vec3, d: Vec3, start: RaycastStart) -> Option<(f64, usize)> {
     match index.filter(|_| !scanning()) {
-        Some(index) => index.raycast(mesh, o, d),
-        None => mesh.raycast(o, d),
+        Some(index) => index.raycast_with_start(mesh, o, d, start),
+        None => mesh.pick_ray(o, d, start)?.nearest(),
     }
 }
 

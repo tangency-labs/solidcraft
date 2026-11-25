@@ -205,6 +205,14 @@ impl Extent1d {
         Self { min, max }
     }
 
+    /// Maps a parameter measured from the start back into this interval's frame.
+    /// Both parameters use the same units. The result must lie in the closed interval.
+    #[must_use]
+    pub fn parameter_from_start(&self, relative: f64) -> Option<f64> {
+        let t = self.min + relative;
+        (relative >= 0.0 && t.is_finite() && (self.min..=self.max).contains(&t)).then_some(t)
+    }
+
     /// Resets to the "inside out" state of [`Extent1d::new`] (`Init`).
     pub fn init(&mut self) {
         *self = Self::new();
@@ -1014,6 +1022,27 @@ mod tests {
     use super::*;
     use crate::math::BOUNDED_INFINITE_PARAM;
 
+    #[test]
+    fn parameters_from_the_start_stay_in_the_closed_interval() {
+        let span = Extent1d::from_raw(-2.0, 5.0);
+        assert_eq!(span.parameter_from_start(0.0), Some(-2.0));
+        assert_eq!(span.parameter_from_start(4.0), Some(2.0));
+        assert_eq!(span.parameter_from_start(7.0), Some(5.0));
+        assert_eq!(span.parameter_from_start(7.01), None);
+        assert_eq!(span.parameter_from_start(-0.01), None);
+        assert_eq!(
+            Extent1d::from_raw(1e20, 2e20).parameter_from_start(-1.0),
+            None
+        );
+        assert_eq!(
+            Extent1d::from_raw(2.0, f64::INFINITY).parameter_from_start(1.0),
+            Some(3.0)
+        );
+        assert_eq!(
+            Extent1d::from_raw(2.0, f64::INFINITY).parameter_from_start(f64::INFINITY),
+            None
+        );
+    }
     #[test]
     fn construct_and_access() {
         let e = Extent1d::from_min_max(3.0, 1.0);

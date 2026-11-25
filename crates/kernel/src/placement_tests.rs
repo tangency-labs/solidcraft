@@ -296,6 +296,40 @@ fn a_rounded_body_moves_exactly_as_the_kernel_moves_it() {
     assert!(kinds.contains(&"exact") && kinds.contains(&"procedural"), "{kinds:?}");
 }
 
+#[test]
+fn conservative_source_bounds_keep_multiple_placements_lazy() {
+    let part = periodic_cylinder();
+    let (c, s) = (0.6_f64.cos(), 0.6_f64.sin());
+    let turn = [[1.0, 0.0, 0.0, 0.0], [0.0, c, s, 0.0], [0.0, -s, c, 0.0], [50.0, -20.0, 5.0, 1.0]];
+    let shift = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [200.0, 40.0, -12.0, 1.0]];
+    let both = solidcore_ops::affine::then(&turn, &shift).unwrap();
+    let placed = transform_matrix(&part, turn).unwrap();
+    let elsewhere = transform_matrix(&part, shift).unwrap();
+    let nested = transform_matrix(&placed, shift).unwrap();
+    let check = |body: &Body, matrix| {
+        assert!(body.record.pending());
+        let bounds = body.loose_bounds().unwrap();
+        // The cylinder has radius 10 and spans Z=0..20 in the shared source.
+        for z in [0.0, 20.0] {
+            for [x, y] in [[10.0, 0.0], [-10.0, 0.0], [0.0, 10.0], [0.0, -10.0]] {
+                let point = moved(matrix, [x, y, z]);
+                assert!(bounds.inflated(1e-8).contains(point), "{point:?} outside {bounds:?}");
+            }
+        }
+        assert!(body.record.pending(), "broad-phase bounds must not materialize a placement");
+    };
+    check(&placed, turn);
+    check(&elsewhere, shift);
+    check(&nested, both);
+
+    // A materialized occurrence can be the source of another placement. It shares the
+    // original's topology but its record and bounds are now in a different frame.
+    let _ = placed.record();
+    let moved_again = transform_matrix(&placed, shift).unwrap();
+    check(&moved_again, both);
+    assert!(elsewhere.record.pending() && nested.record.pending());
+}
+
 /// A body placed by a rigid motion keeps its part's record until its own geometry is read: its
 /// counts, history and face sources come from the part's, and nothing is moved for them. Read,
 /// its record is the one an eager move makes. Placed again (a part in a placed subassembly), it

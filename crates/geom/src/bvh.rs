@@ -4,7 +4,7 @@
 //! a mesh's triangles and one over its edge segments, for picking.
 
 use crate::prelude::*;
-use crate::{Aabb3, Mesh};
+use crate::{Aabb3, Mesh, RaycastStart};
 use solidcore_record::Vec3;
 
 /// Most items in a leaf.
@@ -233,7 +233,7 @@ fn farthest_along(o: Vec3, d: Vec3, b: &Aabb3) -> f64 {
 /// a ray, and the edge segments near one. Built from one mesh and answers only for it.
 #[derive(Clone, Debug, Default)]
 pub struct MeshIndex {
-    triangles: Bvh,
+    triangle_tree: Bvh,
     triangle_count: usize,
     segments: Bvh,
     /// Per segment item: its edge, and its first point in that edge's polyline.
@@ -272,7 +272,7 @@ impl MeshIndex {
                 if bounds.is_empty() { bounds } else { pad_pick_bounds(bounds) }
             })
             .collect();
-        MeshIndex { triangles: Bvh::new(&boxes), triangle_count: mesh.triangles.len(), ..Default::default() }
+        MeshIndex { triangle_tree: Bvh::new(&boxes), triangle_count: mesh.triangles.len(), ..Default::default() }
     }
 
     /// Index the edge polylines separately when a tool can pick display outlines.
@@ -297,13 +297,16 @@ impl MeshIndex {
     /// [`Mesh::raycast`] through the index: the same answer, including which triangle wins a tie.
     /// For a mesh other than the one indexed, the plain scan answers.
     pub fn raycast(&self, mesh: &Mesh, o: Vec3, dir: Vec3) -> Option<(f64, usize)> {
-        if mesh.triangles.len() != self.triangle_count {
-            return mesh.raycast(o, dir);
+        self.raycast_with_start(mesh, o, dir, RaycastStart::SkipSelfHit)
+    }
+
+    /// [`Mesh::pick_ray`] through the index, with ties resolved as in the plain scan.
+    pub fn raycast_with_start(&self, mesh: &Mesh, o: Vec3, dir: Vec3, start: RaycastStart) -> Option<(f64, usize)> {
+        let ray = mesh.pick_ray(o, dir, start)?;
+        if mesh.triangle_count() != self.triangle_count {
+            return ray.nearest();
         }
-        let frame = crate::mesh::RayFrame::new(o, dir)?;
-        self.triangles
-            .nearest(o, dir, |i| mesh.triangles.get(i as usize).and_then(|t| mesh.tri(t)).and_then(|p| frame.hit(p)))
-            .map(|(t, i)| (t, i as usize))
+        self.triangle_tree.nearest(o, dir, |i| ray.hit(i as usize)).map(|(t, i)| (t, i as usize))
     }
 
     /// Calls `f(edge, first point)` for every edge segment that may come within `a + b·t` of the

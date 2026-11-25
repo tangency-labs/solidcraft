@@ -711,7 +711,6 @@ crates/geom/src/brep/form.rs:tube_on_grid atan2,dot
 crates/geom/src/brep/form.rs:turned cross
 crates/geom/src/brep/normal_section.rs:normal_section cross,dot
 crates/geom/src/brep/placement.rs:Affine::conic atan2
-crates/geom/src/bvh.rs:MeshIndex::raycast raycast,triangles
 crates/geom/src/bvh.rs:MeshIndex::triangles_only triangles
 crates/geom/src/chain.rs:Ring::area_vector cross
 crates/geom/src/compare.rs:TriangleTree::nearest closest_on_triangle
@@ -776,7 +775,6 @@ crates/geom/src/mesh.rs:Mesh::inside_index cross,dot,triangles
 crates/geom/src/mesh.rs:Mesh::mass_properties cross,dot,triangles
 crates/geom/src/mesh.rs:Mesh::measure cross,dot,triangles
 crates/geom/src/mesh.rs:Mesh::ray_crossings triangles
-crates/geom/src/mesh.rs:Mesh::raycast triangles
 crates/geom/src/mesh.rs:Mesh::tangent_chain dot,normalized
 crates/geom/src/mesh.rs:ray_crosses cross,dot
 crates/geom/src/mesh.rs:smooth_seam normalized,triangles
@@ -1373,14 +1371,12 @@ crates/ui-egui/src/navigation.rs:orbit_drag dot
 crates/ui-egui/src/navigation.rs:snap_directions normalized
 crates/ui-egui/src/navigation.rs:snapped_axis_camera dot
 crates/ui-egui/src/navigation.rs:snapped_quarter_roll dot
-crates/ui-egui/src/navigation.rs:view_middle distance,dot
 crates/ui-egui/src/navigation.rs:zoom_point dot
 crates/ui-egui/src/occurrence_drag.rs:to dot
 crates/ui-egui/src/pencil.rs:filter distance
 crates/ui-egui/src/pencil.rs:is_pen_release distance
 crates/ui-egui/src/pick_index.rs:PickIndexes::get triangles
 crates/ui-egui/src/pick_index.rs:PickIndexes::prefetch triangles
-crates/ui-egui/src/pick_index.rs:raycast raycast
 crates/ui-egui/src/place_gizmo.rs:angle_of atan2,dot
 crates/ui-egui/src/place_gizmo.rs:arms dot,normalized
 crates/ui-egui/src/place_gizmo.rs:axes cross
@@ -1489,7 +1485,6 @@ crates/ui-egui/src/view_pick.rs:cloud_candidates distance
 crates/ui-egui/src/view_pick.rs:near_edges distance,dot
 crates/ui-egui/src/view_pick.rs:pick_command normalized
 crates/ui-egui/src/view_pick.rs:refine cross,dot,normalized,triangles
-crates/ui-egui/src/view_pick.rs:section_entry dot
 crates/ui-egui/src/view_pick.rs:seg_param dot
 crates/ui-egui/src/view_window_drag.rs:morph distance
 crates/ui-egui/src/viewport.rs:BodyDraw::build triangles

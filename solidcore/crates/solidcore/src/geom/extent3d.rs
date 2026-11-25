@@ -212,32 +212,35 @@ fn grow_unless_infinite(x: f64, d: f64) -> f64 {
     x + if is_infinite_param(x) { 0.0 } else { d }
 }
 
+/// The signed parameters where a non-parallel line enters and leaves a slab.
+fn directed_slab(min: f64, max: f64, p: f64, v: f64, use_unbounded_markers: bool) -> (f64, f64) {
+    let (enter, exit) = if v > 0.0 { (min, max) } else { (max, min) };
+    let parameter = |bound: f64| {
+        let delta = bound - p;
+        if delta.is_infinite() && bound.is_finite() && p.is_finite() && v.abs() > 1.0 {
+            // Opposite, large coordinates can still have a representable line parameter.
+            bound / v - p / v
+        } else {
+            delta / v
+        }
+    };
+    let lo = if use_unbounded_markers && is_infinite_param(enter) {
+        -INFINITE_PARAMETER
+    } else {
+        parameter(enter)
+    };
+    let hi = if use_unbounded_markers && is_infinite_param(exit) {
+        INFINITE_PARAMETER
+    } else {
+        parameter(exit)
+    };
+    (lo, hi)
+}
+
 /// `IntersectLine`'s slab parameters `(tmin, tmax)` along one axis.
 fn slab(min: f64, max: f64, p: f64, v: f64) -> (f64, f64) {
-    if v > EFF_ZERO {
-        let lo = if is_infinite_param(min) {
-            -INFINITE_PARAMETER
-        } else {
-            (min - p) / v
-        };
-        let hi = if is_infinite_param(max) {
-            INFINITE_PARAMETER
-        } else {
-            (max - p) / v
-        };
-        (lo, hi)
-    } else if v < -EFF_ZERO {
-        let hi = if is_infinite_param(min) {
-            INFINITE_PARAMETER
-        } else {
-            (min - p) / v
-        };
-        let lo = if is_infinite_param(max) {
-            -INFINITE_PARAMETER
-        } else {
-            (max - p) / v
-        };
-        (lo, hi)
+    if v.abs() > EFF_ZERO {
+        directed_slab(min, max, p, v, true)
     } else {
         (-BIG_DOUBLE, BIG_DOUBLE)
     }
@@ -1104,6 +1107,71 @@ impl Extent3d {
         Ok(LineHit::Miss)
     }
 
+    /// The closed part of `origin + t * direction` inside a finite box and `window`.
+    /// Each side grows by `padding.0 * box_diagonal + padding.1`. An axis whose direction
+    /// component is smaller in magnitude than `parallel_cutoff` is parallel to its slab.
+    /// The window may extend to infinity. A grazing hit retains equal endpoints.
+    #[must_use]
+    pub fn clipped_line_interval(
+        &self,
+        origin: Point3,
+        direction: Vec3,
+        window: (f64, f64),
+        padding: (f64, f64),
+        parallel_cutoff: f64,
+    ) -> Option<(f64, f64)> {
+        let finite = |p: Vec3| p.to_array().into_iter().all(f64::is_finite);
+        let valid = [self.min, self.max, origin, direction]
+            .into_iter()
+            .all(finite)
+            && [padding.0, padding.1]
+                .into_iter()
+                .all(|p| p.is_finite() && p >= 0.0)
+            && parallel_cutoff.is_finite()
+            && parallel_cutoff > 0.0;
+        if !valid || self.has_negative_volume() {
+            return None;
+        }
+        let size = self.size();
+        let diagonal = size.length();
+        let relative_pad = if padding.0 == 0.0 {
+            0.0
+        } else if diagonal.is_finite() {
+            diagonal * padding.0
+        } else {
+            // A scaled width can be representable even when its square or its subtraction is not.
+            let scaled_width = |min: f64, max: f64, width: f64| {
+                if width.is_finite() {
+                    width * padding.0
+                } else {
+                    max * padding.0 - min * padding.0
+                }
+            };
+            scaled_width(self.min.x, self.max.x, size.x)
+                .hypot(scaled_width(self.min.y, self.max.y, size.y))
+                .hypot(scaled_width(self.min.z, self.max.z, size.z))
+        };
+        let pad = relative_pad + padding.1;
+        let (mut enter, mut exit) = window;
+        for (o, d, min, max) in [
+            (origin.x, direction.x, self.min.x, self.max.x),
+            (origin.y, direction.y, self.min.y, self.max.y),
+            (origin.z, direction.z, self.min.z, self.max.z),
+        ] {
+            let (min, max) = (min - pad, max + pad);
+            if d.abs() < parallel_cutoff {
+                if o < min || o > max {
+                    return None;
+                }
+            } else {
+                let (near, far) = directed_slab(min, max, o, d, false);
+                enter = enter.max(near);
+                exit = exit.min(far);
+            }
+        }
+        (enter <= exit && window.0 <= window.1).then_some((enter, exit))
+    }
+
     /// True when `min > max` on some axis (e.g. a fresh extent)
     /// (`HasNegativeVolume`).
     #[must_use]
@@ -1356,6 +1424,88 @@ mod tests {
             .unwrap();
         assert_eq!(graze.count(), 1);
         assert!(e.intersect_line(p(0.0, 0.0, 0.0), Vec3::ZERO).is_err());
+    }
+
+    #[test]
+    fn clipped_line_intervals_keep_signed_hits_grazes_and_thin_boxes() {
+        let e = Extent3d::from_points(p(0.0, 0.0, 0.0), p(2.0, 1.0, 1.0));
+        let full = (f64::NEG_INFINITY, f64::INFINITY);
+        let interval = |origin, direction, window| {
+            e.clipped_line_interval(origin, direction, window, (0.0, 0.0), 1e-15)
+        };
+        assert_eq!(interval(p(0.5, 0.5, 0.5), Vec3::X, full), Some((-0.5, 1.5)));
+        assert_eq!(
+            interval(p(0.5, 0.5, 0.5), Vec3::X, (0.25, 1.0)),
+            Some((0.25, 1.0))
+        );
+        assert_eq!(
+            interval(p(-3.0, 0.5, 0.5), -Vec3::X, full),
+            Some((-5.0, -3.0))
+        );
+        assert_eq!(
+            interval(p(-3.0, 0.5, 0.5), -Vec3::X, (0.0, f64::INFINITY)),
+            None
+        );
+        assert_eq!(
+            interval(p(-1.0, 0.0, 0.5), p(1.0, 1.0, 0.0), full),
+            Some((1.0, 1.0))
+        );
+        assert_eq!(
+            interval(p(0.0, -1e-15, 0.5), p(1.0, 1e-15, 0.0), full),
+            Some((1.0, 2.0))
+        );
+        assert_eq!(
+            interval(p(0.0, -1e-15, 0.5), p(1.0, 0.5e-15, 0.0), full),
+            None
+        );
+        let thin = Extent3d::from_points(Vec3::ZERO, p(1e-16, 1.0, 1.0));
+        assert_eq!(
+            thin.clipped_line_interval(p(0.0, 0.5, 0.5), Vec3::X, full, (0.0, 0.0), 1e-15),
+            Some((0.0, 1e-16))
+        );
+    }
+
+    #[test]
+    fn clipped_line_interval_pads_by_the_diagonal_and_absolute_allowance() {
+        let e = Extent3d::from_points(Vec3::ZERO, p(2.0, 0.0, 0.0));
+        let full = (f64::NEG_INFINITY, f64::INFINITY);
+        let line = p(0.0, 0.5, 0.0);
+        assert_eq!(
+            e.clipped_line_interval(line, Vec3::X, full, (0.0, 0.0), 1e-15),
+            None
+        );
+        assert_eq!(
+            e.clipped_line_interval(line, Vec3::X, full, (0.25, 0.125), 1e-15),
+            Some((-0.625, 2.625))
+        );
+        let large = Extent3d::from_points(Vec3::ZERO, p(1e155, 1.0, 1.0));
+        assert_eq!(
+            large.clipped_line_interval(p(0.0, 1e152, 0.0), Vec3::X, full, (1e-6, 0.0), 1e-15),
+            None
+        );
+        let far = 1.5 * 2.0_f64.powi(1023);
+        let stretched = Extent3d::from_points(p(-far, 0.0, 0.0), p(far, 0.0, 0.0));
+        assert_eq!(
+            stretched.clipped_line_interval(
+                p(0.0, far * 0.5, 0.0),
+                Vec3::X,
+                full,
+                (0.0625, 0.0),
+                1e-15
+            ),
+            None
+        );
+        let opposite = Extent3d::from_points(p(-far, 0.0, 0.0), p(-far * 0.5, 1.0, 1.0));
+        assert_eq!(
+            opposite.clipped_line_interval(
+                p(far, 0.5, 0.5),
+                p(-2.0, 0.0, 0.0),
+                (0.0, far),
+                (0.0, 0.0),
+                1e-15
+            ),
+            Some((0.75 * far, far))
+        );
     }
 
     #[test]

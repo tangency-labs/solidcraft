@@ -551,10 +551,11 @@ pub fn navigate_frame(app: &mut SolveApp, ctx: &egui::Context, mapping: DriverMa
     app.space_mouse.motion = None;
     app.space_mouse.mapping = Some(mapping);
     if app.space_mouse.read_device != app.space_mouse.device {
-        // Another device: its buttons and its resting hand are not the last one's.
+        // Another device starts its own button, settling and Classic orbit state.
         app.space_mouse.read_device = app.space_mouse.device.clone();
         app.space_mouse.seen = 0;
         app.space_mouse.settle = Default::default();
+        crate::navigation::release_cap_centre_orbit(app);
     }
     let calibration = calibration(app);
     if app.space_mouse.settled_for != calibration {
@@ -585,6 +586,7 @@ pub fn navigate_frame(app: &mut SolveApp, ctx: &egui::Context, mapping: DriverMa
     // Back at rest: the next push picks what the view turns around afresh.
     if !axes.moving() {
         app.viewport.device_pivot = None;
+        crate::navigation::release_cap_centre_orbit(app);
     }
     // Only the window with focus: with two windows open, the cap moves the one being used, not both.
     if !app.preferences.space_mouse_enabled || app.home.open || app.file_picker_busy() || !axes.moving() || !ctx.input(|i| i.focused) {
@@ -1116,15 +1118,22 @@ mod tests {
     #[test]
     fn another_device_starts_with_no_buttons_seen_and_no_settling() {
         let mut app = app();
+        app.preferences.space_mouse_model_pivot = false;
         let ctx = window(true);
+        let mapping = DriverMapping::default();
+        let turn = Axes { translation: [0; 3], rotation: [300, 0, 0] };
         app.space_mouse.device = Some("hid 046d:c62b".into());
-        frame(&mut app, &ctx, DriverMapping::default(), Axes::default(), 0.016);
+        assert!(frame(&mut app, &ctx, mapping, turn, 0.016));
         app.space_mouse.seen = 0b101;
-        frame(&mut app, &ctx, DriverMapping::default(), Axes::default(), 0.016);
+        assert!(frame(&mut app, &ctx, mapping, turn, 0.016));
         assert_eq!(app.space_mouse.seen, 0b101);
+        assert!(app.viewport.device_centre_orbit.is_some(), "the first device is holding its centre");
+
         app.space_mouse.device = Some("hid 256f:c63a".into());
-        frame(&mut app, &ctx, DriverMapping::default(), Axes::default(), 0.016);
+        // Both devices sent a turn. Inspect the handoff before navigation chooses a new centre.
+        assert!(navigate_frame(&mut app, &ctx, mapping, turn, 0.016));
         assert_eq!(app.space_mouse.seen, 0);
+        assert!(app.viewport.device_centre_orbit.is_none(), "a different device must choose its own centre");
     }
 
     #[test]
