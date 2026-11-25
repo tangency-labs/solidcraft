@@ -1994,13 +1994,13 @@ fn bspline_surface_3d(f: &In<'_>, c: &mut Cursor) -> Result<BSplineSurface> {
 /// proved on the form and holding it ([`AnalyticSupport::build`]), never numbers recomputed from
 /// the form's control points, which on a short arc carry the conditioning of a circle fitted
 /// to it (a 1° bend of a pipe, #22146). Numbers the form does not prove leave the face its exact
-/// NURBS, on the range and trims it already carries.
-fn on_label(k: &Kernel, support: &AnalyticSupport, nurbs: BSplineSurface) -> Result<Surface> {
+/// NURBS, on the range and trims it already carries; so does a face with no `support` (its
+/// frame spans no plane).
+fn on_label(k: &Kernel, support: Option<&AnalyticSupport>, nurbs: BSplineSurface) -> Result<Surface> {
+    let Some(support) = support else { return Ok(Surface::from(nurbs)) };
     match support.build(k, nurbs.copy()) {
         Ok(s) => Ok(s),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => {
-            Err(sc("AnalyticSupport::build")(e))
-        }
+        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => Err(sc("AnalyticSupport::build")(e)),
         Err(_) => Ok(Surface::from(nurbs)),
     }
 }
@@ -2282,39 +2282,39 @@ fn flat_to_brep_data(k: &Kernel, f: &In<'_>, s: &Shape) -> Result<BrepData> {
 
         let mut surface: Surface = if form {
             // an analytic face with its NURBS form: the class the arrays name, on its own numbers
+            // (`None`: a frame that spans no plane, which proves nothing)
             let support = if ty == SURFACE_SPHERE_I {
                 let j = i_sphere;
                 i_sphere += 1;
-                let placement = placement(get3(f.r(FACE_SPHERE_CENTER), j)?, get3(f.r(FACE_SPHERE_AXIS), j)?, get3(f.r(FACE_SPHERE_REF_DIRECTION), j)?)?;
-                AnalyticSupport::Sphere { placement, radius: get(f.r(FACE_SPHERE_RADIUS), j)? }
+                let radius = get(f.r(FACE_SPHERE_RADIUS), j)?;
+                placement(get3(f.r(FACE_SPHERE_CENTER), j)?, get3(f.r(FACE_SPHERE_AXIS), j)?, get3(f.r(FACE_SPHERE_REF_DIRECTION), j)?)
+                    .ok()
+                    .map(|placement| AnalyticSupport::Sphere { placement, radius })
             } else if ty == SURFACE_CYLINDER_I {
                 let j = i_cyl;
                 i_cyl += 1;
-                let placement =
-                    placement(get3(f.r(FACE_CYLINDER_ORIGIN), j)?, get3(f.r(FACE_CYLINDER_AXIS), j)?, get3(f.r(FACE_CYLINDER_REF_DIRECTION), j)?)?;
-                AnalyticSupport::Cylinder { placement, radius: get(f.r(FACE_CYLINDER_RADIUS), j)? }
+                let radius = get(f.r(FACE_CYLINDER_RADIUS), j)?;
+                placement(get3(f.r(FACE_CYLINDER_ORIGIN), j)?, get3(f.r(FACE_CYLINDER_AXIS), j)?, get3(f.r(FACE_CYLINDER_REF_DIRECTION), j)?)
+                    .ok()
+                    .map(|placement| AnalyticSupport::Cylinder { placement, radius })
             } else if ty == SURFACE_CONE_I {
                 let j = i_cone;
                 i_cone += 1;
-                let placement = placement(get3(f.r(FACE_CONE_ORIGIN), j)?, get3(f.r(FACE_CONE_AXIS), j)?, get3(f.r(FACE_CONE_REF_DIRECTION), j)?)?;
-                AnalyticSupport::Cone {
-                    placement,
-                    base_radius: get(f.r(FACE_CONE_RADIUS), j)?,
-                    semi_angle_deg: rad2deg(get(f.r(FACE_CONE_SEMI_ANGLE), j)?),
-                }
+                let (base_radius, semi_angle_deg) = (get(f.r(FACE_CONE_RADIUS), j)?, rad2deg(get(f.r(FACE_CONE_SEMI_ANGLE), j)?));
+                placement(get3(f.r(FACE_CONE_ORIGIN), j)?, get3(f.r(FACE_CONE_AXIS), j)?, get3(f.r(FACE_CONE_REF_DIRECTION), j)?)
+                    .ok()
+                    .map(|placement| AnalyticSupport::Cone { placement, base_radius, semi_angle_deg })
             } else if ty == SURFACE_TORUS_I {
                 let j = i_torus;
                 i_torus += 1;
-                let placement = placement(get3(f.r(FACE_TORUS_ORIGIN), j)?, get3(f.r(FACE_TORUS_AXIS), j)?, get3(f.r(FACE_TORUS_REF_DIRECTION), j)?)?;
-                AnalyticSupport::Torus {
-                    placement,
-                    major_radius: get(f.r(FACE_TORUS_MAJOR_RADIUS), j)?,
-                    minor_radius: get(f.r(FACE_TORUS_MINOR_RADIUS), j)?,
-                }
+                let (major_radius, minor_radius) = (get(f.r(FACE_TORUS_MAJOR_RADIUS), j)?, get(f.r(FACE_TORUS_MINOR_RADIUS), j)?);
+                placement(get3(f.r(FACE_TORUS_ORIGIN), j)?, get3(f.r(FACE_TORUS_AXIS), j)?, get3(f.r(FACE_TORUS_REF_DIRECTION), j)?)
+                    .ok()
+                    .map(|placement| AnalyticSupport::Torus { placement, major_radius, minor_radius })
             } else {
                 return Err(Error::Solidcore(format!("flat arrays: face {i}: a NURBS form on a class that has none")));
             };
-            on_label(k, &support, bspline_surface_3d(f, &mut nurbs_cursor)?)?
+            on_label(k, support.as_ref(), bspline_surface_3d(f, &mut nurbs_cursor)?)?
         } else if ty == SURFACE_SPHERE_I {
             let j = i_sphere;
             i_sphere += 1;
