@@ -1,6 +1,6 @@
 //! solidcore's services that the application uses beside the body-making operations: 2D and
 //! curve helpers, projection, hatching, affine maps, sheet development, frame members, the
-//! display plan, and STEP's string and parser helpers. They read records and data; none
+//! display plan, CADIR read and write, and STEP's string and parser helpers. They read records and data; none
 //! makes a body, so none is routed (`docs/design/kernel-layer.md` §2).
 //!
 //! The rest of SolidCraft takes them from here, never from solidcore's crates directly: this
@@ -22,10 +22,11 @@ pub use solidcore_ops::cancel;
 pub use solidcore_ops::cell_grid;
 pub use solidcore_ops::centroid_and_mean_radius;
 pub use solidcore_ops::conic_projection;
+pub use solidcore_ops::constraint;
 pub use solidcore_ops::curve;
 pub use solidcore_ops::curve_fit;
 pub use solidcore_ops::develop;
-pub use solidcore_ops::export_geometry;
+pub use solidcore_ops::dxf;
 pub use solidcore_ops::face_surface;
 pub use solidcore_ops::fit_projection;
 pub use solidcore_ops::frame_gusset;
@@ -33,10 +34,9 @@ pub use solidcore_ops::frame_member;
 pub use solidcore_ops::frame_trim;
 pub use solidcore_ops::hatch;
 pub use solidcore_ops::hole_stacks;
-pub use solidcore_ops::import_geometry;
+pub use solidcore_ops::joint_turn;
 pub use solidcore_ops::outline;
 pub use solidcore_ops::paper_gaps;
-pub use solidcore_ops::path_export;
 pub use solidcore_ops::pcurve;
 pub use solidcore_ops::pick;
 pub use solidcore_ops::point_displacement;
@@ -81,6 +81,15 @@ pub mod tess {
     pub use solidcore_tess::simplify;
     pub use solidcore_tess::triangulate_planar;
     pub use solidcore_tess::triangulate_union;
+}
+
+/// CADIR, cadmpeg's neutral CAD model: its bodies read into B-rep records, and a record written
+/// into it as a body (`solidcore-cadir`).
+pub mod cadir {
+    pub use solidcore_cadir::Bodies;
+    pub use solidcore_cadir::Written;
+    pub use solidcore_cadir::read_bodies;
+    pub use solidcore_cadir::write_body;
 }
 
 /// STEP's helpers that the application's own exchange code uses: the part 21 parser (a header's
