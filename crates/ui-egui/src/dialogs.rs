@@ -11112,7 +11112,7 @@ mod refused_ok_tests {
         let state = app.session.model.state();
         let sheet = &state.surface_sheets[0];
         let body = state.body(&sheet.body).unwrap();
-        let (query, order) = solidcore_ops::Body::from_record(body.body.record(), true).unwrap();
+        let (query, order) = solidcraft_kernel::services::ExactBody::from_record(body.body.record(), true).unwrap();
         [0, 1].map(|joint| {
             let source = sheet.bend_source_edge(joint, body).unwrap();
             sheet
@@ -11140,18 +11140,23 @@ mod refused_ok_tests {
         for (input, (index, point)) in dialog.inputs.iter_mut().zip(corner_join_face_hits(&app)) {
             input.items = vec![Sel::Face { body: body.clone(), index, point }];
         }
-        for (mode, kind) in ["butt", "partial_overlap", "full_overlap"].iter().enumerate() {
-            if let Kind::Sheet(crate::dialogs_sheet::Sm::CornerJoin { kind, .. }) = &mut dialog.kind {
+        for (mode, overlap, expected) in [
+            (0, "", "butt"),
+            (1, "1 mm", "partial_overlap"),
+            (1, "", "full_overlap"),
+        ] {
+            if let Kind::Sheet(crate::dialogs_sheet::Sm::CornerJoin { kind, overlap: value, .. }) = &mut dialog.kind {
                 *kind = mode;
+                *value = overlap.into();
             }
             let commands = preview_commands(&app, &dialog).unwrap();
             let (command, params) = &commands[0];
             assert_eq!(command, "sheet.corner_join");
-            assert_eq!(params["kind"], *kind);
+            assert_eq!(params["kind"], expected);
             for key in ["covering", "covered"] {
                 assert!(params[key].as_str().unwrap().contains('|'));
             }
-            assert_eq!(params.get("overlap").is_some(), mode == 1);
+            assert_eq!(params.get("overlap").is_some(), !overlap.is_empty());
             assert!(params.get("points").is_none());
             let reply = app.session.execute(command, params).unwrap();
             let reopened = for_feature(&app, reply["feature"].as_u64().unwrap(), None).unwrap();
@@ -11165,7 +11170,7 @@ mod refused_ok_tests {
             assert_eq!(edit["feature"], reply["feature"]);
             assert_eq!(edit["command"], "sheet.corner_join");
             for key in ["body", "covering", "covered", "kind", "overlap", "gap"] {
-                assert_eq!(edit["params"].get(key), params.get(key), "reopened {key} in {kind}");
+                assert_eq!(edit["params"].get(key), params.get(key), "reopened {key} in {expected}");
             }
             let feature = reply["feature"].as_u64().unwrap();
             let feature_kind = &app.session.doc.feature(feature).unwrap().kind;
@@ -11202,11 +11207,16 @@ mod refused_ok_tests {
                 for (input, source) in dialog.inputs.iter_mut().zip(order) {
                     input.items = vec![Sel::Face { body: body.name.clone(), index: local_hits[source].0, point: points[source] }];
                 }
-                for (mode, expected_kind) in ["butt", "partial_overlap", "full_overlap"].iter().enumerate() {
-                    let Kind::Sheet(crate::dialogs_sheet::Sm::CornerJoin { kind, .. }) = &mut dialog.kind else {
+                for (mode, overlap, expected_kind) in [
+                    (0, "", "butt"),
+                    (1, "1 mm", "partial_overlap"),
+                    (1, "", "full_overlap"),
+                ] {
+                    let Kind::Sheet(crate::dialogs_sheet::Sm::CornerJoin { kind, overlap: value, .. }) = &mut dialog.kind else {
                         panic!("the command has a corner form")
                     };
                     *kind = mode;
+                    *value = overlap.into();
                     let before = serde_json::to_value(&app.session.doc).unwrap();
                     let commands = preview_commands(&app, &dialog).unwrap();
                     assert_eq!(serde_json::to_value(&app.session.doc).unwrap(), before);
@@ -11215,8 +11225,8 @@ mod refused_ok_tests {
                     assert_eq!(params["body"], definition);
                     assert_eq!(params["covering"], sources[order[0]]);
                     assert_eq!(params["covered"], sources[order[1]]);
-                    assert_eq!(params["kind"], *expected_kind);
-                    assert_eq!(params.get("overlap").is_some(), mode == 1);
+                    assert_eq!(params["kind"], expected_kind);
+                    assert_eq!(params.get("overlap").is_some(), !overlap.is_empty());
                     assert!(params.get("points").is_none());
                     app.session.execute(command, params).unwrap();
                 }
@@ -11307,12 +11317,17 @@ mod refused_ok_tests {
         for key in ["corners", "edges", "height", "angle", "height_from"] {
             assert_eq!(edit["params"][key], params[key], "reopened {key}");
         }
-        for (mode, kind) in ["butt", "partial_overlap", "full_overlap"].iter().enumerate() {
+        for (mode, overlap, kind) in [
+            (0, "", "butt"),
+            (1, "1 mm + 0.25 mm", "partial_overlap"),
+            (1, "", "full_overlap"),
+        ] {
             let Kind::Sheet(crate::dialogs_sheet::Sm::Flange { corners, .. }) = &mut reopened.kind else {
                 panic!("the feature retains its flange form")
             };
             let corner = corners.first_mut().unwrap();
             corner.kind = mode;
+            corner.overlap = overlap.into();
             corner.sources.swap(0, 1);
             let expected = corner.sources.clone();
             let before = serde_json::to_value(&app.session.doc).unwrap();
@@ -11322,8 +11337,8 @@ mod refused_ok_tests {
             let corner = &edit["params"]["corners"][0];
             assert_eq!(corner["covering"], expected[0].to_string());
             assert_eq!(corner["covered"], expected[1].to_string());
-            assert_eq!(corner["kind"], *kind);
-            assert_eq!(corner.get("overlap").is_some(), mode == 1);
+            assert_eq!(corner["kind"], kind);
+            assert_eq!(corner.get("overlap").is_some(), !overlap.is_empty());
             assert_eq!(corner["gap"], "0.2 mm + 0.4 mm");
             assert_eq!(edit["params"]["edges"], params["edges"]);
             app.session.execute(command, edit).unwrap();
@@ -11477,6 +11492,7 @@ mod refused_ok_tests {
         assert!(crate::scenario::rect_of("dialog:ui.surface_corner_covered").is_none(), "raw covered rim names are not form rows");
 
         steps(&mut harness, &[json!({"click": {"handle": "dialog:ui.surface_corner_type:Overlap"}})]);
+        harness.frames(2);
         assert!(shown(&mut harness).is_none());
         assert_eq!(commands(&harness)[0].1["corners"].as_array().unwrap().len(), 1, "Corner 1 retains the rule default");
         assert_eq!(commands(&harness)[0].1["corners"][0]["kind"], "full_overlap");

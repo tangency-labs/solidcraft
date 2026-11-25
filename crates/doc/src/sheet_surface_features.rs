@@ -2864,8 +2864,8 @@ impl SurfaceSheet {
         if body.is_mesh() {
             return err("pick corner joins on an exact sheet body");
         }
-        let query_error = |error: solidcore_ops::Error| DocError::Invalid(format!("could not query the selected sheet: {error}"));
-        let (query, order) = solidcore_ops::Body::from_record(body.record(), true).map_err(query_error)?;
+        let query_error = |error: solidcraft_kernel::services::Error| DocError::Invalid(format!("could not query the selected sheet: {error}"));
+        let (query, order) = solidcraft_kernel::services::ExactBody::from_record(body.record(), true).map_err(query_error)?;
         let points = picks.map(|point| [point.x, point.y, point.z]);
         let mut joints = [None, None];
         for face in 0..body.face_count() {
