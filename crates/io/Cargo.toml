@@ -15,9 +15,7 @@ dxf-legacy-baseline-tests = []
 trust-unknown-source = []
 
 [dependencies]
-solidcore-ops = { workspace = true }
 solidcore-record = { workspace = true }
-solidcore-tess = { workspace = true }
 solidcraft-color = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-kernel = { workspace = true }
@@ -57,6 +55,11 @@ cavalier_contours = { version = "0.9.0", default-features = false }
 # Sheet PDFs (src/paper/pdf.rs).
 pdf-writer = { workspace = true }
 flate2 = { workspace = true }
+# Its neutral model read into B-rep records (src/native_cad.rs, `cadir_records`).
+solidcore-cadir = { workspace = true }
+# Exported mesh file names in NFC, so one name in two Unicode forms is one file (src/urdf.rs);
+# MIT OR Apache-2.0.
+unicode-normalization = { version = "0.1.26", default-features = false }
 
 # The model cache's key (build.rs).
 [build-dependencies]
@@ -70,17 +73,18 @@ rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 # The computer's name for a design's lock file (src/design_lock.rs; the browser keeps no lock files).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 gethostname = { workspace = true }
+# A temporary file in its target folder; also a rename that never replaces a file (src/safe_write.rs, create_atomic).
 tempfile = "3.27"
 same-file = "1.0.6"
+# Whether the process named in a lock is still running (src/design_lock.rs); the workspace's
+# MIT-licensed process lookup, safe API.
+sysinfo = { workspace = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 trash = "5.2.9"
 
 [dev-dependencies]
-solidcore-ops = { workspace = true }
 solidcraft-sketch = { workspace = true }
 solidcraft-testkit = { workspace = true }
-# The mesh path's stats, built by hand in the export notes' test.
-solidcore-tess = { workspace = true }
 # Provenance tests sign with a software OpenPGP key, so they need no GnuPG or smartcard.
 rand = "0.8"

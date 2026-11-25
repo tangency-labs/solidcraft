@@ -40,6 +40,7 @@ fn selection_get(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let s: &Session = s;
     let mut ctx = Context::new(s)?;
+    let scoped = s.all_bodies_selected();
     let items: Vec<SelectionItem> = s
         .selection
         .iter()
@@ -53,7 +54,7 @@ fn selection_get(s: &mut Session, p: &Value) -> Result<Value> {
         })
         .collect();
     let detail_limit = (detail && s.selection.len() > MAX_DETAIL).then_some(MAX_DETAIL);
-    let reply = SelectionGetResult { count: items.len(), items, detail_limit, param_warnings: Vec::new() };
+    let reply = SelectionGetResult { count: s.selected_count()?, all_bodies: scoped, items, detail_limit, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
@@ -163,6 +164,12 @@ impl<'a> Context<'a> {
                     v.insert("bodies".into(), json!(o.bodies.iter().map(|b| &b.world).collect::<Vec<_>>()));
                 }
             }
+            Sel::PointCloudPoint { cloud, point, .. } => {
+                if let Some(c) = self.s.doc.point_clouds.iter().find(|c| c.id == *cloud) {
+                    v.insert("cloud_name".into(), json!(c.name));
+                }
+                v.entry("position").or_insert_with(|| json!(point));
+            }
             // What these are (origin, direction, position) comes from the measurement above.
             Sel::Plane { .. } | Sel::Axis { .. } | Sel::ConstructionPoint { .. } | Sel::Drawing { .. } => {}
         }
@@ -267,15 +274,23 @@ pub(super) fn anchor_from_selection(s: &Session) -> Vec3 {
 /// feature, a constraint, a profile) leaves the anchor to the next selected item.
 fn anchor_of(s: &Session, sel: &Sel) -> Option<Vec3> {
     match sel {
-        // A picked face, edge or vertex: the point it was picked at.
-        Sel::Face { point, .. } | Sel::Edge { point, .. } | Sel::Vertex { point, .. } => point.is_finite().then_some(*point),
+        // A picked face, edge, vertex or point-cloud point: the point it was picked at.
+        Sel::Face { point, .. } | Sel::Edge { point, .. } | Sel::Vertex { point, .. } | Sel::PointCloudPoint { point, .. } => {
+            point.is_finite().then_some(*point)
+        }
         // A body: the middle of its box.
         Sel::Body { name } => {
             let st = s.world_state().ok()?;
             st.body(name).map(|b| b.outline_bounds().center())
         }
-        // A construction point: where it sits.
-        Sel::ConstructionPoint { name } => crate::view::construction_points(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p),
+        // A construction or origin point: where it sits.
+        Sel::ConstructionPoint { name } => {
+            if let Some(p) = s.origin_point(name) {
+                Some(p)
+            } else {
+                crate::view::construction_points(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p)
+            }
+        }
         // A datum plane or axis: the point it passes through.
         Sel::Plane { name } => super::measure_sel::plane_named(s, name).map(|(p, _)| p),
         Sel::Axis { name } => super::measure_sel::axis_named(s, name).map(|(p, _)| p),

@@ -282,6 +282,9 @@ struct Snapshot {
     visibility: crate::Visibility,
     dimension_values: crate::DimensionValues,
     path: Option<String>,
+    /// Whether the design's saves keep the bodies of linked designs ([`Session::linked_bodies`]).
+    /// The copy holds them either way; it carries the choice, so a recovered design keeps it.
+    linked_bodies: bool,
 }
 
 impl Snapshot {
@@ -291,7 +294,11 @@ impl Snapshot {
     fn write(&self) -> Result<Vec<String>> {
         let io = |e: std::io::Error| EngineError::Other(format!("autosave: {e}"));
         let (doc, left_out) = drawing::openable(&self.doc);
-        let bytes = solidcraft_io::write_design_container(&crate::as_saved(&doc, &self.visibility, &self.dimension_values))?;
+        let mut design = crate::as_saved(&doc, &self.visibility, &self.dimension_values);
+        if !self.linked_bodies {
+            design.to_mut().linked_bodies_left_out = true;
+        }
+        let bytes = solidcraft_io::write_design_container(&design)?;
         solidcraft_io::write_atomic(&file(&self.dir, &self.id, solidcraft_io::DESIGN_EXT), &bytes, false).map_err(io)?;
         let entry = Entry {
             id: self.id.clone(),
@@ -374,7 +381,15 @@ impl Autosaver {
                 }
                 // No thread to write on: write here, as before.
                 Err(_) => {
-                    let snapshot = Snapshot { dir: self.dir.clone(), id: self.id.clone(), doc, visibility, dimension_values, path: s.path.clone() };
+                    let snapshot = Snapshot {
+                        dir: self.dir.clone(),
+                        id: self.id.clone(),
+                        doc,
+                        visibility,
+                        dimension_values,
+                        path: s.path.clone(),
+                        linked_bodies: s.linked_bodies,
+                    };
                     let written = snapshot.write();
                     self.written(s, snapshot.doc, snapshot.visibility, written)?;
                     Ok(true)
@@ -415,6 +430,7 @@ impl Autosaver {
             visibility: s.visibility.clone(),
             dimension_values: s.dimension_values.clone(),
             path: s.path.clone(),
+            linked_bodies: s.linked_bodies,
         })
     }
 
@@ -488,7 +504,7 @@ mod tests {
             fs::create_dir_all(&d).unwrap();
             let id = "1-2-3";
             let doc = Document::default();
-            fs::write(d.join(format!("{id}.{ext}")), solidcraft_io::write_design(&doc)).unwrap();
+            fs::write(d.join(format!("{id}.{ext}")), solidcraft_io::write_design(&doc).unwrap()).unwrap();
             let entry = Entry { id: id.into(), path: Some(format!("/d/part.{ext}")), name: "part".into(), saved_at: 1, features: 0 };
             fs::write(d.join(format!("{id}.json")), serde_json::to_vec(&entry).unwrap()).unwrap();
             assert_eq!(orphans(&d).iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), [id], ".{ext}");
@@ -717,7 +733,7 @@ mod tests {
         let d = dir("discard");
         fs::create_dir_all(&d).unwrap();
         let part = d.join("part.solidcraft");
-        fs::write(&part, solidcraft_io::write_design(&Document::default())).unwrap();
+        fs::write(&part, solidcraft_io::write_design(&Document::default()).unwrap()).unwrap();
         let mut s = Session::default();
         let discard = |s: &mut Session, id: &str| s.execute("doc.recovery_discard", &json!({"dir": d.to_string_lossy(), "id": id}));
         let e = discard(&mut s, "part").unwrap_err();
@@ -751,7 +767,7 @@ mod tests {
         assert_eq!(r["features"], 1, "{r}");
         assert!(orphans(&d).is_empty() && !file(&d, &id, "json").exists() && !file(&d, &id, solidcraft_io::DESIGN_EXT).exists());
         let part = d.join("part.solidcraft");
-        fs::write(&part, solidcraft_io::write_design(&Document::default())).unwrap();
+        fs::write(&part, solidcraft_io::write_design(&Document::default()).unwrap()).unwrap();
         assert!(t.execute("doc.recover", &json!({"dir": d.to_string_lossy(), "id": "part", "discard": true})).is_err());
         assert!(part.exists());
         let _ = fs::remove_dir_all(&d);
@@ -791,7 +807,7 @@ mod tests {
         boundary.name = "x".repeat((1 << 20) - base_len);
         let oversized = Entry { id: "oversized".into(), name: "x".repeat(1 << 20), ..good.clone() };
         for entry in [&good, &boundary, &oversized] {
-            fs::write(file(&d, &entry.id, solidcraft_io::DESIGN_EXT), solidcraft_io::write_design(&Document::default())).unwrap();
+            fs::write(file(&d, &entry.id, solidcraft_io::DESIGN_EXT), solidcraft_io::write_design(&Document::default()).unwrap()).unwrap();
             fs::write(file(&d, &entry.id, "json"), serde_json::to_vec(entry).unwrap()).unwrap();
         }
         assert_eq!(fs::metadata(file(&d, "boundary", "json")).unwrap().len(), 1 << 20);
@@ -815,7 +831,7 @@ mod tests {
         let wrong = Entry { id: "other".into(), path: Some("/unrelated-design.solidcraft".into()), name: "wrong".into(), saved_at: 1, features: 0 };
         fs::write(file(&d, "actual", "json"), serde_json::to_vec(&wrong).unwrap()).unwrap();
         for id in ["actual", "other"] {
-            fs::write(file(&d, id, solidcraft_io::DESIGN_EXT), solidcraft_io::write_design(&Document::default())).unwrap();
+            fs::write(file(&d, id, solidcraft_io::DESIGN_EXT), solidcraft_io::write_design(&Document::default()).unwrap()).unwrap();
         }
         assert!(orphans(&d).is_empty(), "metadata under another ID must not be offered");
         assert!(load(&d, "actual").is_err(), "a mismatched path must not become the next save target");

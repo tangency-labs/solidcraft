@@ -168,19 +168,21 @@ point, its x and y running along the two edges into the face. The edge, the face
 are found again by name, so a bracket set 40 mm in from a panel's corner (a planar joint with
 values `[40, 40, 0]`) stays 40 mm in from that corner when the panel changes size.
 
-A joint's Z offset, angle and values can be typed as expressions over the design's parameters
-(`"offset": "gap + 2"`, `"values": ["travel"]`). The joint keeps them and works them out again
-whenever the design changes, so a part seated `gap` above a panel moves with `gap`. Renaming a
+A joint's Z offset, angle, values and the minimum and maximum of its limits can be typed as
+expressions over the design's parameters (`"offset": "gap + 2"`, `"values": ["travel"]`,
+`"limits": [[0, "travel"]]`). The joint keeps them and works them out again whenever the design
+changes, so a part seated `gap` above a panel moves with `gap`, and a slider limited to `travel`
+stops at the new `travel` (its value is held inside the new limits). Renaming a
 parameter carries into the joints that use it, and deleting one they use is refused. If an
 expression stops working out (say a parameter becomes an angle), the joint is left out of the
 solve and `joint.solve` gives the reason, instead of placing the part from old numbers. Typing a
 plain number, or driving the value, drops that expression.
 
 **Edit Joint → Position** shows **Offset X**, **Offset Y** and **Offset Z**. X and Y move along
-the saved first attachment's axes. Their expressions are evaluated once, as during creation;
-scripts use `offset_x` and `offset_y`. Older designs keep their saved attachment positions,
-with X and Y initially zero for additional shifts from those positions. Assembly constraints
-keep their existing controls and reference geometry until changed to a plain joint.
+the saved first attachment's axes, and expressions typed for them follow their parameters just as
+Offset Z does; scripts use `offset_x` and `offset_y`. Older designs keep their saved attachment
+positions, with X and Y initially zero for additional shifts from those positions. Assembly
+constraints keep their existing controls and reference geometry until changed to a plain joint.
 
 **Relations** are joints that tie only part of a placement, so a part is placed the way a
 designer describes it, one relation at a time: `parallel` (z along z, free to move and turn
@@ -214,8 +216,9 @@ which suits scripts and agents checking a whole assembly:
 It returns `overlaps` (pairs sharing at least `min_volume`, 0.01 mm³ by default, with the shared
 volume, area, box and centre), `near` (pairs closer than `clearance`, with the distance and the
 two nearest points; a contact sharing less than `min_volume` is listed here at 0 with its
-`overlap_mm3`), `nearest` (each body's `nearest` closest bodies) and `unchecked` (pairs whose
-overlap could not be worked out, with the reason). `against` limits the check to pairs with one
+`overlap_mm3`), `nearest` (each body's `nearest` closest checked bodies, omitting pairs in
+`unchecked`) and `unchecked` (pairs whose overlap could not be worked out, with the reason).
+`against` limits the check to pairs with one
 body in `bodies` and the other in `against`, and `skip_within` leaves out pairs inside one
 occurrence (`"occurrence"`) or one placed component, its subcomponents included
 (`"component"`): the parts of a bought component that touch by design. Distances are measured on
@@ -311,9 +314,12 @@ picked in the browser, or on the first joint that moves when none is picked.
 grabbed follows the pointer in the plane through it that faces the view, the joints on the
 part's chain take the values that bring it nearest, within their limits, through motion links,
 and with closed loops kept closed, and a four-bar's rocker stops at the end of its swing. The
-whole drag is one undo step. A grounded part, or one its joints hold fixed, is not moved; a drag
-on it draws a selection box. Each frame runs `joint.reach`, which scripts and agents use
-directly to put a part's point somewhere: `joint.reach {occurrence, point}` moves the joints on
+whole drag is one undo step, and Escape puts the part back. A grounded part, or one its joints
+hold fixed, is not moved; a drag on it draws a selection box. While you drag, the part is only
+shown moving (the design, and what depends on where parts are, follow when you let go). With
+contact sets on, each step of the drag changes the design instead, so that the drag stops where
+two parts of a set touch, and Escape leaves the part where it is. The
+release runs `joint.reach` once, which scripts and agents use directly to put a part's point somewhere: `joint.reach {occurrence, point}` moves the joints on
 its chain from where they are to the nearest pose (the arm keeps its elbow up or down, and a
 linkage stays on its branch). `at` picks the part's point (the centre of its bodies by
 default), `z` with `axis` also turns one of its axes, and `joints` names the only joints to
@@ -329,6 +335,16 @@ part ("Pedestal:1 is not connected to anything grounded"), the Drive Joints dial
 row, `motion.play` lists such joints under `unmoved`, and `joint.list` names every such chain under
 `floating`. Ground a part of the chain, or join it to a grounded part (a rigid as-built joint keeps
 it where it is), and it moves.
+
+An imported assembly holds each of its parts with a rigid joint, so `joint.list` on it can run to
+hundreds of rows. Filters keep only the rows asked for: `moving_only` leaves out rigid and
+suppressed joints, `exclude_rigid` every rigid joint, `exclude_rigid_groups` only the rigid joints
+that hold a component's contents together (the ones Unlock Contents removes), `kinds` keeps the
+listed joint types, and `occurrences` keeps the joints with an end at those parts or at a part
+inside them. `dof_free_only` lists only the parts that can still move under `dof`, and
+`joint.solve` takes it too. The reply's `omitted` counts what was left out, by type, and
+`summary: true` adds every joint counted by type, with one row per component for the rigid joints
+that hold its contents (the 20 largest; `more_rigid_groups` counts the rest). `joint.inspect` takes the same filters.
 
 Driving a joint turns the side that is held by no grounded part, with everything joined to it
 rigidly. A rigid joint whose origin is lost (its face was deleted) still holds its two parts as
@@ -484,7 +500,9 @@ Preferences › Design › **Insert Design lists the designs open in other tabs 
 off. A STEP or mesh file picked there is inserted as **Insert STEP** or **Insert
 Mesh** would. The part's solid bodies come
 in as they sit in that design, and they are kept in the assembly, so it opens even without the
-part file. The link is stored relative to the assembly's folder once the assembly is saved.
+part file. Its mesh bodies, such as the parts of a KiCad board, come in too, in the same linked
+component, and **Update Links** follows them as well. A design with mesh bodies only can't be
+linked yet. The link is stored relative to the assembly's folder once the assembly is saved.
 For scripts, `translate: [x,y,z]` places the design's origin in millimetres from the destination
 parent's origin (the active component unless `parent` is supplied). It defaults to `[0,0,0]`.
 With `reuse: true`, insertion reuses the existing linked component but uses the same coordinates;
@@ -497,6 +515,60 @@ a checkout. The parts it reads come in as one step, so one **Undo** takes them a
 that cannot be read keeps its bodies, is tried again the next time, and holds up no other.
 **Update changed linked designs when a tab comes back** (Preferences, Design,
 `update_changed_links`) turns this off.
+
+**Insert STEP** also links `.step` and `.stp` files on disk. Its component shows the same link
+in the Browser, and **Update Links** and **Break Link** (Insert › Links) work on it. Saving the assembly stores
+the source path relative to its folder. Updates replace the imported bodies in one undo step;
+references that still resolve are kept, and references that no longer resolve are reported. Missing
+or corrupt sources keep their previous bodies and are retried next time, without holding up
+other links. The same **Update changed linked designs when a tab comes back** preference controls
+automatic STEP refresh. Use **Break Link** on the
+component to keep an independent copy, or pass `link: false` to `file.insert_step`. Older designs keep their unlinked imports. The web app keeps independent
+copies because uploaded files have no disk source path.
+
+An assembly can be saved without the bodies of its linked parts:
+`file.save {linked_bodies: false}` (or `file.save_as`). The file then keeps each link, with its
+placements, joints and face names, and no copy of the part's bodies, so it stays small and a
+change to a part does not rewrite the assembly's file. This suits designs kept in git as `.json`.
+Opening such an assembly reads the bodies from the part files again, so the part files have to
+be there: a part that cannot be read has no bodies, its feature says so, and **Update Links**
+reads it once the file is back. The assembly keeps the choice: later saves, **Save As** included,
+leave the bodies out until a save with `linked_bodies: true` puts them back. A link whose part
+file cannot be read when the assembly is saved keeps its bodies in the file, and the save says
+which. So does a link whose part file changed since the assembly read it, and a link from an
+older SolidCraft that kept no record of the file it read: run **Update Links**, then save again. A `.sc` assembly saved this way has no saved model, so it is evaluated when it opens. A
+part that is a plain `.json` design is evaluated the first time it is read this way, and that
+evaluation is kept on this computer with the reused imports (**Clear Reused Imports** removes
+them), so later opens read an unchanged part without building it again. A linked STEP file
+(**Insert STEP**) is left out the same way and read again from the STEP file when the assembly
+opens; if the STEP file changed meanwhile, its new bodies come in and **List Links** shows it as
+changed. A STEP file inserted with `reader: "cadmpeg"` keeps its bodies in the file, because
+reading it again gives STEP text, not the records it was read into. Each save without linked
+bodies names it in its warnings. The mesh bodies a linked part brings (an STL or 3MF inserted in
+the part) are left out with its solids and read back with them. An STL, 3MF or OBJ inserted
+straight into the assembly is not linked, so it stays in the file. There is no button for this
+yet: run the command from a script, the command line or an agent.
+
+Linked files from other folders load after you allow them. When an assembly opens, the parts in
+its own folder, or below it, are read again by themselves as above. If a changed part is in
+another folder, SolidCraft asks once, naming the folders: **Load** reads those parts now and
+remembers the folders, so designs that link files from them load them as they open from then
+on; **Not now** leaves them out of date, and **Update Links** reads them whenever you choose.
+An assembly saved without the bodies of its linked parts follows the same rule: parts in another
+folder have no bodies until you answer **Load**. So does one you recover after a crash, for the
+parts it had not read when it was autosaved. A script or agent that opens it with `doc.open`
+reads every linked part it may read; `linked_bodies: "folder"` keeps to the assembly's own folder.
+A linked part that was itself saved without the bodies of its own linked parts follows the rule
+too: read by itself, it reads them only from the assembly's folder or its own. One that reaches
+further is not read in part; its feature says so, and **Update Links** reads all of it.
+The folders you allowed are kept in your own settings, never in a design, and are listed under
+Preferences › General › Files, where you can remove one or forget them all.
+A design opened by a program (the command line, an MCP client, the control channel or the
+assistant) never asks: its parts in other folders stay out of date, also in folders you
+allowed, and running `component.update_links` (all links, or `components: [ids]`) reads them.
+The command line and a headless MCP session don't read links by themselves when a design
+opens, so there `component.update_links` is the way to bring in changed parts.
+
 To edit the source, right-click a linked component or occurrence in the Browser and choose
 **Open Linked Design**. It opens the part in another tab and reports if its file is missing.
 **Break Link** (`component.break_link`) keeps the bodies and forgets the file, and
@@ -703,3 +775,157 @@ no geometry, such as grease, paint, a label or packaging: it is listed in every 
 quantity and weighs nothing. It holds nothing: it can't be the active component, and any command
 that would put a body, a sketch or a component into it is refused. An empty component can be
 made virtual with `component.metadata.set {component, virtual: true}`.
+
+## Hole stacks
+
+Parts held together by rivets, bolts or pins have holes that line up through two or more
+touching layers. **Find Hole Stacks** (`inspect.hole_stacks`) lists them:
+
+```json
+{"command": "inspect.hole_stacks", "params": {"diameters": [[4, 6.5]], "touching": 0.05}}
+```
+
+Each stack has its `axis` (a unit vector pointing from `start` into the stack: down for a
+vertical stack, so `start` is on the top face), its `start` and `end` points on that axis,
+`grip_mm` (the clamped thickness from `start` to `end`) and its `layers`, outermost first:
+the `body`, the hole's diameter `d_mm` and its extent `t: [t0, t1]` in mm from `start`. A
+layer through an obround slot carries `slot: {length_mm, along}`, the slot's overall length
+and the direction of its length. Holes in no stack are listed under `lone` with their body,
+diameter, entry point `at`, axis and `depth_mm`.
+
+A layer reaches from face to face of its body: a countersink or chamfer that opens out from a
+hole counts in its extent, so it adds to the grip and closes the gap it would leave against
+the next layer, while `d_mm` stays the narrowest opening. Holes are on one axis when their
+axes are at most `axis_tolerance` apart (default 0.1 mm), either way round; a round hole
+lines up with a slot when its axis passes through the slot's centre line. Slots that no round
+hole passes through line up when they share a centre line, and their stack's axis runs
+through the middle of the length they share. Layers belong to one stack when the gap between
+them is at most `touching` (default 0.05 mm). `bodies` limits the search to some bodies,
+`diameters` to holes and slot widths in the given ranges, and `slots: false` leaves slots
+out. Standard parts already placed (a washer's hole) are left out unless named in `bodies`.
+Walls that are not one cylinder or cone — a hole another feature has cut into, or a tapped
+hole with its threads modelled — are not found.
+
+## Finding things in the browser
+
+The magnifier in the Browser panel's header (or Ctrl+F with the pointer over the browser, unless you gave Ctrl+F to a command) opens a
+search box in the header, in place of the panel's title. The box holds the magnifier, the field, a filter and **×**. It finds components, bodies, sketches, joints, and construction planes, axes and points by name. It finds the text anywhere in a name,
+ignoring case. With `*` (any text) or `?` (any one character) in it, the whole name must match:
+`*:1` finds every first instance. Each placement of a component is found on its own, so a bolt
+placed six times is listed six times, each under the components that hold it.
+
+Only the matches and their parents stay in the tree, opened for the search; closing a row there
+leaves the tree's own folds as they were. The filter narrows the search to the kinds
+you tick, each with how many it matches, or with nothing typed lists everything of those kinds;
+**All kinds** clears them. **Select all** selects what was found, and **Hide others** hides every
+body it didn't find; the line under the field then says how many it hid, with **Undo**. Esc, **×**
+or the magnifier in the box ends the search and closes the box. Scripts and agents
+search the same way with `browser.find`.
+
+## Secondary joint alignment
+
+Joint creation and editing offer optional **Alignment 1** and **Alignment 2** inputs.
+Pick a planar face, a straight or circular edge, a cylindrical face's axis, a sketch line,
+or an axis/plane of construction geometry on the same occurrence as that side's primary
+face, circle, plane or axis origin. Planes supply their normal, straight lines their direction,
+and cylindrical faces their axis. Circular rims selected in the UI align by centre; the API also accepts their axis. The direction is projected square to the
+primary joint axis. The root origin widget can reference a root-side joint origin; it cannot silently stand for
+a different part's frame. Scripts may explicitly name an origin axis/plane in that side's
+component frame.
+
+Each alignment picker only offers references on its primary origin's exact occurrence.
+Hovering or clicking the other component leaves the confirmed reference and pose unchanged.
+A circular hole rim shows the **Circle center alignment** marker; cylindrical face and
+construction-axis references show their direction. An exact circular edge with a unique adjacent cylinder and end face supplies the persistent
+identity. Multiple possible cylinders are refused
+rather than choosing one arbitrarily.
+
+The UI orders the references by the solved motion: **Alignment 1** is on the moving
+component and **Alignment 2** on the fixed component, independently of primary pick order.
+With both references empty, hovering only highlights geometry and shows snap markers.
+Click the first reference before hovering the second to preview its temporary solution;
+leaving restores the confirmed solution. Wrong-component and degenerate picks are ignored.
+
+Circular rim references automatically use their center. The reference stores the cylindrical
+face and the adjacent face naming the picked rim. Its clocking direction is the vector from
+the primary origin to that circle centre, projected into the joint plane. Thus another hole
+can orient two plates even when the hole axes are parallel. The centre is recomputed when
+geometry changes; a lost/ambiguous rim or a centre on the primary axis is refused. Construction
+axes and cylindrical face directions retain direction semantics and refuse parallel axes.
+Previously saved directional references remain compatible without being reinterpreted.
+Assembly motion displays the solved body as solid and its original placement as the ghost;
+it never treats display-mesh volume drift as material removal.
+
+One **Invert alignment** checkbox reverses the relative secondary orientation. The authored **Angle**
+expression, component **Flip**, motion values, limits and degrees of freedom keep their meaning.
+After choosing the primary origins, picking and highlighting continue on the solved placement.
+An incomplete or invalid secondary input keeps the last valid pose while explaining the error.
+Once its counterpart is confirmed, hovering a valid reference previews that candidate
+temporarily; leaving it restores the authored pose, and only a click fills the selection.
+Cancel discards the operation; accepted edits can be undone.
+
+Preferences > Design offers **Invert joint selection order**, off by default. Its visible help
+explains moving-then-fixed selection when enabled. The primary fields retain their original
+**Component 1** and **Component 2** labels in either mode. Off preserves
+the fixed-then-moving primary pick order; on reverses the two primary input rows while the
+backend keeps the same fixed/moving origins. The preference is captured when a new Joint
+command opens: changing it never reorders a dialog in progress or an existing joint.
+Secondary alignment always starts with the actual moving component, independently of this
+preference. A hovered circular rim stays selectable across preview updates and small pointer
+movements within that hole's projected footprint; leaving that region restores the confirmed pose.
+
+References keep persistent geometry names or feature/curve identities through save/reopen,
+geometry changes and independent component copies. Missing, ambiguous, wrong-component,
+unsupported curve or parallel-axis references are errors. They never silently attach to nearby
+geometry. Clear removes the reference and keeps the current turn as a direction without following
+the cleared geometry. An invalid reference can also be cleared.
+
+Picking a circular hole rim as a primary origin keeps the unique cylindrical face and rim-end
+names, just like picking its cylindrical wall. The displayed hole center therefore remains a
+round origin when the first secondary alignment is added. A generic primary point/edge or an
+ambiguous/unnamed rim can still define a basic joint, but the dialog explains the limitation and
+disables secondary picking until compatible primary origins are selected. Nonzero Offset X/Y
+and nested occurrence paths still need a supported origin; no secondary reference is converted
+to a static frame. Offset Z remains available.
+Existing joints without secondary alignment keep their previous behavior.
+
+Scripts use `a_alignment` and `b_alignment` on `joint.create` or `joint.edit`:
+`{"face": "<persistent planar face name>", "occurrence": "<occurrence name>", "reverse": true}`,
+or a typed reference, for example
+`{"reference": {"type": "edge", "name": "<persistent edge name>"}, "occurrence": "<occurrence name>"}`.
+The other reference types are `circle_center` (`name` of the cylindrical face and `end` naming
+the adjacent rim face), `cylinder` (`name`), `construction` (`feature` id), `sketch_line`
+(`sketch` id and `curve` id), `construction_plane` (`feature` id), `origin_axis` (`axis`: X/Y/Z), and `origin_plane` (`plane`: XY/XZ/YZ).
+Omit a field to leave that side unchanged; pass `null` to clear it. Supplying `occurrence`
+also checks the exact picked instance of a shared definition.
+
+### Alignment preview in the Joint dialog
+
+In the right-hand **Joint** or **Edit Joint** panel, **Options > Preview alignment on hover**
+controls temporary secondary-alignment previews, including hole rims.
+It starts enabled each time a dialog opens. The checkbox belongs to that dialog
+and is not saved in Preferences or in the design.
+Turn it off to keep the confirmed pose while hovering. Click a reference to apply
+its alignment in either mode. Toggling it does not change primary origins,
+saved joints, reference validation or the command API.
+
+### Associative construction-axis references
+
+A construction axis can supply the secondary X direction of a face, circle, plane or axis
+origin. Use its feature ID, returned by the construction command:
+
+```json
+{"occurrence": 0, "plane": "XY", "x": {"reference": {"type": "construction", "feature": 17}}}
+```
+
+The same X object is accepted by `joint.origin` and inline origins in `joint.create` and
+`joint.edit`. The Joint dialog can pick the construction axis through its alignment fields.
+A string in `x` retains its legacy meaning: a persistent face name. Construction axes use
+the typed object above. Renaming the feature keeps its identity.
+
+For positional clocking, create two construction points attached to the selected hole
+centres, then a two-point construction axis from the primary centre to the other centre.
+The joint resolves that axis again and projects its direction square to primary Z; the
+primary origin and Z retain their references. Construction-only edits invalidate the
+resolved frame even when no body changes. An axis parallel to Z is refused. Point origins
+continue to accept only numeric X directions.

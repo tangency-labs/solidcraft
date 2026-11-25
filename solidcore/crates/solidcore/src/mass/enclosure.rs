@@ -40,7 +40,7 @@
 //! certified face holds within its bound of the definition (that bound is not added here).
 //! The enclosure refines the cell of widest enclosure, one bisection at a time,
 //! until it is as narrow as asked ([`enclose_volume`]) or decides the sign
-//! ([`volume_sign`]), or until [`CELL_BUDGET`] cells are spent or no cell is left to cut
+//! ([`volume_sign`]), or until [`CELL_BUDGET`] refinement cells are spent or no cell is left to cut
 //! ([`EnclosureStop`]); it answers the intersection of every enclosure it summed.
 //!
 //! **Moments and area** ([`enclose_quantity`], [`enclose_mass_properties`],
@@ -63,9 +63,9 @@
 //! (2003); [3] R. E. Moore, R. B. Kearfott, M. J. Cloud, *Introduction to Interval
 //! Analysis*, SIAM (2009).
 //!
-//! Deviations: none (not upstream). Bounded work: at most [`CELL_BUDGET`] cells and
-//! [`MAX_DEPTH`] bisections of one cell, no recursion (a work list ordered by width, then by
-//! insertion), the kernel's cancel token polled every 64 cells.
+//! Deviations: none (not upstream). Bounded work: at most [`CELL_BUDGET`] refinement cells
+//! (on top of the starting cells) and [`MAX_DEPTH`] bisections of one cell, no recursion (a work
+//! list ordered by width, then by insertion), the kernel's cancel token polled every 64 cells.
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap};
@@ -76,6 +76,8 @@ use crate::blend::fillet_section::certificate::{
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::series::V3;
 use crate::blend::fillet_section::station::{as_b_spline, knot, span, Nurbs, Partials};
+use crate::error::mass::MassFailure;
+use crate::error::{Failure, SM_ERR_NULL_POINTER};
 use crate::kernel::Kernel;
 use crate::mass::integrator::properties::region_material;
 use crate::math::Point3;
@@ -87,6 +89,30 @@ use crate::{Result, SolidError};
 
 const OP: &str = "mass::enclosure";
 
+/// A defect ([`MassFailure::Defect`]) with the status `SM_ERR` of the `SE(SM_ERR)` it
+/// replaces.
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    Failure::new(OP, MassFailure::Defect { why }).into_error()
+}
+
+/// A defect ([`MassFailure::Defect`]) with the status `SM_ERR_NULL_POINTER` of the `NER` it
+/// replaces.
+#[track_caller]
+fn null_defect(why: &'static str) -> SolidError {
+    Failure::new(OP, MassFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// Why an index into the enclosure's own tables (faces, strips, their sides, pieces,
+/// levels) is out of range.
+const NO_ENTRY: &str = "an index into the enclosure's own tables is out of range, though \
+                        each index it holds was taken from its table when the entry was added";
+/// Why a pcurve's enclosed evaluation has no point or derivative.
+const NO_DERIVATIVE: &str = "the pcurve's enclosed evaluation returned fewer values than asked \
+                             for, though it returns the point and each derivative asked for";
+
 /// The degree of a cell's remainder coefficients: its Taylor polynomial has degree
 /// `ORDER - 1`, and the remainder shrinks with the cell's size to the power `ORDER + 1`.
 pub const ORDER: usize = 8;
@@ -96,9 +122,10 @@ pub const ORDER: usize = 8;
 /// before it is cut.
 pub const FIRST_ORDER: usize = 3;
 
-/// The cells past which an enclosure is no longer refined (the starting cells, one or a
-/// few per trim piece and edge, and the last bisection's two come on top). A bound on the
-/// work of one decision, not fitted to a case: the rig's slowest decision takes about 10^5.
+/// The refinement cells past which an enclosure is no longer refined (the last bisection's two
+/// come on top). Work stays bounded at starting cells + [`CELL_BUDGET`] + 1. A bound on the
+/// work of one decision, not fitted to a case: the rig's slowest decision takes about 10^5
+/// refinement cells.
 pub const CELL_BUDGET: usize = 1 << 17;
 
 /// The most bisections from a starting cell to one of its cells: past it a cell is kept
@@ -135,7 +162,12 @@ pub enum EnclosureStop {
     /// The sign is not decided, and the settled cells and fixed terms already hold 0
     /// whatever the rest becomes ([`volume_sign`] only).
     Settled,
-    /// [`CELL_BUDGET`] cells are spent.
+    /// The width asked is below what any refinement can give ([`VolumeEnclosure::least`]),
+    /// and the enclosure is within the width asked of that least width: no refinement could
+    /// narrow it by more than the width asked. A looser width can therefore be answered
+    /// narrower, by at most the width asked ([`enclose_volume`]).
+    Floor,
+    /// [`CELL_BUDGET`] refinement cells are spent.
     Budget,
     /// No cell is left that a cut narrows: every cell is settled, cut [`MAX_DEPTH`] times,
     /// or of single parameters.
@@ -153,9 +185,15 @@ pub struct VolumeEnclosure {
     /// strip cells and the fixed terms), rounded up: refining does not take that one
     /// enclosure below it. The result can still be narrower, since it intersects the
     /// earlier enclosures too, and can then end at [`EnclosureStop::Reached`] for a width
-    /// below the floor; otherwise a width asked below it ends at [`EnclosureStop::Budget`] or
-    /// [`EnclosureStop::Exhausted`].
+    /// below the floor; otherwise a width asked below it ends at [`EnclosureStop::Floor`],
+    /// [`EnclosureStop::Budget`] or [`EnclosureStop::Exhausted`].
     pub floor: f64,
+    /// A lower bound, rounded down, of the width of every enclosure refining can still give (the
+    /// fixed terms and each strip cell's least width however it is cut): no width below it is
+    /// reached, and the result is at least this wide. Asked a width below it, refining ends at
+    /// [`EnclosureStop::Floor`] at the first check where the enclosure is at most this (as it is
+    /// then) plus the width asked.
+    pub least: f64,
     /// Why refinement ended.
     pub stop: EnclosureStop,
     /// What it cost.
@@ -178,18 +216,34 @@ pub enum VolumeSign {
     /// `hi < 0`: the volume is negative (the body is inside out).
     Negative(VolumeEnclosure),
     /// The enclosure still holds 0 when refinement ends: the cells that no cut narrows (gaps
-    /// between faces) already hold it whatever the rest becomes, [`CELL_BUDGET`] cells are
-    /// spent, or every cell is cut [`MAX_DEPTH`] times.
+    /// between faces) already hold it whatever the rest becomes, [`CELL_BUDGET`] refinement
+    /// cells are spent, or every cell is cut [`MAX_DEPTH`] times.
     Undecided(VolumeEnclosure),
 }
 
 /// An enclosure of the volume of the closed body `b` at most `width` wide
-/// ([`EnclosureStop::Reached`]), or else the narrowest refinement gives within
-/// [`CELL_BUDGET`] cells ([`EnclosureStop::Budget`]) or once no cut narrows a cell
-/// ([`EnclosureStop::Exhausted`]). It is refined whatever `width` is: a width below the
-/// enclosure's [`VolumeEnclosure::floor`] is not reached, and refining stops only at one of
-/// those ends. The result is the intersection of every enclosure summed along the way (each
-/// holds the volume), so a tighter `width` is never answered wider by further refinement.
+/// ([`EnclosureStop::Reached`]), or else the narrowest refinement gives within [`CELL_BUDGET`]
+/// refinement cells ([`EnclosureStop::Budget`]) or once no cut narrows a cell
+/// ([`EnclosureStop::Exhausted`]). A width below the enclosure's [`VolumeEnclosure::least`] is not
+/// reached: refining ends at [`EnclosureStop::Floor`] at the first check where the enclosure is
+/// at most that least width plus `width`, so no refinement could narrow it by more than `width` (the answer is as
+/// close to the narrowest any refinement gives as `width` asks of the volume). A width below the
+/// [`VolumeEnclosure::floor`] alone is still refined toward. The result is the intersection of
+/// every enclosure summed along the way (each holds the volume), so within one call further
+/// refinement never widens it.
+///
+/// Across calls a [`EnclosureStop::Floor`] answer can be wider than the answer to a looser
+/// `width`, but by at most its own `width`. The cells are cut in the same order whatever is
+/// asked (only when the enclosure is summed and checked depends on `width`), so the answer to
+/// any `width` is the intersection of some of the enclosures of one sequence, and
+/// every enclosure of that sequence, before or after the Floor stop, is at least the Floor
+/// answer's [`VolumeEnclosure::least`] wide. A looser `width` between that least width and the
+/// Floor answer may be reached further on, and the answer is not monotone in `width` there. No
+/// rule closes that gap and still stops early: telling whether a looser `width` is reached
+/// takes refining until it is, so it would have to refine every width below the least that far
+/// (on to the cell budget, the cost the Floor stop saves), or end the looser widths at the same
+/// point as unreached although refinement reaches them.
+///
 /// Missing UV trim curves are made on `b`, as
 /// [`super::integrator::properties::brep_volume_default`] makes them.
 ///
@@ -207,8 +261,7 @@ pub fn enclose_volume(k: &Kernel, b: &mut Brep, width: f64) -> Result<VolumeEncl
         return Err(SolidError::invalid_input(OP, "width not positive"));
     }
     let mut w = Work::new(k, b)?;
-    // refined toward `width` whatever the floor: the floor only says where it ends
-    w.refine(|e| e.hi - e.lo <= width, |_, _| false)
+    w.refine(|e| e.hi - e.lo <= width, |_, _| false, absolute(width))
 }
 
 /// What [`enclose_quantity`] encloses.
@@ -241,7 +294,8 @@ pub fn moment_centre(k: &Kernel, b: &mut Brep) -> Result<Point3> {
 
 /// An enclosure of `quantity` of the closed body `b` at most `width` wide, as
 /// [`enclose_volume`] refines it (the [`VolumeEnclosure`] then holds that quantity, not
-/// the volume, unless it is the volume).
+/// the volume, unless it is the volume). [`Quantity::Area`] also takes a sheet body: a
+/// face void on both sides has an area, though it bounds no volume or moment.
 ///
 /// # Errors
 ///
@@ -262,12 +316,14 @@ pub fn enclose_quantity(
         }
     }
     let mut w = Work::with(k, b, quantity)?;
-    w.refine(|e| e.hi - e.lo <= width, |_, _| false)
+    w.refine(|e| e.hi - e.lo <= width, |_, _| false, absolute(width))
 }
 
 /// An enclosure of the total area of the faces `faces` of `b` at most `width` wide, as
 /// [`enclose_quantity`] refines [`Quantity::Area`] (an area is its faces' alone, so any set
-/// of faces has one; a face listed twice counts twice).
+/// of faces has one; a face listed twice counts twice). A sheet's face, void on both sides,
+/// is measured from its upward use; its area, like any face's, is positive whichever of its
+/// uses is upward.
 ///
 /// # Errors
 ///
@@ -285,15 +341,16 @@ pub fn enclose_face_area(
         return Err(SolidError::invalid_input(OP, "no faces"));
     }
     let mut w = Work::over(k, b, Quantity::Area, Some(faces))?;
-    w.refine(|e| e.hi - e.lo <= width, |_, _| false)
+    w.refine(|e| e.hi - e.lo <= width, |_, _| false, absolute(width))
 }
 
-/// An enclosure of the total area of the faces `faces` of `b` at most `rel` of its own
-/// magnitude wide ([`EnclosureStop::Reached`]), or else the narrowest one refinement gives
-/// ([`EnclosureStop::Budget`], [`EnclosureStop::Exhausted`]), as [`enclose_face_area`]
-/// refines it. The width asked follows the enclosure as it narrows, in one refinement: no
-/// rough first enclosure is needed to size it, and no restart re-evaluates an earlier
-/// run's cells. An unbounded enclosure never counts as reached.
+/// An enclosure of the total area of the faces `faces` of `b` at most `rel` of its own magnitude
+/// wide ([`EnclosureStop::Reached`]), or else the narrowest one refinement gives within
+/// [`CELL_BUDGET`] refinement cells ([`EnclosureStop::Budget`], [`EnclosureStop::Exhausted`]) or
+/// within the width asked of the least width any refinement gives ([`EnclosureStop::Floor`]), as
+/// [`enclose_face_area`] refines it. The width asked follows the enclosure as it narrows, in one
+/// refinement: no rough first enclosure is needed to size it, and no restart re-evaluates an
+/// earlier run's cells. An unbounded enclosure never counts as reached.
 ///
 /// # Errors
 ///
@@ -312,16 +369,35 @@ pub fn enclose_face_area_relative(
         return Err(SolidError::invalid_input(OP, "no faces"));
     }
     let mut w = Work::over(k, b, Quantity::Area, Some(faces))?;
-    w.refine(within(rel), |_, _| false)
+    w.refine(within(rel), |_, _| false, relative(rel))
 }
 
 /// Whether an enclosure is finite and at most `rel` of its own magnitude wide (false for
 /// infinite or NaN ends: `inf <= rel * inf` would hold, so an unbounded enclosure would
-/// count as reached before any cell is cut; refinement goes on instead, to its budget).
+/// count as reached before any cell is cut; refinement goes on instead, to its budget of
+/// [`CELL_BUDGET`] refinement cells).
 fn within(rel: f64) -> impl Fn(Ivl) -> bool {
     move |e: Ivl| {
         let width = e.hi - e.lo;
         width.is_finite() && width <= rel * e.mag()
+    }
+}
+
+/// The widths an absolute `width` asks of any enclosure: the `asked` of [`Work::refine`]
+/// (`done` compares each enclosure's `hi - lo`, rounded to nearest, with it).
+fn absolute(width: f64) -> impl Fn(Ivl) -> Option<Ivl> {
+    move |_: Ivl| Some(Ivl::from(width))
+}
+
+/// The widths [`within`] `rel` asks of the enclosures inside `best`: at least `rel` times
+/// `best`'s least magnitude, rounded down, and at most `rel * best.mag()` as [`within`]
+/// rounds it (each enclosure's magnitude is at most `best`'s, and rounding is monotone).
+fn relative(rel: f64) -> impl Fn(Ivl) -> Option<Ivl> {
+    move |best: Ivl| {
+        Some(Ivl::new(
+            (Ivl::from(rel) * Ivl::from(best.mig())).lo,
+            rel * best.mag(),
+        ))
     }
 }
 
@@ -380,7 +456,8 @@ pub struct MassEnclosure {
 /// [`MassEnclosure`] of the closed body `b`: the area, the volume and each moment about
 /// [`moment_centre`] enclosed ([`enclose_quantity`]) at most `rel` of its scale wide (the
 /// area's, the volume's, and the volume times the box's half diagonal to the moment's
-/// degree), then shifted to the origin in interval arithmetic.
+/// degree), then shifted to the origin in interval arithmetic. The area stage takes a
+/// sheet's faces too ([`enclose_quantity`]); the volume stage still refuses them.
 ///
 /// # Errors
 ///
@@ -401,7 +478,7 @@ pub fn enclose_mass_properties(k: &Kernel, b: &mut Brep, rel: f64) -> Result<Mas
     let mut run = |b: &mut Brep, q: Quantity, width: Option<f64>| -> Result<(Ivl, EnclosureStop)> {
         let e = match width {
             Some(width) => enclose_quantity(k, b, q, width)?,
-            None => Work::with(k, b, q)?.refine(within(rel), |_, _| false)?,
+            None => Work::with(k, b, q)?.refine(within(rel), |_, _| false, relative(rel))?,
         };
         cells += e.counts.cells;
         Ok((Ivl::new(e.lo, e.hi), e.stop))
@@ -510,7 +587,7 @@ pub fn volume_sign(k: &Kernel, b: &mut Brep) -> Result<VolumeSign> {
     volume_sign_within(k, b, CELL_BUDGET)
 }
 
-/// [`volume_sign`] within `budget` cells.
+/// [`volume_sign`] within `budget` refinement cells.
 fn volume_sign_within(k: &Kernel, b: &mut Brep, budget: usize) -> Result<VolumeSign> {
     let mut w = Work::new(k, b)?;
     w.budget = budget;
@@ -519,6 +596,7 @@ fn volume_sign_within(k: &Kernel, b: &mut Brep, budget: usize) -> Result<VolumeS
     let e = w.refine(
         |e| e.lo > 0.0 || e.hi < 0.0,
         |rest, still| still >= rest.mag(),
+        |_| None,
     )?;
     Ok(if e.lo > 0.0 {
         VolumeSign::Positive(e)
@@ -863,6 +941,10 @@ struct Item {
     /// A strip cell whose width is mostly a gap no cut removes ([`Work::strip_cell`]): kept
     /// as it is.
     settled: bool,
+    /// A lower bound of the width of this cell's part of every enclosure summed from now on,
+    /// however it is cut ([`Work::strip_cell`]; 0 for a sweep cell, whose enclosure narrows
+    /// toward a point).
+    least: f64,
     enc: Ivl,
     split_t: bool,
 }
@@ -881,7 +963,7 @@ struct Work<'a> {
     heap: BinaryHeap<(u64, Reverse<usize>)>,
     /// The caps' and the loops' rounding terms, `[-w, w]`.
     fixed: Ivl,
-    /// The cells past which it is no longer refined ([`CELL_BUDGET`]).
+    /// The refinement cells past which it is no longer refined ([`CELL_BUDGET`]).
     budget: usize,
     counts: EnclosureCounts,
 }
@@ -1230,12 +1312,13 @@ impl<'a> Work<'a> {
         zcap: &mut [f64; 3],
     ) -> Result<()> {
         use crate::topology::edgeuse::p1 as eu1;
+        // the caller's body: its links are public, and `enclose_volume` does not validate it
         let up = crate::topology::face::p2::upward_faceuse(b, f)?
-            .ok_or_else(|| SolidError::mass_missing(OP, "the face's upward faceuse"))?;
+            .ok_or_else(|| SolidError::mass(OP, MassFailure::FaceWithoutFaceuse))?;
         let mate = b
             .faceuse(up)?
             .mate
-            .ok_or_else(|| SolidError::mass_missing(OP, "the faceuse's mate"))?;
+            .ok_or_else(|| SolidError::mass(OP, MassFailure::FaceuseWithoutMate))?;
         let material = |fu| -> Result<bool> {
             match eu1::faceuse_region(b, fu)? {
                 Some(r) => region_material(b, r),
@@ -1243,13 +1326,17 @@ impl<'a> Work<'a> {
             }
         };
         let (mu, mm) = (material(up)?, material(mate)?);
-        if mu == mm {
+        // a sheet's face (void on both sides) has an area but bounds no material: its
+        // area is measured from its upward use (the integrand `|S_u x S_v|`, with the
+        // loops walked as that use's orientation gives, is positive either way)
+        let sheet_area = self.weight.is_area() && !mu && !mm;
+        if mu == mm && !sheet_area {
             return Err(SolidError::invalid_input(
                 OP,
                 "a face whose sides are not one material region and one void",
             ));
         }
-        let fu = if mu { up } else { mate };
+        let fu = if mu || sheet_area { up } else { mate };
         let sign = if b.faceuse(fu)?.orientation == OrientType::Same {
             -1.0
         } else {
@@ -1259,7 +1346,7 @@ impl<'a> Work<'a> {
             .face(f)?
             .surface
             .as_ref()
-            .ok_or_else(|| SolidError::mass_missing(OP, "the face's surface"))?;
+            .ok_or_else(|| SolidError::mass(OP, MassFailure::FaceWithoutSurface))?;
         let cn = match as_b_spline(k, surface)? {
             Some(bs) => Nurbs::of(&bs)?,
             None => {
@@ -1287,7 +1374,7 @@ impl<'a> Work<'a> {
                 let e = b
                     .edgeuse(eu)?
                     .edge
-                    .ok_or_else(|| SolidError::mass_missing(OP, "the edgeuse's edge"))?;
+                    .ok_or_else(|| SolidError::mass(OP, MassFailure::EdgeuseWithoutEdge))?;
                 lp.push((e, pcurve(k, b, eu)?, dir));
             }
             loops.push(lp);
@@ -1328,11 +1415,7 @@ impl<'a> Work<'a> {
                 let (a, z) = if *dir > 0.0 { (t0, t1) } else { (t1, t0) };
                 let pa = curve_derivs_over(c, Ivl::from(a), 0, None)?;
                 let pz = curve_derivs_over(c, Ivl::from(z), 0, None)?;
-                let first = |d: &[V3<Ivl>]| {
-                    d.first()
-                        .copied()
-                        .ok_or_else(|| SolidError::mass_failed(OP, "the curve has no point"))
-                };
+                let first = |d: &[V3<Ivl>]| d.first().copied().ok_or_else(|| defect(NO_DERIVATIVE));
                 ends.push((first(&pa)?, first(&pz)?));
             }
             let count = lp.len();
@@ -1378,10 +1461,7 @@ impl<'a> Work<'a> {
         open_length: &mut Ivl,
         zcap: &mut [f64; 3],
     ) -> Result<()> {
-        let fg = self
-            .faces
-            .get(face)
-            .ok_or_else(|| SolidError::mass_failed(OP, "no such face"))?;
+        let fg = self.faces.get(face).ok_or_else(|| defect(NO_ENTRY))?;
         let p = partials_at(&fg.cn, end.x, end.y, 1)?;
         let (s, su, sv) = (p.at(0, 0), p.at(1, 0), p.at(0, 1));
         let (du, dv) = (width(end.x), width(end.y));
@@ -1402,10 +1482,7 @@ impl<'a> Work<'a> {
     /// whose control points are nearly one point (a pole), from their spread
     /// ([`side_length`]); else from the partials over its box.
     fn segment_length(&self, face: usize, seg: &NurbsCurve) -> Result<Ivl> {
-        let fg = self
-            .faces
-            .get(face)
-            .ok_or_else(|| SolidError::mass_failed(OP, "no such face"))?;
+        let fg = self.faces.get(face).ok_or_else(|| defect(NO_ENTRY))?;
         let (u, v) = piece_hull(seg, seg.p);
         if let Some(len) = side_length(&fg.cn, u, v) {
             return Ok(len);
@@ -1419,10 +1496,7 @@ impl<'a> Work<'a> {
     /// Adds the cells of one pcurve on face `face`: each polynomial piece, cut where it may
     /// cross a knot line of the surface, swept down to the base.
     fn add_piece(&mut self, face: usize, cn: &NurbsCurve, dir: f64) -> Result<()> {
-        let fg = self
-            .faces
-            .get(face)
-            .ok_or_else(|| SolidError::mass_failed(OP, "no such face"))?;
+        let fg = self.faces.get(face).ok_or_else(|| defect(NO_ENTRY))?;
         let mut lines_u: Vec<f64> = Vec::new();
         for &x in &fg.cn.u {
             if lines_u.last() != Some(&x) {
@@ -1473,6 +1547,7 @@ impl<'a> Work<'a> {
                         depth: 0,
                         order: FIRST_ORDER,
                         settled: false,
+                        least: 0.0,
                         enc: IZ,
                         split_t: true,
                     })?;
@@ -1519,10 +1594,7 @@ impl<'a> Work<'a> {
             }
         }
         // cut at both curves' knots
-        let sg = self
-            .strips
-            .get(strip)
-            .ok_or_else(|| SolidError::mass_failed(OP, "no such strip"))?;
+        let sg = self.strips.get(strip).ok_or_else(|| defect(NO_ENTRY))?;
         let mut cuts = vec![t0, t1];
         for (_, cn) in &sg.sides {
             for &x in &cn.u {
@@ -1550,6 +1622,7 @@ impl<'a> Work<'a> {
                     depth: 0,
                     order: FIRST_ORDER,
                     settled: false,
+                    least: 0.0,
                     enc: IZ,
                     split_t: true,
                 });
@@ -1565,10 +1638,7 @@ impl<'a> Work<'a> {
     fn point(&self, strip: usize, side: usize, t: f64) -> Result<[Ivl; 3]> {
         let (face, cn) = self.strip_side(strip, side)?;
         let d = curve_derivs_over(cn, Ivl::from(t), 0, None)?;
-        let p = d
-            .first()
-            .copied()
-            .ok_or_else(|| SolidError::mass_failed(OP, "the curve has no point"))?;
+        let p = d.first().copied().ok_or_else(|| defect(NO_DERIVATIVE))?;
         let s = partials_at(&face.cn, p.x, p.y, 0)?.at(0, 0);
         Ok([s.x, s.y, s.z])
     }
@@ -1578,12 +1648,8 @@ impl<'a> Work<'a> {
         let (face, cn) = self.strip_side(strip, side)?;
         let d = curve_derivs_over(cn, Ivl::new(t0, t1), 1, None)?;
         let (p, dp) = (
-            d.first()
-                .copied()
-                .ok_or_else(|| SolidError::mass_failed(OP, "the curve has no point"))?,
-            d.get(1)
-                .copied()
-                .ok_or_else(|| SolidError::mass_failed(OP, "the curve has no derivative"))?,
+            d.first().copied().ok_or_else(|| defect(NO_DERIVATIVE))?,
+            d.get(1).copied().ok_or_else(|| defect(NO_DERIVATIVE))?,
         );
         let s = partials_at(&face.cn, p.x, p.y, 1)?;
         let (su, sv) = (s.at(1, 0), s.at(0, 1));
@@ -1597,11 +1663,8 @@ impl<'a> Work<'a> {
             .strips
             .get(strip)
             .and_then(|s| s.sides.get(side))
-            .ok_or_else(|| SolidError::mass_failed(OP, "no such strip side"))?;
-        let fg = self
-            .faces
-            .get(*face)
-            .ok_or_else(|| SolidError::mass_failed(OP, "no such face"))?;
+            .ok_or_else(|| defect(NO_ENTRY))?;
+        let fg = self.faces.get(*face).ok_or_else(|| defect(NO_ENTRY))?;
         Ok((fg, cn))
     }
 
@@ -1617,8 +1680,9 @@ impl<'a> Work<'a> {
             }
             Kind::Strip { strip, spans } => {
                 self.counts.strips += 1;
-                let (enc, settled) = self.strip_cell(strip, spans, it.t, it.order)?;
+                let (enc, settled, least) = self.strip_cell(strip, spans, it.t, it.order)?;
                 it.settled = settled;
+                it.least = least;
                 (enc, true)
             }
         };
@@ -1643,20 +1707,10 @@ impl<'a> Work<'a> {
         s: (f64, f64),
         ord: usize,
     ) -> Result<(Ivl, bool)> {
-        let p = self
-            .pieces
-            .get(piece)
-            .ok_or_else(|| SolidError::mass_failed(OP, "no such piece"))?;
-        let fg = self
-            .faces
-            .get(p.face)
-            .ok_or_else(|| SolidError::mass_failed(OP, "no such face"))?;
+        let p = self.pieces.get(piece).ok_or_else(|| defect(NO_ENTRY))?;
+        let fg = self.faces.get(p.face).ok_or_else(|| defect(NO_ENTRY))?;
         let sign = Ivl::from(fg.sign * p.dir);
-        let a = fg
-            .levels
-            .get(j)
-            .copied()
-            .ok_or_else(|| SolidError::mass_failed(OP, "no such level"))?;
+        let a = fg.levels.get(j).copied().ok_or_else(|| defect(NO_ENTRY))?;
         let next = fg.levels.get(j + 1).copied();
         let z0 = Ivl::from(self.z0);
         let (tc, sc) = (0.5 * (t.0 + t.1), 0.5 * (s.0 + s.1));
@@ -1678,9 +1732,9 @@ impl<'a> Work<'a> {
             let (b0, bs) = match (whole, next) {
                 (true, Some(top)) => (Ivl::from(top) - Ivl::from(a), Bs::zero()),
                 (true, None) => {
-                    return Err(SolidError::mass_failed(
-                        OP,
-                        "no level above the whole piece",
+                    return Err(defect(
+                        "a whole cell has no level above it, though a cell is whole only \
+                         below the top level its trim reaches",
                     ))
                 }
                 (false, _) => (v0 - Ivl::from(a), vs),
@@ -1848,14 +1902,17 @@ impl<'a> Work<'a> {
     /// middle, less the slope's bound times the half length) times its length, which every
     /// cut of it keeps, so cutting it can at most halve that factor. A
     /// real gap between two faces' boundaries (not their rounding) is such a cell: refining
-    /// it would spend the budget without deciding.
+    /// it would spend the budget without deciding. Third, a lower bound of the sum of the
+    /// widths of any cut of it into strip cells, `2 |Phi|_least speed_least kept`: each
+    /// part's `|Phi|` and speed bounds are at least these least values over this cell, and
+    /// its `int |D|` bound at least its own share of `kept` ([`Work::least`]).
     fn strip_cell(
         &self,
         strip: usize,
         spans: [usize; 2],
         t: (f64, f64),
         ord: usize,
-    ) -> Result<(Ivl, bool)> {
+    ) -> Result<(Ivl, bool, f64)> {
         let tc = 0.5 * (t.0 + t.1);
         let (xl, xh) = (
             Ivl::from(t.0) - Ivl::from(tc),
@@ -1868,12 +1925,8 @@ impl<'a> Work<'a> {
         let mut mid = Vec::new();
         let mut over = Vec::new();
         let mut taylor = true;
-        for side in 0..2 {
+        for (side, &sp) in spans.iter().enumerate() {
             let (face, cn) = self.strip_side(strip, side)?;
-            let sp = spans
-                .get(side)
-                .copied()
-                .ok_or_else(|| SolidError::mass_failed(OP, "no such strip side"))?;
             let (hu, hv) = piece_hull(cn, sp);
             let at = |tt: Ivl, n: usize| -> Result<(Bs, Bs, Ivl, Ivl)> {
                 let d = curve_derivs_over(cn, tt, n, Some(sp))?;
@@ -1900,16 +1953,16 @@ impl<'a> Work<'a> {
                     taylor = false;
                     let (du, dv, u, v) = at(Ivl::new(t.0, t.1), 1)?;
                     let Some(p) = partials_over(&face.cn, u, v, 1)? else {
-                        return Ok((Ivl::whole(), false));
+                        return Ok((Ivl::whole(), false, 0.0));
                     };
                     over.push(compose(&p, &du, &dv, 1));
                 }
             }
         }
         let (Some(o1), Some(o2)) = (over.first(), over.get(1)) else {
-            return Err(SolidError::mass_failed(
-                OP,
-                "the cell has fewer than two series",
+            return Err(defect(
+                "the strip cell has fewer than two series, though each of its two sides \
+                 adds one above",
             ));
         };
         let comp = |s: &[Bs; 3], i: usize| [s[0].at(i, 0), s[1].at(i, 0), s[2].at(i, 0)];
@@ -1948,12 +2001,8 @@ impl<'a> Work<'a> {
             None
         } else {
             let mut middle = Vec::new();
-            for side in 0..2 {
+            for (side, &sp) in spans.iter().enumerate() {
                 let (face, cn) = self.strip_side(strip, side)?;
-                let sp = spans
-                    .get(side)
-                    .copied()
-                    .ok_or_else(|| SolidError::mass_failed(OP, "no such strip side"))?;
                 let (hu, hv) = piece_hull(cn, sp);
                 let cell = curve_derivs_over(cn, Ivl::new(t.0, t.1), 0, Some(sp))?;
                 let (uc, _) = curve_series(&cell, 0, 0);
@@ -2027,7 +2076,26 @@ impl<'a> Work<'a> {
         };
         let kept = (Ivl::from(least) * (xh - xl)).lo;
         let settled = kept + kept >= gap.hi;
-        Ok((Ivl::new(-w.hi, w.hi), settled))
+        // lower bounds of every cut's `|Phi|` and speed bounds (`zmax`, `speed`): each is at
+        // least its value at a point of this cell, so at least these (for the volume, the
+        // larger side's least `|z - z0|`, which `zmax` takes the larger of), and the cuts'
+        // `int |D|` bounds sum to at least `kept`
+        let phi_least = if self.weight.quantity == (Quantity::Moment { x: 0, y: 0, z: 0 }) {
+            (o1[2].at(0, 0) - z0).mig().max((o2[2].at(0, 0) - z0).mig())
+        } else {
+            self.weight.phi([hull(0), hull(1), hull(2)]).mig()
+        };
+        let speed_least = least_sum(comp(o1, 1));
+        let at_least = Ivl::from(2.0)
+            * Ivl::from(phi_least)
+            * Ivl::from(speed_least)
+            * Ivl::from(kept.max(0.0));
+        let at_least = if at_least.lo.is_finite() {
+            at_least.lo.max(0.0)
+        } else {
+            0.0
+        };
+        Ok((Ivl::new(-w.hi, w.hi), settled, at_least))
     }
 
     /// The enclosure: the cells' sum and the fixed terms, in insertion order.
@@ -2089,18 +2157,43 @@ impl<'a> Work<'a> {
         (rest, still.hi)
     }
 
+    /// A lower bound, rounded down, of the width of every enclosure summed from now on: the
+    /// fixed terms' width and each live cell's least width however it is cut ([`Item`]'s
+    /// `least`). Each enclosure summed, now or earlier, is a sum whose strip cells and fixed
+    /// terms are symmetric about 0 and hold this much width between them (a cut cell's bound
+    /// is at least its parts' least widths: its `|Phi|`, speed and `int |D|` bounds are at
+    /// least theirs), and the rest of it holds the volume less the strips' true sum, the same
+    /// for each: so the intersection of them all is at least this wide too.
+    fn least(&self) -> f64 {
+        let mut sum = Ivl::from(self.fixed.hi) - Ivl::from(self.fixed.lo);
+        for (it, alive) in self.items.iter().zip(&self.alive) {
+            if *alive {
+                sum = sum + Ivl::from(it.least);
+            }
+        }
+        if sum.lo.is_finite() {
+            sum.lo.max(0.0)
+        } else {
+            0.0
+        }
+    }
+
     /// Refines the widest cell, one bisection at a time, until `done` holds of the
     /// enclosure ([`EnclosureStop::Reached`]), `hopeless` of its parts ([`Work::parts`]: no
-    /// refining can make `done` hold; [`EnclosureStop::Settled`]), the budget is spent, or
-    /// no cell is left to cut. The result is the intersection of every enclosure summed
-    /// (each holds the volume): rounding that grows faster than the cells shrink does not
-    /// widen it. Two enclosures that do not overlap mean one of them is not sound, which no
-    /// cell's construction allows: [`MassFailure::Failed`](crate::error::mass::MassFailure::Failed)
-    /// then, not an enclosure (no input is known to reach it).
+    /// refining can make `done` hold; [`EnclosureStop::Settled`]), the least width
+    /// ([`Work::least`]) is past every width `asked` of an enclosure inside the enclosure
+    /// (`None`: `done` is not a width) while the enclosure is at most that least width plus
+    /// the least width asked ([`EnclosureStop::Floor`]), the refinement budget is spent, or
+    /// no cell is left to cut. The result is the
+    /// intersection of every enclosure summed (each holds the volume): rounding that grows
+    /// faster than the cells shrink does not widen it. Two enclosures that do not overlap mean
+    /// one of them is not sound, which no cell's construction allows: a defect
+    /// ([`MassFailure::Defect`]) then, not an enclosure (no input is known to reach it).
     fn refine(
         &mut self,
         done: impl Fn(Ivl) -> bool,
         hopeless: impl Fn(Ivl, f64) -> bool,
+        asked: impl Fn(Ivl) -> Option<Ivl>,
     ) -> Result<VolumeEnclosure> {
         let out = |w: &Self, best: Ivl, stop: EnclosureStop| -> Result<VolumeEnclosure> {
             let e = intersect(w.total(), best)?;
@@ -2109,10 +2202,13 @@ impl<'a> Work<'a> {
                 lo: e.lo,
                 hi: e.hi,
                 floor: (Ivl::from(still) + Ivl::from(still)).hi,
+                least: w.least(),
                 stop,
                 counts: w.counts,
             })
         };
+        let start = self.counts.cells;
+        let limit = start.saturating_add(self.budget);
         // running sums in f64 say when to sum the enclosure in intervals again: when they
         // look done, or every quarter of the work list's length
         let total = self.total();
@@ -2134,11 +2230,20 @@ impl<'a> Work<'a> {
                 if hopeless(rest, still) {
                     return out(self, best, EnclosureStop::Settled);
                 }
+                // every enclosure from now on is inside `best` and at least `least` wide: past
+                // every width asked, `done` holds of none of them, and once `best` is within
+                // the width asked of `least` no refinement can narrow it by more than that
+                let least = self.least();
+                if let Some(a) = asked(best) {
+                    if least > a.hi && (Ivl::from(width(best)) - Ivl::from(least)).hi <= a.lo {
+                        return out(self, best, EnclosureStop::Floor);
+                    }
+                }
                 (lo, hi) = (total.lo, total.hi);
                 checked = self.counts.cells;
                 next_check = self.counts.cells + (self.items.len() / 4).max(64);
             }
-            if self.counts.cells >= self.budget {
+            if self.counts.cells >= limit {
                 return out(self, best, EnclosureStop::Budget);
             }
             let Some((_, Reverse(i))) = self.heap.pop() else {
@@ -2220,16 +2325,16 @@ fn abs_ivl(a: Ivl) -> Ivl {
     }
 }
 
-/// The intersection of two enclosures of the volume; a [`MassFailure::Failed`](crate::error::mass::MassFailure::Failed)
-/// where they do not overlap (one of them is not sound).
+/// The intersection of two enclosures of the volume; a defect
+/// ([`MassFailure::Defect`]) where they do not overlap (one of them is not sound).
 fn intersect(a: Ivl, b: Ivl) -> Result<Ivl> {
     let (lo, hi) = (a.lo.max(b.lo), a.hi.min(b.hi));
     if lo <= hi {
         Ok(Ivl::new(lo, hi))
     } else {
-        Err(SolidError::mass_failed(
-            OP,
-            "two enclosures of the volume do not overlap",
+        Err(defect(
+            "two enclosures of the volume do not overlap, though each is proved to hold it, \
+             so one of them is not sound",
         ))
     }
 }
@@ -2255,10 +2360,7 @@ fn crossings(
     }
     let at = |t: f64| -> Result<f64> {
         let d = curve_derivs_over(cn, Ivl::from(t), 0, Some(s))?;
-        let p = d
-            .first()
-            .copied()
-            .ok_or_else(|| SolidError::mass_failed(OP, "the curve has no point"))?;
+        let p = d.first().copied().ok_or_else(|| defect(NO_DERIVATIVE))?;
         Ok((if c == 0 { p.x } else { p.y }).mid() - line)
     };
     let mut t0 = a;
@@ -2467,7 +2569,9 @@ fn pcurve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<NurbsCurve> {
     fetch.status?;
     let c = crate::topology::edgeuse::p1::uv_trim_curve(b, eu)?
         .0
-        .ok_or_else(|| SolidError::mass_missing(OP, "the edgeuse's pcurve"))?;
+        .ok_or_else(|| {
+            null_defect("the edge use has no pcurve just after it was made where it was missing")
+        })?;
     let bs: &BSplineCurve = c.b_spline_base().ok_or(SolidError::Unsupported {
         operation: OP,
         reason: "a pcurve with no NURBS form",
@@ -2491,6 +2595,61 @@ mod tests {
         assert!(!done(Ivl::new(1.0, f64::INFINITY)));
         assert!(!done(Ivl::new(f64::NEG_INFINITY, -1.0)));
         assert!(!done(Ivl::new(f64::NAN, 1.0)));
+    }
+
+    /// A sheet's faces, void on both sides, have area enclosures, positive whichever use
+    /// of each face is upward, face by face and over the whole sheet, though they bound no
+    /// volume: the volume is still refused.
+    #[test]
+    fn a_sheet_face_has_an_area_enclosure() {
+        use crate::primitive::api_curves::create_line_segment;
+        let mut k = Kernel::default();
+        // a 3 x 3 square and, apart from it, a 2 x 2 one: areas 9 and 4
+        let squares = [(0.0, 3.0), (4.0, 2.0)];
+        let mut curves: Vec<crate::curve::curve::Curve> = Vec::new();
+        for (x0, s) in squares {
+            let pts = [[x0, 0.0], [x0 + s, 0.0], [x0 + s, s], [x0, s]];
+            for i in 0..4 {
+                let (a, c) = (pts[i], pts[(i + 1) % 4]);
+                curves.push(
+                    create_line_segment(Point3::new(a[0], a[1], 0.0), Point3::new(c[0], c[1], 0.0))
+                        .unwrap()
+                        .into(),
+                );
+            }
+        }
+        let mut b = crate::primitive::api_trim_ops::create_planar_faces(&mut k, &curves).unwrap();
+        let faces = crate::topology::brep::p1::faces(&b, None).unwrap();
+        assert_eq!(faces.len(), 2);
+        let holds = |e: &VolumeEnclosure, a: f64| {
+            assert!(
+                e.lo > 0.0 && e.lo <= a && a <= e.hi,
+                "[{}, {}] for {a}",
+                e.lo,
+                e.hi
+            );
+            assert!(e.hi - e.lo <= 1e-8 * a, "[{}, {}] for {a}", e.lo, e.hi);
+        };
+        for flip in [None, Some(0), Some(1)] {
+            if let Some(i) = flip {
+                crate::topology::face::p1::flip_face_orientation(&mut b, faces[i]).unwrap();
+            }
+            let mut areas = [0.0; 2];
+            for (i, &f) in faces.iter().enumerate() {
+                let e = enclose_face_area_relative(&k, &mut b, &[f], 1e-9).unwrap();
+                areas[i] = (e.lo + e.hi) / 2.0;
+                let a = if (areas[i] - 9.0).abs() < 1.0 {
+                    9.0
+                } else {
+                    4.0
+                };
+                holds(&e, a);
+            }
+            assert!((areas[0] - areas[1]).abs() > 1.0, "{areas:?}");
+            let whole = enclose_quantity(&k, &mut b, Quantity::Area, 1e-8).unwrap();
+            holds(&whole, 13.0);
+        }
+        assert!(enclose_volume(&k, &mut b, 1e-6).is_err());
     }
 
     /// The cylinder r 2, h 5, its side moved along x by `shift`.
@@ -2562,7 +2721,7 @@ mod tests {
         let mut on_knots = 0;
         for h in [0.1, 0.05, 0.025] {
             for (strip, spans, t) in end_cells(&w, h) {
-                let (e, _) = w.strip_cell(strip, spans, t, ORDER).unwrap();
+                let (e, _, _) = w.strip_cell(strip, spans, t, ORDER).unwrap();
                 assert!(e.hi <= 4.0 * h * h * h, "{strip} {t:?}: {e:?}");
                 on_knots += usize::from(on_knot_line(&w, strip, spans, t));
             }
@@ -2581,7 +2740,7 @@ mod tests {
         let mut k = Kernel::default();
         let mut b = cylinder_side_moved(&mut k, d);
         let w = Work::new(&k, &mut b).unwrap();
-        let (mut checked, mut on_knots) = (0, 0);
+        let (mut checked, mut on_knots, mut positive) = (0, 0, 0);
         for h in [0.4, 0.1, 0.025] {
             for (strip, spans, t) in end_cells(&w, h) {
                 let p = |side, at| w.point(strip, side, at).unwrap().map(Ivl::mid);
@@ -2592,13 +2751,45 @@ mod tests {
                     continue; // the seam: both sides on the moved face, which meet
                 }
                 let flux = ((a0[2] - w.z0) * d * (a1[1] - a0[1])).abs();
-                let (e, _) = w.strip_cell(strip, spans, t, ORDER).unwrap();
+                let (e, _, least) = w.strip_cell(strip, spans, t, ORDER).unwrap();
                 assert!(e.hi >= flux, "{strip} {t:?}: {e:?} < {flux}");
+                // #18671: its least width bounds the widths of any cut of it, down to
+                // eighths, from below (`Work::least`); the gap apart makes it positive
+                // wherever the cap is off `z0`
+                let mut cuts = vec![t];
+                for _ in 0..3 {
+                    cuts = cuts
+                        .iter()
+                        .flat_map(|&(a, b)| [(a, 0.5 * (a + b)), (0.5 * (a + b), b)])
+                        .collect();
+                    let sum: f64 = cuts
+                        .iter()
+                        .map(|&c| {
+                            let (e, ..) = w.strip_cell(strip, spans, c, ORDER).unwrap();
+                            e.hi - e.lo
+                        })
+                        .sum();
+                    assert!(
+                        sum >= least,
+                        "{strip} {t:?} in {}: {sum} < {least}",
+                        cuts.len()
+                    );
+                }
+                // and the other way, as `Work::least` needs of the enclosures summed earlier:
+                // a coarser cell's width bounds its cuts' least widths summed
+                let parts: f64 = [(t.0, 0.5 * (t.0 + t.1)), (0.5 * (t.0 + t.1), t.1)]
+                    .iter()
+                    .map(|&c| w.strip_cell(strip, spans, c, ORDER).unwrap().2)
+                    .sum();
+                assert!(parts <= e.hi - e.lo, "{strip} {t:?}: {e:?} < {parts}");
+                assert!(least <= e.hi - e.lo, "{strip} {t:?}: {e:?} {least}");
+                positive += usize::from(least > 0.0);
                 checked += 1;
                 on_knots += usize::from(on_knot_line(&w, strip, spans, t));
             }
         }
         assert!(checked >= 18 && on_knots >= 6, "{checked} {on_knots}");
+        assert!(positive >= 1, "{positive} of {checked}");
     }
 
     /// A knot of full multiplicity inside the vector breaks continuity; one at the ends, or
@@ -2646,8 +2837,9 @@ mod tests {
         assert!(width(Ivl::new(-1e-16, 1.0)) > 1.0);
     }
 
-    /// A budget too small to decide leaves the sign undecided, its enclosure holding the
-    /// volume (the quarter shell R 1e4, t 1e-3, V 157.08, decides within some 150 cells).
+    /// A refinement budget too small to decide leaves the sign undecided, its enclosure
+    /// holding the volume (the quarter shell R 1e4, t 1e-3, V 157.08, needs some 150
+    /// refinement cells to decide).
     #[test]
     fn a_spent_budget_leaves_the_sign_undecided() {
         let mut k = Kernel::default();
@@ -2663,9 +2855,87 @@ mod tests {
         .unwrap();
         let v = 157.0796;
         match volume_sign_within(&k, &mut b, 16).unwrap() {
-            VolumeSign::Undecided(e) => assert!(e.lo < v && v < e.hi, "{e:?}"),
+            VolumeSign::Undecided(e) => {
+                assert_eq!(e.stop, EnclosureStop::Budget);
+                assert!(e.lo < v && v < e.hi, "{e:?}");
+            }
             other => panic!("{other:?}"),
         }
+    }
+
+    /// A budget of 0 refines nothing: refinement stops immediately at `EnclosureStop::Budget`
+    /// with exactly the starting cells, leaving an undecided body undecided.
+    #[test]
+    fn a_budget_of_zero_refines_nothing() -> Result<()> {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_cylindrical_box(
+            &mut k,
+            Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            1e4,
+            1e4 + 1e-3,
+            0.0,
+            90.0,
+        )?;
+        let w = Work::new(&k, &mut b)?;
+        let start = w.counts.cells;
+        match volume_sign_within(&k, &mut b, 0)? {
+            VolumeSign::Undecided(e) => {
+                assert_eq!(e.stop, EnclosureStop::Budget);
+                assert_eq!(e.counts.cells, start);
+            }
+            other => panic!("{other:?}"),
+        }
+        Ok(())
+    }
+
+    /// A body with trims that needs refinement: reading starting cells S and calling
+    /// `volume_sign_within(.., budget)` decides `Positive`. Without the fix, comparing total
+    /// cells against the budget stops at the budget immediately when budget <= S with 0 refinement cuts,
+    /// leaving the sign `Undecided`.
+    #[test]
+    fn a_body_with_many_trims_refines_within_half_its_starting_cells() -> Result<()> {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_cylindrical_box(
+            &mut k,
+            Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            1e4,
+            1e4 + 1e-3,
+            0.0,
+            90.0,
+        )?;
+        let s = Work::new(&k, &mut b)?.counts.cells;
+        // The quarter shell needs ~150 refinement cells to decide Positive.
+        // Providing 200 refinement cells allows it to reach Positive.
+        // Without the fix, a budget of 200 would compare total cells >= 200.
+        // If s >= 200, it would halt immediately at step 0 as Undecided.
+        let full = volume_sign(&k, &mut b)?;
+        let needed = match full {
+            VolumeSign::Positive(ref e) => e.counts.cells - s,
+            other => panic!("expected Positive, got {other:?}"),
+        };
+        let sign = volume_sign_within(&k, &mut b, needed + 10)?;
+        match sign {
+            VolumeSign::Positive(e) => {
+                assert_eq!(e.stop, EnclosureStop::Reached);
+                assert!(
+                    e.counts.cells > s,
+                    "refinement occurred: {} > {s}",
+                    e.counts.cells
+                );
+                assert!(
+                    e.counts.cells <= s + needed + 10,
+                    "bounded: {} <= {}",
+                    e.counts.cells,
+                    s + needed + 10
+                );
+            }
+            other => {
+                panic!("expected Positive within refinement budget {needed} + 10, got {other:?}")
+            }
+        }
+        Ok(())
     }
 
     /// Enclosures intersect to their common part, and two that do not overlap (one of them
@@ -2678,10 +2948,32 @@ mod tests {
         assert!(
             matches!(
                 r.as_ref().map_err(SolidError::mass_failure),
-                Err(Some(crate::error::mass::MassFailure::Failed(_)))
+                Err(Some(MassFailure::Defect { .. }))
             ),
             "{r:?}"
         );
+    }
+
+    /// A body whose face use has no mate (the B-rep's links are public, and the enclosure
+    /// does not validate the body) is the caller's: a named invalid-input cause with
+    /// `SM_ERR_NULL_POINTER`, not a defect.
+    #[test]
+    fn a_face_use_without_its_mate_is_refused_by_name() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                .unwrap();
+        let f = b.faces().ids().next().unwrap();
+        let fu = b.face(f).unwrap().faceuse.unwrap();
+        b.faceuse_mut(fu).unwrap().mate = None;
+        let err = enclose_volume(&k, &mut b, 1e-6).unwrap_err();
+        assert_eq!(
+            err.mass_failure(),
+            Some(&MassFailure::FaceuseWithoutMate),
+            "{err}"
+        );
+        assert_eq!(err.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert!(!err.is_defect(), "{err}");
     }
 
     /// The moments hold the closed forms.

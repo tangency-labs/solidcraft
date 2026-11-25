@@ -87,8 +87,9 @@ fn cone_frustum(angle: f64) -> f64 {
     std::f64::consts::PI * HEIGHT / 3.0 * (RADIUS * RADIUS + RADIUS * top + top * top)
 }
 
-/// Draft `curves` (linear corners, both caps): faces and volume, printed before any check.
-fn draft(label: &str, curves: &[Curve], angle: f64) -> (usize, f64) {
+/// Draft `curves` (linear corners, both caps): faces, edges, vertices and volume, printed
+/// before any check.
+fn draft(label: &str, curves: &[Curve], angle: f64) -> ([usize; 3], f64) {
     let mut k = kernel();
     let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
     let made = create_draft_sweep(&mut k, &refs, HEIGHT, angle, false, 3);
@@ -99,14 +100,17 @@ fn draft(label: &str, curves: &[Curve], angle: f64) -> (usize, f64) {
             panic!("{label}, angle {angle}: {e:?}");
         }
     };
-    let faces = body.face_list().len();
+    let topology = [
+        body.face_list().len(),
+        body.edge_list().len(),
+        body.vertex_list().len(),
+    ];
     let v = volume(&k, &mut body);
     println!(
-        "MEASURE {label} angle {angle}: faces {faces} edges {} vertices {} volume {v:?}",
-        body.edge_list().len(),
-        body.vertex_list().len()
+        "MEASURE {label} angle {angle}: faces {} edges {} vertices {} volume {v:?}",
+        topology[0], topology[1], topology[2]
     );
-    (faces, v)
+    (topology, v)
 }
 
 fn assert_frustum(label: &str, angle: f64, v: f64, want: f64, rel: f64) {
@@ -116,22 +120,25 @@ fn assert_frustum(label: &str, angle: f64, v: f64, want: f64, rel: f64) {
     );
 }
 
-/// The square of four lines drafts to the same frustum as the square of B-spline segments.
-/// Its lines take the tangent corner rule (WR-521), whose walls meet at corner edges: 4
-/// walls and 2 caps both ways. The splines take the offset method, which drafted outward
-/// splits each corner into flat triangles coplanar with the walls beside them (14 faces),
-/// so the face counts differ outward; the volumes are both the closed form.
+/// The frustum's faces, edges and vertices: 4 walls meeting at corner edges and 2 caps.
+const FRUSTUM: [usize; 3] = [6, 12, 8];
+
+/// The square of four lines drafts to the same frustum as the square of B-spline segments,
+/// inward and outward. A B-spline segment that is a straight line is a line to the tangent
+/// corner rule (WR-521), so both take it and their walls meet at corner edges. Before
+/// #16639 the splines took the offset method, which drafted outward split each corner into
+/// two flat triangles coplanar with the walls beside them (14 faces, 28 edges, 16
+/// vertices).
 #[test]
 fn a_square_of_lines_drafts_like_the_square_of_splines() {
     for angle in [5.0, -5.0] {
-        let (spline_faces, spline_v) = draft("splines", &square([false; 4]), angle);
-        let corner_triangles = if angle < 0.0 { 8 } else { 0 };
-        assert_eq!(spline_faces, 6 + corner_triangles, "splines, angle {angle}");
-        let (faces, v) = draft("lines", &square([true; 4]), angle);
         let want = square_frustum(angle);
+        let (spline_topology, spline_v) = draft("splines", &square([false; 4]), angle);
+        assert_eq!(spline_topology, FRUSTUM, "splines, angle {angle}");
         assert_frustum("splines", angle, spline_v, want, 1e-12);
+        let (topology, v) = draft("lines", &square([true; 4]), angle);
+        assert_eq!(topology, FRUSTUM, "lines, angle {angle}");
         assert_frustum("lines", angle, v, want, 1e-12);
-        assert_eq!(faces, 6, "lines, angle {angle}");
     }
 }
 
@@ -139,10 +146,9 @@ fn a_square_of_lines_drafts_like_the_square_of_splines() {
 #[test]
 fn a_square_of_lines_and_a_spline_drafts_whole() {
     for angle in [5.0, -5.0] {
-        let (spline_faces, _) = draft("splines", &square([false; 4]), angle);
-        let (faces, v) = draft("mixed", &square([true, false, true, true]), angle);
+        let (topology, v) = draft("mixed", &square([true, false, true, true]), angle);
         assert_frustum("mixed", angle, v, square_frustum(angle), 1e-12);
-        assert_eq!(faces, spline_faces, "mixed, angle {angle}");
+        assert_eq!(topology, FRUSTUM, "mixed, angle {angle}");
     }
 }
 

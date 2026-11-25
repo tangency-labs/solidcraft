@@ -87,6 +87,10 @@
 //!   [`SolidError::Unported`] and [`SolidError::InvalidInput`]; the ignored call's
 //!   outputs keep their initial values (a failed `DropPoint` is "no drop point", a
 //!   failed coincidence check "not coincident").
+//! - **Face-pair interval edges** (not upstream, #18927): a failed step of
+//!   `FindOrCreateProtoEdge` for an interval of a face pair's intersection refuses with
+//!   [`BooleanFailure::IntervalEdgeNotMade`], its error the cause, where upstream leaves
+//!   the intersection without that edge (`find_or_create_needed_proto_edge`).
 //! - **Curve ownership.** `EdgeFaceCoincidence` resets the curve's owner to the
 //!   original edge after `MakeEdgeInFace`; the port has no curve owners (the curve
 //!   copy is a new handle), so there is nothing to reset.
@@ -128,11 +132,16 @@
 //!   deletions on before its error. Upstream's `SER` returned before setting the flag, so
 //!   `SmMerge::MarkCommon` kept the squeezed vertex as a loop end and `FixGaps` read it once
 //!   deleted (#1036's coincident skins).
+//! - **Not upstream (#17118).** `SetRelationships` relates a vertex once per proto vertex. When
+//!   a second definition of the proto vertex gives the vertex another image in the other
+//!   B-rep, within the tolerance and with no edge between the two images, the second image
+//!   is combined into the first (`combine_images_of_one_vertex`). Upstream's `Relate` failed
+//!   there and its status was dropped, leaving the second image without a mate.
 //! - **Recursion.** None.
 
 use crate::curve::curve::p2::{Curve, CurveKind};
-use crate::error::boolean::BooleanStage;
-use crate::error::{Result, SolidError};
+use crate::error::boolean::{BooleanFailure, BooleanStage};
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{SolutionObject, SolutionType};
@@ -155,13 +164,16 @@ use crate::topology::proto_topology::p3::Mates;
 use crate::topology::proto_topology::{
     ProtoBrep, ProtoEdgeId, ProtoTopologyManager, ProtoVertexId,
 };
+use crate::EntityRef;
 
 use super::coincident_strip::{crossing_inside_coincident_pair, strip_contacts};
+use super::curved_strip::drop_strip_crossings;
+use super::duplicate_edge_run::drop_duplicate_edge_runs;
 use super::p1::{
     add_unique, brep_make_edge_in_face, can_imprint, cc_insert_topology_intersections, contains,
     eval_curve_point, face_face_intersect_curves, find_common_elements, ignore_soft,
     intersect_shell_vertices, intersect_wire_lamina_edges, new_curve_classification,
-    set_edge_class, solve_with_face_caches, surface_coincidence_check,
+    set_edge_class, solve_with_face_caches, split_soft, surface_coincidence_check,
     surface_solve_with_face_caches, FaceIntersectOutputs, IntersectionCurves, IntersectionResults,
     IntersectorBrep, TopologyIntersector,
 };
@@ -271,17 +283,15 @@ impl<O: Ord + Copy> MapMates<O> {
     /// `RemoveRelationship`: `SM_ERR` unless the two are a mated pair.
     fn remove(&mut self, brep_entity: Option<O>, other_entity: Option<O>) -> Result<()> {
         let (Some(b), Some(o)) = (brep_entity, other_entity) else {
-            return Err(SolidError::boolean_stage_failed(
+            return Err(SolidError::boolean(
                 OP_REMOVE,
-                BooleanStage::Relate,
-                "the two entities are not a related pair",
+                BooleanFailure::NotRelatedPair,
             ));
         };
         if self.other(Some(b)) != Some(o) {
-            return Err(SolidError::boolean_stage_failed(
+            return Err(SolidError::boolean(
                 OP_REMOVE,
-                BooleanStage::Relate,
-                "the two entities are not a related pair",
+                BooleanFailure::NotRelatedPair,
             ));
         }
         if let Some(m) = self.b_to_o.as_mut() {
@@ -479,10 +489,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             for ii in 0..c.curves_3d.len() {
                 let c3 = c.curves_3d.get(ii).copied().flatten();
                 let copy = Self::b_spline_copy(geometry, c3)?.ok_or_else(|| {
-                    SolidError::stage_failed(
-                        OP_REGISTER,
-                        "a curve could not be copied for the intersection",
-                    )
+                    SolidError::boolean(OP_REGISTER, BooleanFailure::IntersectionCurveNotCopyable)
                 })?;
                 if let Some(slot) = c.curves_3d.get_mut(ii) {
                     *slot = Some(copy);
@@ -520,10 +527,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         other_entity: Option<O>,
     ) -> Result<()> {
         if !self.is_mated_pair(brep_entity, other_entity) {
-            return Err(SolidError::boolean_stage_failed(
+            return Err(SolidError::boolean(
                 OP_REMOVE,
-                BooleanStage::Relate,
-                "the two entities are not a related pair",
+                BooleanFailure::NotRelatedPair,
             ));
         }
         if let (Some(m), Some(b)) = (self.b_to_o.as_mut(), brep_entity) {
@@ -606,10 +612,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let dist_old = p.distance(brep.vertex_point(other_v)?);
             let dist_new = p.distance(brep.vertex_point(other_vertex)?);
             if dist_new > dist_old + EFF_ZERO_SQRT {
-                return Err(SolidError::boolean_stage_failed(
+                return Err(SolidError::boolean(
                     OP_SQUEEZE,
-                    BooleanStage::Relate,
-                    "the existing relation of the vertex is better",
+                    BooleanFailure::ExistingRelationBetter,
                 ));
             }
 
@@ -641,10 +646,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let dist_old = p.distance(brep.vertex_point(brep_v)?);
             let dist_new = p.distance(brep.vertex_point(brep_vertex)?);
             if dist_new > dist_old + EFF_ZERO_SQRT {
-                return Err(SolidError::boolean_stage_failed(
+                return Err(SolidError::boolean(
                     OP_SQUEEZE,
-                    BooleanStage::Relate,
-                    "the existing relation of the vertex is better",
+                    BooleanFailure::ExistingRelationBetter,
                 ));
             }
 
@@ -824,18 +828,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // when no largerThanTol common edge is found between V1 and V2
                 if !found_common_edge {
                     // Have a good candidate for squeezing
-                    let other_v1 = self.other_mate(Some(v1)).ok_or_else(|| {
-                        SolidError::entity_missing(
-                            OP_FIX_GAPS,
-                            "a related vertex in the other B-rep",
-                        )
-                    })?;
-                    let other_v2 = self.other_mate(Some(v2)).ok_or_else(|| {
-                        SolidError::entity_missing(
-                            OP_FIX_GAPS,
-                            "a related vertex in the other B-rep",
-                        )
-                    })?;
+                    let related = |v| {
+                        self.other_mate(Some(v)).ok_or_else(|| {
+                            SolidError::boolean(OP_FIX_GAPS, BooleanFailure::LoopVertexUnrelated)
+                        })
+                    };
+                    let other_v1 = related(v1)?;
+                    let other_v2 = related(v2)?;
                     // (the casts to SmVertex* are used by CombineCoincidentVertices)
                     Self::as_vertex(Some(other_v1))?;
                     Self::as_vertex(Some(other_v2))?;
@@ -1059,21 +1058,18 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     ) -> Result<bool> {
         // check input
         let brep_vertex = brep_vertex.ok_or_else(|| {
-            SolidError::boolean_entity_missing(
+            SolidError::boolean_null_defect(
                 OP_CLOSE_LOOP,
                 BooleanStage::CloseLoop,
-                "a vertex to close the loop at",
+                "the intersection loop is to be closed at no vertex, though the merge closes \
+                 it only at the vertex where the loop's last edge ends",
             )
         })?;
 
         // find mating vertex in m_pOther brep
         let other_vertex = Self::cast(self.other_mate(Some(brep_vertex)), ClassObjectKind::Vertex)
             .ok_or_else(|| {
-                SolidError::boolean_entity_missing(
-                    OP_CLOSE_LOOP,
-                    BooleanStage::CloseLoop,
-                    "a vertex of the other B-rep related to the loop's vertex",
-                )
+                SolidError::boolean(OP_CLOSE_LOOP, BooleanFailure::LoopVertexUnrelated)
             })?;
 
         // init output
@@ -1606,7 +1602,36 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
             Ok(out)
         };
-        let (boxes1, boxes2) = (face_boxes(&faces1)?, face_boxes(&faces2)?);
+        let (mut boxes1, mut boxes2) = (face_boxes(&faces1)?, face_boxes(&faces2)?);
+        // Not upstream: those boxes narrowed to what each face holds
+        // (`query::face::p1::proved_bounding_box`). The box above of a curved face is its
+        // surface's whole control net, so a sliver of a whole turn was paired with every
+        // face round its ring, and each such pair cost a surface intersection that found
+        // nothing. Only the faces those boxes pair are boxed again, and nothing is made or
+        // written on the operands (a UV trim made here, before the intersections that would
+        // make it, would change what they make).
+        {
+            let (paired1, paired2) = loosely_paired(&boxes1, &boxes2, self.this_approx_tol_3d());
+            for (faces, paired, boxes) in [
+                (&faces1, paired1, &mut boxes1),
+                (&faces2, paired2, &mut boxes2),
+            ] {
+                for ((&f, paired), b) in faces.iter().zip(paired).zip(boxes.iter_mut()) {
+                    k.check_cancelled(OP_INTERSECT_TOPOLOGY)?;
+                    if !paired {
+                        continue;
+                    }
+                    if let Some((arena, EntityRef::Face(face))) = brep.topology_entity(f) {
+                        if let Some(proved) =
+                            crate::query::face::p1::proved_bounding_box(k, arena, face)?
+                        {
+                            // both hold the face: so does their common part
+                            *b = b.intersect(&proved).unwrap_or(proved);
+                        }
+                    }
+                }
+            }
+        }
         // (the fork's tangency-labs/smlib@84a7998) the other B-rep's faces whose box may
         // lie within the tolerance of a face's box: a superset of the pairs the box test
         // below keeps, in ascending order. The pairs it leaves out reach nothing before
@@ -1727,6 +1752,18 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
         }
 
+        // Not upstream (#18166): a curve over a strip of a face within the tolerance of
+        // the other face beside an edge the coincident pairs imprint is no event (module
+        // docs of `curved_strip`).
+        #[cfg(test)]
+        super::curved_strip::probe(k, &*brep, &intersections)?;
+        drop_strip_crossings(k, &*brep, &mut intersections, approx_tol)?;
+
+        // Not upstream (WR-647): a curve's run along part of an edge that another curve of
+        // the same pair is from end to end is a second copy of that edge, no event
+        // (module docs of `duplicate_edge_run`).
+        drop_duplicate_edge_runs(k, &*brep, &mut intersections)?;
+
         // Not upstream: the contact points the strip rule proves (module docs of
         // `coincident_strip`), declared before any proto vertex of a face pair is made.
         let contacts = strip_contacts(k, brep, &intersections, approx_tol)?;
@@ -1759,16 +1796,34 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 for ll in 0..num_ivls {
                     let mut ci1 = *cc1.at(ll)?;
                     let mut ci2 = *cc2.at(ll)?;
-                    // (status unchecked)
-                    let found = ignore_soft(mgr.find_or_create_proto_edge(
-                        k, brep, approx_tol, cc1, &mut ci1, cc2, &mut ci2,
-                    ))?;
+                    // (status unchecked upstream). Not upstream (#18927): a failed step of
+                    // making the interval's edge (any but the geometric quits, which make
+                    // no edge) refuses the Boolean, which would otherwise build a body
+                    // lacking that edge or its definition; that holds too where another
+                    // face pair made the edge already.
+                    let (found, _was_created) = match split_soft(
+                        mgr.find_or_create_needed_proto_edge(
+                            k, brep, approx_tol, cc1, &mut ci1, cc2, &mut ci2,
+                        ),
+                    )? {
+                        Ok(r) => r,
+                        // (a preparation request is retried by its caller, as it is)
+                        Err(cause @ SolidError::PreparationRequired { .. }) => return Err(cause),
+                        Err(cause) => {
+                            return Err(Failure::new(
+                                OP_INTERSECT_TOPOLOGY,
+                                BooleanFailure::IntervalEdgeNotMade,
+                            )
+                            .caused_by(cause)
+                            .into_error())
+                        }
+                    };
                     *cc1.at_mut(ll)? = ci1;
                     *cc2.at_mut(ll)? = ci2;
 
                     // remember pNewPE is part of the trim boundary of this
                     // coincident face pair
-                    if let Some((Some(pe), _was_created)) = found {
+                    if let Some(pe) = found {
                         if are_coincident {
                             add_unique(&mut coinc_pes, pe);
                         }
@@ -1823,10 +1878,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // Not upstream: proto vertices that a point's uncertainty region does not tell
         // apart are one (docs/booleans.md, "One point or two")
-        mgr.combine_proto_vertices_not_proved_apart(
-            k,
-            k.fixes.ssi_proto_topology_statuses_pass_on,
-        )?;
+        mgr.combine_proto_vertices_with_incidence(k, &*brep)?;
 
         // 1. for every ProtoEdge pair - split ProtoEdges at ProtoEdge/ProtoEdge XSects
         // (the list is re-read after each split: splitting appends proto edges)
@@ -1884,14 +1936,19 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// ([`TopologyIntersector::mate_stands_beside`]), so a refusal `Relate` passes on is a
     /// conflict between edges at different places only.
     ///
+    /// Not upstream (#17118): two definitions of one proto vertex that give one vertex
+    /// of a B-rep two different vertices of the other make those two one vertex
+    /// ([`TopologyIntersector::combine_images_of_one_vertex`]) instead of relating the
+    /// shared vertex twice.
+    ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] without a manager or for deleted definitions;
-    /// any error of `Relate`.
+    /// any error of `Relate`; those of the vertex combination.
     pub fn set_relationships(
         &mut self,
-        k: &Kernel,
-        brep: &mut impl IntersectorBrep<O>,
+        k: &mut Kernel,
+        brep: &mut impl IntersectorBrepP2<O>,
     ) -> Result<()> {
         let mgr = self
             .proto_topo_mgr
@@ -1899,21 +1956,40 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             .ok_or(invalid(OP_SET_RELS, "no proto topology manager"))?;
 
         // (the manager is not changed by Relate: collect the pairs first)
-        let mut pairs: Vec<(Option<O>, Option<O>)> = Vec::new();
+        let mut vertex_pairs: Vec<(Option<ProtoVertexId>, Option<O>, Option<O>)> = Vec::new();
         for vd in mgr.all_vertex_definitions()? {
             let d = mgr
                 .vertex_def(vd)
                 .ok_or(invalid(OP_SET_RELS, "vertex definition is deleted"))?;
-            pairs.push((d.final_vertex(1), d.final_vertex(2)));
+            vertex_pairs.push((d.proto_vertex(), d.final_vertex(1), d.final_vertex(2)));
         }
+        let mut edge_pairs: Vec<(Option<O>, Option<O>)> = Vec::new();
         for ed in mgr.all_edge_definitions()? {
             let d = mgr
                 .edge_def(ed)
                 .ok_or(invalid(OP_SET_RELS, "edge definition is deleted"))?;
-            pairs.push((d.final_edge(1), d.final_edge(2)));
+            edge_pairs.push((d.final_edge(1), d.final_edge(2)));
         }
 
-        for (t1, t2) in pairs {
+        // the vertex pairs related here, with their proto vertex
+        let mut related: Vec<(O, O, ProtoVertexId)> = Vec::new();
+        for (pv, t1, t2) in vertex_pairs {
+            let (Some(v1), Some(v2)) = (t1, t2) else {
+                // WARN: Brep Topology not set.
+                continue;
+            };
+            if let Some(pv) = pv {
+                if self.combine_images_of_one_vertex(k, brep, pv, v1, v2, &related)? {
+                    continue;
+                }
+            }
+            let r = self.relate(k, brep, t1, t2);
+            if let (Ok(()), Some(pv)) = (&r, pv) {
+                related.push((v1, v2, pv));
+            }
+            r?;
+        }
+        for (t1, t2) in edge_pairs {
             let (Some(e1), Some(e2)) = (t1, t2) else {
                 // WARN: Brep Topology not set.
                 continue;
@@ -2021,6 +2097,103 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         Ok(false)
     }
 
+    /// Not upstream (#17118): whether the vertex pair `v1`, `v2` of a definition at the
+    /// proto vertex `pv` was made one with a pair already `related` at `pv`, and if so
+    /// makes it one. A proto vertex stands for one point. When one of its definitions
+    /// related `v1` to a vertex `w2` and another now gives `v1` the vertex `v2` of the
+    /// same B-rep as `w2`, both are images of the one vertex `v1`: `v2` is combined into
+    /// `w2` (`CombineCoincidentVertices`), and the same the other way round. Relating
+    /// `v1` twice would break the one-to-one mate maps, and upstream's dropped status
+    /// left `v2` without a mate, so the faces at it were classified across the gap.
+    ///
+    /// This happens where a face of one operand runs within the tolerance of two faces of
+    /// the other that are not adjacent there, such as the two faces of a wedge near its
+    /// knife edge, so that the operand is thinner than the tolerance there: a vertex
+    /// lying on that stretch is on both faces, and each face pair through it imprints its
+    /// own vertex. The pair is combined only when each of the two relations would hold on
+    /// its own (each vertex within the larger tolerance of it and `v1`, the distance a
+    /// relation accepts once `Relate` gives both the larger tolerance), and when the two
+    /// vertices share no edge, so the combination deletes no edge and no relation.
+    /// Otherwise nothing changes and `Relate` refuses the pair as before.
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology reads, of `CombineCoincidentVertices` and of `Relate`;
+    /// [`SolidError::InvalidInput`] without both B-reps.
+    fn combine_images_of_one_vertex(
+        &mut self,
+        k: &mut Kernel,
+        brep: &mut impl IntersectorBrepP2<O>,
+        pv: ProtoVertexId,
+        v1: O,
+        v2: O,
+        related: &[(O, O, ProtoVertexId)],
+    ) -> Result<bool> {
+        let earlier_mate_of_v1 = related
+            .iter()
+            .find(|&&(a, b, p)| p == pv && a == v1 && b != v2)
+            .map(|&(_, b, _)| b);
+        let earlier_mate_of_v2 = related
+            .iter()
+            .find(|&&(a, b, p)| p == pv && b == v2 && a != v1)
+            .map(|&(a, _, _)| a);
+        // (survivor, vertex to delete, their B-rep, the vertex both are images of)
+        let (survivor, deleted, body, shared) = match (earlier_mate_of_v2, earlier_mate_of_v1) {
+            (None, Some(w2)) if self.brep_mate(Some(v2)).is_none() => {
+                let other = self.other.ok_or(invalid(OP_SET_RELS, "no other B-rep"))?;
+                (w2, v2, other, v1)
+            }
+            (Some(w1), None) if self.other_mate(Some(v1)).is_none() => {
+                let this = self.brep.ok_or(invalid(OP_SET_RELS, "no B-rep"))?;
+                (w1, v1, this, v2)
+            }
+            _ => return Ok(false),
+        };
+
+        // each relation would hold on its own
+        let at = brep.vertex_point(shared)?;
+        let shared_tol = tol_of(brep, shared)?;
+        for v in [survivor, deleted] {
+            let apart = at.distance(brep.vertex_point(v)?);
+            let tol = max2(shared_tol, tol_of(brep, v)?);
+            // (a NaN distance is no evidence of one point)
+            if apart.partial_cmp(&tol) == Some(core::cmp::Ordering::Greater) || apart.is_nan() {
+                return Ok(false);
+            }
+        }
+
+        // a common edge would be squeezed away, with any relation it has
+        let survivor_edges = brep.vertex_edges(survivor)?;
+        if brep
+            .vertex_edges(deleted)?
+            .iter()
+            .any(|e| survivor_edges.contains(e))
+        {
+            return Ok(false);
+        }
+
+        if brep
+            .brep_combine_coincident_vertices(k, body, survivor, deleted)?
+            .is_some()
+        {
+            // (only a common edge is ever deleted, and there is none)
+            return Err(SolidError::boolean_defect(
+                OP_SET_RELS,
+                BooleanStage::Relate,
+                "combining two images of one vertex deleted an edge, though combining deletes \
+                 only an edge common to both, and the check above found none",
+            ));
+        }
+
+        // the survivor's relation again: both vertices get the larger tolerance
+        if body == self.other.ok_or(invalid(OP_SET_RELS, "no other B-rep"))? {
+            self.relate(k, brep, Some(shared), Some(survivor))?;
+        } else {
+            self.relate(k, brep, Some(survivor), Some(shared))?;
+        }
+        Ok(true)
+    }
+
     // ---- the classification-pair fix-ups ------------------------------------------------
 
     /// `FixupClassMates(rCurveClassBrep, rCurveClassOther)`: for every interval of a
@@ -2053,9 +2226,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // error condition - curveClassifications not homogenized
         if cc_brep.size() != cc_other.size() {
-            return Err(SolidError::stage_failed(
+            return Err(SolidError::boolean_defect(
                 OP_CLASS_MATES,
-                "the curve classifications differ in length",
+                BooleanStage::MergeClassifications,
+                "the two classifications of one curve differ in length, though every caller \
+                 homogenizes them first",
             ));
         }
 
@@ -2203,10 +2378,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let (success_o, drop_param_o, dist_to_curve_o) = drop(&pc_o)?;
 
         if !success_b && !success_o {
-            return Err(SolidError::boolean_stage_failed(
+            return Err(SolidError::boolean(
                 OP_SPLIT_PAIR,
-                BooleanStage::Split,
-                "neither vertex of the pair can be dropped onto the other's curve",
+                BooleanFailure::VertexPairNotDropped {
+                    brep_gap: dist_to_curve_b,
+                    other_gap: dist_to_curve_o,
+                },
             ));
         }
 
@@ -2387,10 +2564,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 edges2.push(Some(e2));
                 edges2.extend(split.new_edges2.iter().copied());
                 if edges1.len() > MAX_EDGE_LIST || edges2.len() > MAX_EDGE_LIST {
-                    return Err(SolidError::boolean_stage_failed(
+                    return Err(SolidError::boolean(
                         OP_EDGE_EDGE,
-                        BooleanStage::Split,
-                        "the edges split too many times",
+                        BooleanFailure::EdgeListLimit {
+                            limit: MAX_EDGE_LIST,
+                        },
                     ));
                 }
 
@@ -2655,9 +2833,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                                 | SolidError::InvalidInput { .. }
                                 | SolidError::PortInvariant { .. }),
                             ) => return Err(err),
-                            Err(_) => {
+                            Err(cause) => {
                                 if !ignore_problems {
-                                    return Err(SolidError::boolean_stage_failed(OP_EDGE_FACE_COIN, BooleanStage::Coincidence, "the coincidence of an edge with a face could not be resolved"));
+                                    return Err(coincidence_unresolved(cause));
                                 }
                             }
                         }
@@ -2668,6 +2846,15 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         Ok(out)
     }
+}
+
+/// The failure of [`TopologyIntersector::edge_face_coincidence`] where the glue of a new
+/// edge to the edge it was made from fails (status `SM_ERR`, upstream
+/// `return SE(SM_ERR)`), keeping the glue's error as its cause (#13790).
+fn coincidence_unresolved(cause: SolidError) -> SolidError {
+    Failure::new(OP_EDGE_FACE_COIN, BooleanFailure::CoincidenceUnresolved)
+        .caused_by(cause)
+        .into_error()
 }
 
 /// Whether `~SmProtoTopologyManager` reads freed memory (UB-175): it deletes the listed
@@ -2907,6 +3094,25 @@ fn line_edge<O: ClassObject>(
     Some((curve, ProtoBrep::edge_interval(brep, e)?))
 }
 
+/// Which faces of each side the boxes `boxes1` and `boxes2` pair with a face of the other
+/// side (their boxes within `tol`), as the face-pair loop of `intersect_topology` pairs them.
+fn loosely_paired(boxes1: &[Extent3d], boxes2: &[Extent3d], tol: f64) -> (Vec<bool>, Vec<bool>) {
+    let search = SpatialIndex::new(boxes2.iter().copied().map(Some));
+    let mut paired1 = vec![false; boxes1.len()];
+    let mut paired2 = vec![false; boxes2.len()];
+    for (box1, p1) in boxes1.iter().zip(paired1.iter_mut()) {
+        for jj in search.boxes_in_box(box1, tol) {
+            if let (Some(box2), Some(p2)) = (boxes2.get(jj), paired2.get_mut(jj)) {
+                if !box1.are_disjoint(box2, tol) {
+                    *p1 = true;
+                    *p2 = true;
+                }
+            }
+        }
+    }
+    (paired1, paired2)
+}
+
 /// The smallest distance between two distinct vertices of `b` (by their points);
 /// infinite with fewer than two vertices. The points are swept along x, so a pair is
 /// compared only while its x gap is below the best distance found so far.
@@ -2981,5 +3187,45 @@ mod tests {
             ti.forget_deleted_edge_relationships(deleted_primary, deleted_other)
                 .unwrap();
         }
+    }
+
+    /// The glue failure of an edge-face coincidence is reported as its named cause (same
+    /// operation and status), keeping the glue's error as its cause, whose class it takes
+    /// (#13790, #19856).
+    #[test]
+    fn an_unresolved_edge_face_coincidence_keeps_the_glue_error() {
+        let reason = crate::error::Reason::Boolean(BooleanFailure::CoincidenceUnresolved);
+        for cause in [
+            SolidError::sm_err("glue"),
+            SolidError::blend("glue", crate::error::blend::BlendFailure::StageFailed),
+            SolidError::PreparationRequired { operation: "glue" },
+        ] {
+            let e = coincidence_unresolved(cause.clone());
+            assert_eq!(e.operation(), OP_EDGE_FACE_COIN, "{e:?}");
+            assert_eq!(e.failure().map(|f| &f.reason), Some(&reason), "{e:?}");
+            assert_eq!(e.sm_status(), Some(crate::error::SM_ERR), "{e:?}");
+            assert_eq!(e.kind(), crate::error::ErrorKind::Failed, "{e:?}");
+            assert_eq!(e.cause(), Some(&cause), "{e:?}");
+            let source = std::error::Error::source(e.failure().unwrap()).map(ToString::to_string);
+            assert_eq!(source, Some(cause.to_string()));
+            assert_eq!(
+                e.to_string(),
+                format!("{OP_EDGE_FACE_COIN}: {reason}; caused by {cause}")
+            );
+            assert_eq!(e.is_defect(), cause.is_defect(), "{e:?}");
+            assert_eq!(e.is_refusal(), cause.is_refusal(), "{e:?}");
+            assert_eq!(e.is_port_failure(), cause.is_port_failure(), "{e:?}");
+        }
+        // a bare status under it leaves it unclassed, as it was; a stage failure under it
+        // reads as a defect, a solidcore-side failure as no status answer
+        let bare = coincidence_unresolved(SolidError::sm_err("glue"));
+        assert!(!bare.is_defect() && !bare.is_refusal() && bare.is_status_answer());
+        let stage = coincidence_unresolved(SolidError::blend(
+            "glue",
+            crate::error::blend::BlendFailure::StageFailed,
+        ));
+        assert!(stage.is_defect() && stage.is_status_answer());
+        let port = coincidence_unresolved(SolidError::PreparationRequired { operation: "glue" });
+        assert!(port.is_port_failure() && !port.is_status_answer());
     }
 }

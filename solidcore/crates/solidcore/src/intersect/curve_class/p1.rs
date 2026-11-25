@@ -141,7 +141,7 @@ use std::borrow::Cow;
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::curve::curve::p3::{local_curve_intersect, PointSolveOptions};
-use crate::error::{ignored, Result, SolidError, SM_ERR};
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::assert_array::labels::CURVE_CLASSIFICATION_TYPE;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -160,6 +160,7 @@ use crate::math::{max2, Point2, Point3, Vec2, Vec3, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::math::gamma;
+use crate::surface::implicit::AnalyticSupport;
 use crate::surface::normal_cone::intersection_reach;
 use crate::surface::surface::p1::map_to_2d_on_curve;
 use crate::surface::surface::p2::surface_cache;
@@ -172,6 +173,26 @@ const OP_TOUCH: &str = "intersect::curve_class::p1::get_winding_count";
 const OP_XSECT: &str = "intersect::curve_class::p1::set_xsect_curve_through_point";
 const OP_APPLY: &str = "intersect::curve_class::p1::apply_point_solution";
 const OP_GAPS: &str = "intersect::curve_class::p1::get_cci_surface_gaps";
+
+/// A defect ([`IntersectFailure::Defect`]) for something the kernel built that is not there,
+/// keeping the status `SM_ERR_NULL_POINTER` of the `NER` it replaces (the conversion guide,
+/// `docs/failure-codes-and-reproduction.md` §6 rule 2).
+#[track_caller]
+pub(super) fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
+    Failure::new(op, IntersectFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// Why an edge has no vertex.
+pub(super) const EDGE_NO_VERTEX: &str = "the edge has no vertex at an end, though every edge \
+     of a finished B-rep has a vertex at both ends, and classification reads finished B-reps";
+/// Why a point classification of an edge or vertex class has no object.
+pub(super) const PC_NO_OBJECT: &str = "the point classification of the interval has a vertex \
+     or edge class but no object, though its class is unknown whenever it has none";
+/// Why a curve's evaluation to the first derivative gave fewer than two vectors.
+pub(super) const EVAL_1ST: &str = "the curve's evaluation to the first derivative returned \
+     fewer than two vectors, though it returns the point and each derivative asked for";
 
 /// The most intervals [`CurveClassification::set_size`] stores (far above anything a
 /// classification reaches; upstream allocates whatever is asked for).
@@ -313,7 +334,7 @@ use crate::error::intersect::IntersectFailure;
 ///
 /// # Errors
 ///
-/// [`IntersectFailure::Inconsistent`] (status `SM_ERR_ASSERT_FAILURE`) for an
+/// [`IntersectFailure::TouchesUnpaired`] (status `SM_ERR_ASSERT_FAILURE`) for an
 /// odd-length list (`AERN`).
 pub fn remove_non_crossings<O: Copy>(touches: &mut Vec<TouchData<O>>) -> Result<()> {
     let mut count = touches.len();
@@ -323,7 +344,7 @@ pub fn remove_non_crossings<O: Copy>(touches: &mut Vec<TouchData<O>>) -> Result<
     if count % 2 != 0 {
         return Err(SolidError::intersect(
             "intersect::curve_class::remove_non_crossings",
-            IntersectFailure::Inconsistent("the touch list has an odd length"),
+            IntersectFailure::TouchesUnpaired { count },
         ));
     }
     let at = |touches: &[TouchData<O>], i: usize| -> Result<TouchData<O>> {
@@ -594,6 +615,29 @@ pub struct CurveClassification<O> {
     /// where it meets a seam or a pole (docs/booleans.md, "Seams and poles"). `None` until
     /// it is set or first read ([`CurveClassification::source_reach_in`]).
     pub(super) source_reach: Option<SourceReach>,
+    /// Not upstream: whether the face named here has a seam edge (an edge with the face
+    /// on both sides, [`crate::topology::edge::face_on_both_sides`]), as found once by
+    /// [`crate::query::face::p2::curve_on_classify_mut_with_seams`] for its run. Read only
+    /// while it names the classification's face; `None` makes every vertex and edge
+    /// test for itself.
+    pub(super) seam_hint: Option<(O, bool)>,
+    /// Not upstream (WR-647): the other face of a face/face intersection whose curve is
+    /// classified here, as a topology handle. It is set only by
+    /// [`crate::topology::face::p3::face_intersect_breps_cached`]. It lets the tangency
+    /// witness ([`super::witness`]) make a range of the curve on a boundary edge a
+    /// single point, where the two faces' surfaces show the contact is one point.
+    pub(super) tangency_partner: Option<O>,
+    /// Explicit ordinary face classification policy, retained with that face's result.
+    pub(super) native_material_face: Option<O>,
+    pub(super) native_foreign_support: Option<NativeForeignSupport<O>>,
+}
+
+/// A genuine SSI's opposite defining support, tied to the face classified against.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct NativeForeignSupport<O> {
+    pub(super) classified_face: O,
+    pub(super) support: AnalyticSupport,
+    pub(super) zone: f64,
 }
 
 /// Not upstream: how far across itself a classified curve is known (docs/booleans.md,
@@ -659,10 +703,7 @@ pub fn in_reach_region(
 ) -> Result<bool> {
     let values = curve.evaluate(k, at, 1, true, false)?;
     let (Some(&on_curve), Some(&tangent)) = (values.first(), values.get(1)) else {
-        return Err(SolidError::intersect_missing(
-            OP_CC,
-            "the curve's point and tangent",
-        ));
+        return Err(missing_defect(OP_CC, EVAL_1ST));
     };
     let w = point - on_curve;
     let rounding = gamma(8) * (point.length() + on_curve.length());
@@ -739,6 +780,10 @@ impl<O: ClassObject> CurveClassification<O> {
             doing_fillets: false,
             ok_to_set_tolerance: true,
             source_reach: None,
+            seam_hint: None,
+            tangency_partner: None,
+            native_material_face: None,
+            native_foreign_support: None,
             tgt_loops_only: false,
             tgt_loops: Vec::new(),
             other_classification: None,
@@ -804,6 +849,22 @@ impl<O: ClassObject> CurveClassification<O> {
             doing_fillets: self.doing_fillets,
             ok_to_set_tolerance: self.ok_to_set_tolerance,
             source_reach: self.source_reach,
+            native_material_face: self.native_material_face.map(&mut *f).transpose()?,
+            native_foreign_support: self
+                .native_foreign_support
+                .map(|s| {
+                    f(s.classified_face).map(|face| NativeForeignSupport {
+                        classified_face: face,
+                        support: s.support,
+                        zone: s.zone,
+                    })
+                })
+                .transpose()?,
+            seam_hint: self
+                .seam_hint
+                .map(|(h, s)| f(h).map(|h| (h, s)))
+                .transpose()?,
+            tangency_partner: self.tangency_partner.map(&mut *f).transpose()?,
             tgt_loops_only: self.tgt_loops_only,
             tgt_loops,
             other_classification: self.other_classification.map(&mut *f).transpose()?,
@@ -1022,17 +1083,70 @@ impl<O: ClassObject> CurveClassification<O> {
 
     /// `SetSurface1`.
     pub fn set_surface1(&mut self, surface1: Option<O>) {
+        if self.surface1 != surface1 {
+            self.native_foreign_support = None;
+        }
         self.surface1 = surface1;
     }
 
     /// `SetSurface2`.
     pub fn set_surface2(&mut self, surface2: Option<O>) {
+        if self.surface2 != surface2 {
+            self.native_foreign_support = None;
+        }
         self.surface2 = surface2;
     }
 
     /// `SetFace`.
     pub fn set_face(&mut self, face: Option<O>) {
+        if self
+            .native_foreign_support
+            .is_some_and(|s| face != Some(s.classified_face))
+        {
+            self.native_foreign_support = None;
+        }
+        if self.face != face {
+            self.native_material_face = None;
+        }
         self.face = face;
+    }
+
+    /// Marks this face's classification as ordinary, excluding explicit gap repair.
+    pub(crate) fn set_native_material_contacts(&mut self, ordinary: bool) {
+        self.native_material_face = ordinary.then_some(self.face).flatten();
+    }
+
+    /// Whether retained face classifications permit native material contact proofs.
+    pub(crate) fn native_material_contacts(&self) -> bool {
+        !self.doing_fillets && self.face.is_some() && self.native_material_face == self.face
+    }
+
+    /// Records an opposite native support only for a genuine surface intersection.
+    pub(crate) fn set_native_foreign_support(
+        &mut self,
+        face: O,
+        support: AnalyticSupport,
+        zone: f64,
+    ) {
+        self.native_foreign_support = Some(NativeForeignSupport {
+            classified_face: face,
+            support,
+            zone,
+        });
+    }
+
+    /// Independent native support evidence for the current ordinary SSI classification.
+    pub(crate) fn native_foreign_support(&self) -> Option<(&AnalyticSupport, f64)> {
+        self.native_foreign_support
+            .as_ref()
+            .filter(|s| {
+                self.native_material_contacts()
+                    && self.face == Some(s.classified_face)
+                    && self.is_curve_current
+                    && s.zone.is_finite()
+                    && s.zone >= 0.0
+            })
+            .map(|s| (&s.support, s.zone))
     }
 
     /// `SetIgnoreTangency`.
@@ -1055,6 +1169,38 @@ impl<O: ClassObject> CurveClassification<O> {
     #[must_use]
     pub const fn source_reach(&self) -> Option<SourceReach> {
         self.source_reach
+    }
+
+    /// Not upstream: the seam hint (see the field).
+    #[must_use]
+    pub const fn seam_hint(&self) -> Option<(O, bool)> {
+        self.seam_hint
+    }
+
+    /// Not upstream: sets the seam hint (see the field).
+    pub fn set_seam_hint(&mut self, hint: Option<(O, bool)>) {
+        self.seam_hint = hint;
+    }
+
+    /// Not upstream (WR-647): the other face of the face/face intersection whose curve is
+    /// classified here (see the field).
+    #[must_use]
+    pub const fn tangency_partner(&self) -> Option<O> {
+        self.tangency_partner
+    }
+
+    /// Not upstream (WR-647): sets the other face of the face/face intersection whose
+    /// curve is classified here (see the field).
+    pub fn set_tangency_partner(&mut self, partner: Option<O>) {
+        self.tangency_partner = partner;
+    }
+
+    /// Not upstream: whether the classification's face is known to have no seam edge, so
+    /// that none of its edges is a seam and none of its vertices a pole (a pole's edges
+    /// are all seams of the face).
+    #[must_use]
+    pub fn face_known_seam_free(&self) -> bool {
+        matches!(self.seam_hint, Some((h, false)) if self.face == Some(h))
     }
 
     /// Not upstream: sets how far across itself the classified curve is known.
@@ -1112,6 +1258,10 @@ impl<O: ClassObject> CurveClassification<O> {
     /// Sets the curve (`SetCurve`; upstream default `bIsCurveOwned = FALSE`); the curve
     /// becomes current.
     pub fn set_curve(&mut self, curve: Option<O>, is_curve_owned: bool) {
+        if self.curve != curve {
+            self.native_material_face = None;
+            self.native_foreign_support = None;
+        }
         // when needed - free old curve (nothing to free for a handle)
 
         // make assignment
@@ -1130,6 +1280,9 @@ impl<O: ClassObject> CurveClassification<O> {
         is_curve_current: bool,
         ti: Option<O>,
     ) {
+        if self.surface1 != surface1 || self.surface2 != surface2 || !is_curve_current {
+            self.native_foreign_support = None;
+        }
         self.surface1 = surface1;
         self.surface2 = surface2;
         self.is_curve_current = is_curve_current;
@@ -1142,6 +1295,7 @@ impl<O: ClassObject> CurveClassification<O> {
     pub fn set_is_curve_current(&mut self, current: bool) {
         self.is_curve_current = current;
         if !current {
+            self.native_foreign_support = None;
             self.uv_curve1 = None;
             self.uv_curve2 = None;
         }
@@ -2626,10 +2780,10 @@ pub fn make_consistent_classifications<O: ClassObject>(
             let classify_edge = ivl
                 .mid
                 .object()
-                .ok_or_else(|| SolidError::intersect_missing(OP, "the interval's edge"))?;
+                .ok_or_else(|| missing_defect(OP, PC_NO_OBJECT))?;
             let classify_vertex = end
                 .object()
-                .ok_or_else(|| SolidError::intersect_missing(OP, "the interval end's vertex"))?;
+                .ok_or_else(|| missing_defect(OP, PC_NO_OBJECT))?;
             let (edge_vertex1, edge_vertex2) = super::p3::edge_vertices(geometry, classify_edge)?;
 
             // check that classified vertex is one of the Edge's vertices
@@ -2647,9 +2801,7 @@ pub fn make_consistent_classifications<O: ClassObject>(
                 let curve = classification
                     .curve()
                     .and_then(|c| geometry.curve(c))
-                    .ok_or_else(|| {
-                        SolidError::intersect_missing(OP, "the classification's source curve")
-                    })?;
+                    .ok_or_else(|| SolidError::intersect(OP, IntersectFailure::NoSourceCurve))?;
                 let mid_pnt = curve.evaluate_point(k, t_mid)?;
                 let xsect_tol_3d = xsect_tol_3d_from_zones(
                     k,
@@ -2659,7 +2811,7 @@ pub fn make_consistent_classifications<O: ClassObject>(
 
                 // drop a midInterval Point to this VertexEdge
                 let edge_curve = super::p3::edge_curve(geometry, vertex_edge)?
-                    .ok_or_else(|| SolidError::intersect_missing(OP, "the vertex edge's curve"))?;
+                    .ok_or_else(|| SolidError::intersect(OP, IntersectFailure::EdgeWithoutCurve))?;
                 let drop = edge_curve.drop_point(
                     k,
                     &super::p3::edge_interval(geometry, vertex_edge)?,
@@ -2933,7 +3085,7 @@ pub fn compute_face_point_class_in(
 
     // locals: SmSurface *pSurface = pFace->GetSurface(); NER(pSurface);
     let surface = fp2::surface(b, f)?
-        .ok_or_else(|| SolidError::intersect_missing(OP, "the face's surface"))?
+        .ok_or_else(|| SolidError::intersect(OP, IntersectFailure::FaceWithoutSurface))?
         .clone_for_evaluation()?;
     let uv_domain = fp2::uv_domain(b, f)?;
     let face_zone_tol_3d = fp2::tolerance(b, f)?;
@@ -2949,15 +3101,18 @@ pub fn compute_face_point_class_in(
     ) {
         Ok(c) => Some(c),
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(_) => {
-            if make_surface_cache(k, &surface, None::<EntityRef>).is_err() {
-                return Err(SolidError::intersect_missing(
-                    OP,
-                    "the face's surface cache",
-                ));
+        // no trimmed cache: the plain one is the fallback (the trimmed build's error is control
+        // flow when it builds); when it does not, its error is the cause (rule 6), and a
+        // cancellation or an unported step passes on as from the trimmed build
+        Err(_) => match make_surface_cache(k, &surface, None::<EntityRef>) {
+            Ok(_) => None,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(e) => {
+                return Err(Failure::new(OP, IntersectFailure::SurfaceCacheNotBuilt)
+                    .caused_by(e)
+                    .into_error())
             }
-            None
-        }
+        },
     };
 
     // Project Point to Face->Surface, point testing off (every solution is kept
@@ -2988,7 +3143,7 @@ pub fn compute_face_point_class_in(
             solutions = solve(100.0 * xsect_tol_3d)?;
             // signal error and give up if point still fails to project
             if solutions.is_empty() {
-                return Err(SolidError::intersect_failed(OP, "the point does not project onto the face's surface even at 100 times the tolerance"));
+                return Err(SolidError::intersect(OP, IntersectFailure::NoFoot));
             }
         }
     }
@@ -3185,6 +3340,20 @@ fn surface_global_point_solve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Something the kernel built that is not there is a defect keeping the null pointer
+    /// status of the `NER` it replaces.
+    #[test]
+    fn a_missing_kernel_link_is_a_defect_with_the_null_pointer_status() {
+        let e = missing_defect(OP_CC, EVAL_1ST);
+        assert!(e.is_defect());
+        assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(crate::error::upstream_status(&e), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::Defect { why: EVAL_1ST })
+        );
+    }
 
     #[derive(Debug, Clone, Copy, PartialEq)]
     struct H(usize, ClassObjectKind);

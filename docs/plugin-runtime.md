@@ -27,7 +27,9 @@ supplies an owned scratch session and adopts its edits only after a successful c
    stored grants. See [Installing](plugins.md#installing).
 2. `plugin.inspect` reads bounded bytes through the caller's existing file scope and returns
    the manifest and content approval hash. It neither instantiates the component nor invokes
-   a manifest function. Metadata can therefore be reviewed before code runs.
+   a manifest function. Metadata can therefore be reviewed before code runs. The package folder
+   must be named after the plugin's `id`, as Install names it; `plugin.check` accepts any folder
+   name and says when it differs.
 3. The user reviews the package and explicitly calls `plugin.run` with that exact hash, an
    exported entry and JSON parameters. The package is read once for this call; the bytes whose
    hash was checked are the bytes compiled and executed. Changing the files afterward cannot
@@ -96,8 +98,11 @@ grants with the requested access. The caller's file scope is checked against eac
 path on every read and write; hidden paths require explicit authorization. Declaring a folder
 name does not itself grant access. Reading a file that does not exist returns `invalid-input`
 (field `path`, reason "no such file") without failing the run, so an entry can create its file
-on first use. Writes use temporary sibling files, and reads in the same call
-see their staged content. Targets are replaced only after successful guest execution and app
+on first use. A write into a sub-folder that does not exist yet makes that folder inside the
+grant (under `--allow-path` when its nearest existing folder is allowed, however many levels are missing; a path may have at most 64 components); if the run does not publish, the folders it made are removed again while still empty.
+Only a refusal by the system is reported as `permission-denied`; another write failure, such as a
+file where a folder should be, is `invalid-input` for `path`. Writes use temporary sibling files,
+and reads in the same call see their staged content. Targets are replaced only after successful guest execution and app
 transaction commit. A trap, refusal, cancellation or failed app commit removes staged files
 without replacing targets. If publication fails after app commit, the error reports that files
 may have changed; publication of several files is not atomic. `clock.now`
@@ -118,16 +123,15 @@ the user grants it, as folders are:
 
 | Group | Commands |
 |---|---|
-| `file` | `file.*`, `library.*`, `sketch.insert_*`, and other commands that read or write files: `canvas.insert`, `component.insert_design`, `parts.insert`, `pointcloud.insert`, `pointcloud.reload`, `parameters.import`, `parameters.export`, `timeline.export_script`, `sketch.export_dxf`, `sheet.export_dxf`, `sheet.export_bend_table`, `render.export`, `motion.export`, `motion.export_animation` |
-| `doc` | `doc.*`: opening, recovering or switching designs |
+| `file` | `file.*`, `library.*`, `sketch.insert_*`, and other commands that read or write files: `canvas.insert`, `component.insert_design`, `parts.insert`, `pointcloud.insert`, `pointcloud.reload`, `parameters.import`, `parameters.export`, `timeline.export_script`, `sketch.export_dxf`, `sketch.export_svg`, `sheet.export_dxf`, `sheet.export_bend_table`, `render.export`, `motion.export`, `motion.export_animation` |
+| `doc` | `doc.*`: opening, recovering or switching designs, and `doc.info`: the open design's file |
 | `app` | `settings.*`, `ui.*`, `diagnostics.*`: app state outside any design |
 | `plugin` | `plugin.*`: inspecting or running plugins |
 
 A manifest that lists a grouped command without its group is refused when it is read. A refused
 call is a typed `permission_denied` error naming the group, and it poisons the transaction like
 any other refusal. Ungrouped commands run under an empty file scope, so even a feature that names
-an external font or linked design gets no file access. A granted `file` or `doc` command runs with
-a scope of exactly the approved folders that the manifest requests for both read and write.
+an external font or linked design gets no file access. A granted `file` or `doc` command runs within the approved folders requested by its manifest. Known input-only commands (`file.insert_step`, `file.insert_mesh`, `file.insert_gerber`, `file.gerber_files`, `sketch.insert_dxf`, `sketch.insert_svg`) may read files from read-only grants. Commands that can write files, and commands that have not been reviewed as input-only, keep the stricter scope requiring both read and write approval. A read-only grant never authorizes a save, export, copy, move or delete. In such a command's parameters, any string `grant:<name>/<path>` names a file in the folder granted as `<name>`. The host replaces it with that file's absolute path before the command runs (`SolidCraftHost::run_command`, `solidcraft_io::vfs::grant_path`), so the scope checks above, including links, judge it like any other path. Only the folders this command may use resolve: read grants for an input-only command, read-and-write grants otherwise. The rest must be plain names. Anything else is a `permission_denied` refusal. Outside a plugin's `file` and `doc` commands, `grant:` has no meaning: it is an ordinary path, as before.
 `plugin.install` validates its optional `approve` object against the manifest and stores grants
 by plugin id after successful publication. Each folder approval has `name`, absolute local `path`,
 `read` and `write`. Omitting `approve` leaves no grants, including after replacement. Explicit approvals
@@ -140,27 +144,40 @@ A hand-installed package with no grant record receives no groups or folders. Rem
 through `plugin.remove` deletes its grant record; `plugin.revoke` deletes the record and keeps the
 package. These are host preferences, never design data.
 
+`doc.info` (group `doc`, effect `read`) reports the design a run started on, as it was before the
+run: `path`, `read_only`, `unsaved`, `disk` and `document_id`. `run_package` records them in
+`AppState::caller_design`. The scratch keeps `path` empty, so a save in the run never defaults to
+the user's file. `Session::source_path` carries the file name through the desktop worker's copies,
+for `doc.info` only. A design the run opens itself answers for itself. Outside a run, `doc.info`
+reports the session's own design.
+
 ## Versions and capabilities
 
-The WIT package is `craft:plugin@0.1.0`. Its interfaces (`types`, `commands`, `log`, `control`,
-`files`, `clock` and the exported `entry`) make up the capability `commands@0.1`. Later
+The WIT package is `craft:plugin@0.2.0`. Its interfaces (`types`, `commands`, `log`, `control`,
+`files`, `clock` and the exported `entry`) make up the capability `commands@0.2`. Later
 capabilities arrive as their own interfaces, each named and versioned on its own in the manifest:
 `ui`, `viewport`, `formats` and `storage`. While a version is 0.x, a minor version may break the
-previous one, so a host for `commands@0.1` runs only `commands@0.1` plugins.
+previous one. 0.2 added `plugin-error.unsupported`; the host also serves the frozen
+`craft:plugin@0.1.0` (`crates/craft-plugin/wit-0.1/plugin.wit`, `OLDER_CAPABILITIES`), choosing
+the bindings by the version the component's imports and exports name, so plugins built against
+0.1 run unchanged and see `invalid-input` where 0.2 has `unsupported`.
 
 ## Per-design plugin data
 
-A design container reserves `plugins/<plugin-id>/` for files a plugin keeps with that design
-(`plugin_data` in the design, base64 by `<plugin-id>/<path>` in a plain JSON design). SolidCraft
+A design container reserves `plugins/<plugin-id>/` for files a plugin keeps with that design, one
+part each, held as their bytes while the design is open. A plain JSON design can't carry them:
+saving one that has plugin data as `.json` is refused, and an older JSON design's base64
+`plugin_data` is decoded as it opens and never written again. SolidCraft
 keeps those files and saves them back byte for byte whether or not the plugin is installed;
-opening a design never needs, loads or runs a plugin. Plugins cannot read or write this data yet:
-the `storage` capability adds that.
+opening a design never needs, loads or runs a plugin. A plugin with the `storage@0.1` capability
+reads and writes its own folder through the `storage.*` commands (see
+[Plugins](plugins.md#plugin-data-in-a-design)); nothing else changes it.
 
 `model.mesh {body, tolerance?}` is a general read-only input boundary. Tolerance is a finite positive
 number in millimetres (default 0.05). It returns `body`, its owning `component`,
 `frame: "component-local-mm"`, `positions: [[x,y,z], ...]` and `triangles: [[i,j,k], ...]`. Indices are
 zero-based. The mesh is of the evaluated body, rather than only the original import's vertices.
-The command refuses more than 8192 vertices or 16384 triangles. A plugin's host-call result must
+Corners at exactly the same position are handed over once and shared by their triangles (no position moves), so a mesh body that stores three corners per triangle counts its distinct points. The command refuses more than 8192 vertices or 16384 triangles after that, naming the counts. A plugin's host-call result must
 also fit the JSON byte limit; a smaller mesh can still exceed that limit and be refused.
 No reconstruction, fitting, sewing, mesh replacement or conversion algorithm is part of this API.
 
@@ -264,6 +281,11 @@ previously approved package. Desktop results prepared under changed ceilings, gr
 are discarded rather than adopted into the current design. Settings survive new/open design
 operations and scratch copies, but are never serialized as design data.
 
+A component is compiled in memory: first with Winch, Wasmtime's baseline compiler, which compiles
+a large component in about a second; after that call, again with Cranelift on one background thread,
+whose faster code replaces it for later calls. A component Winch refuses is compiled with Cranelift
+straight away. Fuel and epoch interruption are the same under both compilers.
+
 Fuel and epoch checks contain guest execution, not arbitrary native work. Component compilation
 happens before the guest deadline; its input size is bounded, but compiler memory/time are not
 covered by guest fuel. Each approved native command runs under its existing engine/kernel limits;
@@ -283,10 +305,24 @@ Normal command output and plugin result JSON are unchanged. The counter message 
 model data or package paths.
 
 Plugins install from a `.zip` with `plugin.install` (see [Plugins](plugins.md#installing)).
-There is no compiled-code cache, unsafe deserialization, WASI filesystem/clock/socket/process API,
-network integration, persistent guest store, signed index, custom panels or plugin-supplied icons.
-The WIT has no persistent store interface yet (`storage` arrives later; designs already keep
-`plugins/<plugin-id>/` data untouched). `manifest()` is not used.
+Compiled components are kept between sessions in Wasmtime's own compilation cache, in
+`plugin-compile/wasmtime` under the per-user cache folder (`solidcraft_engine::plugin::configure_compile_cache`).
+Only Cranelift's code is cached. `plugin-compile/optimized` holds one empty file per cached component
+(named for a hash of its bytes and the compile settings), which tells the next session to load
+Cranelift's code instead of starting with Winch; it lives outside Wasmtime's folder because Wasmtime's
+cleanup removes files it didn't write there.
+Its key covers the component's bytes, the Wasmtime version and every compile setting, fuel metering and
+epoch interruption included; an entry that fails Wasmtime's checks is compiled again. Wasmtime checks an
+entry's format and settings, not its machine code, so whoever can write that folder can change the code
+a plugin call runs: it is the user's own folder, as trusted as the app's files.
+
+There is no unsafe deserialization in SolidCraft's code, no WASI filesystem/clock/socket/process API,
+network integration, persistent guest store, signed index or plugin-supplied icons.
+The optional `ui@0.1` capability provides host-drawn panels, with declarations in `runtime.ui`
+and the matching `ui-provider.describe` export. Panel updates use the command transaction and
+are merged by the window once per frame; see [Docked panels](plugins.md#docked-panels).
+A plugin keeps data in a design through the `storage.*` commands, not a WIT interface of its own.
+`manifest()` is not used.
 
 ## Author an original plugin
 

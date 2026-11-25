@@ -1,6 +1,7 @@
 //! Airfoil coordinate files (`.dat`), as the public airfoil databases publish them: a name line,
-//! then `x y` pairs with the chord running from 0 to 1. Two layouts are read, told apart by their
-//! content, not the file name:
+//! then `x y` pairs. Coordinates are converted to chord units using the smallest x and the
+//! greater trailing-edge endpoint x. Two layouts are read, told apart by their content, not
+//! the file name:
 //!
 //! - **Selig:** one loop from the trailing edge over the upper side to the leading edge and back
 //!   along the lower side.
@@ -22,8 +23,6 @@ use crate::{IoError, Result};
 pub const MAX_AIRFOIL_BYTES: usize = 1 << 20;
 /// Most points a file may hold; past this the reader stops rather than read on.
 pub const MAX_AIRFOIL_POINTS: usize = 20_000;
-/// How far an `x` may leave 0..1: files round their coordinates and come out at 1.00001.
-const X_SLACK: f64 = 1e-5;
 /// Points closer than this (in chord units) are the same point written twice.
 const SAME_POINT: f64 = 1e-9;
 
@@ -117,7 +116,7 @@ pub fn read_airfoil(text: &str, format: Option<AirfoilFormat>) -> Result<Airfoil
         if pairs.len() >= MAX_AIRFOIL_POINTS {
             return Err(IoError::Invalid(format!("more than {MAX_AIRFOIL_POINTS} points")));
         }
-        let [x, y] = row.tokens[..] else {
+        let [x, y] = row.tokens.as_slice() else {
             return Err(IoError::Invalid(format!("line {}: expected two numbers, found {}: `{}`", row.line, row.tokens.len(), row.tokens.join(" "))));
         };
         pairs.push((row.line, Vec2::new(number(x, row.line)?, number(y, row.line)?)));
@@ -133,29 +132,33 @@ pub fn read_airfoil(text: &str, format: Option<AirfoilFormat>) -> Result<Airfoil
             _ => AirfoilFormat::Selig,
         },
     };
-    let points: Vec<Vec2> = match format {
+    let points: Vec<(usize, Vec2)> = match format {
         AirfoilFormat::Lednicer => {
             let Some((line, upper, lower)) = count_line else {
                 return Err(IoError::Invalid(format!("line {}: a Lednicer file starts with the two point counts", first.0)));
             };
             if upper + lower != body.len() {
-                let found = body.windows(2).position(|w| w[1].1.x < w[0].1.x).map(|i| i + 1).unwrap_or(body.len());
+                let found = body.windows(2).position(|w| matches!(w, [(_, a), (_, b)] if b.x < a.x)).map(|i| i + 1).unwrap_or(body.len());
                 return Err(IoError::Invalid(format!("line {line}: Lednicer counts say {upper}+{lower}, found {found}+{}", body.len() - found)));
             }
             if upper < 2 || lower < 2 {
                 return Err(IoError::Invalid(format!("line {line}: each side needs at least two points")));
             }
-            check_range(body)?;
             let (upper, lower) = body.split_at(upper.min(body.len()));
-            let mut points: Vec<Vec2> = upper.iter().rev().map(|(_, p)| *p).collect();
-            points.extend(lower.iter().map(|(_, p)| *p));
+            let mut points: Vec<(usize, Vec2)> = upper.iter().rev().copied().collect();
+            points.extend(lower.iter().copied());
             points
         }
         AirfoilFormat::Selig => {
-            check_range(&pairs)?;
-            pairs.iter().map(|(_, p)| *p).collect()
+            // A count line cannot become a trailing-edge coordinate when normalization
+            // admits coordinates above 1; a forced or miscounted Lednicer file stays invalid.
+            if count_line.is_some() {
+                return Err(IoError::Invalid(format!("line {}: x = {} is outside 0..1", first.0, first.1.x)));
+            }
+            pairs
         }
     };
+    let points = normalized_points(&points)?;
     // A point written twice in a row (the leading edge of a Lednicer file) is read once.
     let mut clean: Vec<Vec2> = Vec::with_capacity(points.len());
     for p in points {
@@ -187,23 +190,46 @@ fn is_pair(tokens: &[&str]) -> bool {
     matches!(tokens, [a, b] if number(a, 0).is_ok() && number(b, 0).is_ok())
 }
 
-/// Whether `v` is a point count: a whole number above 1 (a coordinate never is).
+/// Whether `v` has the reserved point-count syntax: a whole number above 1.
 fn is_count(v: f64) -> bool {
-    v > 1.0 + X_SLACK && v.fract() == 0.0 && v <= MAX_AIRFOIL_POINTS as f64
+    v > 1.0 && v.fract() == 0.0 && v <= MAX_AIRFOIL_POINTS as f64
 }
 
-/// Every `x` lies on the chord (0 to 1, with a little slack for rounding) and every `y` within
-/// a chord of it; anything else is not an airfoil, or not one in chord units.
-fn check_range(pairs: &[(usize, Vec2)]) -> Result<()> {
-    for (line, p) in pairs {
-        if p.x < -X_SLACK || p.x > 1.0 + X_SLACK {
-            return Err(IoError::Invalid(format!("line {line}: x = {} is outside 0..1", p.x)));
-        }
-        if p.y.abs() > 1.0 {
-            return Err(IoError::Invalid(format!("line {line}: y = {} is outside -1..1", p.y)));
-        }
+/// Convert using the file's chord, never an interior maximum: an interior outlier must
+/// remain an error. Both trailing-edge endpoints contribute, including an open, slanted edge.
+fn normalized_points(pairs: &[(usize, Vec2)]) -> Result<Vec<Vec2>> {
+    if pairs.len() < 4 {
+        return Err(IoError::Invalid(format!("{} points; an airfoil needs at least four", pairs.len())));
     }
-    Ok(())
+    let Some((leading_edge, (_, leading))) = pairs
+        .iter()
+        .enumerate()
+        .min_by(|(_, (_, a)), (_, (_, b))| (a.x, a.y.abs()).partial_cmp(&(b.x, b.y.abs())).unwrap_or(std::cmp::Ordering::Equal))
+    else {
+        return Err(IoError::Invalid("no coordinates".into()));
+    };
+    if leading_edge == 0 || leading_edge + 1 == pairs.len() {
+        return Err(IoError::Invalid("the leading edge is at an end of the points: not a loop from the trailing edge and back".into()));
+    }
+    let Some(((_, first), (_, last))) = pairs.first().zip(pairs.last()) else {
+        return Err(IoError::Invalid("no coordinates".into()));
+    };
+    let trailing_x = first.x.max(last.x);
+    pairs
+        .iter()
+        .map(|(line, p)| {
+            // Check source coordinates before subtraction/division could round an outlier onto 1.
+            if p.x > trailing_x {
+                return Err(IoError::Invalid(format!("line {line}: x = {} is outside {}..{trailing_x}", p.x, leading.x)));
+            }
+            let q = solidcraft_kernel::services::import_geometry::chord_coordinates(*p, leading.x, trailing_x)
+                .map_err(|e| IoError::Invalid(format!("line {line}: {e}")))?;
+            if q.y.abs() > 1.0 {
+                return Err(IoError::Invalid(format!("line {line}: y = {} is outside -1..1", q.y)));
+            }
+            Ok(q)
+        })
+        .collect()
 }
 
 /// A strictly written number: digits with an optional sign, point and exponent, nothing else, so
@@ -247,6 +273,33 @@ mod tests {
         assert_eq!(a.leading_edge, 20);
         assert!((a.te_gap - 2.0 * 0.00126).abs() < 1e-5, "{}", a.te_gap);
         assert!((a.points[0].x - 1.0).abs() < 1e-9 && a.points[0].y > 0.0);
+    }
+
+    #[test]
+    fn airfoil_coordinates_are_normalized_by_the_files_chord() {
+        // Chord 1.25, nose x = 0.25: (0.875 - 0.25)/1.25 = 0.5,
+        // 0.15625/1.25 = 0.125. The lower trailing edge is at x/c = 0.9.
+        let expected = [Vec2::new(1.0, 0.0), Vec2::new(0.5, 0.125), Vec2::ZERO, Vec2::new(0.5, -0.125), Vec2::new(0.9, 0.0)];
+        for (text, format) in [
+            ("Scaled\n1.5 0\n0.875 0.15625\n0.25 0\n0.875 -0.15625\n1.375 0\n", AirfoilFormat::Selig),
+            ("Scaled\n3. 3.\n0.25 0\n0.875 0.15625\n1.5 0\n0.25 0\n0.875 -0.15625\n1.375 0\n", AirfoilFormat::Lednicer),
+        ] {
+            let a = read_airfoil(text, None).unwrap();
+            assert_eq!(a.format, format);
+            assert_eq!(a.points, expected);
+            assert_eq!(a.leading_edge, 2);
+            assert_eq!(a.te_gap, 1.0 - 0.9);
+        }
+        let reversed = read_airfoil("Scaled\n1.375 0\n0.875 -0.15625\n0.25 0\n0.875 0.15625\n1.5 0\n", None).unwrap();
+        assert_eq!(reversed.points, expected.into_iter().rev().collect::<Vec<_>>());
+        // Tiny files still have five distinct points in chord units: deduplicate after scaling.
+        let tiny = read_airfoil("Tiny\n1e-10 0\n5e-11 1.25e-11\n0 0\n5e-11 -1.25e-11\n1e-10 0\n", None).unwrap();
+        assert_eq!(tiny.points.len(), 5);
+        assert_eq!(tiny.points[1], Vec2::new(0.5, 0.125));
+        // A synthetic trailing edge just past 1, with the same exact ratios.
+        let a = read_airfoil("Foil\n1.0004 0\n0.5002 0.12505\n0 0\n0.5002 -0.12505\n1.0004 0\n", None).unwrap();
+        assert_eq!(a.points[1], Vec2::new(0.5, 0.125));
+        assert_eq!(a.points[3], Vec2::new(0.5, -0.125));
     }
 
     /// Lednicer: the counts line, both sides from the nose, the nose written twice; CRLF, a count
@@ -298,6 +351,19 @@ mod tests {
         assert_eq!(e, "line 2: x = 21 is outside 0..1");
     }
 
+    #[test]
+    fn normalized_airfoils_still_refuse_interior_outliers_and_degenerate_chords() {
+        for text in [
+            "Outlier\n1.5 0\n1.6 0.1\n0.25 0\n0.875 -0.1\n1.375 0\n",
+            "Outlier\n1.5 0\n0.875 1.5\n0.25 0\n0.875 -0.1\n1.375 0\n",
+            "Zero\n0 0\n0 0.1\n0 0\n0 -0.1\n0 0\n",
+            "Overflow\n1e308 0\n0 1\n-1e308 0\n0 -1\n1e308 0\n",
+            "Overflow\n1e-320 0\n5e-321 1\n0 0\n5e-321 -1\n1e-320 0\n",
+        ] {
+            assert!(read_airfoil(text, None).is_err(), "{text}");
+        }
+    }
+
     /// The quirks real files have, one each, and the ones that are refused with their line.
     #[test]
     fn quirks_are_read_and_junk_is_refused_by_line() {
@@ -308,7 +374,8 @@ mod tests {
         let quirky = good.replace("Quirky\n", "Quirky\nx y\n").replace("1.000000 0.001050", "1.00001, +.00105\n1.00001, .00105");
         let a = read_airfoil(&quirky, None).unwrap();
         assert_eq!(a.points.len(), pts.len());
-        assert!((a.points[0].y - 0.00105).abs() < 1e-9);
+        // Both axes scale by the trailing-edge x, 1.00001.
+        assert_eq!(a.points[0].y, 0.00105 / 1.00001);
         // No name line: the coordinates start at once.
         let bare = good.replacen("Quirky\n", "", 1);
         let a = read_airfoil(&bare, None).unwrap();
@@ -320,7 +387,7 @@ mod tests {
             ("Name\n0.5 ...... \n", "line 2: not a number: `......`"),
             ("Name\n0.5 (0.1)\n", "line 2: not a number: `(0.1)`"),
             ("Name\n0.5 0.1 0.2\n", "line 2: expected two numbers, found 3: `0.5 0.1 0.2`"),
-            ("Name\n1 0\n0.5 0.1\n100 0\n0.5 -0.1\n1 0\n", "line 4: x = 100 is outside 0..1"),
+            ("Name\n1 0\n0.5 0.1\n100 0\n0 0\n0.5 -0.1\n1 0\n", "line 4: x = 100 is outside 0..1"),
             ("Name\n1 0\n0.5 0.1\n0 0\n0.5 -2\n1 0\n", "line 5: y = -2 is outside -1..1"),
             ("Name\n0.5 nan\n", "line 2: not a number: `nan`"),
             ("Name\n0.5 1e999\n", "line 2: not a number: `1e999`"),
@@ -343,7 +410,8 @@ mod tests {
         let s = "Reflexed\n1 0.0\n0.8 -0.01\n0.5 0.05\n0.2 0.06\n0.00044 0.002\n0.2 -0.03\n0.5 -0.02\n0.8 -0.012\n1 -0.001\n";
         let a = read_airfoil(s, None).unwrap();
         assert_eq!(a.leading_edge, 4);
-        assert!((a.te_gap - 0.001).abs() < 1e-12);
+        // The nose at 0.00044 makes the file chord 1 - 0.00044.
+        assert!((a.te_gap - 0.001 / (1.0 - 0.00044)).abs() < 1e-12);
         assert_eq!(a.format.name(), "selig");
         assert_eq!(AirfoilFormat::parse("Lednicer"), Some(AirfoilFormat::Lednicer));
         assert_eq!(AirfoilFormat::parse("csv"), None);

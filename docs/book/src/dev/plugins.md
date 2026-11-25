@@ -1,12 +1,13 @@
 # Writing a plugin
 
 This guide goes from an empty folder to two working plugins: a command that adds a plate to the
-open design, and an importer that opens a file of another format as a new design. It covers the
+open design, and an importer that opens a file of another format as a new design. A third
+example adds a docked panel to a command plugin. It covers the
 manifest, the WIT interface, building the component, permissions, limits, checking, testing and
 installing.
 
 The reference for everything here is [Plugins](../../../plugins.md) (placement, dialogs, package
-limits, importers) and [the runtime reference](../../../plugin-runtime.md) (execution and file
+limits, importers, exporters) and [the runtime reference](../../../plugin-runtime.md) (execution and file
 scope). The design behind them is [RFC 0002](../../../rfcs/0002-plugins.md).
 
 ## What a plugin is
@@ -19,6 +20,9 @@ component. SolidCraft runs the component in a sandbox:
   nothing.
 - An **importer** reads a file of a format SolidCraft doesn't read and writes a SolidCraft design.
   The design opens as a new, unsaved design, with a report of what could not be carried over.
+- An **exporter** writes the open design as a file of a format SolidCraft doesn't write. It reads
+  the design through read-only commands and returns the file's bytes; SolidCraft writes them where
+  the user chose. See [Exporters](../../../plugins.md#exporters).
 
 A plugin has no network access, ever. It reads and writes files only in folders the user approved,
 and it runs within fuel, memory and time limits. It ships no UI code: SolidCraft draws its dialog
@@ -26,6 +30,10 @@ from the input schema in the manifest.
 
 Plugins can be written in any language that compiles to a WebAssembly component. This guide uses
 Rust.
+
+Both examples are in SolidCraft's source, in `docs/book/plugin-examples`, and are built against
+the current WIT with every change to it (`cargo xtask plugin-examples`), so the code here
+compiles.
 
 ## What you need
 
@@ -60,7 +68,7 @@ Create `plate-maker/plugin.json`:
   "name": "Plate Maker",
   "version": "0.1.0",
   "description": "Adds a square plate.",
-  "capabilities": ["commands@0.1"],
+  "capabilities": ["commands@0.2"],
   "runtime": {
     "module": "plate-maker.wasm",
     "commands": ["solid.box"],
@@ -82,7 +90,7 @@ Create `plate-maker/plugin.json`:
 |---|---|
 | `id` | 1 to 64 lowercase letters, digits and dashes. The package folder has this name. |
 | `name`, `version`, `description` | What the user sees: at most 80, 32 and 240 characters. |
-| `capabilities` | The host interfaces the plugin uses: `commands@0.1` for a command plugin, `formats@0.1` for an importer, plus `evaluate@0.1` for an importer that checks its result. |
+| `capabilities` | The host interfaces the plugin uses: `commands@0.2` for a command plugin, `formats@0.2` for an importer or exporter, plus `evaluate@0.2` for an importer that checks its result. Plugins built for 0.1 still run. |
 | `runtime.module` | The component's file name, beside `plugin.json`. |
 | `runtime.commands` | Every SolidCraft command the plugin calls, by exact id. Anything else is refused. |
 | `runtime.entries` | What the plugin offers. Each entry has a `name`, an `effect` (`edit`, or `read` for one that only reads), an `input_schema` (a JSON schema of an object) and optional `slots`. |
@@ -95,24 +103,9 @@ geometry picked in the viewport, a dropdown, or a picture per option: see
 [Plugins](../../../plugins.md#integration-apis). `slots` place the entry in a ribbon tab or the
 File or Help menu; every entry is in the Plugins menu anyway.
 
-## Step 2: the interface
+## Step 2: the crate
 
-The WIT file is the contract between SolidCraft and the plugin: what the plugin may call, and what
-it must export. Copy it from SolidCraft's source, `crates/craft-plugin/wit/plugin.wit`, into
-`plate-maker-src/wit/plugin.wit`. Its package is `craft:plugin@0.1.0`, and it has two worlds:
-
-- `command-plugin` imports `commands` (run a SolidCraft command), `log`, `control` (progress and
-  cancel), `files` (granted folders) and `clock`, and exports `entry`, whose `execute(entry, params)`
-  SolidCraft calls with the entry's name and its parameters as JSON.
-- `importer-plugin` imports `source` (the file being opened), `design` (where the new design
-  goes), `evaluate`, `log`, `control` and `clock`, and exports `importer`.
-
-Errors are a `plugin-error` variant: `permission-denied`, `command-failed`, `limit-exceeded`,
-`invalid-input` and the others name their cause, and the user sees them.
-
-## Step 3: write the component
-
-Create the crate:
+Create the crate beside the package folder:
 
 ```sh
 cargo new --lib plate-maker-src
@@ -131,6 +124,35 @@ opt-level = "s"
 lto = true
 strip = true
 ```
+
+## Step 3: the interface
+
+The WIT file is the contract between SolidCraft and the plugin: what the plugin may call, and what
+it must export. Copy it from SolidCraft's source, `crates/craft-plugin/wit/plugin.wit`, into the
+crate's `wit` folder:
+
+```sh
+mkdir wit
+cp <SolidCraft source>/crates/craft-plugin/wit/plugin.wit wit/plugin.wit
+```
+
+Its package is `craft:plugin@0.2.0`, and it has three worlds:
+
+- `command-plugin` imports `commands` (run a SolidCraft command), `log`, `control` (progress and
+  cancel), `files` (granted folders) and `clock`, and exports `entry`, whose `execute(entry, params)`
+  SolidCraft calls with the entry's name and its parameters as JSON.
+- `importer-plugin` imports `source` (the file being opened), `design` (where the new design
+  goes), `evaluate`, `log`, `control` and `clock`, and exports `importer`.
+- `exporter-plugin` imports `commands` (only the read-only commands its manifest lists), `log`,
+  `control` and `clock`, and exports `formats-provider`, whose `export-file(slot, options)` returns
+  the file's bytes.
+
+Errors are a `plugin-error` variant: `permission-denied`, `command-failed`, `limit-exceeded`,
+`invalid-input`, `unsupported` and the others name their cause, and the user sees them after the
+plugin's name. Return `unsupported` for a valid file or option your plugin does not handle ("the
+model has no solids"); `invalid-input` is for input that is broken.
+
+## Step 4: write the component
 
 `src/lib.rs`:
 
@@ -173,17 +195,21 @@ export!(Plugin);
 '{...}'` tries one on an empty design. An error from a command (or `?` on it) ends the run, and
 SolidCraft undoes everything the run did.
 
-## Step 4: build it
+## Step 5: build it
+
+In `plate-maker-src`:
 
 ```sh
 cargo build --release --target wasm32-unknown-unknown
 wasm-tools component new target/wasm32-unknown-unknown/release/plate_maker_src.wasm -o ../plate-maker/plate-maker.wasm
+cd ..
 ```
 
 Build for `wasm32-unknown-unknown`, not a WASI target: SolidCraft links no WASI, so a component
-that imports any is refused. `wasm-tools component new` turns the module into a component.
+that imports any is refused. `wasm-tools component new` turns the module into a component. The
+steps after this one run in the folder that holds `plate-maker` and `plate-maker-src`.
 
-## Step 5: check it
+## Step 6: check it
 
 ```sh
 solidcraft-cli plugin check plate-maker
@@ -209,7 +235,7 @@ It takes the package folder or the `.zip`, and `--json` prints the same as data,
 `plugin.check` command (which MCP clients can call too). In a folder, `tests/` and hidden files are
 left out, as they are out of the `.zip`.
 
-## Step 6: test it
+## Step 7: test it
 
 A plugin's tests are JSON files in its `tests` folder, one case per file. Create
 `plate-maker/tests/default-plate.json`:
@@ -245,10 +271,10 @@ installed for you, and your files are not touched. A case is:
 |---|---|
 | `entry` | The entry to run. |
 | `params` | A command's parameters, or an importer's options. Default `{}`. |
-| `design` | A command runs on this design, in the `tests` folder. Default: an empty design. |
+| `design` | A command runs on this design, in the `tests` folder. Default: an empty design. A design saved there as `.json` is not read as a case. |
 | `file` | An importer opens this file, in the `tests` folder. |
 | `grants` | What the user approved: `command_groups`, `folders` (`[{"name", "read", "write", "from"}]`, each a fresh folder, or a copy of `from` in `tests`), `input_folder` and `memory_mib`. Default: everything the manifest asks for, as Install approves it. |
-| `expect.error` | The run fails with this kind of error: `permission_denied`, `command_failed`, `limit_exceeded`, `invalid_input`, `trap`, `cancelled`, or `any`. Default: it succeeds. |
+| `expect.error` | The run fails with this kind of error: `permission_denied`, `command_failed`, `limit_exceeded` (or, more exactly, `exhausted` when a budget ran out and `over_ceiling` when the app refused it before it ran), `invalid_input`, `unsupported`, `trap`, `cancelled`, or `any`. Default: it succeeds. |
 | `expect.message` | Text the error contains. |
 | `expect.reply` | Values the reply holds: `plugin.run`'s is `{"result": <what the entry returned>}`; `file.import`'s has `bodies`, `features`, `errors` and the `loss_report`. |
 | `expect.model` | Values `inspect.measure` gives for the resulting design, as `solidcraft-cli eval` prints them: `body_count`, `total.volume_mm3`, each body. |
@@ -259,9 +285,11 @@ An expected object needs only the keys you list; an array needs every item. An e
 case runs once with its fields' defaults, if it needs nothing else, and is skipped otherwise.
 `--json` prints pass or fail per case as data, and `--out DIR` keeps each case's resulting design
 and log for a closer look. The command exits with an error when a case fails, so a CI job can run
-it.
+it; `--require-cases` also fails the run when an entry is skipped, so CI catches an entry nobody
+tested. Given the `.zip`, `plugin test` runs the cases in the `tests/` folder the `.zip` holds;
+the `.zip` from Step 8 leaves them out, so test the folder.
 
-## Step 7: install it
+## Step 8: install it
 
 Zip the package, without its tests:
 
@@ -291,9 +319,13 @@ it at install:
 - `command_groups`: commands that reach past the open design are grouped: `file` (save, export,
   import, libraries), `doc` (open, create or switch designs), `app` (settings, the window) and
   `plugin` (other plugins). A listed command of a group needs the group here, and the user's grant.
+  A `file` or `doc` command may name a file in a granted folder as `grant:<name>/<path>`, where
+  `<name>` is one of the `files` names below; any command but a known input reader (such as
+  `file.insert_step`) needs that folder with both `read` and `write`.
 - `files`: named folders the plugin reads (`read`) or writes (`write`) through the `files`
-  interface, by name and a relative path. The user picks each folder at install; the plugin never
-  sees where it is. Writes appear only when the run succeeds.
+  interface, by name and a relative path. The user picks each folder at install; the `files`
+  interface never shows the plugin where it is, but a `file` or `doc` command's reply or error
+  can name the full path. Writes appear only when the run succeeds.
 - `clock`: the `clock` interface tells the time; without it, it says 0.
 - `input_folder` (importers only): read the other files in the folder of the file being opened,
   such as an assembly's parts.
@@ -315,8 +347,9 @@ folder fails with `permission_denied`.
 | `plugin.json` | 16 KiB | 16 KiB |
 | Parameters and replies | 1 MiB of JSON each | 1 MiB per read or write, 1 GiB read, a 256 MiB design |
 
-A run that goes past its fuel, memory or deadline stops with `limit_exceeded`, and nothing it did
-is kept. `plugin check` says when a request is over the app's ceilings, and `plugin test` runs
+A run that goes past its fuel, memory, stack or deadline stops with `exhausted`, which names the
+budget and its size ("it used all 100000 fuel it asks for and was stopped"), and nothing it did is
+kept. `plugin check` says when a request is over the app's ceilings, and `plugin test` runs
 under them.
 
 ## An importer
@@ -331,7 +364,7 @@ The manifest, `box-importer/plugin.json`:
   "id": "box-importer",
   "name": "Box Importer",
   "version": "0.1.0",
-  "capabilities": ["formats@0.1"],
+  "capabilities": ["formats@0.2"],
   "runtime": {
     "module": "box-importer.wasm",
     "commands": [],
@@ -419,12 +452,215 @@ holds `20 10 3`, and `box-importer/tests/small.json` is
 }
 ```
 
-A broken file is a case too: a file holding `20 10` with `"expect": {"error": "invalid_input"}`.
+A broken file is a case too: a file holding `20 10` with `"expect": {"error": "invalid_input"}`. A
+valid file the importer does not convert answers `unsupported`, which SolidCraft shows as
+"Box Importer does not support part.box: ...".
 
 Once installed, **File › Open** offers `.box` files, and `doc.open` and `file.import` open them.
 An importer that converts a large file can ask for more time (`deadline_ms` up to 600,000), stack
 (`stack_kib`) and memory; see [Importers](../../../plugins.md#importers), which also covers reading
 an assembly's other files and checking the result with `evaluate`.
+
+## A plugin with a panel
+
+A command plugin can also show a docked panel: a table, a list, a form, buttons and text that
+SolidCraft draws with its own controls and theme. The plugin sends data, never pixels or UI code.
+A click in the panel runs one of the plugin's entries as an ordinary command, so an agent can do
+over MCP everything a person does in the panel.
+
+This one, Job List, keeps a list of machining jobs in the open design and shows them in a **Jobs**
+panel. **Add** in the Model tab's Plugins group asks for a job's name and tool diameter; the
+panel's **Refresh** and **Clear** buttons read the list again or empty it.
+
+The manifest, `job-list/plugin.json`:
+
+```json
+{
+  "id": "job-list",
+  "name": "Job List",
+  "version": "0.1.0",
+  "description": "Keeps a list of machining jobs in the design and shows it in a docked panel.",
+  "capabilities": ["commands@0.2", "ui@0.1", "storage@0.1"],
+  "runtime": {
+    "module": "job-list.wasm",
+    "data_format": 1,
+    "commands": ["storage.get", "storage.set"],
+    "entries": [
+      {
+        "name": "add",
+        "effect": "edit",
+        "input_schema": {"type": "object", "properties": {
+          "name": {"type": "string", "title": "Job", "default": "Pocket"},
+          "tool": {"type": "number", "title": "Tool diameter", "default": 6, "minimum": 0.1, "unit": "mm"}
+        }}
+      },
+      {"name": "clear", "effect": "edit", "input_schema": {"type": "object", "properties": {}}},
+      {"name": "refresh", "effect": "read", "input_schema": {"type": "object", "properties": {}}}
+    ],
+    "ui": {
+      "ui_version": 1,
+      "panels": [{
+        "id": "jobs", "title": "Jobs", "zones": ["right", "bottom"],
+        "layout": {"root": 0, "nodes": [
+          {"widget": {"group": [1, 2]}},
+          {"widget": {"toolbar": [
+            {"label": "Refresh", "icon": null, "entry": "refresh"},
+            {"label": "Clear", "icon": null, "entry": "clear"}
+          ]}},
+          {"widget": {"table": {
+            "bind": "/jobs", "row_id": "id",
+            "columns": [
+              {"key": "name", "label": "Job", "unit": null},
+              {"key": "tool", "label": "Tool", "unit": "length"}
+            ],
+            "select": "single", "on_select": null, "on_edit": null
+          }}}
+        ]}
+      }],
+      "workspaces": []
+    },
+    "limits": {"fuel": 1000000000, "memory_mib": 32, "deadline_ms": 5000}
+  }
+}
+```
+
+What is new beside a command plugin:
+
+- `"ui@0.1"` in `capabilities`, and `runtime.ui`: the panels, each with an `id`, a `title`, the
+  `zones` it may dock in and a `layout`. A layout is a flat list of widgets (`nodes`) with children
+  named by index, so `{"group": [1, 2]}` holds the toolbar and the table. Every `entry` a widget
+  names is one of `runtime.entries`.
+- `"storage@0.1"` and `data_format`: the jobs live in the design, written with the `storage.set`
+  command and read with `storage.get`, so each change is one undo step and a saved design keeps
+  them. See [Plugin data in a design](../../../plugins.md#plugin-data-in-a-design).
+
+The crate is made as in Steps 2 and 3. The component implements the `panel-plugin` world: it
+exports `entry`, as a command does, and `ui-provider`, whose `describe` returns the same panels as
+`runtime.ui` (every run checks that the two agree). `job-list-src/src/lib.rs`:
+
+```rust
+wit_bindgen::generate!({ path: "wit", world: "panel-plugin" });
+
+use craft::plugin::commands;
+use craft::plugin::types::{Datum, FieldFailure, PluginError, Value as Cell};
+use craft::plugin::ui::{self, ButtonSpec, Column, Declarations, DockZone, Layout, Node, PanelSpec, SelectionMode, TableSpec, UiEvent, Widget};
+use serde_json::{Value, json};
+
+struct Plugin;
+
+impl exports::craft::plugin::entry::Guest for Plugin {
+    fn execute(entry: String, params: String) -> Result<String, PluginError> {
+        let params: Value = serde_json::from_str(&params).map_err(|e| invalid("params", e))?;
+        let mut jobs = read_jobs()?;
+        match entry.as_str() {
+            "add" => {
+                let name = params["name"].as_str().unwrap_or("Pocket");
+                let tool = params["tool"].as_f64().unwrap_or(6.0);
+                jobs.push(json!({"id": format!("job{}", jobs.len() + 1), "name": name, "tool": tool}));
+                // The jobs live in the design: one undo step, saved with it.
+                commands::run("storage.set", &json!({"document": {"jobs": jobs}}).to_string())?;
+                ui::show_panel("jobs", true)?;
+            }
+            "clear" => {
+                jobs.clear();
+                commands::run("storage.set", &json!({"document": {"jobs": jobs}}).to_string())?;
+            }
+            "refresh" => {}
+            _ => return Err(invalid("entry", format!("no entry `{entry}`"))),
+        }
+        show(&jobs)?;
+        Ok(json!({"jobs": jobs.len()}).to_string())
+    }
+}
+
+/// The jobs kept in the open design, oldest first.
+fn read_jobs() -> Result<Vec<Value>, PluginError> {
+    let reply: Value = serde_json::from_str(&commands::run("storage.get", "{}")?).map_err(|e| invalid("storage", e))?;
+    Ok(reply["document"]["jobs"].as_array().cloned().unwrap_or_default())
+}
+
+/// Replace the panel's rows: one cell per path, "/jobs/<row>/<column>".
+fn show(jobs: &[Value]) -> Result<(), PluginError> {
+    let mut cells = Vec::new();
+    for (row, job) in jobs.iter().enumerate() {
+        let cell = |key: &str, value: Cell| Datum { path: format!("/jobs/{row}/{key}"), value };
+        cells.push(cell("id", Cell::Text(job["id"].as_str().unwrap_or_default().into())));
+        cells.push(cell("name", Cell::Text(job["name"].as_str().unwrap_or_default().into())));
+        cells.push(cell("tool", Cell::Number(job["tool"].as_f64().unwrap_or_default())));
+    }
+    ui::clear_data("jobs")?;
+    ui::set_data("jobs", &cells)
+}
+
+impl exports::craft::plugin::ui_provider::Guest for Plugin {
+    /// The same panel as `runtime.ui` in plugin.json.
+    fn describe() -> Declarations {
+        let button = |label: &str, entry: &str| ButtonSpec { label: label.into(), icon: None, entry: entry.into() };
+        let column = |key: &str, label: &str, unit: Option<&str>| Column { key: key.into(), label: label.into(), unit: unit.map(Into::into) };
+        let table = TableSpec {
+            bind: "/jobs".into(),
+            row_id: "id".into(),
+            columns: vec![column("name", "Job", None), column("tool", "Tool", Some("length"))],
+            select: SelectionMode::Single,
+            on_select: None,
+            on_edit: None,
+        };
+        let nodes = vec![
+            Node { widget: Widget::Group(vec![1, 2]) },
+            Node { widget: Widget::Toolbar(vec![button("Refresh", "refresh"), button("Clear", "clear")]) },
+            Node { widget: Widget::Table(table) },
+        ];
+        let panel =
+            PanelSpec { id: "jobs".into(), title: "Jobs".into(), zones: vec![DockZone::Right, DockZone::Bottom], layout: Layout { root: 0, nodes } };
+        Declarations { ui_version: 1, panels: vec![panel], workspaces: vec![] }
+    }
+
+    fn on_event(_event: UiEvent) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    fn on_enter(_workspace: String) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    fn on_exit(_workspace: String) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
+fn invalid(field: &str, reason: impl ToString) -> PluginError {
+    PluginError::InvalidInput(FieldFailure { field: field.into(), reason: reason.to_string() })
+}
+
+export!(Plugin);
+```
+
+The plugin fills the panel with `ui::set-data`: one typed value per cell, at a path such as
+`/jobs/0/name`, with lengths in mm. `clear-data` empties it, and `show-panel` opens it. Panel data
+is not kept: it is cleared when the design closes, which is why the panel has a **Refresh** button
+that shows the jobs again from the design.
+
+A button press runs its entry at once, with the press as its `params`:
+`{"panel": "jobs", "event": "press", "path": "refresh", "row": null, "value": null}`, where `path`
+is the button's entry. A button does not open the entry's dialog, so an entry that needs values
+from the user, such as `add`, is opened from the Plugins menu or the Plugins group.
+
+Build, check and install it as in Steps 5 to 8; its test, `job-list/tests/add-job.json`, adds one
+job:
+
+```json
+{
+  "entry": "add",
+  "params": {"name": "Face", "tool": 50},
+  "expect": {
+    "reply": {"result": {"jobs": 1}}
+  }
+}
+```
+
+The panel docks on the right the first time a job is added, with its title, the plugin's name and
+a plugin badge. The other widgets, the events each one sends and the limits (eight panels per
+plugin, 512 widgets per layout) are in [Docked panels](../../../plugins.md#docked-panels).
 
 ## When something goes wrong
 
@@ -434,5 +670,5 @@ an assembly's other files and checking the result with `evaluate`.
 | `plugin check`: "component imports instance `wasi:...`" | The crate was built for a WASI target, or uses something in `std` that needs it. Build for `wasm32-unknown-unknown`. |
 | `plugin check`: "built against craft:plugin@..." | The WIT came from another SolidCraft version. Copy this version's `plugin.wit` and rebuild. |
 | A run fails with `permission_denied: command ... is not granted` | The command is not in `runtime.commands`. |
-| A run fails with `limit_exceeded: fuel` or `deadline` | The run did more work than its `limits` allow: raise them, or do less per run. |
+| A run fails with `exhausted`: "it used all ... fuel" or "ran longer than its time limit" | The run did more work than its `limits` allow: raise them, or do less per run. |
 | A run fails with `trap` | The plugin panicked or reached `unreachable`; the message says where. Nothing the run did is kept. |

@@ -9,22 +9,35 @@
 //! conics (`Conic`) are enclosed by interval evaluation of their rational
 //! parametrisation, each ellipse branch on its own; two conics of one kind and
 //! rotation at the same parameters are bounded through the difference of their
-//! coefficients. Hermite, iso, offset, projected, on-surface, in-volume,
-//! tangent-field and composite curves have no enclosure here and are refused.
+//! coefficients. A Hermite curve is the cubic `P1 + t (D1 + t (C + t D))` its
+//! evaluation computes from the stored coefficients; it is enclosed by the hull of
+//! the Bernstein coefficients of that cubic over the parameter range, computed in
+//! outward-rounded intervals. Two Hermite curves at the same parameters are bounded
+//! through their coefficient differences; a Hermite curve against a Hermite curve or
+//! a line under any affine correspondence through the Bernstein hull of the cubic of
+//! their difference. A composite curve is enclosed by the union of its
+//! segments' enclosures over the parts of the range they cover. Iso, offset,
+//! projected, on-surface, in-volume and tangent-field curves have no enclosure here
+//! and are refused.
 //!
-//! Deviations: no recursion. Work is bounded by the stored knot count and the
-//! kernel's NURBS degree limit. Curves without an implemented exact enclosure,
-//! non-positive weights, extrapolation and non-finite bounds are refused.
+//! Deviations: the only recursion is into a composite's segments, refused past
+//! `MAX_GEOMETRY_NESTING` (32) composites, the construction limit. Other work is
+//! bounded by the stored knot and segment counts and the kernel's NURBS degree
+//! limit. Curves without an implemented exact enclosure, non-positive weights,
+//! extrapolation and non-finite bounds are refused.
 
 use crate::blend::fillet_section::interval::Ivl;
+use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::conic::{Conic, ConicType};
 use crate::curve::curve::{Curve, CurveKind};
+use crate::curve::hermite_curve::HermiteCurve;
 use crate::curve::line::Line;
 use crate::geom::extent1d::Extent1d;
 use crate::math::Point3;
 use crate::nurbs::crv_basic::Curve as Nurbs;
 use crate::nurbs::knots::MAX_DEGREE;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
+use crate::surface::surface::p2::MAX_GEOMETRY_NESTING;
 use crate::{Result, SolidError};
 
 const OP: &str = "heal::stitch::bounds";
@@ -40,7 +53,7 @@ fn unsupported() -> SolidError {
         operation: OP,
         reason: "stitch gap enclosure is implemented for lines, positive-weight B-splines, \
                  the ellipses, circles, hyperbolas and parabolas evaluated through them, \
-                 and planar conics only",
+                 planar conics, Hermite curves and composites of these only",
     }
 }
 
@@ -98,7 +111,7 @@ fn difference(a: Box3, b: Box3) -> Box3 {
 }
 
 /// Upper bound on the exact Euclidean distance between the stored points.
-pub(super) fn points(a: Point3, b: Point3) -> Result<f64> {
+pub(crate) fn points(a: Point3, b: Point3) -> Result<f64> {
     norm(difference(point_box(a)?, point_box(b)?))
 }
 
@@ -292,6 +305,204 @@ fn line_box(line: &Line, t: Ivl) -> Result<Box3> {
     Ok(result)
 }
 
+/// Power-basis coefficients of a curve of degree at most three in its own parameter:
+/// `P(t) = c[0] + c[1] t + c[2] t^2 + c[3] t^3`, each an enclosure of the exact
+/// coefficient.
+type Cubic = [Box3; 4];
+
+fn axis(b: Box3, i: usize) -> Ivl {
+    b.get(i).copied().unwrap_or(Ivl::whole())
+}
+
+fn coefficient(c: &Cubic, k: usize) -> Box3 {
+    c.get(k).copied().unwrap_or([Ivl::whole(); 3])
+}
+
+/// The stored cubic of a Hermite curve, `P1 + t (D1 + t (C + t D))`: the polynomial
+/// `HermiteCurve::evaluate_point` evaluates, with the stored power-basis `C` and `D`
+/// (not recomputed from the end data), on its natural interval `[0, 1]`.
+fn hermite_cubic(h: &HermiteCurve, t: Ivl) -> Result<Cubic> {
+    let natural = h.natural_interval();
+    if !finite(t) || t.lo < natural.min() || t.hi > natural.max() {
+        return Err(invalid("curve gap enclosure does not extrapolate"));
+    }
+    let (c, d) = h.power_basis();
+    let p1 = point_box(h.start_point())?;
+    let d1 = point_box(h.start_derivative())?;
+    Ok([p1, d1, point_box(c)?, point_box(d)?])
+}
+
+/// The coefficients in `s` of `P(t0 + (t1 - t0) s)`, the Taylor shift of `c` to `t0`
+/// scaled by `h = t1 - t0`:
+/// `e0 = P(t0)`, `e1 = h P'(t0)`, `e2 = h^2 P''(t0) / 2`, `e3 = h^3 P'''(t0) / 6`.
+/// Every operation is an outward-rounded interval operation ([`Ivl`]: each end moved
+/// past its rounding error), so each `e_k` holds the exact coefficient.
+fn reparameterize(c: &Cubic, t0: f64, t1: f64) -> Cubic {
+    let t = Ivl::from(t0);
+    let h = Ivl::from(t1) - Ivl::from(t0);
+    let (two, three) = (Ivl::from(2.0), Ivl::from(3.0));
+    let [a0, a1, a2, a3] = [0, 1, 2, 3].map(|k| coefficient(c, k));
+    let at = |b: Box3, i: usize| axis(b, i);
+    [
+        core::array::from_fn(|i| at(a0, i) + t * (at(a1, i) + t * (at(a2, i) + t * at(a3, i)))),
+        core::array::from_fn(|i| h * (at(a1, i) + t * (two * at(a2, i) + three * t * at(a3, i)))),
+        core::array::from_fn(|i| h * h * (at(a2, i) + three * t * at(a3, i))),
+        core::array::from_fn(|i| h * h * h * at(a3, i)),
+    ]
+}
+
+/// A box holding the cubic `e0 + e1 s + e2 s^2 + e3 s^3` for every `s` in `[0, 1]`:
+/// the hull of its Bernstein coefficients `e0`, `e0 + e1/3`, `e0 + (2 e1 + e2)/3` and
+/// `e0 + e1 + e2 + e3`. On `[0, 1]` the cubic is their convex combination (the
+/// Bernstein basis is non-negative and sums to one), so it lies in their hull; each is
+/// computed in outward-rounded intervals and holds the exact coefficient.
+fn bernstein_hull(e: &Cubic) -> Result<Box3> {
+    let three = Ivl::from(3.0);
+    let two = Ivl::from(2.0);
+    let [e0, e1, e2, e3] = [0, 1, 2, 3].map(|k| coefficient(e, k));
+    let result: Box3 = core::array::from_fn(|i| {
+        let (a, b, c, d) = (axis(e0, i), axis(e1, i), axis(e2, i), axis(e3, i));
+        a.hull(a + b / three)
+            .hull(a + (two * b + c) / three)
+            .hull(a + b + c + d)
+    });
+    if !result.into_iter().all(finite) {
+        return Err(invalid("cubic enclosure overflows"));
+    }
+    Ok(result)
+}
+
+fn hermite_box(h: &HermiteCurve, t: Ivl) -> Result<Box3> {
+    bernstein_hull(&reparameterize(&hermite_cubic(h, t)?, t.lo, t.hi))
+}
+
+/// Bounds `|P(t) - Q(t)|` over `t` for two Hermite curves at the same parameters: their
+/// difference is the cubic with the coefficient differences, enclosed like one curve.
+/// Equal stored coefficients give exactly zero.
+fn hermite_difference(first: &HermiteCurve, second: &HermiteCurve, t: Ivl) -> Result<f64> {
+    let p = hermite_cubic(first, t)?;
+    let q = hermite_cubic(second, t)?;
+    let delta: Cubic = core::array::from_fn(|k| difference(coefficient(&p, k), coefficient(&q, k)));
+    if delta.iter().flatten().all(|d| *d == Ivl::from(0.0)) {
+        return Ok(0.0);
+    }
+    norm(bernstein_hull(&reparameterize(&delta, t.lo, t.hi))?)
+}
+
+/// The coefficients in `s` of a Hermite curve or a line over the affine parameter map
+/// `t = range[0] + (range[1] - range[0]) s`, `s` in `[0, 1]`: the cubic of
+/// [`hermite_cubic`] or the affine `p + u(t) v scale` of [`line_box`]; `None` for the
+/// other kinds.
+fn polynomial(curve: &Curve, range: [f64; 2]) -> Result<Option<Cubic>> {
+    let [r0, r1] = range;
+    let t = checked_range(range)?;
+    match curve.kind() {
+        CurveKind::Hermite(h) => Ok(Some(reparameterize(&hermite_cubic(h, t)?, r0, r1))),
+        CurveKind::Line(line) => {
+            // The same parameterization checks as the enclosure.
+            line_box(line, t)?;
+            let natural = line.natural_interval();
+            let step = line.step_interval();
+            let ds = Ivl::from(r1) - Ivl::from(r0);
+            // u = u0 + slope s
+            let (u0, slope) = if line.is_bounded() {
+                let length = Ivl::from(natural.max()) - Ivl::from(natural.min());
+                let (start, direction) = if line.inside_out() {
+                    (natural.max(), -1.0)
+                } else {
+                    (natural.min(), 1.0)
+                };
+                let rate = Ivl::from(direction) * (Ivl::from(step.max()) - Ivl::from(step.min()));
+                (
+                    Ivl::from(step.min()) + (Ivl::from(r0) - Ivl::from(start)) / length * rate,
+                    ds / length * rate,
+                )
+            } else if line.inside_out() {
+                (Ivl::from(0.0) - Ivl::from(r0), Ivl::from(0.0) - ds)
+            } else {
+                (Ivl::from(r0), ds)
+            };
+            let p = point_box(line.line_point())?;
+            let v = point_box(line.line_vector())?;
+            let scale = Ivl::from(line.line_scale());
+            let zero = [Ivl::from(0.0); 3];
+            Ok(Some([
+                core::array::from_fn(|i| axis(p, i) + u0 * axis(v, i) * scale),
+                core::array::from_fn(|i| slope * axis(v, i) * scale),
+                zero,
+                zero,
+            ]))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Encloses a composite over `t`: the hull of its segments' enclosures over the parts of
+/// `t` they cover. The segments lie end to end from the first segment's natural minimum,
+/// each over its natural interval's length; a segment's parameter is its start plus
+/// (`same_sense`) or its end minus the offset into its span, as
+/// `CompositeCurve::calculate_bounding_box` maps them. The span ends are accumulated in
+/// outward-rounded intervals, so every segment that may meet `t` is included over a range
+/// that holds its exact part, clipped to its natural interval. `depth` counts the
+/// composites above this one and is refused at [`MAX_GEOMETRY_NESTING`].
+fn composite_box(c: &CompositeCurve, t: Ivl, depth: usize) -> Result<Box3> {
+    if depth >= MAX_GEOMETRY_NESTING {
+        return Err(invalid("composite curves nest too deeply"));
+    }
+    let natural = c.natural_interval();
+    if c.segments().is_empty()
+        || !finite(t)
+        || !finite(checked_range([natural.min(), natural.max()])?)
+        || natural.has_negative_length()
+        || t.lo < natural.min()
+        || t.hi > natural.max()
+    {
+        return Err(invalid("curve gap enclosure does not extrapolate"));
+    }
+    let mut result: Option<Box3> = None;
+    let mut start: Option<Ivl> = None;
+    for s in c.segments() {
+        let seg = s.curve.natural_interval();
+        // A segment with an empty interval has no span and does not advance the next
+        // one's start (`fixed_segment_target_interval`).
+        if seg.has_negative_length() {
+            continue;
+        }
+        if !seg.min().is_finite() || !seg.max().is_finite() {
+            return Err(invalid("invalid composite segment interval"));
+        }
+        let length = Ivl::from(seg.max()) - Ivl::from(seg.min());
+        let span_start = start.unwrap_or_else(|| Ivl::from(seg.min()));
+        let span_end = span_start + length;
+        start = Some(span_end);
+        if span_start.lo > t.hi || span_end.hi < t.lo {
+            continue;
+        }
+        // The offset into the span: in [0, length] and in t - span_start.
+        let offset = Ivl::new(t.lo, t.hi) - span_start;
+        let offset = Ivl::new(offset.lo.max(0.0), offset.hi.min(length.hi));
+        if offset.lo > offset.hi || offset.lo.is_nan() || offset.hi.is_nan() {
+            continue;
+        }
+        let local = if s.same_sense {
+            Ivl::from(seg.min()) + offset
+        } else {
+            Ivl::from(seg.max()) - offset
+        };
+        // The exact segment parameter is in the segment's natural interval.
+        let local = Ivl::new(local.lo.max(seg.min()), local.hi.min(seg.max()));
+        if local.lo > local.hi || local.lo.is_nan() || local.hi.is_nan() {
+            continue;
+        }
+        let part = curve_box_at(&s.curve, local, depth + 1)?;
+        result = Some(match result {
+            None => part,
+            Some(old) => core::array::from_fn(|i| axis(old, i).hull(axis(part, i))),
+        });
+    }
+    result.ok_or_else(|| invalid("no composite segment covers the curve interval"))
+}
+
 /// A conic's position in its natural frame, as coefficients over functions of `t`:
 /// `x = cx g_x(t) + x0(t)`, `y = cy g_y(t)` (`Conic::evaluate_point` before its
 /// rotation and translation). `x0` is the line's `t`, the same for two lines at the
@@ -469,11 +680,17 @@ fn rational_base(curve: &Curve) -> Result<Option<&Nurbs>> {
 }
 
 fn curve_box(curve: &Curve, range: Ivl) -> Result<Box3> {
-    if let CurveKind::Line(l) = curve.kind() {
-        return line_box(l, range);
-    }
-    if let CurveKind::Conic(c) = curve.kind() {
-        return conic_box(c, range);
+    curve_box_at(curve, range, 0)
+}
+
+/// [`curve_box`] for a curve nested `depth` composites deep.
+fn curve_box_at(curve: &Curve, range: Ivl, depth: usize) -> Result<Box3> {
+    match curve.kind() {
+        CurveKind::Line(l) => return line_box(l, range),
+        CurveKind::Conic(c) => return conic_box(c, range),
+        CurveKind::Hermite(h) => return hermite_box(h, range),
+        CurveKind::Composite(c) => return composite_box(c, range, depth),
+        _ => {}
     }
     match rational_base(curve)? {
         Some(n) => spline_box(n, range),
@@ -483,13 +700,14 @@ fn curve_box(curve: &Curve, range: Ivl) -> Result<Box3> {
 
 /// Outward-rounded boxes that together hold every point of `curve` over the parameters
 /// between `a` and `b`: lines, positive-weight B-splines (and the conics evaluated through
-/// them) and planar conics; an error for the other kinds, as [`curve_to_point`]'s.
+/// them), planar conics, Hermite curves and composites; an error for the other kinds, as [`curve_to_point`]'s.
 ///
 /// A B-spline is covered on each knot span that meets the range, in `parts` equal pieces of
 /// the span's part of it: each piece's interval evaluation, cut down to the box of the span's
 /// control points (with positive weights the span lies in their convex hull; an interval
-/// evaluation of a rational span can be far wider than the curve). A line or planar conic is
-/// covered by its enclosure over `parts` equal pieces of the range.
+/// evaluation of a rational span can be far wider than the curve). A line, planar conic,
+/// Hermite curve or composite is covered by its enclosure over `parts` equal pieces of the
+/// range.
 pub(crate) fn curve_cover(curve: &Curve, a: f64, b: f64, parts: u32) -> Result<Vec<Box3>> {
     let range = checked_range([a, b])?;
     let parts = parts.max(1);
@@ -504,7 +722,10 @@ pub(crate) fn curve_cover(curve: &Curve, a: f64, b: f64, parts: u32) -> Result<V
         Ivl::new(at(i), at(i + 1))
     };
     let base = match curve.kind() {
-        CurveKind::Line(_) | CurveKind::Conic(_) => None,
+        CurveKind::Line(_)
+        | CurveKind::Conic(_)
+        | CurveKind::Hermite(_)
+        | CurveKind::Composite(_) => None,
         _ => Some(rational_base(curve)?.ok_or_else(unsupported)?),
     };
     let mut out = Vec::new();
@@ -563,7 +784,7 @@ pub(crate) fn curve_cover(curve: &Curve, a: f64, b: f64, parts: u32) -> Result<V
 }
 
 /// An upper bound for point-to-curve distance using an exact point of the curve.
-pub(super) fn point_at_curve(point: Point3, curve: &Curve, parameter: f64) -> Result<f64> {
+pub(crate) fn point_at_curve(point: Point3, curve: &Curve, parameter: f64) -> Result<f64> {
     norm(difference(
         point_box(point)?,
         curve_box(curve, checked_range([parameter, parameter])?)?,
@@ -571,7 +792,7 @@ pub(super) fn point_at_curve(point: Point3, curve: &Curve, parameter: f64) -> Re
 }
 
 /// Bounds the whole curve's distance from a point (the geometry a squeeze removes).
-pub(super) fn curve_to_point(curve: &Curve, interval: &Extent1d, point: Point3) -> Result<f64> {
+pub(crate) fn curve_to_point(curve: &Curve, interval: &Extent1d, point: Point3) -> Result<f64> {
     norm(difference(
         curve_box(curve, checked_range([interval.min(), interval.max()])?)?,
         point_box(point)?,
@@ -579,7 +800,7 @@ pub(super) fn curve_to_point(curve: &Curve, interval: &Extent1d, point: Point3) 
 }
 
 /// Bounds both directed curve gaps under the stated endpoint correspondence.
-pub(super) fn curves(first: &Curve, a: [f64; 2], second: &Curve, b: [f64; 2]) -> Result<f64> {
+pub(crate) fn curves(first: &Curve, a: [f64; 2], second: &Curve, b: [f64; 2]) -> Result<f64> {
     let ar = checked_range(a)?;
     let br = checked_range(b)?;
     // With a common positive rational basis the difference is a convex combination
@@ -590,6 +811,9 @@ pub(super) fn curves(first: &Curve, a: [f64; 2], second: &Curve, b: [f64; 2]) ->
             if let Some(bound) = conic_difference(x, y, ar)? {
                 return Ok(bound);
             }
+        }
+        if let (CurveKind::Hermite(x), CurveKind::Hermite(y)) = (first.kind(), second.kind()) {
+            return hermite_difference(x, y, ar);
         }
         let x = rational_base(first)?;
         let y = if x.is_some() {
@@ -623,6 +847,18 @@ pub(super) fn curves(first: &Curve, a: [f64; 2], second: &Curve, b: [f64; 2]) ->
                 }
                 return Ok(upper);
             }
+        }
+    }
+    // A Hermite curve against a Hermite curve or a line: under the affine
+    // correspondence their difference is one cubic in the shared parameter, enclosed
+    // by the hull of its Bernstein coefficients.
+    if matches!(first.kind(), CurveKind::Hermite(_))
+        || matches!(second.kind(), CurveKind::Hermite(_))
+    {
+        if let (Some(p), Some(q)) = (polynomial(first, a)?, polynomial(second, b)?) {
+            let delta: Cubic =
+                core::array::from_fn(|k| difference(coefficient(&p, k), coefficient(&q, k)));
+            return norm(bernstein_hull(&delta)?);
         }
     }
     // Affine curves attain the maximum norm of their difference at an endpoint.
@@ -668,8 +904,10 @@ pub(super) fn curves(first: &Curve, a: [f64; 2], second: &Curve, b: [f64; 2]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::curve::hermite_curve::HermiteCurve;
+    use crate::curve::crv_in_volume::CrvInVolume;
+    use crate::geom::transform::Transform;
     use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::surface::volume::{Volume, VolumeKind};
     use crate::{Kernel, Vec3};
 
     /// Retain the raw data: an ordinary clone/owned constructor tunes the knots.
@@ -876,17 +1114,446 @@ mod tests {
             vec![0.0, 0.0, 1.0, 1.0],
         );
         assert!(point_at_curve(Vec3::ZERO, &mixed, 0.5).is_err());
-        let hermite: Curve = HermiteCurve::new(
-            Vec3::ZERO,
-            Vec3::new(1.0, 0.0, 0.0),
-            Vec3::new(1.0, 0.0, 0.0),
-            Vec3::new(1.0, 0.0, 0.0),
+        // A curve in a volume has no enclosure here (#13724 parts (b) and (c) leave it out).
+        let in_volume: Curve = CrvInVolume::new(
+            Line::from_points(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0), 3).into(),
+            true,
+            Volume::new(VolumeKind::Transform(Transform::IDENTITY)),
             3,
+            0,
         )
+        .unwrap()
         .into();
         assert!(matches!(
-            point_at_curve(Vec3::ZERO, &hermite, 0.5),
+            point_at_curve(Vec3::ZERO, &in_volume, 0.5),
             Err(SolidError::Unsupported { .. })
         ));
+    }
+
+    fn hermite(p1: [f64; 3], d1: [f64; 3], p2: [f64; 3], d2: [f64; 3]) -> HermiteCurve {
+        let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+        HermiteCurve::new(v(p1), v(d1), v(p2), v(d2), 3)
+    }
+
+    fn contains(b: Box3, p: Point3) -> bool {
+        [p.x, p.y, p.z]
+            .into_iter()
+            .zip(b)
+            .all(|(x, i)| i.lo <= x && x <= i.hi)
+    }
+
+    /// x = t, y = t - t^2: the cubic Hermite with these end data (h10 - h11 for y,
+    /// h01 + h10 + h11 = t for x). Its maximum y is 1/4 at t = 1/2, and the Bernstein
+    /// coefficients of y over [0, 1] are 0, 1/3, 1/3, 0.
+    fn parabola_hermite() -> HermiteCurve {
+        hermite([0.0; 3], [1.0, 1.0, 0.0], [1.0, 0.0, 0.0], [1.0, -1.0, 0.0])
+    }
+
+    #[test]
+    fn hermite_enclosure_holds_dense_samples_and_the_interior_extreme() {
+        let k = Kernel::default();
+        let cases = [
+            parabola_hermite(),
+            // Tangents ten times the chord: the curve overshoots both ends.
+            hermite(
+                [0.0; 3],
+                [10.0, 10.0, -3.0],
+                [1.0, 0.0, 0.0],
+                [10.0, -10.0, 7.0],
+            ),
+            // Closed: p1 == p2.
+            hermite(
+                [1.0, 2.0, 3.0],
+                [4.0, 0.0, 1.0],
+                [1.0, 2.0, 3.0],
+                [-4.0, 1.0, 0.0],
+            ),
+            // Far from the origin, small and non-dyadic.
+            hermite(
+                [1.0e6 + 0.1, -2.0e6, 0.3],
+                [1.0e-3, 0.7, 0.0],
+                [1.0e6 + 0.2, -2.0e6 + 1.0, 0.3],
+                [-0.3, 1.1, 1.0e-9],
+            ),
+            // Degenerate: a point.
+            hermite([0.5; 3], [0.0; 3], [0.5; 3], [0.0; 3]),
+        ];
+        for h in cases {
+            let c: Curve = h.into();
+            for (lo, hi) in [
+                (0.0, 1.0),
+                (0.0, 0.5),
+                (0.3, 0.7),
+                (0.1, 0.1 + 1.0e-7),
+                (0.4, 0.4),
+            ] {
+                let b = hermite_box(&h, Ivl::new(lo, hi)).unwrap();
+                for j in 0..=400 {
+                    let t = if j == 400 {
+                        hi
+                    } else {
+                        lo + (hi - lo) * f64::from(j) / 400.0
+                    };
+                    let p = c.evaluate_point(&k, t).unwrap();
+                    assert!(
+                        contains(b, p),
+                        "{h:?} on [{lo}, {hi}] at {t}: {p:?} not in {b:?}"
+                    );
+                }
+            }
+        }
+        // The interior maximum, missed by both ends, is inside and the hull is tight.
+        let b = hermite_box(&parabola_hermite(), Ivl::new(0.0, 1.0)).unwrap();
+        let [x, y, z] = b;
+        assert!(y.hi >= 0.25 && y.hi <= 1.0 / 3.0 + 1.0e-12, "{y:?}");
+        assert!(y.lo <= 0.0 && y.lo > -1.0e-12, "{y:?}");
+        assert!(x.lo <= 0.0 && x.hi >= 1.0 && x.hi < 1.0 + 1.0e-12, "{x:?}");
+        assert!(z.lo <= 0.0 && z.hi >= 0.0 && z.hi < 1.0e-12, "{z:?}");
+        // Past the natural interval: refused, not extrapolated.
+        assert!(hermite_box(&parabola_hermite(), Ivl::new(0.5, 1.5)).is_err());
+        assert!(hermite_box(&parabola_hermite(), Ivl::new(-0.1, 0.5)).is_err());
+    }
+
+    #[test]
+    fn hermite_pair_bound_holds_the_interior_gap_and_proves_identity() {
+        let curve = |h: HermiteCurve| -> Curve { h.into() };
+        let same = curves(
+            &curve(parabola_hermite()),
+            [0.0, 1.0],
+            &curve(parabola_hermite()),
+            [0.0, 1.0],
+        )
+        .unwrap();
+        assert_eq!(same, 0.0);
+        // Against the straight chord y = 0 the gap is t - t^2, 1/4 at t = 1/2; the
+        // ends agree exactly.
+        let chord = hermite([0.0; 3], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
+        let bound = curves(
+            &curve(parabola_hermite()),
+            [0.0, 1.0],
+            &curve(chord),
+            [0.0, 1.0],
+        )
+        .unwrap();
+        assert!((0.25..=1.0 / 3.0 + 1.0e-12).contains(&bound), "{bound}");
+        // A rigid lift by 1/2 along z: every coefficient difference is exact.
+        let lifted = hermite(
+            [0.0, 0.0, 0.5],
+            [1.0, 1.0, 0.0],
+            [1.0, 0.0, 0.5],
+            [1.0, -1.0, 0.0],
+        );
+        let bound = curves(
+            &curve(parabola_hermite()),
+            [0.0, 1.0],
+            &curve(lifted),
+            [0.0, 1.0],
+        )
+        .unwrap();
+        assert!((0.5..0.5 + 1.0e-12).contains(&bound), "{bound}");
+        // Against the chord as a line, forward and with the line reversed under the
+        // reversed correspondence (the same point pairs): the gap is again 1/4, and
+        // a cubic for a line that is a Hermite (exact zero coefficients) gives zero.
+        let line = |a: [f64; 3], b: [f64; 3]| -> Curve {
+            Line::from_points(Vec3::new(a[0], a[1], a[2]), Vec3::new(b[0], b[1], b[2]), 3).into()
+        };
+        let parabola = curve(parabola_hermite());
+        let forward = line([0.0; 3], [1.0, 0.0, 0.0]);
+        let backward = line([1.0, 0.0, 0.0], [0.0; 3]);
+        for (l, range) in [(&forward, [0.0, 1.0]), (&backward, [1.0, 0.0])] {
+            let bound = curves(&parabola, [0.0, 1.0], l, range).unwrap();
+            assert!((0.25..=1.0 / 3.0 + 1.0e-12).contains(&bound), "{bound}");
+            let bound = curves(l, range, &parabola, [0.0, 1.0]).unwrap();
+            assert!((0.25..=1.0 / 3.0 + 1.0e-12).contains(&bound), "{bound}");
+            let bound = curves(&curve(chord), [0.0, 1.0], l, range).unwrap();
+            // Closed form 0; the bound is only rounding. Each Bernstein coefficient
+            // takes under 20 outward-rounded operations on magnitudes at most 3, each
+            // widening an end by at most 2.3e-16 * 3 + 1e-300, so under 1.4e-14 per
+            // coordinate and 2.4e-14 in norm.
+            assert!(bound < 2.4e-14, "{bound}");
+        }
+        // The wrong correspondence pairs t with 1 - t on the chord: gap up to 1.
+        let crossed = curves(&curve(chord), [0.0, 1.0], &forward, [1.0, 0.0]).unwrap();
+        assert!(crossed >= 1.0, "{crossed}");
+        // Point to curve over the whole curve: the far end is sqrt(2) from (0, 1, 0)
+        // ... and the start 1 away.
+        let far = curve_to_point(
+            &curve(parabola_hermite()),
+            &Extent1d::from_min_max(0.0, 1.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        )
+        .unwrap();
+        assert!(far >= 2.0_f64.sqrt(), "{far}");
+    }
+
+    /// A line, a reversed Hermite and a nested composite of a B-spline, end to end.
+    fn mixed_composite() -> (CompositeCurve, Vec<(Curve, bool)>) {
+        let line: Curve = Line::from_points(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), 3).into();
+        // x = 2 - u, y = 3(u - u^2): reversed, it runs from (1, 0, 0) to (2, 0, 0).
+        let h: Curve = hermite(
+            [2.0, 0.0, 0.0],
+            [-1.0, 3.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [-1.0, -3.0, 0.0],
+        )
+        .into();
+        let s = spline(
+            vec![cp(2.0, 0.0, NOW), cp(2.5, -1.0, NOW), cp(3.0, 0.0, NOW)],
+            2,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        );
+        let inner: Curve = CompositeCurve::with_curves(3, vec![s.clone()], false, None, None)
+            .unwrap()
+            .into();
+        let c = CompositeCurve::with_curves(
+            3,
+            vec![line.clone(), h.clone(), inner],
+            false,
+            Some(&[true, false, true]),
+            None,
+        )
+        .unwrap();
+        (c, vec![(line, true), (h, false), (s, true)])
+    }
+
+    #[test]
+    fn composite_enclosure_is_the_union_of_its_mapped_segments() {
+        let k = Kernel::default();
+        let (c, pieces) = mixed_composite();
+        let natural = c.natural_interval();
+        assert_eq!((natural.min(), natural.max()), (0.0, 3.0));
+        // The composite's point at t: segment i = floor(t) at its own parameter,
+        // reversed for the Hermite.
+        let point = |t: f64| {
+            let i = (t.floor() as usize).min(2);
+            let (curve, same) = &pieces[i];
+            let local = t - i as f64;
+            let u = if *same { local } else { 1.0 - local };
+            curve.evaluate_point(&k, u).unwrap()
+        };
+        let whole = composite_box(&c, Ivl::new(0.0, 3.0), 0).unwrap();
+        let cells = 30;
+        for i in 0..cells {
+            let a = 3.0 * f64::from(i) / f64::from(cells);
+            let b = 3.0 * f64::from(i + 1) / f64::from(cells);
+            let cell = composite_box(&c, Ivl::new(a, b), 0).unwrap();
+            for j in 0..=50 {
+                let t = a + (b - a) * f64::from(j) / 50.0;
+                let p = point(t);
+                assert!(contains(cell, p), "t = {t}: {p:?} not in {cell:?}");
+                assert!(contains(whole, p), "t = {t}");
+            }
+        }
+        // Just after t = 1 the reversed Hermite is near its own end (1, 0, 0); read
+        // forward it would be near (2, 0, 0).
+        let near = composite_box(&c, Ivl::new(1.0, 1.05), 0).unwrap();
+        assert!(near[0].lo <= 1.0 && near[0].hi < 1.1, "{near:?}");
+        let late = composite_box(&c, Ivl::new(1.95, 2.0), 0).unwrap();
+        assert!(late[0].lo > 1.9 && late[0].hi >= 2.0, "{late:?}");
+        // Through the public bounds: the composite edge's far point.
+        let far = curve_to_point(&c.clone().into(), &natural, Vec3::ZERO).unwrap();
+        assert!(far >= 3.0, "{far}");
+        // Outside the natural interval: refused.
+        assert!(composite_box(&c, Ivl::new(2.5, 3.5), 0).is_err());
+    }
+
+    #[test]
+    fn composite_recursion_is_refused_past_the_nesting_limit() {
+        let (c, _) = mixed_composite();
+        assert!(composite_box(&c, Ivl::new(0.0, 3.0), MAX_GEOMETRY_NESTING - 2).is_ok());
+        // The nested composite is one level further down.
+        assert!(matches!(
+            composite_box(&c, Ivl::new(0.0, 3.0), MAX_GEOMETRY_NESTING - 1),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(composite_box(&c, Ivl::new(0.0, 0.5), MAX_GEOMETRY_NESTING - 1).is_ok());
+        assert!(matches!(
+            composite_box(&c, Ivl::new(0.0, 0.5), MAX_GEOMETRY_NESTING),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        let empty = CompositeCurve::with_curves(3, Vec::new(), false, None, None).unwrap();
+        assert!(composite_box(&empty, Ivl::new(0.0, 0.0), 0).is_err());
+    }
+
+    /// A composite whose first segment starts at 2, with a reversed segment of length
+    /// 1/2 and a forward Hermite: `[2, 5]` runs `(t - 2, 0)`, `[5, 5.5]` runs
+    /// `(3, 2 (t - 5))`, `[5.5, 6.5]` runs `(3 + (t - 5.5), 1)`.
+    fn offset_composite() -> CompositeCurve {
+        let first = spline(
+            vec![cp(0.0, 0.0, NOW), cp(3.0, 0.0, NOW)],
+            1,
+            vec![2.0, 2.0, 5.0, 5.0],
+        );
+        // (3, 1) at u = 1 to (3, 0) at u = 1.5; reversed, (3, 0) to (3, 1).
+        let up = spline(
+            vec![cp(3.0, 1.0, NOW), cp(3.0, 0.0, NOW)],
+            1,
+            vec![1.0, 1.0, 1.5, 1.5],
+        );
+        let last: Curve = hermite(
+            [3.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [4.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+        )
+        .into();
+        CompositeCurve::with_curves(
+            3,
+            vec![first, up, last],
+            false,
+            Some(&[true, false, true]),
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn composite_spans_start_at_the_first_minimum_and_reverse_within_their_length() {
+        let k = Kernel::default();
+        let c = offset_composite();
+        let natural = c.natural_interval();
+        assert_eq!((natural.min(), natural.max()), (2.0, 6.5));
+        let exact = |t: f64| {
+            if t <= 5.0 {
+                Point3::new(t - 2.0, 0.0, 0.0)
+            } else if t <= 5.5 {
+                Point3::new(3.0, 2.0 * (t - 5.0), 0.0)
+            } else {
+                Point3::new(3.0 + (t - 5.5), 1.0, 0.0)
+            }
+        };
+        for i in 0..=90 {
+            let t = 2.0 + 4.5 * f64::from(i) / 90.0;
+            let b = composite_box(&c, Ivl::new(t, t), 0).unwrap();
+            let p = exact(t);
+            assert!(contains(b, p), "t = {t}: {p:?} not in {b:?}");
+            // Away from the joins the box is one point's rounding: a mapping that put
+            // t elsewhere on the curve could not hold it.
+            let interior = [2.0, 5.0, 5.5, 6.5].iter().all(|j| (t - j).abs() > 1e-3);
+            if interior {
+                assert!(b.iter().all(|x| x.hi - x.lo < 1e-12), "t = {t}: {b:?}");
+            }
+            // The kernel's own certified box maps t through its segment mapping
+            // (`fixed_segment_target_interval`); it must meet this one on every axis.
+            let reference = c
+                .certified_bounding_box(&k, &Extent1d::from_min_max(t, t))
+                .unwrap()
+                .unwrap();
+            for (x, (lo, hi)) in b.iter().zip([
+                (reference.min.x, reference.max.x),
+                (reference.min.y, reference.max.y),
+                (reference.min.z, reference.max.z),
+            ]) {
+                assert!(
+                    x.lo <= hi + 1e-12 && lo - 1e-12 <= x.hi,
+                    "t = {t}: {b:?} {reference:?}"
+                );
+            }
+        }
+        // Read forward, the reversed segment would start at (3, 1).
+        let after = composite_box(&c, Ivl::new(5.0, 5.1), 0).unwrap();
+        assert!(after[1].lo <= 0.0 && after[1].hi < 0.2 + 1e-12, "{after:?}");
+        // A parameter before the first segment's minimum is extrapolation.
+        assert!(composite_box(&c, Ivl::new(1.5, 3.0), 0).is_err());
+    }
+
+    #[test]
+    fn line_polynomials_match_the_line_on_every_parameterization() {
+        use crate::curve::line::BoundedLineOptions;
+        let k = Kernel::default();
+        let point = Vec3::new(1.0, -2.0, 0.5);
+        let vector = Vec3::new(3.0, 4.0, 0.0);
+        let domain = Extent1d::from_min_max(2.0, 7.0);
+        let bounded = |inside_out| {
+            let opts = BoundedLineOptions {
+                scale: 1.5,
+                inside_out,
+                ..BoundedLineOptions::default()
+            };
+            Line::bounded(point, vector, &domain, &opts)
+        };
+        let mut stepped = bounded(false);
+        // The NURBS interval no longer equals the STEP interval.
+        stepped
+            .edit_parameterization(&Extent1d::from_min_max(-1.0, 4.0))
+            .unwrap();
+        let mut stepped_inside_out = bounded(true);
+        stepped_inside_out
+            .edit_parameterization(&Extent1d::from_min_max(-1.0, 4.0))
+            .unwrap();
+        let lines: Vec<Curve> = vec![
+            Line::from_points(Vec3::ZERO, Vec3::new(1.0, 2.0, 3.0), 3).into(),
+            bounded(false).into(),
+            bounded(true).into(),
+            stepped.into(),
+            stepped_inside_out.into(),
+            Line::infinite(point, vector, 3, false).into(),
+            Line::infinite(point, vector, 3, true).into(),
+        ];
+        for line in &lines {
+            let natural = line.natural_interval();
+            let (lo, hi) = if natural.length() > 1e6 {
+                (-3.0, 5.0)
+            } else {
+                (natural.min(), natural.max())
+            };
+            let w = hi - lo;
+            for [f0, f1] in [[0.0, 1.0], [1.0, 0.0], [0.2, 0.7], [0.9, 0.3]] {
+                let range = [lo + f0 * w, lo + f1 * w];
+                let cubic = polynomial(line, range).unwrap().unwrap();
+                let hull = bernstein_hull(&cubic).unwrap();
+                let direct = line_box_of(line, range);
+                let ends = [range[0], range[1]].map(|t| line.evaluate_point(&k, t).unwrap());
+                for (i, x) in hull.iter().enumerate() {
+                    // The same set as the line's own box, up to rounding.
+                    let slack = 1e-12 * (1.0 + x.hi.abs().max(x.lo.abs()));
+                    assert!((x.lo - direct[i].lo).abs() < slack, "{line:?} {range:?}");
+                    assert!((x.hi - direct[i].hi).abs() < slack, "{line:?} {range:?}");
+                }
+                for j in 0..=40 {
+                    let s = f64::from(j) / 40.0;
+                    let t = range[0] + (range[1] - range[0]) * s;
+                    let p = line.evaluate_point(&k, t).unwrap();
+                    assert!(contains(hull, p), "{line:?} t = {t}");
+                }
+                // A Hermite through the same points at the same speed coincides with the
+                // line under this correspondence: the pair bound is rounding only.
+                let d = ends[1] - ends[0];
+                let h: Curve = HermiteCurve::new(ends[0], d, ends[1], d, 3).into();
+                let scale = 1.0 + ends[0].length().max(ends[1].length());
+                let bound = curves(&h, [0.0, 1.0], line, range).unwrap();
+                assert!(bound < 1e-12 * scale, "{line:?} {range:?}: {bound}");
+                let bound = curves(line, range, &h, [0.0, 1.0]).unwrap();
+                assert!(bound < 1e-12 * scale, "{line:?} {range:?}: {bound}");
+            }
+        }
+    }
+
+    fn line_box_of(curve: &Curve, range: [f64; 2]) -> Box3 {
+        let CurveKind::Line(l) = curve.kind() else {
+            panic!("not a line");
+        };
+        line_box(l, checked_range(range).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn reversed_hermite_pairs_cover_every_parameter() {
+        let h: Curve = parabola_hermite().into();
+        // The same parabola stored from its other end: y = t - t^2 is symmetric, x runs
+        // from 1 to 0.
+        let back: Curve = hermite(
+            [1.0, 0.0, 0.0],
+            [-1.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [-1.0, -1.0, 0.0],
+        )
+        .into();
+        let same = curves(&h, [0.0, 1.0], &back, [1.0, 0.0]).unwrap();
+        assert!(same < 1e-14, "{same}");
+        let sub = curves(&h, [0.2, 0.6], &back, [0.8, 0.4]).unwrap();
+        assert!(sub < 1e-14, "{sub}");
+        // Read forward the two run in opposite directions: the ends are 1 apart.
+        let crossed = curves(&h, [0.0, 1.0], &back, [0.0, 1.0]).unwrap();
+        assert!(crossed >= 1.0, "{crossed}");
     }
 }

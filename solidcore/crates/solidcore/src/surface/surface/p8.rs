@@ -63,12 +63,15 @@
 //! its status keeps what was found before the failure. `CoincidenceCheck` keeps the
 //! curve cache of each boundary curve for all its intersections, as upstream keeps
 //! it on the curve, so each boundary curve builds one cache per check.
+//! `InvertPointNearSingularity` refuses an answer proven farther from the test point
+//! than its guess, the evaluations' rounding bounded from the net (upstream reports it
+//! found); a maximize keeps the farthest drop, or its guess reported unconverged.
 //! Unported callees return [`SolidError::Unported`], also where upstream ignores the
 //! status. Recursion: none.
 
 use super::p1::{
-    get_surface_cache, is_node_valid, is_point_valid_with as is_point_valid, OperandDomain,
-    SolveOperands, SurfaceSolveContext,
+    get_surface_cache, is_node_valid, is_point_valid_with as is_point_valid, LentSurfaceCache,
+    OperandDomain, SolveOperands, SurfaceSolveContext,
 };
 use super::p2::{
     original_surface, CrossSectionValues, DerivSurfDefinition, LsiGlobalSolver, Surface,
@@ -81,8 +84,11 @@ use crate::curve::curve::p5::CurveMemoKey;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::curve_cache::CurveCache;
 use crate::curve::line::Line;
-use crate::error::surface::SurfaceFailure;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::surface::{SolverPart, SurfaceFailure};
+use crate::error::{
+    ignore_status, ignored, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER,
+};
+use crate::geom::certified;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -104,12 +110,13 @@ use crate::math::{
 };
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
-use crate::nurbs::b_spline_surface::SurfParamType;
+use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
+use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
 use crate::surface::plane::Coincidence;
 use crate::surface::surface::p7::SpGlobalSolver;
-use crate::surface::surface_cache::p1::SurfaceCache;
+use crate::surface::surface_cache::p1::{SolveModes, SurfaceCache};
 use crate::surface::surface_cache::BezierPatch;
 use std::borrow::Cow;
 use std::sync::OnceLock;
@@ -305,13 +312,31 @@ fn evaluate_3x3_into(
 /// shows nothing) when either cannot be evaluated there. Upstream ignores both statuses
 /// and compares whatever the arrays held; the fork passes them on and fails the whole
 /// check (WR-663, tangency-labs/smlib 21dcf69).
+///
+/// Not upstream (#16870): `false` too where one surface's parameterisation is singular at its
+/// sample (one first derivative vanishing against the other: a sphere's pole) and the other's
+/// is not. Normal curvatures are read from the first fundamental form, which is degenerate at
+/// the singular one, so its readings say nothing of its shape to compare with the regular
+/// one's: at a sphere's pole the curvature along a cylinder's axis read so is 0, the
+/// cylinder's, and a cylinder whose rim is a great circle of the sphere through its poles was
+/// taken for the sphere itself. Where both are singular (a surface with a pole against itself)
+/// the sample is compared as upstream compares it.
 fn evaluate_pair(
     k: &Kernel,
     (sa, uva, pa): (&Surface, Point2, &mut [[Vec3; 3]; 3]),
     (sb, uvb, pb): (&Surface, Point2, &mut [[Vec3; 3]; 3]),
 ) -> Result<bool> {
     Ok(ignored(evaluate_3x3_into(k, sa, uva, pa))?.is_some()
-        && ignored(evaluate_3x3_into(k, sb, uvb, pb))?.is_some())
+        && ignored(evaluate_3x3_into(k, sb, uvb, pb))?.is_some()
+        && regular(pa) == regular(pb))
+}
+
+/// Whether a surface sampled into `p` ([`evaluate_3x3_into`]: `p[1][0]` is `S_u`, `p[0][1]`
+/// is `S_v`) is regular there: neither first derivative vanishes against the other, to the
+/// square root of effective zero.
+fn regular(p: &[[Vec3; 3]; 3]) -> bool {
+    let (su, sv) = (p[1][0].length(), p[0][1].length());
+    su.min(sv) > EFF_ZERO_SQRT * su.max(sv)
 }
 
 /// The B-spline part of a curve of a kind derived from `SmBSplineCurve`.
@@ -694,13 +719,25 @@ impl Surface {
             let mut i = 1;
             while i + 1 < knots.len() {
                 let c = continuities.get(i).copied().ok_or_else(|| {
-                    SolidError::surface_failed(OP_KNOTS, "a knot has no continuity")
+                    SolidError::surface(
+                        OP_KNOTS,
+                        SurfaceFailure::KnotsAndContinuitiesDisagree {
+                            knots: knots.len(),
+                            continuities: continuities.len(),
+                        },
+                    )
                 })?;
                 if (!at_continuity && (c as i32) <= (max_continuity as i32))
                     || (at_continuity && c == max_continuity)
                 {
                     out.push(knots.get(i).copied().ok_or_else(|| {
-                        SolidError::surface_failed(OP_KNOTS, "a continuity has no knot")
+                        SolidError::surface(
+                            OP_KNOTS,
+                            SurfaceFailure::KnotsAndContinuitiesDisagree {
+                                knots: knots.len(),
+                                continuities: continuities.len(),
+                            },
+                        )
                     })?);
                 }
                 i += 1;
@@ -913,10 +950,7 @@ impl Surface {
         if domain0.size().length_squared() < EFF_ZERO_SQ
             || domain1.size().length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::surface_failed(
-                OP_COINC,
-                "a surface has an empty domain",
-            ));
+            return Err(SolidError::surface(OP_COINC, SurfaceFailure::EmptyDomain));
         }
 
         // Check bounding boxes (statuses ignored upstream; passed on as the fork does,
@@ -1367,9 +1401,9 @@ impl Surface {
         let mut def = if let Some(d) = opt_ds_def {
             let mut def = *d;
             if !def.is_from_surface_boundary_curve() {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_BLEND,
-                    "the blend definition is not from a surface boundary curve",
+                    SurfaceFailure::BlendDefinitionNotFromBoundary,
                 ));
             }
             def.tangency_type = TangencyType::DirToReferenceCurve;
@@ -1469,11 +1503,10 @@ impl Surface {
             }
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // a NULL blend surface
-            Err(_) => {
-                return Err(SolidError::surface_failed(
-                    OP_BLEND,
-                    "the blend surface could not be made",
-                ))
+            Err(e) => {
+                return Err(Failure::new(OP_BLEND, SurfaceFailure::BlendSurfaceNotMade)
+                    .caused_by(e)
+                    .into_error())
             }
         };
         Ok(Self::from(blend))
@@ -1502,7 +1535,9 @@ impl Surface {
         match cache.get_tree(k) {
             Ok(_) => Ok(cache),
             Err(e) if e.is_unported_or_cancelled() => Err(e),
-            Err(_) => Err(SolidError::surface_missing(op, "the surface cache's tree")),
+            Err(e) => Err(Failure::new(op, SurfaceFailure::SolveCacheNotMade)
+                .caused_by(e)
+                .into_error()),
         }
     }
 
@@ -1516,7 +1551,11 @@ impl Surface {
         let mut cache = match get_surface_cache::<O>(k, self, handle) {
             Ok(c) => c,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(SolidError::surface_missing(op, "the surface's cache")),
+            Err(e) => {
+                return Err(Failure::new(op, SurfaceFailure::SolveCacheNotMade)
+                    .caused_by(e)
+                    .into_error())
+            }
         };
         // the solves' GetTree (NER): a reused cache whose tree is not built yet
         // (the surface's cache slot) builds it now
@@ -1536,6 +1575,23 @@ impl Surface {
         match context {
             None => self.solve_cache_of(k, handle, op),
             Some(context) => context.build_surface_cache(k, self, handle),
+        }
+    }
+
+    /// [`Surface::solve_cache_from_context`] for a solve that only reads the cache: the
+    /// context's lent cache ([`SurfaceSolveContext::lend_surface_cache`]).
+    fn lent_cache_from_context<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        handle: Option<O>,
+        op: &'static str,
+        context: Option<&mut dyn SurfaceSolveContext<O>>,
+    ) -> Result<LentSurfaceCache<O>> {
+        match context {
+            None => self
+                .solve_cache_of(k, handle, op)
+                .map(LentSurfaceCache::Owned),
+            Some(context) => context.lend_surface_cache(k, self, handle),
         }
     }
 
@@ -1593,30 +1649,19 @@ impl Surface {
         fire_ray: bool,
         distance_tolerance: f64,
     ) -> Result<SolutionArray<O>> {
-        match self.kind() {
-            SurfaceKind::Plane(p) => p.global_line_intersect_in(
-                k,
-                surface,
-                cache,
-                uv_domain,
-                line_point,
-                line_vector,
-                line_interval,
-                fire_ray,
-                distance_tolerance,
-            ),
-            _ => self.base_global_line_intersect_in(
-                k,
-                surface,
-                cache,
-                uv_domain,
-                line_point,
-                line_vector,
-                line_interval,
-                fire_ray,
-                distance_tolerance,
-            ),
-        }
+        self.global_line_intersect_under(
+            k,
+            surface,
+            cache,
+            None,
+            None,
+            uv_domain,
+            line_point,
+            line_vector,
+            line_interval,
+            fire_ray,
+            distance_tolerance,
+        )
     }
 
     /// [`Surface::global_line_intersect`] with caller-supplied topology prepared
@@ -1639,10 +1684,52 @@ impl Surface {
         fire_ray: bool,
         distance_tolerance: f64,
     ) -> Result<SolutionArray<O>> {
-        match self.kind() {
+        self.global_line_intersect_under(
+            k,
+            surface,
+            cache,
+            Some(context),
+            None,
+            uv_domain,
+            line_point,
+            line_vector,
+            line_interval,
+            fire_ray,
+            distance_tolerance,
+        )
+    }
+
+    /// [`Surface::global_line_intersect_in`] (no `context`) or
+    /// [`Surface::global_line_intersect_with_context`], the solve running in `modes`
+    /// (`None`: the surface cache's own, [`SolveModes::of`]). The caller's cache keeps
+    /// its flags.
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's body.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn global_line_intersect_under<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        surface: Option<O>,
+        cache: Option<&mut SurfaceCache<O>>,
+        context: Option<&mut dyn SurfaceSolveContext<O>>,
+        modes: Option<SolveModes>,
+        uv_domain: &Extent2d,
+        line_point: Point3,
+        line_vector: Vec3,
+        line_interval: Option<&Extent1d>,
+        fire_ray: bool,
+        distance_tolerance: f64,
+    ) -> Result<SolutionArray<O>> {
+        let source = match cache {
+            Some(cache) => LineCacheSource::Caller(cache),
+            None => LineCacheSource::Fresh,
+        };
+        match (self.kind(), context) {
             // (the plane's base solve runs on this surface, its face's, with the
             // caller's cache and context)
-            SurfaceKind::Plane(p) => p.global_line_intersect_with_base(
+            (SurfaceKind::Plane(p), Some(context)) => p.global_line_intersect_with_base(
                 uv_domain,
                 line_point,
                 line_vector,
@@ -1653,11 +1740,9 @@ impl Surface {
                     self.base_global_line_intersect_from(
                         k,
                         surface,
-                        match cache {
-                            Some(cache) => LineCacheSource::Caller(cache),
-                            None => LineCacheSource::Fresh,
-                        },
+                        source,
                         Some(context),
+                        modes,
                         uv_domain,
                         line_point,
                         line_vector,
@@ -1667,14 +1752,37 @@ impl Surface {
                     )
                 },
             ),
-            _ => self.base_global_line_intersect_from(
+            // (without a context, `Plane::global_line_intersect_in`: the base solve
+            // runs on the bare plane)
+            (SurfaceKind::Plane(p), None) => p.global_line_intersect_with_base(
+                uv_domain,
+                line_point,
+                line_vector,
+                line_interval,
+                fire_ray,
+                distance_tolerance,
+                |sub_interval| {
+                    Surface::from(p.clone()).base_global_line_intersect_from(
+                        k,
+                        surface,
+                        source,
+                        None,
+                        modes,
+                        uv_domain,
+                        line_point,
+                        line_vector,
+                        Some(sub_interval),
+                        fire_ray,
+                        distance_tolerance,
+                    )
+                },
+            ),
+            (_, context) => self.base_global_line_intersect_from(
                 k,
                 surface,
-                match cache {
-                    Some(cache) => LineCacheSource::Caller(cache),
-                    None => LineCacheSource::Fresh,
-                },
-                Some(context),
+                source,
+                context,
+                modes,
                 uv_domain,
                 line_point,
                 line_vector,
@@ -1751,6 +1859,7 @@ impl Surface {
             k,
             surface,
             source,
+            None,
             None,
             uv_domain,
             line_point,
@@ -1863,6 +1972,7 @@ impl Surface {
                 Some(surface),
                 LineCacheSource::Held(held),
                 context,
+                None,
                 uv_domain,
                 line_point,
                 line_vector,
@@ -1914,6 +2024,7 @@ impl Surface {
                 Some(surface),
                 LineCacheSource::Face(face_cache),
                 None,
+                None,
                 uv_domain,
                 line_point,
                 line_vector,
@@ -1925,7 +2036,7 @@ impl Surface {
     }
 
     /// The body of [`Surface::base_global_line_intersect_in`] with the cache from
-    /// `source`.
+    /// `source`, the solve running in `modes` (`None`: the cache's own).
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn base_global_line_intersect_from<O: SolutionObject>(
         &self,
@@ -1933,6 +2044,7 @@ impl Surface {
         surface: Option<O>,
         source: LineCacheSource<'_, O>,
         mut context: Option<&mut dyn SurfaceSolveContext<O>>,
+        modes: Option<SolveModes>,
         uv_domain: &Extent2d,
         line_point: Point3,
         line_vector: Vec3,
@@ -1945,7 +2057,7 @@ impl Surface {
         if line_vector.length_squared() < EFF_ZERO_SQ {
             return Err(SolidError::surface(
                 OP_LINE,
-                SurfaceFailure::InvalidValue("the line direction is the zero vector"),
+                SurfaceFailure::LineDirectionZero,
             ));
         }
 
@@ -1964,17 +2076,21 @@ impl Surface {
                 owned = match source.build(k) {
                     Ok(c) => c,
                     Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    Err(_) => return Err(SolidError::surface_missing(OP_LINE, "the face's cache")),
+                    Err(e) => {
+                        return Err(Failure::new(OP_LINE, SurfaceFailure::SolveCacheNotMade)
+                            .caused_by(e)
+                            .into_error())
+                    }
                 };
                 face_cache = Some(source);
                 // the face's source ran the trimmed cache's own GetTree: the base
                 // cache's cannot rebuild a face-owned tree
                 let has_tree = owned.tree().is_some();
-                held = Some(&mut owned);
-                match held.as_deref_mut() {
-                    Some(c) if has_tree => &*c,
-                    Some(c) => Self::held_cache(k, c, OP_LINE)?,
-                    None => return Err(SolidError::surface_missing(OP_LINE, "the face's cache")),
+                let c = &mut **held.insert(&mut owned);
+                if has_tree {
+                    &*c
+                } else {
+                    Self::held_cache(k, c, OP_LINE)?
                 }
             }
             LineCacheSource::Caller(c) => {
@@ -1982,17 +2098,15 @@ impl Surface {
                 // context built, which already ran the owning face's virtual GetTree;
                 // the bare base cache cannot rebuild a face-owned tree.
                 let ready = context.is_some() && c.tree().is_some();
-                held = Some(c);
-                match held.as_deref_mut() {
-                    Some(c) if ready => &*c,
-                    Some(c) => Self::held_cache(k, c, OP_LINE)?,
-                    None => {
-                        return Err(SolidError::surface_missing(OP_LINE, "the surface's cache"))
-                    }
+                let c = &mut **held.insert(c);
+                if ready {
+                    &*c
+                } else {
+                    Self::held_cache(k, c, OP_LINE)?
                 }
             }
             LineCacheSource::Fresh => {
-                built = self.solve_cache_from_context(
+                built = self.lent_cache_from_context(
                     k,
                     surface,
                     OP_LINE,
@@ -2004,10 +2118,18 @@ impl Surface {
                 // delays its tree builds it now
                 // The context already performed the owning face's virtual GetTree.
                 // Re-entering the bare base cache cannot rebuild a face-owned tree.
-                if context.is_some() && built.tree().is_some() {
-                    &built
+                // (only a context lends a shared cache, and with its tree)
+                let ready = match &built {
+                    LentSurfaceCache::Shared(_) => true,
+                    LentSurfaceCache::Owned(c) => context.is_some() && c.tree().is_some(),
+                };
+                if ready {
+                    &*built
                 } else {
-                    Self::held_cache(k, &mut built, OP_LINE)?
+                    match &mut built {
+                        LentSurfaceCache::Owned(c) => Self::held_cache(k, c, OP_LINE)?,
+                        LentSurfaceCache::Shared(c) => &**c,
+                    }
                 }
             }
             LineCacheSource::Held(kept) => {
@@ -2029,12 +2151,29 @@ impl Surface {
         let face_queries = context
             .as_deref()
             .and_then(SurfaceSolveContext::face_queries);
-        let tree = cache
-            .tree()
-            .ok_or_else(|| SolidError::surface_missing(OP_LINE, "the cache's tree"))?;
-        let top = tree
-            .top_node()
-            .ok_or_else(|| SolidError::surface_missing(OP_LINE, "the tree's top node"))?;
+        let tree = cache.tree().ok_or_else(|| {
+            Failure::new(
+                OP_LINE,
+                SurfaceFailure::Defect {
+                    why: "the surface cache has no tree, though each source gives one: \
+                          GetTree builds it, or a solve context's build_surface_cache \
+                          returns its cache with the tree ready",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
+        let top = tree.top_node().ok_or_else(|| {
+            Failure::new(
+                OP_LINE,
+                SurfaceFailure::Defect {
+                    why: "the surface cache's tree has no top node, though a successful \
+                          build makes one for the surface's domain",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         let tree_box = tree.node(top)?.bbox;
 
         // scale LineVec so that its length is about 1 to improve solution tolerances
@@ -2057,6 +2196,7 @@ impl Surface {
             distance_tolerance,
         );
         gs.surface_cache = Some(cache);
+        gs.modes = modes;
         gs.face_queries = face_queries;
         gs.face_cache = face_cache;
 
@@ -2074,10 +2214,7 @@ impl Surface {
             &mut sols,
         )?;
         // restore the original scaling to solution parameters
-        for ii in 0..sols.len() {
-            let sol = sols
-                .get_mut(ii)
-                .ok_or_else(|| SolidError::surface_missing(OP_LINE, "the solution"))?;
+        for sol in sols.as_mut_slice() {
             *sol.start.param_mut(0)? /= scale;
             if sol.solution_type == SolutionType::RangeOfValues {
                 *sol.end.param_mut(0)? /= scale;
@@ -2209,8 +2346,9 @@ impl Surface {
 
             // Check Surface/LineSegment Coincidence (its point solve reaches the
             // surface's face through the caller's context, when there is one)
+            // (its fast drop tests the face only when the solve's point testing is on)
             let found = if let Some(context) = context.as_deref_mut() {
-                self.simple_coincidence_checker_with_context::<O>(
+                self.simple_coincidence_checker_from::<O>(
                     k,
                     uv_domain,
                     &line,
@@ -2219,7 +2357,8 @@ impl Surface {
                     true, // bAllowPartialCoinc [B122]
                     [None, surface],
                     Some(cache),
-                    context,
+                    Some(context),
+                    modes.is_some_and(|m| !m.point_test_enabled),
                 )?
             } else {
                 self.simple_coincidence_checker::<O>(
@@ -2461,10 +2600,11 @@ impl Surface {
                     //  tolerances
                     if last_end.param(0)? < curr_start.param(0)? {
                         last_sol.end = curr_sol.end;
-                        if last_sol.start.param(0)? > last_sol.end.param(0)? {
-                            return Err(SolidError::surface_failed(
+                        let (start, end) = (last_sol.start.param(0)?, last_sol.end.param(0)?);
+                        if start > end {
+                            return Err(SolidError::surface(
                                 OP_LINE,
-                                "a merged solution interval is reversed",
+                                SurfaceFailure::MergedRangeReversed { start, end },
                             ));
                         }
                     }
@@ -2518,6 +2658,8 @@ impl Surface {
     /// intersection; a curve coincident with the surface becomes the range(s) of its
     /// drop onto it; otherwise the curve and surface cache trees are solved and the
     /// solutions combined ([`super::p10::global_curve_intersect_combine_solutions`]).
+    /// A curve that lies on the surface over some knot spans only gives those spans
+    /// as ranges, and the trees are solved over the rest (not upstream, #19912).
     ///
     /// # Errors
     ///
@@ -2570,6 +2712,7 @@ impl Surface {
             handles,
             cache,
             None,
+            None,
             uv_domain,
             curve,
             interval,
@@ -2600,6 +2743,7 @@ impl Surface {
             handles,
             cache,
             Some(context),
+            None,
             uv_domain,
             curve,
             interval,
@@ -2607,19 +2751,31 @@ impl Surface {
         )
     }
 
+    /// [`Surface::global_curve_intersect_in`] (no `context`) or
+    /// [`Surface::global_curve_intersect_with_context`], the solve running in `modes`
+    /// (`None`: the surface cache's own, [`SolveModes::of`]): its tree solves, line
+    /// solve and point solves read them, and the caller's cache keeps its flags. The
+    /// point solves' fast drop tests the face only when the solve's point testing is
+    /// on and the cache's is too.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::global_curve_intersect`].
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
-    fn global_curve_intersect_from<O: SolutionObject>(
+    pub(crate) fn global_curve_intersect_from<O: SolutionObject>(
         &self,
         k: &Kernel,
         handles: [Option<O>; 2],
-        cache: Option<&mut SurfaceCache<O>>,
+        mut cache: Option<&mut SurfaceCache<O>>,
         mut context: Option<&mut dyn SurfaceSolveContext<O>>,
+        modes: Option<SolveModes>,
         uv_domain: &Extent2d,
         curve: &Curve,
         interval: &Extent1d,
         distance_tolerance: f64,
     ) -> Result<SolutionArray<O>> {
         let [curve_handle, surface_handle] = handles;
+        let point_test_off = modes.is_some_and(|m| !m.point_test_enabled);
 
         // Special case DegenerateCurve/Surface intersections
         if curve.is_degenerate(k, EFF_ZERO, Some(interval))? {
@@ -2629,7 +2785,13 @@ impl Surface {
             // call found before failing stays in the solutions)
             let mut sols: SolutionArray<O> = SolutionArray::new();
             let solve = if let Some(context) = context {
-                self.global_point_solve_into_with_context(
+                let point_solve = if point_test_off {
+                    Self::global_point_solve_into_with_context_point_test_off
+                } else {
+                    Self::global_point_solve_into_with_context
+                };
+                point_solve(
+                    self,
                     k,
                     surface_handle,
                     cache.as_deref(),
@@ -2659,10 +2821,7 @@ impl Surface {
             solve?;
 
             // set output values
-            for ii in 0..sols.len() {
-                let sol = sols
-                    .get_mut(ii)
-                    .ok_or_else(|| SolidError::surface_missing(OP_CURVE, "the solution"))?;
+            for sol in sols.as_mut_slice() {
                 sol.num_objects = 2;
                 sol.objects[0] = curve_handle;
                 sol.objects[1] = surface_handle;
@@ -2681,48 +2840,35 @@ impl Surface {
             if curve.is_line(k, 10, EFF_ZERO)?.is_some() {
                 // get Line value at param=0.0 avoiding interval boundary problems
                 let pv = curve.evaluate(k, interval.min(), 1, true, false)?;
-                let p0 = pv
-                    .first()
-                    .copied()
-                    .ok_or_else(|| SolidError::surface_failed(OP_CURVE, "the line has no point"))?;
-                let d1 = pv.get(1).copied().ok_or_else(|| {
-                    SolidError::surface_failed(OP_CURVE, "the line has no direction")
-                })?;
+                let (Some(&p0), Some(&d1)) = (pv.first(), pv.get(1)) else {
+                    return Err(SolidError::surface(
+                        OP_CURVE,
+                        SurfaceFailure::Defect {
+                            why: "the line's evaluation returned no point or first \
+                                  derivative, though it returns the derivatives 0..=1 asked \
+                                  of it",
+                        },
+                    ));
+                };
                 let line_point = p0 - interval.min() * d1;
 
                 // pass call to global surface/line intersect
-                let mut sols = if let Some(context) = context {
-                    self.global_line_intersect_with_context(
-                        k,
-                        surface_handle,
-                        cache,
-                        context,
-                        uv_domain,
-                        line_point,
-                        d1,
-                        Some(interval),
-                        false,
-                        distance_tolerance,
-                    )?
-                } else {
-                    self.global_line_intersect_in(
-                        k,
-                        surface_handle,
-                        cache,
-                        uv_domain,
-                        line_point,
-                        d1,
-                        Some(interval),
-                        false,
-                        distance_tolerance,
-                    )?
-                };
+                let mut sols = self.global_line_intersect_under(
+                    k,
+                    surface_handle,
+                    cache,
+                    context,
+                    modes,
+                    uv_domain,
+                    line_point,
+                    d1,
+                    Some(interval),
+                    false,
+                    distance_tolerance,
+                )?;
 
                 // for every solution set the object values
-                for ii in 0..sols.len() {
-                    let sol = sols
-                        .get_mut(ii)
-                        .ok_or_else(|| SolidError::surface_missing(OP_CURVE, "the solution"))?;
+                for sol in sols.as_mut_slice() {
                     sol.num_objects = 2;
                     sol.objects[0] = curve_handle;
                     sol.objects[1] = surface_handle;
@@ -2735,113 +2881,58 @@ impl Surface {
         let mut sols: SolutionArray<O> = SolutionArray::new();
 
         // Run quick not robust coincidence check.
-        let coincidence = if let Some(context) = context.as_mut() {
-            self.simple_coincidence_checker_with_context(
-                k,
-                uv_domain,
-                curve,
-                interval,
-                distance_tolerance,
-                true,
-                [curve_handle, surface_handle],
-                cache.as_deref(),
-                &mut **context,
-            )?
-        } else {
-            self.simple_coincidence_checker::<O>(
-                k,
-                uv_domain,
-                curve,
-                interval,
-                distance_tolerance,
-                true,
-                [curve_handle, surface_handle],
-            )?
-        };
-        let coincident = coincidence.is_some();
+        let coincident = self.curve_coincidence_found(
+            k,
+            handles,
+            cache.as_deref(),
+            context.as_deref_mut(),
+            uv_domain,
+            curve,
+            interval,
+            distance_tolerance,
+            true,
+            point_test_off,
+        )?;
+
+        // the parts of the curve the general solve looks at: all of it, unless parts
+        // of it lie on the surface
+        let mut gaps = vec![*interval];
 
         // When Coincident - make 3Dcurve projection an interval solution
         //                   more than 1 when curve wanders in and out of surface
         //                   boundary by more than dDistanceTolerance
         if coincident {
-            // drop curve to surface (the drop's trace gets the surface's cache,
-            // `smsurf_GetSurfaceCache`: the face's, through a face-aware context)
-            let mut from_context;
-            let cache = match (cache, context.as_mut()) {
-                (Some(c), _) => Some(c),
-                (None, Some(context)) if self.face()?.is_some() => {
-                    from_context = context.build_surface_cache(k, self, surface_handle)?;
-                    Some(&mut from_context)
-                }
-                (None, _) => None,
-            };
-            let dropped = self.drop_and_trim_curve_in_context::<NoObject, O>(
+            let (uv_curves, dist_to_surface) = self.coincident_drop(
                 k,
-                cache,
+                surface_handle,
+                cache.as_deref_mut(),
+                context.as_deref_mut(),
                 uv_domain,
                 curve,
                 interval,
                 distance_tolerance,
-                true,
-                true,
-                None,
-                context.as_mut().map(|solver| DropSolveContext {
-                    solver: &mut **solver,
-                    handle: surface_handle,
-                }),
             )?;
-            let mut dist_to_surface = dropped.max_drop_to_surf;
-            let mut uv_curves: Vec<Curve> = dropped.uv_curves;
 
-            // DropAndTrimCurve() will miss curves that lie entirely within the
-            // boundaries of the surface. Use DropCurve() for that. [090827]
-            if uv_curves.is_empty() {
-                // To find totally interior curves, try dropping the whole curve to the
-                // surface asking only for those curves within dDistanceTolerance of the
-                // surface in the output.
-                if let Some((curves, dist, _deviation)) = ignored(surface_drop_curve(
-                    k,
-                    self,
-                    uv_domain,
-                    curve,
-                    interval,
-                    distance_tolerance,
-                    false,
-                    context.as_mut().map(|solver| DropSolveContext {
-                        solver: &mut **solver,
-                        handle: surface_handle,
-                    }),
-                ))? {
-                    uv_curves = curves;
-                    dist_to_surface = dist;
+            // A curve that lies in a plane over some knot spans and leaves it over
+            // others (#19912): those spans become ranges, and the general solve looks
+            // for crossings over the rest.
+            let split = if dist_to_surface <= distance_tolerance {
+                None
+            } else {
+                self.spans_in_plane(k, handles, curve, interval, distance_tolerance)?
+            };
+
+            // Otherwise: a range solution per dropped curve
+            let Some((ranges, span_gaps)) = split else {
+                for uv_curve in &uv_curves {
+                    sols.add(&coincident_range(k, handles, uv_curve, dist_to_surface)?);
                 }
+                return Ok(sols);
+            };
+            for range in &ranges {
+                sols.add(range);
             }
-
-            // Set up a Solution for each dropped curve: Range solutions.
-            for uv_curve in &uv_curves {
-                let ivl = uv_curve.natural_interval();
-                let mut sol = Solution::<O>::new();
-                sol.num_variables = 3;
-                sol.solution_type = SolutionType::RangeOfValues;
-                sol.num_objects = 2;
-                sol.objects[0] = curve_handle;
-                sol.objects[1] = surface_handle;
-
-                let pnt = uv_curve.evaluate_point(k, ivl.min())?;
-                sol.start.solution_value = dist_to_surface;
-                *sol.start.param_mut(0)? = ivl.min();
-                *sol.start.param_mut(1)? = pnt.x;
-                *sol.start.param_mut(2)? = pnt.y;
-
-                let pnt = uv_curve.evaluate_point(k, ivl.max())?;
-                sol.end.solution_value = dist_to_surface;
-                *sol.end.param_mut(0)? = ivl.max();
-                *sol.end.param_mut(1)? = pnt.x;
-                *sol.end.param_mut(2)? = pnt.y;
-
-                sols.add(&sol);
-            }
-            return Ok(sols);
+            gaps = span_gaps;
         }
 
         // arrive here - need to do a general surf/curve intersection
@@ -2859,7 +2950,7 @@ impl Surface {
                 Self::held_cache(k, c, OP_CURVE)?
             }
         } else {
-            built = self.solve_cache_from_context(
+            built = self.lent_cache_from_context(
                 k,
                 surface_handle,
                 OP_CURVE,
@@ -2867,40 +2958,40 @@ impl Surface {
                     .as_mut()
                     .map(|context| &mut **context as &mut dyn SurfaceSolveContext<O>),
             )?;
-            &built
+            &*built
         };
         let face_queries = context
             .as_deref()
             .and_then(SurfaceSolveContext::face_queries);
-        let surface_tree = surface_cache
-            .tree()
-            .ok_or_else(|| SolidError::surface_missing(OP_CURVE, "the surface cache's tree"))?;
+        let surface_tree = surface_cache.tree().ok_or_else(|| {
+            Failure::new(
+                OP_CURVE,
+                SurfaceFailure::Defect {
+                    why: "the surface cache has no tree, though each source gives one: \
+                          GetTree builds it, or a solve context's build_surface_cache \
+                          returns its cache with the tree ready",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         let curve_cache =
             match crate::curve::curve::p5::make_curve_cache::<O>(k, curve, curve_handle) {
                 Ok(c) => c,
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => return Err(SolidError::surface_missing(OP_CURVE, "the curve's cache")),
+                Err(e) => {
+                    return Err(Failure::new(OP_CURVE, SurfaceFailure::SolveCacheNotMade)
+                        .caused_by(e)
+                        .into_error())
+                }
             };
-        let curve_tree = curve_cache
-            .tree()
-            .ok_or_else(|| SolidError::surface_missing(OP_CURVE, "the curve cache's tree"))?;
+        let curve_tree = curve_cache.tree().ok_or_else(|| {
+            Failure::new(OP_CURVE, SurfaceFailure::SolveCacheNotMade).into_error()
+        })?;
 
-        // instance the Solver
-        let mut gs = super::p1::CsiGlobalSolver::new(
-            k,
-            curve_tree,
-            surface_tree,
-            Some(surface_cache.surface()),
-            coincident,
-            *interval,
-            *uv_domain,
-        );
-        gs.curve = Some(curve);
-        gs.surface_cache = Some(surface_cache);
-        gs.face_queries = face_queries;
         // the solutions name the trees' owners (LocalSolve: the curve, sm_GetOriginalSurface)
         let surface_domain = surface_cache.surface().natural_uv_domain_with_nurb(k)?;
-        gs.operands = Some(SolveOperands {
+        let operands = SolveOperands {
             operands: [
                 curve_tree
                     .owner_object()?
@@ -2909,21 +3000,74 @@ impl Surface {
                     .owner_object()?
                     .map(|h| (h, OperandDomain::Surface(surface_domain))),
             ],
-        });
+        };
 
-        // traverse curve and surface sub-division trees
-        // for each sub-division leaf pair that has intersecting boundaries
-        //   call SmCSIGlobalSolver::LocalSolve()
-        gs.solve_it(
-            &SolveRequest {
-                operation: SolverOperation::Intersect,
-                solution_requested: SolutionRequested::All,
-                tolerance_3d: distance_tolerance,
-                best_answer_so_far_sq: BIG_DOUBLE,
-                opt_vectors: &[],
-            },
-            &mut sols,
-        )?;
+        // the curve parameters where the coincident ranges (all of `sols` so far)
+        // start and end
+        let mut range_ends = Vec::new();
+        for sol in sols.as_slice() {
+            range_ends.push(sol.start.param(0)?);
+            range_ends.push(sol.end.param(0)?);
+        }
+
+        // One solve per gap between the coincident ranges, each into its own array
+        // (the solver inserts in its own order and would compare with the ranges).
+        let mut found: Vec<Solution<O>> = sols.as_slice().to_vec();
+        for gap in &gaps {
+            // instance the Solver (not coincident: a coincident part is a range already)
+            let mut gs = super::p1::CsiGlobalSolver::new(
+                k,
+                curve_tree,
+                surface_tree,
+                Some(surface_cache.surface()),
+                false,
+                *gap,
+                *uv_domain,
+            );
+            gs.curve = Some(curve);
+            gs.surface_cache = Some(surface_cache);
+            gs.modes = modes;
+            gs.face_queries = face_queries;
+            gs.operands = Some(operands);
+
+            // traverse curve and surface sub-division trees
+            // for each sub-division leaf pair that has intersecting boundaries
+            //   call SmCSIGlobalSolver::LocalSolve()
+            let mut gap_sols = SolutionArray::new();
+            gs.solve_it(
+                &SolveRequest {
+                    operation: SolverOperation::Intersect,
+                    solution_requested: SolutionRequested::All,
+                    tolerance_3d: distance_tolerance,
+                    best_answer_so_far_sq: BIG_DOUBLE,
+                    opt_vectors: &[],
+                },
+                &mut gap_sols,
+            )?;
+
+            // A point at a range's end parameter is that end, where the curve leaves
+            // the surface. (A point elsewhere on the curve stays, even where the curve
+            // comes back to the same place.)
+            for sol in gap_sols.as_slice() {
+                if sol.solution_type == SolutionType::SingleValue {
+                    let t = sol.start.param(0)?;
+                    if range_ends.iter().any(|&end| are_same(t, end)) {
+                        continue;
+                    }
+                }
+                found.push(*sol);
+            }
+        }
+
+        // the combining below wants the solutions in curve parameter order (one gap
+        // and no range is the solver's own order, kept as it was)
+        if gaps.len() != 1 || !sols.is_empty() {
+            found.sort_by(|a, b| a.start.parameters[0].total_cmp(&b.start.parameters[0]));
+        }
+        sols.reset();
+        for sol in &found {
+            sols.add(sol);
+        }
 
         // combine duplicate solutions - find coincident regions (the call is not
         // checked upstream, which returns SM_SUCCESS; passed on as the fork does,
@@ -2946,6 +3090,270 @@ impl Surface {
         )?;
         Ok(sols)
     }
+
+    /// `SimpleCoincidenceChecker` of `curve` over `interval` against this surface,
+    /// under the caller's face solve `context` when there is one: whether its samples
+    /// lie on the surface (all of them, or with `partial_coincidence_ok` enough of them).
+    /// `point_test_off`: the solve's point testing is off.
+    #[allow(clippy::too_many_arguments)] // the solve's operands and options
+    fn curve_coincidence_found<'c, O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        handles: [Option<O>; 2],
+        cache: Option<&SurfaceCache<O>>,
+        context: Option<&mut (dyn SurfaceSolveContext<O> + 'c)>,
+        uv_domain: &Extent2d,
+        curve: &Curve,
+        interval: &Extent1d,
+        distance_tolerance: f64,
+        partial_coincidence_ok: bool,
+        point_test_off: bool,
+    ) -> Result<bool> {
+        let coincidence = if let Some(context) = context {
+            self.simple_coincidence_checker_from(
+                k,
+                uv_domain,
+                curve,
+                interval,
+                distance_tolerance,
+                partial_coincidence_ok,
+                handles,
+                cache,
+                Some(context),
+                point_test_off,
+            )?
+        } else {
+            self.simple_coincidence_checker::<O>(
+                k,
+                uv_domain,
+                curve,
+                interval,
+                distance_tolerance,
+                partial_coincidence_ok,
+                handles,
+            )?
+        };
+        Ok(coincidence.is_some())
+    }
+
+    /// The drop of a coincident `curve` over `interval` onto this surface: its UV
+    /// curves and the largest drop distance. `DropAndTrimCurve` keeps every curve;
+    /// when it finds none, `DropCurve` keeps those within `distance_tolerance`. The
+    /// drop's trace gets the surface's cache (`smsurf_GetSurfaceCache`: the face's,
+    /// through a face-aware context).
+    #[allow(clippy::too_many_arguments)] // the solve's operands and options
+    fn coincident_drop<'c, O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        surface_handle: Option<O>,
+        cache: Option<&mut SurfaceCache<O>>,
+        mut context: Option<&mut (dyn SurfaceSolveContext<O> + 'c)>,
+        uv_domain: &Extent2d,
+        curve: &Curve,
+        interval: &Extent1d,
+        distance_tolerance: f64,
+    ) -> Result<(Vec<Curve>, f64)> {
+        let mut from_context;
+        let cache = match (cache, context.as_mut()) {
+            (Some(c), _) => Some(c),
+            (None, Some(context)) if self.face()?.is_some() => {
+                from_context = context.build_surface_cache(k, self, surface_handle)?;
+                Some(&mut from_context)
+            }
+            (None, _) => None,
+        };
+        let dropped = self.drop_and_trim_curve_in_context::<NoObject, O>(
+            k,
+            cache,
+            uv_domain,
+            curve,
+            interval,
+            distance_tolerance,
+            true,
+            true,
+            None,
+            context.as_mut().map(|solver| DropSolveContext {
+                solver: &mut **solver,
+                handle: surface_handle,
+            }),
+        )?;
+        let mut dist_to_surface = dropped.max_drop_to_surf;
+        let mut uv_curves: Vec<Curve> = dropped.uv_curves;
+
+        // DropAndTrimCurve() will miss curves that lie entirely within the
+        // boundaries of the surface. Use DropCurve() for that. [090827]
+        if uv_curves.is_empty() {
+            // To find totally interior curves, try dropping the whole curve to the
+            // surface asking only for those curves within dDistanceTolerance of the
+            // surface in the output.
+            if let Some((curves, dist, _deviation)) = ignored(surface_drop_curve(
+                k,
+                self,
+                uv_domain,
+                curve,
+                interval,
+                distance_tolerance,
+                false,
+                context.as_mut().map(|solver| DropSolveContext {
+                    solver: &mut **solver,
+                    handle: surface_handle,
+                }),
+            ))? {
+                uv_curves = curves;
+                dist_to_surface = dist;
+            }
+        }
+        Ok((uv_curves, dist_to_surface))
+    }
+
+    /// The knot spans of `curve` over `interval` proved to lie within
+    /// `distance_tolerance` of this surface, when it is a plane, as range solutions,
+    /// and the intervals between them for the general solve (#19912). `None` when the
+    /// surface is not a plane, the curve has no 3D NURB form or a weight that is not
+    /// positive, or no span is proved to lie in the plane: the curve then keeps the
+    /// ranges of its whole drop, as before.
+    ///
+    /// A B-spline span lies in the convex hull of its `p + 1` control points (a rational
+    /// one, of their points with positive weights), so it lies within the tolerance of
+    /// the plane when each of them does ([`control_point_distance`], rounding counted).
+    /// Every other span is left to the general solve.
+    fn spans_in_plane<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        handles: [Option<O>; 2],
+        curve: &Curve,
+        interval: &Extent1d,
+        distance_tolerance: f64,
+    ) -> Result<Option<SpanSplit<O>>> {
+        let SurfaceKind::Plane(plane) = self.kind() else {
+            return Ok(None);
+        };
+        let Some(nurb) = b_spline_part(curve).and_then(BSplineCurve::gw_nurb) else {
+            return Ok(None);
+        };
+        let (p, cpts, knots) = (nurb.degree(), nurb.cpts(), nurb.knots());
+        let rational = nurb.is_rational();
+        if cpts
+            .iter()
+            .any(|q| q.z == NOZ || (rational && !certified::above(q.w, 0.0)))
+        {
+            return Ok(None);
+        }
+        let (origin, normal, _) = plane.is_planar();
+
+        let mut ranges = Vec::new();
+        let mut gaps: Vec<Extent1d> = Vec::new();
+        let mut last_was_gap = false;
+        for s in p..cpts.len() {
+            // the span [U_s, U_s+1] within the interval, and its control points
+            let (Some(&lo), Some(&hi)) = (knots.get(s), knots.get(s + 1)) else {
+                continue;
+            };
+            let (lo, hi) = (lo.max(interval.min()), hi.min(interval.max()));
+            if !certified::above(hi, lo) {
+                continue;
+            }
+            let hull = s.checked_sub(p).and_then(|first| cpts.get(first..=s));
+            let mut farthest = Some(0.0_f64);
+            for q in hull.unwrap_or(&[]) {
+                let d = control_point_distance(q, rational, origin, normal);
+                farthest = farthest
+                    .filter(|_| d.at_most(distance_tolerance).is_yes())
+                    .map(|f| f.max(d.value + d.bound));
+            }
+            if let Some(dist) = farthest.filter(|_| hull.is_some()) {
+                let end = |t| -> Result<(f64, Point2)> {
+                    Ok((
+                        t,
+                        plane.project_point_to_uv_domain(curve.evaluate_point(k, t)?),
+                    ))
+                };
+                ranges.push(range_solution(handles, [end(lo)?, end(hi)?], dist)?);
+                last_was_gap = false;
+            } else {
+                match gaps.last_mut() {
+                    Some(gap) if last_was_gap => gap.add_value(hi),
+                    _ => gaps.push(Extent1d::from_min_max(lo, hi)),
+                }
+                last_was_gap = true;
+            }
+        }
+        Ok((!ranges.is_empty()).then_some((ranges, gaps)))
+    }
+}
+
+/// A curve split into knot spans in and out of a plane: the range solutions of the
+/// spans in it, and the intervals between them.
+type SpanSplit<O> = (Vec<Solution<O>>, Vec<Extent1d>);
+
+/// The distance of the B-spline control point `q` from the plane through `origin`
+/// with normal `normal` (of any length), certified. Its point `p = q / w` rounds once
+/// per coordinate (not at all for a non-rational `q`), `p - o` once more and the dot
+/// with `n` in three products and two sums, so the height is within
+/// `gamma_6 * sum |n_i| (2 |p_i| + |o_i|)` of exact. Dividing by `|n|` (within
+/// `gamma_5`) and the quotient's rounding add `gamma_7` of the value, and the bound's
+/// own arithmetic is covered by a factor `1 + gamma_8`.
+fn control_point_distance(
+    q: &CPoint,
+    rational: bool,
+    origin: Point3,
+    normal: Vec3,
+) -> certified::Bounded {
+    let w = if rational { q.w } else { 1.0 };
+    let point = Point3::new(q.x / w, q.y / w, q.z / w);
+    let height = normal.dot(point - origin).abs();
+    let size = normal.x.abs() * (2.0 * point.x.abs() + origin.x.abs())
+        + normal.y.abs() * (2.0 * point.y.abs() + origin.y.abs())
+        + normal.z.abs() * (2.0 * point.z.abs() + origin.z.abs());
+    let length = normal.length();
+    let value = height / length;
+    certified::Bounded {
+        value,
+        bound: (gamma(6) * size / length + gamma(7) * value) * (1.0 + gamma(8)),
+    }
+}
+
+/// The range solution of a curve lying on a surface over the drop `uv_curve`
+/// (parameterised as the curve), at the drop distance `dist_to_surface`.
+fn coincident_range<O: SolutionObject>(
+    k: &Kernel,
+    handles: [Option<O>; 2],
+    uv_curve: &Curve,
+    dist_to_surface: f64,
+) -> Result<Solution<O>> {
+    let ivl = uv_curve.natural_interval();
+    let end = |t| -> Result<(f64, Point2)> {
+        let uv = uv_curve.evaluate_point(k, t)?;
+        Ok((t, Point2::new(uv.x, uv.y)))
+    };
+    range_solution(handles, [end(ivl.min())?, end(ivl.max())?], dist_to_surface)
+}
+
+/// The range solution of a curve and a surface from the curve parameter and surface
+/// point at its two ends, at the distance `dist_to_surface`.
+fn range_solution<O: SolutionObject>(
+    [curve_handle, surface_handle]: [Option<O>; 2],
+    ends: [(f64, Point2); 2],
+    dist_to_surface: f64,
+) -> Result<Solution<O>> {
+    let mut sol = Solution::<O>::new();
+    sol.num_variables = 3;
+    sol.solution_type = SolutionType::RangeOfValues;
+    sol.num_objects = 2;
+    sol.objects[0] = curve_handle;
+    sol.objects[1] = surface_handle;
+    let [(t0, uv0), (t1, uv1)] = ends;
+
+    sol.start.solution_value = dist_to_surface;
+    *sol.start.param_mut(0)? = t0;
+    *sol.start.param_mut(1)? = uv0.x;
+    *sol.start.param_mut(2)? = uv0.y;
+
+    sol.end.solution_value = dist_to_surface;
+    *sol.end.param_mut(0)? = t1;
+    *sol.end.param_mut(1)? = uv1.x;
+    *sol.end.param_mut(2)? = uv1.y;
+    Ok(sol)
 }
 
 // ---- SmSPGlobalSolver::LocalSolve --------------------------------------------------------------------
@@ -2971,21 +3379,23 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
         let k = self.kernel;
         // locals
         let point_node = *self.base.branch_node(branch, 0)?;
-        let surface_node = *self.base.branch_node(branch, 1)?;
-        let surface_id = branch
-            .get(1)
-            .copied()
-            .flatten()
-            .ok_or_else(|| SolidError::surface_missing(OP_SP, "the branch's surface patch"))?;
-        let cache = self
-            .surface_cache
-            .ok_or_else(|| SolidError::surface_missing(OP_SP, "the surface cache"))?;
+        let (surface_id, surface_node) = self.base.branch_entry(branch, 1)?;
+        let surface_node = *surface_node;
+        let cache = self.surface_cache.ok_or_else(|| {
+            SolidError::surface(
+                OP_SP,
+                SurfaceFailure::SolverWithout {
+                    part: SolverPart::SurfaceCache,
+                },
+            )
+        })?;
         let patch = cache.patch(surface_id)?.clone();
         let test_pnt = point_node.bbox.min();
         let tree1 = self.base.tree(1)?;
 
         // If the classification of the node is outside then we can quit here
-        if !is_node_valid(tree1.owner(), cache, &surface_node)? {
+        let modes = SolveModes::of(cache, self.modes);
+        if !is_node_valid(tree1.owner(), cache, modes, &surface_node)? {
             return Ok(false);
         }
 
@@ -3099,7 +3509,7 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
             tol,
             op,
             solve_for_surface,
-            cache.process_boundary_curves(),
+            modes.process_boundary_curves,
         )?;
 
         // For every solution, set some solution parameters, and then check whether to
@@ -3125,6 +3535,7 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
                 k,
                 self.base.tree(1)?.owner(),
                 cache,
+                modes,
                 uv_found,
                 None,
                 self.face_queries,
@@ -3149,7 +3560,9 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
 pub struct SingularityInversion {
     /// `rUVGuess`: the parameters of the closest point.
     pub uv: Point2,
-    /// `reReason`: always `FoundAnswerConverged` on success.
+    /// `reReason`: `FoundAnswerConverged` on success (upstream's only value), or, not
+    /// upstream, `UnableToConverge` for a maximize that keeps its guess: nothing shows
+    /// the guess is a maximum.
     pub reason: TerminationReason,
 }
 
@@ -3160,13 +3573,21 @@ impl Surface {
     /// to it, may already be the answer; else the degenerate parameter is found where
     /// the surviving tangent points to the test point
     /// ([`Surface::find_degen_param_for_direction`]), and the other parameter by
-    /// dropping the point to the iso curve there.
+    /// dropping the point to the iso curve there. Not upstream: where the surface's
+    /// point evaluation has a rounding bound ([`point_rounding`]), an answer proven
+    /// farther from `test_pt` than the guess is refused (upstream reports it found),
+    /// the evaluations' rounding charged to both distances, and so is one proven farther
+    /// than the point the test point drops to on the singular boundary (the method
+    /// assumes that boundary is a pole; where a point of it is nearer, it is not).
     ///
     /// # Errors
     ///
     /// The status of a failing degenerate parameter search (`SM_ERR` when it does not
-    /// converge) or iso curve creation or curve drop; [`SolidError::Unported`] from
-    /// the evaluations and drops.
+    /// converge) or iso curve creation or curve drop; `SM_ERR` for an answer proven
+    /// farther from `test_pt` than the guess or than a point of the singular boundary
+    /// (the boundary is then not a pole), or for a distance that is not enclosed (not a
+    /// number, or at a point past a rational net's knots);
+    /// [`SolidError::Unported`] from the evaluations and drops.
     pub fn invert_point_near_singularity(
         &self,
         k: &Kernel,
@@ -3174,6 +3595,52 @@ impl Surface {
         uv_domain: &Extent2d,
         uv_guess: Point2,
         tol: f64,
+    ) -> Result<SingularityInversion> {
+        self.invert_point_near_singularity_for(k, test_pt, uv_domain, uv_guess, tol, false)
+    }
+
+    /// [`Surface::invert_point_near_singularity`] for a closest point (`farthest`
+    /// false) or for a maximize (`farthest` true, not upstream): of the drops the
+    /// farthest from `test_pt` is kept, and where it is proven nearer than the guess
+    /// the guess is kept; either is reported [`TerminationReason::UnableToConverge`]
+    /// (the point-solve stepper's `Maximize` ends its iteration at an inversion's
+    /// answer; the nearest drop ended goldens `surface_point_solve_p3` `matrix_0105` at
+    /// 18192 against the guess's 21900, and the drops minimize along their iso curves,
+    /// so nothing here shows that the guess or a drop is a maximum).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::invert_point_near_singularity`]; with `farthest`, no
+    /// refusal for the distance.
+    pub(crate) fn invert_point_near_singularity_for(
+        &self,
+        k: &Kernel,
+        test_pt: Point3,
+        uv_domain: &Extent2d,
+        uv_guess: Point2,
+        tol: f64,
+        farthest: bool,
+    ) -> Result<SingularityInversion> {
+        let body =
+            || self.invert_near_singularity_body(k, test_pt, uv_domain, uv_guess, tol, farthest);
+        // (test-only seam of the WR-57 substitution replay, feature `wr57-replay`)
+        #[cfg(feature = "wr57-replay")]
+        let body = || {
+            let input = super::replay::invert_input(test_pt, uv_domain, uv_guess, tol);
+            super::replay::wrap(k, self, super::replay::Seam::Invert, &input, farthest, body)
+        };
+        body()
+    }
+
+    /// [`Surface::invert_point_near_singularity_for`]'s work.
+    fn invert_near_singularity_body(
+        &self,
+        k: &Kernel,
+        test_pt: Point3,
+        uv_domain: &Extent2d,
+        uv_guess: Point2,
+        tol: f64,
+        farthest: bool,
     ) -> Result<SingularityInversion> {
         let reason = TerminationReason::FoundAnswerConverged;
 
@@ -3188,8 +3655,8 @@ impl Surface {
         }
 
         let sing_dir;
-        let mut degen_param; // the one that doesn't move the point
-        let mut good_param; // the one leaving the singularity
+        let degen_param; // the one that doesn't move the point
+        let good_param; // the one leaving the singularity
         let good_domain;
         let mut sing_uv = Point2::UNDEF;
 
@@ -3245,19 +3712,297 @@ impl Surface {
         // test point.
         let pole_pt = self.evaluate_point(k, sing_uv)?;
         let diff_vec = test_pt - pole_pt; // we know this isn't zero.
-        let degen =
-            self.find_degen_param_for_direction(k, sing_uv, diff_vec, true, sing_dir, tol)?;
-        if !degen.converged {
+        let (degen, roots) =
+            self.degen_param_search(k, sing_uv, diff_vec, true, sing_dir, tol, true)?;
+        // (not upstream) The rounding of this surface's point evaluation: where it has
+        // no bound ([`point_rounding`]), no distance comparison below can be proven, and
+        // the inversion is upstream's (the search's answer, its drop, no refusal).
+        let bounded = point_rounding(k, self, uv_guess)?.is_some();
+        // (not upstream) The degenerate parameters to drop onto: the search's answer,
+        // then every parameter where upstream's search solve reports found from one of
+        // its starts. The iso curve through the closest point is the most aligned one
+        // only where the boundary is a collapsed pole; where it is not collapsed, or the
+        // alignment is flat along it, a less aligned iso curve can pass nearer the test
+        // point (goldens `surface_p8` gen1651, gen1460). The nearest drop is kept, the
+        // search's answer unless another is proven nearer; upstream drops onto the
+        // search's answer only.
+        let mut degen_params: Vec<f64> = Vec::new();
+        if degen.converged {
+            degen_params.push(if sing_dir == SurfParamType::U {
+                degen.uv.x
+            } else {
+                degen.uv.y
+            });
+        }
+        if bounded {
+            for r in roots {
+                if !degen_params.contains(&r) {
+                    degen_params.push(r);
+                }
+            }
+        }
+        if degen_params.is_empty() {
             // Probably out of bounds (SM_TR_OUT_OF_BOUNDS / SM_TR_UNABLE_TO_CONVERGE).
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_INVERT,
-                "the degenerate parameter toward the point did not converge",
+                SurfaceFailure::DegenerateParameterNotFound,
             ));
         }
-        sing_uv = degen.uv;
 
+        // (not upstream) The enclosure of the true distance from `test_pt` to the
+        // surface's point at `at`, whose evaluation is `pt`: the computed distance's own
+        // rounding ([`certified::distance`]) and the evaluation's ([`point_rounding`]);
+        // `None` where the evaluation has no bound or a number is not finite.
+        let enclose = |at: Point2, pt: Point3| -> Result<Option<(f64, f64)>> {
+            let d = certified::distance(pt, test_pt);
+            let Some(e) = point_rounding(k, self, at)? else {
+                return Ok(None);
+            };
+            let reach = d.bound + e;
+            let lo = certified::next_down(d.value - reach);
+            let hi = certified::next_up(d.value + reach);
+            Ok((lo.is_finite() && hi.is_finite()).then_some((lo, hi)))
+        };
+
+        // (each kept: the parameters and the enclosure of its distance)
+        let mut kept: Option<(Point2, Option<(f64, f64)>)> = None;
+        let mut first_err = None;
+        for param in degen_params {
+            sing_uv = if sing_dir == SurfParamType::U {
+                Point2::new(param, sing_uv.y)
+            } else {
+                Point2::new(sing_uv.x, param)
+            };
+            // (a failing drop drops that parameter; with none left, the first failure
+            // is returned, as upstream returns its one drop's)
+            let dropped =
+                self.drop_to_degen_iso(k, sing_uv, sing_dir, diff_vec, &good_domain, test_pt, tol);
+            let (uv, found_pt) = match dropped {
+                Ok(v) => v,
+                Err(e)
+                    if e.is_unported_or_cancelled()
+                        || matches!(e, SolidError::PreparationRequired { .. }) =>
+                {
+                    return Err(e)
+                }
+                Err(e) => {
+                    first_err.get_or_insert(e);
+                    continue;
+                }
+            };
+            // (a later drop replaces the kept one only where it is proven nearer (for a
+            // maximize, farther): its enclosure wholly below (above) the kept one's, so
+            // drops equally near within the rounding keep the search's answer; one
+            // without an enclosure replaces nothing, and is replaced by any with one)
+            let d = enclose(uv, found_pt)?;
+            let replaces = match (&kept, d) {
+                (None, _) | (Some((_, None)), Some(_)) => true,
+                (Some((_, Some((klo, khi)))), Some((lo, hi))) => {
+                    if farthest {
+                        lo > *khi
+                    } else {
+                        hi < *klo
+                    }
+                }
+                (Some(_), None) => false,
+            };
+            if replaces {
+                kept = Some((uv, d));
+            }
+        }
+        let Some((uv, found_d)) = kept else {
+            return Err(first_err.unwrap_or_else(|| {
+                SolidError::surface(
+                    OP_INVERT,
+                    SurfaceFailure::Defect {
+                        why: "no drop was kept and none failed, though there is at least one \
+                              degenerate parameter and each one's drop is kept or fails",
+                    },
+                )
+            }));
+        };
+        if !bounded {
+            return Ok(SingularityInversion { uv, reason });
+        }
+
+        // (not upstream) The answer and the guess compared, each distance enclosed with
+        // its evaluation's rounding: the guess's own point (a pole, where every
+        // degenerate parameter gives the same point) differs from the answer's only by
+        // that rounding, which no comparison below can mistake for a distance. A
+        // distance without an enclosure is refused, never compared: one that is not a
+        // number, or one at a point past a rational net's knots, where the evaluation's
+        // rounding has no bound ([`point_rounding`]; the guess's is bounded here).
+        let (Some((found_lo, found_hi)), Some((guess_lo, guess_hi))) =
+            (found_d, enclose(uv_guess, srf_pt)?)
+        else {
+            return Err(SolidError::surface(
+                OP_INVERT,
+                SurfaceFailure::DistanceNotEnclosed,
+            ));
+        };
+        // (not upstream) For a maximize the guess is kept where the drop kept is proven
+        // nearer the test point than it: the stepper ends its iteration at the answer,
+        // and stepping on from the guess ends nearer still (goldens
+        // `surface_point_solve_p3` matrix_0105: the one drop 18192 away, the guess
+        // 21900; matrix_0822 and matrix_0957 end at 0.591 and 0.619 when stepping on).
+        // The drops minimize along their iso curves, so nothing here shows that the
+        // guess or the farthest drop is a maximum: either is reported unconverged.
+        if farthest {
+            let uv = if found_hi < guess_lo { uv_guess } else { uv };
+            return Ok(SingularityInversion {
+                uv,
+                reason: TerminationReason::UnableToConverge,
+            });
+        }
+        // (not upstream) The answer is the closest point only if it is not farther from
+        // the test point than the guess: one proven farther is not an answer. The method
+        // assumes the boundary at `sSingUV` is a pole; where it is not collapsed, the
+        // iso curve at the degenerate parameter can lie far from the test point (goldens
+        // `surface_p8` gen1191: 35505.9 away, the guess 1395.2), and upstream reports it
+        // found.
+        if found_lo > guess_hi {
+            return Err(SolidError::surface(
+                OP_INVERT,
+                SurfaceFailure::FartherThanGuess {
+                    found: found_lo,
+                    guess: guess_hi,
+                },
+            ));
+        }
+        // (not upstream) The pole assumption checked: the boundary at `sSingUV` is a
+        // pole only if every point of it is the same point. The test point is dropped
+        // onto that boundary (the iso curve at the boundary's good parameter, over the
+        // uv domain's degenerate interval, from the answer's degenerate parameter), and
+        // an answer farther than a boundary point proven nearer is not the closest
+        // point (goldens `surface_p8` gen1191: the answer 1163.2 from the test point,
+        // the boundary `u = 1` within 9.4 of it, upstream's search found). A failing
+        // drop or an enclosure that does not exist proves nothing, and refuses nothing.
+        if let Some(near_hi) = self.singular_boundary_distance(
+            k, sing_uv, sing_dir, uv, uv_domain, test_pt, tol, &enclose,
+        )? {
+            if near_hi < found_lo {
+                return Err(SolidError::surface(
+                    OP_INVERT,
+                    SurfaceFailure::SingularBoundaryNotPole {
+                        boundary: near_hi,
+                        found: found_lo,
+                    },
+                ));
+            }
+        }
+        Ok(SingularityInversion { uv, reason })
+    }
+
+    /// The upper end of the enclosed distance from `test_pt` to the nearest point found
+    /// on the singular boundary through `sing_uv` (not upstream, WR-57): `test_pt`
+    /// dropped onto the iso curve at `sing_uv`'s good parameter (the boundary along
+    /// `sing_dir`), over `uv_domain`'s interval in `sing_dir`, from `answer`'s
+    /// parameter in it. `None` where the iso curve, the drop or the evaluation fails,
+    /// the boundary point is not inside `uv_domain`, or the distance has no enclosure
+    /// (`enclose`, the caller's).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`], cancellation and preparation errors only; any other
+    /// failure gives `None`.
+    #[allow(clippy::too_many_arguments)]
+    fn singular_boundary_distance(
+        &self,
+        k: &Kernel,
+        sing_uv: Point2,
+        sing_dir: SurfParamType,
+        answer: Point2,
+        uv_domain: &Extent2d,
+        test_pt: Point3,
+        tol: f64,
+        enclose: &dyn Fn(Point2, Point3) -> Result<Option<(f64, f64)>>,
+    ) -> Result<Option<f64>> {
+        let passes = |e: &SolidError| {
+            e.is_unported_or_cancelled() || matches!(e, SolidError::PreparationRequired { .. })
+        };
+        let (boundary_dir, boundary_param, degen_domain, guess) = if sing_dir == SurfParamType::U {
+            (
+                SurfParamType::V,
+                sing_uv.y,
+                uv_domain.u_interval(),
+                answer.x,
+            )
+        } else {
+            (
+                SurfParamType::U,
+                sing_uv.x,
+                uv_domain.v_interval(),
+                answer.y,
+            )
+        };
+        let mut boundary = match self.create_iso_parametric_curve(
+            k,
+            boundary_dir,
+            boundary_param,
+            tol,
+            None,
+            false,
+        ) {
+            Ok(iso) => iso.curve,
+            Err(e) if passes(&e) => return Err(e),
+            Err(_) => return Ok(None),
+        };
+        enable_out_of_bounds(&mut boundary);
+        let dropped = match boundary.drop_point(
+            k,
+            &degen_domain,
+            test_pt,
+            None,
+            tol,
+            Some(degen_domain.clamp_value(guess)),
+            SolverOperation::Minimize,
+        ) {
+            Ok(d) => d,
+            Err(e) if passes(&e) => return Err(e),
+            Err(_) => return Ok(None),
+        };
+        let t = dropped.parameter;
+        if !t.is_finite() {
+            return Ok(None);
+        }
+        let at = if sing_dir == SurfParamType::U {
+            Point2::new(t, boundary_param)
+        } else {
+            Point2::new(boundary_param, t)
+        };
+        // (a point of the surface only inside its uv domain: the drop runs out of bounds)
+        if !(at.x.is_finite() && at.y.is_finite() && uv_domain.contains_point(at, 0.0)) {
+            return Ok(None);
+        }
+        let pt = match self.evaluate_point(k, at) {
+            Ok(p) => p,
+            Err(e) if passes(&e) => return Err(e),
+            Err(_) => return Ok(None),
+        };
+        Ok(enclose(at, pt)?.map(|(_, hi)| hi))
+    }
+
+    /// The drop of `InvertPointNearSingularity` onto the iso curve at the degenerate
+    /// parameter of `sing_uv` (singular in `sing_dir`): the parameters of the dropped
+    /// point and the point. `diff_vec` is the test point's offset from the pole, which
+    /// with the surviving derivative at `sing_uv` gives the drop's guess.
+    ///
+    /// # Errors
+    ///
+    /// Those of iso curve creation, the evaluations and the curve drop.
+    #[allow(clippy::too_many_arguments)]
+    fn drop_to_degen_iso(
+        &self,
+        k: &Kernel,
+        sing_uv: Point2,
+        sing_dir: SurfParamType,
+        diff_vec: Vec3,
+        good_domain: &Extent1d,
+        test_pt: Point3,
+        tol: f64,
+    ) -> Result<(Point2, Point3)> {
         // Now find the non-degenerate param: drop to iso-curve.
-        degen_param = if sing_dir == SurfParamType::U {
+        let degen_param = if sing_dir == SurfParamType::U {
             sing_uv.x
         } else {
             sing_uv.y
@@ -3278,7 +4023,7 @@ impl Surface {
         // same-point tol for close solutions
         let dropped = iso_curve.drop_point(
             k,
-            &good_domain,
+            good_domain,
             test_pt,
             None,
             tol,
@@ -3286,15 +4031,134 @@ impl Surface {
             SolverOperation::Minimize,
         )?;
         // DropPoint always writes rdDroppedParameter (initialised to 0.0), used as is
-        good_param = dropped.parameter;
+        let good_param = dropped.parameter;
 
         let uv = if sing_dir == SurfParamType::U {
             Point2::new(degen_param, good_param)
         } else {
             Point2::new(good_param, degen_param)
         };
-        Ok(SingularityInversion { uv, reason })
+        Ok((uv, self.evaluate_point(k, uv)?))
     }
+}
+
+/// A bound on `|computed - exact|` of [`Surface::evaluate_point`] at `uv` (not upstream,
+/// WR-57), for the kinds whose point is their NURB's (`N_SrfEvalPt` on a B-spline,
+/// ball patch, sphere, torus, surface of revolution or of extrusion); `None` for any
+/// other kind (their evaluations are their own), a power-basis form, a net that is not
+/// finite or has a weight that is not positive, and a rational net evaluated past its
+/// knots (where its weight sum is not bounded below).
+///
+/// The bound is derived from the net, not the point (Higham, *Accuracy and Stability of
+/// Numerical Algorithms*, 2nd ed., section 3.1, the standard model): `N_SrfEvalPt` takes
+/// each homogeneous coordinate through the Cox-de Boor recurrence (`p` levels in u,
+/// `q` in v, each a difference, a sum, a quotient, two products and a sum) and two
+/// blending sums of `p + 1` and `q + 1` terms, so it is within `gamma(8 (p + q + 2))` of
+/// `sum |N_i| |N_j| |P_ij|`. Inside the knots the basis is non-negative and sums to 1, so
+/// that is at most the net's largest coordinate; past them (an out-of-bounds
+/// evaluation continues the end span `[a, b]` as a polynomial) each recurrence level
+/// grows `sum |N|` by at most `1 + 2 d / (b - a)` at a distance `d` past the span, as
+/// [`extrapolation`] counts. A rational net's weight sum carries the same relative
+/// error, and dividing by it (at least the smallest weight inside the knots) adds
+/// `2 g m W / (w - g W)` (`m` the largest Euclidean coordinate, `W`, `w` the largest and
+/// smallest weights) and two roundings. The coordinate bound times 2 (above `sqrt 3`,
+/// with room for the bound's own rounding) bounds the point.
+pub(crate) fn point_rounding(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Option<f64>> {
+    Ok(evaluation_net(k, surface)?.and_then(|net| net_point_rounding(&net, uv)))
+}
+
+/// The B-spline net whose evaluation is [`Surface::evaluate`]'s for `surface` (WR-57):
+/// a B-spline's own, a ball patch's, a sphere's, torus's or surface of revolution's
+/// NURB and a surface of extrusion's; `None` for every other kind (their evaluations
+/// are their own).
+pub(crate) fn evaluation_net<'s>(
+    k: &Kernel,
+    surface: &'s Surface,
+) -> Result<Option<Cow<'s, BSplineSurface>>> {
+    Ok(Some(match surface.kind_with_nurb(k)? {
+        SurfaceKind::BSpline(s) => Cow::Borrowed(s),
+        SurfaceKind::BallPatch(s) => Cow::Borrowed(s.net()),
+        SurfaceKind::SurfOfRevolution(_) | SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) => {
+            Cow::Borrowed(surface.analytic_base_with_nurb(k)?)
+        }
+        SurfaceKind::SurfOfExtrusion(_) => surface.extrusion_base_with_nurb(k)?,
+        _ => return Ok(None),
+    }))
+}
+
+/// [`point_rounding`] of a B-spline surface's own evaluation.
+fn net_point_rounding(s: &BSplineSurface, uv: Point2) -> Option<f64> {
+    if s.form() == BSplineSurfaceForm::Polynomial {
+        return None;
+    }
+    let nurb = s.gw_nurb()?;
+    let (p, q) = (nurb.p(), nurb.q());
+    let grow = extrapolation(nurb.u_knots(), p, uv.x)? * extrapolation(nurb.v_knots(), q, uv.y)?;
+    let (mut m, mut w_min, mut w_max, mut rational) = (0.0_f64, f64::INFINITY, 0.0_f64, false);
+    for row in nurb.rows() {
+        for c in row {
+            let w = if c.w == NOW {
+                1.0
+            } else {
+                rational = true;
+                c.w
+            };
+            if !(w > 0.0 && w.is_finite()) {
+                return None;
+            }
+            w_min = w_min.min(w);
+            w_max = w_max.max(w);
+            let z = if c.z == NOZ { 0.0 } else { c.z };
+            for x in [c.x, c.y, z] {
+                if !x.is_finite() {
+                    return None;
+                }
+                m = m.max(x.abs() / w);
+            }
+        }
+    }
+    let g = gamma(8 * (p + q + 2)) * grow;
+    let coordinate = if rational {
+        // (the weight sum is at least `w_min - g W` only inside the knots, and only
+        // where that is positive, here at least half the smallest weight)
+        if grow > 1.0 || g * w_max >= 0.5 * w_min || g.is_nan() {
+            return None;
+        }
+        2.0 * g * m * w_max / (w_min - g * w_max) + gamma(2) * m
+    } else {
+        g * m
+    };
+    let bound = 2.0 * coordinate * (1.0 + gamma(8));
+    bound.is_finite().then_some(bound)
+}
+
+/// The growth of `sum |N_i|` of the degree-`p` basis over `knots` at `t`
+/// ([`net_point_rounding`]): 1 inside the knots' domain; past it, `(1 + 2 d / (b - a))^p`
+/// at the distance `d` past the end span `[a, b]` (each recurrence level's two ratios
+/// `(t - u_i) / (u_(i+k) - u_i)` and `(u_(i+k) - t) / (u_(i+k) - u_i)`, over an
+/// interval holding the span, sum in absolute value to at most that). `None` for knots
+/// too few for the degree, a span of no length or a `t` that is not finite.
+fn extrapolation(knots: &[f64], p: usize, t: f64) -> Option<f64> {
+    let lo = *knots.get(p)?;
+    let hi = *knots.get(knots.len().checked_sub(p + 1)?)?;
+    if !t.is_finite() {
+        return None;
+    }
+    if t >= lo && t <= hi {
+        return Some(1.0);
+    }
+    let (d, span) = if t < lo {
+        (lo - t, knots.iter().copied().find(|&x| x > lo)? - lo)
+    } else {
+        (t - hi, hi - knots.iter().rev().copied().find(|&x| x < hi)?)
+    };
+    if span <= 0.0 || span.is_nan() {
+        return None;
+    }
+    let ratio = (1.0 + 2.0 * d / span) * (1.0 + gamma(4));
+    let exponent = i32::try_from(p).ok()?;
+    let grow = ratio.powi(exponent) * (1.0 + gamma(p.saturating_add(1)));
+    grow.is_finite().then_some(grow)
 }
 
 /// `SM_CURVE_ENABLE_OUTOFBOUNDS` for the B-spline part of `curve` (kept for the rest
@@ -3365,10 +4229,11 @@ impl Surface {
 
         // Error if zero line vector.
         if line_vector.length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::surface_failed(
-                OP_LOCAL_LINE,
-                "the line direction is the zero vector",
-            ));
+            return Err(
+                Failure::new(OP_LOCAL_LINE, SurfaceFailure::LineDirectionZero)
+                    .with_status(SM_ERR)
+                    .into_error(),
+            );
         }
 
         let mut uv = uv_domain.clamp_point(uv_guess);
@@ -3383,9 +4248,12 @@ impl Surface {
             let m = s.evaluate(k, uv, 1, 1, flags)?;
             let at = |i: usize, j: usize| {
                 m.get(i).and_then(|r| r.get(j)).copied().ok_or_else(|| {
-                    SolidError::surface_failed(
+                    SolidError::surface(
                         OP_LOCAL_LINE,
-                        "the evaluation has too few derivatives",
+                        SurfaceFailure::Defect {
+                            why: "the surface's evaluation returned too few derivatives, \
+                                  though it returns the orders 0..=1 in u and v asked of it",
+                        },
                     )
                 })
             };
@@ -3669,6 +4537,18 @@ pub struct BoundaryIntersection {
     pub tangency: bool,
 }
 
+/// The boundary curve's evaluation returned no first derivative, though it returns the
+/// derivatives `0..=1` asked of it (`SM_ERR`).
+fn boundary_tangent_missing() -> SolidError {
+    SolidError::surface(
+        OP_BNDRY,
+        SurfaceFailure::Defect {
+            why: "the boundary curve's evaluation returned no first derivative, though it \
+                  returns the derivatives 0..=1 asked of it",
+        },
+    )
+}
+
 /// Intersects `surface` with the iso-parameter curve of `curve_surface` at
 /// `iso_parameter` in direction `param` near the guess (`sm_IntersectSrfBndryCrv`).
 /// A degenerate iso curve, or one lying in the surface at the guess (its tangent
@@ -3711,10 +4591,7 @@ pub fn intersect_srf_bndry_crv(
     // around. When the boundary curve is in the surface, then the regular intersector
     // will work just fine, so just act like nothing happened.
     let pv = iso.evaluate(k, guess_t, 1, true, true)?;
-    let tangent = pv
-        .get(1)
-        .copied()
-        .ok_or_else(|| SolidError::surface_failed(OP_BNDRY, "the boundary curve has no tangent"))?;
+    let tangent = pv.get(1).copied().ok_or_else(boundary_tangent_missing)?;
     let srf_norm = surface.evaluate_normal(k, guess_uv, Side::Right, Side::Right)?;
     if srf_norm.is_perpendicular_to(tangent, 0.05) {
         return Ok(out); // no solutions
@@ -3738,9 +4615,7 @@ pub fn intersect_srf_bndry_crv(
         out.t = f.t;
         out.deviation = f.deviation;
         let pv = iso.evaluate(k, f.t, 1, true, true)?;
-        let tangent = pv.get(1).copied().ok_or_else(|| {
-            SolidError::surface_failed(OP_BNDRY, "the boundary curve has no tangent")
-        })?;
+        let tangent = pv.get(1).copied().ok_or_else(boundary_tangent_missing)?;
         let normal = surface.evaluate_normal(k, f.uv, Side::Left, Side::Left)?;
 
         // when the angle curveTangent/SurfaceNormal angle is perpendicular to +/-5 deg
@@ -3757,7 +4632,6 @@ pub fn intersect_srf_bndry_crv(
 mod tests {
     use super::*;
     use crate::geom::vector3d::Vec3;
-    use crate::nurbs::b_spline_surface::BSplineSurface;
 
     fn bilinear() -> Surface {
         Surface::from(
@@ -3769,6 +4643,210 @@ mod tests {
             )
             .unwrap(),
         )
+    }
+
+    /// A triangle (the edge u = 0 collapsed to its corner) a billion units from the
+    /// origin, `o + (2u, 3uv, uv)`, and a test point 1 above its plane over the point
+    /// at (0.1, 0.2).
+    fn far_pole_triangle() -> (Surface, Point3) {
+        let o = Vec3::new(1e9, -2e9, 3e9);
+        let s = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                o,
+                o + Vec3::new(2.0, 0.0, 0.0),
+                o,
+                o + Vec3::new(2.0, 3.0, 1.0),
+            )
+            .unwrap(),
+        );
+        // (the plane's unit normal: (2, 0, 0) x (2, 3, 1) = (0, -2, 6))
+        let n = Vec3::new(0.0, -1.0, 3.0) / 10.0_f64.sqrt();
+        (s, o + Vec3::new(0.2, 0.06, 0.02) + n)
+    }
+
+    /// WR-57 (#17856): a guess that is the closest point, on a net far from the
+    /// origin, is its own answer, never refused as farther than itself. The search
+    /// drops onto the guess's iso curve, so the answer and the guess are the same
+    /// point evaluated twice, apart by the evaluations' rounding (ulps of `4.8e-7`
+    /// at `3e9`), far above the ulps of their distance (`2.2e-16` at 1): here the
+    /// answer's computed distance exceeds the guess's by about 2.4e9 of those ulps, so
+    /// an allowance in ulps of the distance (16 before #17856 r1) refuses it, and only a
+    /// bound scaled by the net's magnitude tells it from a farther point.
+    #[test]
+    fn invert_near_singularity_keeps_the_guess_own_point_on_a_far_net() {
+        let k = Kernel::default();
+        let (s, test) = far_pole_triangle();
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let guess = Point2::new(0.1, 0.2);
+        let e = point_rounding(&k, &s, guess).unwrap().unwrap();
+        // (the bound grows with the net, not with the point's distance)
+        assert!(e > 1e-8 && e < 1e-4, "{e:e}");
+        let inv = s
+            .invert_point_near_singularity(&k, test, &dom, guess, 1e-9)
+            .expect("the guess's own point is not farther than itself");
+        let at_guess = s.evaluate_point(&k, guess).unwrap();
+        let found = s.evaluate_point(&k, inv.uv).unwrap();
+        // (a few ulps of the coordinates, 4.8e-7 each at 3e9)
+        assert!(found.distance(at_guess) <= 1e-5, "{inv:?}");
+        let (f, g) = (found.distance(test), at_guess.distance(test));
+        assert!(f > g + 16.0 * f64::EPSILON * g, "{f} {g}");
+        assert!(f - g < e, "{f} {g} {e:e}");
+        assert_eq!(inv.reason, TerminationReason::FoundAnswerConverged);
+    }
+
+    /// WR-57 (#17856 r2): goldens `surface_p8` gen0158's inversion. The degree (2, 1)
+    /// surface's boundary `u = u_min` is collapsed (its control row is one point), but
+    /// the guess `(0.4125, 0.9012)` lies far from it; the drop at the search's
+    /// degenerate parameter lands at `u = 0.1249`, 9.1456 from the test point, against
+    /// the guess's 2.2566. That answer is proven farther than the guess, so it is
+    /// refused (`SM_ERR`); upstream (and this test with the refusal removed) answers it.
+    #[test]
+    fn invert_near_singularity_refuses_a_drop_farther_than_its_guess() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        let k = Kernel::default();
+        let rows: [[[f64; 3]; 2]; 6] = [
+            [
+                [-35.483050698468425, 17.741525349234212, 7.818788891325907],
+                [-35.483050698468425, 17.741525349234212, 7.818788891325907],
+            ],
+            [
+                [32.507621345817455, -4.046571938157584, 17.969583229361014],
+                [35.81919849788494, 36.638534977766746, -4.400698408821642],
+            ],
+            [
+                [65.75281164802853, -0.6945300360676128, 20.89004839445563],
+                [77.05678784270278, 28.750838858371857, -3.0921440790612267],
+            ],
+            [
+                [106.41857367023484, 5.906525165692014, 19.556106044942442],
+                [101.46836131428677, 35.546300480416825, -11.126939017671038],
+            ],
+            [
+                [141.24074159750157, 4.0381312349654355, 16.113810566398357],
+                [136.96967186601904, 37.93876060737041, -2.5870594151057227],
+            ],
+            [
+                [172.53549211004483, -4.669618867331914, -19.96803802632554],
+                [184.19656544797408, 37.01336146994187, -0.15366479946000275],
+            ],
+        ];
+        let net = rows
+            .iter()
+            .map(|r| {
+                r.iter()
+                    .map(|&[x, y, z]| CPoint::new(x, y, z, NOW))
+                    .collect()
+            })
+            .collect();
+        let (u0, u1) = (-1.130128346952732, 1.8419707993298213);
+        let u = vec![
+            u0,
+            u0,
+            u0,
+            -0.05690903781019041,
+            0.3585174179267241,
+            1.3801017560592084,
+            u1,
+            u1,
+            u1,
+        ];
+        let nl = NlSurface::new(net, 2, 1, u, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
+        let mut b = BSplineSurface::from_nurb(nl, false);
+        b.set_b_spline_surface_form(BSplineSurfaceForm::from_code(11).unwrap());
+        let s = Surface::from(b);
+        let dom = Extent2d::from_bounds(u0, 0.0, u1, 1.0);
+        let test = Point3::new(83.53257797923465, 27.43436202346898, -2.523781785556575);
+        let guess = Point2::new(0.4125072351599867, 0.901196840920948);
+        let at_guess = s.evaluate_point(&k, guess).unwrap().distance(test);
+        assert!((at_guess - 2.2566).abs() < 1e-3, "{at_guess}");
+        let r = s.invert_point_near_singularity(&k, test, &dom, guess, 1e-6);
+        let e = r.expect_err("an answer farther than the guess is refused");
+        assert!(
+            e.to_string()
+                .contains("farther from the test point than the guess"),
+            "{e}"
+        );
+    }
+
+    /// WR-57 (#17856 r2, goldens `surface_point_solve_p3` `matrix_0105`'s rule): a
+    /// maximize stepping into a pole keeps its guess where every drop is proven nearer
+    /// the test point than the guess, and reports it unable to converge. The triangle
+    /// `(2u, 3uv, uv)` collapses `u = 0` to the origin; the guess `(1e-3, 0.5)` is
+    /// `1.27` from the test point, `0.1` above the triangle's point at `(0.5, 0.5)`,
+    /// and the one drop (onto the iso curve `v = 0.5`, the tangent leaving the pole
+    /// toward the point) is about `0.1` away. A closest-point inversion answers that
+    /// drop, converged; the maximize keeps the guess (it fails with that rule removed,
+    /// answering the drop), and neither is shown to be a maximum.
+    #[test]
+    fn invert_near_singularity_maximize_keeps_a_guess_farther_than_its_drops() {
+        let k = Kernel::default();
+        let s = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(2.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(2.0, 3.0, 1.0),
+            )
+            .unwrap(),
+        );
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let n = Vec3::new(0.0, -1.0, 3.0) / 10.0_f64.sqrt();
+        let test = s.evaluate_point(&k, Point2::new(0.5, 0.5)).unwrap() + n * 0.1;
+        let guess = Point2::new(1e-3, 0.5);
+        let at_guess = s.evaluate_point(&k, guess).unwrap().distance(test);
+        assert!(at_guess > 1.2, "{at_guess}");
+
+        let nearest = s
+            .invert_point_near_singularity(&k, test, &dom, guess, 1e-9)
+            .unwrap();
+        let drop = s.evaluate_point(&k, nearest.uv).unwrap().distance(test);
+        assert!(drop < 0.11, "{nearest:?} {drop}");
+        assert_eq!(nearest.reason, TerminationReason::FoundAnswerConverged);
+
+        let farthest = s
+            .invert_point_near_singularity_for(&k, test, &dom, guess, 1e-9, true)
+            .unwrap();
+        assert_eq!(farthest.uv, guess, "{farthest:?}");
+        assert_eq!(farthest.reason, TerminationReason::UnableToConverge);
+    }
+
+    /// WR-57 (#17856): a distance that is not a number is never compared; the
+    /// inversion refuses it.
+    #[test]
+    fn invert_near_singularity_refuses_a_distance_that_is_not_a_number() {
+        let k = Kernel::default();
+        let (s, _) = far_pole_triangle();
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let test = Point3::new(f64::NAN, 0.0, 0.0);
+        let r = s.invert_point_near_singularity(&k, test, &dom, Point2::new(0.1, 0.2), 1e-9);
+        assert!(r.is_err(), "{r:?}");
+    }
+
+    /// The point rounding is bounded only for a net's own evaluation, and grows past
+    /// the knots by the basis's extrapolation: `(1 + 2 * 0.5)^1` per linear direction.
+    #[test]
+    fn point_rounding_scales_with_the_net_and_its_extrapolation() {
+        let k = Kernel::default();
+        let (s, _) = far_pole_triangle();
+        let inside = point_rounding(&k, &s, Point2::new(0.5, 0.5))
+            .unwrap()
+            .unwrap();
+        let past = point_rounding(&k, &s, Point2::new(1.5, 0.5))
+            .unwrap()
+            .unwrap();
+        assert!(
+            past > 1.9 * inside && past < 2.1 * inside,
+            "{inside:e} {past:e}"
+        );
+        let small = point_rounding(&k, &bilinear(), Point2::new(0.5, 0.5))
+            .unwrap()
+            .unwrap();
+        assert!(inside > 1e8 * small, "{inside:e} {small:e}");
+        assert_eq!(
+            point_rounding(&k, &s, Point2::new(f64::NAN, 0.5)).unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -3979,6 +5057,10 @@ mod tests {
     impl crate::surface::surface_cache::face_context::FaceQueries<NoObject> for NumericalTrimContext {
         fn face_zone_tol_3d(&self, _face: NoObject) -> Result<f64> {
             Ok(1e-5)
+        }
+
+        fn face_has_loopuses(&self, _face: NoObject) -> Result<bool> {
+            Ok(true)
         }
 
         fn face_point_classify(

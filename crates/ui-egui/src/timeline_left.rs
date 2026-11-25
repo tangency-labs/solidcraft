@@ -602,7 +602,7 @@ fn visible_order(
         let open = group_id.is_none_or(|group_id| group_is_open(app, groups, group_id));
         if open {
             order.push(TimelineItem::Feature(*id));
-            if !row.listed.is_empty() && crate::browser::is_open(app, &sketches_key(*id), false) {
+            if !row.listed.is_empty() && crate::browser::fold_open(app, &sketches_key(*id), false) {
                 order.extend(row.listed.iter().filter(|listed| !listed.reference).map(|listed| TimelineItem::Feature(listed.sketch)));
             }
         }
@@ -1067,7 +1067,7 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
         Some(_) => Some((sketches_key(id), false)),
         None => has_patterns.then(|| (format!("timeline/sketch/{id}/patterns"), true)),
     };
-    let fold_open = fold.as_ref().is_some_and(|(key, default)| crate::browser::is_open(app, key, *default));
+    let fold_open = fold.as_ref().is_some_and(|(key, default)| crate::browser::fold_open(app, key, *default));
     let style = if names { crate::ui_kit::HistoryStyle::Names } else { crate::ui_kit::HistoryStyle::Icons };
     // `allocate_exact_size` in two steps, so a row outside the view takes its place and no more.
     let size = vec2(ui.available_width(), style.height());
@@ -1234,7 +1234,7 @@ fn feature_row_body(
     });
     if response.clicked() && on_fold {
         if let Some((key, default)) = fold {
-            crate::browser::toggle(app, key, *default);
+            crate::browser::toggle_fold(app, key, *default);
         }
     } else if response.clicked() && !crate::timeline::pick_feature_into_dialog(app, id, ui.input(|i| i.modifiers)) {
         select_item(app, ui, TimelineItem::Feature(id), order);
@@ -1247,34 +1247,39 @@ fn feature_row_body(
         select_only(app, TimelineItem::Feature(id));
     }
     let mut edit = false;
+    let (edit_label, edit_icon) = crate::timeline::edit_label(*kind);
     crate::ui_kit::Menu::context(&response, |ui| {
-        if crate::ui_kit::menu::button(ui, "Edit Feature", "edit").clicked() {
+        // On several selected features an entry acts on them all or cannot be used; the entries
+        // that take one feature go through `one_row`.
+        let rule = crate::timeline::menu_rule(app, id);
+        if rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, edit_label, edit_icon, on)).clicked() {
             edit = true;
             ui.close();
         }
         crate::timeline::sketch_plane_button(app, ui, id);
         if let Some(sketch) = sketch
-            && crate::ui_kit::menu::button(ui, "Edit Profile Sketch", "sketch").clicked()
+            && rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Edit Profile Sketch", "sketch", on)).clicked()
         {
             app.edit_sketch(sketch.0);
             ui.close();
         }
-        if crate::ui_kit::menu::button(ui, "Rename Feature", "rename").clicked() {
+        if rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Rename Feature", "rename", on)).clicked() {
             crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::Feature(id), rect.center());
             ui.close();
         }
-        if crate::ui_kit::menu::button(ui, if *suppressed { "Unsuppress Feature" } else { "Suppress Feature" }, "suppress").clicked() {
+        // The entry for every selected feature takes this one's place. With the rule off it is
+        // an extra entry, and this one still acts on this feature alone.
+        if !rule.many && crate::ui_kit::menu::button(ui, if *suppressed { "Unsuppress Feature" } else { "Suppress Feature" }, "suppress").clicked() {
             let _ = app.run_heavy("timeline.suppress", json!({"feature": id}));
             ui.close();
         }
-        // An extra entry for the selection; the one above still acts on this feature alone.
         if let Some((label, params)) = crate::timeline::suppress_selected(app, id)
             && crate::ui_kit::menu::button(ui, &label, "suppress").clicked()
         {
             let _ = app.run_heavy("timeline.suppress", params);
             ui.close();
         }
-        if crate::ui_kit::menu::button(ui, "Roll Back Here", "rollback").clicked() {
+        if rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Roll Back Here", "rollback", on)).clicked() {
             let _ = app.run_heavy("timeline.roll_to", json!({"feature": id}));
             ui.close();
         }
@@ -2203,7 +2208,7 @@ mod tests {
         h.settle();
         assert!(row_y("timeline:Block") < row_y("timeline:Profile") && row_y("timeline:Profile") < row_y("timeline:Second"));
         assert!(handle_at("timeline:Pocket").is_none(), "only the opened feature shows its sketch");
-        assert!(h.app.session.selection.is_empty(), "the fold arrow only folds");
+        assert!(!h.app.session.has_selection(), "the fold arrow only folds");
         // The fold is kept with the browser's folds, between runs.
         let mut restored = Harness::new();
         restored.app.load_prefs(&h.app.prefs());
@@ -2275,7 +2280,8 @@ mod tests {
         h.step(&json!({"click": {"handle": "timeline:Profile"}})).unwrap();
         assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Feature { id: profile }], "the row under the feature is the sketch");
         h.step(&json!({"click": {"handle": "timeline:Profile"}, "button": "right"})).unwrap();
-        h.step(&json!({"widget": "Edit Feature"})).unwrap();
+        // A sketch's row names the item as the Browser does (#14366).
+        h.step(&json!({"widget": "Edit Sketch"})).unwrap();
         h.settle();
         assert_eq!(h.app.session.active_sketch, Some(profile));
         assert!(row_y("timeline:Profile") < row_y("timeline:rollback") && row_y("timeline:rollback") < row_y("timeline:Block"));
@@ -2359,7 +2365,7 @@ mod tests {
         h.frames(30);
         h.step(&json!({"click": {"handle": "timeline:Profile"}})).unwrap();
         assert!(h.app.dialog.is_some() && h.app.session.active_sketch.is_none(), "the sketch row's click goes to the dialog too");
-        assert!(h.app.session.selection.is_empty(), "dialog picks leave the ordinary selection alone");
+        assert!(!h.app.session.has_selection(), "dialog picks leave the ordinary selection alone");
     }
 
     #[test]

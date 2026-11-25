@@ -54,3 +54,28 @@ fn widget_lookup_keeps_labels_values_and_shortcut_fallbacks() {
     assert_eq!(widget_centres(&nodes, "Save"), vec![[80.0, 20.0]]);
     assert!(widget_centres(&nodes, "Missing").is_empty());
 }
+
+#[test]
+fn widget_lookup_near_prefers_the_named_value_over_geometric_neighbours() {
+    use egui::accesskit::{Action, NodeId, Role};
+    let label = widget_node(Role::Label, "Placement", 10.0);
+    let mut field = widget_node(Role::ComboBox, "Placement", 40.0);
+    field.set_value("Single");
+    field.add_action(Action::Click);
+    let mut other = widget_node(Role::ComboBox, "Other", 70.0);
+    other.set_value("Single");
+    other.add_action(Action::Click);
+    let mut nodes = vec![(NodeId(1), label), (NodeId(2), field), (NodeId(3), other)];
+    for _ in 0..2 {
+        assert_eq!(widget_near_centres(&nodes, "Single", "Placement"), Some([50.0, 20.0]));
+        assert_eq!(widget_near_centres(&nodes, "Single", "Other"), Some([80.0, 20.0]));
+        assert!(widget_near_centres(&nodes, "Multiple", "Placement").is_none());
+        nodes.reverse();
+    }
+    let label = widget_node(Role::Label, "Depth", 10.0);
+    let mut field = widget_node(Role::TextInput, "", 40.0);
+    field.set_value("20");
+    let nodes = vec![(NodeId(1), label), (NodeId(2), field)];
+    assert_eq!(widget_near_centres(&nodes, "20", "Depth"), Some([50.0, 20.0]));
+    assert!(widget_near_centres(&nodes, "20", "Missing").is_none());
+}

@@ -434,6 +434,8 @@ fn key_of(e: EntityRef) -> ObjectRef {
 
 /// Tolerances of every face, edge and vertex.
 fn put_tols(b: &Brep, out: &mut Vec<f64>) {
+    #[cfg(test)]
+    crate::certify::written(b);
     out.extend(b.faces().iter().map(|(_, f)| f.tolerance));
     out.extend(b.edges().iter().map(|(_, e)| e.tolerance));
     out.extend(b.vertices().iter().map(|(_, v)| v.tolerance));
@@ -457,7 +459,7 @@ fn put_samples(c: &SmCurve, out: &mut Vec<f64>) -> Result<(), SolidError> {
     let ivl = c.natural_interval();
     out.extend([ivl.min(), ivl.max()]);
     for k in 0..=2u8 {
-        match c.evaluate_point(&Kernel::default(), ivl.evaluate(f64::from(k) / 2.0)) {
+        match c.evaluate_point(&crate::runner_kernel(), ivl.evaluate(f64::from(k) / 2.0)) {
             Ok(p) => out.extend([0.0, p.x, p.y, p.z]),
             Err(e) if solidcore::error::upstream_status(&e).is_some() => {
                 out.extend([f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)), 0.0, 0.0, 0.0]);
@@ -568,7 +570,7 @@ macro_rules! status {
 /// reaches it.
 fn own_brep(i: &Inputs) -> Result<crate::own_builder::RustBrep<(Brep, [usize; 10])>, HarnessError> {
     use crate::own_builder::{build_status, counts, finish, in_new_brep, Built as Own, Conventions};
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let conv = &Conventions::TOPOLOGY_FIXTURE;
     let built = match (&i.brep, i.vertex_loop) {
         (CaseBrep::Shared(BrepIn::Face { surface, dom }), Some([fu, fv])) => {
@@ -925,6 +927,24 @@ fn analytic_face(
     Ok((s, [d0[0], d0[1], d1[0], d1[1]]))
 }
 
+/// The case's B-rep as [`run_rust_case`] builds it before the operation, and the face the
+/// operation is on (`None`: the build or the face selection fails). For tests that check
+/// a premise on the model a golden row was computed from (#18325).
+///
+/// # Errors
+///
+/// A case that does not parse, or the build's harness error.
+pub fn scene(case: &Case) -> Result<Option<(Brep, FaceId)>, HarnessError> {
+    let i = case.parse::<Inputs>()?;
+    let Ok((b, counts)) = own_brep(&i)? else {
+        return Ok(None);
+    };
+    let Some(a) = args(&i.op, counts, |f| first_loop(&b, f)) else {
+        return Ok(None);
+    };
+    Ok(Some((b, FaceId::from_index(a[0] as u32))))
+}
+
 #[allow(clippy::too_many_lines)] // one arm per op
 fn run_rust_case(i: &Inputs) -> Result<Output, HarnessError> {
     // a B-rep value above 1e150 is refused (HANG-29, fuzz case fuzz00127): building a face on such a
@@ -943,7 +963,7 @@ fn run_rust_case(i: &Inputs) -> Result<Output, HarnessError> {
     let op = op_of(&i.op);
     let f = FaceId::from_index(a[0] as u32);
     let loop_orient = matches!(i.op, OpIn::LoopOrient { .. });
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let mut out = vec![0.0];
     let complete = if loop_orient {
         loop_geometry_complete(&b, f, LoopId::from_index(a[1] as u32), a[3] != 0.0)
@@ -1705,14 +1725,13 @@ mod tests {
     use super::*;
     use solidcore::curve::line::Line;
     use solidcore::geom::extent1d::Extent1d;
-    use solidcore::kernel::Kernel;
     use solidcore::math::{Point3, Vec3};
     use solidcore::nurbs::b_spline_curve::BSplineCurve;
     use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 
     #[test]
     fn own_uv_trim_copy_slices_line_to_its_b_spline_base() {
-        let k = Kernel::default();
+        let k = crate::runner_kernel();
         let mut nurb = allocate_nurb_curve(1, 1, 3).unwrap();
         for (point, x) in nurb.cpts_mut().iter_mut().zip([-5.0, 5.0]) {
             point.x = x;

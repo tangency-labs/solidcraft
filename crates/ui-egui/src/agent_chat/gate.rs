@@ -30,8 +30,17 @@ pub enum Verdict {
 
 /// Methods the bridged MCP server uses; nothing else (clicks, preferences, quitting, the chat
 /// itself) is the agent's.
-const METHODS: &[&str] =
-    &["engine.commands", "document.inspect", "engine.execute", "engine.batch", "ui.view", "ui.render", "ui.screenshot", "mcp.options"];
+const METHODS: &[&str] = &[
+    "engine.commands",
+    "document.inspect",
+    "document.selection",
+    "engine.execute",
+    "engine.batch",
+    "ui.view",
+    "ui.render",
+    "ui.screenshot",
+    "mcp.options",
+];
 
 /// Commands the window answers itself, with no engine entry (`control.rs`, `execute`).
 const WINDOW_COMMANDS: &[&str] = &["view.pick"];
@@ -119,6 +128,7 @@ const FILE_EXTENSIONS: &[&str] = &[
     "jpg",
     "jpeg",
     "urdf",
+    "sdf",
     "txt",
     "py",
     "toml",
@@ -127,7 +137,10 @@ const FILE_EXTENSIONS: &[&str] = &[
 /// Commands that only read (not counted as changes). Section Analysis changes only the view, but
 /// each change is an undo step.
 fn reads_only(id: &str) -> bool {
-    (id.starts_with("inspect.") && id != "inspect.section")
+    // The engine finds a command ignoring case, so the plugin readers are matched the same way.
+    id.eq_ignore_ascii_case("plugin.inspect")
+        || id.eq_ignore_ascii_case("plugin.check")
+        || (id.starts_with("inspect.") && id != "inspect.section")
         || id.starts_with("model.")
         || id.ends_with(".inspect")
         || id.ends_with(".list")
@@ -141,13 +154,16 @@ fn reads_only(id: &str) -> bool {
                 | "file.slicers"
                 | "engine.describe"
                 | "plugin.check"
+                | "plugin.tools"
+                | "doc.info"
         )
 }
 
 /// Commands that read or write a file by their nature: any string they are given in a path
 /// parameter is a file, whatever it looks like.
 fn is_file_verb(id: &str) -> bool {
-    if id == "plugin.inspect" || id == "plugin.check" {
+    // Ignoring case, as the engine finds the command: `PLUGIN.CHECK` reads the package too.
+    if id.eq_ignore_ascii_case("plugin.inspect") || id.eq_ignore_ascii_case("plugin.check") {
         return true;
     }
     id.starts_with("library.") || ["export", "import", "save", "open", "insert", "load", "write", "recover"].iter().any(|v| id.contains(v))
@@ -293,6 +309,38 @@ pub fn tool_key(method: &str, params: &Value) -> String {
     }
 }
 
+/// What "Always allow" must cover for a request the gate asks about: each command in a batch that
+/// asks (by its registered id), or the request's [`tool_key`]. An answer given for one batch never
+/// covers another batch's file, design, upload or slicer steps.
+pub fn asking_keys(method: &str, params: &Value, undo_left: usize) -> Vec<String> {
+    if method != "engine.batch" {
+        return vec![tool_key(method, params)];
+    }
+    let steps = params.get("commands").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+    let mut keys: Vec<String> = Vec::new();
+    let mut undo_left = undo_left;
+    for s in steps.iter().take(10_000) {
+        let id = command_of(s).unwrap_or("");
+        match command(id, s.get("params").unwrap_or(&Value::Null), undo_left) {
+            Verdict::Ask(_) => {
+                let key = resolve(id).map_or_else(|| id.chars().take(120).collect(), String::from);
+                if !keys.contains(&key) {
+                    keys.push(key);
+                }
+            }
+            Verdict::Run { change } => {
+                if resolve(id) == Some("edit.undo") {
+                    undo_left = undo_left.saturating_sub(1);
+                } else if change {
+                    undo_left += 1;
+                }
+            }
+            Verdict::Refuse(_) | Verdict::Unknown(_) => {}
+        }
+    }
+    if keys.is_empty() { vec![tool_key(method, params)] } else { keys }
+}
+
 /// A request as an approval card says it: the command, or a batch's commands.
 pub fn describe(method: &str, params: &Value) -> String {
     match method {
@@ -341,6 +389,7 @@ mod tests {
         assert_eq!(exec("selection.get", json!({})), Verdict::Run { change: false });
         assert_eq!(request("document.inspect", &json!({}), 0), Verdict::Run { change: false });
         assert_eq!(exec("engine.describe", json!({"command": "solid.box"})), Verdict::Run { change: false });
+        assert_eq!(exec("doc.info", json!({})), Verdict::Run { change: false });
     }
 
     #[test]
@@ -574,6 +623,20 @@ mod tests {
         assert_eq!(exec("view.pick", json!({"x": 1, "y": 1})), Verdict::Run { change: true });
     }
 
+    /// "Always allow" for a batch that asks must cover each command that asked, by its own id.
+    #[test]
+    fn a_batch_that_asks_is_keyed_by_the_commands_that_ask() {
+        let batch = json!({"commands": [
+            {"command": "solid.box"},
+            {"command": "FILE.SAVE", "params": {"path": "a.sc"}},
+            {"id": "file.export", "params": {"path": "a.stl"}},
+            {"command": "file.save", "params": {"path": "b.sc"}},
+        ]});
+        assert_eq!(asking_keys("engine.batch", &batch, 0), ["file.save", "file.export"]);
+        assert_eq!(asking_keys("engine.batch", &json!({"commands": [{"command": "solid.box"}]}), 0), ["batch"]);
+        assert_eq!(asking_keys("engine.execute", &json!({"command": "File.Save"}), 0), ["file.save"]);
+    }
+
     #[test]
     fn external_plugin_code_always_requires_consent() {
         crate::i18n::install();
@@ -583,7 +646,10 @@ mod tests {
             assert!(question.contains("sample") && question.contains("make"), "{question}");
         }
         assert!(matches!(exec("plugin.inspect", json!({"path":"sample"})), Verdict::Ask(_)));
-        assert!(matches!(exec("plugin.check", json!({"path":"sample"})), Verdict::Ask(_)), "checking a package reads its files");
+        for id in ["plugin.check", "PLUGIN.CHECK", "Plugin.Check", "Plugin.Inspect"] {
+            assert!(matches!(exec(id, json!({"path":"sample"})), Verdict::Ask(_)), "{id}: checking a package reads its files");
+            assert!(reads_only(id) && is_file_verb(id), "{id} reads, and only reads, a file");
+        }
     }
 
     /// A plugin's code runs only after the user's Allow: `plugin.run` in any spelling, alone or
