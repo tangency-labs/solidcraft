@@ -3034,7 +3034,7 @@ fn numeric_tool(kind: &FeatureKind) -> bool {
             | FeatureKind::Cylinder { .. }
             | FeatureKind::Sphere { .. }
             | FeatureKind::Torus { .. }
-            | FeatureKind::Coil { sketch: None, .. }
+            | FeatureKind::Coil { sketch: None, axis_ref: None, .. }
     )
 }
 
@@ -3893,6 +3893,36 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                     hash_placement(&relative, &mut h);
                 }
             }
+        }
+    }
+    if let FeatureKind::Coil { axis_ref: Some(axis), .. } = &f.kind {
+        // The Coil reads the axis in its own frame, using the same owner as axis evaluation.
+        let owner = match axis {
+            AxisRef::World { .. } => Some(0),
+            AxisRef::Construction { name } | AxisRef::Model { geo: crate::construct::GeoRef::Axis { name } } => {
+                st.and_then(|st| st.construct.iter().find(|c| c.name == *name)).map(|c| doc.feature(c.feature).map_or(0, |feature| feature.component))
+            }
+            AxisRef::SketchLine { sketch: Some(sketch), .. } => doc.feature(*sketch).map(|s| s.component),
+            AxisRef::Model { geo: crate::construct::GeoRef::PlacedEdge { path, author_path, .. } } => {
+                reads.paths.push(path.clone());
+                if !author_path.is_empty() {
+                    reads.paths.push(author_path.clone());
+                    frame = path_frame(doc, author_path);
+                }
+                // The edge direction is oriented in the world before it enters the Coil's frame.
+                Some(0)
+            }
+            AxisRef::Model { geo: crate::construct::GeoRef::Edge { .. } | crate::construct::GeoRef::Face { .. } } => {
+                // These picks resolve in the world, including copies that share a name.
+                // Read the Coil frame and all placements because a different copy can find the pick.
+                reads.all = true;
+                reads.unlisted = true;
+                None
+            }
+            _ => None,
+        };
+        if let Some(owner) = owner.filter(|owner| *owner != f.component) {
+            reads.components.insert(owner);
         }
     }
     let path = match &f.kind {
@@ -6182,8 +6212,9 @@ fn joined_tools_limit() -> usize {
 /// The recipe of a tool a primitive or coil feature `f` builds: its definition and the values it
 /// uses fix it.
 fn tool_recipe(doc: &Document, f: &Feature, vals: &BTreeMap<String, Value>) -> Option<u64> {
-    // A cylinder placed by reference edges stands on the model, not on its definition alone.
-    if !hole_references(f).is_empty() {
+    // A cylinder placed by reference edges or a Coil on a referenced axis reads model geometry
+    // outside its own definition. The same definition may build a different tool.
+    if !hole_references(f).is_empty() || matches!(f.kind, FeatureKind::Coil { axis_ref: Some(_), .. }) {
         return None;
     }
     Some(fingerprint(doc, 0, f, vals, false, &ImportDigests::default()))
@@ -10007,6 +10038,8 @@ fn feature_tools_with_constructor(
         FeatureKind::Coil {
             base,
             axis,
+            axis_ref,
+            reversed,
             diameter,
             pitch,
             turns,
@@ -10020,8 +10053,79 @@ fn feature_tools_with_constructor(
             profiles,
             ..
         } => {
-            let base = &point(vals, base)?;
-            let k = axis.normalized().ok_or_else(|| DocError::Invalid("coil axis".into()))?;
+            let line_from_world = |origin: Vec3, direction: Vec3| {
+                let (origin, direction) =
+                    solidcraft_kernel::services::affine::line_in_frame(&doc.component_transform(f.component), origin.into(), direction.into())
+                        .map_err(|_| DocError::Invalid("the feature's component frame is invalid".into()))?;
+                Ok::<_, DocError>((Vec3::from(origin), Vec3::from(direction)))
+            };
+            let (base, direction) = match axis_ref {
+                Some(AxisRef::Construction { name }) => {
+                    let recorded = sketch.and_then(|sk| {
+                        let profile_owner = doc.feature(sk.0)?.component;
+                        let axis = st.construct.iter().find(|axis| axis.name == *name)?;
+                        (doc.feature(axis.feature)?.component == profile_owner).then(|| crate::body_transfer::profile_frame(doc, f, sk.0)).flatten()
+                    });
+                    if let Some(frame) = recorded {
+                        // The axis belongs to the transferred profile: read both through the
+                        // same recorded boundary, not the profile's current component placement.
+                        let (origin, direction) = construction_axis_in(None, st, name, f.component)?;
+                        // line_in_frame maps into its argument's local frame. Its argument must
+                        // therefore be the inverse of the owner-to-feature transfer frame.
+                        let inverse = solidcraft_kernel::services::affine::inverse(&frame)
+                            .map_err(|_| DocError::Invalid("the recorded transfer frame is invalid".into()))?;
+                        let (origin, direction) = solidcraft_kernel::services::affine::line_in_frame(&inverse, origin.into(), direction.into())
+                            .map_err(|_| DocError::Invalid("the recorded transfer axis is invalid".into()))?;
+                        (origin.into(), direction.into())
+                    } else {
+                        // An independent axis still follows its live component placement.
+                        construction_axis_in(Some(doc), st, name, f.component)?
+                    }
+                }
+                Some(AxisRef::Model { geo }) => match geo {
+                    crate::construct::GeoRef::Edge { .. } | crate::construct::GeoRef::Face { .. } => {
+                        // Pick and orient the axis in the same frame as the command and viewport.
+                        let world = construction_state(doc, st, 0)?;
+                        let (origin, direction) = crate::construct::coil_model_axis(&world, geo)?;
+                        line_from_world(origin, direction)?
+                    }
+                    _ => crate::construct::model_axis_in(Some(doc), st, geo, f.component)?,
+                },
+                Some(AxisRef::Line { origin, dir }) => (point(vals, origin)?, dir.0),
+                Some(AxisRef::SketchLine { curve, sketch: owner }) => {
+                    let owner =
+                        owner.or(sketch.map(|id| id.0)).ok_or_else(|| DocError::Invalid("a sketch-line axis needs its owning sketch".into()))?;
+                    let solved =
+                        st.sketch(owner).ok_or_else(|| DocError::Unknown(format!("sketch {owner} (it must come earlier in the timeline)")))?;
+                    sketch_line_world(&constructor_profile_in_frame(doc, solved, f)?, curve)?
+                }
+                Some(AxisRef::World { axis }) => {
+                    let direction = match axis.to_ascii_uppercase().as_str() {
+                        "X" => Vec3::X,
+                        "Y" => Vec3::Y,
+                        "Z" => Vec3::Z,
+                        _ => return Err(DocError::Unknown(format!("axis `{axis}`"))),
+                    };
+                    line_from_world(Vec3::ZERO, direction)?
+                }
+                Some(AxisRef::SketchAxis { axis }) => {
+                    let solved =
+                        sketch.and_then(|id| st.sketch(id.0)).ok_or_else(|| DocError::Invalid("a sketch axis needs its owning sketch".into()))?;
+                    let solved = constructor_profile_in_frame(doc, solved, f)?;
+                    let direction = match axis.as_str() {
+                        "x" => solved.plane.x,
+                        "y" => solved.plane.y,
+                        _ => return Err(DocError::Unknown(format!("sketch axis `{axis}`"))),
+                    };
+                    (solved.plane.origin, direction)
+                }
+                None => (point(vals, base)?, axis.0),
+            };
+            let base = &base;
+            let k = direction.normalized().ok_or_else(|| DocError::Invalid("coil axis".into()))?;
+            // Reversed grows the coil against its axis and keeps its hand: it turns about the
+            // reversed axis as well as climbing along it, where a negated pitch would mirror it.
+            let k = if *reversed { -k } else { k };
             let p = val(vals, pitch, Kind::Length)?;
             let n = val(vals, turns, Kind::Unitless)?;
             if sketch.is_some()
@@ -10041,16 +10145,17 @@ fn feature_tools_with_constructor(
                 return Err(DocError::Invalid("a coil's `profiles` need a `sketch`".into()));
             }
             if let Some(sk) = sketch {
-                let ss = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk} (it must come earlier in the timeline)")))?;
-                let regions = select_profiles(ss, profiles)?;
+                let stored = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk} (it must come earlier in the timeline)")))?;
+                let ss = constructor_profile_in_frame(doc, stored, f)?;
+                let regions = select_profiles(&ss, profiles)?;
                 if regions.iter().any(|r| !r.holes.is_empty()) {
                     return Err(DocError::Invalid("a coil from a sketch takes a profile without holes".into()));
                 }
                 let [region] = &regions[..] else {
                     return Err(DocError::Invalid(format!("a coil from a sketch takes one closed profile (the sketch has {})", regions.len())));
                 };
-                let axis = if *clockwise { k * -1.0 } else { k };
-                // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
+                let axis = if *clockwise { -k } else { k };
+                // Clockwise changes rotation; negating pitch keeps the chosen propagation direction.
                 let pitch = if *clockwise { -p } else { p };
                 return Ok(unnamed(vec![kernel::sweep_helix(&ss.plane, region, *base, axis, pitch, n)?]));
             }
