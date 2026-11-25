@@ -4265,6 +4265,8 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.placed_body(st, &b.0);
             }
         }
+        // A surface extrude To Next runs into whichever body is in its way, wherever it is placed.
+        FeatureKind::SurfaceExtrude { to_next: true, .. } => reads.all = true,
         // Copies meet the bodies they change where those are placed relative to their source's
         // tools' frame, whatever the pattern's own placement (#14271).
         FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => {

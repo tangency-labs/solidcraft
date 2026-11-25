@@ -323,7 +323,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
-        FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent } => {
+        FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent, to_next } => {
             let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
@@ -334,10 +334,14 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     "not supported yet: a surface extrude through all, from an object, with a taper, or with symmetric offset".into(),
                 ));
             }
+            if *to_next && extent.to.is_some() {
+                return Err(DocError::Invalid("a surface extrude goes To Next or To Object, not both".into()));
+            }
             let off = extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
             let chains = sheet_chains(&ss, profiles.as_ref(), curves)?;
             let body = match extent.to {
                 Some(to) => sheet_to_object(doc, vals, f, st, &ss, &chains, extent, to.0, off)?,
+                None if *to_next => sheet_to_next(doc, f, st, &ss, &chains, extent, off)?,
                 None => {
                     let d = val(vals, &extent.distance, Kind::Length)?;
                     let (a, b) = extent_sides(vals, extent, d, extent.direction)?;
@@ -716,6 +720,50 @@ fn sheet_to_object(
         reach = (reach * SHEET_REACH_GROWTH).min(limit);
     }
     Err(DocError::Invalid("part of the surface extrude never meets the To face's surface".into()))
+}
+
+/// A surface extrude To Next, starting `start` along the sketch normal: each wall runs one way
+/// (`extent.direction`: positive along the normal, negative against it) until it first meets a
+/// body, any face of a solid or surface body as it is ([`kernel::stop_at_bodies`]). A wall that
+/// meets no body is refused, as To Object refuses one that never meets its face, and so is a
+/// symmetric or two-sided To Next.
+fn sheet_to_next(
+    doc: &Document,
+    f: &Feature,
+    st: &ModelState,
+    ss: &SolvedSketch,
+    chains: &[Vec<Seg2>],
+    extent: &crate::Extent,
+    start: f64,
+) -> Result<kernel::Body> {
+    if extent.direction == crate::Direction::Symmetric || extent.distance2.is_some() {
+        return Err(DocError::Invalid("not supported yet: a surface extrude To Next to both sides (symmetric or a second side)".into()));
+    }
+    let plane = &ss.plane;
+    let toward = if extent.direction == crate::Direction::Negative { -1.0 } else { 1.0 };
+    // The bodies as this feature's component sees them, as To Object measures its target. A
+    // component's envelope only stands in for its contents: it stops nothing.
+    let tst = state_in_frame_pinned_to(doc, st, f.component, &extent.picked_placements)?;
+    let bodies: Vec<&kernel::Body> = tst.bodies.iter().filter(|b| !b.envelope).map(|b| &b.body).filter(|b| !b.is_mesh()).collect();
+    if bodies.is_empty() {
+        return Err(DocError::Invalid("a surface extrude To Next needs a body in its way, and the model has none".into()));
+    }
+    // Past every body, so a wall that meets none still runs to the far end.
+    let reach = through_all_distance(&tst, plane, start, &[])?;
+    let far = start + toward * reach;
+    extrude_within_reach([start, far])?;
+    let long = kernel::extrude_sheet(plane, chains, start.min(far), start.max(far))?;
+    // A corner of each chain's wall at the start picks the pieces to keep.
+    let start_plane = plane.offset(start);
+    let starts: Vec<Vec3> = chains.iter().filter_map(|c| c.first()).map(|s| start_plane.to_world(s.start())).collect();
+    let (kept, met) = kernel::stop_at_bodies(&long, &bodies, &starts, plane.normal() * toward)?;
+    // `reach` runs at least 1 past every body, so a wall that met one ends within half of it.
+    let [low, high] = kernel::levels_along(&kept, plane)?;
+    let furthest = if toward > 0.0 { high } else { -low };
+    if !met || furthest > toward * far - 0.5 {
+        return Err(DocError::Invalid("part of the surface extrude To Next meets no body".into()));
+    }
+    Ok(kept)
 }
 
 /// A surface builder's body, added to the model with what its faces came from.

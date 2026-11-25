@@ -2854,6 +2854,16 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         };
         parameters.entry("convention").or_insert_with(|| json!(convention));
     }
+    // The Surface Extrude window has no start offset to show or send, so an edit that names
+    // none keeps the stored one instead of moving the walls back to the sketch plane. An edit
+    // that names one still replaces it.
+    if let FeatureKind::SurfaceExtrude { extent, .. } = &old.kind
+        && cid == "surface.extrude"
+        && let Some(start) = &extent.start_offset
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("start_offset").or_insert_with(|| json!(start));
+    }
     if let FeatureKind::Revolve { convention, .. } = &old.kind
         && cid == "solid.revolve"
         && let Some(parameters) = params.as_object_mut()
