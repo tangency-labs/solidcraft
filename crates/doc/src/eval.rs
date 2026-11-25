@@ -6521,6 +6521,32 @@ fn draft_corner_for(ss: &SolvedSketch, r: &Region2, distance: f64, taper: f64, n
     })
 }
 
+/// The profiles an Emboss lays on its face (#20386): `regions`, as [`select_profiles`] gives them,
+/// turned `angle` radians counter-clockwise about the middle of their bounds and then moved by
+/// `shift`, all in the sketch's coordinates, so the shift runs along the sketch's x and y whatever
+/// the angle. Exact: a line stays a line and an arc an arc. With no shift and no turn the regions
+/// come back as they are.
+pub fn emboss_placement(regions: Vec<Region2>, shift: Vec2, angle: f64) -> Result<Vec<Region2>> {
+    if shift == Vec2::ZERO && angle == 0.0 {
+        return Ok(regions);
+    }
+    let out_of_range = || DocError::Invalid("the emboss offsets or angle are out of range".into());
+    if !(shift.x.abs() < 1e9 && shift.y.abs() < 1e9 && angle.is_finite()) {
+        return Err(out_of_range());
+    }
+    // Whole turns change nothing; left out, they keep an arc's start angle small.
+    let angle = angle % std::f64::consts::TAU;
+    // A point p goes to R (p − middle) + middle + shift, which is R p + (shift + middle − R middle).
+    let mut to = shift;
+    if angle != 0.0 {
+        let middle = crate::frame::anchor_point(&regions, crate::frame::Anchor::Center);
+        to += middle - solidcraft_geom::Similarity2::new(1.0, angle, Vec2::ZERO).ok_or_else(out_of_range)?.apply(middle);
+    }
+    let by = solidcraft_geom::Similarity2::new(1.0, angle, to).ok_or_else(out_of_range)?;
+    let placed = |l: &solidcore_record::Loop2| solidcore_record::Loop2 { segs: l.segs.iter().map(|s| s.similar(&by)).collect() };
+    Ok(regions.iter().map(|r| Region2 { outer: placed(&r.outer), holes: r.holes.iter().map(placed).collect() }).collect())
+}
+
 pub fn select_profiles(ss: &SolvedSketch, sel: &ProfileSel) -> Result<Vec<Region2>> {
     let ps = &ss.profiles;
     if ps.is_empty() {

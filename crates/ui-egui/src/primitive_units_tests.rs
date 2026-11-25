@@ -633,7 +633,7 @@ fn operation_length_defaults_follow_every_design_unit() {
         ("solid.hole", &["5", "10", "9", "3", "10", ""]),
         ("solid.rib", &["2", ""]),
         ("solid.web", &["2", ""]),
-        ("solid.emboss", &["1"]),
+        ("solid.emboss", &["1", "", ""]),
         ("solid.offset_face", &["2"]),
         ("solid.pattern.rectangular", &["20", "20", "100", "100"]),
         ("solid.pattern.path", &["20", ""]),

@@ -206,6 +206,7 @@ pub use eval::curve_pick_error;
 pub use eval::draft_corner_options;
 pub use eval::edge_names_for;
 pub use eval::edge_refs;
+pub use eval::emboss_placement;
 pub use eval::face_point_names;
 pub use eval::face_point_state;
 pub use eval::feature_operation;

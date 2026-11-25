@@ -1726,6 +1726,20 @@ pub enum FeatureKind {
         face: Option<EmbossFace>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
+        /// A shift of the picked profiles along the sketch's x before they are laid on the face
+        /// (#20386); the sketch is not changed. `None`: no shift.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Offset X")]
+        offset_x: Option<Expr>,
+        /// The same along the sketch's y.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Offset Y")]
+        offset_y: Option<Expr>,
+        /// A turn of the picked profiles, counter-clockwise in the sketch, about the middle of
+        /// their bounds; the offsets are not turned with them. `None`: no turn.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Angle")]
+        angle: Option<Expr>,
     },
     /// A thin wall from open sketch curves: `thickness` across the sketch plane, filling from
     /// the curves toward the body (to the next face, or `depth`), or with `normal` along the
