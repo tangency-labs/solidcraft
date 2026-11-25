@@ -78,6 +78,8 @@ pub(crate) struct Draft {
     pub corner: crate::DraftCorner,
 }
 
+#[cfg(test)]
+pub(crate) use imp::loft_piece_by_piece;
 pub(crate) use imp::{
     body_from_record, curve, curve_tolerance, cylinder, extrude, extrude_drafted_with_holes, face_section, loft, loft_curves, loft_many_rails,
     loft_to_point, loft_to_point_with_rails, path_curve, project_onto_face, rail_curves, railed_skin, revolve, screw, screw_radial, skin_sections,
@@ -2291,17 +2293,185 @@ mod imp {
         Ok(((t1 + t2).normalized().ok_or_else(|| KernelError::Invalid("path corner".into()))?, turn))
     }
 
-    /// A loft through `sections` (each a closed loop of pieces, all re-split to the same count
-    /// and lined up), `first` the index of the section given first (its cap is the start cap).
-    pub(crate) fn loft(sections: &[(Plane, Vec<Piece>)], first: usize) -> Result<Body> {
-        let curves: Vec<Vec<Curve>> = sections.iter().map(|(pl, ps)| curves(pl, ps)).collect::<Result<_>>()?;
-        // Ruled between two sections, else smooth through them (cubic from four).
-        let degree = match sections.len() {
+    /// A first derivative is one across a joint where its two sides differ by no more than this
+    /// fraction of the longer one. It is the kernel's own measure: below it the kernel's rule
+    /// for a wall's knot lines reads the wall as `C1` there (`JUMP`, its `EFF_ZERO_SQRT`, in
+    /// solidcore's `intersect/surface_drop_lib/knot_lines.rs`).
+    const ONE_DERIVATIVE: f64 = 1e-6;
+
+    /// A Bézier: its degree and its control points `[x, y, z, weight]`.
+    type Bezier = (usize, Vec<[f64; 4]>);
+
+    /// The piece as one Bézier: none for a line or an arc, and none for a piece that goes to
+    /// SMLib as its halves ([`unfolded`]).
+    fn whole_bezier(plane: &Plane, x: &Piece) -> Result<Option<Bezier>> {
+        let Curve::Nurbs { degree, points, knots } = curve(plane, &x.seg)? else { return Ok(None) };
+        let whole = degree > 0 && points.len() == degree + 1 && knots.len() == 2 * (degree + 1) && !turns_back(&points);
+        Ok(whole.then_some((degree, points)))
+    }
+
+    /// The first derivative a Bézier (`[x, y, z, weight]` points) leaves its start with and the
+    /// one it reaches its end with, each on a span of one and without the factor of its degree.
+    fn end_derivatives(points: &[[f64; 4]]) -> Option<(Vec3, Vec3)> {
+        let at = |q: &[f64; 4]| Vec3::new(q[0], q[1], q[2]);
+        let (first, second) = (points.first()?, points.get(1)?);
+        let (last, before) = (points.last()?, points.get(points.len().checked_sub(2)?)?);
+        let leaves = (at(second) - at(first)) * (second[3] / first[3]);
+        let reaches = (at(last) - at(before)) * (before[3] / last[3]);
+        (leaves.len().is_finite() && reaches.len().is_finite()).then_some((leaves, reaches))
+    }
+
+    /// Whether the Bézier `this` carries on the Bézier `prev` with one first derivative
+    /// ([`ONE_DERIVATIVE`]) when its span is `ratio` times `prev`'s: the two are of one degree,
+    /// `this` starts where `prev` ends, and on those spans it leaves with the derivative `prev`
+    /// arrives with, in direction and in length. A piece that arrives or leaves with no
+    /// derivative (a handle on its own end) carries nothing on.
+    fn carries_on(prev: &Bezier, this: &Bezier, ratio: f64) -> bool {
+        let at = |q: &[f64; 4]| Vec3::new(q[0], q[1], q[2]);
+        let (Some(end), Some(start)) = (prev.1.last().map(at), this.1.first().map(at)) else { return false };
+        let (Some((_, reaches)), Some((leaves, _))) = (end_derivatives(&prev.1), end_derivatives(&this.1)) else { return false };
+        // On spans h and ratio h the derivatives are reaches / h and leaves / (ratio h).
+        let reaches = reaches * ratio;
+        prev.0 == this.0
+            && end.dist(start) <= 1e-9 * (1.0 + start.len())
+            && leaves.len() > 0.0
+            && reaches.len() > 0.0
+            && (leaves - reaches).len() <= ONE_DERIVATIVE * leaves.len().max(reaches.len())
+    }
+
+    /// Which pieces of a loft's `sections` go to the skin joined to the piece before them, as
+    /// one B-spline ([`Piece::joins_previous`]); the same for every section.
+    ///
+    /// The skin gives each curve of a section one unit of a wall's parameter, whatever its
+    /// length. Where two pieces of a section meet tangentially at different speeds (two spans of
+    /// one spline of different lengths), the wall's first derivative along the section jumps
+    /// there, though the wall is smooth, and a curve drawn across the wall (a cut's edge) has to
+    /// turn a corner in the wall's parameters on that knot line (#22319). A piece is joined
+    /// where one parameter can take that jump away: where in every section it carries on the
+    /// piece before it with one first derivative ([`carries_on`]) on the spans that keep the
+    /// speed of the first section (the first in the loft's own order, which is the same
+    /// whichever end the sections were given from). Sections of one outline at different sizes
+    /// agree so; sections of different shapes, whose speeds change by different ratios at a
+    /// joint, do not, and their pieces go in as they are.
+    ///
+    /// Only a run with a joint where the speeds differ is joined: a run whose pieces all meet
+    /// at one speed already has one first derivative on a unit each, and goes in as it is. A
+    /// closed run that in any section turns back on itself where it meets its own start is
+    /// broken half-way round, as an extrusion's is ([`broken_at_seams`]).
+    fn loft_joins(sections: &[(Plane, Vec<Piece>)]) -> Result<Vec<bool>> {
+        let Some((_, lead)) = sections.first() else { return Ok(Vec::new()) };
+        let none = vec![false; lead.len()];
+        if sections.iter().any(|(_, ps)| ps.len() != lead.len()) {
+            return Ok(none);
+        }
+        let beziers: Vec<Vec<Option<Bezier>>> =
+            sections.iter().map(|(pl, ps)| ps.iter().map(|x| whole_bezier(pl, x)).collect::<Result<_>>()).collect::<Result<_>>()?;
+        let Some(led) = beziers.first() else { return Ok(none) };
+        // The span of each piece against the one before it that keeps the first section's speed
+        // through their joint, where the piece is joined.
+        let ratios: Vec<Option<f64>> = (0..lead.len())
+            .map(|i| {
+                let before = i.checked_sub(1)?;
+                let (prev, this) = (led.get(before)?.as_ref()?, led.get(i)?.as_ref()?);
+                let (reaches, leaves) = (end_derivatives(&prev.1)?.1, end_derivatives(&this.1)?.0);
+                let ratio = leaves.len() / reaches.len();
+                let agreed = ratio.is_finite()
+                    && ratio > 0.0
+                    && beziers.iter().all(|section| {
+                        matches!((section.get(before), section.get(i)), (Some(Some(p)), Some(Some(t))) if p.0 == prev.0 && carries_on(p, t, ratio))
+                    });
+                agreed.then_some(ratio)
+            })
+            .collect();
+        let mut joins: Vec<bool> = ratios.iter().map(Option::is_some).collect();
+        // A run at one speed throughout is left as it is.
+        let mut i = 0;
+        while i < joins.len() {
+            let j = i + 1 + joins.iter().skip(i + 1).take_while(|x| **x).count();
+            let differs = ratios.get(i + 1..j).is_some_and(|run| run.iter().flatten().any(|r| (r - 1.0).abs() > ONE_DERIVATIVE));
+            if !differs {
+                joins.iter_mut().take(j).skip(i + 1).for_each(|x| *x = false);
+            }
+            i = j;
+        }
+        if !joins.contains(&true) {
+            return Ok(none);
+        }
+        for (plane, pieces) in sections {
+            let flagged: Vec<Piece> = pieces.iter().zip(&joins).map(|(x, joined)| Piece { joins_previous: *joined, ..x.clone() }).collect();
+            for (joined, x) in joins.iter_mut().zip(broken_at_seams(plane, &flagged)?) {
+                *joined = x.joins_previous;
+            }
+        }
+        Ok(joins)
+    }
+
+    /// The curves of a loft's `sections` for the skin: one for each piece, and one B-spline for
+    /// each run of joined pieces ([`loft_joins`]), every section's on the first section's knots
+    /// for the run. The sections' own knots for a run agree to the measure they were joined by;
+    /// a skin through knots a breath apart would take both of each pair. A curve that is no
+    /// such run is as [`curves`] makes it.
+    fn loft_section_curves(sections: &[(Plane, Vec<Piece>)]) -> Result<Vec<Vec<Curve>>> {
+        let joins = loft_joins(sections)?;
+        if !joins.contains(&true) {
+            return sections.iter().map(|(pl, ps)| curves(pl, ps)).collect();
+        }
+        // Whether each curve of a section is a run: `curves` makes one curve of each piece that
+        // does not join the one before it, with the pieces that join it.
+        let mut runs: Vec<bool> = Vec::new();
+        for joined in &joins {
+            match runs.last_mut() {
+                Some(run) if *joined => *run = true,
+                _ => runs.push(false),
+            }
+        }
+        let mut all: Vec<Vec<Curve>> = sections
+            .iter()
+            .map(|(pl, ps)| {
+                let flagged: Vec<Piece> = ps.iter().zip(&joins).map(|(x, joined)| Piece { joins_previous: *joined, ..x.clone() }).collect();
+                curves(pl, &flagged)
+            })
+            .collect::<Result<_>>()?;
+        let lead: Vec<Option<Vec<f64>>> = all
+            .first()
+            .map(|section| section.iter().map(|c| if let Curve::Nurbs { knots, .. } = c { Some(knots.clone()) } else { None }).collect())
+            .unwrap_or_default();
+        for section in all.iter_mut().skip(1) {
+            for ((c, from), run) in section.iter_mut().zip(&lead).zip(&runs) {
+                if let (true, Curve::Nurbs { knots, .. }, Some(lead_knots)) = (*run, c, from)
+                    && knots.len() == lead_knots.len()
+                {
+                    knots.clone_from(lead_knots);
+                }
+            }
+        }
+        Ok(all)
+    }
+
+    /// Ruled between two sections, else smooth through them (cubic from four).
+    fn loft_degree(sections: usize) -> u32 {
+        match sections {
             0..=2 => 1,
             3 => 2,
             _ => 3,
-        };
-        loft_through(sections, first, &curves, degree)
+        }
+    }
+
+    /// A loft through `sections` (each a closed loop of pieces, all re-split to the same count
+    /// and lined up), `first` the index of the section given first (its cap is the start cap).
+    /// A run of pieces that every section agrees is one curve goes to the skin as one curve
+    /// ([`loft_joins`]): the same wall, each piece still paired with its partner on its own
+    /// parameter, without a jump of its first derivative where pieces of different speeds meet.
+    pub(crate) fn loft(sections: &[(Plane, Vec<Piece>)], first: usize) -> Result<Body> {
+        loft_through(sections, first, &loft_section_curves(sections)?, loft_degree(sections.len()))
+    }
+
+    /// [`loft`] with every piece a curve of its own, whatever the sections agree on: what a loft
+    /// through joined pieces is measured against.
+    #[cfg(test)]
+    pub(crate) fn loft_piece_by_piece(sections: &[(Plane, Vec<Piece>)], first: usize) -> Result<Body> {
+        let curves: Vec<Vec<Curve>> = sections.iter().map(|(pl, ps)| curves(pl, ps)).collect::<Result<_>>()?;
+        loft_through(sections, first, &curves, loft_degree(sections.len()))
     }
 
     /// The loft skinned through `curves` (the sections', or with stations between them), `degree`

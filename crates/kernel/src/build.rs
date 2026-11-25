@@ -1030,6 +1030,11 @@ pub fn planar_face_record(plane: &Plane, r: &Region2) -> Result<solidcore_record
 /// knot between them is a point of the wall, so a rectangle lofted to a circle has its x-sides'
 /// middles at the circle's 0 and 180 degree points (pinned by
 /// `loft_rectangle_to_circle_pairs_each_span_on_its_own_parameter`, #19478).
+///
+/// The spans of one spline keep that pairing, but where every section agrees on how their
+/// speeds change from one span to the next (sections of one outline at different sizes) they go
+/// to the skin as one curve, so the wall's first derivative does not jump where two spans of
+/// different lengths meet (`smlib_sweeps::loft`, #22319).
 pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "loft");
     loft_with_rails(sections, &[], RailFit::Scale)
