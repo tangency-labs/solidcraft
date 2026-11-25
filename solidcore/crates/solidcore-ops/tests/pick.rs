@@ -126,3 +126,11 @@ fn a_box_face_picks_by_point() {
     );
     assert!(solidcore_ops::pick::faces(&b, &[[f64::NAN, 0.0, 0.0]], 1e-6).is_err());
 }
+
+/// A box's faces each have one loop of four distinct corners: no outline touches itself.
+#[test]
+fn a_box_outline_touches_nowhere() {
+    all_fixes();
+    let b = make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap();
+    assert_eq!(b.outline_touch().unwrap(), None);
+}
