@@ -124,6 +124,7 @@ use crate::curve::curve::p6::DropPointCaches;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::error::intersect::IntersectFailure;
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
@@ -2329,8 +2330,8 @@ fn classify_curve_type(
         // We're at least TAN.
         ret = TsectCurveType::Tangent;
         let (Some(g1), Some(g2)) = (
-            crate::error::ignored(surface_evaluate_geometric(k, surface1, uv1))?,
-            crate::error::ignored(surface_evaluate_geometric(k, surface2, uv2))?,
+            unless_singular(surface_evaluate_geometric(k, surface1, uv1))?,
+            unless_singular(surface_evaluate_geometric(k, surface2, uv2))?,
         ) else {
             return Ok(None);
         };
@@ -2659,6 +2660,20 @@ fn surface_evaluate_geometric(k: &Kernel, surface: &Surface, uv: Point2) -> Resu
     })
 }
 
+/// A surface's principal curvatures for [`classify_curve_type`]: `None` where the point is a
+/// singular point of the surface ([`SurfaceFailure::SingularPoint`]: a pole, an apex, a
+/// collapsed patch edge, where curvatures are undefined and another point of the curve may
+/// decide). Every other refusal propagates as before (#21996 review): a surface that cannot
+/// give its curvatures at a regular point (a procedural sweep refusing second partials)
+/// proves no contact, and its refusal is named, not read as a tangency.
+fn unless_singular(g: Result<Principal>) -> Result<Option<Principal>> {
+    match g {
+        Ok(g) => Ok(Some(g)),
+        Err(e) if matches!(e.surface_failure(), Some(SurfaceFailure::SingularPoint)) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 /// `smsurf_EvaluateNormalSection(eval, direction, ..)`: the curvature in `direction`.
 fn evaluate_normal_section(eval: &[[Vec3; 3]; 3], direction: Vec3) -> Result<f64> {
     // (upstream may rebuild a vanishing first derivative of the caller's matrix in
@@ -2941,6 +2956,29 @@ mod tests {
         let uv2 = uv_line([0.0, 0.5], [0.8, 0.5]);
         let r = compute_curve_type(&k, &patch, &flat, &uv1, &uv2);
         assert_eq!(r.unwrap(), TsectCurveType::Tangent);
+    }
+
+    /// #21996 review: only a singular point's missing curvatures leave the label to another
+    /// point of the curve; any other refusal to give them (a procedural sweep refusing its
+    /// second partials at a regular point) is named, not read as a tangency.
+    #[test]
+    fn only_a_singular_points_missing_curvatures_are_passed_over() {
+        let op = "test";
+        let singular = SolidError::surface(op, SurfaceFailure::SingularPoint);
+        assert!(unless_singular(Err(singular)).unwrap().is_none());
+        let other = SolidError::surface(
+            op,
+            SurfaceFailure::Defect {
+                why: "no second partials",
+            },
+        );
+        let e = unless_singular(Err(other)).unwrap_err();
+        assert!(
+            matches!(e.surface_failure(), Some(SurfaceFailure::Defect { .. })),
+            "{e}"
+        );
+        let cancelled = SolidError::cancelled(op);
+        assert!(unless_singular(Err(cancelled)).unwrap_err().is_cancelled());
     }
 
     /// `m_apUserPointer` follows copies and assignment, and compares by identity.
