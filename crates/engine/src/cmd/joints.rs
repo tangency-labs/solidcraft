@@ -1182,12 +1182,11 @@ fn circle_centre(s: &Session, occurrence: u64, pick: Vec3) -> Option<Snap> {
     }
     let mut best: Option<(f64, Vec3, Vec3)> = None;
     for b in st.bodies.iter().filter(|b| s.doc.model_body_component(b) == component && !b.body.is_mesh()) {
-        let mesh = b.mesh();
         let size = b.body.size();
         let tol = (size * 1e-3).max(1e-3);
         let rim_tol = (size * 1e-6).max(1e-6);
         for f in 0..b.body.face_count() {
-            let Some((c, half_angle)) = solidcraft_doc::kernel::cone_face(&b.body, &mesh, f) else { continue };
+            let Some((c, half_angle)) = solidcraft_doc::kernel::cone_face(&b.body, f) else { continue };
             let tan_h = half_angle.tan();
             let v = pick - c.axis_point;
             let along = v.dot(c.axis);

@@ -1240,6 +1240,20 @@ fn insert_joint_on_hole_rim_stays_on_plate_face_after_chamfer_and_follows_plate_
     assert_eq!(solved["errors"], json!([]), "{solved}");
     let both_chamfered = place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0));
     assert!(near(both_chamfered, Vec3::new(1025.0, 50.0, 50.0)), "{both_chamfered:?}");
+
+    // Explicit `circle` (cylinder wall) + `end` (planar plate face across the chamfer) is
+    // accepted by both `joint.origin` and `joint.edit`, while an unrelated side face is refused.
+    let wall = face_name(&mut s, "Plate", Vec3::new(1027.5, 53.0, 50.0));
+    let front = face_name(&mut s, "Plate", Vec3::new(1025.0, 10.0, 10.0));
+    let side = face_name(&mut s, "Plate", Vec3::new(1027.5, 0.0, 50.0));
+    assert!(!wall.is_empty() && !front.is_empty() && !side.is_empty());
+    run(&mut s, "joint.origin", json!({"name": "WallOnFront", "occurrence": "Plate", "circle": wall, "end": front}));
+    let (pt, z) = origin_frame(&s, "WallOnFront").unwrap();
+    assert!(near(pt, Vec3::new(1025.0, 50.0, 50.0)) && near(z, -Vec3::X), "{pt:?} {z:?}");
+    let edited = run(&mut s, "joint.edit", json!({"joint": "WasherSeat", "a": {"occurrence": "Plate", "circle": wall, "end": front}}));
+    assert_eq!(edited["errors"], json!([]), "{edited}");
+    assert!(near(place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1025.0, 50.0, 50.0)));
+    assert!(s.execute("joint.origin", &json!({"name": "BadEnd", "occurrence": "Plate", "circle": wall, "end": side})).is_err());
 }
 
 /// Picking `circle` on the outer circular rim (edge or centre) of a chamfered or countersunk
