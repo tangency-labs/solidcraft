@@ -2317,6 +2317,12 @@ impl Document {
     pub fn eval_point(&self, p: &crate::PointExpr) -> Result<Vec3> {
         point(&self.evaluation_values(), p)
     }
+
+    /// An expression read with `vals` from [`Document::evaluation_values`], as the features read
+    /// it: a bare number beside a parameter is in the design's length unit (#9015).
+    pub fn eval_as_features(vals: &BTreeMap<String, Value>, e: &str, kind: Kind) -> Result<f64> {
+        val(vals, e, kind)
+    }
 }
 
 /// The values features are evaluated with: the parameters, and the design's length unit.

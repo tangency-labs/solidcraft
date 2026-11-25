@@ -622,12 +622,15 @@ fn rectangular_pattern_distance_types_place_the_copies() {
 
 /// The command works a row out with the values the pattern is built with, so an expression's
 /// bare number is read in the design's unit there too (#8523): in an inch design `2 + 0` is a
-/// 2 in extent, not 2 mm that a 1 in spacing would not fit in.
+/// 2 in extent, not 2 mm that a 1 in spacing would not fit in. The spacings are checked the same
+/// way before that: with `inset` at 1 mm, `1 - inset` is 24.4 mm there, not the 0 mm a division would
+/// refuse.
 #[test]
 fn rectangular_pattern_extent_reads_an_expression_in_the_design_unit() {
     let pattern = |p: Value| {
         let mut s = Session::default();
         run(&mut s, "document.units", json!({"units": "in"}));
+        run(&mut s, "parameters.add", json!({"name": "inset", "expression": "1 mm"}));
         run(&mut s, "solid.box", json!({"length": "10 mm", "width": "10 mm", "height": "10 mm", "body_name": "Cube"}));
         let mut p = p;
         p["bodies"] = json!(["Cube"]);
@@ -650,6 +653,14 @@ fn rectangular_pattern_extent_reads_an_expression_in_the_design_unit() {
     assert!((xs[1] - 50.8).abs() < 1e-9, "{xs:?}");
     let solidcraft_doc::PatternKind::Rectangular { spacing1, .. } = &p else { panic!("not rectangular") };
     assert_eq!(spacing1.as_str(), "25.4 mm");
+    let gap = 10.0 / 24.4;
+    for p in [
+        json!({"dir1": [1, 0, 0], "count1": 2, "spacing1": "10 mm * 1 mm / (1 - inset)"}),
+        json!({"dir1": [1, 0, 0], "distance1": "count_list", "count1": 2, "spacing_list1": ["10 mm * 1 mm / (1 - inset)"]}),
+    ] {
+        let (xs, _) = pattern(p.clone());
+        assert!(xs.len() == 1 && (xs[0] - gap).abs() < 1e-9, "{p}: {xs:?}");
+    }
 }
 
 /// A direction set by count and spacing list takes the list's gaps in turn and from the start

@@ -3489,8 +3489,8 @@ struct PatternDirection {
 const MAX_SPACING_LIST: usize = 10_000;
 
 /// `spacing_list<k>`: the gaps of a count and spacing list direction, each a number or a length
-/// expression. Left out or `null`, none.
-fn spacing_list(s: &Session, p: &Value, cmd: &str, key: &str) -> Result<Vec<Expr>> {
+/// expression, each checked with `check`. Left out or `null`, none.
+fn spacing_list(p: &Value, cmd: &str, key: &str, check: &dyn Fn(&str, &str) -> Result<()>) -> Result<Vec<Expr>> {
     let malformed = || bad(cmd, format!("`{key}` must be a list of spacings, each a number or an expression"));
     let items = match p.get(key) {
         None | Some(Value::Null) => return Ok(Vec::new()),
@@ -3506,7 +3506,7 @@ fn spacing_list(s: &Session, p: &Value, cmd: &str, key: &str) -> Result<Vec<Expr
             _ => None,
         }
         .ok_or_else(malformed)?;
-        check_expr(s, &e, Kind::Length, cmd, &format!("{key} spacing {}", i + 1))?;
+        check(&e, &format!("{key} spacing {}", i + 1))?;
         out.push(e);
     }
     Ok(out)
@@ -3543,7 +3543,13 @@ fn pattern_direction(s: &Session, p: &Value, cmd: &str, k: &str, used: bool) -> 
     let count = given("count", distance.uses_count())?;
     let spacing = given("spacing", distance.uses_spacing())?;
     let extent = given("extent", distance.uses_extent())?;
-    let list = spacing_list(s, p, cmd, &key("spacing_list"))?;
+    // Checked as the feature evaluates them, a bare number in an expression in the design's
+    // unit, so a length the row accepts below isn't refused here first.
+    let vals = s.doc.evaluation_values();
+    let check_length = |e: &str, what: &str| -> Result<()> {
+        solidcraft_doc::Document::eval_as_features(&vals, e, Kind::Length).map(|_| ()).map_err(|err| bad(cmd, format!("{what}: {err}")))
+    };
+    let list = spacing_list(p, cmd, &key("spacing_list"), &check_length)?;
     if used && distance.uses_list() && list.is_empty() {
         return Err(bad(cmd, format!("`{}` must list at least one spacing", key("spacing_list"))));
     }
@@ -3552,7 +3558,7 @@ fn pattern_direction(s: &Session, p: &Value, cmd: &str, k: &str, used: bool) -> 
     }
     for (name, e) in [(key("spacing"), &spacing), (key("extent"), &extent)] {
         if let Some(e) = e {
-            check_expr(s, e, Kind::Length, cmd, &name)?;
+            check_length(e, &name)?;
         }
     }
     let mut direction = PatternDirection {
@@ -3567,8 +3573,6 @@ fn pattern_direction(s: &Session, p: &Value, cmd: &str, k: &str, used: bool) -> 
     if !used {
         return Ok(direction);
     }
-    // As the feature evaluates it: a bare number in an expression reads in the design's unit.
-    let vals = s.doc.evaluation_values();
     let given = solidcraft_doc::PatternRowValues {
         distance,
         count: direction.count.as_deref(),
