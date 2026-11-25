@@ -109,7 +109,7 @@ fn describe_returns_both_schemas() {
 #[test]
 fn inspect_schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<DocumentInspectParams>(), &["bodies", "measure", "sketch_counts", "timeline"]);
-    assert_keys(input_schema_for::<MeasureParams>(), &["bodies", "items", "names_only"]);
+    assert_keys(input_schema_for::<MeasureParams>(), &["bodies", "items", "mode", "names_only", "within"]);
     assert_keys(input_schema_for::<CommandsParams>(), &[]);
     assert_keys(input_schema_for::<MaterialListParams>(), &[]);
     assert_keys(input_schema_for::<MaterialAssignParams>(), &["bodies", "material"]);
