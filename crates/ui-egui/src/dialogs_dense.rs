@@ -1457,7 +1457,6 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             enter |= expr_row(ui, "ui.finger_joint_edge_offset", edge_offset);
             ui_kit::checkbox_grid(ui, &mut [("ui.finger_joint_inverted", inverted)], 1);
         }
-        Kind::Surface(k) => enter |= crate::dialogs_surface::rows(ui, k, &mut d.inputs, &mut d.active),
         Kind::Surface(k) => {
             enter |= crate::dialogs_surface::rows(ui, k, &mut d.inputs, &mut d.active);
             // Extend's Distance drops a kept plane or face (one the dialog couldn't pick), so
