@@ -3111,14 +3111,17 @@ mod tests {
             ),
         ];
         for (cause, status, entity) in samples {
+            // the creator's face list is the executive's own (`build_local`): a defect
+            let defect = matches!(cause, OffsetFailure::LocalFaceNotListed);
             assert!(cause.replaces_upstream_status(), "{cause:?}");
-            assert!(!cause.is_phrase() && !cause.is_defect(), "{cause:?}");
+            assert!(!cause.is_phrase(), "{cause:?}");
+            assert_eq!(cause.is_defect(), defect, "{cause:?}");
             let e = SolidError::offset("offset::op", cause);
             assert_eq!(e.upstream_status(), Some(status), "{cause:?}");
             assert_eq!(super::super::upstream_status(&e), Some(status));
             assert_eq!(e.sm_status(), Some(status), "{cause:?}");
             assert_eq!(e.entity(), entity, "{cause:?}");
-            assert!(!e.is_defect(), "{cause:?}");
+            assert_eq!(e.is_defect(), defect, "{cause:?}");
         }
         // a site that kept another status keeps it through `with_status`
         let e = Failure::new("offset::op", OffsetFailure::FaceHasNoOuterFaceuse { face })

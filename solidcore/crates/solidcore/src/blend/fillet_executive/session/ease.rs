@@ -540,7 +540,7 @@ mod tests {
         let missing = missing(EaseInput::CornerVertex);
         assert_eq!(
             missing.to_string(),
-            "blend::fillet_executive::session::ease: missing: an eased corner has no filleted vertex"
+            "blend::fillet_executive::session::ease: invalid_input: an eased corner has no filleted vertex"
         );
         assert_eq!(missing.sm_status(), Some(SM_ERR_NULL_POINTER));
         let failed = stop(EaseStop::EasePastEdgeEnd);
