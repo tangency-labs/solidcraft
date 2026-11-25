@@ -275,6 +275,7 @@ pub mod pencil;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
+mod plane_resize;
 mod plugin_events;
 mod plugin_images;
 pub mod plugin_install;
@@ -606,6 +607,8 @@ pub struct Services {
     pub open_bytes: Option<Box<dyn Fn(&str, &str, &[u8]) -> Result<(), String>>>,
     /// Open a file in the program the system opens its kind with (a PDF in its viewer, to print).
     pub open_path: Option<Box<dyn Fn(&str) -> Result<(), String>>>,
+    /// A browser persists prepared design bytes and acknowledges them after the write ends.
+    pub persist_design: Option<save_job::PersistDesign>,
     /// Open a dialog for one file of a kind (its name, its extensions): on macOS a dialog allows
     /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
     /// Open dialog.
@@ -759,6 +762,8 @@ pub struct SolveApp {
     pub(crate) import_report: Option<import_report::Shown>,
     /// A Save or Save As being written on a worker (see [`save_job`]).
     saving: Option<save_job::Saving>,
+    host_saves: Vec<save_job::HostSaving>,
+    host_save_left_dirty: std::collections::HashSet<u64>,
     /// A signature check running on a worker (see [`verify_job`]).
     verifying: Option<verify_job::Verifying>,
     /// A drawing view being drawn on a worker (see [`drawing_jobs`]).
@@ -1191,6 +1196,8 @@ impl SolveApp {
             plugin_updates: Default::default(),
             import_report: None,
             saving: None,
+            host_saves: Vec::new(),
+            host_save_left_dirty: Default::default(),
             verifying: None,
             drawing_job: None,
             viewport: viewport::ViewportState::default(),
@@ -2177,6 +2184,14 @@ impl SolveApp {
             }
             if id == "view.origin_axes_across_view" {
                 self.preferences.origin_axes_across_view = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
+            }
+            if id == "view.isolate_others" {
+                if let Some(show) = v.get("show").and_then(|s| serde_json::from_value(s.clone()).ok()) {
+                    self.preferences.isolate_others = show;
+                }
+                if let Some(pick) = v.get("pick").and_then(Value::as_bool) {
+                    self.preferences.isolate_others_pick = pick;
+                }
             }
             if id == "view.scale_bar" {
                 self.preferences.scale_bar = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
@@ -4987,14 +5002,12 @@ impl SolveApp {
             dim_view::set_model_drawn(Vec::new());
             let id = self.docs.views.active().id;
             drawing_sheet_page::show_view(self, ui, id);
-            view_tiles::single_sketch_chrome(self, ui);
         } else if drawing_workspace::active(self) {
             if dialogs_sheet::flat_active(self) {
                 viewport::show(self, ui);
             } else {
                 dim_view::set_model_drawn(Vec::new());
                 drawing_workspace::show(self, ui);
-                view_tiles::single_sketch_chrome(self, ui);
             }
         } else if view_window_drag::unanchored(self, ui.ctx(), self.docs.views.active().id) {
             self.viewport.rect = Some(ui.max_rect());
@@ -5121,6 +5134,10 @@ impl SolveApp {
             ctx.request_repaint();
             return;
         };
+        if control::host_save(self, &req) {
+            ctx.request_repaint();
+            return;
+        }
         let reply = req.reply.clone();
         match control::handle(self, ctx, &req) {
             control::Outcome::Done(v) => {

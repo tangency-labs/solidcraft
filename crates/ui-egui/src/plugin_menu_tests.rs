@@ -212,7 +212,7 @@ fn deliver_form_reply(app: &mut SolveApp, value: Value) {
     let source_guard =
         solidcraft_engine::schema::plugin::FormGuard { document_id: app.session.document_id.clone(), revision: app.session.design_revision() };
     app.plugin_menu.dialogs.last_mut().unwrap().running =
-        Some(Running { reply, ticket: request.ticket, received: None, source_guard: Some(source_guard) });
+        Some(Running { serial: request.serial, reply, ticket: request.ticket, received: None, source_guard: Some(source_guard) });
 }
 
 #[test]
@@ -874,6 +874,7 @@ fn set_input(fields: &mut [(Field, Input)], key: &str, input: Input) {
     let (field, value) = fields.iter_mut().find(|(f, _)| f.key == key).unwrap();
     *value = input;
     field.edited = true;
+    field.folder_chosen |= field.grant_read;
     refresh_conditions(fields);
 }
 
@@ -1139,12 +1140,12 @@ fn export_save_callback_queues_for_the_dialogs_original_session() {
     let dialog = h.app.plugin_menu.dialog().unwrap();
     let (id, session) = (dialog.id, dialog.session);
     crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
-    queue(&mut h.app, id, json!({"command":"file.export","params":{"path":"bracket.smp"}}));
+    queue(&mut h.app, id, json!({"command":"file.export","params":{"path":"bracket.smp"}}), None);
     let request = h.app.control_held.pop_back().unwrap();
     assert_eq!(h.app.plugin_menu.pending.last(), Some(&(request.serial, session)));
     assert!(check_dispatch(&mut h.app, &request).is_err(), "a file picker cannot redirect an export to another design");
     h.app.plugin_menu.dialogs.clear();
-    queue(&mut h.app, id, json!({"command":"file.export","params":{}}));
+    queue(&mut h.app, id, json!({"command":"file.export","params":{}}), None);
     assert!(h.app.control_held.is_empty(), "a dismissed dialog cannot queue an export");
 }
 
@@ -1807,11 +1808,11 @@ fn run_waits_for_required_fields_and_valid_values() {
     );
 }
 
-fn entry(name: &str, effect: &str, slots: Value) -> solidcraft_engine::plugin::Entry {
+pub(crate) fn entry(name: &str, effect: &str, slots: Value) -> solidcraft_engine::plugin::Entry {
     serde_json::from_value(json!({"name":name,"effect":effect,"input_schema":{"type":"object"},"slots":slots})).unwrap()
 }
 
-fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -> Listed {
+pub(crate) fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -> Listed {
     Listed {
         id: id.into(),
         name: format!("{id} plugin"),
@@ -1871,6 +1872,33 @@ fn the_menu_lists_install_then_entries_with_a_submenu_for_several() {
     assert_eq!(label, "tools plugin");
     let labels: Vec<&str> = sub.iter().map(|r| if let FileRow::Item(i) = r { i.label.as_str() } else { "" }).collect();
     assert_eq!(labels, ["measure…", "tidy…"]);
+}
+
+#[test]
+fn importer_menu_rows_use_the_same_entry_icon_for_single_entries_and_submenus() {
+    use crate::app_bar::FileRow;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let importer = |name: &str| {
+        serde_json::from_value(json!({"name":name,"kind":"importer","extensions":["sample"],
+            "input_schema":{"type":"object","x-solidcraft-icon":"format.svg"}}))
+        .unwrap()
+    };
+    let mut plugin = listed("imports", vec![importer("convert")]);
+    plugin.images.insert("format.svg".into(), "checked-format-icon".into());
+    app.plugin_menu.listed = vec![plugin];
+    assert!(matches!(&rows(&app)[3], FileRow::Item(item) if item.icon == "checked-format-icon"));
+    app.plugin_menu.listed[0].entries.push(importer("other"));
+    let menu = rows(&app);
+    let FileRow::Sub { rows, .. } = &menu[3] else { panic!("several importers have a submenu") };
+    assert!(rows.iter().all(|row| matches!(row, FileRow::Item(item) if item.icon == "checked-format-icon")));
+    app.plugin_menu.listed[0].images.clear();
+    let menu = super::rows(&app);
+    let FileRow::Sub { rows, .. } = &menu[3] else { panic!("several importers have a submenu") };
+    assert!(rows.iter().all(|row| matches!(row, FileRow::Item(item) if item.icon == crate::plugin_images::GENERIC)));
+    app.plugin_menu.listed[0].entries.truncate(1);
+    app.plugin_menu.listed[0].entries[0].input_schema = json!({"type":"object"});
+    assert!(matches!(&super::rows(&app)[3], FileRow::Item(item) if item.icon.is_empty()), "no annotation keeps the old menu row");
+    assert_eq!(ribbon_buttons(&app)[0].icon, crate::plugin_images::GENERIC);
 }
 
 /// Each plugin is its own thing: every command gets its own menu row (several under the plugin's
@@ -3291,4 +3319,583 @@ mod native {
         assert!(same_camera(&h.app.cam, &stayed), "a failed run does not move the camera: {:?} vs {stayed:?}", h.app.cam);
         let _ = std::fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn one_run_folder_consent_reaches_the_command_worker_without_changing_its_source_identity() {
+        let root = package("folder-consent");
+        let path = root.join("boxes/plugin.json");
+        let mut manifest: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        manifest["runtime"]["entries"][0]["input_schema"]["properties"]["library"] =
+            json!({"type":"string","format":"directory","x-solidcraft-grant":"read"});
+        std::fs::write(&path, manifest.to_string()).unwrap();
+        let mut h = crate::scenario::Harness::new();
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        open_entry(&mut h.app, 0, 0);
+        let id = h.app.plugin_menu.dialog().unwrap().id;
+        apply_browsed_folder(&mut h.app, id, "library", root.to_string_lossy().into_owned());
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        assert!(h.app.plugin_menu.dialogs.is_empty(), "a successful edit must be accepted from its worker");
+        assert!(h.app.session.plugin_state.user.dialog_folders.is_none());
+        assert!(h.app.session.plugin_state.grants.is_empty() && h.app.preferences.plugin_grants.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn replacing_an_importer_file_invalidates_pending_general_patches_before_reading_the_new_file() {
+    let mut h = crate::scenario::Harness::new();
+    let mut entry = importing_entry();
+    entry.dialog_hook = true;
+    entry.input_schema["properties"]["bodies"] = json!({"type":"array","items":{"type":"string"}});
+    h.app.session.selection = vec![Sel::Body { name: "prefilled".into() }];
+    h.app.plugin_menu.listed = vec![listed("sample", vec![entry])];
+    h.app.plugin_menu.loaded = true;
+    open_entry(&mut h.app, 0, 0);
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    let id = dialog.id;
+    let generation = dialog.hook.as_ref().unwrap().generation;
+    let update = solidcraft_engine::plugin::dialog::apply(
+        &dialog.hook.as_ref().unwrap().schema,
+        &json!({}),
+        &Default::default(),
+        Some(r#"{"part":{"value":"old file"},"bodies":{"value":["computed"]}}"#),
+        false,
+    )
+    .unwrap();
+    assert!(apply_hook_reply(dialog, generation, update.clone()));
+    let (send, receive) = std::sync::mpsc::channel();
+    dialog.hook.as_mut().unwrap().pending = Some((generation, receive));
+    h.app.dialog.as_mut().unwrap().inputs = dialog.selection_inputs();
+    select_file(&mut h.app, id, "replacement.smp".into());
+    sync_picks(&mut h.app);
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    assert!(dialog.hook.as_ref().unwrap().generation > generation);
+    assert!(dialog.file_job.is_none(), "the new file reader waits for the previous hook worker");
+    send.send(Ok(update)).unwrap();
+    poll_hooks(&mut h.app, &h.ctx);
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    assert!(dialog.hook.as_ref().unwrap().pending.is_none());
+    assert!(dialog.file.is_none());
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["part"], "initial", "the old file's patch was discarded");
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["bodies"], json!(["prefilled"]), "the original viewport prefill survives");
+}
+
+#[test]
+fn importer_file_conditions_and_general_patches_share_defaults_without_overwriting_edits() {
+    let schema = json!({"type":"object","properties":{
+        "width":{"type":"number","default":1,"x-solidcraft-defaults":[{"when":{"file":"extension","eq":"asm"},"value":6}]},
+        "part":{"type":"string","default":"initial"},
+        "detail":{"type":"string","default":"shown","x-solidcraft-visible-when":{"file":"extension","eq":"asm"}}
+    }});
+    let mut h = crate::scenario::Harness::new();
+    let mut entry = importing_entry();
+    entry.dialog_hook = true;
+    entry.input_schema = schema.clone();
+    h.app.plugin_menu.listed = vec![listed("sample", vec![entry])];
+    h.app.plugin_menu.loaded = true;
+    open_entry(&mut h.app, 0, 0);
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    set_input(dialog.fields.as_mut().unwrap(), "part", Input::Text("chosen".into()));
+    dialog.source = Some("parts.asm".into());
+    dialog.file_generation = 1;
+    let file = solidcraft_engine::plugin::dialog::FileFacts {
+        name: "parts.asm".into(),
+        extension: "asm".into(),
+        size: 42,
+        format: "sample.convert".into(),
+        generation: 1,
+    };
+    let bound = solidcraft_engine::plugin::conditions::bind_file_conditions(&schema, Some(&file)).unwrap();
+    let (send, receive) = std::sync::mpsc::channel();
+    dialog.file_job = Some(FileJob { generation: 1, reply: receive });
+    send.send(Ok(solidcraft_engine::plugin::ImportDialog { file, schema: bound.clone(), hook: false })).unwrap();
+    poll_file(dialog);
+    assert_eq!(dialog.hook.as_ref().unwrap().schema, bound);
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["width"], 6.0);
+    let update = solidcraft_engine::plugin::dialog::apply(
+        &bound,
+        &json!({"part":"chosen"}),
+        &std::collections::BTreeSet::from(["part".into()]),
+        Some(r#"{"width":{"default":24},"part":{"value":"computed"},"detail":{"visible":false,"enabled":false,"hint":"Header detail"}}"#),
+        false,
+    )
+    .unwrap();
+    assert!(update.warning.is_none());
+    let generation = dialog.hook.as_ref().unwrap().generation;
+    assert!(apply_hook_reply(dialog, generation, update));
+    let fields = dialog.fields.as_ref().unwrap();
+    let detail = &fields.iter().find(|(field, _)| field.key == "detail").unwrap().0;
+    assert!(!detail.visible && !detail.enabled);
+    assert_eq!(detail.tip.as_deref(), Some("Header detail"));
+    assert_eq!(params(fields).unwrap()["width"], 24.0);
+    assert_eq!(params(fields).unwrap()["part"], "chosen");
+    assert!(!dialog.has_hook, "general patches do not resubmit the file-aware schema hook");
+    let dialog = h.app.plugin_menu.dialogs.last().unwrap();
+    assert!(dialog.ready(&h.app).is_ok());
+}
+
+fn importing_entry() -> solidcraft_engine::plugin::Entry {
+    serde_json::from_value(json!({"name":"convert","kind":"importer","effect":"open","extensions":["smp"],
+        "input_schema":{"type":"object","properties":{"part":{"type":"string","default":"initial"}}}}))
+    .unwrap()
+}
+
+/// The same importer, whose manifest asks to choose the file before its options.
+fn file_first_entry() -> solidcraft_engine::plugin::Entry {
+    let mut entry = importing_entry();
+    entry.file_first = true;
+    entry
+}
+
+#[test]
+fn importer_menu_picks_first_only_when_its_manifest_says_file_first_and_cancel_opens_no_form() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.plugin_menu.listed = vec![listed("sample", vec![file_first_entry()])];
+    h.app.plugin_menu.loaded = true;
+    h.app.services.pick_open = Some(Box::new(|extensions| {
+        assert_eq!(extensions, &["smp"]);
+        Box::pin(std::future::ready(None))
+    }));
+    open_entry(&mut h.app, 0, 0);
+    assert!(h.app.plugin_menu.dialogs.is_empty(), "the picker comes before the form");
+    h.frames(2);
+    assert!(h.app.plugin_menu.dialogs.is_empty(), "cancel never runs the importer or opens a form");
+    assert!(h.app.file_load.idle());
+    h.app.services.pick_open = Some(Box::new(|_| Box::pin(std::future::ready(Some("picked.smp".into())))));
+    open_entry(&mut h.app, 0, 0);
+    crate::file_picker::tick(&mut h.app, &h.ctx);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().source.as_deref(), Some("picked.smp"));
+    assert!(h.app.file_load.idle(), "choosing the file only starts its form");
+    // An importer that does not say so keeps the options-first dialog, and never asks for a file.
+    h.app.plugin_menu.dialogs.clear();
+    h.app.plugin_menu.listed = vec![listed("sample", vec![importing_entry()])];
+    h.app.services.pick_open = Some(Box::new(|_| panic!("an options-first importer does not pick a file first")));
+    open_entry(&mut h.app, 0, 0);
+    assert!(h.app.plugin_menu.dialog().unwrap().source.is_none(), "options come first");
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app), Ok(json!({"part":"initial"})));
+    let saved = serde_json::to_value(&h.app.preferences).unwrap();
+    assert!(saved.get("plugin_import_file_first").is_none(), "no preference chooses it");
+}
+
+#[test]
+fn importer_file_generations_discard_late_updates_and_close_disconnects_the_worker() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.plugin_menu.listed = vec![listed("sample", vec![importing_entry()])];
+    h.app.plugin_menu.loaded = true;
+    open_entry(&mut h.app, 0, 0);
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.source = Some("new.smp".into());
+    dialog.file_generation = 2;
+    let result = |generation, name: &str| solidcraft_engine::plugin::ImportDialog {
+        file: solidcraft_engine::plugin::dialog::FileFacts {
+            name: name.into(),
+            extension: "smp".into(),
+            size: 24,
+            format: "sample.convert".into(),
+            generation,
+        },
+        schema: json!({"type":"object","properties":{"part":{"type":"string","enum":[name],"default":name}}}),
+        hook: true,
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    dialog.file_job = Some(FileJob { generation: 1, reply: rx });
+    tx.send(Ok(result(1, "old.smp"))).unwrap();
+    poll_file(dialog);
+    assert!(dialog.file.is_none());
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap(), json!({"part":"initial"}));
+    let (tx, rx) = std::sync::mpsc::channel();
+    dialog.file_job = Some(FileJob { generation: 2, reply: rx });
+    dialog.hook_values = Some(json!({"part":"new.smp"}));
+    assert!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).is_err());
+    tx.send(Ok(result(2, "new.smp"))).unwrap();
+    poll_file(h.app.plugin_menu.dialogs.last_mut().unwrap());
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    assert_eq!(dialog.file.as_ref().unwrap().name, "new.smp");
+    assert_eq!(dialog.ready(&h.app).unwrap(), json!({"part":"new.smp"}));
+    h.app.plugin_menu.dialogs.last_mut().unwrap().hook_values = Some(json!({"part":"previous input"}));
+    assert!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).is_err(), "Open cannot race the next input update");
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.plugin_menu.dialogs.last_mut().unwrap().file_job = Some(FileJob { generation: 2, reply: rx });
+    h.app.plugin_menu.dialogs.clear();
+    assert!(tx.send(Ok(result(2, "late.smp"))).is_err(), "closing drops the result receiver");
+}
+
+#[test]
+fn interactive_open_and_drop_reuse_the_file_and_do_not_start_importing_before_the_form() {
+    let root = solidcraft_engine::io::vfs::temp_dir().join(format!("sc-plugin-file-form-{}", std::process::id()));
+    let folder = root.join("plugins/sample");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.2"],"runtime":{
+        "module":"sample.wasm","commands":[],"entries":[importing_entry()]}});
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    std::fs::write(folder.join("sample.wasm"), b"not run while choosing a file").unwrap();
+    let path = root.join("part.smp").to_string_lossy().into_owned();
+    std::fs::write(&path, b"header").unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.session.plugin_state.plugins_dir = Some(root.join("plugins"));
+    assert!(!offer_import(&mut h.app, &path), "an importer without file_first keeps direct Open/drop");
+    assert!(h.app.plugin_menu.dialogs.is_empty());
+    // The same importer, now asking for its file first in its manifest.
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.2"],"runtime":{
+        "module":"sample.wasm","commands":[],"entries":[file_first_entry()]}});
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    for generation in 1..=2 {
+        if generation == 1 {
+            h.app.open_path_async(&path);
+        } else {
+            h.app.drop_path(&path);
+        }
+        let dialog = h.app.plugin_menu.dialog().unwrap();
+        assert_eq!(dialog.source.as_deref(), Some(path.as_str()));
+        assert_eq!(dialog.file_generation, generation);
+        assert_eq!(h.app.plugin_menu.dialogs.len(), 1);
+        assert!(h.app.file_load.idle(), "the form holds the path until Open is pressed");
+        assert!(!h.app.file_picker_busy(), "Open and drops already have a file");
+    }
+    // Join the bounded file reader through its channel before removing the fixture's files.
+    if let Some(job) = h.app.plugin_menu.dialogs.last_mut().and_then(|d| d.file_job.take()) {
+        let _ = job.reply.recv();
+    }
+    // A script's `doc.open` never shows the form, whatever the manifest says.
+    let shown = h.app.plugin_menu.dialogs.len();
+    let _ = h.call("doc.open", json!({"path":path,"allow_paths":[root]}));
+    assert_eq!(h.app.plugin_menu.dialogs.len(), shown, "scripts and MCP calls are unchanged");
+    h.app.plugin_menu.dialogs.clear();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn importer_file_facts_drive_visibility_enabled_choices_and_defaults_without_running_wasm() {
+    let schema = json!({"type":"object","properties":{
+        "count":{"type":"integer","default":1,"x-solidcraft-defaults":[{"when":{"file":"extension","eq":"asm"},"value":3}]},
+        "part":{"type":"string","default":"whole","oneOf":[{"const":"whole"},
+            {"const":"assembly","x-solidcraft-when":{"file":"extension","eq":"asm"}}]},
+        "flatten":{"type":"boolean","x-solidcraft-visible-when":{"file":"format","eq":"sample.convert"},
+            "x-solidcraft-enabled-when":{"file":"extension","eq":"asm"}}
+    }});
+    let mut file = solidcraft_engine::plugin::dialog::FileFacts {
+        name: "parts.asm".into(),
+        extension: "asm".into(),
+        size: 42,
+        format: "sample.convert".into(),
+        generation: 1,
+    };
+    let mut fields = form(&solidcraft_engine::plugin::conditions::bind_file_conditions(&schema, Some(&file)).unwrap()).unwrap();
+    assert_eq!(params(&fields).unwrap()["count"], 3);
+    assert!(fields.iter().find(|(f, _)| f.key == "flatten").unwrap().0.enabled);
+    set_input(&mut fields, "part", Input::Choice(Some(1)));
+    set_input(&mut fields, "count", Input::Integer(8));
+    file.extension = "txt".into();
+    file.generation = 2;
+    let mut updated = form(&solidcraft_engine::plugin::conditions::bind_file_conditions(&schema, Some(&file)).unwrap()).unwrap();
+    retain_edits(&mut updated, &fields);
+    refresh_conditions(&mut updated);
+    assert_eq!(params(&updated).unwrap()["part"], "whole", "an unavailable edited choice resets");
+    assert_eq!(params(&updated).unwrap()["count"], 8, "custom input survives the file change");
+    assert!(!updated.iter().find(|(f, _)| f.key == "flatten").unwrap().0.enabled);
+    file.format = "different.convert".into();
+    let fields = form(&solidcraft_engine::plugin::conditions::bind_file_conditions(&schema, Some(&file)).unwrap()).unwrap();
+    assert!(params(&fields).unwrap().get("flatten").is_none());
+}
+
+/// Deliver a completed hook deterministically, preserving the snapshot set when it was submitted.
+fn finish_import_fields(dialog: &mut EntryDialog, schema: Value) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    dialog.file_job = Some(FileJob { generation: dialog.file_generation, reply: rx });
+    tx.send(Ok(solidcraft_engine::plugin::ImportDialog {
+        file: solidcraft_engine::plugin::dialog::FileFacts {
+            name: "part.smp".into(),
+            extension: "smp".into(),
+            size: 24,
+            format: "sample.convert".into(),
+            generation: dialog.file_generation,
+        },
+        schema,
+        hook: true,
+    }))
+    .unwrap();
+    poll_file(dialog);
+}
+
+#[test]
+fn hook_refresh_preserves_cleared_text_and_incomplete_numeric_edits() {
+    let schema = json!({"type":"object","properties":{
+        "text":{"type":"string","default":"initial"},
+        "number":{"type":"number","default":1.5},
+        "integer":{"type":"integer","default":2},
+        "empty_number":{"type":"number","default":3.5}
+    }});
+    let mut h = crate::scenario::Harness::new();
+    let mut entry = importing_entry();
+    entry.input_schema = schema.clone();
+    h.app.plugin_menu.listed = vec![listed("sample", vec![entry])];
+    h.app.plugin_menu.loaded = true;
+    open_entry(&mut h.app, 0, 0);
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.source = Some("part.smp".into());
+    let edits = [
+        ("text", Input::Text(String::new())),
+        ("number", Input::Typed("-".into())),
+        ("integer", Input::Typed("2e+".into())),
+        ("empty_number", Input::Typed(String::new())),
+    ];
+    for (key, value) in &edits {
+        set_input(dialog.fields.as_mut().unwrap(), key, value.clone());
+    }
+    let submitted = dialog_values(dialog);
+    assert_eq!(submitted, json!({}), "cleared and incomplete input has no scalar value");
+    dialog.hook_values = Some(submitted.clone());
+    finish_import_fields(dialog, schema);
+    for (key, value) in edits {
+        let (field, actual) = dialog.fields.as_ref().unwrap().iter().find(|(f, _)| f.key == key).unwrap();
+        assert_eq!(*actual, value, "{key} must keep the raw edit");
+        assert!(field.edited);
+    }
+    assert_eq!(dialog_values(dialog), submitted, "hook refresh must not restore omitted defaults");
+}
+
+#[test]
+fn bounded_text_choice_updates_remain_drawable_and_keep_original_constraints() {
+    let schema = json!({"type":"object","properties":{
+        "part":{"type":"string","minLength":4,"maxLength":32,"format":"text","default":"plate"}
+    }});
+    for update in [
+        json!({"fields":{"part":{"enum":["plate","cover"],"default":"plate"}}}),
+        json!({"fields":{"part":{"oneOf":[{"const":"plate","title":"Plate"},{"const":"cover","title":"Cover"}],"default":"plate"}}}),
+    ] {
+        let updated = solidcraft_engine::plugin::dialog::apply_update(&schema, &update).unwrap();
+        assert_eq!(updated["properties"]["part"]["minLength"], 4);
+        assert_eq!(updated["properties"]["part"]["maxLength"], 32);
+        let mut h = crate::scenario::Harness::new();
+        let mut entry = importing_entry();
+        entry.input_schema = schema.clone();
+        h.app.plugin_menu.listed = vec![listed("sample", vec![entry])];
+        h.app.plugin_menu.loaded = true;
+        open_entry(&mut h.app, 0, 0);
+        let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+        dialog.source = Some("part.smp".into());
+        dialog.hook_values = Some(dialog_values(dialog));
+        finish_import_fields(dialog, updated);
+        assert!(!dialog.file_failed, "valid bounded choices must not disable the form");
+        assert!(matches!(dialog.fields.as_ref().unwrap()[0].0.kind, Kind::Choice { .. }));
+        assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"part":"plate"}));
+    }
+    for value in [json!("bad"), json!("x".repeat(33))] {
+        let update = json!({"fields":{"part":{"enum":[value]}}});
+        assert!(solidcraft_engine::plugin::dialog::apply_update(&schema, &update).is_err());
+    }
+    assert!(
+        form(&json!({"type":"object","properties":{
+            "part":{"type":"string","maxLength":3,"enum":["plate"]}
+        }}))
+        .is_none(),
+        "static choices must obey the same length constraints"
+    );
+}
+
+#[test]
+fn hook_defaults_trigger_another_update_until_submitted_values_match_the_form() {
+    let schema = json!({"type":"object","properties":{
+        "mode":{"type":"boolean","default":false,"x-solidcraft-defaults":[
+            {"when":{"file":"extension","eq":"smp"},"value":true}
+        ]},
+        "part":{"type":"string","default":"same"}
+    }});
+    let mut h = crate::scenario::Harness::new();
+    let mut entry = importing_entry();
+    entry.input_schema = schema.clone();
+    h.app.plugin_menu.listed = vec![listed("sample", vec![entry])];
+    h.app.plugin_menu.loaded = true;
+    open_entry(&mut h.app, 0, 0);
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.source = Some("part.smp".into());
+    dialog.hook_values = Some(dialog_values(dialog));
+    let submitted = dialog.hook_values.clone();
+    assert_eq!(submitted, Some(json!({"mode":false,"part":"same"})));
+    let file = solidcraft_engine::plugin::dialog::FileFacts {
+        name: "part.smp".into(),
+        extension: "smp".into(),
+        size: 24,
+        format: "sample.convert".into(),
+        generation: dialog.file_generation,
+    };
+    let bound = solidcraft_engine::plugin::conditions::bind_file_conditions(&schema, Some(&file)).unwrap();
+    let first =
+        solidcraft_engine::plugin::dialog::apply_update(&bound, &json!({"fields":{"part":{"enum":["same","old"],"default":"same"}}})).unwrap();
+    finish_import_fields(dialog, first);
+    assert_eq!(dialog.hook_values, submitted, "displayed defaults were never submitted to this hook");
+    assert_eq!(dialog_values(dialog), json!({"mode":true,"part":"same"}));
+    assert!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).is_err(), "Open waits for choices computed for mode=true");
+    poll(&mut h.app);
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    assert!(dialog.file_job.is_some(), "poll queues the missing update");
+    assert_eq!(dialog.hook_values, Some(json!({"mode":true,"part":"same"})));
+    let second =
+        solidcraft_engine::plugin::dialog::apply_update(&bound, &json!({"fields":{"part":{"enum":["same","new"],"default":"same"}}})).unwrap();
+    finish_import_fields(dialog, second);
+    assert_eq!(dialog.hook_values.as_ref(), Some(&dialog_values(dialog)));
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"mode":true,"part":"same"}));
+    poll(&mut h.app);
+    assert!(h.app.plugin_menu.dialog().unwrap().file_job.is_none(), "unchanged values must not queue another update");
+}
+
+#[test]
+fn dialog_hook_folder_defaults_do_not_grant_access_or_overwrite_a_browsed_folder() {
+    use solidcraft_engine::plugin::dialog::apply;
+
+    let mut h = hook_dialog_harness();
+    let root = h.dir.join("hook-library");
+    let other = h.dir.join("hook-other");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&other).unwrap();
+    let schema = json!({"type":"object","properties":{
+        "folder":{"type":"string","format":"directory","x-solidcraft-grant":"read"}
+    }});
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.fields = form(&schema);
+    dialog.hook.as_mut().unwrap().schema = schema.clone();
+    let reply = json!({"folder":{"default":root}}).to_string();
+    let update = apply(&schema, &json!({}), &Default::default(), Some(&reply), false).unwrap();
+    assert!(apply_hook_reply(dialog, 0, update));
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["folder"], root.to_string_lossy().as_ref());
+    assert!(dialog.folder_consent().unwrap().folders.is_empty(), "a hook default is not user consent");
+    let id = dialog.id;
+    apply_browsed_folder(&mut h.app, id, "folder", root.to_string_lossy().into_owned());
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    let protected = std::collections::BTreeSet::from(["folder".into()]);
+    let reply = json!({"folder":{"value":other}}).to_string();
+    let update = apply(&schema, &hook_values(dialog.fields.as_ref().unwrap()), &protected, Some(&reply), false).unwrap();
+    assert!(apply_hook_reply(dialog, 0, update));
+    let consent = dialog.folder_consent().unwrap();
+    assert_eq!(consent.folders.len(), 1);
+    assert_eq!(consent.folders[0].folder, std::fs::canonicalize(&root).unwrap(), "the browsed value remains the granted root");
+    for patch in [json!({"folder":{"visible":false}}), json!({"folder":{"enabled":false}})] {
+        let reply = patch.to_string();
+        let update = apply(&schema, &hook_values(dialog.fields.as_ref().unwrap()), &protected, Some(&reply), false).unwrap();
+        assert!(apply_hook_reply(dialog, 0, update));
+        assert!(dialog.folder_consent().unwrap().folders.is_empty(), "hook-hidden or disabled fields add no consent");
+    }
+}
+
+#[test]
+fn annotated_folder_fields_grant_only_edited_visible_values_for_the_internal_request() {
+    let mut h = crate::scenario::Harness::new();
+    let root = h.dir.join("library");
+    let pasted = h.dir.join("pasted");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&pasted).unwrap();
+    let mut command = entry("load", "read", json!([]));
+    command.input_schema = json!({"type":"object","properties":{
+        "use_library":{"type":"boolean","default":true},
+        "folder":{"type":"string","title":"Library","format":"directory","default":root,
+            "x-solidcraft-grant":"read","x-solidcraft-visible-when":{"field":"use_library","eq":true}}
+    }});
+    h.app.plugin_menu.listed = vec![listed("files", vec![command])];
+    h.app.services.pick_folder = Some(Box::new(|_| Box::pin(std::future::pending())));
+    open_entry(&mut h.app, 0, 0);
+    h.frames(2);
+    let note = h.app.tr("ui.plugin_dialog_folder_read_once").to_owned();
+    assert!(!h.widgets(&note).is_empty(), "the field explains the run-only read permission");
+    assert!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).is_err(), "a default is not consent");
+    let id = h.app.plugin_menu.dialog().unwrap().id;
+    apply_browsed_folder(&mut h.app, id, "folder", root.to_string_lossy().into_owned());
+    assert!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).is_ok(), "Browse consents even when it selects the default");
+    h.frames(2);
+    let editor = crate::scenario::handle_at("plugin_dialog:field:folder").expect("directory text editor is drawn");
+    let browse = crate::scenario::handle_at("plugin_dialog:browse:folder").expect("Browse has a separate handle");
+    assert_ne!(editor, browse);
+    h.step(&json!({"click":{"handle":"plugin_dialog:field:folder"}})).unwrap();
+    h.step(&json!({"key":"A","ctrl":true,"cmd":true})).unwrap();
+    h.step(&json!({"text":pasted.to_string_lossy()})).unwrap();
+    let consent = h.app.plugin_menu.dialog().unwrap().folder_consent().unwrap();
+    assert_eq!(consent.folders[0].folder, std::fs::canonicalize(&pasted).unwrap());
+    run(&mut h.app).unwrap();
+    let request = h.app.control_held.back().unwrap();
+    let serial = request.serial;
+    assert_eq!(request.params["params"]["params"]["folder"], pasted.to_string_lossy().as_ref());
+    assert!(request.params["params"].get("dialog_folders").is_none(), "consent is not a JSON parameter");
+    assert!(take_folder_consent(&mut h.app, serial + 100).is_none());
+    assert_eq!(take_folder_consent(&mut h.app, serial), Some(consent));
+    assert!(take_folder_consent(&mut h.app, serial).is_none(), "one request consumes it");
+    assert!(h.app.session.plugin_state.grants.is_empty() && h.app.preferences.plugin_grants.is_empty());
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    let fields = dialog.fields.as_mut().unwrap();
+    fields.iter_mut().find(|(f, _)| f.key == "use_library").unwrap().1 = Input::Boolean(false);
+    refresh_conditions(fields);
+    assert!(dialog.folder_consent().unwrap().folders.is_empty(), "a hidden value adds no grant");
+}
+
+#[test]
+fn stored_folder_values_need_actual_consent_and_file_refresh_keeps_a_chosen_folder() {
+    let mut h = crate::scenario::Harness::new();
+    let root = h.dir.join("stored-library");
+    std::fs::create_dir_all(&root).unwrap();
+    let schema = json!({"type":"object","properties":{
+        "library":{"type":"string","format":"directory","x-solidcraft-grant":"read"}
+    }});
+    let mut command = entry("load", "read", json!([]));
+    command.input_schema = schema.clone();
+    h.app.plugin_menu.listed = vec![listed("files", vec![command])];
+    h.app.plugin_menu.loaded = true;
+    open_form(&mut h.app, "files", "load", &json!({"library":root})).unwrap();
+    checked_prefill(&h.app);
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    assert!(dialog.fields.as_ref().unwrap()[0].0.edited, "stored input remains protected from hook defaults");
+    assert!(dialog.folder_consent().unwrap().folders.is_empty(), "stored values do not grant read access");
+    assert!(dialog.ready(&h.app).is_err());
+    let id = dialog.id;
+    apply_browsed_folder(&mut h.app, id, "library", root.to_string_lossy().into_owned());
+    assert!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).is_ok(), "choosing the same path supplies consent");
+    h.app.plugin_menu.dialogs.clear();
+    let mut importer = importing_entry();
+    importer.input_schema = schema.clone();
+    h.app.plugin_menu.listed = vec![listed("files", vec![importer])];
+    open_entry(&mut h.app, 0, 0);
+    let id = h.app.plugin_menu.dialog().unwrap().id;
+    apply_browsed_folder(&mut h.app, id, "library", root.to_string_lossy().into_owned());
+    let before = h.app.plugin_menu.dialog().unwrap().folder_consent().unwrap();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    // A completed file-first form refresh rebuilds fields, retaining real user interaction.
+    finish_import_fields(dialog, schema);
+    assert_eq!(dialog.folder_consent().unwrap(), before);
+}
+
+#[test]
+fn scoped_ui_file_import_keeps_its_caller_scope_when_submitted_from_a_normal_frame() {
+    let mut h = crate::scenario::Harness::new();
+    let root = h.dir.join("allowed");
+    let folder = root.join("plugins/sample");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.2"],"runtime":{
+        "module":"sample.wasm","commands":[],"entries":[file_first_entry()]}});
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    std::fs::write(folder.join("sample.wasm"), b"not executed by the dialog").unwrap();
+    let path = root.join("part.smp").to_string_lossy().into_owned();
+    std::fs::write(&path, b"header").unwrap();
+    h.app.session.plugin_state.plugins_dir = Some(root.join("plugins"));
+    let reply = h.call("ui.file", json!({"path":path,"allow_paths":[root]}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    let id = h.app.plugin_menu.dialog().unwrap().id;
+    // Join the facts worker without using frame timing; submit outside the caller's scope.
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    if let Some(job) = dialog.file_job.take() {
+        let update = job.reply.recv().unwrap().unwrap();
+        dialog.file = Some(update.file);
+        dialog.fields = form(&update.schema);
+        dialog.hook_values = Some(dialog_values(dialog));
+    }
+    assert!(solidcraft_engine::io::vfs::current_scope().is_none());
+    h.app.services.pick_open = Some(Box::new(|_| Box::pin(std::future::pending())));
+    h.app.pick_open_for(&["smp"], |_, _| {});
+    run_dialog(&mut h.app, id).unwrap();
+    let request = h.app.file_load.queued_requests().back().unwrap();
+    assert_eq!(request.kind, crate::file_load::Kind::Open);
+    assert_eq!(request.path, path);
+    let scope = request.scope.as_ref().expect("the scoped ui.file authority survives the form");
+    assert!(scope.check(&path).is_ok());
+    let outside = h.dir.join("outside-caller-scope");
+    std::fs::write(&outside, b"private").unwrap();
+    assert!(scope.check(&outside.to_string_lossy()).is_err());
+    h.app.file_load.cancel();
 }
