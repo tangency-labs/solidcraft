@@ -74,29 +74,7 @@ pub(crate) struct PaletteArena {
     generation: u64,
 }
 
-/// The palette entry a whole-body hover is drawn in: reserved at a fixed index (never
-/// allocated to a body), so recolouring a hovered placement is a word in its instance row
-/// rather than a copy of its geometry.
-pub const HOVER_ENTRY: u32 = 1;
-
-/// The colour a whole-body hover is drawn in, as a palette entry's bytes: the theme's hover lift,
-/// the same colour the highlight pass tints with (`Frame::hover_tint`).
-pub fn hover_rgba(t: &solidcraft_theme::Tokens) -> [u8; 4] {
-    [t.hover_face_lift, t.hover_face_lift, t.hover_face_lift, 255]
-}
-
 impl PaletteArena {
-    /// Set the hover entry's colour without interning: a fixed index, so every scene built from
-    /// this arena (the model's and the highlight's) has the same entry.
-    pub fn set_hover_colour(&mut self, rgba: [u8; 4]) {
-        if self.entries.len() <= HOVER_ENTRY as usize {
-            self.entries.resize(HOVER_ENTRY as usize + 1, [0; 4]);
-        }
-        if let Some(e) = self.entries.get_mut(HOVER_ENTRY as usize) {
-            *e = rgba;
-        }
-    }
-
     /// The stable entries, copied into the scene's palette.
     pub fn entries(&self) -> Vec<[u8; 4]> {
         self.entries.clone()
@@ -188,12 +166,8 @@ impl PaletteArena {
     /// New colour, edge, hidden-edge and placement slots, no faces yet, with a motion slot of
     /// their own that they name when `moves`.
     fn base(&mut self, moves: bool) -> BodySlots {
-        // Entries 0 and 1 are reserved: 0 is the stand-in (kept before the first body's
-        // entries, never named by a slot), 1 is the whole-body hover colour
-        // ([`HOVER_ENTRY`]), whose index must not depend on how many entries a
-        // scene happens to hold, so it is always there and always the same.
+        // Entry 0 is the stand-in: kept before the first body's entries, never named by a slot.
         if self.entries.is_empty() {
-            self.entries.push([0; 4]);
             self.entries.push([0; 4]);
         }
         // A body whose entries are its own gets a motion slot; one that has to share the stand-in
