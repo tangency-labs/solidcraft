@@ -514,13 +514,6 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             );
             layout_check(
                 ui,
-                app.tr("prefs.wide_panel_grab"),
-                app.tr("prefs.wide_panel_grab_help"),
-                &mut app.preferences.wide_panel_grab,
-                "wide_panel_grab",
-            );
-            layout_check(
-                ui,
                 app.tr("prefs.history_in_browser"),
                 app.tr("prefs.history_in_browser_note"),
                 &mut app.preferences.history_in_browser,

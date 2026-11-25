@@ -151,7 +151,6 @@ const PROFILE_KEYS: &[&str] = &[
     "viewport_status_summary",
     "viewport_theme",
     "wheel_zoom_speed",
-    "wide_panel_grab",
     "zoom_reverse",
     "zoom_stop_at_model",
     "zoom_to_cursor",
