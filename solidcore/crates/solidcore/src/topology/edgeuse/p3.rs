@@ -1586,6 +1586,10 @@ fn brute_force(
             SolutionRequested::All,
         )?;
 
+        eprintln!(
+            "L9DBG ii={ii} param={param} nsol={}",
+            solutions.as_slice().len()
+        );
         // when a closest point was found
         if let Some(sol) = solutions.as_slice().first() {
             // get the surface UV Point from the solution array
@@ -1597,6 +1601,10 @@ fn brute_force(
                 pnt.y = crate::eval::uv::unwrap(pnt.y, previous.y, v_period);
             }
 
+            eprintln!(
+                "L9DBG   pnt=({}, {}) uvtol={uv_tol} periods={u_period:?},{v_period:?}",
+                pnt.x, pnt.y
+            );
             // save the first sample Point and subsequent ones that are far enough apart
             if points.last().is_none_or(|l| pnt.distance(*l) > uv_tol) {
                 points.push(pnt);
@@ -4586,6 +4594,59 @@ mod tests {
                 lifted.distance(expected)
             );
         }
+    }
+
+    /// The edge lies a little off its surface, more than its tolerance, and crosses the
+    /// periodic seam: the trim still covers the whole edge interval.
+    #[test]
+    fn point_drop_of_an_edge_off_its_surface_covers_the_whole_interval() {
+        use crate::nurbs::b_spline_curve::p1::NurbCircleParam;
+        use crate::primitive::api_primitives::{create_cylinder, create_cylinder_surface};
+
+        let mut k = Kernel::default();
+        let mut b = create_cylinder(&mut k, Vec3::ZERO, 5.0, 3.0).unwrap();
+        let (eu, e) = b
+            .edgeuses()
+            .iter()
+            .find_map(|(eu, u)| u.edge.map(|e| (eu, e)))
+            .unwrap();
+        b.edge_mut(e).unwrap().tolerance = 1e-6;
+        let surface = Surface::from(create_cylinder_surface(&k, Vec3::ZERO, 5.0, 3.0).unwrap());
+        let curve = Curve::from(
+            BSplineCurve::create_circle_segment(
+                3,
+                &Axis2Placement::default(),
+                5.0 + 1.7e-6,
+                -10.0,
+                10.0,
+                NurbCircleParam::Quadratic,
+            )
+            .unwrap(),
+        );
+        let interval = curve.natural_interval();
+        let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        let mut fail = DropCurveFail::default();
+        let made = brute_force(
+            &k, &mut b, eu, e, &surface, &domain, &curve, &interval, false, true, &mut fail,
+        )
+        .unwrap();
+        let span = made.curve.natural_interval();
+        eprintln!(
+            "L9DBG span {:?} {:?} edge {:?} {:?}",
+            span.min(),
+            span.max(),
+            interval.min(),
+            interval.max()
+        );
+        assert!(
+            (span.min() - interval.min()).abs() < 1e-9
+                && (span.max() - interval.max()).abs() < 1e-9,
+            "the trim runs over [{}, {}], the edge over [{}, {}]",
+            span.min(),
+            span.max(),
+            interval.min(),
+            interval.max()
+        );
     }
 
     #[test]
