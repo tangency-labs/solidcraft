@@ -4671,6 +4671,7 @@ mod tests {
             corner_relief_size: 1.0,
             relief_width: 1.0,
             relief_depth: 1.0,
+            bend_relief: crate::sheet::BendReliefShape::Rectangular,
         };
         // Analytic volume for open sweep θ: 50 mm² * 44.6 mm * θ = 2230 * θ mm³; with K = 0.5 and
         // thickness 1 mm, the flat annular sector area matches 2230 * θ mm².
