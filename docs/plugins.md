@@ -250,6 +250,30 @@ required capabilities; unsupported optional capabilities are left ungranted. It 
 hidden `.install-…` folder beside the installed plugins, then renames it to `plugins/<id>/`.
 The entries resolve immediately, with no restart.
 
+## Updates
+
+A plugin can name the GitHub repository it is released from, and SolidCraft 0.49 and later offer its
+new versions on its card. Older versions refuse a manifest with this field.
+
+```json
+{"id": "gears", "name": "Gears", "version": "1.0.0", "updates": {"github": "maker/gears"}}
+```
+
+- At every start, and once a day while SolidCraft stays open, one background request per such
+  plugin (at most 20) asks GitHub for that repository's latest release. Nothing else is sent, and a
+  failed request (offline, rate limited) says nothing. The app's **Check at start and once a day**
+  update setting, or the organization's policy over it, turns these checks off too.
+- The release is offered when it is a stable release, its tag is a version (`v1.1.0` or `1.1.0`)
+  newer than the installed `version`, and it has an asset named `<id>.zip` or `<id>-<version>.zip`
+  under that repository's releases, for which GitHub lists a sha256 digest. Both versions must be
+  `major.minor.patch` versions.
+- **Update to 1.1.0** then shows beside the card's on/off control, also on a turned-off plugin. It downloads
+  the `.zip` into the hidden `plugins/.updates/` folder and checks it against the sha256 digest GitHub
+  lists for the asset. The same confirmation as Install follows, titled Update plugin: the package
+  must be the same id and the offered version, every install check applies, and the installed
+  version's folders are kept as for any update (above). **Update** replaces the plugin, with no restart;
+  **Cancel** or any failure leaves the installed version. The downloaded `.zip` is then deleted.
+
 ## Removing
 
 Each installed plugin card in **Preferences > Plugins** has an enable switch and **Remove** action.
@@ -1041,6 +1065,10 @@ or require a host that provides them with `min_host_version` and a required capa
 defer opening until the entry succeeds, and programmatic hosts return `interactive_required`.
 `dialog@0.1` is available for the field hooks described above; a hook entry declares it in
 the required capabilities and opts in with `dialog_hook`.
+
+`themes@0.1` lets a plugin add colour themes to Preferences > Appearance > Theme from
+`solidcraft-theme/1` files it ships; it needs no runtime. A plugin that does not list it is not
+affected. See [plugin themes](plugin-themes.md).
 
 0.2 added one error, `plugin-error.unsupported(string)`: the input is valid, but this plugin does
 not handle it, such as a file with no solids or a newer version of its format. Use it instead of

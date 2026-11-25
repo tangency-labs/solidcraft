@@ -175,6 +175,7 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         shaders: keys(craft_plugin::shader::ShaderKind::Background),
         tints: keys(craft_plugin::shader::ShaderKind::Tint),
         panel_shaders: keys(craft_plugin::shader::ShaderKind::Panel),
+        themes: manifest.themes.clone(),
         replaces,
         installed,
         folder: folder.to_string_lossy().into_owned(),

@@ -43,6 +43,7 @@ pub const MAX_MEMORY_MIB: usize = 4096;
 pub const MAX_APPROVED_FUEL: u64 = 10_000_000_000_000;
 
 pub mod shader;
+pub mod theme;
 
 pub type Result<T> = std::result::Result<T, HostError>;
 
@@ -212,6 +213,7 @@ pub const CAPABILITIES: &[(&str, (u32, u32))] = &[
     ("host", (0, 1)),
     ("shaders", (0, 2)),
     ("storage", (0, 1)),
+    ("themes", (0, 1)),
     ("ui", (0, 1)),
     ("user-storage", (0, 1)),
 ];
@@ -766,6 +768,32 @@ pub struct Manifest {
     /// View backgrounds and tints (`shaders@0.2`); a plugin may ship shaders and no runtime.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shaders: Vec<shader::Shader>,
+    /// Colour themes for the theme picker (`themes@0.1`); a plugin may ship themes and no runtime.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub themes: Vec<theme::ThemeDecl>,
+    /// Where newer versions are published. SolidCraft before 0.49 refuses the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updates: Option<Updates>,
+}
+
+/// The plugin's GitHub repository, `owner/repo`: its latest release is the update.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Updates {
+    pub github: String,
+}
+
+/// A GitHub `owner/repo`: an owner of 1..39 letters, digits and hyphens, and a repository of
+/// 1..100 letters, digits, `-`, `_` and `.`, other than `.` and `..`.
+pub fn valid_github_repo(text: &str) -> bool {
+    let Some((owner, repo)) = text.split_once('/') else { return false };
+    (1..=39).contains(&owner.len())
+        && owner.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
+        && !owner.starts_with('-')
+        && (1..=100).contains(&repo.len())
+        && repo.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.'))
+        && repo != "."
+        && repo != ".."
 }
 
 impl Manifest {
@@ -1285,6 +1313,11 @@ pub fn parse_manifest_for_version(text: &[u8], folder: &str, app: &str, host_ver
     check_capability_declarations(&manifest.capabilities, &manifest.optional_capabilities)?;
     check_capabilities(&manifest.capabilities, app)?;
     let granted = manifest.granted_capabilities();
+    if let Some(updates) = &manifest.updates
+        && !valid_github_repo(&updates.github)
+    {
+        return Err(invalid("updates.github", "must be a GitHub repository, owner/repo"));
+    }
     if let Some(runtime) = &manifest.runtime {
         if runtime.entries.iter().any(|entry| entry.dialog_hook) && !manifest.capabilities.iter().any(|c| c.starts_with("dialog@")) {
             return Err(invalid("capabilities", "a dialog hook needs the dialog capability: dialog@0.1"));
@@ -1337,6 +1370,15 @@ pub fn parse_manifest_for_version(text: &[u8], folder: &str, app: &str, host_ver
             ));
         }
         shader::validate(&manifest.shaders)?;
+    }
+    let themed = manifest.capabilities.iter().any(|capability| capability.starts_with("themes@"));
+    if !manifest.themes.is_empty() {
+        if !themed {
+            return Err(invalid("capabilities", "a plugin with themes needs the themes capability: \"capabilities\": [\"themes@0.1\"]"));
+        }
+        theme::validate(&manifest.themes)?;
+    } else if themed {
+        return Err(invalid("themes", "the themes capability needs at least one theme"));
     }
     Ok(manifest)
 }

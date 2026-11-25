@@ -282,6 +282,9 @@ fn install_problem(e: &InstallError) -> CheckProblem {
             e.to_string(),
             format!("Build the component and put it beside plugin.json as {module}, the file runtime.module names."),
         ),
+        InstallError::MissingTheme(file) => {
+            error_problem("themes", e.to_string(), format!("Add {file} beside plugin.json, or remove the theme that names it from \"themes\"."))
+        }
         _ => error_problem("package", e.to_string(), fix_for("package")),
     }
 }

@@ -2215,6 +2215,8 @@ mod tests {
                 panels: Vec::new(),
                 shader_settings: Default::default(),
                 pictures: Vec::new(),
+                updates: None,
+                themes: Vec::new(),
             }];
             h.app.plugin_menu.loaded = true;
             crate::plugin_menu::open_entry(&mut h.app, 0, 0);
