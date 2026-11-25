@@ -160,6 +160,15 @@ fn solid_of(
         let cell = cells.iter_mut().find(|c| mine(c)).ok_or_else(|| DocError::Invalid("a bead lies on no panel of its sheet".into()))?;
         cell.open.push(form.open.clone());
     }
+    for c in &mut cells {
+        c.outer = f.split_wide_roll_segs(c.piece, &c.outer);
+        for h in &mut c.holes {
+            *h = f.split_wide_roll_segs(c.piece, h);
+        }
+        for o in &mut c.open {
+            *o = f.split_wide_roll_segs(c.piece, o);
+        }
+    }
     let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
     // Shared with a neighbor: the same flat line the other way, landing in the same place
     // (flat neighbors from two pieces laid side by side do not).
@@ -303,6 +312,54 @@ fn cells(pieces: Vec<(Piece, Region2)>, work: &mut FlatWork) -> Result<Vec<Cell>
 }
 
 impl Folded<'_> {
+    /// Splits any line or arc on a rolled panel whose 3D angular sweep exceeds three quarters of a
+    /// turn (`3π/2`) in half, so that its folded 3D arc keeps its ends well apart for three-point
+    /// circle fitting (#21829; on a cone a 360° rim unfolds to less than 270° in the flat and is
+    /// not caught by `sheet_surface::halved`).
+    fn split_wide_roll_segs(&self, piece: Piece, segs: &[Seg2]) -> Vec<Seg2> {
+        let Some(fold) = self.fold.filter(|_| self.flat.is_none()) else { return segs.to_vec() };
+        let (Piece::Panel(i) | Piece::Tab(_, i)) = piece else { return segs.to_vec() };
+        if fold.axis(i).is_none() {
+            return segs.to_vec();
+        }
+        let wide = |seg: &Seg2| -> bool {
+            let mut prev: Option<f64> = None;
+            let mut total = 0.0;
+            for k in 0..=4 {
+                let Some(q) = fold.param(i, seg.point_at(k as f64 / 4.0)) else { return false };
+                if let Some(p) = prev {
+                    let mut dy = q.y - p;
+                    dy -= (dy / std::f64::consts::TAU).round() * std::f64::consts::TAU;
+                    total += dy;
+                }
+                prev = Some(q.y);
+            }
+            total.abs() > 1.5 * std::f64::consts::PI + 1e-6
+        };
+        let mut out = Vec::with_capacity(segs.len());
+        for &seg in segs {
+            if wide(&seg) {
+                match seg {
+                    Seg2::Arc { center, radius, start, sweep } => {
+                        let half = sweep / 2.0;
+                        out.push(Seg2::Arc { center, radius, start, sweep: half });
+                        out.push(Seg2::Arc { center, radius, start: start + half, sweep: half });
+                        continue;
+                    }
+                    Seg2::Line { a, b } => {
+                        let mid = a.lerp(b, 0.5);
+                        out.push(Seg2::Line { a, b: mid });
+                        out.push(Seg2::Line { a: mid, b });
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            out.push(seg);
+        }
+        out
+    }
+
     fn bent(&self, zone: usize) -> Option<&Bent> {
         self.dev.zones.get(zone).and_then(|z| self.fold?.bends.get(z.joint)).and_then(Option::as_ref)
     }

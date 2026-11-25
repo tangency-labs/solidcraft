@@ -21,6 +21,8 @@ mod arena_uv_trim_owner;
 mod assert_valid_level0_helpers;
 #[path = "../brep_query_cache_lifetime.rs"]
 mod brep_query_cache_lifetime;
+#[path = "../check_memo_incremental.rs"]
+mod check_memo_incremental;
 #[path = "../constructed_transforms.rs"]
 mod constructed_transforms;
 #[path = "../contact_between_bodies.rs"]
@@ -173,6 +175,8 @@ mod public_copy_transforms;
 mod public_scale_ownership;
 #[path = "../query_normal_definition.rs"]
 mod query_normal_definition;
+#[path = "../recognise_analytic.rs"]
+mod recognise_analytic;
 #[path = "../section_frames.rs"]
 mod section_frames;
 #[path = "../sphere_drop_spans_certified.rs"]

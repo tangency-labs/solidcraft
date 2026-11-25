@@ -216,6 +216,7 @@ fn ignore_soft<T>(r: Result<T>) -> Result<()> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
@@ -3735,8 +3736,13 @@ pub fn collapse_zero_area_two_edge_faces_among(
         if ends != edge::start_end_vertices(b, gone)? || ends.0 == ends.1 || ends.0.is_none() {
             continue;
         }
-        // the loop has no area
-        let area = crate::topology::face::p3::compute_loop_orientation(k, b, f, l, None, false);
+        // the loop has no area; a test that could not answer reads as area, except that a
+        // cancellation (or an unported status) stops the collapse, never swallowed (#21915)
+        let area =
+            match crate::topology::face::p3::compute_loop_orientation(k, b, f, l, None, false) {
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                area => area,
+            };
         if !matches!(area, Ok(OrientType::Unknown)) {
             continue;
         }
@@ -3920,31 +3926,31 @@ pub fn split_disconnected_shells(k: &mut Kernel, b: &mut Brep) -> Result<()> {
 /// Not upstream: the shells of bounded region `r` after [`split_disconnected_shells`] split
 /// one of them, regrouped into regions as their nesting says. A region is bounded by one
 /// outer shell and the voids that lie directly inside it. A void is a face-use shell the
-/// region does not lie inside (its face uses face out of it, so
+/// region does not lie inside (closed, its face uses facing out of it, so
 /// [`crate::topology::Shell::is_inner_shell`], which is true for the shell holding its
 /// region, as [`shell::order_region_shells`] reads it, is false). A void lying directly
 /// inside another of `r`'s shells that is not one ([`shell::is_inner_shell_of`]) bounds
-/// that shell's region; every other shell is the outer shell of a solid of its own, as solids touching
-/// along a curve are, and as a shell is whose nesting the ray tests cannot decide. The
-/// region of the group holding `r`'s first shell stays `r`; each other group gets a new
-/// region with `r`'s void flag. Each group's outer shell is listed first, its voids after
-/// it in `r`'s order.
+/// that shell's region; every other shell is the outer shell of a solid of its own, as
+/// solids touching along a curve are. The region of the group holding `r`'s first shell
+/// stays `r`; each other group gets a new region with `r`'s void flag. Each group's outer
+/// shell is listed first, its voids after it in `r`'s order.
 ///
 /// # Errors
 ///
-/// Those of the ray tests (an [`SolidError::Unported`] or cancelled call), the list edits
-/// and dangling ids.
+/// Those of the ray tests: [`crate::topology::Shell::is_inner_shell`]'s (its `SM_ERR` for
+/// a shell its rays cannot classify, [`SolidError::Unported`], a cancelled call), and a
+/// [`TopologyFailure::VoidOwnerUndecided`] for a void that no outer shell holds where a
+/// nesting test was unsure (`SM_UNSURE`): which solid it bounds is not decided, so the
+/// region is not regrouped on a guess. Those of the list edits and dangling ids.
 fn regroup_split_region(k: &mut Kernel, b: &mut Brep, r: RegionId) -> Result<()> {
     let shells = region_shells(b, r)?;
-    // a void of the region: a face-use shell the region does not lie inside
+    // a void of the region: a closed face-use shell the region does not lie inside (an
+    // open shell encloses nothing, so it is no void)
     let mut void = Vec::new();
     for &s in &shells {
         let is_void = b.shell(s)?.is_faceuse_shell()
-            && match crate::topology::Shell::is_inner_shell(k, b, s) {
-                Ok(holds_the_region) => !holds_the_region,
-                Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => false,
-            };
+            && b.shell(s)?.is_closed(b, s)?
+            && !crate::topology::Shell::is_inner_shell(k, b, s)?;
         void.push(is_void);
     }
     // each shell's outer shell: itself, or the outer shell a void lies directly inside
@@ -3953,16 +3959,32 @@ fn regroup_split_region(k: &mut Kernel, b: &mut Brep, r: RegionId) -> Result<()>
         if !void.get(i).copied().unwrap_or(false) {
             continue;
         }
+        let mut held_by = None;
+        let mut unsure = false;
         for (j, &t) in shells.iter().enumerate() {
             if i == j || void.get(j).copied().unwrap_or(true) {
                 continue;
             }
-            if shell::is_inner_shell_of(k, b, s, Some(t))? == TRUE {
+            let nested = shell::is_inner_shell_of(k, b, s, Some(t))?;
+            if nested == TRUE {
+                held_by = Some(j);
+                break;
+            }
+            unsure |= nested == crate::error::SM_UNSURE;
+        }
+        match held_by {
+            Some(j) => {
                 if let Some(slot) = outer.get_mut(i) {
                     *slot = j;
                 }
-                break;
             }
+            None if unsure => {
+                return Err(SolidError::topology(
+                    OP,
+                    TopologyFailure::VoidOwnerUndecided,
+                ))
+            }
+            None => {}
         }
     }
     let keep = outer.first().copied().unwrap_or(0);

@@ -55,6 +55,12 @@
 //!   the radius's span, `height / (old_top_radius - old_bot_radius)`, so a truncated
 //!   cone's offset keeps its slope and stays `S + d n` at the same parameters; full apex
 //!   cones give the same value.
+//! - **Shallow cones (tangency-labs/solidcraft#18005).** `IsNurbSurfaceCone` refuses
+//!   any cone whose end circles' centres are less than `EFF_ZERO_SQRT` apart as a disk.
+//!   Here [`Cone::is_nurb_surface_cone`] refuses one only when its height is under
+//!   `EFF_ZERO`, or when its height and the difference of its end radii are both under
+//!   [`Cone::MIN_HEIGHT`]: a nearly flat cone with a real radial span (a STEP face of half
+//!   angle 89.999 degrees, 5.4e-7 high) keeps its exact cone, so its pcurves can be made.
 //! - **NURB.** As in `surface::cone::p1`, the cone is expected to have its NURB
 //!   ([`Cone::make_nurb`]); upstream makes a missing one inside `const` queries, which
 //!   the port does (and keeps) at the `Surface` level (`Surface::kind_with_nurb`).
@@ -489,7 +495,11 @@ fn iso_curve(
 ) -> Result<std::result::Result<BSplineCurve, SolidError>> {
     match s.create_iso_parametric_curve(k, sweep, knot, IsoCurveOptions::default()) {
         Ok(iso) => Ok(Ok(iso.curve)),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         Err(e) => Ok(Err(e)),
     }
 }
@@ -1095,8 +1105,9 @@ impl Cone {
     // ---- IsNurbSurfaceCone -------------------------------------------------------
 
     /// The height (the distance between its end circles' centres) below which
-    /// [`Self::is_nurb_surface_cone`] refuses a NURB as a disk, not a cone, and
-    /// [`Self::rebuild_step_from_nurb_parameters`] refuses to rebuild one. Named so that the
+    /// [`Self::rebuild_step_from_nurb_parameters`] refuses to rebuild a cone, and
+    /// [`Self::is_nurb_surface_cone`] refuses a NURB as a disk, not a cone, when its end
+    /// radii also differ by less than this (tangency-labs/solidcraft#18005). Named so that the
     /// rotational sweep, which builds no analytic cone lower than this, and these tests use
     /// the same number (tangency-labs/solidcraft#17085). Above it a form can still be refused
     /// by the other tests.
@@ -1217,8 +1228,10 @@ impl Cone {
         let mut nurb_z_axis = center_top - center_bot;
         let height = nurb_z_axis.length();
 
-        // not a cone - height of cone is degenerate (cone is a disk)
-        if height < Self::MIN_HEIGHT {
+        // not a cone - height of cone is degenerate (cone is a disk): no height at all, or
+        // a height and a radial span both under the floor. A shallow cone whose radii differ
+        // by more keeps its cone (tangency-labs/solidcraft#18005).
+        if height < EFF_ZERO || height.max((top.radius - bot.radius).abs()) < Self::MIN_HEIGHT {
             return Ok(None);
         }
         nurb_z_axis = nurb_z_axis.unitize_or_z();
@@ -2747,6 +2760,32 @@ mod tests {
             assert!((found.top_radius() - cone.top_radius()).abs() < 1e-9);
             assert_eq!(found.rev().swap_uv(), swap);
         }
+    }
+
+    #[test]
+    fn nearly_flat_cone_keeps_its_analytic_parametrisation() {
+        use crate::surface::implicit::AnalyticSupport;
+        use crate::surface::surface::Surface;
+
+        let k = kernel();
+        for (swap, inside) in [(false, false), (true, false), (false, true), (true, true)] {
+            for top in [1.95, 2.05] {
+                let cone = canonical(&k, 2.0, top, 5.0e-7, swap, inside);
+                let form = cone.rev().base();
+                let found = Cone::is_nurb_surface_cone(&k, form, 1.0)
+                    .unwrap()
+                    .expect("a shallow cone is still a cone");
+                assert!((found.bot_radius() - cone.bot_radius()).abs() < 1e-12);
+                assert!((found.top_radius() - cone.top_radius()).abs() < 1e-12);
+                assert_eq!(found.rev().swap_uv(), swap);
+                let support = AnalyticSupport::of(&Surface::from(cone.clone())).unwrap();
+                support.build(&k, form.copy()).unwrap();
+            }
+        }
+        let tiny = canonical(&k, 2.0e-6, 2.5e-6, 8.0e-7, false, false);
+        assert!(Cone::is_nurb_surface_cone(&k, tiny.rev().base(), 1.0)
+            .unwrap()
+            .is_none());
     }
 
     #[test]

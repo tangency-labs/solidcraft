@@ -538,6 +538,7 @@ pub fn tessellate_boundaries(
                 Err(
                     err @ (SolidError::Unported { .. }
                     | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
                     | SolidError::PreparationRequired { .. }),
                 ) => return Err(err),
                 Ok(_) | Err(_) => None,
@@ -2803,25 +2804,24 @@ pub fn make_vertex_split_uv_trim_curve(
 }
 
 /// Not upstream (#21416): `uv`, a UV trim curve on `surface`, moved by a whole period into the
-/// surface's natural domain where it lies wholly past a side of that domain in a periodic
-/// direction (within a period of it). A UV curve lifted across the seam, continuous through it,
-/// holds its part beyond the seam a period outside the domain; cut at the seam, that part alone
-/// is the same curve on the face a period back. A curve within the domain, one across a side,
+/// surface's natural domain where it is proved to lie wholly past a side of that domain in a
+/// periodic direction (within a period of it). A UV curve lifted across the seam, continuous
+/// through it, holds its part beyond the seam a period outside the domain; cut at the seam, that
+/// part alone is the same curve on the face a period back. The proof is the curve's control
+/// polygon ([`uv_hull`]): with positive weights the curve lies in its convex hull, so where every
+/// control point, rounding included, lies past the side the whole curve does, between its
+/// samples too. A curve within the domain, one across a side or not proved past it, one whose
+/// hull is not certain (a kind without a control polygon of its own, a weight not positive)
 /// and one on a surface periodic in neither direction are left as they are.
 ///
 /// # Errors
-/// Those of the domain, the periodicity tests, the evaluations and the move.
+/// Those of the domain, the periodicity tests, the copy and the move.
 pub(crate) fn uv_into_period(k: &Kernel, surface: &Surface, uv: &mut Curve) -> Result<()> {
     use crate::geom::axis2_placement::Axis2Placement;
-    // the curve's samples: a piece lifted past a side lies past it at every one
-    const SAMPLES: u32 = 8;
+    let Some(hull) = uv_hull(uv)? else {
+        return Ok(());
+    };
     let domain = surface.natural_uv_domain_with_nurb(k)?;
-    let ivl = uv.natural_interval();
-    let mut points = Vec::new();
-    for i in 0..=SAMPLES {
-        let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / f64::from(SAMPLES);
-        points.push(uv.evaluate_point(k, t)?);
-    }
     let mut shift = Vec3::new(0.0, 0.0, 0.0);
     for (param, side) in [
         (SurfParamType::U, domain.u_interval()),
@@ -2832,10 +2832,11 @@ pub(crate) fn uv_into_period(k: &Kernel, surface: &Surface, uv: &mut Curve) -> R
         // a rounding of the domain's sides, far below any piece of a curve
         let tol = 1e-9 * period.abs().max(1.0);
         let along = |p: &Point3| if param == SurfParamType::U { p.x } else { p.y };
-        let (min, max) = points
+        // the hull's extent along the direction, each control point's rounding included
+        let (min, max) = hull
             .iter()
-            .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), p| {
-                (a.min(along(p)), b.max(along(p)))
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (p, e)| {
+                (a.min(along(p) - e), b.max(along(p) + e))
             });
         let by = if min >= hi - tol && max > hi + tol && max <= hi + period + tol {
             -period
@@ -2862,6 +2863,31 @@ pub(crate) fn uv_into_period(k: &Kernel, surface: &Surface, uv: &mut Curve) -> R
     uv.transform(k, &axis, None)?;
     uv.convert_to_2d(k)?;
     Ok(())
+}
+
+/// Not upstream (#21416): points whose convex hull holds the UV curve `uv` over its natural
+/// interval, each with the error bound of its coordinates, `x` and `y` the curve's `u` and `v`
+/// ([`Curve::piece_hull_points`] of a 3D copy of it, made for the hull alone: a 2D curve has
+/// none there). A B-spline curve, a line or an ellipse, whose control polygon is their own;
+/// `None` for the other kinds and where no hull is certain (a weight not positive, knots not
+/// clamped) or the copy is not made 3D.
+///
+/// # Errors
+/// Those of the copy.
+fn uv_hull(uv: &Curve) -> Result<Option<Vec<(Point3, f64)>>> {
+    let mut copy = uv.clone_for_evaluation()?;
+    let made_3d = match copy.kind_mut() {
+        CurveKind::BSpline(b) => b.convert_to_3d().is_ok(),
+        CurveKind::Line(l) => l.convert_to_3d().is_ok(),
+        CurveKind::Ellipse(e) => {
+            e.convert_to_3d();
+            true
+        }
+        _ => false,
+    };
+    Ok(made_3d
+        .then(|| copy.piece_hull_points(&uv.natural_interval()))
+        .flatten())
 }
 
 // ---- B-rep intersection (SmBrep::BrepIntersect) -----------------------------------------
@@ -4428,5 +4454,79 @@ mod tests {
         assert_eq!(copy.get_at(Some(c)).unwrap(), Some(a));
         assert_eq!(rev.get_at(Some(a)).unwrap(), Some(c));
         assert_eq!(copy.len(), 1);
+    }
+
+    /// A cylinder of radius 2 about z, periodic in `u`, and the degree 1 UV curve through
+    /// `points` at the parameters `params` (clamped: the first and last twice).
+    fn cylinder_and_uv_polyline(k: &Kernel, points: &[Point2], params: &[f64]) -> (Surface, Curve) {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::nurbs::math::{CPoint, NOW, NOZ};
+        use crate::surface::cone::Cone;
+        let surface = Surface::from(
+            Cone::create_canonical_cylinder(k, &Axis2Placement::IDENTITY, 2.0).unwrap(),
+        );
+        let pw: Vec<CPoint> = points
+            .iter()
+            .map(|p| CPoint::new(p.x, p.y, NOZ, NOW))
+            .collect();
+        let mut u = vec![params[0]];
+        u.extend_from_slice(params);
+        u.push(params[params.len() - 1]);
+        let n = pw.len() - 1;
+        let c = BSplineCurve::from_data(2, n, n + 2, 1, &pw, &u).unwrap();
+        (surface, Curve::from(c))
+    }
+
+    /// #21416 review: a split UV piece is moved a period back only where its control polygon
+    /// proves it lies wholly past the seam. The reviewer's piece runs from the seam `hi` back
+    /// into the domain to `hi - q` at t = 1/16, then out to `hi + q` from t = 1/8 to 1: every
+    /// one of the nine samples at i/8 lies at or past `hi`, but the piece crosses the seam
+    /// between the first two, so moved by the period its point at 1/16 would be at `lo - q`,
+    /// outside the domain. It is left as it is. A piece wholly past the seam, from `hi` to
+    /// `hi + q`, is moved back: from `lo` to `lo + q`.
+    #[test]
+    fn a_uv_piece_crossing_the_seam_between_samples_is_not_moved_a_period() {
+        let k = Kernel::default();
+        let probe = cylinder_and_uv_polyline(
+            &k,
+            &[Point2::new(0.0, 0.0), Point2::new(1.0, 0.0)],
+            &[0.0, 1.0],
+        )
+        .0;
+        let domain = probe.natural_uv_domain_with_nurb(&k).unwrap();
+        assert!(probe.is_periodic(&k, &domain, SurfParamType::U).unwrap());
+        let (lo, hi) = (domain.u_interval().min(), domain.u_interval().max());
+        let q = (hi - lo) / 4.0;
+        let v = 1.0;
+
+        let mut points = vec![Point2::new(hi, v), Point2::new(hi - q, v)];
+        let mut params = vec![0.0, 1.0 / 16.0];
+        for i in 1..=8 {
+            points.push(Point2::new(hi + q, v));
+            params.push(f64::from(i) / 8.0);
+        }
+        let (surface, mut crossing) = cylinder_and_uv_polyline(&k, &points, &params);
+        // the nine samples a sampled test reads all lie at or past the seam
+        for i in 0..=8 {
+            let p = crossing.evaluate_point(&k, f64::from(i) / 8.0).unwrap();
+            assert!(p.x >= hi, "sample {i} at {}", p.x);
+        }
+        uv_into_period(&k, &surface, &mut crossing).unwrap();
+        let p = crossing.evaluate_point(&k, 1.0 / 16.0).unwrap();
+        assert_eq!((p.x, p.y), (hi - q, v));
+        let p = crossing.evaluate_point(&k, 1.0).unwrap();
+        assert_eq!((p.x, p.y), (hi + q, v));
+
+        let (surface, mut past) = cylinder_and_uv_polyline(
+            &k,
+            &[Point2::new(hi, v), Point2::new(hi + q, v)],
+            &[0.0, 1.0],
+        );
+        uv_into_period(&k, &surface, &mut past).unwrap();
+        for (t, u) in [(0.0, lo), (1.0, lo + q)] {
+            let p = past.evaluate_point(&k, t).unwrap();
+            assert!((p.x - u).abs() <= 1e-12 * hi.abs(), "{t}: {} {u}", p.x);
+            assert!((p.y - v).abs() <= 1e-12, "{t}: {}", p.y);
+        }
     }
 }
