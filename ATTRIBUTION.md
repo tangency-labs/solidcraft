@@ -469,6 +469,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | crates/look/icons/design/svg/flat/grid.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/flat/ground_shadow.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/flat/ambient_occlusion.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/collision_auto.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/model/placeholder.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/model/plane.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/model/plane_angle.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
@@ -1055,10 +1056,11 @@ into THIRD-PARTY-LICENSES.txt when `main` regenerates it.
 
 ## FreeCAD, Rhino and OpenUSD library
 
-FreeCAD `.FCStd` and Rhino `.3dm` files are read, and OpenUSD files read and written, with
+FreeCAD `.FCStd` files are read, Rhino `.3dm` files are read and written, OpenUSD files read and written, and STEP and IGES
+files read and written when that is asked for, with
 [cadmpeg](https://github.com/cadmpeg/cadmpeg) 0.6.12 (Apache-2.0), linked as the crates `cadmpeg-core`,
-`cadmpeg-ir`, `cadmpeg-registry`, `cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-rhino`,
-`cadmpeg-codec-step`, `cadmpeg-codec-usd` and `cadmpeg-tessellate`
+`cadmpeg-ir`, `cadmpeg-registry`, `cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-iges`,
+`cadmpeg-codec-rhino`, `cadmpeg-codec-step`, `cadmpeg-codec-usd` and `cadmpeg-tessellate`
 in native and browser builds (`crates/io/src/native_cad.rs`). Only those open-format codecs are built: no
 default features, so cadmpeg's codecs for commercial CAD formats and its ShapeManager/ACIS
 codec are not compiled in. Its licence text is in THIRD-PARTY-LICENSES.txt; no code from it is

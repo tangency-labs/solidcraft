@@ -2390,8 +2390,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             return Err(refusal);
         }
 
-        // Resolve OverlappingPEs (SE_MSG: the status only warns)
-        if let Some(d) = ignore_soft(mgr.resolve_overlapping_proto_edges(k, brep, approx_tol))? {
+        // Resolve OverlappingPEs (SE_MSG: the status only warns). Not upstream (#18927): a
+        // group that failed part way through its replacement refuses the Boolean.
+        let resolved = mgr.resolve_overlapping_proto_edges(k, brep, approx_tol);
+        if let Some(refusal) = mgr.take_self_loop_refusal() {
+            return Err(refusal);
+        }
+        if let Some(d) = ignore_soft(resolved)? {
             deleted.extend(d);
         }
 
@@ -4395,6 +4400,10 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Face
 {
     fn face_zone_tol_3d(&self, face: O) -> Result<f64> {
         self.with_queries(face, |q| q.face_zone_tol_3d(face))
+    }
+
+    fn face_has_loopuses(&self, face: O) -> Result<bool> {
+        self.with_queries(face, |q| q.face_has_loopuses(face))
     }
 
     fn face_point_classify(

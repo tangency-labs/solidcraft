@@ -183,9 +183,9 @@ pub fn create_plane(k: &mut Kernel, origin: Point3, x: f64, y: f64) -> Result<Br
     let frame = xy_frame(origin);
     let mut brep = p1::create_rectangle(k, 1.0e-5, x, y, &frame)?;
     if brep.face_list().is_empty() {
-        return Err(SolidError::primitive_failed(
+        return Err(SolidError::primitive(
             "primitive::api_primitives::create_plane",
-            "the rectangle has no face",
+            crate::error::primitive::PrimitiveFailure::SheetHasNoFace,
         ));
     }
     // (not upstream: the port's cached topology fields, true for the caller)
@@ -218,9 +218,9 @@ pub fn create_planar_circle(k: &mut Kernel, origin: Point3, radius: f64) -> Resu
     let frame = xy_frame(origin);
     let mut brep = p1::create_circle(k, 1.0e-5, radius, &frame)?;
     if brep.face_list().is_empty() {
-        return Err(SolidError::primitive_failed(
+        return Err(SolidError::primitive(
             "primitive::api_primitives::create_planar_circle",
-            "the disc has no face",
+            crate::error::primitive::PrimitiveFailure::SheetHasNoFace,
         ));
     }
     // (not upstream: the port's cached topology fields, true for the caller)
@@ -1178,26 +1178,22 @@ mod tests {
         assert!(crate::topology::brep::p2::is_manifold_solid(&sphere).unwrap());
         let cylinder = create_partial_cylinder(k, o(), 5.0, 10.0, 0.0, 90.0).unwrap();
         assert!(crate::topology::brep::p2::is_manifold_solid(&cylinder).unwrap());
-        // with `fixes.revolve_analytic_profile_faces` (WR-448, #545) the swept face is
-        // an analytic torus; upstream's is a B-spline surface
-        for (fix, expected) in [(false, 0), (true, 1)] {
-            k.fixes.revolve_analytic_profile_faces = fix;
-            let torus = create_partial_torus(k, o(), 10.0, 2.0, 0.0, 90.0).unwrap();
-            assert!(crate::topology::brep::p2::is_manifold_solid(&torus).unwrap());
-            let tori = torus
-                .face_list()
-                .iter()
-                .filter(|&&f| {
-                    let surface = torus.face(f).unwrap().surface.as_ref().unwrap();
-                    matches!(
-                        surface.kind(),
-                        crate::surface::surface::SurfaceKind::Torus(_)
-                    )
-                })
-                .count();
-            assert_eq!(tori, expected, "{fix}");
-        }
-        k.fixes.revolve_analytic_profile_faces = false;
+        // the swept face is an analytic torus (WR-448, #545); upstream's is a B-spline
+        // surface
+        let torus = create_partial_torus(k, o(), 10.0, 2.0, 0.0, 90.0).unwrap();
+        assert!(crate::topology::brep::p2::is_manifold_solid(&torus).unwrap());
+        let tori = torus
+            .face_list()
+            .iter()
+            .filter(|&&f| {
+                let surface = torus.face(f).unwrap().surface.as_ref().unwrap();
+                matches!(
+                    surface.kind(),
+                    crate::surface::surface::SurfaceKind::Torus(_)
+                )
+            })
+            .count();
+        assert_eq!(tori, 1);
         // edges without an edge use on their face
         let mut brep = Brep::new_with_infinite_region().unwrap();
         let (edge, face) = (EdgeId::from_index(0), FaceId::from_index(0));
@@ -1254,9 +1250,9 @@ mod tests {
             failures,
             [
                 SolidError::invalid_input("geom::vector2d::Vec2::unitize", "zero-length vector"),
-                SolidError::surface_failed(
+                SolidError::surface(
                     "surface::surface::p6::DerivSurfDefinition::sample_values",
-                    "the reference curve point lies on the boundary curve"
+                    crate::error::surface::SurfaceFailure::ReferencePointOnBoundary
                 ),
             ]
         );
@@ -1264,7 +1260,7 @@ mod tests {
             failures.iter().map(SolidError::kind).collect::<Vec<_>>(),
             [
                 crate::error::ErrorKind::InvalidInput,
-                crate::error::ErrorKind::Failed
+                crate::error::ErrorKind::Degenerate
             ]
         );
 

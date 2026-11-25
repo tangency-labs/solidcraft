@@ -23,13 +23,19 @@ use crate::{DocError, Document, Feature, FeatureId, FeatureKind, ProfileSel, Res
 
 #[path = "frame_earlier.rs"]
 mod earlier;
+#[path = "frame_paths.rs"]
+mod paths;
+#[path = "eval_frame_trim.rs"]
+mod trimming;
+
+pub(super) fn trim(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
+    trimming::trim(doc, vals, f, st, warning)
+}
 
 /// Most profiles a profile sketch may have for its material to be worked out.
 const MAX_PROFILE_PIECES: usize = 256;
 /// Shortest member (mm).
 const MIN_LENGTH: f64 = 1e-6;
-/// How far (mm) a 3D sketch curve may stray from the line between its ends and still be a line.
-const STRAIGHT_TOL: f64 = 1e-3;
 
 /// Evaluate a `FrameMember` feature: one new body per member (a line, a pair, or under every type but None each
 /// piece of a line cut where tubes cross, [`pieced`], but for a piece left wholly inside the tubes it is fitted to),
@@ -38,6 +44,26 @@ const STRAIGHT_TOL: f64 = 1e-3;
 /// `<its name> · <the other's>`. An error about a piece names it by its line and the tube it starts past
 /// ([`pieces_by_line`]).
 pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
+    evaluate_members(doc, vals, f, st)?;
+    // Use the final naming/identity pass: Auto frames may split, notch or drop members.
+    // Metadata must not change whether the frame itself can build.
+    let names: Vec<String> = st.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.to_string()).collect();
+    let picked: Vec<&str> = names.iter().map(String::as_str).collect();
+    if let Ok(lines) = members_of_bodies(doc, st, f, &picked)
+        && lines.len() == names.len()
+    {
+        for (body, line) in st.bodies.iter_mut().filter(|b| b.feature == f.id).zip(lines) {
+            body.frame_member_line = line.map(Into::into);
+        }
+    }
+    Ok(())
+}
+
+// Preserve main's complete flat/grouped evaluation before adding optional provenance.
+fn evaluate_members(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
+    if paths::uses(st, &f.kind)? {
+        return paths::evaluate(doc, vals, f, st);
+    }
     if frame::groups_joined(&f.kind) {
         // One frame, its corners finished across its groups: each member named as its group names it.
         frame::check_group_options(&f.kind)?;
@@ -63,6 +89,7 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
         let bases = group_bases(&f.kind, &default, ids.len());
         let pinned = ids.iter().cloned().zip(group_member_names(st, &ids, &bases, names)).collect::<BTreeMap<_, _>>();
         let (start, counter) = (st.bodies.len(), st.body_counter);
+        let records = st.frame_members.len();
         let result = (|| {
             let mut offset = 0;
             for mut group in groups {
@@ -78,6 +105,7 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
         if result.is_err() {
             st.bodies.truncate(start);
             st.body_counter = counter;
+            st.frame_members.truncate(records);
         }
         return result;
     }
@@ -102,7 +130,7 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
     let FeatureKind::FrameMember { body_name, names, corner, flip, corners, fit_ends, gap, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
-    let Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre, placing } = layout(doc, vals, f, st)?;
+    let Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre, placing, .. } = layout(doc, vals, f, st)?;
     if corners.iter().flat_map(|c| &c.members).any(|m| m.feature.as_ref().is_some_and(|n| *n != f.name)) {
         return Err(DocError::Invalid("not supported yet: a corner with a member of another frame".into()));
     }
@@ -278,6 +306,11 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
         let all: Vec<Traced> = made.into_iter().enumerate().flat_map(|(m, t)| t.into_iter().chain(later_of(m).into_iter().map(|p| p.1))).collect();
         for (k, t) in all.into_iter().enumerate() {
             let name = new_name(st, f, copy_offset + k);
+            if trimming::can_rebuild(&f.kind)
+                && let Some((line, ..)) = segments.get(k)
+            {
+                st.frame_members.push(trimming::record(f.id, line, &name, [None, None], &t.body));
+            }
             st.bodies.push(ModelBody::traced_new(name, t, f.id));
         }
         return Ok(());
@@ -289,6 +322,11 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
     // A piece with no body leaves its name unused.
     for (m, (name, t)) in named.iter().zip(made).enumerate() {
         if let Some(t) = t {
+            if trimming::can_rebuild(&f.kind)
+                && let Some(line) = ids.get(m)
+            {
+                st.frame_members.push(trimming::record(f.id, line, name, [None, None], &t.body));
+            }
             st.bodies.push(ModelBody::traced_new(name.clone(), t, f.id));
         }
         // A later piece of a tube split where another overlaps it, `L>X` (X: the other's line or pair id, a piece's
@@ -1853,6 +1891,8 @@ struct Layout {
     /// In a frame of several groups, each line's profile point on it and turn about it: its
     /// group's. Empty for one group, whose `at` and `turn` every member takes.
     placing: BTreeMap<String, (Vec2, f64)>,
+    /// The profile's own origin, which `locate` is measured from.
+    origin: Vec2,
 }
 
 /// Each member's profile point on its line, its group's turn and its Rotate turn (#15070), by its
@@ -1877,6 +1917,31 @@ fn member_placing(
 }
 
 fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Layout> {
+    let (segments, sketch_x, drawn, planes) = segments(doc, vals, f, st)?;
+    let (Section { regions, description, at, turn, turns, centre, origin }, placing) = placed_profile(doc, vals, f, st)?;
+    Ok(Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre, placing, origin })
+}
+
+/// The section as the feature places it, whatever path its members follow (a continuous member's too).
+pub(super) struct Section {
+    /// The unmirrored profile origin, also used by the straight-member section view.
+    pub(super) origin: Vec2,
+    pub(super) regions: Vec<Region2>,
+    pub(super) description: String,
+    pub(super) at: Vec2,
+    pub(super) turn: f64,
+    pub(super) turns: BTreeMap<String, f64>,
+    pub(super) centre: Vec2,
+}
+
+/// The feature's section ([`placed_profile`]'s, the first group's placement).
+pub(super) fn section(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Section> {
+    placed_profile(doc, vals, f, st).map(|(s, _)| s)
+}
+
+/// The feature's section placed as its first group places it, and in a frame of several groups each line's profile
+/// point and turn: its group's.
+fn placed_profile(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<(Section, BTreeMap<String, (Vec2, f64)>)> {
     let FeatureKind::FrameMember { profile, corner, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
@@ -1885,7 +1950,6 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
         frame::check_group_options(&f.kind)?;
     }
     let first = groups.first().cloned().unwrap_or_default();
-    let (segments, sketch_x, drawn, planes) = segments(doc, vals, f, st)?;
     let (mut regions, description, origin) = profile_regions(vals, st, profile)?;
     // Several groups share one section: they agree on Mirror ([`frame::check_group_options`]).
     let mirror = first.mirror;
@@ -1934,7 +1998,7 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
     }
     let turns = member_turns(doc, vals, FeatureId(f.id)).into_iter().map(|(line, (_, a))| (line, a)).collect();
     let centre = frame::anchor_point(&regions, frame::Anchor::Center);
-    Ok(Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre, placing })
+    Ok((Section { regions, description, at, turn, turns, centre, origin }, placing))
 }
 
 /// The profile point on the line of a member a Rotate step turns `t` (radians) further (#15070): the profile turns
@@ -2023,9 +2087,83 @@ type Path = (Vec<(String, Vec3, Vec3)>, Option<Vec3>, Vec<usize>, Vec<MemberPlan
 /// Each member's centreline where the view shows it: (member id, start, end), in the world.
 /// `st` is the model the feature was evaluated on (`Model::state_before`).
 pub fn member_segments(doc: &Document, st: &ModelState, f: &Feature) -> Result<Vec<(String, Vec3, Vec3)>> {
+    if paths::uses(st, &f.kind)? {
+        return paths::member_segments(doc, st, f);
+    }
     let m = doc.component_transform(f.component);
     let place = |p: Vec3| crate::apply_point(&m, p);
     Ok(segments(doc, &doc.evaluation_values(), f, st)?.0.into_iter().map(|(id, a, b)| (id, place(a), place(b))).collect())
+}
+
+/// A member's section as a dialog shows it before the member is made: the section of the member
+/// on the feature's first line, in world coordinates, laid out by the same code that makes the
+/// body, so what the dialog shows is where the member goes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SectionView {
+    /// The first line's start, where the section sits, and its end.
+    pub start: Vec3,
+    pub end: Vec3,
+    /// The section's axes (unit, x × y along the line).
+    pub x: Vec3,
+    pub y: Vec3,
+    /// The section's regions in its own coordinates, mirrored when the member is.
+    pub regions: Vec<Region2>,
+    /// The section point that sits on the line.
+    pub at: Vec2,
+    /// The profile's own origin, which `locate` is measured from.
+    pub origin: Vec2,
+    pub mirror: bool,
+}
+
+impl SectionView {
+    /// The world point of section point `p`.
+    pub fn world(&self, p: Vec2) -> Vec3 {
+        self.start + self.x * (p.x - self.at.x) + self.y * (p.y - self.at.y)
+    }
+
+    /// The section point at world point `q` (projected onto the section's plane).
+    pub fn section_point(&self, q: Vec3) -> Vec2 {
+        let d = q - self.start;
+        Vec2::new(self.at.x + d.dot(self.x), self.at.y + d.dot(self.y))
+    }
+
+    /// The `locate` that puts section point `p` on the line: measured from the profile's own
+    /// origin, before the mirror, as the member reads it.
+    pub fn locate_of(&self, p: Vec2) -> [f64; 2] {
+        let q = if self.mirror { Vec2::new(-p.x, p.y) } else { p };
+        [q.x - self.origin.x, q.y - self.origin.y]
+    }
+
+    /// Every anchor's section point, in [`frame::Anchor::ALL`] order.
+    pub fn anchors(&self) -> Vec<(frame::Anchor, Vec2)> {
+        frame::Anchor::ALL.iter().map(|a| (*a, frame::anchor_point(&self.regions, *a))).collect()
+    }
+}
+
+/// The section member feature `f` (not made yet: no Rotate step turns it) puts on its first line
+/// (see [`SectionView`]), carried to world by `placed` (the component's frame as shown: the active
+/// occurrence's, with its pending move); an error when the feature could not be made as it stands.
+pub fn section_view(doc: &Document, st: &ModelState, f: &Feature, placed: &crate::Mat) -> Result<SectionView> {
+    let FeatureKind::FrameMember { corner, corners, gap, mirror, .. } = &f.kind else {
+        return Err(DocError::Invalid("not a frame member feature".into()));
+    };
+    let (vals, _) = doc.param_values();
+    let Layout { segments, regions, at, turn, sketch_x, drawn, planes, origin, .. } = layout(doc, &vals, f, st)?;
+    let (line, a, b) = segments.first().cloned().ok_or_else(|| DocError::Invalid("the member feature has no lines".into()))?;
+    // The axes as the body is made ([`member_pivot`]'s way): under Auto they follow the frame's plan.
+    let gap = gap_value(&vals, gap.as_ref(), "`gap`")?;
+    let corners = &overrides(*corner, (&segments, &planes, &drawn, sketch_x), corners, Some((&vals, gap)))?;
+    let (plan, crossing) = plans(*corner, &segments, &planes, corners, &drawn)?;
+    let (segments, planes, _) = pieced(segments, planes, drawn, plan.as_ref().or(crossing.as_ref()))?;
+    // The piece from the first line's start keeps the line's id.
+    let m = segments.iter().position(|s| s.0 == line).ok_or_else(|| DocError::Invalid("the member feature has no lines".into()))?;
+    let (axes, _) = section_axes(&segments, &planes, plan.as_ref(), &vec![turn; segments.len()], &vec![0.0; segments.len()])?;
+    let (x, y) = axes.get(m).copied().ok_or_else(|| DocError::Invalid("the first line has no length".into()))?;
+    // The whole carried to world as the component is shown.
+    let t = placed;
+    let unit = |v: Vec3| crate::apply_vector(t, v).normalized().ok_or_else(|| DocError::Invalid("the component frame is degenerate".into()));
+    let (x, y) = (unit(x)?, unit(y)?);
+    Ok(SectionView { start: crate::apply_point(t, a), end: crate::apply_point(t, b), x, y, regions, at, origin, mirror: *mirror })
 }
 
 /// The member of feature `f` with id `line` (a line, a pair, or a piece of a line cut where tubes cross, [`pieced`]),
@@ -2041,6 +2179,20 @@ pub(crate) fn member_section(
     st: &ModelState,
     line: &str,
 ) -> Result<(Plane, f64, Region2, [bool; 2])> {
+    let original = untrimmed_member_section(doc, vals, f, st, line)?;
+    trimming::section(doc, vals, f, st, line, original)
+}
+
+fn untrimmed_member_section(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &ModelState,
+    line: &str,
+) -> Result<(Plane, f64, Region2, [bool; 2])> {
+    if paths::uses(st, &f.kind)? {
+        return paths::member_section(doc, vals, f, st, line);
+    }
     if !frame::groups_joined(&f.kind)
         && let Some(groups) = frame::group_features(f)?
     {
@@ -2051,7 +2203,7 @@ pub(crate) fn member_section(
             FeatureKind::FrameMember { lines, .. } if lines.is_empty() || lines.iter().any(|id| id == line))
             })
             .ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
-        return member_section(doc, vals, &group, st, line);
+        return untrimmed_member_section(doc, vals, &group, st, line);
     }
     let FeatureKind::FrameMember { corner, corners, gap, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
@@ -2101,6 +2253,9 @@ pub(crate) fn member_section(
 /// The point member `line` of `f` turns about, halfway along it: the centre of the profile's
 /// bounding box, which a Rotate step's turn leaves where it is ([`turned_at`]).
 pub(crate) fn member_pivot(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState, line: &str) -> Result<Vec3> {
+    if paths::uses(st, &f.kind)? {
+        return paths::member_pivot(doc, vals, f, st, line);
+    }
     if !frame::groups_joined(&f.kind)
         && let Some(groups) = frame::group_features(f)?
     {
@@ -2252,6 +2407,9 @@ pub(super) fn check_turn(doc: &Document, vals: &BTreeMap<String, Value>, f: &Fea
     if !member_line_ids(st, &source.kind)?.contains(&member.line) {
         return Err(DocError::Invalid(format!("Line `{}` of its frame member is gone", member.line)));
     }
+    if paths::uses(st, &source.kind)? {
+        paths::member_pivot(doc, vals, source, st, &member.line)?;
+    }
     turn_angle(vals, angle).map(|_| ())
 }
 
@@ -2263,6 +2421,9 @@ pub fn member_line_ids(st: &ModelState, kind: &FeatureKind) -> Result<Vec<String
 
 /// [`member_line_ids`], and which of them are later pieces of a cut line ([`LaterPieces`]).
 pub fn member_parts(st: &ModelState, kind: &FeatureKind) -> Result<(Vec<String>, LaterPieces)> {
+    if paths::uses(st, kind)? {
+        return paths::member_parts(st, kind);
+    }
     if let FeatureKind::FrameMember { groups, path_sketch: Some(path), .. } = kind
         && !groups.is_empty()
     {
@@ -2598,7 +2759,7 @@ pub fn is_member_line(sk: &Sketch, ci: usize) -> bool {
 /// Whether wire `wi` of `sk` is a 3D line a frame member is laid on unless lines are picked: a
 /// straight one drawn in it (not projected or otherwise linked), as [`member_lines`] takes them.
 pub fn is_member_wire(sk: &Sketch, wi: usize) -> bool {
-    sk.wires.get(wi).is_some_and(|w| w.link.is_none() && straight(&w.pts).is_some())
+    sk.wires.get(wi).is_some_and(|w| w.link.is_none() && wire_line(w).is_ok_and(|line| line.is_some()))
 }
 
 /// Each member's place in the sketch's drawing order: a 2D line's curve index, a 3D line's wire
@@ -2626,7 +2787,7 @@ fn member_lines(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<(String, Vec3, 
             }
         }
         for w in sk.wires.iter().filter(|w| w.link.is_none()) {
-            if let Some((a, b)) = straight(&w.pts)
+            if let Some((a, b)) = wire_line(w)?
                 && a.dist(b) > MIN_LENGTH
             {
                 out.push((w.id.clone(), a, b));
@@ -2649,12 +2810,15 @@ fn member_lines(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<(String, Vec3, 
             return Err(DocError::Invalid(format!("line `{id}` is listed twice")));
         }
         let line = if let Some(wi) = sk.wire_index(id) {
-            sk.wires.get(wi).and_then(|w| straight(&w.pts))
+            match sk.wires.get(wi) {
+                Some(w) => wire_line(w)?,
+                None => None,
+            }
         } else {
             let ci = sk.curve_index(id).ok_or_else(|| DocError::Unknown(format!("line `{id}` in {}", ss.name)))?;
             planar_line(ss, ci)
         };
-        let (a, b) = line.ok_or_else(|| DocError::Invalid(format!("`{id}` is not a straight line (members run along lines)")))?;
+        let (a, b) = line.ok_or_else(|| DocError::Invalid(format!("`{id}` is not a straight line or an exact circular arc")))?;
         if !(a.dist(b) > MIN_LENGTH) {
             return Err(DocError::Invalid(format!("line `{id}` has no length")));
         }
@@ -2670,22 +2834,15 @@ fn planar_line(ss: &SolvedSketch, ci: usize) -> Option<(Vec3, Vec3)> {
     Some((ss.plane.to_world(pa), ss.plane.to_world(pb)))
 }
 
-/// The ends of a 3D polyline that runs straight from its first point to its last: every point
-/// within [`STRAIGHT_TOL`] of the line between them, none behind the start, past the end or back
-/// from a point before it.
-fn straight(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
-    let (a, b) = (*pts.first()?, *pts.last()?);
-    let (len, d) = (a.dist(b), (b - a).normalized()?);
-    let mut reached = 0.0_f64;
-    for p in pts {
-        let q = *p - a;
-        let t = q.dot(d);
-        if (q - d * t).len() > STRAIGHT_TOL || t < reached - STRAIGHT_TOL || t > len + STRAIGHT_TOL {
-            return None;
-        }
-        reached = reached.max(t);
-    }
-    Some((a, b))
+/// Exact straight stock only: defining line points or one retained analytic line.
+/// A display polyline never turns a spline into straight member stock.
+fn wire_line(w: &solidcraft_sketch::Wire) -> Result<Option<(Vec3, Vec3)>> {
+    paths::wire_line(w).map(|line| {
+        line.map(|p| {
+            let d = p.data();
+            (d.a, d.b)
+        })
+    })
 }
 
 /// The regions of a member's profile, in the profile's own coordinates: one piece of material,

@@ -366,3 +366,20 @@ fn every_call_runs_right_after_its_listing() {
     reply(&mut s, &json!([call("level", json!({})), call("echo", json!({"text": "b"}))]));
     assert_eq!(s.tools().log, ["list", "list", "call echo", "list", "list", "call level", "list", "call echo"]);
 }
+
+/// Open schemas forward extra keys, but still check declared properties and required fields.
+#[test]
+fn additional_properties_are_forwarded_only_when_allowed() {
+    let mut schema = object(json!({"theme": {"type": "string"}}), &["theme"]);
+    for additional in [None, Some(false), Some(true)] {
+        if let Some(allow) = additional {
+            schema["additionalProperties"] = json!(allow);
+        } else {
+            schema.as_object_mut().unwrap().remove("additionalProperties");
+        }
+        let defs = vec![tool("prefs", "Preferences", "Set preferences", schema.clone(), Effect::Edits)];
+        assert_eq!(check_arguments(&defs, "prefs", &json!({"theme": "dark", "other": 1})).is_ok(), additional == Some(true));
+        assert!(check_arguments(&defs, "prefs", &json!({"theme": 1})).is_err());
+        assert!(check_arguments(&defs, "prefs", &json!({"other": 1})).is_err());
+    }
+}
