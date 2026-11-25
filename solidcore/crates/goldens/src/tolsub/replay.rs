@@ -84,11 +84,12 @@
 //! `stubs4-delete-edge-sphere_diff_3cylinders-e1/e4-r0.1/r0.5`, keep main's committed line
 //! to the bit, but with the cover's raises put back their edges hold #18166's lazily raised
 //! tolerances (lower, each a proved bound) instead of main's, so the put-back row is no
-//! longer main's: they are not replayed with the cover's raises put back. They are checked
-//! instead as rows that did not move ([`KEPT_MAIN_ROW`]): run as is, each is main's committed
-//! line to the bit (its hash, taken from main's expected file, which holds these four lines
-//! unchanged) and this branch's committed line. (The hashes their [`TRIM_COVER`] entries held
-//! were of an older main's run, not of the line main now commits.)
+//! longer main's: they are not replayed with the cover's raises put back. They were checked
+//! instead as rows that did not move (run as is, each was main's committed line to the bit
+//! and this branch's committed line), until the retirement of
+//! `fillet_cleanup_keeps_target_faces` (WR-459) moved all four (the clean-up keeps the
+//! target's own faces); that check is deleted, and the rows are checked in
+//! `units::blend_fillet_executive_p3::end_to_end::wr459_sphere_rows`.
 //!
 //! #20179 (the point test asks the face whether to test) adds five UV trims to the read of
 //! `Fillet/sphere_diff_3cylinders.smb`, and six `blend.fillet_executive_p3` rows keep them
@@ -684,86 +685,6 @@ fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usiz
         }
     }
     wrong
-}
-
-/// Rows #18166 took out of [`TRIM_COVER`] that it does not move (see the module docs): unit,
-/// case, and the hash of main's committed line (`origin/main` ee673a19bf's expected file).
-/// #18490 moves these four rows (the round sits on the sphere drop's finer trims), so each
-/// hash is of the row with that change, from Linux CI.
-/// Each hash is of the line without the `fillet_point_step` key, which recorded the retired
-/// step latch (#18916). Two changes move the four rows' `mass_properties` only: the drop
-/// tracer's clamped-sliver rule (#21353: a span whose clamped UV image is one point within
-/// the drop's tolerances is left out) and WR-732's retirement (#18934: the fillet's own
-/// classifications while it edits, by up to 1.7e-10 of the area). So each hash is of main's
-/// line without its `mass_properties` key (main's expected file at e97d2814d7; #21353 leaves
-/// it unchanged); the moved mass entries are classified against a certified enclosure
-/// (`tests/wr493_moved_rows_are_classified`, `tests/drop_clamped_sliver_moved_mass_rows.rs`).
-const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        KEPT_E1_R01,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        KEPT_E1_R05,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        KEPT_E4_R01,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        KEPT_E4_R05,
-    ),
-];
-
-/// The hashes of [`KEPT_MAIN_ROW`]: main's committed line of each row (e97d2814d7) without
-/// its `mass_properties` key.
-const KEPT_E1_R01: u64 = 0x977c_63d7_b621_5306;
-const KEPT_E1_R05: u64 = 0x2c5d_ffd0_302a_cccf;
-const KEPT_E4_R01: u64 = 0x6d3c_42d8_6b25_81f2;
-const KEPT_E4_R05: u64 = 0x8557_8f8e_7925_20db;
-
-/// Each [`KEPT_MAIN_ROW`] row, run as is, is this branch's committed line, and without its
-/// `mass_properties` key it is main's committed line to the bit.
-#[test]
-fn rows_the_lazy_raise_keeps_are_main_s() {
-    let mut failures = Vec::new();
-    for &(unit_id, name, main_hash) in KEPT_MAIN_ROW {
-        assert!(
-            !TRIM_COVER.iter().any(|r| r.0 == unit_id && r.1 == name)
-                && !DATA.iter().any(|r| r.0 == unit_id && r.1 == name),
-            "{unit_id} {name}: replayed as well"
-        );
-        let u = unit(unit_id);
-        let all = cases(u.as_ref());
-        let golden = read(&default_dir(), unit_id).unwrap();
-        let case = all
-            .get(name)
-            .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
-        let line = run(u.as_ref(), case);
-        if golden.get(name) != Some(&line) {
-            failures.push(format!("{unit_id} {name}: not the committed line"));
-        }
-        let mut without_mass = line.clone();
-        let removed = without_mass["values"]
-            .as_object_mut()
-            .and_then(|v| v.remove("mass_properties"));
-        if removed.is_none() {
-            failures.push(format!("{unit_id} {name}: no mass_properties"));
-        }
-        if hash(&without_mass) != main_hash {
-            failures.push(format!(
-                "{unit_id} {name}: not main's line without its mass ({:#018x})",
-                hash(&without_mass)
-            ));
-        }
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Writes, per `unit<TAB>case` line of `$TOLSUB_CASES`, one JSON line to `$TOLSUB_OUT`:

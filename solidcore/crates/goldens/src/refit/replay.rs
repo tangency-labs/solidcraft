@@ -28,8 +28,9 @@
 //! moves by less than the goldens' comparator keeps main's committed line, so it is not
 //! listed (its run is not that line to the bit). Of `blend.fillet_executive_p3`'s moved rows
 //! the ten `sphere_diff_3cylinders` rows and `stubs4-sphere_plane-e3-r0.5` were listed
-//! (`REFIT_UNITS` that unit alone, these rows kept); #18934 deleted the four `e1`/`e4` rows,
-//! which it moves apart from the refit (see `data`). Its other moved row,
+//! (`REFIT_UNITS` that unit alone, these rows kept); WR-459's retirement took out the four
+//! `e1`/`e4` rows (see [`DATA`]), leaving seven (#18934 moves their mass as well, apart
+//! from the refit). Its other moved row,
 //! `source-file-box_w_slot-all-edges`, is not listed: there the seam rebuilds main's run of
 //! the case bit for bit (measured on main at 0b321cbaa4), but main's committed line is not
 //! main's own run to the bit (`mass_properties` up to 1.7e-10 relative off, within the

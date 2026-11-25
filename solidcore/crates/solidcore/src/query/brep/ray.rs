@@ -226,6 +226,7 @@ fn face_surface_cache(
     let trims_failed = |e: SolidError| match e {
         e @ (SolidError::Unported { .. }
         | SolidError::Cancelled { .. }
+        | SolidError::OutOfFuel { .. }
         | SolidError::PreparationRequired { .. }) => e,
         _ if editing => unavailable.clone(),
         e => e,

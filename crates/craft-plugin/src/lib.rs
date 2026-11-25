@@ -42,6 +42,8 @@ pub const MAX_MEMORY_MIB: usize = 4096;
 /// The user's Max plugin fuel remains the default for packages without an approval.
 pub const MAX_APPROVED_FUEL: u64 = 10_000_000_000_000;
 
+pub mod shader;
+
 pub type Result<T> = std::result::Result<T, HostError>;
 
 /// An open document session and its committed history state, kept outside authored document data.
@@ -175,12 +177,13 @@ pub const CAPABILITIES: &[(&str, (u32, u32))] = &[
     ("evaluate", (0, 2)),
     ("formats", (0, 2)),
     ("forms", (0, 1)),
+    ("shaders", (0, 2)),
     ("storage", (0, 1)),
     ("ui", (0, 1)),
 ];
 /// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
 /// `craft:plugin@0.1.0` ([`WIT_0_1`]) run unchanged.
-pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
+pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1)), ("shaders", (0, 1))];
 /// The WIT versions a host runs, newest first: [`API`]'s and the frozen 0.1 one.
 pub const WIT_VERSIONS: &[&str] = &["0.2.0", "0.1.0"];
 /// `craft:plugin@0.1.0`, unchanged, for plugins built before 0.2.
@@ -659,6 +662,9 @@ pub struct Manifest {
     pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RuntimeManifest>,
+    /// View backgrounds and tints (`shaders@0.2`); a plugin may ship shaders and no runtime.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shaders: Vec<shader::Shader>,
 }
 
 /// A read-only entry called after a coalesced design or linked-file invalidation. Listeners refresh
@@ -1074,6 +1080,20 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
     }
     if manifest.runtime.as_ref().and_then(|runtime| runtime.ui.as_ref()).is_some() && !has_ui {
         return Err(invalid("runtime.ui", "panel declarations require ui@0.1"));
+    }
+    if !manifest.shaders.is_empty() {
+        if !manifest.capabilities.iter().any(|capability| capability.starts_with("shaders@")) {
+            return Err(invalid(
+                "capabilities",
+                "a plugin with shaders needs the shaders capability: \"capabilities\": [\"shaders@0.2\"] (backgrounds alone may say \"shaders@0.1\")",
+            ));
+        }
+        // Tints and settings came with 0.2: a 0.1 plugin keeps exactly what 0.1 offered.
+        let newer = manifest.shaders.iter().any(|s| s.kind != shader::ShaderKind::Background || !s.settings.is_empty());
+        if newer && !manifest.capabilities.iter().any(|capability| capability == "shaders@0.2") {
+            return Err(invalid("capabilities", "tints and shader settings need \"shaders@0.2\"; update SolidCraft or the plugin"));
+        }
+        shader::validate(&manifest.shaders)?;
     }
     Ok(manifest)
 }

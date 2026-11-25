@@ -807,6 +807,15 @@ component's own imports and exports, and serves the frozen 0.1 WIT
 (`crates/craft-plugin/wit-0.1/plugin.wit`) to those. A component that names a version the host does
 not run, or two versions at once, is refused before any of its code runs.
 
+`shaders@0.1` lets a plugin draw the 3D view's background with a WGSL shader the host checks,
+wraps and limits; it needs no runtime. See [plugin shaders](plugin-shaders.md) and
+[RFC 0015, amendment 1](rfcs/0015-plugin-ui-workspaces.md#amendment-1-shaders).
+
+`shaders@0.2` adds tints, which colour the ribbon's icons, its button blocks and the panels each
+frame, and settings sliders for shaders. See [plugin shaders](plugin-shaders.md#tints).
+It also adds panel shaders, which draw every see-through panel's background from what is behind
+it. See [plugin panels](plugin-panels.md).
+
 ## Docked panels
 
 Add `"ui@0.1"` alongside `"commands@0.2"`, declare `runtime.ui`, and target `panel-plugin` in
