@@ -1157,7 +1157,7 @@
   "ai.prefs.control_listening": "127.0.0.1:{port} で待機中",
   "ai.prefs.control_not_listening": "待機していません",
   "ai.prefs.control_port": "ポート",
-  "ai.prefs.control_port_note": "このコンピューター上で AI エージェントが接続するポート (127.0.0.1)。既定は 27878 で、使用中の場合は次の空いているポートを使います。それ以外のポートはそのまま使います。MCP クライアントも同じポートに向けてください (例: solidcraft-cli mcp --connect 127.0.0.1:7878)。",
+  "ai.prefs.control_port_note": "このコンピューター上で AI エージェントが接続するポート (127.0.0.1)。既定は 27878 で、使用中の場合は次の空いているポートを使います。それ以外のポートはそのまま使います。MCP クライアントも同じポートに向けてください (例: solidcraft-cli mcp --connect 127.0.0.1:27878)。",
   "ai.prefs.control_port_taken": "ポート {port} は別のプログラム (または別の SolidCraft ウィンドウ) が使用しています。別のポートを選んでください。",
   "ai.prefs.follow_camera": "カメラを追従",
   "ai.prefs.follow_camera_off": "カメラの自動追従はオフです。",
