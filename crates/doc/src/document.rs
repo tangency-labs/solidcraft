@@ -4867,20 +4867,21 @@ impl Document {
     /// The parameter renamed from `previous` to this design, as `(old, new)`, when that rename
     /// ([`Document::rename_param`], with every reference it follows) is all that changed (#611).
     pub fn param_rename_from(&self, previous: &Document) -> Option<(String, String)> {
-        let names = |d: &Document| -> std::collections::BTreeSet<String> {
-            let stored = d.params.iter().map(|p| p.name.clone()).chain(d.text_params.iter().map(|p| p.name.clone()));
-            stored.chain(d.features.iter().flat_map(|f| f.param_names.iter().cloned())).collect()
-        };
+        // Borrowed names: every command that changes the design asks, and most rename nothing.
+        fn names(d: &Document) -> std::collections::BTreeSet<&str> {
+            let stored = d.params.iter().map(|p| p.name.as_str()).chain(d.text_params.iter().map(|p| p.name.as_str()));
+            stored.chain(d.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str))).collect()
+        }
         let (before, after) = (names(previous), names(self));
         let mut gone = before.difference(&after);
         let mut came = after.difference(&before);
-        let (old, new) = (gone.next()?, came.next()?);
+        let (old, new) = (*gone.next()?, *came.next()?);
         if gone.next().is_some() || came.next().is_some() {
             return None;
         }
         let mut expected = previous.clone();
         expected.rename_param(old, new).ok()?;
-        (expected == *self).then(|| (old.clone(), new.clone()))
+        (expected == *self).then(|| (old.to_string(), new.to_string()))
     }
 
     /// A complete structural proof: no non-render field is allowed to differ. Keeping this

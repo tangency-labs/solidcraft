@@ -1436,13 +1436,7 @@ impl ModelState {
         // Later features read a sketch's solved geometry: they are keyed by it (to the
         // quantum), so a value set back that solves to the same geometry reuses their results.
         if let Some(s) = self.sketches.iter().find(|s| s.feature == feature) {
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            serde_json::to_string(&s.plane).unwrap_or_default().hash(&mut h);
-            let mut sketch = s.sketch.clone();
-            fingerprint_sketch(&mut sketch);
-            serde_json::to_string(&sketch).unwrap_or_default().hash(&mut h);
-            s.report.ok().hash(&mut h);
-            self.sketch_keys.insert(feature, h.finish());
+            self.sketch_keys.insert(feature, s.key());
         }
     }
 }
@@ -1719,6 +1713,18 @@ impl EvalCache {
 }
 
 impl SolvedSketch {
+    /// Its evaluation-cache key: a digest of its plane and its solved geometry to the quantum
+    /// ([`fingerprint_sketch`]), and whether it solved.
+    fn key(&self) -> u64 {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        serde_json::to_string(&self.plane).unwrap_or_default().hash(&mut h);
+        let mut sketch = self.sketch.clone();
+        fingerprint_sketch(&mut sketch);
+        serde_json::to_string(&sketch).unwrap_or_default().hash(&mut h);
+        self.report.ok().hash(&mut h);
+        h.finish()
+    }
+
     /// The curves `ids` in order along the open chain they make, from one free end to the other,
     /// whatever order they were given in. Refused unless they join end to end into one open chain.
     pub fn chain_order(&self, ids: &[String]) -> Result<Vec<String>> {
@@ -5447,15 +5453,15 @@ impl Model {
     /// `previous` with only that rename ([`Document::param_rename_from`]), so every feature reads
     /// the same values under the new name and keeps its result. False, leaving the model as it
     /// was, when the model isn't the design's, a value differs or fails, a message quotes the old
-    /// name, or the rename reached what a result keeps a copy of or the model doesn't evaluate: a
-    /// sketch (its solved copy keeps its expressions), sheet metal or plastic rules, canvases,
-    /// placements or joints: evaluate then.
+    /// name, or the rename reached what the model doesn't evaluate: sheet metal or plastic rules,
+    /// canvases, placements or joints: evaluate then. A sketch the rename reached keeps its
+    /// solve: the solved copies the states keep of it take the new name as the design's sketch
+    /// did ([`crate::params::rename_param_in_sketch`]), and their cache keys follow.
     pub fn rename_param(&mut self, previous: &Document, doc: &Document, old: &str, new: &str) -> bool {
         if self.results.len() != doc.features.len() || self.results.iter().zip(&doc.features).any(|(r, f)| r.id != f.id || r.stale) {
             return false;
         }
         if previous.features.len() != doc.features.len()
-            || previous.features.iter().zip(&doc.features).any(|(a, b)| matches!(a.kind, FeatureKind::Sketch { .. }) && a != b)
             || previous.sheet != doc.sheet
             || previous.plastic != doc.plastic
             || previous.canvases != doc.canvases
@@ -5478,6 +5484,39 @@ impl Model {
         let quotes = |m: &String| m.split(|c: char| !(c.is_alphanumeric() || c == '_')).any(|w| w == old);
         if self.results.iter().any(|r| [&r.error, &r.warning].into_iter().flatten().any(quotes)) {
             return false;
+        }
+        let sketches: std::collections::BTreeSet<u64> = previous
+            .features
+            .iter()
+            .zip(&doc.features)
+            .filter(|(a, b)| matches!(a.kind, FeatureKind::Sketch { .. }) && a != b)
+            .map(|(a, _)| a.id)
+            .collect();
+        // States, and solved sketches between them, are shared: each is renamed once and stays shared.
+        let mut solved: std::collections::HashMap<*const SolvedSketch, (Arc<SolvedSketch>, u64)> = std::collections::HashMap::new();
+        let mut renamed: std::collections::HashMap<*const ModelState, Arc<ModelState>> = std::collections::HashMap::new();
+        for r in self.results.iter_mut().filter(|r| r.state.sketches.iter().any(|k| sketches.contains(&k.feature))) {
+            let state = renamed
+                .entry(Arc::as_ptr(&r.state))
+                .or_insert_with(|| {
+                    let mut st = (*r.state).clone();
+                    for k in st.sketches.iter_mut().filter(|k| sketches.contains(&k.feature)) {
+                        let (copy, key) = solved
+                            .entry(Arc::as_ptr(k))
+                            .or_insert_with(|| {
+                                let mut copy = (**k).clone();
+                                crate::params::rename_param_in_sketch(&mut copy.sketch, old, new);
+                                let key = copy.key();
+                                (Arc::new(copy), key)
+                            })
+                            .clone();
+                        st.sketch_keys.insert(copy.feature, key);
+                        *k = copy;
+                    }
+                    Arc::new(st)
+                })
+                .clone();
+            r.state = state;
         }
         self.refingerprint(doc);
         true
