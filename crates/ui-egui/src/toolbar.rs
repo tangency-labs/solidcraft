@@ -1987,9 +1987,6 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             ribbon::text(ui, at, app.tr("ui.toolbar_tabs_hidden"), t.font_body, t.text_dim, false);
             crate::scenario::publish_handle("ribbon:tabs_hidden", at);
         }
-        if tab == "MODEL" {
-            crate::plugin_menu::ensure_listed(app);
-        }
         let panels = RibbonPanels::new(app, ui, &tab, &lists, &painter, running.clone());
         let more_tip = solidcraft_ui_text::tr_label("More toolbar panels");
         let accent = crate::workspace::tab_accent(&t, &tab);
@@ -3069,7 +3066,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 || crate::drawing_sheet_page::clear_view_selection(app)
             {
                 app.esc_handled = true;
-            } else if !app.session.selection.is_empty() {
+            } else if app.session.has_selection() {
                 app.esc_handled = true;
                 let _ = app.run("select.clear", json!({}));
             }
@@ -3227,7 +3224,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::dialogs::cancel(app);
                 } else if crate::viewport_status::enabled(app) && crate::viewport_status::escape(app, repeat) {
                     app.last_escape = None;
-                } else if !app.session.selection.is_empty() || app.session.active_sketch.is_none() {
+                } else if app.session.has_selection() || app.session.active_sketch.is_none() {
                     crate::edit_clipboard::drop_cut(app);
                     app.tree.picked_joints.clear();
                     let _ = app.run("select.clear", json!({}));

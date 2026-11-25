@@ -2450,6 +2450,87 @@ fn a_round_too_small_to_change_the_part_is_refused() {
     assert!(volume(&b) < before);
 }
 
+/// #3351: on a square edge of a body of tolerance 1e-5, a round narrower across its faces
+/// than eight tolerances (its chord, r*sqrt(2), below 8e-5) is refused as too small, naming
+/// the smallest that builds, 8e-5/sqrt(2) and one part in a million: 2e-5 lies within
+/// tolerance of the edge, 2.5e-5 failed with no fillet faces made and 4e-5 failed matching
+/// its edges, untyped. A round of the smallest named builds exact, and so do rounds just
+/// above it. So on a 120 degree turn, where a chord of exactly eight tolerances fails.
+#[test]
+fn a_round_narrower_than_eight_tolerances_is_refused_naming_one_that_builds() {
+    all_fixes();
+    let floor = 8e-5 / std::f64::consts::SQRT_2 * (1.0 + 1e-6);
+    let mut smallest = 0.0;
+    for r in [2e-5, 2.5e-5, 4e-5, 5.5e-5] {
+        let b = block();
+        let e = edge_at(&b, [15.0, 0.0, 0.0]);
+        match blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled) {
+            Err(Error::RoundTooSmall {
+                edge, smallest: s, ..
+            }) => {
+                assert_eq!(edge, e);
+                assert!((s - floor).abs() < 1e-9 * floor, "{r} {s}");
+                smallest = s;
+            }
+            other => panic!("{r}: {other:?}"),
+        }
+        assert!(rel(volume(&b), ABC) < 1e-12, "{r}");
+    }
+    for r in [smallest, 5.7e-5, 6e-5] {
+        let b = block();
+        let e = edge_at(&b, [15.0, 0.0, 0.0]);
+        blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled)
+            .unwrap_or_else(|err| panic!("a round of {r} builds: {err}"));
+        let removed = 30.0 * r * r * (1.0 - std::f64::consts::FRAC_PI_4);
+        assert!(
+            ((ABC - volume(&b)) - removed).abs() < 1e-3 * removed,
+            "{r} {}",
+            volume(&b)
+        );
+        assert_eq!(b.counts().unwrap(), [7, 15, 10], "{r}");
+    }
+    // a prism whose edge at the origin turns its faces by 120 degrees
+    let a = 10.0 / 60f64.to_radians().tan();
+    let prism = || {
+        swept(
+            &[
+                segment((0.0, 0.0), (20.0, 0.0)),
+                segment((20.0, 0.0), (20.0, 10.0)),
+                segment((20.0, 10.0), (a, 10.0)),
+                segment((a, 10.0), (0.0, 0.0)),
+            ],
+            10.0,
+        )
+    };
+    let turn = 120f64.to_radians();
+    let floor = 8e-5 / (2.0 * (0.5 * turn).sin()) * (1.0 + 1e-6);
+    let b = prism();
+    let before = volume(&b);
+    let e = edge_at(&b, [0.0, 0.0, 5.0]);
+    match blend(&b, Blend::Round, &[e], &[4.5e-5], &[], Corners::Filled) {
+        Err(Error::RoundTooSmall {
+            edge, smallest: s, ..
+        }) => {
+            assert_eq!(edge, e);
+            assert!((s - floor).abs() < 1e-9 * floor, "{s}");
+            smallest = s;
+        }
+        other => panic!("4.5e-5 at 120 degrees: {other:?}"),
+    }
+    assert!(rel(volume(&b), before) < 1e-12);
+    for r in [smallest, 4.7e-5] {
+        let b = prism();
+        let e = edge_at(&b, [0.0, 0.0, 5.0]);
+        blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled)
+            .unwrap_or_else(|err| panic!("a round of {r} at 120 degrees builds: {err}"));
+        let removed = 10.0 * r * r * ((0.5 * turn).tan() - 0.5 * turn);
+        assert!(
+            ((before - volume(&b)) - removed).abs() < 1e-3 * removed,
+            "{r}"
+        );
+    }
+}
+
 /// #17511: a round of 8 on a quarter circle of radius 10 that meets a straight side 16.7
 /// degrees off tangent. On the top, the round of the arc touches the circle of radius 2 about
 /// the arc's centre and the round of the side touches the line 8 in from it; they cross twice,
