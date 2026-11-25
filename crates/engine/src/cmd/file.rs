@@ -1620,7 +1620,7 @@ struct KicadModelAccess<'a> {
 }
 
 /// The file extensions of the models KiCad's 3D library holds (any case).
-const KICAD_MODEL_EXTENSIONS: [&str; 5] = ["wrl", "wrz", "step", "stp", "stpz"];
+const KICAD_MODEL_EXTENSIONS: &[&str] = &["wrl", "wrz", "step", "stp", "stpz"];
 
 fn read_kicad_model_file(path: &std::path::Path, access: &KicadModelAccess) -> std::io::Result<Vec<u8>> {
     let text = path.to_string_lossy();
@@ -1631,7 +1631,7 @@ fn read_kicad_model_file(path: &std::path::Path, access: &KicadModelAccess) -> s
     // files can be reached that way. Any other folder stays refused (`--allow-path` adds it).
     match solidcraft_io::vfs::check_design_path(&text, Some(access.board)) {
         Ok(()) => solidcraft_io::vfs::read(&text, limit),
-        Err(refused) => solidcraft_io::vfs::read_in_library(&text, access.libraries, &KICAD_MODEL_EXTENSIONS, limit).unwrap_or(Err(refused)),
+        Err(refused) => solidcraft_io::vfs::read_in_library(&text, access.libraries, KICAD_MODEL_EXTENSIONS, limit).unwrap_or(Err(refused)),
     }
 }
 

@@ -807,7 +807,7 @@ fn linked_bodies_schema(_: &mut SchemaGenerator) -> Schema {
 
 /// The names of the KiCad board options `doc.open` takes (for a `.kicad_pcb` or `.kicad_pro`
 /// file), in the order [`kicad_open_properties`] lists them.
-pub const KICAD_OPEN_OPTIONS: [&str; 6] = ["thickness", "components", "copper", "silkscreen", "color", "representation"];
+pub const KICAD_OPEN_OPTIONS: &[&str] = &["thickness", "components", "copper", "silkscreen", "color", "representation"];
 
 /// The KiCad board options of `doc.open` as JSON Schema properties. `OpenParams` publishes these
 /// and the MCP `open` tool lists the same ones, so the two cannot name or describe them apart.

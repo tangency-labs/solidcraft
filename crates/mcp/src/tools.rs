@@ -1021,8 +1021,10 @@ fn open_properties(mut own: Value) -> Value {
 
 /// The arguments of `open` that `doc.open` takes.
 fn open_params(a: &Map<String, Value>) -> Value {
-    let keys: Vec<&str> =
-        ["path", "new_tab", "up", "names", "geometry"].into_iter().chain(solidcraft_engine::schema::file::KICAD_OPEN_OPTIONS).collect();
+    let keys: Vec<&str> = ["path", "new_tab", "up", "names", "geometry"]
+        .into_iter()
+        .chain(solidcraft_engine::schema::file::KICAD_OPEN_OPTIONS.iter().copied())
+        .collect();
     pick(a, &keys)
 }
 
