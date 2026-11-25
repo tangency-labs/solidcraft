@@ -3378,10 +3378,7 @@ pub(crate) fn refresh_sketch_scene(app: &mut SolveApp, proj: &Proj) {
     refresh_wireframe(app, proj);
     let sk = sketch_scene_key(app, proj);
     if sk != app.viewport.sketch_key {
-        // The last scene's sizes are this one's best guess: the lists are filled in one go
-        // instead of growing (and copying) through many reallocations.
-        let hint = app.viewport.sketch_slot.lock().ok().and_then(|slot| slot.as_ref().map(GpuScene::capacity_hint));
-        let scene = build_sketch_scene_with(app, proj, hint);
+        let scene = build_sketch_scene(app, proj);
         if let Ok(mut slot) = app.viewport.sketch_slot.lock() {
             *slot = Some(scene);
         }
@@ -3422,13 +3419,11 @@ fn refresh_wireframe(app: &mut SolveApp, proj: &Proj) {
 
 /// View-dependent geometry: grid, sketch feedback and the ground shadow's visibility.
 pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
-    build_sketch_scene_with(app, proj, None)
-}
-
-fn build_sketch_scene_with(app: &SolveApp, proj: &Proj, hint: Option<[usize; 4]>) -> GpuScene {
     let tk = Tokens::get();
     let mut sc = GpuScene::default();
-    if let Some(sizes) = hint {
+    // The last scene's sizes are this one's best guess: the lists are filled in one go instead of
+    // growing (and copying) through many reallocations.
+    if let Some(sizes) = app.viewport.sketch_slot.lock().ok().and_then(|slot| slot.as_ref().map(GpuScene::capacity_hint)) {
         sc.reserve_lists(sizes);
     }
     let st = crate::open_meshing::shown_world(app);
@@ -21136,7 +21131,9 @@ mod grid_plane_tests {
         app.run("sketch.finish", json!({})).unwrap();
         let proj = projection(&app, rect);
         let plain = build_sketch_scene(&app, &proj);
-        let hinted = build_sketch_scene_with(&app, &proj, Some(plain.capacity_hint()));
+        assert!(app.viewport.sketch_slot.lock().unwrap().is_none(), "nothing to size it by yet");
+        *app.viewport.sketch_slot.lock().unwrap() = Some(plain.clone());
+        let hinted = build_sketch_scene(&app, &proj);
         assert!(!plain.under.is_empty() && !plain.lines.is_empty());
         assert_eq!((&plain.lines, &plain.overlay, &plain.under, &plain.trans), (&hinted.lines, &hinted.overlay, &hinted.under, &hinted.trans));
         assert_eq!(plain.palette.entries(), hinted.palette.entries());
