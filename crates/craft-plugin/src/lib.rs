@@ -1109,7 +1109,14 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
         EntryKind::Command => Ok(()),
         EntryKind::Importer | EntryKind::Exporter => {
             let mut seen = BTreeSet::new();
-            let valid = |e: &String| (1..=16).contains(&e.len()) && e.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+            let is_alnum = |c: u8| c.is_ascii_lowercase() || c.is_ascii_digit();
+            let valid = |e: &String| {
+                let bytes = e.as_bytes();
+                (1..=16).contains(&bytes.len())
+                    && bytes.first().copied().is_some_and(is_alnum)
+                    && bytes.last().copied().is_some_and(is_alnum)
+                    && bytes.iter().all(|&c| is_alnum(c) || c == b'_')
+            };
             if entry.extensions.is_empty() || entry.extensions.len() > MAX_EXTENSIONS || !entry.extensions.iter().all(|e| valid(e) && seen.insert(e))
             {
                 return Err(invalid(
