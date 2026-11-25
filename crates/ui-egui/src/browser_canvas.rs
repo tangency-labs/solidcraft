@@ -52,7 +52,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         .actions(ok, cancel, None)
         .show(ctx, true, |ui| {
             if m.trace {
-                ui_kit::text(ui, hint_text(&m), ui_kit::Text::Note("trace_hint"));
+                ui_kit::text(ui, &hint_text(&m), ui_kit::Text::Note("trace_hint"));
                 ui_kit::row(ui, solidcraft_ui_text::tr("browser.trace_tolerance"), |ui| {
                     ui_kit::slider(ui, &mut m.tolerance, 0.0..=100.0, Default::default())
                 });
