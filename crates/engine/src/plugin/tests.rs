@@ -1371,7 +1371,10 @@ mod native {
             },
         );
         let error = run_workspace_hook(&mut session, package, "manufacture", true).unwrap_err();
-        assert!(error.to_string().contains("from a workspace hook"), "{error}");
+        // Refused either as a file-writing command from a hook or, since `file.export` is an
+        // edit command, as an edit from a read entry: in both cases nothing is written.
+        let text = error.to_string();
+        assert!(text.contains("from a workspace hook") || text.contains("from read entry"), "{error}");
         assert!(!f.0.join("sample/hook-export.step").exists());
     }
 
