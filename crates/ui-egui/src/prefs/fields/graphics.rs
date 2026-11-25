@@ -37,10 +37,6 @@ macro_rules! graphics_preferences {
             /// construction has fully constrained. Off: every joint draws alike. The ring and axis
             /// style draws every joint alike either way.
             highlight_moving_joints: bool = true, PAGE_GRAPHICS => check_id("prefs.highlight_moving_joints");
-            /// In Fillet and Chamfer the edges a click would take are drawn thin in `hover_edge_lit`
-            /// (orange in Light and Dark): the edge under the pointer, or the edges of the face under it.
-            /// Off (the default): the edge or face is lit as everywhere else.
-            hover_edge_lit: bool = false, PAGE_GRAPHICS => check_id("prefs.hover_edge_lit");
             /// How the view shows what an Isolate hid: not at all (the default), see-through, or as
             /// edges (#8120). Chosen on the Isolation pill or the bar's Isolate slot.
             isolate_others: solidcraft_engine::schema::view_navigation::IsolateShow = Default::default(), PAGE_GRAPHICS;

@@ -363,8 +363,6 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:cut_preview_tint", cut_tint.rect);
             let hidden_edges = setting::show_selected_hidden_edges(app, ui).backing_on_hover_text(app.tr("prefs.show_selected_hidden_edges_help"));
             crate::scenario::publish_target("prefs:show_selected_hidden_edges", hidden_edges.rect);
-            let edge_lit = setting::hover_edge_lit(app, ui).backing_on_hover_text(app.tr("prefs.hover_edge_lit_help"));
-            crate::scenario::publish_target("prefs:hover_edge_lit", edge_lit.rect);
             let reference =
                 setting::reference_geometry_through_bodies(app, ui).backing_on_hover_text(app.tr("settings.reference_geometry_through_bodies_help"));
             crate::scenario::publish_target("dialog:Show reference geometry through bodies", reference.rect);

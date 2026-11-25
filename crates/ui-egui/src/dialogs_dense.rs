@@ -765,6 +765,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 ui.scope(|ui| ui_kit::checkbox_grid(ui, &mut [("Tangent Chain", chain), ("Preview", &mut d.preview_enabled)], 2))
                     .response
                     .backing_on_hover_text(tr("ui.fillet_options_tip"));
+                ui.scope(|ui| form_row(ui, "ui.fillet_color_edges", |ui| check(ui, &mut app.preferences.hover_edge_lit)))
+                    .response
+                    .backing_on_hover_text(tr("ui.fillet_color_edges_tip"));
             });
             // The radii along the edge, for the two types that take them.
             if !*chamfer && matches!(rtype, 2 | 4) {
@@ -1681,6 +1684,11 @@ mod tests {
         assert_eq!(h.app.dialog.as_ref().unwrap().extra.get("type"), Some(&json!("curvature")));
         h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
         assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::Fillet { chain: false, .. }));
+        // Color edges is the remembered preference, not a command parameter.
+        assert!(!h.app.preferences.hover_edge_lit);
+        h.step(&json!({"click":{"handle":"dialog:ui.fillet_color_edges"}})).unwrap();
+        assert!(h.app.preferences.hover_edge_lit);
+        assert_eq!(h.app.dialog.as_ref().unwrap().extra.get("type"), Some(&json!("curvature")));
         h.step(&json!({"click":{"handle":"dialog:section:Options"}})).unwrap();
         h.frames(2);
         assert!(scenario::handle_at("dialog:Tangent Chain").is_none());

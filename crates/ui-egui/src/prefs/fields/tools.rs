@@ -54,6 +54,11 @@ macro_rules! tools_preferences {
             /// Placing a Single hole snaps to the middle of the face and the centres of its round edges
             /// (`hole_place`). Off by default: a hole goes where it is clicked.
             hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");
+            /// In Fillet and Chamfer the edges a click would take are drawn thin in `hover_edge_lit`
+            /// (orange in Light and Dark): the edge under the pointer, or the edges of the face under it.
+            /// Off (the default): the edge or face is lit as everywhere else. Switched in the tool's
+            /// Options section, never in Preferences; remembered between uses.
+            hover_edge_lit: bool = false, PAGE_TOOLS;
             /// Degrees per step near the assembly Move ring.
             joint_rotation_coarse: f64 = 10.0, PAGE_TOOLS;
             /// Degrees per step after pulling the cursor outside the precision guide.
