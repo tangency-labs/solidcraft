@@ -597,7 +597,7 @@ fn frame_in_sketch(s: &Session, c: &Canvas, sketch: u64, cmd: &str) -> Result<[V
 
 /// [`frame_in_sketch`]'s corners, or `None` when the image does not lie on the sketch's plane.
 fn corners_in_sketch(s: &Session, c: &Canvas, sketch: u64, cmd: &str) -> Result<Option<[Vec2; 3]>> {
-    use solidcore_ops::affine;
+    use solidcraft_kernel::services::affine;
     let (vals, _) = s.doc.param_values();
     let state = s.model.state();
     let ss = state.sketch(sketch).ok_or_else(|| bad(cmd, "the sketch being edited has not been solved; finish or repair it first"))?;

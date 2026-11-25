@@ -602,7 +602,7 @@ fn a_frame_without_turns_keeps_its_fingerprint() {
         let steps = super::ImportDigests::default();
         let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, None);
         // And the key its result is cached under, which leaves the chain out.
-        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, &ModelState::default(), &steps, 0).whole)
+        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, 0, &ModelState::default(), &steps).whole)
     };
     let before = key(&doc);
     let turn = doc
@@ -676,6 +676,199 @@ fn an_import_after_a_moved_sketch_is_not_read_again() {
     assert_eq!(work.imports_read, 0, "the import after the sketch must not be read again: {work:?}");
     assert_eq!(model.last_recomputed, 1, "only the sketch is evaluated again: {work:?}");
     assert_eq!(model.state().bodies.len(), 2, "the plate and the imported part: {work:?}");
+}
+
+/// Adds a single-box imported component to `doc`, returning `(component_id, feature_id)`.
+fn add_imported_part(doc: &mut Document, part_name: &str, body_name: &str, origin_x: f64, size: f64) -> (u64, u64) {
+    let solid = kernel::box_solid(Vec3::new(origin_x, 0.0, 0.0), Vec3::new(origin_x + size, size, size)).unwrap();
+    let step: Arc<str> = kernel::step_export(&[&solid], part_name).unwrap().into();
+    let comp = doc.add_component(Some(part_name), 0).unwrap();
+    let kind = FeatureKind::Import { file: format!("{part_name}.step"), step, components: Vec::new(), skip: Vec::new(), records: None };
+    let id = doc.add_feature(kind, Some(part_name)).unwrap();
+    let f = doc.feature_mut(id).unwrap();
+    f.component = comp;
+    f.body_names = vec![body_name.into()];
+    (comp, id)
+}
+
+/// Snapshot of a model's bodies (name, cache key, owning component, quantized volume, face names)
+/// and threads for verifying cached replay matches fresh evaluation identically.
+fn import_snapshot(model: &Model) -> (Vec<(String, u64, u64, i64, Vec<String>)>, Vec<ThreadInfo>) {
+    let st = model.state();
+    let bodies = st
+        .bodies
+        .iter()
+        .map(|b| {
+            let vol = (kernel::measure(&b.body).unwrap().volume * 1e6).round() as i64;
+            (b.name.clone(), b.key, b.component, vol, (*crate::naming::face_names(b)).clone())
+        })
+        .collect();
+    (bodies, st.threads.clone())
+}
+
+/// Deleting an early independent Import component must not re-evaluate later independent Import
+/// components — both in-session and on the first edit after opening a saved design — while
+/// preserving carried face names and linked cosmetic threads. A saved import whose bodies carry a
+/// legacy key safely falls back to evaluating once.
+#[test]
+fn deleting_an_early_import_keeps_later_independent_imports() {
+    let mut doc = Document::new("assembly delete");
+    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Origin { name: "XY".into() } }, Some("Datum")).unwrap();
+    let (_comp_a, _feat_a) = add_imported_part(&mut doc, "PartA", "BlockA", 0.0, 10.0);
+    let (comp_b, _feat_b) = add_imported_part(&mut doc, "PartB", "BlockB", 20.0, 10.0);
+    let (_comp_c, feat_c) = add_imported_part(&mut doc, "PartC", "BlockC", 40.0, 10.0);
+    let (_comp_d, feat_d) = add_imported_part(&mut doc, "PartD", "BlockD", 60.0, 10.0);
+    let (_comp_e, _feat_e) = add_imported_part(&mut doc, "PartE", "BlockE", 80.0, 10.0);
+
+    doc.feature_mut(feat_c).unwrap().link_faces = vec![vec!["F1:top".into(), "F1:bottom".into()]];
+    doc.feature_mut(feat_d).unwrap().link_threads = vec![vec![ThreadInfo {
+        feature: 0,
+        body: String::new(),
+        designation: "M8".into(),
+        major_diameter: 8.0,
+        radius: 4.0,
+        pitch: 1.25,
+        internal: true,
+        axis_point: Vec3::new(65.0, 5.0, 0.0),
+        axis: solidcraft_geom::UnitVec3::new(Vec3::Z).unwrap(),
+        start: 0.0,
+        end: 10.0,
+        form: crate::thread_forms::ThreadForm::default(),
+        hand: crate::thread_forms::ThreadHand::default(),
+        starts: 1,
+    }]];
+
+    let mut model = Model::new();
+    let initial = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(initial.imports_read, 5, "{initial:?}");
+
+    let saved = model.saved(&doc).unwrap();
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+
+    // Mutate PartD's saved body key to simulate a design saved by an older version with a
+    // different key: PartD must fall back to evaluating once while PartC and PartE stay cached.
+    let mut legacy_saved = model.saved(&doc).unwrap();
+    let block_d = legacy_saved.records["model_bodies"].as_array_mut().unwrap().iter_mut().find(|b| b["name"] == "BlockD").unwrap();
+    block_d["key"] = serde_json::json!("deadbeef");
+    let rekeyed = Model::adopt(&doc, &legacy_saved).unwrap();
+
+    doc.remove_component_tree(comp_b).unwrap();
+
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    let expected = import_snapshot(&fresh);
+    assert_eq!(expected.0.len(), 4);
+    assert_eq!(expected.1.len(), 1);
+    assert_eq!(expected.1[0].body, "BlockD");
+    assert_eq!(expected.1[0].feature, feat_d);
+
+    for (what, mut candidate, reads) in [("in-session", model, 0), ("opened", reopened, 0), ("opened legacy key", rekeyed, 1)] {
+        let work = counted(|| candidate.evaluate(&doc));
+        assert!(candidate.results.iter().all(|r| r.error.is_none()), "{what}");
+        assert_eq!(work.imports_read, reads, "{what}: {work:?}");
+        assert_eq!(candidate.last_recomputed, reads, "{what}: {work:?}");
+        assert_eq!(import_snapshot(&candidate), expected, "{what}: cached replay must match fresh evaluation");
+    }
+}
+
+/// Updating an early independent Import feature (changing its STEP payload and body count) must
+/// re-evaluate only that import and reuse every later independent Import feature, both in-session
+/// and on the first edit after opening a saved design.
+#[test]
+fn updating_an_early_import_keeps_later_independent_imports() {
+    let mut doc = Document::new("assembly update");
+    let (_comp_a, _feat_a) = add_imported_part(&mut doc, "PartA", "BlockA", 0.0, 10.0);
+    let (_comp_b, feat_b) = add_imported_part(&mut doc, "PartB", "BlockB", 20.0, 10.0);
+    let (_comp_c, _feat_c) = add_imported_part(&mut doc, "PartC", "BlockC", 40.0, 10.0);
+    let (_comp_d, _feat_d) = add_imported_part(&mut doc, "PartD", "BlockD", 60.0, 10.0);
+
+    let mut model = Model::new();
+    let initial = counted(|| model.evaluate(&doc));
+    assert_eq!(initial.imports_read, 4, "{initial:?}");
+
+    let saved = model.saved(&doc).unwrap();
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+
+    // Update PartB to carry two bodies instead of one, shifting body indices before PartC and PartD.
+    let b1 = kernel::box_solid(Vec3::new(20.0, 0.0, 0.0), Vec3::new(32.0, 12.0, 12.0)).unwrap();
+    let b2 = kernel::box_solid(Vec3::new(20.0, 20.0, 0.0), Vec3::new(26.0, 26.0, 6.0)).unwrap();
+    let new_step: Arc<str> = kernel::step_export(&[&b1, &b2], "PartB").unwrap().into();
+    let f = doc.feature_mut(feat_b).unwrap();
+    if let FeatureKind::Import { step, .. } = &mut f.kind {
+        *step = new_step;
+    }
+    f.body_names = vec!["BlockB1".into(), "BlockB2".into()];
+
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    let expected = import_snapshot(&fresh);
+    assert_eq!(expected.0.len(), 5);
+
+    for (what, mut candidate) in [("in-session", model), ("opened", reopened)] {
+        let work = counted(|| candidate.evaluate(&doc));
+        assert!(candidate.results.iter().all(|r| r.error.is_none()), "{what}");
+        assert_eq!(work.imports_read, 1, "{what}: only the updated import should be read: {work:?}");
+        assert_eq!(candidate.last_recomputed, 1, "{what}: only the updated import should recompute: {work:?}");
+        assert_eq!(import_snapshot(&candidate), expected, "{what}: cached replay must match fresh evaluation");
+    }
+}
+
+/// Independent Import caching must stay exact when body-name collisions are unchanged, removed, or
+/// newly introduced by an earlier edit (both in-session and after opening a saved design).
+#[test]
+fn import_cache_recomputes_when_body_name_collisions_change() {
+    let mut doc = Document::new("assembly collisions");
+    let (comp_a, _feat_a) = add_imported_part(&mut doc, "PartA", "Block", 0.0, 10.0);
+    let (comp_b, _feat_b) = add_imported_part(&mut doc, "PartB", "Plate", 20.0, 10.0);
+    let (_comp_c, feat_c) = add_imported_part(&mut doc, "PartC", "Block", 40.0, 10.0);
+    let (_comp_d, _feat_d) = add_imported_part(&mut doc, "PartD", "Cap", 60.0, 10.0);
+
+    let mut model = Model::new();
+    let initial = counted(|| model.evaluate(&doc));
+    assert_eq!(initial.imports_read, 4, "{initial:?}");
+    let names = |m: &Model| m.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&model), ["Block", "Plate", "Block (2)", "Cap"]);
+
+    // 1. Deleting unrelated PartB leaves PartC's blocker ("Block") intact: zero imports re-read.
+    doc.remove_component_tree(comp_b).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert_eq!(work.imports_read, 0, "unrelated delete must keep PartC and PartD cached: {work:?}");
+    assert_eq!(model.last_recomputed, 0, "{work:?}");
+    assert_eq!(names(&model), ["Block", "Block (2)", "Cap"]);
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    assert_eq!(import_snapshot(&model), import_snapshot(&fresh));
+
+    // Save this colliding state and reopen it before removing the blocker.
+    let saved = model.saved(&doc).unwrap();
+    let mut reopened = Model::adopt(&doc, &saved).unwrap();
+
+    // 2. Deleting PartA frees "Block": PartC must re-evaluate and claim "Block", while PartD stays cached.
+    doc.remove_component_tree(comp_a).unwrap();
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    let expected = import_snapshot(&fresh);
+    assert_eq!(names(&fresh), ["Block", "Cap"]);
+
+    for (what, candidate) in [("in-session", &mut model), ("opened", &mut reopened)] {
+        let work = counted(|| candidate.evaluate(&doc));
+        assert_eq!(work.imports_read, 1, "{what}: only PartC should re-evaluate when its blocker disappears: {work:?}");
+        assert_eq!(candidate.last_recomputed, 1, "{what}: {work:?}");
+        assert_eq!(import_snapshot(candidate), expected, "{what}");
+    }
+    assert_eq!(names(&model), ["Block", "Cap"]);
+
+    // 3. Introducing a new collision ("Cap" in PartC) before PartD must force PartD to re-evaluate
+    //    and disambiguate to "Cap (2)".
+    doc.feature_mut(feat_c).unwrap().body_names = vec!["Cap".into()];
+    let work = counted(|| model.evaluate(&doc));
+    assert_eq!(work.imports_read, 2, "PartC and colliding PartD must both evaluate: {work:?}");
+    assert_eq!(model.last_recomputed, 2, "{work:?}");
+    assert_eq!(names(&model), ["Cap", "Cap (2)"]);
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    assert_eq!(import_snapshot(&model), import_snapshot(&fresh));
 }
 
 /// Pinning body names fingerprints the timeline again only from the first renamed feature on
@@ -923,6 +1116,25 @@ fn turning_a_joint_between_parts_cuts_no_hole_again() {
     }
     model.evaluate(&doc);
     assert_eq!(model.last_recomputed, 0);
+}
+
+#[test]
+fn a_coil_cut_recipe_requires_a_numeric_axis() {
+    let mut doc = Document::new("coil cut");
+    let kind = serde_json::from_value(serde_json::json!({
+        "type": "coil", "base": ["0", "0", "0"], "diameter": "20", "pitch": "8",
+        "turns": "2", "section_size": "1", "operation": "cut"
+    }))
+    .unwrap();
+    let coil = doc.add_feature(kind, None).unwrap();
+    let feature = doc.feature(coil).unwrap();
+    let vals = BTreeMap::new();
+    assert!(super::tool_recipe(&doc, feature, &vals).is_some());
+
+    let mut referenced = feature.clone();
+    let FeatureKind::Coil { axis_ref, .. } = &mut referenced.kind else { panic!("expected a Coil") };
+    *axis_ref = Some(AxisRef::Construction { name: "Spine".into() });
+    assert!(super::tool_recipe(&doc, &referenced, &vals).is_none());
 }
 
 #[test]
@@ -1838,6 +2050,52 @@ fn a_join_into_the_only_body_makes_no_contact_test() {
     assert!(work.contact_tests > 0, "{work:?}");
     assert!((volume(&model, "A") - 2000.0).abs() < 1e-6, "{}", volume(&model, "A"));
     assert!((volume(&model, "B") - (2000.0 + 64.0)).abs() < 1e-6, "{}", volume(&model, "B"));
+}
+
+/// A cut that takes nothing from the body says so without measuring its volume: the cut's
+/// history traces every face of the body to the body itself, so the tool took no material
+/// (#8990: two exact volumes, a second each, for one such cut). A cut that takes material is
+/// still told apart, and says nothing.
+#[test]
+fn a_cut_that_takes_nothing_is_known_without_measuring() {
+    // A square on XY from (x, y) to (x + 4, y + 4), cut 4 mm up into block A.
+    let cut_at = |doc: &mut Document, x: f64, y: f64| {
+        let mut sk = Sketch::new();
+        let p = [(x, y), (x + 4.0, y), (x + 4.0, y + 4.0), (x, y + 4.0)].map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap());
+        for k in 0..4 {
+            sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+        }
+        let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+        let kind = FeatureKind::Extrude {
+            thin: None,
+            sketch: SketchId(sketch),
+            profiles: ProfileSel::All,
+            extent: serde_json::from_value(serde_json::json!({"distance": "4"})).unwrap(),
+            operation: Operation::Cut,
+            targets: vec![],
+        };
+        doc.add_feature(kind, Some("Cut")).unwrap()
+    };
+    // Against the block's side at x 10, face to face: it takes nothing.
+    let mut doc = Document::new("beside");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    let cut = cut_at(&mut doc, 10.0, -2.0);
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    let result = model.result(cut).unwrap();
+    assert!(result.error.is_none(), "{:?}", result.error);
+    assert!(result.warning.as_deref().is_some_and(|w| w.contains("the cut removes no material")), "{:?}", result.warning);
+    assert_eq!(work.measures, 0, "{work:?}");
+    assert!((volume(&model, "A") - 2000.0).abs() < 1e-6, "{}", volume(&model, "A"));
+    // Into the block's corner: it takes 2 x 2 x 4 mm, and says nothing.
+    let mut doc = Document::new("into");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    let cut = cut_at(&mut doc, 8.0, 3.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let result = model.result(cut).unwrap();
+    assert!(result.error.is_none() && result.warning.is_none(), "{:?} {:?}", result.error, result.warning);
+    assert!((volume(&model, "A") - (2000.0 - 16.0)).abs() < 1e-6, "{}", volume(&model, "A"));
 }
 
 /// `comps` parts, each with `bodies` boxes, `sketches` sketches and `taps` taps, placed `copies`
@@ -3362,6 +3620,56 @@ fn a_hole_classifies_its_bottom_in_the_bodies_there_only() {
     assert!((plate - through).abs() < 1e-6 * through, "{plate}");
     assert!((under.unwrap() - 50_000.0).abs() < 1e-6 * 50_000.0, "the slab is not drilled: {under:?}");
     assert_eq!(work.hole_points, 4, "{work:?}");
+}
+
+#[test]
+fn targeted_holes_and_their_copies_classify_only_the_plate() {
+    let mut doc = Document::new("plate and reference");
+    let reference = MeshData {
+        name: "Reference".into(),
+        // A tetrahedron whose box contains both holes. At the plate's bottom (z = 0)
+        // the mesh ends at x + y = 45, and the plate starts at x + y = 48.
+        positions: [0., 0., -5., 60., 0., -5., 0., 60., -5., 0., 0., 15.].into(),
+        triangles: [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3].into(),
+        color: None,
+        corner_normals: Default::default(),
+    };
+    doc.add_feature(FeatureKind::MeshImport { file: "reference.stl".into(), meshes: vec![reference] }, Some("Reference")).unwrap();
+    let plate = doc
+        .add_feature(
+            serde_json::from_value(serde_json::json!({"type": "box", "corner": [24, 24, 0], "length": "10", "width": "10", "height": "10"})).unwrap(),
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(plate).unwrap().body_names = vec!["Plate".into()];
+    let hole = doc
+        .add_feature(
+            serde_json::from_value(serde_json::json!({
+                "type": "hole", "position": [27, 27, 10], "direction": [0, 0, -1], "diameter": "3", "depth": "5",
+            }))
+            .unwrap(),
+            Some("Hole"),
+        )
+        .unwrap();
+    doc.feature_mut(hole).unwrap().participants = vec!["Plate".into()];
+    doc.add_feature(
+        serde_json::from_value(serde_json::json!({
+            "type": "pattern", "features": [hole],
+            "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "2", "spacing1": "4"},
+        }))
+        .unwrap(),
+        Some("Copy"),
+    )
+    .unwrap();
+
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    // Two samples either side of the depth of each of the two holes.
+    assert_eq!(work.hole_points, 4, "{work:?}");
+    let volume = kernel::measure(&model.state().body("Plate").unwrap().body).unwrap().volume;
+    let expected = 1000.0 - 2.0 * std::f64::consts::PI * 1.5 * 1.5 * 5.0;
+    assert!((volume - expected).abs() < 1e-6 * expected, "{volume} against {expected}");
 }
 
 /// A pattern of a hole builds its tools once when every copy is drilled the same way, and for

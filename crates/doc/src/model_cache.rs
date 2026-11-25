@@ -774,6 +774,8 @@ impl SavedModel {
                 origin_frames: Default::default(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
                 sketches: ids("sketches", sketches.len())?.into_iter().filter_map(|i| sketches.get(i).cloned()).collect(),
+                // A world state's alone: a model's own state has none.
+                sketch_copies: BTreeMap::new(),
                 body_counter: index(s.get("body_counter"), usize::MAX)?,
                 reserved_body_names: s
                     .get("reserved_body_names")
@@ -1133,6 +1135,7 @@ impl Model {
         let import_digests = ImportDigests::of(doc, &ImportDigests::default(), heal);
         let marker = doc.marker.unwrap_or(usize::MAX);
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
+        let shared = shared_context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let mut before = Arc::new(ModelState::default());
         // Whether `before` is the state before the feature: one the file left out only stands in.
         let mut exact = true;
@@ -1249,7 +1252,7 @@ impl Model {
                     before = r.state.clone();
                     continue;
                 }
-                let key = EvalKey::new(doc, &vals, f, r.fingerprint, ctx, &before, &model.import_digests, 0);
+                let key = EvalKey::new(doc, &vals, f, r.fingerprint, ctx, shared, &before, &model.import_digests);
                 let whole = CachedEval {
                     error: None,
                     error_code: None,
@@ -1262,23 +1265,22 @@ impl Model {
                 };
                 // And what it changed, by what it read, as an evaluation keeps it: the first edit
                 // after opening then evaluates only the features that read what the edit changed,
-                // as every later edit does, not every feature after the edit. An import's key also
-                // digests the features before it, so an import is left out (evaluated as before),
-                // as is a feature that names its pieces as later features pick them. So is one
-                // whose bodies were not stamped with this key (saved by a version that keyed them
+                // as every later edit does, not every feature after the edit. Features that name
+                // their pieces as later features pick them are left out, as is any feature whose
+                // bodies were not stamped with this key (saved by a version that keyed them
                 // otherwise, or stamped by the whole model): `stamp` would work their names out
                 // afresh, with no lineage to work them from. It is evaluated again instead.
                 if let Some((k, read)) = &key.reads
-                    && !matches!(f.kind, FeatureKind::Import { .. })
                     && !f.shell_piece_order
-                    && let Some(change) = r.state.change_from(&before, f.id, read)
-                    && change.bodies.iter().all(|b| match b {
-                        Changed::Made(b) => b.key == made_body_key(*k, &b.name),
-                        Changed::Kept(_) => true,
-                    })
+                    && let Some(change) = r.state.change_from(&before, f, read)
                 {
-                    let bytes = change.retained_bytes();
-                    cache.changes.put(*k, whole.with(change), bytes, r.ms);
+                    // A change that holds whatever the bodies it did not read was stamped with the
+                    // key without them; one saved before that key, with the other.
+                    let relative = key.relative.filter(|_| change.relative().is_some());
+                    if let Some(k) = relative.into_iter().chain([*k]).find(|k| change.made_bodies_stamped(*k)) {
+                        let bytes = change.retained_bytes();
+                        cache.changes.put(k, whole.with(change), bytes, r.ms);
+                    }
                 }
                 cache.states.put(key.whole, whole, r.state.retained_bytes(), r.ms);
                 before = r.state.clone();
