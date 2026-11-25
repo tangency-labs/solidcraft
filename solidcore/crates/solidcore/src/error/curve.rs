@@ -320,7 +320,8 @@ pub enum CurveFailure {
     },
     /// A piece `[a, b]` of a length bracket lies outside the knot span
     /// `[span_start, span_end]` it is blossomed in: the bracket's rounding bound holds only
-    /// for a piece within its span (a port invariant: the halving keeps every piece within).
+    /// for a piece within its span. The halving keeps every piece within, so this is the
+    /// kernel's defect ([`ErrorKind::StageFailed`]).
     PieceOutsideSpan {
         /// The piece's start.
         a: f64,
@@ -787,8 +788,8 @@ impl CurveFailure {
     /// refusal (the accuracy asked is finer than the computation resolves); for a routine's
     /// failure, the kind the status it replaced had ([`ErrorKind::Failed`],
     /// [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`]), named per variant; [`ErrorKind::StageFailed`] for a stage that failed, reviewed
-    /// or not, a defect;
-    /// [`ErrorKind::PortInvariant`] for a piece outside its span, a port invariant broken;
+    /// or not, a defect, and for a piece outside its span (the halving broke its own
+    /// invariant: a defect, not a solidcore-side port failure);
     /// [`ErrorKind::InvalidInput`] for a check of the caller's argument or curve,
     /// [`ErrorKind::Unsupported`] for what the routine does not do,
     /// [`ErrorKind::Degenerate`] for a curve, arc or offset with no extent to work on,
@@ -872,8 +873,9 @@ impl CurveFailure {
             | Self::StartsApart { .. }
             | Self::SubdivisionCap { .. } => ErrorKind::NotWithinTolerance,
             Self::Missing(_) => ErrorKind::Missing,
-            Self::PieceOutsideSpan { .. } => ErrorKind::PortInvariant,
-            Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::PieceOutsideSpan { .. } | Self::StageFailed | Self::Defect { .. } => {
+                ErrorKind::StageFailed
+            }
             Self::TargetDidNotDrop => ErrorKind::NotFound,
         }
     }
@@ -1422,6 +1424,20 @@ mod tests {
             assert_eq!(e.to_string(), text);
             assert_eq!(e.curve_failure(), Some(&refusal));
         }
+        // a piece outside its span is the halving's own broken invariant: a defect, not a
+        // solidcore-side port failure, and it replaced no status either
+        let piece = CurveFailure::PieceOutsideSpan {
+            a: 0.0,
+            b: 2.0,
+            span_start: 0.0,
+            span_end: 1.0,
+        };
+        let e = Failure::new("curve::length_bound", piece).into_error();
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(e.kind(), ErrorKind::StageFailed);
+        assert!(!piece.replaces_upstream_status());
+        assert!(e.is_defect() && !e.is_refusal());
+        assert!(!e.is_port_failure());
     }
 
     /// The named causes keep the status of the phrase they replace, and `upstream_status`
