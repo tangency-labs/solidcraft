@@ -2,6 +2,7 @@
   "order": 220,
   "provenance": "Maps the Okibi design system",
   "base": "light",
+  "accepts_accent": true,
   "colors": {
     "accent": "#c63a00",
     "accent_soft": "#e8d0c3",
