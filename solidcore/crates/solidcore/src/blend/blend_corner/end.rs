@@ -727,12 +727,11 @@ const SIDE_EDGE_BALL_SAMPLES: u32 = 48;
 /// round's radius (`within` or `on_g`), the round's rail misses the side edge completely,
 /// and the largest ball along the edge (less the open margin) is the largest radius whose
 /// rail still reaches it. Returns `Ok(None)` if any probe reaches the round's radius (the
-/// rail does not pass over the edge), if a probe fails to solve, or if no positive ball
-/// fits.
+/// rail does not pass over the edge) or if no positive ball fits.
 ///
 /// # Errors
-/// `SM_ERR_NULL_POINTER` without side edge or curve; cancellation and unported errors from
-/// evaluations and [`ball_touching_at`].
+/// `SM_ERR_NULL_POINTER` without solver, side edge or curve; those of the evaluations and
+/// [`ball_touching_with`].
 fn max_ball_over_side_edge(
     k: &Kernel,
     target: &Brep,
@@ -741,17 +740,20 @@ fn max_ball_over_side_edge(
     side_eu: EdgeuseId,
     other_face: FaceId,
 ) -> Result<Option<f64>> {
+    let fs = solvers.solver_of_edgeuse(fil_eu)?;
     let side_edge = edge_of(target, side_eu)?;
     let curve = curve_of(target, side_edge)?;
     let ivl = edge::interval(target, side_edge)?;
     let probe = |t: f64| -> Result<Option<f64>> {
         let p = curve.evaluate_point(k, t)?;
-        match ball_touching_at(k, target, solvers, fil_eu, side_eu, other_face, p) {
-            Ok((true, _, _)) => Ok(Some(0.0)),
-            Ok((false, true, rho)) => Ok(Some(rho)),
-            Err(e) if e.is_unported_or_cancelled() => Err(e),
-            Ok((false, false, _)) | Err(_) => Ok(None),
-        }
+        let (on_g, within, rho) = ball_touching_with(k, target, fs, side_eu, other_face, p, None)?;
+        Ok(if on_g {
+            Some(0.0)
+        } else if within {
+            Some(rho)
+        } else {
+            None
+        })
     };
     let mut best_i = 0_u32;
     let mut best_rho = 0.0_f64;
@@ -3095,6 +3097,13 @@ pub fn calc_end_edge_geom(
         // the smaller limit of the two.
         let mut refusal =
             refuse_end_past_side_edge(k, target, corner, solvers, fil_eu, side_eu, other_face);
+        if refusal
+            .as_ref()
+            .err()
+            .is_some_and(SolidError::is_unported_or_cancelled)
+        {
+            return refusal.map(EndEdges::Refused);
+        }
         if misses[0] && misses[1] {
             let second_fv = if miss_fv == start_fv {
                 end_fv
@@ -3113,14 +3122,7 @@ pub fn calc_end_edge_geom(
                     };
                     let second_rail = rail_face(fil_faces, second_side_faces);
                     let second_continues =
-                        end_face_runs_on_past_side_edge(k, target, corner, second_eu, second_rail)?
-                            || rail_rolls_on_past_side_edge(
-                                k,
-                                target,
-                                corner,
-                                second_eu,
-                                second_rail,
-                            )?;
+                        end_face_runs_on_past_side_edge(k, target, corner, second_eu, second_rail)?;
                     if !second_continues {
                         match refuse_end_past_side_edge(
                             k,
