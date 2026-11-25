@@ -152,17 +152,21 @@ pub(crate) fn begin(k: &Kernel, mut stars: Stars) {
 }
 
 /// Ends the check begun by [`begin`]. When the body was found valid with no report at all,
-/// `after` (its digests as the check left it) are kept as clean.
+/// its digests as the check began on it and `after` (its digests as the check left it) are
+/// kept as clean: each describes everything the skipped tests read, and the check passed
+/// both. The first is the one the next operation's body usually shares: the gaps its kept
+/// entities cached are the ones the operation cached, not the ones a check filled in.
 pub(crate) fn end(k: &Kernel, after: Option<Stars>) {
     let mut memo = k.check_memo.borrow_mut();
-    memo.current = None;
+    let before = memo.current.take();
     if let Some(after) = after {
-        if memo.clean.len() + after.faces.len() + after.edges.len() + after.vertices.len()
-            > MOST_CLEAN
-        {
+        let mut ids: Vec<ContentId> = after.all().collect();
+        if let Some(before) = &before {
+            ids.extend(before.all());
+        }
+        if memo.clean.len() + ids.len() > MOST_CLEAN {
             memo.clean.clear();
         }
-        let ids: Vec<ContentId> = after.all().collect();
         memo.clean.extend(ids);
     }
 }
