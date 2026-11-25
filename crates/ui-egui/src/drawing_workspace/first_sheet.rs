@@ -228,7 +228,7 @@ fn another_name(app: &SolveApp) -> Option<String> {
         return None;
     }
     let base = &app.session.doc.name;
-    (2..=drawings.len() + 1).map(|n| format!("{base} {n}")).find(|name| drawings.iter().all(|d| d.name != *name))
+    (2..=drawings.len() + 2).map(|n| format!("{base} {n}")).find(|name| drawings.iter().all(|d| d.name != *name))
 }
 
 fn create(app: &mut SolveApp, mut params: Value) -> bool {

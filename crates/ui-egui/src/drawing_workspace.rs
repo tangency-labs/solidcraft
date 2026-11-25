@@ -134,13 +134,15 @@ fn open_a_drawing(app: &mut SolveApp) {
 /// Opens the design's drawing `id` on its first sheet, fitted, in place of the one open: the
 /// drawing picker's choice. The panels and picks of the drawing left go with it.
 pub(crate) fn open_drawing(app: &mut SolveApp, id: u64) {
-    app.drawing_workspace.return_to = None;
     if app.session.open_drawing == Some(id) {
+        app.drawing_workspace.return_to = None;
         return;
     }
     close_panel(app);
     match app.run("drawing.open", serde_json::json!({"drawing": solidcraft_engine::doc::ids::encode(id)})) {
         Ok(_) => {
+            // Kept until the open succeeds: a failed Back leaves the setup page and its Back.
+            app.drawing_workspace.return_to = None;
             app.session.selection.retain(|item| !matches!(item, solidcraft_engine::Sel::Drawing { drawing, .. } if *drawing != id));
             crate::drawing_sheet_page::fit(app);
         }
