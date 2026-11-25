@@ -18,6 +18,7 @@ pub use solidcore_ops::FailureCode;
 pub use solidcore_ops::PointNormalFace;
 pub use solidcore_ops::SquareFaceLevel;
 pub use solidcore_ops::affine;
+pub use solidcore_ops::arrange;
 pub use solidcore_ops::cancel;
 pub use solidcore_ops::cell_grid;
 pub use solidcore_ops::centroid_and_mean_radius;

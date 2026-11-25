@@ -1,9 +1,9 @@
 //! Arrange (`solid.arrange`, #12430): lay bodies out side by side on a rectangle of the XY plane,
 //! as for a build plate or a sheet to cut from. Each body keeps its height and is only turned
 //! about Z, unless it is laid down on a flat side first: the side picked for it, or with
-//! `lay_flat` the one it rests on best ([`solidcore_ops::arrange::flat_sides`]). Its footprint is the outline
+//! `lay_flat` the one it rests on best ([`solidcraft_kernel::services::arrange::flat_sides`]). Its footprint is the outline
 //! it covers seen from above, worked out from its exact edges and silhouettes
-//! ([`solidcore_ops::arrange::footprint`]); the footprints are packed by [`solidcore_ops::arrange`],
+//! ([`solidcraft_kernel::services::arrange::footprint`]); the footprints are packed by [`solidcraft_kernel::services::arrange`],
 //! and each body that fits is moved there by a Move feature, all in one undo step. Bodies that
 //! don't fit stay where they are and are listed.
 //!
@@ -13,14 +13,14 @@
 //! touch, as Extrude takes areas ([`sheet_areas`]).
 
 use serde_json::{Value, json};
-use solidcore_ops::arrange::{
+use solidcore_record::brep::Brep;
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::prelude::*;
+use solidcraft_kernel::services::arrange::{
     ArrangeItem, ArrangeMethod, ArrangeOptions, COARSEN_BUDGET, FlatSide, Footprint, Hurry, IDENTITY, MAX_COPIES, MAX_IMPROVE, MAX_OBSTACLES,
     MAX_ROTATIONS, Placement2, Shadow, Shape2, apart, arrange_hurried, axis_angle, coarsen, flat_face_at, flat_sides, footprint, footprint_of,
     in_frame, margin_line, parallel, plane_frame, pointing_down, side_at, squared_up, turned_about,
 };
-use solidcore_record::brep::Brep;
-use solidcore_record::{Vec2, Vec3};
-use solidcraft_geom::prelude::*;
 
 use solidcraft_doc::expr::Kind;
 
