@@ -677,6 +677,9 @@ pub struct Dialog {
     pub(crate) started_from_sketch: Option<u64>,
     /// New Sketch was pressed: the dialog waits while the sketch is drawn ([`crate::command_sketch`]).
     pub(crate) new_sketch: bool,
+    /// Editing a surface feature saved before `stays_surface` whose result closed into a solid
+    /// (#21969): the form offers Keep as Surface, which saves `stays_surface: true`.
+    pub(crate) legacy_closed_sheet: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -955,6 +958,7 @@ impl Dialog {
             started_from_sketch: None,
             auto: None,
             new_sketch: false,
+            legacy_closed_sheet: false,
         }
     }
 
@@ -9803,10 +9807,33 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
         }
     }
+    d.legacy_closed_sheet = legacy_closed_sheet(app, &f);
     d.editing = Some((id, marker));
     d.active = 0;
     d.error = None;
     Some(d)
+}
+
+/// Whether `f` is a surface feature saved before `stays_surface` (#21969) whose result closed
+/// and so is a solid: Surface Revolve, Sweep, Loft, Offset or Ruled Surface making a body whose
+/// shells all close, or Extend closing the body it extends. Read from the model as it was before
+/// the edit opened.
+pub(crate) fn legacy_closed_sheet(app: &SolveApp, f: &solidcraft_engine::doc::Feature) -> bool {
+    let extended = match &f.kind {
+        FeatureKind::SurfaceRevolve { stays_surface: false, .. }
+        | FeatureKind::SurfaceSweep { stays_surface: false, .. }
+        | FeatureKind::SurfaceLoft { stays_surface: false, .. }
+        | FeatureKind::SurfaceOffset { stays_surface: false, .. }
+        | FeatureKind::SurfaceRuled { stays_surface: false, .. } => None,
+        FeatureKind::SurfaceExtend { stays_surface: false, body, .. } => Some(body.0.as_str()),
+        _ => return false,
+    };
+    let session = app.editing_state.as_ref().map_or(&app.session, |e| &e.original);
+    let st = crate::open_meshing::session_world(session);
+    match extended {
+        Some(name) => st.body(name).is_some_and(|b| !b.body.is_mesh() && b.is_closed()),
+        None => st.bodies.iter().any(|b| b.feature == f.id && !b.body.is_mesh() && b.is_closed()),
+    }
 }
 
 #[cfg(test)]

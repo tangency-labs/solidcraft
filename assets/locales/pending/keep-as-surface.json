@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.keep_as_surface": "Keep as surface"
+  },
+  "ar": {
+    "ui.keep_as_surface": "الإبقاء كسطح"
+  },
+  "de": {
+    "ui.keep_as_surface": "Als Fläche behalten"
+  },
+  "he": {
+    "ui.keep_as_surface": "השאר כמשטח"
+  },
+  "ja": {
+    "ui.keep_as_surface": "サーフェスのまま保持"
+  },
+  "ko": {
+    "ui.keep_as_surface": "서피스로 유지"
+  },
+  "vi": {
+    "ui.keep_as_surface": "Giữ là mặt cong"
+  },
+  "zh": {
+    "ui.keep_as_surface": "保留为曲面"
+  }
+}
