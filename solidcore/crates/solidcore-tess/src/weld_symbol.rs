@@ -4,14 +4,14 @@
 //! entry for clients that hold [`solidcore_record`] types: it converts in, calls the kernel and
 //! converts the result back, nothing more.
 
-use solidcore_convert::{record_seg2, record_vec2, vec2};
+use solidcore_convert::{record_seg2, vec2};
 use solidcore_record::{Seg2, Vec2};
 
 pub use solidcore::weld_symbol::WeldContour;
 
 use crate::{Result, TessError};
 
-fn invalid(error: solidcore::SolidError) -> TessError {
+fn invalid(error: &solidcore::SolidError) -> TessError {
     TessError::Invalid(error.to_string())
 }
 
@@ -36,14 +36,14 @@ pub fn weld_contour_mark(
         contour,
     )
     .map(|segment| record_seg2(&segment))
-    .map_err(invalid)
+    .map_err(|e| invalid(&e))
 }
 
 /// The depth of a sixty-degree V groove of the given opening `width`.
 /// # Errors
 /// A `width` that is not finite and positive.
 pub fn v_groove_height(width: f64) -> Result<f64> {
-    solidcore::weld_symbol::v_groove_height(width).map_err(invalid)
+    solidcore::weld_symbol::v_groove_height(width).map_err(|e| invalid(&e))
 }
 
 #[cfg(test)]
