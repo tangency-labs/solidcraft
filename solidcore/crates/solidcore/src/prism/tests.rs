@@ -15,6 +15,7 @@ use super::extrude::{
     extrude_region, level_on_plane, plane_gap, plane_rise, symmetric_offset_intervals,
     symmetric_offset_probe_points,
 };
+use super::extrude::{plane_raised, slab_sides};
 use super::measure::{equivalent, section};
 use super::placement::LoopPlacement;
 use super::profile::rational_curve;
@@ -3251,6 +3252,130 @@ fn the_gap_between_two_planes_over_a_profile_turns_negative_only_where_they_cros
     assert!(is_range(g, (0.0, 1.5)), "{g:?}");
     // No profile has no gap.
     assert!(plane_gap(&xy(), &xy(), &half_slope(), &[]).is_err());
+}
+
+/// `frame` with its normal reversed (its y axis negated, so `x × y` turns over).
+fn flipped(frame: &Frame) -> Frame {
+    let [a, b, c] = frame.y_axis;
+    Frame {
+        y_axis: [-a, -b, -c],
+        ..*frame
+    }
+}
+
+#[test]
+fn a_plane_raised_along_the_extrusion_rises_by_the_same_level_everywhere() {
+    use crate::geom::vector3d::Vec3;
+    // z = 1 + x / 2 raised by 2 along +z is z = 3 + x / 2: level 5 at x = 4, 2 at x = -2.
+    let up = plane_raised(&xy(), &half_slope(), 2.0).unwrap();
+    assert_eq!(up.origin, [0.0, 0.0, 3.0]);
+    assert_eq!(
+        (up.x_axis, up.y_axis),
+        (half_slope().x_axis, half_slope().y_axis)
+    );
+    for (x, want) in [(4.0, 5.0), (-2.0, 2.0)] {
+        let level = level_on_plane(&xy(), Vec3::new(x, 0.0, 0.0), &up).unwrap();
+        assert!(close(level, want), "{x}: {level}");
+    }
+    // A sketch whose normal is +x (sketch x = world y, sketch y = world z): the line along +x
+    // through world (0, u, v) meets z = 1 + x / 2 at x = 2 (v - 1); lowered by 3 it meets the
+    // moved plane at x = 2 (v - 1) - 3, wherever u is.
+    let side = Frame {
+        origin: [0.0; 3],
+        x_axis: [0.0, 1.0, 0.0],
+        y_axis: [0.0, 0.0, 1.0],
+    };
+    let down = plane_raised(&side, &half_slope(), -3.0).unwrap();
+    assert_eq!(down.origin, [-3.0, 0.0, 1.0]);
+    for (u, v) in [(0.0, 1.0), (5.0, 4.0), (-7.0, -0.5)] {
+        let level = level_on_plane(&side, Vec3::new(0.0, u, v), &down).unwrap();
+        assert!(close(level, 2.0 * (v - 1.0) - 3.0), "({u}, {v}): {level}");
+    }
+    // 1e8 above the world origin: the same rise of 2.
+    let far = 1e8;
+    let up = plane_raised(&raised(&xy(), far), &raised(&half_slope(), far), 2.0).unwrap();
+    let level = level_on_plane(&raised(&xy(), far), Vec3::new(4.0, 7.0, far), &up).unwrap();
+    assert!(close(level, 5.0), "{level}");
+    // A distance or an origin that is not finite is refused.
+    for by in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(plane_raised(&xy(), &half_slope(), by).is_err(), "{by}");
+    }
+    assert!(plane_raised(
+        &raised(&xy(), f64::MAX),
+        &raised(&half_slope(), f64::MAX),
+        f64::MAX
+    )
+    .is_err());
+}
+
+#[test]
+fn the_cuts_between_two_planes_keep_the_side_each_plane_faces_along_the_travel() {
+    use crate::geom::vector3d::Vec3;
+    let up = Vec3::new(0.0, 0.0, 1.0);
+    // Which side of `plane` a point is on, `true` for the side its normal points to.
+    let side_of = |plane: &Frame, q: [f64; 3]| {
+        let (o, n) = (
+            Vec3::from(plane.origin),
+            Vec3::from(plane.x_axis).cross(Vec3::from(plane.y_axis)),
+        );
+        (Vec3::from(q) - o).dot(n) > 0.0
+    };
+    // Each answer is the side of its plane a point between the planes lies on: from z = 0 up
+    // to z = 1 + x / 2, the point (0, 0, 1/2); with either plane turned over, the other side.
+    let between = [0.0, 0.0, 0.5];
+    for (from, to) in [
+        (xy(), half_slope()),
+        (flipped(&xy()), half_slope()),
+        (xy(), flipped(&half_slope())),
+        (flipped(&xy()), flipped(&half_slope())),
+    ] {
+        let sides = slab_sides(up, &from, &to).unwrap();
+        assert_eq!(
+            sides,
+            (side_of(&from, between), side_of(&to, between)),
+            "{from:?} {to:?}"
+        );
+    }
+    assert_eq!(slab_sides(up, &xy(), &half_slope()).unwrap(), (true, false));
+    // The same two planes travelled downwards, from z = 1 + x / 2 to z = 0: past the slope is
+    // below it, short of z = 0 is above it.
+    let down = Vec3::new(0.0, 0.0, -1.0);
+    assert_eq!(
+        slab_sides(down, &half_slope(), &xy()).unwrap(),
+        (false, true)
+    );
+    // A travel along x past planes steeper than 45 degrees: z = 1 + 3 x faces -x, so past it
+    // along +x is its negative side; short of the plane x = 2 (normal +x) too.
+    let wall_at_two = Frame {
+        origin: [2.0, 0.0, 0.0],
+        x_axis: [0.0, 1.0, 0.0],
+        y_axis: [0.0, 0.0, 1.0],
+    };
+    let along_x = Vec3::new(1.0, 0.0, 0.0);
+    assert_eq!(
+        slab_sides(along_x, &sloped(3.0, 0.0), &wall_at_two).unwrap(),
+        (false, false)
+    );
+    // The answers do not change with the travel's length or the planes' distance from the
+    // world origin.
+    assert_eq!(
+        slab_sides(up * 1e-6, &raised(&xy(), 1e8), &raised(&half_slope(), 1e8)).unwrap(),
+        (true, false)
+    );
+    // A plane along the travel never ends it, and a travel that is zero or not finite has no
+    // direction: refused.
+    assert!(slab_sides(along_x, &xy(), &half_slope()).is_err());
+    assert!(slab_sides(up, &xy(), &wall_at_two).is_err());
+    for travel in [
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, f64::NAN),
+        Vec3::new(0.0, 0.0, f64::INFINITY),
+    ] {
+        assert!(
+            slab_sides(travel, &xy(), &half_slope()).is_err(),
+            "{travel:?}"
+        );
+    }
 }
 
 /// Straight members (`member`): closed forms for the middle line, the extrusion range, trims to

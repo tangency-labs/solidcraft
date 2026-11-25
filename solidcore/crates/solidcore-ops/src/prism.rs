@@ -617,6 +617,34 @@ pub fn plane_gap(
     .map_err(crate::error::status)
 }
 
+/// `plane` moved by `by` along `sketch`'s normal, its axes kept ([`extrude::plane_raised`]): an
+/// extrude's end on a slanted face moved along the extrusion.
+///
+/// # Errors
+///
+/// [`Error::Refused`] for a distance or an origin that is not finite.
+pub fn plane_raised(sketch: &Plane, plane: &Plane, by: f64) -> Result<Plane> {
+    extrude::plane_raised(&convert::plane(sketch), &convert::plane(plane), by)
+        .map(|f| convert::record_plane(&f))
+        .map_err(crate::error::status)
+}
+
+/// Which side of `from` and of `to` holds what lies past `from` and short of `to` along
+/// `travel`, each `true` for the side the plane's normal points to
+/// ([`extrude::slab_sides`]): the two cuts that keep an extrude's tools between its ends.
+///
+/// # Errors
+///
+/// [`Error::Refused`] for a plane along `travel`, or a `travel` that is zero or not finite.
+pub fn slab_sides(travel: Vec3, from: &Plane, to: &Plane) -> Result<(bool, bool)> {
+    extrude::slab_sides(
+        convert::vec3(travel),
+        &convert::plane(from),
+        &convert::plane(to),
+    )
+    .map_err(crate::error::status)
+}
+
 /// A channel filled by [`fill_channel`] ([`fill::Filled`] in the record's types).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChannelFill {

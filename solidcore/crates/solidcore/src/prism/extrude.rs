@@ -6,8 +6,9 @@
 //! sweep (`SmApiCreateLinearSweep`) of the region's curves.
 //!
 //! The levels of an extrude's ends on planes at a slant to it ([`level_on_plane`],
-//! [`plane_rise`], [`plane_gap`]) were SolidCraft's extrude From/To code, moved into the kernel
-//! the same way (#21934).
+//! [`plane_rise`], [`plane_gap`]), and the planes and sides an extrude's tools are cut between
+//! ([`plane_raised`], [`slab_sides`]), were SolidCraft's extrude From/To code, moved into the
+//! kernel the same way (#21934).
 //!
 //! Deviations: none (no upstream counterpart). No recursion; the search over a free-form span
 //! is bounded by [`MAX_HALVINGS`] and [`MAX_PIECES`] and refuses past them.
@@ -91,6 +92,8 @@ pub fn symmetric_offset_probe_points(
 const OP_LEVEL: &str = "prism::extrude::level_on_plane";
 const OP_RISE: &str = "prism::extrude::plane_rise";
 const OP_GAP: &str = "prism::extrude::plane_gap";
+const OP_RAISED: &str = "prism::extrude::plane_raised";
+const OP_SLAB: &str = "prism::extrude::slab_sides";
 
 /// Halvings of a free-form span past which [`span_extremes`] refuses: at 2^-60 of the span's
 /// parameter a piece's enclosure has long reached its rounding (it shrinks to about a quarter
@@ -214,6 +217,47 @@ pub fn plane_gap(
         slope: to.slope - from.slope,
     };
     affine_extremes(gap, regions, OP_GAP)
+}
+
+/// `plane` moved by `by` along `frame`'s normal `n` (`x × y`): its origin moved to
+/// `origin + by n`, its axes kept. Its level above `frame` is `by` (times `n·n`, 1 for an
+/// orthonormal frame) more than `plane`'s at every sketch point: an extrude's end on a slanted
+/// face moved along the extrusion.
+///
+/// # Errors
+///
+/// `InvalidInput` for a distance or an origin that is not finite.
+pub fn plane_raised(frame: &Frame, plane: &Frame, by: f64) -> Result<Frame> {
+    let (_, _, _, n) = axes(frame);
+    let origin = Vec3::from(plane.origin) + n * by;
+    if !(by.is_finite() && origin.x.is_finite() && origin.y.is_finite() && origin.z.is_finite()) {
+        return Err(SolidError::invalid_input(
+            OP_RAISED,
+            "a distance or an origin that is not finite",
+        ));
+    }
+    Ok(Frame {
+        origin: origin.to_array(),
+        ..*plane
+    })
+}
+
+/// Which side of each plane holds what lies past `from` and short of `to` along `travel`: an
+/// extrude's tools cut between its two ends. Each answer is `true` for the side the plane's
+/// normal (`x × y`) points to: past `from` when `travel` runs with `from`'s normal, short of
+/// `to` when it runs against `to`'s. A plane is refused as running along `travel` only where the
+/// sign of their dot product is within its rounding, `gamma(3) |travel| |m|` (as
+/// [`level_on_plane`] refuses it): there the travel never crosses the plane.
+///
+/// # Errors
+///
+/// `InvalidInput` for a plane along `travel` (or a `travel` that is zero or not finite).
+pub fn slab_sides(travel: Vec3, from: &Frame, to: &Frame) -> Result<(bool, bool)> {
+    let (_, _, _, m_from) = axes(from);
+    let (_, _, _, m_to) = axes(to);
+    let past_from = meeting(travel, m_from, OP_SLAB)? > 0.0;
+    let short_of_to = meeting(travel, m_to, OP_SLAB)? < 0.0;
+    Ok((past_from, short_of_to))
 }
 
 /// The least and the most of `level` over the outer loops of `regions`. Over a line they lie at
