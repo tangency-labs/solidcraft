@@ -3143,19 +3143,19 @@ fn a_square_ended_coil_refuses_turns_that_overlap() {
     run(&mut s, "solid.coil", coil(2.002));
 }
 
-fn clockwise_coil_bbox(clockwise: bool) -> Value {
+fn clockwise_coil_bbox(clockwise: bool, reversed: bool) -> Value {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
     run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 0.25, "pitch": 8, "clockwise": clockwise}));
+    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 0.25, "pitch": 8, "clockwise": clockwise, "reversed": reversed}));
     measure(&mut s)["bodies"][0]["bbox"].clone()
 }
 
 #[test]
 fn a_sketch_coil_clockwise_is_the_mirror_image() {
-    let right = clockwise_coil_bbox(false);
-    let left = clockwise_coil_bbox(true);
+    let right = clockwise_coil_bbox(false, false);
+    let left = clockwise_coil_bbox(true, false);
     let at = |v: &Value, k: &str, i: usize| v[k][i].as_f64().unwrap_or(f64::NAN);
     assert!((at(&right, "min", 0) + at(&left, "max", 0)).abs() < 1e-6, "{right} {left}");
     assert!((at(&right, "max", 0) + at(&left, "min", 0)).abs() < 1e-6, "{right} {left}");
@@ -3163,6 +3163,158 @@ fn a_sketch_coil_clockwise_is_the_mirror_image() {
         assert!((at(&right, "min", i) - at(&left, "min", i)).abs() < 1e-6, "{right} {left}");
         assert!((at(&right, "max", i) - at(&left, "max", i)).abs() < 1e-6, "{right} {left}");
     }
+}
+
+/// Reversed keeps the coil's hand: the reversed quarter turn from a profile on +Y is the forward
+/// one turned half a turn about Y (x and z negated, y kept), a rotation and not a mirror. A
+/// mirror in XY (z negated alone) would change the hand.
+#[test]
+fn coil_reverse_keeps_the_hand_and_grows_the_other_way() {
+    let at = |v: &Value, k: &str, i: usize| v[k][i].as_f64().unwrap_or(f64::NAN);
+    for clockwise in [false, true] {
+        let forward = clockwise_coil_bbox(clockwise, false);
+        let backward = clockwise_coil_bbox(clockwise, true);
+        for i in [0, 2] {
+            assert!((at(&forward, "min", i) + at(&backward, "max", i)).abs() < 1e-5, "axis {i}: {forward} {backward}");
+            assert!((at(&forward, "max", i) + at(&backward, "min", i)).abs() < 1e-5, "axis {i}: {forward} {backward}");
+        }
+        for key in ["min", "max"] {
+            assert!((at(&forward, key, 1) - at(&backward, key, 1)).abs() < 1e-5, "{forward} {backward}");
+        }
+        assert!(at(&forward, "max", 0) - at(&forward, "min", 0) > 1.0, "the quarter turn spans x, so x tells the hand: {forward}");
+    }
+}
+
+#[test]
+fn coil_reverse_changes_propagation_independently_of_clockwise() {
+    for sketch in [false, true] {
+        for clockwise in [false, true] {
+            for reversed in [false, true] {
+                let mut s = Session::default();
+                let mut params = json!({"axis":"Z","revolutions":1,"pitch":8,"clockwise":clockwise,"reversed":reversed});
+                if sketch {
+                    run(&mut s, "sketch.create", json!({"plane":"XZ","name":"Section"}));
+                    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[10,-0.5],"p1":[11,0.5]}));
+                    run(&mut s, "sketch.finish", json!({}));
+                    params["sketch"] = json!("Section");
+                } else {
+                    params["diameter"] = json!(20);
+                    params["section_size"] = json!(1);
+                }
+                run(&mut s, "solid.coil", params);
+                let bbox = measure(&mut s)["bodies"][0]["bbox"].clone();
+                let expected = if reversed { [-8.5, 0.5] } else { [-0.5, 8.5] };
+                for (key, want) in ["min", "max"].into_iter().zip(expected) {
+                    assert!(
+                        (bbox[key][2].as_f64().unwrap() - want).abs() < 1e-5,
+                        "sketch={sketch}, clockwise={clockwise}, reversed={reversed}: {bbox}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn coil_accepts_the_same_axis_reference_forms_as_revolve() {
+    for (axis, kind) in [
+        (json!({"type":"world","axis":"Z"}), "world"),
+        (json!({"origin":[30,0,0],"dir":[0,0,1]}), "line"),
+        (json!({"sketch":"Centerline","curve":"l1"}), "sketch_line"),
+        (json!({"face":[34,0,3]}), "model"),
+        (json!({"edge":[34,0,0]}), "model"),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius":4,"height":6,"base":[30,0,0],"body_name":"Stock"}));
+        run(&mut s, "sketch.create", json!({"plane":"XZ","name":"Centerline"}));
+        run(&mut s, "sketch.line", json!({"points":[[30,0],[30,10]]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.coil", json!({"axis":axis,"diameter":20,"section_size":1,"revolutions":1,"pitch":8,"name":"Spring"}));
+        let saved = serde_json::to_value(&s.doc.find_feature("Spring").unwrap().kind).unwrap();
+        assert_eq!(saved["axis_ref"]["type"], kind);
+    }
+}
+
+/// Two moved components: A's box is placed where B's box is drawn, so B's unplaced edge passes
+/// through the world point picked on A's placed edge. The Coil names its pick in the world, where
+/// it finds it, so it winds about A's edge, not B's placed edge far away.
+#[test]
+fn a_coil_edge_pick_is_named_where_the_moved_edge_is() {
+    let mut s = Session::default();
+    for (name, base, shift) in [("A", 0, 50), ("B", 50, 100)] {
+        let c = run(&mut s, "component.create", json!({"name":name,"grounded":false}))["component"].as_u64().unwrap();
+        run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"body_name":name}));
+        if base != 0 {
+            run(&mut s, "solid.move", json!({"bodies":[name],"translate":[base,0,0]}));
+        }
+        run(&mut s, "component.activate", json!({"component":"root"}));
+        let occurrence = s.doc.occurrence_of(c).unwrap().id;
+        run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[shift,0,0]}));
+    }
+    let bbox = |s: &mut Session, name: &str| {
+        let m = measure(s);
+        let body = m["bodies"].as_array().unwrap().iter().find(|b| b["name"] == name).unwrap_or_else(|| panic!("{name}: {m}")).clone();
+        let read = |key: &str, i: usize| body["bbox"][key][i].as_f64().unwrap();
+        ([read("min", 0), read("min", 1)], [read("max", 0), read("max", 1)])
+    };
+    let (a_min, _) = bbox(&mut s, "A");
+    let (b_min, _) = bbox(&mut s, "B");
+    // B's unplaced box is where A's placed box is: the pick is on both, B's placed box is 100 away.
+    assert!((b_min[0] - a_min[0] - 100.0).abs() < 1e-6, "{a_min:?} {b_min:?}");
+    run(
+        &mut s,
+        "solid.coil",
+        json!({"axis":{"edge":[a_min[0], a_min[1], 1]},"diameter":6,"section_size":0.5,"revolutions":1,"pitch":4,"body_name":"Winding"}),
+    );
+    let (min, max) = bbox(&mut s, "Winding");
+    let centre = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
+    assert!((centre[0] - a_min[0]).abs() < 0.5 && (centre[1] - a_min[1]).abs() < 0.5, "the Coil winds about A's edge: {centre:?}, {a_min:?}");
+
+    // A second placement of A has the same edge names: the pick on it finds that placement's edge.
+    let a = s.doc.find_component("A").unwrap();
+    let copy = run(&mut s, "occurrence.copy", json!({"component":a,"translate":[30,0,0]}))["occurrence"].as_u64().unwrap();
+    let second = [a_min[0] + 30.0, a_min[1]];
+    run(
+        &mut s,
+        "solid.coil",
+        json!({"axis":{"edge":[second[0], second[1], 1]},"diameter":6,"section_size":0.5,"revolutions":1,"pitch":4,"body_name":"Second"}),
+    );
+    let (min, max) = bbox(&mut s, "Second");
+    let centre = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
+    assert!((centre[0] - second[0]).abs() < 0.5 && (centre[1] - second[1]).abs() < 0.5, "the Coil winds about A's second placement: {centre:?}");
+
+    // Moved off the picked point, the second placement keeps its Coil: the pick names its placement.
+    run(&mut s, "occurrence.move", json!({"occurrence":copy,"translate":[12,0,0]}));
+    let (min, max) = bbox(&mut s, "Second");
+    let centre = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
+    assert!((centre[0] - second[0] - 12.0).abs() < 0.5 && (centre[1] - second[1]).abs() < 0.5, "the Coil follows the moved placement: {centre:?}");
+}
+
+#[test]
+fn a_coil_follows_its_named_axis_after_redefinition_and_save() {
+    use solidcraft_doc::FeatureKind;
+    let mut s = Session::default();
+    let axis = |x| json!({"a":{"point":[x,0,0]},"b":{"point":[x,0,10]},"name":"Spin"});
+    run(&mut s, "construct.axis.two_points", axis(30));
+    run(&mut s, "solid.coil", json!({"axis":"Spin","diameter":20,"section_size":1,"revolutions":1,"pitch":8,"reversed":true,"name":"Spring"}));
+    let bounds = |s: &mut Session| measure(s)["bodies"][0]["bbox"].clone();
+    let before = bounds(&mut s);
+    run(&mut s, "timeline.redefine", json!({"feature":"Spin","command":"construct.axis.two_points","params":axis(40)}));
+    let after = bounds(&mut s);
+    for key in ["min", "max"] {
+        assert!((after[key][0].as_f64().unwrap() - before[key][0].as_f64().unwrap() - 10.0).abs() < 1e-5);
+    }
+    run(&mut s, "timeline.rename", json!({"feature":"Spin","name":"RenamedSpin"}));
+    let value = serde_json::to_value(&s.doc).unwrap();
+    let loaded: solidcraft_doc::Document = serde_json::from_value(value).unwrap();
+    match &loaded.find_feature("Spring").unwrap().kind {
+        FeatureKind::Coil { axis_ref, reversed, .. } => {
+            assert!(matches!(axis_ref, Some(solidcraft_doc::AxisRef::Construction { name }) if name.as_ref() == "RenamedSpin"));
+            assert!(*reversed);
+        }
+        other => panic!("expected coil: {other:?}"),
+    }
+    assert!(s.execute("solid.coil", &json!({"axis":"Missing","diameter":20,"section_size":1,"revolutions":1,"pitch":8})).is_err());
 }
 
 #[test]

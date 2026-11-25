@@ -19,7 +19,7 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, AxisDir, CoilEndCutParam, CoilSectionParam, CoilSectionPositionParam, DomeShapeParam, EmbossFacePoint, EmbossModeParam, FaceRef,
+    AngleExpr, CoilAxis, CoilEndCutParam, CoilSectionParam, CoilSectionPositionParam, DomeShapeParam, EmbossFacePoint, EmbossModeParam, FaceRef,
     FeatureCommon, IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam, RibDirectionParam, SketchRef,
     StringList, TouchingParam, feature_common, present,
 };
@@ -303,14 +303,18 @@ pub struct CoilParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointExpr3")]
     pub base: Option<PointExpr3>,
-    /// The direction the helix climbs. Default: Z.
+    /// The direction the helix climbs, or an axis reference in the same forms as Revolve. Default: Z.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "AxisDir")]
-    pub axis: Option<AxisDir>,
+    #[schemars(with = "CoilAxis")]
+    pub axis: Option<CoilAxis>,
+    /// Climb in the opposite direction along the axis, independently of `clockwise`. Default: false.
+    #[serde(default, deserialize_with = "super::features::reversed_flag", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub reversed: Option<bool>,
     /// Where around the axis the section starts. Default: 0. Refused with `sketch`.
     #[serde(default)]
     pub start_angle: Option<AngleExpr>,
-    /// A left-handed coil, turning the other way while still climbing along `axis`. Default: false.
+    /// Turn clockwise about the selected axis without changing axial propagation. Default: false.
     #[serde(default)]
     pub clockwise: Option<bool>,
     /// Where the wire ends: in a plane through the axis (axial, the default) or square to the
