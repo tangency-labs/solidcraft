@@ -38,5 +38,10 @@
     "prefs.preview_reselect_modifier": "隐藏预览以重新选择",
     "prefs.preview_reselect_primary_at_least": "Ctrl + 修饰键",
     "prefs.preview_reselect_primary_at_least_mac": "Cmd + 修饰键"
+  },
+  "fr": {
+    "prefs.preview_reselect_modifier": "Masquer l’aperçu lors d’une nouvelle sélection",
+    "prefs.preview_reselect_primary_at_least": "Ctrl + modificateurs",
+    "prefs.preview_reselect_primary_at_least_mac": "Cmd + modificateurs"
   }
 }

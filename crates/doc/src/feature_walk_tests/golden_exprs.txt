@@ -452,6 +452,12 @@ surface_offset
     Distance = soff.distance (Length)
     Tolerance = soff.tolerance (Length)
   expressions: soff.distance, soff.tolerance
+surface_midsurface
+  inputs:
+    Max thickness = smid.max_thickness (Length)
+    Min thickness = smid.min_thickness (Length)
+    Fill holes below = smid.suppress_holes_below (Length)
+  expressions: smid.max_thickness, smid.min_thickness, smid.suppress_holes_below
 surface_blend
 surface_boundary
 surface_network
@@ -504,6 +510,13 @@ move
     Z distance = move.z (Length)
     Angle = move.angle (Angle)
   expressions: move.x, move.y, move.z, move.angle
+capture_position
+  inputs:
+    X distance = capture.x (Length)
+    Y distance = capture.y (Length)
+    Z distance = capture.z (Length)
+    Angle = capture.angle (Angle)
+  expressions: capture.x, capture.y, capture.z, capture.angle, capture.ox, capture.oy, capture.oz
 import
 mesh_convert
   inputs:

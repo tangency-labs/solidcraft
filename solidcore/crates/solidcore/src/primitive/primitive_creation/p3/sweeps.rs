@@ -14,6 +14,9 @@
 //! 4096; the repeated linear sweep checks that bound before its end cap, which moves
 //! the profile once per repetition. No additional recursion. Unavailable calls retain
 //! their full caller tails.
+//! Not upstream (#22184): the profile's split at its C1 discontinuities also cuts a
+//! B-spline piece exactly where it turns too sharply at an end for the result's check
+//! (`BSplineCurve::split_sharp_ends`), so each edge passes it with the same geometry.
 //! Not upstream (WR-409, tangency-labs/solidcore#1113): a profile that bounds no planar
 //! face becomes wires joined where its curves meet (`join_profile_wire_ends`).
 //! Not upstream (WR-442, tangency-labs/solidcore#478): after a full turn's
@@ -109,10 +112,24 @@ fn split(a: &impl PrimitiveAccess, b: BrepId, curves: &mut Vec<Option<Curve>>) -
         // `((SmBSplineCurve *)cr3DCurves[ii])->SubdivideAtDiscontinuity(..)`: the curve with
         // the NURB its own `GetOrCreateGwNurbPointer` makes (a line's lazy NURB), not a copy
         // of its bare base, which has none and refuses (`make_nurb`, 1001).
+        let spline = matches!(curve.kind(), CurveKind::BSpline(_));
         let curve = bspline_with_nurb(k, curve)?
             .ok_or_else(|| SolidError::invalid_input(OP, "non B-spline continuity input"))?;
         // fork c8f6a31 (WR-662): SER(SubdivideAtDiscontinuity(..)).
-        let pieces = curve.subdivide_at_discontinuity(k, ContinuityType::C1, 0.5)?;
+        let mut pieces = curve.subdivide_at_discontinuity(k, ContinuityType::C1, 0.5)?;
+        // Not upstream (#22184): a B-spline piece that turns too sharply at an end for the
+        // result's check (test 14) is cut there exactly, so each edge passes it with the
+        // profile's own geometry.
+        if spline {
+            let mut cut = Vec::new();
+            for piece in pieces {
+                match piece.split_sharp_ends(k)? {
+                    Some(more) => cut.extend(more),
+                    None => cut.push(piece),
+                }
+            }
+            pieces = cut;
+        }
         if pieces.len() > 1 {
             let count = pieces.len();
             curves.splice(

@@ -678,6 +678,35 @@ fn export_tool_writes_a_urdf_package() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `export` passes `quality` and `chord` to `file.export`, called directly and as a batch step
+/// (#20393): a batch step dropped them and wrote the standard mesh.
+#[test]
+fn export_tool_passes_the_mesh_quality_and_chord() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.cylinder", "params": {"diameter": 3, "height": 14}}));
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-chord-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let triangles = |name: &str| -> u32 {
+        let bytes = std::fs::read(dir.join(name)).unwrap_or_default();
+        bytes.get(80..84).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    let at = |name: &str| dir.join(name).to_string_lossy().to_string();
+    tool(&mut s, "export", json!({"path": at("standard.urdf")}));
+    tool(&mut s, "export", json!({"path": at("direct.urdf"), "chord": 0.05}));
+    tool(&mut s, "export", json!({"path": at("fine.urdf"), "quality": "fine"}));
+    let r = tool(&mut s, "batch", json!({"commands": [{"command": "export", "params": {"path": at("batch.urdf"), "chord": 0.05}}]}));
+    assert_eq!(r["completed"], 1, "{r}");
+    let (standard, direct, batch, fine) =
+        (triangles("standard-base.stl"), triangles("direct-base.stl"), triangles("batch-base.stl"), triangles("fine-base.stl"));
+    assert!(direct > 0 && direct * 5 < standard, "chord 0.05: {direct}, standard {standard}");
+    assert_eq!(batch, direct, "a batch step takes the chord too");
+    assert!(fine > standard, "fine {fine}, standard {standard}");
+    let r = raw_tool(&mut s, "export", json!({"path": at("both.urdf"), "chord": 0.05, "quality": "fine"}));
+    assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `format` accepts every format the extension does: iges, igs and stp were refused (#11806).
 #[test]
 fn export_tool_format_argument_accepts_iges() {
@@ -4860,6 +4889,64 @@ fn auto_session_bridges_to_a_late_app_only_while_empty() {
     let r = raw_tool(&mut s, "inspect_design", json!({}));
     assert!(text(&r).contains("headless session because the SolidCraft app was not found"), "{r}");
     assert!(!s.backend().has_ui());
+}
+
+/// Regression (#21377): starting a new headless design with `new_design` (`file.new`) clears
+/// `doc.features`, so a running desktop app appearing afterward must not hijack the session.
+#[test]
+fn auto_session_stays_headless_after_new_design() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use crate::backend::Backend;
+
+    let text = |r: &Value| r["result"]["content"].as_array().unwrap().iter().filter_map(|c| c["text"].as_str()).collect::<Vec<_>>().join("\n");
+
+    // 1) Headless work followed by `new_design` stays headless even after an app starts.
+    let port = Rc::new(Cell::new(None::<u16>));
+    let seen = port.clone();
+    let mut s = Server::new(Box::new(crate::Auto::new(Headless::default(), Box::new(move || seen.get()), None)));
+    let r = raw_tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+    assert_ne!(r["result"]["isError"], json!(true), "{r}");
+    let r = raw_tool(&mut s, "new_design", json!({"name": "PartB"}));
+    assert_ne!(r["result"]["isError"], json!(true), "{r}");
+    port.set(Some(1));
+    let r = raw_tool(&mut s, "inspect_design", json!({}));
+    assert!(!s.backend().has_ui());
+    assert!(text(&r).contains("headless session because the SolidCraft app was not found"), "{r}");
+
+    // 2) Calling `new_design` directly from a fresh headless session also commits the session to headless.
+    let port = Rc::new(Cell::new(None::<u16>));
+    let seen = port.clone();
+    let mut s = Server::new(Box::new(crate::Auto::new(Headless::default(), Box::new(move || seen.get()), None)));
+    let r = raw_tool(&mut s, "new_design", json!({}));
+    assert_ne!(r["result"]["isError"], json!(true), "{r}");
+    port.set(Some(1));
+    let r = raw_tool(&mut s, "inspect_design", json!({}));
+    assert!(!s.backend().has_ui());
+    assert!(text(&r).contains("headless session because the SolidCraft app was not found"), "{r}");
+
+    // 3) A failing `engine.script` that already ran `file.new` before a later step failed
+    // still commits the session to headless (its `file.new` effect was kept on the session).
+    let port = Rc::new(Cell::new(None::<u16>));
+    let seen = port.clone();
+    let mut auto = crate::Auto::new(Headless::default(), Box::new(move || seen.get()), None);
+    let err = auto.call("engine.script", json!({"commands": [{"command": "file.new", "params": {}}, {"command": "no.such.command", "params": {}}]}));
+    assert!(err.is_err(), "expected failing script step: {err:?}");
+    port.set(Some(1));
+    auto.call("engine.execute", json!({"command": "document.inspect", "params": {}})).unwrap();
+    assert!(!auto.has_ui());
+
+    // 4) A failing `engine.script` that fails *before* `file.new` runs leaves the session clean,
+    // so a desktop app appearing afterward can still take over.
+    let port = Rc::new(Cell::new(None::<u16>));
+    let seen = port.clone();
+    let mut auto = crate::Auto::new(Headless::default(), Box::new(move || seen.get()), None);
+    let err = auto.call("engine.script", json!({"commands": [{"command": "no.such.command", "params": {}}, {"command": "file.new", "params": {}}]}));
+    assert!(err.is_err(), "expected failing script step: {err:?}");
+    port.set(Some(1));
+    let _ = auto.supports_plugin_tools();
+    assert!(auto.has_ui());
 }
 
 #[test]

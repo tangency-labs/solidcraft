@@ -217,7 +217,13 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         Mod::Offset { .. } => vec![SelInput::new("Curves", CURVES, true)],
         // AXES is the mask that takes a straight sketch curve (`selection::SelInput::accepts`).
         Mod::Mirror => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Mirror line", AXES, false)],
-        Mod::Move { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Center", SKETCH_POINTS, false)],
+        // From and To (#21235): with both picked, the entities move by To - From (Point to Point).
+        Mod::Move { .. } => vec![
+            SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true),
+            SelInput::new("Center", SKETCH_POINTS, false),
+            SelInput::new("From", SKETCH_POINTS, false),
+            SelInput::new("To", SKETCH_POINTS, false),
+        ],
         // Center: the point Scale and Angle work about (#11718); empty, the middle of the picks' box.
         Mod::Transform { .. } => {
             vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Center", SKETCH_POINTS, false)]
@@ -334,6 +340,21 @@ pub fn edit_equation(app: &mut SolveApp, id: &str) -> bool {
     app.tool = None;
     app.dialog = Some(dialog);
     true
+}
+
+/// Merge Lines (#20317): the selected lines become one. It has no picks of its own: with fewer
+/// than two lines selected, the status bar says what to select.
+pub fn merge_selected_lines(app: &mut SolveApp) {
+    let curves: Vec<String> =
+        app.session.selection.iter().filter_map(|s| if let Sel::SketchCurve { id, .. } = s { Some(id.clone()) } else { None }).collect();
+    if curves.len() < 2 {
+        let hint = app.tr("ui.merge_lines_pick").to_owned();
+        app.set_status(hint, false);
+        return;
+    }
+    if let Err(e) = app.run("sketch.merge_lines", json!({ "curves": curves })) {
+        app.set_status(e, true);
+    }
 }
 
 /// The equation curve the selection is, when it is one curve that has formulas.
@@ -846,6 +867,31 @@ pub(crate) fn corner_hit(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Hit,
     Some((Hit::SketchPoint { sketch, id, at }, sel))
 }
 
+/// The Move window's Point to Point step (#21235): To minus From, on the sketch, when both rows
+/// hold a point of the sketch being edited.
+pub(crate) fn point_to_point(app: &SolveApp, inputs: &[SelInput]) -> Option<Vec2> {
+    let state = crate::open_meshing::session_world(&app.session);
+    let sk = &state.sketch(app.session.active_sketch?)?.sketch;
+    let at = |i: usize| {
+        let id = point_id(&app.session, items(inputs, i).first()?)?;
+        sk.resolve_point(id).and_then(|p| sk.point(p))
+    };
+    Some(at(3)? - at(2)?)
+}
+
+/// Keep the Move window's X and Y on To minus From while both are picked, so the rows, the value
+/// box and the preview show the step OK will make.
+pub fn refresh_move(app: &mut SolveApp) {
+    let Some(d) = app.dialog.as_ref().filter(|d| matches!(d.kind, Kind::SketchModify(Mod::Move { .. }))) else { return };
+    let Some(step) = point_to_point(app, &d.inputs) else { return };
+    // Whole nanometres: a step of 40 reads "40 mm", not "40.00000000000001 mm".
+    let mm = |v: f64| format!("{} mm", (v * 1e6).round() / 1e6 + 0.0);
+    if let Some(Kind::SketchModify(Mod::Move { x, y, .. })) = app.dialog.as_mut().map(|d| &mut d.kind) {
+        *x = mm(step.x);
+        *y = mm(step.y);
+    }
+}
+
 /// What input `i` holds.
 fn items(inputs: &[SelInput], i: usize) -> &[Sel] {
     inputs.get(i).map(|x| x.items.as_slice()).unwrap_or(&[])
@@ -1126,8 +1172,10 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to move first".into());
             }
-            let dx = value(app, x, ValueKind::Length, "X Distance")?;
-            let dy = value(app, y, ValueKind::Length, "Y Distance")?;
+            let (dx, dy) = match point_to_point(app, inputs) {
+                Some(d) => (d.x, d.y),
+                None => (value(app, x, ValueKind::Length, "X Distance")?, value(app, y, ValueKind::Length, "Y Distance")?),
+            };
             let deg = value(app, angle, ValueKind::Angle, "Angle")?.to_degrees();
             let dz = if *three_d { value(app, z, ValueKind::Length, "Z Distance")? } else { 0.0 };
             if dx.abs() < 1e-9 && dy.abs() < 1e-9 && dz.abs() < 1e-9 && deg.abs() < 1e-9 {
