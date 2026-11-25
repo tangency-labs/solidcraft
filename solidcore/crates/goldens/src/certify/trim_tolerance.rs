@@ -50,7 +50,8 @@ use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::ControlPointForm;
 use solidcore::nurbs::math::CPoint;
 use solidcore::query::curve_surface_gap::{
-    curve_face_gap_bound_within, line_evaluation_slack, plane_uv_lipschitz, trim_image_gap_bound,
+    clamped_trim_gap_bound, crv_on_surf_trim_gap_bound, curve_face_gap_bound_within,
+    line_evaluation_slack, plane_uv_lipschitz, trim_image_gap_bound, uv_line_slack_on_surface,
 };
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::edgeuse::p1 as eu1;
@@ -410,6 +411,31 @@ enum UseBound {
 
 /// `B` of the UV trim of `e`'s use `eu` ([`trim_bounds`]).
 fn use_bound(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId) -> UseBound {
+    use_bound_on(k, b, e, eu, false)
+}
+
+/// [`trim_bounds`] with a UV line enclosed on any surface with an exact net, not only a plane
+/// ([`uv_line_slack_on_surface`]), each with its edge use: the WR-450 certificate of the trims
+/// a copied analytic face keeps (`wr450_rows`).
+pub(crate) fn trim_bounds_any_surface(
+    k: &Kernel,
+    b: &Brep,
+    e: EdgeId,
+) -> Vec<(EdgeuseId, Option<f64>)> {
+    let rec = b.edge(e).expect("edge");
+    rec.edgeuses
+        .iter()
+        .filter_map(|&eu| match use_bound_on(k, b, e, eu, true) {
+            UseBound::NoTrim => None,
+            UseBound::Open => Some((eu, None)),
+            UseBound::Bound(x) => Some((eu, Some(x))),
+        })
+        .collect()
+}
+
+/// [`use_bound`]; with `any_surface`, a UV line on a surface other than a plane is enclosed
+/// too ([`trim_bounds_any_surface`]).
+fn use_bound_on(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId, any_surface: bool) -> UseBound {
     let rec = b.edge(e).expect("edge");
     let Some(curve) = rec.curve.as_ref() else {
         return UseBound::NoTrim;
@@ -440,10 +466,17 @@ fn use_bound(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId) -> UseBound {
             let Some(d) = line_evaluation_slack(l, true) else {
                 return UseBound::Open;
             };
-            let Some(lip) = plane_uv_lipschitz(surface, &cpts, d) else {
-                return UseBound::Open;
+            line_slack = if any_surface {
+                match uv_line_slack_on_surface(k, surface, &cpts, d).expect("the slack") {
+                    Some(x) => x,
+                    None => return UseBound::Open,
+                }
+            } else {
+                let Some(lip) = plane_uv_lipschitz(surface, &cpts, d) else {
+                    return UseBound::Open;
+                };
+                lip * d * (1.0 + 4.0 * f64::EPSILON)
             };
-            line_slack = lip * d * (1.0 + 4.0 * f64::EPSILON);
             line_nurb = Curve::from(nurb);
             &line_nurb
         }
@@ -454,13 +487,27 @@ fn use_bound(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId) -> UseBound {
     let ivl = rec.interval;
     let range = [ivl.min(), ivl.max()];
     let floor = FLOOR * rec.tolerance;
-    let mut bound =
-        trim_image_gap_bound(k, &surface, curve, trim, range, floor).expect("the bound");
+    // (with `any_surface`, an edge curve on a surface is enclosed through its own UV curve
+    // and surface: [`crv_on_surf_trim_gap_bound`])
+    let mut bound = if any_surface && matches!(curve.kind(), CurveKind::CrvOnSurf(_)) {
+        crv_on_surf_trim_gap_bound(k, &surface, curve, trim, range, floor).expect("the bound")
+    } else {
+        trim_image_gap_bound(k, &surface, curve, trim, range, floor).expect("the bound")
+    };
     // Past the tolerance (or not enclosed), the same pair is bounded again on an exactly
     // translated copy ([`exact_translated_bound`]): the same geometry, nearer the origin,
     // where the enclosures are not widened by the coordinates; the smaller bound is kept.
     if !bound.is_some_and(|x| x + line_slack <= rec.tolerance) {
         if let Some(x) = exact_translated_bound(k, &surface, curve, trim, range, floor) {
+            bound = Some(bound.map_or(x, |b| b.min(x)));
+        }
+    }
+    // A B-spline trim whose domain ends inside the edge's interval is evaluated clamped there:
+    // bounded on its domain plus the curve's run over the slivers ([`clamped_trim_gap_bound`]).
+    if any_surface && !bound.is_some_and(|x| x + line_slack <= rec.tolerance) {
+        if let Some(x) =
+            clamped_trim_gap_bound(k, &surface, curve, trim, range, floor).expect("the bound")
+        {
             bound = Some(bound.map_or(x, |b| b.min(x)));
         }
     }
@@ -1048,7 +1095,9 @@ fn certify(unit: &str) -> Tally {
             .find(|c| c.name == row.case)
             .unwrap_or_else(|| panic!("{unit}: no case {}", row.case));
         super::watch_written();
-        let out = runner.run_rust(case);
+        // (a row the WR-450 retirement moves too: main's run had main's choices at its seams)
+        let out =
+            crate::wr450_rows::with_mains_choices_for(unit, &row.case, || runner.run_rust(case));
         let bodies = super::take_written();
         let mut mass_bands = std::collections::BTreeMap::new();
         let out = out.unwrap_or_else(|e| panic!("{unit} {}: {e:?}", row.case));
@@ -1804,6 +1853,8 @@ fn the_rows_are_the_whole_golden_diff_from_main() {
             _ => Ok(text),
         }
         .unwrap_or_else(|e| panic!("{unit}: {e}"));
+        // (the rows the WR-450 retirement moved: main's lines, [`crate::wr450_rows::DATA`])
+        let text = crate::wr450_rows::with_mains_lines(unit, &text);
         // and WR-587's loop normal rows (#21291), each replayed to main's line
         let keep: Vec<&str> = rows.iter().map(|r| r.case.as_str()).collect();
         let text = crate::wr587_replay::put_back_main_lines(unit, &text, &keep)
@@ -1851,8 +1902,7 @@ fn replay_case(unit: &str, case: &str) -> Result<crate::Output, String> {
         .iter()
         .find(|c| c.name == case)
         .ok_or_else(|| format!("{unit}: no case {case}"))?;
-    runner
-        .run_rust(c)
+    crate::wr450_rows::with_mains_choices_for(unit, case, || runner.run_rust(c))
         .map_err(|e| format!("{unit} {case}: {e:?}"))
 }
 

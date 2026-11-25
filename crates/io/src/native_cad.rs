@@ -87,7 +87,7 @@ fn step_producer(bytes: &[u8]) -> Producer {
     for _ in 0..STEP_HEADER_ENDS {
         let Some(end) = next_end_section(&text, from) else { break };
         let header = format!("{};\nEND-ISO-10303-21;\n", text.get(..end).unwrap_or_default());
-        if let Ok(ex) = solidcore_record::step::p21::parse(&header) {
+        if let Ok(ex) = solidcraft_kernel::services::step::p21::parse(&header) {
             return Producer { system: ex.originating_system, preprocessor: ex.preprocessor, description: ex.description };
         }
         from = end;
