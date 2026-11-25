@@ -1874,7 +1874,8 @@ fn an_edit_shows_the_corner_settings_and_overrides() {
 /// default one the card scrolls, and its OK and Cancel lie over the last rows.
 fn tall_harness() -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();
-    h.call("ui.resize", json!({"width": 1600, "height": 1400}));
+    // Tall enough for every row of a frame with corner overrides, Offset A and B included.
+    h.call("ui.resize", json!({"width": 1600, "height": 1800}));
     h.app.home.open = false;
     h
 }
