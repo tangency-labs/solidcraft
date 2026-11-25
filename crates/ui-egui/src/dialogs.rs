@@ -8680,6 +8680,36 @@ pub(crate) fn angle_pivot(d: &Dialog) -> Option<&Sel> {
     d.inputs.iter().find(|i| i.label == "Pivot").and_then(|i| i.items.first())
 }
 
+/// The axis the Plane at Angle dialog turns about, as the command reads it: the picked axis, a
+/// sketch line or an edge, or the axis an edited feature stored (numbers, a name, or a saved
+/// reference).
+pub(crate) fn angle_axis(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
+    if let Some(sel) = d.inputs.get(1).and_then(|i| i.items.first()) {
+        return axis_of(app, sel);
+    }
+    let stored = d.extra.get("axis")?;
+    // The numbers an edited feature stored: an origin and a direction.
+    if let (Some(origin), Some(dir)) = (stored.get("origin"), stored.get("dir"))
+        && let (Ok(o), Ok(v)) = (serde_json::from_value::<[f64; 3]>(origin.clone()), serde_json::from_value::<[f64; 3]>(dir.clone()))
+    {
+        return Some((Vec3::new(o[0], o[1], o[2]), Vec3::new(v[0], v[1], v[2])));
+    }
+    // A name, or a saved reference the dialog keeps until a new pick replaces it.
+    let sel = match stored {
+        Value::String(name) => Some(Sel::Axis { name: name.clone() }),
+        other => {
+            use solidcraft_engine::doc::construct::GeoRef;
+            let reference = serde_json::from_value::<GeoRef>(other.clone()).ok()?;
+            match &reference {
+                GeoRef::Axis { name } => Some(Sel::Axis { name: name.to_string() }),
+                GeoRef::World { axis } => Some(Sel::Axis { name: axis.clone() }),
+                _ => model_axis_sel(&app.session, &reference),
+            }
+        }
+    }?;
+    axis_of(app, &sel)
+}
+
 /// A stored point reference back into a dialog pick: a body vertex, sketch point or construction point.
 fn point_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
     use solidcraft_engine::doc::construct::GeoRef;
