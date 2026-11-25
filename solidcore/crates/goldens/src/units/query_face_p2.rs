@@ -992,11 +992,16 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             // SmBSplineCurve::CreateLineSegment, as the shim
             let line = match BSplineCurve::create_line_segment(u64::from(*dim), p, q) {
                 Ok(line) => line,
-                Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-                    let code = solidcore::error::upstream_status(&e).unwrap_or_default();
-                    return Ok(
-                        Output::new().values("curve_classification", vec![-3.0, f64::from(code)])
-                    )
+                // (before kinds: only an error with a status, as `[-3, status]`)
+                Err(e)
+                    if crate::status::typed()
+                        || solidcore::error::upstream_status(&e).is_some() =>
+                {
+                    let record = crate::status::legacy_or(
+                        vec![-3.0, f64::from(solidcore::error::upstream_status(&e).unwrap_or_default())],
+                        || vec![crate::status::kind_slot(&e, 0.0)],
+                    );
+                    return Ok(Output::new().values("curve_classification", record));
                 }
                 Err(e) => return Ok(rust_err(&e)),
             };

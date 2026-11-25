@@ -247,7 +247,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let op = lookup(&i.op)?;
     match rust_run(op, i)? {
         Ok(o) => Ok(o),
-        Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(normalise(&e)))),
+        Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, normalise(&e)))),
     }
 }
 

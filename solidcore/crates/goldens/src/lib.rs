@@ -47,6 +47,7 @@ pub mod script;
 pub mod solidcraft;
 pub mod soundness;
 pub mod ssi;
+pub mod status;
 pub mod step;
 pub(crate) mod tolsub;
 pub(crate) mod trim_hook;
