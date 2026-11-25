@@ -200,6 +200,29 @@ fn a_boolean_result_after_its_input_checks_the_same() {
     assert_eq!(on(&mut k, &holed_block), full(&holed_block));
 }
 
+/// Moves vertex `v` of `b` by `dx` along x as a modelling step does (`SetPoint`), which
+/// resets the gaps its uses cached; writing the point alone would leave the check reading
+/// the gaps measured before the move.
+fn move_vertex(b: &mut Brep, v: solidcore::topology::VertexId, dx: f64) {
+    use solidcore::error::EntityRef;
+    use solidcore::topology::loopuse::notify_ref;
+    let mut p = b.vertex(v).unwrap().point;
+    p.x += dx;
+    let mut records = NotifyRecords::new();
+    let mut attributes = AttributeStore::default();
+    solidcore::topology::vertex::set_point(
+        b,
+        v,
+        p,
+        &mut records,
+        &mut attributes,
+        None,
+        notify_ref(EntityRef::Vertex(v)),
+        &|vu| notify_ref(EntityRef::Vertexuse(vu)),
+    )
+    .unwrap();
+}
+
 /// A plate checked clean, then the same plate with one vertex moved off its edges and
 /// faces: the moved vertex's neighbourhoods have other digests and are tested again, so
 /// the check reports what the full check reports.
@@ -209,7 +232,7 @@ fn a_moved_vertex_is_tested_again_after_its_shape_was_clean() {
         move || {
             let mut b = plate(2);
             let v = b.vertex_list()[0];
-            b.vertex_mut(v).unwrap().point.x += dx;
+            move_vertex(&mut b, v, dx);
             b
         }
     };
@@ -221,6 +244,29 @@ fn a_moved_vertex_is_tested_again_after_its_shape_was_clean() {
         assert!(!want.is_empty(), "moved {dx}: valid");
         assert_eq!(on(&mut k, &make), want, "moved {dx}");
     }
+}
+
+/// A plate checked clean, then the same plate whose vertex uses cached a gap no
+/// measurement gives: the check reads a cached gap instead of measuring, so the full check
+/// reports it, and the incremental check must test those vertices again, not skip them as
+/// the clean shape they look like.
+#[test]
+fn a_vertex_with_another_cached_gap_is_tested_again() {
+    let stale = || {
+        let mut b = plate(2);
+        let v = b.vertex_list()[0];
+        for vu in b.vertex(v).unwrap().vertexuses.clone() {
+            let u = b.vertexuse_mut(vu).unwrap();
+            u.vertex_face_gap.vertexuse = Some(vu);
+            u.vertex_face_gap.gap_3d = 1.0;
+        }
+        b
+    };
+    let mut k = Kernel::default();
+    assert!(on(&mut k, &|| plate(2)).is_empty());
+    let want = full(&stale);
+    assert!(!want.is_empty(), "a cached gap of 1 passed");
+    assert_eq!(on(&mut k, &stale), want);
 }
 
 #[test]

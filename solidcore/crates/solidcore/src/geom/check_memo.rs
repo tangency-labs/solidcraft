@@ -317,19 +317,55 @@ fn vertex_digest(
     Some(d.finish())
 }
 
-/// Writes edge `e`'s curve, interval and tolerance.
+/// Writes edge `e`'s curve, interval and tolerance, and the gaps cached on its uses.
 fn edge_geometry(b: &Brep, e: EdgeId, d: &mut Digest) -> Option<()> {
     let edge = b.edge(e).ok()?;
     edge.curve.as_ref()?.content(d)?;
     edge.interval.content(d)?;
     d.f64(crate::topology::edge::tolerance(b, e).ok()?);
+    // the gaps cached on the edge's uses: the check reads them where they are set instead
+    // of measuring again, so the same curve with other cached gaps may get another answer
+    d.usize(edge.edgeuses.len());
+    for &eu in &edge.edgeuses {
+        let u = b.edgeuse(eu).ok()?;
+        let f = u.max_edge_face_gap;
+        d.f64(f.gap_3d);
+        d.hashed(&f.edgeuse.map(|x| x == eu));
+        d.f64(f.edge_t);
+        d.f64(f.face_uv.x);
+        d.f64(f.face_uv.y);
+        let g = u.edge_ccw_edge_gap;
+        d.f64(g.gap_3d);
+        d.hashed(&g.edgeuse0.map(|x| x == eu));
+        d.bool(g.edgeuse1.is_some());
+        d.f64(g.edge_t0);
+        d.f64(g.edge_t1);
+    }
     Some(())
 }
 
-/// Writes vertex `v`'s point and tolerance.
+/// Writes vertex `v`'s point and tolerance, and its uses' UV points and cached gaps.
 fn vertex_point(b: &Brep, v: VertexId, d: &mut Digest) -> Option<()> {
     let vertex = b.vertex(v).ok()?;
     vertex.point.content(d)?;
     d.f64(vertex.tolerance);
+    // the UV points and the gaps cached on the vertex's uses: the check reads a set gap
+    // instead of measuring again, so the same point with other cached gaps may get
+    // another answer
+    d.usize(vertex.vertexuses.len());
+    for &vu in &vertex.vertexuses {
+        let u = b.vertexuse(vu).ok()?;
+        d.f64(u.uv_point.x);
+        d.f64(u.uv_point.y);
+        let e = u.vertex_edge_gap;
+        d.f64(e.gap_3d);
+        d.hashed(&e.vertexuse.map(|x| x == vu));
+        d.f64(e.edge_t);
+        let f = u.vertex_face_gap;
+        d.f64(f.gap_3d);
+        d.hashed(&f.vertexuse.map(|x| x == vu));
+        d.f64(f.face_uv.x);
+        d.f64(f.face_uv.y);
+    }
     Some(())
 }
