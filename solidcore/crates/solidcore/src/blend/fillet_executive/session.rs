@@ -6944,7 +6944,7 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                     {
                                         if !inside_corner_wedge(
                                             k,
-                                            CornerWedge {
+                                            &CornerWedge {
                                                 rails: &rails,
                                                 edge_curves: &edge_curves,
                                                 others,
@@ -7164,7 +7164,7 @@ struct CornerWedge<'a> {
 /// Those of the drops onto the rails and their evaluation.
 fn inside_corner_wedge(
     k: &Kernel,
-    wedge: CornerWedge<'_>,
+    wedge: &CornerWedge<'_>,
     end: crate::math::Point3,
     sample: crate::math::Point3,
     tol: f64,
