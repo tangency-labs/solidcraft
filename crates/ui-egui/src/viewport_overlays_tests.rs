@@ -3111,10 +3111,10 @@ fn the_isolation_pill_shows_off_the_bar_and_its_close_exits_isolation() {
 }
 
 /// #8120: with the view showing what an Isolate hid see-through or as edges, the bodies Isolate
-/// hid are drawn (never ones the user hid before it) and picks still go through them; the pill's
-/// details choose how.
+/// hid are drawn and can be picked (never ones the user hid before it, which stay hidden); the
+/// pill's details choose how.
 #[test]
-fn what_an_isolate_hid_shows_see_through_or_as_edges_and_is_never_picked() {
+fn what_an_isolate_hid_shows_see_through_or_as_edges_and_can_be_picked() {
     use solidcraft_engine::schema::view_navigation::IsolateShow;
     let mut h = Harness::new();
     for (corner, name) in [([0, 0, 0], "A"), ([20, 0, 0], "B"), ([40, 0, 0], "C")] {
@@ -3139,7 +3139,9 @@ fn what_an_isolate_hid_shows_see_through_or_as_edges_and_is_never_picked() {
         assert_eq!(crate::viewport::isolate_ghost(&h.app, "B"), Some(show), "what the Isolate hid");
         assert!(crate::viewport::isolate_ghost(&h.app, "C").is_none(), "hidden before the Isolate: stays hidden");
         assert!(crate::viewport::isolate_ghost(&h.app, "A").is_none(), "shown: drawn as it is");
-        assert!(!h.app.session.body_visible("B"), "still hidden, so nothing picks it");
+        assert!(!h.app.session.body_visible("B"), "still hidden in the design");
+        assert!(crate::viewport::body_shown(&h.app, "B"), "drawn, so it can be picked");
+        assert!(!crate::viewport::body_shown(&h.app, "C"), "hidden before the Isolate: never picked");
     }
     h.app.run("view.isolate_others", json!({"show": "hidden"})).unwrap();
     assert_eq!(h.app.preferences.isolate_others, IsolateShow::Hidden);

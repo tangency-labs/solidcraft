@@ -1243,8 +1243,8 @@ pub(crate) const ISOLATE_SHOWS: [(solidcraft_engine::schema::view_navigation::Is
 
 /// How body `name` is drawn because an Isolate hid it: see-through or as its edges, when the
 /// view shows what an Isolate hid ([`crate::prefs::Prefs::isolate_others`]). `None` for a body
-/// shown, hidden by the user before the Isolate, or with the setting at Hidden. Such a body is
-/// still hidden: nothing picks it.
+/// shown, hidden by the user before the Isolate, or with the setting at Hidden. Such a body
+/// stays hidden in the design, but is drawn and can be picked ([`body_shown`]).
 pub(crate) fn isolate_ghost(app: &SolveApp, name: &str) -> Option<solidcraft_engine::schema::view_navigation::IsolateShow> {
     use solidcraft_engine::schema::view_navigation::IsolateShow;
     let show = app.preferences.isolate_others;
@@ -1253,6 +1253,12 @@ pub(crate) fn isolate_ghost(app: &SolveApp, name: &str) -> Option<solidcraft_eng
     }
     let before = app.session.visibility.before_isolate.as_ref()?;
     (before.shown_bodies.contains(name) && !app.session.body_visible(name)).then_some(show)
+}
+
+/// Body `name` is on screen: shown, or drawn see-through or as edges because an Isolate hid it
+/// ([`isolate_ghost`]). What is drawn can be picked; only what is hidden cannot.
+pub(crate) fn body_shown(app: &SolveApp, name: &str) -> bool {
+    app.body_visible(name) || isolate_ghost(app, name).is_some()
 }
 
 /// With a component active, bodies outside it are drawn faded.
@@ -5140,7 +5146,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     // quadratic for assemblies with many small parts.
     for (i, b) in st.bodies.iter().enumerate() {
         // A ghosted frame member's faces don't stop a click: it goes through to what is behind.
-        if (!through && !app.body_visible(&b.name)) || frame_ghosted(app, b) {
+        if (!through && !crate::viewport::body_shown(app, &b.name)) || frame_ghosted(app, b) {
             continue;
         }
         // Bodies whose box the ray misses (or enters behind the best hit so far) are skipped.
@@ -5214,7 +5220,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     let mut bestv = Near::new(all);
     let mut beste = Near::new(all);
     for (i, b) in st.bodies.iter().enumerate() {
-        if !through && !app.body_visible(&b.name) {
+        if !through && !crate::viewport::body_shown(app, &b.name) {
             continue;
         }
         // A ghosted frame member's vertices are picked, its edges are not.
@@ -7174,7 +7180,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     // in the error colour, over the shading (and dimmed where the model hides it), like the
     // selection's outline.
     for (body, face) in &app.viewport.refused_ring {
-        let Some(b) = st.body(body).filter(|_| app.session.body_visible(body)) else { continue };
+        let Some(b) = st.body(body).filter(|_| crate::viewport::body_shown(app, body)) else { continue };
         // The face itself tinted (a face whose edges are two small circles still reads as one).
         face_tris(&mut sc, &shown(b), *face, c4(t.error.gamma_multiply(0.35)), false);
         let m = drawn_mesh(app, b);
@@ -7242,7 +7248,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         let k = (strength * 2.25).min(1.0);
         let rim = Color32::from_rgb(blend(edge.r(), cap.r(), k), blend(edge.g(), cap.g(), k), blend(edge.b(), cap.b(), k));
         let outline = EdgeColours::new(&mut feedback, rim, rim);
-        for b in st.bodies.iter().filter(|b| app.session.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name)) {
+        for b in st.bodies.iter().filter(|b| crate::viewport::body_shown(app, &b.name) && !app.preview.effective_replaced().contains(&b.name)) {
             let Some(Ok(face)) = s.doc.print_face(&st, b) else { continue };
             let (r, g, bl) = body_rgb(app, &b.name);
             face_tris(&mut feedback, &shown(b), face.index, [mix(r, cap.r()), mix(g, cap.g()), mix(bl, cap.b()), 255], true);
@@ -7273,7 +7279,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 // A live preview stands in for the body: its old faces would fight with it.
                 // Lit, not flat: an imported mesh (STL, OBJ) is one face, and a flat fill would
                 // paint the whole part as a single silhouette.
-                if let Some(b) = by_name.get(body).filter(|_| app.body_visible(body) && !replaced(body)) {
+                if let Some(b) = by_name.get(body).filter(|_| crate::viewport::body_shown(app, body) && !replaced(body)) {
                     // The only face of an imported mesh covers all its triangles and has no
                     // pickable outline. Preserve authored normals in the copied fill: the
                     // instanced flat shader uses the geometric normal even on a triangle with
@@ -7306,7 +7312,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 // As a face: lit over a live preview, the old body fought with it in slivers. A body
                 // Move/Copy moves is outlined by its preview while one draws it.
                 if let Some(b) = by_name.get(name)
-                    && app.body_visible(name)
+                    && crate::viewport::body_shown(app, name)
                     && !replaced(name)
                     && !(moved && app.preview.effective_replaced().iter().any(|n| n == name))
                 {
@@ -7346,7 +7352,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             }
             Sel::Edge { body, index, point } => {
                 if let Some(b) = by_name.get(body)
-                    && app.body_visible(body)
+                    && crate::viewport::body_shown(app, body)
                     && !moving(body)
                 {
                     let m = drawn(b);
@@ -7475,7 +7481,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             selected_faces.entry(body.as_str()).or_default().insert(*index);
         }
     }
-    for b in st.bodies.iter().filter(|b| app.body_visible(&b.name)) {
+    for b in st.bodies.iter().filter(|b| crate::viewport::body_shown(app, &b.name)) {
         // A body the preview stands in for is not lit, its old faces fighting with the preview,
         // but outlined by what the preview draws for it where it says (a combine's result, or a
         // tool it ghosts).
@@ -9875,7 +9881,7 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
         let active_bodies = if scoped_bodies { active_body_names(app) } else { None };
         let measuring = measuring_mesh_edges(app);
         for b in &st.bodies {
-            if !app.body_visible(&b.name) || (scoped_bodies && body_faded(app, b, &active_bodies)) {
+            if !crate::viewport::body_shown(app, &b.name) || (scoped_bodies && body_faded(app, b, &active_bodies)) {
                 continue;
             }
             let m = b.mesh();

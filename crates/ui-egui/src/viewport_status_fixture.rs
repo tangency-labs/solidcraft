@@ -42,15 +42,17 @@ fn specimen(id: &str, readout: bool) -> crate::ui_kit::Details {
             label: tr("ui.details_pull"),
             value: DetailValue::Axis { value: [0.0, 0.0, 1.0], current: "Z".into() },
             enabled: true,
+            stacked: false,
         },
-        DetailSetting { id: "angle".into(), label: tr("ui.details_angle"), value: DetailValue::Angle(1.0), enabled: true },
+        DetailSetting { id: "angle".into(), label: tr("ui.details_angle"), value: DetailValue::Angle(1.0), enabled: true, stacked: false },
         DetailSetting {
             id: "slider".into(),
             label: tr("ui.details_stripes"),
             value: DetailValue::Slider { value: 14.5, min: 1.0, max: 200.0 },
             enabled: true,
+            stacked: false,
         },
-        DetailSetting { id: "check".into(), label: tr("ui.details_hatch"), value: DetailValue::Check(true), enabled: true },
+        DetailSetting { id: "check".into(), label: tr("ui.details_hatch"), value: DetailValue::Check(true), enabled: true, stacked: false },
     ];
     if readout {
         description.readout = (0..9).map(|index| (tr("ui.details_fixture_readout"), format!("{index}.00 mm"))).collect();

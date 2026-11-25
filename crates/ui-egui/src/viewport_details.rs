@@ -13,7 +13,7 @@ fn tr(id: &str) -> String {
     solidcraft_ui_text::tr(id).to_owned()
 }
 fn field(id: &str, label: &str, value: DetailValue) -> DetailSetting {
-    DetailSetting { id: id.into(), label: tr(label), value, enabled: true }
+    DetailSetting { id: id.into(), label: tr(label), value, enabled: true, stacked: false }
 }
 fn length(app: &SolveApp, value: f64) -> DetailValue {
     DetailValue::Length { value, units: app.session.doc.units.clone(), decimals: app.preferences.length_decimals }
@@ -95,7 +95,8 @@ pub(crate) fn description(app: &SolveApp, effect: &StatusItem) -> Details {
             let shows = crate::viewport::ISOLATE_SHOWS;
             let selected = shows.iter().position(|(show, _, _)| *show == app.preferences.isolate_others).unwrap_or(0);
             let options = shows.iter().map(|(_, _, label)| tr(label)).collect();
-            details.settings.push(field("show", "ui.isolate_show", DetailValue::Choice { selected, options }));
+            // "Other parts display as" is longer than the label column: above its choice.
+            details.settings.push(DetailSetting { stacked: true, ..field("show", "ui.isolate_show", DetailValue::Choice { selected, options }) });
         }
         StatusSetting::Environment => {}
     }
