@@ -480,6 +480,8 @@ pub struct SearchOption<'a> {
 }
 
 /// Searchable dropdown with an optional custom-value action and loading message.
+/// Focuses the search box on opening. The editor keeps its usual key handling; Escape closes
+/// the popup regardless of which widget has focus.
 /// Returns a chosen value; callers keep domain-specific validation and discovery.
 /// Tokens: control_height, space_24, font_label and scope control tokens.
 pub fn searchable_dropdown(
@@ -491,13 +493,46 @@ pub fn searchable_dropdown(
     custom: Option<&str>,
     pending: Option<&str>,
 ) -> Option<String> {
-    searchable_dropdown_with(ui, id, current, filter, options, SearchMenu { custom, pending, icon: None })
+    searchable_dropdown_with(
+        ui,
+        id,
+        current,
+        filter,
+        options,
+        SearchMenu { custom, pending, icon: None, fit_contents: false, keyboard_selection: false },
+    )
+}
+
+/// Searchable dropdown whose list fits its matches up to the usual scrolling limit.
+/// Keeps a loading status below the list, inside the popup, using [`searchable_dropdown`] theme tokens.
+/// Opting into `keyboard_selection` lets Up/Down highlight a match and Enter choose it (the
+/// current value when unfiltered, otherwise the first match before an arrow is used). Escape
+/// closes only the popup. Leave it off to keep the editor's usual key handling.
+pub fn searchable_dropdown_fitting(
+    ui: &mut Ui,
+    id: &str,
+    current: &str,
+    filter: &mut String,
+    options: &[SearchOption<'_>],
+    pending: Option<&str>,
+    keyboard_selection: bool,
+) -> Option<String> {
+    searchable_dropdown_with(
+        ui,
+        id,
+        current,
+        filter,
+        options,
+        SearchMenu { custom: None, pending, icon: None, fit_contents: true, keyboard_selection },
+    )
 }
 
 struct SearchMenu<'a> {
     custom: Option<&'a str>,
     pending: Option<&'a str>,
     icon: Option<&'static str>,
+    fit_contents: bool,
+    keyboard_selection: bool,
 }
 
 fn searchable_dropdown_with(
@@ -508,7 +543,7 @@ fn searchable_dropdown_with(
     options: &[SearchOption<'_>],
     menu: SearchMenu<'_>,
 ) -> Option<String> {
-    let SearchMenu { custom, pending, icon } = menu;
+    let SearchMenu { custom, pending, icon, fit_contents, keyboard_selection } = menu;
     super::settings_search::note_current(ui, current);
     let mut chosen = None;
     let row = label(ui).to_owned();
@@ -522,13 +557,69 @@ fn searchable_dropdown_with(
     } else {
         combo.icon(dropdown_arrow)
     };
+    let state = ui.make_persistent_id(egui::IdSalt::new(id)).with("search_keyboard");
+    if fit_contents {
+        let query = filter.to_lowercase();
+        let layout = (options.iter().filter(|option| option.label.to_lowercase().contains(&query)).count(), pending.is_some());
+        let changed = ui.data_mut(|data| {
+            let previous = data.get_temp::<(usize, bool)>(state.with("layout"));
+            data.insert_temp(state.with("layout"), layout);
+            let changed = previous.is_some_and(|previous| previous != layout);
+            if changed {
+                // The popup is measured again below, and the editor can lose the keyboard in that
+                // pass; ask for focus again instead of treating the earlier request as final.
+                data.remove::<bool>(state.with("focused"));
+            }
+            changed
+        });
+        let widget = ui.make_persistent_id(egui::IdSalt::new(id));
+        let popup = widget.with("popup");
+        // The native combo's outer scroll area otherwise keeps the last frame's height,
+        // preventing a short list from growing when the filter or loading state changes.
+        if changed
+            && egui::ComboBox::is_open(ui.ctx(), widget)
+            && let Some(mut area) = egui::containers::AreaState::load(ui.ctx(), popup)
+        {
+            area.size = None;
+            ui.memory_mut(|memory| memory.areas_mut().set_state(egui::LayerId::new(egui::Order::Foreground, popup), area));
+            ui.ctx().request_discard("searchable dropdown contents changed");
+        }
+    }
     let popup = super::container::show_combo(ui, ui.make_persistent_id(egui::IdSalt::new(id)), combo, |ui| {
+        // Opted-in pickers keep editor focus while arrows move the highlighted result.
+        // Only those pickers consume Enter before it reaches an enclosing dialog.
+        let search_id = state.with("editor");
+        let focused = ui.memory(|memory| memory.has_focus(search_id));
+        let (up, down, enter, escape) = if keyboard_selection && focused {
+            ui.input_mut(|input| {
+                (
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
+                )
+            })
+        } else {
+            (false, false, false, false)
+        };
+        if escape {
+            ui.close();
+        }
         let search = ui.add(
             text_input(egui::TextEdit::singleline(filter))
-                .id_salt(format!("{id}_search"))
+                .id(search_id)
+                .char_limit(1024)
                 .hint_text(solidcraft_ui_text::tr_label("Search"))
                 .desired_width(f32::INFINITY),
         );
+        if !ui.data(|data| data.get_temp::<bool>(state.with("focused"))).unwrap_or(false) {
+            if search.has_focus() {
+                ui.data_mut(|data| data.insert_temp(state.with("focused"), true));
+            } else {
+                search.request_focus();
+                ui.ctx().request_repaint();
+            }
+        }
         // Preferences types into its own search only while no field has the keyboard.
         if search.has_focus() {
             super::settings_search::note_key_sink(ui.ctx());
@@ -537,21 +628,55 @@ fn searchable_dropdown_with(
         if let Some(custom) = custom {
             let response = ui.selectable_label(false, custom);
             solidcraft_ui_registry::publish_handle(&format!("dialog:{row} file"), response.rect.center());
-            if response.clicked() {
+            if response.clicked() || enter {
                 chosen = Some(filter.trim().to_owned());
                 ui.close();
             }
             return;
         }
         let query = filter.to_lowercase();
+        let visible: Vec<_> = options.iter().filter(|o| o.label.to_lowercase().contains(&query)).collect();
+        let cursor_id = state.with("cursor");
+        let initial = if query.is_empty() { visible.iter().position(|option| option.label == current) } else { None };
+        // Only deliberate arrow navigation is stored. Until then, discovery can add the
+        // current value and update its automatic highlight without leaving a stale cursor.
+        let mut cursor = initial;
+        if keyboard_selection {
+            let navigated = ui.data(|data| data.get_temp::<String>(cursor_id));
+            if !search.changed() {
+                cursor = navigated.as_ref().and_then(|value| visible.iter().position(|option| option.value == value.as_str())).or(initial);
+            }
+            if search.changed() || navigated.as_ref().is_some_and(|value| !visible.iter().any(|option| option.value == value.as_str())) {
+                ui.data_mut(|data| data.remove::<String>(cursor_id));
+            }
+        }
+        if down && !visible.is_empty() {
+            cursor = Some(cursor.map_or(0, |index| (index + 1).min(visible.len().saturating_sub(1))));
+        }
+        if up && !visible.is_empty() {
+            cursor = Some(cursor.map_or(visible.len().saturating_sub(1), |index| index.saturating_sub(1)));
+        }
+        if enter && let Some(option) = visible.get(cursor.unwrap_or(0)) {
+            chosen = Some(option.value.to_owned());
+            ui.close();
+        }
+        if (up || down)
+            && let Some(option) = cursor.and_then(|index| visible.get(index))
+        {
+            // Keep the chosen value when newly discovered options change the row order.
+            ui.data_mut(|data| data.insert_temp(cursor_id, option.value.to_owned()));
+        }
         egui::ScrollArea::vertical()
             .id_salt(format!("{id}_list"))
             .max_height(Tokens::get().space_24 * 10.0)
-            .min_scrolled_height(Tokens::get().space_24 * 10.0)
-            .auto_shrink([false, false])
+            .min_scrolled_height(if fit_contents { 0.0 } else { Tokens::get().space_24 * 10.0 })
+            .auto_shrink([false, fit_contents])
             .show(ui, |ui| {
-                for option in options.iter().filter(|o| o.label.to_lowercase().contains(&query)) {
-                    let response = ui.selectable_label(current == option.label, option.label);
+                for (index, option) in visible.iter().enumerate() {
+                    let response = ui.selectable_label(cursor.map_or(current == option.label, |cursor| cursor == index), option.label);
+                    if (up || down) && cursor == Some(index) {
+                        response.scroll_to_me(Some(egui::Align::Center));
+                    }
                     if let Some(handle) = option.handle {
                         solidcraft_ui_registry::publish_handle(handle, response.rect.center());
                     }
@@ -560,14 +685,23 @@ fn searchable_dropdown_with(
                         ui.close();
                     }
                 }
-                if let Some(pending) = pending {
+                if !fit_contents && let Some(pending) = pending {
                     ui.label(pending);
                 }
             });
+        if fit_contents && let Some(pending) = pending {
+            ui.label(pending);
+        }
     });
     let response = popup.response;
     if popup.inner.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         response.request_focus();
+    }
+    if !egui::ComboBox::is_open(ui.ctx(), response.id) {
+        ui.data_mut(|data| {
+            data.remove::<bool>(state.with("focused"));
+            data.remove::<String>(state.with("cursor"));
+        });
     }
     publish(ui, &response, egui::Role::ComboBox);
     chosen
@@ -1798,7 +1932,14 @@ pub fn shell_search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &
 
 /// Compact icon action opening the shared searchable menu.
 pub fn searchable_icon_dropdown(ui: &mut Ui, icon: &'static str, label: &str, filter: &mut String, options: &[SearchOption<'_>]) -> Option<String> {
-    searchable_dropdown_with(ui, "icon_search_menu", label, filter, options, SearchMenu { custom: None, pending: None, icon: Some(icon) })
+    searchable_dropdown_with(
+        ui,
+        "icon_search_menu",
+        label,
+        filter,
+        options,
+        SearchMenu { custom: None, pending: None, icon: Some(icon), fit_contents: false, keyboard_selection: false },
+    )
 }
 
 /// The filter at the top of a long menu: a search glyph, a frameless editor and a rule under

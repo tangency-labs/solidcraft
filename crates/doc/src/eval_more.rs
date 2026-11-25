@@ -1287,7 +1287,7 @@ pub(super) fn sheet_eval(
             }
             Ok(())
         }
-        FeatureKind::SheetContour { sketch, curves, distance, rule, flip, reverse } => {
+        FeatureKind::SheetContour { sketch, curves, distance, radius, rule, orientation, symmetric, flip, reverse } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
             // The profile as the sketch draws it, exactly, end to end, and the sketch curve each
             // of its pieces was drawn on with the piece's key, the curves put in chain order first
@@ -1298,13 +1298,32 @@ pub(super) fn sheet_eval(
                 return Err(DocError::Invalid("the contour flange distance must be positive".into()));
             }
             let r = doc.sheet_rule(rule.as_deref());
-            let rule = convert_rule(&doc.rule_values(vals, &r)?);
+            let mut rv = doc.rule_values(vals, &r)?;
+            if let Some(radius) = radius {
+                rv.bend_radius = val(vals, radius, Kind::Length)?;
+                if !(rv.bend_radius >= 0.0 && rv.bend_radius < 1e4) {
+                    return Err(DocError::Invalid("the contour flange bend radius must be non-negative".into()));
+                }
+            }
+            let rule = convert_rule(&rv);
+            // Where the sketched profile lies across the sheet's thickness, as its depth into the
+            // material from the face the sheet's surfaces are (`side1`): on that face, through the
+            // middle (`center`) or on the other face (`side2`).
+            let depth = match orientation.as_deref() {
+                None | Some("side1") => 0.0,
+                Some("center") => rule.thickness / 2.0,
+                Some("side2") => rule.thickness,
+                Some(_) => return Err(DocError::Invalid("contour flange orientation must be center, side1 or side2".into())),
+            };
+            // `reverse` (Other side) mirrors the sketch, taking the width to the other side of
+            // its plane, with an orientation saved or not.
             let plane = if *reverse { Plane { origin: ss.plane.origin, x: ss.plane.x, y: ss.plane.y * -1.0 } } else { ss.plane };
             let segs: Vec<Seg2> = if *reverse { segs.iter().map(mirrored_y).collect() } else { segs };
             // Mirroring the sketch swaps the material side too. A sheet made from surfaces (#6748):
             // each piece pushed out along the normal is a panel of it.
             let name = new_name(st, f, 0);
-            let (sheet, solid) = crate::SurfaceSheet::contour(&name, &r.name, &rule, &plane, &segs, w, *flip != *reverse, f.id, &drawn)?;
+            let (sheet, solid) =
+                crate::SurfaceSheet::contour(&name, &r.name, &rule, &plane, &segs, w, depth, *symmetric, *flip != *reverse, f.id, &drawn)?;
             st.bodies.push(new_sheet_body(name, &sheet, solid, f.id));
             st.surface_sheets.push(sheet);
             Ok(())

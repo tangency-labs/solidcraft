@@ -6899,7 +6899,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 return Err("pick profiles in two or more sketches, or a profile and a sketch point".into());
             }
             let mut p = json!({"sections": sections, "operation": OPS.get(*operation).copied().unwrap_or("new")});
-            crate::dialogs_sweep::rail_params(app, *rail_fit, [sels(d, 1), sels(d, 2)], &mut p)?;
+            let rails: Vec<&[Sel]> = (1..d.inputs.len()).map(|i| sels(d, i)).collect();
+            crate::dialogs_sweep::rail_params(app, *rail_fit, &rails, &mut p)?;
             ("solid.loft", p)
         }
         Kind::Sweep { operation, opts } => {
@@ -6951,7 +6952,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 p["path_sketch"] = json!(path_sketch);
                 p["path"] = json!(path);
             }
-            crate::dialogs_sweep::params(app, opts, sels(d, 2).first(), [sels(d, 3), sels(d, 4)], &mut p)?;
+            crate::dialogs_sweep::params(app, opts, sels(d, 2).first(), &[sels(d, 3), sels(d, 4)], &mut p)?;
             ("solid.sweep", p)
         }
         Kind::OffsetPlane { .. } => {
@@ -9627,9 +9628,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         FeatureKind::Loft { sections, operation, targets, rails, rail_fit } => {
             let mut d = start("solid.loft")?;
             d.kind = Kind::Loft { operation: op_index(operation), rail_fit: crate::dialogs_sweep::rail_fit_index(*rail_fit) };
-            for (inp, items) in d.inputs.iter_mut().skip(1).zip(crate::dialogs_sweep::rail_sels(rails, s.active_sketch)) {
-                inp.items = items;
-            }
+            crate::dialogs_sweep::fill_rails(&mut d.inputs, 1, crate::dialogs_sweep::rail_sels(rails, s.active_sketch));
+            crate::dialogs_sweep::grow_loft_rails(&mut d);
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = sections
                     .iter()
@@ -9669,8 +9669,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let Some(inp) = d.inputs.get_mut(2) {
                 inp.items = direction.into_iter().collect();
             }
-            for (inp, items) in d.inputs.iter_mut().skip(3).zip(crate::dialogs_sweep::rail_sels(rails, s.active_sketch)) {
-                inp.items = items;
+            let mut sweep_rails = crate::dialogs_sweep::rail_sels(rails, s.active_sketch).into_iter();
+            for inp in d.inputs.iter_mut().skip(3) {
+                inp.items = sweep_rails.next().unwrap_or_default();
             }
             let items = st.sketch(sketch.0).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
             if let Some(inp) = d.inputs.get_mut(0) {

@@ -15,6 +15,7 @@ default = ["usage-stats"]
 usage-stats = ["dep:getrandom", "solidcraft-engine/usage-stats"]
 
 [dependencies]
+craft-plugin = { workspace = true }
 solidcraft-viewport-egui = { workspace = true }
 solidcraft-viewport-gpu = { workspace = true }
 solidcraft-viewport = { workspace = true }

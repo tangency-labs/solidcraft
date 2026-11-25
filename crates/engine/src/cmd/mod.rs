@@ -40,6 +40,7 @@ mod construct_auto;
 pub(crate) mod delete;
 pub(crate) mod diagnostics;
 mod drawing;
+mod drawing_auto_mark;
 mod drawing_balloon;
 mod drawing_break;
 mod drawing_centre_line;
@@ -703,6 +704,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(drawing::COMMANDS.iter());
     v.extend(drawing_balloon::COMMANDS.iter());
     v.extend(drawing_break::COMMANDS.iter());
+    v.extend(drawing_auto_mark::COMMANDS.iter());
     v.extend(drawing_centre_line::COMMANDS.iter());
     v.extend(drawing_centre_mark::COMMANDS.iter());
     v.extend(drawing_check::COMMANDS.iter());
