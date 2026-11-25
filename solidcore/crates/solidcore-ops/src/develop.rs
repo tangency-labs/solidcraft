@@ -21,11 +21,14 @@ use solidcore_convert::develop as cv;
 use solidcore_convert::{
     record_region2, record_seg2, record_vec2, record_vec3, region2, seg2, vec2, vec3,
 };
-use solidcore_record::develop::{Bend, Development, Lap, Mismatch, Rigid2, Rigid3, Sheet, Surface};
+use solidcore_record::develop::{
+    Bead, BeadForm, BeadOutline, Bend, Development, Lap, Mismatch, Rigid2, Rigid3, Sheet, Surface,
+};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 
 pub use solidcore::develop::{
-    ContourRefusal, JointRefusal, PanelRefusal, Refusal, RuleRefusal, MAX_JOINTS, MAX_PANELS,
+    BeadAgainst, BeadRefusal, ContourRefusal, JointRefusal, PanelRefusal, Refusal, RuleRefusal,
+    MAX_JOINTS, MAX_PANELS, MIN_BEAD_RADIUS,
 };
 
 /// Lays the sheet out flat ([`solidcore::develop::develop`]): `anchors` says where some panels'
@@ -437,6 +440,101 @@ pub mod hermite {
     pub fn cubic(p0: Vec2, d0: Vec2, p3: Vec2, d3: Vec2, h: f64) -> Seg2 {
         record_seg2(&k::cubic(vec2(p0), vec2(d0), vec2(p3), vec2(d3), h))
     }
+}
+
+impl Fold {
+    /// What bead `b` does to the folded solid of a sheet `t` thick
+    /// ([`solidcore::develop::bead_form`]): the footprint its panel's faces leave open, in the
+    /// flat, and its faces in space, each with what it is.
+    ///
+    /// # Errors
+    /// The kernel's [`BeadRefusal`]: a section that does not fit, or a panel with no place.
+    pub fn bead_form(&self, b: &Bead, t: f64) -> Result<BeadForm, BeadRefusal> {
+        k::bead_form(&self.inner, &cv::bead(b), t).map(|f| cv::record_bead_form(&f))
+    }
+
+    /// Bead `b` in the flat of a sheet `t` thick ([`solidcore::develop::bead_outline`]): its
+    /// footprint, its centreline, its crown, and how a note along it is written; with `mirror`,
+    /// in the flat as a flat pattern is read (mirrored across its x axis).
+    ///
+    /// # Errors
+    /// The kernel's [`BeadRefusal`]: a section that does not fit, or a panel with no place.
+    pub fn bead_outline(&self, b: &Bead, t: f64, mirror: bool) -> Result<BeadOutline, BeadRefusal> {
+        k::bead_outline(&self.inner, &cv::bead(b), t, mirror).map(|o| cv::record_bead_outline(&o))
+    }
+
+    /// Where a note `height` high along bead `b` stands in the flat of a sheet `t` thick
+    /// ([`solidcore::develop::bead_note`]): its anchor and its angle (radians); with `mirror`,
+    /// as a flat pattern is read.
+    ///
+    /// # Errors
+    /// The kernel's [`BeadRefusal`]: a section that does not fit, or a panel with no place.
+    pub fn bead_note(
+        &self,
+        b: &Bead,
+        t: f64,
+        mirror: bool,
+        height: f64,
+    ) -> Result<(Vec2, f64), BeadRefusal> {
+        k::bead_note(&self.inner, &cv::bead(b), t, mirror, height).map(|(p, a)| (record_vec2(p), a))
+    }
+
+    /// Where a straight line from `a` to `b`, drawn on the plane through `origin` with unit
+    /// normal `normal`, lies in planar panel `i`'s chart, in a sheet `t` thick
+    /// ([`solidcore::develop::line_in_chart`]): its ends, and whether the plane is the panel's
+    /// far face. None where the plane is neither of its faces, or the panel has no place.
+    #[must_use]
+    pub fn line_in_chart(
+        &self,
+        i: usize,
+        t: f64,
+        origin: Vec3,
+        normal: Vec3,
+        a: Vec3,
+        b: Vec3,
+    ) -> Option<(Vec2, Vec2, bool)> {
+        let place = self.inner.places.get(i).copied().flatten()?;
+        k::line_in_chart(&place, t, vec3(origin), vec3(normal), vec3(a), vec3(b))
+            .map(|(p, q, far)| (record_vec2(p), record_vec2(q), far))
+    }
+}
+
+/// Bead `b`'s footprint in its panel's chart, counter-clockwise, on a sheet `t` thick
+/// ([`solidcore::develop::bead_footprint`]).
+///
+/// # Errors
+/// The kernel's [`BeadRefusal`]: a section that does not fit.
+pub fn bead_footprint(b: &Bead, t: f64) -> Result<[Vec2; 4], BeadRefusal> {
+    k::bead_footprint(&cv::bead(b), t).map(|f| f.map(record_vec2))
+}
+
+/// Where bead `b`'s footprint, on a sheet `t` thick, lies against the outline `l` in its panel's
+/// chart, coming within `near` of it counting as meeting it
+/// ([`solidcore::develop::bead_against`]).
+///
+/// # Errors
+/// The kernel's [`BeadRefusal`]: a section that does not fit, or an outline it cannot place.
+pub fn bead_against(b: &Bead, t: f64, l: &Loop2, near: f64) -> Result<BeadAgainst, BeadRefusal> {
+    let l = solidcore::prism::profile::Loop2 {
+        segs: l.segs.iter().map(seg2).collect(),
+    };
+    k::bead_against(&cv::bead(b), t, &l, near)
+}
+
+/// Whether the segment from `a` to `b` lies wholly in `region`
+/// ([`solidcore::develop::segment_in_region`]). None where it cannot be decided.
+#[must_use]
+pub fn segment_in_region(region: &Region2, a: Vec2, b: Vec2) -> Option<bool> {
+    k::segment_in_region(&region2(region), vec2(a), vec2(b))
+}
+
+/// The flanks' angle (radians) of a bead `depth` deep and `width` wide that leaves a crown
+/// `crown_width` wide ([`solidcore::develop::bead_flank_angle`]).
+///
+/// # Errors
+/// The kernel's [`BeadRefusal`]: a crown width not at least 0 and less than the width.
+pub fn bead_flank_angle(depth: f64, width: f64, crown_width: f64) -> Result<f64, BeadRefusal> {
+    k::bead_flank_angle(depth, width, crown_width)
 }
 
 #[cfg(test)]

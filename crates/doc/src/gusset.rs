@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use crate::expr::{Kind, Value};
 use crate::{DocError, Document, Expr, Feature, FeatureKind, ModelState, PlaneRef, Result};
 use serde::{Deserialize, Serialize};
-use solidcore_ops::frame_gusset as geometry;
 use solidcore_record::Plane;
+use solidcraft_kernel::services::frame_gusset as geometry;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(deny_unknown_fields)]
@@ -145,12 +145,16 @@ pub(crate) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
     Ok(())
 }
 
-fn geometry_error(error: solidcore_ops::Error) -> DocError {
+fn geometry_error(error: solidcraft_kernel::services::Error) -> DocError {
     match error {
-        solidcore_ops::Error::Refused { reason, .. } | solidcore_ops::Error::Unsupported(reason) => invalid(reason),
-        solidcore_ops::Error::Argument | solidcore_ops::Error::Profile(_) => solidcraft_kernel::KernelError::Invalid(error.to_string()).into(),
-        solidcore_ops::Error::Internal(message) => solidcraft_kernel::KernelError::Internal(message).into(),
-        error @ solidcore_ops::Error::Invariant { defect: true, .. } => solidcraft_kernel::KernelError::Internal(error.to_string()).into(),
+        solidcraft_kernel::services::Error::Refused { reason, .. } | solidcraft_kernel::services::Error::Unsupported(reason) => invalid(reason),
+        solidcraft_kernel::services::Error::Argument | solidcraft_kernel::services::Error::Profile(_) => {
+            solidcraft_kernel::KernelError::Invalid(error.to_string()).into()
+        }
+        solidcraft_kernel::services::Error::Internal(message) => solidcraft_kernel::KernelError::Internal(message).into(),
+        error @ solidcraft_kernel::services::Error::Invariant { defect: true, .. } => {
+            solidcraft_kernel::KernelError::Internal(error.to_string()).into()
+        }
         other => solidcraft_kernel::KernelError::Failed(other.to_string()).into(),
     }
 }
