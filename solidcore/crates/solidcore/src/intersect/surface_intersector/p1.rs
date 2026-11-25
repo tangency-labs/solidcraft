@@ -30,7 +30,7 @@
 //! | [`SurfaceIntersector::test_span_accuracy`], [`SpanAccuracy`] | `TestSpanAccuracy`                    |
 //! | [`SurfaceIntersector::add_point_to_curve`]        | `AddPointToCurve`                                |
 //! | [`SurfaceIntersector::add_start_point`]           | `AddStartPoint`                                  |
-//! | [`SurfaceIntersector::is_same_tangent_cluster`], [`IntersectionPointType::is_tangent_type`], `tangent_start_rank` (private) | the SolidCraft fork's `IsSameTangentCluster`, `sm_IsTangentType`, `sm_TangentStartRank` (opt-in, WR-76) |
+//! | [`SurfaceIntersector::is_same_tangent_cluster`], [`IntersectionPointType::is_tangent_type`], `tangent_start_rank` (private) | the SolidCraft fork's `IsSameTangentCluster`, `sm_IsTangentType`, `sm_TangentStartRank` (WR-76) |
 //! | [`SurfaceIntersector::add_through_point`]         | `AddThroughPoint`                                |
 //! | [`SurfaceIntersector::reverse_curve_direction`]   | `ReverseCurveDirection`                          |
 //! | [`SurfaceIntersector::is_point_on_curve`]         | `IsPointOnCurve`                                 |
@@ -71,13 +71,11 @@
 //! - **`AddStartPoint`** keeps upstream's "replace a bounded start point by the exact
 //!   one" branch, which only reassigns a local pointer: the exact candidate is
 //!   dropped and the bounded point stays.
-//! - **Opt-in fix (WR-76, #392).** With
-//!   [`UpstreamFixes::ssi_trace_tangent_curves_once`](crate::kernel::UpstreamFixes::ssi_trace_tangent_curves_once)
-//!   `AddStartPoint` keeps one start point per tangent cluster
+//! - **Fix (WR-76, #392).** `AddStartPoint` keeps one start point per tangent cluster
 //!   ([`SurfaceIntersector::is_same_tangent_cluster`]): a candidate in a cluster
 //!   replaces the start point it clusters with when it ranks better and is dropped
-//!   otherwise (the SolidCraft fork's tangency-labs/smlib@0ce09f2). Off by default
-//!   (upstream behaviour).
+//!   otherwise (the SolidCraft fork's tangency-labs/smlib@0ce09f2); upstream keeps
+//!   every start point of the cluster.
 //! - **WR-51.** `IsPointOnStartPoint` compares each distance with the tolerance;
 //!   upstream compares the squared distance with the tolerance itself.
 //! - **WR-52.** [`SurfaceIntersector::is_point_on_curve`] (`SmSurfaceIntersector.cpp:7376`,
@@ -107,6 +105,15 @@
 //!   span ([`SurfaceIntersector::span_images_certified`], [`super::sphere_span`],
 //!   bisection depth bound [`super::sphere_span::MAX_DEPTH`]). Otherwise it is rejected as
 //!   a sampled failure is, and the trace shortens its step.
+//! - **The default tolerance from both surfaces (not upstream).** Upstream's constructor
+//!   says its default is "based on the sizes of the surfaces" but sizes it from surface 1
+//!   alone, so a plane first ran at a thousandth of its 2.47e6 natural domain and the
+//!   swapped order at the other surface's size. Here each surface gives a scale
+//!   (`default_tolerance_measure`: its size over a bounded domain, the cross-section
+//!   at the parameter nearest 0 when one range is unbounded, none for two) and the
+//!   default is the smaller scale over 1000, then the smaller size, then upstream's
+//!   size of surface 1. Surface 2's evaluations now propagate `Unported` and
+//!   cancellation as surface 1's do.
 //! - **Not ported here.** `SmTsectPnt::Dump` / `Draw` (debug output) and the
 //!   `SM_DEBUG_CODE` blocks (graphics and jump statistics).
 //!
@@ -116,7 +123,8 @@ use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::p6::DropPointCaches;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
-use crate::error::{Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -125,7 +133,9 @@ use crate::geom::tol::is_zero;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{max2, max3, min2, EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
+use crate::math::{
+    max2, max3, min2, EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, INFINITE_PARAMETER, PI,
+};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::knots::Side;
@@ -190,7 +200,7 @@ pub enum IntersectionPointType {
 
 impl IntersectionPointType {
     /// A tangent point, tangent curve or coincidence point (the fork's
-    /// `sm_IsTangentType`, opt-in fix WR-76, #392).
+    /// `sm_IsTangentType`, fix WR-76, #392).
     #[must_use]
     pub const fn is_tangent_type(self) -> bool {
         matches!(
@@ -675,6 +685,14 @@ pub struct SurfaceIntersector<'s> {
     pub(crate) start_loop_trace_steps: u64,
     /// Not upstream: a `trace_step` call was refused because `trace_steps_left` ran out.
     pub trace_budget_refused: bool,
+    /// Not upstream (fix WR-76): the curve's only point, when `TraceCurve` stopped
+    /// because the first span from it lies on a found curve
+    /// ([`SurfaceIntersector::span_on_found_curve`], which requires that point within
+    /// `this_approx_tol_3d` of a found curve). [`SurfaceIntersector::flush_curve`]
+    /// flushes nothing for that point alone: it is a point of a curve already found,
+    /// not a touching point. Cleared with `curve_points` (a new trace, a flush, and each
+    /// `curve_points.clear()`).
+    pub lone_start_on_found_curve: Option<TsectId>,
     /// `m_bCheckForInteriorCurves` (no longer used upstream).
     pub check_for_interior_curves: bool,
     /// `m_bDoingSelfIntersection`: both surfaces are the same object.
@@ -701,9 +719,6 @@ pub struct SurfaceIntersector<'s> {
     /// ([`SurfaceIntersector::add_deferred_touching_points`]; not upstream, which
     /// drops them for good).
     pub(crate) deferred_touching: Vec<super::p3::DeferredTouching>,
-    /// `Kernel::fixes.brep_edit_statuses_pass_on` captured from the constructing kernel
-    /// (WR-658; fork e7ebc8d's `SmAdvSurfaceIntersector` statuses).
-    pub(crate) edit_statuses: bool,
     /// The object is an `SmAdvSurfaceIntersector`: the virtual
     /// `ComputeSingularityPoint` that `ComputePointValues` calls is that class's
     /// override, not the basic `SM_ERR` one.
@@ -723,6 +738,86 @@ fn or_keep<T>(r: Result<T>, fallback: T) -> Result<T> {
     }
 }
 
+/// What one surface over the caller's domain gives the default tolerance of
+/// [`SurfaceIntersector::new`]: each value only when it counts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ToleranceMeasure {
+    /// Upstream's size, `|P(min) P(mid)| + |P(mid) P(max)|`.
+    size: Option<f64>,
+    /// The size for a bounded domain; with exactly one parameter range unbounded, the
+    /// same polyline along the bounded range at the point of the unbounded range nearest
+    /// 0; none when both ranges are unbounded.
+    scale: Option<f64>,
+}
+
+/// `|P(a) P(m)| + |P(m) P(b)|` on `surface`: `None` unless all three evaluations
+/// succeed and the length is finite and positive (`Unported` and cancellation
+/// propagate).
+fn polyline_length(k: &Kernel, surface: &Surface, uvs: [Point2; 3]) -> Result<Option<f64>> {
+    let mut pts = [Vec3::UNDEF; 3];
+    for (p, uv) in pts.iter_mut().zip(uvs) {
+        match or_keep(surface.evaluate_point(k, uv).map(Some), None)? {
+            Some(q) => *p = q,
+            None => return Ok(None),
+        }
+    }
+    let [a, m, b] = pts;
+    let length = a.distance(m) + m.distance(b);
+    Ok((length.is_finite() && length > 0.0).then_some(length))
+}
+
+/// Not upstream (tangency-labs/solidcraft#17720): the size and scale of `surface` over
+/// `domain` for the default tolerance of [`SurfaceIntersector::new`]. A domain with an
+/// inverted range (the inside-out extent among them) gives neither. A parameter range is
+/// unbounded when it is at least [`INFINITE_PARAMETER`] long. With exactly one
+/// unbounded range the scale is taken at `clamp(0, lo, hi)` of that range: an
+/// extrusion's profile, a cylinder's reference circle, an unbounded cone's base circle.
+///
+/// # Errors
+///
+/// `Unported` and cancellation from the surface's evaluations.
+fn default_tolerance_measure(
+    k: &Kernel,
+    surface: &Surface,
+    domain: &Extent2d,
+) -> Result<ToleranceMeasure> {
+    if domain.has_negative_area() {
+        return Ok(ToleranceMeasure {
+            size: None,
+            scale: None,
+        });
+    }
+    let size = polyline_length(
+        k,
+        surface,
+        [domain.min(), domain.evaluate(0.5, 0.5), domain.max()],
+    )?;
+    let unbounded = |lo: f64, hi: f64| hi - lo >= INFINITE_PARAMETER;
+    let nearest_zero = |lo: f64, hi: f64| min2(max2(0.0, lo), hi);
+    let (u0, u1, v0, v1) = (
+        domain.u_min(),
+        domain.u_max(),
+        domain.v_min(),
+        domain.v_max(),
+    );
+    let (um, vm) = (0.5 * (u0 + u1), 0.5 * (v0 + v1));
+    let scale = match (unbounded(u0, u1), unbounded(v0, v1)) {
+        (false, false) => size,
+        (false, true) => {
+            let v = nearest_zero(v0, v1);
+            let uvs = [Point2::new(u0, v), Point2::new(um, v), Point2::new(u1, v)];
+            polyline_length(k, surface, uvs)?
+        }
+        (true, false) => {
+            let u = nearest_zero(u0, u1);
+            let uvs = [Point2::new(u, v0), Point2::new(u, vm), Point2::new(u, v1)];
+            polyline_length(k, surface, uvs)?
+        }
+        (true, true) => None,
+    };
+    Ok(ToleranceMeasure { size, scale })
+}
+
 impl<'s> SurfaceIntersector<'s> {
     /// The intersector of `surface1` over `uv_domain1` and `surface2` over
     /// `uv_domain2` (`SmSurfaceIntersector(...)`; upstream default
@@ -730,9 +825,16 @@ impl<'s> SurfaceIntersector<'s> {
     ///
     /// Unless `from_fillet_intersector`, a domain not contained in its surface's
     /// natural domain is cut to the overlap (reset to the inside-out extent when they
-    /// are disjoint). The closedness flags and the default tolerance
-    /// `this_approx_tol_3d = (|P(min) P(mid)| + |P(mid) P(max)|) / 1000` are taken
-    /// on the given domains.
+    /// are disjoint). The closedness flags and the default tolerance are taken on the
+    /// given domains: `this_approx_tol_3d` is the smaller scale of the two surfaces over
+    /// 1000; with no scale, the smaller size; with no size either, upstream's
+    /// `(|P(min) P(mid)| + |P(mid) P(max)|) / 1000` of `surface1`
+    /// (`default_tolerance_measure`).
+    ///
+    /// # Errors
+    ///
+    /// `Unported` and cancellation from either surface's evaluations, and those of the
+    /// natural domains and closedness tests.
     pub fn new(
         k: &Kernel,
         surface1: &'s Surface,
@@ -770,15 +872,30 @@ impl<'s> SurfaceIntersector<'s> {
         let closed_v1 = surface_is_closed(k, surface2, uv_domain2, SurfParamType::V)?;
 
         // Compute a reasonable default tolerance for intersection based on the sizes
-        // of the surfaces (statuses are only reported upstream).
-        let p1 = or_keep(surface1.evaluate_point(k, uv_domain1.min()), Vec3::UNDEF)?;
-        let p_mid = or_keep(
-            surface1.evaluate_point(k, uv_domain1.evaluate(0.5, 0.5)),
-            Vec3::UNDEF,
-        )?;
-        let p2 = or_keep(surface1.evaluate_point(k, uv_domain1.max()), Vec3::UNDEF)?;
-        let size = p1.distance(p_mid) + p_mid.distance(p2);
-        let this_approx_tol_3d = size / 1000.0; // accuracy is 1/1000th size of surface
+        // of the surfaces (not upstream, which sizes it from surface1 alone; see
+        // `default_tolerance_measure`).
+        let m1 = default_tolerance_measure(k, surface1, uv_domain1)?;
+        let m2 = default_tolerance_measure(k, surface2, uv_domain2)?;
+        let least = |a: Option<f64>, b: Option<f64>| match (a, b) {
+            (Some(a), Some(b)) => Some(min2(a, b)),
+            (a, b) => a.or(b),
+        };
+        let this_approx_tol_3d = match (least(m1.scale, m2.scale), least(m1.size, m2.size)) {
+            (Some(scale), _) => scale / 1000.0,
+            (None, Some(size)) => size / 1000.0,
+            // degenerate input on both sides: upstream's size of surface1 (statuses
+            // are only reported upstream)
+            (None, None) => {
+                let p1 = or_keep(surface1.evaluate_point(k, uv_domain1.min()), Vec3::UNDEF)?;
+                let p_mid = or_keep(
+                    surface1.evaluate_point(k, uv_domain1.evaluate(0.5, 0.5)),
+                    Vec3::UNDEF,
+                )?;
+                let p2 = or_keep(surface1.evaluate_point(k, uv_domain1.max()), Vec3::UNDEF)?;
+                let size = p1.distance(p_mid) + p_mid.distance(p2);
+                size / 1000.0 // accuracy is 1/1000th size of surface
+            }
+        };
 
         Ok(Self {
             surfaces: [surface1, surface2],
@@ -802,6 +919,7 @@ impl<'s> SurfaceIntersector<'s> {
             trace_steps_left: u64::MAX,
             start_loop_trace_steps: super::p4::MAX_START_LOOP_TRACE_STEPS,
             trace_budget_refused: false,
+            lone_start_on_found_curve: None,
             check_for_interior_curves: true,
             doing_self_intersection: core::ptr::eq(surface1, surface2),
             clipped_by_through_point: false,
@@ -813,7 +931,6 @@ impl<'s> SurfaceIntersector<'s> {
             start_points: Vec::new(),
             through_points: Vec::new(),
             deferred_touching: Vec::new(),
-            edit_statuses: k.fixes.brep_edit_statuses_pass_on,
             advanced: false,
         })
     }
@@ -915,19 +1032,32 @@ impl<'s> SurfaceIntersector<'s> {
     // ---- simple virtuals -------------------------------------------------------------------
 
     /// `ComputePointValuesDelta`: not implemented by the basic intersector (`SM_ERR`).
+    ///
+    /// # Errors
+    ///
+    /// Always [`IntersectFailure::DeltaStepUnsupported`], status `SM_ERR`: a law intersection
+    /// run on the basic intersector asks for it (and tries larger steps, then gives up).
     pub fn compute_point_values_delta(&self) -> Result<()> {
-        Err(SolidError::intersect_stage_failed(OP_DELTA, SM_ERR))
+        Err(SolidError::intersect(
+            OP_DELTA,
+            IntersectFailure::DeltaStepUnsupported,
+        ))
     }
 
     /// `ComputeSingularityPoint`: the basic intersector does not handle singular or
     /// tangent points; it reports and returns `SM_ERR`.
+    ///
+    /// # Errors
+    ///
+    /// Always [`IntersectFailure::Tangent`], status `SM_ERR`: a contact the basic
+    /// intersector cannot prove is refused by name (`docs/ssi.md` §1).
     pub fn compute_singularity_point(
         &self,
         _uv_values: [Point2; 2],
         _point: TsectId,
         _previous: Option<TsectId>,
     ) -> Result<()> {
-        Err(SolidError::intersect_stage_failed(OP_SING, SM_ERR))
+        Err(SolidError::intersect(OP_SING, IntersectFailure::Tangent))
     }
 
     /// `ComputeStepSize`: `100 * this_approx_tol_3d` when `old_step_size` is zero
@@ -944,9 +1074,9 @@ impl<'s> SurfaceIntersector<'s> {
     // ---- singularities -------------------------------------------------------------------------
 
     /// Steps back from a surface pole along the curve and recomputes good first
-    /// derivatives of surface `srf` (`StepBackFromSingularity`): copies the curve
-    /// tangent of one point to the other (not with
-    /// `Kernel::fixes.ssi_pole_point_keeps_its_tangent`, WR-550), drops the point at `t = 0.01` (from
+    /// derivatives of surface `srf` (`StepBackFromSingularity`): leaves each point its
+    /// own curve tangent (WR-550; upstream copies one point's over the other's), drops
+    /// the point at `t = 0.01` (from
     /// `previous`) or `t = 0.99` (from `current`, when `step_off_current`) of the
     /// Hermite span onto the surface, and stores the derivatives and the singular
     /// parameter found there in that point. For a point on the degenerate boundary (not
@@ -997,20 +1127,12 @@ impl<'s> SurfaceIntersector<'s> {
         curr: &mut TsectPnt,
         step_size: f64,
     ) -> Result<()> {
-        // copy the curve tangent of the point stepped off to the other one
-        // Not upstream (WR-550, opt-in `fixes.ssi_pole_point_keeps_its_tangent`; the
-        // fork's tangency-labs/smlib@8d95600): the points keep their own curve tangents.
-        // The tangent at the singular point comes from the surface's limit normal there
-        // (`ComputePointValues`), so it is exact; copying the other point's tangent over
-        // it bent the fitted span into the pole. Only the surface derivatives are taken
-        // from the stepped-back point.
-        if !k.fixes.ssi_pole_point_keeps_its_tangent {
-            if step_off_current {
-                curr.curve_pv[1] = prev.crv_deriv();
-            } else {
-                prev.curve_pv[1] = curr.crv_deriv();
-            }
-        }
+        // Not upstream (WR-550; the fork's tangency-labs/smlib@8d95600): the points keep
+        // their own curve tangents, where upstream copies the tangent of the point
+        // stepped off to the other one. The tangent at the singular point comes from the
+        // surface's limit normal there (`ComputePointValues`), so it is exact; copying
+        // the other point's tangent over it bent the fitted span into the pole. Only the
+        // surface derivatives are taken from the stepped-back point.
 
         let herm = HermiteCurve::new(
             prev.crv_pos(),
@@ -1269,7 +1391,7 @@ impl<'s> SurfaceIntersector<'s> {
         if next_tsp.crv_deriv().length() < self.stepping_parallel_tol_radians {
             return Err(SolidError::intersect(
                 OP_SPAN,
-                crate::error::intersect::IntersectFailure::StepTangentTooShort,
+                IntersectFailure::StepTangentTooShort,
             ));
         }
 
@@ -1517,9 +1639,9 @@ impl<'s> SurfaceIntersector<'s> {
         let scaled_zero = EFF_ZERO * 100.0 * (1.0 + start.srf_pos(SrfIndex::First).max_dimension());
         let bounded_start = start.is_bounded_start(scaled_zero);
 
-        // opt-in fix (WR-76, #392): keep one start point per tangent cluster, the
+        // fix (WR-76, #392): keep one start point per tangent cluster, the
         // tangent-curve point with the smallest deviation
-        if k.fixes.ssi_trace_tangent_curves_once && start.point_type.is_tangent_type() {
+        if start.point_type.is_tangent_type() {
             for i in 0..self.start_points.len() {
                 let Some(&tid) = self.start_points.get(i) else {
                     break;
@@ -1530,7 +1652,20 @@ impl<'s> SurfaceIntersector<'s> {
                 }
                 if tangent_start_rank(&start) < tangent_start_rank(&target) {
                     // the new point is the better representative: it takes the
-                    // target's place
+                    // target's place, keeping the target's direction. The sign of
+                    // a tangent sample's direction depends only on the boundary
+                    // that produced it, and `TestPoint` snaps a trace onto a start
+                    // point whose direction opposes the trace: flipping it with
+                    // the representative would let a trace from the contact band's
+                    // edge stop on the cluster after one step, short of the
+                    // contact curve, and the cluster would then go with that stub.
+                    if start.crv_deriv().dot(target.crv_deriv()) < 0.0 {
+                        let p = self.point_mut(id)?;
+                        p.curve_pv[1] = -p.curve_pv[1];
+                        for uv in &mut p.uv_curve_pv {
+                            uv[1] = -uv[1];
+                        }
+                    }
                     if let Some(slot) = self.start_points.get_mut(i) {
                         *slot = id;
                     }
@@ -1612,18 +1747,14 @@ impl<'s> SurfaceIntersector<'s> {
                     };
                     let ang_tol_rad = 0.01 + self.this_approx_tol_3d.atan2(c_radius);
 
-                    // status ignored: a zero tangent gives an angle of 0. With
-                    // `ssi_proto_topology_statuses_pass_on` (fork bcc6f01) an angle that
-                    // cannot be computed does not meet the test.
-                    let ang = start.crv_deriv().angle_between(tsp.crv_deriv());
-                    let ang_ok = ang.is_ok() || !k.fixes.ssi_proto_topology_statuses_pass_on;
-                    let ang_between_rad = ang.unwrap_or(0.0);
-
-                    // when tangent angles are the same - these are an exact/bounded
+                    // status ignored upstream (a zero tangent gives an angle of 0); fork
+                    // bcc6f01: an angle that cannot be computed does not meet the test.
+                    // When tangent angles are the same - these are an exact/bounded
                     // startPoint pair: keep the exact one. (Upstream "replaces" the
                     // bounded target by assigning a local pointer only, so either way
                     // the candidate is not added.)
-                    if ang_ok && ang_between_rad < ang_tol_rad {
+                    let ang = start.crv_deriv().angle_between(tsp.crv_deriv());
+                    if ang.is_ok_and(|ang_between_rad| ang_between_rad < ang_tol_rad) {
                         found_match = true;
                         break;
                     }
@@ -1658,7 +1789,7 @@ impl<'s> SurfaceIntersector<'s> {
 
     /// True when two tangent-type boundary start points are two samples of one
     /// tangential contact crossing a boundary, not two intersection branches
-    /// (`IsSameTangentCluster`, opt-in fix WR-76, #392; the SolidCraft fork's
+    /// (`IsSameTangentCluster`, fix WR-76, #392; the SolidCraft fork's
     /// tangency-labs/smlib@0ce09f2): they lie on a common boundary side of both
     /// surfaces, within `10 sqrt(this_approx_tol_3d (1 + size))` of each other, and
     /// the surfaces stay within `this_approx_tol_3d` of each other at three points of
@@ -1733,7 +1864,7 @@ impl<'s> SurfaceIntersector<'s> {
     /// first or the last curve point, when those differ: the trace reaches the
     /// boundary within tolerance but not necessarily at the cluster's representative
     /// start point, which would otherwise be traced again from that end (the
-    /// SolidCraft fork's `DoIntersection` block before `FlushCurve`, opt-in fix
+    /// SolidCraft fork's `DoIntersection` block before `FlushCurve`, fix
     /// WR-76, #392; tangency-labs/smlib@0ce09f2).
     ///
     /// # Errors
@@ -1787,12 +1918,13 @@ impl<'s> SurfaceIntersector<'s> {
 
     /// Reverses the traced curve (`ReverseCurveDirection`): negates every point's
     /// curve and UV tangents, re-parameterises so the old end is `0` (same range),
-    /// and reverses the curve point order. An empty curve is `SM_ERR_NULL_POINTER`.
+    /// and reverses the curve point order. An empty curve is the caller's
+    /// [`IntersectFailure::NoCurveToReverse`] (`SM_ERR_NULL_POINTER`).
     pub fn reverse_curve_direction(&mut self) -> Result<()> {
         if self.curve_points.is_empty() {
-            return Err(SolidError::intersect_stage_failed(
+            return Err(SolidError::intersect(
                 OP_REVERSE,
-                SM_ERR_NULL_POINTER,
+                IntersectFailure::NoCurveToReverse,
             ));
         }
         let pnts = core::mem::take(&mut self.curve_points);
@@ -1895,47 +2027,15 @@ impl<'s> SurfaceIntersector<'s> {
 
                 // If within 10x tol, then check whether the surfaces diverge in
                 // between (two separate intersection curves).
-                if success && dist < self.this_approx_tol_3d * 10.0 {
-                    let srf1 = self.surfaces[0];
-                    let srf2 = self.surfaces[1];
-                    let dom1 = srf1.natural_uv_domain_with_nurb(k)?;
-                    let dom2 = srf2.natural_uv_domain_with_nurb(k)?;
-
-                    if k.fixes.ssi_proto_topology_statuses_pass_on {
-                        // fork bcc6f01: each drop (its status and its bOk) and evaluation
-                        // must succeed; without all the points there is no evidence that
-                        // the point lies on this curve.
-                        if self.is_point_on_curve_gap_checked(k, curve, point, crv_param)?
-                            == Some(true)
-                        {
-                            return Ok(true);
-                        }
-                        continue;
-                    }
-
-                    let (int_pt_uv1, int_pt_gap1) =
-                        surface_drop_point(k, srf1, point, &dom1, None)?;
-                    let (int_pt_uv2, int_pt_gap2) =
-                        surface_drop_point(k, srf2, point, &dom2, None)?;
-
-                    // status ignored upstream: an uninitialised point on failure
-                    let crv_pt = or_keep(curve.evaluate_point(k, crv_param), Vec3::UNDEF)?;
-
-                    let (crv_pt_uv1, crv_pt_gap1) =
-                        surface_drop_point(k, srf1, crv_pt, &dom1, Some(int_pt_uv1))?;
-                    let (crv_pt_uv2, crv_pt_gap2) =
-                        surface_drop_point(k, srf2, crv_pt, &dom2, Some(int_pt_uv2))?;
-
-                    let mid_pt_uv1 = (int_pt_uv1 + crv_pt_uv1) / 2.0;
-                    let mid_pt_uv2 = (int_pt_uv2 + crv_pt_uv2) / 2.0;
-                    let mid_srf1 = or_keep(srf1.evaluate_point(k, mid_pt_uv1), Vec3::UNDEF)?;
-                    let mid_srf2 = or_keep(srf2.evaluate_point(k, mid_pt_uv2), Vec3::UNDEF)?;
-
-                    let gap_mid = mid_srf1.distance(mid_srf2);
-
-                    if gap_mid < (int_pt_gap1 + int_pt_gap2) + (crv_pt_gap1 + crv_pt_gap2) {
-                        return Ok(true);
-                    }
+                if success
+                    && dist < self.this_approx_tol_3d * 10.0
+                    // fork bcc6f01: each drop (its status and its bOk) and evaluation must
+                    // succeed; without all the points there is no evidence that the point
+                    // lies on this curve.
+                    && self.is_point_on_curve_gap_checked(k, curve, point, crv_param)?
+                        == Some(true)
+                {
+                    return Ok(true);
                 }
             }
         }
@@ -2061,8 +2161,8 @@ impl<'s> SurfaceIntersector<'s> {
 
         // set Offset Surface Offset signed distances
         let [o0, o1] = surface_orientations;
-        set_offset_distance(self.surfaces[0], offsets[0] * o0)?;
-        set_offset_distance(self.surfaces[1], offsets[0] * o1)?;
+        set_offset_distance(self.surfaces[0], 0, offsets[0] * o0)?;
+        set_offset_distance(self.surfaces[1], 1, offsets[0] * o1)?;
 
         // do surf/surf/plane intersection
         let (found_answer, sol) = surface_local_plane_surface_intersect(
@@ -2078,7 +2178,10 @@ impl<'s> SurfaceIntersector<'s> {
             plane_normal,
         )?;
         if !found_answer {
-            return Err(SolidError::intersect_stage_failed(OP_LAW, SM_ERR));
+            return Err(SolidError::intersect(
+                OP_LAW,
+                IntersectFailure::NoIntersection,
+            ));
         }
 
         let [s0, s1, s2, s3] = sol;
@@ -2105,32 +2208,21 @@ pub fn compute_curve_type(
     let mut ret = TsectCurveType::Crossing;
     let ivl1 = uv_curve1.natural_interval();
     let ivl2 = uv_curve2.natural_interval();
-    let (uv1, uv2, norm1, norm2) = if k.fixes.ssi_proto_topology_statuses_pass_on {
-        // fork bcc6f01 (`sm_ComputeCurveType`): normals that cannot be evaluated show no
-        // tangency; the curve keeps the crossing type it starts with.
-        let (Some(p1), Some(p2)) = (
-            crate::error::ignored(uv_curve1.evaluate_point(k, ivl1.evaluate(0.5)))?,
-            crate::error::ignored(uv_curve2.evaluate_point(k, ivl2.evaluate(0.5)))?,
-        ) else {
-            return Ok(ret);
-        };
-        let uv1 = Point2::new(p1.x, p1.y);
-        let uv2 = Point2::new(p2.x, p2.y);
-        let (Some(norm1), Some(norm2)) = (
-            crate::error::ignored(surface_evaluate_normal(k, surface1, uv1))?,
-            crate::error::ignored(surface_evaluate_normal(k, surface2, uv2))?,
-        ) else {
-            return Ok(ret);
-        };
-        (uv1, uv2, norm1, norm2)
-    } else {
-        let p1 = or_keep(uv_curve1.evaluate_point(k, ivl1.evaluate(0.5)), Vec3::UNDEF)?;
-        let p2 = or_keep(uv_curve2.evaluate_point(k, ivl2.evaluate(0.5)), Vec3::UNDEF)?;
-        let uv1 = Point2::new(p1.x, p1.y);
-        let uv2 = Point2::new(p2.x, p2.y);
-        let norm1 = or_keep(surface_evaluate_normal(k, surface1, uv1), Vec3::UNDEF)?;
-        let norm2 = or_keep(surface_evaluate_normal(k, surface2, uv2), Vec3::UNDEF)?;
-        (uv1, uv2, norm1, norm2)
+    // fork bcc6f01 (`sm_ComputeCurveType`): normals that cannot be evaluated show no
+    // tangency; the curve keeps the crossing type it starts with.
+    let (Some(p1), Some(p2)) = (
+        crate::error::ignored(uv_curve1.evaluate_point(k, ivl1.evaluate(0.5)))?,
+        crate::error::ignored(uv_curve2.evaluate_point(k, ivl2.evaluate(0.5)))?,
+    ) else {
+        return Ok(ret);
+    };
+    let uv1 = Point2::new(p1.x, p1.y);
+    let uv2 = Point2::new(p2.x, p2.y);
+    let (Some(norm1), Some(norm2)) = (
+        crate::error::ignored(surface_evaluate_normal(k, surface1, uv1))?,
+        crate::error::ignored(surface_evaluate_normal(k, surface2, uv2))?,
+    ) else {
+        return Ok(ret);
     };
     let mut sign = 1.0;
     let dot = norm1.dot(norm2);
@@ -2527,29 +2619,13 @@ fn surface_global_point_solve(
 
 /// The rank of a tangent start point as a cluster's representative, lower is better:
 /// a traceable tangent-curve point first, then the smallest deviation (the fork's
-/// `sm_TangentStartRank`, opt-in fix WR-76, #392).
+/// `sm_TangentStartRank`, fix WR-76, #392).
 fn tangent_start_rank(tsp: &TsectPnt) -> f64 {
     (if tsp.point_type == IntersectionPointType::TangentCurve {
         0.0
     } else {
         1.0
     }) + min2(tsp.deviation, 0.5)
-}
-
-/// `crSurface.DropPoint(point, domain, guess, ..)`: the UV point and its gap.
-fn surface_drop_point(
-    k: &Kernel,
-    surface: &Surface,
-    point: Point3,
-    domain: &Extent2d,
-    guess: Option<Point2>,
-) -> Result<(Point2, f64)> {
-    let opts = crate::surface::surface::p5::DropPointOptions {
-        guess_uv: guess,
-        ..Default::default()
-    };
-    let r = surface.drop_point::<crate::surface::surface::p4::NoObject>(k, point, domain, &opts)?;
-    Ok((r.result_uv, r.gap))
 }
 
 /// `m_cpSurface[0]->LocalSurfaceIntersect(..)`: found flag and the solution's start
@@ -2628,15 +2704,16 @@ fn surface_local_plane_surface_intersect(
 /// `SM_CAST_PTR(SmOffsetSurface, surface)->SetOffsetDistance(distance)` (`NULL`
 /// dereferenced upstream for a surface that is not an offset). The intersector shares
 /// the surface with its owner, as upstream (the offset distance is a `Cell`).
-fn set_offset_distance(surface: &Surface, distance: f64) -> Result<()> {
+/// `index` is the surface's place in the intersector (0 or 1), for the error.
+fn set_offset_distance(surface: &Surface, index: usize, distance: f64) -> Result<()> {
     match surface.kind() {
         SurfaceKind::OffsetSurface(o) => {
             o.set_offset_distance(distance);
             Ok(())
         }
-        _ => Err(SolidError::intersect_stage_failed(
+        _ => Err(SolidError::intersect(
             "intersect::surface_intersector::p1::set_offset_distance",
-            SM_ERR_NULL_POINTER,
+            IntersectFailure::SurfaceNotOffset { surface: index },
         )),
     }
 }
@@ -2644,6 +2721,7 @@ fn set_offset_distance(surface: &Surface, distance: f64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR_NULL_POINTER;
     use crate::surface::plane::Plane;
 
     fn plane(o: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Surface {
@@ -2658,7 +2736,8 @@ mod tests {
 
     /// fork bcc6f01 (`sm_ComputeCurveType`, "normals that cannot be evaluated show no
     /// tangency"): the first UV curve cannot be evaluated. Upstream reads its unset
-    /// point and goes on to compare normals there; the fork keeps the crossing type.
+    /// point and goes on to compare normals there; the port keeps the crossing type, as
+    /// the fork does.
     #[test]
     fn compute_curve_type_without_a_uv_point_is_crossing() {
         let s1 = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
@@ -2673,16 +2752,9 @@ mod tests {
             )
             .unwrap(),
         );
-        for pass_on in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.ssi_proto_topology_statuses_pass_on = pass_on;
-            let r = compute_curve_type(&k, &s1, &s2, &bad, &uv2);
-            if pass_on {
-                assert_eq!(r.unwrap(), TsectCurveType::Crossing);
-            } else {
-                assert!(!matches!(r, Ok(TsectCurveType::Crossing)), "{r:?}");
-            }
-        }
+        let k = Kernel::default();
+        let r = compute_curve_type(&k, &s1, &s2, &bad, &uv2);
+        assert_eq!(r.unwrap(), TsectCurveType::Crossing);
     }
 
     /// `m_apUserPointer` follows copies and assignment, and compares by identity.
@@ -2741,6 +2813,196 @@ mod tests {
         assert!(same.doing_self_intersection);
     }
 
+    /// The default tolerances of `s1` over `d1` with `s2` over `d2`, in both orders.
+    fn default_tolerances(
+        k: &Kernel,
+        (s1, d1): (&Surface, &Extent2d),
+        (s2, d2): (&Surface, &Extent2d),
+    ) -> [f64; 2] {
+        let tol = |a, da, b, db| {
+            SurfaceIntersector::new(k, a, da, b, db, false)
+                .unwrap()
+                .this_approx_tol_3d
+        };
+        [tol(s1, d1, s2, d2), tol(s2, d2, s1, d1)]
+    }
+
+    fn assert_near(got: [f64; 2], want: f64) {
+        for t in got {
+            assert!((t - want).abs() <= 1e-12 * want, "{got:?}, want {want}");
+        }
+    }
+
+    fn frame(
+        o: [f64; 3],
+        x: [f64; 3],
+        y: [f64; 3],
+    ) -> crate::geom::axis2_placement::Axis2Placement {
+        let mut f = crate::geom::axis2_placement::Axis2Placement::default();
+        f.set_canonical(
+            Vec3::from_array(o),
+            Vec3::from_array(x),
+            Vec3::from_array(y),
+        )
+        .unwrap();
+        f
+    }
+
+    /// The plane through `o` spanned by `x` and `y` over its natural domain,
+    /// `[-1234567, 1234567]^2`.
+    fn infinite_plane(o: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Surface {
+        Surface::from(Plane::create_canonical(&frame(o, x, y)).unwrap())
+    }
+
+    fn horizontal_plane(z: f64) -> Surface {
+        infinite_plane([0.0, 0.0, z], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+    }
+
+    /// The cone with no height of base radius `2 s` at `(1, 2, 3) s` and semi-angle
+    /// `semi_angle_deg`: its base circle is its cross-section at height 0.
+    fn unbounded_cone(k: &Kernel, s: f64, semi_angle_deg: f64, swap_uv: bool) -> Surface {
+        Surface::from(
+            crate::surface::cone::Cone::create_canonical_with_semi_angle(
+                k,
+                &frame([s, 2.0 * s, 3.0 * s], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+                2.0 * s,
+                semi_angle_deg,
+                None,
+                swap_uv,
+                false,
+            )
+            .unwrap(),
+        )
+    }
+
+    /// The extrusion along z of the profile from (0, 0, 0) to (3, 0, 0) (a cubic Bezier
+    /// with evenly spaced control points, so `x = 3u`), over `[-1234567, 1234567]` in v.
+    fn extrusion(k: &Kernel) -> Surface {
+        let profile: Vec<Point3> = (0..4).map(|i| Vec3::new(f64::from(i), 0.0, 0.0)).collect();
+        let profile = Curve::from(crate::primitive::api_curves::create_curve(&profile).unwrap());
+        Surface::from(
+            crate::surface::surf_of_extrusion::SurfOfExtrusion::create_canonical(
+                k,
+                profile,
+                Vec3::new(0.0, 0.0, 1.0),
+            )
+            .unwrap(),
+        )
+    }
+
+    /// tangency-labs/solidcraft#17720: two planes over their natural domains have no
+    /// scale (both ranges unbounded), so the default falls back to the smaller size,
+    /// `2 sqrt(2) 1234567 / 1000 = 3491.9`, upstream's value, in either order.
+    #[test]
+    fn two_infinite_planes_keep_the_size_default() {
+        let k = &Kernel::default();
+        let a = horizontal_plane(0.0);
+        let b = infinite_plane([5.0, -1.0, 2.0], [0.0, 0.6, 0.8], [1.0, 0.0, 0.0]);
+        let (da, db) = (
+            a.natural_uv_domain_with_nurb(k).unwrap(),
+            b.natural_uv_domain_with_nurb(k).unwrap(),
+        );
+        let got = default_tolerances(k, (&a, &da), (&b, &db));
+        assert_near(got, 2.0 * 2.0f64.sqrt() * INFINITE_PARAMETER / 1000.0);
+    }
+
+    /// tangency-labs/solidcraft#17720: a cone with no height runs over `[apex, 1234567]`
+    /// in v (`[-1234567, apex]` for a negative semi-angle, WR-713), unbounded, so its
+    /// scale is its cross-section at height 0, the base circle, `4 r` along its u range.
+    /// Against a plane over its natural domain (no scale) the default is `4 r / 1000` in
+    /// either order, and it scales with the model.
+    #[test]
+    fn an_unbounded_cone_scales_by_its_base_circle() {
+        let k = Kernel::default();
+        for s in [1.0, 10.0] {
+            for semi_angle in [30.0, -30.0] {
+                let cone = unbounded_cone(&k, s, semi_angle, false);
+                let dc = cone.natural_uv_domain_with_nurb(&k).unwrap();
+                assert!(dc.v_max() - dc.v_min() >= INFINITE_PARAMETER, "{dc:?}");
+                let plane = horizontal_plane(7.0 * s);
+                let dp = plane.natural_uv_domain_with_nurb(&k).unwrap();
+                let got = default_tolerances(&k, (&cone, &dc), (&plane, &dp));
+                assert_near(got, 4.0 * 2.0 * s / 1000.0);
+            }
+        }
+    }
+
+    /// tangency-labs/solidcraft#17720: swapped, the cone's unbounded range is u, and its
+    /// scale is taken along v at the u nearest 0: the same default as unswapped.
+    #[test]
+    fn a_swapped_cone_scales_as_the_unswapped_one() {
+        let k = &Kernel::default();
+        let plane = horizontal_plane(0.0);
+        let dp = plane.natural_uv_domain_with_nurb(k).unwrap();
+        let tol = |swap| {
+            let cone = unbounded_cone(k, 1.0, 30.0, swap);
+            let dc = cone.natural_uv_domain_with_nurb(k).unwrap();
+            let long_u = dc.u_max() - dc.u_min() >= INFINITE_PARAMETER;
+            assert_eq!(long_u, swap, "{dc:?}");
+            default_tolerances(k, (&cone, &dc), (&plane, &dp))
+        };
+        let unswapped = tol(false);
+        assert_near(unswapped, 8.0 / 1000.0);
+        assert_near(tol(true), unswapped[0]);
+    }
+
+    /// tangency-labs/solidcraft#17720: an extrusion's scale is its profile (length 3)
+    /// whenever its sweep range is unbounded, `[-1234567, 1234567]` or the half-infinite
+    /// `[0, 1234567]`. A range one shorter is bounded, and the scale is then the size
+    /// along the diagonal, `2 sqrt(1.5^2 + 617283^2)`: the default jumps by about 4e5 at
+    /// that cut, which this rule inherits from upstream's `INFINITE_PARAMETER` (a limit,
+    /// not a fix).
+    #[test]
+    fn an_extrusion_scales_by_its_profile_over_an_unbounded_sweep() {
+        let k = &Kernel::default();
+        let e = extrusion(k);
+        let plane = horizontal_plane(2.0);
+        let dp = plane.natural_uv_domain_with_nurb(k).unwrap();
+        let natural = e.natural_uv_domain_with_nurb(k).unwrap();
+        let (u0, u1) = (natural.u_min(), natural.u_max());
+        for d in [
+            natural,
+            Extent2d::from_bounds(u0, 0.0, u1, INFINITE_PARAMETER),
+        ] {
+            assert_near(default_tolerances(k, (&e, &d), (&plane, &dp)), 3.0 / 1000.0);
+        }
+        let short = Extent2d::from_bounds(u0, 0.0, u1, INFINITE_PARAMETER - 1.0);
+        let half = 0.5 * (INFINITE_PARAMETER - 1.0);
+        let diagonal = 2.0 * (1.5f64 * 1.5 + half * half).sqrt();
+        assert_near(
+            default_tolerances(k, (&e, &short), (&plane, &dp)),
+            diagonal / 1000.0,
+        );
+    }
+
+    /// tangency-labs/solidcraft#17720: a surface counts for the default only over a domain
+    /// of positive area and where all its evaluations succeed; otherwise the other surface
+    /// decides, in either order. Here the unit plane (size `sqrt 2`) over the inside-out
+    /// extent, and a STEP surface with no base surface (every evaluation `InvalidInput`),
+    /// leave the cone's `8 / 1000`.
+    #[test]
+    fn a_surface_that_cannot_be_measured_leaves_the_other_one() {
+        let k = &Kernel::default();
+        let cone = unbounded_cone(k, 1.0, 30.0, false);
+        let dc = cone.natural_uv_domain_with_nurb(k).unwrap();
+        let unit = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let measured = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        assert_near(
+            default_tolerances(k, (&unit, &measured), (&cone, &dc)),
+            2.0f64.sqrt() / 1000.0,
+        );
+        assert_near(
+            default_tolerances(k, (&unit, &Extent2d::new()), (&cone, &dc)),
+            8.0 / 1000.0,
+        );
+        let empty = Surface::from(crate::surface::surface::StepSurface::empty());
+        assert!(empty.evaluate_point(k, Point2::new(0.5, 0.5)).is_err());
+        assert_near(
+            default_tolerances(k, (&empty, &measured), (&cone, &dc)),
+            8.0 / 1000.0,
+        );
+    }
+
     #[test]
     fn lists_and_reverse() {
         let k = &Kernel::default();
@@ -2771,6 +3033,7 @@ mod tests {
 
     #[test]
     fn empty_reverse_is_null_pointer() {
+        use crate::error::SM_ERR;
         let k = &Kernel::default();
         let s1 = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
@@ -2778,17 +3041,26 @@ mod tests {
         let e = si.reverse_curve_direction().unwrap_err();
         assert_eq!(
             e.intersect_failure(),
-            Some(&crate::error::intersect::IntersectFailure::StageFailed)
+            Some(&IntersectFailure::NoCurveToReverse)
         );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(e.upstream_status(), Some(1006));
-        assert!(e.is_defect());
-        // the basic intersector's unimplemented virtuals answer SM_ERR, a stage failure
+        assert!(!e.is_defect());
+        // the basic intersector's unimplemented delta step answers SM_ERR, unsupported
         let e = si.compute_point_values_delta().unwrap_err();
         assert_eq!(
             e.intersect_failure(),
-            Some(&crate::error::intersect::IntersectFailure::StageFailed)
+            Some(&IntersectFailure::DeltaStepUnsupported)
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert!(!e.is_defect());
+        // a singular or tangent point is refused by name, keeping SM_ERR
+        let e = si
+            .compute_singularity_point([Point2::new(0.0, 0.0); 2], TsectId(0), None)
+            .unwrap_err();
+        assert_eq!(e.intersect_failure(), Some(&IntersectFailure::Tangent));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert!(!e.is_defect());
     }
 
     /// WR-51: `IsPointOnStartPoint` compares each distance with the tolerance, so it

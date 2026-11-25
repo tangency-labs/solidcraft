@@ -1,8 +1,6 @@
-//! Mesh conversions save `reconstruction`: `analytic_v1` uses partial arcs and combined analytic parts
-//! or the upstream faceted fallback, with v5 source-bound names. An absent value or `legacy_prism`
-//! keeps the upstream converter, geometry-derived names and conversion feature owner after resaving.
-//! The unreleased `source_bound_names` Boolean is accepted as an alias: true selects `analytic_v1`,
-//! false selects `legacy_prism`. New commands save the canonical version name.
-//! The opt-in `analytic_v1_geometry_names` version uses the same new analytic reconstruction with
-//! geometry-derived names. Its per-feature value survives preference changes, undo and reopening.
-//! The previous release asks for an update instead of reading this format.
+//! Mesh conversions replay through the one SolidCore converter, using analytic faces where
+//! certified and the original closed mesh's planar facets otherwise. Every conversion uses
+//! source-bound v6 face names. Earlier designs and unreleased reconstruction/source_bound_names
+//! fields also replay this path; obsolete fields are ignored. References that no longer resolve
+//! report the normal broken-reference error and may need reattachment. The previous release
+//! opens a newer-format design with a warning and preserves fields it cannot read.

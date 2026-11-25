@@ -22,6 +22,14 @@ fn camera(view: StandardView) -> Camera {
 fn export(s: &mut Session, c: Camera, hidden: &str) -> Value {
     run(s, CMD, json!({"camera":c,"hidden":hidden}))
 }
+/// The LINE entities of an export's DXF.
+fn lines(v: &Value) -> Vec<(Vec2, Vec2)> {
+    solidcraft_io::read_dxf(v["dxf"].as_str().unwrap())
+        .unwrap()
+        .into_iter()
+        .filter_map(|g| if let solidcraft_io::Geom2::Line(a, b) = g { Some((a, b)) } else { None })
+        .collect()
+}
 
 #[test]
 fn view_dxf_cancellation_at_each_stage_preserves_the_destination_and_document() {
@@ -194,6 +202,84 @@ fn view_dxf_keeps_every_occurrence_while_sharing_geometry() {
     }
     assert!(centers.len() >= 3, "{centers:?}");
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
+    // The definition's first placement hidden: the others are still drawn from the shared mesh.
+    let first = s.world_state().unwrap().bodies.first().map(|b| b.name.clone()).unwrap();
+    run(&mut s, "browser.visibility", json!({"items":[first],"visible":false}));
+    let result = export(&mut s, camera(StandardView::Top), "dashed");
+    assert_eq!((result["stats"]["bodies"].clone(), result["stats"]["shared_meshes"].clone()), (json!(2), json!(1)), "{result}");
+}
+
+/// The lines themselves, worked by hand: a plain 40 x 30 x 10 box seen from the front is its
+/// 40 x 10 outline. Every line lies along one of its four sides, they add up to its 100 mm
+/// perimeter, and nothing is hidden.
+#[test]
+fn view_dxf_front_view_of_a_box_is_its_outline() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"body_name":"Plate"}));
+    let v = export(&mut s, camera(StandardView::Front), "dashed");
+    assert_eq!(v["hidden"], 0, "{v}");
+    let lines = lines(&v);
+    let lo = lines.iter().fold(Vec2::new(f64::INFINITY, f64::INFINITY), |m, (a, b)| Vec2::new(m.x.min(a.x).min(b.x), m.y.min(a.y).min(b.y)));
+    let hi = lines.iter().fold(Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY), |m, (a, b)| Vec2::new(m.x.max(a.x).max(b.x), m.y.max(a.y).max(b.y)));
+    assert!(((hi - lo) - Vec2::new(40.0, 10.0)).len() < 1e-6, "{lo:?} {hi:?}");
+    let near = |x: f64, y: f64| (x - y).abs() < 1e-6;
+    for (a, b) in &lines {
+        let along = (near(a.x, b.x) && (near(a.x, lo.x) || near(a.x, hi.x))) || (near(a.y, b.y) && (near(a.y, lo.y) || near(a.y, hi.y)));
+        assert!(along, "{a:?} {b:?} isn't along the outline");
+    }
+    let length: f64 = lines.iter().map(|(a, b)| a.dist(*b)).sum();
+    assert!((length - 100.0).abs() < 1e-6, "{length}");
+}
+
+/// A plate with a through hole, seen from the iso view, has every line drawn once: no two lines
+/// lie along each other. The faces round the rim are meshed apart, a hair off each other, and the
+/// mesh sides between them lie on the rim's own edge: they are no silhouettes.
+#[test]
+fn view_dxf_draws_a_holes_rim_once() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"body_name":"Plate"}));
+    run(&mut s, "solid.cylinder", json!({"radius":3,"height":12,"base":[10,10,-1],"operation":"cut","targets":["Plate"]}));
+    let lines = lines(&export(&mut s, camera(StandardView::Iso), "omit"));
+    assert!(!lines.is_empty());
+    for (i, &(a, b)) in lines.iter().enumerate() {
+        let dir = (b - a) / a.dist(b);
+        let (off, along) = (|p: Vec2| dir.cross(p - a).abs(), |p: Vec2| (p - a).dot(dir));
+        for &(c, d) in &lines[i + 1..] {
+            let overlap = along(c).max(along(d)).min(a.dist(b)) - along(c).min(along(d)).max(0.0);
+            assert!(off(c).max(off(d)) > 1e-5 || overlap < 1e-4, "drawn twice: {a:?} {b:?} and {c:?} {d:?}");
+        }
+    }
+}
+
+/// A bend seen end on draws each of its arcs once. The plate is 2 mm sheet, bent up 60° or 90° on its x = 60
+/// edge with an inner radius of its thickness, and seen from the front: every triangle of the bend's surface
+/// is seen edge on, whatever facing the mesh's rounding gives it, so its rows draw no chords beside the arcs.
+/// At 90° the thin triangles that join the bend's edge samples to its first rows lean past 1e-3; the
+/// surface's own normals still see them edge on. The lines on each bend circle add up to its arc, less only
+/// what sampling takes off.
+#[test]
+fn view_dxf_draws_a_bends_arcs_once() {
+    for degrees in [60f64, 90.] {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name": "Steel 2mm", "thickness": "2 mm", "bend_radius": "Thickness", "active": true}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [60, 40]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+        run(&mut s, "sheet.flange", json!({"edges": [[60, 20, 2]], "height": 20, "angle": format!("{degrees} deg")}));
+        let mut c = Camera { target: Vec3::new(30., 20., 5.), fov: 0., distance: 200., ..Default::default() };
+        c.set_view(StandardView::Front);
+        let lines = lines(&export(&mut s, c, "omit"));
+        // The bend's axis, 4 mm (radius and thickness) above the plate's underside, where the flange's
+        // outside meets the edge flanged: on the view, less the camera's target.
+        let axis = Vec2::new(60. - 4. * (degrees / 2.).to_radians().tan() - 30., 4. - 5.);
+        for radius in [2., 4.] {
+            let on = |p: Vec2| (p.dist(axis) - radius).abs() < 1e-3;
+            let drawn: f64 = lines.iter().filter(|&&(a, b)| on(a) && on(b)).map(|(a, b)| a.dist(*b)).sum();
+            let arc = radius * degrees.to_radians();
+            assert!(drawn > 0.99 * arc && drawn <= arc, "{degrees}°, radius {radius}: {drawn} mm of lines on a {arc} mm arc");
+        }
+    }
 }
 
 #[test]
@@ -261,6 +347,47 @@ fn view_dxf_hides_finished_sketches_behind_bodies_but_draws_the_active_sketch_on
     assert!((length(&dashed) - 80.).abs() < 1e-3, "{}", length(&dashed));
 }
 
+/// A shown sketch under an extrusion's outline is drawn once, as the body's black line, not again
+/// in blue on SKETCH: a cutting service reads the blue copy as a marking line (#19507).
+#[test]
+fn view_dxf_draws_a_shown_sketch_under_a_bodys_outline_once() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Panel"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Panel","distance":2,"body_name":"Panel"}));
+    let sketch = s.doc.features[0].id;
+    let sides = |v: &Value| {
+        let mut sides: Vec<i64> = lines(v).iter().map(|(a, b)| (a.dist(*b) * 1000.).round() as i64).collect();
+        sides.sort_unstable();
+        sides
+    };
+    for hidden in ["omit", "dashed"] {
+        // The body's own lines, with the sketch hidden. The top view is tilted a hair, so the
+        // panel's bottom edge on one side can show beside the top one: that line is the body's.
+        s.visibility.shown_sketches.retain(|id| *id != sketch);
+        let body = sides(&export(&mut s, camera(StandardView::Top), hidden));
+        assert!(
+            body.iter().filter(|l| **l == 30_000).count() >= 2 && body.iter().filter(|l| **l == 40_000).count() >= 2,
+            "hidden={hidden}: {body:?}"
+        );
+        s.visibility.shown_sketches.push(sketch);
+        assert!(crate::view::sketch_shown(&s, sketch));
+        let v = export(&mut s, camera(StandardView::Top), hidden);
+        assert_eq!(v["sketch"], 0, "hidden={hidden}: {v}");
+        let file = solidcraft_io::read_dxf_file(v["dxf"].as_str().unwrap()).unwrap();
+        assert!(file.entities().iter().all(|e| file.layer(e.layer()).unwrap().name() != "SKETCH"), "hidden={hidden}");
+        // Showing the sketch adds no line: the drawing is the body's lines alone.
+        assert_eq!(sides(&v), body, "hidden={hidden}");
+    }
+    // The sketch past the body keeps its own line: a second rectangle beside the panel.
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Beside"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[50,0],"p1":[60,10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let v = export(&mut s, camera(StandardView::Top), "omit");
+    assert!(v["sketch"].as_u64().is_some_and(|n| n > 0), "{v}");
+}
+
 #[test]
 fn view_dxf_zero_origin_puts_the_model_origin_at_the_drawing_zero() {
     let mut s = sample();
@@ -296,12 +423,12 @@ fn view_dxf_zero_origin_puts_the_model_origin_at_the_drawing_zero() {
 
 /// The lines of a regular polygon with `n` sides round `c`, from angle `from` to `to`.
 /// Over a whole turn the last line returns to the first point and the ring is closed.
-fn ring(c: Vec2, r: f64, n: usize, from: f64, to: f64) -> Vec<DxfEntity> {
+fn ring(c: Vec2, r: f64, n: usize, from: f64, to: f64) -> Vec<(Vec2, Vec2)> {
     let at = |i: usize| {
         let t = from + (to - from) * i as f64 / n as f64;
         Vec2::new(c.x + r * t.cos(), c.y + r * t.sin())
     };
-    (0..n).map(|i| DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Line(at(i), at(i + 1)) }).collect()
+    (0..n).map(|i| (at(i), at(i + 1))).collect()
 }
 
 #[test]
@@ -312,12 +439,12 @@ fn view_dxf_arcs_turn_a_tessellated_circle_into_a_circle_and_keep_polygons_as_li
     // circle for the 0.01 mm the drawing was made with, so they are polygons and stay lines.
     let fine = arcs::recognise(ring(c, 10., 64, 0., tau), 0.01);
     assert_eq!(fine.len(), 1, "{fine:?}");
-    let DxfShape::Circle { c: found, r } = &fine[0].shape else { panic!("{fine:?}") };
+    let DxfShape::Circle { c: found, r } = &fine[0] else { panic!("{fine:?}") };
     assert!((*found - c).len() < 1e-9 && (r - 10.).abs() < 1e-9, "{fine:?}");
     for sides in [6, 8, 32] {
         let polygon = arcs::recognise(ring(c, 10., sides, 0., tau), 0.01);
         assert_eq!(polygon.len(), sides, "{sides} sides");
-        assert!(polygon.iter().all(|e| matches!(e.shape, DxfShape::Line(..))));
+        assert!(polygon.iter().all(|shape| matches!(shape, DxfShape::Line(..))));
     }
 }
 
@@ -328,12 +455,10 @@ fn view_dxf_arcs_turn_a_run_of_lines_into_an_arc_that_runs_counter_clockwise() {
     // The run goes round clockwise, from 90 to 0 degrees: the DXF arc names 0 first, then 90.
     let run = arcs::recognise(ring(c, 10., 40, quarter, 0.), 0.01);
     assert_eq!(run.len(), 1, "{run:?}");
-    let DxfShape::Arc { r, a0, a1, .. } = &run[0].shape else { panic!("{run:?}") };
+    let DxfShape::Arc { r, a0, a1, .. } = &run[0] else { panic!("{run:?}") };
     assert!((r - 10.).abs() < 1e-9 && a0.abs() < 1e-6 && (a1 - 90.).abs() < 1e-6, "{run:?}");
     // A straight run, and a few lines, are never an arc.
-    let straight: Vec<DxfEntity> = (0..10)
-        .map(|i| DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Line(Vec2::new(i as f64, 0.), Vec2::new(i as f64 + 1., 0.)) })
-        .collect();
+    let straight: Vec<(Vec2, Vec2)> = (0..10).map(|i| (Vec2::new(i as f64, 0.), Vec2::new(i as f64 + 1., 0.))).collect();
     assert_eq!(arcs::recognise(straight, 0.01).len(), 10);
     assert_eq!(arcs::recognise(ring(c, 10., 3, 0., quarter), 0.01).len(), 3);
 }
@@ -360,13 +485,35 @@ fn view_dxf_curves_arcs_write_a_round_hole_as_one_circle_and_the_default_still_w
     assert!(err.contains("curves must be lines or arcs"), "{err}");
 }
 
+/// With `curves: "arcs"` and dashed hidden lines, each kind of entity sits on its own layer: the
+/// circle and the plate's sides on VISIBLE, the blind hole's dashed runs on HIDDEN, and the hidden
+/// runs come first in the file, as they always have (the order is part of the file's bytes).
+#[test]
+fn view_dxf_curves_arcs_with_dashed_hidden_lines_keep_their_layers_and_order() {
+    let mut s = sample();
+    run(&mut s, "solid.cylinder", json!({"radius":5,"height":10,"base":[20,15,0],"operation":"cut","targets":["Plate"]}));
+    let v = run(&mut s, CMD, json!({"camera": camera(StandardView::Top), "curves": "arcs", "hidden": "dashed"}));
+    let file = solidcraft_io::read_dxf_file(v["dxf"].as_str().unwrap()).unwrap();
+    let on = |entity: &solidcraft_io::DxfFileEntity<DxfShape>| file.layer(entity.layer()).unwrap().name().to_string();
+    let layers: Vec<String> = file.entities().iter().map(on).collect();
+    let first_visible = layers.iter().position(|name| name == "VISIBLE").unwrap();
+    assert!(first_visible > 0 && layers[..first_visible].iter().all(|name| name == "HIDDEN"), "{layers:?}");
+    assert!(layers[first_visible..].iter().all(|name| name == "VISIBLE"), "{layers:?}");
+    let kinds = |layer: &str| -> Vec<&DxfShape> { file.entities().iter().filter(|e| on(e) == layer).map(|e| e.geometry()).collect() };
+    assert!(kinds("HIDDEN").iter().all(|shape| matches!(shape, DxfShape::Polyline { .. })));
+    assert_eq!(kinds("VISIBLE").iter().filter(|shape| matches!(shape, DxfShape::Circle { .. })).count(), 1);
+    assert_eq!(kinds("VISIBLE").iter().filter(|shape| matches!(shape, DxfShape::Line(..))).count(), 4);
+}
+
 // Frozen pre-X2 assembly recipe, with its real shared projection and legacy
 // byte-baseline seam. This is not another production writer or parser.
 fn legacy_view_projection_bytes(s: &Session, cam: &Camera, dashed: bool) -> String {
     use solidcraft_io::test_support::{DxfEntity, DxfLayer, legacy_dxf_baseline};
-    let meshes = mesh_lines::prepare(s, CMD, 0.01, |b| s.body_visible(&b.name)).unwrap();
+    let meshes =
+        mesh_lines::prepare(s, &s.world_state().unwrap(), CMD, 0.01, mesh_lines::Ask::default(), |b| s.body_visible(&b.name), refused).unwrap();
     let parts = sketch::parts(s, 0.01).unwrap();
-    let drawing = mesh_lines::drawing(&meshes, &parts, &View::from_camera(cam)).unwrap();
+    let mut drawing = mesh_lines::drawing(&meshes, &parts, &View::from_camera(cam)).unwrap();
+    drawing.sketch = mesh_lines::sketch_off_lines(std::mem::take(&mut drawing.sketch), &drawing.lines, 0.02 + drawing.eps);
     let mut entities = Vec::new();
     let mut hidden = Vec::new();
     for line in drawing.lines {

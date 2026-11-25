@@ -7,12 +7,9 @@ use std::path::{Path, PathBuf};
 
 /// The Linux app id (Flatpak, desktop entry, AppStream, Wayland `app_id`).
 pub const APP_ID: &str = "io.tangencylabs.solidcraft";
-/// The app id of releases before 0.8 (compatibility shim, docs/compatibility.md). eframe kept
-/// the window state under it, so it is also the old settings key.
-pub const LEGACY_APP_ID: &str = "ai.storyteller.solvecraft";
 /// Every earlier app id, newest first (compatibility shim, docs/compatibility.md): 0.8 until the
-/// move to Tangency Labs used `ai.storyteller.solidcraft`, releases before 0.8 `LEGACY_APP_ID`.
-pub const PREVIOUS_APP_IDS: [&str; 2] = ["ai.storyteller.solidcraft", LEGACY_APP_ID];
+/// move to Tangency Labs used `ai.storyteller.solidcraft`.
+pub const PREVIOUS_APP_IDS: [&str; 1] = ["ai.storyteller.solidcraft"];
 
 /// Most files and nesting copied from a legacy folder (it holds preferences, autosaves and
 /// small caches; anything bigger is not ours).
@@ -86,16 +83,16 @@ mod tests {
     #[test]
     fn copies_legacy_folder_once_and_keeps_it() {
         let d = scratch("copy");
-        let old = d.join("solvecraft");
+        let old = d.join("old");
         std::fs::create_dir_all(old.join("recovery")).unwrap();
         std::fs::write(old.join("graphics.json"), "{\"msaa\":8}").unwrap();
-        std::fs::write(old.join("recovery").join("a.solvecraft"), "x").unwrap();
+        std::fs::write(old.join("recovery").join("a.sc"), "x").unwrap();
         let new = d.join("solidcraft");
         assert!(adopt_legacy_dir(&new, &old).unwrap());
         assert_eq!(std::fs::read_to_string(new.join("graphics.json")).unwrap(), "{\"msaa\":8}");
-        assert!(new.join("recovery").join("a.solvecraft").is_file());
+        assert!(new.join("recovery").join("a.sc").is_file());
         // The legacy folder is untouched.
-        assert!(old.join("graphics.json").is_file() && old.join("recovery").join("a.solvecraft").is_file());
+        assert!(old.join("graphics.json").is_file() && old.join("recovery").join("a.sc").is_file());
         // Once the current folder exists, nothing is copied again.
         std::fs::write(old.join("later.json"), "{}").unwrap();
         assert!(!adopt_legacy_dir(&new, &old).unwrap());
@@ -108,10 +105,7 @@ mod tests {
         let home = Path::new("/home/u");
         let ours = home.join(".var/app/io.tangencylabs.solidcraft/data/solidcraft");
         let id = std::ffi::OsStr::new(APP_ID);
-        assert_eq!(
-            flatpak_twins(&ours, id, home),
-            [home.join(".var/app/ai.storyteller.solidcraft/data/solidcraft"), home.join(".var/app/ai.storyteller.solvecraft/data/solidcraft")]
-        );
+        assert_eq!(flatpak_twins(&ours, id, home), [home.join(".var/app/ai.storyteller.solidcraft/data/solidcraft")]);
         // Outside our sandbox folder, or in another app's sandbox, there is nothing to map.
         assert!(flatpak_twins(&home.join(".local/share/solidcraft"), id, home).is_empty());
         assert!(flatpak_twins(&ours, std::ffi::OsStr::new("org.example.Other"), home).is_empty());
@@ -139,7 +133,7 @@ mod tests {
         assert!(!adopt_legacy_dir(&new, &d.join("missing")).unwrap());
         assert!(!new.exists());
         // An existing current folder is never overwritten.
-        let old = d.join("solvecraft");
+        let old = d.join("old");
         std::fs::create_dir_all(&old).unwrap();
         std::fs::write(old.join("p.json"), "old").unwrap();
         std::fs::create_dir_all(&new).unwrap();

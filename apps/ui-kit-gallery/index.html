@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>SolidCraft UI kit: component gallery</title>
+  <meta name="description" content="Every component of SolidCraft's UI kit, live: what it is for, how to call it, and its do's and don'ts.">
+  <link data-trunk rel="rust" data-bin="ui-kit-gallery" data-wasm-opt="z" data-weak-refs />
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/32x32/io.tangencylabs.solidcraft.png">
+  <link data-trunk rel="copy-file" href="../../assets/icons/app/linux/exports/hicolor/32x32/apps/io.tangencylabs.solidcraft.png" data-target-path="icons/32x32" />
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #2e3440; }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; outline: none; }
+    #kit_loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #d8dee9; font: 14px system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <canvas id="kit_canvas"></canvas>
+  <div id="kit_loading" role="status">Loading the component gallery&hellip;</div>
+</body>
+</html>

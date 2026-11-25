@@ -37,7 +37,8 @@
 //!   trajectory's tangent, its derivative in closed form. Not upstream (#16959):
 //!   [`ZSource::RotationMinimizing`], a projection normal sample with that method's own
 //!   rate in closed form, and [`create_b_vectors_closing`], which also says whether a
-//!   closed curve's vectors were corrected to close.
+//!   closed curve's vectors were corrected to close and (#18117) corrects them by spreading
+//!   the closing angle evenly along the curve instead of upstream's backward averages.
 //! - `N_SweepCrossTangentCrv` ignores failures of `N_CrvEval` on the cross section
 //!   (the accumulated sample parameter can round past the last knot) and keeps the
 //!   previous sample, as does the Rust function; only a failure on the very first
@@ -130,18 +131,80 @@ fn ends(k: &[f64], op: &'static str) -> Result<(f64, f64)> {
 /// [`NurbsFailure::Geometry`] when a vector cannot be normalised; errors of
 /// [`Curve::eval_tangent`]; `InvalidInput` for an empty `t`.
 pub fn create_b_vectors(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<Vec<Vec3>> {
-    create_b_vectors_closing(cur, b0, t).map(|(b, _)| b)
+    const OP: &str = OP_BVEC;
+    let (mut b, tg) = projection_b_vectors(cur, b0, t)?;
+    let k = t.len().checked_sub(1).ok_or_else(|| oob(OP))?;
+
+    // Correct for closed curves.
+    if closing_gap(cur, &b)? {
+        let first = at(&b, 0, OP)?;
+        put(&mut b, k, first, OP)?;
+        for i in (2..=k).rev() {
+            let bi = at(&b, i, OP)?;
+            let ti = at(&tg, i - 1, OP)?;
+            let dot = bi.dot(ti);
+            let (a, _) = normalize(combine2_pts(1.0, bi, -dot, ti))?;
+            let avg = combine2_pts(0.5, at(&b, i - 1, OP)?, 0.5, a);
+            let (bm, _) = normalize(avg)?;
+            put(&mut b, i - 1, bm, OP)?;
+        }
+    }
+    Ok(b)
 }
 
-/// [`create_b_vectors`] that also says whether the closed curve's correction was made
-/// (not upstream, #16959): the vectors are then no longer the projection normal method's
-/// alone, they also turn by the spread closing gap, so their rate is not
+/// The vectors of [`create_b_vectors`] made to close on a closed curve in another way
+/// (not upstream, #16959, #18117), and whether they were: where upstream would correct
+/// them (its test, the last vector missing the first by more than `NL_MTOL`), each vector
+/// is turned about its own tangent by its share of the closing angle, the angle about the
+/// last tangent that turns the last vector onto the first, in proportion to its parameter
+/// along `t` (Wang, Jüttler, Zheng and Liu, "Computation of rotation minimizing frames",
+/// ACM Transactions on Graphics 27(1), 2008, section 6: a closed curve's rotation minimizing
+/// frame is closed by spreading that angle along the curve). The frame then turns by the
+/// angle at one even rate in the parameter on top of the method's own, so it meets itself
+/// at the closure as smoothly as it runs anywhere else; upstream's backward averages put the
+/// whole turn into the last few vectors, a crease across the closure of the surface swept
+/// along them. The last vector is the first, so the last section lies on the first. The
+/// vectors are no longer the projection normal method's alone, so their rate is not
 /// [`ZSource::RotationMinimizing`]'s.
 ///
 /// # Errors
 ///
-/// Those of [`create_b_vectors`].
+/// Those of [`create_b_vectors`]; `InvalidInput` for parameters that do not ascend from
+/// the first to the last.
 pub fn create_b_vectors_closing(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<(Vec<Vec3>, bool)> {
+    const OP: &str = OP_BVEC;
+    let (mut b, tg) = projection_b_vectors(cur, b0, t)?;
+    if !closing_gap(cur, &b)? {
+        return Ok((b, false));
+    }
+    let k = t.len().checked_sub(1).ok_or_else(|| oob(OP))?;
+    let (first, last) = (at(&b, 0, OP)?, at(&b, k, OP)?);
+    let t_last = at(&tg, k, OP)?;
+    // the signed angle about the last tangent from the last vector to the first
+    let angle = last.cross(first).dot(t_last).atan2(last.dot(first));
+    let (t0, tk) = (at(t, 0, OP)?, at(t, k, OP)?);
+    let span = tk - t0;
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+    if !(span > 0.0) || !angle.is_finite() {
+        return Err(SolidError::InvalidInput {
+            operation: OP,
+            reason: "a closed curve's parameters do not ascend",
+        });
+    }
+    for i in 1..k {
+        let turn = angle * (at(t, i, OP)? - t0) / span;
+        let (bi, ti) = (at(&b, i, OP)?, at(&tg, i, OP)?);
+        // B[i] is square to T[i]: turned about it, it stays so
+        let (turned, _) = normalize(combine2_pts(turn.cos(), bi, turn.sin(), ti.cross(bi)))?;
+        put(&mut b, i, turned, OP)?;
+    }
+    put(&mut b, k, first, OP)?;
+    Ok((b, true))
+}
+
+/// The projection normal method's vectors `B` and the unit tangents `T` along `cur` at
+/// `t` (`T[0]` is not computed: zero), before any correction for a closed curve.
+fn projection_b_vectors(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<(Vec<Vec3>, Vec<Vec3>)> {
     const OP: &str = OP_BVEC;
     let k = t.len().checked_sub(1).ok_or_else(|| oob(OP))?;
     let mut b = vec![Vec3::ZERO; k + 1];
@@ -161,27 +224,20 @@ pub fn create_b_vectors_closing(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<(Vec
         let (bi, _) = normalize(combine2_pts(1.0, bp, -dot, ti))?;
         put(&mut b, i, bi, OP)?;
     }
+    Ok((b, tg))
+}
 
-    // Correct for closed curves.
-    let mut closing = false;
-    if cur.is_closed() {
-        let dis = dist_pt_pt(at(&b, 0, OP)?, at(&b, k, OP)?);
-        if dis > MODEL_TOL {
-            closing = true;
-            let first = at(&b, 0, OP)?;
-            put(&mut b, k, first, OP)?;
-            for i in (2..=k).rev() {
-                let bi = at(&b, i, OP)?;
-                let ti = at(&tg, i - 1, OP)?;
-                let dot = bi.dot(ti);
-                let (a, _) = normalize(combine2_pts(1.0, bi, -dot, ti))?;
-                let avg = combine2_pts(0.5, at(&b, i - 1, OP)?, 0.5, a);
-                let (bm, _) = normalize(avg)?;
-                put(&mut b, i - 1, bm, OP)?;
-            }
-        }
+/// Whether upstream corrects the vectors `b` along `cur` to close: the curve is closed and
+/// its last vector misses the first by more than `NL_MTOL`.
+fn closing_gap(cur: &Curve, b: &[Vec3]) -> Result<bool> {
+    const OP: &str = OP_BVEC;
+    if !cur.is_closed() {
+        return Ok(false);
     }
-    Ok((b, closing))
+    let (Some(&first), Some(&last)) = (b.first(), b.last()) else {
+        return Err(oob(OP));
+    };
+    Ok(dist_pt_pt(first, last) > MODEL_TOL)
 }
 
 // ---- N_CreateCoonsSrf ---------------------------------------------------------------

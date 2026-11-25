@@ -445,19 +445,35 @@ impl FileView {
         recover: &str,
         discard: Option<&str>,
     ) -> (Response, Option<Response>) {
-        recovery_panel(ui, id, message, recover, discard, true)
+        let (recover, discard, _) = recovery_panel(ui, id, message, recover, discard, None, true);
+        (recover, discard)
+    }
+
+    /// The recovery banner with a close (×) after its buttons, named `close` for screen readers
+    /// and hover: it hides the banner and leaves the designs to recover.
+    pub fn recovery_banner_closable(
+        ui: &mut Ui,
+        id: &str,
+        message: RecoveryMessage<'_>,
+        recover: &str,
+        discard: Option<&str>,
+        close: &str,
+    ) -> (Response, Option<Response>, Option<Response>) {
+        recovery_panel(ui, id, message, recover, discard, Some(close), true)
     }
 
     pub fn recovery_review(ui: &mut Ui, id: &str, title: &str, detail: &str, recover: &str, discard: &str) -> (Response, Option<Response>) {
         let separated = format!("\n{}", detail.trim_start());
-        recovery_panel(
+        let (recover, discard, _) = recovery_panel(
             ui,
             id,
             RecoveryMessage { title, before_filename: &separated, filename: "", after_filename: "" },
             recover,
             Some(discard),
+            None,
             false,
-        )
+        );
+        (recover, discard)
     }
 }
 
@@ -474,6 +490,10 @@ fn allocate(ui: &mut Ui, id: &str, width: f32, height: f32, label: &str) -> (Rec
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     if response.clicked() {
         response.request_focus();
+    }
+    // Request this while the containing scroll area is still open.
+    if response.gained_focus() {
+        response.scroll_to_me(None);
     }
     if response.enabled() && response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -516,8 +536,9 @@ fn recovery_panel(
     message: RecoveryMessage<'_>,
     recover: &str,
     discard: Option<&str>,
+    close: Option<&str>,
     banner: bool,
-) -> (Response, Option<Response>) {
+) -> (Response, Option<Response>, Option<Response>) {
     let t = Tokens::get();
     let fill = if banner { t.file_recovery } else { t.file_surface };
     let border = if banner { t.file_recovery_border } else { t.file_border };
@@ -535,10 +556,13 @@ fn recovery_panel(
             };
             let recover_width = button_width(recover);
             let discard_width = discard.map_or(0.0, button_width);
-            let actions_width = recover_width + if discard.is_some() { t.space_8 + discard_width } else { 0.0 };
+            let close_width = if close.is_some() { t.space_8 + t.file_action_height } else { 0.0 };
+            let buttons_width = recover_width + if discard.is_some() { t.space_8 + discard_width } else { 0.0 };
+            let actions_width = buttons_width + close_width;
             let icon_width = if banner { t.file_recovery_icon + t.space_14 } else { 0.0 };
             let wrapped = width < icon_width + t.form_card_width + actions_width + t.space_14;
-            let text_width = (width - icon_width - if wrapped { 0.0 } else { actions_width + t.space_14 }).max(0.0);
+            // Wrapped, the buttons go under the text and the close (×) takes the top-right corner.
+            let text_width = (width - icon_width - if wrapped { close_width } else { actions_width + t.space_14 }).max(0.0);
             let mut job = egui::text::LayoutJob::default();
             for (text, font) in [
                 (message.title, crate::type_face::semibold(t.font_button)),
@@ -550,8 +574,9 @@ fn recovery_panel(
             }
             job.wrap.max_width = text_width;
             let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
-            let top_height =
-                galley.size().y.max(if banner { t.file_recovery_icon } else { 0.0 }).max(if wrapped { 0.0 } else { t.file_action_height });
+            // The top row is as tall as a button whenever one sits in it (the row's buttons, or the ×).
+            let button_row = if wrapped && close.is_none() { 0.0 } else { t.file_action_height };
+            let top_height = galley.size().y.max(if banner { t.file_recovery_icon } else { 0.0 }).max(button_row);
             let height = top_height + if wrapped { t.space_12 + t.file_action_height } else { 0.0 };
             let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
             if banner {
@@ -564,7 +589,7 @@ fn recovery_panel(
             ui.painter().with_clip_rect(ui.clip_rect().intersect(rect)).galley(text_at, galley, t.form_ink);
             let action_top = if wrapped { rect.bottom() - t.file_action_height } else { rect.top() + (top_height - t.file_action_height) / 2.0 };
             let action_left = if wrapped { rect.left() } else { rect.right() - actions_width };
-            let scale = if wrapped { (width / actions_width).min(1.0) } else { 1.0 };
+            let scale = if wrapped { (width / buttons_width).min(1.0) } else { 1.0 };
             let recover_rect = Rect::from_min_size(pos2(action_left, action_top), vec2(recover_width * scale, t.file_action_height));
             let discard_rect =
                 Rect::from_min_size(pos2(recover_rect.right() + t.space_8 * scale, action_top), vec2(discard_width * scale, t.file_action_height));
@@ -584,7 +609,17 @@ fn recovery_panel(
                     super::actions::Button::Normal,
                 )
             });
-            (a, b)
+            // The close (×) is a square as tall as the buttons: at the end of their row, or in the
+            // top-right corner when they wrap under the text.
+            let close_min = if wrapped {
+                pos2(rect.right() - t.file_action_height, rect.top())
+            } else {
+                let after = if discard.is_some() { discard_rect.right() } else { recover_rect.right() };
+                pos2(after + t.space_8, action_top)
+            };
+            let close_rect = Rect::from_min_size(close_min, Vec2::splat(t.file_action_height));
+            let c = close.map(|label| ui.push_id(format!("{id}:close"), |ui| super::actions::icon_button_at(ui, close_rect, "close", label)).inner);
+            (a, b, c)
         },
     )
     .inner

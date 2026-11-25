@@ -113,3 +113,23 @@ fn a_block_flush_with_the_flat_face_of_a_hemisphere_joins_exactly() {
         assert!(lowest > -1e-6, "the join reaches down to z = {lowest}");
     }
 }
+
+/// A cylinder of radius 2 and height 16 along -Y, with a sphere of the same radius centred on its
+/// base cap, joins into a cylinder with a hemispherical end: pi 2² 16 + 2/3 pi 2³ (#16870). The
+/// cap's rim is a great circle of the sphere through its poles, along the sphere's seam meridian.
+/// At the pole the sphere's parameterisation is singular, and the coincidence check read the
+/// cylinder wall and the sphere as one surface there; along -Y the cylinder's seam vertex lies on
+/// the sphere's seam edge, and the join failed classifying a point 14 mm off the sphere on it. The
+/// other axes, which did not fail, give the same solid.
+#[test]
+fn a_cylinder_whose_rim_is_a_great_circle_through_a_sphere_s_poles_joins_it() {
+    let want = std::f64::consts::PI * 4.0 * 16.0 + 2.0 / 3.0 * std::f64::consts::PI * 8.0;
+    for axis in [Vec3::new(0.0, -1.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 0.0, -1.0)] {
+        let c = cylinder(Vec3::ZERO, axis, 2.0, 16.0).unwrap();
+        let s = sphere(Vec3::ZERO, 2.0).unwrap();
+        let joined = boolean(&c, &s, BoolOp::Union).unwrap_or_else(|e| panic!("axis {axis:?}: {e}")).unwrap();
+        let volume = measure(&joined).unwrap().volume;
+        assert!((volume - want).abs() < 1e-9 * want, "axis {axis:?}: {volume} vs {want}");
+        assert!(joined.validity().is_empty(), "axis {axis:?}: {:?}", joined.validity());
+    }
+}

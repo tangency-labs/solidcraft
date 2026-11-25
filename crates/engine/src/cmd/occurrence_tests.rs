@@ -320,6 +320,29 @@ fn component_create_rejects_unknown_keys_and_accepts_documented_keys() {
     assert_eq!(s.active_occurrence_path, Some(vec![occurrence]));
 }
 
+/// The viewport asks whether every body is shown several times a frame. While no body is
+/// hidden (hidden joints hide none), the answers build no index of the hidden items; hiding a
+/// copy still hides it.
+#[test]
+fn asking_whether_bodies_are_shown_builds_nothing_while_no_body_is_hidden() {
+    use crate::occurrences::visibility_work;
+    let mut s = Session::default();
+    let (component, first) = created(&mut s, "Knob");
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Knob"}));
+    let second = run(&mut s, "occurrence.copy", json!({"component": component, "translate": [20, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let name = |s: &Session, path: &[u64]| s.occurrence_placement(path).unwrap().bodies[0].world.clone();
+    s.visibility.hidden_joints = (1_000..1_100).collect();
+    visibility_work::built_take();
+    for _ in 0..3 {
+        assert!(s.body_visible(&name(&s, &[first])) && s.body_visible(&name(&s, &[second])));
+    }
+    assert_eq!(visibility_work::built_take(), 0, "no index is built to answer that nothing is hidden");
+    let hidden = name(&s, &[second]);
+    run(&mut s, "browser.visibility", json!({"items": [hidden], "visible": false}));
+    assert!(s.body_visible(&name(&s, &[first])));
+    assert!(!s.body_visible(&name(&s, &[second])), "a hidden copy is still hidden");
+}
+
 #[test]
 fn body_and_component_renames_keep_hidden_copies_through_history() {
     let mut s = Session::default();
@@ -620,7 +643,7 @@ fn exact_visibility_isolate_rename_and_async_accept() {
     let mut scratch = s.scratch();
     assert_eq!(scratch.visibility, s.visibility);
     run(&mut scratch, "component.rename", json!({"component":component,"name":"Changed"}));
-    s.accept_computed(scratch);
+    s.accept_computed(scratch).unwrap();
     assert!(!s.occurrence_visible(&[second]));
     run(&mut s, "browser.visibility", json!({"visible":true,"paths":[[second]],"isolate":true}));
     assert!(!s.body_visible(&first_body));
@@ -1034,7 +1057,7 @@ fn designs_without_saved_visibility_open_unchanged() {
     let (dir, path) = temp_design("legacy", "json");
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length":4,"width":4,"height":4,"body_name":"Base"}));
-    let mut legacy: Value = serde_json::from_slice(&solidcraft_io::write_design(&s.doc)).unwrap();
+    let mut legacy: Value = serde_json::from_slice(&solidcraft_io::write_design(&s.doc).unwrap()).unwrap();
     assert!(legacy.get("visibility").is_none(), "nothing hidden: no visibility in the file");
     legacy["format"] = json!("solidcraft/15");
     std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
@@ -1123,6 +1146,61 @@ fn a_cut_or_join_from_the_top_level_into_a_linked_part_is_refused() {
     assert_eq!(s.doc.features.len(), features);
     let volume = run(&mut s, "inspect.measure", json!({"bodies": ["Plate"]}))["total"]["volume_mm3"].clone();
     near(&volume, 6000.0);
+}
+
+/// #5679 for a revolve from a fixed face, which keeps no attachment: a cut or join from the top
+/// level into the linked part's face is refused the same way, and the plate stays.
+#[test]
+fn a_fixed_face_revolve_from_the_top_level_into_a_linked_part_is_refused() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-linked-revolve-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let part = dir.join("plate.solidcraft");
+    saved_box_design(&part, 30.0);
+    let mut s = Session::default();
+    run(&mut s, INSERT_DESIGN, json!({"path": part, "translate": [50, 0, 0]}));
+    let _ = std::fs::remove_dir_all(&dir);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let features = s.doc.features.len();
+    for operation in ["cut", "join"] {
+        let refused = s
+            .execute(
+                "solid.revolve",
+                &json!({"face": [55, 10, 30], "fixed": true, "axis": {"origin": [50, 0, 30], "dir": [0, 1, 0]},
+                        "angle": "180 deg", "direction": "symmetric", "operation": operation}),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(refused.contains("`Plate`") && refused.contains("linked to a design file"), "{operation}: {refused}");
+    }
+    assert_eq!(s.doc.features.len(), features);
+    let volume = run(&mut s, "inspect.measure", json!({"bodies": ["Plate"]}))["total"]["volume_mm3"].clone();
+    near(&volume, 6000.0);
+}
+
+/// A fixed-face cut from a linked sibling's face changes only the active component's bodies, so
+/// the link does not refuse it.
+#[test]
+fn a_fixed_face_revolve_cut_from_a_linked_siblings_face_cuts_the_active_component() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-linked-sibling-revolve-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let part = dir.join("plate.solidcraft");
+    saved_box_design(&part, 30.0);
+    let mut s = Session::default();
+    run(&mut s, INSERT_DESIGN, json!({"path": part, "translate": [50, 0, 0]}));
+    let _ = std::fs::remove_dir_all(&dir);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "A", "activate": true}));
+    run(&mut s, "solid.box", json!({"length": 100, "width": 20, "height": 25, "body_name": "Base"}));
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"face": [55, 10, 30], "fixed": true, "axis": {"origin": [50, 0, 30], "dir": [0, 1, 0]},
+               "angle": "180 deg", "direction": "symmetric", "operation": "cut"}),
+    );
+    let base = run(&mut s, "inspect.measure", json!({"bodies": ["Base"]}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(base < 100.0 * 20.0 * 25.0 - 1.0, "Base was not cut: {base}");
+    let plate = run(&mut s, "inspect.measure", json!({"bodies": ["Plate"]}))["total"]["volume_mm3"].clone();
+    near(&plate, 6000.0);
 }
 
 /// The compact list counts what a component holds and leaves out identity transforms; the full
@@ -1358,6 +1436,34 @@ fn combine_across_a_turned_occurrence_meets_the_tool_where_it_is_shown() {
     run(&mut s, "solid.combine", json!({"target": "Base", "tools": ["Peg"], "operation": "cut"}));
     let want = 40.0 * 40.0 * 10.0 - 10.0 * 10.0 * 5.0;
     assert!((volume(&s, "Base") - want).abs() < 1e-6 * want, "{} vs {want}", volume(&s, "Base"));
+}
+
+/// #20040: a combine with tools from several placements of one component cuts at each of them,
+/// not at the component's first placement. Drill holds a 10 x 10 x 5 bit; its copies at x, y 20
+/// and 60 each take 500 from the top of a 100 x 100 x 10 board, the first placement (at the
+/// corner) none. Renaming the component keeps both holes; moving one copy off the board takes its
+/// hole with it.
+#[test]
+fn combine_with_tools_of_several_placements_cuts_at_each() {
+    let volume = |s: &Session| s.model.state().body("Board").map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).unwrap_or(0.0);
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 10, "body_name": "Board"}));
+    created(&mut s, "Drill");
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [-50, -50, 5], "body_name": "Bit"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.copy", json!({"component": "Drill", "translate": [70, 70, 0]}));
+    run(&mut s, "occurrence.copy", json!({"component": "Drill", "translate": [110, 110, 0]}));
+    let r = run(&mut s, "solid.combine", json!({"target": "Board", "tools": ["Bit (Drill:2)", "Bit (Drill:3)"], "operation": "cut"}));
+    near(&json!(volume(&s)), 100_000.0 - 2.0 * 500.0);
+    // A placement's tool is not taken away: that would take the bit from every placement.
+    let warning = s.model.result(r["feature"].as_u64().unwrap()).unwrap().warning.clone().unwrap_or_default();
+    assert!(warning.contains("`Bit (Drill:2)` is kept: it is a placement of `Bit`"), "{warning}");
+    // Renaming the component renames its placements (`Tool:2`); the combine follows them.
+    run(&mut s, "component.rename", json!({"component": "Drill", "name": "Tool"}));
+    near(&json!(volume(&s)), 100_000.0 - 2.0 * 500.0);
+    run(&mut s, "occurrence.move", json!({"occurrence": "Tool:3", "space": "world", "translate": [100, 0, 0]}));
+    run(&mut s, "component.capture_position", json!({}));
+    near(&json!(volume(&s)), 100_000.0 - 500.0);
 }
 
 /// #3383: a feature joining into a body of another, placed component draws its tool where the
@@ -2311,7 +2417,7 @@ fn resolver_order_is_feature_first_at_every_site() {
     run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": &axis_key, "angle": "30 deg", "name": "Axis line"}));
     let f = s.doc.features.iter().find(|f| f.name == "Axis line").unwrap();
     let FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { axis_origin, .. } } = &f.kind else { panic!("{:?}", f.kind) };
-    assert!(axis_origin.dist(Vec3::ZERO) < 1e-9, "{axis_origin:?}");
+    assert!(s.doc.eval_point(axis_origin).unwrap().dist(Vec3::ZERO) < 1e-9, "{axis_origin:?}");
 
     // axis_param: a revolve saves the construction axis by name, not the datum.
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
@@ -2324,7 +2430,7 @@ fn resolver_order_is_feature_first_at_every_site() {
 
     // plane_param: a sketch on the named plane is attached to the feature, not the datum.
     let sid = run(&mut s, "sketch.create", json!({"plane": &plane_key, "name": "On the feature"}))["sketch"].as_u64().unwrap();
-    let FeatureKind::Sketch { plane: PlaneRef::Construction { feature }, .. } = &s.doc.feature(sid).unwrap().kind else {
+    let FeatureKind::Sketch { plane: PlaneRef::Construction { feature, .. }, .. } = &s.doc.feature(sid).unwrap().kind else {
         panic!("{:?}", s.doc.feature(sid).unwrap().kind)
     };
     let named = s.doc.features.iter().find(|f| f.name == plane_key).unwrap().id;
@@ -2353,7 +2459,10 @@ fn world_axis_names_keep_their_precedence_at_the_axis_resolvers() {
         run(&mut s, "construct.plane.at_angle", json!({"base":"XY","axis":name,"angle":"30 deg","name":format!("Angled {name}")}));
         let f = s.doc.features.iter().find(|f| f.name == format!("Angled {name}")).unwrap();
         let FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { axis_origin, .. } } = &f.kind else { panic!("{:?}", f.kind) };
-        assert!(axis_origin.dist(Vec3::ZERO) < 1e-9, "{name}: the world axis, not the construction axis at {axis_origin:?}");
+        assert!(
+            s.doc.eval_point(axis_origin).unwrap().dist(Vec3::ZERO) < 1e-9,
+            "{name}: the world axis, not the construction axis at {axis_origin:?}"
+        );
     }
 }
 
@@ -2736,4 +2845,56 @@ fn moves_that_cancel_each_other_still_keep_up_with_their_parameter() {
     run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": true}));
     run(&mut s, "parameters.change", json!({"name": "q", "expression": "5 mm"}));
     at(centre(&mut s, occ), [1.0, 0.5, 0.5]);
+}
+
+/// A component's name is 1…128 characters, as the refusal says, not 128 bytes of its UTF-8: a
+/// hundred `ł` (200 bytes) is taken, 129 characters are not.
+#[test]
+fn component_names_count_characters_not_bytes() {
+    let mut s = Session::default();
+    let (component, _) = created(&mut s, "A");
+    let long = "ł".repeat(100);
+    run(&mut s, "component.rename", json!({"component": component, "name": long}));
+    assert_eq!(s.doc.find_component(&long), Some(component));
+    let error = s.execute("component.rename", &json!({"component": component, "name": "ł".repeat(129)})).unwrap_err().to_string();
+    assert!(error.contains("1…128 characters"), "{error}");
+}
+
+/// The Browser's index of placed bodies (their path, by world name) makes the design's name
+/// index once for the whole walk, not once at every placement: naming each placement on its own
+/// built the index for every placement, and on a 100-printer assembly that was 14 s inside one
+/// frame on the window thread.
+#[test]
+fn the_browser_body_paths_make_the_name_index_once() {
+    let mut s = Session::default();
+    let (assembly_component, assembly) = created(&mut s, "Assembly");
+    run(&mut s, "component.activate", json!({"component": assembly_component}));
+    let (part, _) = created(&mut s, "Part");
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Part"}));
+    let mut copies = Vec::new();
+    for i in 0..130 {
+        let o = run(&mut s, "occurrence.copy", json!({"component": part, "translate": [i as f64 * 10.0, 0.0, 0.0]}));
+        copies.push(o["occurrence"].as_u64().unwrap());
+    }
+    let (doc, state) = (s.doc.clone(), s.model.state());
+    crate::occurrences::NAME_INDEXES.with(|n| n.set(0));
+    let paths = crate::occurrences::body_paths(&doc, &state);
+    assert_eq!(crate::occurrences::NAME_INDEXES.with(std::cell::Cell::get), 1, "one name index for the 131 placements");
+    // Every placed body is named at its own path, exactly as `Session::occurrence_placement`
+    // names it: the Browser's answer is the same one.
+    let mut named = 0;
+    for o in &copies {
+        let path = vec![assembly, *o];
+        let placement = s.occurrence_placement(&path).unwrap();
+        for body in &placement.bodies {
+            assert_eq!(paths.get(&body.world), Some(&path), "{body:?}");
+            named += 1;
+        }
+    }
+    assert_eq!(named, copies.len(), "each copy's body");
+    // Every entry names a body at the path it is placed at, and nothing else.
+    for (world, path) in &paths {
+        let placement = s.occurrence_placement(path).expect("a path the index named");
+        assert!(placement.bodies.iter().any(|b| &b.world == world), "{world} at {path:?}");
+    }
 }

@@ -195,6 +195,28 @@ fn reference_edges_place_one_hole() {
     assert!(err.contains("one hole"), "{err}");
 }
 
+/// #18047: a reference edge whose distance box is empty (a circular edge has nothing to measure)
+/// is left out of the command, which no longer refuses the hole for an empty distance.
+#[test]
+fn a_reference_edge_with_an_empty_distance_is_left_out() {
+    let mut h = plate();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = screen(&mut h, Vec3::new(30.0, 25.0, 10.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Reference 1"}})).unwrap();
+    let left = screen(&mut h, Vec3::new(0.0, 20.0, 10.0));
+    h.step(&json!({"click": left})).unwrap();
+    h.frames(2);
+    if let Some(Kind::Hole { opts, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        opts.refs.distance[0].clear();
+    }
+    let d = h.app.dialog.as_ref().unwrap();
+    let commands = crate::dialogs::apply_commands(&h.app, d).unwrap();
+    let (name, params) = &commands[0];
+    assert_eq!(name, "solid.hole");
+    assert!(!params.to_string().contains("\"distance\":\"\""), "no empty distance is sent: {params}");
+}
+
 /// A number typed straight after an edge pick is that edge's distance, not the diameter.
 #[test]
 fn a_number_typed_after_an_edge_pick_sets_its_distance() {

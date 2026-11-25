@@ -13,7 +13,9 @@ use super::geometry::{
     circle, distance_to_segment, nest_regions, polygon, ring_at_sharpest_corner, segment_length,
     MeshPlane, PlanarVector,
 };
-use super::{certify_nesting, fit_loop, invalid, native, TriMesh, MAX_BOUNDARY, MAX_LOOPS};
+use super::{
+    certify_nesting, fit_loop, invalid, native, straight_corners, TriMesh, MAX_BOUNDARY, MAX_LOOPS,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Circle {
@@ -233,8 +235,10 @@ fn fitted(points: &[Vec2], models: &[Circle], tolerance: f64, epsilon: f64) -> L
     if points.len() < 5 || models.is_empty() {
         return original;
     }
+    // A circle hint must not restore the straight subdivisions fit_loop already removed.
+    let points = straight_corners(points, epsilon);
     let n = points.len();
-    let ring = ring_at_sharpest_corner(points);
+    let ring = ring_at_sharpest_corner(&points);
     // A whole circle has no preferred seam.
     for &model in models {
         if let Some(Seg2::Arc {
@@ -418,8 +422,8 @@ fn certified(points: &[Vec2], curves: &[Seg2], tolerance: f64) -> bool {
 }
 
 /// Recognize a bounded extrusion whose projected caps and walls match the hinted section curves.
-/// Returns `None` only when applicability is rejected before the native solid sweep.
-/// Boundary, nesting, construction and solid or volume certificate errors propagate.
+/// Returns `None` when applicability or a boundary, nesting, solid or volume certificate
+/// is not proved. Cancellation and unexpected construction errors propagate.
 pub(super) fn extrusion(
     k: &mut Kernel,
     mesh: &TriMesh,
@@ -521,22 +525,26 @@ pub(super) fn extrusion(
         }
     }
     let raw: Vec<_> = lower.iter().map(|p| polygon(p)).collect();
-    certify_nesting(k, &raw, &lower_matched, epsilon, size)?;
+    if !certify_nesting(k, &raw, &lower_matched, epsilon, size)? {
+        return Ok(None);
+    }
     let Some(regions) = nest_regions(&loops, &loops)? else {
         return Ok(None);
     };
-    let mut body = native::extrude(k, &plane.frame(), &regions, hi - lo)?;
+    let Some(mut body) = native::extrude(k, &plane.frame(), &regions, hi - lo)? else {
+        return Ok(None);
+    };
     let original = mesh.volume();
-    let volume = native::volume(k, &mut body)?;
+    let Some(volume) = native::volume(k, &mut body)? else {
+        return Ok(None);
+    };
     let perimeter: f64 = curves.iter().map(segment_length).sum();
     if !native::is_valid(k, &mut body)?
         || !volume.is_finite()
         || volume <= 0.
         || (volume - original).abs() > perimeter * (hi - lo) * tolerance + epsilon * size * size
     {
-        return Err(invalid(
-            "analytic section failed solid or volume validation",
-        ));
+        return Ok(None);
     }
     Ok(Some(body))
 }

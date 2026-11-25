@@ -17,9 +17,11 @@ use self::geometry::{
 
 mod cap;
 mod curves;
+mod faceted;
 mod geometry;
 mod native;
 mod parts;
+mod topology;
 
 #[cfg(test)]
 mod tests;
@@ -36,8 +38,9 @@ impl TriMesh {
         mesh_size(&self.positions)
     }
 
-    /// Signed source volume, in the same triangle order as the former split-corner measurement.
+    /// Signed source volume about a source point, avoiding cancellation from world translation.
     fn volume(&self) -> f64 {
+        let origin = self.positions.first().copied().unwrap_or(Vec3::ZERO);
         let mut six = 0.;
         for &[a, b, c] in &self.triangles {
             if let (Some(a), Some(b), Some(c)) = (
@@ -45,7 +48,7 @@ impl TriMesh {
                 self.positions.get(b as usize),
                 self.positions.get(c as usize),
             ) {
-                six += a.dot(b.cross(*c));
+                six += (*a - origin).dot((*b - origin).cross(*c - origin));
             }
         }
         six / 6.
@@ -79,19 +82,42 @@ fn invalid(message: &'static str) -> SolidError {
     SolidError::invalid_input("reconstruct mesh", message)
 }
 
-/// Recover a closed indexed triangle mesh as certified straight extrusions and planar shoulders.
-/// Returns `None` when the mesh does not match a supported analytic decomposition.
+/// Version of this producer's face, edge and vertex construction order.
+/// Bump this when either representation changes that order; applications include the
+/// version in source-bound geometry identities rather than assuming an unstated order.
+pub const FACE_ORDER_VERSION: u32 = 1;
+
+/// How the converter represented the source mesh.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReconstructionKind {
+    /// Certified planes and circular cylinders, including planar shoulders.
+    Analytic,
+    /// The source mesh's planar facets, with adjacent coplanar triangles joined.
+    Faceted,
+}
+
+/// A converted solid and the representation selected from its source geometry.
+#[derive(Debug)]
+pub struct MeshReconstruction {
+    /// The closed reconstructed solid.
+    pub body: Brep,
+    /// Whether analytic reconstruction was certified or the source facets were retained.
+    pub kind: ReconstructionKind,
+}
+
+/// Convert a closed indexed source mesh to certified analytic geometry or its own facets.
+/// Analytic work limits and failed certificates select the faceted representation of the
+/// unchanged welded source; they never refuse a closed mesh solely because it is complex.
 ///
 /// # Errors
-/// Returns an error for malformed input, a tolerance outside 0.000001–1 mm, exceeded hard work
-/// limits, or a refused boundary, nesting, solid or volume certificate. Construction and validation
-/// errors also propagate. These refusals do not select another reconstruction.
+/// Malformed source geometry, an invalid tolerance, an original input over its hard budget,
+/// cancellation, or a kernel failure while constructing or exporting the solid.
 pub fn reconstruct(
     k: &mut Kernel,
     positions: &[Vec3],
     triangles: &[[u32; 3]],
     tolerance: f64,
-) -> Result<Option<Brep>> {
+) -> Result<MeshReconstruction> {
     if !tolerance.is_finite() || !(1e-6..=1.).contains(&tolerance) {
         return Err(invalid("tolerance must be between 0.000001 and 1 mm"));
     }
@@ -139,10 +165,22 @@ pub fn reconstruct(
     axes.sort_by(|a, b| b.1.total_cmp(&a.1));
     for &(axis, _) in axes.iter().take(16) {
         if let Some(result) = extrusion(k, &mesh, axis, tolerance)? {
-            return Ok(Some(result));
+            return Ok(MeshReconstruction {
+                body: result,
+                kind: ReconstructionKind::Analytic,
+            });
         }
     }
-    parts::reconstruct(k, &mesh, tolerance)
+    if let Some(body) = parts::reconstruct(k, &mesh, tolerance)? {
+        return Ok(MeshReconstruction {
+            body,
+            kind: ReconstructionKind::Analytic,
+        });
+    }
+    Ok(MeshReconstruction {
+        body: faceted::build(k, &mesh)?,
+        kind: ReconstructionKind::Faceted,
+    })
 }
 
 fn check_budget(positions: &[Vec3], triangles: &[[u32; 3]]) -> Result<()> {
@@ -172,7 +210,7 @@ fn weld(
         || source_positions.iter().any(|p| {
             [p.x, p.y, p.z]
                 .iter()
-                .any(|v| !v.is_finite() || v.abs() >= 1e9 || (v / epsilon).abs() > 1e15)
+                .any(|v| !v.is_finite() || (v / epsilon).abs() > 1e15)
         })
     {
         return Err(invalid("mesh coordinates exceed the conversion budget"));
@@ -224,13 +262,10 @@ fn weld(
         };
         remap.push(i);
     }
-    // A triangle of no area (its corners on one line, or welded into one another) adds no
-    // surface, so it is dropped rather than refused (#4561); the closed-manifold check that
-    // follows still refuses a mesh that needed it to close. Only the vertices the kept triangles
-    // use stay, so a dropped triangle's corner cannot widen the part's extent.
-    let mut used: Vec<Option<u32>> = vec![None; positions.len()];
-    let mut kept_positions: Vec<Vec3> = Vec::new();
-    let mut triangles = Vec::new();
+    // Preserve a closed collinear sliver's T-junction by splitting the sole triangle on
+    // its long edge. Other zero-area triangles add no surface and are discarded.
+    let mut kept = Vec::new();
+    let mut slivers = Vec::new();
     for &[a, b, c] in source_triangles {
         let (Some(&a), Some(&b), Some(&c)) = (
             remap.get(a as usize),
@@ -246,9 +281,26 @@ fn weld(
         ) else {
             return Err(invalid("missing triangle vertex"));
         };
-        if normalize((pb - pa).cross(pc - pa)).is_none() {
-            continue;
+        if normalize((pb - pa).cross(pc - pa)).is_some() {
+            kept.push([a, b, c]);
+        } else if a != b && b != c && c != a {
+            slivers.extend(
+                [
+                    (pa.distance(pb), c, a, b),
+                    (pb.distance(pc), a, b, c),
+                    (pc.distance(pa), b, c, a),
+                ]
+                .into_iter()
+                .max_by(|x, y| x.0.total_cmp(&y.0))
+                .map(|(_, middle, u, v)| (u, v, middle)),
+            );
         }
+    }
+    resolve_slivers(&mut kept, &slivers)?;
+    let mut used: Vec<Option<u32>> = vec![None; positions.len()];
+    let mut kept_positions = Vec::new();
+    let mut triangles = Vec::new();
+    for [a, b, c] in kept {
         let mut keep = |i: u32| -> Result<u32> {
             let slot = used
                 .get_mut(i as usize)
@@ -280,6 +332,51 @@ fn weld(
     // before testing manifoldness and orient a closed shell outward.
     parts::orient(&mut mesh);
     Ok(mesh)
+}
+
+/// Resolve the source's collinear slivers without inventing surface or losing edge subdivisions.
+fn resolve_slivers(kept: &mut Vec<[u32; 3]>, slivers: &[(u32, u32, u32)]) -> Result<()> {
+    let edge = |a: u32, b: u32| (a.min(b), a.max(b));
+    let sides = |[a, b, c]: [u32; 3]| [(a, b, c), (b, c, a), (c, a, b)];
+    let mut users = BTreeMap::<(u32, u32), Vec<usize>>::new();
+    for (i, &t) in kept.iter().enumerate() {
+        for (a, b, _) in sides(t) {
+            users.entry(edge(a, b)).or_default().push(i);
+        }
+    }
+    for &(u, v, middle) in slivers {
+        let Some(&[i]) = users.get(&edge(u, v)).map(Vec::as_slice) else {
+            continue;
+        };
+        let t = kept
+            .get(i)
+            .copied()
+            .ok_or_else(|| invalid("missing sliver neighbour"))?;
+        let Some((x, y, z)) = sides(t)
+            .into_iter()
+            .find(|&(a, b, _)| edge(a, b) == edge(u, v))
+        else {
+            continue;
+        };
+        for (a, b, _) in sides(t) {
+            if let Some(list) = users.get_mut(&edge(a, b)) {
+                list.retain(|&j| j != i);
+            }
+        }
+        let j = kept.len();
+        let left = [x, middle, z];
+        let right = [middle, y, z];
+        *kept
+            .get_mut(i)
+            .ok_or_else(|| invalid("missing sliver neighbour"))? = left;
+        kept.push(right);
+        for (index, tri) in [(i, left), (j, right)] {
+            for (a, b, _) in sides(tri) {
+                users.entry(edge(a, b)).or_default().push(index);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Certify matching caps and straight walls before building an analytic prism with valid nesting and volume.
@@ -450,7 +547,7 @@ fn extrusion(k: &mut Kernel, mesh: &TriMesh, axis: Vec3, tolerance: f64) -> Resu
         })
         .collect();
     if mesh.positions.len().saturating_mul(boundary_segments.len()) > 32_000_000 {
-        return Err(invalid("boundary certification exceeds its work budget"));
+        return Ok(None);
     }
     for p in &mesh.positions {
         let h = p.dot(axis);
@@ -495,14 +592,18 @@ fn extrusion(k: &mut Kernel, mesh: &TriMesh, axis: Vec3, tolerance: f64) -> Resu
         raw_loops.push(polygon(&chain));
         loops.push(fit_loop(&chain, tolerance, epsilon));
     }
-    certify_nesting(k, &raw_loops, &loops, epsilon, size)?;
+    if !certify_nesting(k, &raw_loops, &loops, epsilon, size)? {
+        return Ok(None);
+    }
     // Nest by the original polygon, so smoothing cannot change which loop is a hole.
     let Some(regions) = nest_regions(&raw_loops, &loops)? else {
         return Ok(None);
     };
-    let mut body = native::extrude(k, &plane.frame(), &regions, height)?;
+    let Some(mut body) = native::extrude(k, &plane.frame(), &regions, height)? else {
+        return Ok(None);
+    };
     if !native::is_valid(k, &mut body)? {
-        return Err(invalid("reconstructed solid did not pass validity checks"));
+        return Ok(None);
     }
     let perimeter: f64 = loops
         .iter()
@@ -510,44 +611,43 @@ fn extrusion(k: &mut Kernel, mesh: &TriMesh, axis: Vec3, tolerance: f64) -> Resu
         .map(segment_length)
         .sum();
     let original = mesh.volume();
-    let rebuilt = native::volume(k, &mut body)?;
+    let Some(rebuilt) = native::volume(k, &mut body)? else {
+        return Ok(None);
+    };
     if !original.is_finite()
         || original <= 0.
         || (rebuilt - original).abs() > perimeter * height * tolerance + epsilon * size.powi(2)
     {
-        return Err(invalid(
-            "reconstructed volume is inconsistent with the source mesh",
-        ));
+        return Ok(None);
     }
     Ok(Some(body))
 }
 
-/// Reject fitted boundaries that cross or change containment, with a cap on pairwise Boolean work.
+/// Whether fitted boundaries keep containment, within the bounded pairwise Boolean work.
 fn certify_nesting(
     k: &mut Kernel,
     raw: &[Loop2],
     fitted: &[Loop2],
     epsilon: f64,
     size: f64,
-) -> Result<()> {
-    if raw.len() > MAX_LOOPS {
-        return Err(invalid(
-            "mesh is too complex to convert (at most 50 boundary loops are supported)",
-        ));
+) -> Result<bool> {
+    if raw.len() > MAX_LOOPS || raw.len() != fitted.len() {
+        return Ok(false);
     }
     let mut work = 0usize;
     for (i, a) in raw.iter().enumerate() {
         for (j, b) in raw.iter().enumerate().skip(i + 1) {
             work = work.saturating_add(a.segs.len().saturating_mul(b.segs.len()));
             if work > 16_000_000 {
-                return Err(invalid("loop certification exceeds its work budget"));
+                return Ok(false);
             }
-            let (ab, ba) = (
-                geometry::contains_loop(a, b)?,
-                geometry::contains_loop(b, a)?,
-            );
+            let (Some(ab), Some(ba)) =
+                (geometry::contains_loop(a, b), geometry::contains_loop(b, a))
+            else {
+                return Ok(false);
+            };
             if ab && ba {
-                return Err(invalid("overlapping boundary loops"));
+                return Ok(false);
             }
             for (a, b) in [
                 (a, b),
@@ -566,12 +666,15 @@ fn certify_nesting(
                         holes: Vec::new(),
                     })
                 };
-                let area = native::intersection_area(
+                let Some(area) = native::intersection_area(
                     k,
                     &region(a)?,
                     &region(b)?,
                     epsilon.clamp(1e-9, 1.),
-                )?;
+                )?
+                else {
+                    return Ok(false);
+                };
                 let expected = if ab {
                     b.signed_area()?.value.abs()
                 } else if ba {
@@ -580,12 +683,12 @@ fn certify_nesting(
                     0.
                 };
                 if (area - expected).abs() > epsilon * size.max(1.) * 10. {
-                    return Err(invalid("conversion would cross or merge boundary loops"));
+                    return Ok(false);
                 }
             }
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Recover full circles or partial arcs only after sample and chord checks; otherwise retain polygon corners.
@@ -641,6 +744,12 @@ fn fit_loop(points: &[Vec2], tolerance: f64, epsilon: f64) -> Loop2 {
             }
         }
     }
+    let points = straight_corners(points, epsilon);
+    fit_partial_arcs(&points, tolerance, epsilon)
+}
+
+/// Remove only the source's straight subdivisions, with the same bounded total displacement.
+fn straight_corners(points: &[Vec2], epsilon: f64) -> Vec<Vec2> {
     let mut points = points.to_vec();
     let linear_tolerance = epsilon / points.len().max(1) as f64;
     loop {
@@ -659,7 +768,7 @@ fn fit_loop(points: &[Vec2], tolerance: f64, epsilon: f64) -> Loop2 {
             keep
         });
     }
-    fit_partial_arcs(&points, tolerance, epsilon)
+    points
 }
 
 /// A circular arc through both actual endpoints, independently certified against every

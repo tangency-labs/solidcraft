@@ -167,9 +167,39 @@ fn an_interior_vertex_split_reports_the_original_curve_gap() {
 }
 
 /// Two adjacent squares, with one shared edge represented by an exact cubic
-/// Hermite line. Stitching can compare it; this certificate does not support it.
-fn unsupported_shared_edge() -> (Kernel, Brep) {
+/// Hermite line over [0, 1].
+fn hermite_shared_edge() -> (Kernel, Brep) {
     use solidcore::curve::hermite_curve::HermiteCurve;
+    shared_edge_as(|a, z| HermiteCurve::new(a, z - a, z, z - a, 3).into())
+}
+
+/// Two adjacent squares, with one shared edge represented by the zero offset of the
+/// line's B-spline in the squares' plane. Stitching can compare it; this certificate
+/// does not support it (#13724 part (c) takes offset curves; the kind only has to be
+/// unsupported here and writable for the exact binary restore check).
+fn unsupported_shared_edge() -> (Kernel, Brep) {
+    use solidcore::curve::offset_curve::OffsetCurve;
+    use solidcore::geom::extent1d::Extent1d;
+    use solidcore::nurbs::b_spline_curve::BSplineCurve;
+    shared_edge_as(|a, z| {
+        OffsetCurve::new(
+            3,
+            BSplineCurve::create_line_segment(3, a, z).unwrap().into(),
+            Extent1d::from_min_max(0.0, 1.0),
+            Vec3::Z,
+            0.0,
+            true,
+        )
+        .unwrap()
+        .into()
+    })
+}
+
+/// Two adjacent squares, with the shared edge replaced by `make(start, end)` over
+/// [0, 1].
+fn shared_edge_as(
+    make: impl Fn(solidcore::math::Point3, solidcore::math::Point3) -> solidcore::curve::curve::Curve,
+) -> (Kernel, Brep) {
     let mut k = Kernel::default();
     let mut b = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
     add_square(&mut k, &mut b, 0.0, 0.0);
@@ -199,7 +229,7 @@ fn unsupported_shared_edge() -> (Kernel, Brep) {
     let old = data.curve.as_ref().unwrap();
     let a = old.evaluate_point(&k, data.interval.min()).unwrap();
     let z = old.evaluate_point(&k, data.interval.max()).unwrap();
-    let mut curve: solidcore::curve::curve::Curve = HermiteCurve::new(a, z - a, z, z - a, 3).into();
+    let mut curve = make(a, z);
     curve.set_owner(
         old.owner(),
         Some(solidcore::topology::brep::p2::brep_ref(&b)),
@@ -271,9 +301,8 @@ fn certificate_failure_propagates_and_rolls_back_earlier_closures_with_flags_off
         "the direct stitch has already edited the operand"
     );
 
-    for statuses in [false, true] {
+    {
         let (mut k, mut b) = unsupported_shared_edge();
-        k.fixes.brep_edit_statuses_pass_on = statuses;
         let before = binary(&k, &b);
         let ids = (
             b.face_list().to_vec(),
@@ -289,13 +318,9 @@ fn certificate_failure_propagates_and_rolls_back_earlier_closures_with_flags_off
                     ..
                 })
             ),
-            "flag={statuses}: {result:?}"
+            "{result:?}"
         );
-        assert_eq!(
-            binary(&k, &b),
-            before,
-            "flag={statuses}: the full operand must be restored"
-        );
+        assert_eq!(binary(&k, &b), before, "the full operand must be restored");
         assert_eq!(
             (
                 b.face_list().to_vec(),
@@ -305,6 +330,132 @@ fn certificate_failure_propagates_and_rolls_back_earlier_closures_with_flags_off
             ids
         );
     }
+}
+
+#[test]
+fn a_hermite_shared_edge_reports_a_certified_gap() {
+    // The Hermite edge is the exact line its neighbour's edge is (its stored cubic
+    // coefficients are zero), so the closed-form gap is 0; the bound holds it and stays
+    // within rounding of it. Before Hermite enclosures this closure was refused.
+    // Rounding: the squares' coordinates and the cubic's coefficients are at most 4
+    // in magnitude, every interval operation widens by at most |x| 2.3e-16 + 1e-300,
+    // and the pair bound takes well under 100 operations per axis (shift, hull,
+    // difference, norm), so its excess over 0 is under 100 * 4 * 2.3e-16 * sqrt(3)
+    // < 2e-13; 1e-12 is the floor the line-edge tests above use.
+    let (mut k, mut b) = hermite_shared_edge();
+    let gaps = stitch_and_orient_reported(&mut k, &mut b, &StitchAndOrientOptions::default())
+        .expect("a Hermite edge has a certified enclosure");
+    for entry in &gaps {
+        check_accounting(entry);
+    }
+    let edges = edge_closures(&gaps);
+    assert_eq!(edges.len(), 1, "{gaps:?}");
+    let (entry, _, _) = edges[0];
+    assert!(entry.gap >= 0.0 && entry.gap < 1e-12, "{entry:?}");
+    b.refresh_cached_topology();
+    assert_eq!(b.edge_list().len(), 7);
+}
+
+/// The plane through `a` with unit `u` direction `z - a` (the shared edges are unit
+/// long), on the analytic domain [0, 1]^2: its `v = 0` line is the segment a -> z.
+fn plane_along(a: solidcore::math::Point3, z: solidcore::math::Point3) -> Surface {
+    use solidcore::math::Vec2;
+    Surface::from(Plane::new(
+        a,
+        z - a,
+        Vec3::new(0.0, 0.0, 1.0),
+        Vec2::new(1.0, 1.0),
+        &Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0)),
+    ))
+}
+
+/// The parameter line (u0, v0) -> (u1, v1) over [0, 1], as a 2D B-spline.
+fn uv_line(from: (f64, f64), to: (f64, f64)) -> solidcore::curve::curve::Curve {
+    use solidcore::nurbs::b_spline_curve::BSplineCurve;
+    use solidcore::nurbs::crv_basic::Curve as Nurbs;
+    use solidcore::nurbs::math::{CPoint, NOW, NOZ};
+    let cp = |(x, y): (f64, f64)| CPoint::new(x, y, NOZ, NOW);
+    let n = Nurbs::new(vec![cp(from), cp(to)], 1, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
+    BSplineCurve::from_nurb(n, 2, true).into()
+}
+
+/// Asserts the stitch closes the one shared edge, reporting a gap in `range`.
+fn closes_shared_edge(mut k: Kernel, mut b: Brep, range: core::ops::Range<f64>) {
+    let gaps = stitch_and_orient_reported(&mut k, &mut b, &StitchAndOrientOptions::default())
+        .expect("the shared edge has a certified enclosure");
+    for entry in &gaps {
+        check_accounting(entry);
+    }
+    let edges = edge_closures(&gaps);
+    assert_eq!(edges.len(), 1, "{gaps:?}");
+    let (entry, _, _) = edges[0];
+    assert!(range.contains(&entry.gap), "{entry:?}");
+    b.refresh_cached_topology();
+    assert_eq!(b.edge_list().len(), 7);
+}
+
+#[test]
+fn a_curve_on_surface_shared_edge_reports_a_certified_gap() {
+    // The parameter line (0, 0) -> (1, 0) on `plane_along(a, z)` is a + u (z - a): the
+    // neighbour's line at every parameter, so the closed-form gap is 0. The coordinates
+    // are at most 2 in magnitude and the mean-value pair bound takes well under 100
+    // interval operations per axis on each cell (plane affine form, chain rule,
+    // difference, norm), each widening by at most |x| 2.3e-16 + 1e-300, so its excess
+    // over 0 is under 100 * 2 * 2.3e-16 * sqrt(3) < 1e-13; 1e-12 is the floor the
+    // Hermite case uses. Before surface-curve enclosures this closure was refused.
+    let (k, b) = shared_edge_as(|a, z| {
+        let k = Kernel::default();
+        let uv = uv_line((0.0, 0.0), (1.0, 0.0));
+        solidcore::curve::crv_on_surf::CrvOnSurf::new(&k, uv, plane_along(a, z), None, 0)
+            .unwrap()
+            .into()
+    });
+    closes_shared_edge(k, b, 0.0..1e-12);
+}
+
+#[test]
+fn an_iso_shared_edge_reports_a_certified_gap() {
+    // The v = 0 iso line of `plane_along(a, z)` is a + u (z - a) over u in [0, 1]: the
+    // neighbour's line at every parameter, closed-form gap 0, and the same rounding
+    // budget as the curve-on-surface case above.
+    let (k, b) = shared_edge_as(|a, z| {
+        use solidcore::curve::iso_curve::IsoCurve;
+        use solidcore::nurbs::b_spline_surface::SurfParamType;
+        let k = Kernel::default();
+        IsoCurve::from_surface(&k, plane_along(a, z), SurfParamType::V, 0.0, true, false)
+            .unwrap()
+            .into()
+    });
+    closes_shared_edge(k, b, 0.0..1e-12);
+}
+
+#[test]
+fn a_tangent_field_shared_edge_reports_a_finite_certified_gap() {
+    // A tangent field on the squares' plane z = 0 from (1, 0, 0) to (1, 1, 0): its value
+    // is s dt + e (1 - dt) with dt = (1 + cos(pi t)) / 2, in the plane already, so it
+    // is (1, (1 - cos(pi t)) / 2, 0), on the shared edge x = 1 but away from the
+    // neighbour's (1, t, 0) at the same parameter. That distance
+    // t - (1 - cos(pi t)) / 2 peaks where sin(pi t) = 2 / pi, at
+    // asin(2 / pi) / pi - (1 - sqrt(1 - 4 / pi^2)) / 2 = 0.10525..., which the bound
+    // must hold; it encloses the field by its Thales spheres only, so it stays finite
+    // but is not tight. Before tangent-field enclosures this closure was refused.
+    let (k, b) = shared_edge_as(|a, z| {
+        use solidcore::curve::tangent_field::{TangentDirType, TangentFieldCurve};
+        let k = Kernel::default();
+        let uv = uv_line((0.0, 0.0), (1.0, 0.0));
+        TangentFieldCurve::new(
+            &k,
+            uv,
+            Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0))),
+            TangentDirType::Interpolate,
+            a,
+            z,
+            None,
+        )
+        .unwrap()
+        .into()
+    });
+    closes_shared_edge(k, b, 0.105..f64::MAX);
 }
 
 /// The edge closures of a report, with their kept and deleted edges.

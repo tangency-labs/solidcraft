@@ -72,7 +72,7 @@ original geometric reference independently of those choices.
 ## Booleans
 
 Booleans run in SMLib, with no retries or fallbacks: a Boolean SMLib cannot do exactly is an
-error that names why, never a nudged or approximate result. The retry reports truck's Booleans
+error that names why, never a nudged or approximate result. The retry reports the old kernel's Booleans
 kept (`boolean_diagnostics` in `timeline.inspect` and `doc.inspect`) are gone with them.
 
 ## Results
@@ -163,6 +163,4 @@ Found by QA on new users' first steps, each with an engine test against the anal
 
 - Partial unions of a cap and a face (a cylinder's end lying partly on a box face): pushing
   one face into the other adds material where they don't overlap.
-- Shells of partial annuli (a half ring) whose cavity truck's boolean rejects although the
-  same cavity built another way cuts cleanly.
 - Very slow booleans on bodies with many patterned features.

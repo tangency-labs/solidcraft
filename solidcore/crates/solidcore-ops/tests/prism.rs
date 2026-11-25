@@ -13,11 +13,11 @@
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_3, FRAC_PI_4, PI, TAU};
 
 use solidcore_ops::prism::{
-    extrude_planar_regions, loop_holds, planar_regions_boolean, prism_equivalent, prism_section,
-    region_area, PrismSection,
+    extrude_planar_regions, fitted_loop, loop_holds, planar_regions_boolean, prism_equivalent,
+    prism_section, region_area, PrismSection,
 };
 use solidcore_ops::{make_box, make_cylinder, session, Body, BooleanOp, CheckLevel, Error};
-use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 fn all_fixes() {
     session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
@@ -1337,6 +1337,76 @@ fn planar_region_api_rejects_hostile_values_and_budgets() {
     ));
 }
 
+#[test]
+fn a_prism_section_does_not_depend_on_the_query_frame_origin() {
+    all_fixes();
+    let body = make_cylinder([50.0, 50.0, -3.0], 5.0, 6.0).unwrap();
+    let exact_volume = 150.0 * PI;
+    for offset in [0.0, 300.0, 1000.0, 10000.0, -10000.0] {
+        let plane = Plane {
+            origin: Vec3::new(offset, offset, 7.0),
+            ..Plane::XY
+        };
+        let section = prism_section(&body, &plane)
+            .unwrap()
+            .unwrap_or_else(|| panic!("the same cylinder is a prism at origin {offset}"));
+        assert!((section.lo + 10.0).abs() <= section.tolerance);
+        assert!((section.hi + 4.0).abs() <= section.tolerance);
+        assert!(section.volume.lo <= exact_volume && exact_volume <= section.volume.hi);
+        assert!(section.region.holes.is_empty());
+        for segment in &section.region.outer.segs {
+            let Seg2::Arc { center, radius, .. } = segment else {
+                panic!("a cylinder's section is circular: {segment:?}");
+            };
+            assert!((center.x + offset - 50.0).abs() < 1e-8);
+            assert!((center.y + offset - 50.0).abs() < 1e-8);
+            assert!((radius - 5.0).abs() < 1e-8);
+        }
+    }
+    for offset in [1e20, f64::MAX] {
+        let plane = Plane {
+            origin: Vec3::new(offset, offset, 7.0),
+            ..Plane::XY
+        };
+        assert!(prism_section(&body, &plane).unwrap().is_none());
+    }
+    let moved = make_cylinder([500.0, 500.0, -3.0], 5.0, 6.0).unwrap();
+    let plane = Plane {
+        origin: Vec3::new(500.0, 500.0, 0.0),
+        ..Plane::XY
+    };
+    let section = prism_section(&moved, &plane).unwrap().unwrap();
+    assert!((section.lo + 3.0).abs() <= section.tolerance);
+    assert!((section.hi - 3.0).abs() <= section.tolerance);
+    assert!(section.volume.lo <= exact_volume && exact_volume <= section.volume.hi);
+}
+
+#[test]
+fn a_prism_section_refuses_a_wall_displaced_from_its_caps() {
+    use solidcore_record::brep::Surface;
+
+    all_fixes();
+    let body = make_cylinder([50.0, 50.0, -3.0], 5.0, 6.0).unwrap();
+    let (mut record, _) = body.to_record().unwrap();
+    let wall = record
+        .faces
+        .iter_mut()
+        .find(|face| matches!(face.surface, Surface::Cylinder { .. }))
+        .unwrap();
+    let Surface::Cylinder { frame, .. } = &mut wall.surface else {
+        unreachable!()
+    };
+    frame.origin[2] += 1000.0;
+    let Some(Surface::RationalSpline { homogeneous, .. }) = &mut wall.nurbs else {
+        panic!("the cylinder's wall has a rational net")
+    };
+    for p in homogeneous.iter_mut().flatten() {
+        p[2] += 1000.0 * p[3];
+    }
+    let (displaced, _) = Body::from_record(&record, true).unwrap();
+    assert!(prism_section(&displaced, &Plane::XY).unwrap().is_none());
+}
+
 /// A box cut by a cylinder through it, moved: a prism along its moved axis, and the same prism
 /// as itself moved the same way; the drilled box against a box drilled wider is not.
 #[test]
@@ -1409,6 +1479,98 @@ fn loop_holds_a_point_on_an_edge_line_off_the_loop() {
     assert_eq!(loop_holds(&sq, v(11.0, 10.0)), Some(false));
     assert_eq!(loop_holds(&sq, v(5.0, 5.0)), Some(true));
     assert_eq!(loop_holds(&sq, v(5.0, 0.0)), None);
+}
+
+#[test]
+fn directed_planar_sweep_preserves_record_coordinates() {
+    let center = v(10.0, 20.0);
+    assert_eq!(
+        solidcore_ops::prism::counterclockwise_sweep(center, v(12.0, 20.0), v(10.0, 23.0)),
+        Some(FRAC_PI_2)
+    );
+    assert_eq!(
+        solidcore_ops::prism::counterclockwise_sweep(center, center, v(10.0, 23.0)),
+        None
+    );
+}
+
+#[test]
+fn hatch_record_admission_bounds_conversion_before_geometry() {
+    use solidcore_ops::hatch::generate;
+    use solidcore_record::hatch::{Invalid, Pattern};
+    let pattern = Pattern::lines_45();
+    let line = Seg2::Line {
+        a: v(0.0, 0.0),
+        b: v(1.0, 0.0),
+    };
+    let mut region = Region2 {
+        outer: Loop2 {
+            segs: vec![line; solidcore::hatch::MAX_INPUT_PIECES + 1],
+        },
+        holes: Vec::new(),
+    };
+    assert_eq!(
+        generate(&pattern, &region),
+        Err(Invalid("input piece budget exhausted"))
+    );
+    region.outer.segs.pop();
+    assert_ne!(
+        generate(&pattern, &region),
+        Err(Invalid("input piece budget exhausted")),
+        "the exact ceiling remains inclusive"
+    );
+    let circle = Loop2::circle(v(0.0, 0.0), 5.0);
+    region = Region2 {
+        outer: circle.clone(),
+        holes: vec![circle.clone(), circle],
+    };
+    assert_eq!(
+        generate(&pattern, &region),
+        Err(Invalid("not supported yet: multiple circular hatch holes"))
+    );
+    region = Region2 {
+        outer: Loop2 {
+            segs: vec![line; 3],
+        },
+        holes: vec![Loop2::default(); solidcore::hatch::MAX_INPUT_PIECES / 3 + 1],
+    };
+    assert_eq!(
+        generate(&pattern, &region),
+        Err(Invalid("too many region holes"))
+    );
+}
+
+/// The section fit as Convert Mesh takes it (moved from SolidCraft's `mesh_convert.rs`
+/// `planar_boxes_are_exact_and_coarse_polygons_are_not_rounded`): a hexagon keeps its six sides,
+/// sixteen nodes too coarse for 0.001 keep sixteen, and within 0.2 they are the exact circle, one
+/// arc of one full turn round the centre at the radius.
+#[test]
+fn coarse_section_polygons_are_not_rounded_and_a_fine_one_is_the_exact_circle() {
+    let ring = |n: usize| -> Vec<Vec2> {
+        (0..n)
+            .map(|i| {
+                let angle = i as f64 * TAU / n as f64;
+                v(angle.cos() * 10., angle.sin() * 10.)
+            })
+            .collect()
+    };
+    assert_eq!(fitted_loop(&ring(6), 1., 1e-6).unwrap().segs.len(), 6);
+    assert_eq!(fitted_loop(&ring(16), 0.001, 1e-6).unwrap().segs.len(), 16);
+    let fitted = fitted_loop(&ring(16), 0.2, 1e-6).unwrap();
+    let [Seg2::Arc {
+        center,
+        radius,
+        sweep,
+        ..
+    }] = fitted.segs.as_slice()
+    else {
+        panic!("not one arc: {fitted:?}")
+    };
+    assert!(
+        center.x.hypot(center.y) < 1e-9 && (radius - 10.).abs() < 1e-9,
+        "centre {center:?}, radius {radius}"
+    );
+    assert!((sweep.abs() - TAU).abs() < 1e-9, "sweep {sweep}");
 }
 
 /// The point of the circle about `c` of radius `r` at angle `deg` (degrees).
@@ -1654,4 +1816,148 @@ fn a_round_notch_drawn_as_two_arcs_keeps_their_meeting_points_on_its_outline() {
         "{}",
         area(&out[0])
     );
+}
+
+/// A face strays across a direction by its tilt over its own size (the diagonal of its tight
+/// box), in closed form: on a Y-groove plate swept along z the walls not at all, each cap by
+/// twice its diagonal, the 30° bevel across x by √3 times its own diagonal, the top not at all;
+/// a cylinder's side along its axis not at all and across it by four times its box diagonal; a
+/// wide thin disc's caps by their whole diameter (a cap's only vertex is its seam's, brett19 on
+/// #21614); a ruled spline net along its rulings not at all, short or long, and across a tilt by
+/// twice its height times the tilt's sine; any finite scale of a direction as the unit one; zero
+/// no bound; NaN and a face past the faces refused.
+#[test]
+fn a_face_strays_across_a_direction_by_its_tilt_over_its_own_size() {
+    let zone = solidcore_ops::sweep::zone_tolerance().unwrap();
+    let close = |got: f64, want: f64, what: &str| {
+        assert!((got - want).abs() <= 1e-6 * want, "{what}: {got} != {want}");
+    };
+    let t = 30.0_f64.to_radians().tan();
+    let top = 0.5 + 7.0 * t;
+    let corners = [
+        v(-40.0, 0.0),
+        v(-40.0, -8.0),
+        v(-0.5, -8.0),
+        v(-0.5, -7.0),
+        v(-top, 0.0),
+    ];
+    let region = Region2 {
+        outer: Loop2::polygon(&corners),
+        holes: vec![],
+    };
+    let plate = extrude_planar_regions(&Plane::XY, &[region], 0.0, 120.0).unwrap();
+    let (_, order) = plate.to_record().unwrap();
+    let normal = |f: usize| plate.face_plane_normal(&order, f).unwrap().unwrap().value;
+    let stray = |f: usize, d: [f64; 3]| plate.face_straying(&order, f, d).unwrap().unwrap();
+    let cap = (39.5_f64.powi(2) + 8.0_f64.powi(2)).sqrt();
+    let bevel = ((7.0 * t).powi(2) + 7.0_f64.powi(2) + 120.0_f64.powi(2)).sqrt();
+    let (mut caps, mut bevels, mut tops) = (0, 0, 0);
+    for f in 0..order.faces.len() {
+        let n = normal(f);
+        let along = stray(f, [0.0, 0.0, 1.0]);
+        if n[2].abs() > 0.99 {
+            caps += 1;
+            close(along, 2.0 * cap, "cap");
+            continue;
+        }
+        assert!(along <= zone, "face {f}: {along}");
+        let across = stray(f, [1.0, 0.0, 0.0]);
+        if n[1] > 0.99 {
+            tops += 1;
+            assert!(across <= zone, "top: {across}");
+        } else if n[0] > 0.1 && n[1] > 0.1 {
+            bevels += 1;
+            close(across, 3.0_f64.sqrt() * bevel, "bevel");
+        }
+    }
+    assert_eq!((caps, bevels, tops), (2, 1, 1));
+    // any finite scale of a direction gives the unit direction's bound
+    let f = (0..order.faces.len())
+        .find(|&f| normal(f)[0] > 0.1 && normal(f)[1] > 0.1)
+        .unwrap();
+    let unit = stray(f, [1.0, 0.0, 0.0]);
+    for scale in [7.0, 1e200, 1e-200] {
+        let scaled = stray(f, [scale, 0.0, 0.0]);
+        assert!(
+            (scaled - unit).abs() <= 1e-12 * unit,
+            "{scale}: {scaled} != {unit}"
+        );
+    }
+    assert_eq!(plate.face_straying(&order, f, [0.0; 3]).unwrap(), None);
+    assert!(matches!(
+        plate.face_straying(&order, f, [f64::NAN, 0.0, 1.0]),
+        Err(Error::Argument)
+    ));
+    assert!(matches!(
+        plate.face_straying(&order, order.faces.len(), [0.0, 0.0, 1.0]),
+        Err(Error::Argument)
+    ));
+
+    // a cylinder of radius 5 and height 20: its side's box diagonal is √600
+    let cylinder = make_cylinder([0.0; 3], 5.0, 20.0).unwrap();
+    let (_, order) = cylinder.to_record().unwrap();
+    let side = (0..order.faces.len())
+        .find(|&f| cylinder.face_plane_normal(&order, f).unwrap().is_none())
+        .unwrap();
+    let along = cylinder
+        .face_straying(&order, side, [0.0, 0.0, 1.0])
+        .unwrap()
+        .unwrap();
+    assert!(along <= zone, "{along}");
+    let across = cylinder
+        .face_straying(&order, side, [1.0, 0.0, 0.0])
+        .unwrap()
+        .unwrap();
+    close(across, 4.0 * 600.0_f64.sqrt(), "side across x");
+
+    // a disc of radius 1000 and height 1, d 4e-6 off its plane: a line along d across a cap
+    // leaves it by 8e-3, so each cap is far from straight (its vertex box would have said 1)
+    let disc = make_cylinder([0.0; 3], 1000.0, 1.0).unwrap();
+    let (_, order) = disc.to_record().unwrap();
+    let d = [1.0, 0.0, 4e-6];
+    let mut flat = 0;
+    for f in 0..order.faces.len() {
+        if disc.face_plane_normal(&order, f).unwrap().is_some() {
+            flat += 1;
+            let got = disc.face_straying(&order, f, d).unwrap().unwrap();
+            close(got, 2.0 * 8.0_f64.sqrt() * 1000.0 * 4e-6, "disc cap");
+        }
+    }
+    assert_eq!(flat, 2);
+
+    // a plain ruled spline net (brett19 on #21614): a degree-1 loft between a cubic at z = 0 and
+    // the same cubic at z = h runs straight along its rulings, however short they are against
+    // its width, and strays across a direction tilted θ off them by 2·h·sin θ
+    let ruled = |width: f64, h: f64| {
+        let cubic = |z: f64| solidcore_ops::sweep::Curve::Nurbs {
+            degree: 3,
+            points: vec![
+                [0.0, 0.0, z, 1.0],
+                [0.3 * width, 0.2 * width, z, 1.0],
+                [0.7 * width, -0.2 * width, z, 1.0],
+                [width, 0.0, z, 1.0],
+            ],
+            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        };
+        let sheet =
+            solidcore_ops::sweep::loft(&[vec![cubic(0.0)], vec![cubic(h)]], 1, false).unwrap();
+        let (_, order) = sheet.to_record().unwrap();
+        assert_eq!(order.faces.len(), 1);
+        (sheet, order)
+    };
+    for (width, h) in [(10.0, 10.0), (10.0, 1.0), (1000.0, 1.0)] {
+        let (sheet, order) = ruled(width, h);
+        let along = sheet
+            .face_straying(&order, 0, [0.0, 0.0, 1.0])
+            .unwrap()
+            .unwrap();
+        assert!(along <= zone, "ruled {width} x {h}: {along}");
+    }
+    let (sheet, order) = ruled(10.0, 10.0);
+    let tilted = sheet
+        .face_straying(&order, 0, [1e-3, 0.0, 1.0])
+        .unwrap()
+        .unwrap();
+    let sin = 1e-3 / (1.0 + 1e-6_f64).sqrt();
+    close(tilted, 2.0 * 10.0 * sin, "ruled, tilted");
 }

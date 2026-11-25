@@ -42,17 +42,20 @@
 use super::original_trim::OriginalSurfaceDeletion;
 use super::{invalid, FilletBody, FilletObject, FilletSession, SessionObjects};
 use crate::blend::fillet_cliff_overflow::Refusal;
+use crate::blend::fillet_corner::p1::keeping_cause;
 use crate::blend::fillet_executive::p3::{
-    ErrorInfo, FilletExecutive, FilletFinishAccess, StitchAttempt, StitchSettings,
+    caught, ErrorInfo, FilletExecutive, FilletFinishAccess, StitchAttempt, StitchSettings,
 };
 use crate::blend::fillet_geom::p1::FilletErrorType;
+use crate::error::blend::BlendFailure;
 use crate::error::{EntityRef, Result, SolidError};
+use crate::geom::attribute::{ids, Attribute, Behavior, TagData};
 use crate::geom::object::NotifyOperation;
 use crate::geom::tol::approx_tol3d;
 use crate::kernel::Kernel;
 use crate::surface::procedural_blend::NetScope;
 use crate::topology::brep::{p1, p3};
-use crate::topology::{BrepId, EdgeId};
+use crate::topology::{Brep, BrepId, EdgeId};
 use std::collections::BTreeSet;
 
 const OP: &str = "blend::fillet_executive::session::finish";
@@ -68,9 +71,52 @@ fn refusable(error: &SolidError) -> Option<(&'static str, i32, Option<EntityRef>
         .map(|code| (error.operation(), code, error.entity()))
 }
 
-/// `FILEXEC_ERR` (`SM_ERR`): the executive's generic failure status, as the phrase says.
-fn failure(what: &'static str) -> SolidError {
-    SolidError::blend_failed(OP, what)
+/// Whether `error` is the failure a missing corner produces in the live session: a solver
+/// that looks up the corner of its vertex and finds none
+/// (`SessionGeometryContext::corner`, the session's
+/// [`BlendFailure::FilletVertexWithoutCorner`]),
+/// keeping no cause. That failure names no vertex, so which missing corner it met is not
+/// checked.
+pub(super) fn is_missing_corner(error: &SolidError) -> bool {
+    error.cause().is_none()
+        && error.operation() == "blend::fillet_executive::session"
+        && matches!(
+            error.blend_failure(),
+            Some(BlendFailure::FilletVertexWithoutCorner)
+        )
+}
+
+/// `error` with `cause`, the error of the classification that left a vertex without a
+/// corner, kept as the cause of the root of its chain ([`SolidError::root_cause`]), only
+/// where that root is the failure a missing corner produces ([`is_missing_corner`]; #19803).
+/// Then the operation, reason, status and site of every error in the chain stay as they
+/// were, but the error is no longer equal to the one given, its message gains
+/// `"; caused by {cause}"` at its end, and the predicates that follow the chain
+/// ([`SolidError::is_defect`], [`SolidError::is_refusal`], [`SolidError::sized`],
+/// [`SolidError::is_port_failure`], [`SolidError::is_status_answer`]) read `cause` too. Any
+/// other chain is returned as it is and `cause` is dropped (the error record still holds it,
+/// [`ErrorInfo::unsupported_corner_cause`]).
+fn rooted_in(mut error: SolidError, cause: SolidError) -> SolidError {
+    if !is_missing_corner(error.root_cause()) {
+        return error;
+    }
+    let mut slot = &mut error;
+    while let SolidError::Failed(failure) = slot {
+        if let Some(ref mut inner) = failure.cause {
+            slot = inner;
+        } else {
+            failure.cause = Some(cause);
+            break;
+        }
+    }
+    error
+}
+
+/// The fillet body is not built, or has no faces: a step of the executive failed
+/// ([`BlendFailure::ExecutiveStepFailed`], `FILEXEC_ERR`, `SM_ERR`). The session's error info
+/// says which step and why; the step's own error, where there is one, is kept as the cause.
+fn step_failed() -> SolidError {
+    SolidError::blend(OP, BlendFailure::ExecutiveStepFailed)
 }
 
 /// Ordinary statuses become `None`; deferrals propagate.
@@ -99,6 +145,276 @@ const fn mate_entity(object: FilletObject) -> Option<EntityRef> {
     }
 }
 
+/// (not upstream, WR-661) The target's boundary before filleting (each lamina edge's
+/// curve, the interval between its vertices and its tolerance) and its faces. An open
+/// result is kept only when its boundary is this one, cut back where a fillet meets it
+/// ([`OpenInput::keeps_open_result`]). A closed input has no boundary, so a result the
+/// fillet left open is never kept.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct OpenInput {
+    boundary: Vec<BoundaryPiece>,
+    /// The target's faces before filleting, sorted. Ids are never reused, so a face of
+    /// the result that is not here was made by the fillet.
+    faces: Vec<crate::topology::FaceId>,
+    /// The orientation's failure, when an open result was kept in its place: the
+    /// finished body must pass the level-2 check ([`OpenInput::check_kept`]).
+    kept: Option<SolidError>,
+}
+
+/// A lamina edge's curve, the interval between its vertices and its tolerance.
+type BoundaryPiece = (
+    crate::curve::curve::Curve,
+    crate::geom::extent1d::Extent1d,
+    f64,
+);
+
+/// The lamina edges of `b` with a curve, as [`BoundaryPiece`]s, and whether every lamina
+/// edge has one.
+fn boundary_of(b: &Brep) -> Result<(Vec<(EdgeId, BoundaryPiece)>, bool)> {
+    let mut pieces = Vec::new();
+    let mut all = true;
+    for edge in p1::edges(b, None)? {
+        if !crate::topology::edgeuse::p1::edge_is_lamina(b, edge)? {
+            continue;
+        }
+        let Some(curve) = crate::topology::edge::curve(b, edge)? else {
+            all = false;
+            continue;
+        };
+        pieces.push((
+            edge,
+            (
+                curve.clone(),
+                crate::topology::edge::interval(b, edge)?,
+                crate::topology::edge::tolerance(b, edge)?,
+            ),
+        ));
+    }
+    Ok((pieces, all))
+}
+
+/// Whether `point` lies on one of `pieces`: its drop point on the piece's curve, over the
+/// piece's interval, is within the larger of the piece's tolerance and `tolerance`. A
+/// piece the point cannot be measured against (a failed drop, a NaN distance) counts as
+/// `unmeasured_is_on`, so each caller can take the side that refuses.
+fn on_one_of<'a>(
+    k: &Kernel,
+    pieces: impl IntoIterator<Item = &'a BoundaryPiece>,
+    point: crate::math::Point3,
+    tolerance: f64,
+    unmeasured_is_on: bool,
+) -> Result<bool> {
+    for (curve, interval, piece_tolerance) in pieces {
+        let within = piece_tolerance.max(tolerance);
+        let measured = match curve.drop_point(
+            k,
+            interval,
+            point,
+            None,
+            within,
+            None,
+            crate::geom::global_solver::SolverOperation::Minimize,
+        ) {
+            Ok(dropped) if dropped.success && !dropped.distance.is_nan() => {
+                Some(dropped.distance <= within)
+            }
+            Err(error) if error.is_unported_or_cancelled() => return Err(error),
+            Ok(_) | Err(_) => None,
+        };
+        if measured.unwrap_or(unmeasured_is_on) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Whether `curve` over `interval` is a stretch of `piece` over `piece_interval` exactly:
+/// both are B-splines with the same NURB and `interval` lies inside `piece_interval`. The
+/// edge then runs along the piece by identity, which needs no bound; a long edge on a
+/// tight tolerance would otherwise use up the certificate's pieces.
+fn same_spline_within(
+    curve: &crate::curve::curve::Curve,
+    piece: &crate::curve::curve::Curve,
+    interval: &crate::geom::extent1d::Extent1d,
+    piece_interval: &crate::geom::extent1d::Extent1d,
+) -> bool {
+    use crate::curve::curve::CurveKind;
+    let (CurveKind::BSpline(a), CurveKind::BSpline(b)) = (curve.kind(), piece.kind()) else {
+        return false;
+    };
+    let (Ok(a), Ok(b)) = (a.nurb_ref(), b.nurb_ref()) else {
+        return false;
+    };
+    a == b
+        && piece_interval.contains_value(interval.min(), 0.0)
+        && piece_interval.contains_value(interval.max(), 0.0)
+}
+
+/// Whether the curve `curve` over `interval` runs along one of `pieces`, certified (no
+/// sampled acceptance): its two ends drop onto the piece within the larger of the
+/// piece's tolerance and `tolerance`, and [`curves_stay_within`] certifies that the whole
+/// stretch between them stays within that distance of the piece's curve between the two
+/// drop parameters. The drops only choose which stretch of the piece is compared; the
+/// acceptance is the certificate. A stretch that cannot be certified on any one piece
+/// (a curve that leaves the piece between its ends, one that runs over two pieces, a
+/// curve kind without a speed bound, a failed drop) does not run along `pieces`.
+///
+/// [`curves_stay_within`]: crate::curve::curve::p8::curves_stay_within
+fn runs_along_one_of<'a>(
+    k: &Kernel,
+    pieces: impl IntoIterator<Item = &'a BoundaryPiece>,
+    curve: &crate::curve::curve::Curve,
+    interval: &crate::geom::extent1d::Extent1d,
+    tolerance: f64,
+) -> Result<bool> {
+    let ends = [interval.min(), interval.max()];
+    let points = [
+        curve.evaluate_point(k, ends[0])?,
+        curve.evaluate_point(k, ends[1])?,
+    ];
+    for (piece, piece_interval, piece_tolerance) in pieces {
+        if same_spline_within(curve, piece, interval, piece_interval) {
+            return Ok(true);
+        }
+        let within = piece_tolerance.max(tolerance);
+        let mut on_piece = [0.0; 2];
+        let mut dropped_both = true;
+        for (at, point) in on_piece.iter_mut().zip(points) {
+            match piece.drop_point(
+                k,
+                piece_interval,
+                point,
+                None,
+                within,
+                None,
+                crate::geom::global_solver::SolverOperation::Minimize,
+            ) {
+                Ok(dropped) if dropped.success && dropped.distance <= within => {
+                    *at = dropped.parameter;
+                }
+                Err(error) if error.is_unported_or_cancelled() => return Err(error),
+                Ok(_) | Err(_) => dropped_both = false,
+            }
+        }
+        if !dropped_both {
+            continue;
+        }
+        match crate::curve::curve::p8::curves_stay_within(
+            k,
+            curve,
+            piece,
+            [ends[0], on_piece[0]],
+            [ends[1], on_piece[1]],
+            within,
+        ) {
+            Ok(true) => return Ok(true),
+            Err(error) if error.is_unported_or_cancelled() => return Err(error),
+            Ok(false) | Err(_) => {}
+        }
+    }
+    Ok(false)
+}
+
+impl OpenInput {
+    /// The boundary of `target` as it is now. A lamina edge with no curve cannot be
+    /// matched, so nothing lies on it.
+    ///
+    /// # Errors
+    /// Lookup failures.
+    pub(crate) fn capture(target: &Brep) -> Result<Self> {
+        let (pieces, _) = boundary_of(target)?;
+        let mut faces = p1::faces(target, None)?;
+        faces.sort_unstable();
+        Ok(Self {
+            boundary: pieces.into_iter().map(|(_, piece)| piece).collect(),
+            faces,
+            kept: None,
+        })
+    }
+
+    /// WR-661: a body kept open in place of the orientation's failure must pass the
+    /// level-2 check once the filleting is done (the edges are not valid before then:
+    /// the orientation runs before the last edge updates); if it does not, that failure
+    /// is returned. Nothing is checked when no open result was kept.
+    ///
+    /// # Errors
+    /// The kept failure; those of the check.
+    pub(crate) fn check_kept(&mut self, k: &mut Kernel, result: &mut Brep) -> Result<()> {
+        let Some(error) = self.kept.take() else {
+            return Ok(());
+        };
+        let check = crate::topology::brep::validation::check_brep(
+            k,
+            result,
+            crate::topology::brep::validation::CheckLevel::Level2,
+        )?;
+        if check.lines().is_empty() {
+            Ok(())
+        } else {
+            Err(error)
+        }
+    }
+
+    /// WR-661: whether `result`, which the stitch left open, is kept. All of these must hold:
+    /// - the input was open (it had a boundary);
+    /// - every end vertex of every lamina edge of `result` lies on the input's boundary
+    ///   (to the result's tolerance);
+    /// - a lamina edge on a face the input had runs along the input's boundary: the
+    ///   whole edge stays within the tolerance of one boundary piece, certified
+    ///   ([`runs_along_one_of`]). Only an edge whose faces the fillet made
+    ///   (a blend's end) may leave the boundary, with both ends on it. So the result's
+    ///   boundary is the input's, cut back where a fillet meets it, and a seam the stitch
+    ///   left unjoined, at any distance, is refused whenever one side of it is an input
+    ///   face: its edge there runs off the boundary;
+    /// - no lamina edge of `result` lies on another one (its curve's middle point is on
+    ///   no other lamina edge, and one that cannot be measured counts as on): two such
+    ///   edges are a seam within the tolerance that the stitch did not join;
+    /// - and, checked when the filleting is done ([`Self::check_kept`]), the finished body
+    ///   passes the level-2 check.
+    ///
+    /// Anything else is refused: a closed input left open, or an open input that gained
+    /// a boundary along an input face (a gap the stitch left, a missing face).
+    ///
+    /// # Errors
+    /// Lookup failures; unported or cancelled curve and check steps.
+    pub(crate) fn keeps_open_result(&self, k: &mut Kernel, result: &mut Brep) -> Result<bool> {
+        if self.boundary.is_empty() {
+            return Ok(false);
+        }
+        let tolerance = result.tolerance();
+        let (lamina, all_have_curves) = boundary_of(result)?;
+        if !all_have_curves {
+            return Ok(false);
+        }
+        for (edge, (curve, interval, _)) in &lamina {
+            for vertex in crate::topology::edge::vertices(result, *edge, None)? {
+                let Some(vertex) = vertex else {
+                    return Ok(false);
+                };
+                let point = crate::topology::vertex::point(result, vertex)?;
+                if !on_one_of(k, &self.boundary, point, tolerance, false)? {
+                    return Ok(false);
+                }
+            }
+            let on_input_face = crate::topology::edge::faces(result, *edge, None)?
+                .iter()
+                .any(|face| self.faces.binary_search(face).is_ok());
+            if on_input_face && !runs_along_one_of(k, &self.boundary, curve, interval, tolerance)? {
+                return Ok(false);
+            }
+            let middle = curve.evaluate_point(k, interval.mid())?;
+            let others = lamina
+                .iter()
+                .filter(|(other, _)| other != edge)
+                .map(|(_, piece)| piece);
+            if on_one_of(k, others, middle, tolerance, true)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+}
+
 pub(super) struct FinishAccess<'a, 'target>(pub(super) &'a mut SessionObjects<'target>);
 
 impl FinishAccess<'_, '_> {
@@ -117,7 +433,7 @@ impl FinishAccess<'_, '_> {
         k: &mut Kernel,
         body: impl FnOnce(
             &mut Kernel,
-            &mut crate::topology::Brep,
+            &mut Brep,
             &mut crate::topology::edge::NotifyEnv<'_>,
         ) -> Result<T>,
     ) -> Result<T> {
@@ -370,7 +686,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
                 relations.mates.vertices.record(vertex, other)?;
             }
         }
-        if let Some((edges, faces)) = &self.0.cleanup_kept {
+        if let Some(edges) = &self.0.cleanup_kept {
             // An input edge is kept by its id while it is still the whole input edge, with
             // the ends it had. A split one is not: which of its pieces keeps the id follows
             // the edge's direction, so a part and its mirror image would keep different
@@ -383,9 +699,23 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
                     relations.kept_edges.insert(edge);
                 }
             }
-            relations.kept_faces.clone_from(faces);
+            // #17169: a face is the target's while it carries the target's face mark, so
+            // a face the trim left of a split input face is one whichever piece kept the
+            // id (by its id alone, a round and its mirror image kept different faces).
+            for face in p1::faces(self.0.target, None)? {
+                let key = p3::topology_ref(self.0.target_serial, EntityRef::Face(face)).key;
+                if self
+                    .0
+                    .attributes
+                    .find_attribute(key, ids::FILLET_TARGET_FACE)
+                    .is_some()
+                {
+                    relations.kept_faces.insert(face);
+                }
+            }
         }
         let before = p1::edges(self.0.target, None)?;
+        let vertices_before = std::mem::take(&mut self.0.vertices_before);
         // The cleanup's face and edge merges notify through the session's store, so the
         // survivors keep the attributes of the objects merged into them.
         let result = self.with_target_env(k, |k, target, env| {
@@ -394,8 +724,18 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
                 target,
                 &relations,
                 check_all_edges,
-                Some(env),
-            )
+                Some(&mut *env),
+            )?;
+            // As the boolean's merge places its own after its cleanup (#3090): a vertex the
+            // fillet made on a target edge stands on that edge's curve, which may lie up to the
+            // edge's tolerance off one of its faces, past the B-rep's intersection tolerance that
+            // every vertex/face gap must stay under. The fillet's vertices (those the target did
+            // not have) go to the corner their faces define, under the boolean's guards.
+            let vertices: Vec<_> = p1::vertices(target, None)?
+                .into_iter()
+                .filter(|v| !vertices_before.contains(v))
+                .collect();
+            crate::boolean::merge::p1::place_vertices_on_face_corners(k, target, &vertices, env)
         });
         let cleared = self.clear_deleted_edges(&before);
         result.and(cleared)
@@ -528,6 +868,22 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
         *maybe_not_solid = oriented.maybe_not_closed_solid;
         Ok(())
     }
+    fn finish_keeps_open_result(
+        &mut self,
+        k: &mut Kernel,
+        brep: FilletObject,
+        error: &SolidError,
+    ) -> Result<bool> {
+        Self::require_target(brep)?;
+        let SessionObjects {
+            target, open_input, ..
+        } = &mut *self.0;
+        let keeps = open_input.keeps_open_result(k, target)?;
+        if keeps {
+            open_input.kept = Some(error.clone());
+        }
+        Ok(keeps)
+    }
 }
 
 impl FilletSession<'_> {
@@ -539,17 +895,28 @@ impl FilletSession<'_> {
     /// Not upstream (WR-513, #1469): a missing-corner note written by this call's corner
     /// stage is kept in [`FilletSession::error_info`] across the later failure, unless
     /// that failure is a no-room refusal; the returned error is still the later stage's
-    /// own status.
+    /// own status. Where that note's vertex has no corner because its classification failed
+    /// ([`ErrorInfo::unsupported_corner_cause`]) and the later failure's root is a solver
+    /// finding a vertex's corner missing, that root keeps the classification's error as its
+    /// cause ([`rooted_in`], #19803).
     ///
     /// Not upstream (#2510): the fillet is built to the target's approximation tolerance
     /// (`SmTol::GetApproxTol3d`, its solvers' and its merge's), so a face it rolls on that
     /// is a blend by its definition evaluates as its certified net wherever the net's
     /// bound is within that tolerance ([`NetScope::within`]); a step that asks for more
-    /// (a station of a definition) takes S.
+    /// (a station of a definition) takes S. [`Self::do_filleting`], called on its own after
+    /// [`Self::create_corners`] as solidcore-ops does, opens the same scope.
     pub fn do_fillet(&mut self, k: &mut Kernel) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::session::do_fillet");
-        let tolerance = approx_tol3d(k, 0.5 * self.objects.target.tolerance());
+        let tolerance = self.net_tolerance(k);
         NetScope::within_mut(k, tolerance, |k| self.do_fillet_within(k))
+    }
+
+    /// The tolerance the fillet is built to, the target's approximation tolerance
+    /// (`SmTol::GetApproxTol3d`): the [`NetScope`] [`Self::do_fillet`] and
+    /// [`Self::do_filleting`] run in.
+    fn net_tolerance(&self, k: &Kernel) -> f64 {
+        approx_tol3d(k, 0.5 * self.objects.target.tolerance())
     }
 
     /// The body of [`Self::do_fillet`], in its tolerance's [`NetScope`].
@@ -572,12 +939,18 @@ impl FilletSession<'_> {
             == FilletErrorType::CornerUnsupported as i32
             && self.executive.error != noted_before)
             .then(|| self.executive.error.clone());
-        let (result, split_and_logged) = self.filleting_split_and_logged(k, None);
+        let (mut result, split_and_logged) = self.filleting_split_and_logged(k, None);
         if result.is_err()
             && self.executive.error.code != FilletErrorType::NoRoom as i32
             && self.executive.error.no_room == noted_before.no_room
         {
             if let Some(note) = missing_corner_note {
+                // (not upstream, #19803) where the later failure's root is a solver finding
+                // a vertex's corner missing, the error of the classification that left the
+                // noted vertex without one is kept as that root's cause
+                if let Some(cause) = note.unsupported_corner_cause().cloned() {
+                    result = result.map_err(|error| rooted_in(error, cause));
+                }
                 self.executive.error = note;
             }
         }
@@ -615,14 +988,19 @@ impl FilletSession<'_> {
     /// A round whose radius law has a corner is split there (the fork's
     /// `SplitFilletFacesAtRadiusCorners`, which its `DoFillet` runs), so a session filleted
     /// step by step, its corners set between [`Self::create_corners`] and this, builds the
-    /// law's corners as [`Self::do_fillet`] does.
+    /// law's corners as [`Self::do_fillet`] does. It runs in [`Self::do_fillet`]'s
+    /// [`NetScope`] too, so a session filleted step by step reads a round kept as its
+    /// definition through its certified net as [`Self::do_fillet`] does.
     pub fn do_filleting(
         &mut self,
         k: &mut Kernel,
         error_out: Option<&mut ErrorInfo<FilletObject>>,
     ) -> Result<()> {
-        let (status, split_and_logged) = self.filleting_split_and_logged(k, error_out);
-        status.and(split_and_logged)
+        let tolerance = self.net_tolerance(k);
+        NetScope::within_mut(k, tolerance, |k| {
+            let (status, split_and_logged) = self.filleting_split_and_logged(k, error_out);
+            status.and(split_and_logged)
+        })
     }
 
     /// The filleting's status, then the split at the radius law's corners and the blend
@@ -642,10 +1020,71 @@ impl FilletSession<'_> {
         } else {
             Ok(())
         };
+        // (not upstream, WR-661) an open result kept in place of the orientation's
+        // failure must be valid once finished
+        let status = match (status, &split) {
+            (Ok(()), Ok(())) => {
+                let SessionObjects {
+                    target, open_input, ..
+                } = &mut self.objects;
+                open_input.check_kept(k, target)
+            }
+            (status, _) => status,
+        };
         // (not upstream) the blend face log is read after the split, whose faces replace
         // the round's
         let logged = self.take_blend_faces(k, status.is_ok() && split.is_ok());
-        (status, split.and(logged))
+        let unmarked = self.remove_target_face_marks();
+        (status, split.and(logged).and(unmarked))
+    }
+
+    /// WR-459 (#17169): marks each face of the target, as filleting starts, with
+    /// [`ids::FILLET_TARGET_FACE`] (`SM_AB_COPY`, so a split's pieces and a merge's
+    /// survivor carry it): the clean-up after filleting leaves the faces that carry it.
+    fn mark_target_faces(&mut self) -> Result<()> {
+        for face in p1::faces(self.objects.target, None)? {
+            let mark = Attribute::tag(ids::FILLET_TARGET_FACE, TagData::default(), Behavior::Copy);
+            let handle = self.objects.attributes.insert(mark)?;
+            // recorded first, so a failed attach is still destroyed at the end
+            self.objects.cleanup_face_marks.push(handle);
+            let key = self.target_identity(EntityRef::Face(face)).key;
+            self.objects.attributes.add_attribute(key, handle)?;
+        }
+        Ok(())
+    }
+
+    /// Removes every target face mark ([`Self::mark_target_faces`]) when filleting ends,
+    /// whether it succeeded or not, so the target's attributes are as they would be without
+    /// them: the marks set, and the copies the splits and merges made of them.
+    fn remove_target_face_marks(&mut self) -> Result<()> {
+        // the recorded marks go first, so a failed face walk below cannot leak them
+        let mut status = Ok(());
+        for handle in std::mem::take(&mut self.objects.cleanup_face_marks) {
+            if self.objects.attributes.get(handle).is_some() {
+                // (destroyed even after an earlier failure; the first error is kept)
+                let destroyed = self.objects.attributes.destroy(handle);
+                status = status.and(destroyed);
+            }
+        }
+        // then the copies the splits and merges made, found on the target's faces
+        let mut found = Vec::new();
+        for face in p1::faces(self.objects.target, None)? {
+            let key = self.target_identity(EntityRef::Face(face)).key;
+            if let Some(handle) = self
+                .objects
+                .attributes
+                .find_attribute(key, ids::FILLET_TARGET_FACE)
+            {
+                found.push(handle);
+            }
+        }
+        for handle in found {
+            if self.objects.attributes.get(handle).is_some() {
+                let destroyed = self.objects.attributes.destroy(handle);
+                status = status.and(destroyed);
+            }
+        }
+        status
     }
 
     /// [`Self::do_filleting`]'s filleting, without the split at the radius law's corners
@@ -723,22 +1162,33 @@ impl FilletSession<'_> {
         // setback set on a made corner (SetSetBackDist) that builds none (neither the
         // Setback nor an N x N corner) would be dropped silently, so it is refused, as
         // `create_corners` refuses one asked with SetSetBackFill at such a corner
-        if self
+        // (not the fork, #2933) otherwise a corner at a vertex marked set back is classified
+        // now, where the setback set on it is first read: the Setback where it is one. A corner
+        // that is the Setback already builds the setback set on it (#16408); one beside a
+        // curved face asked an ease, which its G1 fill cannot take, is refused rather than
+        // built without the ask. Both refusals end in the one failure below.
+        let not_built = if self
             .objects
             .corners
             .iter()
             .any(crate::blend::blend_corner::setback::asked_setback_not_built)
         {
+            Some(crate::blend::blend_corner::setback::SETBACK_NOT_BUILT)
+        } else if self.set_back_marked_corners(k)?.is_some() {
+            Some(crate::blend::blend_corner::setback::SETBACK_EASE_NOT_BUILT)
+        } else {
+            None
+        };
+        if let Some(comment) = not_built {
             self.note_refusal(Refusal {
                 code: FilletErrorType::CornerUnsupported,
                 reason: None,
-                comment: crate::blend::blend_corner::setback::SETBACK_NOT_BUILT,
+                comment,
             });
-            return Err(failure("an asked setback is not built"));
+            // the refusal noted just above holds why: a corner refused at its vertex
+            // (`FILEXEC_ERR`, `SM_ERR`, as the phrase it replaces had)
+            return Err(SolidError::blend(OP, BlendFailure::CornerRefused));
         }
-        // (not the fork, #2933) a corner at a vertex marked set back is classified now, where
-        // the setback set on it is first read: the Setback where it is one
-        self.set_back_marked_corners(k)?;
         // not the fork's (#3145): setbacks that overlap on an edge, before the trace
         if let Some((vertex, refusal)) = crate::blend::blend_corner::setback::overlapping_setbacks(
             k,
@@ -758,20 +1208,19 @@ impl FilletSession<'_> {
                 &refusal,
             ));
         }
+        self.objects.vertices_before = p1::vertices(self.objects.target, None)?
+            .into_iter()
+            .collect();
         // WR-459: the clean-up after filleting leaves the target's own edges and faces.
-        self.objects.cleanup_kept = if k.fixes.fillet_cleanup_keeps_target_faces {
-            let mut edges = std::collections::BTreeMap::new();
-            for edge in p1::edges(self.objects.target, None)? {
-                let ends = crate::topology::edge::vertices(self.objects.target, edge, None)?;
-                edges.insert(edge, ends);
-            }
-            Some((
-                edges,
-                p1::faces(self.objects.target, None)?.into_iter().collect(),
-            ))
-        } else {
-            None
-        };
+        let mut edges = std::collections::BTreeMap::new();
+        for edge in p1::edges(self.objects.target, None)? {
+            let ends = crate::topology::edge::vertices(self.objects.target, edge, None)?;
+            edges.insert(edge, ends);
+        }
+        self.objects.cleanup_kept = Some(edges);
+        self.mark_target_faces()?;
+        // WR-661: the boundary an open result must keep to be kept.
+        self.objects.open_input = OpenInput::capture(self.objects.target)?;
         self.with_filleting_context(k, |session, k| {
             let made = session.create_fillet_brep(k, error_out.as_deref_mut());
             if let Err(error) = &made {
@@ -780,11 +1229,12 @@ impl FilletSession<'_> {
                 // its own status
                 session.note_unnoted(&format!("Fillet Surface Computation Failure: {error}"));
             }
-            if ignore(made)?.is_none() {
+            // the step's error is kept as the failure's cause (#13790)
+            if let Err(stage) = caught(made)? {
                 if let Some(output) = error_out.as_deref_mut() {
                     output.assign(&session.executive.error);
                 }
-                return Err(failure("the fillet body is not built"));
+                return Err(keeping_cause(step_failed(), stage));
             }
             let faces = session
                 .objects
@@ -799,7 +1249,7 @@ impl FilletSession<'_> {
                 if let Some(output) = error_out {
                     output.assign(&session.executive.error);
                 }
-                return Err(failure("the fillet body has no faces"));
+                return Err(step_failed());
             }
             session.shrink_fillet_faces(k)?;
             // The fork's NoteRadiusCornerSurfaces (6eecf04): the fillet surfaces that turn at
@@ -830,36 +1280,16 @@ impl FilletSession<'_> {
                     return kept.map(drop);
                 }
             }
-            // The fork's (WR-631, WR-638): a cliff overflow closes the fillet faces into the
-            // region the blends remove and subtracts it from the target, instead of merging
-            // the fillet faces in; the error a failed subtraction noted stands.
-            // WR-674: a round left open at its tangent-continuation ends is built the same
-            // way, by subtraction
-            // WR-695 (the fork's TrimAtCreases, smlib#79 step 6): with
-            // `fillet_overflow_trim_at_creases` a cliff overflow is trimmed at its creases in
-            // place instead, and so is a WR-674 section end (WR-706)
+            // WR-695 (the fork's TrimAtCreases, smlib#79 step 6, which deletes the
+            // subtraction of WR-631 and WR-638): a cliff overflow is trimmed at its creases
+            // in place, and so is a round left open at its tangent-continuation ends as
+            // WR-674 section ends (WR-706)
             // The fork's ef57570 (smlib#125): so is an open G1 setback
             // corner's hole made (no patches: its spring curves are imprinted on its faces
             // with the sheet's boundary)
             let sectioned = session.executive.open_ends.iter().any(|end| end.section);
-            let trimmed = open_setback
-                || if sectioned {
-                    k.fixes.fillet_overflow_trim_at_creases
-                } else {
-                    session.executive.cliff_overflow && k.fixes.fillet_overflow_trim_at_creases
-                };
-            if trimmed {
+            if open_setback || sectioned || session.executive.cliff_overflow {
                 let result = session.trim_at_creases(k);
-                session.objects.target.set_editing_enabled(editing);
-                if let Some(output) = error_out {
-                    output.assign(&session.executive.error);
-                }
-                return result;
-            }
-            if session.executive.cliff_overflow
-                || session.executive.open_ends.iter().any(|end| end.section)
-            {
-                let result = session.subtract_removal_region(k);
                 session.objects.target.set_editing_enabled(editing);
                 if let Some(output) = error_out {
                     output.assign(&session.executive.error);
@@ -1015,6 +1445,205 @@ mod stitch_identity_tests {
     }
 }
 
+/// WR-661: which open results the orientation's pass-over keeps. A box opened by removing
+/// faces stands for a result the stitch left open.
+#[cfg(test)]
+mod open_input_tests {
+    use super::*;
+    use crate::math::Point3;
+    use crate::topology::FaceId;
+
+    fn open(k: &mut Kernel, b: &mut Brep, face: FaceId) {
+        let editing = b.editing_enabled();
+        b.set_editing_enabled(true);
+        crate::topology::brep::p5::remove_faces(k, b, true, &[face]).unwrap();
+        b.set_editing_enabled(editing);
+    }
+
+    /// A face of `b` that shares no edge with `face` (the opposite face of a box).
+    fn opposite(b: &Brep, face: FaceId) -> FaceId {
+        let edges = crate::topology::face::p4::edges(b, face, None, false, None).unwrap();
+        p1::faces(b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                f != face
+                    && crate::topology::face::p4::edges(b, f, None, false, None)
+                        .unwrap()
+                        .iter()
+                        .all(|e| !edges.contains(e))
+            })
+            .unwrap()
+    }
+
+    fn a_box(k: &mut Kernel) -> Brep {
+        crate::primitive::api_primitives::create_box(k, Point3::ZERO, 10.0, 20.0, 30.0).unwrap()
+    }
+
+    /// A closed input has no boundary: a result the fillet left open is never kept.
+    #[test]
+    fn a_closed_input_left_open_is_refused() {
+        let mut k = Kernel::default();
+        let mut b = a_box(&mut k);
+        let input = OpenInput::capture(&b).unwrap();
+        assert!(input.boundary.is_empty());
+        let face = p1::faces(&b, None).unwrap()[0];
+        open(&mut k, &mut b, face);
+        assert!(!input.keeps_open_result(&mut k, &mut b).unwrap());
+    }
+
+    /// An open input whose result keeps its boundary and passes the level-2 check is kept;
+    /// one that gained a boundary elsewhere is not, even though it is still level-2 clean.
+    #[test]
+    fn an_open_input_is_kept_only_with_its_boundary() {
+        let mut k = Kernel::default();
+        let mut b = a_box(&mut k);
+        let top = p1::faces(&b, None).unwrap()[0];
+        let bottom = opposite(&b, top);
+        open(&mut k, &mut b, top);
+        let input = OpenInput::capture(&b).unwrap();
+        assert_eq!(input.boundary.len(), 4);
+        let lines = crate::topology::brep::validation::check_brep(
+            &mut k,
+            &mut b,
+            crate::topology::brep::validation::CheckLevel::Level2,
+        )
+        .unwrap()
+        .lines();
+        assert!(lines.is_empty(), "{lines:?}");
+        assert!(input.keeps_open_result(&mut k, &mut b).unwrap());
+        // the opposite face's edges become boundary, and their ends lie nowhere on the
+        // input's boundary. The input's faces are cleared, as if the fillet had made
+        // every face, so that only the end rule can refuse (the edges also run off the
+        // boundary along input faces, which `a_tube_missing_a_side_is_refused` covers).
+        let mut input = input;
+        input.faces.clear();
+        open(&mut k, &mut b, bottom);
+        let lines = crate::topology::brep::validation::check_brep(
+            &mut k,
+            &mut b,
+            crate::topology::brep::validation::CheckLevel::Level2,
+        )
+        .unwrap()
+        .lines();
+        assert!(lines.is_empty(), "{lines:?}");
+        assert!(!input.keeps_open_result(&mut k, &mut b).unwrap());
+    }
+
+    /// A tube: a box without two opposite faces.
+    fn a_tube(k: &mut Kernel) -> Brep {
+        let mut b = a_box(k);
+        let top = p1::faces(&b, None).unwrap()[0];
+        let bottom = opposite(&b, top);
+        open(k, &mut b, top);
+        open(k, &mut b, bottom);
+        b
+    }
+
+    /// A seam the stitch left open within the tolerance is refused, even where the
+    /// fillet made both faces: a tube with one side unstitched has its boundary's ends all
+    /// on the tube's rims, and passes the level-2 check, but the side's two long edges
+    /// each lie on a neighbour's. The input's faces are cleared here, as if the fillet
+    /// had made every face, so that only the seam rule can refuse.
+    #[test]
+    fn an_open_seam_is_refused() {
+        let mut k = Kernel::default();
+        let mut b = a_tube(&mut k);
+        let mut input = OpenInput::capture(&b).unwrap();
+        assert_eq!(input.boundary.len(), 8);
+        assert!(input.keeps_open_result(&mut k, &mut b).unwrap());
+        input.faces.clear();
+        let side = p1::faces(&b, None).unwrap()[0];
+        crate::topology::brep::p7::unstitch(&mut k, &mut b, Some(&[side])).unwrap();
+        let (lamina, _) = boundary_of(&b).unwrap();
+        assert_eq!(lamina.len(), 12, "the rims and both sides of the two seams");
+        let lines = crate::topology::brep::validation::check_brep(
+            &mut k,
+            &mut b,
+            crate::topology::brep::validation::CheckLevel::Level2,
+        )
+        .unwrap()
+        .lines();
+        assert!(lines.is_empty(), "{lines:?}");
+        assert!(!input.keeps_open_result(&mut k, &mut b).unwrap());
+    }
+
+    /// An open result whose boundary moved along an input face is refused, however wide
+    /// the gap: a tube missing one side face (a gap of the whole side, 10 or 20 wide,
+    /// far beyond any stitch tolerance) has every boundary end on the tube's rims, no
+    /// two boundary edges on each other, and passes the level-2 check. Its two new
+    /// boundary edges lie on the input's side faces and run across, not along, the rims.
+    /// Were those faces made by the fillet, the result would be kept: the input-face
+    /// rule is what refuses it.
+    #[test]
+    fn a_tube_missing_a_side_is_refused() {
+        let mut k = Kernel::default();
+        let mut b = a_tube(&mut k);
+        let mut input = OpenInput::capture(&b).unwrap();
+        let side = p1::faces(&b, None).unwrap()[0];
+        open(&mut k, &mut b, side);
+        let (lamina, _) = boundary_of(&b).unwrap();
+        assert_eq!(lamina.len(), 8, "six rim edges and the two side edges");
+        assert_eq!(p1::faces(&b, None).unwrap().len(), 3);
+        let lines = crate::topology::brep::validation::check_brep(
+            &mut k,
+            &mut b,
+            crate::topology::brep::validation::CheckLevel::Level2,
+        )
+        .unwrap()
+        .lines();
+        assert!(lines.is_empty(), "{lines:?}");
+        assert!(!input.keeps_open_result(&mut k, &mut b).unwrap());
+        input.faces.clear();
+        assert!(input.keeps_open_result(&mut k, &mut b).unwrap());
+    }
+
+    /// A cubic through the straight boundary piece's two ends and its middle point that
+    /// leaves it in between, `(t, 16 t (t - 1/2) (t - 1), 0)`, 0.75 off at `t = 1/4`
+    /// (PR #18402 review): a check of the ends and the middle point would take it as
+    /// running along the piece; the certificate does not. The piece itself and a straight
+    /// stretch of it are certified.
+    #[test]
+    fn an_edge_that_leaves_the_boundary_between_samples_is_not_along_it() {
+        use crate::curve::curve::Curve;
+        use crate::geom::extent1d::Extent1d;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        let k = Kernel::default();
+        let cubic = |ys: [f64; 4], x0: f64, x1: f64| {
+            let points = ys
+                .iter()
+                .enumerate()
+                .map(|(i, &y)| {
+                    let x = x0 + (x1 - x0) * i as f64 / 3.0;
+                    crate::nurbs::math::CPoint::from_point(Point3::new(x, y, 0.0))
+                })
+                .collect();
+            let nurb = crate::nurbs::crv_basic::Curve::new(
+                points,
+                3,
+                vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap();
+            Curve::from(BSplineCurve::from_nurb(nurb, 3, false))
+        };
+        let unit = Extent1d::from_min_max(0.0, 1.0);
+        let boundary = cubic([0.0; 4], 0.0, 1.0);
+        let pieces = [(boundary.clone(), unit, 1e-6)];
+        let wiggle = cubic([0.0, 8.0 / 3.0, -8.0 / 3.0, 0.0], 0.0, 1.0);
+        // the samples a midpoint rule reads all lie on the piece
+        for t in [0.0, 0.5, 1.0] {
+            let p = wiggle.evaluate_point(&k, t).unwrap();
+            assert!(on_one_of(&k, &pieces, p, 1e-6, false).unwrap(), "t = {t}");
+        }
+        let off = wiggle.evaluate_point(&k, 0.25).unwrap();
+        assert!((off.y - 0.75).abs() < 1e-12, "{off:?}");
+        assert!(!runs_along_one_of(&k, &pieces, &wiggle, &unit, 1e-6).unwrap());
+        assert!(runs_along_one_of(&k, &pieces, &boundary, &unit, 1e-6).unwrap());
+        let stretch = cubic([0.0; 4], 0.25, 0.75);
+        assert!(runs_along_one_of(&k, &pieces, &stretch, &unit, 1e-6).unwrap());
+    }
+}
+
 #[cfg(test)]
 mod pre_edit_tests {
     use super::*;
@@ -1156,18 +1785,79 @@ mod ball_fit_tests {
     }
 
     /// The executive's generic failure (`FILEXEC_ERR`) is a typed failure with the status,
-    /// operation and (no) entity of the bare status it replaced (#13790).
+    /// operation and (no) entity of the bare status it replaced (#13790), the fillet body not
+    /// built a step of the executive failing (#19824).
     #[test]
     fn the_generic_failure_is_typed_with_its_status() {
-        let e = failure("the fillet body is not built");
-        assert_eq!(
-            e.blend_failure(),
-            Some(&BlendFailure::Failed("the fillet body is not built"))
-        );
+        let e = step_failed();
+        assert_eq!(e.blend_failure(), Some(&BlendFailure::ExecutiveStepFailed));
         assert_eq!(e.upstream_status(), Some(1001));
         assert_eq!(e.operation(), OP);
         assert_eq!(e.entity(), None);
         assert_eq!(refusable(&e), Some((OP, 1001, None)));
+    }
+
+    /// A fillet body whose building failed at a stage is not built, as before (the same
+    /// failure, status and error info), keeping the executive's failure as its cause, which
+    /// keeps the stage's error (#13790): the closed corner of a disc's rim round past its
+    /// wall, without the trace reaching its rails (WR-610), whose vertex geometry fails.
+    #[test]
+    fn a_fillet_body_not_built_keeps_the_executives_failure() {
+        let mut k = Kernel::default();
+        k.fixes.fillet_trace_reaches_rails = false;
+        let mut body =
+            crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 13.0, 2.0)
+                .unwrap();
+        let rim = p1::edges(&body, None)
+            .unwrap()
+            .into_iter()
+            .find(|&e| {
+                let interval = edge::interval(&body, e).unwrap();
+                let curve = edge::curve(&body, e).unwrap().unwrap();
+                (0..=8).all(|i| {
+                    let p = curve
+                        .evaluate_point(&k, interval.evaluate(f64::from(i) / 8.0))
+                        .unwrap();
+                    (p.z - 2.0).abs() < 1e-9
+                })
+            })
+            .unwrap();
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &[rim], 2.5, 1, 1, 1.0)
+            .unwrap();
+        let e = session.do_fillet(&mut k).unwrap_err();
+        let info = session.error_info().clone();
+        // as before: the session's failure, its status and the corner's note
+        let bare = step_failed();
+        assert_eq!(e.operation(), OP, "{e:?}");
+        assert_eq!(e.blend_failure(), bare.blend_failure(), "{e:?}");
+        assert_eq!(e.sm_status(), Some(1001), "{e:?}");
+        assert_eq!(refusable(&e), refusable(&bare), "{e:?}");
+        assert_eq!(info.code, 3);
+        assert_eq!(
+            info.comment,
+            "Fillet Corner Error: Unable to Compute Geometry"
+        );
+        // now keeping the executive's failure, which keeps the corner's error
+        let executive = e.cause().expect("the executive's failure is kept");
+        assert_eq!(
+            executive.operation(),
+            "blend::fillet_executive::p3",
+            "{e:?}"
+        );
+        assert_eq!(
+            executive.blend_failure(),
+            Some(&BlendFailure::ExecutiveStepFailed)
+        );
+        assert_eq!(executive.sm_status(), Some(1001));
+        let stage = executive.cause().expect("the stage's error is kept");
+        assert!(!stage.is_unported_or_cancelled(), "{stage:?}");
+        assert_eq!(
+            e.to_string(),
+            format!("{bare}; caused by {executive}"),
+            "{e:?}"
+        );
     }
 
     /// #13790: the executive's decision on a bare `Upstream` (the WR-696 refusal with a fit
@@ -1190,6 +1880,128 @@ mod ball_fit_tests {
         }
         for native in native_failures("intersect::x", 1001) {
             assert_eq!(refusable(&native), None, "{native:?}");
+        }
+    }
+
+    /// The chain `do_fillet` returns where a solver finds a vertex's corner missing: the
+    /// fillet body not built, the executive's step, the missing corner (as the pyramid's
+    /// unsupported apex gives it in `session.rs`), over `root`.
+    fn later_failure_over(root: SolidError) -> SolidError {
+        let step = keeping_cause(
+            SolidError::blend(
+                "blend::fillet_executive::p3",
+                BlendFailure::ExecutiveStepFailed,
+            ),
+            root,
+        );
+        keeping_cause(step_failed(), step)
+    }
+
+    fn a_classification_failure() -> SolidError {
+        SolidError::InvalidInput {
+            operation: "topology::edgeuse::p3",
+            reason: "EvaluateBinormal: face without surface",
+        }
+    }
+
+    /// #19803: the error of a corner's failed classification goes to the root of the later
+    /// failure's chain where that root is a solver finding a vertex's corner missing. Every
+    /// error in the chain keeps its operation, reason and status; the message gains the
+    /// classification's error at its end.
+    #[test]
+    fn a_classification_error_goes_to_the_root_of_the_later_failure() {
+        let missing = SolidError::blend(
+            "blend::fillet_executive::session",
+            BlendFailure::FilletVertexWithoutCorner,
+        );
+        assert!(is_missing_corner(&missing));
+        let before = later_failure_over(missing);
+        let classification = a_classification_failure();
+        let after = rooted_in(before.clone(), classification.clone());
+        for (was, now) in std::iter::successors(Some(&before), |e| e.cause())
+            .zip(std::iter::successors(Some(&after), |e| e.cause()))
+        {
+            assert_eq!(now.operation(), was.operation());
+            assert_eq!(now.blend_failure(), was.blend_failure());
+            assert_eq!(now.sm_status(), was.sm_status());
+        }
+        assert_eq!(after.root_cause(), &classification);
+        assert_eq!(
+            after
+                .cause()
+                .and_then(SolidError::cause)
+                .and_then(SolidError::cause),
+            Some(&classification)
+        );
+        assert_eq!(
+            after.to_string(),
+            format!("{before}; caused by {classification}")
+        );
+    }
+
+    /// #19803: a chain whose root is no record that keeps a cause is returned as it is.
+    #[test]
+    fn a_classification_error_is_not_kept_under_a_root_that_keeps_none() {
+        let root = SolidError::InvalidInput {
+            operation: "topology::edgeuse::p3",
+            reason: "EvaluateBinormal: face without surface",
+        };
+        let before = keeping_cause(step_failed(), root);
+        let after = rooted_in(
+            before.clone(),
+            SolidError::blend_missing("blend::blend_corner::setback", "z"),
+        );
+        assert_eq!(after, before);
+        assert_eq!(
+            rooted_in(
+                SolidError::sm_err("op"),
+                SolidError::blend(OP, BlendFailure::CornerRefused)
+            ),
+            SolidError::sm_err("op")
+        );
+    }
+
+    /// #19803: a later failure whose root is a record that could keep a cause, but is not
+    /// the missing corner (another stage's failure at another edge, the same phrase in
+    /// another operation, a missing corner that already keeps a cause), is returned as it
+    /// is: nothing ties it to the unsupported vertex.
+    #[test]
+    fn a_classification_error_is_not_kept_under_an_unrelated_root() {
+        let unrelated = [
+            SolidError::blend_failed("blend::fillet_geom::p2::srf_srf_intersection", "w"),
+            SolidError::blend_missing("blend::fillet_executive::session", "the corner"),
+            SolidError::blend_missing(
+                "blend::fillet_solver::p1::set_extension_flags",
+                "the vertex's corner",
+            ),
+            keeping_cause(
+                SolidError::blend_missing(
+                    "blend::fillet_executive::session",
+                    "the vertex's corner",
+                ),
+                SolidError::sm_err("op"),
+            ),
+            // the same with the cause the session's missing corner now has
+            SolidError::blend(
+                "blend::fillet_solver::p1::set_extension_flags",
+                BlendFailure::FilletVertexWithoutCorner,
+            ),
+            keeping_cause(
+                SolidError::blend(
+                    "blend::fillet_executive::session",
+                    BlendFailure::FilletVertexWithoutCorner,
+                ),
+                SolidError::sm_err("op"),
+            ),
+        ];
+        for root in unrelated {
+            let before = later_failure_over(root.clone());
+            assert_eq!(
+                rooted_in(before.clone(), a_classification_failure()),
+                before,
+                "{root:?}"
+            );
+            assert_eq!(rooted_in(root.clone(), a_classification_failure()), root);
         }
     }
 }

@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
 
-use super::MeshConvertParams;
+use super::{MeshConvertParams, MeshReduceParams, MeshReduceResult};
 use crate::Sel;
 use crate::schema::features::FeatureResult;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -11,7 +11,7 @@ use crate::tests::mesh_convert::imported_box;
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<MeshConvertParams>(), &["body", "legacy_names", "name", "participants", "tolerance"]);
+    assert_keys(input_schema_for::<MeshConvertParams>(), &["body", "name", "participants", "tolerance"]);
 }
 
 /// The handler finds the body before it reads the tolerance, so on a design with no mesh body
@@ -66,9 +66,9 @@ fn the_check_takes_what_the_schema_allows() {
     for (p, takes) in [
         (json!({}), true),
         (json!({"body": "Mesh"}), true),
-        (json!({"legacy_names": true}), true),
-        (json!({"legacy_names": false}), true),
-        (json!({"legacy_names": null}), true),
+        (json!({"legacy_names": true}), false),
+        (json!({"legacy_names": false}), false),
+        (json!({"legacy_names": null}), false),
         (json!({"legacy_names": "true"}), false),
         (json!({"legacy_names": 1}), false),
         (json!({"body": "Mesh", "tolerance": "0.01 mm", "name": "Rebuilt", "participants": ["Mesh"]}), true),
@@ -105,8 +105,6 @@ fn convert_mesh_replies_with_feature_result() {
         json!({}),
         json!({"body": "", "tolerance": "0.01 mm", "name": "Rebuilt"}),
         json!({"body": "Mesh", "tolerance": 0.02, "participants": ["Mesh"]}),
-        json!({"body": "Mesh", "legacy_names": true}),
-        json!({"body": "Mesh", "legacy_names": false}),
     ] {
         let mut s = imported_box();
         s.param_check = ParamCheck::Warn;
@@ -120,4 +118,18 @@ fn convert_mesh_replies_with_feature_result() {
         assert_eq!(lists, (&json!(["Mesh"]), &json!([]), &json!([])), "{p}: {r}");
         assert!(s.model.state().body("Mesh").is_some_and(|b| !b.body.is_mesh()), "{p}: still a mesh");
     }
+}
+
+#[test]
+fn reduction_schema_and_reply() {
+    assert_keys(input_schema_for::<MeshReduceParams>(), &["body", "name", "participants", "percentage", "triangle_count"]);
+    let mut s = crate::tests::mesh_convert::subdivided_box();
+    s.param_check = ParamCheck::Warn;
+    let reply = s.execute("mesh.reduce", &json!({"body":"Mesh", "triangle_count":1})).unwrap();
+    let schema = output_schema_for::<MeshReduceResult>();
+    let schema = schema.as_value();
+    assert!(conforms(schema, schema, &reply), "{reply} doesn't match {schema}");
+    assert!(reply.get("param_warnings").is_none());
+    assert!(reply["achieved_triangles"].as_u64().unwrap() < reply["original_triangles"].as_u64().unwrap());
+    assert!(!crate::schema::issues("mesh.reduce", &json!({"body":"Mesh","percentage":50,"unknown":1})).is_empty());
 }

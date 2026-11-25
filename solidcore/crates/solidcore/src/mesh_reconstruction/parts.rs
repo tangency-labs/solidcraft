@@ -19,7 +19,16 @@ const MAX_FACES: usize = 256;
 
 /// Start bounded shoulder decomposition with one shared cut budget and original-mesh circle hints.
 pub(super) fn reconstruct(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Result<Option<Brep>> {
-    recover(k, mesh, mesh, tolerance, 0, &mut 0, &mut BTreeMap::new())
+    recover(
+        k,
+        mesh,
+        mesh,
+        tolerance,
+        0,
+        &[],
+        &mut 0,
+        &mut BTreeMap::new(),
+    )
 }
 
 /// Rank at most sixteen canonical face-normal directions by triangle area to bound the reconstruction search.
@@ -54,6 +63,56 @@ fn axes(mesh: &TriMesh) -> Vec<(Vec3, f64)> {
     out
 }
 
+/// Keep a recovered wall on every known shoulder it runs along. Source f32 normals can
+/// leave independently recovered directions slightly skew: sweeping that direction would
+/// pull the far edge off the shared cut plane. The direction is projected onto the common
+/// tangent subspace only when its full source-size displacement stays in the existing
+/// boundary certificate. A near-normal candidate uses its existing signed plane-family
+/// normal before it can define another cut, so repeated shoulders have one direction.
+/// Dependent constraint normals are discarded at this same physical bound before their
+/// residual is normalized: f32 angular noise must not become a new spatial constraint.
+/// No source point or certificate tolerance is changed.
+pub(super) fn shoulder_direction(
+    axis: Vec3,
+    shoulders: &[Vec3],
+    size: f64,
+    epsilon: f64,
+) -> Option<Vec3> {
+    let bound = epsilon * 3.;
+    let mut direction = axis;
+    for &normal in shoulders {
+        let aligned = if axis.dot(normal) < 0. {
+            -normal
+        } else {
+            normal
+        };
+        if size * (aligned - axis).length() <= bound {
+            direction = aligned;
+            break;
+        }
+    }
+    let mut basis: Vec<Vec3> = Vec::new();
+    for &normal in shoulders {
+        if size * axis.dot(normal).abs() > bound {
+            continue;
+        }
+        let mut independent = normal;
+        for &previous in &basis {
+            independent -= previous * independent.dot(previous);
+        }
+        if size * independent.length() <= bound {
+            continue;
+        }
+        let Some(normal) = normalize(independent) else {
+            continue;
+        };
+        direction -= normal * direction.dot(normal);
+        basis.push(normal);
+    }
+    let direction = normalize(direction)?;
+    (size * (direction - axis).length() <= bound).then_some(direction)
+}
+
 /// Try certified extrusions before splitting at existing shoulders, sharing cut, depth and recovered-face budgets.
 fn recover(
     k: &mut Kernel,
@@ -61,13 +120,21 @@ fn recover(
     root: &TriMesh,
     tolerance: f64,
     depth: usize,
+    shoulders: &[Vec3],
     attempts: &mut usize,
     models: &mut BTreeMap<(i64, i64, i64), Vec<super::curves::Circle>>,
 ) -> Result<Option<Brep>> {
     if depth > MAX_DEPTH || *attempts >= MAX_ATTEMPTS {
         return Ok(None);
     }
-    let candidates = axes(mesh);
+    let size = mesh.size();
+    let epsilon = (size.max(1.) * 1e-7).min(tolerance * 0.01).max(1e-9);
+    let candidates: Vec<_> = axes(mesh)
+        .into_iter()
+        .filter_map(|(axis, area)| {
+            shoulder_direction(axis, shoulders, size, epsilon).map(|axis| (axis, area))
+        })
+        .collect();
     {
         for &(axis, _) in &candidates {
             let key = (
@@ -80,7 +147,7 @@ fn recover(
             });
             // A cut adds cap vertices, so a piece can match its polygonal caps without matching
             // a section from the original circle hints. None rejects that applicability before any
-            // solid sweep. The ? propagates every certification or construction error.
+            // solid sweep. Failed certificates return None; kernel errors propagate.
             let result = match super::curves::extrusion(k, mesh, axis, tolerance, circles)? {
                 Some(body) => Some(body),
                 None if depth > 0 => extrusion(k, mesh, axis, tolerance)?,
@@ -94,8 +161,6 @@ fn recover(
             }
         }
     }
-    let size = mesh.size();
-    let epsilon = (size.max(1.) * 1e-7).min(tolerance * 0.01).max(1e-9);
     let mut cuts = Vec::new();
     let area = candidates.iter().map(|x| x.1).sum::<f64>();
     for &(axis, _) in candidates.iter().take(6) {
@@ -174,8 +239,19 @@ fn recover(
         }
         let mut bodies = Vec::new();
         let mut faces = 0;
+        let mut child_shoulders = shoulders.to_vec();
+        child_shoulders.push(axis);
         for piece in &pieces {
-            let Some(body) = recover(k, piece, root, tolerance, depth + 1, attempts, models)?
+            let Some(body) = recover(
+                k,
+                piece,
+                root,
+                tolerance,
+                depth + 1,
+                &child_shoulders,
+                attempts,
+                models,
+            )?
             else {
                 bodies.clear();
                 break;
@@ -199,12 +275,14 @@ fn recover(
         }
         if let Some(mut body) = result {
             if !native::is_valid(k, &mut body)? {
-                return Err(invalid("reconstructed parts did not form a valid solid"));
+                return Ok(None);
             }
-            let volume = native::volume(k, &mut body)?;
+            let Some(volume) = native::volume(k, &mut body)? else {
+                return Ok(None);
+            };
             let bound = size.powi(2) * tolerance * 4.;
             if !volume.is_finite() || volume <= 0. || (volume - original).abs() > bound {
-                return Err(invalid("reconstructed part volume differs from the source"));
+                return Ok(None);
             }
             return Ok(Some(body));
         }
@@ -254,18 +332,18 @@ impl CutMesh {
         Ok(i)
     }
     /// Weld a clipped triangle, discard degenerate corners and enforce the clipping triangle budget.
-    fn triangle(&mut self, a: Vec3, b: Vec3, c: Vec3) -> Result<()> {
+    fn triangle(&mut self, a: Vec3, b: Vec3, c: Vec3) -> Result<bool> {
         if (b - a).cross(c - a).length() <= self.epsilon.powi(2) {
-            return Ok(());
+            return Ok(true);
         }
         let (a, b, c) = (self.point(a)?, self.point(b)?, self.point(c)?);
         if a != b && b != c && c != a {
             self.mesh.triangles.push([a, b, c]);
         }
         if self.mesh.triangles.len() > MAX_TRIANGLES {
-            return Err(invalid("part clipping exceeds its triangle budget"));
+            return Ok(false);
         }
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -290,24 +368,31 @@ fn half(
                 return Err(invalid("missing clipping vertex"));
             };
             let d = p.dot(axis) - height;
-            points.push(if d.abs() <= epsilon { p - axis * d } else { p });
+            // An ON vertex's signed distance stays exactly zero after projection: the rounded
+            // dot product must not split a wall edge its coplanar shoulder keeps whole.
+            points.push(if d.abs() <= epsilon {
+                (p - axis * d, 0.)
+            } else {
+                (p, d)
+            });
         }
-        if points
-            .iter()
-            .all(|p| (p.dot(axis) - height).abs() <= epsilon)
-        {
-            let (Some(a), Some(b), Some(c)) = (points.first(), points.get(1), points.get(2)) else {
+        if points.iter().all(|(_, distance)| *distance == 0.) {
+            let (Some((a, _)), Some((b, _)), Some((c, _))) =
+                (points.first(), points.get(1), points.get(2))
+            else {
                 return Ok(None);
             };
-            if (*b - *a).cross(*c - *a).dot(axis) * sign < 0. {
-                out.triangle(*a, *b, *c)?;
+            if (*b - *a).cross(*c - *a).dot(axis) * sign < 0. && !out.triangle(*a, *b, *c)? {
+                return Ok(None);
             }
             continue;
         }
         let mut polygon = Vec::new();
-        for (a, b) in points.iter().zip(points.iter().cycle().skip(1)).take(3) {
-            let da = (a.dot(axis) - height) * sign;
-            let db = (b.dot(axis) - height) * sign;
+        for ((a, distance_a), (b, distance_b)) in
+            points.iter().zip(points.iter().cycle().skip(1)).take(3)
+        {
+            let da = distance_a * sign;
+            let db = distance_b * sign;
             if da >= 0. {
                 polygon.push(*a);
             }
@@ -327,7 +412,9 @@ fn half(
         }
         if let Some(&a) = polygon.first() {
             for (&b, &c) in polygon.iter().skip(1).zip(polygon.iter().skip(2)) {
-                out.triangle(a, b, c)?;
+                if !out.triangle(a, b, c)? {
+                    return Ok(None);
+                }
             }
         }
     }
@@ -362,7 +449,7 @@ fn half(
         }
     }
     if next.len() > MAX_BOUNDARY {
-        return Err(invalid("part cap exceeds its boundary budget"));
+        return Ok(None);
     }
     let Some(plane) = MeshPlane::from_normal(axis * height, axis) else {
         return Ok(None);
@@ -411,7 +498,7 @@ fn half(
         }
     }
     if out.mesh.triangles.len() > MAX_TRIANGLES {
-        return Err(invalid("part cap exceeds its triangle budget"));
+        return Ok(None);
     }
     if !closed(&out.mesh) {
         return Ok(None);
@@ -507,7 +594,7 @@ fn components(mesh: &TriMesh) -> Result<Option<Vec<TriMesh>>> {
             continue;
         }
         if out.len() >= MAX_COMPONENTS {
-            return Err(invalid("too many reconstructed components"));
+            return Ok(None);
         }
         let mut part = TriMesh::default();
         let mut remap = BTreeMap::new();

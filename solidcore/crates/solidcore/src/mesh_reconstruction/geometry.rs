@@ -7,8 +7,6 @@ use crate::math::{Vec2, Vec3};
 use crate::prism::profile::{cross2, Loop2, Region2, Seg2};
 use crate::Result;
 
-use super::invalid;
-
 /// The scale-independent normalization used by the reconstruction's normal and chord tests.
 const MIN_DIRECTION: f64 = 1e-9;
 
@@ -198,18 +196,12 @@ pub(super) fn ccw(lp: &Loop2) -> Result<Loop2> {
     })
 }
 
-fn contains(lp: &Loop2, probe: Vec2) -> Result<bool> {
+fn contains(lp: &Loop2, probe: Vec2) -> Option<bool> {
     lp.holds(probe)
-        .ok_or_else(|| invalid("boundary loops touch or have uncertain containment"))
 }
 
-pub(super) fn contains_loop(outer: &Loop2, inner: &Loop2) -> Result<bool> {
-    let probe = inner
-        .segs
-        .first()
-        .ok_or_else(|| invalid("empty mesh boundary loop"))?
-        .start();
-    contains(outer, probe)
+pub(super) fn contains_loop(outer: &Loop2, inner: &Loop2) -> Option<bool> {
+    contains(outer, inner.segs.first()?.start())
 }
 
 /// Use even–odd containment on the input loops and put each hole in its smallest containing outline.
@@ -222,8 +214,13 @@ pub(super) fn nest_regions(raw: &[Loop2], fitted: &[Loop2]) -> Result<Option<Vec
         };
         let mut owners = 0;
         for (j, other) in raw.iter().enumerate() {
-            if j != i && contains(other, probe)? {
-                owners += 1;
+            if j != i {
+                let Some(inside) = contains(other, probe) else {
+                    return Ok(None);
+                };
+                if inside {
+                    owners += 1;
+                }
             }
         }
         if owners % 2 == 0 {
@@ -239,7 +236,10 @@ pub(super) fn nest_regions(raw: &[Loop2], fitted: &[Loop2]) -> Result<Option<Vec
         let mut owner = None;
         let mut best = f64::INFINITY;
         for (i, region) in regions.iter().enumerate() {
-            if contains(&region.outer, probe)? {
+            let Some(inside) = contains(&region.outer, probe) else {
+                return Ok(None);
+            };
+            if inside {
                 let area = region.outer.signed_area()?.value.abs();
                 if area < best {
                     best = area;

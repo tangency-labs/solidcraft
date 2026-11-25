@@ -26,6 +26,9 @@ continuity = { master = "edge_continuity", accent = "surface" }
 error = { master = "status_error", accent = "surface" }
 warning = { master = "status_warning", accent = "mesh" }
 ground = "c_fix"
+# Assembly constraints: the same relation as the sketch constraint, between parts (Solid colours).
+constraint_parallel = "c_parallel"
+constraint_perpendicular = "c_perpendicular"
 
 # Visual style: Shaded with edges is the generic style icon.
 style_shaded_edges = "style"
@@ -39,6 +42,7 @@ sketch_scale = { master = "scale", accent = "sketch" }
 sketch_text = { master = "text", accent = "sketch" }
 surface_fair = { master = "spline_cv", accent = "surface" }
 mesh_export = { master = "export", accent = "mesh" }
+insert_step = "import"
 
 # Legacy feature-history id for the same Split Body operation.
 split = "split_body"

@@ -56,6 +56,9 @@ pub enum SketchError {
         crate::limits::CEILING_POINTS
     )]
     TooLarge,
+    /// Fonts this text falls back to are being looked for beside the window: ask again.
+    #[error("the fonts for this text are still being looked for")]
+    FontPending,
 }
 
 pub(crate) type Result<T> = std::result::Result<T, SketchError>;
@@ -111,6 +114,11 @@ pub struct SPoint {
     /// come to (`Document::apply_point_values` works them out before each solve).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exprs: Option<Box<PointExprs>>,
+    /// A point that only helps place or dimension other geometry, as a construction line does:
+    /// features that read a sketch's points (a Hole from the whole sketch) leave it out (#18448).
+    /// Not saved when false, so a design without one is written as it was.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub construction: bool,
 }
 
 /// The expressions of a point placed by parameters, over the design's parameters; a coordinate
@@ -815,6 +823,17 @@ pub struct SketchView {
     pub three_d: bool,
 }
 
+/// Where a sketch's 2D geometry lies for its 3D curves ([`Sketch::frame`]): derived from the
+/// model each time the sketch's links are refreshed, so two sketches compare equal whatever it is.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SketchFrame(pub Option<solidcore_record::Plane>);
+
+impl PartialEq for SketchFrame {
+    fn eq(&self, _: &SketchFrame) -> bool {
+        true
+    }
+}
+
 /// A 2D sketch. Point 0 is always the fixed sketch origin (id `origin`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sketch {
@@ -832,9 +851,26 @@ pub struct Sketch {
     /// New certified normal offsets; legacy sampled output splines remain independent.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub freeform_offsets: Vec<crate::freeform_offset::FreeformOffset>,
+    /// Trimmed offsets of chains that include a free-form curve: ordinary curves rebuilt
+    /// from their sources when the distance that drives them changes (#12294).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub freeform_chain_offsets: Vec<crate::freeform_offset::FreeformChainOffset>,
     /// 3D curves (world coordinates) carried by the sketch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wires: Vec<crate::wire::Wire>,
+    /// Constraints among the drawn 3D curves' fit points, solved after the planar sketch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wire_constraints: Vec<crate::wire_solve::WireConstraint>,
+    /// The drawn 3D curves that met were joined (once, at the sketch's first 3D constraint or
+    /// the first curve drawn after it could take one): later edits join only new curves, so a
+    /// joint deleted stays deleted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wires_joined: bool,
+    /// The plane the 2D geometry lies on, in the drawn 3D curves' component coordinates, as the
+    /// document last resolved it (#10616): a 3D point on a 2D point or curve is placed through it.
+    /// Not saved; set when the sketch's links are refreshed.
+    #[serde(skip)]
+    pub frame: SketchFrame,
     /// Curves drawn from formulas (#8352): the fit point splines they place, with their formulas.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub equations: Vec<crate::equation::EquationCurve>,
@@ -844,6 +880,35 @@ pub struct Sketch {
     /// Display options (Sketch Palette).
     #[serde(default, skip_serializing_if = "is_default_view")]
     pub view: SketchView,
+}
+
+impl Sketch {
+    /// Everything of the sketch a numerical solve's residuals can read besides its constraints
+    /// (which a solve reads through its residual blocks, with the values it is solving for), as
+    /// text that tells any two such states apart: for remembering the solver's runs
+    /// (`solver::lm_memo`). Every field is named, so a new one has to be decided on here.
+    pub(crate) fn solve_fingerprint(&self) -> String {
+        let Sketch {
+            points,
+            curves,
+            constraints: _,
+            patterns,
+            links,
+            offsets,
+            freeform_offsets,
+            freeform_chain_offsets,
+            wires,
+            wire_constraints,
+            wires_joined,
+            equations,
+            counters: _,
+            view: _,
+            frame,
+        } = self;
+        format!(
+            "{points:?}{curves:?}{patterns:?}{links:?}{offsets:?}{freeform_offsets:?}{freeform_chain_offsets:?}{wires:?}{wire_constraints:?}{wires_joined:?}{equations:?}{frame:?}"
+        )
+    }
 }
 
 fn is_default_view(v: &SketchView) -> bool {
@@ -857,16 +922,29 @@ impl Default for Sketch {
 }
 
 impl Sketch {
+    /// Bodies read by projected geometry and by 3D constraints held to model faces.
+    pub fn linked_bodies(&self) -> Vec<&str> {
+        self.links
+            .iter()
+            .flat_map(|link| link.source.bodies())
+            .chain(self.wire_constraints.iter().filter_map(|c| c.kind.model_plane()).flat_map(|plane| plane.source.bodies()))
+            .collect()
+    }
+
     pub fn new() -> Self {
         Sketch {
-            points: vec![SPoint { id: "origin".into(), pos: Vec2::ZERO, fixed: true, link: None, exprs: None }],
+            points: vec![SPoint { id: "origin".into(), pos: Vec2::ZERO, fixed: true, link: None, exprs: None, construction: false }],
             curves: Vec::new(),
             constraints: Vec::new(),
             patterns: Vec::new(),
             links: Vec::new(),
             offsets: Vec::new(),
             freeform_offsets: Vec::new(),
+            freeform_chain_offsets: Vec::new(),
             wires: Vec::new(),
+            wire_constraints: Vec::new(),
+            wires_joined: false,
+            frame: SketchFrame(None),
             equations: Vec::new(),
             counters: Default::default(),
             view: SketchView::default(),
@@ -904,6 +982,7 @@ impl Sketch {
             .saturating_add(self.patterns.len())
             .saturating_add(self.links.len())
             .saturating_add(self.wires.len())
+            .saturating_add(self.wire_constraints.len())
             .saturating_add(
                 self.offsets.iter().filter_map(|r| r.topology.as_ref()).fold(0usize, |n, r| n.saturating_add(r.roles.len()).saturating_add(1)),
             )
@@ -931,7 +1010,8 @@ impl Sketch {
     }
 
     /// Every id the sketch holds: its points, curves, constraints, patterns, links, wires and
-    /// offset topologies with their outputs (what [`Sketch::id_taken`] searches).
+    /// their 3D constraints, and offset topologies with their outputs (what
+    /// [`Sketch::id_taken`] searches).
     fn all_ids(&self) -> impl Iterator<Item = &str> {
         self.points
             .iter()
@@ -941,6 +1021,7 @@ impl Sketch {
             .chain(self.patterns.iter().map(|p| p.id.as_str()))
             .chain(self.links.iter().map(|l| l.id.as_str()))
             .chain(self.wires.iter().map(|w| w.id.as_str()))
+            .chain(self.wire_constraints.iter().map(|c| c.id.as_str()))
             .chain(
                 self.offsets
                     .iter()
@@ -964,6 +1045,7 @@ impl Sketch {
             || self.patterns.iter().any(|p| p.id == id)
             || self.links.iter().any(|l| l.id == id)
             || self.wires.iter().any(|w| w.id == id)
+            || self.wire_constraints.iter().any(|c| c.id == id)
             || self.offsets.iter().filter_map(|r| r.topology.as_ref()).any(|r| r.id == id || r.roles.iter().any(|role| role.output == id))
     }
 
@@ -997,7 +1079,7 @@ impl Sketch {
             return Err(SketchError::TooLarge);
         }
         let id = self.new_id(id, "p", taken)?;
-        self.points.push(SPoint { id, pos: p, fixed: false, link: None, exprs: None });
+        self.points.push(SPoint { id, pos: p, fixed: false, link: None, exprs: None, construction: false });
         Ok(self.points.len() - 1)
     }
 
@@ -1221,10 +1303,13 @@ impl Sketch {
             | Vertical { l }
             | Length { l, .. }
             | LineAngle { l, .. }
-            | Midpoint { l, .. }
             | Symmetric { l, .. }
             | PointLineDistance { l, .. }
             | LinearDiameter { l, .. } => need_line(l)?,
+            // The middle of a line is its ends' mean; the middle of an arc is halfway along it.
+            Midpoint { l, .. } if !matches!(self.curves.get(l).map(|c| &c.kind), Some(CurveKind::Line { .. } | CurveKind::Arc { .. })) => {
+                return Err(SketchError::WrongKind(name(l), "needs a line or an arc".into()));
+            }
             ArcLength { c, .. } | ArcSweep { c, .. } if !matches!(self.curves.get(c).map(|c| &c.kind), Some(CurveKind::Arc { .. })) => {
                 return Err(SketchError::WrongKind(name(c), "arc length needs an arc".into()));
             }
@@ -1312,12 +1397,12 @@ impl Sketch {
             _ => {}
         }
         if let Some(v) = k.value()
-            && (!v.is_finite() || v.abs() > MAX_COORD || (v < 0.0 && !k.is_angle()))
+            && (!v.is_finite() || v.abs() > MAX_COORD || (v < 0.0 && !k.is_angle() && !matches!(k, OffsetDistance { .. })))
         {
             return Err(SketchError::Invalid(format!("dimension value {v}")));
         }
         if let OffsetDistance { output, value, .. } = k
-            && (*value <= 1e-9 || output.len() > 512 || self.offset_distance(output).is_none())
+            && (value.abs() <= 1e-9 || output.len() > 512 || self.offset_distance(output).is_none())
         {
             return Err(SketchError::Invalid("offset dimension needs a nonzero distance and an existing association".into()));
         }
@@ -1443,6 +1528,21 @@ impl Sketch {
                 } else {
                     false
                 }
+            }
+            ConstraintKind::OffsetDistance { ref output, .. } => {
+                if !mag.is_finite() || mag <= 1e-9 || mag > MAX_COORD {
+                    return false;
+                }
+                let Some(constraint) =
+                    self.constraints.iter_mut().find(|c| matches!(&c.kind, ConstraintKind::OffsetDistance { output: id, .. } if id == output))
+                else {
+                    return false;
+                };
+                if let ConstraintKind::OffsetDistance { value, reverse, .. } = &mut constraint.kind {
+                    *reverse = !*reverse;
+                    *value = mag;
+                }
+                true
             }
             _ => false,
         }
@@ -1620,7 +1720,12 @@ impl Sketch {
             ConstraintKind::Pierce { .. } => true,
             ref k => k.is_dimension() && !k.is_angle() && !c.driven,
         });
-        sizes || !self.patterns.is_empty() || !self.offsets.is_empty() || !self.freeform_offsets.is_empty() || !self.wires.is_empty()
+        sizes
+            || !self.patterns.is_empty()
+            || !self.offsets.is_empty()
+            || !self.freeform_offsets.is_empty()
+            || !self.freeform_chain_offsets.is_empty()
+            || !self.wires.is_empty()
     }
 
     /// Is point `i` held in place: fixed, projected (linked), fixed by a Fix constraint or a
@@ -1910,7 +2015,7 @@ impl Sketch {
         // curve alone joins nothing (a circle's radius and centre move independently).
         let own = self.curves.iter().filter_map(|x| match &x.kind {
             CurveKind::Arc { c, a, b } => Some(vec![*c, *a, *b]),
-            CurveKind::Spline { pts, periodic: true, .. } => match (pts.first(), pts.last()) {
+            CurveKind::Spline { pts, periodic: true, control: false, .. } => match (pts.first(), pts.last()) {
                 (Some(a), Some(b)) if a != b => Some(vec![*a, *b]),
                 _ => None,
             },
@@ -2021,6 +2126,11 @@ impl Sketch {
                         .collect(),
                 )
             }
+            CurveKind::Spline { pts, control: true, degree, periodic: true, .. } => {
+                let p: Vec<Vec2> = pts.iter().map(pt).collect::<Option<_>>()?;
+                let pieces = crate::nurbs::closed_control_beziers(&p, *degree)?;
+                pieces.iter().map(|piece| solidcraft_geom::bezier(piece)).collect()
+            }
             CurveKind::Spline { pts, control: true, degree, nurbs: Some(nurbs), .. } => {
                 let p: Vec<Vec2> = pts.iter().map(pt).collect::<Option<_>>()?;
                 nurbs.segs(&p, *degree)
@@ -2117,8 +2227,10 @@ impl Sketch {
                         solidcore_record::MAX_BEZIER_DEGREE
                     )));
                 }
-                if *periodic {
-                    if *control || *degree != 3 {
+                if *periodic && *control {
+                    crate::periodic::validate_closed_control(pts.len(), *degree)?;
+                } else if *periodic {
+                    if *degree != 3 {
                         return Err(SketchError::Invalid("periodic mode requires a cubic fit spline".into()));
                     }
                     let p = pts
@@ -2643,7 +2755,12 @@ impl Sketch {
             return Some(i);
         }
         let (cid, role) = r.rsplit_once('.')?;
-        let c = self.curves.get(self.curve_index(cid)?)?;
+        Self::curve_point(self.curves.get(self.curve_index(cid)?)?, role)
+    }
+
+    /// The point a role (`start`, `end`, `center`, `major` or `apex`) names on a curve. A reversed
+    /// curve swaps its start and end, so they keep their as-drawn meaning.
+    pub(crate) fn curve_point(c: &Curve, role: &str) -> Option<usize> {
         let role = match (role, c.reversed) {
             ("start", true) => "end",
             ("end", true) => "start",

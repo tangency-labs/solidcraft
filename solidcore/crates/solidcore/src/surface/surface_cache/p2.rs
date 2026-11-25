@@ -58,6 +58,7 @@
 
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -399,8 +400,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` when more than `SM_MAX_ALT_CACHES` caches are held (cannot happen
-    /// through this method).
+    /// `SM_ERR` ([`SurfaceFailure::AltCachesFull`]) when more than `SM_MAX_ALT_CACHES`
+    /// caches are held: this method's eviction never allows it, but a caller can push
+    /// past the limit through [`SurfaceCache::alt_caches_mut`].
     pub fn add_curves_to_cache(
         &mut self,
         cache_type: AltSrfCacheType,
@@ -412,10 +414,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ) -> Result<()> {
         let caches = self.alt_caches_mut();
         if caches.len() > MAX_ALT_CACHES {
-            return Err(SolidError::surface_failed(
-                OP_ADD,
-                "the alternate caches are full",
-            ));
+            return Err(SolidError::surface(OP_ADD, SurfaceFailure::AltCachesFull));
         }
 
         if caches.len() == MAX_ALT_CACHES {
@@ -470,13 +469,16 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             (n.aux_type, n.child1.is_some(), fields)
         };
         if aux_type != AuxDataType::BezierSurface && aux_type != AuxDataType::AuxData {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_TEST,
-                "the node is not a surface node",
+                SurfaceFailure::NodeNotSurfaceNode,
             ));
         }
         if has_child {
-            return Err(SolidError::surface_failed(OP_TEST, "the node has children"));
+            return Err(SolidError::surface(
+                OP_TEST,
+                SurfaceFailure::NodeHasChildren,
+            ));
         }
         let fields = fields.ok_or_else(|| invalid(OP_TEST, "node has no surface data"))?;
 
@@ -856,7 +858,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         };
         let handle = fields
             .surface
-            .ok_or_else(|| SolidError::surface_missing(OP_BLOCK, "the node's surface"))?;
+            .ok_or_else(|| SolidError::surface(OP_BLOCK, SurfaceFailure::NodeHasNoSurface))?;
         // upstream works on the node's surface itself (`pAux->mBA_pSurface`); the cache is
         // edited below, so an evaluation copy (exact knots, owner kept) stands for it: the
         // copy constructor's knot fix-up would move near-coincident knots and so the splits.
@@ -1057,9 +1059,16 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         let mut curr: Vec<NodeId> = base_nodes.clone();
         let mut next: Vec<NodeId> = Vec::with_capacity(base_nodes.len());
         let at = |v: &[NodeId], i: usize| -> Result<NodeId> {
-            v.get(i)
-                .copied()
-                .ok_or_else(|| SolidError::surface_failed(OP_BLOCK, "a base node is out of range"))
+            v.get(i).copied().ok_or_else(|| {
+                SolidError::surface(
+                    OP_BLOCK,
+                    SurfaceFailure::Defect {
+                        why: "the generations are combined over the base nodes this \
+                                  routine made, one per split cell, so an index past them is \
+                                  the kernel's",
+                    },
+                )
+            })
         };
 
         // assemble U and V splits until there is just one
@@ -1346,6 +1355,9 @@ mod tests {
             .subdivide_by_block(&Kernel::default(), NodeId(0))
             .expect_err("null");
         assert_eq!(e.upstream_status(), Some(1006));
+        // the node is the caller's: a refusal of its input, not a kernel defect
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert!(!e.is_defect());
     }
 
     #[test]

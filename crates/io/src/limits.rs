@@ -4,6 +4,9 @@
 //! past [`CEILING`]. Every read site asks [`max_step_bytes`] / [`max_design_bytes`] for the limit
 //! in force, so the size check still happens before a file is read. In the browser (wasm32) the
 //! defaults always apply: the web app's address space can't hold more.
+//!
+//! A point cloud file ([`Kind::PointCloud`]) follows the limit for import files and is never read
+//! under the 1 GiB it has always had: the preference raises that limit, never lowers it.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -16,13 +19,15 @@ pub const CEILING: u64 = 16 * GB;
 /// Whether this build lets the limits rise: not in the browser.
 pub const ADJUSTABLE: bool = cfg!(not(target_arch = "wasm32"));
 
-/// The two kinds of file with a size limit.
+/// The kinds of file with a size limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     /// STEP, IGES and the other CAD files read as an Import feature.
     Step,
     /// Design files (`.sc`, older `.solidcraft`, JSON).
     Design,
+    /// Point cloud files (`.ply`, `.pcd`, `.e57`, `.xyz`, `.pts`, `.asc`).
+    PointCloud,
 }
 
 impl Kind {
@@ -32,6 +37,7 @@ impl Kind {
         match self {
             Kind::Step => l.step,
             Kind::Design => l.design,
+            Kind::PointCloud => point_cloud_limit(l.step),
         }
     }
 
@@ -39,6 +45,7 @@ impl Kind {
         match self {
             Kind::Step => "STEP and import files",
             Kind::Design => "design files",
+            Kind::PointCloud => "point cloud files",
         }
     }
 }
@@ -48,6 +55,12 @@ impl Kind {
 pub struct FileLimits {
     pub step: u64,
     pub design: u64,
+}
+
+/// The limit a point cloud file is read under: the limit for import files, and never under the
+/// 1 GiB a point cloud file has always been read up to.
+fn point_cloud_limit(step: u64) -> u64 {
+    step.max(crate::MAX_POINT_CLOUD_BYTES as u64)
 }
 
 impl Default for FileLimits {
@@ -171,12 +184,34 @@ fn resolve(adjustable: bool, preferred: FileLimits, flag: u64) -> FileLimits {
 
 /// The largest STEP or import file read now.
 pub fn max_step_bytes() -> usize {
+    #[cfg(test)]
+    if let Some(cap) = test_cap::get() {
+        return cap;
+    }
     usize::try_from(effective().step).unwrap_or(usize::MAX)
 }
 
 /// The largest design file read (and written) now.
 pub fn max_design_bytes() -> usize {
+    #[cfg(test)]
+    if let Some(cap) = test_cap::get() {
+        return cap;
+    }
     usize::try_from(effective().design).unwrap_or(usize::MAX)
+}
+
+/// A file limit for this test's thread only, so a test
+/// can pass the limit with a small design.
+#[cfg(test)]
+pub(crate) mod test_cap {
+    use std::cell::Cell;
+    thread_local!(static CAP: Cell<Option<usize>> = const { Cell::new(None) });
+    pub fn get() -> Option<usize> {
+        CAP.with(Cell::get)
+    }
+    pub fn set(cap: Option<usize>) {
+        CAP.with(|c| c.set(cap));
+    }
 }
 
 const BROWSER_NOTE: &str = "the web app can't open larger files: a browser tab can't hold them";
@@ -198,6 +233,36 @@ pub fn too_large(kind: Kind, size: u64) -> String {
 /// Refuse a `size`-byte file of this kind before it is read.
 pub fn check(kind: Kind, size: u64) -> Result<(), String> {
     if size > kind.limit() { Err(too_large(kind, size)) } else { Ok(()) }
+}
+
+/// The memory reading a `size`-byte file at `path` may need and the memory there is for it, in
+/// bytes, when that is more than the machine can spare (#15588). Only a STEP text (`.step`,
+/// `.stp`) is measured this way; an IGES, FreeCAD or Rhino file is not.
+pub fn memory_short(path: &str, size: u64) -> Option<(u64, u64)> {
+    let step = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"));
+    if !step {
+        return None;
+    }
+    match solidcraft_kernel::step_check_memory(usize::try_from(size).unwrap_or(usize::MAX)) {
+        Err(solidcraft_kernel::services::step::p21::Error::NeedsMemory { needed, available }) => Some((needed as u64, available as u64)),
+        _ => None,
+    }
+}
+
+/// A warning, logged and returned, when a `size`-byte STEP file at `path` may need more memory
+/// than the machine can spare, naming that memory (#15588). It is a warning only: a valid file is
+/// always opened, from the app, scripts, the control channel and the CLI alike.
+pub fn memory_warning(path: &str, size: u64) -> Option<String> {
+    let (needed, available) = memory_short(path, size)?;
+    let message = format!(
+        "{}; opening it anyway, but SolidCraft may slow down or run out of memory",
+        solidcraft_kernel::services::step::p21::Error::NeedsMemory { needed: needed as usize, available: available as usize }
+    );
+    log::warn!("{path}: {message}");
+    Some(message)
 }
 
 /// [`crate::vfs::read`] with this kind's limit; a file over it is refused, before reading, with
@@ -331,6 +396,17 @@ mod tests {
     }
 
     #[test]
+    fn a_point_cloud_file_follows_the_import_limit_and_keeps_the_1_gib_it_has_always_had() {
+        assert_eq!(point_cloud_limit(512 * MB), crate::MAX_POINT_CLOUD_BYTES as u64, "never under the 1 GiB it has always had");
+        assert_eq!(point_cloud_limit(2 * GB), 2 * GB, "the preference raises it");
+        let message = too_large(Kind::PointCloud, 2 * GB);
+        assert!(message.contains("point cloud files") && message.contains("1 GB"), "{message}");
+        if ADJUSTABLE {
+            assert!(message.contains("Preferences > General > Largest file to open") && message.contains("--max-file-size"), "{message}");
+        }
+    }
+
+    #[test]
     fn the_flag_overrides_the_preference_and_the_browser_keeps_the_defaults() {
         let preferred = FileLimits { step: 4 * GB, design: GB };
         assert_eq!(resolve(true, preferred, 0), preferred);
@@ -341,5 +417,28 @@ mod tests {
             assert!(set_preferred(preferred).is_err() && set_override(Some(2 * GB)).is_err());
             assert_eq!(effective(), FileLimits::DEFAULT);
         }
+    }
+    /// #15588: a STEP file that may need more memory than the machine can spare is named, with
+    /// that memory, before it is read, and warned about, never refused; other files aren't
+    /// measured this way.
+    #[test]
+    fn a_step_file_that_may_need_more_memory_than_there_is_is_warned_about() {
+        let peak = solidcraft_kernel::services::step::p21::PEAK_PER_BYTE as u64;
+        // As if the machine could spare 64 MB: a 2 MB file is over it.
+        solidcraft_kernel::step_with_memory_to_spare(64 << 20, || {
+            assert_eq!(memory_short("small.step", MB), None);
+            let size = 2 * MB + 1;
+            assert_eq!(memory_short("big.step", size), Some((size * peak, 64 << 20)));
+            assert_eq!(memory_short("big.STP", size), Some((size * peak, 64 << 20)));
+            assert_eq!(memory_short("big.igs", size), None);
+            assert_eq!(memory_short("big.FCStd", size), None);
+            let message = memory_warning("big.step", size).unwrap();
+            assert!(
+                message.starts_with("STEP file needs about 64 MB of memory to read, more than the 64 MB available for it; opening it anyway"),
+                "{message}"
+            );
+            assert_eq!(memory_warning("small.step", MB), None);
+            assert_eq!(memory_warning("big.igs", size), None);
+        });
     }
 }

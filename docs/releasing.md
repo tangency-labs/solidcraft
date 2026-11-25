@@ -217,6 +217,12 @@ docs updates include the latest stable Flatpak release too. Verify the resulting
 not only the dispatch job, so a release cannot erase the docs or app and docs updates cannot
 erase the package repository.
 
+Only one Pages run waits at a time, so a later push to `main` cancels the release's own Pages
+request; that later run includes the release, but if it fails nothing deploys. The Flatpak workflow
+therefore also runs hourly: when `flatpak/index.html` names an older release than the latest stable
+one and no Pages run is queued, it requests one for the latest tag, once per commit on `main`. If
+that run fails too, the hourly check fails until a Pages run succeeds.
+
 ## Snap package and Snap Store
 
 Every release and nightly attaches `solidcraft-<version>-linux-<arch>.snap` for x86_64 and
@@ -350,7 +356,7 @@ and the API key secrets (`APPLE_API_KEY_P8`, `APPLE_API_KEY_ID`, `APPLE_API_ISSU
 When the `SIGNPATH_API_TOKEN` secret (the API token of the SignPath CI user) exists, the release
 workflow's Windows jobs Authenticode-sign through [SignPath Foundation](https://signpath.org)
 (organization `fa603ff4-c702-404b-8588-a524371c7a4e`, project `solidcraft`). Each architecture
-sends two signing requests: `solidcraft.exe`, `solidcraft-cli.exe` and `solvecraft-cli.exe` first,
+sends two signing requests: `solidcraft.exe` and `solidcraft-cli.exe` first,
 so the MSI, the portable zip and the plain `.exe` are made from signed binaries, then the MSI. Each
 request uploads the files as a workflow artifact, SignPath fetches and signs it, and the job checks
 that every file came back signed. Without the secret (forks) the jobs build unsigned as before.

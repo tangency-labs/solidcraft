@@ -16,9 +16,10 @@ design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSO
 | STEP (AP203, AP214, AP242) | solids, assemblies, units, names, colours | AP242 with names, colours and the component tree |
 | IGES 5.3 | manifold solids, or trimmed surfaces sewn into solids | manifold solids with names and colours |
 | FreeCAD `.FCStd` | sketches and features (Pad, Pocket, Revolution, Groove, Fillet, Chamfer, primitives, Mirrored, patterns), else solids, through cadmpeg | |
-| Rhino `.3dm` | solids, through cadmpeg | |
+| Rhino `.3dm` | solids, through cadmpeg | Rhino 8, through cadmpeg: bodies with flat faces and straight edges exact, others as meshes; names and colours (desktop only) |
 | 3MF, STL, OBJ | mesh bodies | yes |
 | glTF 2.0 (`.glb`, `.gltf` with its `.bin` files) | mesh bodies in the node tree's components, materials as appearances | `.glb`: placed bodies with their colours, metallic and roughness, in metres with Y up |
+| OpenUSD (`.usd`, `.usda`, `.usdc`, `.usdz`), through cadmpeg | mesh bodies in the prim tree's components, materials as appearances; with `geometry: "exact"`, its B-reps as B-rep bodies | each body's mesh, named, with its exact B-rep where cadmpeg's model holds it; looks with metallic, roughness and opacity; the component tree; in metres with Z up |
 | 3MF with face tags | as 3MF | each triangle tagged with its B-rep face, exact coordinates |
 | URDF | | the assembly as a robot: links with meshes, mass and inertia, joints from the assembly's joints |
 | DXF, SVG | into a sketch | sketches and flat patterns as DXF |
@@ -33,11 +34,64 @@ requires, through one root node. A transparent body or face, and a body that a r
 image texture or optics, are refused with a message that names the body, since the file would show it
 wrongly; leave such a body out with `bodies`. A refused export leaves a file already at the path as it was.
 
+**File → Export OpenUSD…** (`file.export` with a `.usd`, `.usda`, `.usdc` or `.usdz` path) writes an
+OpenUSD stage for NVIDIA Omniverse and Isaac Sim, Blender, Apple's tools and other USD viewers. The
+extension picks the encoding: `.usda` is text, `.usdc` and `.usd` are binary, and `.usdz` is a package of
+one binary file. The design is written straight into cadmpeg's model, which cadmpeg writes as USD. With
+no bodies chosen, each component placement is an `Xform` prim named after the occurrence, holding its
+component's bodies; a component placed more than once is written once, under the abstract `Prototypes`
+prim, and referenced at each placement. Chosen bodies are written where the design shows them, under one
+prim named after the design. Each body is a prim named after it, holding its exact B-rep (a `BrepArray`
+prim) and the mesh SolidCraft draws it with, made at the export's Mesh quality (`quality`: standard, fine
+or finest, as for STL). A mesh body has its mesh alone, and so has a body whose shape cadmpeg's model
+cannot hold exactly yet, with a warning naming it. Looks become `UsdPreviewSurface` materials named after them, with their colour,
+opacity (a transparent look stays transparent), metallic, roughness and index of refraction; a face with a
+look of its own gets that material. The stage is in metres with Z up and says so in its metadata.
+With `physics: true`, an export of the whole design also writes OpenUSD physics for a simulator: its
+rigid, revolute, slider, cylindrical, planar and ball joints (revolute and slider joints keep their limits;
+the others are written without them, with a warning), each grounded placement fixed to the world, each
+placement of a component as a rigid body, each component's mass, centre of mass and principal inertia from
+its bodies' materials, and a physics scene. Gears between two revolute joints and a rack and pinion become
+PhysX gear and rack-and-pinion joints that couple the two joints. PhysX's gears turn opposite ways and its
+rack moves with the pinion's turn, so gears that turn the same way (an internal gear, or reversed
+gears), a rack that moves against the pinion's turn, other joint kinds, suppressed joints, screws, cams
+and other motion links are left out with a warning. With bodies chosen, or a placement that is not rigid, no physics is written, and a
+warning says why. With `render_setup: <name>` and a `.usdz` path, the images that render setup gives the
+bodies (base colour, roughness, metallic, and a normal map the file can show as the renderer does) go
+into the package, on each body's mesh; a `.usda` or `.usdc` file is written without them, with a warning.
+With `images: true` and a `.usdz` path, each picture shown on the model (a decal or a placed image) goes
+into the package as a body of its own in its component, named after it: a quad lifted 0.2 mm off each
+side, its image as its colour and, for a PNG with transparency, its opacity. A hidden picture is not
+written; a `.usda` or `.usdc` file, or an export of chosen bodies, leaves the pictures out with a warning.
+With `render_setup`, a body the setup gives optics is written as glass, in every encoding: the setup's
+index of refraction, and full transmission on the MaterialX OpenPBR shader with the colour 1 mm of the
+absorption leaves (a reader of the preview surface alone shows it opaque, and a warning says so).
+Collision shapes are not written yet.
+
+**File → Export Rhino…** (`file.export` with a `.3dm` path) writes a Rhino 8 file through cadmpeg, from
+the design directly. cadmpeg's Rhino writer does not write assemblies yet, so every body is written where
+the design shows it, named after it and in its colour. A body whose faces are all flat and whose edges
+are all straight is written as its exact shape; cadmpeg cannot write any other exact shape to Rhino yet,
+so a body with round faces is written as its mesh, at the export's Mesh quality, without its name or
+colour. A face's own colour is not written. The reply's warnings name each body this applies to.
+FreeCAD files cannot be exported yet: cadmpeg only writes back a FreeCAD file it read. Rhino export is
+not available in the browser yet.
+
+STEP and IGES are written by SolidCraft's own writers. To compare them with cadmpeg's, turn on
+Preferences › General › Export STEP and IGES with cadmpeg (off by default), or pass `writer: "cadmpeg"`
+to `file.export` (`writer` applies to STEP and IGES only). cadmpeg then writes the file from the design:
+STEP AP242 (edition 1, as SolidCraft's writer declares) with the components and placements, each
+body's colour and each face's own colour, but without the bodies' names, and IGES 5.3 with each body where the design shows it,
+named and in its colour, as cadmpeg's IGES writer writes no assemblies. The reply's warnings say what
+the file leaves out.
+
 Opening a STEP, IGES, FreeCAD or Rhino file creates a design with the file's bodies as a base feature, and
 inserting one adds them to the current design. Later features build on them. A FreeCAD file's
 sketches and features are rebuilt as SolidCraft features instead, so its dimensions can be edited;
 when one cannot be, its bodies come in as a base feature and a warning says why (Preferences ›
-General › FreeCAD files turns the rebuild off). Mesh bodies render,
+General › FreeCAD files turns the rebuild off). Preferences › General › Import with cadmpeg (off
+by default) reads STEP, IGES, FreeCAD and Rhino files with cadmpeg straight into B-rep instead of
+through SolidCraft's own STEP and IGES readers, to compare the two. Mesh bodies render,
 measure, move and export, but solid features need B-rep bodies.
 
 The stand-up offer for STEP and IGES files remembers your answer for unchanged files; Preferences › Design lets you turn this memory off or forget all remembered answers.
@@ -51,7 +105,7 @@ removing the oldest first, in SolidCraft's data folder across updates. Preferenc
 **Reuse imports I've opened before** is on by default; turn it off to import every time,
 or use **Clear** beside it to remove cached imports without forgetting stand-up answers.
 
-Every imported file (STEP, IGES, 3MF, STL, OBJ or glTF) comes in as a new component named after the
+Every imported file (STEP, IGES, 3MF, STL, OBJ, glTF or OpenUSD) comes in as a new component named after the
 file, so its bodies never mix with yours. A STEP assembly keeps its structure: its parts and
 sub-assemblies become nested components, and a part used several times is one component with an
 occurrence for each place. The imported assembly is rigid: moving its component moves everything,
@@ -67,6 +121,29 @@ the model looks right in Render; textures, skins and animations are not imported
 mirrored nodes are baked into their meshes. Compressed meshes (Draco, meshopt) are refused with a
 message: save the file uncompressed first.
 
+An OpenUSD file (`.usd`, `.usda`, `.usdc` or `.usdz`) comes in the same way as a glTF file. cadmpeg reads
+the stage and composes it within its own layer: variants, internal references, inheritance and instancing.
+Each mesh becomes a mesh body, each placed prim a nested component, and a prim placed again with the same
+contents another occurrence of one component. Lengths become millimetres from the stage's `metersPerUnit`,
+and a stage that says Y is up (or says nothing, as OpenUSD then means Y) is turned to stand Z up
+(`up: "z"` keeps its axes). A material's base colour, opacity, metallic and roughness, or else a prim's
+constant display colour, become the body's appearance. Scaled or mirrored prims are baked into their
+meshes. Invisible prims, NURBS patches, B-rep with no mesh, curves, intrinsic shapes such as `Cube`,
+and references to other files are left out with a warning.
+
+With the `geometry: "exact"` parameter (on the `doc.open` and `file.insert_mesh` commands, and the
+MCP tools that call them), an OpenUSD file comes in by its exact geometry instead, as a FreeCAD or
+Rhino file read with cadmpeg does: each B-rep (a `BrepArray` prim's solids and shells, such as
+SolidCraft's own exports carry) becomes a B-rep body of one Import feature, with exact faces and edges
+to pick, fillet and measure, and only a mesh with no B-rep beside it becomes a mesh body of that
+feature. A mesh that only shows a B-rep (its fallback mesh) is not read a second time, unless that
+B-rep cannot be built: the body then comes in as its fallback mesh, with a warning saying why. A
+`NurbsPatch` is left out with a warning for now: its boundary is not read. The prim tree becomes the component tree, a part placed again another occurrence of it,
+and the stage's up axis stands the import up as for its meshes (`up: "z"` keeps its axes). Each body
+takes its material's base colour and opacity. Unlike the mesh import, metallic and roughness are not
+carried, a prim placed by a scale or a mirror is left out with the reason rather than baked, and an
+invisible prim comes in hidden. The default, `geometry: "meshes"`, is the mesh import above.
+
 A 3MF project saved by a slicer comes in too, also when it keeps its objects in model parts of
 their own inside the file (the 3MF Production extension): each object on the build plates becomes
 one mesh body, with all its volumes merged where the slicer placed them. Each body is named after
@@ -79,6 +156,11 @@ negative volumes come in as ordinary solid geometry.
 panel, and in the right-click menu of a body) open the same dialog with that format chosen; it saves
 the selected bodies as STL, 3MF or 3MF with face tags (below) to a file you name, and you can change
 the format there.
+
+If a body cannot be meshed, STL, OBJ and 3MF exports still write the other bodies. The toast
+names each body that was left out and stays until you dismiss it, and the command's reply lists
+them in `skipped`, with the reason for each in `warnings`. If no body can be meshed, the export
+fails.
 
 A 3MF has one object per body, so a slicer arranges the bodies of a multi-body part apart on the
 bed. Scripts and the control channel can keep each component together: `file.export` or
@@ -149,11 +231,32 @@ Closed meshes can be rebuilt as solids with the `mesh.convert` command (command 
 scripts and the control channel): a mesh with a constant cross-section as analytic planar and
 cylindrical faces, any other closed mesh as the faceted solid its triangles describe.
 
+Use **Surface → Mesh → Reduce Mesh** to create a separate, simpler mesh without changing the
+original. Select the mesh body and choose either a retained percentage (greater than 0 and less
+than 100) or a positive target triangle count. The status reports the original, target and achieved
+triangle counts, including when a run stops above the target. Open boundary edges and original
+creases sharper than 30° stay in place. The reduced body inherits the source body's colour
+and placement and preserves per-corner normal seams. Reduction does not repair the source.
+Smaller targets can remove more detail: the triangle count is not a geometric tolerance.
+The reduced body can be selected for Convert Mesh, which still requires a closed mesh within its
+triangle limit. The reported count describes the body in the design: mesh exporters that weld
+nearby vertices can write a different count. Scripts can call `mesh.reduce` with `body` and
+exactly one of `percentage` or `triangle_count`; an optional `name` names the history feature.
+
+The **Mesh** section also contains **Convert Mesh**, **Insert Mesh**, and **Save As Mesh**.
+To restore the previous Surface toolbar, enable **Use legacy Surface toolbar** in Layout preferences.
+Mesh panel customizations are kept but hidden while the legacy toolbar is enabled.
+
 **File → Export 3MF…** with the format changed to **3MF with face tags** (`file.export` or `file.save_mesh` with `format: "3mf-tagged"`) writes an
 ordinary 3MF in which every triangle also names the B-rep face it lies on and every coordinate
 is the tessellation's own double-precision value. Meshing and analysis tools can use the tags to
 keep a model's faces (for loads, boundary conditions or feature edges); other 3MF readers ignore
 them. The format is specified in [`docs/formats/3mf-face-tags.md`](https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/3mf-face-tags.md).
+
+`file.export` with `format: "stla"` (or `file.export_stl` with `ascii: true`) and `solids: "face"` writes an ASCII STL with
+one named `solid` block per B-rep face, named by the face's persistent name, so CFD meshers such as snappyHexMesh and
+cfMesh make a boundary patch of each. It is command-only for now. The naming rule is in
+[`docs/formats/stl-face-solids.md`](https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/stl-face-solids.md).
 
 **File → Export URDF…** (`file.export` with a `.urdf` path) writes the assembly for robot
 simulators and ROS: a link per component placement with its mesh, mass and inertia, and the
@@ -248,11 +351,31 @@ points up (+Z), a positive angle lowers the leading edge: the usual washout at t
 ]}
 ```
 
+## Opening a file while SolidCraft runs
+
+Opening a design from your file manager, or with `solidcraft part.sc`, while SolidCraft is already
+running opens it in that window, as File > Open does, and no second app starts. The two launches
+talk through a socket in your settings folder (a named pipe on Windows) that only you can reach;
+nothing listens on the network, and only file paths are sent, with whether they open read-only.
+If the running window does not answer within a moment, the new launch starts normally.
+`solidcraft --new-instance part.sc` always starts a separate app.
+
+`solidcraft --read-only part.sc` opens the design read-only, as **Open Read-Only** does (see
+[Designs in shared or synced folders](#designs-in-shared-or-synced-folders)): you can change it,
+and Save asks for a new file. It covers every file named on that command line, in a new window or
+in the running one. A design that another SolidCraft has open opens without asking. A SolidCraft
+from before this option doesn't take read-only files from a new launch; that launch opens them in
+a window of its own. STEP, mesh and other imported files always open as new, unsaved designs, so
+the option changes nothing for them. Without a file it does nothing.
+
 ## Large files
 
 SolidCraft opens STEP, IGES and the other CAD files it imports up to **512 MB**, and design files
-up to **256 MB**. A larger file is refused before it is read, and the message says how to raise
-the limit. In the desktop app you can raise both:
+up to **256 MB**. Mesh files (3MF, STL, OBJ, PLY) and point cloud files (PLY, PCD, E57, XYZ, PTS,
+ASC) follow the limit for import files: a point cloud file is read up to 1 GB, and more when that
+limit is raised.
+A larger file is refused before it is read, and the message says how to raise the limit. In the
+desktop app you can raise both:
 
 - **Preferences › General › Largest file to open** sets each limit in MB, from its default up to
   16 GB (16384 MB). It is kept between runs; Restore page defaults on the General page puts back 512 MB
@@ -268,9 +391,10 @@ Before you raise them:
 - **Memory:** a file is read whole, and what is built from it is held in memory beside it. Expect
   several times the file's size in RAM, more for finely detailed parts, and a long open and a slow
   view for an assembly with hundreds of thousands of faces.
-- **Saving:** a design keeps the text of a STEP import, compressed, and the design limit applies
-  to the saved file. An import whose compressed text doesn't fit in a design file is refused when
-  it is imported, so it never opens and then fails to save; raise the design file limit too, or
+- **Saving:** a design keeps the text of a STEP import, compressed. A design that grows past the
+  design limit is still saved (and autosaved), and the save says that the file is over the limit and
+  how to raise it to open the file again. An import whose compressed text doesn't fit in a design file is refused when
+  it is imported; raise the design file limit too, or
   open the file with `--max-file-size`, which raises both. Opening that design again needs the
   same limits.
 - **Web app:** the browser version keeps 512 MB and 256 MB: a browser tab can't hold larger files.
@@ -289,6 +413,7 @@ placeholder in it is replaced:
 |---|---|
 | `{design}` | The design's name |
 | `{body}` | The exported body's name. When an export holds several bodies, the first one |
+| `{source}` | The name, without folder or extension, of the file the exported body was imported from; for a body a later feature made, the design's first import. Without an import, the design's name |
 | `{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}` | That [design property](#design-properties) |
 
 The help icon next to the setting lists the same placeholders. A design property that is not set
@@ -301,6 +426,23 @@ name that Windows keeps for a device, such as `CON` or `NUL`, gets a `_` in fron
 cut to 200 characters and 240 bytes, so it fits with its extension. Left empty, File → Export
 offers the design's name, and Save As Mesh and a body's Export… offer the body's name. The control
 channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
+
+## Default folders
+
+**Preferences → Design → Folders** sets where the save dialogs open. Both settings are empty by
+default. An empty setting keeps the old behaviour: the dialog opens in the folder you used last, or
+in the folder of the open design.
+
+- **Designs folder**: **Save** and **Save As** open here for a design that has never been saved.
+  **Save As** for a design that is already saved still opens in that design's folder.
+- **Exports folder**: **File → Export**, **Save As Mesh**, drawings and the other files SolidCraft
+  saves open here. When you choose another folder in one of these dialogs, the next one opens in
+  that folder until you quit or change the setting.
+
+Type a folder or choose one with **Browse…**. **Clear** empties the setting. A folder that no longer
+exists is ignored, and the dialog opens in the folder you used last. The web app saves through the
+browser, so it has no folder settings. The control channel sets them with
+`ui.prefs {"designs_folder": "/home/sam/Designs", "exports_folder": "/home/sam/Prints"}`.
 
 ## Design properties
 
@@ -376,6 +518,49 @@ Drive) can be open on two computers at once. The desktop app watches for two wri
 Scripts, the CLI and the control channel never get these questions. `doc.open` opens the design
 and reports `open_elsewhere` in its result (`read_only: true` opens it read-only), and `file.save`
 over a file that changed on disk fails with an error until it is given `overwrite: true`.
+
+## Designs in Git
+
+A design saved as `.json` is plain text, so Git shows what changed in it with no setup. A design
+saves as the same text each time, with a short list of numbers such as a point `[40.0, 6.0]` on one
+line. Choose `.json` with **Save As** for a design without imported files that you keep in a
+repository. A `.json` design keeps an imported STEP file inside it as one very long line, so for a
+design with imports, keep the `.sc` container and set up textconv as below. The first save of a
+`.json` design written by an earlier version puts its short lists of numbers on one line, so commit
+that save on its own.
+
+A `.sc` design or a `.scdwg` drawing is a container (a ZIP file), which Git shows only as changed
+binary data. To see its changes as text in `git diff`, `git log -p` and `git show`, have Git run
+`solidcraft-cli textconv` on it. Add these lines to the repository's `.gitattributes` and commit
+them.
+
+```text
+*.sc diff=solidcraft
+*.solidcraft diff=solidcraft
+*.scdwg diff=solidcraft
+```
+
+Then run this once on each computer.
+
+```text
+git config --global diff.solidcraft.textconv "solidcraft-cli textconv"
+```
+
+Git never runs a program that a repository names, which is why the second step is needed on each
+computer. If `solidcraft-cli` is not on your `PATH`, put its full path in the quotes, with forward
+slashes. A path with a space needs single quotes of its own inside the double quotes, for example
+`"'C:/Program Files/SolidCraft/solidcraft-cli.exe' textconv"`. `git diff --no-textconv` shows the
+raw change again. The Snap and Flatpak builds can't read the files Git hands to textconv, so use
+the AppImage, a `.deb` or `.rpm` package, or a release download for this.
+
+For a container, textconv prints its `container.json` on one line, then the design or drawing, laid
+out as a `.json` save lays it out. Then each other file the container holds, such as an imported
+STEP file or the signature log, gets one line with
+its size and SHA-256, so a changed import shows as a changed line. The model cache, the preview and
+a plugin's own cache are left out, because a save or the plugin writes them afresh. A file textconv
+cannot show prints one line with its size and SHA-256 instead, and Git goes on with the rest of the
+diff. Web pages that show a repository's changes do not run textconv, so a `.sc` design still shows
+as binary there.
 
 ## Saving in the web app
 

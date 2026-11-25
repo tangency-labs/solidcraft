@@ -14,4 +14,6 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 syn = { workspace = true, features = ["visit"] }
 toml = { workspace = true }
+# `plugin-examples --run`: wraps a module as a component, as `wasm-tools component new` does.
+wit-component = { version = "0.254", default-features = false }
 zip = { workspace = true }

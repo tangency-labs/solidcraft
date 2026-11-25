@@ -1,12 +1,12 @@
 # What works
 
-The full feature summary, moved out of the README. The commands by area are in [features.md](features.md); status and plans are in [ROADMAP](roadmap-detail.md).
+The full feature summary, moved out of the README. The commands by area are in [features.md](features.md); status and plans are in [roadmap-detail.md](roadmap-detail.md).
 
 **Status: early but usable for simple parts.** 75 of 76 public reference parts
 match their analytic or FreeCAD-computed volume, area, centre of mass and bounding box
 ([oracle.md](oracle.md)); the other is a tracked bug.
 These checks do not establish complete geometric or workflow equivalence. The commands SolidCraft has
-are listed by area in [features.md](features.md); status and plans are in [ROADMAP.md](roadmap-detail.md).
+are listed by area in [features.md](features.md); status and plans are in [roadmap-detail.md](roadmap-detail.md).
 Open work and known bugs are in [GitHub issues](https://github.com/tangency-labs/solidcraft/issues),
 and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
 
@@ -42,7 +42,7 @@ and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
 - **Features** on a parametric timeline: extrude, revolve, sweep, loft, fillet/chamfer,
   shell, draft, holes, threads, patterns, mirror, split, combine, move and construction geometry.
   The timeline rebuilds incrementally; features can be edited, suppressed, renamed, reordered
-  and deleted. Supported geometry and current limitations are described in [ROADMAP.md](roadmap-detail.md).
+  and deleted. Supported geometry and current limitations are described in [roadmap-detail.md](roadmap-detail.md).
   New revolves preserve symmetric and two-sided angular placement across reversed axes;
   older designs retain their saved convention when reopened or edited.
 - **Parameters and configurations** with unit-aware expressions (`2 * width + 5 mm`,
@@ -59,21 +59,21 @@ and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
   provisional picture from warm geometry caches while rebuilding before editing; caches never
   replace the parametric design. Export to STEP (AP242 with body names, colours and
   components as assemblies; revolved faces as native planes, cylinders, cones, spheres and tori),
-  IGES 5.3 (manifold solid B-reps with names and colours), 3MF, STL (binary/ASCII), OBJ and GLB (placed bodies with their opaque
-  colours, metallic and roughness, in metres with Y up, each part under a node named after its occurrence), and
+  IGES 5.3 (manifold solid B-reps with names and colours), 3MF, STL (binary/ASCII), OBJ and GLB (placed bodies with their
+  colours, metallic, roughness and opacity, and render-setup Glass as glTF transmission, in metres with Y up, each part under a node named after its occurrence), and
   assemblies with joints as URDF for robot simulators (urdf.md);
   3MF, STL, OBJ and glTF 2.0 (`.glb`/`.gltf`, its node tree as components and its materials as
   appearances) import as mesh bodies (they render, measure, move and export; solid features
   need B-rep bodies). The `mesh.convert` command reconstructs closed meshes as parametric solids.
   Supported straight-extrusion parts and planar shoulders become planar and circular cylindrical
   faces, including partial circular walls within the chosen tolerance. Other closed meshes become
-  faceted solids with planar faces that follow the source triangles. Malformed inputs, hard work
-  limits and failed safety certificates remain refused. New conversions use
-  source-bound face names; the `mesh_convert_legacy_names` preference (or `mesh.convert`'s
-  `legacy_names: true` parameter) keeps geometry-derived names without changing reconstruction
-  geometry. New sketches in this mode need an explicit fixed plane; source-bound names support
-  dynamic face attachments. Saved legacy sketch references still replay. The naming choice is
-  saved per conversion; changing the preference does not alter existing designs;
+  faceted solids with planar faces that follow the source triangles, including closed meshes
+  outside the analytic reconstruction budgets or certificates. Before recognition, triangle winding
+  is made consistent within closed, orientable components. Open, nonmanifold, wholly degenerate
+  and oversized inputs remain refused. All conversions use source-bound face names and support
+  dynamic face attachments. Saved conversions rebuild with the current converter; a reference
+  that no longer resolves is reported as broken. After changing the mesh or fit tolerance,
+  attached sketches may need reattachment;
   STEP import (AP203/AP214/AP242 solids, assemblies, units, names, colours) and IGES import
   (manifold solid B-reps, or trimmed and bounded surfaces sewn into solids) as a base feature
   that later features build on — open a `.step`/`.stp`/`.igs`/`.iges` file, insert one into a

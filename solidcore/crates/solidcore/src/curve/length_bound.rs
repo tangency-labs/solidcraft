@@ -5,9 +5,17 @@
 //! quadrature whose steps are accepted on an estimate, so it has no error bound; a caller
 //! that refuses on a length compares against this bracket instead.
 //!
-//! | Rust                    | Kind                                                     |
-//! |-------------------------|----------------------------------------------------------|
-//! | [`Curve::length_bound`] | a line, a circular arc, a B-spline (rational or not)     |
+//! | Rust                             | Kind                                              |
+//! |----------------------------------|---------------------------------------------------|
+//! | [`Curve::length_bound`]          | a line, a circular arc, a B-spline (rational or not) |
+//! | [`Curve::proved_length_at_most`] | the enclosure above, settled rather than narrowed |
+//!
+//! **Settling a limit.** [`Curve::proved_length_at_most`] asks the same enclosure whether the
+//! length is at most a limit, and it stops as soon as the pieces settle that: an enclosure whose
+//! lower end is past the limit proves the length is more than it, and one whose upper end is
+//! within it proves the length is at most. Asking [`Curve::length_bound`] for a bracket no wider
+//! than the limit instead answers the same, but a curve far longer than the limit never gets
+//! there: it halves to [`MAX_PIECES`] (a piece may carry no upper end at all) and is refused.
 //!
 //! **A line**: the distance between its ends, each known to `gamma_3` of its size (`P0 + t D`).
 //!
@@ -146,6 +154,61 @@ impl Curve {
                 reason: "no certified length for this curve kind",
             }),
         }
+    }
+
+    /// Not upstream: whether the arc length over `interval` is at most `limit`, certified,
+    /// stopping as soon as the enclosure settles it (module docs): `Some(true)`
+    /// where the length is proved at most `limit`, `Some(false)` where it is proved more.
+    ///
+    /// `most` bounds the work: a B-spline's pieces are halved at most that many times (and never
+    /// past [`MAX_PIECES`]). `None` where neither end settles it within that: a kind it does not
+    /// enclose (module docs), or a B-spline whose pieces reach `most` or whose widest piece is
+    /// mostly its own rounding. Never a guess: `None` is "no bound settles it here", so a caller
+    /// asks within the work it can spend and reads `None` as "not proved", never as "no".
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an interval or limit that is not finite, or a malformed curve; those
+    /// of the evaluations and the parameter conversions.
+    pub fn proved_length_at_most(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        limit: f64,
+        most: usize,
+    ) -> Result<Option<bool>> {
+        let (a, b) = (interval.min(), interval.max());
+        if !(a.is_finite() && b.is_finite() && limit.is_finite() && limit >= 0.0) {
+            return Err(SolidError::invalid_input(
+                OP,
+                "an interval or limit not finite",
+            ));
+        }
+        if b - a <= 0.0 {
+            return Ok(Some(true));
+        }
+        let bracket = match self.kind() {
+            CurveKind::Line(_) => {
+                let (p, q) = (self.evaluate_point(k, a)?, self.evaluate_point(k, b)?);
+                // as `length_bound`'s line: one product and one sum per end
+                let e = gamma(3) * (1.0 + p.max_dimension().max(q.max_dimension()));
+                let chord = (q - p).length();
+                let slack = 2.0 * 3.0_f64.sqrt() * e + gamma(4) * chord;
+                Bracket {
+                    lower: (chord - slack).max(0.0),
+                    upper: chord + slack,
+                }
+            }
+            CurveKind::Ellipse(el) if el.is_circle() => {
+                arc_bound(k, self, el.base(), el.x_radius().max(el.y_radius()), a, b)?.0
+            }
+            CurveKind::Ellipse(el) => return spline_at_most(el.base(), a, b, limit, most),
+            CurveKind::BSpline(c) => return spline_at_most(c, a, b, limit, most),
+            CurveKind::Parabola(c) => return spline_at_most(c.base(), a, b, limit, most),
+            CurveKind::Hyperbola(c) => return spline_at_most(c.base(), a, b, limit, most),
+            _ => return Ok(None),
+        };
+        Ok(settles(bracket, limit))
     }
 }
 
@@ -356,8 +419,11 @@ struct H {
 /// The knot span `j` of a B-spline of degree `p` (rational or not): its control points in
 /// homogeneous difference form, `w_s (P_s - P_0)` and `w_s`, its local knots, and the
 /// rounding of the points and weights read off it by blossoming.
-struct Span {
+pub(crate) struct Span {
     p: usize,
+    /// The span's first control point `P_0`, Euclidean, which the difference form is taken
+    /// from.
+    origin: Vec3,
     /// The knots `t_(j-p+1) ..= t_(j+p)`.
     knots: Vec<f64>,
     /// The knot span `[t_j, t_(j+1)]`: a piece within it is blossomed to the rounding bound.
@@ -382,7 +448,8 @@ fn difference_of_products(a: f64, b: f64, c: f64, d: f64) -> f64 {
 }
 
 impl Span {
-    fn of(c: &BSplineCurve, mid: f64) -> Result<Self> {
+    /// The knot span of `c` that holds `mid`.
+    pub(crate) fn of(c: &BSplineCurve, mid: f64) -> Result<Self> {
         let p = c.degree()?;
         let cpts = c.control_points()?;
         let (unique, mult) = c.knots(None)?;
@@ -454,6 +521,7 @@ impl Span {
         }
         Ok(Self {
             p,
+            origin: Vec3::new(c0.x / w0, c0.y / w0, z(&c0) / w0),
             knots: local,
             start,
             end,
@@ -504,6 +572,30 @@ impl Span {
                 self.blossom(&u)
             })
             .collect()
+    }
+
+    /// The Euclidean Bezier control points of the curve on `[a, b]` within this span, whose
+    /// convex hull holds the curve there, and the bound of each coordinate's rounding: the
+    /// blossomed difference point's and weight's through the division (as
+    /// [`Span::piece`]'s ends), and `gamma_2` of the point for the origin's own division and
+    /// the sum that puts it back. `None` for a piece outside the span or of no length,
+    /// where the rounding bound does not hold, and for numbers not finite.
+    pub(crate) fn hull(&self, a: f64, b: f64) -> Option<(Vec<Vec3>, f64)> {
+        if !(self.start <= a && a < b && b <= self.end) {
+            return None;
+        }
+        let pts = self.bezier(a, b);
+        let (e, ew, wl) = (self.rounding, self.rounding_w, self.w_min);
+        let size = pts.iter().fold(0.0_f64, |m, h| m.max(h.x.length() / h.w));
+        let from = self.origin;
+        let origin = from.x.abs().max(from.y.abs()).max(from.z.abs());
+        let rounding = (e + size * ew) / wl + gamma(2) * size + gamma(2) * (origin + size);
+        let out: Vec<Vec3> = pts.iter().map(|h| from + h.x * (1.0 / h.w)).collect();
+        let finite = rounding.is_finite()
+            && out
+                .iter()
+                .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite());
+        finite.then_some((out, rounding))
     }
 
     /// The bracket of the piece `[a, b]` (module docs): its chord `c`, and `c / cos phi`,
@@ -752,6 +844,86 @@ fn spline_bound(c: &BSplineCurve, a: f64, b: f64, width: f64) -> Result<Bracket>
         .into_error());
     }
     Ok(bracket)
+}
+
+/// Whether a B-spline's length over `[a, b]` is at most `limit`, settling as [`spline_bound`]
+/// halves but before it would narrow to the limit itself: every 64 halvings the pieces' bracket
+/// is asked whether it settles it ([`settles`]). A sliver's edge is a few µm long and its limit
+/// a tolerance above that, so an enclosure already settles it; an edge far longer than the limit
+/// is settled the other way by its lower end long before the halving cap, where narrowing to the
+/// limit would never arrive (module docs).
+fn spline_at_most(
+    c: &BSplineCurve,
+    a: f64,
+    b: f64,
+    limit: f64,
+    most: usize,
+) -> Result<Option<bool>> {
+    if c.degree()? == 0 {
+        return Err(SolidError::invalid_input(OP, "a B-spline of degree 0"));
+    }
+    let mut spans: Vec<Span> = Vec::new();
+    let mut queue = std::collections::BinaryHeap::new();
+    for w in breaks(c, a, b)?.windows(2) {
+        let [lo, hi] = w else { continue };
+        if hi <= lo {
+            continue;
+        }
+        let span = Span::of(c, 0.5 * (lo + hi))?;
+        queue.push(Queued(spans.len(), span.piece(*lo, *hi)?));
+        spans.push(span);
+    }
+    let mut done: Vec<Piece> = Vec::new();
+    let mut pieces = queue.len();
+    let mut halvings = 0usize;
+    let most = most.min(MAX_PIECES);
+    loop {
+        // the total is summed afresh every 64 halvings, as `spline_bound` keeps it
+        if halvings % 64 == 0 {
+            let all = queue.iter().map(|q| &q.1).chain(done.iter());
+            if let Some(bracket) = summed(all, queue.len() + done.len()) {
+                if let Some(settled) = settles(bracket, limit) {
+                    return Ok(Some(settled));
+                }
+            }
+        }
+        if pieces >= most {
+            return Ok(None);
+        }
+        let Some(Queued(s, piece)) = queue.pop() else {
+            return Ok(None);
+        };
+        // the widest piece is mostly rounding: halving it (or any other) widens the bracket
+        if piece.geometric <= (piece.upper - piece.lower) - piece.geometric {
+            return Ok(None);
+        }
+        let Some(span) = spans.get(s) else {
+            return Err(SolidError::invalid_input(OP, "a piece without its span"));
+        };
+        let m = 0.5 * (piece.a + piece.b);
+        if !(m > piece.a && m < piece.b) {
+            // halved to the parameter's resolution: kept as it is
+            done.push(piece);
+            continue;
+        }
+        queue.push(Queued(s, span.piece(piece.a, m)?));
+        queue.push(Queued(s, span.piece(m, piece.b)?));
+        pieces += 1;
+        halvings += 1;
+    }
+}
+
+/// What `bracket` settles about the length being at most `limit`, where it settles it: an upper
+/// end within the limit proves the length is at most it, a lower end past the limit that it is
+/// more. `None` where the limit lies strictly between them.
+fn settles(bracket: Bracket, limit: f64) -> Option<bool> {
+    if bracket.upper <= limit {
+        Some(true)
+    } else if bracket.lower > limit {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 /// The bracket the `n` pieces give: their sides summed, each sum to `gamma_(n+1)` of itself.

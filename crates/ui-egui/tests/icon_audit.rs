@@ -1,4 +1,7 @@
 //! Runtime icon discovery: use the same headless UI and requests as control clients.
+// Test helpers outside #[test] functions print what they skip or measure; clippy.toml
+// `allow-print-in-tests` covers only #[test] functions and #[cfg(test)] code.
+#![allow(clippy::print_stderr)]
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -25,8 +28,32 @@ fn escape(h: &mut Harness) {
     h.app.design_properties = None;
 }
 
+fn planned_drawing_placeholder(id: &str) -> bool {
+    if solidcraft_engine::cmd::drawing_pending_icon(id).is_none() {
+        return false;
+    }
+    solidcraft_engine::find_command(id).is_some_and(|command| command.planned.is_some() && command.icon == icon_svg::PLACEHOLDER)
+}
+
+fn expected_planned_drawing_placeholder(h: &Harness) -> bool {
+    // The renderer records icon names, not command ids. Only these two surfaces may
+    // request the literal provisional glyph; unknown ids remain failures everywhere.
+    if workspace::drawing_tab(&h.app.ui.tab) {
+        return solidcraft_engine::command_specs().iter().any(|command| command.tab == h.app.ui.tab && planned_drawing_placeholder(command.id));
+    }
+    !h.app.sbox.text.is_empty()
+        && solidcraft_ui_egui::shortcut_box::search(&h.app, &h.app.sbox.text).iter().take(56).any(|row| planned_drawing_placeholder(row.0))
+}
+
+fn permitted_request(name: &str, placeholder: bool, planned_drawing: bool) -> bool {
+    !placeholder || (name == icon_svg::PLACEHOLDER && planned_drawing)
+}
+
 fn collect(h: &mut Harness, surface: &str, requested: &mut BTreeMap<String, bool>) {
-    let reply = h.call("ui.icon_audit", json!({}));
+    let planned_drawing = expected_planned_drawing_placeholder(h);
+    // The control wrapper settles after draining. Read the same audit API directly,
+    // so its extra frames cannot leave requests for the next, unrelated surface.
+    let reply = icon_svg::audit::take();
     use std::io::Write as _;
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/icon-audit");
     std::fs::create_dir_all(&dir).unwrap();
@@ -36,15 +63,16 @@ fn collect(h: &mut Harness, surface: &str, requested: &mut BTreeMap<String, bool
         "{surface}\tpanel={:?}\ttool={:?}\t{}",
         h.app.dialog.as_ref().map(|d| &d.kind),
         h.app.tool.as_ref().map(|t| t.cmd),
-        reply["result"]["requested"]
+        serde_json::to_string(&reply).unwrap()
     )
     .unwrap();
-    for item in reply["result"]["requested"].as_array().expect("audit requests") {
-        let name = item["name"].as_str().unwrap();
-        let placeholder = item["placeholder"].as_bool().unwrap();
+    for item in reply {
+        let name = item.name.as_str();
+        let placeholder = item.placeholder;
         if placeholder && !requested.contains_key(name) {
             eprintln!("{surface}: {name} fell back to the placeholder");
         }
+        assert!(permitted_request(name, placeholder, planned_drawing), "{surface}: unexpected placeholder request {name}");
         requested.insert(name.to_owned(), placeholder);
     }
 }
@@ -220,7 +248,7 @@ fn menu(h: &mut Harness, target: Value, surface: &str, requested: &mut BTreeMap<
         // Planned workspace rows deliberately have no artwork until their workspace exists.
         let intentional = id == "-" || id.starts_with('#') || (id == "ui.workspace" && item["shortcut"] == "coming later");
         assert!(!blank || intentional, "{surface}: icon-less menu item {item}");
-        assert_eq!(item["placeholder"], false, "{surface}: {item}");
+        assert!(item["placeholder"] == false || (item["icon"] == icon_svg::PLACEHOLDER && planned_drawing_placeholder(id)), "{surface}: {item}");
         flyout_icons(item, surface);
     }
     collect(h, surface, requested);
@@ -237,7 +265,10 @@ fn flyout_icons(item: &Value, surface: &str) {
         }
         let icon = child["icon"].as_str().unwrap();
         assert!(!icon.is_empty(), "{surface}: submenu row has no icon: {child}");
-        assert_eq!(child["placeholder"], false, "{surface}: submenu placeholder {icon}");
+        assert!(
+            child["placeholder"] == false || (icon == icon_svg::PLACEHOLDER && planned_drawing_placeholder(id)),
+            "{surface}: submenu placeholder {icon}"
+        );
         flyout_icons(child, surface);
     }
 }
@@ -390,10 +421,16 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     }
     h.call("ui.status_fixture", json!({"preset":"off"}));
     collect(&mut h, "initial browser and timeline", &mut requested);
+    // The Browser's search field in its header, with its kind filter (#1634).
+    click(&mut h, "browser:magnifier");
+    h.frames(3);
+    collect(&mut h, "browser search field", &mut requested);
+    click(&mut h, "browser:magnifier");
+    h.frames(2);
     assistant(&mut h, &mut requested);
 
     let navigation = h.app.preferences.navigation_bar.clone();
-    h.call("ui.prefs", json!({"navigation_bar":{"slots":["orbit","pan","zoom","spin","fit","look_at","home","visual_style","projection","display","grid","ground_shadow","ambient_occlusion"]}}));
+    h.call("ui.prefs", json!({"navigation_bar":{"slots":["orbit","pan","zoom","spin","fit","look_at","home","selection_mode","visual_style","projection","display","grid","ground_shadow","ambient_occlusion"]}}));
     collect(&mut h, "navigation catalogue", &mut requested);
     let size = h.ctx.content_rect().size();
     h.call("ui.resize", json!({"width":500,"height":800}));
@@ -406,7 +443,11 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     h.call("ui.prefs", json!({"navigation_bar":navigation}));
     h.frames(3);
 
-    for (handle, surface) in [("nav:slot:visual_style", "navigation visual styles"), ("nav:view", "navigation display")] {
+    for (handle, surface) in [
+        ("nav:slot:selection_mode", "navigation selection modes"),
+        ("nav:slot:visual_style", "navigation visual styles"),
+        ("nav:view", "navigation display"),
+    ] {
         click(&mut h, handle);
         h.frames(3);
         collect(&mut h, surface, &mut requested);
@@ -448,6 +489,25 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     ribbon(&mut h, &mut requested);
     solidcraft_ui_egui::render_workspace::enter(&mut h.app, false).unwrap();
     h.frames(3);
+    {
+        // Independent egui context keeps closing Drawing popup animations out of the
+        // following Design menu scenes, where the provisional glyph is forbidden.
+        let mut drawing = Harness::new();
+        drawing.app.home.open = false;
+        // This scene audits the retained legacy management and docking controls.
+        drawing.app.preferences.drawing_sheets_visibility = "legacy".into();
+        workspace::enter(&mut drawing.app, "drawing").unwrap();
+        drawing.frames(3);
+        collect(&mut drawing, "Drawing sheet strip and browser", &mut requested);
+        ribbon(&mut drawing, &mut requested);
+        click(&mut drawing, "drawing:sheets:manage");
+        collect(&mut drawing, "Drawing sheet management and docking", &mut requested);
+        escape(&mut drawing);
+        click(&mut drawing, "drawing:sheets:settings");
+        collect(&mut drawing, "Drawing Sheet Settings", &mut requested);
+        click(&mut drawing, "drawing:settings:close");
+        collect(&mut drawing, "Drawing panel closed", &mut requested);
+    }
 
     let body = h.app.session.model.state().bodies.first().unwrap().name.clone();
     let sketch = h.app.session.world_state().unwrap().sketches.first().unwrap().feature;
@@ -471,15 +531,20 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         menu(&mut h, target.clone(), &target.to_string(), &mut requested);
     }
     // The Section Analysis and a canvas have a menu only while they are there (#10745).
+    // Escape after each menu ends the section, so each menu gets one of its own.
+    let plane = h.app.run("inspect.section", json!({"plane": "YZ"})).unwrap()["section"]["id"].clone();
+    menu(&mut h, json!({"type":"section","plane":plane}), "section", &mut requested);
     h.app.run("inspect.section", json!({"plane": "YZ"})).unwrap();
-    menu(&mut h, json!({"type":"section"}), "section", &mut requested);
+    menu(&mut h, json!({"type":"analysis"}), "analysis", &mut requested);
     h.app.run("inspect.section", json!({"clear": true})).unwrap();
     let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
     png.extend(400u32.to_be_bytes());
     png.extend(200u32.to_be_bytes());
     png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-    let canvas = h.app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].clone();
+    let data = std::env::temp_dir().join(format!("solidcraft-icon-audit-{}.png", std::process::id()));
+    std::fs::write(&data, &png).unwrap();
+    let data = data.to_string_lossy().into_owned();
+    let canvas = h.app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 80})).unwrap()["canvas"].clone();
     menu(&mut h, json!({"type":"canvas","id":canvas}), "canvas", &mut requested);
     h.app.run("selection.delete", json!({"canvases": [canvas]})).unwrap();
     for selection in [
@@ -727,8 +792,24 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
             "Runtime icon discovery changed. Regenerate with UPDATE_ICON_MANIFEST=1 cargo test -p solidcraft-ui-egui --test icon_audit"
         );
     }
-    let missing = requested.iter().filter(|(_, placeholder)| **placeholder).map(|(name, _)| name).collect::<Vec<_>>();
+    // Each request was checked in its Drawing/search context by `collect` above.
+    let missing = requested
+        .iter()
+        .filter(|(name, placeholder)| **placeholder && name.as_str() != icon_svg::PLACEHOLDER)
+        .map(|(name, _)| name)
+        .collect::<Vec<_>>();
     assert!(missing.is_empty(), "Runtime placeholder requests (see surface diagnostics above): {missing:?}");
+}
+
+#[test]
+fn intentional_drawing_requests_do_not_allow_unknown_or_unplanned_icons() {
+    assert!(!planned_drawing_placeholder("drawing.view.base.planned"));
+    assert!(!planned_drawing_placeholder("drawing.unknown"));
+    assert!(!planned_drawing_placeholder("solid.extrude"));
+    assert!(permitted_request(icon_svg::PLACEHOLDER, true, true));
+    assert!(!permitted_request(icon_svg::PLACEHOLDER, true, false));
+    assert!(!permitted_request("missing_audit_test_icon", true, true));
+    assert!(!permitted_request("drawing_unknown", true, true));
 }
 
 #[test]
@@ -752,7 +833,17 @@ fn audit_is_opt_in_drains_and_records_resolved_aliases() {
 #[test]
 fn offset_mode_artwork_review() {
     use solidcraft_theme::{ColorVision, Tokens};
-    let names = ["offset", "offset_two_sides", "offset_symmetric", "sketch_chamfer", "sketch_chamfer_two_distances", "split_body"];
+    let names = [
+        "offset",
+        "offset_two_sides",
+        "offset_symmetric",
+        "sketch_chamfer",
+        "sketch_chamfer_two_distances",
+        "split_body",
+        "gusset_side_negative",
+        "gusset_side_center",
+        "gusset_side_positive",
+    ];
     let mut sheet = tiny_skia::Pixmap::new(400, names.len() as u32 * 88).unwrap();
     for (row, name) in names.iter().enumerate() {
         let resolved = icon_svg::resolve(name);
