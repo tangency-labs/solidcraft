@@ -408,3 +408,75 @@ fn a_hovered_blend_value_field_keeps_wheel_steps_from_reaching_the_camera() {
     let kept = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).unwrap();
     assert!(kept.contains(field.center()), "the field stays under its wheel-stepping pointer");
 }
+
+/// A real arrow drag gives its distance the keyboard even when the other form row held it.
+/// Keep the unequal 3/7 mm values, so a label following the old focus cannot pass by coincidence.
+#[test]
+fn dragging_either_chamfer_arrow_takes_focus_from_the_other_distance() {
+    for flip in [false, true] {
+        for secondary in [false, true] {
+            let (mut h, _) = blend_beside_its_arrow("solid.chamfer", true, flip, secondary);
+            for (label, text) in [("dialog:Distance 1", "3 mm"), ("dialog:Distance 2", "7 mm")] {
+                h.step(&json!({"click":{"handle":label}})).unwrap();
+                h.step(&json!({"key":"A","cmd":true})).unwrap();
+                h.step(&json!({"text":text})).unwrap();
+            }
+            h.frames(4);
+            assert!((blend_distance(&h, false) - 3.0).abs() < 1e-9);
+            assert!((blend_distance(&h, true) - 7.0).abs() < 1e-9);
+            let handle = if secondary { "arrow2" } else { "arrow" };
+            // Keep the actual arrow exposed after entering the unequal distances.
+            let tip = crate::scenario::handle_at(handle).unwrap();
+            let window = h.app.viewport.dialog_rect.unwrap();
+            let title = crate::scenario::handle_at("dialog:title").unwrap();
+            let delta = egui::vec2(tip.x + 30.0 - window.left(), tip.y - 80.0 - window.top());
+            h.call("ui.drag", json!({"x0":title.x,"y0":title.y,"x1":title.x+delta.x,"y1":title.y+delta.y,"steps":8}));
+            h.frames(24);
+            let opposite = if secondary { "dialog:Distance 1" } else { "dialog:Distance 2" };
+            h.step(&json!({"click":{"handle":opposite}})).unwrap();
+            h.frames(4);
+            let canvas_id = egui::Id::unique("sc_canvas_value");
+            let focused = h.ctx.memory(|m| m.focused()).expect("the opposite form field has the keyboard");
+            assert_ne!(focused, canvas_id);
+            assert!(h.ctx.read_response(focused).unwrap().rect.contains(crate::scenario::handle_at(opposite).unwrap()));
+            assert_eq!(crate::canvas::chamfer_editing(h.app.dialog.as_ref().unwrap()), Some(usize::from(!secondary)));
+            let design = h.app.session.doc.to_json();
+            let undo = h.app.session.undo.len();
+            let sibling = blend_distance(&h, !secondary);
+            let d = h.app.dialog.as_ref().unwrap();
+            let (base, _) = anchor(&h.app, d).unwrap();
+            let (first, second) = crate::canvas::chamfer_face_dirs(&h.app, d, base).unwrap();
+            // The primary's longer text also catches selecting the old "7 mm" range.
+            let distance = if secondary { 8.0 } else { 12.125 };
+            let target = base + (if secondary { second } else { first }) * distance;
+            // No Tab, title click or other focus change between the drag and its observations.
+            h.step(&json!({"drag":[{"handle":handle},{"world":[target.x,target.y,target.z]}],"ctrl":true})).unwrap();
+            h.frames(8);
+            assert!(
+                (blend_distance(&h, secondary) - distance).abs() < 0.3,
+                "the actual arrow sets its own distance, flip={flip}, secondary={secondary}"
+            );
+            assert!((blend_distance(&h, !secondary) - sibling).abs() < 1e-9);
+            assert_eq!(crate::canvas::chamfer_editing(h.app.dialog.as_ref().unwrap()), Some(usize::from(secondary)));
+            assert!(h.ctx.memory(|m| m.has_focus(canvas_id)), "the dragged distance must keep the floating field's keyboard after settling");
+            let label = if secondary { "Distance 2" } else { "Distance 1" };
+            let Some(Kind::Fillet { radius, distance2, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("the chamfer form") };
+            let shown = if secondary { distance2 } else { radius };
+            let texts = value_box_texts(&h);
+            assert!(
+                texts.iter().any(|text| text == label) && texts.iter().any(|text| text == shown),
+                "the floating label and value must belong to the dragged arrow: {texts:?}"
+            );
+            // Type directly into the drag-selected text: Ctrl+A here would hide a stale range.
+            h.step(&json!({"text":"9 mm"})).unwrap();
+            h.frames(4);
+            assert!((blend_distance(&h, secondary) - 9.0).abs() < 1e-9, "typing keeps the dragged distance's target");
+            assert!((blend_distance(&h, !secondary) - sibling).abs() < 1e-9);
+            assert_eq!(crate::canvas::chamfer_editing(h.app.dialog.as_ref().unwrap()), Some(usize::from(secondary)));
+            let texts = value_box_texts(&h);
+            assert!(texts.iter().any(|text| text == label) && texts.iter().any(|text| text == "9 mm"));
+            assert_eq!(h.app.session.doc.to_json(), design, "arrow and text edits must not commit the preview");
+            assert_eq!(h.app.session.undo.len(), undo);
+        }
+    }
+}

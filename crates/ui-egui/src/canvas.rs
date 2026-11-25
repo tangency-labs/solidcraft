@@ -1198,14 +1198,14 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // (a copy, written back below), and names it.
     let look1 = chamfer_look(d, 0);
     let two_distances = matches!(d.kind, Kind::Fillet { chamfer: true, ctype: 1, .. });
-    let on_second = two_distances && chamfer_editing(d) == Some(1);
+    let mut on_second = two_distances && chamfer_editing(d) == Some(1);
     let second_before = match &d.kind {
         Kind::Fillet { distance2, .. } if on_second => Some(distance2.clone()),
         _ => None,
     };
     let mut second = second_before.clone();
     let Some((label, kind, value)) = d.primary() else { return };
-    let label = match (two_distances, on_second) {
+    let mut label = match (two_distances, on_second) {
         (true, true) => "Distance 2",
         (true, false) => "Distance 1",
         _ => label,
@@ -1275,6 +1275,13 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             }
         }
     }
+    // A primary drag may have replaced a previously active Distance 2. Select the primary
+    // text now, rather than focusing the old secondary text until the following frame.
+    if two_distances && *value != before {
+        on_second = false;
+        second = None;
+        label = "Distance 1";
+    }
     if on_second && let Some(t2) = tip2 {
         box_at = t2 + vec2(14.0, -12.0);
         anchor = t2;
@@ -1298,10 +1305,14 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // extrude reaches, so the field is empty and its hint names the extent. Text typed there is
     // the new Distance. Like any empty box it has no number to step (Up, Down, the wheel).
     let shows_all = names_all && *value == before;
-    let changed = match (&second, &second_before) {
-        (Some(now), Some(was)) => now != was,
-        _ => *value != before,
-    };
+    // Distance 2's arrow changed its value before the canvas copy was taken. Either arrow
+    // must give this field the keyboard, or the previously focused form row takes it back.
+    let changed = dragged2
+        || *value != before
+        || match (&second, &second_before) {
+            (Some(now), Some(was)) => now != was,
+            _ => false,
+        };
     let select_all = focus || changed;
     // The other value boxes can now clear every arrow drawn for this command, including
     // a primary arrow that was drawn after the secondary direction.
@@ -1353,6 +1364,11 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     }
     if let Some(k) = editing_now {
         set_chamfer_editing(d, k);
+    }
+    if two_distances && changed && box_has_keyboard && boxes_shown(ui.ctx()) && TOOL_WINDOW.get() {
+        // The viewport press queued restoring the old form field after release. The canvas
+        // editor now has the keyboard, so that stale restoration must not take it back.
+        d.restore_value_focus = false;
     }
     // Double-clicking the arrow reverses the direction, as the window's Reverse Direction does
     // (#17402). Symmetric has no direction to reverse.
