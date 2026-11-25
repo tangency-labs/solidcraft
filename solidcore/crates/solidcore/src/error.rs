@@ -2843,8 +2843,8 @@ mod tests {
             ),
             (
                 SolidError::nurbs("op", nurbs::NurbsFailure::Knots),
-                ErrorKind::Failed,
-                6,
+                ErrorKind::InvalidInput,
+                1,
             ),
             (
                 SolidError::nurbs("op", nurbs::NurbsFailure::NotConverged),
@@ -2909,43 +2909,43 @@ mod tests {
             (
                 N::CurveDefinition,
                 "the curve's control point, knot and degree counts do not agree",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 1,
             ),
             (
                 N::SurfaceDefinition,
                 "the surface's control net, knot and degree counts do not agree",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 2,
             ),
             (
                 N::Degree,
                 "the degree is not allowed here",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 3,
             ),
             (
                 N::DegreeTooHigh { given: 21, max: 16 },
                 "degree 21 is above the largest degree, 16",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 3,
             ),
             (
                 N::Knots,
                 "the knot vector is not valid here",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 4,
             ),
             (
                 N::KnotsDecrease { index: 4 },
                 "the knot vector decreases at knot 4",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 4,
             ),
             (
                 N::Weight,
                 "a weight is not valid here",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 5,
             ),
             (
@@ -2956,7 +2956,7 @@ mod tests {
                     max: 8.0,
                 },
                 "the weight of control point 1 is -2, outside [0.5, 8]",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 5,
             ),
             (
@@ -2975,23 +2975,28 @@ mod tests {
                 ErrorKind::OutsideDomain,
                 6,
             ),
-            (N::Index, "an index is out of range", ErrorKind::Failed, 7),
+            (
+                N::Index,
+                "an index is out of range",
+                ErrorKind::InvalidInput,
+                7,
+            ),
             (
                 N::IndexOutOfRange { index: 9, len: 4 },
                 "index 9 is out of range for 4 items",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 7,
             ),
             (
                 N::ZeroDerivative,
                 "a derivative is zero where a direction is needed",
-                ErrorKind::Failed,
+                ErrorKind::Degenerate,
                 8,
             ),
             (
                 N::Storage,
                 "a buffer supplied by the caller is too small",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 9,
             ),
             (
@@ -3015,7 +3020,7 @@ mod tests {
             (
                 N::Input,
                 "the input data is not valid",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 14,
             ),
             (
@@ -3027,7 +3032,7 @@ mod tests {
             (
                 N::Singular,
                 "the system of equations is singular",
-                ErrorKind::Failed,
+                ErrorKind::Degenerate,
                 16,
             ),
             (
@@ -3039,13 +3044,13 @@ mod tests {
             (
                 N::NoDerivativeRows,
                 "the output has no row for the point itself",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 20,
             ),
             (
                 N::DerivativeOrder { given: 7, max: 4 },
                 "derivative order 7 is above the largest order, 4",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 20,
             ),
         ];
@@ -3097,7 +3102,7 @@ mod tests {
             (
                 B::NoNurbsForm,
                 "it holds no NURBS form",
-                ErrorKind::Failed,
+                ErrorKind::Unsupported,
                 SM_ERR,
             ),
             (
@@ -3119,7 +3124,7 @@ mod tests {
                     max: 17,
                 },
                 "degree 1 is outside [2, 17]",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 SM_ERR,
             ),
             (
@@ -3129,7 +3134,7 @@ mod tests {
                     hi: 1.0,
                 },
                 "parameter 1.5 is outside the domain [0, 1]",
-                ErrorKind::Failed,
+                ErrorKind::OutsideDomain,
                 SM_ERR,
             ),
             (
@@ -3145,14 +3150,14 @@ mod tests {
             assert_eq!(error.to_string(), format!("{op}: {message}"));
             assert_eq!(error.operation(), op);
             assert_eq!(error.nurbs_failure(), Some(&N::BSpline(failure)));
-            // the same kind and statuses as the `Upstream` the method returned before
+            // the statuses of the `Upstream` the method returned before; the kind is the
+            // cause's own (#21871)
             let before = SolidError::Upstream {
                 operation: op,
                 code: status,
                 entity: None,
             };
             assert_eq!(error.kind(), kind, "{error}");
-            assert_eq!(error.kind(), before.kind(), "{error}");
             assert_eq!(error.sm_status(), before.sm_status(), "{error}");
             assert_eq!(error.upstream_status(), Some(status), "{error}");
             assert_eq!(error.is_port_failure(), before.is_port_failure());

@@ -1177,10 +1177,14 @@ mod tests {
 
     #[test]
     fn basis_eval_zero_span_errors() {
-        // Too many equal interior knots with an unclamped start: zero delta.
+        // Too many equal interior knots with an unclamped start: zero delta, from either
+        // side (the goldens' `zero_delta_eval{,_right}` cases).
         let k = [0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0];
-        let r = kv(&k).basis_eval(2, 1.0 + 1e-300, Side::Left);
-        assert!(r.is_ok() || matches!(&r, Err(e) if e.is_nurbs_failure()));
+        for (u, side) in [(1.000_000_1, Side::Left), (0.999_999_9, Side::Right)] {
+            let e = kv(&k).basis_eval(2, u, side).unwrap_err();
+            assert_eq!(e.nurbs_failure(), Some(&NurbsFailure::Numerical), "{e}");
+            assert_eq!(e.operation(), OP_BASIS_EVAL);
+        }
     }
 
     #[test]

@@ -1062,6 +1062,54 @@ mod tests {
         assert_eq!(lin.max, vec![1.0, 1.0]);
     }
 
+    /// The cause and kind of an error a routine returned.
+    #[track_caller]
+    fn assert_cause<T: core::fmt::Debug>(
+        got: Result<T>,
+        cause: &NurbsFailure,
+        kind: crate::error::ErrorKind,
+    ) {
+        let e = got.unwrap_err();
+        assert_eq!(e.nurbs_failure(), Some(cause), "{e:?}");
+        assert_eq!(e.kind(), kind, "{e:?}");
+    }
+
+    /// The negative cases of the NLib fixtures (`global_max_{zero,big}_tol`, the
+    /// `DropCurveCurve` index sweep), plus a zero-length span, as typed causes (#21871).
+    #[test]
+    fn maxima_and_derivs_name_their_cause() {
+        use crate::error::ErrorKind::{Failed, InvalidInput, NotConverged};
+        use NurbsFailure::{Index, Numerical};
+        // A tolerance the Newton iteration can never meet: 0, or above the maximum.
+        let k = [0.0, 0.0, 0.0, 1.0, 3.0, 3.0, 3.0];
+        for tol in [0.0, 0.9] {
+            assert_cause(
+                find_global_max(&kv(&k), 1, 2, tol),
+                &NurbsFailure::NotConverged,
+                NotConverged,
+            );
+        }
+        assert_cause(
+            find_all_span_maxima(&kv(&k), 1, 2, 0.0),
+            &NurbsFailure::NotConverged,
+            NotConverged,
+        );
+        // Index past the last basis function of a linear knot vector.
+        let line = [0.0, 0.0, 84.578_121_761_980_9, 84.578_121_761_980_9];
+        assert_cause(find_global_max(&kv(&line), 2, 1, 1e-12), &Index, InvalidInput);
+        assert_cause(find_all_span_maxima(&kv(&line), 2, 1, 1e-12), &Index, InvalidInput);
+        // A support so wide the second derivative underflows to zero.
+        let wide = [0.0, 0.0, 0.0, 1e200, 3e200, 3e200, 3e200];
+        assert_cause(find_global_max(&kv(&wide), 1, 2, 0.0), &Numerical, Failed);
+        // A span shorter than the 1e-24 knot-difference guard.
+        let tiny = [0.0, 0.0, 0.0, 1e-30, 1e-30, 1e-30];
+        assert_cause(
+            basis_derivs(&kv(&tiny), 2, 5e-31, Side::Left, 1),
+            &Numerical,
+            Failed,
+        );
+    }
+
     #[test]
     fn reparam_maps_ends_and_inner() {
         let mut k = vec![2.0, 2.0, 3.0, 4.0, 6.0, 6.0];

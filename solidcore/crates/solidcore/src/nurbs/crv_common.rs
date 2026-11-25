@@ -772,7 +772,7 @@ mod tests {
             assert_eq!(e.nurbs_failure(), Some(&NurbsFailure::Input), "{e}");
             assert!(e.is_nurbs_failure());
             assert_eq!(e.operation(), "nurbs::crv_common::quartic_arc_tol");
-            assert_eq!(e.kind(), ErrorKind::Failed);
+            assert_eq!(e.kind(), ErrorKind::InvalidInput);
             assert!(!e.is_port_failure());
             assert!(e.is_status_answer());
             assert_eq!(e.sm_status(), Some(SM_ERR));

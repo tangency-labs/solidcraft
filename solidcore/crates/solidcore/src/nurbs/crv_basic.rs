@@ -1551,7 +1551,7 @@ mod tests {
                 "nurbs::crv_basic::Curve::counts_are_valid: degree {p} is above the largest degree, {MAX_DEGREE}"
             )
         );
-        assert_eq!(e.kind(), ErrorKind::Failed);
+        assert_eq!(e.kind(), ErrorKind::InvalidInput);
         assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
 
         // a rational curve with a weight outside [WEIGHT_MIN, WEIGHT_MAX]

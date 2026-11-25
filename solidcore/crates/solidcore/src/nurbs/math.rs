@@ -2612,4 +2612,97 @@ mod tests {
         a.transpose_in_place().unwrap();
         assert_eq!(a.get(0, 0).unwrap(), 2.0);
     }
+
+    /// The cause and kind of an error a routine returned.
+    #[track_caller]
+    fn assert_cause<T: core::fmt::Debug>(
+        got: Result<T>,
+        cause: &NurbsFailure,
+        kind: crate::error::ErrorKind,
+    ) {
+        let e = got.unwrap_err();
+        assert_eq!(e.nurbs_failure(), Some(cause), "{e:?}");
+        assert_eq!(e.kind(), kind, "{e:?}");
+    }
+
+    /// The negative cases of the NLib fixtures, as typed causes: a caller's bad matrix
+    /// or argument is `InvalidInput`, a singular one `Failed` (`Numerical`, #21871).
+    #[test]
+    fn matrix_routines_name_their_cause() {
+        use crate::error::ErrorKind::{Failed, InvalidInput, NotConverged};
+        use NurbsFailure::{Index, Input, Numerical, Storage};
+        let banded = |rows: Vec<Vec<f64>>, mtp| {
+            let n = rows.len() - 1;
+            RealMatrix::from_rows(n, n, rows, mtp, 2).unwrap()
+        };
+        let lower = || banded(vec![vec![2.0, 0.0], vec![1.0, 3.0]], MatrixType::LowerLeft);
+        let upper = || banded(vec![vec![2.0, 1.0], vec![0.0, 3.0]], MatrixType::UpperRight);
+        // Not decomposable, not square, singular.
+        let mut a = full(&[&[1.0, 2.0, 3.0], &[4.0, 5.0, 6.0]]);
+        assert_cause(a.lu_decompose(), &Index, InvalidInput);
+        assert_cause(lower().lu_decompose(), &Input, InvalidInput);
+        let singular = || full(&[&[1.0, 1.0, 1.0], &[1.0, 1.0, 1.0], &[1.0, 2.0, 3.0]]);
+        assert_cause(singular().lu_decompose(), &Numerical, Failed);
+        assert_cause(singular().inverse(false), &Numerical, Failed);
+        // Substitution with a triangular matrix, and with a zero diagonal.
+        let pts = [Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 5.0, 6.0)];
+        let cpts = [CPoint::new(1.0, 2.0, 3.0, 1.0), CPoint::new(4.0, 5.0, 6.0, 2.0)];
+        let zero_diagonal = full(&[&[0.0, 0.0], &[0.0, 1.0]]);
+        assert_cause(lower().for_back_points(&pts), &Input, InvalidInput);
+        assert_cause(zero_diagonal.for_back_points(&pts), &Numerical, Failed);
+        assert_cause(lower().for_back_cpoints(&cpts), &Input, InvalidInput);
+        assert_cause(zero_diagonal.for_back_cpoints(&cpts), &Numerical, Failed);
+        assert_cause(upper().right_for_back(&[1.0, 2.0]), &Input, InvalidInput);
+        assert_cause(zero_diagonal.right_for_back(&[1.0, 2.0]), &Numerical, Failed);
+        // An output smaller than the result.
+        let mut a = RealMatrix::from_rows(
+            2,
+            2,
+            vec![
+                vec![1.0, 1.0, 2.0],
+                vec![2.0, 4.0, -3.0],
+                vec![3.0, 6.0, -5.0],
+            ],
+            MatrixType::Full,
+            2,
+        )
+        .unwrap();
+        let mut small =
+            RealMatrix::from_rows(1, 2, vec![vec![0.0; 3]; 2], MatrixType::Full, 1).unwrap();
+        assert_cause(a.inverse_into(false, &mut small), &Storage, InvalidInput);
+        let mut m = RealMatrix::from_rows(1, 1, vec![vec![0.0; 2]; 2], MatrixType::Full, 1).unwrap();
+        assert_cause(m.ensure(2, 1, MatrixType::Full, 2), &Storage, InvalidInput);
+        // Banded operands are not multiplied.
+        let b = RealMatrix::from_rows(
+            3,
+            3,
+            vec![
+                vec![0.0, 4.0, 1.0],
+                vec![1.0, 4.0, 1.0],
+                vec![1.0, 4.0, 1.0],
+                vec![1.0, 4.0, 0.0],
+            ],
+            MatrixType::Banded,
+            3,
+        )
+        .unwrap();
+        assert_cause(b.multiply_into(&b, &mut RealMatrix::null()), &Input, InvalidInput);
+        // A rational surface whose weight vanishes at the point.
+        let w = |w: f64| CPoint::new(0.0, 0.0, 0.0, w);
+        let net = vec![vec![w(1.0), w(0.0)], vec![w(-1.0), w(0.0)]];
+        assert_cause(
+            srf_power_basis_eval_derivs(&net, 1, 1, 1.0, 0.0, false, 0, 0),
+            &NurbsFailure::NotConverged,
+            NotConverged,
+        );
+        // Each overflowing division of the quadratic formula.
+        for (a, b, c) in [
+            (1e-11, 0.0, 1e300),
+            (1e-11, 1e300, 0.0),
+            (1e-11, 1e200, 1.0),
+            (2.0, 1e200, 1.0),
+        ] {
+            assert_cause(solve_quadratic(a, b, c), &Numerical, Failed);
+        }
+    }
 }
