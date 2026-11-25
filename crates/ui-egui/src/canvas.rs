@@ -472,6 +472,7 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
             .and_then(|r| proj.to_screen(r.point(r.angle)))
             .is_some_and(|end| egui::Rect::from_center_size(end, vec2(20.0, 20.0)).contains(p))
         || crate::place_gizmo::contains_pointer(app, p)
+        || crate::place_gizmo::frame_anchor::contains_pointer(app, p)
         || app.dialog.as_ref().is_some_and(|d| matches!(&d.kind, Kind::Measure { labels, .. } if labels.contains(p)))
 }
 
@@ -613,6 +614,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     // The placement handles (a Single hole's among them), over the depth arrow's stem: a press
     // on a marker moves the feature.
     crate::place_gizmo::show(app, ui, painter, proj);
+    // Frame Member's section and its hot points at the first line's start.
+    crate::place_gizmo::frame_anchor::show(app, ui, painter, proj);
     crate::hole_place::marks(app, painter, proj);
 }
 

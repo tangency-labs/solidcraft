@@ -2983,7 +2983,8 @@ impl SurfaceConversion {
         let folded = fold_onto(&self.sheet, &self.development, &placed)?;
         let mut solids = Vec::with_capacity(parts.len());
         for (part, pieces) in parts {
-            let made = crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, &pieces, &mut FlatWork::new(), &|_, _| None)?;
+            let made =
+                crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, &pieces, &[], &mut FlatWork::new(), &|_, _| None)?;
             solids.push((part, made.0));
         }
         let own_bend = |a: Part, b: Part| match (a, b) {
@@ -3027,7 +3028,7 @@ impl SurfaceConversion {
     pub fn solid(&self) -> Result<Body> {
         let places: Vec<Option<Rigid3>> = self.places.iter().copied().map(Some).collect();
         let folded = fold_onto(&self.sheet, &self.development, &places)?;
-        Ok(crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, self.pieces()?, &mut FlatWork::new(), &|_, _| None)?.0)
+        Ok(crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, self.pieces()?, &[], &mut FlatWork::new(), &|_, _| None)?.0)
     }
 
     /// [`Self::solid`], with what each face was made for (see [`crate::sheet::FaceNamer`]) and
@@ -3038,14 +3039,14 @@ impl SurfaceConversion {
         let places: Vec<Option<Rigid3>> = self.places.iter().copied().map(Some).collect();
         let folded = fold_onto(&self.sheet, &self.development, &places)?;
         let pieces = self.pieces()?;
-        let namer = crate::sheet::FaceNamer::new(&sk.sheet, &self.development, pieces, &[], &sk.recipes);
+        let namer = crate::sheet::FaceNamer::new(&sk.sheet, &self.development, pieces, &[], &sk.recipes, &[]);
         let made = std::cell::RefCell::new(Vec::new());
         let keep = |p: crate::sheet_surface::Piece, r: crate::sheet::FaceRole| {
             let mut made = made.borrow_mut();
             made.push((p, r));
             Some((made.len() - 1).to_string())
         };
-        let (body, keys) = crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, pieces, &mut FlatWork::new(), &keep)?;
+        let (body, keys) = crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, pieces, &[], &mut FlatWork::new(), &keep)?;
         let made = made.into_inner();
         let at = |k: &Option<String>| k.as_deref().and_then(|k| k.parse::<usize>().ok()).and_then(|k| made.get(k).copied());
         // What each face was made for, and a panel's cap's sketch frame, carried through the cuts.
@@ -3316,6 +3317,9 @@ pub struct SurfaceSheet {
     /// The holes cuts made in its panels (see [`HoleRecord`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub holes: Vec<HoleRecord>,
+    /// The beads pressed into its planar panels (see `sheet_surface_bead`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub beads: Vec<crate::SurfaceBead>,
 }
 
 /// What a face of a sheet's body was made for, by its builder: the sheet's own structure, never a
@@ -3340,6 +3344,9 @@ pub enum SheetPart {
     Drill { feature: u64, role: String },
     /// A wall of the relief cut where the bends that make `panels` (sorted) meet at a corner.
     Relief { panels: [String; 2] },
+    /// A face of the bead the feature `feature` pressed along its sketch curve `curve`: `face` is
+    /// what it is (see `sheet_surface_bead::face_role`).
+    Bead { feature: u64, curve: String, face: String },
 }
 
 /// What made an edge of a panel's outline.
@@ -3658,6 +3665,7 @@ impl SurfaceSheet {
             parts: Vec::new(),
             recipes,
             holes: Vec::new(),
+            beads: Vec::new(),
         };
         sheet.laid_out(&c.development, c.pieces()?, c.flat()?)?;
         let (solid, parts, frames) = c.parted_solid(&sheet)?;
@@ -3857,6 +3865,7 @@ impl SurfaceSheet {
             parts: Vec::new(),
             recipes,
             holes: Vec::new(),
+            beads: Vec::new(),
         };
         let solid = sheet.build()?;
         Ok((sheet, solid))
@@ -4169,7 +4178,7 @@ impl SurfaceSheet {
             let frames = folded.places.clone();
             (Some(folded), frames)
         };
-        let namer = crate::sheet::FaceNamer::new(&self.sheet, &dev, &pieces, &self.sketch_curves, &self.recipes);
+        let namer = crate::sheet::FaceNamer::new(&self.sheet, &dev, &pieces, &self.sketch_curves, &self.recipes, &self.beads);
         // What the builder made each face for, in the order it makes them: each face's name from
         // the builder is its place in that order, read back below.
         let made = std::cell::RefCell::new(Vec::new());
@@ -4179,7 +4188,10 @@ impl SurfaceSheet {
             Some((made.len() - 1).to_string())
         };
         let (mut body, keys) = match &folded {
-            Some(folded) => crate::sheet_surface_fold::solid(&dev, folded, self.thickness, &pieces, &mut work, &keep)?,
+            Some(folded) => {
+                let forms = crate::sheet_surface_bead::forms(self, &pieces, folded)?;
+                crate::sheet_surface_fold::solid(&dev, folded, self.thickness, &pieces, &forms, &mut work, &keep)?
+            }
             // Laid flat in the sheet's flat: the same faces, so the flat's are the folded
             // sheet's (#7990).
             None => crate::sheet_surface_fold::solid_flat(&dev, self.flat, self.thickness, &pieces, &mut work, &keep)?,
