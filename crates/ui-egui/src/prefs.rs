@@ -4776,6 +4776,60 @@ mod tests {
         assert!(!app.preferences.invert_curved_roll_arrows);
     }
 
+    #[test]
+    fn browser_leave_recovery_defaults_to_preserving_work_and_roundtrips() {
+        use super::*;
+        assert!(Prefs::default().recover_after_browser_leave);
+        assert!(lenient(&json!({"theme": "light"})).recover_after_browser_leave);
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        let doc = app.session.doc.to_json();
+        let revision = app.session.revision;
+        assert_eq!(control(&mut app, &json!({"recover_after_browser_leave": false})).unwrap()["recover_after_browser_leave"], false);
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(!restored.preferences.recover_after_browser_leave);
+        for invalid in [json!("false"), json!(null), json!(0), json!([])] {
+            let before = app.preferences.clone();
+            assert!(set(&mut app, &json!({"recover_after_browser_leave": invalid})).is_err());
+            assert_eq!(app.preferences, before);
+        }
+        let profile = crate::settings_profiles::capture(&app, "Browser recovery");
+        assert!(profile["preferences"].get("recover_after_browser_leave").is_none(), "profiles keep browser-local recovery choices");
+        defaults(&mut app, PAGE_LAYOUT);
+        assert!(!app.preferences.recover_after_browser_leave, "another page leaves the option alone");
+        defaults(&mut app, PAGE_GENERAL);
+        assert!(app.preferences.recover_after_browser_leave, "General restores recovery");
+        assert_eq!(app.session.doc.to_json(), doc);
+        assert_eq!(app.session.revision, revision);
+        assert!(!app.session.is_dirty());
+    }
+
+    #[test]
+    fn browser_leave_recovery_control_is_web_only_and_cancel_restores_it() {
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        let label = solidcraft_ui_text::tr("prefs.recover_after_browser_leave").to_string();
+        h.call("ui.prefs", json!({"open": "General"}));
+        h.frames(5);
+        assert!(h.widget(&label).is_none());
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        h.app.services.browser_files = Some(Box::new(|| {}));
+        h.call("ui.prefs", json!({"open": "General"}));
+        super::reveal_preference(&mut h, "prefs:recover_after_browser_leave");
+        h.step(&json!({"click": {"handle": "prefs:recover_after_browser_leave"}})).unwrap();
+        assert!(!h.app.preferences.recover_after_browser_leave);
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        assert!(h.app.preferences.recover_after_browser_leave);
+        h.call("ui.prefs", json!({"open": "General", "keep_unsaved_in_browser": true}));
+        h.frames(5);
+        assert!(h.widget(&label).is_none(), "per-design kept copies use their own policy");
+        h.call("ui.prefs", json!({"keep_unsaved_in_browser": false, "recover_after_browser_leave": false, "button": "apply"}));
+        h.call("ui.prefs", json!({"button": "defaults"}));
+        assert!(h.app.preferences.recover_after_browser_leave);
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        assert!(!h.app.preferences.recover_after_browser_leave, "Cancel restores the last applied option");
+    }
+
     /// #10220: off by default, offered on Preferences › General only where designs are kept in
     /// a browser (the web app), set through `ui.prefs` and saved with the settings.
     #[test]
