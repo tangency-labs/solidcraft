@@ -147,6 +147,12 @@ pub(crate) struct Field {
     pub(crate) images: Vec<String>,
     /// Optional package raster per option, including partially illustrated lists.
     pub(crate) swatches: Vec<Option<String>>,
+    /// Optional larger `x-solidcraft-image` path per option. A loaded picture wins over the
+    /// option's swatch; the swatch stays as the fallback when the picture does not load.
+    pub(crate) pictures: Vec<Option<String>>,
+    /// Whether an option names a larger `x-solidcraft-image`: the list then shows a big picture of
+    /// the highlighted option.
+    pub(crate) pictured: bool,
     conditions: FieldConditions,
     order: usize,
     pub(crate) visible: bool,
@@ -332,6 +338,8 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
     let default = p.get("default");
     let mut images = Vec::new();
     let mut swatches = Vec::new();
+    let mut pictures = Vec::new();
+    let mut pictured = false;
     let (kind, input) = match kind {
         "number" if !choice => {
             // `exclusiveMinimum` as a number (draft 6+); a boolean beside `minimum` (draft 4).
@@ -375,7 +383,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         }
         "boolean" => (Kind::Boolean, Input::Boolean(default.and_then(Value::as_bool).unwrap_or(false))),
         "string" if choice => {
-            let (values, titles, pictures) = choices(p)?;
+            let (values, titles, listed) = choices(p)?;
             // A finite choice still obeys the string's original bounds. Directory fields keep
             // their text/picker path and grant checks rather than becoming dropdowns.
             if text("format").as_deref() == Some("directory")
@@ -387,14 +395,23 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             {
                 return None;
             }
-            images = pictures;
-            swatches = p
+            images = listed;
+            let named = |key: &str| -> Vec<Option<String>> {
+                p.get("oneOf")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .map(|option| option.get(key).and_then(Value::as_str).map(str::to_owned))
+                    .collect()
+            };
+            swatches = named(solidcraft_engine::plugin::swatches::KEY);
+            pictures = named(solidcraft_engine::plugin::swatches::IMAGE_KEY);
+            pictured = p
                 .get("oneOf")
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
-                .map(|option| option.get(solidcraft_engine::plugin::swatches::KEY).and_then(Value::as_str).map(str::to_owned))
-                .collect();
+                .any(|option| option.get(solidcraft_engine::plugin::swatches::IMAGE_KEY).is_some());
             let chosen = default.and_then(Value::as_str).and_then(|d| values.iter().position(|o| o == d));
             (Kind::Choice { values, titles }, Input::Choice(chosen))
         }
@@ -417,6 +434,8 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             font,
             images,
             swatches,
+            pictures,
+            pictured,
             conditions: Default::default(),
             order: 0,
             visible: true,
@@ -496,6 +515,8 @@ fn selection_field(key: &str, p: &Map<String, Value>, required: bool) -> Option<
             font: false,
             images: Vec::new(),
             swatches: Vec::new(),
+            pictures: Vec::new(),
+            pictured: false,
             conditions: Default::default(),
             order: 0,
             visible: true,
@@ -563,6 +584,7 @@ fn choices(p: &Map<String, Value>) -> Option<(Vec<String>, Vec<String>, Vec<Stri
                             | "x-solidcraft-when"
                             | crate::plugin_images::KEY
                             | solidcraft_engine::plugin::swatches::KEY
+                            | solidcraft_engine::plugin::swatches::IMAGE_KEY
                     )
                 }) {
                     return None;
@@ -3003,15 +3025,20 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
                         .collect::<Option<Vec<&str>>>()
                 })
                 .flatten();
-            let swatches = plugin.swatches.get();
-            if swatches.is_none() && field.swatches.iter().any(Option::is_some) {
+            let artwork = plugin.swatches.get();
+            if artwork.is_none() && field.swatches.iter().chain(&field.pictures).any(Option::is_some) {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
             }
             // The picker uses visible indices; the form and plugin always use schema indices.
             let tiles: Vec<_> = field
                 .available
                 .iter()
-                .map(|i| field.swatches.get(*i).and_then(Option::as_ref).and_then(|rel| swatches?.get(rel)).map(|image| image.texture(ui.ctx())))
+                .map(|i| {
+                    // The loaded picture, else the loaded swatch, each judged by its own limits.
+                    let picture = field.pictures.get(*i).and_then(Option::as_ref).and_then(|rel| artwork?.pictures.get(rel));
+                    let swatch = field.swatches.get(*i).and_then(Option::as_ref).and_then(|rel| artwork?.swatches.get(rel));
+                    picture.or(swatch).map(|image| image.texture(ui.ctx()))
+                })
                 .collect();
             if tiles.iter().any(Option::is_some) {
                 let titles: Vec<String> = field.available.iter().filter_map(|i| titles.get(*i).cloned()).collect();
@@ -3022,7 +3049,13 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
                         ui,
                         &id,
                         &mut selected,
-                        ui_kit::SwatchPicker { titles: &titles, textures: &tiles, choose: &choose, search_hint: app.tr("ui.plugin_swatch_search") },
+                        ui_kit::SwatchPicker {
+                            titles: &titles,
+                            textures: &tiles,
+                            choose: &choose,
+                            search_hint: app.tr("ui.plugin_swatch_search"),
+                            preview: field.pictured,
+                        },
                     )
                 });
                 if selected != before_selected {

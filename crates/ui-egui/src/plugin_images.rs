@@ -65,7 +65,15 @@ pub(crate) fn load_with_groups(
 }
 
 /// Shared across the inventory and open dialogs. Files and decoding stay off the window thread.
-pub(crate) type Swatches = std::sync::Arc<std::sync::OnceLock<BTreeMap<String, Swatch>>>;
+pub(crate) type Swatches = std::sync::Arc<std::sync::OnceLock<Artwork>>;
+
+/// The decoded package rasters, kept apart by the annotation that named them: a file accepted as
+/// a larger `x-solidcraft-image` picture may still have failed the swatch limits.
+#[derive(Debug, Default)]
+pub(crate) struct Artwork {
+    pub(crate) swatches: BTreeMap<String, Swatch>,
+    pub(crate) pictures: BTreeMap<String, Swatch>,
+}
 
 #[derive(Debug)]
 pub(crate) struct Swatch {
@@ -89,38 +97,32 @@ impl Swatch {
     }
 }
 
-pub(crate) fn read_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::Entry]) -> BTreeMap<String, Swatch> {
-    let report = solidcraft_engine::plugin::swatches::check(entries, |rel| solidcraft_engine::plugin::swatches::read_file(dir, rel));
+pub(crate) fn read_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::Entry]) -> Artwork {
+    let report = solidcraft_engine::plugin::swatches::check(entries, |rel| solidcraft_engine::plugin::swatches::read_artwork(dir, rel));
     for warning in report.warnings {
         log::warn!("plugin {}: {warning}", dir.display());
     }
-    report
-        .images
-        .into_iter()
-        .map(|(path, image)| {
-            let mut hash = std::collections::hash_map::DefaultHasher::new();
-            image.size.hash(&mut hash);
-            image.rgba.hash(&mut hash);
-            let key = egui::Id::unique(("plugin_swatch", hash.finish()));
-            (path, Swatch { image: egui::ColorImage::from_rgba_unmultiplied(image.size, &image.rgba), key })
-        })
-        .collect()
+    let texture = |(path, image): (String, solidcraft_engine::plugin::swatches::Swatch)| {
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        image.size.hash(&mut hash);
+        image.rgba.hash(&mut hash);
+        let key = egui::Id::unique(("plugin_swatch", hash.finish()));
+        (path, Swatch { image: egui::ColorImage::from_rgba_unmultiplied(image.size, &image.rgba), key })
+    };
+    Artwork { swatches: report.images.into_iter().map(texture).collect(), pictures: report.pictures.into_iter().map(texture).collect() }
 }
 
 pub(crate) fn load_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::Entry]) -> Swatches {
     let swatches = Swatches::default();
     let referenced = entries.iter().any(|entry| {
         entry.input_schema.get("properties").and_then(Value::as_object).into_iter().flat_map(|p| p.values()).any(|property| {
-            property
-                .get("oneOf")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .any(|option| option.get(solidcraft_engine::plugin::swatches::KEY).is_some())
+            property.get("oneOf").and_then(Value::as_array).into_iter().flatten().any(|option| {
+                option.get(solidcraft_engine::plugin::swatches::KEY).is_some() || option.get(solidcraft_engine::plugin::swatches::IMAGE_KEY).is_some()
+            })
         })
     });
     if !referenced {
-        let _ = swatches.set(BTreeMap::new());
+        let _ = swatches.set(Artwork::default());
         return swatches;
     }
     let (dir, entries, result) = (dir.to_path_buf(), entries.to_vec(), swatches.clone());
@@ -128,7 +130,7 @@ pub(crate) fn load_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::En
         let _ = result.set(read_swatches(&dir, &entries));
     }) {
         log::warn!("could not load plugin swatches: {error}");
-        let _ = swatches.set(BTreeMap::new());
+        let _ = swatches.set(Artwork::default());
     }
     swatches
 }

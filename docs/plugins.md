@@ -992,6 +992,24 @@ tiles and loads and decodes each distinct image once
 when it loads the package, then caches its texture. A missing, corrupt, wrongly typed or oversized
 swatch is omitted with a warning in `plugin check` and the install review; the plugin still works.
 
+An option may instead name a picture of the thing it stands for, such as a manufacturer's part,
+with `x-solidcraft-image`:
+
+```json
+{"const": "elbow90", "title": "Elbow 90° PVC d63", "x-solidcraft-image": "parts/elbow90.png"}
+```
+
+It follows the swatch rules (a plain relative path inside the package, no `.`, `..`, absolute path
+or link, nothing fetched from the network, `.png`, `.jpg` or `.jpeg`, colours kept as they are)
+with bigger limits: at most **512 KiB** and **1024 × 1024** decoded pixels. The host keeps each
+picture at most 512 pixels on a side, decodes each distinct file once when it loads the package,
+and caches its texture. The choice list shows the picture as a thumbnail beside the option, and a
+larger one of the highlighted option (the chosen one when none is highlighted). If an option names
+both, the picture is used, and if that picture is missing or refused, the swatch. A package may name at most 256 distinct swatches and pictures together.
+Decoded swatches and pictures share a budget of 128 MiB per package. When the total would exceed it, the host omits that entry, every later swatch and picture, and records a warning.
+A missing, corrupt, wrongly typed or oversized picture is omitted with a warning in `plugin check`
+and the install review; the plugin still works, and the value sent is still the option's `const`.
+
 A partially illustrated choice shows tiles beside the option titles in its dropdown. When every
 available option has a usable swatch, the dialog offers a grid with a search box; search matches a
 case-insensitive substring of the title. Choosing either presentation still sends the option's

@@ -853,6 +853,21 @@ fn swatch_annotations_preserve_partial_choices_and_const_values() {
     assert_eq!(params(&fields), Ok(json!({"finish":"walnut"})));
 }
 
+#[test]
+fn image_annotations_load_as_option_pictures_and_keep_const_values() {
+    let schema = json!({"type":"object","properties":{"part":{"type":"string","oneOf":[
+        {"const":"elbow","title":"Elbow","x-solidcraft-image":"parts/elbow.png"},
+        {"const":"tee","title":"Tee","x-solidcraft-image":7},
+        {"const":"plain","title":"Plain"}
+    ]}}});
+    let mut fields = form(&schema).expect("bad artwork does not disable the dialog");
+    assert_eq!(fields[0].0.pictures, [Some("parts/elbow.png".into()), None, None]);
+    assert_eq!(fields[0].0.swatches, [None, None, None]);
+    assert!(fields[0].0.pictured);
+    fields[0].1 = Input::Choice(Some(1));
+    assert_eq!(params(&fields), Ok(json!({"part":"tee"})));
+}
+
 /// Two full dialog captures, with synthetic artwork generated here, plus pointer selection.
 #[test]
 fn swatch_dialog_dropdown_and_filtered_grid_render_and_send_const_values() {
@@ -978,6 +993,58 @@ fn swatch_dialog_dropdown_and_filtered_grid_render_and_send_const_values() {
         );
         assert_eq!(params(fields), Ok(json!({"finish": if complete { "white" } else { "plain" }, "show_unavailable":false})));
     }
+}
+
+/// Synthetic artwork: a missing picture falls back to the option's valid swatch, and a file too
+/// large for a swatch is not drawn as one.
+#[test]
+fn option_swatch_is_the_fallback_for_a_missing_picture_and_oversized_swatches_are_omitted() {
+    let mut h = crate::scenario::Harness::new();
+    let dir = h.dir.join("fallback");
+    std::fs::create_dir_all(&dir).unwrap();
+    image::RgbImage::from_pixel(16, 16, image::Rgb([137, 61, 23])).save(dir.join("small.png")).unwrap();
+    image::RgbImage::from_pixel(300, 300, image::Rgb([20, 90, 160])).save(dir.join("big.png")).unwrap();
+    let mut command = entry("finish", "read", json!([]));
+    command.input_schema = json!({"type":"object","properties":{"part":{"type":"string","title":"Part","oneOf":[
+        {"const":"a","title":"A","x-solidcraft-image":"missing.png","x-solidcraft-swatch":"small.png"},
+        {"const":"b","title":"B","x-solidcraft-swatch":"big.png"},
+        {"const":"c","title":"C"}
+    ]}}});
+    let mut plugin = listed("fallback", vec![command]);
+    let artwork = crate::plugin_images::read_swatches(&dir, &plugin.entries);
+    assert_eq!(artwork.swatches.keys().collect::<Vec<_>>(), ["small.png"], "the oversized swatch is refused");
+    assert!(artwork.pictures.is_empty());
+    plugin.swatches = Arc::new(std::sync::OnceLock::from(artwork));
+    h.app.plugin_menu.listed = vec![plugin];
+    h.app.plugin_menu.loaded = true;
+    h.app.plugin_menu.dialogs.clear();
+    open_entry(&mut h.app, 0, 0);
+    let ctx = crate::fonts::test_context();
+    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
+    let mut tick = 0;
+    let mut frame = |app: &mut SolveApp, events: Vec<egui::Event>| {
+        tick += 1;
+        solidcraft_ui_registry::clear_handles();
+        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(tick as f64 / 60.0), events, ..Default::default() }, |ui| {
+            ui_kit::scope(ui, |_ui| show(app, &ctx));
+        });
+    };
+    for _ in 0..6 {
+        frame(&mut h.app, vec![]);
+    }
+    let trigger = crate::scenario::handle_at("plugin_dialog:field:part").unwrap();
+    for pressed in [true, false] {
+        let events = vec![
+            egui::Event::PointerMoved(trigger),
+            egui::Event::PointerButton { pos: trigger, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+        ];
+        frame(&mut h.app, events);
+    }
+    for _ in 0..3 {
+        frame(&mut h.app, vec![]);
+    }
+    assert!(crate::scenario::rect_of("swatch:plugin_field_part:tile:0").is_some(), "the swatch stands in for the missing picture");
+    assert!(crate::scenario::rect_of("swatch:plugin_field_part:tile:1").is_none(), "an oversized swatch is not drawn");
 }
 
 #[test]
@@ -1383,7 +1450,7 @@ fn dialog_hook_narrowing_preserves_an_edited_choice_until_the_user_selects_an_av
                 options[1]["x-solidcraft-swatch"] = json!("size.png");
             }
             plugin.swatches = Arc::new(std::sync::OnceLock::from(crate::plugin_images::read_swatches(&h.dir, &plugin.entries)));
-            assert_eq!(plugin.swatches.get().unwrap().len(), 1, "the swatch path must be exercised");
+            assert_eq!(plugin.swatches.get().unwrap().swatches.len(), 1, "the swatch path must be exercised");
         }
         h.app.plugin_menu.dialogs.clear();
         open_entry(&mut h.app, 0, 0);
