@@ -209,7 +209,11 @@ fn adapters(instance: &wgpu::Instance) -> (Vec<wgpu::Adapter>, wgpu::Backends) {
     let mut all = pollster::block_on(instance.enumerate_adapters(searched));
     #[cfg(target_os = "windows")]
     retain_vulkan_instance(instance, &all);
-    if gl_when_vulkan_has_none(all.len(), wgpu::Backends::from_env()) {
+    // This crate's own tests keep the Vulkan-only set: they check the headless device's
+    // multisampling and compositing on Vulkan, Metal or D3D12, and OpenGL has tests of its own on
+    // an OpenGL instance (`opengl_window_device`). A test runner without Vulkan skips them as
+    // before instead of running them on llvmpipe.
+    if !cfg!(test) && gl_when_vulkan_has_none(all.len(), wgpu::Backends::from_env()) {
         let mut desc = crate::instance_descriptor_from_env();
         desc.backends = wgpu::Backends::GL;
         all = pollster::block_on(start_instance(desc).enumerate_adapters(wgpu::Backends::GL));
