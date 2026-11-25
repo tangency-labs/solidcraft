@@ -30,8 +30,8 @@ use common::edge_at;
 use solidcore_ops::blend::{blend, Blend, Corners};
 use solidcore_ops::boolean::boolean;
 use solidcore_ops::{
-    blend_with, chamfer_sides_facing, make_box, session, BlendOptions, Body, BooleanOp,
-    ChamferSecond, CheckLevel, Contract, Error, RoomReason,
+    blend_with, make_box, session, BlendOptions, Body, BooleanOp, CheckLevel, Contract, Error,
+    RoomReason,
 };
 
 const LENGTH: f64 = 10.0;
@@ -1694,6 +1694,7 @@ const BLOCK_EDGE_ROUND_TOPOLOGY: (usize, usize, usize) = (13, 33, 22);
 #[test]
 fn a_chamfer_ending_at_a_block_across_its_edge_ends_on_the_block_s_side_below_its_bottom() {
     use solidcore::query::api_queries::edge_closest_point;
+    use solidcore_ops::{chamfer_sides_facing, ChamferSecond};
     for &(d_top, d_side, angle_45) in &[(2.5, 2.5, false), (2.5, 2.5, true), (1.5, 3.0, false)] {
         for side in [-1.0, 1.0] {
             let what = format!("d_top {d_top} d_side {d_side} angle_45 {angle_45} side {side}");
@@ -1792,6 +1793,7 @@ fn widened_recess_floor_step(side_edge_len: f64) -> Body {
 #[test]
 fn a_chamfer_on_an_edge_meeting_a_widened_recess_floor_step_builds() {
     use solidcore::query::api_queries::edge_closest_point;
+    use solidcore_ops::{chamfer_sides_facing, ChamferSecond};
     for side_edge_len in [1.0, 0.2] {
         let input_vol = 3000.0 - 30.0 * (10.0 - side_edge_len);
         // 1.5 equal chamfer, 1.5 x 45 deg chamfer, 1.5 x 2.5 unequal chamfer, and 1.5 round
@@ -1907,6 +1909,7 @@ fn four_edge_recess_floor_vertex(mirrored: bool) -> Body {
 /// check on an unprocessed extended vertex, failing with status 1001.
 #[test]
 fn a_chamfer_on_an_edge_meeting_a_four_edge_recess_floor_vertex_builds() {
+    use solidcore_ops::{chamfer_sides_facing, ChamferSecond};
     let expected_input = 3000.0 - 875.0 / 6.0;
     for mirrored in [false, true] {
         let edge_y = if mirrored { 20.0 } else { 0.0 };
