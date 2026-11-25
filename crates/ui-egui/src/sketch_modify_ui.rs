@@ -149,12 +149,13 @@ pub enum Mod {
     /// of the three chamfer commands runs (0 equal distance, 1 two distances, 2 distance and
     /// angle). `size` is the radius or the first distance, `distance2` the second distance and
     /// `angle` the angle from the first line. `flip` names the two lines in the other order, so
-    /// the first distance lands on the other leg of the corner.
+    /// the first distance lands on the other leg of the corner. For a fillet of two parallel
+    /// lines, `flip` joins them at the other end (the half circle's side).
     Corner { chamfer: bool, ctype: usize, size: String, distance2: String, angle: String, flip: bool },
     /// `sketch.equation_curve` (or `.edit` on the curve the window's `curve` extra names): the
     /// form (an index into [`EQUATION_FORMS`]), x(t) and y(t) (or y(x)), the variable's range and
     /// how far the curve may stray from the formulas.
-    Equation { form: usize, x: String, y: String, start: String, end: String, tolerance: String, range_unit: bool },
+    Equation { form: usize, x: String, y: String, start: String, end: String, tolerance: String, range_unit: bool, radians_trig: bool },
     /// `sketch.point.divide` (#8969): the curves picked are each divided into `count` pieces of equal
     /// length by points held at their shares of it.
     Divide { count: String },
@@ -297,12 +298,13 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         // A sine wave to start from: one period, 40 wide and 10 high in the design's unit.
         "sketch.equation_curve" => Mod::Equation {
             form: 0,
-            x: "20 * t / pi".into(),
+            x: "t / 9".into(),
             y: "5 * sin(t)".into(),
             start: "0".into(),
-            end: "2 * pi".into(),
+            end: "360".into(),
             tolerance: "0.01 mm".into(),
             range_unit: false,
+            radians_trig: false,
         },
         "sketch.point.divide" => Mod::Divide { count: "4".into() },
         _ => return None,
@@ -325,6 +327,7 @@ pub fn edit_equation(app: &mut SolveApp, id: &str) -> bool {
         end: eq.end,
         tolerance: format!("{} mm", eq.tolerance),
         range_unit: eq.variable_unit == VariableUnit::Range,
+        radians_trig: eq.radians_trig,
     };
     let mut dialog = Dialog::new(Kind::SketchModify(kind), Vec::new());
     dialog.extra.insert("curve".into(), json!(id));
@@ -391,6 +394,17 @@ pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) ->
                 return None;
             }
             sk.curve_index(id)?;
+            d.active_input()?.accepts(hit, Some(active), |_, _| false)
+        }
+        // Once the picked curves close a shape, Offset takes no curve that meets it at a corner:
+        // such a curve neither highlights nor picks. A picked curve still does, so clicking it
+        // opens the shape again, and so does a curve of a shape apart from the closed one.
+        Hit::SketchCurve { id, .. } if matches!(d.kind, Kind::SketchModify(Mod::Offset { .. })) => {
+            let follow = matches!(d.kind, Kind::SketchModify(Mod::Offset { chain: true, .. }));
+            let state = crate::open_meshing::session_world(session);
+            if solidcraft_engine::cmd::offset_leaves_out(&state.sketch(active)?.sketch, &curve_ids(&d.inputs, 0), id, follow) {
+                return None;
+            }
             d.active_input()?.accepts(hit, Some(active), |_, _| false)
         }
         _ => d.active_input()?.accepts(hit, Some(active), |_, _| false),
@@ -620,7 +634,24 @@ fn pattern_hint(ui: &mut egui::Ui) {
 
 /// Dense rows after the selection inputs; true when an expression field accepts Enter.
 /// `doc` evaluates the pattern counts the step arrows change.
-pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
+/// Whether the window's picks are exactly two parallel lines of the sketch being edited: only then
+/// does a Fillet join them with a half circle and its "Other end" option mean anything (#16238).
+pub(crate) fn picks_two_parallel_lines(app: &SolveApp, inputs: &[SelInput]) -> bool {
+    let ids = line_ids(inputs, 0);
+    let [a, b] = ids.as_slice() else { return false };
+    let Some(sid) = app.session.active_sketch else { return false };
+    let state = crate::open_meshing::session_world(&app.session);
+    let Some(sk) = state.sketch(sid).map(|s| &s.sketch) else { return false };
+    let dir = |id: &str| match sk.curve_index(id).and_then(|i| sk.shape(i)) {
+        Some(solidcraft_engine::sketch::Shape::Line { a, b }) => Some(b - a),
+        _ => None,
+    };
+    let (Some(u), Some(v)) = (dir(a), dir(b)) else { return false };
+    let (lu, lv) = (u.len(), v.len());
+    lu > 1e-12 && lv > 1e-12 && ((u.x * v.y - u.y * v.x) / (lu * lv)).abs() < 1e-9
+}
+
+pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document, two_parallel_lines: bool) -> bool {
     let mut enter = false;
     match k {
         Mod::Scale { factor } => enter |= number(ui, "Factor", factor),
@@ -693,7 +724,9 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             enter |= quantity(ui, doc, "Segments", count, 2, DIVIDE_MAX);
             ui_kit::text(ui, solidcraft_ui_text::tr("sketch.divide_hint"), ui_kit::Text::Note("divide"));
         }
-        Mod::Equation { form, x, y, start, end, tolerance, range_unit } => {
+        Mod::Equation { form, x, y, start, end, tolerance, range_unit, radians_trig } => {
+            let note = if *radians_trig { "ui.equation_angles_legacy" } else { "ui.equation_angles_degrees" };
+            ui_kit::text(ui, solidcraft_ui_text::tr(note), ui_kit::Text::Note("equation"));
             ui_kit::choice_row(ui, "Form", "equation_form", form, &EQUATION_FORMS);
             if *form == 0 {
                 enter |= number(ui, "x(t)", x);
@@ -705,8 +738,9 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             enter |= number(ui, "End", end);
             enter |= number(ui, "Tolerance", tolerance);
             ui_kit::checkbox_grid(ui, &mut [(solidcraft_ui_text::tr("ui.equation_variable_unit"), range_unit)], 1);
-            let note = if *range_unit { "ui.equation_note_range" } else { "ui.equation_note" };
-            ui_kit::text(ui, solidcraft_ui_text::tr(note), ui_kit::Text::Note("equation"));
+            if *range_unit {
+                ui_kit::text(ui, solidcraft_ui_text::tr("ui.equation_note_range"), ui_kit::Text::Note("equation_range"));
+            }
         }
         Mod::Corner { chamfer, ctype, size, distance2, angle, flip } => {
             if *chamfer {
@@ -721,6 +755,11 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             }
             if *chamfer && *ctype > 0 {
                 ui_kit::options(ui, "corner_options", &mut [("Flip", flip)]);
+            }
+            // Two parallel lines are joined by a half circle at one of their ends (#16238); the
+            // option shows only then, so a window rounding corners keeps its size.
+            if !*chamfer && two_parallel_lines {
+                ui_kit::options(ui, "corner_options", &mut [("Other end", flip)]);
             }
         }
     }
@@ -1175,7 +1214,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 json!({"entities": entities, "center": center, "count": count, "angle": angle, "alignment": alignment, "reversed": reversed}),
             )
         }
-        Mod::Corner { chamfer: false, size, .. } => {
+        Mod::Corner { chamfer: false, size, flip, .. } => {
             let corners = corner_ids(app, inputs, 0);
             let lines = line_ids(inputs, 0);
             // The engine keeps its millimetre API; bare UI values use the design unit.
@@ -1185,7 +1224,9 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 (true, []) => return Err("select the corners to round first".into()),
                 (false, []) => ("sketch.fillet", json!({"points": corners, "radius": radius})),
                 // Two lines name their corner even where other lines end at its point (#1824).
-                (true, [a, b]) => ("sketch.fillet", json!({"a": a, "b": b, "radius": radius})),
+                // `end` only matters for two parallel lines, which a half circle joins at the
+                // start of the first line, or at its end with "Other end" (#16238).
+                (true, [a, b]) => ("sketch.fillet", json!({"a": a, "b": b, "radius": radius, "end": if *flip { "end" } else { "start" }})),
                 _ => return Err("select corner points, or the two lines of one corner".into()),
             }
         }
@@ -1217,7 +1258,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 _ => ("sketch.chamfer.equal_distance", p),
             }
         }
-        Mod::Equation { form, x, y, start, end, tolerance, range_unit } => {
+        Mod::Equation { form, x, y, start, end, tolerance, range_unit, .. } => {
             let filled = |label: &str, text: &str| -> Result<String, String> {
                 let text = text.trim();
                 if text.is_empty() { Err(format!("{label} is empty")) } else { Ok(text.to_string()) }

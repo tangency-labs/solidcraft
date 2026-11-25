@@ -31,7 +31,7 @@ use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
 use solidcore::math::Vec3;
 use solidcore::primitive::api_curves as curves;
-use solidcore::primitive::api_primitives::create_box;
+use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::edge_closest_point;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p1::regions;
@@ -239,4 +239,55 @@ fn a_round_on_a_sheet_has_no_part_to_cut() {
         .unwrap();
     let done = session.do_fillet(&mut k);
     assert!(done.is_ok(), "{done:?}: {}", session.error_info().comment);
+}
+
+/// #21434: a 40 x 40 x 10 plate with four holes of radius 2 through it, all their top rims
+/// rounded or chamfered 0.5. Every section's middle lies in the plate, and every face of the
+/// plate is blended or shares an edge with a blended face, so neither the cut check nor the
+/// break-through check has anything an intersection could tell it: none runs (at 32 stations
+/// along each of the four rims there were two faces for each check and each edge whose box
+/// reaches the station's plane). The volumes are Pappus's: a rim loses, at radius `2 + c`,
+/// `(1 - pi/4) 0.5^2` with `c = 0.5 (10 - 3 pi) / (12 - 3 pi)`, or `0.5^2 / 2` with
+/// `c = 0.5 / 3`.
+///
+/// A round that does cut its part still intersects it (the bridge of the tests above).
+#[test]
+fn rims_that_cannot_cut_or_break_through_run_no_intersection() {
+    use std::f64::consts::PI;
+    let plate = 1600.0 * 10.0 - 4.0 * PI * 4.0 * 10.0;
+    let round =
+        (1.0 - PI / 4.0) * 0.25 * 2.0 * PI * (2.0 + 0.5 * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI));
+    let chamfer = 0.125 * 2.0 * PI * (2.0 + 0.5 / 3.0);
+    for (xsect, rim) in [(1, round), (0, chamfer)] {
+        let mut k = kernel();
+        let mut b = create_box(&mut k, Point3::ZERO, 40.0, 40.0, 10.0).unwrap();
+        let mut rims = Vec::new();
+        for (x, y) in [(10.0, 10.0), (30.0, 10.0), (10.0, 30.0), (30.0, 30.0)] {
+            let hole = create_cylinder(&mut k, Point3::new(x, y, -1.0), 2.0, 12.0).unwrap();
+            b = boolean_difference(&mut k, b, hole).unwrap();
+            rims.push(Point3::new(x + 2.0, y, 10.0));
+        }
+        let edges: Vec<EdgeId> = rims.iter().map(|&q| pick(&k, &b, q)).collect();
+        k.work_counters.reset();
+        let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &edges, 0.5, xsect, 2, 0.0)
+            .unwrap();
+        let done = session.do_fillet(&mut k);
+        assert!(done.is_ok(), "{done:?}: {}", session.error_info().comment);
+        drop(session);
+        assert_eq!(k.work_counters.band_face_solves(), 0, "xsect {xsect}");
+        assert_eq!(k.work_counters.band_edge_solves(), 0, "xsect {xsect}");
+        let (v, want) = (volume(&k, &mut b), plate - 4.0 * rim);
+        assert!(
+            (v - want).abs() <= 1e-7 * want,
+            "xsect {xsect}: {v} vs {want}"
+        );
+    }
+    let mut k = kernel();
+    let mut b = bridged_block(&mut k);
+    k.work_counters.reset();
+    assert!(blend(&mut k, &mut b, Point3::new(2.0, 0.0, 10.0), 9.0, 1).is_err());
+    assert!(k.work_counters.band_edge_solves() > 0);
+    assert!(k.work_counters.band_face_solves() > 0);
 }

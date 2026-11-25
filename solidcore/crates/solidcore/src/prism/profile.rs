@@ -18,6 +18,8 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests, kept as written
 
+pub mod line_family;
+
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use crate::curve::curve::Curve;
@@ -33,6 +35,11 @@ use crate::math::{Point2, Vec2};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::crv_basic::CONIC_ANGLE_TOL_DEG;
 use crate::nurbs::crv_common::DEFAULT_ANGLE_TOL;
+
+mod crossing;
+
+pub use crossing::{loop_crosses, near_miss};
+pub(crate) use crossing::{on_arc, on_seg};
 
 const OP_CURVE: &str = "prism::profile::curve_on_frame";
 const OP_AREA: &str = "prism::profile::Loop2::signed_area";
@@ -136,6 +143,9 @@ fn arc_build(radius: f64, sweep: f64, tol: f64) -> std::result::Result<ArcBuild,
         Ok(ArcBuild::Open(deg))
     }
 }
+
+/// The radius an arc of a profile stays below ([`check_regions`]).
+pub const MAX_ARC_RADIUS: f64 = 1e9;
 
 /// Highest degree of a [`Seg2::Bezier`].
 pub const MAX_BEZIER_DEGREE: usize = 9;
@@ -562,7 +572,7 @@ impl Seg2 {
 /// `B(k + 3, k + 1)`; the tail is bounded by a geometric series. Elsewhere in closed form: with
 /// `w = cos φ` (an ellipse), `w (φ - w s) / s^3`, `s = sin φ`; with `w = cosh ψ` (a hyperbola),
 /// `w (w s - ψ) / s^3`, `s = sinh ψ`.
-fn conic_factor(w: f64) -> Option<(f64, f64)> {
+pub(super) fn conic_factor(w: f64) -> Option<(f64, f64)> {
     if !(w.is_finite() && w > 1e-9 && w < 1e9) {
         return None;
     }
@@ -883,7 +893,7 @@ pub fn check_regions<'a>(
                     finite(center)
                         && radius.is_finite()
                         && radius > 0.0
-                        && radius < 1e9
+                        && radius < MAX_ARC_RADIUS
                         && start.is_finite()
                         && sweep.is_finite()
                         && zone_ok
@@ -1261,15 +1271,4 @@ pub fn rational_curve(knots: &[f64], homogeneous: &[[f64; 4]]) -> Result<Curve> 
         trim: None,
     };
     Ok(Curve::from(BSplineCurve::create_canonical(&data)?))
-}
-
-/// A tapered flange's thickness at its two ends: `(at the toe, at the root)`. The flange is
-/// `thickness` thick at the middle of its inside length `inside` (a channel's width less its web)
-/// and its inside face slopes by `slope` degrees across that length, so each end differs from the
-/// middle by half the length times the slope's tangent. No slope: `thickness` at both ends.
-/// Inputs are not checked: a caller refuses a slope or a length out of its range first; a
-/// non-finite input gives a non-finite answer, never a panic.
-pub fn tapered_flange_ends(inside: f64, thickness: f64, slope: f64) -> (f64, f64) {
-    let change = inside / 2.0 * slope.to_radians().tan();
-    (thickness - change, thickness + change)
 }
