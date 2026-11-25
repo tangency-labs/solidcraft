@@ -28,7 +28,6 @@ use solidcore::topology::brep::validation::{
 };
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::topology::VertexId;
 use solidcore::{Brep, Kernel};
 use std::path::{Path, PathBuf};
 
@@ -90,14 +89,15 @@ fn on(k: &mut Kernel, make: &dyn Fn() -> Brep) -> Vec<String> {
 }
 
 /// Checks the body `make` builds in full and twice on one kernel with the memo, and
-/// requires the same lines; says whether the body was found valid.
-fn same(label: &str, make: &dyn Fn() -> Brep) -> bool {
+/// requires the same lines; says whether the body was found valid. With `digested`, a valid
+/// body must also leave something clean: its geometry is all of kinds with a digest.
+fn same(label: &str, make: &dyn Fn() -> Brep, digested: bool) -> bool {
     let want = full(make);
     let mut k = Kernel::default();
     assert_eq!(on(&mut k, make), want, "{label}: first check");
     let filled = k.check_memo.borrow().len();
     assert_eq!(on(&mut k, make), want, "{label}: second check");
-    if want.is_empty() {
+    if digested && want.is_empty() {
         assert!(filled > 0, "{label}: a valid body left nothing clean");
     }
     want.is_empty()
@@ -139,10 +139,13 @@ fn holed_block() -> Brep {
     holed
 }
 
+/// A body maker of [`primitives_and_a_boolean_check_the_same_incrementally`].
+type Maker = Box<dyn Fn() -> Brep>;
+
 #[test]
 fn primitives_and_a_boolean_check_the_same_incrementally() {
     let o = Point3::new(0.0, 0.0, 0.0);
-    let makers: Vec<(&str, Box<dyn Fn() -> Brep>)> = vec![
+    let makers: Vec<(&str, Maker)> = vec![
         (
             "box",
             Box::new(move || {
@@ -174,14 +177,14 @@ fn primitives_and_a_boolean_check_the_same_incrementally() {
         ("box less cylinder", Box::new(holed_block)),
     ];
     for (label, make) in &makers {
-        assert!(same(label, make.as_ref()), "{label}: not valid");
+        assert!(same(label, make.as_ref(), true), "{label}: not valid");
     }
 }
 
 #[test]
 fn plates_with_holes_check_the_same_incrementally() {
     for n in [1, 2, 4] {
-        assert!(same(&format!("{n} by {n} holes"), &|| plate(n)));
+        assert!(same(&format!("{n} by {n} holes"), &|| plate(n), true));
     }
 }
 
@@ -205,7 +208,8 @@ fn a_moved_vertex_is_tested_again_after_its_shape_was_clean() {
     let moved = |dx: f64| {
         move || {
             let mut b = plate(2);
-            b.vertex_mut(VertexId::from_index(0)).unwrap().point.x += dx;
+            let v = b.vertex_list()[0];
+            b.vertex_mut(v).unwrap().point.x += dx;
             b
         }
     };
@@ -232,7 +236,9 @@ fn every_vendored_body_checks_the_same_incrementally() {
             }
             read += 1;
             let make = || read_smb(bytes.clone()).unwrap();
-            valid += usize::from(same(&path.display().to_string(), &make));
+            // (a body may hold geometry with no digest, an offset surface or a blend's
+            // definition, and so leave nothing clean)
+            valid += usize::from(same(&path.display().to_string(), &make, false));
         }
     }
     assert!(read >= 20, "only {read} bodies read");
