@@ -213,6 +213,10 @@ pub struct Unchecked {
     /// could not be computed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub distance_mm: Option<f64>,
+    /// `false` when `distance_mm` was measured on the meshes; absent when measured on the exact
+    /// faces and edges or when `distance_mm` is absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exact: Option<bool>,
 }
 
 #[cfg(test)]

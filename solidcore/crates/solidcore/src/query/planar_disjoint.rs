@@ -31,8 +31,20 @@ use crate::topology::face::p2::{face_side_regions, faceuses};
 use crate::topology::{loopuse, Brep, EdgeId, FaceId, FaceuseId};
 use crate::{EntityRef, Result};
 
+/// Operation name used for cancellation checks.
+const OP: &str = "query::contact::planar_interiors_disjoint";
+
 /// Maximum number of overlap-region faces per body inspected by the planar proof.
 const MAX_OVERLAP_FACES: usize = 256;
+
+/// Maximum segment-segment intersection tests per coplanar polygon overlap check.
+const MAX_SEG_PAIRS: usize = 65_536;
+
+/// Maximum horizontal scanline events processed in a 2D polygon sweep.
+const MAX_Y_EVENTS: usize = 16_384;
+
+/// Iteration stride between cooperative cancellation checks in tight inner loops.
+const CANCEL_STRIDE: usize = 256;
 
 /// Axis-aligned bounding box.
 #[derive(Clone, Copy, Debug)]
@@ -243,13 +255,14 @@ pub(crate) fn planar_interiors_disjoint(
 
     // Check C: face-face coplanar and transverse crossing analysis.
     match check_face_pairs(
+        k,
         &faces_a,
         &faces_b,
         &edge_faces_a,
         &edge_faces_b,
         tol_max,
         eps,
-    ) {
+    )? {
         Verdict::Yes => {}
         other => return Ok(other),
     }
@@ -324,13 +337,29 @@ fn extract_single_planar_face(
     bbox: Aabb,
     eps: f64,
 ) -> Result<Option<PlanarFace>> {
-    let origin = {
+    let (support_origin, support_normal) = {
         let face_rec = brep.face(f)?;
         let Some(surf) = face_rec.surface.as_ref() else {
             return Ok(None);
         };
         match surf.kind() {
-            SurfaceKind::Plane(plane) => plane.position().origin(),
+            SurfaceKind::Plane(plane) => {
+                let pos = plane.position();
+                let Ok(sn) = pos.z_axis().unitize() else {
+                    return Ok(None);
+                };
+                let so = pos.origin();
+                if !(so.x.is_finite()
+                    && so.y.is_finite()
+                    && so.z.is_finite()
+                    && sn.x.is_finite()
+                    && sn.y.is_finite()
+                    && sn.z.is_finite())
+                {
+                    return Ok(None);
+                }
+                (so, sn)
+            }
             _ => return Ok(None),
         }
     };
@@ -386,7 +415,9 @@ fn extract_single_planar_face(
     let Ok(normal) = frame.normal.value.unitize() else {
         return Ok(None);
     };
-    if !(normal.x.is_finite() && normal.y.is_finite() && normal.z.is_finite()) {
+    if !(normal.x.is_finite() && normal.y.is_finite() && normal.z.is_finite())
+        || normal.dot(support_normal).abs() < 1.0 - 1e-10
+    {
         return Ok(None);
     }
     let Ok([_, y_ref, z_ref]) = normal.make_unit_ortho_vectors(None) else {
@@ -398,12 +429,13 @@ fn extract_single_planar_face(
         (y_ref, z_ref)
     };
 
-    // Use the first vertex as plane origin for numerical accuracy, and certify that every
-    // vertex of every loop lies on this exact plane within `eps`.
-    let plane_origin = raw_loops
+    // Anchor the local 2D frame on the exact analytic support plane near the loop vertices,
+    // and certify that every loop vertex lies on the analytic support plane within `eps`.
+    let anchor = raw_loops
         .first()
         .and_then(|l| l.first())
-        .map_or(origin, |&(_, p)| p);
+        .map_or(support_origin, |&(_, p)| p);
+    let plane_origin = anchor - normal * (anchor - support_origin).dot(normal);
     let mut loops_3d = Vec::with_capacity(raw_loops.len());
     let mut loops_2d = Vec::with_capacity(raw_loops.len());
     let mut edges = Vec::new();
@@ -412,7 +444,9 @@ fn extract_single_planar_face(
         let mut pts_3d = Vec::with_capacity(n_pts);
         let mut pts_2d = Vec::with_capacity(n_pts);
         for &(_, p) in &loop_items {
-            if (p - plane_origin).dot(normal).abs() > eps {
+            if (p - support_origin).dot(normal).abs() > eps
+                || (p - plane_origin).dot(normal).abs() > eps
+            {
                 return Ok(None);
             }
             let d = p - plane_origin;
@@ -610,8 +644,8 @@ fn check_face_interiors(
     eps: f64,
 ) -> Result<Verdict> {
     for face in from_faces {
-        k.check_cancelled("query::contact::planar_interiors_disjoint")?;
-        let Some(pt) = face_interior_point_3d(face, eps) else {
+        k.check_cancelled(OP)?;
+        let Some(pt) = face_interior_point_3d(k, face, eps)? else {
             return Ok(Verdict::Undecided);
         };
         match classify_point_strict(k, other, other_faces, pt, other_tol, eps)? {
@@ -624,20 +658,23 @@ fn check_face_interiors(
 }
 
 fn check_face_pairs(
+    k: &Kernel,
     faces_a: &[PlanarFace],
     faces_b: &[PlanarFace],
     edge_faces_a: &BTreeMap<EdgeId, Vec<usize>>,
     edge_faces_b: &BTreeMap<EdgeId, Vec<usize>>,
     tol_max: f64,
     eps: f64,
-) -> Verdict {
+) -> Result<Verdict> {
     for f in faces_a {
+        k.check_cancelled(OP)?;
         let f_box = f.bbox.inflated(2.0 * tol_max);
         for g in faces_b {
             if !f_box.meets(g.bbox) {
                 continue;
             }
             match check_single_face_pair(
+                k,
                 f,
                 g,
                 faces_a,
@@ -646,13 +683,13 @@ fn check_face_pairs(
                 edge_faces_b,
                 tol_max,
                 eps,
-            ) {
+            )? {
                 Verdict::Yes => {}
-                other => return other,
+                other => return Ok(other),
             }
         }
     }
-    Verdict::Yes
+    Ok(Verdict::Yes)
 }
 
 fn signed_range_on_plane(
@@ -672,6 +709,7 @@ fn signed_range_on_plane(
 }
 
 fn check_single_face_pair(
+    k: &Kernel,
     f: &PlanarFace,
     g: &PlanarFace,
     faces_a: &[PlanarFace],
@@ -680,7 +718,7 @@ fn check_single_face_pair(
     edge_faces_b: &BTreeMap<EdgeId, Vec<usize>>,
     tol_max: f64,
     eps: f64,
-) -> Verdict {
+) -> Result<Verdict> {
     let (min_g_on_f, max_g_on_f) = signed_range_on_plane(g, f.origin, f.normal);
     let (min_f_on_g, max_f_on_g) = signed_range_on_plane(f, g.origin, g.normal);
     let ndot = f.normal.dot(g.normal);
@@ -695,11 +733,13 @@ fn check_single_face_pair(
                 .iter()
                 .map(|lp| lp.iter().map(|&p| f.project_2d(p)).collect())
                 .collect();
-            if polygons_2d_interiors_overlap(&f.loops_2d, &g_in_f, eps) {
-                return Verdict::No;
+            match polygons_2d_interiors_overlap(k, &f.loops_2d, &g_in_f, eps)? {
+                Some(true) => return Ok(Verdict::No),
+                Some(false) => {}
+                None => return Ok(Verdict::Undecided),
             }
         }
-        return Verdict::Yes;
+        return Ok(Verdict::Yes);
     }
 
     // Sub-tolerance opposite-normal slab guard: if `g` lies strictly on the inward side of `f`
@@ -711,21 +751,23 @@ fn check_single_face_pair(
             .iter()
             .map(|lp| lp.iter().map(|&p| f.project_2d(p)).collect())
             .collect();
-        if polygons_2d_interiors_overlap(&f.loops_2d, &g_in_f, eps) {
-            return Verdict::No;
+        match polygons_2d_interiors_overlap(k, &f.loops_2d, &g_in_f, eps)? {
+            Some(true) => return Ok(Verdict::No),
+            Some(false) => {}
+            None => return Ok(Verdict::Undecided),
         }
     }
 
     // Strictly separated on one side of either plane: cannot cross.
     if min_g_on_f > eps || max_g_on_f < -eps || min_f_on_g > eps || max_f_on_g < -eps {
-        return Verdict::Yes;
+        return Ok(Verdict::Yes);
     }
 
     // Case C2: Non-coplanar faces whose planes intersect across both faces.
     let cross = f.normal.cross(g.normal);
     let c2 = cross.dot(cross);
     if !(c2 > 1e-24 && c2.is_finite()) {
-        return Verdict::Undecided;
+        return Ok(Verdict::Undecided);
     }
     let dir = cross / c2.sqrt();
     let df = f.origin.dot(f.normal);
@@ -736,16 +778,16 @@ fn check_single_face_pair(
         || (p_line - f.origin).dot(f.normal).abs() > eps * 10.0
         || (p_line - g.origin).dot(g.normal).abs() > eps * 10.0
     {
-        return Verdict::Undecided;
+        return Ok(Verdict::Undecided);
     }
 
     let f_dir = [dir.dot(f.u), dir.dot(f.v)];
     let g_dir = [dir.dot(g.u), dir.dot(g.v)];
     let Some(spans_f) = clip_line_to_face_2d(f, f.project_2d(p_line), f_dir, eps) else {
-        return Verdict::Undecided;
+        return Ok(Verdict::Undecided);
     };
     let Some(spans_g) = clip_line_to_face_2d(g, g.project_2d(p_line), g_dir, eps) else {
-        return Verdict::Undecided;
+        return Ok(Verdict::Undecided);
     };
 
     for sf in &spans_f {
@@ -756,7 +798,7 @@ fn check_single_face_pair(
                 continue;
             }
             match (sf.kind, sg.kind) {
-                (SpanKind::Interior, SpanKind::Interior) => return Verdict::No,
+                (SpanKind::Interior, SpanKind::Interior) => return Ok(Verdict::No),
                 (SpanKind::Interior, SpanKind::BoundaryEdge { edge_id, inward_3d }) => {
                     match check_edge_touching_face_interior(
                         f.normal,
@@ -768,7 +810,7 @@ fn check_single_face_pair(
                         eps,
                     ) {
                         Verdict::Yes => {}
-                        other => return other,
+                        other => return Ok(other),
                     }
                 }
                 (SpanKind::BoundaryEdge { edge_id, inward_3d }, SpanKind::Interior) => {
@@ -782,7 +824,7 @@ fn check_single_face_pair(
                         eps,
                     ) {
                         Verdict::Yes => {}
-                        other => return other,
+                        other => return Ok(other),
                     }
                 }
                 (SpanKind::BoundaryEdge { .. }, SpanKind::BoundaryEdge { .. }) => {}
@@ -790,7 +832,7 @@ fn check_single_face_pair(
         }
     }
 
-    Verdict::Yes
+    Ok(Verdict::Yes)
 }
 
 /// Checks an edge of one solid lying in the strict interior of a face of the other solid
@@ -939,17 +981,23 @@ fn scanline_intervals_2d(loops: &[Vec<[f64; 2]>], y: f64) -> Vec<(f64, f64)> {
     out
 }
 
-fn face_interior_point_3d(face: &PlanarFace, eps: f64) -> Option<Point3> {
+fn face_interior_point_3d(k: &Kernel, face: &PlanarFace, eps: f64) -> Result<Option<Point3>> {
     let mut ys = Vec::new();
     for lp in &face.loops_2d {
         for &p in lp {
+            if ys.len() >= MAX_Y_EVENTS {
+                return Ok(None);
+            }
             ys.push(p[1]);
         }
     }
     ys.sort_by(f64::total_cmp);
     let ys = dedup_sorted(&ys, eps);
     let mut best: Option<(f64, [f64; 2])> = None;
-    for pair in ys.windows(2) {
+    for (band_idx, pair) in ys.windows(2).enumerate() {
+        if band_idx % CANCEL_STRIDE == 0 {
+            k.check_cancelled(OP)?;
+        }
         let (Some(&y0), Some(&y1)) = (pair.first(), pair.get(1)) else {
             continue;
         };
@@ -977,21 +1025,38 @@ fn face_interior_point_3d(face: &PlanarFace, eps: f64) -> Option<Point3> {
             }
         }
     }
-    let (_, uv) = best?;
+    let Some((_, uv)) = best else {
+        return Ok(None);
+    };
     if point_in_polygon_2d(&face.loops_2d, uv, eps) != PolyClass::Inside {
-        return None;
+        return Ok(None);
     }
-    Some(face.lift_3d(uv))
+    Ok(Some(face.lift_3d(uv)))
 }
 
-fn polygons_2d_interiors_overlap(a: &[Vec<[f64; 2]>], b: &[Vec<[f64; 2]>], eps: f64) -> bool {
+/// Checks whether two 2D polygons (each with optional holes) have overlapping interiors.
+///
+/// Returns `Ok(Some(true))` when overlap is proved, `Ok(Some(false))` when all segment pairs
+/// and horizontal bands were checked without finding overlap, `Ok(None)` when the work budget
+/// ([`MAX_SEG_PAIRS`] / [`MAX_Y_EVENTS`]) is exceeded (never returning a verdict from partial
+/// events), or `Err` on cooperative cancellation.
+fn polygons_2d_interiors_overlap(
+    k: &Kernel,
+    a: &[Vec<[f64; 2]>],
+    b: &[Vec<[f64; 2]>],
+    eps: f64,
+) -> Result<Option<bool>> {
     let mut ys = Vec::new();
     for lp in a.iter().chain(b.iter()) {
         for &p in lp {
+            if ys.len() >= MAX_Y_EVENTS {
+                return Ok(None);
+            }
             ys.push(p[1]);
         }
     }
     // Include y-coordinates of all proper segment intersections between edges of `a` and `b`.
+    let mut pairs_checked = 0_usize;
     for la in a {
         let na = la.len();
         for i in 0..na {
@@ -1002,6 +1067,13 @@ fn polygons_2d_interiors_overlap(a: &[Vec<[f64; 2]>], b: &[Vec<[f64; 2]>], eps: 
             for lb in b {
                 let nb = lb.len();
                 for j in 0..nb {
+                    if pairs_checked >= MAX_SEG_PAIRS {
+                        return Ok(None);
+                    }
+                    if pairs_checked % CANCEL_STRIDE == 0 {
+                        k.check_cancelled(OP)?;
+                    }
+                    pairs_checked += 1;
                     let (Some(&b0), Some(&b1)) = (lb.get(j), lb.get((j + 1) % nb)) else {
                         continue;
                     };
@@ -1016,6 +1088,9 @@ fn polygons_2d_interiors_overlap(a: &[Vec<[f64; 2]>], b: &[Vec<[f64; 2]>], eps: 
                     if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
                         let y = a0[1] + t * da[1];
                         if y.is_finite() {
+                            if ys.len() >= MAX_Y_EVENTS {
+                                return Ok(None);
+                            }
                             ys.push(y);
                         }
                     }
@@ -1025,7 +1100,10 @@ fn polygons_2d_interiors_overlap(a: &[Vec<[f64; 2]>], b: &[Vec<[f64; 2]>], eps: 
     }
     ys.sort_by(f64::total_cmp);
     let ys = dedup_sorted(&ys, eps);
-    for pair in ys.windows(2) {
+    for (band_idx, pair) in ys.windows(2).enumerate() {
+        if band_idx % CANCEL_STRIDE == 0 {
+            k.check_cancelled(OP)?;
+        }
         let (Some(&y0), Some(&y1)) = (pair.first(), pair.get(1)) else {
             continue;
         };
@@ -1038,12 +1116,12 @@ fn polygons_2d_interiors_overlap(a: &[Vec<[f64; 2]>], b: &[Vec<[f64; 2]>], eps: 
         for &(a0, a1) in &ivs_a {
             for &(b0, b1) in &ivs_b {
                 if a1.min(b1) - a0.max(b0) > eps {
-                    return true;
+                    return Ok(Some(true));
                 }
             }
         }
     }
-    false
+    Ok(Some(false))
 }
 
 fn clip_line_to_face_2d(
@@ -1202,12 +1280,26 @@ mod tests {
         boolean_difference(k, outer, slot).unwrap()
     }
 
+    fn hollow_cube(k: &mut Kernel, half_outer: f64, half_inner: f64) -> Brep {
+        let outer = make_box(
+            k,
+            [-half_outer, -half_outer, -half_outer],
+            [2.0 * half_outer, 2.0 * half_outer, 2.0 * half_outer],
+        );
+        let inner = make_box(
+            k,
+            [-half_inner, -half_inner, -half_inner],
+            [2.0 * half_inner, 2.0 * half_inner, 2.0 * half_inner],
+        );
+        boolean_difference(k, outer, inner).unwrap()
+    }
+
     #[test]
     fn flush_tenon_in_slot_with_3e5_vertex_shift_is_certified_disjoint() {
         let mut k = kernel();
         let mut plate = slotted_plate(&mut k);
         let mut tenon = make_box(&mut k, [0.0, 0.0, 3e-5], [10.0, 10.0, 10.0]);
-        let v = interiors_disjoint(&k, &mut plate, &mut tenon, 0.01).unwrap();
+        let v = interiors_disjoint(&k, &mut plate, &mut tenon).unwrap();
         assert_eq!(v, Verdict::Yes);
     }
 
@@ -1217,7 +1309,7 @@ mod tests {
         for depth in [0.5, 3e-5, 5e-6] {
             let mut plate = slotted_plate(&mut k);
             let mut tenon = make_box(&mut k, [-depth, 0.0, 0.0], [10.0, 10.0, 10.0]);
-            let v = interiors_disjoint(&k, &mut plate, &mut tenon, 0.01).unwrap();
+            let v = interiors_disjoint(&k, &mut plate, &mut tenon).unwrap();
             assert_eq!(v, Verdict::No, "depth {depth} must be detected as overlap");
         }
     }
@@ -1227,7 +1319,7 @@ mod tests {
         let mut k = kernel();
         let mut a = make_box(&mut k, [-10.0, -2.0, 0.0], [20.0, 4.0, 5.0]);
         let mut b = make_box(&mut k, [-2.0, -10.0, -1.0], [4.0, 20.0, 7.0]);
-        let v = interiors_disjoint(&k, &mut a, &mut b, 0.01).unwrap();
+        let v = interiors_disjoint(&k, &mut a, &mut b).unwrap();
         assert_eq!(v, Verdict::No);
     }
 
@@ -1236,7 +1328,7 @@ mod tests {
         let mut k = kernel();
         let mut a = make_box(&mut k, [0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
         let mut b = make_box(&mut k, [0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
-        let v = interiors_disjoint(&k, &mut a, &mut b, 0.01).unwrap();
+        let v = interiors_disjoint(&k, &mut a, &mut b).unwrap();
         assert_eq!(v, Verdict::No);
     }
 
@@ -1246,7 +1338,7 @@ mod tests {
         for gap in [0.0, 3e-5] {
             let mut a = make_box(&mut k, [0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
             let mut b = make_box(&mut k, [10.0 + gap, 0.0, 3e-5], [10.0, 10.0, 10.0]);
-            let v = interiors_disjoint(&k, &mut a, &mut b, 0.01).unwrap();
+            let v = interiors_disjoint(&k, &mut a, &mut b).unwrap();
             assert_eq!(v, Verdict::Yes, "gap {gap}");
         }
     }
@@ -1256,7 +1348,52 @@ mod tests {
         let mut k = kernel();
         let mut a = make_box(&mut k, [0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
         let mut cyl = create_cylinder(&mut k, Point3::new(0.0, 5.0, 0.0), 2.0, 10.0).unwrap();
-        let v = interiors_disjoint(&k, &mut a, &mut cyl, 0.01).unwrap();
+        let v = interiors_disjoint(&k, &mut a, &mut cyl).unwrap();
         assert_eq!(v, Verdict::Undecided);
+    }
+
+    /// Concentric hollow cubes A (wall 2..4) and B (wall 1..3) have strictly separated
+    /// boundaries (1 mm apart) yet overlap in material across 2..3: neither `meets` nor
+    /// `interiors_disjoint` may certify them disjoint.
+    #[test]
+    fn concentric_hollow_cubes_with_separated_boundaries_are_not_disjoint() {
+        let mut k = kernel();
+        let mut a = hollow_cube(&mut k, 4.0, 2.0);
+        let mut b = hollow_cube(&mut k, 3.0, 1.0);
+        let contact = crate::query::contact::meets(&k, &mut a, &mut b, 1e-9).unwrap();
+        assert_eq!(contact.verdict, Verdict::Yes);
+        let disjoint = interiors_disjoint(&k, &mut a, &mut b).unwrap();
+        assert_eq!(disjoint, Verdict::No);
+    }
+
+    /// Two boxes with a tiny positive penetration (5e-7 mm) must never be certified disjoint.
+    #[test]
+    fn tiny_slab_penetration_is_not_certified_disjoint() {
+        let mut k = kernel();
+        let mut a = make_box(&mut k, [0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
+        let mut b = make_box(&mut k, [10.0 - 5e-7, 0.0, 0.0], [10.0, 10.0, 10.0]);
+        let v = interiors_disjoint(&k, &mut a, &mut b).unwrap();
+        assert_ne!(v, Verdict::Yes);
+    }
+
+    /// Exceeding the segment-pair budget in `polygons_2d_interiors_overlap` returns `Ok(None)`
+    /// rather than deciding from incomplete events.
+    #[test]
+    fn polygon_overlap_budget_exhaustion_returns_none() {
+        let k = kernel();
+        let ring = |n: usize, r: f64, ox: f64| -> Vec<Vec<[f64; 2]>> {
+            let pts = (0..n)
+                .map(|i| {
+                    let ang = std::f64::consts::TAU * (i as f64) / (n as f64);
+                    [ox + r * ang.cos(), r * ang.sin()]
+                })
+                .collect();
+            vec![pts]
+        };
+        let a = ring(300, 1.0, 0.0);
+        let b = ring(300, 1.0, 5.0);
+        // 300 * 300 = 90_000 > MAX_SEG_PAIRS (65_536)
+        let res = polygons_2d_interiors_overlap(&k, &a, &b, 1e-9).unwrap();
+        assert_eq!(res, None);
     }
 }

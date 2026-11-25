@@ -788,18 +788,25 @@ fn unchecked_pair_carries_non_boolean_distance_while_staying_excluded_from_neare
     use super::{PairContext, PairResult, collect_pair_results};
 
     let bx = |x0: f64, x1: f64| Aabb3 { min: Vec3::new(x0, 0.0, 0.0), max: Vec3::new(x1, 10.0, 10.0) };
-    let names = ["A", "B", "C"];
-    let subjects = [0, 1, 2];
-    let boxes = [bx(0.0, 10.0), bx(10.0, 20.0), bx(25.0, 35.0)];
+    let names = ["A", "B", "C", "D"];
+    let subjects = [0, 1, 2, 3];
+    let boxes = [bx(0.0, 10.0), bx(10.0, 20.0), bx(25.0, 35.0), bx(10.0, 20.0)];
     let allowed = |i: usize, j: usize| i != j;
     let ctx = PairContext { names: &names, subjects: &subjects, boxes: &boxes, allowed: &allowed, gap: 1.0, min_volume: 0.01, nearest: 2 };
 
-    let close = [(0, 1)];
-    let results = [Ok(PairResult {
-        unchecked: Some("relate conflict".into()),
-        distance: Some(BodyDistance { distance: 0.0, from: Vec3::new(10.0, 5.0, 5.0), to: Vec3::new(10.0, 5.0, 5.0), exact: true }),
-        ..PairResult::default()
-    })];
+    let close = [(0, 1), (0, 3)];
+    let results = [
+        Ok(PairResult {
+            unchecked: Some("relate conflict".into()),
+            distance: Some(BodyDistance { distance: 0.0, from: Vec3::new(10.0, 5.0, 5.0), to: Vec3::new(10.0, 5.0, 5.0), exact: true }),
+            ..PairResult::default()
+        }),
+        Ok(PairResult {
+            unchecked: Some("certified_vertex_gaps".into()),
+            distance: Some(BodyDistance { distance: 0.25, from: Vec3::new(10.0, 5.0, 5.0), to: Vec3::new(10.25, 5.0, 5.0), exact: false }),
+            ..PairResult::default()
+        }),
+    ];
     let mut unchecked = Vec::new();
     let summary = collect_pair_results(&ctx, &close, results, &mut unchecked, |pairs| {
         pairs.iter().map(|&(i, j)| Ok(Some(if (i.min(j), i.max(j)) == (0, 2) { 15.0 } else { 5.0 }))).collect()
@@ -807,8 +814,15 @@ fn unchecked_pair_carries_non_boolean_distance_while_staying_excluded_from_neare
 
     assert!(summary.overlaps.is_empty());
     assert!(summary.near.is_empty());
-    assert_eq!(unchecked.len(), 1);
+    assert_eq!(unchecked.len(), 2);
     assert_eq!(unchecked[0].distance_mm, Some(0.0));
+    assert_eq!(unchecked[0].exact, None);
+    assert_eq!(unchecked[1].distance_mm, Some(0.25));
+    assert_eq!(unchecked[1].exact, Some(false));
+    let exact_json = serde_json::to_value(&unchecked[0]).unwrap();
+    let mesh_json = serde_json::to_value(&unchecked[1]).unwrap();
+    assert!(exact_json.get("exact").is_none(), "{exact_json}");
+    assert_eq!(mesh_json.get("exact"), Some(&json!(false)), "{mesh_json}");
     let a_near: Vec<(&str, f64)> = summary.nearest["A"].iter().map(|n| (n.body.as_str(), n.distance_mm)).collect();
     assert_eq!(a_near, vec![("C", 15.0)]);
 }

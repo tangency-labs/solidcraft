@@ -149,9 +149,8 @@ impl Body {
     /// proved, `None` when undecided. Neither body changes.
     ///
     /// # Errors
-    /// [`Error::Refused`] for a negative or non-finite `min_volume` or a body without faces;
-    /// those of the session.
-    pub fn interiors_disjoint(&self, other: &Body, min_volume: f64) -> Result<Option<bool>> {
+    /// [`Error::Refused`] for a body without faces; those of the session.
+    pub fn interiors_disjoint(&self, other: &Body) -> Result<Option<bool>> {
         poisoned(&[self, other])?;
         let verdict = run_on(
             "contact::interiors_disjoint",
@@ -159,7 +158,7 @@ impl Body {
             |k| {
                 let mut a = copy_of(k, self)?;
                 let mut b = copy_of(k, other)?;
-                c::interiors_disjoint(k, &mut a, &mut b, min_volume)
+                c::interiors_disjoint(k, &mut a, &mut b)
             },
         )?;
         Ok(match verdict {
@@ -226,7 +225,7 @@ mod tests {
         let a = make_box([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
         let flush = make_box([10.0, 0.0, 3e-5], [10.0, 10.0, 10.0]).unwrap();
         let overlap = make_box([9.9, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
-        assert_eq!(a.interiors_disjoint(&flush, 0.01).unwrap(), Some(true));
-        assert_eq!(a.interiors_disjoint(&overlap, 0.01).unwrap(), Some(false));
+        assert_eq!(a.interiors_disjoint(&flush).unwrap(), Some(true));
+        assert_eq!(a.interiors_disjoint(&overlap).unwrap(), Some(false));
     }
 }

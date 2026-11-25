@@ -322,12 +322,12 @@ pub fn point_closest(p: Vec3, b: &Body, to: Members) -> Result<Option<BodyDistan
 /// Returns `Some(true)` when certified disjoint or flush contact with no interior overlap,
 /// `Some(false)` when real interior overlap is proved, and `None` for mesh bodies, conversion
 /// errors, or undecided geometry.
-pub fn interiors_disjoint(a: &Body, b: &Body, min_volume: f64) -> Option<bool> {
+pub fn interiors_disjoint(a: &Body, b: &Body) -> Option<bool> {
     let (Some(form_a), Some(form_b)) = (exact_body(a).ok()?, exact_body(b).ok()?) else {
         return None;
     };
     let ((ops_a, _), (ops_b, _)) = (&*form_a, &*form_b);
-    ops_a.interiors_disjoint(ops_b, min_volume).ok().flatten()
+    ops_a.interiors_disjoint(ops_b).ok().flatten()
 }
 
 /// `body`'s exact B-rep for a measurement: `None` for a mesh body, whose triangles are its
