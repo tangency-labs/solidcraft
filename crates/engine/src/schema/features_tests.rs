@@ -71,6 +71,7 @@ fn schemas_and_the_key_check_agree() {
             "thin",
             "through_all",
             "to",
+            "to_body_apart",
             "to_offset",
             "touching",
         ],
@@ -139,7 +140,7 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<BoundingSolidParams>(),
         &["bodies", "body_name", "body_names", "component", "margin", "margins", "name", "participants"],
     );
-    assert_keys(input_schema_for::<ScaleParams>(), &["bodies", "factor", "factors", "name", "origin", "participants"]);
+    assert_keys(input_schema_for::<ScaleParams>(), &["about", "bodies", "factor", "factors", "name", "origin", "participants"]);
     assert_keys(input_schema_for::<OffsetPlaneParams>(), &["base", "name", "offset", "participants", "through"]);
     assert_keys(input_schema_for::<PlaneAtAngleParams>(), &["angle", "axis", "base", "direction_only", "name", "participants", "pivot"]);
     assert_keys(
@@ -188,6 +189,10 @@ fn combine_schema_and_the_key_check_agree() {
             "keep_tools",
             "name",
             "new_component",
+            "offset",
+            "offset_edges",
+            "offset_faces",
+            "offset_radius",
             "operation",
             "participants",
             "target",
@@ -372,6 +377,20 @@ fn combine_check_takes_what_the_schema_allows() {
         (json!({"target": "A", "tools": ["B"], "touching": "glued"}), false),
         (json!({"target": "A", "tools": ["B"], "keep_tools": "yes"}), false),
         (json!({"target": "A", "tools": ["B"], "targets": ["A"]}), false),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": "gap + 0.1 mm", "offset_edges": "round"}), true),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 0.2, "offset_edges": "sharp"}), true),
+        (json!({"target": "A", "tools": ["B"], "offset": null, "offset_edges": null}), true),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": [1]}), false),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": "wavy"}), false),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": true}), false),
+        (
+            json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": "round", "offset_radius": "2 mm", "offset_faces": [[1, 2, 3]]}),
+            true,
+        ),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_faces": []}), false),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_faces": [[1, 2]]}), false),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_faces": [{"point": [1, 2, 3]}, "Top"]}), true),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_radius": [2]}), false),
     ] {
         let issues = crate::schema::issues("solid.combine", &p);
         assert_eq!(issues.is_empty(), takes, "{p}: {issues:?}");
@@ -454,6 +473,7 @@ fn sweep_schemas_and_the_key_check_agree() {
         "path_sketch",
         "profiles",
         "sketch",
+        "stays_surface",
     ];
     surface.extend(shape);
     surface.sort_unstable();

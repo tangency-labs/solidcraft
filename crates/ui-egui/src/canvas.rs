@@ -138,10 +138,10 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         // A section's distance runs against the plane's normal, into the part from a face.
         Kind::Section { .. } => (at, normal.map(|n| -n)),
         Kind::OffsetPlane { .. } => (at, normal),
-        // Fillet radii and chamfer distances grow the way `blend_grow_dir` gives (into the body
-        // on an outside edge, into the open corner on an inside one); shell thickness grows into
-        // the body.
-        // A chamfer of two distances measures Distance 1 along its own face, not along the bisector.
+        // Fillet radii grow the way `blend_grow_dir` gives (into the body on an outside edge,
+        // into the open corner on an inside one); shell thickness grows into the body.
+        // A chamfer's distance is the setback along each of the two faces at the edge, so its
+        // arrow runs along one of those faces, where the edge the distance sets is (#13527).
         Kind::Fillet { .. } if matches!(first, Sel::Edge { .. }) => {
             let Sel::Edge { body, index, .. } = first else { return None };
             let along_face = chamfer_face_dirs(app, d, at).map(|(first_face, _)| first_face);
@@ -298,6 +298,22 @@ fn edge_bisector(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
     edge_sides(m, index, p)?.iter().fold(Vec3::ZERO, |sum, (n, _)| sum + *n).normalized()
 }
 
+/// The directions into the two faces at an edge, at `p`: square to the edge, one along each
+/// face, and into that face's own material. The faces' normals give the directions, and the
+/// triangle beside the edge says which way each one goes, so a round edge (a hole's rim) is
+/// answered as well as a straight one.
+fn edge_face_dirs(sides: &[(Vec3, Vec3)], at: Vec3) -> Option<(Vec3, Vec3)> {
+    let [(n1, c1), (n2, c2)] = sides else { return None };
+    let along = n1.cross(*n2).normalized()?;
+    // Into a face: square to the edge and in the face's plane. The triangle beside the edge
+    // says which way that face's own material lies.
+    let into = |n: Vec3, c: Vec3| {
+        let d = n.cross(along).normalized()?;
+        Some(if d.dot(c - at) >= 0.0 { d } else { -d })
+    };
+    Some((into(*n1, *c1)?, into(*n2, *c2)?))
+}
+
 /// Whether the edge is an inside (concave) one: each face near it lies in front of the other's
 /// plane, where on an outside edge it lies behind. Only the offset across the edge counts, since
 /// each normal is square to the edge.
@@ -414,25 +430,21 @@ fn chamfer_look(d: &Dialog, distance: usize) -> ArrowLook {
     chamfer_arrow_looks(chamfer_editing(d))[distance.min(1)]
 }
 
-/// The directions Distance 1 and Distance 2 of a chamfer of two distances run from its edge at
-/// `at`: along the face that faces up most, or the other one with Flip, and along the remaining
-/// face (the kernel's `chamfer_tool_sides` picks them the same way). None for any other dialog.
+/// The directions Distance 1 and Distance 2 of a chamfer run from its edge at `at`: along the
+/// face that faces up most, or the other one with Flip, and along the remaining face (the
+/// kernel's `chamfer_tool_sides` picks them the same way). None for any other dialog.
 pub(crate) fn chamfer_face_dirs(app: &SolveApp, d: &Dialog, at: Vec3) -> Option<(Vec3, Vec3)> {
-    let Kind::Fillet { chamfer: true, ctype: 1, flip, .. } = &d.kind else { return None };
+    let Kind::Fillet { chamfer: true, ctype, flip, .. } = &d.kind else { return None };
     let Some(Sel::Edge { body, index, .. }) = &anchor_item(app, d) else { return None };
     let st = crate::open_meshing::session_world(&app.session);
     let mesh = st.body(body)?.mesh();
     let sides = edge_sides(&mesh, *index, at)?;
-    let [(n1, c1), (n2, c2)] = sides.as_slice() else { return None };
-    let along = n1.cross(*n2).normalized()?;
-    // From the edge into each face: the way to its centroid, square to the edge.
-    let into = |c: Vec3| {
-        let v = c - at;
-        (v - along * v.dot(along)).normalized()
-    };
-    let (t1, t2) = (into(*c1)?, into(*c2)?);
+    let [(n1, _), (n2, _)] = sides.as_slice() else { return None };
+    let (t1, t2) = edge_face_dirs(&sides, at)?;
+    // A chamfer with one distance measures it along both faces, so Flip does not move its arrow.
+    let flip = if *ctype == 0 { false } else { *flip };
     let up = Vec3::new(1e-6, 1e-3, 1.0);
-    Some(if (n2.dot(up) > n1.dot(up)) != *flip { (t2, t1) } else { (t1, t2) })
+    Some(if (n2.dot(up) > n1.dot(up)) != flip { (t2, t1) } else { (t1, t2) })
 }
 
 /// Whether a dynamically registered canvas handle owns this point before navigation.
@@ -449,6 +461,7 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
             .and_then(|r| proj.to_screen(r.point(r.angle)))
             .is_some_and(|end| egui::Rect::from_center_size(end, vec2(20.0, 20.0)).contains(p))
         || crate::place_gizmo::contains_pointer(app, p)
+        || crate::place_gizmo::frame_anchor::contains_pointer(app, p)
         || app.dialog.as_ref().is_some_and(|d| matches!(&d.kind, Kind::Measure { labels, .. } if labels.contains(p)))
 }
 
@@ -590,6 +603,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     // The placement handles (a Single hole's among them), over the depth arrow's stem: a press
     // on a marker moves the feature.
     crate::place_gizmo::show(app, ui, painter, proj);
+    // Frame Member's section and its hot points at the first line's start.
+    crate::place_gizmo::frame_anchor::show(app, ui, painter, proj);
     crate::hole_place::marks(app, painter, proj);
 }
 
@@ -869,6 +884,12 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         }
         return;
     }
+    // Plane at Angle: a handle on the preview square's edge turns the plane about its axis,
+    // and the angle box stays beside it for typing an exact value (#17290).
+    if matches!(d.kind, Kind::AnglePlane { .. }) {
+        draw_angle_plane(app, ui, painter, proj, d, bs, focus);
+        return;
+    }
     // Two sides: the second distance gets its own arrow, the other way from the first side.
     if let (Kind::Extrude { direction: crate::dialogs::TWO_SIDES | crate::dialogs::TWO_SIDES_REVERSED, distance2, .. }, Some(n)) = (&mut d.kind, dir)
     {
@@ -912,7 +933,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let look2 = chamfer_look(d, 1);
     let mut dragged2 = false;
     let mut tip2 = None;
-    if let (Kind::Fillet { distance2, .. }, Some((_, t2))) = (&mut d.kind, faces)
+    if let (Kind::Fillet { chamfer: true, ctype: 1, distance2, .. }, Some((_, t2))) = (&mut d.kind, faces)
         && let Some(l2) = crate::length_input::eval(&app.session.doc, distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
         let before = distance2.clone();
@@ -2628,6 +2649,130 @@ fn draw_revolve(
         let dragging = *angle != angle_before;
         value_box(ui, solidcraft_ui_text::tr_label("Angle"), angle, box_at, focus || dragging, box_place(app, proj));
     }
+}
+
+/// The half side of the square the preview draws for a new plane, in millimetres: the preview
+/// draws the plane's own axes at ten times their length.
+const PREVIEW_PLANE_HALF: f64 = 10.0;
+
+/// What Plane at Angle turns about: the axis, and the circle its handle rides.
+struct AngleTurn {
+    /// The point on the axis the circle is centred on.
+    centre: Vec3,
+    /// The circle's own axes: where the handle stands at the angle 0, and a quarter turn on.
+    e1: Vec3,
+    e2: Vec3,
+    /// The axis the plane turns about, as a unit vector.
+    axis: Vec3,
+    /// How far the handle stands from the axis.
+    radius: f64,
+    /// The angle the plane stands at now, in radians.
+    angle: f64,
+}
+
+/// Plane at Angle's turn: the axis the plane turns about, and the circle its handle rides.
+///
+/// The base plane and the axis are read as the command reads them: the base is an origin
+/// plane or a construction plane by name, the axis a picked axis, a sketch line or an edge.
+/// A face as the base is captured by the engine in the authoring frame, so the square the
+/// preview draws is not one the handle can stand on: the angle box types the angle instead.
+fn angle_plane_turn(app: &SolveApp, d: &Dialog) -> Option<AngleTurn> {
+    let Kind::AnglePlane { angle, direction_only } = &d.kind else { return None };
+    let base = d.inputs.first().and_then(|i| i.items.first()).and_then(|sel| match sel {
+        Sel::Plane { name } => crate::dialogs::plane_by_name(&app.session, name),
+        _ => None,
+    })?;
+    let (axis_origin, axis_dir) = crate::dialogs::angle_axis(app, d)?;
+    // "Use axis direction only": the plane turns about a line in the base plane, through the
+    // pivot (the base's own origin when none is picked), as the engine reads it.
+    let (pivot, dir) = if *direction_only {
+        let n = base.normal();
+        let dir = (axis_dir - n * n.dot(axis_dir)).normalized()?;
+        let pivot = angle_pivot_point(app, d).unwrap_or(base.origin);
+        (pivot - n * n.dot(pivot - base.origin), dir)
+    } else {
+        (axis_origin, axis_dir.normalized()?)
+    };
+    let rad = crate::length_input::eval(&app.session.doc, angle, ValueKind::Angle).ok().filter(|v| v.is_finite())?;
+    // The square the preview draws: half a side of ten millimetres round the plane's origin,
+    // along the plane's own axes. The handle stands on the middle of one of its edges: the
+    // edge whose middle stands farthest from the axis, whose circle is the biggest and so
+    // the finest to drag. An edge along the axis would not move at all.
+    let mut best: Option<(f64, Vec3)> = None;
+    for edge in [base.x, base.y] {
+        let p = base.origin + edge * PREVIEW_PLANE_HALF;
+        let r = (p - pivot - dir * (p - pivot).dot(dir)).len();
+        if r > 1e-3 && best.is_none_or(|(old, _)| r > old) {
+            best = Some((r, p));
+        }
+    }
+    let (radius, p) = best?;
+    let centre = pivot + dir * (p - pivot).dot(dir);
+    let e1 = (p - centre) / radius;
+    Some(AngleTurn { centre, e1, e2: dir.cross(e1), axis: dir, radius, angle: rad })
+}
+
+/// The point the Plane at Angle dialog takes as the pivot, in world coordinates.
+fn angle_pivot_point(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
+    match crate::dialogs::angle_pivot(d)? {
+        Sel::Vertex { point, .. } => Some(*point),
+        Sel::SketchPoint { id } => {
+            let st = crate::open_meshing::session_world(&app.session);
+            sketch_point_at(app, &st, id)
+        }
+        Sel::ConstructionPoint { name } => {
+            solidcraft_engine::view::construction_points(&app.session).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p)
+        }
+        _ => None,
+    }
+}
+
+/// Plane at Angle: the handle that turns the plane about its axis (#17290). It stands on the
+/// edge of the square the preview draws, so the plane turns as the handle is dragged. The angle
+/// box stays where it was, beside the plane, for typing an exact value.
+fn draw_angle_plane(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog, bs: Pos2, focus: bool) {
+    let turn = angle_plane_turn(app, d);
+    let Kind::AnglePlane { angle, .. } = &mut d.kind else { return };
+    let before = angle.clone();
+    // The angle box stays where it has always been, beside the base anchor: the handle is
+    // added beside it, not in place of it (#17290).
+    let box_at = bs + vec2(16.0, -30.0);
+    let mut handle = None;
+    if let Some(turn) = turn {
+        // The circle the handle rides, so the sweep the plane makes is seen.
+        let points: Vec<Pos2> = (0..=48)
+            .filter_map(|i| {
+                let a = i as f64 * std::f64::consts::TAU / 48.0;
+                proj.to_screen(turn.centre + (turn.e1 * a.cos() + turn.e2 * a.sin()) * turn.radius)
+            })
+            .collect();
+        if points.len() > 1 {
+            painter.add(egui::Shape::line(points, Stroke::new(1.0, Tokens::get().origin_plane_edge.linear_multiply(0.35))));
+        }
+        handle = rotation_handle(
+            ui,
+            painter,
+            proj,
+            turn.centre,
+            turn.e1,
+            turn.e2,
+            turn.axis,
+            turn.radius,
+            turn.angle,
+            1.0,
+            0.0,
+            (-std::f64::consts::TAU, std::f64::consts::TAU),
+            "angle_plane",
+            angle,
+        );
+    }
+    // A box over a handle takes the press meant for the handle (#6608): the box moves aside.
+    let mut place = box_place(app, proj);
+    if let Some(end) = handle {
+        place.handles = Some(egui::Rect::from_center_size(end, vec2(28.0, 28.0)));
+    }
+    let dragging = *angle != before;
+    value_box(ui, "Angle", angle, box_at, focus || dragging, place);
 }
 
 fn revolve_convention(d: &Dialog) -> solidcraft_engine::doc::RevolveConvention {

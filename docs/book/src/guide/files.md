@@ -15,7 +15,7 @@ design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSO
 | `.json` (self-contained plain JSON design) | yes | yes |
 | STEP (AP203, AP214, AP242) | solids, assemblies, units, names, colours | AP242 with names, colours and the component tree |
 | IGES 5.3 | manifold solids, or trimmed surfaces sewn into solids | manifold solids with names and colours |
-| FreeCAD `.FCStd` | sketches and features (Pad, Pocket, Revolution, Groove, Fillet, Chamfer, primitives, Mirrored, patterns), else solids, through cadmpeg | |
+| FreeCAD `.FCStd` | sketches and features (Pad, Pocket, Revolution, Groove, Fillet, Chamfer, primitives, Mirrored, patterns), else solids and sketches, through cadmpeg | |
 | Rhino `.3dm` | solids, through cadmpeg | Rhino 8, through cadmpeg: bodies with flat faces and straight edges exact, others as meshes; names and colours (desktop only) |
 | 3MF, STL, OBJ | mesh bodies | yes |
 | glTF 2.0 (`.glb`, `.gltf` with its `.bin` files) | mesh bodies in the node tree's components, materials as appearances | `.glb`: placed bodies with their colours, metallic and roughness, in metres with Y up |
@@ -88,7 +88,8 @@ the file leaves out.
 Opening a STEP, IGES, FreeCAD or Rhino file creates a design with the file's bodies as a base feature, and
 inserting one adds them to the current design. Later features build on them. A FreeCAD file's
 sketches and features are rebuilt as SolidCraft features instead, so its dimensions can be edited;
-when one cannot be, its bodies come in as a base feature and a warning says why (Preferences ›
+when one cannot be, its bodies come in as a base feature with its sketches beside them, and a
+warning says why (Preferences ›
 General › FreeCAD files turns the rebuild off). Preferences › General › Import with cadmpeg (off
 by default) reads STEP, IGES, FreeCAD and Rhino files with cadmpeg straight into B-rep instead of
 through SolidCraft's own STEP and IGES readers, to compare the two. Mesh bodies render,
@@ -157,6 +158,11 @@ panel, and in the right-click menu of a body) open the same dialog with that for
 the selected bodies as STL, 3MF or 3MF with face tags (below) to a file you name, and you can change
 the format there.
 
+If a body cannot be meshed, STL, OBJ and 3MF exports still write the other bodies. The toast
+names each body that was left out and stays until you dismiss it, and the command's reply lists
+them in `skipped`, with the reason for each in `warnings`. If no body can be meshed, the export
+fails.
+
 A 3MF has one object per body, so a slicer arranges the bodies of a multi-body part apart on the
 bed. Scripts and the control channel can keep each component together: `file.export` or
 `file.save_mesh` with `objects: "component"` writes every placed component that holds two or more
@@ -207,6 +213,15 @@ the same bodies, so sending again **replaces the file the slicer has open**: use
 Reload from disk to pick it up. If Windows won't let the file be replaced because the slicer holds
 it, the new copy gets a number (`name-2.3mf`) and the status line says so. Files older than seven days are
 deleted the next time SolidCraft starts.
+
+To keep the file with your other parts instead, tick **Keep in a folder** in the Send
+window (the desktop app only) and **Choose…** a folder. The file is then saved there, named after the
+design with the next free version (`Mount plate-v1.3mf`, `Mount plate-v2.3mf`, …), and the slicer
+opens that file. Tick **Replace file** to keep one file (`Mount plate.3mf`)
+instead. SolidCraft remembers the folder for each saved design (a design that was never saved asks again), so the next send of it starts with
+the folder already chosen; untick the box to go back to the slicer folder. Scripts pass `copy_to`
+(the folder) and, to replace the file, `copy_overwrite: true` to `file.send_to_slicer`; the reply has
+`copy: true` and the `version`.
 
 If the slicer is already running, PrusaSlicer, SuperSlicer and Cura load the file in
 the open window instead of starting another one (they are started with `--single-instance`).
@@ -351,9 +366,17 @@ points up (+Z), a positive angle lowers the leading edge: the usual washout at t
 Opening a design from your file manager, or with `solidcraft part.sc`, while SolidCraft is already
 running opens it in that window, as File > Open does, and no second app starts. The two launches
 talk through a socket in your settings folder (a named pipe on Windows) that only you can reach;
-nothing listens on the network, and only file paths are sent. If the running window does not answer
-within a moment, the new launch starts normally. `solidcraft --new-instance part.sc` always starts
-a separate app.
+nothing listens on the network, and only file paths are sent, with whether they open read-only.
+If the running window does not answer within a moment, the new launch starts normally.
+`solidcraft --new-instance part.sc` always starts a separate app.
+
+`solidcraft --read-only part.sc` opens the design read-only, as **Open Read-Only** does (see
+[Designs in shared or synced folders](#designs-in-shared-or-synced-folders)): you can change it,
+and Save asks for a new file. It covers every file named on that command line, in a new window or
+in the running one. A design that another SolidCraft has open opens without asking. A SolidCraft
+from before this option doesn't take read-only files from a new launch; that launch opens them in
+a window of its own. STEP, mesh and other imported files always open as new, unsaved designs, so
+the option changes nothing for them. Without a file it does nothing.
 
 ## Large files
 
@@ -400,6 +423,7 @@ placeholder in it is replaced:
 |---|---|
 | `{design}` | The design's name |
 | `{body}` | The exported body's name. When an export holds several bodies, the first one |
+| `{source}` | The name, without folder or extension, of the file the exported body was imported from; for a body a later feature made, the design's first import. Without an import, the design's name |
 | `{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}` | That [design property](#design-properties) |
 
 The help icon next to the setting lists the same placeholders. A design property that is not set
@@ -413,11 +437,29 @@ cut to 200 characters and 240 bytes, so it fits with its extension. Left empty, 
 offers the design's name, and Save As Mesh and a body's Export… offer the body's name. The control
 channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
 
+## Default folders
+
+**Preferences → Design → Folders** sets where the save dialogs open. Both settings are empty by
+default. An empty setting keeps the old behaviour: the dialog opens in the folder you used last, or
+in the folder of the open design.
+
+- **Designs folder**: **Save** and **Save As** open here for a design that has never been saved.
+  **Save As** for a design that is already saved still opens in that design's folder.
+- **Exports folder**: **File → Export**, **Save As Mesh**, drawings and the other files SolidCraft
+  saves open here. When you choose another folder in one of these dialogs, the next one opens in
+  that folder until you quit or change the setting.
+
+Type a folder or choose one with **Browse…**. **Clear** empties the setting. A folder that no longer
+exists is ignored, and the dialog opens in the folder you used last. The web app saves through the
+browser, so it has no folder settings. The control channel sets them with
+`ui.prefs {"designs_folder": "/home/sam/Designs", "exports_folder": "/home/sam/Prints"}`.
+
 ## Design properties
 
 **File → Design Properties…** (also under **Document Settings** in the Browser, and on the
 top component's right-click menu, under **Design**) records who made a design and what it is: project, part
-number, revision, author, organization, description and licence. **OK** applies the changes as
+number, revision, author, organization, description, material, finish (with a list of common
+finishes to pick from; a design that is one part carries them itself) and licence. **OK** applies the changes as
 one undo step. Scripts and agents use the same commands: `document.metadata` reads them,
 `document.metadata.set` (`key` and `value`, or `values: {key: value, …}`) and
 `document.metadata.remove` (`key` or `keys`) change them. `document.inspect` and the MCP

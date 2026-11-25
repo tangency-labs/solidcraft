@@ -23,18 +23,23 @@ pub mod constructor;
 pub mod dump;
 pub mod fixtures;
 pub mod flat;
+#[cfg(test)]
+pub(crate) mod g1r_cert;
 pub mod golden;
 #[cfg(test)]
 pub(crate) mod interval;
 pub mod jobs;
 pub mod json;
 #[cfg(test)]
+mod kept_trim_rows;
+#[cfg(test)]
+mod merged_vertex_rows;
+#[cfg(test)]
 mod operand_trim_rows;
 pub mod output;
 pub(crate) mod own_builder;
 pub(crate) mod own_reader;
 pub mod plan;
-pub(crate) mod refit;
 pub mod rng;
 pub mod runner;
 pub mod script;
@@ -42,15 +47,14 @@ pub mod solidcraft;
 pub mod soundness;
 pub mod ssi;
 pub mod step;
-pub(crate) mod tolsub;
 pub(crate) mod trim_hook;
 #[cfg(test)]
 pub(crate) mod trims_on_edges;
 pub mod util;
 #[cfg(test)]
-pub(crate) mod wr493_rows;
+mod wr459_rows;
 #[cfg(test)]
-mod wr57_replay;
+mod wr495_rows;
 
 pub use case::Case;
 pub use case::CaseContext;
@@ -67,15 +71,9 @@ pub use rng::Rng;
 pub use runner::RunOptions;
 pub use runner::UnitDiff;
 
-/// A runner's kernel: [`solidcore::Kernel::default`]. In this crate's tests it also
-/// carries the WR-57 substitution replay's seam while a `wr57_replay` test has one
-/// installed on this thread (the seam state is the kernel's; the runners make their own
-/// kernels, so they take it from here).
+/// A runner's kernel: [`solidcore::Kernel::default`].
 pub(crate) fn runner_kernel() -> solidcore::Kernel {
-    let k = solidcore::Kernel::default();
-    #[cfg(test)]
-    let k = wr57_replay::with_seam(k);
-    k
+    solidcore::Kernel::default()
 }
 
 /// Error from the harness itself (bad fixture, missing file, ...), as opposed

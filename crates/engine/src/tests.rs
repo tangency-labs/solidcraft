@@ -1203,168 +1203,176 @@ fn hostile_params_never_panic() {
     let _reset = mesh_convert::MadeUp;
     *crate::slicers::TEST_DETECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Vec::new());
     let keys = [
-        "plane",
-        "offset",
-        "name",
-        "sketch",
-        "points",
+        "a",
+        "add",
+        "anchor",
+        "angle",
+        "apex",
+        "ascii",
+        "at",
+        "axis",
+        "b",
+        "base",
+        "bodies",
+        "body",
+        "body_name",
+        "center",
+        "chain",
+        "clip",
         "closed",
+        "comment",
+        "configuration",
         "construction",
+        "continuity",
+        "copy",
+        "corner",
+        "count",
+        "count2",
+        "crown",
+        "curve",
+        "curves",
+        "damping",
+        "datum",
+        "delete",
+        "density",
+        "depth",
+        "detail",
+        "diameter",
+        "dir",
+        "direction",
+        "distance",
+        "distance2",
+        "dot_grid",
+        "drills",
+        "drills_text",
+        "driven",
+        "edges",
+        "effort",
+        "end",
+        "entities",
+        "entity",
+        "expression",
+        "extend",
+        "face",
+        "faces",
+        "factor",
+        "favorite",
+        "favorites",
+        "feature",
+        "features",
+        "filter",
+        "fixed",
+        "format",
+        "friction",
+        "from",
+        "gap",
+        "head",
+        "head_gap",
+        "height",
+        "id",
         "ids",
         "infer",
+        "items",
+        "keep",
+        "keep_tools",
+        "keep_with",
+        "kind",
+        "length",
+        "line",
+        "line_group",
+        "lines",
+        "link",
+        "major",
+        "margin",
+        "measure",
+        "members",
+        "mid",
+        "minor",
+        "minor_radius",
+        "mode",
+        "name",
+        "names",
+        "near",
+        "new_name",
+        "next_pair",
+        "offset",
+        "operation",
+        "orientation",
+        "origin",
+        "outline",
+        "outline_text",
         "p0",
         "p1",
         "p2",
-        "center",
-        "corner",
-        "radius",
-        "diameter",
-        "start",
-        "end",
-        "through",
-        "sides",
-        "angle",
-        "width",
-        "point",
-        "id",
-        "entities",
-        "type",
-        "value",
-        "line",
-        "mode",
-        "a",
-        "b",
-        "entity",
-        "fixed",
-        "curves",
-        "to",
-        "distance",
-        "profiles",
-        "direction",
+        "pairs",
         "parallel_to",
-        "distance2",
-        "start_offset",
-        "operation",
-        "targets",
-        "body_name",
-        "axis",
-        "length",
-        "height",
-        "base",
-        "major",
-        "minor",
-        "top_radius",
-        "top_diameter",
-        "edges",
-        "body",
-        "target",
-        "tools",
-        "keep_tools",
-        "bodies",
-        "translate",
-        "expression",
-        "unit",
-        "comment",
-        "delete",
-        "features",
-        "feature",
-        "position",
-        "suppressed",
-        "set",
-        "items",
-        "add",
         "path",
-        "format",
-        "ascii",
-        "measure",
-        "refs",
-        "link",
-        "project_edges",
-        "mid",
-        "near",
-        "factor",
-        "copy",
-        "count",
-        "spacing",
-        "count2",
-        "spacing2",
-        "dir",
-        "side",
-        "chain",
-        "at",
-        "curve",
-        "minor_radius",
-        "apex",
-        "rho",
-        "text",
-        "lines",
-        "driven",
-        "from",
-        "datum",
-        "tolerance",
-        "face",
-        "new_name",
-        "favorite",
-        "favorites",
-        "filter",
-        "kind",
-        "detail",
+        "plane",
+        "point",
+        "points",
+        "position",
+        "position_mm",
         "prefix",
-        "orientation",
-        "seam",
-        "twist",
-        "scale",
-        "continuity",
-        "crown",
-        "faces",
-        "u",
-        "v",
-        "keep",
-        "with",
-        "keep_with",
-        "stitch",
-        "extend",
-        "view",
-        "visual_style",
-        "reference_style",
+        "profile",
+        "profiles",
+        "project_edges",
+        "radius",
         "reference_hides_model",
         "reference_shown_percent",
-        "tangent_edges",
-        "line_group",
-        "sheet",
-        "position_mm",
-        "profile",
-        "anchor",
-        "density",
-        "names",
-        "pairs",
-        "next_pair",
-        "members",
+        "reference_style",
         "references",
-        "head",
-        "head_gap",
-        "configuration",
-        "outline",
-        "outline_text",
-        "drills",
-        "drills_text",
-        "thickness",
-        "origin",
+        "refs",
+        "reverse",
+        "rho",
+        "scale",
+        "seam",
+        "set",
         "shape",
+        "sheet",
+        "side",
+        "sides",
         "size",
-        "web",
-        "clip",
-        "margin",
+        "sketch",
+        "spacing",
+        "spacing2",
+        "start",
+        "start_offset",
+        "stitch",
+        "suppressed",
+        "tangent_edges",
+        "target",
+        "targets",
+        "text",
+        "thickness",
+        "through",
         "through_all",
-        "depth",
-        "dot_grid",
+        "to",
+        "tolerance",
+        "tools",
+        "top_diameter",
+        "top_radius",
+        "translate",
         "turn",
+        "twist",
+        "type",
+        "u",
+        "unit",
+        "v",
+        "value",
+        "velocity",
+        "view",
+        "visual_style",
+        "web",
+        "width",
+        "with",
     ];
     // Commands are independent; worker threads take them one at a time (their costs vary a lot).
     let ids: Vec<&str> = command_specs()
         .iter()
         .map(|spec| spec.id)
-        .filter(|id| !matches!(*id, "doc.open" | "file.save" | "file.save_as" | "file.export" | "file.save_mesh" | "sketch.export_dxf")) // file system side effects are covered by their own tests
+        .filter(|id| {
+            !matches!(*id, "doc.open" | "file.save" | "file.save_as" | "file.export" | "file.save_mesh" | "sketch.export_dxf" | "sketch.export_svg")
+        }) // file system side effects are covered by their own tests
         .collect();
     assert!(ids.contains(&"inspect.classify_points"), "exact point inspection must receive every hostile value");
     let next = std::sync::atomic::AtomicUsize::new(0);
@@ -1397,11 +1405,13 @@ fn hostile_params_never_panic() {
                                         || matches!(
                                             id,
                                             "file.export_3mf"
+                                                | "file.export_mjcf"
                                                 | "file.export_obj"
                                                 | "file.export_sdf"
                                                 | "file.export_step"
                                                 | "file.export_stl"
                                                 | "file.export_urdf"
+                                                | "file.export_urdf_options"
                                         ))
                                 {
                                     continue; // parameter, script and export files: covered by their own tests (no stray files)
@@ -4133,6 +4143,42 @@ fn split_body_of_a_body_of_two_pieces_splits_both() {
     }
 }
 
+/// A cap: a plate, a skirt round its edge and a tube through a hole in the plate.
+fn cap(s: &mut Session) {
+    run(s, "solid.cylinder", json!({"radius": 50, "height": 15, "base": [0, 0, 0], "body_name": "Cap"}));
+    run(s, "solid.cylinder", json!({"radius": 46, "height": 20, "base": [0, 0, 2], "operation": "cut", "targets": ["Cap"]}));
+    run(s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [-10, -10, 0], "operation": "join", "targets": ["Cap"]}));
+    run(s, "solid.box", json!({"length": 16, "width": 16, "height": 60, "corner": [-8, -8, -10], "operation": "cut", "targets": ["Cap"]}));
+}
+
+/// Split Body at the plate's inner face (#6762): the skirt and the tube above it do not touch, so
+/// they are two bodies, not one body of two pieces. The plate keeps the name it had, `Cap (1)`;
+/// the pieces' volumes are the analytic ones and add up to the cap's (a slab would add 3.5e-4 of
+/// it). The same with the plane the dialog sends for the picked face, tilted about 2e-15 by
+/// rounding: no slab is left under the face to join the skirt and the tube.
+#[test]
+fn split_body_makes_each_piece_that_does_not_touch_a_body() {
+    let picked = json!({"origin": [-27.14101384226774, -19.861536909343386, 1.9999999999997158], "normal": [-2.164854201260163e-15, -3.46457633831685e-16, 1]});
+    for plane in [json!({"origin": [0, 0, 2], "normal": [0, 0, 1]}), picked] {
+        let mut s = Session::default();
+        cap(&mut s);
+        let whole = solidcraft_kernel::measure(&s.world_state().unwrap().body("Cap").unwrap().body).unwrap().volume;
+        run(&mut s, "solid.split_body", json!({"body": "Cap", "plane": plane}));
+        let st = s.world_state().unwrap();
+        let volume = |n: &str| solidcraft_kernel::measure(&st.body(n).unwrap().body).unwrap().volume;
+        let names: Vec<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, ["Cap", "Cap (1)", "Cap (2)"], "{plane}");
+        assert!(st.bodies.iter().all(|b| b.body.lumps().unwrap().len() == 1), "{plane}");
+        let (plate, skirt, tube) = (PI * 2500.0 * 2.0 - 16.0 * 16.0 * 2.0, PI * (2500.0 - 2116.0) * 13.0, (400.0 - 256.0) * 38.0);
+        assert!(rel(volume("Cap (1)"), plate) < 1e-3, "{plane}: {}", volume("Cap (1)"));
+        let mut upper = [volume("Cap"), volume("Cap (2)")];
+        upper.sort_by(f64::total_cmp);
+        assert!(rel(upper[0], tube) < 1e-3 && rel(upper[1], skirt) < 1e-3, "{plane}: {upper:?}");
+        let total: f64 = names.iter().map(|n| volume(n)).sum();
+        assert!(rel(total, whole) < 1e-5, "{plane}: {total} vs {whole}");
+    }
+}
+
 /// Fillet types: chord length (radius from the face angle) and a radius varying along the
 /// edge; volumes from the removed material.
 #[test]
@@ -6139,6 +6185,153 @@ fn combine_keep_tools_and_new_component() {
     assert!(rel(solidcraft_kernel::measure(&a.body).unwrap().volume, 4000.0) < 1e-9);
 }
 
+/// A Combine cut with an offset grows the tool before it cuts (#3774): a 10 mm cube inside a
+/// 40 × 40 × 20 block, offset `gap`, cuts the cube (10 + 2 gap)³ out of the block's 32000 mm³ and
+/// leaves the tool as it is. The offset follows its parameter.
+#[test]
+fn combine_cut_offset_leaves_a_clearance() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "0.5 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"corner": [15, 15, 5], "length": 10, "width": 10, "height": 10, "body_name": "Pin"}));
+    run(&mut s, "solid.combine", json!({"target": "Block", "tools": ["Pin"], "operation": "cut", "keep_tools": true, "offset": "gap"}));
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.model.state().body(name).unwrap().body).unwrap().volume;
+    assert!(rel(vol(&s, "Block"), 32000.0 - 11.0f64.powi(3)) < 1e-9, "{}", vol(&s, "Block"));
+    assert!(rel(vol(&s, "Pin"), 1000.0) < 1e-9, "the tool is not grown: {}", vol(&s, "Pin"));
+    run(&mut s, "parameters.change", json!({"name": "gap", "expression": "1 mm"}));
+    assert!(rel(vol(&s, "Block"), 32000.0 - 12.0f64.powi(3)) < 1e-9, "{}", vol(&s, "Block"));
+    // Shrunk 1 mm, for a press fit: the cube 8³.
+    run(&mut s, "parameters.change", json!({"name": "gap", "expression": "-1 mm"}));
+    assert!(rel(vol(&s, "Block"), 32000.0 - 8.0f64.powi(3)) < 1e-9, "{}", vol(&s, "Block"));
+}
+
+/// With `offset_edges: round` the grown cube's edges and corners are rounded with the offset
+/// as their radius: every point within d of the cube (Steiner's formula for a box of side a),
+/// a³ + 6 a² d + 3 π a d² + (4/3) π d³, comes out of the block.
+#[test]
+fn combine_cut_offset_round_edges() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"corner": [15, 15, 5], "length": 10, "width": 10, "height": 10, "body_name": "Pin"}));
+    run(&mut s, "solid.combine", json!({"target": "Block", "tools": ["Pin"], "operation": "cut", "offset": 1, "offset_edges": "round"}));
+    let st = s.model.state();
+    assert!(st.body("Pin").is_none(), "the cut uses the tool up");
+    let (a, d) = (10.0f64, 1.0f64);
+    let grown = a.powi(3) + 6.0 * a * a * d + 3.0 * PI * a * d * d + 4.0 / 3.0 * PI * d.powi(3);
+    let v = solidcraft_kernel::measure(&st.body("Block").unwrap().body).unwrap().volume;
+    assert!(rel(v, 32000.0 - grown) < 1e-9, "{v} vs {}", 32000.0 - grown);
+    let saved = serde_json::to_value(&s.doc.features.last().unwrap().kind).unwrap();
+    assert_eq!(saved["offset_edges"], "round", "{saved}");
+}
+
+/// A 40 × 40 × 20 block, a 10 mm square pin from z 5 to 35 standing in it (its pocket is 15
+/// deep), and the block's volume after `params` (a Combine cut of the pin, kept) from 32000 mm³.
+fn pin_pocket(extra: &[(&str, [f64; 3], [f64; 3])], params: Value) -> (Session, f64) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"corner": [15, 15, 5], "length": 10, "width": 10, "height": 30, "body_name": "Pin"}));
+    for (name, corner, size) in extra {
+        run(&mut s, "solid.box", json!({"corner": corner, "length": size[0], "width": size[1], "height": size[2], "body_name": name}));
+    }
+    let mut p = json!({"target": "Block", "operation": "cut", "keep_tools": true});
+    if let (Some(o), Some(extra)) = (p.as_object_mut(), params.as_object()) {
+        o.extend(extra.clone());
+    }
+    run(&mut s, "solid.combine", p);
+    let v = solidcraft_kernel::measure(&s.model.state().body("Block").unwrap().body).unwrap().volume;
+    (s, v)
+}
+
+/// Only the picked faces move: the pin's two sides at x 15 and 25 grown 0.5 make its pocket
+/// 11 × 10 × 15; the other faces stay where they are.
+#[test]
+fn combine_cut_offset_of_picked_faces() {
+    // A face is a point on it, in any of the forms a face takes (`{point}` too).
+    let (s, v) = pin_pocket(&[], json!({"tools": ["Pin"], "offset": 0.5, "offset_faces": [{"point": [15, 20, 10]}, [25, 20, 10]]}));
+    assert!(rel(v, 32000.0 - 11.0 * 10.0 * 15.0) < 1e-9, "{v}");
+    let pin = solidcraft_kernel::measure(&s.model.state().body("Pin").unwrap().body).unwrap().volume;
+    assert!(rel(pin, 3000.0) < 1e-9, "the tool is not changed: {pin}");
+}
+
+/// Two adjacent sides grown 1 and rounded: the edge between them becomes a quarter cylinder of
+/// radius 1 about the old edge, the edges to the faces that don't move stay sharp. The pocket's
+/// section is 11 × 11 less the corner's 1 − π/4, 15 deep.
+#[test]
+fn combine_cut_offset_of_picked_faces_rounds_the_edge_between_them() {
+    let (_, v) = pin_pocket(&[], json!({"tools": ["Pin"], "offset": 1, "offset_edges": "round", "offset_faces": [[25, 20, 10], [20, 25, 10]]}));
+    let pocket = 15.0 * (121.0 - (1.0 - PI / 4.0));
+    assert!(rel(v, 32000.0 - pocket) < 1e-9, "{v} vs {}", 32000.0 - pocket);
+}
+
+/// Every face grown 1 with rounds of 0.5: the 12 × 12 × 32 box from z 4 with its edges rounded
+/// 0.5 and its corners balls of 0.5. Below z 20: the bottom layer (z 4 to 4.5),
+/// 11² · 0.5 + 22 · π 0.5² / 2 + (2/3) π 0.5³, and the rest (z 4.5 to 20) of section
+/// 144 − (4 − π) 0.5², 15.5 high.
+#[test]
+fn combine_cut_offset_with_its_own_rounding_radius() {
+    let (_, v) = pin_pocket(&[], json!({"tools": ["Pin"], "offset": 1, "offset_edges": "round", "offset_radius": "0.5 mm"}));
+    let r: f64 = 0.5;
+    let bottom = 11.0 * 11.0 * r + 22.0 * PI * r * r / 2.0 + 2.0 / 3.0 * PI * r.powi(3);
+    let rest = 15.5 * (144.0 - (4.0 - PI) * r * r);
+    assert!(rel(v, 32000.0 - bottom - rest) < 1e-6, "{v} vs {}", 32000.0 - bottom - rest);
+}
+
+/// A tool none of whose faces is picked cuts as it is: the 5 mm post's pocket 5 × 5 × 15 beside
+/// the pin's, whose side at x 25 alone grows 1 (11 × 10 × 15).
+#[test]
+fn combine_cut_offset_leaves_a_tool_without_picked_faces_as_it_is() {
+    let (_, v) =
+        pin_pocket(&[("Post", [2.0, 2.0, 5.0], [5.0, 5.0, 30.0])], json!({"tools": ["Pin", "Post"], "offset": 1, "offset_faces": [[25, 20, 10]]}));
+    assert!(rel(v, 32000.0 - 11.0 * 10.0 * 15.0 - 5.0 * 5.0 * 15.0) < 1e-9, "{v}");
+}
+
+/// A picked point on no tool face is named.
+#[test]
+fn combine_cut_offset_refusals_of_picked_faces() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"corner": [15, 15, 5], "length": 10, "width": 10, "height": 30, "body_name": "Pin"}));
+    let p = json!({"target": "Block", "tools": ["Pin"], "operation": "cut", "offset": 1, "offset_faces": [[0, 20, 10]]});
+    let said = s.execute("solid.combine", &p).expect_err(&p.to_string()).to_string();
+    assert!(said.contains("no tool face"), "{said}");
+}
+
+/// An offset is a cut's only, and `offset_edges` needs one.
+#[test]
+fn combine_offset_refusals() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"corner": [10, 0, 0], "length": 20, "width": 20, "height": 20, "body_name": "B"}));
+    for (p, says) in [
+        (json!({"target": "A", "tools": ["B"], "operation": "join", "offset": 1}), "only for a cut"),
+        (json!({"target": "A", "tools": ["B"], "operation": "intersect", "offset": 1}), "only for a cut"),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset_edges": "round"}), "needs an `offset`"),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": "wavy"}), "sharp or round"),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": "2 deg"}), "offset"),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset_faces": [[0, 0, 0]]}), "needs an `offset`"),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_radius": 2}), "needs `offset_edges: round`"),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": "round", "offset_radius": -2}), "must be positive"),
+    ] {
+        let e = s.execute("solid.combine", &p).expect_err(&p.to_string()).to_string();
+        assert!(e.contains(says), "{p}: {e}");
+    }
+    assert_eq!(s.doc.features.len(), 2, "nothing was added");
+    // Without the schema check too, a value that is no expression is refused, never read as
+    // none: the cut would otherwise be saved without its clearance.
+    let mut s = Session { param_check: crate::schema::ParamCheck::Off, ..Session::default() };
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"corner": [10, 0, 0], "length": 20, "width": 20, "height": 20, "body_name": "B"}));
+    for (p, says) in [
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": [0.2]}), "`offset`"),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": true}), "sharp or round"),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": "round", "offset_radius": [2]}), "`offset_radius`"),
+    ] {
+        let e = s.execute("solid.combine", &p).expect_err(&p.to_string()).to_string();
+        assert!(e.contains(says), "{p}: {e}");
+    }
+    assert_eq!(s.doc.features.len(), 2, "nothing was added");
+}
+
 /// Align with snap points: a box's vertex onto another's face centre, an edge midpoint onto a
 /// hole's circle centre.
 #[test]
@@ -6173,6 +6366,65 @@ fn boundary_fill_cells() {
     let m = run(&mut s, "inspect.measure", json!({}));
     assert!(rel(m["total"]["volume_mm3"].as_f64().unwrap_or(0.0), 2.0 * 10.0 * 20.0 * 20.0) < 1e-9, "{m}");
     assert!(s.execute("solid.boundary_fill", &json!({"tools": ["A"], "cells": [[100, 100, 100]]})).is_err());
+}
+
+/// A cup: a cylinder of radius 10 and height 40 with a blind bore of radius 6 from height 10 up,
+/// open at the top, and a plane `Cap` across the bore at the height of the parameter `cap_z`.
+fn plane_fill_cup(s: &mut Session) {
+    run(s, "parameters.add", json!({"name": "cap_z", "expression": "30 mm"}));
+    run(s, "solid.cylinder", json!({"radius": 10, "height": 40, "base": [0, 0, 0], "body_name": "Cup"}));
+    run(s, "solid.cylinder", json!({"radius": 6, "height": 30, "base": [0, 0, 10], "operation": "cut", "targets": ["Cup"]}));
+    run(s, "construct.plane.offset", json!({"base": "XY", "offset": "cap_z", "name": "Cap"}));
+}
+
+/// Boundary Fill takes planes as tools (#20679): a plane across the open end of a cup closes the
+/// bore, so the bore is a cell that exists only with the plane. Its volume follows the plane.
+#[test]
+fn boundary_fill_plane_closes_an_open_cup() {
+    use std::f64::consts::PI;
+    let mut s = Session::default();
+    plane_fill_cup(&mut s);
+    let cup = (100.0 * 40.0 - 36.0 * 30.0) * PI;
+    assert!(rel(body_volume(&s.model.state()), cup) < 1e-6, "the cup alone");
+    // The bore is outside the cup: without the plane there is no cell there.
+    assert!(s.execute("solid.boundary_fill", &json!({"tools": ["Cup"], "cells": [[0, 0, 20]]})).is_err());
+    run(&mut s, "solid.boundary_fill", json!({"tools": ["Cup"], "planes": ["Cap"], "cells": [[0, 0, 20]]}));
+    // The bore between its floor (height 10) and the plane (height 30): pi * 6^2 * 20.
+    assert!(rel(body_volume(&s.model.state()), cup + 36.0 * 20.0 * PI) < 1e-6, "{}", body_volume(&s.model.state()));
+    // Moving the plane changes the filled volume: the saved feature follows it.
+    run(&mut s, "parameters.change", json!({"name": "cap_z", "expression": "25 mm"}));
+    assert!(rel(body_volume(&s.model.state()), cup + 36.0 * 15.0 * PI) < 1e-6, "{}", body_volume(&s.model.state()));
+}
+
+/// A plane that leaves the region open (the cup's bore, cut off below its mouth) closes no cell.
+#[test]
+fn boundary_fill_refuses_a_region_the_planes_leave_open() {
+    let mut s = Session::default();
+    plane_fill_cup(&mut s);
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "5 mm", "name": "Low"}));
+    let before = s.model.state().bodies.len();
+    // Above the low plane the bore is open at the top.
+    let error = s.execute("solid.boundary_fill", &json!({"tools": ["Cup"], "planes": ["Low"], "cells": [[0, 0, 20]]})).unwrap_err().to_string();
+    assert!(error.contains("leave open"), "{error}");
+    assert_eq!(s.model.state().bodies.len(), before);
+    // A name that is no plane is refused.
+    assert!(s.execute("solid.boundary_fill", &json!({"tools": ["Cup"], "planes": ["Nope"], "cells": [[0, 0, 20]]})).is_err());
+    // A cell point on a plane is refused.
+    assert!(s.execute("solid.boundary_fill", &json!({"tools": ["Cup"], "planes": ["Cap"], "cells": [[0, 0, 30]]})).is_err());
+}
+
+/// Bodies and planes mix: the half of a box on one side of a plane.
+#[test]
+fn boundary_fill_mixes_a_body_and_a_plane() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": "10 mm", "name": "Mid"}));
+    run(&mut s, "solid.boundary_fill", json!({"tools": ["A"], "planes": ["Mid"], "cells": [[15, 10, 10]]}));
+    assert!(rel(body_volume(&s.model.state()), 8000.0 + 10.0 * 20.0 * 20.0) < 1e-9, "{}", body_volume(&s.model.state()));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "solid.boundary_fill", json!({"tools": ["A"], "planes": ["Mid"], "cells": [[5, 10, 10], [15, 10, 10]], "remove_tools": true}));
+    assert!(rel(body_volume(&s.model.state()), 8000.0) < 1e-9, "{}", body_volume(&s.model.state()));
+    assert_eq!(s.model.state().bodies.len(), 2);
 }
 
 /// An open square tube crossing two cylinders cannot be treated as a solid operand.

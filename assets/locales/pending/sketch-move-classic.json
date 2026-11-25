@@ -5,7 +5,7 @@
   },
   "ar": {
     "prefs.sketch_move_classic": "مقابض تحريك الرسم القديمة",
-    "prefs.sketch_move_classic_note": "يعرض النقل/النسخ سهم X فقط، وتعرض النقطة ثلاثية الأبعاد المرسومة عند النقر عليها أسهمها الخاصة بدلاً من السحب الحر."
+    "prefs.sketch_move_classic_note": "يعرض النقل/النسخ سهم X فقط، وتعرض النقطة ثلاثية الأبعاد المرسومة عند النقر عليها أسهمها الخاصة بدلًا من السحب الحر."
   },
   "he": {
     "prefs.sketch_move_classic": "ידיות הזזת סקיצה ישנות",
@@ -22,5 +22,9 @@
   "zh": {
     "prefs.sketch_move_classic": "旧版草图移动控制柄",
     "prefs.sketch_move_classic_note": "移动/复制仅显示 X 箭头；单击已绘制的 3D 点时显示其自身的箭头，而不是自由拖动。"
+  },
+  "fr": {
+    "prefs.sketch_move_classic": "Anciennes poignées de déplacement d’esquisse",
+    "prefs.sketch_move_classic_note": "Déplacer/Copier n’affiche que sa flèche X, et un point 3D dessiné sur lequel vous cliquez affiche ses propres flèches au lieu de se déplacer librement par glissement."
   }
 }

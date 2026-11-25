@@ -128,6 +128,36 @@ fn a_picked_section_and_the_placement() {
     assert!(m.all && m.mirror && m.name == "Rail" && m.angle == "15 deg" && ANCHORS[m.anchor].0 == "bottom", "{m:?}");
 }
 
+/// The Up Axis row: a part drawn with Y up picks Y, the command gets `up: "Y"`, and Edit Feature
+/// shows the member's own axis and keeps it; Z, the default, is left out of the command.
+#[test]
+fn the_up_axis_row_sets_and_keeps_the_members_up_axis() {
+    let mut app = frame_app();
+    let lines = frame_lines(&app);
+    let mut d = dialog_on(&mut app, &lines);
+    assert_eq!(UP_AXES[member(&mut d).up].0, "Z");
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c[0].1.get("up").is_none(), "{}", c[0].1);
+    member(&mut d).up = UP_AXES.iter().position(|a| a.0 == "Y").unwrap();
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["up"], json!("Y"), "{}", c[0].1);
+    run_all(&mut app, c);
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    assert_eq!(UP_AXES[member(&mut e).up].0, "Y");
+    member(&mut e).angle = "90 deg".into();
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["up"], json!("Y"), "{}", c[0].1);
+    run_all(&mut app, c);
+    let FeatureKind::FrameMember { up, angle, .. } = &app.session.doc.feature(f).unwrap().kind else { panic!() };
+    assert_eq!((up, angle.as_deref()), (&frame::UpAxis::Y, Some("90 deg")));
+    // Back to Z: the axis is dropped, not kept from the feature.
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    member(&mut e).up = 0;
+    let c = apply_commands(&app, &e).unwrap();
+    assert!(c[0].1["params"].get("up").is_none(), "{}", c[0].1);
+}
+
 /// A member whose section is a whole profile sketch keeps it when edited: the dialog shows the
 /// sketch rather than picking every region of it, which would fill the tube's hole.
 #[test]
@@ -198,6 +228,55 @@ fn an_edit_keeps_each_groups_located_point() {
     let groups = frame::member_groups(&app.session.doc.feature(f).unwrap().kind);
     assert_eq!(groups.iter().map(|g| g.locate).collect::<Vec<_>>(), [Some([10.0, 5.0]), None]);
     assert_eq!(groups[1].body_name.as_deref(), Some("Post"));
+}
+
+/// Edit Feature shows a located member's Offset A and B, worked out once from its `locate` and
+/// its anchor; OK keeps the located point as it was.
+#[test]
+fn an_edit_shows_the_offsets_of_a_located_member() {
+    let mut app = frame_app();
+    let tube = json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3});
+    app.run("frame.member", json!({"sketch": "Frame", "profile": tube, "anchor": "bottom", "locate": [0, -70]})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    assert_eq!(member(&mut e).offset, ["0 mm".to_string(), "50 mm".to_string()], "the tube's bottom is 50 mm from its line");
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["locate"], json!([0.0, -70.0]), "{}", c[0].1);
+}
+
+/// A parameter a profile dimension names, changed while the dialog is open, moves the anchors: the
+/// offsets stay as they were and `locate` is worked out again from them, as OK would.
+#[test]
+fn a_parameter_change_while_open_works_locate_out_again() {
+    let mut app = frame_app();
+    app.run("parameters.add", json!({"name": "H", "expression": "40 mm"})).unwrap();
+    let tube = json!({"kind": "rect_tube", "width": 40, "height": "H", "wall": 3});
+    app.run("frame.member", json!({"sketch": "Frame", "profile": tube, "anchor": "bottom", "locate": [0, -70]})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    assert_eq!(member(&mut e).offset, ["0 mm".to_string(), "50 mm".to_string()]);
+    app.run("parameters.change", json!({"name": "H", "expression": "60 mm"})).unwrap();
+    let (inputs, extra, mut m) = (e.inputs.clone(), e.extra.clone(), member(&mut e).clone());
+    super::sync_offset(&app, &mut m, &inputs, &extra);
+    // The bottom is 30 mm below the centre now; 50 mm from the line is 80 mm.
+    assert_eq!(m.locate, Some([0.0, -80.0]));
+    assert_eq!(m.offset, ["0 mm".to_string(), "50 mm".to_string()], "the offsets are kept");
+}
+
+/// A `locate` the engine takes can be farther from the anchor than any one coordinate may be: an
+/// unchanged edit keeps it, and only a `locate` past the largest profile is refused.
+#[test]
+fn an_edit_keeps_a_located_point_far_from_its_anchor() {
+    let mut app = frame_app();
+    let tube = json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3});
+    app.run("frame.member", json!({"sketch": "Frame", "profile": tube, "anchor": "bottom", "locate": [0, 10000]})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    assert_eq!(member(&mut e).offset, ["0 mm".to_string(), "-10020 mm".to_string()]);
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["locate"], json!([0.0, 10000.0]), "{}", c[0].1);
+    member(&mut e).offset[1] = "-20000 mm".into();
+    assert!(apply_commands(&app, &e).is_err());
 }
 
 /// Without lines there is nothing to place; lines and the section in one sketch are refused.
@@ -2938,6 +3017,298 @@ fn adding_groups_refuses_joined_corners_without_resetting_flat_frame_controls() 
     assert_eq!(p["coped"], true);
     assert_eq!(p["gap"], "2 mm");
     assert_eq!(p["fit_ends"], true);
+}
+
+fn trim(d: &mut Dialog) -> &mut Trim {
+    match &mut d.kind {
+        Kind::FrameTrim(t) => t,
+        k => panic!("{k:?}"),
+    }
+}
+
+/// A post along Y at x = 0 and a rail along X from x = 100, 45 × 45 bar, each its own member
+/// feature: `Post` and `Rail`.
+fn post_and_rail() -> SolveApp {
+    let bar = json!({"kind": "bar", "width": 45, "height": 45});
+    app_with(&[
+        ("sketch.create", json!({"plane": "XY", "name": "Posts"})),
+        ("sketch.line", json!({"points": [[0, -100], [0, 100]]})),
+        ("sketch.finish", json!({})),
+        ("sketch.create", json!({"plane": "XY", "name": "Rails"})),
+        ("sketch.line", json!({"points": [[100, 0], [300, 0]]})),
+        ("sketch.finish", json!({})),
+        ("frame.member", json!({"sketch": "Posts", "profile": bar, "body_name": "Post"})),
+        ("frame.member", json!({"sketch": "Rails", "profile": bar, "body_name": "Rail"})),
+    ])
+}
+
+/// Members and a target picked in the view make `frame.trim`; End and Gap follow the rows; a face
+/// of a member is that member, a plane its name. Edit Feature refills the picks and rows, and a
+/// target a pick can't show (a member's chosen side) is kept unless unticked.
+#[test]
+fn trim_from_picked_members_and_targets() {
+    let mut app = post_and_rail();
+    app.session.selection = vec![Sel::Body { name: "Rail".into() }];
+    app.start("frame.trim");
+    let mut d = app.dialog.clone().unwrap();
+    assert_eq!(d.inputs[0].items, [Sel::Body { name: "Rail".into() }], "the selected member is picked");
+    assert!(apply_commands(&app, &d).is_err(), "nothing to trim to yet");
+    d.inputs[1].items =
+        vec![Sel::Face { body: "Post".into(), index: 0, point: solidcore_record::Vec3::new(22.5, 0.0, 0.0) }, Sel::Plane { name: "YZ".into() }];
+    let t = trim(&mut d);
+    t.end = 1;
+    t.gap = "2 mm".into();
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].0, "frame.trim");
+    assert_eq!(c[0].1, json!({"members": ["Rail"], "to": ["Post", {"plane": "YZ"}], "end": "start", "gap": "2 mm"}));
+    // Only the post: the rail's start butts its side, 2 short of it.
+    d.inputs[1].items.truncate(1);
+    let c = apply_commands(&app, &d).unwrap();
+    run_all(&mut app, c);
+
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    assert_eq!(e.inputs[0].items, [Sel::Body { name: "Rail".into() }]);
+    assert_eq!(e.inputs[1].items, [Sel::Body { name: "Post".into() }]);
+    let t = trim(&mut e);
+    assert_eq!((t.end, t.gap.as_str(), t.kept.len()), (1, "2 mm", 0));
+    t.gap.clear();
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    run_all(&mut app, c);
+
+    // A side chosen through the command is kept by Edit Feature as it is.
+    app.run(
+        "timeline.redefine",
+        json!({"feature": f, "command": "frame.trim", "params": {"members": ["Rail"], "to": [{"member": "Post", "side": "left"}]}}),
+    )
+    .unwrap();
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    assert!(e.inputs[1].items.is_empty());
+    let t = trim(&mut e);
+    assert!(t.keep && t.kept.len() == 1, "{:?}", t.kept);
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["to"][0]["side"], json!("left"), "{}", c[0].1);
+    // Unticked, it goes, and with nothing else picked there is nothing to trim to.
+    trim(&mut e).keep = false;
+    assert!(apply_commands(&app, &e).unwrap_err().contains("trim them to"));
+    run_all(&mut app, c);
+}
+
+/// A face of a body that isn't a member is a plane target, sent as the exact face picked (its
+/// body, index and path), as Start Sketch sends one.
+#[test]
+fn a_face_target_is_the_exact_face_picked() {
+    let mut app = post_and_rail();
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [400, 0, 0], "body_name": "Block"})).unwrap();
+    app.session.selection = vec![Sel::Body { name: "Rail".into() }];
+    app.start("frame.trim");
+    let mut d = app.dialog.clone().unwrap();
+    d.inputs[1].items = vec![Sel::Face { body: "Block".into(), index: 2, point: solidcore_record::Vec3::new(400.0, 5.0, 5.0) }];
+    let c = apply_commands(&app, &d).unwrap();
+    let plane = &c[0].1["to"][0]["plane"];
+    assert_eq!((&plane["face"], &plane["body"], &plane["index"]), (&json!([400.0, 5.0, 5.0]), &json!("Block"), &json!(2)), "{}", c[0].1);
+    assert!(plane["path"].is_array(), "{}", c[0].1);
+}
+
+#[test]
+fn a_changed_member_face_target_follows_its_actual_face() {
+    let mut app = post_and_rail();
+    app.run("solid.move", json!({"bodies": ["Post"], "translate": [10, 0, 0]})).unwrap();
+    app.session.selection = vec![Sel::Body { name: "Rail".into() }];
+    app.start("frame.trim");
+    let mut d = app.dialog.clone().unwrap();
+    let st = app.session.world_state().unwrap();
+    let b = st.body("Post").unwrap();
+    let face = b.body.faces(0.01).unwrap().into_iter().find(|f| f.plane_normal.is_some_and(|n| n.x > 0.99)).unwrap();
+    d.inputs[1].items = vec![Sel::Face { body: "Post".into(), index: face.index, point: face.centroid }];
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["to"][0]["plane"]["body"], "Post");
+    run_all(&mut app, c);
+}
+
+#[test]
+fn editing_a_trim_resolves_a_renamed_construction_plane_by_id() {
+    let mut app = post_and_rail();
+    app.run("construct.plane.offset", json!({"base": "YZ", "offset": 150, "name": "Cut"})).unwrap();
+    let trim = app.run("frame.trim", json!({"members": ["Rail"], "to": {"plane": "Cut"}})).unwrap()["feature"].clone();
+    app.run("timeline.rename", json!({"feature": "Cut", "name": "Renamed cut"})).unwrap();
+    let d = edit_dialog(&app, trim.as_u64().unwrap(), None).unwrap();
+    assert_eq!(d.inputs[1].items, [Sel::Plane { name: "Renamed cut".into() }]);
+    let c = apply_commands(&app, &d).unwrap();
+    run_all(&mut app, c);
+
+    // A placed construction plane cannot be reduced to its name: keep its saved placement.
+    let cut = app.session.doc.find_feature("Renamed cut").unwrap().id;
+    let mut placement = solidcraft_engine::doc::IDENTITY;
+    placement[3][0] = 10.0;
+    let plane = json!({"type": "construction", "feature": cut, "placement": placement});
+    app.run("timeline.redefine", json!({"feature": trim, "command": "frame.trim", "params": {"members": ["Rail"], "to": {"plane_ref": plane}}}))
+        .unwrap();
+    let d = edit_dialog(&app, trim.as_u64().unwrap(), None).unwrap();
+    assert!(d.inputs[1].items.is_empty(), "the placement is kept as an exact reference");
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["params"]["to"][0]["plane_ref"], plane);
+    run_all(&mut app, c);
+}
+
+#[test]
+fn a_transferred_member_face_is_an_exact_plane_target() {
+    let mut app = post_and_rail();
+    let c = app.run("component.create", json!({"name": "Child"})).unwrap()["component"].clone();
+    app.run("component.move_bodies", json!({"component": c, "bodies": ["Post"]})).unwrap();
+    app.run("component.activate", json!({"component": "root"})).unwrap();
+    app.session.selection = vec![Sel::Body { name: "Rail".into() }];
+    app.start("frame.trim");
+    let mut d = app.dialog.clone().unwrap();
+    let st = app.session.world_state().unwrap();
+    let face = st.body("Post").unwrap().body.faces(0.01).unwrap().into_iter().find(|f| f.plane_normal.is_some_and(|n| n.x > 0.99)).unwrap();
+    d.inputs[1].items = vec![Sel::Face { body: "Post".into(), index: face.index, point: face.centroid }];
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["to"][0]["plane"]["body"], "Post");
+    run_all(&mut app, c);
+}
+
+#[test]
+fn continuous_member_dialog_preserves_path_order_and_edit_intent() {
+    let d = 100.0 / 2f64.sqrt();
+    let mut app = app_with(&[
+        ("sketch.create", json!({"plane": "XY", "name": "Chassis"})),
+        ("sketch.line", json!({"points": [[100, -200], [100, 0]]})),
+        ("sketch.arc.three_point", json!({"start": [100, 0], "through": [d, d], "end": [0, 100]})),
+        ("sketch.line", json!({"points": [[0, 100], [-300, 100]]})),
+        ("sketch.finish", json!({})),
+    ]);
+    let id = sketch_id(&app, "Chassis");
+    let ids: Vec<_> = app.session.doc.sketch(id).unwrap().curves.iter().map(|c| c.id.clone()).collect();
+    let mut d = dialog_on(&mut app, &ids);
+    member(&mut d).continuous = true;
+    let commands = apply_commands(&app, &d).unwrap();
+    assert_eq!(commands[0].1["continuous"], true);
+    assert_eq!(commands[0].1["lines"], json!(ids));
+    run_all(&mut app, commands);
+    assert_eq!(body_names(&app).len(), 1);
+    let fid = app.session.doc.features.last().unwrap().id;
+    let mut edit = edit_dialog(&app, fid, None).unwrap();
+    assert!(member(&mut edit).continuous);
+    let commands = apply_commands(&app, &edit).unwrap();
+    assert_eq!(commands[0].1["params"]["continuous"], true);
+    run_all(&mut app, commands);
+    assert_eq!(body_names(&app).len(), 1);
+    member(&mut edit).all = true;
+    assert!(apply_commands(&app, &edit).unwrap_err().contains("path order"));
+}
+
+/// Preselect two exact support faces as a user would before starting the dialog.
+fn gusset_with_picked_supports() -> SolveApp {
+    let mut app = app_with(&[
+        ("solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":300,"body_name":"Post"})),
+        ("solid.box", json!({"corner":[20,-20,0],"length":300,"width":40,"height":40,"body_name":"Rail"})),
+    ]);
+    for (name, point, normal) in [("Post", [20., 0., 100.], [1., 0., 0.]), ("Rail", [100., 0., 40.], [0., 0., 1.])] {
+        let st = app.session.model.state();
+        let body = st.body(name).unwrap();
+        let point = solidcore_record::Vec3::new(point[0], point[1], point[2]);
+        let normal = solidcore_record::Vec3::new(normal[0], normal[1], normal[2]);
+        let index = (0..body.body.face_count())
+            .find(|i| body.body.planar_face(*i).is_some_and(|p| p.normal().dot(normal) > 0.999 && (p.origin - point).dot(normal).abs() < 1e-6))
+            .unwrap();
+        app.session.selection.push(Sel::Face { body: name.into(), index, point });
+    }
+    app
+}
+
+#[test]
+/// Preselection, preview and Edit Feature preserve the picks and rebuild the changed plate.
+fn gusset_preselection_preview_and_edit_keep_exact_supports() {
+    let mut app = gusset_with_picked_supports();
+    app.start("frame.gusset");
+    let mut d = app.dialog.clone().unwrap();
+    assert!(d.previews());
+    assert_eq!(d.inputs.iter().map(|i| i.items.len()).collect::<Vec<_>>(), [1, 1]);
+    let Kind::Gusset(g) = &mut d.kind else { panic!("wrong dialog") };
+    g.leg1 = "80 mm".into();
+    g.leg2 = "100 mm".into();
+    let preview = crate::dialogs::preview_commands(&app, &d).unwrap();
+    assert_eq!(preview[0].0, "frame.gusset");
+    assert!(preview[0].1["supports"][0]["index"].is_number());
+    let c = apply_commands(&app, &d).unwrap();
+    run_all(&mut app, c);
+    let fid = app.session.doc.features.last().unwrap().id;
+    let mut edit = edit_dialog(&app, fid, None).unwrap();
+    assert!(edit.inputs.iter().all(|i| i.items.len() == 1));
+    let Kind::Gusset(g) = &mut edit.kind else { panic!("wrong edit dialog") };
+    assert_eq!(g.leg2, "100 mm");
+    g.thickness = "8 mm".into();
+    let c = apply_commands(&app, &edit).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    run_all(&mut app, c);
+    let state = app.session.model.state();
+    let body = state.bodies.iter().find(|b| b.feature == fid).unwrap();
+    assert!((body.mesh().measure().volume - 32000.).abs() < 1e-5);
+}
+
+/// The outline follows the evaluated clip, and editing thickness preserves its expression.
+#[test]
+fn gusset_edit_restores_the_outline_from_the_clip_expression() {
+    let mut app = gusset_with_picked_supports();
+    app.session.execute("parameters.add", &json!({"name":"tip","expression":"0.0 mm"})).unwrap();
+    app.start("frame.gusset");
+    let mut d = app.dialog.clone().unwrap();
+    let Kind::Gusset(g) = &mut d.kind else { panic!("wrong dialog") };
+    g.clip = "tip".into();
+    g.profile = 1;
+    let c = apply_commands(&app, &d).unwrap();
+    run_all(&mut app, c);
+    let fid = app.session.doc.features.last().unwrap().id;
+
+    let mut edit = edit_dialog(&app, fid, None).unwrap();
+    let Kind::Gusset(g) = &mut edit.kind else { panic!("wrong edit dialog") };
+    assert_eq!(g.profile, 0);
+    g.thickness = "8 mm".into();
+    let c = apply_commands(&app, &edit).unwrap();
+    assert_eq!(c[0].1["params"]["clip"], "tip");
+    run_all(&mut app, c);
+    app.session.execute("parameters.change", &json!({"name":"tip","expression":"10 mm"})).unwrap();
+    let edit = edit_dialog(&app, fid, None).unwrap();
+    let Kind::Gusset(g) = &edit.kind else { panic!("wrong edit dialog") };
+    assert_eq!(g.profile, 1);
+}
+
+#[test]
+/// Click each icon and verify both the resulting plate bounds and translated accessible names.
+fn gusset_placement_icons_select_both_sides_and_center_with_exact_bounds() {
+    let mut h = crate::scenario::Harness::new();
+    h.app = gusset_with_picked_supports();
+    h.app.home.open = false;
+    h.app.start("frame.gusset");
+    h.frames(3);
+    assert!(crate::scenario::rect_of("dialog:segments:Thickness Placement").is_some(), "placement is a visible icon strip");
+    let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
+    for label in ["Negative Side", "Centered", "Positive Side"] {
+        assert!(nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(label)), "accessible icon: {label}");
+    }
+    for (label, placement, min, max) in
+        [("Negative Side", "negative", 0., 6.), ("Centered", "center", -3., 3.), ("Positive Side", "positive", -6., 0.)]
+    {
+        crate::test_support::click(&mut h, &format!("dialog:Thickness Placement:{label}"));
+        let d = h.app.dialog.as_ref().unwrap();
+        let commands = crate::dialogs::preview_commands(&h.app, d).unwrap();
+        assert_eq!(commands[0].1["placement"], placement);
+        let mut preview = Session::new(solidcraft_engine::doc::Document::from_json(&h.app.session.doc.to_json()).unwrap());
+        let result = preview.execute(&commands[0].0, &commands[0].1).unwrap();
+        let state = preview.model.state();
+        let body = state.bodies.iter().find(|b| b.feature == result["feature"].as_u64().unwrap()).unwrap();
+        let bounds = body.mesh().bounds();
+        assert!((bounds.min.y - min).abs() < 1e-6 && (bounds.max.y - max).abs() < 1e-6, "{label}: {bounds:?}");
+    }
+    // Icon-only controls still have translated names for keyboard/screen-reader users.
+    h.app.preferences.language = "de".into();
+    h.frames(3);
+    let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
+    for id in ["ui.gusset.negative", "ui.gusset.center", "ui.gusset.positive"] {
+        assert!(nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(h.app.tr(id))), "{id}");
+    }
 }
 
 fn plate_app() -> (SolveApp, Sel) {

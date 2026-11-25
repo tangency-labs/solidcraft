@@ -307,7 +307,7 @@ fn select_item(app: &mut SolveApp, ui: &egui::Ui, item: TimelineItem, order: &[T
     }
 }
 
-fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft_engine::doc::TimelineGroup], feature_menu: bool) {
+pub(crate) fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft_engine::doc::TimelineGroup], feature_menu: bool) {
     let features = selected_feature_ids(app);
     let selected_groups = app.tree.picked_timeline_groups.clone();
     let has_selection = !features.is_empty() || !selected_groups.is_empty();
@@ -418,7 +418,7 @@ pub fn reveal_feature(app: &mut SolveApp, feature: u64) {
 }
 
 /// The features of these folders and of the folders nested in them, in timeline order.
-fn folder_features(app: &SolveApp, roots: &[u64]) -> Vec<u64> {
+pub(crate) fn folder_features(app: &SolveApp, roots: &[u64]) -> Vec<u64> {
     let groups = &app.session.doc.timeline_groups;
     let inside = |feature: u64| {
         group_for(groups, feature).is_some_and(|group| roots.contains(&group) || roots.iter().any(|root| group_is_descendant(groups, group, *root)))
@@ -618,7 +618,7 @@ fn visible_order(
 }
 
 /// Start a folder rename typed in its History row: no floating box (#16217).
-fn start_folder_rename(app: &mut SolveApp, group: u64) {
+pub(crate) fn start_folder_rename(app: &mut SolveApp, group: u64) {
     crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(group), pos2(0.0, 0.0));
     if let Some(rename) = app.menu.rename.as_mut() {
         rename.inline = true;
@@ -1061,6 +1061,7 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
     let reference = matches!(row_kind, RowKind::Reference { .. });
     let listed =
         (row_kind == RowKind::Own).then(|| plan.row_at(index)).flatten().map(|row| row.listed.as_slice()).filter(|listed| !listed.is_empty());
+    // Its patterns and projections fold under a sketch.
     let has_patterns = !reference && matches!(kind, TimelineKind::Sketch) && table.has_patterns.get(index).copied().unwrap_or(false);
     // One fold per row: a feature's listed sketches, or a sketch's patterns.
     let fold = match listed {
@@ -1113,6 +1114,7 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
     if names && has_patterns && fold_open {
         let depth = group_id.map_or(1, |group| table.depth_of(group) + 2) + usize::from(row_kind == RowKind::Nested);
         crate::sketch_pattern_tree::rows(app, ui, id, depth, "timeline", None, false);
+        crate::sketch_link_tree::rows(app, ui, id, depth, "timeline", false);
     }
     if let Some(listed) = listed.filter(|_| names && fold_open) {
         for child in listed {
@@ -2208,7 +2210,7 @@ mod tests {
         h.settle();
         assert!(row_y("timeline:Block") < row_y("timeline:Profile") && row_y("timeline:Profile") < row_y("timeline:Second"));
         assert!(handle_at("timeline:Pocket").is_none(), "only the opened feature shows its sketch");
-        assert!(h.app.session.selection.is_empty(), "the fold arrow only folds");
+        assert!(!h.app.session.has_selection(), "the fold arrow only folds");
         // The fold is kept with the browser's folds, between runs.
         let mut restored = Harness::new();
         restored.app.load_prefs(&h.app.prefs());
@@ -2365,7 +2367,7 @@ mod tests {
         h.frames(30);
         h.step(&json!({"click": {"handle": "timeline:Profile"}})).unwrap();
         assert!(h.app.dialog.is_some() && h.app.session.active_sketch.is_none(), "the sketch row's click goes to the dialog too");
-        assert!(h.app.session.selection.is_empty(), "dialog picks leave the ordinary selection alone");
+        assert!(!h.app.session.has_selection(), "dialog picks leave the ordinary selection alone");
     }
 
     #[test]
@@ -2441,7 +2443,10 @@ mod tests {
         for (index, feature) in features.iter().enumerate() {
             assert_eq!(table.group_of[index], group_for(groups, feature.0), "{}", feature.1);
             let sketch = matches!(feature.5, TimelineKind::Sketch);
-            assert_eq!(sketch && table.has_patterns[index], sketch && crate::sketch_pattern_tree::has_patterns(app, feature.0));
+            assert_eq!(
+                sketch && table.has_patterns[index],
+                sketch && (crate::sketch_pattern_tree::has_patterns(app, feature.0) || crate::sketch_link_tree::has_links(app, feature.0))
+            );
         }
         for (at, group) in groups.iter().enumerate() {
             assert_eq!(table.depth[at], group_depth(groups, group.id), "{}", group.name);
