@@ -2604,7 +2604,7 @@ fn rust_heal(
                 stop = true;
                 break;
             }
-            Ok(new_probs) => o.extend([0.0, flag(new_probs)]),
+            Ok(new_probs) => o.extend([crate::status::ok_slot(0.0), flag(new_probs)]),
             Err(e) => match classify(e) {
                 Fail::NullDeref(s) => {
                     o.push(s);

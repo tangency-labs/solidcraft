@@ -653,7 +653,7 @@ fn rust_cci(cci: &CciIn, leaves: Option<(u64, u64)>) -> Result<Output, HarnessEr
         ($c:expr, $cache:expr, $h:expr) => {
             match build_cache(&k, $c, $cache, $h) {
                 Ok(cc) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     Some(cc)
                 }
                 Err(Fail::Deferred(d)) => return Ok(*d),
@@ -703,7 +703,7 @@ fn rust_cci(cci: &CciIn, leaves: Option<(u64, u64)>) -> Result<Output, HarnessEr
             };
             match gs.solve_it(&req, &mut sols) {
                 Ok(()) => {
-                    o.extend([0.0, sols.len() as f64]);
+                    o.extend([crate::status::ok_slot(0.0), sols.len() as f64]);
                     for s in sols.as_slice() {
                         put_sol(&mut o, s, &n1, &n2);
                     }

@@ -633,8 +633,8 @@ fn rust_cr_eu_body(
         &mut guess,
     );
     match &res {
-        Ok(Some(iv)) => v.extend([0.0, iv.surface2_rail as f64, iv.surface2_index as f64]),
-        Ok(None) => v.extend([0.0, -1.0, 999.0]),
+        Ok(Some(iv)) => v.extend([crate::status::ok_slot(0.0), iv.surface2_rail as f64, iv.surface2_index as f64]),
+        Ok(None) => v.extend([crate::status::ok_slot(0.0), -1.0, 999.0]),
         Err(e) if e.is_unported() => return Err(e.clone()),
         // (upstream sets rpSurface2 first and leaves the index unchanged)
         Err(e) => v.extend([status(e), (1 - rail) as f64, 999.0]),
@@ -1052,8 +1052,8 @@ fn rust_record_seen(
                 cr.take_surface_extension(*rail, &s1).map_err(|e| he(&e))?;
             }
             match &res {
-                Ok(Some(v)) => o.extend([0.0, v.surface2_rail as f64, v.surface2_index as f64]),
-                Ok(None) => o.extend([0.0, -1.0, 999.0]),
+                Ok(Some(v)) => o.extend([crate::status::ok_slot(0.0), v.surface2_rail as f64, v.surface2_index as f64]),
+                Ok(None) => o.extend([crate::status::ok_slot(0.0), -1.0, 999.0]),
                 Err(e) => match fail(e) {
                     // (upstream sets rpSrf2Offset first and leaves the index unchanged)
                     Ok(s) => o.extend([s, 1usize.wrapping_sub(*rail) as f64, 999.0]),
@@ -1104,9 +1104,9 @@ fn rust_record_seen(
                 )
             };
             match res {
-                Ok(false) => o.extend([0.0, 0.0]),
+                Ok(false) => o.extend([crate::status::ok_slot(0.0), 0.0]),
                 Ok(true) => {
-                    o.extend([0.0, 1.0]);
+                    o.extend([crate::status::ok_slot(0.0), 1.0]);
                     push_tsect_uvs(&mut o, &t);
                     if !guess {
                         for srf in [SrfIndex::First, SrfIndex::Second] {
@@ -1472,8 +1472,8 @@ fn rust_rollover(ri: &RolloverIn) -> Result<Output, HarnessError> {
     };
     let mut o = Vec::new();
     match &res {
-        Ok(Some(v)) => o.extend([0.0, v.surface2_rail as f64, v.surface2_index as f64]),
-        Ok(None) => o.extend([0.0, -1.0, 999.0]),
+        Ok(Some(v)) => o.extend([crate::status::ok_slot(0.0), v.surface2_rail as f64, v.surface2_index as f64]),
+        Ok(None) => o.extend([crate::status::ok_slot(0.0), -1.0, 999.0]),
         Err(e) => match fail(e) {
             // (upstream sets rpSrf2Offset first and leaves the index unchanged)
             Ok(st) => o.extend([st, 1usize.wrapping_sub(rail) as f64, 999.0]),

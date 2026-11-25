@@ -1308,7 +1308,7 @@ fn put_exact_curve(o: &mut Vec<f64>, k: &Kernel, c: &Curve) -> solidcore::Result
     for i in 0..=4 {
         match c.evaluate(k, ivl.evaluate(0.25 * f64::from(i)), 1, true, true) {
             Ok(pn) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 for v in pn.iter().take(2) {
                     pv(o, *v);
                 }

@@ -172,7 +172,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut o = Vec::new();
     match r {
         Ok(out) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             o.push(out.max_drop_to_surf);
             o.push(out.max_approx_dev);
             put_curves(&mut o, &out.uv_curves)?;

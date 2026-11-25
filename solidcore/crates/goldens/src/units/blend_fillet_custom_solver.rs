@@ -484,7 +484,7 @@ fn rust_create(
     let res = EiffelTowerCrossSectionFsg::new().create_surface(&k, tol, &mut r1, &mut r2, &pts);
     let mut o = Vec::new();
     match &res {
-        Ok(_) => o.push(0.0),
+        Ok(_) => o.push(crate::status::ok_slot(0.0)),
         Err(e) => {
             if let Some(out) = Output::unported(e) {
                 return Ok(out);
@@ -551,7 +551,7 @@ fn rust_jac(
     let mut o = Vec::new();
     let found = match &res {
         Ok(b) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             *b
         }
         Err(e) => {
@@ -641,8 +641,8 @@ fn rust_init(
     };
     let mut o = Vec::new();
     match &res {
-        Ok(Some(iv)) => o.extend([0.0, iv.surface2_rail as f64, iv.surface2_index as f64]),
-        Ok(None) => o.extend([0.0, -1.0, 999.0]),
+        Ok(Some(iv)) => o.extend([crate::status::ok_slot(0.0), iv.surface2_rail as f64, iv.surface2_index as f64]),
+        Ok(None) => o.extend([crate::status::ok_slot(0.0), -1.0, 999.0]),
         Err(e) => {
             if let Some(out) = Output::unported(e) {
                 return Ok(out);

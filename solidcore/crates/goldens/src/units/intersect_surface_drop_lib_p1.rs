@@ -666,7 +666,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             let a = pt_in(start)?;
             let mut e = pt_in(end)?;
             match st(a.check_seam_jump(k, &s, closure(*cl), *tol, &mut e))? {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(code) => o.push(code),
             }
             put_pt(o, &e);
@@ -698,7 +698,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                     StackIn::Look => stack_look(&stack),
                 };
                 match st(r)? {
-                    Ok((t, uv)) => o.extend([0.0, t, uv[0].x, uv[0].y, uv[1].x, uv[1].y]),
+                    Ok((t, uv)) => o.extend([crate::status::ok_slot(0.0), t, uv[0].x, uv[0].y, uv[1].x, uv[1].y]),
                     Err(code) => o.push(code),
                 }
             }

@@ -675,7 +675,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             o.clear();
             match bp.create_boundary_curve_for_index(&k, &surface, *index) {
                 Ok(c) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     dump_iso_curve(&mut o, &c)?;
                 }
                 Err(e) if e.is_unported() => return Ok(Err(e)),
@@ -688,7 +688,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             }
             match bp.compute_bounding_planes(&k, &surface) {
                 Ok(()) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     o.push(flag(bp.are_planes_computed()));
                     for i in 0..4 {
                         o.push(flag(bp.is_boundary_degenerate(i)));
@@ -898,7 +898,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                         Err(e) => return Err(harness(format!("region: {e}"))),
                     },
                     ProgIn::Mark => match cache.mark_face_containment(&k) {
-                        Ok(()) => o.push(0.0),
+                        Ok(()) => o.push(crate::status::ok_slot(0.0)),
                         Err(e) if e.is_unported() => return Ok(Err(e)),
                         Err(e) => o.push(status(&e)),
                     },
@@ -982,7 +982,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             for (d, tol) in calls {
                 match cache.iso_boundary_curves(&k, &dom_of(*d), *tol) {
                     Ok(r) => {
-                        o.push(0.0);
+                        o.push(crate::status::ok_slot(0.0));
                         o.push(flag(r.cached));
                         for c in &r.curves {
                             dump_iso_curve(&mut o, c)?;

@@ -325,7 +325,7 @@ fn run_rust_op(op: &OpIn, b: &mut Brep, eu: EdgeuseId) -> Result<Vec<f64>, Solid
             let mut v = Vec::new();
             match eu3::evaluate_binormal_uv(&k, b, eu, t, *use_3d, &options) {
                 Ok(r) => {
-                    v.push(0.0);
+                    v.push(crate::status::ok_slot(0.0));
                     for p in [
                         r.eval.point,
                         r.eval.binormal,
@@ -352,7 +352,7 @@ fn run_rust_op(op: &OpIn, b: &mut Brep, eu: EdgeuseId) -> Result<Vec<f64>, Solid
             let mut v = Vec::new();
             match eu3::normalized_evaluate(&k, b, eu, *t, *parameter_space, *want_deriv, *ok_make) {
                 Ok(r) => {
-                    v.push(0.0);
+                    v.push(crate::status::ok_slot(0.0));
                     v.extend([r.point.x, r.point.y, r.point.z]);
                     let d = r.first_deriv.unwrap_or(Vec3::new(0.0, 0.0, 0.0));
                     v.extend([d.x, d.y, d.z]);

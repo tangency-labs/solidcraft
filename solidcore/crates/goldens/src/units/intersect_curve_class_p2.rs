@@ -498,7 +498,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     cc.interval_max_uv(&k, &geometry, *j, given)
                 };
                 match st(r)? {
-                    Ok(p) => o.extend([0.0, p.x, p.y]),
+                    Ok(p) => o.extend([crate::status::ok_slot(0.0), p.x, p.y]),
                     Err(code) => o.extend([code, uv[0], uv[1]]),
                 }
             }

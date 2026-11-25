@@ -143,7 +143,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         let ivl = Extent1d::from_min_max(c.ivl[0], c.ivl[1]);
         match law.evaluate(c.t, &ivl, c.reverse) {
             Ok(v) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 o.extend(v);
             }
             Err(e) => {
@@ -735,7 +735,7 @@ fn exec_step(
                 Ok(())
             });
             match r {
-                Ok(()) => q.extend([0.0, f64::from(u8::from(bevel))]),
+                Ok(()) => q.extend([crate::status::ok_slot(0.0), f64::from(u8::from(bevel))]),
                 Err(e) => q.push(status(&e)),
             }
         }

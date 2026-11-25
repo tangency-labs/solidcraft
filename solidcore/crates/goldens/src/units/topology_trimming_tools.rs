@@ -1061,7 +1061,7 @@ fn put_samples(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
     for i in 0..=4 {
         match c.evaluate_point(k, ivl.evaluate(f64::from(i) / 4.0)) {
             Ok(p) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 put_vec(o, p);
             }
             Err(e) => {
@@ -1120,7 +1120,7 @@ fn find_outer(
     );
     match r {
         Ok(outer) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             put_outer(o, &ordered, &counts, &orients, normal, &outer);
         }
         Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => o.extend([0.0, crate::status::kind_slot(&kernel_err, NULL_DEREF)]),

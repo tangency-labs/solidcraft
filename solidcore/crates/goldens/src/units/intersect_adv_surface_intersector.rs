@@ -243,7 +243,7 @@ fn legacy_status(e: &SolidError) -> f64 {
 fn st<T>(o: &mut Vec<f64>, r: solidcore::Result<T>) -> Result<Option<T>, Fail> {
     match r {
         Ok(v) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             Ok(Some(v))
         }
         Err(e) => {
@@ -698,7 +698,7 @@ fn rust_inner(i: &Inputs) -> Result<Vec<f64>, Fail> {
     } else if i.build_trees {
         match si.set_surface_caches(&k, &mut caches) {
             Ok(()) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 for t in 0..2 {
                     let tree = si
                         .solver

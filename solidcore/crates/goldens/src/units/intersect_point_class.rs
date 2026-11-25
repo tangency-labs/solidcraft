@@ -884,7 +884,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                         return Err(rejected());
                     }
                     match st(pc.find_obj_point_3d(&k, &pool))? {
-                        Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
+                        Ok(p) => o.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
                         Err(c) => o.push(c),
                     }
                 }
@@ -989,7 +989,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     };
                     match st(merged)? {
                         Ok(m) => {
-                            o.extend([0.0, m.new_edges.len() as f64, m.new_vertices.len() as f64]);
+                            o.extend([crate::status::ok_slot(0.0), m.new_edges.len() as f64, m.new_vertices.len() as f64]);
                         }
                         Err(c) => o.extend([c, 0.0, 0.0]),
                     }

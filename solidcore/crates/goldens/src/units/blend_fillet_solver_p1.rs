@@ -1410,7 +1410,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                 &mut guess,
             );
             match r {
-                Ok(_) => o.push(0.0),
+                Ok(_) => o.push(crate::status::ok_slot(0.0)),
                 Err(e @ SolidError::Unported { .. }) => {
                     return Ok(Output::unported(&e).unwrap_or_default())
                 }

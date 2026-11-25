@@ -1344,7 +1344,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                         };
                         match r {
                             Ok((t, pvv)) => {
-                                o.extend([0.0, t]);
+                                o.extend([crate::status::ok_slot(0.0), t]);
                                 pv(&mut o, pvv[0]);
                                 pv(&mut o, pvv[1]);
                             }

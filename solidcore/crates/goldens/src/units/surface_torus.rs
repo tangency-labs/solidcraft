@@ -507,7 +507,7 @@ fn rust_op(
                         match off.rebuild_step_from_nurb_parameters(k) {
                             Err(e) if e.is_unported() => return Err(e),
                             Err(e) => o.push(status(&e)),
-                            Ok(()) => o.push(0.0),
+                            Ok(()) => o.push(crate::status::ok_slot(0.0)),
                         }
                     }
                     put_state(o, &off)?;
@@ -544,7 +544,7 @@ fn rust_op(
                 Ok(())
             }
             Ok(other) => {
-                o.extend([0.0, flag(t.approx_eq(&other)), flag(other.approx_eq(t))]);
+                o.extend([crate::status::ok_slot(0.0), flag(t.approx_eq(&other)), flag(other.approx_eq(t))]);
                 Ok(())
             }
         },
@@ -558,7 +558,7 @@ fn rust_op(
             let pnat = p.natural_uv_domain();
             match t.intersect_with_plane(k, &p, &dom_of(args.other_dom, pnat), args.tol) {
                 Ok((more, out)) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_intersection(o, more, &out);
                     Ok(())
                 }
@@ -620,7 +620,7 @@ fn rust_op(
                 Ok(())
             }
             Ok(None) => {
-                o.extend([0.0, 0.0]);
+                o.extend([crate::status::ok_slot(0.0), 0.0]);
                 Ok(())
             }
             Ok(Some(found)) => {
@@ -680,7 +680,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             o.push(status(&e));
         }
         Ok(mut t) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             let at = o.len();
             if let Err(e) = rust_op(&k, &mut t, &i.op, &mut o)? {
                 if let Some(out) = Output::unported(&e) {

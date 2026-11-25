@@ -116,7 +116,7 @@ fn surface(out: &mut Vec<f64>, k: &Kernel, s: Option<&Surface>) -> solidcore::Re
             let u = u0 + (u1 - u0) * (i as f64 / (GRID - 1) as f64);
             let v = v0 + (v1 - v0) * (j as f64 / (GRID - 1) as f64);
             match s.evaluate_point(k, Point2::new(u, v)) {
-                Ok(p) => out.extend([0.0, p.x, p.y, p.z]),
+                Ok(p) => out.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
                 Err(e) => out.push(status(&e)),
             }
         }

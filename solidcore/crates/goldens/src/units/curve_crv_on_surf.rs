@@ -1209,7 +1209,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let mut db = DatabaseReader::with_stream(ft, InputStream::new(read_db.bytes.clone()));
             match CrvOnSurf::read_from_db(&Kernel::default(), &mut db, read_db.version) {
                 Ok(c) => {
-                    o.extend([0.0, 1.0]);
+                    o.extend([crate::status::ok_slot(0.0), 1.0]);
                     put_state(&mut o, &c);
                 }
                 Err(e) => {

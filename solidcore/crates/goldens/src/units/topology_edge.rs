@@ -1226,7 +1226,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             })?;
         }
         OpIn::EndTangent { e, at_start } => match ed::end_tangent(&k, b, eid(*e), *at_start) {
-            Ok(t) => out.extend([0.0, t.x, t.y, t.z]),
+            Ok(t) => out.extend([crate::status::ok_slot(0.0), t.x, t.y, t.z]),
             Err(kernel_err @ SolidError::InvalidInput { .. }) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
             Err(err) if err.is_unported() => return Err(err.into()),
             Err(_) => out.extend([1.0, 0.0, 0.0, 0.0]),
@@ -1242,7 +1242,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             cascade,
         } => match ed::set_tolerance(b, eid(*e), *tol, *only_larger, *cascade) {
             Ok(()) => {
-                out.push(0.0);
+                out.push(crate::status::ok_slot(0.0));
                 put_state(b, &mut out);
             }
             Err(kernel_err @ SolidError::InvalidInput { .. }) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
@@ -1339,7 +1339,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             };
             match r {
                 Ok(g) => {
-                    out.push(0.0);
+                    out.push(crate::status::ok_slot(0.0));
                     match g.max {
                         Some(m) => out.extend(gap_values(&m)),
                         None => out.extend([-1.0, 0.0]),
@@ -1369,7 +1369,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             };
             match ed::notify(b, eid(*e), &mut env, notify_operation(*operation)?, [None; 3]) {
                 Ok(()) => {
-                    out.push(0.0);
+                    out.push(crate::status::ok_slot(0.0));
                     put_state(b, &mut out);
                 }
                 Err(kernel_err @ SolidError::InvalidInput { .. }) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
@@ -1509,7 +1509,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             let mut dydx = vec![1.0; *n as usize];
             let ode = ed::OdeEdgeLength::new(c, Vec3::new(origin[0], origin[1], origin[2]), *radius);
             match ode.evaluate(&k, *t, &mut dydx) {
-                Ok(()) => out.push(0.0),
+                Ok(()) => out.push(crate::status::ok_slot(0.0)),
                 Err(kernel_err @ SolidError::InvalidInput { .. }) => {
                     return Ok(Output::new().values("state", vec![crate::status::kind_slot(&kernel_err, NULL_DEREF)]))
                 }

@@ -399,7 +399,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Inputs::Trim { a, b, .. } => {
             let mut trim = Extent3d::new();
             match need()?.trim_param_bounding_box_simple(&ext(&[*a, *b]), &mut trim) {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(e) => {
                     if let Some(d) = Output::unported(&e) {
                         return Ok(d);

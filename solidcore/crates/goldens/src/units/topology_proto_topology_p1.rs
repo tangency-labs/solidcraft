@@ -848,7 +848,7 @@ pub(super) fn put_curve(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
     for i in 0..=4 {
         match c.evaluate_point(k, ivl.evaluate(f64::from(i) / 4.0)) {
             Ok(p) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 put_vec(o, p);
             }
             Err(e) => o.push(status(&e)),
@@ -868,7 +868,7 @@ fn put_surface(k: &Kernel, o: &mut Vec<f64>, s: &Surface) {
             );
             match s.evaluate_point(k, uv) {
                 Ok(p) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_vec(o, p);
                 }
                 Err(e) => o.push(status(&e)),
@@ -2770,7 +2770,7 @@ pub(super) fn unique_live<T: PartialEq + Copy>(v: &[T], live: impl Fn(T) -> bool
 fn put_eval(out: &mut Vec<f64>, r: Result<(Option<Vec3>, Option<Vec3>), f64>, mode: i64) {
     match r {
         Ok((pp, tt)) => {
-            out.push(0.0);
+            out.push(crate::status::ok_slot(0.0));
             if mode & 1 != 0 {
                 put_vec(out, pp.unwrap_or(Vec3::UNDEF));
             }

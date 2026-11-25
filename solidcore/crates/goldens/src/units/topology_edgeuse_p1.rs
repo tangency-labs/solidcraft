@@ -1075,7 +1075,7 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                 )),
                 2 => match eu1::calc_max_edge_face_gap(&crate::runner_kernel(), b, e, *f) {
                     Ok(g) => {
-                        out.extend([0.0, flag(*want_out && g.is_init())]);
+                        out.extend([crate::status::ok_slot(0.0), flag(*want_out && g.is_init())]);
                         if *want_out && g.is_init() {
                             vals.extend([g.gap_3d, g.edge_t, g.face_uv.x, g.face_uv.y]);
                         }
@@ -1085,7 +1085,7 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                 },
                 _ => match eu1::calc_edge_ccw_edge_gap(&crate::runner_kernel(), b, e, *want_out, *f) {
                     Ok(g) => {
-                        out.extend([0.0, flag(g.is_some_and(|g| g.is_init()))]);
+                        out.extend([crate::status::ok_slot(0.0), flag(g.is_some_and(|g| g.is_init()))]);
                         if let Some(g) = g.filter(solidcore::heal::gap::EdgeEdgeGap::is_init) {
                             vals.extend([g.gap_3d, g.edge_t0, g.edge_t1]);
                         }

@@ -511,7 +511,7 @@ fn probes(k: &Kernel, o: &mut Vec<f64>, c: &Curve, ts: &[f64]) -> Result<(), Sol
     for &t in ts {
         match c.evaluate_point(k, t) {
             Ok(p) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 pv(o, p);
             }
             Err(e @ SolidError::Unported { .. }) => return Err(e),
@@ -519,7 +519,7 @@ fn probes(k: &Kernel, o: &mut Vec<f64>, c: &Curve, ts: &[f64]) -> Result<(), Sol
         }
         match c.evaluate(k, t, 3, true, true) {
             Ok(v) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 for x in v {
                     pv(o, x);
                 }

@@ -1092,7 +1092,7 @@ fn surface_op_on(
                         2 => e.set_sect_dir(Vec3::new(st[1], st[2], st[3])),
                         _ => match e.eval() {
                             Ok(()) => {
-                                o.push(0.0);
+                                o.push(crate::status::ok_slot(0.0));
                                 let pvv = e.values();
                                 for (i, row) in pvv.iter().enumerate() {
                                     for (j, v) in row.iter().enumerate() {

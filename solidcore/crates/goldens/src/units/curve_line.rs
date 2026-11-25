@@ -440,7 +440,7 @@ impl From<HarnessError> for Fail {
 fn st<T>(o: &mut Vec<f64>, r: solidcore::Result<T>) -> Result<Option<T>, Fail> {
     match r {
         Ok(v) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             Ok(Some(v))
         }
         Err(e) => {
@@ -1040,7 +1040,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     };
     let mut a = match made {
         Ok(l) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             l
         }
         Err(s) => {

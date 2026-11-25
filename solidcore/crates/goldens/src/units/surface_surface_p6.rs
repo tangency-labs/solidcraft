@@ -504,7 +504,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
     match &i.op {
         OpIn::Cont { param } => match st(s.calculate_continuities(&k, param_of(*param)?))? {
             Ok((min, conts)) => {
-                o.extend([0.0, f64::from(min as i32), conts.len() as f64]);
+                o.extend([crate::status::ok_slot(0.0), f64::from(min as i32), conts.len() as f64]);
                 o.extend(conts.iter().map(|c| f64::from(*c as i32)));
             }
             Err(c) => o.push(c),
@@ -512,7 +512,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         OpIn::Trim { dom, side, remove } => {
             match st(s.create_natural_uv_trim_curves(&k, &dom_of(*dom), param_of(*side)?, *remove))? {
                 Ok(t) => {
-                    o.extend([0.0, t.curves_3d.len() as f64]);
+                    o.extend([crate::status::ok_slot(0.0), t.curves_3d.len() as f64]);
                     for (j, c) in t.curves_3d.iter().enumerate() {
                         let orient = t.orients.get(j).copied().unwrap_or_default();
                         o.push(orient_code(orient));
@@ -575,7 +575,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             };
             match st(def.sample_values(&k, &s, &bc, &ivl_of(*ivl), opts))? {
                 Ok(r) => {
-                    o.extend([0.0, r.params.len() as f64]);
+                    o.extend([crate::status::ok_slot(0.0), r.params.len() as f64]);
                     for (j, t) in r.params.iter().enumerate() {
                         o.push(*t);
                         let get = |v: &[Vec3]| v.get(j).copied().ok_or_else(|| harness("short"));
@@ -656,7 +656,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             let sol = solution_of(sol, [curve_obj(&c), surface_obj(0, &s)])?;
             match st(s.classify_intersecting_range_solution(&k, &c, &sol))? {
                 Ok((degenerate, point)) => {
-                    o.extend([0.0, b(degenerate)]);
+                    o.extend([crate::status::ok_slot(0.0), b(degenerate)]);
                     match point {
                         Some(p) => {
                             o.push(p.solution_value);
@@ -746,7 +746,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             );
             match st(r)? {
                 Ok(sols) => {
-                    o.extend([0.0, sols.len() as f64]);
+                    o.extend([crate::status::ok_slot(0.0), sols.len() as f64]);
                     for sol in sols.as_slice() {
                         o.extend([
                             f64::from(sol.solution_type.code()),

@@ -618,7 +618,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                     &mut ch,
                 );
                 match st(r)? {
-                    Ok(()) => o.push(0.0),
+                    Ok(()) => o.push(crate::status::ok_slot(0.0)),
                     Err(c) => {
                         o.push(c);
                         failed = true;
@@ -633,7 +633,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                 let mut ch = false;
                 let r = flush_curve(&d, &mut poly, &mut knots, uv_tol[0], uv_tol[1], &mut curves, &mut ch);
                 match st(r)? {
-                    Ok(()) => o.push(0.0),
+                    Ok(()) => o.push(crate::status::ok_slot(0.0)),
                     Err(c) => o.push(c),
                 }
                 o.push(b(ch));
@@ -654,7 +654,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             let mut ch = false;
             let r = flush_curve(&d, &mut poly, &mut knots, uv_tol[0], uv_tol[1], &mut curves, &mut ch);
             match st(r)? {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(c) => o.push(c),
             }
             o.push(b(ch));

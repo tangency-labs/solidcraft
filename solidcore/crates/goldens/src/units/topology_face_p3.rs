@@ -460,7 +460,7 @@ fn put_samples(c: &SmCurve, out: &mut Vec<f64>) -> Result<(), SolidError> {
     out.extend([ivl.min(), ivl.max()]);
     for k in 0..=2u8 {
         match c.evaluate_point(&crate::runner_kernel(), ivl.evaluate(f64::from(k) / 2.0)) {
-            Ok(p) => out.extend([0.0, p.x, p.y, p.z]),
+            Ok(p) => out.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
             Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
                 out.extend([f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))), 0.0, 0.0, 0.0]);
             }

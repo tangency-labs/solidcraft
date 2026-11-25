@@ -206,7 +206,7 @@ fn put_surface_samples(k: &Kernel, o: &mut Vec<f64>, s: &Surface) -> Result<(), 
     for fu in f {
         for fv in f {
             match s.evaluate_point(k, dom.evaluate(fu, fv)) {
-                Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
+                Ok(p) => o.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
                 Err(e) => {
                     if let Some(d) = Output::unported(&e) {
                         return Err(Box::new(d));

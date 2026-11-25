@@ -904,7 +904,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
         }
         OpIn::UvPoint { vu, ok_to_make } => {
             match vu1::compute_uv_point(&k, b, vid(*vu), *ok_to_make) {
-                Ok(p) => vec![0.0, p.x, p.y],
+                Ok(p) => vec![crate::status::ok_slot(0.0), p.x, p.y],
                 Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => vec![crate::status::kind_slot(&kernel_err, NULL_DEREF) as f64],
                 Err(e) => vec![
                     status_of(&e)?,

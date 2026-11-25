@@ -393,7 +393,7 @@ fn put_trims(k: &Kernel, o: &mut Vec<f64>, b: &Brep) -> SolidResult<()> {
             o.extend([c.type_code() as f64, d.min(), d.max()]);
             for f in [0.17, 0.37, 0.83] {
                 match c.evaluate_point(k, d.evaluate(f)) {
-                    Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
+                    Ok(p) => o.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
                     Err(e) if e.is_unported() => return Err(e),
                     Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => o.push(f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1)))),
                     Err(_) => o.push(-1.0),

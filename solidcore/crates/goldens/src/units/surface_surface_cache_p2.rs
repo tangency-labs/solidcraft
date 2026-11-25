@@ -349,7 +349,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             for &ix in idx {
                 match bp.nth_bounding_plane(&k, &surface, usize::from(ix)) {
                     Ok(r) => {
-                        o.extend([0.0, flag(r.plane_exists), flag(r.boundary_degenerate)]);
+                        o.extend([crate::status::ok_slot(0.0), flag(r.plane_exists), flag(r.boundary_degenerate)]);
                         if let Some(p) = r.plane {
                             push3(&mut o, p.base_point);
                             push3(&mut o, p.normal);
@@ -543,7 +543,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             let r = cache.subdivide_by_block(&k, NodeId(0));
             let mut o = Vec::new();
             match r {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(e) if e.is_unported() => return Ok(Err(e)),
                 Err(e) => o.push(status(&e)),
             }

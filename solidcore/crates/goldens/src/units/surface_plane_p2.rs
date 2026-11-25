@@ -385,7 +385,7 @@ fn defer<T>(r: solidcore::Result<T>) -> Result<solidcore::Result<T>, Fail> {
 fn st<T>(o: &mut Vec<f64>, r: solidcore::Result<T>) -> Result<Option<T>, Fail> {
     match defer(r)? {
         Ok(v) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             Ok(Some(v))
         }
         Err(e) => {

@@ -3231,7 +3231,7 @@ impl From<HarnessError> for Fail {
 fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, Fail> {
     match r {
         Ok(v) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             Ok(Some(v))
         }
         Err(e @ (SolidError::Upstream { .. } | SolidError::Failed(_))) => {

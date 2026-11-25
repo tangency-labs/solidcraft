@@ -739,7 +739,7 @@ fn measures(k: &Kernel, b: &mut Brep) -> Result<Vec<f64>, Stop> {
     };
     crate::dump::body(k, "volume", b);
     let mut o = match brep_volume(k, b, VOLUME_ACCURACY, &attrs) {
-        Ok(v) => vec![0.0, v],
+        Ok(v) => vec![crate::status::ok_slot(0.0), v],
         Err(e) => vec![fail(&e)?, 0.0],
     };
     let faces = brep_p1::faces(b, None).map_err(|e| stop("GetFaces", &e))?;

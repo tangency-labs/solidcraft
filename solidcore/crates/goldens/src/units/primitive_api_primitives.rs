@@ -346,7 +346,7 @@ fn put_grid(o: &mut Vec<f64>, d: &Extent2d, eval: impl Fn(Point2) -> solidcore::
             );
             match eval(uv) {
                 Ok(p) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_vec(o, p);
                 }
                 Err(e) => o.push(status(&e)),

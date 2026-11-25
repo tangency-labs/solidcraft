@@ -562,7 +562,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         OpIn::NormalSing { uv, tol } => {
             match st(s.evaluate_normal_at_singularity(&k, p2(*uv), *tol))? {
                 Ok(n) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     pv(&mut o, n);
                 }
                 Err(c) => o.push(c),

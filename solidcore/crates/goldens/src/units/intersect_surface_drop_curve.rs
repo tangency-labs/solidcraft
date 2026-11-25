@@ -445,7 +445,7 @@ fn run_op(
             let mut prev = if *use_prev { r.last } else { None };
             match st(t.compute_point_values_with_prev(k, p2(*uv), &mut p, prev.as_mut()))? {
                 Ok(()) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_point(o, &p);
                     o.push(b(prev.is_some()));
                     if let Some(pp) = prev {
@@ -457,7 +457,7 @@ fn run_op(
             }
         }
         OpIn::Step { param, old } => match st(t.step_size(*param, *old))? {
-            Ok(v) => o.extend([0.0, v]),
+            Ok(v) => o.extend([crate::status::ok_slot(0.0), v]),
             Err(s) => o.extend([s, 0.0]),
         },
         OpIn::AddBreak { values, new } => {
@@ -483,7 +483,7 @@ fn run_op(
         OpIn::Graze { p1, curve: c2, p2 } => {
             let c2 = rust_curve(c2)?;
             match st(is_grazing_intersection(k, curve, *p1, &c2, *p2))? {
-                Ok(g) => o.extend([0.0, b(g)]),
+                Ok(g) => o.extend([crate::status::ok_slot(0.0), b(g)]),
                 Err(s) => o.push(s),
             }
         }
@@ -492,7 +492,7 @@ fn run_op(
             nb.curve_parameter = *param;
             match st(t.drop_local_point_solve(k, p2(*guess), &mut nb))? {
                 Ok(found) => {
-                    o.extend([0.0, b(found.is_some())]);
+                    o.extend([crate::status::ok_slot(0.0), b(found.is_some())]);
                     put_point(o, &nb);
                     if let Some(f) = found {
                         put_uv(o, f);
@@ -541,7 +541,7 @@ fn run_op(
             };
             match st(t.span_deviation(k, &lp, &lp, *step))? {
                 Ok((dev, ok)) => {
-                    o.extend([0.0, b(ok)]);
+                    o.extend([crate::status::ok_slot(0.0), b(ok)]);
                     if ok {
                         o.push(dev.unwrap_or(0.0));
                     }
@@ -556,12 +556,12 @@ fn run_op(
             };
             let id = t.base.new_point(lp);
             match st(t.trace_curve_2(k, id, &mut r.acc))? {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(s) => o.push(s),
             }
         }
         OpIn::Interior => match st(t.interior_curves(k, &mut r.acc))? {
-            Ok(()) => o.push(0.0),
+            Ok(()) => o.push(crate::status::ok_slot(0.0)),
             Err(s) => o.push(s),
         },
         OpIn::Boundary => {
@@ -571,7 +571,7 @@ fn run_op(
             };
             match st(t.boundary_start_points(k, &mut cache, &mut r.acc))? {
                 Ok(()) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_start_points(o, t)?;
                 }
                 Err(s) => o.push(s),
@@ -584,7 +584,7 @@ fn run_op(
             let (tol, ang) = (t.base.approx_tol_3d, t.base.ang_tol_rad);
             match st(t.drop_trace(k, &mut cache, Some(tol), Some(ang), None))? {
                 Ok(out) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_acc(o, &out);
                 }
                 Err(s) => o.push(s),

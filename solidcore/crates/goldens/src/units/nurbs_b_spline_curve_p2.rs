@@ -819,7 +819,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
         let mut o = Vec::new();
         match BSplineCurve::create_by_joining(&mut set, senses.as_deref()) {
             Ok(c) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 push_new(&mut o, Some(&c));
             }
             Err(e) => {

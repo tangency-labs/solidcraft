@@ -966,7 +966,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         let mut db = DatabaseReader::with_stream(FileType::Ascii, InputStream::new(bytes.clone()));
         match SrfInVolume::read_from_db(&k, &mut db, *version) {
             Ok(c) => {
-                o.extend([0.0, 1.0]);
+                o.extend([crate::status::ok_slot(0.0), 1.0]);
                 put_state(&mut o, &c);
             }
             Err(e) => {

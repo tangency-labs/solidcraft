@@ -223,7 +223,7 @@ fn run_enfo<E: EvalNFunctions>(
         let mut jac = Matrix::new(dim, dim);
         match stat(e.evaluate(x, &mut f, Some(&mut jac)))? {
             Ok(found) => {
-                o.extend([0.0, b(found)]);
+                o.extend([crate::status::ok_slot(0.0), b(found)]);
                 o.extend_from_slice(&f);
                 for r in 0..dim {
                     for c in 0..dim {
@@ -270,7 +270,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
         OpIn::EvalGeometric { uv, fu, fv } => {
             match stat(s.evaluate_geometric(k, p2(*uv), side(*fu), side(*fv)))? {
                 Ok(g) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     push_geometric(&mut o, &g);
                 }
                 Err(c) => o.push(c),
@@ -279,7 +279,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
         OpIn::NormalSection { uv, fu, fv, dir } => {
             match stat(s.evaluate_normal_section(k, p2(*uv), side(*fu), side(*fv), v3(*dir)))? {
                 Ok(sec) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     pv(&mut o, sec.tangent);
                     o.push(sec.curvature);
                     pv(&mut o, sec.normal);
@@ -291,7 +291,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
             let k = Kernel::new(&KernelOptions::default());
             match stat(s.get_singularities(&k, *pts, *nrm))? {
                 Ok(sing) => {
-                    o.extend([0.0, f64::from(sing.singular), f64::from(sing.approx_singular)]);
+                    o.extend([crate::status::ok_slot(0.0), f64::from(sing.singular), f64::from(sing.approx_singular)]);
                     for p in sing.pole_points.iter().flatten() {
                         pv(&mut o, *p);
                     }
@@ -308,7 +308,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
             let k = Kernel::new(&KernelOptions::default());
             match stat(s.cover_coincident_surface_deferring_trims(&k, &other, *tol, d.as_ref()))? {
                 Ok(r) => {
-                    o.extend([0.0, b(r.success), r.max_dist]);
+                    o.extend([crate::status::ok_slot(0.0), b(r.success), r.max_dist]);
                     if let Some(c) = r.covered_step_domain.filter(|_| r.success) {
                         o.extend([c.u_min(), c.v_min(), c.u_max(), c.v_max()]);
                     }

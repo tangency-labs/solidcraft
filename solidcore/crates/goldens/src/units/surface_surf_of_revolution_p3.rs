@@ -508,7 +508,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             o.push(status(&e));
         }
         Ok(surf) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             let at = o.len();
             if let Err(e) = rust_op(&k, &surf, &i.op, &mut o)? {
                 if let Some(out) = Output::unported(&e) {

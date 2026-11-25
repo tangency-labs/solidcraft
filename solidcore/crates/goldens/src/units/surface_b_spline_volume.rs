@@ -254,7 +254,7 @@ fn put_state(o: &mut Vec<f64>, v: &Volume) {
 fn put_knots(o: &mut Vec<f64>, r: solidcore::Result<(Vec<f64>, Vec<usize>)>) {
     match r {
         Ok((k, m)) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             o.push(k.len() as f64);
             o.extend(k);
             o.push(m.len() as f64);

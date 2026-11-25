@@ -895,7 +895,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 g.base.best_answer_so_far_sq = *best;
                 let branch: Branch = [Some(nd), None, None];
                 match g.local_solve(&branch) {
-                    Ok(needs) => o.extend([0.0, b(needs)]),
+                    Ok(needs) => o.extend([crate::status::ok_slot(0.0), b(needs)]),
                     Err(e) => match Fail::from(e) {
                         Fail::Deferred(d) => return Ok(*d),
                         Fail::Status(s) => o.extend([s, 0.0]),

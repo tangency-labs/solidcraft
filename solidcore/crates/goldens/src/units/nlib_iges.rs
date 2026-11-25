@@ -254,7 +254,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Inputs::Validate { u, p, v } => {
             let m = u.len().checked_sub(1).ok_or_else(|| harness("no knots"))?;
             match iges::validate(u, m, *p, *v) {
-                Ok(()) => vec![0.0],
+                Ok(()) => vec![crate::status::ok_slot(0.0)],
                 Err(e) => vec![status_of(&e)],
             }
         }

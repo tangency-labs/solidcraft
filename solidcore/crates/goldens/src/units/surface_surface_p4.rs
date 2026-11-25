@@ -217,7 +217,7 @@ fn run_enfo<E: EvalNFunctions>(
         let mut jac = Matrix::new(dim, dim);
         match stat(e.evaluate(x, &mut f, Some(&mut jac)))? {
             Ok(found) => {
-                o.extend([0.0, b(found)]);
+                o.extend([crate::status::ok_slot(0.0), b(found)]);
                 if found {
                     // upstream returns early: only the last function value is set
                     o.push(f.last().copied().unwrap_or(0.0));
@@ -255,7 +255,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
             match stat(e.eval())? {
                 Ok(()) => match stat(e.normal(k))? {
                     Ok(n) => {
-                        o.push(0.0);
+                        o.push(crate::status::ok_slot(0.0));
                         pv(&mut o, n);
                     }
                     Err(c) => o.push(c),
@@ -266,7 +266,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
         OpIn::SectionFn { uv, dir } => match eval_matrix(k, &s, *uv)? {
             Ok(mut pvv) => match stat(evaluate_normal_section(&mut pvv, v3(*dir)))? {
                 Ok((tangent, curvature)) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     pv(&mut o, tangent);
                     o.push(curvature);
                 }
@@ -297,7 +297,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
             let d = dom.map(dom_of);
             match stat(is_point_on_normal(k, &s, d.as_ref(), p2(*uv), v3(*p), deriv.map(v3), *tol))? {
                 Ok(r) => {
-                    o.extend([0.0, b(r.from_left_u), b(r.from_left_v), b(r.good_point)]);
+                    o.extend([crate::status::ok_slot(0.0), b(r.from_left_u), b(r.from_left_v), b(r.good_point)]);
                     o.push(reason_code(r.reason));
                     o.push(r.drop_to_surf);
                     o.push(if r.reason == NormalTestReason::BadSurfacePoint {
@@ -310,14 +310,14 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
             }
         }
         OpIn::PassSp { uv, p, tol } => match stat(pass_sp_convergence_test(k, &s, p2(*uv), v3(*p), *tol))? {
-            Ok(pass) => o.extend([0.0, b(pass)]),
+            Ok(pass) => o.extend([crate::status::ok_slot(0.0), b(pass)]),
             Err(c) => o.push(c),
         },
         OpIn::Seam { param, known } => {
             let k = Kernel::new(&KernelOptions::default());
             match stat(s.create_seam_curve(&k, param_of(*param)?, *known))? {
                 Ok(seam) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     o.push(b(seam.is_some()));
                     if let Some(c) = seam {
                         let iv = c.natural_interval();
@@ -326,7 +326,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
                             let t = iv.min() + (iv.max() - iv.min()) * f64::from(n) / 4.0;
                             match stat(c.evaluate_point(&k, t))? {
                                 Ok(p) => {
-                                    o.push(0.0);
+                                    o.push(crate::status::ok_slot(0.0));
                                     pv(&mut o, p);
                                 }
                                 Err(code) => {
@@ -342,7 +342,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
         }
         OpIn::IsOnSeam { uv, tol } => match stat(s.is_on_seam(&Kernel::new(&KernelOptions::default()), p2(*uv), *tol))? {
             Ok(info) => {
-                o.extend([0.0, b(info.on_seam), f64::from(info.seam_dir as i32)]);
+                o.extend([crate::status::ok_slot(0.0), b(info.on_seam), f64::from(info.seam_dir as i32)]);
                 o.push(info.cross_seam_uvs.len() as f64);
                 for q in &info.cross_seam_uvs {
                     o.extend([q.x, q.y]);
@@ -378,7 +378,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
         OpIn::StepInv { dom, p, tol, guess } => {
             let k = Kernel::new(&KernelOptions::default());
             match stat(s.step_inversion(&k, &dom_of(*dom), v3(*p), *tol, guess.map(p2)))? {
-                Ok((uv, loc)) => o.extend([0.0, uv.x, uv.y, f64::from(loc as i32)]),
+                Ok((uv, loc)) => o.extend([crate::status::ok_slot(0.0), uv.x, uv.y, f64::from(loc as i32)]),
                 Err(c) => o.push(c),
             }
         }

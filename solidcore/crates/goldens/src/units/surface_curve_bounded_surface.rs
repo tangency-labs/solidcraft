@@ -606,7 +606,7 @@ fn dump_curve(k: &Kernel, o: &mut Vec<f64>, c: &SmCurve) {
         let t = a + (b - a) * (f64::from(i) / 4.0);
         match c.evaluate_point(k, t) {
             Ok(p) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 push3(o, p);
             }
             Err(e) => {

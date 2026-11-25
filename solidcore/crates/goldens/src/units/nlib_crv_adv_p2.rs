@@ -506,7 +506,7 @@ fn rust_record(i: &Inputs, c: &InlineCrv, cur: &Curve) -> Vec<f64> {
                     .and_then(|u| cur.eval_unbounded_pts_and_derivs(u, e.ndr, cont.cont(), &mut st));
                 match res {
                     Ok(d) => {
-                        r.push(0.0);
+                        r.push(crate::status::ok_slot(0.0));
                         for p in d {
                             push3(&mut r, p);
                         }

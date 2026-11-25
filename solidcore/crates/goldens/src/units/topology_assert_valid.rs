@@ -503,7 +503,7 @@ fn update_rust(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> Result<Output, Harne
     let mut out = vec![0.0];
     match validation::validate_and_update_tolerances(k, b, false, Some(&mut reports), i.level) {
         Ok(g) => {
-            out.push(1000.0);
+            out.push(crate::status::ok_slot(1000.0));
             out.extend([
                 f64::from(g.violated_or_updated),
                 g.max_vertex_edge_gap,

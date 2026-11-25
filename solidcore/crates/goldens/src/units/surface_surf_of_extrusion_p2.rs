@@ -639,7 +639,7 @@ fn put_tsect(o: &mut Vec<f64>, r: &ExtrusionIntersection) {
 fn tsect(o: &mut Vec<f64>, r: solidcore::Result<ExtrusionIntersection>) -> Result<(), Stop> {
     match r {
         Ok(r) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             put_tsect(o, &r);
             Ok(())
         }
@@ -665,7 +665,7 @@ fn nurb_surface(s: &SurfOfExtrusion) -> Result<BSplineSurface, HarnessError> {
 fn sub<T>(o: &mut Vec<f64>, r: Result<T, Stop>) -> Result<Option<T>, Stop> {
     match r {
         Ok(v) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             Ok(Some(v))
         }
         Err(Stop::Status(s)) => {
@@ -788,7 +788,7 @@ fn rust_op(
         }
         OpIn::Trim { dom } => match s.trim_with_domain(k, &dom4(*dom)) {
             Ok(()) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 put_state(k, o, s).map_err(|e| stop(&e))
             }
             Err(e) => match stop(&e) {
@@ -830,7 +830,7 @@ fn rust_test(
         }
         TestSourceIn::Src { of } => match rust_src(k, of)? {
             Ok(s) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 nurb_surface(&s)?
             }
             Err(Stop::Status(st)) => {
@@ -843,7 +843,7 @@ fn rust_test(
     let push = |o: &mut Vec<f64>, r: solidcore::Result<()>| -> Result<(), Stop> {
         match r {
             Ok(()) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 Ok(())
             }
             Err(e) => match stop(&e) {
@@ -904,7 +904,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                         let made = if had { Ok(()) } else { s.make_nurb(&k) };
                         match made {
                             Ok(()) => {
-                                o.push(0.0);
+                                o.push(crate::status::ok_slot(0.0));
                                 put_state(&k, &mut o, &s).map_err(|e| harness(e.to_string()))?;
                             }
                             Err(e) => {
@@ -915,7 +915,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                             }
                         }
                     }
-                    Ok(None) => o.extend([0.0, 0.0]),
+                    Ok(None) => o.extend([crate::status::ok_slot(0.0), 0.0]),
                     Err(e) => {
                         if let Some(d) = Output::unported(&e) {
                             return Ok(d);
@@ -929,7 +929,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             Err(Stop::Deferred(d)) => return Ok(*d),
             Err(Stop::Status(st)) => o.push(st),
             Ok(mut s) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 if let Err(stop) = rust_op(&k, &mut s, op, &mut o)? {
                     match stop {
                         Stop::Deferred(d) => return Ok(*d),
@@ -948,7 +948,7 @@ fn rust_query(k: &Kernel, s: &Surface, q: &QueryIn, o: &mut Vec<f64>) -> Result<
     fn st<T>(o: &mut Vec<f64>, r: solidcore::Result<T>) -> Result<Option<T>, Box<Output>> {
         match r {
             Ok(v) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 Ok(Some(v))
             }
             Err(e) => {

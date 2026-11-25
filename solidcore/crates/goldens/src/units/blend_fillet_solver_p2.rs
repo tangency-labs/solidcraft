@@ -905,7 +905,7 @@ fn rust_run(i: &Inputs, o: &mut Vec<f64>) -> Result<Result<(), SolidError>, Harn
             );
             match r {
                 Ok(found) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_offsets(o, &fs);
                     o.push(b(found));
                     if found {
@@ -958,7 +958,7 @@ fn rust_run(i: &Inputs, o: &mut Vec<f64>) -> Result<Result<(), SolidError>, Harn
             );
             match r {
                 Ok(param) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_offsets(o, &fs);
                     o.push(b(param.is_some()));
                     if let Some(p) = param {
@@ -1004,7 +1004,7 @@ fn rust_run(i: &Inputs, o: &mut Vec<f64>) -> Result<Result<(), SolidError>, Harn
             );
             match r {
                 Ok(found) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_offsets(o, &fa);
                     put_offsets(o, &fb);
                     o.push(b(found));

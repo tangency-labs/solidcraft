@@ -769,7 +769,7 @@ fn push_res<T>(
 ) -> Result<(), Fail> {
     match r {
         Ok(v) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             f(o, v)
         }
         Err(e) => {
@@ -1104,7 +1104,7 @@ fn run_step_seen(
         StepIn::Copy => push_res(o, s.copy(k), |o, c| put_result(k, o, &Surface::from(c))),
         StepIn::Eq { other } => match rust_off(k, other)? {
             Ok(other) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 let eq = s.approx_eq(k, &Surface::from(other));
                 let w = Surface::from(s.clone());
                 let self_eq = w.approx_eq(k, &w);

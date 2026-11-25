@@ -1034,7 +1034,7 @@ pub(crate) fn put_curve(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
     }
     for i in 0..=6 {
         match c.evaluate_point(k, ivl.evaluate(f64::from(i) / 6.0)) {
-            Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
+            Ok(p) => o.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
             Err(e) => o.push(status(&e)),
         }
     }

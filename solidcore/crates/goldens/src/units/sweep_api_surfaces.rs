@@ -423,7 +423,7 @@ fn surface_result(
 ) -> Result<(), SolidError> {
     match r {
         Ok(s) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             dump_surface(o, &s);
             Ok(())
         }
@@ -590,7 +590,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             }
             match api::create_skin_from_faces(&mut k, &faces, degree) {
                 Ok(r) => {
-                    o.extend([0.0, 1.0, r.new_faces.len() as f64]);
+                    o.extend([crate::status::ok_slot(0.0), 1.0, r.new_faces.len() as f64]);
                     Ok(())
                 }
                 Err(e) if e.is_unported() => Err(e),

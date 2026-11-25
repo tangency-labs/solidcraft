@@ -1272,7 +1272,7 @@ fn run_rust_op(
             let indexed: Vec<usize> = indexed.iter().map(|&i| i as usize).collect();
             let key = key_of(t).key;
             match bp1::add_attributes(&mut store, key, &indexed, &handles) {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(e) => o.push(status_of(&e)),
             }
             let got: Vec<i64> = store
@@ -1286,7 +1286,7 @@ fn run_rust_op(
             let e = EdgeId::from_index(*edge as u32);
             match bp1::reverse_reflection_edgeuses(b, e) {
                 Ok(()) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     o.extend(ids(&b.edge(e)?.edgeuses));
                 }
                 Err(e) => o.push(status_of(&e)),
@@ -1296,7 +1296,7 @@ fn run_rust_op(
             let f = FaceId::from_index(*face as u32);
             match bp1::swap_reflection_shells(b, f) {
                 Ok(()) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     let fu1 = b.face(f)?.faceuse.ok_or_else(|| harness("no face use"))?;
                     let fu2 = b.faceuse(fu1)?.mate.ok_or_else(|| harness("no mate"))?;
                     for fu in [fu1, fu2] {
@@ -1345,7 +1345,7 @@ fn run_rust_op(
             };
             match r {
                 Ok(()) => {
-                    o.extend([0.0, size]);
+                    o.extend([crate::status::ok_slot(0.0), size]);
                     if let Some(v) = v {
                         o.extend(ids(&b.vertex(v)?.vertexuses));
                     }
@@ -1495,7 +1495,7 @@ fn run_rust_op(
             };
             let r = bp1::update_vertex_edge_intervals(k, b, &mut env, v);
             match r {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(e) if e.is_unported() => return Err(e.into()),
                 Err(e) => o.push(status_of(&e)),
             }
@@ -1519,7 +1519,7 @@ fn run_rust_op(
             let uv: Option<Curve> = has_uv.then(stand_in_uv_curve);
             let d = Extent2d::from_bounds(dom[0], dom[1], dom[2], dom[3]);
             match bp1::redistribute_seam_uv_trim_curves(k, b, e, uv.as_ref(), seam, &d) {
-                Ok(swapped) => o.extend([0.0, flag(swapped)]),
+                Ok(swapped) => o.extend([crate::status::ok_slot(0.0), flag(swapped)]),
                 Err(err) if err.is_unported() => return Err(err.into()),
                 Err(err) => o.push(status_of(&err)),
             }
@@ -1569,7 +1569,7 @@ fn run_rust_op(
                 *for_tess,
             );
             match r {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(e) if e.is_unported() => return Err(e.into()),
                 Err(e) => o.push(status_of(&e)),
             }
@@ -1607,7 +1607,7 @@ fn run_rust_op(
                 .collect();
             match bp1::create_corner_blend(k, b, &ids, tangent.as_deref(), *tol, *ang) {
                 Ok(s) => {
-                    o.extend([0.0, s.len() as f64]);
+                    o.extend([crate::status::ok_slot(0.0), s.len() as f64]);
                     for blend in s {
                         put_surface(&mut o, &Surface::from(blend))?;
                     }
@@ -1741,7 +1741,7 @@ fn run_rust_op(
             };
             match bp1::create_parallel_projection_curves(k, b, &c, Vec3::from_array(*vec), &opts) {
                 Ok(r) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     match r.curves_3d {
                         None => o.push(-1.0),
                         Some(cs) => {
@@ -1945,7 +1945,7 @@ fn put_intersection_curve(k: &Kernel, curve: &Curve, out: &mut Vec<f64>) -> Resu
     for fraction in INTERSECTION_SAMPLES {
         match curve.evaluate_point(k, domain.evaluate(fraction)) {
             Ok(point) => {
-                out.push(0.0);
+                out.push(crate::status::ok_slot(0.0));
                 out.extend(point.to_array());
             }
             Err(e) if e.is_unported() => return Err(e.into()),

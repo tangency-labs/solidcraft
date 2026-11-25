@@ -1580,7 +1580,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
             }
             match fp2::points_in_face(&mut k, b, fid(*f), *count) {
             Ok(r) => {
-                o.extend([0.0, r.uv.len() as f64]);
+                o.extend([crate::status::ok_slot(0.0), r.uv.len() as f64]);
                 for p in &r.uv {
                     o.extend([p.x, p.y]);
                 }
@@ -1597,7 +1597,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
             // `CalculateAnInternalPoint` (its OP_INTERNAL)
             super::query_face_p1::drop_trim_cache(b, fid(*f))?;
             match fp2::calculate_an_internal_point(&k, b, fid(*f)) {
-            Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
+            Ok(p) => o.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
                 Err(e) => o.extend([status_of(e)?, 0.0, 0.0, 0.0]),
             }
         }
@@ -1608,7 +1608,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
             want_uv,
         } => match fp2::create_curves_from_face(&k, b, fid(*f), orient(*or), *want_3d, *want_uv) {
             Ok(r) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 o.push(r.curve_loops.len() as f64);
                 o.extend(r.curve_loops.iter().map(|&n| n as f64));
                 o.push(r.curve_orients.len() as f64);
@@ -1731,7 +1731,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
                 return Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]);
             };
             match fp2::fix_uv_trim_curves(&k, b, cur, p, v, *tol, *dist, &dom) {
-                Ok(fixed) => o.extend([0.0, flag(fixed)]),
+                Ok(fixed) => o.extend([crate::status::ok_slot(0.0), flag(fixed)]),
                 Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => return Ok(vec![crate::status::kind_slot(&kernel_err, NULL_DEREF)]),
                 Err(e) => o.extend([status_of(e)?, 0.0]),
             }

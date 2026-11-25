@@ -407,7 +407,7 @@ pub(crate) fn put_default_geom(
             d.min().y + fv * (d.max().y - d.min().y),
         );
         match s.surface.evaluate_point(k, uv) {
-            Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
+            Ok(p) => v.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
             Err(e) if e.is_unported() => return Err(e),
             Err(e) if crate::status::is_kernel(&e, solidcore::error::nurbs::upstream_status(&e).is_some()) => {
                 v.extend([f64::from(crate::status::kind_slot(&e, solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1))), 0.0, 0.0, 0.0]);
@@ -605,7 +605,7 @@ fn rust_generator(i: &Inputs) -> Result<Rec, HarnessError> {
         _ => return Err(harness("not a generator op")),
     };
     match &res {
-        Ok(_) => o.push(0.0),
+        Ok(_) => o.push(crate::status::ok_slot(0.0)),
         Err(e) => match fail(e) {
             Ok(s) => o.push(s),
             Err(out) => return Ok(Err(out)),
@@ -797,7 +797,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             let r2 = bcurve_of(rail2)?;
             match LinearCrossSectionFsg.create_surface(&r1, &r2) {
                 Ok(s) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     dump_surface(&mut o, &s);
                 }
                 Err(e) => match fail(&e) {
@@ -822,7 +822,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
                 }
                 match fs.evaluate_base_curve(&k, t, n) {
                     Ok(pv) => {
-                        o.push(0.0);
+                        o.push(crate::status::ok_slot(0.0));
                         for v in pv {
                             o.extend([v.x, v.y, v.z]);
                         }
@@ -873,7 +873,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             // (`SmExtent2d(u0, v0, u1, v1)`: stored as given, as the shim builds it)
             let mut d = Extent2d::from_bounds(domain[0], domain[1], domain[2], domain[3]);
             match fs.setup_offset_extension(&k, &s, &mut d) {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 // (no status upstream: a void function)
                 Err(e) => match fail(&e) {
                     Ok(s) => o.push(s),
@@ -954,7 +954,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             );
             let found = match &res {
                 Ok(b) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     *b
                 }
                 Err(e) => match fail(e) {
@@ -1036,7 +1036,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             );
             let found = match &res {
                 Ok(b) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     *b
                 }
                 Err(e) => match fail(e) {
@@ -1152,7 +1152,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
         Inputs::VrSetup { solver, user } => {
             let mut fs = vr_of(&k, solver)?;
             match fs.setup_offset_values(&tsect(*user)) {
-                Ok(d) => o.extend([0.0, d]),
+                Ok(d) => o.extend([crate::status::ok_slot(0.0), d]),
                 Err(e) => match fail(&e) {
                     Ok(s) => o.extend([s, -999.0]),
                     Err(out) => return Ok(Err(out)),
@@ -1285,7 +1285,7 @@ fn rust_edgeuse_body(
     let id = FilletSolverId(0);
     match constant_radius_from_edgeuse(&k, b, &mut pseudo, id, tol, ang, tan, r, eu, r2) {
         Ok(fs) => {
-            v.push(0.0);
+            v.push(crate::status::ok_slot(0.0));
             for i in 0..2 {
                 let e = fs.solver.edgeuses.get(i).copied().flatten();
                 v.push(e.map_or(-1.0, |e| f64::from(e.index())));
@@ -1305,7 +1305,7 @@ fn rust_edgeuse_body(
                     d.min().y + fv * (d.max().y - d.min().y),
                 );
                 match s.surface.evaluate_point(&k, uv) {
-                    Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
+                    Ok(p) => v.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
                     Err(e) if e.is_unported() => return Err(e),
                     Err(e) if crate::status::is_kernel(&e, false) => {
                         v.extend([crate::status::kind_slot(&e, 0.0), 0.0, 0.0, 0.0]);

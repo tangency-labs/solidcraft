@@ -281,7 +281,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                 conts: vec![ContinuityType::C0],
             };
             match v.calculate_continuities_simple(k, param, &mut d, *geom) {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(e) => {
                     if let Some(d) = Output::unported(&e) {
                         return Ok(d);

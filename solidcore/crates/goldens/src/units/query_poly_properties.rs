@@ -177,7 +177,7 @@ fn push<T>(
 ) -> Result<(), Box<Output>> {
     match r {
         Ok(x) => {
-            v.push(0.0);
+            v.push(crate::status::ok_slot(0.0));
             f(v, x);
             Ok(())
         }

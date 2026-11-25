@@ -664,7 +664,7 @@ fn rust_flat(prog: &[FCmd]) -> Result<Vec<f64>, HarnessError> {
             Op::Evaluate => put(&mut o, x.evaluate(f_at(a, 0)?, f_at(a, 1)?, f_at(a, 2)?)),
             Op::InvertAbsolute => match x.invert_absolute(v3_at(a, 0)?) {
                 Ok(p) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put(&mut o, p);
                 }
                 Err(e) => o.push(status(&e)),
@@ -677,7 +677,7 @@ fn rust_flat(prog: &[FCmd]) -> Result<Vec<f64>, HarnessError> {
             Op::Distance => o.push(x.distance_to_point(v3_at(a, 0)?)),
             Op::IntersectLine => match x.intersect_line(v3_at(a, 0)?, v3_at(a, 3)?) {
                 Ok(hit) => {
-                    o.extend([0.0, f64::from(hit.count())]);
+                    o.extend([crate::status::ok_slot(0.0), f64::from(hit.count())]);
                     match hit {
                         LineHit::Miss => o.extend([0.0, 0.0]),
                         LineHit::Graze(t) => o.extend([t, t]),

@@ -303,7 +303,7 @@ impl From<HarnessError> for Fail {
 fn st<T>(o: &mut Vec<f64>, r: solidcore::Result<T>) -> Result<Option<T>, Fail> {
     match r {
         Ok(v) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             Ok(Some(v))
         }
         Err(e) => {
@@ -828,7 +828,7 @@ fn planed(i: &Inputs) -> Result<Result<(Vec<f64>, Plane), Output>, HarnessError>
     };
     let mut a = match made {
         Ok(p) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             p
         }
         Err(s) => {

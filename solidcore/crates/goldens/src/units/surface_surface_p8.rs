@@ -283,7 +283,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         OpIn::Knots { cont, at } => {
             match st(s.find_knots_by_max_continuity(&k, cont_of(*cont)?, *at))? {
                 Ok((u, v)) => {
-                    o.extend([0.0, u.len() as f64]);
+                    o.extend([crate::status::ok_slot(0.0), u.len() as f64]);
                     o.extend(&u);
                     o.push(v.len() as f64);
                     o.extend(&v);
@@ -302,7 +302,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             };
             let target = if *same { &s } else { &s2 };
             match st(s.coincidence_check(&k, target, *tol, *whole))? {
-                Ok(c) => o.extend([0.0, b(c.are_coincident), c.max_distance]),
+                Ok(c) => o.extend([crate::status::ok_slot(0.0), b(c.are_coincident), c.max_distance]),
                 Err(c) => o.push(c),
             }
         }
@@ -403,7 +403,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         },
         OpIn::Invert { p, dom, uv, tol } => {
             match st(s.invert_point_near_singularity(&k, v3(*p), &dom_of(*dom), p2(*uv), *tol))? {
-                Ok(r) => o.extend([0.0, f64::from(r.reason as i32), r.uv.x, r.uv.y]),
+                Ok(r) => o.extend([crate::status::ok_slot(0.0), f64::from(r.reason as i32), r.uv.x, r.uv.y]),
                 Err(c) => o.push(c),
             }
         }

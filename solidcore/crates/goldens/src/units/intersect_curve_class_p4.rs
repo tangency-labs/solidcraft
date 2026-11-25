@@ -1331,7 +1331,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     OpIn::IvlBound { j, do_min, .. } => {
                         let r = cc.ivl_bound_edgeuse_obj(&k, &pool, *j, *do_min);
                         match st(r)? {
-                            Ok(eu) => o.extend([0.0, pool.id(eu)]),
+                            Ok(eu) => o.extend([crate::status::ok_slot(0.0), pool.id(eu)]),
                             Err(s) => o.push(s),
                         }
                     }
@@ -1398,7 +1398,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                         // touches collected before the failure)
                         match st(r)? {
                             Ok(touches) => {
-                                o.push(0.0);
+                                o.push(crate::status::ok_slot(0.0));
                                 put_touches(&mut o, &pool, &touches);
                                 if *with_props {
                                     let snap = hfp::snapshot(&props, pool.face_id());

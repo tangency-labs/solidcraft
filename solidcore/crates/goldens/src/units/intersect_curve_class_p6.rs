@@ -445,7 +445,7 @@ fn put_cc(
         put_pc(out, &i.end, g);
         for t in [i.min(), i.interval.evaluate(0.5), i.max()] {
             match g.curve.evaluate_point(k, t) {
-                Ok(p) => out.extend([0.0, p.x, p.y, p.z]),
+                Ok(p) => out.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
                 Err(e) => {
                     if e.is_unported() {
                         return Err(h(e.to_string()));
