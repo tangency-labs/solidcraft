@@ -124,9 +124,10 @@ impl Body {
             CheckLevel::Geometry => KernelCheckLevel::Level1,
             CheckLevel::All => KernelCheckLevel::Level2,
         };
+        // the body's own naming scheme: the copy the check runs on is named afresh
+        let unknown = self.lock().naming() == NamingScheme::Unknown;
         let c = match measure_body("check", self, |k, b| {
-            let naming = b.naming();
-            if naming == NamingScheme::Unknown {
+            if unknown {
                 return Ok(Err(Refusal::Naming));
             }
             match check_brep_scoped(k, b, lv, scope) {
