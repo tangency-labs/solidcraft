@@ -629,7 +629,7 @@ fn the_types_read_each_key_as_its_handler_does() {
     check("view.perspective", json!({}), "enabled", with(vec![json!(true), json!(false)]));
     let base = json!({"camera": nav_camera(), "action": "fit"});
     let all_actions: Vec<Value> =
-        ["left", "right", "up", "down", "clockwise", "counterclockwise", "home", "fit", "spin"].iter().map(|a| json!(a)).collect();
+        ["left", "right", "up", "down", "clockwise", "counterclockwise", "turn_around", "home", "fit", "spin"].iter().map(|a| json!(a)).collect();
     check("view.navigate", json!({"camera": nav_camera()}), "action", with(all_actions));
     check("view.navigate", base.clone(), "fit", with(vec![json!(true), json!(false)]));
     check(

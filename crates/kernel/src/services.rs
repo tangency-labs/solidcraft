@@ -1,5 +1,5 @@
 //! solidcore's services that the application uses beside the body-making operations: 2D and
-//! curve helpers, projection, hatching, affine maps, sheet development, frame members, the
+//! curve helpers, projection, line-family clipping, affine maps, sheet development, frame members, the
 //! display plan, CADIR read and write, and STEP's string and parser helpers. They read records and data; none
 //! makes a body, so none is routed (`docs/design/kernel-layer.md` §2).
 //!
@@ -19,7 +19,6 @@ pub use solidcore_ops::PointNormalFace;
 pub use solidcore_ops::SquareFaceLevel;
 pub use solidcore_ops::affine;
 pub use solidcore_ops::cancel;
-pub use solidcore_ops::cell_grid;
 pub use solidcore_ops::centroid_and_mean_radius;
 pub use solidcore_ops::conic_projection;
 pub use solidcore_ops::constraint;
@@ -32,7 +31,6 @@ pub use solidcore_ops::fit_projection;
 pub use solidcore_ops::frame_gusset;
 pub use solidcore_ops::frame_member;
 pub use solidcore_ops::frame_trim;
-pub use solidcore_ops::hatch;
 pub use solidcore_ops::hole_stacks;
 pub use solidcore_ops::joint_turn;
 pub use solidcore_ops::mesh;
@@ -44,8 +42,11 @@ pub use solidcore_ops::point_displacement;
 pub use solidcore_ops::point_distance;
 pub use solidcore_ops::point_identity;
 pub use solidcore_ops::prism;
+pub use solidcore_ops::profile;
 pub use solidcore_ops::query;
+pub use solidcore_ops::section_corners;
 pub use solidcore_ops::session;
+pub use solidcore_ops::sketch_arc;
 pub use solidcore_ops::spline_projection;
 pub use solidcore_ops::sweep;
 pub use solidcore_ops::{Body as ExactBody, CheckLevel, Order, Result, boolean, make_box, make_sphere, measure};

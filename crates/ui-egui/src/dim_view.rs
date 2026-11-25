@@ -91,6 +91,15 @@ struct Edit {
     /// A drawing's dimension or note, edited on its sheet with the same box: `expr` is its text
     /// and `param` what the box is headed. None: a sketch dimension's value.
     sheet: Option<SheetText>,
+    /// Only after a refused unknown name: a one-click, explicit variable definition.
+    create_variable: Option<VariableOffer>,
+}
+
+#[derive(Clone, Debug)]
+struct VariableOffer {
+    name: String,
+    definition: String,
+    error: String,
 }
 
 /// What on a drawing's sheet the inline editor's text belongs to.
@@ -333,6 +342,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
             driven: None,
             params: Default::default(),
             sheet: None,
+            create_variable: None,
         })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
@@ -376,6 +386,7 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
             driven: None,
             params: Default::default(),
             sheet: None,
+            create_variable: None,
         })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
@@ -638,6 +649,7 @@ fn open_model(app: &mut SolveApp, d: ModelDim) -> bool {
             driven: None,
             params: Default::default(),
             sheet: None,
+            create_variable: None,
         })
     });
     true
@@ -743,6 +755,7 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
             driven,
             params: Default::default(),
             sheet: None,
+            create_variable: None,
         })
     });
     true
@@ -771,6 +784,7 @@ pub(crate) fn edit_sheet_text(target: SheetText, title: &str, text: String, at: 
             driven: None,
             params: Default::default(),
             sheet: Some(target),
+            create_variable: None,
         })
     });
 }
@@ -868,6 +882,35 @@ fn make_driving(app: &mut SolveApp, constraint: &str, typed: &str) -> Result<ser
     result
 }
 
+/// An unused bare name may be offered as an explicit Create variable fix (#18721).
+/// Enter must retain the original unknown-parameter error for mistyped names. The
+/// `name = expression` path then creates the named dimension in a single undo step.
+fn dimension_value_or_definition(
+    doc: &solidcraft_engine::doc::Document,
+    source: &solidcraft_engine::doc::Document,
+    param: &str,
+    typed: &str,
+    measured: Option<&str>,
+) -> String {
+    let name = typed.trim();
+    let definition = format!("{name} = 1");
+    if solidcraft_engine::doc::expr::definition(&definition).is_none_or(|(n, _)| n != name)
+        || solidcraft_engine::doc::Document::param_name_problem(name).is_some()
+        || doc.all_param_exprs().iter().any(|(n, _, _)| n == name)
+        || doc.text_param(name).is_some()
+        || source.param(name).is_some()
+    {
+        return typed.to_string();
+    }
+    if let Some(p) = source.param(param) {
+        let length = solidcraft_engine::doc::expr::unit_info(&p.unit).is_some_and(|(k, _)| k == solidcraft_engine::doc::expr::Kind::Length);
+        let expr = if length { crate::length_input::stored(source, &p.expr) } else { p.expr.clone() };
+        format!("{name} = {expr}")
+    } else {
+        measured.map_or_else(|| typed.to_string(), |expr| format!("{name} = {expr}"))
+    }
+}
+
 /// The window's value with its changed parameter rows (#16319): the parameters first, in one
 /// `parameters.change` (the command Change Parameters uses), then the value as OK applies it
 /// alone, unless it is the expression the dimension already has. One undo step takes both back;
@@ -891,6 +934,34 @@ fn with_parameters(app: &mut SolveApp, e: &Edit, changes: serde_json::Map<String
         app.session.undo.truncate(depth + 1);
     }
     result
+}
+
+/// Offer an explicit definition only after a free, bare name was refused by the
+/// original unknown-parameter check. Typos do not create variables on Enter.
+fn variable_offer(app: &SolveApp, e: &Edit, error: &str) -> Option<VariableOffer> {
+    if e.sheet.is_some() || !error.contains("unknown parameter") {
+        return None;
+    }
+    let name = e.expr.trim();
+    let quoted = format!("{}{}{}", char::from(96u8), name, char::from(96u8));
+    if !error.contains(&quoted) {
+        return None;
+    }
+    let source = e.draft.as_ref().map_or(app.session.doc.as_ref(), |draft| draft.preview_doc.as_ref());
+    let definition = dimension_value_or_definition(&app.session.doc, source, &e.param, &e.expr, e.driven.as_ref().map(|_| e.expr.as_str()));
+    if definition == e.expr {
+        return None;
+    }
+    Some(VariableOffer { name: name.to_string(), definition, error: error.to_string() })
+}
+
+/// Same explicit action for the inline and floating window editors.
+fn create_variable_button(ui: &mut egui::Ui, offer: Option<&VariableOffer>) -> bool {
+    let Some(offer) = offer else { return false };
+    let label = solidcraft_ui_text::format("dialog.dimension_create_variable", &[("name", &offer.name)]);
+    let response = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal);
+    crate::scenario::publish_target("dim:create_variable", response.rect);
+    response.clicked()
 }
 
 /// Set dimension parameter `param` to the expression typed for it, in the parameter's unit.
@@ -1300,6 +1371,7 @@ pub fn edit_param(app: &SolveApp, param: &str) {
             driven: None,
             params: Default::default(),
             sheet: None,
+            create_variable: None,
         })
     });
 }
@@ -1586,6 +1658,9 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     e.owned |= r.changed() || completed;
                     e.typed |= r.changed() || completed;
+                    if r.changed() || completed {
+                        e.create_variable = None;
+                    }
                     // Solved now, so the next frame draws the sketch at the new value from its start.
                     if (r.changed() || completed)
                         && let Some(draft) = e.draft.as_mut()
@@ -1593,9 +1668,12 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                         let expr = e.expr.clone();
                         reevaluate(app, draft, &expr);
                     }
-                    if let Some(error) = e.draft.as_ref().and_then(|d| d.error.as_ref()) {
+                    if let Some(error) =
+                        e.create_variable.as_ref().map(|offer| &offer.error).or_else(|| e.draft.as_ref().and_then(|d| d.error.as_ref()))
+                    {
                         crate::ui_kit::text(ui, error, crate::ui_kit::Text::Report("dimension_error", true));
                     }
+                    let create = create_variable_button(ui, e.create_variable.as_ref());
                     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                     let pointer_pos = ui.input(|i| i.pointer.interact_pos());
                     let on_popup = r.hovered() || pointer_pos.is_some_and(|p| ui.min_rect().expand(4.0).contains(p));
@@ -1625,6 +1703,15 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                         // Esc cancels the whole dimension, picks included.
                         escaped = true;
                     }
+                    if create
+                        && !escaped
+                        && let Some(offer) = e.create_variable.take()
+                    {
+                        e.expr = offer.definition;
+                        e.owned = true;
+                        e.typed = true;
+                        done = Some(true);
+                    }
                 });
             });
         },
@@ -1639,27 +1726,31 @@ fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
     e.fresh = e.fresh.saturating_sub(1);
     match done {
         Some(true) => {
+            // The first attempt submits exactly what was typed. Only the explicit
+            // Create variable button can substitute a definition after refusal.
+            let submitted = e.expr.clone();
             let result = if let Some(target) = e.sheet.clone() {
                 change_sheet_text(app, target, &e.expr)
             } else if let Some(draft) = &e.draft {
                 if draft.valid(app) {
                     draft
-                        .evaluate(app, &e.expr)
-                        .and_then(|_| app.run("sketch.dimension", draft.params(&e.expr)).map_err(|err| shown_error("sketch.dimension", &err)))
+                        .evaluate(app, &submitted)
+                        .and_then(|_| app.run("sketch.dimension", draft.params(&submitted)).map_err(|err| shown_error("sketch.dimension", &err)))
                 } else {
                     Err("The sketch changed; place the dimension again".into())
                 }
             } else if let Some(changes) = window::parameter_changes(&app.session.doc, &e.param, &e.expr, &e.params) {
                 with_parameters(app, &e, changes)
             } else if let Some(constraint) = &e.driven {
-                make_driving(app, constraint, &e.expr)
+                make_driving(app, constraint, &submitted)
             } else {
-                change_value(app, &e.param, &e.expr)
+                change_value(app, &e.param, &submitted)
             };
             match result {
                 Err(err) => {
+                    e.create_variable = variable_offer(app, &e, &err);
                     app.set_status(err, true);
-                    // The value is selected again, so typing replaces it.
+                    // Keep the refused expression until the person corrects or opts in.
                     EDIT.with(|x| *x.borrow_mut() = Some(Edit { fresh: FRESH, owned: false, ..e }));
                 }
                 Ok(_) if e.sheet.is_some() => {}
@@ -1788,6 +1879,38 @@ pub fn drawn() -> Vec<(String, Pos2)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn variable_creation_only_uses_free_parameter_names() {
+        let mut doc = solidcraft_engine::doc::Document::new("Test");
+        doc.add_user_param("width", "20 mm", Some("mm"), None).unwrap();
+        let name = |typed: &str| dimension_value_or_definition(&doc, &doc, "width", typed, None);
+        assert_eq!(name("breite"), "breite = 20 mm");
+        assert_eq!(name("width"), "width", "existing names remain references");
+        assert_eq!(name("sin"), "sin", "reserved functions are not new variables");
+        assert_eq!(name("12width"), "12width", "invalid names keep normal validation");
+        assert_eq!(name("breite = 50 mm"), "breite = 50 mm", "explicit definitions are unchanged");
+        let mut inch = solidcraft_engine::doc::Document::new("Inch");
+        inch.units = "in".into();
+        let length = inch.new_model_param("30", "mm");
+        assert_eq!(
+            dimension_value_or_definition(&inch, &inch, &length, "height", None),
+            "height = 30 mm",
+            "a legacy bare model length remains millimetres in an inch design"
+        );
+        let angle = inch.new_model_param("45", "deg");
+        assert_eq!(dimension_value_or_definition(&inch, &inch, &angle, "sweep", None), "sweep = 45", "non-length expressions are unchanged");
+        assert_eq!(
+            dimension_value_or_definition(&inch, &inch, "missing", "driven", Some("20 mm")),
+            "driven = 20 mm",
+            "driven dimensions use the measured expression when the source has no parameter"
+        );
+        assert_eq!(
+            dimension_value_or_definition(&inch, &inch, "missing", "driven = 25 mm", Some("20 mm")),
+            "driven = 25 mm",
+            "an explicit definition is never replaced"
+        );
+    }
 
     /// #11057: a value typed before its target keeps a 30 px gap from the pointer, and near the
     /// viewport's edge it opens on the pointer's other side instead of sliding back over it.

@@ -393,8 +393,8 @@ fn a_transparent_snapshot_clears_the_background_and_keeps_the_model_opaque() {
     s.execute("view.apply", &json!({"camera": side_camera()})).unwrap();
     let cam = s.camera.unwrap();
     let guides = solidcraft_engine::view::Guides { grid: false, axes: false };
-    let mut scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides).unwrap();
-    let canvas = solidcraft_viewport::render_transparent(&mut scene, &cam, SIZE.0 as usize, SIZE.1 as usize);
+    let scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides).unwrap();
+    let canvas = solidcraft_viewport::render_transparent(&scene, &cam, SIZE.0 as usize, SIZE.1 as usize);
     let expected = solidcraft_viewport::png(canvas.w, canvas.h, canvas.rgba).unwrap();
     assert_eq!(std::fs::read(dir.0.join("cpu-clear.png")).unwrap(), expected);
 }

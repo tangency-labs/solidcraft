@@ -559,6 +559,9 @@ pub struct FixOutcome {
     /// geometry are not counted. A point placed by parameter expressions is released as plain
     /// numbers at its current place.
     pub changed: usize,
+    /// Why nothing changed, when every entity picked is projected (it follows its source).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// What `sketch.constraint.fix` returns.
