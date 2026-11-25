@@ -6549,6 +6549,21 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             ];
             edge_curves.push((curve, ivl, ends));
         }
+        // each blended edge's ends that another blended edge shares: corners, where the
+        // band past the end is the corner's (#21749)
+        let mut corner_ends = Vec::new();
+        for &(edge_b, ends_b) in &edges {
+            let mut at = Vec::new();
+            for v in ends_b.into_iter().flatten() {
+                let shared = edges
+                    .iter()
+                    .any(|&(edge_j, ends_j)| edge_j != edge_b && ends_j.contains(&Some(v)));
+                if shared {
+                    at.push(crate::topology::vertex::point(self.target, v)?);
+                }
+            }
+            corner_ends.push(at);
+        }
         // Pruning by boxes (#16645: the pair loop is quadratic in the blends). A pair
         // `(a, b)` can refuse only through a sample `p` of rail `a`'s kept part for which,
         // with `e` on edge `b` and `r` on rail `b`, `|p - e| < |e - r|`. So `p` lies
@@ -6644,6 +6659,7 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                 }
                 let edge_box_b = if every_box { run_box } else { None };
                 let edge_box_b = edge_box_b.as_ref();
+                let corners_b = corner_ends.get(b).map_or(&[][..], Vec::as_slice);
                 for (ia, (face_a, curve_a, kept_a)) in rails_a.iter().enumerate() {
                     for (ib, (face_b, curve_b, kept_b)) in rails_b.iter().enumerate() {
                         if face_a != face_b {
@@ -6819,12 +6835,17 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                             // band's chord across the face and falsely catch a distant rail
                             // (#2903), and an end on another edge of the run (a tangent
                             // chain's) says nothing of band `b`'s width. A closed edge (both
-                            // ends one point) has no end to run on past.
+                            // ends one point) has no end to run on past. Nor has an end where
+                            // another blended edge meets edge `b` (#21749): the corner there
+                            // ends the band at the mitre with that edge's blend, as it trims
+                            // two bands that share a vertex (above), so the band does not run
+                            // on past it as wide as its section.
                             let own_end_b = edge_curves
                                 .get(b)
                                 .map(|(_, _, ends)| *ends)
                                 .filter(|[q0, q1]| (*q0 - *q1).length() > tol)
-                                .filter(|ends| ends.iter().any(|&q| (e - q).length() <= tol));
+                                .filter(|ends| ends.iter().any(|&q| (e - q).length() <= tol))
+                                .filter(|_| !corners_b.iter().any(|&c| (e - c).length() <= tol));
                             let past_end = match own_end_b {
                                 Some(ends) if at_run_end && band_has_ends => Some(ends),
                                 _ => None,
