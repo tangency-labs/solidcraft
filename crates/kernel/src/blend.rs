@@ -3675,6 +3675,26 @@ mod tests {
         assert_eq!(out.face_count(), 3);
         assert!(out.validity().is_empty(), "{:?}", out.validity());
     }
+
+    /// #22188: `solid.chamfer` 1.5 x 45 deg on a vertical edge meeting a widened recess floor
+    /// whose side edge stops short of 1.5 mm while the wall continues past it.
+    #[test]
+    fn chamfer_1_5_by_45_on_an_edge_meeting_a_widened_recess_floor_builds() {
+        for side_edge_len in [1.0, 0.2] {
+            let slab = crate::build::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 5.0)).unwrap();
+            let wall = crate::build::box_solid(Vec3::new(10.0, 10.0, 5.0), Vec3::new(20.0, 20.0, 15.0)).unwrap();
+            let step = crate::boolean(&slab, &wall, crate::BoolOp::Union).unwrap().unwrap();
+            let deeper = crate::build::box_solid(Vec3::new(0.0, 10.0 + side_edge_len, 2.0), Vec3::new(10.0, 20.0, 5.0)).unwrap();
+            let body = crate::boolean(&step, &deeper, crate::BoolOp::Cut).unwrap().unwrap();
+            let before = crate::measure(&body).unwrap().volume;
+            let pick = Vec3::new(10.0, 10.0, 10.0);
+            let out = chamfer_sides_carrying_face(&body, &[pick], 1.5, ChamferSide::Angle(std::f64::consts::FRAC_PI_4), false).unwrap();
+            assert!(out.validity().is_empty(), "len={side_edge_len}: {:?}", out.validity());
+            let after = crate::measure(&out).unwrap().volume;
+            let removed = 10.0 * 0.5 * 1.5 * 1.5;
+            assert!(((before - after) - removed).abs() < 1e-5, "len={side_edge_len}: {} vs {removed}", before - after);
+        }
+    }
 }
 
 #[cfg(test)]

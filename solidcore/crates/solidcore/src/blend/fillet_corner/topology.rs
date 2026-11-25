@@ -826,6 +826,7 @@ impl FilletCorner {
         let mut end_face = None;
         let mut extend_edge = None;
         let mut turned_back = [None, None];
+        let mut turned_back_past = 0.0_f64;
 
         for rail in 0..2 {
             let side = *need(sides.get(rail), "side index")?;
@@ -921,7 +922,13 @@ impl FilletCorner {
                         side,
                         vertex,
                     ) {
-                        Ok(found) => found,
+                        Ok(Some((tb, past))) => {
+                            if past > turned_back_past {
+                                turned_back_past = past;
+                            }
+                            Some(tb)
+                        }
+                        Ok(None) => None,
                         // only Unported and a cancellation pass on: any other failure,
                         // `FaceTrimsUnavailable` from the classification included, declines
                         Err(
@@ -963,17 +970,14 @@ impl FilletCorner {
             vertex,
             total: corner_total,
             mixed,
-            // the end face is picked from the side edge that is not the seam
-            same: if seam_side[0] || seam_side[1] {
-                [seam_side[1], seam_side[0]]
-            } else {
-                same
-            },
+            same,
+            seam_side,
             tangent_side,
             sides,
             end_face,
             extend_edge,
             turned_back,
+            turned_back_past,
         })
     }
 }
