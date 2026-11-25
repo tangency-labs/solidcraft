@@ -30,8 +30,9 @@ fn body<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
 /// is not built yet (its `warning` names it on every rebuild, and an edit that makes its two faces
 /// cover the same part of the wall builds it): a rebuild chooses no other pairs, and checks the
 /// stored ones again (a pair that no longer faces across a wall within the thickness limits makes
-/// the rebuild fail). The reply's `warning` lists what is not covered. A new surface body (one
-/// per sheet, or per piece of a sheet a joint cut in pieces, without `stitch`). One undo step.
+/// the rebuild fail). The reply's `warning` lists what is not covered. A new body: with `stitch`
+/// one, a solid where the sewn sheets close up and otherwise a surface body; without it a surface
+/// body per sheet, or per piece of a sheet a joint cut in pieces. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct MidsurfaceParams {
@@ -79,9 +80,10 @@ pub struct MidsurfaceParams {
     /// Keep the solid. Default: true.
     #[serde(default)]
     pub keep_original: Option<bool>,
-    /// Sew the sheets where they meet into one surface body (edges where three sheets meet stay
-    /// open). False: a surface body per sheet, and one per piece of a sheet that a joint cut
-    /// in pieces across a carried hole. Default: true.
+    /// Sew the sheets where they meet into one body (edges where three sheets meet stay open): a
+    /// solid where the sewn sheets close up, as a sealed hollow box's six walls do, otherwise a
+    /// surface body. False: a surface body per sheet, and one per piece of a sheet that a joint
+    /// cut in pieces across a carried hole. Default: true.
     #[serde(default)]
     pub stitch: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]

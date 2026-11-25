@@ -584,6 +584,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let chosen = mid::pairs_at(&mb.body, &analysis, &points)?;
             let sheets = mid::sheets_with(&mb.body, &chosen, &mid::Build { carry_holes: *carry_holes, suppress_holes_below: below })?;
             let notes = mid::report_chosen(&analysis, &chosen, &sheets);
+            mid::something_built(&sheets, &notes)?;
             for (k, made) in mid::surface_bodies(&sheets, *stitch)?.into_iter().enumerate() {
                 let made = Traced::step(made, &[&mb.traced()]);
                 let name = new_name(st, f, k);

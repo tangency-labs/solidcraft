@@ -2426,7 +2426,8 @@ pub enum FeatureKind {
     },
     /// The mid-surfaces of `body`'s thin walls: for each pair of faces that face each other
     /// across material (`faces`, two points a pair, in order: the pairs chosen when the feature
-    /// was made; a rebuild chooses no other pairs), the sheet halfway between them, joined to its
+    /// was made; a rebuild chooses no other pairs: each pair is the faces at its two points, as
+    /// every [`FacePick`] names its face), the sheet halfway between them, joined to its
     /// neighbours. A rebuild checks the stored pairs again: they must still face each other
     /// between `min_thickness` and `max_thickness` apart, or the feature fails. `min_aspect`
     /// (default 5) decides which pairs not chosen the warning says need a decision.

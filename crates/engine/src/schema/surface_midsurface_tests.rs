@@ -144,6 +144,10 @@ fn replies_match_the_output_schemas() {
     // Read-only: the analysis adds no feature and no undo step.
     assert_eq!(s.doc, before, "{analysis}");
     assert_eq!(s.undo.len(), undo, "{analysis}");
+    // So a caller with read authority alone may run it; building stays an edit.
+    let effect = |id: &str| crate::cmd::find_command(id).map(|c| c.effect);
+    assert_eq!(effect("surface.midsurface_analyze"), Some(craft_plugin::Effect::Read));
+    assert_eq!(effect("surface.midsurface"), Some(craft_plugin::Effect::Edit));
     check(output_schema_for::<MidsurfaceAnalysis>(), &analysis);
     let built = s
         .execute(

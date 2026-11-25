@@ -257,11 +257,12 @@ fn inside_point(body: &Body, q: &Query, f: usize, flat: Option<&Flat>, axis: Opt
     let e = *face_edges(q, f).first()?;
     let [t0, t1] = q.edge_interval(e)?;
     let (p, tangent) = q.edge_at(e, 0.5 * (t0 + t1))?;
-    let step = (body.size() * 1e-3).max(tol * 10.0);
-    round_directions(array(axis), array(tangent))
-        .ok()?
-        .into_iter()
-        .find_map(|d| body.point_lies_on_face(f, p + vec3(d) * step, step * 0.5).ok().flatten())
+    let directions = round_directions(array(axis), array(tangent)).ok()?;
+    // A narrow wall (a short band, a small radius in a large body) holds no probe a thousandth of
+    // the body out: each failed round tries a quarter as far, down to ten times the slack.
+    let floor = tol * 10.0;
+    std::iter::successors(Some((body.size() * 1e-3).max(floor)), |s| Some(s * 0.25).filter(|s| *s >= floor))
+        .find_map(|step| directions.iter().find_map(|d| body.point_lies_on_face(f, p + vec3(*d) * step, step * 0.5).ok().flatten()))
         .map(array)
 }
 
@@ -476,9 +477,8 @@ fn round_pair(
     }
     let confidence = if notes.is_empty() { Confidence::High } else { Confidence::Review };
     let (pa, pb) = (inside_point(body, q, faces[0], None, Some(a.axis), tol), inside_point(body, q, faces[1], None, Some(b.axis), tol));
-    let (Some(pa), Some(pb)) = (pa, pb) else {
-        return Err(DocError::Invalid(format!("midsurface: no point inside faces {faces:?} could be found to name them by")));
-    };
+    // As for two flat faces: a pair that cannot be named is left out, and the scan goes on.
+    let (Some(pa), Some(pb)) = (pa, pb) else { return Ok(None) };
     Ok(Some(Pair {
         faces,
         points: [pa, pb],
@@ -1419,7 +1419,8 @@ pub fn report(analysis: &Analysis, sheets: &[Sheet]) -> Vec<String> {
 /// [`report`] of a build of `chosen` (pairs of `analysis`): a chosen pair that was not built (a
 /// round wall whose faces cover different parts of it) is named with the reason, a pair
 /// built though something lies between its faces keeps its `blocked` note (and one filled over a
-/// bore that narrows between its faces its `stepped` note), and only the pairs neither chosen nor
+/// bore that narrows between its faces its `stepped` note, and one a face of which could not be
+/// tested exactly its `unchecked` note), and only the pairs neither chosen nor
 /// built are counted as needing a decision.
 pub fn report_chosen(analysis: &Analysis, chosen: &[Pair], sheets: &[Sheet]) -> Vec<String> {
     let mut out = Vec::new();
@@ -1440,6 +1441,10 @@ pub fn report_chosen(analysis: &Analysis, chosen: &[Pair], sheets: &[Sheet]) -> 
         }
         for note in p.notes.iter().filter(|n| n.starts_with("stepped")) {
             out.push(format!("the sheet of faces {:?} was built over a bore: {note}", p.faces));
+        }
+        // A face the exact tests could not read: nothing found between is no proof of nothing.
+        for note in p.notes.iter().filter(|n| n.starts_with("unchecked")) {
+            out.push(format!("the sheet of faces {:?} was built, but {note}", p.faces));
         }
     }
     let c = completeness(analysis, &built);
@@ -1481,6 +1486,17 @@ pub fn report_chosen(analysis: &Analysis, chosen: &[Pair], sheets: &[Sheet]) -> 
         }
     }
     out
+}
+
+/// Fails when `sheets` hold no sheet to build (each pair chosen is one not built yet, such as a
+/// partial round wall), with `notes` (the build's [`report_chosen`]) saying why, rather than only
+/// that there is no sheet.
+pub fn something_built(sheets: &[Sheet], notes: &[String]) -> Result<()> {
+    if sheets.iter().any(|s| !s.collapsed) {
+        return Ok(());
+    }
+    let why = if notes.is_empty() { "no sheet could be made".to_string() } else { notes.join("; ") };
+    Err(DocError::Invalid(format!("Midsurface: nothing to build: {why}")))
 }
 
 /// One surface body for `sheets`: each sheet a planar patch at its own corners, sewn where they
@@ -1605,7 +1621,16 @@ mod tests {
         let c = completeness(&a, &confident(&a));
         assert_eq!((c.paired.len(), c.rims.len(), c.reported.len()), (2, 4, 0), "{c:?}");
         assert!(c.accounts_for_every_face());
-        assert!(report(&a, &sheets(&block(40.0, 30.0, 2.0), &a.pairs).unwrap()).is_empty());
+        let built = sheets(&block(40.0, 30.0, 2.0), &a.pairs).unwrap();
+        assert!(report(&a, &built).is_empty());
+        // A pair built though a face could not be tested for blocking says so: the build is no
+        // warning-free proof that nothing lies between its faces.
+        let mut untested = a.clone();
+        let note = "unchecked: face 7 could not be tested for blocking exactly".to_string();
+        untested.pairs[0].notes.push(note.clone());
+        for notes in [report(&untested, &built), report_chosen(&untested, &untested.pairs, &built)] {
+            assert_eq!(notes.iter().filter(|n| n.ends_with(&note)).count(), 1, "{notes:?}");
+        }
     }
 
     #[test]
@@ -2199,6 +2224,11 @@ mod tests {
         let named = format!("the pair of faces {:?} was chosen but not built: partial", round[0].faces);
         assert!(notes.iter().any(|n| n.starts_with(&named)), "{notes:?}");
         assert!(!notes.iter().any(|n| n.contains("need a decision")), "{notes:?}");
+        // Chosen alone, nothing is built: the build fails, and says why.
+        let alone = std::slice::from_ref(round[0]);
+        let s = sheets(&part, alone).unwrap();
+        let error = something_built(&s, &report_chosen(&a, alone, &s)).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(error.contains(&named), "{error}");
     }
 
     #[test]
@@ -2470,6 +2500,27 @@ mod tests {
         // Accepted anyway, it is not built.
         let s = sheets(&part, &a.pairs).unwrap();
         assert!(!s.iter().any(|x| x.faces == round[0].faces), "{s:?}");
+    }
+
+    #[test]
+    fn a_short_small_ring_on_a_long_plate_is_still_paired() {
+        // A plate 10,000 x 20 x 2 with a ring of radii 3 and 5, 2 tall (z = 2 to 4), standing on
+        // it at the origin. A thousandth of the body is about 10: a probe that far from the
+        // ring's faces misses a band 2 tall along the axis, and round a radius of 3 or 5 leaves
+        // the cylinder by far more than half of it. The ring is still one round wall 2 thick.
+        let part = union(&cuboid([-10.0, -10.0, 0.0], [9990.0, 10.0, 2.0]), &tube(3.0, 5.0, 2.0, 4.0));
+        let loose = Options { min_thickness: 0.0, max_thickness: 2.5, min_aspect: 0.0, tolerance: 0.0 };
+        let a = analyze(&part, &loose).unwrap();
+        let round: Vec<&Pair> = a.pairs.iter().filter(|p| p.is_round()).collect();
+        assert_eq!(round.len(), 1, "{:?}", a.pairs);
+        assert!((round[0].thickness - 2.0).abs() < 1e-9, "{:?}", round[0]);
+        // Its pick points lie on radii 5 and 3, on the band.
+        for p in round[0].points {
+            let r = (p[0] * p[0] + p[1] * p[1]).sqrt();
+            assert!(((r - 5.0).abs() < 1e-6 || (r - 3.0).abs() < 1e-6) && (2.0..=4.0).contains(&p[2]), "{p:?}");
+        }
+        // The plate's own wall is paired too.
+        assert!(a.pairs.iter().any(|p| !p.is_round() && (p.thickness - 2.0).abs() < 1e-9), "{:?}", a.pairs);
     }
 
     #[test]
