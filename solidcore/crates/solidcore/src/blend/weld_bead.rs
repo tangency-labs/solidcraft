@@ -1041,7 +1041,7 @@ pub fn bead_body(
             // a concave arc only on supports where its bound is proved: refused here, before
             // any joint's sagitta is read against its size
             if sagitta < 0.0 {
-                blend.sagitta_that_fits(k, legs, sagitta, &params)?;
+                blend.concave_gate(k, legs, &params)?;
             }
             joints.push((legs, blend, params));
             continue;
@@ -1161,13 +1161,12 @@ fn no_leg_below_resolution(target: &Brep, refused: SolidError) -> SolidError {
 /// sagitta that fits over the joints after it too, naming the edge whose fit it is (the site is
 /// then that edge alone: a joint not yet built has no station that failed). Those before `at`
 /// were built at the sagitta asked, and every joint's legs and toes were checked before. Each
-/// of those joints' fits is its foot blend's over its check stations
-/// ([`crate::blend::foot_blend::FootBlend::sagitta_that_fits`]): sampled, where the build
-/// reads every station it makes, so a retry at the fit can be refused again, with a smaller
-/// one, where a joint's least bound lies between two of its check stations. A joint refused
-/// for another reason is left to its own refusal at the retry; one that fails otherwise (a
-/// defect) is returned in place of `refused`, whose fit would not have looked at it. Any other
-/// `refused` is returned as it is.
+/// of those joints' fits is its foot blend's over its spans
+/// ([`crate::blend::foot_blend::FootBlend::sagitta_that_fits`]): the lower end proved for the
+/// bound over every parameter, which the build reads too, so a retry at the fit is not refused
+/// for its sagitta. A joint refused for another reason is left to its own refusal at the
+/// retry; one that fails otherwise (a defect) is returned in place of `refused`, whose fit
+/// would not have looked at it. Any other `refused` is returned as it is.
 #[allow(clippy::too_many_arguments)]
 fn smallest_sagitta_fit(
     k: &Kernel,

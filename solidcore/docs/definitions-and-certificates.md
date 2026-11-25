@@ -543,6 +543,8 @@ A reviewer checks each of these on a change that touches a definition, a net or 
    `surface::procedural_blend::record` (`ProceduralBlendRecord`, `ExactRoundRecord`,
    `CornerRecord`), every number as stored. A chord with a sagitta (a weld bead's) has no record
    yet: `exact_to_record` refuses it (`Unsupported`) rather than write it as the flat chord.
+   A chamfer whose setbacks hold at every station has a record (`ChamferKindRecord::Setbacks`)
+   but no construction yet: reading one is refused, never read as offsets.
    `convert::rebuild`, `exact_rebuild` and
    `corner_rebuild` make the definition exactly and certify the net again before it is an operand
    (or take the proof the kernel already finished for the same record, §4.5).

@@ -15,7 +15,7 @@ mod text;
 mod thumbnail;
 pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
 pub use import_cache::ImportCache;
-pub use native_cache::read_design_geometry;
+pub use native_cache::{read_design_geometry, take_last_cache_refusal};
 pub use provenance::{
     OpenPgpSignature, OpenPgpSigner, ProvenanceChain, ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus,
     ProvenanceSummary, SignatureSource, Signer,
@@ -444,8 +444,10 @@ fn write_container(
     if crate::safe_write::cancelled() {
         return Err(cancelled());
     }
+    native_cache::take_last_cache_refusal();
     let cache = geometry.and_then(|g| native_cache::encode_model(g, &metadata, writer.space(2, budget)).ok());
     if let Some((manifest, data)) = cache {
+        native_cache::take_last_cache_refusal();
         let [manifest_entry, payload_entry] = native_cache::ENTRIES;
         // Deflated whatever the policy: the encoded bodies shrink about fourfold to tenfold, faster
         // than the extra bytes would be written and read.
@@ -2608,6 +2610,41 @@ mod tests {
         crate::limits::test_cap::set(None);
         assert_eq!(reopened.unwrap().to_json(), doc.to_json());
         assert_eq!(bytes, required);
+    }
+
+    /// When an imported body fails round-trip encoding or decoding, the refusal specifically identifies
+    /// the failing body and feature rather than misdiagnosing the refusal as file size budget (#21610).
+    #[test]
+    fn unencodable_body_refusal_identifies_body_and_feature_name() -> Result<()> {
+        use solidcore_record::Vec3;
+        let broken = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.))?.with_paint(Some(solidcraft_kernel::Paint {
+            opacity: 1.0,
+            faces: vec![solidcraft_kernel::FacePaint { face: usize::MAX, color: [1.0, 0.0, 0.0], opacity: 1.0, name: None }],
+            name: None,
+        }));
+        let mut model = saved_model(vec![broken]);
+        model.records["model_bodies"][0]["name"] = json!("CoolingFin");
+        let doc_json = json!({
+            "features": [{"id": 1, "name": "GPU Cooler Import"}]
+        });
+        let doc_bytes = serde_json::to_vec(&doc_json).map_err(invalid)?;
+        let err = native_cache::encode_model(&model, &doc_bytes, usize::MAX).err().ok_or_else(|| invalid("expected encode error"))?;
+        assert!(
+            err.to_string().contains("body 'CoolingFin' in feature 'GPU Cooler Import' could not be stored exactly"),
+            "unexpected error message: {err}"
+        );
+        let refusal = take_last_cache_refusal().ok_or_else(|| invalid("refusal reason was captured"))?;
+        assert!(refusal.contains("body 'CoolingFin' in feature 'GPU Cooler Import' could not be stored exactly"), "unexpected refusal: {refusal}");
+        assert!(!refusal.contains("design file budget"), "must not blame budget: {refusal}");
+
+        let mut doc = document();
+        doc.features[0].id = 1;
+        doc.features[0].name = "GPU Cooler Import".into();
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&model))?;
+        assert!(!DesignContainerReader::new(Cursor::new(&bytes))?.has_model_cache());
+        let refusal = take_last_cache_refusal().ok_or_else(|| invalid("refusal captured after write_design_container"))?;
+        assert!(refusal.contains("CoolingFin") && refusal.contains("GPU Cooler Import"), "write_design_container captured refusal: {refusal}");
+        Ok(())
     }
 
     /// #20724: the cap on the cache's manifest follows the design file limit (an eighth of it, the
