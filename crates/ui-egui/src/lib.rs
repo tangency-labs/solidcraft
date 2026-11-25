@@ -3106,12 +3106,19 @@ impl SolveApp {
             // Collinear and Tangent also take a curve and an origin axis from the selection
             // (#15461): the axis as the sketch's own x / y, or its reference, which the command
             // projects. Two curves are taken by the commands' own selection hooks above.
+            let active = self.session.active_sketch;
             if tools::takes_axis_curve(id)
                 && let [first, second] = self.session.selection.as_slice()
-                && let Some((curve, axis, curve_first)) = match (first, second) {
-                    (solidcraft_engine::Sel::SketchCurve { id: c, .. }, solidcraft_engine::Sel::Axis { name }) => Some((c, name, true)),
-                    (solidcraft_engine::Sel::Axis { name }, solidcraft_engine::Sel::SketchCurve { id: c, .. }) => Some((c, name, false)),
+                && let Some((curve, s, axis, curve_first)) = match (first, second) {
+                    (solidcraft_engine::Sel::SketchCurve { id: c, sketch: s }, solidcraft_engine::Sel::Axis { name }) => Some((c, s, name, true)),
+                    (solidcraft_engine::Sel::Axis { name }, solidcraft_engine::Sel::SketchCurve { id: c, sketch: s }) => Some((c, s, name, false)),
                     _ => None,
+                }
+                && s.is_none_or(|sid| Some(sid) == active)
+                && {
+                    let state = crate::open_meshing::session_world(&self.session);
+                    let sketch = active.and_then(|sid| state.sketch(sid)).map(|ss| &ss.sketch);
+                    tools::curve_compatible_with_constraint(id, sketch, curve)
                 }
                 && let Some(axis) = tools::axis_operand(self, axis)
                 && axis != json!(curve)
@@ -3124,17 +3131,16 @@ impl SolveApp {
                 return;
             }
             if id == "sketch.dimension" {
-                t.picks = self
-                    .session
-                    .selection
-                    .iter()
-                    .filter_map(|s| match s {
-                        solidcraft_engine::Sel::SketchCurve { id, .. } | solidcraft_engine::Sel::SketchPoint { id } => Some(id.clone()),
-                        solidcraft_engine::Sel::Axis { name } => tools::sketch_axis_of(self, name).map(str::to_string),
-                        _ => None,
-                    })
-                    .take(2)
-                    .collect();
+                if tools::seed_dimension_preselection(self, &mut t) {
+                    t.preselected = true;
+                    let _ = self.session.execute("select.clear", &json!({}));
+                } else if !self.session.selection.is_empty() {
+                    let _ = self.session.execute("select.clear", &json!({}));
+                }
+            } else if tools::seed_constraint_preselection(self, &mut t) {
+                t.preselected = true;
+                let _ = self.session.execute("select.clear", &json!({}));
+            } else if tools::is_constraint_pick_tool(&t) && !self.session.selection.is_empty() {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             if self.session.has_selection() && (matches!(t.kind, tools::Kind::Draw(_)) || crate::sketch_tools::is_drawing_tool(id)) {

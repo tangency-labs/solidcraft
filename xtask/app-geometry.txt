@@ -1339,7 +1339,6 @@ crates/ui-egui/src/icons/markers.rs:snap normalized
 crates/ui-egui/src/inference.rs:Tracking::axis_guide distance
 crates/ui-egui/src/inference.rs:Tracking::meeting_of distance
 crates/ui-egui/src/inference.rs:Tracking::update distance
-crates/ui-egui/src/inference.rs:lines dot,normalized
 crates/ui-egui/src/inference.rs:tangent dot,normalized
 crates/ui-egui/src/inference.rs:through_center cross,dot,normalized
 crates/ui-egui/src/inference.rs:track_and_show distance

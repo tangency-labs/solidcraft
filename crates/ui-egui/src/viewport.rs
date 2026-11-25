@@ -7735,6 +7735,15 @@ pub(crate) fn seg_dist(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     p.distance(a + ab * t)
 }
 
+/// Raw point on the active sketch plane under screen `pos` without snapping.
+pub(crate) fn sketch_plane_cursor(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec2> {
+    let sid = app.session.active_sketch?;
+    let st = crate::open_meshing::shown_world(app);
+    let ss = st.sketch(sid)?;
+    let (o, d) = proj.ray(pos);
+    crate::sketch_cursor_readout::plane_point(&ss.plane, o, d)
+}
+
 /// Point on the active sketch plane under the cursor (sketch coordinates), snapped to sketch
 /// points within a few pixels and otherwise to a fine grid. Returns the snapped point and the
 /// id of the sketch point it snapped to.
@@ -8292,7 +8301,8 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     // A tool's click that moved on the way (#2448) clicks where the button is let go.
     if app.viewport.tool_click && resp.drag_stopped() {
         app.viewport.tool_click = false;
-        if let Some(p) = ui.input(|i| i.pointer.latest_pos()).filter(|p| rect.contains(*p))
+        if !crate::dim_view::consumed_outside_press()
+            && let Some(p) = ui.input(|i| i.pointer.latest_pos()).filter(|p| rect.contains(*p))
             && app.tool.is_some()
         {
             crate::tools::on_hover(app, &proj, p, mods.shift);
@@ -8433,6 +8443,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.viewport.draw_drag = app.tool.as_ref().is_some_and(|t| t.pts.len() == 1).then_some(a);
         } else if app.tool.is_some()
             && !app.viewport.trim_drag
+            && !crate::dim_view::consumed_outside_press()
             && !held
             && primary_nav.is_none()
             && mode.is_none()
@@ -8463,7 +8474,13 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             dialog.restore_value_focus = true;
         }
-        if resp.clicked() && !held && !reference_pick && !joint_handle_pointer && !app.viewport.draw_drag_handled {
+        let dim_accept = resp.clicked_by(egui::PointerButton::Primary)
+            && !held
+            && !reference_pick
+            && !joint_handle_pointer
+            && !app.viewport.draw_drag_handled
+            && crate::dim_view::accept_outside_click(app);
+        if resp.clicked() && !held && !reference_pick && !dim_accept && !joint_handle_pointer && !app.viewport.draw_drag_handled {
             if crate::browser_canvas::click(app, &proj, p) {
                 // Calibrate Canvas: the click sets Point A or B on the image (#9108).
             } else if app.tool.is_some() {
@@ -8780,41 +8797,58 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             q = if mirrored { offset - q } else { q + offset };
             let from = grab.map_or(q, |point| if mirrored { offset - point } else { point + offset });
             let with = dragged_with(app, &id);
-            // Snap the dragged point (or the line's ends) to other geometry, like drawing.
-            let snap = {
+            let q_raw = q;
+            // Snap the dragged point (or the line's ends / curve tangency) near the cursor.
+            let (snap, snap_mm_px) = {
                 let st = crate::open_meshing::shown_world(app);
-                crate::sketch_view::active_sketch(app).and_then(|s| st.sketch(s)).and_then(|ss| {
+                let found = crate::sketch_view::active_sketch(app).and_then(|s| st.sketch(s)).and_then(|ss| {
                     let sk = &ss.sketch;
                     let (own, exclude) = crate::drag_snap::moving_points(sk, std::iter::once(id.as_str()).chain(with.iter().map(String::as_str)));
                     if own.iter().any(|&p| sk.point_locked(p)) {
-                        return crate::drag_snap::find(sk, &[], &[], 0.0);
+                        return Some((crate::drag_snap::find(sk, &[], &[], 0.0), 0.0));
                     }
-                    let a = proj.to_screen(ss.plane.to_world(q))?;
-                    let b = proj.to_screen(ss.plane.to_world(q + Vec2::X))?;
+                    let a = proj.to_screen(ss.plane.to_world(q_raw))?;
+                    let b = proj.to_screen(ss.plane.to_world(q_raw + Vec2::X))?;
                     let mm_px = 1.0 / (a.distance(b) as f64).max(1e-9);
-                    let d = q - from;
+                    let d = q_raw - from;
                     let moving: Vec<(usize, Vec2)> =
-                        own.iter().filter_map(|&p| if grab.is_some() { sk.point(p).map(|x| (p, x + d)) } else { Some((p, q)) }).collect();
-                    crate::drag_snap::find(sk, &moving, &exclude, mm_px)
-                })
+                        own.iter().filter_map(|&p| if grab.is_some() { sk.point(p).map(|x| (p, x + d)) } else { Some((p, q_raw)) }).collect();
+                    Some((crate::drag_snap::find_for_drag(sk, &id, q_raw, d, &moving, &exclude, mm_px), mm_px))
+                });
+                found.unwrap_or((None, 0.0))
             };
-            if let Some(s) = snap {
+            if let Some(s) = &snap {
                 q += s.offset;
             }
             // Each frame re-solves the sketch only (`live`); the model follows when the drag ends.
-            let params = json!({"entity": id, "with": with, "from": [from.x, from.y], "to": [q.x, q.y], "live": true});
-            let at = match app.session.execute("sketch.drag", &params) {
-                Ok(r) => {
-                    app.session.undo.truncate(depth + 1);
-                    // Budget-limited progress continues even when the mouse stops. A stalled
-                    // search asks for no more frames; release gets one bounded final attempt.
-                    if r.get("retry").and_then(serde_json::Value::as_bool) == Some(true) && !resp.drag_stopped() {
-                        ui.ctx().request_repaint();
+            let run_drag = |app: &mut SolveApp, drag_from: Vec2, target: Vec2| -> Vec2 {
+                let params = json!({"entity": id, "with": with, "from": [drag_from.x, drag_from.y], "to": [target.x, target.y], "live": true});
+                match app.session.execute("sketch.drag", &params) {
+                    Ok(r) => {
+                        app.session.undo.truncate(depth + 1);
+                        // Budget-limited progress continues even when the mouse stops. A stalled
+                        // search asks for no more frames; release gets one bounded final attempt.
+                        if r.get("retry").and_then(serde_json::Value::as_bool) == Some(true) && !resp.drag_stopped() {
+                            ui.ctx().request_repaint();
+                        }
+                        r.get("at").and_then(solidcraft_engine::params::vec2).unwrap_or(target)
                     }
-                    r.get("at").and_then(solidcraft_engine::params::vec2).unwrap_or(q)
+                    Err(_) => drag_from,
                 }
-                Err(_) => from,
             };
+            let mut at = run_drag(app, from, q);
+            // If an existing constraint prevented the geometry from reaching the snap target,
+            // fall back to the unsnapped drag position and drop the snap so it never flickers.
+            if let Some(s) = &snap {
+                let st = crate::open_meshing::session_world(&app.session);
+                let satisfied = crate::sketch_view::active_sketch(app)
+                    .and_then(|sid| st.sketch(sid))
+                    .is_some_and(|ss| crate::drag_snap::satisfied_after_drag(&ss.sketch, s, snap_mm_px));
+                if !satisfied {
+                    crate::drag_snap::clear();
+                    at = run_drag(app, at, q_raw);
+                }
+            }
             // The grab stays on the geometry: what it could not follow this frame it catches up
             // with on the next one instead of lagging the cursor for the rest of the drag.
             // `grab` is where the pointer is, `at` where the point got to: back through the offset
@@ -8972,13 +9006,15 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::browser::dims_overlay(app, &painter, &proj);
     paint_device_pivot(app, &painter, &proj);
     draw_notes(app, &painter, &proj);
+    if !primary_down && !ui.input(|i| i.pointer.primary_pressed()) {
+        crate::dim_view::clear_consumed_outside_press();
+    }
     crate::dim_view::show(app, ui, &painter, &proj);
     crate::sketch_text_handles::show(app, ui, &painter, &proj, hover);
     crate::sketch3d::show(app, &painter, &proj);
     let tracking_cursor = hover.filter(|_| inside && !navigating && !app.esc_handled && !ui.input(|i| i.key_pressed(egui::Key::Escape)));
     crate::inference::track_and_show(app, &painter, &proj, tracking_cursor);
     crate::inference::show(app, &painter, &proj);
-    crate::drag_snap::show(app, &painter, &proj);
     crate::insert_handles::show(app, ui, &proj);
     crate::sketch_transform_ui::refresh(app);
     crate::sketch_transform_ui::show(app, ui, &proj);
@@ -9006,6 +9042,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     crate::canvas::show(app, ui, &painter, &proj);
     crate::sketch_tools::show(app, ui, &painter, &proj);
+    crate::drag_snap::show(app, &painter, &proj);
     crate::sketch_line_arc::paint_mode(app, ui, &painter, &proj);
     crate::design_properties::overlay(app, &painter, &proj);
     crate::sketch_dims::show(app, ui, &proj);
@@ -9072,6 +9109,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !crate::shell::covered(app, *p)
     });
     crate::tool_cursor::show(app, &painter, badge_at);
+    crate::sketch_tools::paint_constraint_cursor(app, &painter, &proj, badge_at, mods.shift);
     // With no tool running, where the pointer is in the open sketch (#11070).
     crate::sketch_cursor_readout::show(app, &painter, &proj, badge_at);
 }
@@ -10163,10 +10201,12 @@ fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     // the design: a highlight there would trace a curve where none is drawn. Other sketches are
     // drawn where they are.
     let previewed = crate::dim_view::previewed_sketch(app);
+    let dragging = app.viewport.point_drag.is_some();
     let col = Tokens::get().hover_profile_edge;
     let st = crate::open_meshing::shown_world(app);
     let hover = app.viewport.hover.as_ref().filter(|h| {
         !matches!(h, Hit::SketchCurve { sketch, .. } | Hit::SketchMidpoint { sketch, .. } | Hit::SketchPoint { sketch, .. } if previewed == Some(*sketch))
+            && !(dragging && matches!(h, Hit::SketchMidpoint { .. }))
     });
     match hover {
         Some(Hit::SketchPoint3d { at, .. } | Hit::PlacedSketchPoint { at, .. }) => {
@@ -13054,6 +13094,33 @@ mod tests {
             h.app.run("edit.undo", json!({})).unwrap();
         }
         crate::sketch_palette::set_mode(&mut h.app, 0);
+    }
+
+    #[test]
+    fn hover_highlight_hides_midpoint_triangle_while_dragging_point() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let r = h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"infer":false})).unwrap();
+        let id = r["curves"][0].as_str().unwrap().to_string();
+        let sketch = h.app.session.active_sketch.unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.settle();
+        let proj = display_proj(&h.app);
+        h.app.viewport.hover = Some(Hit::SketchMidpoint { sketch, id, at: Vec2::new(10.0, 0.0) });
+
+        let has_mid = |app: &SolveApp| {
+            let ctx = crate::fonts::test_context();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                hover_highlight(app, &ui.ctx().layer_painter(egui::LayerId::background()), &proj);
+            });
+            output.textures_delta.clear();
+            !output.shapes.is_empty()
+        };
+
+        assert!(has_mid(&h.app), "idle hover over midpoint should show MID marker");
+        h.app.viewport.point_drag = Some(("p1".into(), 0, None, Vec2::ZERO, true));
+        assert!(!has_mid(&h.app), "dragging a point must suppress midpoint triangle and MID label");
+        h.app.viewport.point_drag = None;
     }
 
     /// Headless pictures of the view (`ui.render`, the agent's view image) are drawn in the
