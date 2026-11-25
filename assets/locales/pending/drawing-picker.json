@@ -1,0 +1,18 @@
+{
+  "en": {
+    "ui.drawing_picker.back": "Back to {name}",
+    "ui.drawing_picker.new": "New drawing…"
+  },
+  "de": {
+    "ui.drawing_picker.back": "Zurück zu {name}",
+    "ui.drawing_picker.new": "Neue Zeichnung…"
+  },
+  "es": {
+    "ui.drawing_picker.back": "Volver a {name}",
+    "ui.drawing_picker.new": "Nuevo dibujo…"
+  },
+  "fr": {
+    "ui.drawing_picker.back": "Revenir à {name}",
+    "ui.drawing_picker.new": "Nouveau plan…"
+  }
+}

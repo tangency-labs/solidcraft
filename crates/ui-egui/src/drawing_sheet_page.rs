@@ -271,6 +271,11 @@ pub(crate) fn show_view(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) -> bool 
         message(ui, ui.max_rect(), app.tr("sheet_views.missing"), Tokens::get().error);
         return true;
     };
+    // New drawing… closed the drawing this focused Sheet shows: the setup page takes its place.
+    if app.session.view_context.focused() == id && crate::drawing_workspace::left_for_new(app).is_some() {
+        crate::drawing_workspace::show_setup(app, ui);
+        return true;
+    }
     let subject = descriptor.subject;
     let (drawing, sheet) = match crate::sheet_views::resolve(app, subject.as_deref()) {
         Ok(owner) => owner,
