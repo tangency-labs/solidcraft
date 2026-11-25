@@ -1352,6 +1352,11 @@ fn view_set_home(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.set_home";
     let c = p.get("camera").ok_or_else(|| bad(cmd, "`camera` is required"))?;
     let v = saved_view_form(c).map_err(|e| bad(cmd, e))?;
+    // Home must be a camera `view.apply` can go to: a field of view below 0 is refused here,
+    // and the Home kept so far stays.
+    if !usable_camera(&camera_of(&v)) {
+        return Err(bad(cmd, "the camera's field of view must be 0 or more"));
+    }
     s.doc_mut().home_view = Some(solidcraft_doc::NamedView { name: String::new(), ..v });
     reply(cmd, ViewHome { home: s.doc.home_view.clone(), param_warnings: Vec::new() })
 }
@@ -3265,6 +3270,10 @@ mod tests {
         for p in [json!({}), json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": -1}}), json!({"camera": "x"})] {
             assert!(s.execute("view.set_home", &p).is_err(), "{p}");
         }
+        let kept = s.doc.home_view.clone();
+        let unusable = json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 100, "fov": -1}});
+        assert!(s.execute("view.set_home", &unusable).is_err(), "a field of view below 0 is refused");
+        assert_eq!(s.doc.home_view, kept, "and the Home kept so far stays");
         run(&mut s, "view.reset_home", json!({}));
         assert!(s.doc.home_view.is_none());
         assert_eq!(run(&mut s, "view.apply", json!({"view": "home"}))["camera"], framed);
