@@ -2,6 +2,7 @@
 
 use super::{FilletBody, FilletObject, FilletSession, NetScope};
 use crate::blend::blend_corner::separate_ends::{plan, SectionKind, SeparateEndPlan};
+use crate::blend::blend_corner::TurnChoice;
 use crate::blend::fillet_executive::p3::{FitKind, FitSize, NoRoomReason};
 use crate::blend::fillet_geom::p1::FilletErrorType;
 use crate::blend::fillet_solver::p1::{FilletSurfaceGenerator, FilletSurfaceGeneratorType};
@@ -92,6 +93,8 @@ impl FilletSession<'_> {
     }
 
     /// The edge and section of every loaded standard constant solver.
+    /// Auto still permits these Ends: the plan qualifies six-sector fans, so
+    /// none of these pairs is a three-edge Turn that could be swept.
     fn separate_end_selection(&self, k: &Kernel) -> Result<Option<Selection>> {
         let exec = &self.executive;
         let objects = &self.objects;
@@ -113,7 +116,7 @@ impl FilletSession<'_> {
             || !exec.earlier_pass_faces.is_empty()
             || !exec.fan_split_points.is_empty()
             || objects.second_base.is_some()
-            || objects.swept_turns
+            || objects.turns == TurnChoice::Swept
             || objects.roll_over_classify
             || !objects.roll_over_ends.is_empty()
             || objects.chamfer_corner.is_some()

@@ -280,6 +280,34 @@ fn post_foot_blends_stop_at_a_through_cut_corner() {
 }
 
 #[test]
+fn post_foot_blends_end_separately_with_auto_turns() {
+    all_fixes();
+    let size = 2.0_f64;
+    for (kind, area) in [(Blend::Chamfer, 0.5), (Blend::Round, 1.0 - PI / 4.0)] {
+        let body = post_foot(true);
+        let made = blend_with(
+            &body,
+            kind,
+            &post_foot_edges(&body),
+            &[size],
+            &[],
+            Corners::Filled,
+            BlendOptions {
+                turn: Turn::Auto,
+                ..BlendOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(made.dropped, [false; 2]);
+        assert!(made.holes.is_empty());
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+        assert_eq!(body.solid_count().unwrap(), 1);
+        let expected = 12_900.0 + 20.0 * area * size.powi(2);
+        assert!(rel(volume(&body), expected) < 1e-9, "{kind:?}");
+    }
+}
+
+#[test]
 fn post_foot_blends_at_a_triangular_opening() {
     use solidcore_ops::{boolean::boolean, BooleanOp, PointClass};
 

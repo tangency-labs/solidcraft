@@ -1883,7 +1883,7 @@ fn blend_on_body(
     if picked.len() > 1
         && back.is_empty()
         && corners == Corners::Filled
-        && turn == Turn::Mitre
+        && turn != Turn::Swept
         && options.chamfer_corner == ChamferCorner::Mitre
         && matches!(kind, Blend::Chamfer | Blend::Round)
     {

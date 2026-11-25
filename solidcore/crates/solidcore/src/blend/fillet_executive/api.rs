@@ -1198,10 +1198,16 @@ mod tests {
 
     #[test]
     fn joint_post_foot_blends_through_a_direct_session() {
+        use crate::blend::blend_corner::TurnChoice;
         use crate::geom::attribute::{ids, Attribute, Behavior};
 
         let mut failed = Vec::new();
-        for (code, area) in [(0, 0.5), (1, 1.0 - PI / 4.0)] {
+        for (code, area, turn) in [
+            (0, 0.5, TurnChoice::Mitre),
+            (1, 1.0 - PI / 4.0, TurnChoice::Mitre),
+            (0, 0.5, TurnChoice::Auto),
+            (1, 1.0 - PI / 4.0, TurnChoice::Auto),
+        ] {
             let mut k = Kernel {
                 fixes: crate::kernel::UpstreamFixes::all(),
                 ..Kernel::default()
@@ -1230,13 +1236,14 @@ mod tests {
             .unwrap();
             let result = {
                 let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+                session.set_turns(turn);
                 session
                     .prepare_constant_radius_edges(&mut k, &edges, 5.0, code, 1, 1.0)
                     .unwrap();
                 session.do_fillet(&mut k)
             };
             if let Err(error) = result {
-                failed.push((code, error));
+                failed.push((code, turn, error));
                 continue;
             }
             stitch_and_orient(&mut k, &mut body, &StitchAndOrientOptions::default()).unwrap();
