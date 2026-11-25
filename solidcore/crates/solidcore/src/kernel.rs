@@ -470,7 +470,6 @@ impl WorkCounters {
     #[must_use]
     pub fn face_intersections(&self) -> u64 {
         self.face_intersections.get()
-
     }
 
     /// Intersections of a convex blend's section with a face of the part, run to learn whether
