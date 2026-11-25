@@ -31,12 +31,17 @@ fn front_view() -> (Session, u64) {
 }
 
 /// A drawing of `s`, open, with its front view at 1:1: the session and the view's id.
-fn drawn_from_the_front(mut s: Session) -> (Session, u64) {
+fn drawn_from_the_front(s: Session) -> (Session, u64) {
+    drawn_from(s, NamedView::Front)
+}
+
+/// A drawing of `s`, open, with its view from `named` at 1:1: the session and the view's id.
+fn drawn_from(mut s: Session, named: NamedView) -> (Session, u64) {
     run(&mut s, "drawing.create", json!({}));
     let mut d = (**s.drawing("test").unwrap()).clone();
     let id = d.allocate_id(&mut ids::IdSource::seeded(4896)).unwrap();
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
-    let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
+    let kind = ViewKind::Base { source, view: ViewDirection::Named(named) };
     let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), ..ViewOverrides::default() };
     d.add_views([Arc::new(View {
         id,
@@ -446,6 +451,25 @@ fn a_radial_dimension_reads_a_hole_and_an_edit_makes_it_a_diameter() {
         assert!(e.contains("a radial dimension has only `diameter`"), "{p}: {e}");
     }
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+}
+
+/// A radial dimension on the circle where a countersink meets its bore reads the bore's diameter
+/// from above (#22308): the kernel holds that edge only as a spline, split in two, and each piece
+/// reads as the bore's circle, as the bore's rim on the bottom face does.
+#[test]
+fn a_radial_dimension_reads_where_a_countersink_meets_its_bore() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10, "body_name": "Box"}));
+    let hole = json!({"position": [15, 20, 10], "diameter": 4.5, "type": "countersink", "cs_diameter": 9, "cs_angle": 90});
+    run(&mut s, "solid.hole", hole);
+    let (mut s, view) = drawn_from(s, NamedView::Top);
+    // The countersink's 90° cone meets the 2.25 mm bore 2.25 mm below the 4.5 mm rim.
+    let (cos, sin) = (0.3_f64.cos(), 0.3_f64.sin());
+    for at in [[15.0 + 2.25 * cos, 20.0 + 2.25 * sin, 7.75], [15.0 - 2.25 * cos, 20.0 - 2.25 * sin, 7.75], [17.25, 20.0, 0.0]] {
+        let across = add(&mut s, view, json!({"radial": {"edge": at}}));
+        reads(&across, 4.5, "Ø4.50");
+        assert_eq!(across["record"]["kind"]["radial"]["diameter"], json!(true), "{at:?}: {across}");
+    }
 }
 
 /// A point on a curved edge names it wherever it falls between the edge's chords, a little way off it
