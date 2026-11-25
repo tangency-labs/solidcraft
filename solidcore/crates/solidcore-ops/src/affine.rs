@@ -298,13 +298,7 @@ pub fn pivot_displacement(matrix: &Matrix, pivot: [f64; 3]) -> Result<[f64; 3]> 
 
 /// Cosine of the angle between two directions, computed by the kernel.
 pub fn direction_cosine(a: [f64; 3], b: [f64; 3]) -> Option<f64> {
-    let (la, a) = vec3(a).length_and_unit()?;
-    let (lb, b) = vec3(b).length_and_unit()?;
-    if !la.is_finite() || !lb.is_finite() || la <= 1e-9 || lb <= 1e-9 {
-        return None;
-    }
-    let cosine = a.dot(b);
-    cosine.is_finite().then_some(cosine)
+    vec3(a).direction_cosine(vec3(b), 1e-9)
 }
 
 /// `direction`, reversed when it points more than a right angle away from `like`, through

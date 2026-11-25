@@ -338,6 +338,23 @@ impl Vec3 {
         Some((scale * sqrt(len_sq), scaled.unitize_nonzero(len_sq)))
     }
 
+    /// Cosine between two directions, with a caller-supplied minimum length.
+    /// Returns `None` for non-finite lengths, lengths at or below the minimum,
+    /// or an invalid minimum (negative or not finite).
+    #[must_use]
+    pub fn direction_cosine(self, other: Self, min_length: f64) -> Option<f64> {
+        if !min_length.is_finite() || min_length < 0.0 {
+            return None;
+        }
+        let (la, a) = self.length_and_unit()?;
+        let (lb, b) = other.length_and_unit()?;
+        if !la.is_finite() || !lb.is_finite() || la <= min_length || lb <= min_length {
+            return None;
+        }
+        let cosine = a.dot(b);
+        cosine.is_finite().then_some(cosine)
+    }
+
     fn unitize_nonzero(self, len_sq: f64) -> Self {
         if (len_sq - 1.0).abs() > EFF_ZERO_SQ {
             let len = sqrt(len_sq);
@@ -1073,6 +1090,21 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn direction_cosine_checks_lengths_and_normalizes() {
+        let x = Vec3::new(2.0, 0.0, 0.0);
+        let y = Vec3::new(0.0, 3.0, 0.0);
+        let min = 1e-9;
+        assert_eq!(x.direction_cosine(y, min), Some(0.0));
+        assert_eq!(x.direction_cosine(-x, min), Some(-1.0));
+        assert_eq!(x.direction_cosine(x, min), Some(1.0));
+        assert_eq!(x.direction_cosine(Vec3::new(min, 0.0, 0.0), min), None);
+        assert_eq!(Vec3::new(0.0, 0.0, 0.0).direction_cosine(x, min), None);
+        assert_eq!(Vec3::new(f64::NAN, 0.0, 0.0).direction_cosine(x, min), None);
+        assert_eq!(x.direction_cosine(y, f64::NAN), None);
+        assert_eq!(x.direction_cosine(y, -1.0), None);
+    }
 
     /// A side with normal X, turned about Z to square with a line.
     #[test]
