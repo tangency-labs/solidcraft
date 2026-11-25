@@ -152,7 +152,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
-        FeatureKind::SurfaceExtend { body, edges, distance, mode, up_to, neighbours } => {
+        FeatureKind::SurfaceExtend { body, edges, distance, mode, up_to, neighbours, stays_surface } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let mode = match mode {
@@ -179,7 +179,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 }
             };
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody { sheet: mb.sheet, ..ModelBody::new(mb.name, out, mb.feature) };
+                *slot = ModelBody { sheet: mb.sheet || *stays_surface, ..ModelBody::new(mb.name, out, mb.feature) };
             }
             Ok(())
         }
@@ -323,7 +323,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
-        FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent } => {
+        FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent, to_next } => {
             let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
@@ -334,10 +334,14 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     "not supported yet: a surface extrude through all, from an object, with a taper, or with symmetric offset".into(),
                 ));
             }
+            if *to_next && extent.to.is_some() {
+                return Err(DocError::Invalid("a surface extrude goes To Next or To Object, not both".into()));
+            }
             let off = extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
             let chains = sheet_chains(&ss, profiles.as_ref(), curves)?;
             let body = match extent.to {
                 Some(to) => sheet_to_object(doc, vals, f, st, &ss, &chains, extent, to.0, off)?,
+                None if *to_next => sheet_to_next(doc, f, st, &ss, &chains, extent, off)?,
                 None => {
                     let d = val(vals, &extent.distance, Kind::Length)?;
                     let (a, b) = extent_sides(vals, extent, d, extent.direction)?;
@@ -386,9 +390,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 kernel::revolve_sheet_legacy_sides(&ss.plane, &chains, o, d, start, sweep)?
             };
             push_sheet(st, f, crate::lineage::ChainRoles { sketch: &ss, chains: &chains }.tool(body));
-            if *stays_surface && let Some(made) = st.bodies.last_mut() {
-                made.sheet = true;
-            }
+            stays_a_surface(st, *stays_surface);
             Ok(())
         }
         FeatureKind::Unstitch { body, faces } => {
@@ -436,6 +438,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             rails,
             rail_fit,
             spline_as_samples,
+            stays_surface,
         } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?;
             // The path is a chain of a body's edges (#2216) or the curves of a sketch.
@@ -490,9 +493,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             };
             let traced = crate::lineage::ChainRoles { sketch: ss, chains: &chains }.tool(body);
             push_sheet(st, f, traced);
+            stays_a_surface(st, *stays_surface);
             Ok(())
         }
-        FeatureKind::SurfaceLoft { sections, continuity, crown, rails, rail_fit, faced } => {
+        FeatureKind::SurfaceLoft { sections, continuity, crown, rails, rail_fit, faced, stays_surface } => {
             // A loft with edge chains or 3D sketch curves for sections, or one that has to leave its
             // ends a particular way, is built through `loft_blend` from the frames of every
             // section; the plain one (planar sketch chains only, both ends G0) is the loft of old.
@@ -505,7 +509,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                         "not supported yet: guide rails on a loft with edge sections or end continuity".into()
                     }));
                 }
-                return loft_blend(st, f, sections, *continuity, *crown, doc);
+                loft_blend(st, f, sections, *continuity, *crown, doc)?;
+                stays_a_surface(st, *stays_surface);
+                return Ok(());
             }
             let mut secs = Vec::with_capacity(sections.len());
             let mut sketches = Vec::with_capacity(sections.len());
@@ -546,9 +552,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let loops: Vec<solidcore_record::Loop2> = secs.iter().map(|(_, c)| solidcore_record::Loop2 { segs: c.clone() }).collect();
             let traced = crate::lineage::SectionRoles { sections: sketches.iter().zip(&loops).map(|(s, lp)| (s, vec![lp])).collect() }.tool(body);
             push_sheet(st, f, traced);
+            stays_a_surface(st, *stays_surface);
             Ok(())
         }
-        FeatureKind::SurfaceOffset { faces, body, distance, chain, tolerance } => {
+        FeatureKind::SurfaceOffset { faces, body, distance, chain, tolerance, stays_surface } => {
             let d = val(vals, distance, Kind::Length)?;
             let tol = match tolerance {
                 Some(t) => val(vals, t, Kind::Length)?,
@@ -568,9 +575,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let made = Traced::step(kernel::offset_surface(&mb.body, &picked, d, tol)?, &[&mb.traced()]);
             let name = new_name(st, f, 0);
             st.bodies.push(ModelBody::traced_new(name, made, f.id));
+            stays_a_surface(st, *stays_surface);
             Ok(())
         }
-        FeatureKind::SurfaceRuled { body, edges, distance, mode, angle, direction, flip, corners, face, far } => {
+        FeatureKind::SurfaceRuled { body, edges, distance, mode, angle, direction, flip, corners, face, far, stays_surface } => {
             let d = val(vals, distance, Kind::Length)?;
             let mode = match mode {
                 RuledMode::Normal => kernel::RuledMode::Normal,
@@ -593,6 +601,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let made = Traced::step(kernel::ruled_surface_with(&mb.body, &crate::plain(edges), &r, &handles)?, &[&mb.traced()]);
             let name = new_name(st, f, 0);
             st.bodies.push(ModelBody::traced_new(name, made, f.id));
+            stays_a_surface(st, *stays_surface);
             Ok(())
         }
         FeatureKind::SurfaceUntrim { face, holes, outer, in_place } => {
@@ -713,7 +722,60 @@ fn sheet_to_object(
     Err(DocError::Invalid("part of the surface extrude never meets the To face's surface".into()))
 }
 
+/// A surface extrude To Next, starting `start` along the sketch normal: each wall runs one way
+/// (`extent.direction`: positive along the normal, negative against it) until it first meets a
+/// body, any face of a solid or surface body as it is ([`kernel::stop_at_bodies`]). A wall that
+/// meets no body is refused, as To Object refuses one that never meets its face, and so is a
+/// symmetric or two-sided To Next.
+fn sheet_to_next(
+    doc: &Document,
+    f: &Feature,
+    st: &ModelState,
+    ss: &SolvedSketch,
+    chains: &[Vec<Seg2>],
+    extent: &crate::Extent,
+    start: f64,
+) -> Result<kernel::Body> {
+    if extent.direction == crate::Direction::Symmetric || extent.distance2.is_some() {
+        return Err(DocError::Invalid("not supported yet: a surface extrude To Next to both sides (symmetric or a second side)".into()));
+    }
+    let plane = &ss.plane;
+    let toward = if extent.direction == crate::Direction::Negative { -1.0 } else { 1.0 };
+    // The bodies as this feature's component sees them, as To Object measures its target. A
+    // component's envelope only stands in for its contents: it stops nothing.
+    let tst = state_in_frame_pinned_to(doc, st, f.component, &extent.picked_placements)?;
+    let bodies: Vec<&kernel::Body> = tst.bodies.iter().filter(|b| !b.envelope).map(|b| &b.body).filter(|b| !b.is_mesh()).collect();
+    if bodies.is_empty() {
+        return Err(DocError::Invalid("a surface extrude To Next needs a body in its way, and the model has none".into()));
+    }
+    // Past every body, so a wall that meets none still runs to the far end.
+    let reach = through_all_distance(&tst, plane, start, &[])?;
+    let far = start + toward * reach;
+    extrude_within_reach([start, far])?;
+    let long = kernel::extrude_sheet(plane, chains, start.min(far), start.max(far))?;
+    // A corner of each chain's wall at the start picks the pieces to keep.
+    let start_plane = plane.offset(start);
+    let starts: Vec<Vec3> = chains.iter().filter_map(|c| c.first()).map(|s| start_plane.to_world(s.start())).collect();
+    let (kept, met) = kernel::stop_at_bodies(&long, &bodies, &starts, plane.normal() * toward)?;
+    // `reach` runs at least 1 past every body, so a wall that met one ends within half of it.
+    let [low, high] = kernel::levels_along(&kept, plane)?;
+    let furthest = if toward > 0.0 { high } else { -low };
+    if !met || furthest > toward * far - 0.5 {
+        return Err(DocError::Invalid("part of the surface extrude To Next meets no body".into()));
+    }
+    Ok(kept)
+}
+
 /// A surface builder's body, added to the model with what its faces came from.
+/// The body a surface feature just made is a surface body even where its shells close, when the
+/// feature says so (`stays_surface`, #21969); without it (designs saved before), a result that
+/// closes is a solid, as it always was.
+fn stays_a_surface(st: &mut ModelState, stays_surface: bool) {
+    if stays_surface && let Some(made) = st.bodies.last_mut() {
+        made.sheet = true;
+    }
+}
+
 fn push_sheet(st: &mut ModelState, f: &Feature, traced: crate::lineage::Traced) {
     let name = new_name(st, f, 0);
     st.bodies.push(ModelBody::traced_new(name, traced, f.id));

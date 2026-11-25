@@ -99,6 +99,14 @@ mod value_focus;
 mod viewport_status;
 mod wheel;
 
+/// The shared rule for chrome that tells views, tiles or windows apart (a tile's header label, an
+/// active-tile or mode marker): it shows only when there is more than one to tell apart. With one
+/// view nothing is drawn; with several, at most a thin neutral marker. New chrome of that kind goes
+/// through this predicate.
+pub fn disambiguates(count: usize) -> bool {
+    count > 1
+}
+
 pub use actions::Button;
 pub use actions::button;
 pub use actions::*;

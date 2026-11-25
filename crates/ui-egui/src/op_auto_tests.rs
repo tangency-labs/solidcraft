@@ -214,6 +214,56 @@ fn hidden_bodies_take_no_part() {
     assert_eq!(op(&mut h), NEW);
 }
 
+/// Pipe and Thicken don't choose their operation, yet a Cut from their windows leaves a hidden
+/// body alone too: two 20 mm boxes, the second hidden, a path through both at half height.
+#[test]
+fn a_pipe_or_thicken_cut_from_its_window_leaves_hidden_bodies_alone() {
+    let volume = |h: &Harness, name: &str| {
+        let st = crate::open_meshing::session_world(&h.app.session);
+        st.body(name).and_then(|b| solidcraft_engine::doc::kernel::measure(&b.body).ok()).map(|m| m.volume)
+    };
+    let mut found = Vec::new();
+    for tool in ["solid.pipe", "surface.thicken"] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"})).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [40, 0, 0], "body_name": "B"})).unwrap();
+        h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "Mid"})).unwrap();
+        h.app.run("sketch.create", json!({"plane": "Mid"})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[-10, 10], [70, 10]], "ids": ["path"]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let mut sels = vec![solidcraft_engine::Sel::SketchCurve { id: "path".into(), sketch: None }];
+        if tool == "surface.thicken" {
+            h.app.run("surface.extrude", json!({"curves": ["path"], "distance": 4, "body_name": "Sheet"})).unwrap();
+            sels = vec![solidcraft_engine::Sel::Body { name: "Sheet".into() }];
+        }
+        h.app.run("browser.visibility", json!({"items": ["B"], "visible": false})).unwrap();
+        h.app.session.selection = sels;
+        h.app.start(tool);
+        let Some(mut d) = h.app.dialog.clone() else { panic!("{tool}: no window") };
+        match &mut d.kind {
+            Kind::Pipe { diameter, operation, .. } => (*diameter, *operation) = ("6 mm".into(), CUT),
+            Kind::Surface(crate::dialogs_surface::Surf::Thicken { thickness, operation, .. }) => (*thickness, *operation) = ("2 mm".into(), CUT),
+            other => panic!("{tool}: {other:?}"),
+        }
+        for (cmd, p) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+            h.app.run(&cmd, p).unwrap();
+        }
+        // Editing it keeps the shown box as its only target.
+        let id = h.app.session.doc.features.last().map(|f| f.id);
+        let edit = id.and_then(|id| crate::dialogs::for_feature(&h.app, id, None)).and_then(|d| crate::dialogs::apply_commands(&h.app, &d).ok());
+        let kept = edit.as_ref().and_then(|c| c.first()).map(|(_, p)| p["params"]["targets"].clone());
+        found.push((tool, volume(&h, "A").unwrap_or_default(), volume(&h, "B").unwrap_or_default(), kept));
+    }
+    // Pipe: 6 mm across 20 mm takes 180π (565.49 mm3); Thicken: 20 x 4 x 2 takes 160 mm3.
+    for (tool, a, b, kept) in &found {
+        let cut = if *tool == "solid.pipe" { 180.0 * std::f64::consts::PI } else { 160.0 };
+        assert!(
+            (a - (8000.0 - cut)).abs() < 1.0 && (b - 8000.0).abs() < 1e-6 && *kept == Some(json!(["A"])),
+            "the shown box A is cut, the hidden B untouched, an edit keeps A as the target: {found:?}"
+        );
+    }
+}
+
 #[test]
 fn into_a_hidden_body_with_nothing_shown_is_a_new_body_until_it_is_shown() {
     // The profile on the hidden cube's base, extruded into it (#9919).

@@ -1460,6 +1460,46 @@ impl ModelState {
     }
 }
 
+/// The role of each face of `split` (Split Face's result, `from` the face of the body before
+/// each came from) that is a piece of one of the faces `picked`: which side of the tool it lies
+/// on (`+`/`-` of a plane or a tool face, `in`/`out` of a closed sketch curve, `left`/`right` of
+/// an open one), and with several sketch curves each curve's side by its number (`in:2`, a piece
+/// inside the second; `out`, outside every closed one). `None` for every other face, and for a
+/// piece whose side the tool can't tell: it is told apart by the faces around it, as before.
+fn split_piece_roles(split: &kernel::Body, from: &[usize], picked: &[usize], tool: &kernel::SplitTool) -> Vec<Option<String>> {
+    let pieces: Vec<usize> = (0..from.len()).filter(|i| from.get(*i).is_some_and(|f| picked.contains(f))).collect();
+    let mut roles = vec![None; from.len()];
+    let Ok(sides) = kernel::split_piece_sides(split, &pieces, tool) else { return roles };
+    let many = sides.fields.len() > 1;
+    for (face, of) in pieces.iter().zip(&sides.sides) {
+        let mut parts: Vec<String> = Vec::new();
+        let mut known = true;
+        for (k, (kind, side)) in sides.fields.iter().zip(of).enumerate() {
+            let Some(first) = *side else {
+                known = false;
+                break;
+            };
+            let word = match (kind, first) {
+                (kernel::FieldKind::Plane | kernel::FieldKind::Face, true) => "+",
+                (kernel::FieldKind::Plane | kernel::FieldKind::Face, false) => "-",
+                (kernel::FieldKind::Loop, true) => "in",
+                (kernel::FieldKind::Loop, false) if many => continue,
+                (kernel::FieldKind::Loop, false) => "out",
+                (kernel::FieldKind::Curve, true) => "left",
+                (kernel::FieldKind::Curve, false) => "right",
+            };
+            parts.push(if many { format!("{word}:{}", k + 1) } else { word.to_string() });
+        }
+        if !known {
+            continue;
+        }
+        if let Some(slot) = roles.get_mut(*face) {
+            *slot = Some(if parts.is_empty() { "out".to_string() } else { parts.join(".") });
+        }
+    }
+    roles
+}
+
 /// The key [`ModelState::stamp`] gives body `name` that a feature evaluated with cache key `key`
 /// made or changed.
 fn made_body_key(key: u64, name: &str) -> u64 {
@@ -4225,6 +4265,8 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.placed_body(st, &b.0);
             }
         }
+        // A surface extrude To Next runs into whichever body is in its way, wherever it is placed.
+        FeatureKind::SurfaceExtrude { to_next: true, .. } => reads.all = true,
         // Copies meet the bodies they change where those are placed relative to their source's
         // tools' frame, whatever the pattern's own placement (#14271).
         FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => {
@@ -6546,7 +6588,7 @@ thread_local! {
 fn joined_into<'d>(doc: &'d Document, state: &ModelState, f: &Feature, name: &str) -> Option<&'d str> {
     let mut now: Option<&'d str> = None;
     for g in doc.features.iter().take_while(|g| g.id != f.id).filter(|g| !g.suppressed) {
-        if let FeatureKind::Combine { target, tools, operation: Operation::Join | Operation::NewBody, keep_tools: false } = &g.kind
+        if let FeatureKind::Combine { target, tools, operation: Operation::Join | Operation::NewBody, keep_tools: false, .. } = &g.kind
             && tools.iter().any(|t| t.0.as_str() == now.unwrap_or(name))
         {
             now = Some(target.0.as_str());
@@ -10548,8 +10590,8 @@ pub(crate) fn kernel_rail_fit(fit: crate::RailFit) -> kernel::RailFit {
 /// A sweep's or a loft's guide rails as polylines in the feature's frame, each a chain of its sketch's curves
 /// (planar or 3D) from the end nearest `start` (the start of the path, the loft's first section).
 pub(crate) fn rail_polylines(doc: &Document, st: &ModelState, rails: &[crate::SweepRail], consumer: u64, start: Vec3) -> Result<Vec<Vec<Vec3>>> {
-    if rails.len() > 2 {
-        return Err(DocError::Invalid("a sweep or a loft takes one or two guide rails".into()));
+    if rails.len() > kernel::MAX_LOFT_RAILS {
+        return Err(DocError::Invalid(format!("a loft takes 1…{} guide rails (a sweep one or two)", kernel::MAX_LOFT_RAILS)));
     }
     rails
         .iter()
@@ -14897,6 +14939,22 @@ fn eval_feature_kind(
             }
             Ok(())
         }
+        FeatureKind::Dome { face, height, shape, reverse, body } => {
+            let h = val(vals, height, Kind::Length)?;
+            let i = body_at(st, body, &[face.0])?;
+            let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let index =
+                crate::appearance::face_index_at(&mb, face.0).ok_or_else(|| DocError::Invalid("the dome's face is not on the body".into()))?;
+            let shape = match shape {
+                crate::DomeShape::Elliptical => kernel::DomeShape::Elliptical,
+                crate::DomeShape::Spherical => kernel::DomeShape::Spherical,
+            };
+            let nb = Traced::step(kernel::dome(&mb.body, index, h, shape, *reverse)?, &[&mb.traced()]);
+            if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = mb.remade(nb);
+            }
+            Ok(())
+        }
         FeatureKind::Draft { faces, angle, neutral, pull, body } => {
             let a = val(vals, angle, Kind::Angle)?;
             let pl = doc.resolve_plane_in(vals, neutral, 0, f.component, Some(st))?;
@@ -14966,8 +15024,8 @@ fn eval_feature_kind(
             });
             Ok(())
         }
-        FeatureKind::BoundaryFill { tools, cells, operation, remove_tools } => {
-            if tools.is_empty() || tools.len() > 64 || cells.is_empty() || cells.len() > 1000 {
+        FeatureKind::BoundaryFill { tools, planes, cells, operation, remove_tools } => {
+            if tools.is_empty() || tools.len() + planes.len() > 64 || cells.is_empty() || cells.len() > 1000 {
                 return Err(DocError::Invalid("Boundary Fill needs 1…64 tool bodies and 1…1000 cells".into()));
             }
             let tb: Vec<ModelBody> =
@@ -14976,6 +15034,34 @@ fn eval_feature_kind(
             if tb.iter().any(|b| b.body.is_mesh() || b.body.is_surface()) {
                 return Err(DocError::Invalid("Boundary Fill needs closed solid tools; open surface and mesh tools are not supported".into()));
             }
+            // A plane tool cuts space like an infinite plane: a cell lies on the side of it its point
+            // is on. The region a plane and the bodies close off may hold no body at all (the
+            // bore of an open tube), so with planes the cells are cut from a box (exact) that
+            // covers every tool and cell point with a margin; a cell that reaches that box is
+            // not enclosed.
+            let mut cut_planes: Vec<Plane> = Vec::new();
+            for pr in planes {
+                // A construction plane of another component is stored in that component's frame.
+                cut_planes.push(doc.resolve_plane_in(vals, &*construction_planes_in_frame(doc, st, f.component, pr)?, 0, f.component, Some(&*st))?);
+            }
+            let universe = match cells.first() {
+                Some(first) if !cut_planes.is_empty() => {
+                    let (mut lo, mut hi) = (first.0, first.0);
+                    for c in cells {
+                        lo = lo.min(c.0);
+                        hi = hi.max(c.0);
+                    }
+                    for b in &tb {
+                        let bb = b.body.exact_bounds()?;
+                        lo = lo.min(bb.min);
+                        hi = hi.max(bb.max);
+                    }
+                    let margin = (hi - lo).len() * 0.5 + 1.0;
+                    let pad = Vec3::new(margin, margin, margin);
+                    Some((kernel::box_solid(lo - pad, hi + pad)?, lo, hi, margin))
+                }
+                _ => None,
+            };
             let mut made = Vec::new();
             for p in cells {
                 // The cell: inside the tools that hold the point, outside the others.
@@ -14996,12 +15082,49 @@ fn eval_feature_kind(
                         Some(a) => kernel::boolean(&a.body, &b.body, BoolOp::Intersect)?.map(|r| Traced::step(r, &[&a, &b.traced()])),
                     };
                 }
-                let Some(mut cell) = acc else {
-                    return Err(DocError::Invalid(format!("the point {} is outside every tool: no enclosed cell there", p.0)));
+                let mut cell = match (acc, &universe) {
+                    (Some(a), _) => a,
+                    (None, Some((u, ..))) => Traced { body: u.clone(), lineage: None, recipe: None },
+                    (None, None) => {
+                        return Err(DocError::Invalid(format!("the point {} is outside every tool: no enclosed cell there", p.0)));
+                    }
                 };
+                for pl in &cut_planes {
+                    let side = pl.height(p.0);
+                    if side.abs() <= 1e-7 * (1.0 + cell.body.size()) {
+                        return Err(DocError::Invalid("Boundary Fill cell points must be away from tool planes".into()));
+                    }
+                    cell = half_traced(&cell, pl, side > 0.0)?.ok_or_else(|| DocError::Invalid("a cell came out empty".into()))?;
+                }
                 for (b, _) in tb.iter().zip(&inside).filter(|(_, i)| !**i) {
                     let cut = kernel::boolean(&cell.body, &b.body, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("a cell came out empty".into()))?;
                     cell = Traced::step(cut, &[&cell, &b.traced()]);
+                }
+                if let Some((_, lo, hi, margin)) = &universe {
+                    // The planes can split a cell's region in pieces: the cell is the one holding the point.
+                    let lumps = cell.body.lumps()?;
+                    let lineages = crate::lineage::Lineage::lumps(&cell.body, cell.lineage.as_ref(), &lumps);
+                    let mut picked = None;
+                    for (lump, lineage) in lumps.into_iter().zip(lineages) {
+                        if matches!(lump.classify_point(p.0), Ok(kernel::PointClass::Inside)) {
+                            picked = Some(Traced { body: lump, lineage, recipe: None });
+                            break;
+                        }
+                    }
+                    cell = picked.ok_or_else(|| DocError::Invalid(format!("the point {p:?} is not inside a cell the tools and planes enclose")))?;
+                    let bb = cell.body.exact_bounds()?;
+                    let reach = *margin * 0.5;
+                    if bb.min.x < lo.x - reach
+                        || bb.min.y < lo.y - reach
+                        || bb.min.z < lo.z - reach
+                        || bb.max.x > hi.x + reach
+                        || bb.max.y > hi.y + reach
+                        || bb.max.z > hi.z + reach
+                    {
+                        return Err(DocError::Invalid(format!(
+                            "the point {p:?} is in a region the tools and planes leave open: no enclosed cell there"
+                        )));
+                    }
                 }
                 if cell.body.is_surface() {
                     return Err(DocError::Invalid("Boundary Fill did not produce a closed solid cell".into()));
@@ -15024,12 +15147,12 @@ fn eval_feature_kind(
                     picked.push(fi);
                 }
             }
-            let nb = match (tool, sketch) {
+            let split_tool = match (tool, sketch) {
                 (Some(t), _) => {
                     let tb = st.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
                     let face = crate::appearance::face_index_at(tb, t.point.0)
                         .ok_or_else(|| DocError::Invalid(format!("no face of `{}` at the tool point", t.body)))?;
-                    kernel::split_faces(&mb.body, &picked, &kernel::SplitTool::Face { body: &tb.body, face })?
+                    kernel::SplitTool::Face { body: &tb.body, face }
                 }
                 (None, Some(sid)) => {
                     let ss = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
@@ -15048,14 +15171,13 @@ fn eval_feature_kind(
                     if curves.is_empty() {
                         return Err(DocError::Invalid(format!("sketch `{}` has no curves to split with", ss.name)));
                     }
-                    kernel::split_faces(&mb.body, &picked, &kernel::SplitTool::Curves { plane: ss.plane, curves, along: None })?
+                    kernel::SplitTool::Curves { plane: ss.plane, curves, along: None }
                 }
-                (None, None) => {
-                    let pl = doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?;
-                    kernel::split_faces(&mb.body, &picked, &kernel::SplitTool::Plane(pl))?
-                }
+                (None, None) => kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?),
             };
-            let nb = Traced::step(nb, &[&mb.traced()]);
+            let (nb, from) = kernel::split_faces_with_map(&mb.body, &picked, &split_tool)?;
+            let pieces = split_piece_roles(&nb, &from, &picked, &split_tool);
+            let nb = Traced::step(nb, &[&mb.traced()]).with_pieces(pieces);
             if let Some(slot) = st.bodies.get_mut(i) {
                 *slot = mb.remade(nb);
             }
@@ -15442,10 +15564,18 @@ fn eval_feature_kind(
             let tool = more::cone(point(vals, base)?, axis.0, radius, top_radius, height)?;
             apply_traced(doc, st, f, vec![tool], *operation, &[])
         }
-        FeatureKind::Combine { target, tools, operation, keep_tools } => {
+        FeatureKind::Combine { target, tools, operation, keep_tools, offset, offset_edges, offset_faces, offset_radius } => {
             if tools.iter().any(|t| t == target) {
                 return Err(DocError::Invalid("a body cannot be combined with itself".into()));
             }
+            // A cut's clearance (#3774): each tool is grown by it before it cuts.
+            let offset = match offset {
+                Some(_) if *operation != Operation::Cut => {
+                    return Err(DocError::Invalid("an offset is only for a cut".into()));
+                }
+                Some(e) => val(vals, e, Kind::Length)?,
+                None => 0.0,
+            };
             // Each body is kept in its own component's frame: a tool placed differently from the
             // target is moved into the target's frame, so it is combined where it is shown (#3383).
             // A tool placed exactly as the target is left as it is.
@@ -15555,6 +15685,47 @@ fn eval_feature_kind(
                 }
                 _ => {}
             }
+            // The grown copies cut; the tool bodies stay as they are.
+            let tb = if offset == 0.0 {
+                tb
+            } else {
+                let round = match (offset_edges, offset_radius) {
+                    (crate::OffsetEdges::Sharp, None) => None,
+                    (crate::OffsetEdges::Sharp, Some(_)) => {
+                        return Err(DocError::Invalid("a rounding radius is only for an offset with round edges".into()));
+                    }
+                    (crate::OffsetEdges::Round, None) => Some(offset.abs()),
+                    (crate::OffsetEdges::Round, Some(e)) => Some(val(vals, e, Kind::Length)?),
+                };
+                // Each picked face goes to the tool it lies on (exactly: its nearest face).
+                let mut picked: Vec<Vec<Vec3>> = vec![Vec::new(); tb.len()];
+                for p in offset_faces.iter().map(|p| p.0) {
+                    let nearest = tb
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, t)| t.body.nearest_face(p).map(|(d, _)| (d, i, t.body.size())))
+                        .min_by(|a, b| a.0.total_cmp(&b.0));
+                    match nearest {
+                        Some((d, i, size)) if d <= size * 1e-3 + 1e-6 => {
+                            if let Some(slot) = picked.get_mut(i) {
+                                slot.push(p);
+                            }
+                        }
+                        _ => return Err(DocError::Invalid(format!("no tool face at ({:.3}, {:.3}, {:.3}) to offset", p.x, p.y, p.z))),
+                    }
+                }
+                tb.into_iter()
+                    .zip(picked)
+                    .map(|(t, at)| match (offset_faces.is_empty(), at.is_empty()) {
+                        // Faces are picked, none of this tool's: it cuts as it is.
+                        (false, true) => Ok(t),
+                        (all, _) => {
+                            let faces = if all { None } else { Some(at.as_slice()) };
+                            Ok(Traced::step(kernel::offset_tool(&t.body, faces, offset, round)?, &[&t]))
+                        }
+                    })
+                    .collect::<Result<Vec<_>>>()?
+            };
             apply_traced(doc, st, f, tb, op, std::slice::from_ref(&target.0))?;
             if !keep_tools {
                 st.bodies.retain(|b| !tools.iter().any(|t| *t == b.name));
@@ -17688,15 +17859,22 @@ fn split_by_plane_traced(input: &Traced, plane: &Plane) -> Result<Vec<Traced>> {
     let plane = &square_to_axes(plane);
     let mut parts = Vec::new();
     for positive in [true, false] {
-        let (part, tool) = kernel::half_space(&input.body, plane, positive)?;
-        let Some(part) = part else { continue };
-        // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
-        let section = Some("section".to_string());
-        let caps = if positive { [section, None] } else { [None, section] };
-        let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: [None, None], thin: None }.tool(tool, None);
-        parts.push(Traced::step(part, &[input, &tool]));
+        if let Some(part) = half_traced(input, plane, positive)? {
+            parts.push(part);
+        }
     }
     Ok(parts)
+}
+
+/// The part of `input` on one side of a plane (`None` when nothing is there), with its history.
+fn half_traced(input: &Traced, plane: &Plane, positive: bool) -> Result<Option<Traced>> {
+    let (part, tool) = kernel::half_space(&input.body, plane, positive)?;
+    let Some(part) = part else { return Ok(None) };
+    // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
+    let section = Some("section".to_string());
+    let caps = if positive { [section, None] } else { [None, section] };
+    let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: [None, None], thin: None }.tool(tool, None);
+    Ok(Some(Traced::step(part, &[input, &tool])))
 }
 
 /// `plane` with its directions' parts below rounding (1e-12) along a world axis dropped. A flat

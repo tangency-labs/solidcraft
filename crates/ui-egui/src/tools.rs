@@ -126,6 +126,10 @@ pub struct Tool {
     /// Construction/Normal switch under the Length box sets `line_type`, and only a typed length
     /// makes a segment. Kept in step with the preference while the tool runs.
     pub classic: bool,
+    /// The 3-Point Arc's tangent mode is on (`sketch_arc_tangent_snap`, #20719): its third point
+    /// has Radius and Sweep boxes and a centre cross. Kept in step with the preference while the
+    /// tool runs; off, the tool shows only the pointer's coordinates, as before.
+    pub arc_modes: bool,
     /// True when the constraint/dimension tool was entered from a valid preselection: once that
     /// single operation commits, the tool unselects itself (`app.tool = None`).
     pub preselected: bool,
@@ -188,6 +192,7 @@ impl Tool {
             chain: Default::default(),
             line_type: 3,
             classic: false,
+            arc_modes: false,
             preselected: false,
             finished: false,
         })
@@ -233,21 +238,35 @@ fn xy(p: &(Vec2, Option<String>)) -> Value {
 /// A clicked point that is held where it snapped: a midpoint, on-curve, crossing or body-vertex
 /// snap goes as itself, so the command keeps the point there. A snap to an existing point goes as
 /// its place, where the command's `connect` joins the two with a Coincident the sketch shows.
-/// So does a snap whose curve is no longer in the sketch: Undo between a rectangle's two clicks
-/// can take away the curve its first corner snapped to, and the command would refuse the snap
-/// click after click (the Line's chain re-checks the same way, #10016). And so does every snap
-/// in a drawing sheet's sketch, where the commands take no snap yet.
+/// So does every snap in a drawing sheet's sketch, where the commands take no snap yet. A snap
+/// whose curve the Undo button took away does not reach this function as a snap: `run_shape`
+/// passes every stored click through `standing` first, which turns it into the place clicked.
 fn held(app: &SolveApp, p: &(Vec2, Option<String>)) -> Value {
-    let stands = |id: &str| {
-        if app.session.sheet_sketching() {
-            return false;
-        }
-        let st = crate::open_meshing::session_world(&app.session);
-        app.session.active_sketch.and_then(|sid| st.sketch(sid)).is_some_and(|ss| crate::sketch_line_arc::chain_point(&ss.sketch, id, p.0).is_some())
-    };
     match &p.1 {
-        Some(id) if solidcraft_engine::cmd::SNAP_PREFIXES.iter().any(|k| id.starts_with(k)) && stands(id) => json!(id),
+        Some(id) if solidcraft_engine::cmd::SNAP_PREFIXES.iter().any(|k| id.starts_with(k)) && snap_stands(app, id, p.0) == Some(true) => json!(id),
         _ => xy(p),
+    }
+}
+
+/// Whether the snap `id` of a click at `at` still names a point, curve or crossing of the sketch
+/// being edited. None when there is no such sketch to look in, as in a drawing sheet's sketch.
+fn snap_stands(app: &SolveApp, id: &str, at: Vec2) -> Option<bool> {
+    if app.session.sheet_sketching() {
+        return None;
+    }
+    let st = crate::open_meshing::session_world(&app.session);
+    let ss = app.session.active_sketch.and_then(|sid| st.sketch(sid))?;
+    Some(crate::sketch_line_arc::chain_point(&ss.sketch, id, at).is_some())
+}
+
+/// A stored click as a shape sends it: a snap whose point or curve the Undo button took away
+/// after the click (it leaves the tool on) goes as the place clicked, so the command does not
+/// refuse click after click (#21835), as the Line's chain re-checks its point (#10016). It is
+/// checked when the shape is sent, so a Redo that brings the curve back brings the snap back.
+fn standing(app: &SolveApp, p: &(Vec2, Option<String>)) -> (Vec2, Option<String>) {
+    match &p.1 {
+        Some(id) if snap_stands(app, id, p.0) == Some(false) => (p.0, None),
+        _ => p.clone(),
     }
 }
 
@@ -838,6 +857,14 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
                     }
                 }
                 let placed: Vec<Vec2> = tool.pts.iter().map(|p| p.0).collect();
+                // A 3-Point Arc whose third point was the tangent snap is tangent to the curves it
+                // starts and ends on (#20719).
+                if tool.cmd == "sketch.arc.three_point"
+                    && let [start, end, through] = placed[..]
+                    && let Some(arc) = curves.first()
+                {
+                    crate::inference::commit_arc(app, arc, start, end, through);
+                }
                 crate::sketch_tools::constrain_lined(app, &mut tool, &placed, &before);
                 tool.pts.clear();
                 crate::sketch_dims::reset(&mut tool);
@@ -884,7 +911,8 @@ pub(crate) fn draw(app: &mut SolveApp, t: &Tool, params: Value) -> Result<Value,
 }
 
 fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
-    let p = &t.pts;
+    let pts: Vec<_> = t.pts.iter().map(|p| standing(app, p)).collect();
+    let p = &pts;
     let d = |a: usize, b: usize| p[a].0.dist(p[b].0);
     let sides = crate::sketch_dims::locked_value(app, t, "Sides").map_or(6, |v| v as usize);
     let params = match t.cmd {
@@ -900,7 +928,9 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
             // The second click gives the edge's direction and half-length, the third its width.
             // The middle goes as the circle's centre does: a snap to a line's midpoint, a curve or
             // a crossing as itself, so it is held there; a snap to a point as its place (#7299).
-            let (a, p1) = (p[0].0, edge_end(p[0].0, &p[1]));
+            // The edge's end is read from the click as it was made, as the preview reads it: a
+            // snap whose curve Undo took away still keeps the edge off the axis nudge.
+            let (a, p1) = (p[0].0, edge_end(p[0].0, &t.pts[1]));
             let d = (p1 - a).normalized().ok_or("the edge's end must differ from its middle")?;
             let corner = a + d * (p1 - a).len() + d.perp() * (p[2].0 - a).dot(d.perp());
             let anchor = match &p[0].1 {
@@ -1587,15 +1617,8 @@ pub(crate) fn preview_curve(
     Some(sk)
 }
 
-fn preview_circumcentre(a: Vec2, b: Vec2, c: Vec2) -> Option<Vec2> {
-    let ab = b - a;
-    let ac = c - a;
-    let d = 2.0 * ab.cross(ac);
-    if !d.is_finite() || d.abs() < 1e-12 {
-        return None;
-    }
-    let centre = a + Vec2::new(ac.y * ab.len2() - ab.y * ac.len2(), ab.x * ac.len2() - ac.x * ab.len2()) / d;
-    centre.is_finite().then_some(centre)
+pub(crate) fn preview_circumcentre(a: Vec2, b: Vec2, c: Vec2) -> Option<Vec2> {
+    solidcraft_kernel::services::sketch_arc::circumcentre(a.into(), b.into(), c.into()).map(Vec2::from)
 }
 
 /// The polygon's actual straight edges, in the same orientation as the eventual command.

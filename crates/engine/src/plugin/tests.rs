@@ -3991,6 +3991,23 @@ mod importers {
     }
 
     #[test]
+    fn importer_refusals_return_the_typed_message_without_changing_the_design() {
+        let (mut s, root) = installed("refusal", &[("smp", &["smp"], false)]);
+        let path = put(&root, "refused.smp", b"U");
+        let before = s.doc.to_json();
+        for command in ["doc.open", "file.import"] {
+            let error = s.execute(command, &json!({"path": path})).unwrap_err();
+            let EngineError::PluginFailed(failure) = &error else { panic!("{error:?}") };
+            assert_eq!(failure.plugin, "Sample Importer");
+            assert_eq!(failure.file.as_deref(), Some("refused.smp"));
+            assert_eq!(error.host_error(), Some(&HostError::Unsupported { reason: "the model has no solids".into() }));
+            assert_eq!(serde_json::to_value(error.host_error()).unwrap(), json!({"kind":"unsupported","reason":"the model has no solids"}));
+            assert_eq!(s.doc.to_json(), before);
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn an_assembly_reads_the_files_beside_it_only_when_asked_and_granted_at_install() {
         for (asked, granted) in [(false, false), (true, false), (true, true)] {
             let (mut s, root) = installed(&format!("folder-{asked}-{granted}"), &[("smp", &["smp"], asked)]);

@@ -86,6 +86,18 @@ one as a separate piece, and the feature's warning says so: "`Body1` is now in 2
 pieces". Combine joins the bodies it is given without that warning. Changing the default does not
 alter operations already saved in a design.
 
+**A clearance round a Combine cut.** Parts that fit into each other, such as a pin in a hole
+or a slider in a slot, need a small gap. With the operation Cut, Combine's **Offset** grows each
+tool by that much before it cuts; the tool bodies themselves do not change. A negative offset
+shrinks the tools instead, for a press fit. **Faces** chooses All (every face of every tool moves)
+or Selected (only the faces picked under **Faces to Offset** move; a tool with none of them cuts
+as it is). **Round Edges** rounds each edge between two moved faces; **Round Radius** sets the
+radius, by default the offset itself, so the gap is the same all round.
+
+```json
+{"command": "solid.combine", "params": {"target": "Block", "tools": ["Pin"], "operation": "cut", "keep_tools": true, "offset": "gap", "offset_edges": "round"}}
+```
+
 **A new sketch from inside Extrude.** The Extrude dialog's **New Sketch** button (or a click on
 an origin or construction plane while **Profiles** is still empty) opens a sketch while the
 dialog waits: pick its plane or planar face and draw. **Finish Sketch** (or Extrude's own button

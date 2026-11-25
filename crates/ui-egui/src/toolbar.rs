@@ -1579,7 +1579,7 @@ struct Panel {
     more: Vec<PanelMoreRow>,
 }
 
-/// The ribbon's Plugins group (Model tab): one button per command of each plugin turned on.
+/// The ribbon's Plugins group (Model tab): commands and explicitly declared plugin menus.
 struct PluginGroup {
     label: String,
     tip: String,
@@ -1776,7 +1776,11 @@ impl RibbonPanels {
                         enabled: true,
                         pressed: false,
                         exit: false,
-                        split: None,
+                        split: b.id.starts_with(crate::plugin_menu::RIBBON_GROUP_PREFIX).then_some(ribbon::Split {
+                            key: &b.id,
+                            title: &b.label,
+                            name: &b.name,
+                        }),
                         app_paints: false,
                         covers: &[],
                     };
@@ -2064,6 +2068,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             let deferred = d.deferred.take();
             if let Some(b) = panels.plugin_button(d) {
                 let _ = d.response.clone().backing_on_hover_text(&b.name);
+                if d.split.as_ref().is_some_and(|arrow| arrow.clicked()) {
+                    out.actions.push(ribbon::Action::Run { id: b.id.clone(), rect: d.whole, place: ribbon::Place::Button });
+                }
                 continue;
             }
             let Some(b) = panels.panel_button(d) else {
@@ -2120,6 +2127,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             }
             match action {
                 ribbon::Action::Run { id, rect, place } => {
+                    if crate::plugin_menu::toggle_ribbon_group(app, ui.ctx(), &id, rect) {
+                        continue;
+                    }
                     // A plugin command's button opens that command's dialog, and nothing else.
                     if crate::plugin_menu::choose_ribbon(app, &id) {
                         continue;
@@ -2171,7 +2181,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 }
                 ribbon::Action::Drop { id, group, before } => {
                     // Plugin buttons stay in their own group; they are not pinned commands.
-                    if id.starts_with(crate::plugin_menu::RIBBON_PREFIX) {
+                    if id.starts_with(crate::plugin_menu::RIBBON_PREFIX) || id.starts_with(crate::plugin_menu::RIBBON_GROUP_PREFIX) {
                         continue;
                     }
                     if let Some((panel, _, _)) = panels.panel_index(group).and_then(|i| lists.get(i)) {
@@ -2778,6 +2788,7 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
         // The tool's own help, when it has one (#2758).
         if let Some(help) = crate::command_help::help(command.id) {
             ui.add(egui::Label::new(egui::RichText::new(help).color(t.text_dim)).wrap());
+            crate::command_help::illustration(ui, command.id);
         }
         let reason = if crate::drawing_workspace::active(app) && command.planned.is_some() {
             coming_soon(app, command).then(|| app.tr("ui.drawing_ribbon.planned"))

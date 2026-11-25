@@ -26,6 +26,7 @@ fn boundary_fill_classifies_cells_on_exact_surfaces() {
         .add_feature(
             FeatureKind::BoundaryFill {
                 tools: vec![BodyName(tool)],
+                planes: Vec::new(),
                 cells: vec![Position(Vec3::new(0.0, 0.0, 5.0))],
                 operation: Operation::NewBody,
                 remove_tools: true,
@@ -48,6 +49,20 @@ fn boundary_fill_classifies_cells_on_exact_surfaces() {
     let error = model.result(fill).unwrap().error.as_ref().unwrap();
     assert!(error.contains("Boundary Fill cell points must be away from tool boundaries"), "{error}");
     assert_eq!(model.state().bodies.len(), 1, "the original tool is kept on failure");
+}
+
+/// A design saved before Boundary Fill took planes has none, and one without planes saves as it did.
+#[test]
+fn boundary_fill_without_planes_reads_and_saves_as_before() {
+    let old = serde_json::json!({"type": "boundary_fill", "tools": ["B"], "cells": [[0.0, 0.0, 5.0]]});
+    let kind: FeatureKind = serde_json::from_value(old).unwrap();
+    let FeatureKind::BoundaryFill { planes, .. } = &kind else { panic!("Boundary Fill") };
+    assert!(planes.is_empty());
+    assert!(serde_json::to_value(&kind).unwrap().get("planes").is_none());
+    let with = serde_json::json!({"type": "boundary_fill", "tools": ["B"], "planes": [{"type": "origin", "name": "XY"}], "cells": [[0.0, 0.0, 5.0]]});
+    let kind: FeatureKind = serde_json::from_value(with).unwrap();
+    let FeatureKind::BoundaryFill { planes, .. } = &kind else { panic!("Boundary Fill") };
+    assert_eq!(planes.len(), 1);
 }
 
 #[test]
@@ -1902,8 +1917,20 @@ fn primitives_and_combine() {
         None,
     )
     .unwrap();
-    doc.add_feature(FeatureKind::Combine { target: "Body1".into(), tools: vec!["Body2".into()], operation: Operation::Cut, keep_tools: false }, None)
-        .unwrap();
+    doc.add_feature(
+        FeatureKind::Combine {
+            target: "Body1".into(),
+            tools: vec!["Body2".into()],
+            operation: Operation::Cut,
+            keep_tools: false,
+            offset: None,
+            offset_edges: OffsetEdges::Sharp,
+            offset_faces: Vec::new(),
+            offset_radius: None,
+        },
+        None,
+    )
+    .unwrap();
     let mut m = Model::new();
     m.evaluate(&doc);
     assert!(m.results.iter().all(|r| r.error.is_none()), "{:?}", m.results);
@@ -2512,6 +2539,10 @@ fn a_combine_leaves_out_a_tool_whose_feature_is_suppressed() {
                 tools: vec!["Body2".into(), "Body3".into()],
                 operation: Operation::Join,
                 keep_tools: false,
+                offset: None,
+                offset_edges: OffsetEdges::Sharp,
+                offset_faces: Vec::new(),
+                offset_radius: None,
             },
             None,
         )
@@ -2596,7 +2627,16 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
     )
     .unwrap();
     doc.add_feature(
-        FeatureKind::Combine { target: "Body1".into(), tools: vec!["Body2".into()], operation: Operation::Join, keep_tools: false },
+        FeatureKind::Combine {
+            target: "Body1".into(),
+            tools: vec!["Body2".into()],
+            operation: Operation::Join,
+            keep_tools: false,
+            offset: None,
+            offset_edges: OffsetEdges::Sharp,
+            offset_faces: Vec::new(),
+            offset_radius: None,
+        },
         None,
     )
     .unwrap();
@@ -2647,6 +2687,10 @@ fn a_join_splits_off_only_what_touches_along_an_edge() {
                 tools: vec!["Body3".into(), "Body2".into()],
                 operation: Operation::Join,
                 keep_tools: false,
+                offset: None,
+                offset_edges: OffsetEdges::Sharp,
+                offset_faces: Vec::new(),
+                offset_radius: None,
             },
             None,
         )

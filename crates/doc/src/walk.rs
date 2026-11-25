@@ -69,6 +69,7 @@ impl Walk for crate::document::FilletTurn {}
 impl Walk for crate::document::MeshData {}
 impl Walk for crate::document::RevolveConvention {}
 impl Walk for crate::document::RailFit {}
+impl Walk for crate::document::DomeShape {}
 impl Walk for crate::document::CoilSection {}
 impl Walk for crate::document::CoilEndCut {}
 impl Walk for crate::document::ThinSide {}
@@ -79,6 +80,7 @@ impl Walk for crate::document::RuledMode {}
 impl Walk for crate::document::RuledCorners {}
 impl Walk for crate::document::ExtrudeConvention {}
 impl Walk for crate::document::FoldSide {}
+impl Walk for crate::document::OffsetEdges {}
 impl Walk for crate::thread_forms::ThreadForm {}
 impl Walk for crate::thread_forms::ThreadHand {}
 impl Walk for crate::thread_forms::ThreadTip {}

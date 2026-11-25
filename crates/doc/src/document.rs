@@ -241,6 +241,35 @@ pub enum Touching {
     OneBody,
 }
 
+/// What a grown or shrunk body's convex edges become (Combine's cut offset).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OffsetEdges {
+    /// The moved faces are extended until they meet: the edges stay sharp.
+    #[default]
+    Sharp,
+    /// Each convex edge is rounded with the offset as its radius, so every point of the grown
+    /// body's surface is the offset from the body's.
+    Round,
+}
+
+impl OffsetEdges {
+    /// `sharp`, or `round` (also `rounded`), in any case and with spaces round it; `None` for
+    /// anything else.
+    pub fn parse(s: &str) -> Option<OffsetEdges> {
+        Some(match s.to_ascii_lowercase().trim() {
+            "sharp" => OffsetEdges::Sharp,
+            "round" | "rounded" => OffsetEdges::Round,
+            _ => return None,
+        })
+    }
+
+    /// Whether the edges stay sharp, the default, which a design leaves out when it saves.
+    pub fn is_sharp(&self) -> bool {
+        *self == OffsetEdges::Sharp
+    }
+}
+
 impl Touching {
     pub fn parse(s: &str) -> Option<Touching> {
         Some(match s.to_ascii_lowercase().replace([' ', '-'], "_").as_str() {
@@ -268,12 +297,12 @@ pub enum CellGridMode {
 }
 
 /// The smallest cell size and web of a cell grid, in mm.
-pub const CELL_GRID_MIN_SIZE: f64 = solidcraft_kernel::services::cell_grid::MIN_SIZE;
+pub const CELL_GRID_MIN_SIZE: f64 = solidcraft_kernel::CELL_GRID_LIMITS.min_size;
 
 /// The most sides of a polygon cell.
-pub const CELL_GRID_MAX_SIDES: u32 = solidcraft_kernel::services::cell_grid::MAX_SIDES;
+pub const CELL_GRID_MAX_SIDES: u32 = solidcraft_kernel::CELL_GRID_LIMITS.max_sides;
 /// The most lattice lines a snapped field edge may be moved in.
-pub const CELL_GRID_MAX_SNAP_INSET: u32 = solidcraft_kernel::services::cell_grid::MAX_SNAP_INSET;
+pub const CELL_GRID_MAX_SNAP_INSET: u32 = solidcraft_kernel::CELL_GRID_LIMITS.max_snap_inset;
 
 fn default_cell_shape() -> solidcore_record::cell_grid::CellShape {
     solidcore_record::cell_grid::CellShape::Hexagon
@@ -538,6 +567,24 @@ pub enum RailFit {
 impl RailFit {
     pub fn is_scale(&self) -> bool {
         *self == RailFit::Scale
+    }
+}
+
+/// A dome's meridian (#19532): a quarter ellipse (on a circle, a half ellipsoid of revolution), or
+/// the sphere through the rim and the apex (on a circle, a spherical cap).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DomeShape {
+    /// The quarter-ellipse meridian.
+    #[default]
+    Elliptical,
+    /// The sphere through the rim and the apex, on a circle.
+    Spherical,
+}
+
+impl DomeShape {
+    pub fn is_elliptical(&self) -> bool {
+        *self == DomeShape::Elliptical
     }
 }
 
@@ -1102,6 +1149,25 @@ pub enum FeatureKind {
         operation: Operation,
         #[serde(default)]
         keep_tools: bool,
+        /// A cut only: how far each tool is grown along its faces' outward normals before it
+        /// cuts (negative: shrunk), so the cut leaves a clearance round the tool (#3774). The
+        /// tool bodies themselves are not changed. None, as older designs: the tools cut as
+        /// they are.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Offset")]
+        offset: Option<Expr>,
+        /// With `offset`: what the grown tool's convex edges become.
+        #[serde(default, skip_serializing_if = "OffsetEdges::is_sharp")]
+        offset_edges: OffsetEdges,
+        /// With `offset`: only the tool faces at these points move; the other faces, and tools
+        /// with none of them, cut as they are. Empty: every face of every tool moves.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        offset_faces: Vec<FacePick>,
+        /// With `offset_edges: round`: the radius the edges between moved faces are rounded with.
+        /// None: the offset's size.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Offset radius")]
+        offset_radius: Option<Expr>,
     },
     /// Copies of other features' results, of bodies, or of components (rectangular, circular or
     /// along a path). The copied features are named by id (#1134). Component copies are named by
@@ -1336,6 +1402,20 @@ pub enum FeatureKind {
         /// Open the faces smoothly joined to the picked ones too.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         tangent_chain: bool,
+    },
+    /// Raise a planar face of a body into a dome: a cap `height` high along the face's outward
+    /// normal, its outline the face's own (#19532).
+    Dome {
+        face: FacePick,
+        #[walk(length = "Height")]
+        height: Expr,
+        #[serde(default, skip_serializing_if = "DomeShape::is_elliptical")]
+        shape: DomeShape,
+        /// Cut the dome into the body instead (not built yet: refused).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
     },
     /// Tilt faces (at the given points) about a neutral plane, leaning toward `pull`.
     Draft {
@@ -1717,7 +1797,7 @@ pub enum FeatureKind {
     /// outer loop is the field, a loop inside it a keep-out), cut from the targets `depth` deep
     /// (or through all) along the sketch normal, or with `mode: raised` standing `depth` high
     /// from the sketch plane and joined to the targets. The cells are planned by solidcore
-    /// (`solidcraft_kernel::services::cell_grid`) and cut in one boolean.
+    /// (`solidcraft_kernel::plan_cell_grid`) and cut in one boolean.
     CellGrid {
         /// Feature id of the sketch.
         sketch: SketchId,
@@ -1848,7 +1928,16 @@ pub enum FeatureKind {
         #[walk(length = "Distance")]
         distance: Expr,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Bend radius")]
+        radius: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         rule: Option<String>,
+        /// center | side1 | side2 (where the contour lies across the sheet thickness).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        orientation: Option<String>,
+        /// Apply the contour distance on both sides of the sketch plane (twice the total width).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        symmetric: bool,
         /// Material on the other side of the chain.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flip: bool,
@@ -2229,6 +2318,10 @@ pub enum FeatureKind {
     /// tools and outside the rest), each picked by a point inside it.
     BoundaryFill {
         tools: Vec<BodyName>,
+        /// Planes (origin or construction planes) that also bound the cells, each cutting space
+        /// like an infinite plane: a cell lies on the side of it its point is on.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        planes: Vec<PlaneRef>,
         cells: Vec<Position>,
         #[serde(default)]
         operation: Operation,
@@ -2299,6 +2392,11 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         curves: Vec<String>,
         extent: Extent,
+        /// To Next: instead of `extent.distance`, each wall runs on, along `extent.direction`
+        /// (one side), until it first meets a body: any face of a solid or surface body, as it
+        /// is. Designs saved before To Next carry none.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        to_next: bool,
     },
     /// A body taken apart: each face at `faces` (every face when empty) its own surface body,
     /// the faces left one surface body under the body's name. A solid comes apart into surfaces.
@@ -2398,6 +2496,10 @@ pub enum FeatureKind {
         /// new or redefined sweep, which follows the spline itself.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         spline_as_samples: bool,
+        /// A result whose shells close stays a surface body (#21969). New features save it;
+        /// designs saved before it make a solid of a result that closes, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// A surface body lofted through sections in order, each one open or closed chain of
     /// sketch curves: walls only, no caps.
@@ -2419,6 +2521,10 @@ pub enum FeatureKind {
         /// lofts save it; designs saved before it keep each wall along its skinned surface's normal.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         faced: bool,
+        /// A result whose shells close stays a surface body (#21969). New features save it;
+        /// designs saved before it make a solid of a result that closes, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// The faces at `faces` copied out at a signed `distance` along their normals as a new
     /// surface body (0 copies them); `chain` takes each pick's whole smooth chain of faces;
@@ -2434,6 +2540,10 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Tolerance")]
         tolerance: Option<Expr>,
+        /// A result whose shells close stays a surface body (#21969). New features save it;
+        /// designs saved before it make a solid of a result that closes, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// A strip of ruled surface `distance` wide hanging off the chain of `body`'s edges through
     /// `edges`, as a new surface body: along `mode` (`angle` from `direction`, or from the
@@ -2461,6 +2571,10 @@ pub enum FeatureKind {
         face: Option<FacePick>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         far: Vec<Option<Vec<Position>>>,
+        /// A result whose shells close stays a surface body (#21969). New features save it;
+        /// designs saved before it make a solid of a result that closes, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// A surface body's boundary edges through `edges` extended outward: by `distance`, or up
     /// to `up_to`; the surface continued (`mode` natural) or a run-off face along each edge
@@ -2477,6 +2591,10 @@ pub enum FeatureKind {
         up_to: Option<ExtendTo>,
         #[serde(default = "yes", skip_serializing_if = "is_yes")]
         neighbours: bool,
+        /// A result whose shells close stays a surface body (#21969). New features save it;
+        /// designs saved before it make a solid of a result that closes, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// A blend surface bridging two picked edge chains of two bodies (`surface.blend`): each end
     /// repeats the surface it leaves up to its requested continuity, with the fullness `bulge`.
@@ -3656,6 +3774,7 @@ impl FeatureKind {
             FeatureKind::Loft { .. } => "LoftFeature",
             FeatureKind::Sweep { .. } => "SweepFeature",
             FeatureKind::Shell { .. } => "ShellFeature",
+            FeatureKind::Dome { .. } => "DomeFeature",
             FeatureKind::Draft { .. } => "DraftFeature",
             FeatureKind::Split { .. } => "SplitBodyFeature",
             FeatureKind::SplitFace { .. } => "SplitFaceFeature",
@@ -3750,6 +3869,7 @@ impl FeatureKind {
             FeatureKind::Loft { .. } => "loft",
             FeatureKind::Sweep { .. } => "sweep",
             FeatureKind::Shell { .. } => "shell",
+            FeatureKind::Dome { .. } => "dome",
             FeatureKind::Draft { .. } => "draft",
             FeatureKind::ConstructionPlane { .. } => "construction_plane",
             FeatureKind::Split { .. } => "split",
@@ -3844,6 +3964,7 @@ impl FeatureKind {
             "LoftFeature" => "loft",
             "SweepFeature" => "sweep",
             "ShellFeature" => "shell",
+            "DomeFeature" => "dome",
             "DraftFeature" => "draft",
             "SplitBodyFeature" => "split",
             "SplitFaceFeature" => "split_face",
@@ -3938,6 +4059,7 @@ impl FeatureKind {
             FeatureKind::Loft { .. } => "Loft",
             FeatureKind::Sweep { .. } => "Sweep",
             FeatureKind::Shell { .. } => "Shell",
+            FeatureKind::Dome { .. } => "Dome",
             FeatureKind::Draft { .. } => "Draft",
             FeatureKind::Split { .. } => "Split",
             FeatureKind::SplitFace { .. } => "SplitFace",
@@ -4223,6 +4345,10 @@ pub struct StandardPart {
     pub size: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub length: Option<f64>,
+    /// How its metric thread is made: `modeled` (cut into the body). Absent: a cosmetic thread,
+    /// recorded on the face, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
 }
 
 /// A component whose contents come from a design or STEP source file: where that file
@@ -4423,6 +4549,10 @@ pub struct Document {
     /// Named views: saved cameras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
+    /// Construction planes dragged to a size of their own, by feature id: `[x0, y0, x1, y1]` in the
+    /// plane's own coordinates, mm. Others are drawn at their automatic size. Display only.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub plane_extents: std::collections::BTreeMap<u64, [f64; 4]>,
     /// Notes: text anchored to points in model space, drawn as screen-facing callouts (#1631).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<crate::notes::Note>,
@@ -4485,6 +4615,37 @@ pub struct Visibility {
     /// once the folder is shown.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hidden_folders: Vec<String>,
+    /// What Isolate changed, as it was before the first Isolate, for Unisolate. Never saved with
+    /// the design: it lives in the session and its undo steps only.
+    #[serde(skip)]
+    pub before_isolate: Option<BeforeIsolate>,
+}
+
+/// The parts of [`Visibility`] an Isolate changes, kept so that Unisolate can put them back and
+/// leave everything changed since (locks, sketches, dimensions) as it is.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BeforeIsolate {
+    pub hidden_bodies: Vec<String>,
+    pub hidden_occurrences: Vec<Vec<u64>>,
+    pub hidden_folders: Vec<String>,
+    /// The bodies on screen when the first Isolate began (world names). Those hidden now are
+    /// what Isolate hid, which the view may show see-through or as edges.
+    pub shown_bodies: std::collections::BTreeSet<String>,
+}
+
+impl Visibility {
+    /// Keeps what an Isolate is about to change, unless an earlier Isolate is still in effect:
+    /// Unisolate goes back to before the first one.
+    pub fn remember_before_isolate(&mut self) {
+        if self.before_isolate.is_none() {
+            self.before_isolate = Some(BeforeIsolate {
+                hidden_bodies: self.hidden_bodies.clone(),
+                hidden_occurrences: self.hidden_occurrences.clone(),
+                hidden_folders: self.hidden_folders.clone(),
+                shown_bodies: Default::default(),
+            });
+        }
+    }
 }
 
 impl Visibility {
@@ -4744,6 +4905,7 @@ impl Document {
             timeline_groups: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
+            plane_extents: std::collections::BTreeMap::new(),
             notes: Vec::new(),
             visibility: Visibility::default(),
             drawings: Vec::new(),
@@ -5596,6 +5758,8 @@ impl Document {
         for group in &mut self.timeline_groups {
             group.features.retain(|feature| !gone.contains(feature));
         }
+        // A deleted plane's size goes with it: a plane added later under its id is not drawn at it.
+        self.plane_extents.retain(|id, _| !gone.contains(id));
         // Configuration columns of deleted features go with them.
         let keep: Vec<bool> = self
             .configs

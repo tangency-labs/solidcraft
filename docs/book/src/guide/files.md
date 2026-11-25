@@ -15,7 +15,7 @@ design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSO
 | `.json` (self-contained plain JSON design) | yes | yes |
 | STEP (AP203, AP214, AP242) | solids, assemblies, units, names, colours | AP242 with names, colours and the component tree |
 | IGES 5.3 | manifold solids, or trimmed surfaces sewn into solids | manifold solids with names and colours |
-| FreeCAD `.FCStd` | sketches and features (Pad, Pocket, Revolution, Groove, Fillet, Chamfer, primitives, Mirrored, patterns), else solids, through cadmpeg | |
+| FreeCAD `.FCStd` | sketches and features (Pad, Pocket, Revolution, Groove, Fillet, Chamfer, primitives, Mirrored, patterns), else solids and sketches, through cadmpeg | |
 | Rhino `.3dm` | solids, through cadmpeg | Rhino 8, through cadmpeg: bodies with flat faces and straight edges exact, others as meshes; names and colours (desktop only) |
 | 3MF, STL, OBJ | mesh bodies | yes |
 | glTF 2.0 (`.glb`, `.gltf` with its `.bin` files) | mesh bodies in the node tree's components, materials as appearances | `.glb`: placed bodies with their colours, metallic and roughness, in metres with Y up |
@@ -88,7 +88,8 @@ the file leaves out.
 Opening a STEP, IGES, FreeCAD or Rhino file creates a design with the file's bodies as a base feature, and
 inserting one adds them to the current design. Later features build on them. A FreeCAD file's
 sketches and features are rebuilt as SolidCraft features instead, so its dimensions can be edited;
-when one cannot be, its bodies come in as a base feature and a warning says why (Preferences ›
+when one cannot be, its bodies come in as a base feature with its sketches beside them, and a
+warning says why (Preferences ›
 General › FreeCAD files turns the rebuild off). Preferences › General › Import with cadmpeg (off
 by default) reads STEP, IGES, FreeCAD and Rhino files with cadmpeg straight into B-rep instead of
 through SolidCraft's own STEP and IGES readers, to compare the two. Mesh bodies render,
@@ -448,7 +449,8 @@ browser, so it has no folder settings. The control channel sets them with
 
 **File → Design Properties…** (also under **Document Settings** in the Browser, and on the
 top component's right-click menu, under **Design**) records who made a design and what it is: project, part
-number, revision, author, organization, description and licence. **OK** applies the changes as
+number, revision, author, organization, description, material, finish (with a list of common
+finishes to pick from; a design that is one part carries them itself) and licence. **OK** applies the changes as
 one undo step. Scripts and agents use the same commands: `document.metadata` reads them,
 `document.metadata.set` (`key` and `value`, or `values: {key: value, …}`) and
 `document.metadata.remove` (`key` or `keys`) change them. `document.inspect` and the MCP
