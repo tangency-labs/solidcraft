@@ -32,7 +32,7 @@ use solidcore::topology::api_files::write_brep_to_file;
 use solidcore::topology::brep_data_write::FromBrepEnv;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::EdgeuseId;
-use solidcore::topology::{edge, loopuse, vertex};
+use solidcore::topology::{edge, loopuse};
 use solidcore::{EdgeId, FaceId, Point2, Vec3};
 use solidcore_record::brep::Brep as Record;
 
@@ -1965,8 +1965,9 @@ fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
                 .vertex_list()
                 .iter()
                 .map(|&v| {
-                    let at = vertex::point(&brep, v).unwrap();
-                    (at.distance(q), vertex::tolerance(&brep, v).unwrap())
+                    use solidcore::topology::vertex::{point, tolerance};
+                    let at = point(&brep, v).unwrap();
+                    (at.distance(q), tolerance(&brep, v).unwrap())
                 })
                 .min_by(|a, b| a.0.total_cmp(&b.0))
                 .unwrap();
