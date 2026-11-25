@@ -10,6 +10,7 @@ use crate::ui_kit::{Container, Surface};
 use egui::{Color32, Pos2, Stroke, vec2};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Sel;
+use solidcraft_engine::doc::PatternDistance;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::geom::Mesh;
 use solidcraft_engine::geom::prelude::*;
@@ -137,10 +138,10 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         // A section's distance runs against the plane's normal, into the part from a face.
         Kind::Section { .. } => (at, normal.map(|n| -n)),
         Kind::OffsetPlane { .. } => (at, normal),
-        // Fillet radii and chamfer distances grow the way `blend_grow_dir` gives (into the body
-        // on an outside edge, into the open corner on an inside one); shell thickness grows into
-        // the body.
-        // A chamfer of two distances measures Distance 1 along its own face, not along the bisector.
+        // Fillet radii grow the way `blend_grow_dir` gives (into the body on an outside edge,
+        // into the open corner on an inside one); shell thickness grows into the body.
+        // A chamfer's distance is the setback along each of the two faces at the edge, so its
+        // arrow runs along one of those faces, where the edge the distance sets is (#13527).
         Kind::Fillet { .. } if matches!(first, Sel::Edge { .. }) => {
             let Sel::Edge { body, index, .. } = first else { return None };
             let along_face = chamfer_face_dirs(app, d, at).map(|(first_face, _)| first_face);
@@ -156,7 +157,17 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         Kind::Plastic(_) => (at, normal),
         // A surface extrude's profiles stand square to their sketch, as a solid extrude's do.
         Kind::Surface(crate::dialogs_surface::Surf::Extrude { .. }) => (at, normal),
-        Kind::PatternRect { .. } => (at, d.inputs.get(1).and_then(|i| i.items.first()).and_then(|x| crate::dialogs::axis_of(app, x)).map(|a| a.1)),
+        // The way the first copy goes: Flip turns the arrow round (#8523).
+        // A reopened pattern whose first direction is no origin axis keeps it only in `dir1`,
+        // as the second keeps `dir2`; a picked direction comes first.
+        Kind::PatternRect { .. } => {
+            let heading = pattern_heading(&d.extra, 0);
+            let dir1 = match d.inputs.get(1).and_then(|i| i.items.first()) {
+                Some(x) => crate::dialogs::axis_of(app, x).map(|a| a.1),
+                None => d.extra.get("dir1").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2])),
+            };
+            (at, dir1.map(|n| n * heading))
+        }
         // A sketch move's X Distance grows along the sketch's own x axis, so its drag arrow
         // lies in the sketch plane. Scale has no arrow: a factor is not a length, and the
         // square handle it wants is its own change.
@@ -179,7 +190,8 @@ fn pattern_dir2(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
         Kind::PatternRect { .. } => match d.inputs.get(2).and_then(|i| i.items.first()) {
             Some(x) => crate::dialogs::axis_of(app, x).map(|a| a.1),
             None => d.extra.get("dir2").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2])),
-        },
+        }
+        .map(|n| n * pattern_heading(&d.extra, 1)),
         Kind::SketchModify(_) => crate::sketch_modify_ui::arrow2(app, d),
         _ => None,
     }
@@ -284,6 +296,22 @@ fn edge_sides(m: &Mesh, index: usize, p: Vec3) -> Option<Vec<(Vec3, Vec3)>> {
 /// The outward direction between the two faces at an edge: the mean of their normals.
 fn edge_bisector(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
     edge_sides(m, index, p)?.iter().fold(Vec3::ZERO, |sum, (n, _)| sum + *n).normalized()
+}
+
+/// The directions into the two faces at an edge, at `p`: square to the edge, one along each
+/// face, and into that face's own material. The faces' normals give the directions, and the
+/// triangle beside the edge says which way each one goes, so a round edge (a hole's rim) is
+/// answered as well as a straight one.
+fn edge_face_dirs(sides: &[(Vec3, Vec3)], at: Vec3) -> Option<(Vec3, Vec3)> {
+    let [(n1, c1), (n2, c2)] = sides else { return None };
+    let along = n1.cross(*n2).normalized()?;
+    // Into a face: square to the edge and in the face's plane. The triangle beside the edge
+    // says which way that face's own material lies.
+    let into = |n: Vec3, c: Vec3| {
+        let d = n.cross(along).normalized()?;
+        Some(if d.dot(c - at) >= 0.0 { d } else { -d })
+    };
+    Some((into(*n1, *c1)?, into(*n2, *c2)?))
 }
 
 /// Whether the edge is an inside (concave) one: each face near it lies in front of the other's
@@ -402,25 +430,21 @@ fn chamfer_look(d: &Dialog, distance: usize) -> ArrowLook {
     chamfer_arrow_looks(chamfer_editing(d))[distance.min(1)]
 }
 
-/// The directions Distance 1 and Distance 2 of a chamfer of two distances run from its edge at
-/// `at`: along the face that faces up most, or the other one with Flip, and along the remaining
-/// face (the kernel's `chamfer_tool_sides` picks them the same way). None for any other dialog.
+/// The directions Distance 1 and Distance 2 of a chamfer run from its edge at `at`: along the
+/// face that faces up most, or the other one with Flip, and along the remaining face (the
+/// kernel's `chamfer_tool_sides` picks them the same way). None for any other dialog.
 pub(crate) fn chamfer_face_dirs(app: &SolveApp, d: &Dialog, at: Vec3) -> Option<(Vec3, Vec3)> {
-    let Kind::Fillet { chamfer: true, ctype: 1, flip, .. } = &d.kind else { return None };
+    let Kind::Fillet { chamfer: true, ctype, flip, .. } = &d.kind else { return None };
     let Some(Sel::Edge { body, index, .. }) = &anchor_item(app, d) else { return None };
     let st = crate::open_meshing::session_world(&app.session);
     let mesh = st.body(body)?.mesh();
     let sides = edge_sides(&mesh, *index, at)?;
-    let [(n1, c1), (n2, c2)] = sides.as_slice() else { return None };
-    let along = n1.cross(*n2).normalized()?;
-    // From the edge into each face: the way to its centroid, square to the edge.
-    let into = |c: Vec3| {
-        let v = c - at;
-        (v - along * v.dot(along)).normalized()
-    };
-    let (t1, t2) = (into(*c1)?, into(*c2)?);
+    let [(n1, _), (n2, _)] = sides.as_slice() else { return None };
+    let (t1, t2) = edge_face_dirs(&sides, at)?;
+    // A chamfer with one distance measures it along both faces, so Flip does not move its arrow.
+    let flip = if *ctype == 0 { false } else { *flip };
     let up = Vec3::new(1e-6, 1e-3, 1.0);
-    Some(if (n2.dot(up) > n1.dot(up)) != *flip { (t2, t1) } else { (t1, t2) })
+    Some(if (n2.dot(up) > n1.dot(up)) != flip { (t2, t1) } else { (t1, t2) })
 }
 
 /// Whether a dynamically registered canvas handle owns this point before navigation.
@@ -429,6 +453,7 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
     // Test its geometry before navigation, including the first frame entering a handle.
     crate::joint_handles::owns_pointer(app, proj, p)
         || app.dialog.as_ref().and_then(|d| crate::dialogs_move::triad(app, d)).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p))
+        || app.dialog.as_ref().and_then(|d| sketch_move_triad(app, d, anchor(app, d)?.0)).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p))
         || app
             .dialog
             .as_ref()
@@ -535,6 +560,39 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         crate::place_gizmo::show(app, ui, painter, proj);
         return;
     }
+    if let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. }) = d.kind
+        && !app.preferences.sketch_move_classic
+        && let Some((pivot, _)) = anchor(app, &d)
+    {
+        let mut dragging = false;
+        // Picking comes first: a click picks sketch geometry even under a handle of the triad.
+        let picked = d.inputs.first().map(|i| i.items.as_slice()).unwrap_or_default();
+        let unpicked = match &app.viewport.hover {
+            Some(crate::viewport::Hit::SketchCurve { id, .. }) => !picked.iter().any(|s| matches!(s, Sel::SketchCurve { id: p, .. } if p == id)),
+            Some(crate::viewport::Hit::SketchPoint { id, .. }) => !picked.iter().any(|s| matches!(s, Sel::SketchPoint { id: p } if p == id)),
+            _ => false,
+        };
+        crate::gizmo::give_way(unpicked);
+        if let Some(t) = sketch_move_triad(app, &d, pivot)
+            && let Some(g) = crate::gizmo::show(ui, painter, proj, egui::Id::unique("sc_sketch_move_triad"), &t, snap_step(app.cam.half_height()))
+        {
+            sketch_move_drag(app, &mut d, &t, g);
+            dragging = true;
+        }
+        crate::gizmo::give_way(false);
+        let triad = sketch_move_triad(app, &d, pivot);
+        let at = triad.as_ref().map_or(pivot, |t| t.center);
+        let mut place = box_place(app, proj);
+        place.handles = triad.as_ref().and_then(|t| crate::gizmo::handles_region(proj, t));
+        let focus = std::mem::take(&mut d.focus);
+        if let Some(bs) = proj.to_screen(at)
+            && let Some((label, _, value)) = d.primary()
+        {
+            value_box(ui, label, value, bs + vec2(crate::gizmo::LEN_PX as f32 + 16.0, -12.0), focus || dragging, place);
+        }
+        app.dialog = Some(d);
+        return;
+    }
     if let Some((base, dir)) = anchor(app, &d)
         && let Some(bs) = proj.to_screen(base)
     {
@@ -609,6 +667,73 @@ fn draw_move_rotation(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter
     Some((end, *angle != before))
 }
 
+/// Move/Copy Sketch Entities' triad at `pivot` moved so far, in the sketch's x, y and normal.
+pub(crate) fn sketch_move_triad(app: &SolveApp, d: &Dialog, pivot: Vec3) -> Option<crate::gizmo::Triad> {
+    if app.preferences.sketch_move_classic {
+        return None;
+    }
+    let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { x, y, z, angle, three_d, .. }) = &d.kind else { return None };
+    let st = crate::open_meshing::session_world(&app.session);
+    let plane = app.session.active_sketch.and_then(|id| st.sketch(id))?.plane;
+    let (px, py, pn) = (plane.x, plane.y, plane.normal());
+    let len = |v: &String| sketch_move_len(app, v);
+    let dz = if *three_d { len(z) } else { 0.0 };
+    let turn = crate::length_input::eval(&app.session.doc, angle, ValueKind::Angle).ok().filter(|v| v.is_finite()).unwrap_or(0.0);
+    let centre = d
+        .inputs
+        .get(1)
+        .and_then(|i| i.items.first())
+        .and_then(|sel| crate::sketch_modify_ui::point_id(&app.session, sel))
+        .and_then(|id| sketch_point_at(app, &st, id))
+        .unwrap_or(plane.origin);
+    // The command turns the in-plane part about the centre, then moves it.
+    let from = pivot - centre;
+    let (u, v) = (from.dot(px), from.dot(py));
+    let (sin, cos) = turn.sin_cos();
+    let turned = pivot + px * ((u * cos - v * sin) - u) + py * ((u * sin + v * cos) - v);
+    Some(crate::gizmo::Triad {
+        center: turned + px * len(x) + py * len(y) + pn * dz,
+        translate: true,
+        rotate: true,
+        frame: [px, py, pn],
+        axes: [true, true, *three_d],
+        rings: [false, false, true],
+    })
+}
+
+/// A Move/Copy Sketch Entities distance field in mm, read as the command reads it (design units).
+fn sketch_move_len(app: &SolveApp, text: &str) -> f64 {
+    crate::length_input::eval(&app.session.doc, text, ValueKind::Length).ok().filter(|v| v.is_finite()).unwrap_or(0.0)
+}
+
+/// A triad drag on Move/Copy Sketch Entities, added to the values it had when the drag began.
+fn sketch_move_drag(app: &SolveApp, d: &mut Dialog, t: &crate::gizmo::Triad, g: crate::gizmo::Drag) {
+    let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { x, y, z, angle, .. }) = &d.kind else { return };
+    if g.started || !d.extra.contains_key("drag0") {
+        let len = |v: &String| sketch_move_len(app, v);
+        let deg = crate::length_input::eval(&app.session.doc, angle, ValueKind::Angle).ok().filter(|v| v.is_finite()).unwrap_or(0.0).to_degrees();
+        d.extra.insert("drag0".into(), serde_json::json!([len(x), len(y), len(z), deg]));
+    }
+    let v0: [f64; 4] = d.extra.get("drag0").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+    let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { x, y, z, angle, three_d, .. }) = &mut d.kind else { return };
+    match g.change {
+        crate::gizmo::Change::Translate(v) => {
+            *x = format_len(&app.session.doc, v0[0] + v.dot(t.frame[0]));
+            *y = format_len(&app.session.doc, v0[1] + v.dot(t.frame[1]));
+            if *three_d {
+                *z = format_len(&app.session.doc, v0[2] + v.dot(t.frame[2]));
+            }
+        }
+        crate::gizmo::Change::Rotate { angle: a, .. } => {
+            let deg = v0[3] + a.to_degrees();
+            *angle = format!("{} deg", (deg * 100.0).round() / 100.0);
+        }
+    }
+    if g.done {
+        d.extra.remove("drag0");
+    }
+}
+
 /// A round step for dragged values at this zoom (1, 2 or 5 times a power of ten).
 pub fn snap_step(half_height: f64) -> f64 {
     let raw = (half_height / 40.0).max(1e-4);
@@ -651,6 +776,11 @@ fn sketch_point_at(app: &SolveApp, st: &solidcraft_engine::doc::ModelState, id: 
         None => (app.session.active_sketch?, id),
     };
     let ss = st.sketch(sketch)?;
+    // A drawn 3D point, `<wire>@<index>` (Move/Copy in a 3D sketch picks these).
+    if let Some((wire, index)) = point.split_once('@') {
+        let fit = &ss.sketch.wires.iter().find(|w| w.id == wire)?.fit;
+        return fit.get(index.parse::<usize>().ok()?).copied();
+    }
     Some(ss.plane.to_world(ss.sketch.point(ss.sketch.resolve_point(point)?)?))
 }
 
@@ -700,9 +830,22 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         (_, Kind::Surface(crate::dialogs_surface::Surf::Extrude { direction: 2, .. })) => -1.0,
         _ => 1.0,
     };
-    let symmetric = to_span.is_none()
-        && matches!(d.kind, Kind::Extrude { direction: 2, .. } | Kind::Surface(crate::dialogs_surface::Surf::Extrude { direction: 1, .. }));
-    let symmetric_scale = if symmetric {
+    // Quantity and Extent: the canvas value is the extent, which a centred pattern spreads half
+    // each way from the original (#8523).
+    let pattern_extent = matches!(d.kind, Kind::PatternRect { .. }) && crate::dialogs::pattern_distance(&d.extra, 0) == PatternDistance::CountExtent;
+    // How much of it lies ahead of the original and behind, when not all ahead: centred, the
+    // copies go both ways (an even quantity one step further ahead).
+    let pattern_split = match &d.kind {
+        Kind::PatternRect { count, .. } if pattern_extent => Some(extent_sides(&app.session.doc, &d.extra, 0, count)),
+        _ => None,
+    }
+    .filter(|(_, behind)| *behind > 0.0);
+    let symmetric = pattern_split.is_some()
+        || (to_span.is_none()
+            && matches!(d.kind, Kind::Extrude { direction: 2, .. } | Kind::Surface(crate::dialogs_surface::Surf::Extrude { direction: 1, .. })));
+    let symmetric_scale = if let Some((ahead, _)) = pattern_split {
+        ahead
+    } else if symmetric {
         d.extra
             .get("convention")
             .cloned()
@@ -721,8 +864,9 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         | Kind::Move { .. }
         | Kind::Section { .. }
         | Kind::OffsetPlane { .. }
-        | Kind::OffsetFaces { .. }
-        | Kind::PatternRect { .. } => true,
+        | Kind::OffsetFaces { .. } => true,
+        // An extent is a length, never below zero.
+        Kind::PatternRect { .. } => !pattern_extent,
         Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. } | crate::sketch_modify_ui::Mod::PatternRect { .. }) => true,
         Kind::SketchModify(crate::sketch_modify_ui::Mod::Offset { mode, .. }) => !crate::sketch_modify_ui::offset_symmetric(*mode),
         _ => false,
@@ -780,7 +924,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let look2 = chamfer_look(d, 1);
     let mut dragged2 = false;
     let mut tip2 = None;
-    if let (Kind::Fillet { distance2, .. }, Some((_, t2))) = (&mut d.kind, faces)
+    if let (Kind::Fillet { chamfer: true, ctype: 1, distance2, .. }, Some((_, t2))) = (&mut d.kind, faces)
         && let Some(l2) = crate::length_input::eval(&app.session.doc, distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
         let before = distance2.clone();
@@ -803,30 +947,80 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     }
     // A rectangular pattern's second direction gets its own arrow for Spacing 2 (#2462), as the
     // first direction's arrow sets Spacing.
+    // Its distance type decides which: Spacing 2, Extent 2 or both, Extent 2 in the second arrow
+    // colour beside Spacing 2 and halved each way when the direction is centred (#8523).
+    let distance2 = crate::dialogs::pattern_distance(&d.extra, 1);
+    let sides2 = match &d.kind {
+        Kind::PatternRect { count2, .. } => extent_sides(&app.session.doc, &d.extra, 1, count2),
+        _ => (1.0, 0.0),
+    };
+    if let Some(n2) = pattern_dir2(app, d)
+        && let Kind::PatternRect { extent2, .. } = &mut d.kind
+        && distance2.uses_extent()
+    {
+        let (id, ink) = if distance2.uses_spacing() {
+            (egui::Id::unique("sc_manipulator2_extent"), second_inks())
+        } else {
+            (egui::Id::unique("sc_manipulator2"), [t.manipulator, t.accent])
+        };
+        let before = extent2.clone();
+        let ts = extent_arrow(&app.session.doc, ui, painter, proj, (base, bs, n2), sides2, id, half_height, decimals, ink, extent2);
+        // Text that is no length yet has no tip: the box stays beside the base, as Extent's
+        // does, so typing goes on in it.
+        value_box_in(
+            ui,
+            (egui::Id::unique("sc_canvas_area_extent2"), egui::Id::unique("sc_canvas_value_extent2")),
+            "ui.pattern_extent_2",
+            extent2,
+            (ts.unwrap_or(bs + vec2(16.0, 44.0)) + vec2(14.0, 8.0), egui::Align2::LEFT_TOP),
+            *extent2 != before,
+            false,
+            box_place(app, proj),
+        );
+    }
     if let Some(n2) = pattern_dir2(app, d) {
+        let solid_pattern = matches!(d.kind, Kind::PatternRect { .. });
         let spacing2 = match &mut d.kind {
-            Kind::PatternRect { spacing2, .. } | Kind::SketchModify(crate::sketch_modify_ui::Mod::PatternRect { spacing2, .. }) => Some(spacing2),
+            Kind::PatternRect { spacing2, .. } if distance2.uses_spacing() => Some(spacing2),
+            Kind::SketchModify(crate::sketch_modify_ui::Mod::PatternRect { spacing2, .. }) => Some(spacing2),
             _ => None,
         };
-        if let Some(spacing2) = spacing2
-            && let Some(l2) = crate::length_input::eval(&app.session.doc, spacing2, ValueKind::Length).ok().filter(|v| v.is_finite())
-        {
-            drag_arrow(
-                &app.session.doc,
-                ui,
-                painter,
-                proj,
-                base,
-                bs,
-                n2,
-                l2,
-                true,
-                egui::Id::unique("sc_manipulator2"),
-                half_height,
-                0.0,
-                decimals,
-                spacing2,
-            );
+        if let Some(spacing2) = spacing2 {
+            let before = spacing2.clone();
+            // Text that is no length yet has no arrow to draw.
+            let l2 = crate::length_input::eval(&app.session.doc, spacing2, ValueKind::Length).ok().filter(|v| v.is_finite());
+            let ts = l2.and_then(|l2| {
+                drag_arrow(
+                    &app.session.doc,
+                    ui,
+                    painter,
+                    proj,
+                    base,
+                    bs,
+                    n2,
+                    l2,
+                    true,
+                    egui::Id::unique("sc_manipulator2"),
+                    half_height,
+                    0.0,
+                    decimals,
+                    spacing2,
+                )
+            });
+            // A solid pattern's Spacing 2 has its box at the tip, as Spacing has (#8523); with
+            // no tip it stays beside the base, below Extent 2's, so typing goes on in it.
+            if solid_pattern {
+                value_box_in(
+                    ui,
+                    (egui::Id::unique("sc_canvas_area_spacing2"), egui::Id::unique("sc_canvas_value_spacing2")),
+                    "Spacing 2",
+                    spacing2,
+                    (ts.map_or(bs + vec2(30.0, 82.0), |ts| ts + vec2(14.0, -30.0)), egui::Align2::LEFT_TOP),
+                    *spacing2 != before,
+                    false,
+                    box_place(app, proj),
+                );
+            }
         }
     }
     // An offset plane shows where it will be: at the distance, or through the picked point.
@@ -953,6 +1147,28 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             );
         }
     }
+    // Spacing and Extent: Extent has its own arrow and box beside Spacing's, in the second
+    // arrow colour (#8523).
+    let sides1 = extent_sides(&app.session.doc, &d.extra, 0, "");
+    if matches!(d.kind, Kind::PatternRect { .. })
+        && crate::dialogs::pattern_distance(&d.extra, 0) == PatternDistance::SpacingExtent
+        && let (Kind::PatternRect { extent, .. }, Some(n)) = (&mut d.kind, dir)
+    {
+        let before = extent.clone();
+        let doc = &app.session.doc;
+        let id = egui::Id::unique("sc_manipulator_extent");
+        let ts = extent_arrow(doc, ui, painter, proj, (base, bs, n), sides1, id, half_height, decimals, second_inks(), extent);
+        value_box_in(
+            ui,
+            (egui::Id::unique("sc_canvas_area_extent"), egui::Id::unique("sc_canvas_value_extent")),
+            "ui.pattern_extent",
+            extent,
+            (ts.unwrap_or(bs + vec2(16.0, 14.0)) + vec2(14.0, 8.0), egui::Align2::LEFT_TOP),
+            *extent != before,
+            false,
+            box_place(app, proj),
+        );
+    }
     // A placement marker at the base: the arrow stands above it and the base dot is the marker's.
     let clear = crate::place_gizmo::arrow_clearance(app, d);
     // While an extrude's arrow is dragged, the flat faces it can stop at (#2398).
@@ -1015,6 +1231,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             &stops,
             decimals,
             dragged,
+            [t.manipulator, t.accent],
         );
         if let Some((_, Some(stop), _)) = &drawn {
             crate::extrude_face_snap::outline(app, painter, proj, stop);
@@ -1029,8 +1246,10 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                 let step = snap_step(half_height);
                 *value = format_len_drag(&app.session.doc, (v - baseline) / symmetric_scale, step, decimals);
             }
-            if symmetric && let Some(bt) = proj.to_screen(base - n * half) {
-                arrow(painter, bs, bt, t.manipulator);
+            let behind = pattern_split.map_or(half, |(_, behind)| l * behind);
+            if symmetric && let Some(bt) = proj.to_screen(base - n * behind) {
+                let ink = if pattern_split.is_some() { behind_ink(t.manipulator) } else { t.manipulator };
+                arrow(painter, bs, bt, ink);
             }
             if clear == 0.0 {
                 painter.circle(bs, 3.5, t.manipulator, Stroke::new(1.0, Color32::WHITE));
@@ -1462,6 +1681,110 @@ fn drag_arrow(
     drag_arrow_looked(doc, ui, painter, proj, (base, bs, n), (l, signed, clear_px), id, (half_height, decimals), ArrowLook::Plain, value)
 }
 
+/// The colour of a second arrow beside one drawn in `ink` (a pattern's extent beside its
+/// spacing, #8523): `ink` a sixth of the way round the colour wheel, so it follows the theme's
+/// manipulator colour; a grey `ink`, which has no hue to turn, is made lighter or darker.
+pub(crate) fn second_ink(ink: Color32) -> Color32 {
+    let mut hsva = egui::ecolor::Hsva::from(ink);
+    if hsva.s < 0.15 {
+        hsva.v = if hsva.v > 0.5 { hsva.v * 0.65 } else { (hsva.v + 0.35).min(1.0) };
+    } else {
+        hsva.h = (hsva.h + 1.0 / 6.0).fract();
+    }
+    Color32::from(hsva)
+}
+
+/// A second arrow's colours at rest and while hovered or dragged, beside an arrow in the theme's
+/// manipulator and accent colours (#8523).
+pub(crate) fn second_inks() -> [Color32; 2] {
+    let t = Tokens::get();
+    [second_ink(t.manipulator), second_ink(t.accent)]
+}
+
+/// An arrow that only shows how far the copies reach the other way and can't be dragged: its
+/// colour, faded (#8523).
+fn behind_ink(ink: Color32) -> Color32 {
+    ink.gamma_multiply(0.4)
+}
+
+/// A rectangular pattern direction's (`index` 0 or 1) alignment and Flip, from the dialog's
+/// extra parameters.
+fn pattern_layout(extra: &serde_json::Map<String, serde_json::Value>, index: usize) -> (solidcraft_engine::sketch::PatternAlignment, bool) {
+    let (alignment, reversed) = if index == 0 { ("alignment", "reversed") } else { ("alignment2", "reversed2") };
+    let alignment = extra.get(alignment).cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+    (alignment, extra.get(reversed).and_then(serde_json::Value::as_bool).unwrap_or(false))
+}
+
+/// The way a rectangular pattern direction's first copy goes along its picked direction: 1, or
+/// -1 when Flip (or Left) sends it back.
+fn pattern_heading(extra: &serde_json::Map<String, serde_json::Value>, index: usize) -> f64 {
+    let (alignment, reversed) = pattern_layout(extra, index);
+    if alignment.multiplier(1, reversed) < 0.0 { -1.0 } else { 1.0 }
+}
+
+/// How much of a rectangular pattern direction's extent lies ahead of the original (the way its
+/// first copy goes) and behind it, as fractions (#8523): all ahead, unless the direction is
+/// centred. Centred with Quantity and Extent, each side has its own share: Quantity 4 puts two
+/// steps ahead and one behind. Centred with Spacing and Extent, half is on each side.
+fn extent_sides(doc: &solidcraft_engine::doc::Document, extra: &serde_json::Map<String, serde_json::Value>, index: usize, count: &str) -> (f64, f64) {
+    let (alignment, reversed) = pattern_layout(extra, index);
+    if alignment != solidcraft_engine::sketch::PatternAlignment::Center {
+        return (1.0, 0.0);
+    }
+    if crate::dialogs::pattern_distance(extra, index) != PatternDistance::CountExtent {
+        return (0.5, 0.5);
+    }
+    let heading = pattern_heading(extra, index);
+    let n = doc.eval(count.trim(), ValueKind::Unitless).ok().filter(|n| n.is_finite() && (2.0..=10_000.0).contains(n)).map(|n| n as usize);
+    let Some(n) = n else { return (1.0, 0.0) };
+    let steps = (n - 1) as f64;
+    let along = (0..n).map(|i| alignment.multiplier(i, reversed) * heading);
+    let ahead = along.clone().fold(0.0_f64, f64::max) / steps;
+    let behind = -along.fold(0.0_f64, f64::min) / steps;
+    (ahead, behind)
+}
+
+/// A rectangular pattern's extent arrow along `n`, drawn in `ink` (#8523): the share of the
+/// extent ahead of the base (see [`extent_sides`]), which a drag sets, and the share behind it
+/// the other way. Returns the tip of the arrow that can be dragged.
+#[allow(clippy::too_many_arguments)]
+fn extent_arrow(
+    doc: &solidcraft_engine::doc::Document,
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    proj: &Proj,
+    (base, bs, n): (Vec3, Pos2, Vec3),
+    (ahead, behind): (f64, f64),
+    id: egui::Id,
+    half_height: f64,
+    decimals: u8,
+    ink: [Color32; 2],
+    value: &mut String,
+) -> Option<Pos2> {
+    let l = crate::length_input::eval(doc, value, ValueKind::Length).ok().filter(|v| v.is_finite())?;
+    let scale = if ahead > 0.0 { ahead } else { 1.0 };
+    let line = ArrowLine { base, bs, n, l: l * scale, signed: false, clear_px: 0.0, look: ArrowLook::Plain };
+    let ts = if scale != 1.0 || behind > 0.0 {
+        let mut shown = format_len(doc, l * scale);
+        let original = shown.clone();
+        let drawn = drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], decimals, &mut shown, ink);
+        if shown != original
+            && let Ok(v) = crate::length_input::eval(doc, &shown, ValueKind::Length)
+        {
+            *value = format_len_drag(doc, v / scale, snap_step(half_height), decimals);
+        }
+        if behind > 0.0
+            && let Some(bt) = proj.to_screen(base - n * (l * behind))
+        {
+            arrow(painter, bs, bt, behind_ink(ink[0]));
+        }
+        drawn
+    } else {
+        drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], decimals, value, ink)
+    };
+    ts.map(|(ts, _, _)| ts)
+}
+
 /// [`drag_arrow`] drawn with `look` (a chamfer's two arrows tell which distance is being edited).
 #[allow(clippy::too_many_arguments)]
 fn drag_arrow_looked(
@@ -1477,7 +1800,8 @@ fn drag_arrow_looked(
     value: &mut String,
 ) -> Option<Pos2> {
     let line = ArrowLine { base, bs, n, l, signed, clear_px, look };
-    drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], decimals, value).map(|(ts, _, _)| ts)
+    let t = Tokens::get();
+    drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], decimals, value, [t.manipulator, t.accent]).map(|(ts, _, _)| ts)
 }
 
 /// Where a drag arrow stands: from `base` (on screen `bs`) along `n`, showing `l`; `signed` lets
@@ -1508,10 +1832,10 @@ fn drag_arrow_to(
     stops: &[crate::extrude_face_snap::Stop],
     decimals: u8,
     value: &mut String,
+    ink: [Color32; 2],
 ) -> Option<(Pos2, Option<crate::extrude_face_snap::Stop>, bool)> {
     let ArrowLine { base, bs, n, l, signed, clear_px, look } = line;
     let mut stopped = None;
-    let t = Tokens::get();
     let min = f64::from(40.0 + clear_px) * 2.0 * half_height / f64::from(proj.rect.height().max(1.0));
     let tip = |length: f64| {
         let shown = if length.abs() < min { min * if length < 0.0 { -1.0 } else { 1.0 } } else { length };
@@ -1568,13 +1892,25 @@ fn drag_arrow_to(
     }
     // Paint the value just read from this frame's pointer, including the value box anchor.
     // Using the old distance here made both trail the drag by another frame.
-    crate::scenario::publish_handle(if id == egui::Id::unique("sc_manipulator") { "arrow" } else { "arrow2" }, ts);
+    let handle = if id == egui::Id::unique("sc_manipulator") {
+        "arrow"
+    } else if id == egui::Id::unique("sc_manipulator_extent") {
+        "arrow_extent"
+    } else if id == egui::Id::unique("sc_manipulator2_extent") {
+        "arrow2_extent"
+    } else {
+        "arrow2"
+    };
+    crate::scenario::publish_handle(handle, ts);
     let hot = r.hovered() || r.dragged();
+    // Its own colour at rest and while hovered or dragged; a chamfer's arrow being edited is
+    // wider and the other one faded.
+    let [rest, hot_ink] = ink;
     let (col, width) = match look {
-        _ if hot => (t.accent, 2.0),
-        ArrowLook::Plain => (t.manipulator, 2.0),
-        ArrowLook::Active => (t.accent, 3.5),
-        ArrowLook::Dimmed => (t.manipulator.gamma_multiply(0.4), 2.0),
+        _ if hot => (hot_ink, 2.0),
+        ArrowLook::Plain => (rest, 2.0),
+        ArrowLook::Active => (hot_ink, 3.5),
+        ArrowLook::Dimmed => (rest.gamma_multiply(0.4), 2.0),
     };
     arrow_wide(painter, start(ts), ts, col, width);
     if hot {
@@ -2767,5 +3103,53 @@ mod taper_limit_tests {
         assert!(close(lo, -deg(2.0, 10.0)));
         assert_eq!(taper_limits(taper_radii(&[]), 10.0), (-89.0, 89.0));
         assert_eq!(taper_limits(taper_radii(&[&rect]), 0.0), (-89.0, 89.0));
+    }
+}
+
+/// The extent arrows of a rectangular pattern's directions and their colours (#8523).
+#[cfg(test)]
+mod pattern_arrow_tests {
+    use super::*;
+
+    /// A pattern direction's extent arrows (#8523): all ahead unless centred; centred with
+    /// Quantity and Extent each side shows its own share (Quantity 4: two steps ahead, one
+    /// behind), with Spacing and Extent half each way; Flip and Left turn the arrows round.
+    #[test]
+    fn pattern_extent_arrows_show_each_sides_share() {
+        use serde_json::json;
+        let doc = solidcraft_engine::doc::Document::new("Arrows");
+        let extra = |v: serde_json::Value| v.as_object().cloned().unwrap_or_default();
+        let near = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-12 && (a.1 - b.1).abs() < 1e-12;
+        let count_extent = extra(json!({"distance1": "count_extent"}));
+        assert_eq!(extent_sides(&doc, &count_extent, 0, "4"), (1.0, 0.0));
+        let centred = extra(json!({"distance1": "count_extent", "alignment": "center"}));
+        assert!(near(extent_sides(&doc, &centred, 0, "4"), (2.0 / 3.0, 1.0 / 3.0)));
+        assert!(near(extent_sides(&doc, &centred, 0, "5"), (0.5, 0.5)));
+        // Flip sends the extra step the other way, and the arrow with it: still two ahead.
+        let flipped = extra(json!({"distance1": "count_extent", "alignment": "center", "reversed": true}));
+        assert!(near(extent_sides(&doc, &flipped, 0, "4"), (2.0 / 3.0, 1.0 / 3.0)));
+        assert_eq!(pattern_heading(&flipped, 0), -1.0);
+        assert_eq!(pattern_heading(&extra(json!({"alignment": "left"})), 0), -1.0);
+        assert_eq!(pattern_heading(&extra(json!({})), 0), 1.0);
+        // A count that doesn't read yet keeps the whole arrow ahead.
+        assert_eq!(extent_sides(&doc, &centred, 0, "nope"), (1.0, 0.0));
+        let spacing_extent = extra(json!({"distance2": "spacing_extent", "alignment2": "center"}));
+        assert_eq!(extent_sides(&doc, &spacing_extent, 1, ""), (0.5, 0.5));
+        assert_eq!(extent_sides(&doc, &spacing_extent, 0, ""), (1.0, 0.0));
+    }
+
+    /// The second arrow's colour follows the theme's: another hue at the same lightness, and a
+    /// grey made lighter or darker; the arrow the other way is the same colour, faded.
+    #[test]
+    fn a_second_arrow_takes_its_colour_from_the_first() {
+        let blue = Color32::from_rgb(40, 110, 220);
+        let second = second_ink(blue);
+        assert_ne!(second, blue);
+        let (a, b) = (egui::ecolor::Hsva::from(blue), egui::ecolor::Hsva::from(second));
+        assert!((a.v - b.v).abs() < 0.02 && (a.s - b.s).abs() < 0.02, "{a:?} {b:?}");
+        for grey in [Color32::from_gray(60), Color32::from_gray(200)] {
+            assert_ne!(second_ink(grey), grey);
+        }
+        assert!(behind_ink(blue).a() < blue.a());
     }
 }

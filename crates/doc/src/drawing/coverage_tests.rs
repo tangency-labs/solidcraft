@@ -2,8 +2,8 @@ use solidcore_record::Vec3;
 
 use super::*;
 use crate::drawing::dimension::{DimensionKind, ModelEdge, ModelFace, ModelPoint, Silhouette};
+use crate::drawing::measure::{LinearDirection, SilhouetteSide};
 use crate::{FeatureKind, Operation, point_expr};
-use solidcraft_geom::drawing_measure::{LinearDirection, SilhouetteSide};
 
 /// A design of four boxes, F1 to F4, with F4 moved before F3 in the timeline.
 fn design() -> Document {

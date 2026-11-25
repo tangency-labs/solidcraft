@@ -69,6 +69,23 @@ pub struct NurbsSurfaceRecord {
     pub weights: Option<Vec<f64>>,
 }
 
+/// A cone or cylinder the NURBS form was built from: the placement's origin and axes,
+/// the radius at the origin, and the semi-angle in degrees (0 for a cylinder). The axis
+/// is `x_axis × y_axis`. A reader uses it only where the form lies on that cone.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct RevolutionRecord {
+    /// A point of the axis, where [`Self::radius`] is measured.
+    pub origin: [f64; 3],
+    /// The placement's unit X axis, the sweep's 0° direction.
+    pub x_axis: [f64; 3],
+    /// The placement's unit Y axis, square to [`Self::x_axis`].
+    pub y_axis: [f64; 3],
+    /// The radius at [`Self::origin`].
+    pub radius: f64,
+    /// The semi-angle, degrees. 0 is a cylinder.
+    pub semi_angle_deg: f64,
+}
+
 /// The analytic kind of a support, a label beside its NURBS form, which is the support's one
 /// geometric truth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,6 +106,7 @@ pub enum SupportKindRecord {
 
 /// A surface the ball rolls on: a NURBS form with its analytic kind, or itself a blend by its
 /// definition.
+#[allow(clippy::large_enum_variant)] // boxing the NURBS form would allocate every support
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SupportRecord {
     /// A surface by its NURBS form, and its analytic kind.
@@ -97,6 +115,9 @@ pub enum SupportRecord {
         kind: SupportKindRecord,
         /// The NURBS form.
         form: NurbsSurfaceRecord,
+        /// The cone or cylinder the form was built from. None for any other surface.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        revolution: Option<RevolutionRecord>,
     },
     /// A procedural blend, definition and net (nested, at most [`RECORD_MAX_DEPTH`] deep in all).
     Blend(Box<ProceduralBlendRecord>),
@@ -112,6 +133,8 @@ pub enum RadiusRecord {
     },
     /// A ball whose radius is the x of a curve over the leader's parameter.
     Law(NurbsCurveRecord),
+    /// The rolling radius is set by the chamfer's equal setbacks at each pair of feet.
+    EqualSetback,
 }
 
 /// How a chamfer's size was asked for.
@@ -311,6 +334,24 @@ fn points_finite(points: &[[f64; 3]]) -> bool {
     points.iter().all(|p| all_finite(p))
 }
 
+fn revolution_finite(r: &RevolutionRecord) -> bool {
+    points_finite(&[r.origin, r.x_axis, r.y_axis])
+        && r.radius.is_finite()
+        && r.semi_angle_deg.is_finite()
+}
+
+fn validate_support_form(
+    form: &NurbsSurfaceRecord,
+    revolution: Option<&RevolutionRecord>,
+    field: &'static str,
+) -> Result<(), RecordError> {
+    form.validate(field)?;
+    if revolution.is_some_and(|r| !revolution_finite(r)) {
+        return Err(refuse(field, "a cone or cylinder's numbers are finite"));
+    }
+    Ok(())
+}
+
 /// `count + degree + 1`, or `None` past `usize`.
 fn knot_count(count: usize, degree: u32) -> Option<usize> {
     let degree = usize::try_from(degree).ok()?;
@@ -419,7 +460,9 @@ impl NurbsSurfaceRecord {
 impl SupportRecord {
     fn validate_at(&self, depth: u32, field: &'static str) -> Result<(), RecordError> {
         match self {
-            SupportRecord::Nurbs { form, .. } => form.validate(field),
+            SupportRecord::Nurbs {
+                form, revolution, ..
+            } => validate_support_form(form, revolution.as_ref(), field),
             SupportRecord::Blend(b) => b.validate_at(depth + 1),
         }
     }
@@ -494,6 +537,17 @@ impl BlendDefinitionRecord {
                 }
             }
             RadiusRecord::Law(law) => law.validate("definition.radius")?,
+            RadiusRecord::EqualSetback => {
+                if self.order != 0
+                    || !matches!(self.chamfer.as_ref().map(|c| c.size),
+                    Some(ChamferSizeRecord::Distances([a, b])) if a == b && a > 0.0)
+                {
+                    return Err(refuse(
+                        "definition.radius",
+                        "a local wedge needs an equal-setback chamfer",
+                    ));
+                }
+            }
         }
         self.leader.validate("definition.leader")?;
         for seed in &self.seeds {
@@ -505,7 +559,7 @@ impl BlendDefinitionRecord {
     /// How many numbers it holds, nested supports included (call on a validated record).
     pub fn items(&self) -> usize {
         let law = match &self.radius {
-            RadiusRecord::Constant { .. } => 0,
+            RadiusRecord::Constant { .. } | RadiusRecord::EqualSetback => 0,
             RadiusRecord::Law(law) => law.items(),
         };
         self.supports
@@ -544,7 +598,9 @@ impl ExactRoundDefinition {
     pub fn validate(&self) -> Result<(), RecordError> {
         for support in &self.supports {
             match support {
-                SupportRecord::Nurbs { form, .. } => form.validate("supports")?,
+                SupportRecord::Nurbs {
+                    form, revolution, ..
+                } => validate_support_form(form, revolution.as_ref(), "supports")?,
                 SupportRecord::Blend(_) => {
                     return Err(refuse("supports", "an exact round's supports are faces"));
                 }

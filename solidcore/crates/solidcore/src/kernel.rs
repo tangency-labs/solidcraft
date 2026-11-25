@@ -18,7 +18,6 @@
 //! | [`Tolerances::large_small_size_ratio`] | `SM_LARGE_SMALL_SIZE_RATIO`               |
 //! | [`Rng`], [`Kernel::seed`], [`Kernel::seeded_rng`] | C `rand()` / `srand(time(NULL))` (e.g. `SmShell.cpp`) |
 //! | [`Caches`]                             | `SmCacheMgr`, `SmCacheMgrCrv/Srf/TSrf/Brep` |
-//! | [`Kernel::fillet_point_step`], [`Kernel::latch_fillet_point_step`] | the function-static `sdStaticStep` of `SmFilletSolver::ComputePointValues` |
 //! | [`Kernel::upstream_ub_passed`], [`Kernel::note_upstream_ub`] | (none: upstream undefined behaviour the port went past) |
 //! | [`CancelToken`], [`Kernel::cancel`], [`Kernel::set_cancel_token`], [`Kernel::check_cancelled`] | (none: cooperative cancellation for worker-thread jobs) |
 //! | [`WorkCounters`], [`Kernel::work_counters`] | the SolidCraft fork's `SmWorkCounters` (process-wide there) |
@@ -31,15 +30,14 @@
 //! `plan/findings.md`).
 //!
 //! Upstream also keeps a few process-global function statics whose first use fixes
-//! their value for the rest of the process; those that change results live on the
-//! [`Kernel`] as latches (e.g. [`Kernel::fillet_point_step`]), so each kernel starts
-//! unlatched and a difftest runner can seed the latch with the value the C++ process
-//! already holds. Kernels that stand in for one process together share its value
-//! ([`Kernel::process_fillet_point_step`]).
+//! their value for the rest of the process. The kernel keeps no such state: a value
+//! upstream fixes on first use is chosen here from the call's own input (the
+//! finite-difference step of `SmFilletSolver::ComputePointValues`, `sdStaticStep`, is
+//! chosen for each point), so a result never depends on the calls before it.
 
 use core::cell::{Cell, RefCell};
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use crate::error::SolidError;
 use crate::geom::context::Context;
@@ -148,6 +146,12 @@ pub struct Caches {
     /// option, only the import's narrow seam. (tangency-labs/solidcore#3368 makes the proved
     /// raise fast enough for import and removes the sampled path.)
     pub(crate) prove_lazy_trim_raise: bool,
+    /// Not upstream (#21105): whether a UV trim built now leaves its edge's tolerance as
+    /// it is, as `SetUVTrimCurve` does on a B-rep marked `m_bValidateOnly`. Set only for
+    /// the duration of a validate-only tolerance pass ([`Kernel::with_held_trim_raise`]),
+    /// which so takes `bValidateOnly` as its argument instead of setting and restoring the
+    /// flag on the body it checks. Crate-private: not a kernel option.
+    pub(crate) hold_trim_raise: bool,
 }
 
 impl Default for Caches {
@@ -155,16 +159,18 @@ impl Default for Caches {
         Self {
             curve_analysis: RefCell::default(),
             prove_lazy_trim_raise: true,
+            hold_trim_raise: false,
         }
     }
 }
 
 impl Caches {
-    /// Drops all cached data. The trim raise's mode stays: clearing a kernel's caches must
+    /// Drops all cached data. The trim raise's modes stay: clearing a kernel's caches must
     /// change no result.
     pub fn clear(&mut self) {
         *self = Self {
             prove_lazy_trim_raise: self.prove_lazy_trim_raise,
+            hold_trim_raise: self.hold_trim_raise,
             ..Self::default()
         };
     }
@@ -192,6 +198,7 @@ pub struct WorkCounters {
     face_extreme_control_points: Cell<u64>,
     feet_tm_coefficients: Cell<u64>,
     mass_iso_evaluations: Cell<u64>,
+    mass_closure_evaluations: Cell<u64>,
     coincident_curves_classified: Cell<u64>,
     containment_edge_drops: Cell<u64>,
     loop_walks: Cell<u64>,
@@ -203,6 +210,9 @@ pub struct WorkCounters {
     blends_recertified: Cell<u64>,
     vertex_drops: Cell<u64>,
     seam_tests: Cell<u64>,
+    contact_stretch_certifications: Cell<u64>,
+    uv_trim_builds: Cell<u64>,
+    trim_deviation_bounds: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -304,6 +314,14 @@ impl WorkCounters {
         self.mass_iso_evaluations.get()
     }
 
+    /// Integrand evaluations of the ruled strips the precise mass properties close a face
+    /// onto its edges' curves with (`gap_closure`): each point of a strip's trim the
+    /// strip's integration samples. Not the fork's.
+    #[must_use]
+    pub fn mass_closure_evaluations(&self) -> u64 {
+        self.mass_closure_evaluations.get()
+    }
+
     /// Edge curves of two coincident faces that `FaceIntersect` classifies on both: those
     /// of each face within reach of the other face's box. Not upstream (the fork's counters
     /// have none).
@@ -402,6 +420,34 @@ impl WorkCounters {
         self.seam_tests.get()
     }
 
+    /// Stretches a curve intersection certified to keep its two curves within the
+    /// tolerance, from a point solution to an end of either curve, to learn whether the
+    /// solution moves to that end (`move_contacts_to_curve_ends`): each certificate
+    /// subdivides the stretch. The count grows with the point solutions near an end, so
+    /// two curves that coincide within the tolerance along many turns, crossing at
+    /// thousands of points, show here. Not the fork's.
+    #[must_use]
+    pub fn contact_stretch_certifications(&self) -> u64 {
+        self.contact_stretch_certifications.get()
+    }
+
+    /// UV trim curves built for an edge use
+    /// (`topology::edgeuse::p3::create_uv_trim_curve`): each build, whether it
+    /// attaches its curve or fails. Not the fork's (#21105).
+    #[must_use]
+    pub fn uv_trim_builds(&self) -> u64 {
+        self.uv_trim_builds.get()
+    }
+
+    /// Certified bounds on a new UV trim's distance from its edge
+    /// (`topology::edgeuse::p3::trim_deviation_bound`, and its same-parameter form
+    /// `trim_same_parameter_deviation_bound` that gates a boolean's carried trims): each
+    /// bisection the bound starts, the costly part of building a trim. Not the fork's (#21105).
+    #[must_use]
+    pub fn trim_deviation_bounds(&self) -> u64 {
+        self.trim_deviation_bounds.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -415,6 +461,7 @@ impl WorkCounters {
         self.face_extreme_control_points.set(0);
         self.feet_tm_coefficients.set(0);
         self.mass_iso_evaluations.set(0);
+        self.mass_closure_evaluations.set(0);
         self.coincident_curves_classified.set(0);
         self.containment_edge_drops.set(0);
         self.loop_walks.set(0);
@@ -426,11 +473,32 @@ impl WorkCounters {
         self.blends_recertified.set(0);
         self.vertex_drops.set(0);
         self.seam_tests.set(0);
+        self.contact_stretch_certifications.set(0);
+        self.uv_trim_builds.set(0);
+        self.trim_deviation_bounds.set(0);
+    }
+
+    /// Counts one UV trim curve built.
+    pub(crate) fn add_uv_trim_build(&self) {
+        self.uv_trim_builds
+            .set(self.uv_trim_builds.get().saturating_add(1));
+    }
+
+    /// Counts one certified bound on a trim's distance from its edge.
+    pub(crate) fn add_trim_deviation_bound(&self) {
+        self.trim_deviation_bounds
+            .set(self.trim_deviation_bounds.get().saturating_add(1));
     }
 
     /// Counts one edge or vertex asked whether it is a seam or a pole of a face.
     pub(crate) fn add_seam_test(&self) {
         self.seam_tests.set(self.seam_tests.get().saturating_add(1));
+    }
+
+    /// Counts one stretch certified for a contact's move to a curve end.
+    pub(crate) fn add_contact_stretch_certification(&self) {
+        self.contact_stretch_certifications
+            .set(self.contact_stretch_certifications.get().saturating_add(1));
     }
 
     /// Counts one vertex a classified curve is solved against.
@@ -496,6 +564,12 @@ impl WorkCounters {
     pub(crate) fn add_mass_iso_evaluation(&self) {
         self.mass_iso_evaluations
             .set(self.mass_iso_evaluations.get().saturating_add(1));
+    }
+
+    /// Counts one evaluation of a mass-property closure strip's integrand.
+    pub(crate) fn add_mass_closure_evaluation(&self) {
+        self.mass_closure_evaluations
+            .set(self.mass_closure_evaluations.get().saturating_add(1));
     }
 
     /// Counts `n` series coefficients a feet Taylor model computed.
@@ -819,25 +893,6 @@ pub struct Kernel {
     /// The session's modeling context (marks, Boolean flag, callbacks, its own
     /// model size estimate); created with the defaults, as `SmApiGetOrCreateContext`.
     pub context: Context,
-    /// The function-static `sdStaticStep` of `SmFilletSolver::ComputePointValues`
-    /// (`SmFilletSolver.cpp`, unit `blend.fillet_solver_p4`): `None` until the first
-    /// finite-difference step of a fillet point evaluation latches it (to `1e-3` when
-    /// that first point is a tangent point, else `1e-5`); every later evaluation on
-    /// this kernel reuses the latched value, as upstream does for the whole process.
-    /// A [`Cell`] so the latch can be set through the `&Kernel` the solvers take
-    /// (the kernel stays `Send`). Difftest runners seed it with the value the C++
-    /// process has latched; see [`Kernel::latch_fillet_point_step`].
-    pub fillet_point_step: Cell<Option<f64>>,
-    /// The step of the process this kernel stands in for, when it is one of several that do
-    /// (a pool of kernels, each running calls side by side): `None` for a kernel of its own,
-    /// whose latch is its alone. Every kernel of the pool is handed the one cell, so the
-    /// first latch on any of them settles the step under the cell's lock, and every latch
-    /// after it, on any of them and whenever that kernel was made or taken, gets that step
-    /// ([`Kernel::latch_fillet_point_step`]), as upstream's one function static does. The
-    /// cell is `'static` because the step lives as long as the process, as upstream's does;
-    /// the kernel only borrows it, so it never learns who owns it, and a kernel copy (one
-    /// made for caches) shares it by copying the reference.
-    pub process_fillet_point_step: Option<&'static OnceLock<f64>>,
     /// The upstream undefined-behaviour conditions (their `plan/upstream-issues.md`
     /// ids, e.g. `"UB-175"`) that operations on this kernel met and went past with the
     /// port's defined semantics, each listed once in the order first met. Upstream's
@@ -1000,8 +1055,6 @@ impl Kernel {
             seed: options.seed,
             caches: Caches::default(),
             context: Context::default(),
-            fillet_point_step: Cell::new(None),
-            process_fillet_point_step: None,
             upstream_ub_passed: Vec::new(),
             memoize_curve_caches: !cfg!(feature = "curve-memo-off"),
             fixes: UpstreamFixes::default(),
@@ -1051,6 +1104,18 @@ impl Kernel {
         self.caches.prove_lazy_trim_raise = false;
         let out = f(self);
         self.caches.prove_lazy_trim_raise = proved;
+        out
+    }
+
+    /// Runs `f` with every UV trim it builds leaving its edge's tolerance as it is (see
+    /// [`Caches::hold_trim_raise`]), then restores the previous mode, whether `f` returns a
+    /// value or an error: the validate-only tolerance pass's `bValidateOnly`, carried for the
+    /// pass instead of written to the B-rep it checks (#21105).
+    pub(crate) fn with_held_trim_raise<T>(&mut self, f: impl FnOnce(&mut Kernel) -> T) -> T {
+        let held = self.caches.hold_trim_raise;
+        self.caches.hold_trim_raise = true;
+        let out = f(self);
+        self.caches.hold_trim_raise = held;
         out
     }
 
@@ -1122,32 +1187,6 @@ impl Kernel {
         if !self.upstream_ub_passed.contains(&id) {
             self.upstream_ub_passed.push(id);
         }
-    }
-
-    /// `static double sdStaticStep = first;`: the latched value of
-    /// [`Kernel::fillet_point_step`], latching `first` when nothing is latched yet: the
-    /// process's step when the kernel shares one ([`Kernel::process_fillet_point_step`]),
-    /// settled to `first` if this is the first latch of the process.
-    #[must_use]
-    pub fn latch_fillet_point_step(&self, first: f64) -> f64 {
-        if let Some(step) = self.fillet_point_step.get() {
-            return step;
-        }
-        let step = self
-            .process_fillet_point_step
-            .map_or(first, |process| *process.get_or_init(|| first));
-        self.fillet_point_step.set(Some(step));
-        step
-    }
-
-    /// The step a fillet point evaluation on this kernel takes, once one is latched: the
-    /// kernel's own latch, else the process's ([`Kernel::process_fillet_point_step`]).
-    #[must_use]
-    pub fn latched_fillet_point_step(&self) -> Option<f64> {
-        self.fillet_point_step.get().or_else(|| {
-            self.process_fillet_point_step
-                .and_then(|process| process.get().copied())
-        })
     }
 }
 
@@ -1283,32 +1322,6 @@ mod tests {
         k.clear_cancel_token();
         assert!(k.cancel.is_none());
         assert_eq!(k.check_cancelled("kernel::test"), Ok(()));
-    }
-
-    #[test]
-    fn fillet_point_step_latches_once() {
-        let k = Kernel::default();
-        assert_eq!(k.fillet_point_step.get(), None);
-        assert_eq!(k.latch_fillet_point_step(1.0e-5), 1.0e-5);
-        assert_eq!(k.latch_fillet_point_step(1.0e-3), 1.0e-5);
-        k.fillet_point_step.set(Some(1.0e-3));
-        assert_eq!(k.latch_fillet_point_step(1.0e-5), 1.0e-3);
-    }
-
-    /// Kernels sharing a process step settle one: the first latch on either is the step of
-    /// both, read before the other latches and kept when it does. A kernel of its own
-    /// latches its own.
-    #[test]
-    fn kernels_sharing_a_process_step_settle_one() {
-        static PROCESS: OnceLock<f64> = OnceLock::new();
-        let (mut a, mut b) = (Kernel::default(), Kernel::default());
-        a.process_fillet_point_step = Some(&PROCESS);
-        b.process_fillet_point_step = Some(&PROCESS);
-        assert_eq!(b.latched_fillet_point_step(), None);
-        assert_eq!(a.latch_fillet_point_step(1.0e-5), 1.0e-5);
-        assert_eq!(b.latched_fillet_point_step(), Some(1.0e-5));
-        assert_eq!(b.latch_fillet_point_step(1.0e-3), 1.0e-5);
-        assert_eq!(Kernel::default().latch_fillet_point_step(1.0e-3), 1.0e-3);
     }
 
     #[test]
