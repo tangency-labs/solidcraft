@@ -149,6 +149,31 @@ fn tilt_comes_from_the_tangent() {
     assert_eq!(start, 2.0 * FRAC_PI_3);
 }
 
+/// Two marks the same to within rounding: their end points, or their arcs' centres, radii and
+/// angles, within 1e-12.
+fn close(a: Seg2, b: Seg2) -> bool {
+    let near = |x: f64, y: f64| (x - y).abs() <= 1e-12;
+    let at = |p: Point2, q: Point2| near(p.x, q.x) && near(p.y, q.y);
+    match (a, b) {
+        (Seg2::Line { a: a0, b: b0 }, Seg2::Line { a: a1, b: b1 }) => at(a0, a1) && at(b0, b1),
+        (
+            Seg2::Arc {
+                center: c0,
+                radius: r0,
+                start: s0,
+                sweep: w0,
+            },
+            Seg2::Arc {
+                center: c1,
+                radius: r1,
+                start: s1,
+                sweep: w1,
+            },
+        ) => at(c0, c1) && near(r0, r1) && near(s0, s1) && near(w0, w1),
+        _ => false,
+    }
+}
+
 #[test]
 fn a_direction_of_any_length_is_its_own_direction() {
     let d = 1.0 / 2.0_f64.sqrt();
@@ -157,8 +182,9 @@ fn a_direction_of_any_length_is_its_own_direction() {
         WeldContour::Convex,
         WeldContour::Concave,
     ] {
-        // The fillet face's diagonals, as unit vectors and as (1, -1) and (1, 1): the same mark,
-        // to the bit, since 1 / sqrt(2) is each component over the length.
+        // The fillet face's diagonals, as unit vectors and as (1, -1) and (1, 1): the same mark.
+        // A unit vector given is taken over its own length again, which moves it by a rounding
+        // step, so the two agree to within one; (1, -1) over its length is exactly 1 / sqrt(2).
         let unit = weld_contour_mark(Point2::ZERO, Vec2::new(d, -d), Vec2::new(d, d), G, contour);
         let long = weld_contour_mark(
             Point2::ZERO,
@@ -167,7 +193,7 @@ fn a_direction_of_any_length_is_its_own_direction() {
             G,
             contour,
         );
-        assert_eq!(unit.unwrap(), long.unwrap(), "{contour:?}");
+        assert!(close(unit.unwrap(), long.unwrap()), "{contour:?}");
         let scaled = weld_contour_mark(
             Point2::ZERO,
             Vec2::new(2.0, 0.0),
