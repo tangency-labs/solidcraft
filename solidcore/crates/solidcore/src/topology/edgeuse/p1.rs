@@ -92,6 +92,7 @@
 //!   and [`loopuse_shell`] call unit `topology.loopuse`.
 
 use crate::curve::curve::Curve;
+use crate::error::topology::TopologyFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
@@ -1005,9 +1006,9 @@ pub fn calc_max_edge_face_gap(
     // construct gap function
     let interval = b.edge(e)?.interval;
     if interval.min() == interval.max() {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP,
-            "the edge's interval is a single point",
+            TopologyFailure::DegenerateEdgeInterval,
         ));
     }
     let sample = {
@@ -1645,9 +1646,9 @@ impl EvalNFunctions for FindStepOff<'_> {
         let dv_len_sq = s_dv.length_squared();
         // if we have a zero length tangent then we must fail
         if du_len_sq < EFF_ZERO_SQ || dv_len_sq < EFF_ZERO_SQ {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_STEP,
-                "the surface has a zero-length tangent",
+                TopologyFailure::ZeroSurfaceTangent,
             ));
         }
 

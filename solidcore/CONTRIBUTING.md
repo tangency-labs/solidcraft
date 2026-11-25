@@ -59,7 +59,10 @@ case, replacing the code they supersede. This page is the short version;
   `crates/solidcore/src/kernel/fixes/<flag>.md`) is welcome work. SolidCraft runs every flag on,
   so a broken fix is fixed or removed in solidcore, never held off.
 - **Don't extend the old paths.** Improve the construction that replaces them.
-- **Keep history linear.** Rebase your branch onto `main`; never merge `main` into it.
+- **Bring your branch up to date** with the latest `main` by merging `main` in or by rebasing;
+  both are fine. Merging costs less: when the PR already passed and the merge leaves your change
+  as it was, CI carries the passing run; a rebase re-runs the full suite and needs
+  `--force-with-lease`. Never force-push `main` or a branch someone else works on.
 
 ## Goldens
 

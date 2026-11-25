@@ -1013,6 +1013,7 @@
   "cmd.motion_list": "Listar os estudos de movemento",
   "cmd.motion_play": "Reproducir o estudo de movemento",
   "cmd.motion_plot": "Representar o estudo de movemento",
+  "cmd.motion_simulate": "Simular movemento",
   "cmd.motion_study": "Estudo de movemento",
   "cmd.motion_trace": "Traxectoria do movemento",
   "cmd.motion_trace_edit": "Editar a traxectoria do movemento",

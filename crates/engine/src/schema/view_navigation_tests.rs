@@ -1,13 +1,13 @@
 use serde_json::{Value, json};
 
 use super::{
-    AmbientOcclusionParams, AmbientOcclusionResult, AngleReadoutParams, CameraReply, DisplayToggleParams, GraphicsPresetParams, GraphicsPresetResult,
-    HistoryLayoutParams, HistoryLayoutResult, LayoutParams, LayoutResult, NavigateParams, NavigateResult, NavigationBarParams, NormalToParams,
-    PerspectiveParams, PerspectiveResult, RenderPanelVisibilityParams, RenderPanelVisibilityResult, StandardViewParams, TabStep, TabStepParams,
-    ToolParams, ToolResult, VisualStyleParams, VisualStyleResult,
+    AmbientOcclusionParams, AmbientOcclusionResult, AngleReadoutParams, CameraReply, DisplayToggleParams, FitHomeParams, FitHomeResult,
+    GraphicsPresetParams, GraphicsPresetResult, HistoryLayoutParams, HistoryLayoutResult, LayoutParams, LayoutResult, NavigateParams, NavigateResult,
+    NavigationBarParams, NormalToParams, PerspectiveParams, PerspectiveResult, RenderPanelVisibilityParams, RenderPanelVisibilityResult, RenderStage,
+    RenderStageParams, RenderStageResult, StandardViewParams, TabStep, TabStepParams, ToolParams, ToolResult, VisualStyleParams, VisualStyleResult,
 };
 use crate::Session;
-use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
+use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, closed_list, conforms, names_of};
 use crate::schema::types::CameraParam;
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
@@ -15,6 +15,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<AngleReadoutParams>(), &["enabled"]);
     assert_keys(input_schema_for::<super::OriginAxesAcrossViewParams>(), &["enabled"]);
+    assert_keys(input_schema_for::<super::ScaleBarParams>(), &["enabled"]);
     assert_keys(input_schema_for::<StandardViewParams>(), &["camera"]);
     assert_keys(input_schema_for::<NormalToParams>(), &["camera"]);
     assert_keys(input_schema_for::<LayoutParams>(), &["mode"]);
@@ -23,6 +24,8 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<AmbientOcclusionParams>(), &["enabled"]);
     assert_keys(input_schema_for::<DisplayToggleParams>(), &["on"]);
     assert_keys(input_schema_for::<NavigationBarParams>(), &["visible"]);
+    assert_keys(input_schema_for::<FitHomeParams>(), &[]);
+    assert_keys(input_schema_for::<RenderStageParams>(), &["stage"]);
     assert_keys(
         input_schema_for::<NavigateParams>(),
         &["action", "anchor", "camera", "degrees", "delta", "direction", "factor", "fit", "free_orbit", "motion", "pivot", "viewport"],
@@ -257,6 +260,9 @@ fn strict_keeps_todays_errors() {
         ("view.perspective", json!({"enabled": 1})),
         ("view.perspective", json!({"enabled": "true"})),
         ("view.perspective", json!({"enabled": null})),
+        ("view.scale_bar", json!({"enabled": 1})),
+        ("view.scale_bar", json!({"enabled": "true"})),
+        ("view.scale_bar", json!({"enabled": null})),
     ]);
 }
 
@@ -282,6 +288,20 @@ fn origin_axes_across_view_replies_match_the_output_schema() {
     let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
     for enabled in [true, false] {
         let reply = s.execute("view.origin_axes_across_view", &json!({"enabled": enabled})).unwrap();
+        assert!(conforms(schema, schema, &reply), "{reply} doesn't match {schema}");
+        assert_eq!(reply, json!({"enabled": enabled}));
+    }
+    assert!(!conforms(schema, schema, &json!({"enabled": "yes"})));
+    assert!(!conforms(schema, schema, &json!({})));
+}
+
+#[test]
+fn scale_bar_replies_match_the_output_schema() {
+    let schema = output_schema_for::<super::ScaleBarResult>();
+    let schema = schema.as_value();
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    for enabled in [true, false] {
+        let reply = s.execute("view.scale_bar", &json!({"enabled": enabled})).unwrap();
         assert!(conforms(schema, schema, &reply), "{reply} doesn't match {schema}");
         assert_eq!(reply, json!({"enabled": enabled}));
     }
@@ -902,4 +922,119 @@ fn render_panel_refusals_stay_the_handlers_below_strict() {
         let e = strict.err().unwrap_or_else(|| panic!("{id} {hostile} runs in strict"));
         assert!(e.to_string().contains("unknown key `off`"), "{id}: {e}");
     }
+}
+
+/// `view.fit` and `view.home` take nothing and answer nothing: their published contract refuses
+/// every key, their published output is the empty object the handlers return, and no level lets a
+/// key through or changes the design.
+#[test]
+fn the_framing_commands_take_and_answer_nothing() {
+    let out = output_schema_for::<FitHomeResult>();
+    let out = out.as_value();
+    let mut s = Session::default();
+    for id in ["view.fit", "view.home"] {
+        let spec = crate::find_command(id).unwrap();
+        assert!(spec.contract.is_some() && spec.output.is_some() && !spec.undoable, "{id}");
+        let d = s.execute("engine.describe", &json!({"command": id})).unwrap_or_else(|e| panic!("{id}: {e}"));
+        assert_eq!(d["input"]["additionalProperties"], json!(false), "{id}");
+        assert_eq!(d["output"]["type"], "object", "{id}");
+        assert!(d["output"].get("required").is_none(), "{id} asks its reply for something: {d}");
+        for level in ParamCheck::ALL {
+            let mut checked = Session { param_check: level, ..Session::default() };
+            checked.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap_or_else(|e| panic!("{e}"));
+            let (before, undo) = (checked.doc.to_json(), checked.undo.len());
+            let r = checked.execute(id, &json!({})).unwrap_or_else(|e| panic!("{id} with no parameters, check {level:?}: {e}"));
+            assert_eq!(r, json!({}), "{id}");
+            assert!(conforms(out, out, &r), "{r} doesn't match {out}");
+            assert_eq!(checked.doc.to_json(), before, "{id} changed the design");
+            assert_eq!(checked.undo.len(), undo, "{id} added an undo step");
+        }
+        // A key the command doesn't read: today's refusal with the check off and in warn, the
+        // contract's in strict.
+        for level in [ParamCheck::Off, ParamCheck::Warn] {
+            let mut checked = Session { param_check: level, ..Session::default() };
+            let e = checked
+                .execute(id, &json!({"off": true}))
+                .err()
+                .unwrap_or_else(|| panic!("{id} reads a key it doesn't know with the check {level:?}"));
+            assert_eq!(e.to_string(), format!("invalid parameters for `{id}`: unknown parameter: off"), "{id}");
+        }
+        let e = Session { param_check: ParamCheck::Strict, ..Session::default() }.execute(id, &json!({"off": true}));
+        let e = e.err().unwrap_or_else(|| panic!("{id} reads a key it doesn't know in strict"));
+        assert_eq!(e.to_string(), format!("invalid parameters for `{id}`: unknown key `off`"), "{id}");
+    }
+}
+
+/// `view.render_stage` takes one of the four stage names the Render window keeps its stages under
+/// and echoes it back. A name it doesn't have, no name, and a key it doesn't read keep the
+/// handler's own messages with the check off and in warn; in strict the contract speaks first, the
+/// way the published schema names them.
+#[test]
+fn the_render_stage_takes_one_of_the_four_stages() {
+    let input = input_schema_for::<RenderStageParams>();
+    let out = output_schema_for::<RenderStageResult>();
+    assert_eq!(closed_list(&input, "RenderStage"), names_of(&RenderStage::ALL));
+    assert_eq!(closed_list(&out, "RenderStage"), names_of(&RenderStage::ALL), "the reply names the stages the call may use");
+    let out = out.as_value();
+    let mut s = Session::default();
+    let d = s.execute("engine.describe", &json!({"command": "view.render_stage"})).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(d["input"]["required"], json!(["stage"]), "the stage is required, as the handler has always asked");
+    assert_eq!(d["input"]["additionalProperties"], json!(false));
+    for stage in names_of(&RenderStage::ALL) {
+        for level in ParamCheck::ALL {
+            let mut checked = Session { param_check: level, ..Session::default() };
+            checked.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap_or_else(|e| panic!("{e}"));
+            let (before, undo) = (checked.doc.to_json(), checked.undo.len());
+            let p = json!({"stage": stage});
+            let r = checked.execute("view.render_stage", &p).unwrap_or_else(|e| panic!("{p} with the check {level:?}: {e}"));
+            assert_eq!(r, json!({"stage": stage}), "{p}");
+            assert!(conforms(out, out, &r), "{r} doesn't match {out}");
+            assert_eq!(checked.doc.to_json(), before, "{p} changed the design");
+            assert_eq!(checked.undo.len(), undo, "{p} added an undo step");
+        }
+    }
+    // A stage the window doesn't have. The handler names the key it reads as its command, as it has
+    // always done; the contract answers under the command's own id.
+    let wrong = json!({"stage": "material"});
+    for level in [ParamCheck::Off, ParamCheck::Warn] {
+        let mut checked = Session { param_check: level, ..Session::default() };
+        let e = checked.execute("view.render_stage", &wrong).err().unwrap_or_else(|| panic!("{wrong} runs with the check {level:?}"));
+        assert_eq!(e.to_string(), "invalid parameters for `stage`: expected look, light, frame or output", "{wrong}");
+    }
+    let e = Session { param_check: ParamCheck::Strict, ..Session::default() }.execute("view.render_stage", &wrong);
+    let e = e.err().unwrap_or_else(|| panic!("{wrong} runs in strict"));
+    assert_eq!(e.to_string(), "invalid parameters for `view.render_stage`: expected look, light, frame or output", "{wrong}");
+    // No stage at all: the handler's own refusal with the check off and in warn, because the
+    // contract leaves the key to it (optional in the type, required in the schema); in strict the
+    // contract speaks first and names the key the way the published schema does.
+    for level in [ParamCheck::Off, ParamCheck::Warn] {
+        let mut checked = Session { param_check: level, ..Session::default() };
+        let e = checked.execute("view.render_stage", &json!({})).err().unwrap_or_else(|| panic!("no stage runs with the check {level:?}"));
+        assert_eq!(e.to_string(), "invalid parameters for `view.render_stage`: missing field `stage`", "no stage");
+    }
+    let e = Session { param_check: ParamCheck::Strict, ..Session::default() }.execute("view.render_stage", &json!({}));
+    let e = e.err().unwrap_or_else(|| panic!("no stage runs in strict"));
+    assert!(e.to_string().contains("`stage`"), "no stage in strict: {e}");
+    // A stage that isn't a name: the handler asks its caller for a string, the contract for one of
+    // the four names, so the words differ on purpose.
+    let not_a_name = json!({"stage": 3});
+    for level in [ParamCheck::Off, ParamCheck::Warn] {
+        let mut checked = Session { param_check: level, ..Session::default() };
+        let e = checked.execute("view.render_stage", &not_a_name).err().unwrap_or_else(|| panic!("{not_a_name} runs with the check {level:?}"));
+        assert_eq!(e.to_string(), "invalid parameters for `view.render_stage`: invalid type: integer `3`, expected a string", "{not_a_name}");
+    }
+    let e = Session { param_check: ParamCheck::Strict, ..Session::default() }.execute("view.render_stage", &not_a_name);
+    let e = e.err().unwrap_or_else(|| panic!("{not_a_name} runs in strict"));
+    assert_eq!(e.to_string(), "invalid parameters for `view.render_stage`: expected look, light, frame or output", "{not_a_name}");
+    // A key the command doesn't read: today's refusal with the check off and in warn, the
+    // contract's in strict.
+    let hostile = json!({"stage": "look", "off": true});
+    for level in [ParamCheck::Off, ParamCheck::Warn] {
+        let mut checked = Session { param_check: level, ..Session::default() };
+        let e = checked.execute("view.render_stage", &hostile).err().unwrap_or_else(|| panic!("{hostile} runs with the check {level:?}"));
+        assert_eq!(e.to_string(), "invalid parameters for `view.render_stage`: unknown field `off`, expected `stage`", "{hostile}");
+    }
+    let e = Session { param_check: ParamCheck::Strict, ..Session::default() }.execute("view.render_stage", &hostile);
+    let e = e.err().unwrap_or_else(|| panic!("{hostile} runs in strict"));
+    assert_eq!(e.to_string(), "invalid parameters for `view.render_stage`: unknown key `off`", "{hostile}");
 }

@@ -1,0 +1,56 @@
+{
+  "en": {
+    "ui.frame_hot_point_tip": "Click to put this point of the section on the line",
+    "ui.frame_locate_tip": "Drag to put another point of the section on the line",
+    "ui.frame_offset_a": "Offset A",
+    "ui.frame_offset_b": "Offset B"
+  },
+  "de": {
+    "ui.frame_hot_point_tip": "Klicken, um diesen Punkt des Querschnitts auf die Linie zu setzen",
+    "ui.frame_locate_tip": "Ziehen, um einen anderen Punkt des Querschnitts auf die Linie zu setzen",
+    "ui.frame_offset_a": "Versatz A",
+    "ui.frame_offset_b": "Versatz B"
+  },
+  "ar": {
+    "ui.frame_hot_point_tip": "انقر لوضع هذه النقطة من المقطع على الخط",
+    "ui.frame_locate_tip": "اسحب لوضع نقطة أخرى من المقطع على الخط",
+    "ui.frame_offset_a": "الإزاحة A",
+    "ui.frame_offset_b": "الإزاحة B"
+  },
+  "he": {
+    "ui.frame_hot_point_tip": "לחץ כדי להציב נקודה זו של החתך על הקו",
+    "ui.frame_locate_tip": "גרור כדי להציב נקודה אחרת של החתך על הקו",
+    "ui.frame_offset_a": "היסט A",
+    "ui.frame_offset_b": "היסט B"
+  },
+  "ja": {
+    "ui.frame_hot_point_tip": "クリックすると断面のこの点を線上に置きます",
+    "ui.frame_locate_tip": "ドラッグすると断面の別の点を線上に置きます",
+    "ui.frame_offset_a": "オフセット A",
+    "ui.frame_offset_b": "オフセット B"
+  },
+  "ko": {
+    "ui.frame_hot_point_tip": "클릭하면 단면의 이 점을 선 위에 놓습니다",
+    "ui.frame_locate_tip": "끌면 단면의 다른 점을 선 위에 놓습니다",
+    "ui.frame_offset_a": "오프셋 A",
+    "ui.frame_offset_b": "오프셋 B"
+  },
+  "vi": {
+    "ui.frame_hot_point_tip": "Nhấp để đặt điểm này của mặt cắt lên đường",
+    "ui.frame_locate_tip": "Kéo để đặt một điểm khác của mặt cắt lên đường",
+    "ui.frame_offset_a": "Độ lệch A",
+    "ui.frame_offset_b": "Độ lệch B"
+  },
+  "zh": {
+    "ui.frame_hot_point_tip": "单击将截面的此点放在线上",
+    "ui.frame_locate_tip": "拖动将截面的另一点放在线上",
+    "ui.frame_offset_a": "偏移 A",
+    "ui.frame_offset_b": "偏移 B"
+  },
+  "es": {
+    "ui.frame_hot_point_tip": "Haz clic para poner este punto de la sección sobre la línea",
+    "ui.frame_locate_tip": "Arrastra para poner otro punto de la sección sobre la línea",
+    "ui.frame_offset_a": "Desfase A",
+    "ui.frame_offset_b": "Desfase B"
+  }
+}
