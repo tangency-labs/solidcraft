@@ -11,6 +11,7 @@
 //! | [`test_closure_split_region`] | `SmBrep::TestClosureSplitRegion(SmFaceuse*)` |
 //! | [`test_closure_split_region_attempt`] | same, retaining native status and partial outputs |
 //! | `nest_closed_shells_as_cavities` (crate) | none: WR-442, the full-turn rotational sweep's opt-in |
+//! | `every_shell_closed` (crate) | none: its WR-529 test, shared with the stitch's region nesting |
 //!
 //! Deviations: pointers become arena ids; optional outputs become return values.
 //! Edits preserve the upstream mutations preceding an error. A closed-shell split
@@ -1640,6 +1641,7 @@ fn split_vertex_joined_pieces(
                 error,
                 SolidError::Unported { .. }
                     | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
                     | SolidError::InvalidInput { .. }
                     | SolidError::PortInvariant { .. }
                     | SolidError::NotFound { .. }
@@ -1948,6 +1950,7 @@ fn native<T>(r: Result<T>) -> Result<Option<T>> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
@@ -2266,6 +2269,28 @@ fn nest_shells(
     Ok(())
 }
 
+/// Whether every shell of every region of `brep` is a closed face-use shell
+/// ([`crate::topology::Shell::is_closed`]: a face use's mate lies in another shell), so
+/// no wire or vertex shell and no sheet on its own. A caller that also knows no lamina
+/// edge is left has a nested solid model, the region inside each closed shell the
+/// opposite of the region outside it
+/// ([`super::p1::set_region_is_void_flags_for_nested_solids`]).
+///
+/// # Errors
+///
+/// Those of the region, shell and closure queries.
+pub(crate) fn every_shell_closed(brep: &Brep) -> Result<bool> {
+    for region in super::p1::regions(brep, None)? {
+        for &s in &brep.region(region)?.shells {
+            let shell = brep.shell(s)?;
+            if !shell.is_faceuse_shell() || !shell.is_closed(brep, s)? {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
 /// Not upstream (WR-442, tangency-labs/solidcore#478): makes a closed solid lying
 /// inside another one that solid's cavity, for builders that make every closed shell
 /// its own solid (the full-turn rotational sweep). A candidate is a solid region with
@@ -2291,17 +2316,8 @@ pub(crate) fn nest_closed_shells_as_cavities(
     // material. Where every shell is closed the regions alternate material and void from
     // the infinite region in.
     if brep.region(infinite)?.shells.len() < 2 {
-        let regions = super::p1::regions(brep, None)?;
-        if regions.len() <= 2 {
+        if super::p1::regions(brep, None)?.len() <= 2 || !every_shell_closed(brep)? {
             return Ok(());
-        }
-        for &region in &regions {
-            for &s in &brep.region(region)?.shells {
-                let shell = brep.shell(s)?;
-                if !shell.is_faceuse_shell() || !shell.is_closed(brep, s)? {
-                    return Ok(());
-                }
-            }
         }
         return super::p1::set_region_is_void_flags_for_nested_solids(k, brep);
     }
@@ -2585,6 +2601,7 @@ fn ignore_status(r: Result<()>) -> Result<()> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),

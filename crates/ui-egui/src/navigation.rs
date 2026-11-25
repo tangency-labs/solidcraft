@@ -12,9 +12,9 @@
 
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::json;
-use solidcore_ops::{centroid_and_mean_radius, point_displacement, point_distance};
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::prelude::*;
+use solidcraft_kernel::services::{centroid_and_mean_radius, point_displacement, point_distance};
 use solidcraft_viewport::Camera;
 
 use crate::SolveApp;
@@ -66,9 +66,16 @@ pub(crate) fn panel_scroll_offset(ctx: &egui::Context, previous: egui::Vec2, max
 }
 
 /// Supplies the scroll phases browsers omit, before the shared navigation sees input.
-#[derive(Default)]
 pub struct WebWheelGestures {
     last_scroll: Option<f64>,
+    /// A bare vertical point delta of `WHEEL_STEP_MIN` or more is a wheel notch, not a swipe.
+    wheel_steps: bool,
+}
+
+impl Default for WebWheelGestures {
+    fn default() -> Self {
+        Self { last_scroll: None, wheel_steps: true }
+    }
 }
 
 impl WebWheelGestures {
@@ -104,7 +111,7 @@ impl WebWheelGestures {
                     let point = *unit == MouseWheelUnit::Point;
                     let valid_delta = delta.is_finite() && *delta != Vec2::ZERO;
                     let always_zoom = mode == crate::prefs::BrowserScrollWheel::AlwaysZoom && *modifiers == Modifiers::NONE;
-                    let step = delta.x == 0.0 && (delta.y.abs() >= WHEEL_STEP_MIN || always_zoom);
+                    let step = self.wheel_steps && delta.x == 0.0 && (delta.y.abs() >= WHEEL_STEP_MIN || always_zoom);
                     let swipe = valid_time && point && valid_delta && !modifiers.ctrl && (self.last_scroll.is_some() || !step);
                     if swipe {
                         if self.last_scroll.is_none() {
@@ -124,6 +131,11 @@ impl WebWheelGestures {
             raw.events.push(event);
         }
         self.last_scroll.and_then(|last| std::time::Duration::try_from_secs_f64((IDLE - (now - last)).clamp(0.0, IDLE)).ok())
+    }
+
+    /// Windows touchpad (winit sends pixels only for it): every point delta is a swipe, with no wheel-notch guess.
+    pub fn every_point_swipes() -> Self {
+        Self { wheel_steps: false, ..Self::default() }
     }
 }
 
@@ -2435,6 +2447,61 @@ mod tests {
         assert_eq!(wheel.pan, vec2(0.0, -2.0));
     }
 
+    /// #15353: a Windows touchpad's point deltas have no wheel-notch guess, so the first delta,
+    /// however large, opens the swipe and pans; the idle timeout closes it.
+    #[test]
+    fn windows_touchpad_swipes_pan_from_the_first_delta() {
+        use egui::{Modifiers, MouseWheelUnit::Point, TouchPhase, vec2};
+        let mut state = super::WebWheelGestures::every_point_swipes();
+        let mut gesture = false;
+        let (first, events) = web_frame(&mut state, 0.0, vec![web_wheel(Point, vec2(0.0, -60.0), Modifiers::NONE)], &mut gesture);
+        assert!(events.iter().any(|e| matches!(e, egui::Event::MouseWheel { phase: TouchPhase::Start, .. })), "{events:?}");
+        assert!(gesture);
+        let (second, _) = web_frame(&mut state, 0.016, vec![web_wheel(Point, vec2(12.0, -80.0), Modifiers::NONE)], &mut gesture);
+        assert_eq!(first.pan + second.pan, vec2(12.0, -140.0));
+        assert_eq!(first.zoom + second.zoom, 0.0);
+        let (_, events) = web_frame(&mut state, 0.2, vec![], &mut gesture);
+        assert!(!gesture);
+        assert!(
+            matches!(events.as_slice(), [egui::Event::MouseWheel { phase: TouchPhase::End, delta, .. }] if *delta == egui::Vec2::ZERO),
+            "{events:?}"
+        );
+    }
+
+    /// #15353: a Windows wheel sends line deltas, which are never bracketed: no Start or End is
+    /// inserted, a vertical notch zooms by one line, and a horizontal line delta does nothing.
+    #[test]
+    fn windows_line_wheel_is_never_bracketed() {
+        use egui::{Modifiers, MouseWheelUnit::Line, vec2};
+        for (delta, zoom) in [(vec2(0.0, 1.0), 40.0), (vec2(1.0, 0.0), 0.0)] {
+            let mut state = super::WebWheelGestures::every_point_swipes();
+            let mut gesture = false;
+            let event = web_wheel(Line, delta, Modifiers::NONE);
+            let (wheel, events) = web_frame(&mut state, 0.0, vec![event.clone()], &mut gesture);
+            assert_eq!(events, vec![event], "delta {delta:?}");
+            assert!(!gesture, "delta {delta:?}");
+            assert_eq!(wheel.zoom, zoom, "delta {delta:?}");
+            assert_eq!(wheel.pan, egui::Vec2::ZERO, "delta {delta:?}");
+        }
+    }
+
+    /// #15353: Ctrl with a touchpad's point scroll is its pinch, never a swipe; it ends an open swipe.
+    #[test]
+    fn windows_touchpad_pinch_ends_an_open_swipe() {
+        use egui::{Modifiers, MouseWheelUnit::Point, TouchPhase, vec2};
+        let mut state = super::WebWheelGestures::every_point_swipes();
+        let mut gesture = false;
+        web_frame(&mut state, 0.0, vec![web_wheel(Point, vec2(0.0, -60.0), Modifiers::NONE)], &mut gesture);
+        assert!(gesture);
+        let pinch = web_wheel(Point, vec2(0.0, -30.0), Modifiers::CTRL);
+        let (wheel, events) = web_frame(&mut state, 0.01, vec![pinch.clone()], &mut gesture);
+        assert!(!gesture);
+        assert_eq!(events.len(), 2, "{events:?}");
+        assert!(matches!(&events[0], egui::Event::MouseWheel { phase: TouchPhase::End, delta, .. } if *delta == egui::Vec2::ZERO), "{events:?}");
+        assert_eq!(events[1], pinch);
+        assert_eq!(wheel.pan, egui::Vec2::ZERO);
+    }
+
     #[test]
     fn web_wheel_steps_and_pinch_keep_zooming() {
         use egui::{Modifiers, MouseWheelUnit::*, vec2};
@@ -2739,7 +2806,7 @@ mod tests {
                     assert!(app.viewport.orbit_free.is_none());
                     assert!(!ctx.input(|i| i.pointer.any_down()));
                     assert_eq!(app.session.doc.to_json(), design);
-                    assert!(app.session.undo.is_empty() && app.session.selection.is_empty());
+                    assert!(app.session.undo.is_empty() && !app.session.has_selection());
                 }
             }
         }
@@ -2806,7 +2873,7 @@ mod tests {
         assert_eq!(app.cam, stopped);
         assert_eq!(app.session.doc.to_json(), design);
         assert_eq!(app.session.log.len(), log);
-        assert!(app.session.undo.is_empty() && app.session.selection.is_empty());
+        assert!(app.session.undo.is_empty() && !app.session.has_selection());
     }
 
     #[test]
@@ -3977,7 +4044,7 @@ mod tests {
         assert_eq!(h.app.cam.target, before.target);
         assert_eq!(h.app.cam.back(), before.back());
         assert!(h.app.tool.is_none() && h.app.dialog.is_none());
-        assert!(h.app.session.undo.is_empty() && h.app.session.selection.is_empty());
+        assert!(h.app.session.undo.is_empty() && !h.app.session.has_selection());
     }
 
     #[test]
@@ -4605,7 +4672,7 @@ mod tests {
         let legacy_centre = points.iter().fold(egui::Vec2::ZERO, |sum, point| sum + point.to_vec2()) / points.len() as f32;
         let legacy_mean = points.iter().map(|point| point.distance(legacy_centre.to_pos2())).sum::<f32>() / points.len() as f32;
         let kernel_points: Vec<_> = points.iter().map(|point| super::screen_point(*point)).collect();
-        let kernel_mean = solidcore_ops::centroid_and_mean_radius(&kernel_points).unwrap().mean_distance;
+        let kernel_mean = solidcraft_kernel::services::centroid_and_mean_radius(&kernel_points).unwrap().mean_distance;
         assert!(
             (f64::from(legacy_mean) - kernel_mean).abs() <= f64::from(f32::EPSILON) * kernel_mean.max(1.0),
             "legacy f32 {legacy_mean} vs f64 query {kernel_mean}"
@@ -4796,7 +4863,7 @@ mod tests {
         let mut events = pointer(at.x, at.y, Some(false));
         events.extend([finger(1, End, at.x, at.y), egui::Event::PointerGone]);
         h.frame_with(events);
-        assert!(!h.app.session.selection.is_empty(), "a stationary touch selects even when its pointer disappears");
+        assert!(h.app.session.has_selection(), "a stationary touch selects even when its pointer disappears");
         assert_eq!(h.app.cam, before);
         h.app.session.selection.clear();
         h.frames(2);
@@ -4813,7 +4880,7 @@ mod tests {
         let mut events = pointer(to.x, to.y, Some(false));
         events.extend([finger(1, End, to.x, to.y), egui::Event::PointerGone]);
         h.frame_with(events);
-        assert!(h.app.session.selection.is_empty(), "orbiting must not select on release");
+        assert!(!h.app.session.has_selection(), "orbiting must not select on release");
         h.step(&json!({"shot":"touch-orbit"})).unwrap();
         let orbited = h.app.cam;
         h.frame_with(pointer(at.x, at.y, None));

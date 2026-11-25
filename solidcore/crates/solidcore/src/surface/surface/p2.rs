@@ -246,8 +246,8 @@ use crate::curve::curve::{Curve, CurvePropertyType};
 use crate::curve::line::Line;
 use crate::error::surface::SurfaceFailure;
 use crate::error::{
-    ignore_status, EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NOT_WITHIN_TOLERANCE,
-    SM_ERR_OUTSIDE_OF_DOMAIN,
+    ignore_status, native_failure, EntityRef, Failure, Result, SolidError, SM_ERR,
+    SM_ERR_NOT_WITHIN_TOLERANCE, SM_ERR_OUTSIDE_OF_DOMAIN,
 };
 use crate::geom::a_object::{self, AObject, CacheStore};
 use crate::geom::assert_array::labels::DERIV_SURF_DEFINITION_TYPE;
@@ -4224,6 +4224,26 @@ impl Surface {
         context: Option<SurfaceIntersectContext<'_, O>>,
         out: &mut SurfaceIntersection,
     ) -> Result<()> {
+        // A two-row spline loft can have a plane section at a single parameter.
+        // Test the control net in either order. If constructing the section fails,
+        // the general intersector still needs to classify the surface pair.
+        use crate::surface::plane::spline_section::intersect;
+        let tolerance = approx_tol_3d.map_or(k.tolerances.zone_tol_3d, |t| {
+            crate::geom::tol::approx_tol3d(k, t)
+        });
+        let section = match (self.kind(), other.kind()) {
+            (SurfaceKind::BSpline(s), SurfaceKind::Plane(p)) => {
+                intersect(k, s, uv_domain, p, other_uv_domain, tolerance)
+            }
+            (SurfaceKind::Plane(p), SurfaceKind::BSpline(s)) => {
+                intersect(k, s, other_uv_domain, p, uv_domain, tolerance)
+            }
+            _ => Ok(None),
+        };
+        if let Some(section) = native_failure(section)?.flatten() {
+            *out = section;
+            return Ok(());
+        }
         match self.kind_with_nurb(k)? {
             SurfaceKind::Plane(p) => crate::surface::plane::p2::global_surface_intersect_into(
                 k,

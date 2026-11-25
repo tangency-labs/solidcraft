@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.command_search_centred": "Open Search commands centered",
+    "prefs.command_search_centred_note": "The search shortcut opens Search commands centered over the view instead of in the ribbon's top-right corner. Running a command or pressing Esc closes it."
+  },
+  "ar": {
+    "prefs.command_search_centred": "فتح «البحث في الأوامر» في منتصف العرض",
+    "prefs.command_search_centred_note": "يفتح اختصار البحث «البحث في الأوامر» في منتصف العرض بدلاً من الزاوية العلوية اليمنى للشريط. يُغلق عند تشغيل أمر أو الضغط على Esc."
+  },
+  "de": {
+    "prefs.command_search_centred": "Befehle suchen zentriert öffnen",
+    "prefs.command_search_centred_note": "Das Tastenkürzel für die Suche öffnet Befehle suchen mittig über der Ansicht statt in der rechten oberen Ecke des Menübands. Ein gestarteter Befehl oder Esc schließt sie."
+  },
+  "he": {
+    "prefs.command_search_centred": "פתיחת חיפוש פקודות במרכז התצוגה",
+    "prefs.command_search_centred_note": "קיצור החיפוש פותח את חיפוש הפקודות במרכז התצוגה במקום בפינה הימנית העליונה של הסרגל. הפעלת פקודה או Esc סוגרות אותו."
+  },
+  "ja": {
+    "prefs.command_search_centred": "コマンド検索をビューの中央に開く",
+    "prefs.command_search_centred_note": "検索のショートカットで、コマンド検索をリボンの右上ではなくビューの中央に開きます。コマンドを実行するか Esc を押すと閉じます。"
+  },
+  "ko": {
+    "prefs.command_search_centred": "명령 검색을 뷰 가운데에 열기",
+    "prefs.command_search_centred_note": "검색 단축키를 누르면 명령 검색이 리본의 오른쪽 위 대신 뷰 가운데에 열립니다. 명령을 실행하거나 Esc를 누르면 닫힙니다."
+  },
+  "vi": {
+    "prefs.command_search_centred": "Mở Tìm lệnh ở giữa khung nhìn",
+    "prefs.command_search_centred_note": "Phím tắt tìm kiếm mở Tìm lệnh ở giữa khung nhìn thay vì ở góc trên bên phải của thanh ribbon. Chạy một lệnh hoặc nhấn Esc sẽ đóng nó."
+  },
+  "zh": {
+    "prefs.command_search_centred": "在视图中央打开搜索命令",
+    "prefs.command_search_centred_note": "搜索快捷键会在视图中央打开搜索命令，而不是在功能区右上角。运行命令或按 Esc 即可关闭。"
+  }
+}

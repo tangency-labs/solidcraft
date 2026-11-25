@@ -2983,7 +2983,8 @@ impl SurfaceConversion {
         let folded = fold_onto(&self.sheet, &self.development, &placed)?;
         let mut solids = Vec::with_capacity(parts.len());
         for (part, pieces) in parts {
-            let made = crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, &pieces, &mut FlatWork::new(), &|_, _| None)?;
+            let made =
+                crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, &pieces, &[], &mut FlatWork::new(), &|_, _| None)?;
             solids.push((part, made.0));
         }
         let own_bend = |a: Part, b: Part| match (a, b) {
@@ -3027,7 +3028,7 @@ impl SurfaceConversion {
     pub fn solid(&self) -> Result<Body> {
         let places: Vec<Option<Rigid3>> = self.places.iter().copied().map(Some).collect();
         let folded = fold_onto(&self.sheet, &self.development, &places)?;
-        Ok(crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, self.pieces()?, &mut FlatWork::new(), &|_, _| None)?.0)
+        Ok(crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, self.pieces()?, &[], &mut FlatWork::new(), &|_, _| None)?.0)
     }
 
     /// [`Self::solid`], with what each face was made for (see [`crate::sheet::FaceNamer`]) and
@@ -3038,14 +3039,14 @@ impl SurfaceConversion {
         let places: Vec<Option<Rigid3>> = self.places.iter().copied().map(Some).collect();
         let folded = fold_onto(&self.sheet, &self.development, &places)?;
         let pieces = self.pieces()?;
-        let namer = crate::sheet::FaceNamer::new(&sk.sheet, &self.development, pieces, &[], &sk.recipes);
+        let namer = crate::sheet::FaceNamer::new(&sk.sheet, &self.development, pieces, &[], &sk.recipes, &[]);
         let made = std::cell::RefCell::new(Vec::new());
         let keep = |p: crate::sheet_surface::Piece, r: crate::sheet::FaceRole| {
             let mut made = made.borrow_mut();
             made.push((p, r));
             Some((made.len() - 1).to_string())
         };
-        let (body, keys) = crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, pieces, &mut FlatWork::new(), &keep)?;
+        let (body, keys) = crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, pieces, &[], &mut FlatWork::new(), &keep)?;
         let made = made.into_inner();
         let at = |k: &Option<String>| k.as_deref().and_then(|k| k.parse::<usize>().ok()).and_then(|k| made.get(k).copied());
         // What each face was made for, and a panel's cap's sketch frame, carried through the cuts.
@@ -3316,6 +3317,9 @@ pub struct SurfaceSheet {
     /// The holes cuts made in its panels (see [`HoleRecord`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub holes: Vec<HoleRecord>,
+    /// The beads pressed into its planar panels (see `sheet_surface_bead`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub beads: Vec<crate::SurfaceBead>,
 }
 
 /// What a face of a sheet's body was made for, by its builder: the sheet's own structure, never a
@@ -3340,6 +3344,9 @@ pub enum SheetPart {
     Drill { feature: u64, role: String },
     /// A wall of the relief cut where the bends that make `panels` (sorted) meet at a corner.
     Relief { panels: [String; 2] },
+    /// A face of the bead the feature `feature` pressed along its sketch curve `curve`: `face` is
+    /// what it is (see `sheet_surface_bead::face_role`).
+    Bead { feature: u64, curve: String, face: String },
 }
 
 /// What made an edge of a panel's outline.
@@ -3658,6 +3665,7 @@ impl SurfaceSheet {
             parts: Vec::new(),
             recipes,
             holes: Vec::new(),
+            beads: Vec::new(),
         };
         sheet.laid_out(&c.development, c.pieces()?, c.flat()?)?;
         let (solid, parts, frames) = c.parted_solid(&sheet)?;
@@ -3857,6 +3865,7 @@ impl SurfaceSheet {
             parts: Vec::new(),
             recipes,
             holes: Vec::new(),
+            beads: Vec::new(),
         };
         let solid = sheet.build()?;
         Ok((sheet, solid))
@@ -4169,7 +4178,7 @@ impl SurfaceSheet {
             let frames = folded.places.clone();
             (Some(folded), frames)
         };
-        let namer = crate::sheet::FaceNamer::new(&self.sheet, &dev, &pieces, &self.sketch_curves, &self.recipes);
+        let namer = crate::sheet::FaceNamer::new(&self.sheet, &dev, &pieces, &self.sketch_curves, &self.recipes, &self.beads);
         // What the builder made each face for, in the order it makes them: each face's name from
         // the builder is its place in that order, read back below.
         let made = std::cell::RefCell::new(Vec::new());
@@ -4179,7 +4188,10 @@ impl SurfaceSheet {
             Some((made.len() - 1).to_string())
         };
         let (mut body, keys) = match &folded {
-            Some(folded) => crate::sheet_surface_fold::solid(&dev, folded, self.thickness, &pieces, &mut work, &keep)?,
+            Some(folded) => {
+                let forms = crate::sheet_surface_bead::forms(self, &pieces, folded)?;
+                crate::sheet_surface_fold::solid(&dev, folded, self.thickness, &pieces, &forms, &mut work, &keep)?
+            }
             // Laid flat in the sheet's flat: the same faces, so the flat's are the folded
             // sheet's (#7990).
             None => crate::sheet_surface_fold::solid_flat(&dev, self.flat, self.thickness, &pieces, &mut work, &keep)?,
@@ -4517,5 +4529,80 @@ mod tests {
         let got = extent_across(&arch, (Vec2::new(-1.0, 1.0), Vec2::X));
         assert!(got.is_some_and(|g| near(g, (3.0 - reach, 3.0 + reach))), "{got:?}");
         assert_eq!(extent_across(&arch, (Vec2::new(-1.0, 3.0), Vec2::X)), None);
+    }
+
+    /// #21829: a cone frustum roll must be recognized and converted at any sweep angle (not only
+    /// multiples of 90°), including non-quarter sweeps and a closed 360° cone, preserving its
+    /// solid volume and producing the expected annular-sector flat pattern.
+    #[test]
+    fn cone_roll_recognizes_and_converts_at_any_sweep_angle() {
+        use solidcore_record::{Plane, Vec3};
+        use solidcraft_geom::Region2Geom;
+        use solidcraft_kernel::{revolve, revolve_sheet};
+
+        use super::{ConvertRule, ReliefShape, SheetFaces, SurfaceSheet, convert_surfaces};
+        use crate::{IDENTITY, ModelBody};
+
+        // Cross-section on Plane::XZ (x = +X, y = -Z, so (r, -z) maps to world (r, 0, z)).
+        let xz = Plane::XZ;
+        let profile = Region2 {
+            outer: Loop2::polygon(&[Vec2::new(60.0, 0.0), Vec2::new(30.0, -40.0), Vec2::new(29.2, -39.4), Vec2::new(59.2, 0.6)]),
+            holes: Vec::new(),
+        };
+        let rule = ConvertRule {
+            thickness: 1.0,
+            k_factor: 0.5,
+            bend_radius: 1.0,
+            gap: 0.1,
+            corner_relief: ReliefShape::Round,
+            corner_relief_size: 1.0,
+            relief_width: 1.0,
+            relief_depth: 1.0,
+        };
+        // Analytic volume for open sweep θ: 50 mm² * 44.6 mm * θ = 2230 * θ mm³; with K = 0.5 and
+        // thickness 1 mm, the flat annular sector area matches 2230 * θ mm².
+        for deg in [10.0_f64, 45.0, 90.0, 100.0, 180.0, 200.0, 270.0, 359.9, 360.0] {
+            let rad = deg.to_radians();
+            let body = revolve(&xz, std::slice::from_ref(&profile), Vec2::ZERO, Vec2::new(0.0, -1.0), rad)
+                .unwrap_or_else(|e| panic!("revolve {deg}°: {e}"))
+                .remove(0);
+            let mb = ModelBody::new("Cone".into(), body, 1);
+            let mid = (0.5 * rad).min(1.0);
+            let pick = Vec3::new(45.0 * mid.cos(), 45.0 * mid.sin(), 20.0);
+            let conv = convert_surfaces(&mb, &|_| Ok(rule), &[], SheetFaces::Sheet { face: Some(pick), skip: &[] }, &[], false, &IDENTITY)
+                .unwrap_or_else(|e| panic!("convert_surfaces {deg}°: {e}"));
+            let (sheet, solid) = SurfaceSheet::converted("Cone", "T1", &conv, 1).unwrap_or_else(|e| panic!("converted {deg}°: {e}"));
+            assert!(solid.validity().is_empty(), "{deg}°: {:?}", solid.validity());
+            let vol = solidcraft_kernel::measure(&solid).unwrap().volume;
+            let expected = 50.0 * 44.6 * rad;
+            assert_eq!(sheet.regions.len(), 1, "{deg}°: expected 1 flat region");
+            let flat_area = sheet.regions[0].area();
+            if deg < 360.0 {
+                assert!((vol - expected).abs() < 0.2, "{deg}°: got vol {vol:.3}, expected {expected:.3}");
+                assert!((flat_area - expected).abs() < 0.2, "{deg}°: got flat area {flat_area:.3}, expected {expected:.3}");
+                let rolls = sheet.roll_infos();
+                assert_eq!(rolls.len(), 1, "{deg}°: expected 1 roll, got {rolls:?}");
+                assert!((rolls[0].length - 50.0).abs() < 0.05, "{deg}°: roll slant length {}", rolls[0].length);
+            } else {
+                // Closed 360° cone opens along a narrow 0.1 mm rip gap (~5 mm² removed along 50 mm slant).
+                assert!(vol > expected - 10.0 && vol < expected, "360°: got vol {vol:.3}, full {expected:.3}");
+                assert!(flat_area > expected - 10.0 && flat_area < expected, "360°: flat area {flat_area:.3}, full {expected:.3}");
+            }
+        }
+
+        // Convert on a revolved cone sheet (surface body), both inside and outside directions.
+        let slant = vec![Seg2::Line { a: Vec2::new(60.0, 0.0), b: Vec2::new(30.0, -40.0) }];
+        for (deg, outward) in [(100.0_f64, false), (100.0, true), (359.9, false)] {
+            let rad = deg.to_radians();
+            let surface = revolve_sheet(&xz, std::slice::from_ref(&slant), Vec2::ZERO, Vec2::new(0.0, -1.0), 0.0, rad)
+                .unwrap_or_else(|e| panic!("revolve_sheet {deg}°: {e}"));
+            let mb = ModelBody::new("ConeSheet".into(), surface, 2);
+            let conv = convert_surfaces(&mb, &|_| Ok(rule), &[], SheetFaces::AllBut(&[]), &[], outward, &IDENTITY)
+                .unwrap_or_else(|e| panic!("convert sheet {deg}° outward={outward}: {e}"));
+            let (sheet, solid) =
+                SurfaceSheet::converted("ConeSheet", "T1", &conv, 2).unwrap_or_else(|e| panic!("converted sheet {deg}° outward={outward}: {e}"));
+            assert!(solid.validity().is_empty(), "sheet {deg}° outward={outward}: {:?}", solid.validity());
+            assert_eq!(sheet.regions.len(), 1, "sheet {deg}° outward={outward}: expected 1 flat region");
+        }
     }
 }
