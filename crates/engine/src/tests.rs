@@ -1232,6 +1232,7 @@ fn hostile_params_never_panic() {
         "crown",
         "curve",
         "curves",
+        "damping",
         "datum",
         "delete",
         "density",
@@ -1247,6 +1248,7 @@ fn hostile_params_never_panic() {
         "drills_text",
         "driven",
         "edges",
+        "effort",
         "end",
         "entities",
         "entity",
@@ -1262,7 +1264,9 @@ fn hostile_params_never_panic() {
         "filter",
         "fixed",
         "format",
+        "friction",
         "from",
+        "gap",
         "head",
         "head_gap",
         "height",
@@ -1362,6 +1366,7 @@ fn hostile_params_never_panic() {
         "unit",
         "v",
         "value",
+        "velocity",
         "view",
         "visual_style",
         "web",
@@ -1412,6 +1417,7 @@ fn hostile_params_never_panic() {
                                                 | "file.export_step"
                                                 | "file.export_stl"
                                                 | "file.export_urdf"
+                                                | "file.export_urdf_options"
                                         ))
                                 {
                                     continue; // parameter, script and export files: covered by their own tests (no stray files)
@@ -4140,6 +4146,42 @@ fn split_body_of_a_body_of_two_pieces_splits_both() {
         // Each half holds the half of both squares: two pieces, half the body each.
         assert!(rel(solidcraft_kernel::measure(&b.body).unwrap().volume, 4000.0) < 1e-6, "{}", b.name);
         assert_eq!(b.body.lumps().unwrap().len(), 2, "{}", b.name);
+    }
+}
+
+/// A cap: a plate, a skirt round its edge and a tube through a hole in the plate.
+fn cap(s: &mut Session) {
+    run(s, "solid.cylinder", json!({"radius": 50, "height": 15, "base": [0, 0, 0], "body_name": "Cap"}));
+    run(s, "solid.cylinder", json!({"radius": 46, "height": 20, "base": [0, 0, 2], "operation": "cut", "targets": ["Cap"]}));
+    run(s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [-10, -10, 0], "operation": "join", "targets": ["Cap"]}));
+    run(s, "solid.box", json!({"length": 16, "width": 16, "height": 60, "corner": [-8, -8, -10], "operation": "cut", "targets": ["Cap"]}));
+}
+
+/// Split Body at the plate's inner face (#6762): the skirt and the tube above it do not touch, so
+/// they are two bodies, not one body of two pieces. The plate keeps the name it had, `Cap (1)`;
+/// the pieces' volumes are the analytic ones and add up to the cap's (a slab would add 3.5e-4 of
+/// it). The same with the plane the dialog sends for the picked face, tilted about 2e-15 by
+/// rounding: no slab is left under the face to join the skirt and the tube.
+#[test]
+fn split_body_makes_each_piece_that_does_not_touch_a_body() {
+    let picked = json!({"origin": [-27.14101384226774, -19.861536909343386, 1.9999999999997158], "normal": [-2.164854201260163e-15, -3.46457633831685e-16, 1]});
+    for plane in [json!({"origin": [0, 0, 2], "normal": [0, 0, 1]}), picked] {
+        let mut s = Session::default();
+        cap(&mut s);
+        let whole = solidcraft_kernel::measure(&s.world_state().unwrap().body("Cap").unwrap().body).unwrap().volume;
+        run(&mut s, "solid.split_body", json!({"body": "Cap", "plane": plane}));
+        let st = s.world_state().unwrap();
+        let volume = |n: &str| solidcraft_kernel::measure(&st.body(n).unwrap().body).unwrap().volume;
+        let names: Vec<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, ["Cap", "Cap (1)", "Cap (2)"], "{plane}");
+        assert!(st.bodies.iter().all(|b| b.body.lumps().unwrap().len() == 1), "{plane}");
+        let (plate, skirt, tube) = (PI * 2500.0 * 2.0 - 16.0 * 16.0 * 2.0, PI * (2500.0 - 2116.0) * 13.0, (400.0 - 256.0) * 38.0);
+        assert!(rel(volume("Cap (1)"), plate) < 1e-3, "{plane}: {}", volume("Cap (1)"));
+        let mut upper = [volume("Cap"), volume("Cap (2)")];
+        upper.sort_by(f64::total_cmp);
+        assert!(rel(upper[0], tube) < 1e-3 && rel(upper[1], skirt) < 1e-3, "{plane}: {upper:?}");
+        let total: f64 = names.iter().map(|n| volume(n)).sum();
+        assert!(rel(total, whole) < 1e-5, "{plane}: {total} vs {whole}");
     }
 }
 

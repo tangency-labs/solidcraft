@@ -168,23 +168,6 @@ pub(crate) fn ignore_status<T>(r: Result<T>) -> Result<()> {
     ignored(r).map(|_| ())
 }
 
-/// One call whose status SMLib drops and the fork passes on (`SER(...)`): with `pass_on`
-/// its error is returned to the caller (through the outer `?`); without it the result
-/// is handed back unchanged for the site's own ignore policy, so
-/// `ignore_status(passed_on(r, false)?)` is `ignore_status(r)`.
-pub(crate) fn passed_on<T>(r: Result<T>, pass_on: bool) -> Result<Result<T>> {
-    match r {
-        Err(e) if pass_on || e.is_unported_or_cancelled() => Err(e),
-        r => Ok(r),
-    }
-}
-
-/// [`ignore_status`] of a call whose status SMLib drops and the fork passes on: with
-/// `pass_on` its error is returned, without it the status is ignored as upstream.
-pub(crate) fn ignore_or_pass_on<T>(r: Result<T>, pass_on: bool) -> Result<()> {
-    ignore_status(passed_on(r, pass_on)?)
-}
-
 /// A reference to one topological entity, used as error context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EntityRef {
@@ -2175,10 +2158,6 @@ mod tests {
         assert_eq!(ignored::<()>(Err(e.clone())), Err(e.clone()));
         assert_eq!(native_failure::<()>(Err(e.clone())), Err(e.clone()));
         assert_eq!(ignore_status::<()>(Err(e.clone())), Err(e.clone()));
-        assert_eq!(
-            passed_on::<()>(Err(e.clone()), false).map(|_| ()),
-            Err(e.clone())
-        );
         assert_eq!(SolidError::nl_ser("op")(e.clone()), e);
         assert_eq!(SolidError::nurbs_routine("op")(e.clone()), e);
         assert!(!SolidError::sm_err("t").is_not_certified());
