@@ -510,13 +510,14 @@ fn assert_drill_point(height: f64, z0: f64, corner: sweeps::OffsetCornerType) {
 }
 
 /// #22149's blind cut: 3 mm down from the block's top face at z 5, the apex 0.6928 mm in;
-/// under both corner rules (a circle has no corner, so they agree).
+/// under every corner rule (a circle has no corner, so they agree).
 #[test]
 fn a_circle_drafted_past_its_centre_ends_at_its_apex() {
     within_budget(std::time::Duration::from_secs(300), || {
         for corner in [
             sweeps::OffsetCornerType::CurveExtension,
             sweeps::OffsetCornerType::LinearExtension,
+            sweeps::OffsetCornerType::FilletCorner,
         ] {
             assert_drill_point(-3.0, 5.0, corner);
         }
@@ -538,5 +539,38 @@ fn a_circle_drafted_far_past_its_centre_is_the_same_cone() {
 fn a_circle_drafted_exactly_to_its_centre_is_its_cone() {
     within_budget(std::time::Duration::from_secs(300), || {
         assert_drill_point(-drill_apex(), 5.0, sweeps::OffsetCornerType::CurveExtension);
+    });
+}
+
+/// An open arc of the drill point's circle, a quarter turn, drafted the same past its centre
+/// and uncapped, is no circle: it is not built as the whole cone, whatever the draft makes of
+/// it (no vertex at the cone's apex).
+#[test]
+fn an_open_arc_drafted_past_its_centre_is_not_the_whole_cone() {
+    use solidcore::curve::ellipse::Ellipse;
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::geom::extent1d::Extent1d;
+    within_budget(std::time::Duration::from_secs(300), || {
+        let mut k = Kernel::default();
+        let frame = Axis2Placement::new(Point3::new(0.0, 0.0, 5.0), Vec3::X, Vec3::Y);
+        let quarter = Extent1d::from_min_max(0.0, 90.0);
+        let arc = Curve::from(
+            Ellipse::create_canonical_circle(&k, &frame, DRILL_R, Some(&quarter), None).unwrap(),
+        );
+        let result = sweeps::create_taper_extrude_with_corner(
+            &mut k,
+            &[Some(&arc)],
+            -3.0,
+            DRILL_DEG,
+            0,
+            sweeps::OffsetCornerType::CurveExtension,
+        );
+        if let Ok(sweeps::TaperExtrude::Solid(b)) = result {
+            let apex = Point3::new(0.0, 0.0, 5.0 - drill_apex());
+            for v in b.vertices().ids() {
+                let p = b.vertex(v).unwrap().point;
+                assert!(p.distance(apex) > 1e-6, "a vertex at the apex: {p:?}");
+            }
+        }
     });
 }
