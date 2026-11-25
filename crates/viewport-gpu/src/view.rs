@@ -2946,7 +2946,8 @@ impl Batches {
             if row >= count {
                 return None;
             }
-            let at: u32 = self.instanced.iter().take(usize::try_from(draw).ok()?).map(|d| u32::try_from(d.placements.len() / INSTANCE_SIZE).unwrap_or(0)).sum();
+            let at: u32 =
+                self.instanced.iter().take(usize::try_from(draw).ok()?).map(|d| u32::try_from(d.placements.len() / INSTANCE_SIZE).unwrap_or(0)).sum();
             Some((at.saturating_add(row), entry))
         });
         if let (Some(g), Some(indirect)) = (self.gpu_cull.as_mut(), self.indirect.as_mut()) {
@@ -5321,14 +5322,14 @@ impl Renderer {
         // the cull could draw a placement the previous pyramid hid.
         res.pic.ss_key = (res.pic.ss_ready && res.refused_upload.is_none() && !cb.occlusion).then_some(key);
 
-    // Integrating the highlight-only fast path with this branch: its `fast_store` (the depth a
-    // highlight-only frame repaints over) and this branch's pyramid depth (`hiz_kernel`) both
-    // want the depth kept, and neither implies the other. When they meet, the depth must be
-    // stored if EITHER wants it (`see_through || hiz_kernel.is_some() || fast_store`), and the
-    // frame's record must carry the ACTUAL store operation, not `fast_store`: a fast frame
-    // admitted over a discarded depth would repaint against whatever depth was left, which the
-    // fast path's own comment says corrupts the next frame. Found merging perf/highlight-layer
-    // into this tree (six conflicts, two of them this decision).
+        // Integrating the highlight-only fast path with this branch: its `fast_store` (the depth a
+        // highlight-only frame repaints over) and this branch's pyramid depth (`hiz_kernel`) both
+        // want the depth kept, and neither implies the other. When they meet, the depth must be
+        // stored if EITHER wants it (`see_through || hiz_kernel.is_some() || fast_store`), and the
+        // frame's record must carry the ACTUAL store operation, not `fast_store`: a fast frame
+        // admitted over a discarded depth would repaint against whatever depth was left, which the
+        // fast path's own comment says corrupts the next frame. Found merging perf/highlight-layer
+        // into this tree (six conflicts, two of them this decision).
     }
 
     /// Draw the frame into `pass` within `viewport` (x, y, width, height in physical pixels):
@@ -6964,6 +6965,7 @@ mod tests {
         use std::sync::{Arc, Mutex};
         let slot = || Arc::new(Mutex::new(None));
         super::Frame {
+            hover_place: None,
             product_lights: None,
             product: false,
             upload_error: None,
@@ -7695,6 +7697,7 @@ mod glass_tests {
         }
         let none = || Arc::new(Mutex::new(None));
         let frame = Frame {
+            hover_place: None,
             product_lights: None,
             product: false,
             upload_error: None,
@@ -7905,6 +7908,7 @@ mod glass_tests {
         const SIZE: u32 = 64;
         let none = || Arc::new(Mutex::new(None));
         Frame {
+            hover_place: None,
             product_lights: None,
             product: false,
             upload_error: None,

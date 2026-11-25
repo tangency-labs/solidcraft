@@ -1545,8 +1545,8 @@ impl SolveApp {
         let portable = match cached {
             Some(portable) => portable,
             None => {
-                let portable = panel_runtime::portable_preferences_value(self, layout.clone())
-                    .map_err(solidcraft_engine::panels::commands::error_text)?;
+                let portable =
+                    panel_runtime::portable_preferences_value(self, layout.clone()).map_err(solidcraft_engine::panels::commands::error_text)?;
                 if let Ok(mut cache) = self.portable_prefs.lock() {
                     *cache = Some((layout, portable.clone()));
                 }

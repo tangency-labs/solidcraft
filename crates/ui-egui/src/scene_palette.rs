@@ -86,11 +86,6 @@ pub fn hover_rgba(t: &solidcraft_theme::Tokens) -> [u8; 4] {
 }
 
 impl PaletteArena {
-    /// The reserved hover entry ([`HOVER_ENTRY`]); its colour is set by [`Self::set_hover_colour`].
-    pub fn hover_entry(&self) -> [u8; 4] {
-        self.entries.get(HOVER_ENTRY as usize).copied().unwrap_or([0; 4])
-    }
-
     /// Set the hover entry's colour without interning: a fixed index, so every scene built from
     /// this arena (the model's and the highlight's) has the same entry.
     pub fn set_hover_colour(&mut self, rgba: [u8; 4]) {
@@ -195,7 +190,7 @@ impl PaletteArena {
     fn base(&mut self, moves: bool) -> BodySlots {
         // Entries 0 and 1 are reserved: 0 is the stand-in (kept before the first body's
         // entries, never named by a slot), 1 is the whole-body hover colour
-        // ([`PaletteArena::hover_entry`]), whose index must not depend on how many entries a
+        // ([`HOVER_ENTRY`]), whose index must not depend on how many entries a
         // scene happens to hold, so it is always there and always the same.
         if self.entries.is_empty() {
             self.entries.push([0; 4]);

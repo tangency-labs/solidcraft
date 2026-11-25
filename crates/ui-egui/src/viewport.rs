@@ -14201,6 +14201,7 @@ mod tests {
                 let proj = projection(&app, rect);
                 let e = proj.cam.eye().to_f32();
                 let frame = Frame {
+                    hover_place: None,
                     product_lights: None,
                     product: false,
                     upload_error: None,

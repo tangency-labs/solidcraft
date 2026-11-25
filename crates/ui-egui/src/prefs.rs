@@ -10262,7 +10262,7 @@ mod tests {
     /// panel layout is unchanged must reuse the last build instead.
     #[test]
     fn a_save_with_the_same_panel_layout_reuses_the_portable_preferences() {
-        let mut app = SolveApp::new(Default::default(), Default::default());
+        let app = SolveApp::new(Default::default(), Default::default());
         let first = app.try_prefs().unwrap();
         let cached = app.portable_prefs.lock().unwrap().clone();
         let (layout, portable) = cached.expect("the first save builds and caches the portable preferences");

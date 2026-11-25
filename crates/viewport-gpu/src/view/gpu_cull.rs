@@ -644,8 +644,8 @@ mod tests {
         let size = [800.0, 600.0];
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         let motions = Motions::default();
-        gpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None);
-        cpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None);
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None, None);
+        cpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None, None);
         queue.submit([encoder.finish()]);
         assert!(cpu.gpu_cull.is_none());
         let Some(g) = gpu.gpu_cull.as_ref() else { panic!("the GPU culls the scene") };
@@ -703,9 +703,9 @@ mod tests {
         // GPU again, from the buffers the cull took back.
         let shift = [[1.0, 0.0, 0.0, 30.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        gpu.cull(&device, &queue, &mut encoder, &vp, size, &Motions::new([(1, shift)]), crate::view::EDGE_PX, None);
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &Motions::new([(1, shift)]), crate::view::EDGE_PX, None, None);
         assert!(gpu.gpu_cull.is_none(), "a frame with motions is culled on the CPU");
-        gpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None);
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None, None);
         assert!(gpu.gpu_cull.is_some(), "a frame without motions is culled on the GPU again");
         queue.submit([encoder.finish()]);
     }
@@ -723,7 +723,7 @@ mod tests {
     ) -> (u32, Vec<u8>) {
         use super::super::INSTANCE_SIZE;
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        batches.cull(device, queue, &mut encoder, vp, size, &super::super::Motions::default(), crate::view::EDGE_PX, hidden);
+        batches.cull(device, queue, &mut encoder, vp, size, &super::super::Motions::default(), crate::view::EDGE_PX, hidden, None);
         queue.submit([encoder.finish()]);
         let Some(g) = batches.gpu_cull.as_ref() else { panic!("the GPU culls the scene") };
         let out = batches.indirect.as_ref().and_then(|i| i.instances()).expect("placements");

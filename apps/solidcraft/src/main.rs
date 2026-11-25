@@ -728,11 +728,11 @@ struct LostWatch {
 impl App {
     fn prefs_for_storage(&self, storage: &dyn eframe::Storage) -> Result<String, String> {
         let started = std::time::Instant::now();
-        let result = (|| self.solve.try_prefs().or_else(|reason| {
+        let result = self.solve.try_prefs().or_else(|reason| {
             log::warn!("Panel layout changes were not saved: {reason}");
             let previous = solidcraft_ui_egui::prefs::stored(|key| storage.get_string(key));
             self.solve.prefs_with_stored_panel_layout(previous.as_deref())
-        }))();
+        });
         if solidcraft_engine::geom::env::var_os("SAVE_TIMING").is_some() {
             solidcraft_engine::note!("SolidCraft save: {} ms", started.elapsed().as_millis());
         }
@@ -2048,7 +2048,7 @@ fn main() -> eframe::Result {
             // macOS: AppKit must not move the window from a press on a tab or a bar button.
             #[cfg(target_os = "macos")]
             if !native_titlebar_macos::install(cc) {
-                eprintln!("SolidCraft window: could not stop native title bar drags; tabs may move the window");
+                solidcraft_engine::note!("SolidCraft window: could not stop native title bar drags; tabs may move the window");
             }
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.cpu_meshing = safe_mode || safe;
