@@ -398,9 +398,10 @@ impl Weld {
                 let (w, height) = elementary_size(s.kind, aws, g)?;
                 elementary(&mut drawing.items, s.kind, x, y, w, sign * height, d);
                 if let Some(contour) = s.contour {
-                    let diagonal = 1.0 / 2.0_f64.sqrt();
+                    // The fillet's sloping face runs along (1, -sign) and faces (1, sign); the
+                    // kernel takes each as its own direction.
                     let (face, tangent, outward) = if s.kind == Kind::Fillet {
-                        (Vec2::new(x + g / 2.0, y + sign * g / 2.0), Vec2::new(diagonal, -sign * diagonal), Vec2::new(diagonal, sign * diagonal))
+                        (Vec2::new(x + g / 2.0, y + sign * g / 2.0), Vec2::new(1.0, -sign), Vec2::new(1.0, sign))
                     } else {
                         (Vec2::new(x + w / 2.0, y + sign * height), Vec2::new(1.0, 0.0), Vec2::new(0.0, sign))
                     };

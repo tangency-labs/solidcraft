@@ -30,15 +30,15 @@ pub enum WeldContour {
 
 /// The contour mark over the weld face at `face`, as one segment.
 ///
-/// `tangent` runs along the face and `outward` leaves it, both unit and at a right angle; their
-/// handedness fixes the side the arc turns to. `size` is the symbol's size `g` (the mark is
+/// `tangent` runs along the face and `outward` leaves it, at a right angle; any length but zero,
+/// as each is taken as its own direction. Their handedness fixes the side the arc turns to. `size` is the symbol's size `g` (the mark is
 /// `1.5 g` long). The mark's middle stands `0.5 g` off the face for a flush contour; an arc has
 /// radius `1.5 g`, spans sixty degrees, and its chord is that flush line, so the arc and the
 /// line meet the same two ends.
 ///
 /// # Errors
 /// [`SolidError::InvalidInput`] when `face` or a direction is not finite, a direction is not
-/// of unit length, the two are not perpendicular, or `size` is not finite and positive.
+/// zero, the two are not perpendicular, or `size` is not finite and positive.
 pub fn weld_contour_mark(
     face: Point2,
     tangent: Vec2,
@@ -60,13 +60,15 @@ pub fn weld_contour_mark(
             "the symbol size must be finite and positive",
         ));
     }
-    let unit = |v: Vec2| (v.length() - 1.0).abs() <= DIRECTION_TOLERANCE;
-    if !unit(tangent) || !unit(outward) {
-        return Err(SolidError::invalid_input(
-            OP,
-            "a direction is not a unit vector",
-        ));
-    }
+    // Each direction as its unit vector: each component over the length, so a fillet face's
+    // diagonal (1, -1) gives exactly 1 / sqrt(2).
+    let unit = |v: Vec2| {
+        let length = v.length();
+        (length > DIRECTION_TOLERANCE).then(|| Vec2::new(v.x / length, v.y / length))
+    };
+    let (Some(tangent), Some(outward)) = (unit(tangent), unit(outward)) else {
+        return Err(SolidError::invalid_input(OP, "a direction is zero"));
+    };
     if tangent.dot(outward).abs() > DIRECTION_TOLERANCE {
         return Err(SolidError::invalid_input(
             OP,

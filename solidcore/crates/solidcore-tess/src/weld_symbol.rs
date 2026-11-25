@@ -17,9 +17,9 @@ fn invalid(error: &solidcore::SolidError) -> TessError {
 
 /// The contour mark over the weld face at `face`: a line for a flush contour, a sixty-degree arc
 /// of radius `1.5 * size` for a convex or concave one. `tangent` runs along the face and
-/// `outward` leaves it, both unit and perpendicular. See [`solidcore::weld_symbol::weld_contour_mark`].
+/// `outward` leaves it, perpendicular, each of any length but zero. See [`solidcore::weld_symbol::weld_contour_mark`].
 /// # Errors
-/// A point or direction that is not finite, a direction that is not a unit vector, directions
+/// A point or direction that is not finite, a zero direction, directions
 /// that are not perpendicular, or a `size` that is not finite and positive.
 pub fn weld_contour_mark(
     face: Vec2,

@@ -150,6 +150,43 @@ fn tilt_comes_from_the_tangent() {
 }
 
 #[test]
+fn a_direction_of_any_length_is_its_own_direction() {
+    let d = 1.0 / 2.0_f64.sqrt();
+    for contour in [
+        WeldContour::Flush,
+        WeldContour::Convex,
+        WeldContour::Concave,
+    ] {
+        // The fillet face's diagonals, as unit vectors and as (1, -1) and (1, 1): the same mark,
+        // to the bit, since 1 / sqrt(2) is each component over the length.
+        let unit = weld_contour_mark(Point2::ZERO, Vec2::new(d, -d), Vec2::new(d, d), G, contour);
+        let long = weld_contour_mark(
+            Point2::ZERO,
+            Vec2::new(1.0, -1.0),
+            Vec2::new(1.0, 1.0),
+            G,
+            contour,
+        );
+        assert_eq!(unit.unwrap(), long.unwrap(), "{contour:?}");
+        let scaled = weld_contour_mark(
+            Point2::ZERO,
+            Vec2::new(2.0, 0.0),
+            Vec2::new(0.0, 3.0),
+            G,
+            contour,
+        );
+        let plain = weld_contour_mark(
+            Point2::ZERO,
+            Vec2::new(1.0, 0.0),
+            Vec2::new(0.0, 1.0),
+            G,
+            contour,
+        );
+        assert_eq!(scaled.unwrap(), plain.unwrap(), "{contour:?}");
+    }
+}
+
+#[test]
 fn v_groove_height_of_an_equilateral_groove() {
     for width in [1e-6, 1.0, 5.0, 123.4] {
         let height = v_groove_height(width).unwrap();
@@ -174,7 +211,6 @@ fn hostile_input_is_refused() {
         (face, t, Vec2::new(0.0, f64::INFINITY)),
         (face, Vec2::ZERO, n),
         (face, t, Vec2::ZERO),
-        (face, Vec2::new(2.0, 0.0), n),
         (face, t, t),
         (face, t, Vec2::new(0.6, 0.8)),
     ];
