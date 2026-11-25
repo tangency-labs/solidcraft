@@ -253,7 +253,9 @@ fn status<T>(r: &SolidResult<T>) -> f64 {
         Err(SolidError::Upstream { code, .. }) => f64::from(*code),
         // Upstream's NLib flag without an error number (see the module docs of
         // `solidcore::nurbs::nurbs_srf`).
-        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => 1000.0,
+        Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
+            crate::status::kind_slot(kernel_err, 1000.0)
+        }
         Err(_) => -1.0,
     }
 }

@@ -1036,10 +1036,10 @@ fn run_rust_op(
                     }
                 }
                 7 if b.faces().iter().any(|(_, r)| r.surface.is_none()) => {
-                    return Ok(Ok(vec![NULL_DEREF]));
+                    return Ok(Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]));
                 }
                 8 if b.edges().iter().any(|(_, r)| r.curve.is_none()) => {
-                    return Ok(Ok(vec![NULL_DEREF]));
+                    return Ok(Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]));
                 }
                 _ => {}
             }
@@ -1153,15 +1153,15 @@ fn run_rust_op(
                 2 => bp1::set_region_is_void_flags_for_nested_solids(k, b),
                 _ => Ok(()),
             };
-            let status = match r {
-                Ok(()) => 0.0,
+            let (status, guarded) = match r {
+                Ok(()) => (crate::status::ok_slot(0.0), false),
                 Err(e) if e.is_unported() => return Err(e.into()),
-                Err(e) => status_of(&e),
+                Err(e) => (status_of(&e), legacy_status_of(&e) == NULL_DEREF),
             };
             o.push(status);
             // the shim stops at the guard where upstream dereferences the null old
             // infinite region (the swap flag); otherwise it reports the state
-            if status != NULL_DEREF {
+            if !guarded {
                 o.push(b.infinite_region().map_or(-1.0, |r| f64::from(r.index())));
                 o.extend(ids(&bp1::regions(b, None)?));
             }
@@ -1351,9 +1351,8 @@ fn run_rust_op(
                     }
                 }
                 Err(e) => {
-                    let st = status_of(&e);
-                    o.push(st);
-                    if st != NULL_DEREF {
+                    o.push(status_of(&e));
+                    if legacy_status_of(&e) != NULL_DEREF {
                         o.push(size);
                     }
                 }
@@ -1372,9 +1371,8 @@ fn run_rust_op(
                     o.extend(ids(&loops));
                 }
                 Err(e) => {
-                    let st = status_of(&e);
-                    o.push(st);
-                    if st != NULL_DEREF {
+                    o.push(status_of(&e));
+                    if legacy_status_of(&e) != NULL_DEREF {
                         o.extend(ids(&loops));
                     }
                 }
@@ -1482,7 +1480,7 @@ fn run_rust_op(
                 .iter()
                 .any(|&e| b.edge(e).map_or(true, |r| r.curve.is_none()))
             {
-                return Ok(Ok(vec![NULL_DEREF]));
+                return Ok(Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]));
             }
             if let Some(d) = inexact(types, Some(&[]), Some(&edges)) {
                 return Ok(Err(d));
@@ -1617,10 +1615,12 @@ fn run_rust_op(
                 Err(e) if e.is_unported() => return Err(e.into()),
                 // UB-195: an empty rational-curve drop is where upstream reads sUVCurves[0]
                 // of an empty array; the port's InvalidInput there is that null dereference
-                Err(SolidError::InvalidInput {
-                    operation: "nurbs::b_spline_surface_n_lib::p1::create_non_rational_curve",
-                    ..
-                }) => o.extend([NULL_DEREF, 0.0]),
+                Err(
+                    kernel_err @ SolidError::InvalidInput {
+                        operation: "nurbs::b_spline_surface_n_lib::p1::create_non_rational_curve",
+                        ..
+                    },
+                ) => o.extend([crate::status::kind_slot(&kernel_err, NULL_DEREF), 0.0]),
                 // upstream resets the output array before failing
                 Err(e) => o.extend([status_of(&e), 0.0]),
             }

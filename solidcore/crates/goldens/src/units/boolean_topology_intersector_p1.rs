@@ -3493,7 +3493,7 @@ pub(super) fn run_rust_script_counted(
                         SolidError::Upstream { .. } | SolidError::Failed(_) => {
                             f64::from(crate::status::kind_slot(e, e.sm_status().unwrap_or(solidcore::error::SM_ERR)))
                         }
-                        _ => NULL_DEREF,
+                        _ => crate::status::kind_slot(e, NULL_DEREF),
                     });
                 }
                 o.push(flag(r.have_existing_ssi));
@@ -3546,7 +3546,7 @@ pub(super) fn run_rust_script_counted(
                 o.push(21.0);
                 let eh = triple_to_h(*e);
                 if !two.edge_ok(eh) || !eh.is_some_and(|e| two.has_primary_edgeuse(e)) {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 }
                 let eh = eh.ok_or_else(|| harness("edge"))?;
@@ -3661,7 +3661,7 @@ pub(super) fn run_rust_script_counted(
                 if es.iter().any(|e| e.is_some() && !two.edge_ok(*e))
                     || fs.iter().any(|f| f.is_some() && !two.face_ok(*f))
                 {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 }
                 let r = ti.edge_face_intersect(&mut k, &mut two, &es, &fs, *manifold, *ignore);
@@ -3723,7 +3723,7 @@ pub(super) fn run_rust_script_counted(
                     }
                 }
                 if !ok {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 }
                 let r = ti.face_face_coincidence(&mut k, &mut two, &es, &fs, *ignore, *nesting);
@@ -3941,7 +3941,7 @@ fn run_part2_op(
                 }
             }
             if !ok {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(());
             }
             let Some(r) = status(ti.fix_gaps(k, two, &vs), o)? else {
@@ -3964,8 +3964,8 @@ fn run_part2_op(
                 // (without the maps, a definition with both finals is the port's
                 // InvalidInput, which the shim refuses with -2 alone)
                 let r = ti.set_relationships(k, two);
-                if matches!(r, Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) {
-                    o.push(NULL_DEREF);
+                if let Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) = &r {
+                    o.push(crate::status::kind_slot(kernel_err, NULL_DEREF));
                     return Ok(());
                 }
                 status(r, o)?;
@@ -4030,7 +4030,7 @@ fn run_part2_op(
                 .chain(&e2)
                 .any(|e| e.is_some() && !two.edge_ok(*e))
             {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(());
             }
             let r = ti.edge_edge_intersect(k, two, &e1, &e2, *manifold, *ignore);
@@ -4068,7 +4068,7 @@ fn run_part2_op(
                 }
             }
             if !ok {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(());
             }
             let r = ti.edge_face_coincidence(k, two, &vs, &ex, *ignore, *nesting);
@@ -4103,7 +4103,7 @@ fn run_part2_op(
                     }
                 }
                 if !ok {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     return Ok(());
                 }
             }

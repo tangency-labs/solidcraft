@@ -73,7 +73,7 @@ fn parse(value: &Value) -> Result<Inputs, HarnessError> {
 /// Separates all discrete fields from floating values so identities/statuses/counts
 /// compare exactly, not using the relative floating-point tolerance.
 fn output(flat: &[f64]) -> Result<Output, HarnessError> {
-    if flat.first().copied() != Some(SUCCESS) {
+    if flat.first().copied() != Some(crate::status::ok_slot(SUCCESS)) {
         return Err(harness(format!(
             "native_face fixture read failed: {flat:?}"
         )));
@@ -85,7 +85,7 @@ fn output(flat: &[f64]) -> Result<Output, HarnessError> {
         .get(9)
         .copied()
         .ok_or_else(|| harness("missing build status"))?;
-    if build_status != -1.0 && build_status != SUCCESS {
+    if build_status != -1.0 && build_status != crate::status::ok_slot(SUCCESS) {
         // A failed native operation is NOT a rejected fixture or a successful
         // status-only parity case. The fixture must exercise a successful build.
         return Err(harness(format!(
@@ -356,13 +356,13 @@ fn rust_record(input: &Inputs, brep: &mut Brep, face: FaceId) -> SolidResult<Vec
                 .map(|_| ());
         }
         let build_status = match built {
-            Ok(()) => SUCCESS,
+            Ok(()) => crate::status::ok_slot(SUCCESS),
             Err(error) => status(error)?,
         };
         out.push(build_status);
         cache.base_mut().face_was_modified = input.modified;
         state(&mut out, cache.base(), brep.editing_enabled());
-        if build_status != SUCCESS {
+        if build_status != crate::status::ok_slot(SUCCESS) {
             out.push(0.0);
             return Ok(out);
         }

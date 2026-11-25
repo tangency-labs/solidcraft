@@ -667,7 +667,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
             let e = EdgeId::from_index(*edge as u32);
             let v = VertexId::from_index(*vertex as u32);
             if sector_null_deref(&b, f, v, e).map_err(|e| fail(&e))? {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let edge_rec = b.edge(e).map_err(|e| fail(&e))?;

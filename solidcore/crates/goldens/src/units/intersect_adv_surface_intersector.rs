@@ -545,7 +545,7 @@ fn run_op(k: &Kernel, cx: &mut Ctx<'_>, si: &mut Si<'_>, op: &OpIn, o: &mut Vec<
             let r = si.compute_singularity_point(uvs, id, prev.map(TsectId));
             if let Err(e) = &r {
                 if is_sing_overflow(e) {
-                    o.push(REJECTED);
+                    o.push(crate::status::kind_slot(e, REJECTED));
                     return Ok(());
                 }
             }

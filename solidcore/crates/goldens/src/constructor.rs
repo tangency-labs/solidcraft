@@ -310,7 +310,10 @@ fn run_into(
                 natural,
                 domain,
             } => match surfaces.get_mut(*surface).and_then(Option::take) {
-                None => Ok(crate::status::state_slot(crate::status::RunnerState::NotReached, SKIPPED)),
+                None => Ok(crate::status::state_slot(
+                    crate::status::RunnerState::NotReached,
+                    SKIPPED,
+                )),
                 Some(s) => {
                     // `GetNaturalUVDomain`, which makes a lazy analytic's NURB
                     // (`Surface::natural_uv_domain_with_nurb`)
@@ -350,7 +353,10 @@ fn run_into(
             Op::SetEdgeCurve { curve, uv } => match curve {
                 None => status(&c.set_edge_curve(k, None, *uv), notes)?,
                 Some(j) => match curves.get_mut(*j).and_then(Option::take) {
-                    None => Ok(crate::status::state_slot(crate::status::RunnerState::NotReached, SKIPPED)),
+                    None => Ok(crate::status::state_slot(
+                        crate::status::RunnerState::NotReached,
+                        SKIPPED,
+                    )),
                     Some(cv) => status(&c.set_edge_curve(k, Some(cv), *uv), notes)?,
                 },
             },
@@ -379,7 +385,10 @@ fn run_into(
             }
             Op::AdjustStepUvDomain { surface, domain } => {
                 match surfaces.get_mut(*surface).and_then(Option::as_mut) {
-                    None => Ok(crate::status::state_slot(crate::status::RunnerState::NotReached, SKIPPED)),
+                    None => Ok(crate::status::state_slot(
+                        crate::status::RunnerState::NotReached,
+                        SKIPPED,
+                    )),
                     Some(s) => {
                         let d = Extent2d::from_bounds(domain[0], domain[1], domain[2], domain[3]);
                         status(&s.adjust_step_uv_domain(k, &d), notes)?

@@ -562,7 +562,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 ints.extend(out);
             }
             Step::Skip => {
-                ints.extend([ST_SKIP, 0]);
+                ints.extend([crate::status::state_slot(crate::status::RunnerState::Skipped, ST_SKIP), 0]);
             }
         }
     }

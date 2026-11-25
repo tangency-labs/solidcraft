@@ -349,14 +349,21 @@ impl From<HarnessError> for Fail {
     }
 }
 
-/// A slot's value: the result, or [`NULL_DEREF`] for [`SolidError::InvalidInput`];
-/// deferral and other errors end the case.
-fn slot<T>(r: Result<T, SolidError>) -> Result<Option<T>, Fail> {
+/// A slot's value: the result, or the kernel error for [`SolidError::InvalidInput`]
+/// (recorded through [`null`]); deferral and other errors end the case.
+fn slot<T>(r: Result<T, SolidError>) -> Result<Result<T, SolidError>, Fail> {
     match r {
-        Ok(v) => Ok(Some(v)),
-        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(None),
+        Ok(v) => Ok(Ok(v)),
+        Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
+            Ok(Err(kernel_err))
+        }
         Err(e) => Err(fail(&e)),
     }
+}
+
+/// A kernel error's slot: [`NULL_DEREF`] in legacy mode.
+fn null(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, NULL_DEREF)
 }
 
 fn fail(e: &SolidError) -> Fail {
@@ -434,23 +441,23 @@ fn put_lists(
     conn: Option<EntityRef>,
 ) -> Result<(), Fail> {
     match slot(lu1::edges(b, lu, attr))? {
-        Some(v) => put_list(o, &v.iter().map(|&e| idx(e, EdgeId::index)).collect::<Vec<_>>()),
-        None => o.push(NULL_DEREF),
+        Ok(v) => put_list(o, &v.iter().map(|&e| idx(e, EdgeId::index)).collect::<Vec<_>>()),
+        Err(kernel_err) => o.push(null(&kernel_err)),
     }
     match slot(lu1::edgeuses(b, lu, attr, conn))? {
-        Some(v) => put_list(o, &v.iter().map(|e| f64::from(e.index())).collect::<Vec<_>>()),
-        None => o.push(NULL_DEREF),
+        Ok(v) => put_list(o, &v.iter().map(|e| f64::from(e.index())).collect::<Vec<_>>()),
+        Err(kernel_err) => o.push(null(&kernel_err)),
     }
     match slot(lu1::vertexuses(b, lu, attr))? {
-        Some(v) => put_list(
+        Ok(v) => put_list(
             o,
             &v.iter().map(|&e| idx(e, VertexuseId::index)).collect::<Vec<_>>(),
         ),
-        None => o.push(NULL_DEREF),
+        Err(kernel_err) => o.push(null(&kernel_err)),
     }
     match slot(lu1::vertices(b, lu, attr))? {
-        Some(v) => put_list(o, &v.iter().map(|&e| idx(e, VertexId::index)).collect::<Vec<_>>()),
-        None => o.push(NULL_DEREF),
+        Ok(v) => put_list(o, &v.iter().map(|&e| idx(e, VertexId::index)).collect::<Vec<_>>()),
+        Err(kernel_err) => o.push(null(&kernel_err)),
     }
     Ok(())
 }
@@ -490,17 +497,18 @@ fn put_use_state(o: &mut Vec<f64>, b: &Brep) {
     }
 }
 
-/// A status slot: `0`, the upstream code, or `None` for [`SolidError::InvalidInput`].
-fn status(r: Result<(), SolidError>) -> Result<Option<f64>, Fail> {
+/// A status slot: `0` or the upstream code, or `Err` with the [`null`] slot of a
+/// [`SolidError::InvalidInput`].
+fn status(r: Result<(), SolidError>) -> Result<Result<f64, f64>, Fail> {
     match r {
-        Ok(()) => Ok(Some(0.0)),
-        Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => Ok(Some(f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1))))),
-        Err(e) => slot(Err(e)).map(|_: Option<()>| None),
+        Ok(()) => Ok(Ok(crate::status::ok_slot(0.0))),
+        Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => Ok(Ok(f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1))))),
+        Err(e) => slot(Err::<(), _>(e)).map(|r| r.map(|()| 0.0).map_err(|kernel_err| null(&kernel_err))),
     }
 }
 
 fn bool_slot(o: &mut Vec<f64>, r: Result<bool, SolidError>) -> Result<(), Fail> {
-    o.push(slot(r)?.map_or(NULL_DEREF, flag));
+    o.push(slot(r)?.map_or_else(|kernel_err| null(&kernel_err), flag));
     Ok(())
 }
 
@@ -510,17 +518,18 @@ fn run_rust_op(b: &mut Brep, op: &Resolved) -> Result<Vec<f64>, Fail> {
     match op {
         Resolved::LuQuery(lu) => {
             let lu = LoopuseId::from_index(u(*lu));
-            let e = |r| slot(r).map(|x: Option<f64>| x.unwrap_or(NULL_DEREF));
+            let e = |r| slot(r).map(|x: Result<f64, SolidError>| x.unwrap_or_else(|kernel_err| null(&kernel_err)));
             o.push(e(lu1::vertexuse(b, lu).map(|x| idx(x, VertexuseId::index)))?);
             o.push(e(lu1::faceuse(b, lu).map(|x| idx(x, FaceuseId::index)))?);
             o.push(e(lu1::loop_(b, lu).map(|x| idx(x, LoopId::index)))?);
             o.push(e(lu1::orientation(b, lu).map(orient_code))?);
             o.push(e(lu1::other_loopuse(b, lu).map(|x| idx(x, LoopuseId::index)))?);
-            let (st, si) = match slot(lu1::eu_or_vu(b, lu))?.flatten() {
-                Some(EntityRef::Edgeuse(eu)) => (EDGEUSE_TYPE, f64::from(eu.index())),
-                Some(EntityRef::Vertexuse(vu)) => (VERTEXUSE_TYPE, f64::from(vu.index())),
-                Some(_) => (-4.0, -4.0),
-                None => (-1.0, -1.0),
+            let (st, si) = match slot(lu1::eu_or_vu(b, lu))? {
+                Ok(Some(EntityRef::Edgeuse(eu))) => (EDGEUSE_TYPE, f64::from(eu.index())),
+                Ok(Some(EntityRef::Vertexuse(vu))) => (VERTEXUSE_TYPE, f64::from(vu.index())),
+                Ok(Some(_)) => (-4.0, -4.0),
+                Ok(None) => (-1.0, -1.0),
+                Err(kernel_err) => (crate::status::kind_slot(&kernel_err, -1.0), -1.0),
             };
             o.extend([st, si]);
             o.push(e(lu1::loopuse_type(b, lu).map(|t| t as f64))?);
@@ -548,14 +557,17 @@ fn run_rust_op(b: &mut Brep, op: &Resolved) -> Result<Vec<f64>, Fail> {
         }
         Resolved::LoopQuery(l) => {
             let l = LoopId::from_index(u(*l));
-            o.push(idx(slot(lu1::loop_loopuse(b, l))?.flatten(), LoopuseId::index));
+            o.push(match slot(lu1::loop_loopuse(b, l))? {
+                Ok(x) => idx(x, LoopuseId::index),
+                Err(kernel_err) => crate::status::kind_slot(&kernel_err, -1.0),
+            });
             o.push(match slot(lu1::loop_face(b, l))? {
-                Some(f) => idx(f, FaceId::index),
-                None => NULL_DEREF,
+                Ok(f) => idx(f, FaceId::index),
+                Err(kernel_err) => null(&kernel_err),
             });
             match slot(lu1::loop_loopuses(b, l))? {
-                Some((a, c)) => o.extend([f64::from(a.index()), idx(c, LoopuseId::index)]),
-                None => o.extend([NULL_DEREF, NULL_DEREF]),
+                Ok((a, c)) => o.extend([f64::from(a.index()), idx(c, LoopuseId::index)]),
+                Err(kernel_err) => o.extend([null(&kernel_err), NULL_DEREF]),
             }
             bool_slot(&mut o, lu1::is_outer_loop(b, l))?;
             bool_slot(&mut o, lu1::loop_is_closed_ptrs(b, l))?;
@@ -565,21 +577,21 @@ fn run_rust_op(b: &mut Brep, op: &Resolved) -> Result<Vec<f64>, Fail> {
             put_str(&mut o, lu1::LOOP_TYPE_STRING);
             put_str(&mut o, lu1::LOOP_CLASS_STRING);
             match slot(lu1::loop_vertices(b, l))? {
-                Some(v) => {
+                Ok(v) => {
                     put_list(&mut o, &v.iter().map(|&e| idx(e, VertexId::index)).collect::<Vec<_>>());
                 }
-                None => o.push(NULL_DEREF),
+                Err(kernel_err) => o.push(null(&kernel_err)),
             }
             match slot(lu1::loop_edges(b, l))? {
-                Some(v) => put_list(&mut o, &v.iter().map(|&e| idx(e, EdgeId::index)).collect::<Vec<_>>()),
-                None => o.push(NULL_DEREF),
+                Ok(v) => put_list(&mut o, &v.iter().map(|&e| idx(e, EdgeId::index)).collect::<Vec<_>>()),
+                Err(kernel_err) => o.push(null(&kernel_err)),
             }
             match slot(lu1::loop_edgeuses(b, l))? {
-                Some(v) => put_list(
+                Ok(v) => put_list(
                     &mut o,
                     &v.iter().map(|e| f64::from(e.index())).collect::<Vec<_>>(),
                 ),
-                None => o.push(NULL_DEREF),
+                Err(kernel_err) => o.push(null(&kernel_err)),
             }
         }
         Resolved::LoopConnected(l, target) => {
@@ -600,9 +612,9 @@ fn run_rust_op(b: &mut Brep, op: &Resolved) -> Result<Vec<f64>, Fail> {
                 slot(lu1::is_closed_3d(&k, b, LoopuseId::from_index(u(*index)), *all).map(Some))?
             };
             match r {
-                None => o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)),
-                Some(None) => o.extend([1.0, -5.0, -7.0, 777.0]),
-                Some(Some(c)) => {
+                Err(kernel_err) => o.push(null(&kernel_err)),
+                Ok(None) => o.extend([1.0, -5.0, -7.0, 777.0]),
+                Ok(Some(c)) => {
                     o.push(flag(c.closed));
                     o.push(if want[0] { idx(c.edgeuse, EdgeuseId::index) } else { -5.0 });
                     o.push(if want[1] { c.max_gap } else { -7.0 });
@@ -618,8 +630,8 @@ fn run_rust_op(b: &mut Brep, op: &Resolved) -> Result<Vec<f64>, Fail> {
             let l = LoopId::from_index(u(*l));
             let d = solidcore::geom::extent2d::Extent2d::from_bounds(dom[0], dom[1], dom[2], dom[3]);
             match slot(lu1::uv_corner_boundaries(&k, b, l, &d, *tol))? {
-                None => o.push(NULL_DEREF),
-                Some(r) => {
+                Err(kernel_err) => o.push(null(&kernel_err)),
+                Ok(r) => {
                     o.push(f64::from(r.boundaries));
                     put_list(
                         &mut o,
@@ -636,8 +648,8 @@ fn run_rust_op(b: &mut Brep, op: &Resolved) -> Result<Vec<f64>, Fail> {
         Resolved::Flip(l) => {
             let l = LoopId::from_index(u(*l));
             match status(lu1::flip_loop_orientation(b, l))? {
-                None => o.push(NULL_DEREF),
-                Some(s) => {
+                Err(s) => o.push(s),
+                Ok(s) => {
                     o.push(s);
                     put_use_state(&mut o, b);
                 }
@@ -646,27 +658,30 @@ fn run_rust_op(b: &mut Brep, op: &Resolved) -> Result<Vec<f64>, Fail> {
         Resolved::Collect(lu, eu) => {
             let lu = LoopuseId::from_index(u(*lu));
             let eu = opt(*eu, EdgeuseId::from_index);
-            let s = status(lu1::collect_edgeuses(b, lu, eu))?.unwrap_or(NULL_DEREF);
+            let s = status(lu1::collect_edgeuses(b, lu, eu))?.unwrap_or_else(|s| s);
             o.push(s);
             put_use_state(&mut o, b);
         }
         Resolved::SetEdgeuse(lu, eu) => {
             let lu = LoopuseId::from_index(u(*lu));
             let eu = opt(*eu, EdgeuseId::from_index);
-            let s = status(lu1::set_edgeuse(b, lu, eu))?.unwrap_or(NULL_DEREF);
+            let s = status(lu1::set_edgeuse(b, lu, eu))?.unwrap_or_else(|s| s);
             o.push(s);
             put_use_state(&mut o, b);
         }
         Resolved::SetOrient(lu, or) => {
             let lu = LoopuseId::from_index(u(*lu));
-            slot(lu1::set_orientation(b, lu, orient_of(*or)))?;
-            o.push(slot(lu1::orientation(b, lu))?.map_or(NULL_DEREF, orient_code));
+            let _ = slot(lu1::set_orientation(b, lu, orient_of(*or)))?;
+            o.push(slot(lu1::orientation(b, lu))?.map_or_else(|kernel_err| null(&kernel_err), orient_code));
             put_use_state(&mut o, b);
         }
         Resolved::SetLoop(lu, l) => {
             let lu = LoopuseId::from_index(u(*lu));
-            slot(lu1::set_loop(b, lu, opt(*l, LoopId::from_index)))?;
-            o.push(idx(slot(lu1::loop_(b, lu))?.flatten(), LoopId::index));
+            let _ = slot(lu1::set_loop(b, lu, opt(*l, LoopId::from_index)))?;
+            o.push(match slot(lu1::loop_(b, lu))? {
+                Ok(x) => idx(x, LoopId::index),
+                Err(kernel_err) => crate::status::kind_slot(&kernel_err, -1.0),
+            });
             put_use_state(&mut o, b);
         }
     }

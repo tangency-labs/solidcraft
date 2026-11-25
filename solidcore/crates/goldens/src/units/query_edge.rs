@@ -608,11 +608,14 @@ fn rust_err(e: &SolidError) -> Output {
     if let Some(o) = Output::unported(e) {
         return o;
     }
-    let failed = if matches!(e, SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) {
-        NULL_DEREF
-    } else {
-        1
-    };
+    let failed = crate::status::kind_slot(
+        e,
+        if matches!(e, SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) {
+            NULL_DEREF
+        } else {
+            1
+        },
+    );
     Output::new().int("failed", failed)
 }
 
@@ -636,7 +639,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let br = &mut s.brep;
     let eid = |i: usize| EdgeId::from_index(i as u32);
     let euid = |i: usize| EdgeuseId::from_index(i as u32);
-    let ok = Output::new().int("failed", 0);
+    let ok = Output::new().int("failed", crate::status::ok_slot(0));
     Ok(match r {
         Resolved::Bbox { edge, req, tight } => {
             match qe::calculate_bounding_box(&k, br, eid(edge), req, tight) {

@@ -1177,14 +1177,14 @@ fn rust_record_seen(
                         if n1.cross(n2).length_squared() < solidcore::math::EFF_ZERO_SQ =>
                     {
                         match fs.calc_fillet_geom(&k) {
-                            Ok(()) => 0.0,
+                            Ok(()) => crate::status::ok_slot(0.0),
                             Err(e) => match fail(&e) {
                                 Ok(s) => s,
                                 Err(out) => return Ok(Err(out)),
                             },
                         }
                     }
-                    _ => NOT_RUN,
+                    _ => crate::status::state_slot(crate::status::RunnerState::Skipped, NOT_RUN),
                 };
             }
             o.push(cs);

@@ -125,7 +125,9 @@ fn e2(e: &Extent1d) -> E2 {
 /// Status value of a Rust error (upstream `SmStatus`).
 fn status_of(e: &SolidError) -> Result<f64, HarnessError> {
     match e {
-        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(1007.0),
+        kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
+            Ok(crate::status::kind_slot(kernel_err, 1007.0))
+        }
         SolidError::Upstream { code, .. } => Ok(f64::from(*code)),
         e if crate::status::is_kernel(e, solidcore::error::upstream_status(e).is_some()) => {
             Ok(f64::from(crate::status::kind_slot(e, solidcore::error::upstream_status(e).unwrap_or(-1))))

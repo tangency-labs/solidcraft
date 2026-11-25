@@ -610,7 +610,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
         } => {
             if let OpIn::UvDomainAfterTrimShift { domain, shift, .. } = &i.op {
                 if fp2::surface(&b, f).map_err(e)?.is_none() {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     return Ok(o);
                 }
                 solidcore::topology::face::p3::create_uv_trim_curves(&k, &mut b, f, false, None)
@@ -658,7 +658,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
             };
             // (upstream dereferences the upward face use only without a loop to use)
             if (l.is_none() && b.face(f).map_err(e)?.faceuse.is_none()) || !lu_ok {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let r = fp1::create_oriented_trim_boundary(&k, &mut b, f, *param, *fill, l, ko);
@@ -708,7 +708,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
         OpIn::LoopRoundTrip { loop_ } => {
             let l = LoopId::from_index(*loop_ as u32);
             if !ok_round_trip(&b, f, l).map_err(e)? {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let r = fp1::remove_loop(&mut b, f, l);
@@ -719,7 +719,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
         }
         OpIn::RemoveUv => {
             if b.face(f).map_err(e)?.faceuse.is_none() {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let r = fp1::remove_uv_trim_curves(&mut b, f);
@@ -732,7 +732,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
                 || face.faceuse.is_none()
                 || !reaches_brep(&b, f).map_err(e)?
             {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let r = fp1::swap_uv(&k, &mut b, f);

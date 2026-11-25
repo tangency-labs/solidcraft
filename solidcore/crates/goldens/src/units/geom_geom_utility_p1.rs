@@ -616,7 +616,7 @@ fn static_rust(name: &str, args: &[f64]) -> Result<Output, HarnessError> {
         let all = [Vec3::new(s1, s2, s3), Vec3::new(s4, s5, s6)];
         let mut pts: Vec<Vec3> = all.iter().take(n).copied().collect();
         let st = match gu::add_point(&mut pts, tol, pnt) {
-            Ok(()) => SM_SUCCESS,
+            Ok(()) => crate::status::ok_slot(SM_SUCCESS),
             Err(e) => status_code(&e).ok_or_else(|| HarnessError::new(e.to_string()))?,
         };
         // Slots beyond the count keep their input values, as in the C++ array.

@@ -801,7 +801,9 @@ fn rust_brep(
             let side = EdgeuseId::from_index(eid(r[3])?);
             let one = |res: Result<usize, SolidError>| match res {
                 Ok(v) => Ok(v as f64),
-                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(-2.0),
+                Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
+                    Ok(crate::status::kind_slot(&kernel_err, -2.0))
+                }
                 Err(e) => Err(e),
             };
             (|| -> Result<(), SolidError> {

@@ -5361,7 +5361,7 @@ fn apply_transform_op_inner(
 
 fn transform_status(res: solidcore::Result<()>) -> Result<f64, Fail> {
     Ok(match res {
-        Ok(()) => SM_SUCCESS,
+        Ok(()) => crate::status::ok_slot(SM_SUCCESS),
         Err(e) => match Output::unported(&e) {
             Some(d) => return Err(Fail::Deferred(Box::new(d))),
             None => match e {

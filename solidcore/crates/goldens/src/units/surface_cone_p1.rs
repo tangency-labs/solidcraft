@@ -281,7 +281,7 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
             .ok_or_else(|| harness("empty record"))?;
         out = out.values("build", vec![*b]);
         rest = r;
-        if *b != SUCCESS {
+        if *b != crate::status::ok_slot(SUCCESS) {
             if !rest.is_empty() {
                 return Err(harness("record continues after a failed build"));
             }
@@ -944,7 +944,7 @@ pub(super) fn common_cases(ctx: &CaseContext) -> Result<Vec<Case>, HarnessError>
 fn const_make_output(flat: &[f64]) -> Result<Output, HarnessError> {
     let (b, rest) = flat.split_first().ok_or_else(|| harness("empty record"))?;
     let out = Output::new().values("build", vec![*b]);
-    if *b != SUCCESS {
+    if *b != crate::status::ok_slot(SUCCESS) {
         return Ok(out);
     }
     Ok(out.values("out", rest.to_vec()))

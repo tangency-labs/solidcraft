@@ -751,10 +751,13 @@ impl From<HarnessError> for Fail {
 
 /// [`NULL_DEREF`] alone where upstream dereferences null; deferral and missing ids
 /// propagate.
-fn or_null<T>(r: Result<T, SolidError>) -> Result<Option<T>, SolidError> {
+/// The `Err` is the kernel error's slot ([`NULL_DEREF`] in legacy mode).
+fn or_null<T>(r: Result<T, SolidError>) -> Result<Result<T, i64>, SolidError> {
     match r {
-        Ok(v) => Ok(Some(v)),
-        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(None),
+        Ok(v) => Ok(Ok(v)),
+        Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
+            Ok(Err(crate::status::kind_slot(&kernel_err, NULL_DEREF)))
+        }
         Err(e) => Err(e),
     }
 }
@@ -766,18 +769,18 @@ fn put_list<T>(
     f: impl Fn(&T) -> i64,
 ) -> Result<(), SolidError> {
     match or_null(r)? {
-        Some(l) => {
+        Ok(l) => {
             q.push(l.len() as i64);
             q.extend(l.iter().map(f));
         }
-        None => q.push(NULL_DEREF),
+        Err(s) => q.push(s),
     }
     Ok(())
 }
 
 /// A flag, or [`NULL_DEREF`].
 fn put_flag(q: &mut Vec<i64>, r: Result<bool, SolidError>) -> Result<(), SolidError> {
-    q.push(or_null(r)?.map_or(NULL_DEREF, i64::from));
+    q.push(or_null(r)?.map_or_else(|s| s, i64::from));
     Ok(())
 }
 
@@ -1138,8 +1141,8 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             q.push(id(vx::primary_vertexuse(b, v)?, VertexuseId::index));
             put_list(&mut q, vx::vertexuses(b, v), |x| i64::from(x.index()))?;
             q.push(match or_null(vx::brep(b, v).map(|r| r.is_some()))? {
-                Some(x) => i64::from(x),
-                None => NULL_DEREF,
+                Ok(x) => i64::from(x),
+                Err(s) => s,
             });
             q.push(i64::from(vx::is_shell_vertex(b, v)?));
             q.push(i64::from(vx::is_loop_vertex(b, v)?));
@@ -1160,8 +1163,8 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
         OpIn::VuOfFace { v, face } => {
             let f = opt_id(*face, FaceId::from_index);
             let q = match or_null(vx::vertexuse_of_face(b, vid(*v), f))? {
-                Some(x) => id(x, VertexuseId::index),
-                None => NULL_DEREF,
+                Ok(x) => id(x, VertexuseId::index),
+                Err(s) => s,
             };
             return Ok(Output::new().ints("q", vec![q]));
         }
@@ -1191,23 +1194,23 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             let both = vx::edges(b, vid(*v), f)
                 .and_then(|es| Ok((es, vx::common_edges(b, vid(*v), o, f)?)));
             let q = match or_null(both)? {
-                Some((es, ce)) => {
+                Ok((es, ce)) => {
                     let mut q = vec![es.len() as i64];
                     q.extend(es.iter().map(|x| i64::from(x.index())));
                     q.push(ce.len() as i64);
                     q.extend(ce.iter().map(|x| i64::from(x.index())));
                     q
                 }
-                None => vec![NULL_DEREF],
+                Err(s) => vec![s],
             };
             return Ok(Output::new().ints("q", q));
         }
         OpIn::ShellInRegion { v, region } => {
             let r = opt_id(*region, RegionId::from_index);
             let q = match or_null(vx::shell_in_region(b, vid(*v), r))? {
-                Some(Some(s)) => vec![0, i64::from(s.index())],
-                Some(None) => vec![i64::from(solidcore::error::SM_ERR), -1],
-                None => vec![NULL_DEREF],
+                Ok(Some(s)) => vec![crate::status::ok_slot(0), i64::from(s.index())],
+                Ok(None) => vec![i64::from(solidcore::error::SM_ERR), -1],
+                Err(s) => vec![s],
             };
             return Ok(Output::new().ints("q", q));
         }
@@ -1221,20 +1224,20 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             return Ok(Output::new().ints("q", q));
         }
         OpIn::Topological { v } => match or_null(vx::is_topological_vertex(&k, b, vid(*v)))? {
-            Some(t) => {
+            Ok(t) => {
                 let mut out = vec![flag(t)];
                 gap_states(b, &mut out);
                 out
             }
-            None => vec![NULL_DEREF as f64],
+            Err(s) => vec![s as f64],
         },
         OpIn::OnPole { v } => match or_null(vx::is_on_pole(&k, b, vid(*v)))? {
-            Some(t) => {
+            Ok(t) => {
                 let mut out = vec![flag(t)];
                 gap_states(b, &mut out);
                 out
             }
-            None => vec![NULL_DEREF as f64],
+            Err(s) => vec![s as f64],
         },
         OpIn::Gaps {
             v,
@@ -1247,8 +1250,8 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             // SmTol3d stores the magnitude
             let t = has_tol.then_some(solidcore::geom::tol::tol3d(*tol));
             match or_null(vx::max_up_dim_gap_3d(&k, b, vid(*v), arr, t))? {
-                Some(m) => {
-                    let mut out = vec![0.0];
+                Ok(m) => {
+                    let mut out = vec![crate::status::ok_slot(0.0)];
                     put_gap(&mut out, m);
                     if *want_array {
                         out.push(list.len() as f64);
@@ -1261,7 +1264,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                     gap_states(b, &mut out);
                     out
                 }
-                None => vec![NULL_DEREF as f64],
+                Err(s) => vec![s as f64],
             }
         }
         OpIn::Notify { v, operation } => {
@@ -1298,8 +1301,8 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                 )?;
             }
             match or_null(corner_op(&k, b, v))? {
-                Some(out) => out,
-                None => vec![NULL_DEREF as f64],
+                Ok(out) => out,
+                Err(s) => vec![s as f64],
             }
         }
         OpIn::SetPoint { v, p } => {
@@ -1332,14 +1335,14 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
         }
         OpIn::RefreshTolerance { v, nested } => {
             match or_null(vx::refresh_tolerance(b, vid(*v), *nested))? {
-                Some(()) => {
-                    let mut out = vec![0.0, vx::tolerance(b, vid(*v))?];
+                Ok(()) => {
+                    let mut out = vec![crate::status::ok_slot(0.0), vx::tolerance(b, vid(*v))?];
                     for (_, e) in b.edges().iter() {
                         out.push(e.tolerance);
                     }
                     out
                 }
-                None => vec![NULL_DEREF as f64],
+                Err(s) => vec![s as f64],
             }
         }
         OpIn::Exact { v, exact, poly } => {

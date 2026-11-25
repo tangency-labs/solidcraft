@@ -1353,8 +1353,8 @@ fn rust_record(k: &mut Kernel, i: &Inputs, built: Option<Brep>) -> Record {
                     Vec3::new(0.0, *side, 0.0),
                 ];
                 for (a, b) in p.iter().zip(p.iter().cycle().skip(1)) {
-                    if Line::create_line_segment(3, *a, *b, None).is_err() {
-                        return Ok(vec![NOT_RUN]);
+                    if let Err(e) = Line::create_line_segment(3, *a, *b, None) {
+                        return Ok(vec![crate::status::kind_slot(&e, NOT_RUN)]);
                     }
                 }
                 // The shim's loop: `new SmBrep()` (its infinite void region), MakeShellVertex

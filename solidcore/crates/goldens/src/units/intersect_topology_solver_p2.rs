@@ -826,7 +826,9 @@ fn static_rust(case: &Case) -> Result<Output, HarnessError> {
                 return Ok(deferred);
             }
             let status = match e {
-                SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
+                ref kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
+                    crate::status::kind_slot(kernel_err, 1007.0)
+                }
                 ref e if crate::status::is_kernel(e, solidcore::error::upstream_status(e).is_some()) => {
                     f64::from(crate::status::kind_slot(e, solidcore::error::upstream_status(e).unwrap_or(-1)))
                 }

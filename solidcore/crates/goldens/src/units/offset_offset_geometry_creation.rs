@@ -2180,14 +2180,16 @@ fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, Fa
             o.push(f64::from(crate::status::kind_slot(&e, solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1))));
             Ok(None)
         }
-        Err(SolidError::InvalidInput {
-            operation: UNDEFINED_UPSTREAM,
-            ..
-        }) => {
+        Err(
+            kernel_err @ SolidError::InvalidInput {
+                operation: UNDEFINED_UPSTREAM,
+                ..
+            },
+        ) => {
             // the library met a null dereference or failed cast upstream would make
             // (undefined): the shim's refusal status, so that it never passes as a
             // real SM_ERR_INVALID_INPUT; a shim that did not refuse the same op fails
-            o.push(NULL_DEREF);
+            o.push(crate::status::kind_slot(&kernel_err, NULL_DEREF));
             Ok(None)
         }
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {

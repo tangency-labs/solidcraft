@@ -427,7 +427,7 @@ fn rust_op(
                     if e.is_unported() {
                         return Ok(Err(e));
                     }
-                    o.push(SC_ERR_ARG);
+                    o.push(crate::status::kind_slot(&e, SC_ERR_ARG));
                     return Ok(Ok(()));
                 }
             }

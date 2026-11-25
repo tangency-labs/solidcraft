@@ -435,7 +435,10 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
             let status = match result {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
-                Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
+                Err(
+                    kernel_err @ (solidcore::SolidError::InvalidInput { .. }
+                    | solidcore::SolidError::PortInvariant { .. }),
+                ) => crate::status::kind_slot(&kernel_err, 1007),
                 Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
                     crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))
                 }
@@ -471,7 +474,10 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
             let status = match result {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
-                Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
+                Err(
+                    kernel_err @ (solidcore::SolidError::InvalidInput { .. }
+                    | solidcore::SolidError::PortInvariant { .. }),
+                ) => crate::status::kind_slot(&kernel_err, 1007),
                 Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
                     crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))
                 }
@@ -530,7 +536,10 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
             let status = match result {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
-                Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
+                Err(
+                    kernel_err @ (solidcore::SolidError::InvalidInput { .. }
+                    | solidcore::SolidError::PortInvariant { .. }),
+                ) => crate::status::kind_slot(&kernel_err, 1007),
                 Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
                     crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))
                 }

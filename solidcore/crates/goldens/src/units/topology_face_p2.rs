@@ -1706,7 +1706,8 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
             let dom = if *face_dom {
                 match eu1::face(b, cur) {
                     Ok(Some(f)) => fp2::uv_domain(b, f)?,
-                    _ => return Ok(vec![NULL_DEREF]),
+                    Ok(None) => return Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]),
+                    Err(kernel_err) => return Ok(vec![crate::status::kind_slot(&kernel_err, NULL_DEREF)]),
                 }
             } else {
                 Extent2d::from_bounds(dom[0], dom[1], dom[2], dom[3])
@@ -1755,7 +1756,8 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
                     Some(s) => s.clone(),
                     None => return Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]),
                 },
-                _ => return Ok(vec![NULL_DEREF]),
+                Ok(None) => return Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]),
+                Err(kernel_err) => return Ok(vec![crate::status::kind_slot(&kernel_err, NULL_DEREF)]),
             };
             let before: Vec<bool> = slots.iter().map(Option::is_some).collect();
             match fp2::find_best_uv_curve(&k, b, &surf, e, &mut slots, &orients) {

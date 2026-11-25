@@ -205,11 +205,11 @@ fn put_created_lift(
     let edge = eu1::edge(b, eu)?.map(|e| b.edge(e)).transpose()?;
     let face = eu1::face(b, eu)?.map(|f| b.face(f)).transpose()?;
     let (Some(edge), Some(surface)) = (edge, face.and_then(|f| f.surface.as_ref())) else {
-        out.push(NULL_DEREF);
+        out.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
         return Ok(());
     };
     let Some(curve) = edge.curve.as_ref() else {
-        out.push(NULL_DEREF);
+        out.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
         return Ok(());
     };
     out.extend([5.0, curve.type_code() as f64]);

@@ -563,7 +563,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                 ))?
                 .is_err()
             {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
                 return Ok(());
             }
             let pole_pts: Option<Vec<Vec3>> = poles.as_ref().map(|ps| ps.iter().map(|p| v3(*p)).collect());

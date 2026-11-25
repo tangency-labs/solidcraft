@@ -1885,7 +1885,7 @@ fn run_rust_brep(k: &mut Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fa
                     ok = ok_loop_extremes(b, l)?;
                 }
                 if !ok {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     return Ok(o);
                 }
             }

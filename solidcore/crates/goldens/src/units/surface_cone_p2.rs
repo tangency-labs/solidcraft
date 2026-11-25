@@ -292,7 +292,7 @@ fn edit_of(e: &EditIn) -> Edit {
 fn to_output(flat: &[f64]) -> Result<Output, HarnessError> {
     let (b, rest) = flat.split_first().ok_or_else(|| harness("empty record"))?;
     let out = Output::new().values("build", vec![*b]);
-    if *b != SUCCESS {
+    if *b != crate::status::ok_slot(SUCCESS) {
         if !rest.is_empty() {
             return Err(harness("record continues after a failed build"));
         }

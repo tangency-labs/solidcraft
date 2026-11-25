@@ -598,7 +598,7 @@ const SM_SUCCESS: i64 = 1000;
 /// The upstream `SmStatus` of a relation call.
 fn status(r: &solidcore::Result<()>) -> i64 {
     match r {
-        Ok(()) => SM_SUCCESS,
+        Ok(()) => crate::status::ok_slot(SM_SUCCESS),
         Err(err) if crate::status::is_kernel(err, solidcore::error::upstream_status(err).is_some()) => i64::from(crate::status::kind_slot(err, solidcore::error::upstream_status(err).unwrap_or(-1))),
         Err(_) => -1,
     }

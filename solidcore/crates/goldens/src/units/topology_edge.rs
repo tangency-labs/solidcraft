@@ -760,7 +760,7 @@ impl From<HarnessError> for Fail {
 fn slot<T>(r: Result<T, SolidError>, f: impl FnOnce(T) -> f64) -> Result<f64, SolidError> {
     match r {
         Ok(v) => Ok(f(v)),
-        Err(kernel_err @ (SolidError::InvalidInput { .. })) => Ok(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
+        Err(kernel_err @ SolidError::InvalidInput { .. }) => Ok(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
         Err(e) => Err(e),
     }
 }
@@ -777,7 +777,7 @@ fn list_slot<T: Copy>(
             out.extend(v.into_iter().map(f));
             Ok(())
         }
-        Err(kernel_err @ (SolidError::InvalidInput { .. })) => {
+        Err(kernel_err @ SolidError::InvalidInput { .. }) => {
             out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF));
             Ok(())
         }
@@ -789,12 +789,13 @@ fn ix<I: Copy>(o: Option<I>, f: impl Fn(I) -> u32) -> f64 {
     o.map_or(-1.0, |x| f64::from(f(x)))
 }
 
-/// An upstream status: `0` for success, the `SmStatus` of an upstream error.
-fn status_of(r: &Result<(), SolidError>) -> Result<Option<f64>, SolidError> {
+/// An upstream status: `0` for success, the `SmStatus` of an upstream error; `Err` with
+/// the slot of an [`SolidError::InvalidInput`] ([`NULL_DEREF`] in legacy mode).
+fn status_of(r: &Result<(), SolidError>) -> Result<Result<f64, f64>, SolidError> {
     match r {
-        Ok(()) => Ok(Some(0.0)),
-        Err(up_err) if crate::status::is_kernel(up_err, solidcore::error::upstream_status(up_err).is_some()) => Ok(Some(f64::from(crate::status::kind_slot(up_err, solidcore::error::upstream_status(up_err).unwrap_or(-1))))),
-        Err(SolidError::InvalidInput { .. }) => Ok(None),
+        Ok(()) => Ok(Ok(crate::status::ok_slot(0.0))),
+        Err(up_err) if crate::status::is_kernel(up_err, solidcore::error::upstream_status(up_err).is_some()) => Ok(Ok(f64::from(crate::status::kind_slot(up_err, solidcore::error::upstream_status(up_err).unwrap_or(-1))))),
+        Err(kernel_err @ SolidError::InvalidInput { .. }) => Ok(Err(crate::status::kind_slot(kernel_err, NULL_DEREF))),
         Err(e) => Err(e.clone()),
     }
 }
@@ -1139,7 +1140,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             out.push(slot(ed::end_vertex(b, e), |x| ix(x, VertexId::index))?);
             match ed::start_end_vertices(b, e) {
                 Ok((s, t)) => out.extend([ix(s, VertexId::index), ix(t, VertexId::index)]),
-                Err(kernel_err @ (SolidError::InvalidInput { .. })) => out.extend([crate::status::kind_slot(&kernel_err, NULL_DEREF), crate::status::kind_slot(&kernel_err, NULL_DEREF)]),
+                Err(kernel_err @ SolidError::InvalidInput { .. }) => out.extend([crate::status::kind_slot(&kernel_err, NULL_DEREF), crate::status::kind_slot(&kernel_err, NULL_DEREF)]),
                 Err(err) => return Err(err.into()),
             }
             list_slot(&mut out, ed::vertices(b, e, None), |x| ix(x, VertexId::index))?;
@@ -1169,7 +1170,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             let f = opt_id(*f, FaceId::from_index);
             let first = match ed::edgeuse_of_face(b, e, f) {
                 Ok(x) => x,
-                Err(kernel_err @ (SolidError::InvalidInput { .. })) => {
+                Err(kernel_err @ SolidError::InvalidInput { .. }) => {
                     return Ok(Output::new().values("state", vec![crate::status::kind_slot(&kernel_err, NULL_DEREF)]))
                 }
                 Err(err) => return Err(err.into()),
@@ -1226,7 +1227,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
         }
         OpIn::EndTangent { e, at_start } => match ed::end_tangent(&k, b, eid(*e), *at_start) {
             Ok(t) => out.extend([0.0, t.x, t.y, t.z]),
-            Err(kernel_err @ (SolidError::InvalidInput { .. })) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
+            Err(kernel_err @ SolidError::InvalidInput { .. }) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
             Err(err) if err.is_unported() => return Err(err.into()),
             Err(_) => out.extend([1.0, 0.0, 0.0, 0.0]),
         },
@@ -1244,7 +1245,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                 out.push(0.0);
                 put_state(b, &mut out);
             }
-            Err(kernel_err @ (SolidError::InvalidInput { .. })) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
+            Err(kernel_err @ SolidError::InvalidInput { .. }) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
             Err(err) => return Err(err.into()),
         },
         OpIn::SetOrient { e, orientation } => {
@@ -1253,32 +1254,32 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
         }
         OpIn::Reverse { e } => match ed::reverse_orientation(&k, b, eid(*e)) {
             Ok(()) => {
-                out.push(0.0);
+                out.push(crate::status::ok_slot(0.0));
                 put_curve(&mut out, b.edge(eid(*e))?.curve.as_ref())?;
                 put_state(b, &mut out);
             }
-            Err(kernel_err @ (SolidError::InvalidInput { .. })) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
+            Err(kernel_err @ SolidError::InvalidInput { .. }) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
             Err(err) => return Err(err.into()),
         },
         OpIn::OrientSeq { edges } => {
             let es: Vec<EdgeId> = edges.iter().map(|&x| eid(x)).collect();
             let r = ed::orient_edge_sequence(&k, b, &es);
             match status_of(&r)? {
-                Some(s) => {
+                Ok(s) => {
                     out.push(s);
                     put_state(b, &mut out);
                 }
-                None => out.push(NULL_DEREF),
+                Err(s) => out.push(s),
             }
         }
         OpIn::ResetPrimary { e, eu } => {
             let r = ed::reset_primary_edgeuse(b, eid(*e), opt_id(*eu, EdgeuseId::from_index));
             match status_of(&r)? {
-                Some(s) => {
+                Ok(s) => {
                     out.push(s);
                     put_state(b, &mut out);
                 }
-                None => out.push(NULL_DEREF),
+                Err(s) => out.push(s),
             }
         }
         OpIn::AddPair { e, o1, o2, sector } => {
@@ -1302,11 +1303,11 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                 opt_id(*sector, EdgeuseId::from_index),
             );
             match status_of(&r)? {
-                Some(s) => {
+                Ok(s) => {
                     out.push(s);
                     put_state(b, &mut out);
                 }
-                None => out.push(NULL_DEREF),
+                Err(s) => out.push(s),
             }
         }
         OpIn::ManifoldEnd { e, vu, is_start } => {
@@ -1317,11 +1318,11 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                 *is_start,
             );
             match status_of(&r)? {
-                Some(s) => {
+                Ok(s) => {
                     out.push(s);
                     put_state(b, &mut out);
                 }
-                None => out.push(NULL_DEREF),
+                Err(s) => out.push(s),
             }
         }
         OpIn::Gaps {
@@ -1353,7 +1354,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                         None => out.push(-1.0),
                     }
                 }
-                Err(kernel_err @ (SolidError::InvalidInput { .. })) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
+                Err(kernel_err @ SolidError::InvalidInput { .. }) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
                 Err(err) => return Err(err.into()),
             }
         }
@@ -1371,7 +1372,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                     out.push(0.0);
                     put_state(b, &mut out);
                 }
-                Err(kernel_err @ (SolidError::InvalidInput { .. })) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
+                Err(kernel_err @ SolidError::InvalidInput { .. }) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
                 Err(err) => return Err(err.into()),
             }
         }
@@ -1430,7 +1431,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                     ix(r.coincident_faceuse, FaceuseId::index),
                 ]),
                 Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => out.extend([f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1))), -1.0, -1.0]),
-                Err(kernel_err @ (SolidError::InvalidInput { .. })) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
+                Err(kernel_err @ SolidError::InvalidInput { .. }) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
                 Err(err) => return Err(err.into()),
             }
         }
@@ -1460,14 +1461,14 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                     ix(r.radial_edgeuse, EdgeuseId::index),
                     ix(r.coincident_faceuse, FaceuseId::index),
                 ]),
-                Err(kernel_err @ (SolidError::InvalidInput { .. })) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
+                Err(kernel_err @ SolidError::InvalidInput { .. }) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
                 Err(err) => return Err(err.into()),
             }
         }
         OpIn::UvOfSurface { e, f } => {
             match ed::uv_trim_curve_of_surface(&k, b, eid(*e), opt_id(*f, FaceId::from_index)) {
                 Ok(h) => out.extend([flag(h.is_some()), ix(h, EdgeuseId::index)]),
-                Err(kernel_err @ (SolidError::InvalidInput { .. })) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
+                Err(kernel_err @ SolidError::InvalidInput { .. }) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
                 Err(err) => return Err(err.into()),
             }
         }
@@ -1484,7 +1485,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                 ix(t.surf_to_keep, FaceId::index),
                 t.dist_between,
             ]),
-            Err(kernel_err @ (SolidError::InvalidInput { .. })) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
+            Err(kernel_err @ SolidError::InvalidInput { .. }) => out.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
             Err(err) => return Err(err.into()),
         },
         OpIn::Tangent {
@@ -1509,7 +1510,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             let ode = ed::OdeEdgeLength::new(c, Vec3::new(origin[0], origin[1], origin[2]), *radius);
             match ode.evaluate(&k, *t, &mut dydx) {
                 Ok(()) => out.push(0.0),
-                Err(kernel_err @ (SolidError::InvalidInput { .. })) => {
+                Err(kernel_err @ SolidError::InvalidInput { .. }) => {
                     return Ok(Output::new().values("state", vec![crate::status::kind_slot(&kernel_err, NULL_DEREF)]))
                 }
                 Err(err) if err.is_unported() => return Err(err.into()),
@@ -1533,7 +1534,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                 }
             }
             if !ok {
-                out.push(NULL_DEREF);
+                out.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(Output::new().values("state", out));
             }
             let mut moved = 0.0;

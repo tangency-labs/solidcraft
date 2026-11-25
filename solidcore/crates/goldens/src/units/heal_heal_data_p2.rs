@@ -1183,8 +1183,9 @@ fn rust_prob(kind: u8, n: u64, ops: &[[i64; 4]]) -> Result<Output, HarnessError>
 
 /// How a step's Rust failure is reported.
 enum Fail {
-    /// The case stops with `-2` (upstream undefined behaviour, refused by the shim).
-    NullDeref,
+    /// The case stops with this slot (`-2` before kinds: upstream undefined behaviour,
+    /// refused by the shim).
+    NullDeref(f64),
     /// An upstream status: `status new_probs`, then the case stops.
     Status(i32),
     /// Unported callee: the case is deferred.
@@ -1198,7 +1199,9 @@ fn classify(e: SolidError) -> Fail {
         return Fail::Deferred(o);
     }
     match e {
-        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Fail::NullDeref,
+        kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
+            Fail::NullDeref(crate::status::kind_slot(&kernel_err, NULL_DEREF))
+        }
         err if crate::status::is_kernel(&err, solidcore::error::upstream_status(&err).is_some()) => Fail::Status(crate::status::kind_slot(&err, solidcore::error::upstream_status(&err).unwrap_or(-1))),
         e => Fail::Other(e.to_string()),
     }
@@ -2189,7 +2192,7 @@ fn rust_heal(
             Step::RemoveVertexProps { sel } => {
                 let alive: Vec<_> = h.vertex_props.alive().map(|(i, _)| i).collect();
                 let Some(p) = pick(&alive, *sel) else {
-                    o.push(NONE_ALIVE);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NONE_ALIVE));
                     continue;
                 };
                 match h.remove_vertex_props_from_lists(p) {
@@ -2203,7 +2206,7 @@ fn rust_heal(
             Step::RemoveEdgeProps { sel } => {
                 let alive: Vec<_> = h.edge_props.alive().map(|(i, _)| i).collect();
                 let Some(p) = pick(&alive, *sel) else {
-                    o.push(NONE_ALIVE);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NONE_ALIVE));
                     continue;
                 };
                 match h.remove_edge_props_from_lists(p) {
@@ -2217,7 +2220,7 @@ fn rust_heal(
             Step::RemoveFaceProps { sel } => {
                 let alive: Vec<_> = h.face_props.alive().map(|(i, _)| i).collect();
                 let Some(p) = pick(&alive, *sel) else {
-                    o.push(NONE_ALIVE);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NONE_ALIVE));
                     continue;
                 };
                 match h.remove_face_props_from_lists(p) {
@@ -2301,7 +2304,7 @@ fn rust_heal(
             Step::MoveToNotYet { sel } => {
                 let alive: Vec<_> = h.face_props.alive().map(|(i, _)| i).collect();
                 let Some(p) = pick(&alive, *sel) else {
-                    o.push(NONE_ALIVE);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NONE_ALIVE));
                     continue;
                 };
                 match h.move_to_not_yet_problems(p) {
@@ -2397,7 +2400,7 @@ fn rust_heal(
                     }
                     _ => false,
                 }) {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     stop = true;
                     break;
                 }
@@ -2419,7 +2422,7 @@ fn rust_heal(
                     && i64::from(*op).min(h.done_heal_op.code())
                         >= HealerOpType::FixCoinVertices.code()
                 {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     stop = true;
                     break;
                 }
@@ -2465,7 +2468,7 @@ fn rust_heal(
                 }
             }
             Step::SeedFaceProblems { .. } | Step::SeedDegenFaces if degen_face_seeded(&h) => {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 stop = true;
                 break;
             }
@@ -2603,8 +2606,8 @@ fn rust_heal(
             }
             Ok(new_probs) => o.extend([0.0, flag(new_probs)]),
             Err(e) => match classify(e) {
-                Fail::NullDeref => {
-                    o.push(NULL_DEREF);
+                Fail::NullDeref(s) => {
+                    o.push(s);
                     stop = true;
                     break;
                 }

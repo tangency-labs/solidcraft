@@ -477,7 +477,7 @@ fn run_steps(k: &Kernel, b: &mut Brep, steps: &[StepIn]) -> Result<Vec<f64>, Fai
                 // the default argument is `FALSE`
                 let r = qb::lock_bounding_box(k, b, tight && !defaults);
                 o.push(match st(r)? {
-                    Ok(()) => SUCCESS,
+                    Ok(()) => crate::status::ok_slot(SUCCESS),
                     Err(code) => code,
                 });
             }

@@ -616,7 +616,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                 test_bdry(*test),
             ))? {
                 Ok(poc) => o.push(f64::from(poc.code())),
-                Err(kernel_err) => o.push(crate::status::kind_slot(&kernel_err, REJECTED)),
+                Err(kernel_status) => o.push(crate::status::legacy_or(REJECTED, || kernel_status)),
             }
         }
         Inputs::Span {
@@ -638,7 +638,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             let a = pt_in(start)?;
             let e = pt_in(end)?;
             if span_undefined(k, &s, &d, &a, &e)? {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
                 return Ok(());
             }
             match st(a.test_span_accuracy(k, &s, &d, &c, &e, *tol, uv_tol[0], uv_tol[1], *refine))? {
@@ -718,7 +718,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                         put_vec(o, p);
                     }
                 }
-                Err(kernel_err) => o.push(crate::status::kind_slot(&kernel_err, REJECTED)),
+                Err(kernel_status) => o.push(crate::status::legacy_or(REJECTED, || kernel_status)),
             }
         }
         Inputs::Dups { uv_tol, uvs } => {

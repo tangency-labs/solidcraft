@@ -300,7 +300,7 @@ fn stopped(records: Vec<f64>, stage: &str, e: SolidError) -> Measured {
         },
         e => Measured::Values {
             records,
-            error: Some(format!("{stage}: {e}")),
+            error: Some(crate::status::kernel_text(&e, format!("{stage}: {e}"))),
         },
     }
 }
