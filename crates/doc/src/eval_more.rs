@@ -2832,7 +2832,7 @@ fn body_under(st: &ModelState, body: &Option<crate::BodyName>, p: Vec3) -> Resul
     let i = body_at(st, body, &[p])?;
     let b = st.bodies.get(i).ok_or_else(|| DocError::Invalid("there is no body".into()))?;
     let tolerance = (b.body.size() * 1e-5).max(1e-4);
-    if crate::project::nearest_face(&b.mesh(), p).is_none_or(|(_, _, distance)| distance > tolerance) {
+    if b.body.nearest_face(p).is_none_or(|(distance, _)| distance > tolerance) {
         return Err(DocError::Invalid("the plastic feature's placement is no longer on its body face".into()));
     }
     Ok(b.name.clone())

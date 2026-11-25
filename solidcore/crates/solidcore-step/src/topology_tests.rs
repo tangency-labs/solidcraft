@@ -2515,6 +2515,38 @@ fn a_spline_that_departs_from_its_circle_between_the_samples_is_not_a_circle() {
     }
 }
 
+/// A full circle written unclamped, as some writers give a closed rational circle: nine points
+/// of the square's corners and edge midpoints, knots −0.25, 0 (twice) … 1 (twice), 1.25. Over its
+/// domain [0, 1] a degree 2 spline does not use its outermost knots, so it is the circle the
+/// clamped knots give, and it reads as that circle, a full turn. 0.49.0 refused it, as the proof
+/// on its control points took only clamped knots, and a revolved round on it lost its face
+/// (tangency-labs/solidcore#3401).
+#[test]
+fn a_circle_written_with_unclamped_knots_is_a_circle() {
+    let (r, o) = (2.0, [-3.0, -132.0, 152.7]);
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let corners = [(1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (-1.0, 1.0), (-1.0, 0.0), (-1.0, -1.0), (0.0, -1.0), (1.0, -1.0), (1.0, 0.0)];
+    let circle = crate::geom::BSplineCurve {
+        degree: 2,
+        points: corners.iter().map(|(x, z)| [o[0] + r * x, o[1], o[2] + r * z]).collect(),
+        weights: Some((0..9).map(|i| if i % 2 == 1 { w } else { 1.0 }).collect()),
+        knots: vec![-0.25, 0.0, 0.25, 0.5, 0.75, 1.0, 1.25],
+        multiplicities: vec![1, 2, 2, 2, 2, 2, 1],
+        form: crate::geom::CurveForm::Unspecified,
+        closed: crate::geom::Logical::True,
+        self_intersect: crate::geom::Logical::False,
+        knot_spec: crate::geom::KnotSpec::Unspecified,
+    };
+    let Some((Curve::Circle { position, radius }, swept)) = swept::spline_circle(&circle) else { panic!("the unclamped circle is a circle") };
+    assert!((radius - r).abs() <= 1e-9 * r, "radius {radius}");
+    assert!((swept.abs() - std::f64::consts::TAU).abs() <= 1e-9, "swept {swept}");
+    assert!(position.origin.iter().zip(o).all(|(a, b)| (a - b).abs() <= 1e-9 * r), "{:?}", position.origin);
+    // Off its circle it is still refused: the point at its far side moved 1 mm out.
+    let mut off = circle.clone();
+    off.points[4][0] -= 1.0;
+    assert!(swept::spline_circle(&off).is_none(), "a spline off its circle is a circle");
+}
+
 #[test]
 fn a_closed_edge_on_a_spline_that_runs_on_past_a_full_turn_is_the_turn_between_its_passes() {
     // Five quarters from (2, 0): the curve passes (0, 2) at 1 and again at 5, its end. A
@@ -4655,4 +4687,21 @@ fn whole_turn_cone_faces_close_on_their_seam_beside_a_quarter_line() {
         })
         .collect();
     assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+#[test]
+fn a_finer_read_holds_only_while_no_edge_gap_reaches_the_shortest_edge() {
+    // A cube 10 x 20 x 30: its shortest edge is 10 mm. Read finer, an edge that lies off its
+    // faces keeps its gap as its tolerance; once a gap is as long as the shortest edge, the finer
+    // read tells nothing apart that the stated one did not (issue #18848: an Inventor plate read at
+    // 1.6e-6 mm for an edge of 6.2e-6 mm kept gaps of 2.6e-4 mm, and the next boolean on its face
+    // failed SMLib's coincident-edge test).
+    let mut brep = one_solid(&cube(BoxStyle::default())).brep;
+    let shortest = shortest_edge(&brep);
+    assert_eq!(shortest, 10.0);
+    assert!(fine_read_holds(&brep, shortest));
+    brep.edges[3].tolerance = 9.99;
+    assert!(fine_read_holds(&brep, shortest));
+    brep.edges[3].tolerance = 10.0;
+    assert!(!fine_read_holds(&brep, shortest));
 }
