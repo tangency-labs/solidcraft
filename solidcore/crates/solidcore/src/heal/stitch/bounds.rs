@@ -16,28 +16,51 @@
 //! through their coefficient differences; a Hermite curve against a Hermite curve or
 //! a line under any affine correspondence through the Bernstein hull of the cubic of
 //! their difference. A composite curve is enclosed by the union of its
-//! segments' enclosures over the parts of the range they cover. Iso, offset,
-//! projected, on-surface, in-volume and tangent-field curves have no enclosure here
-//! and are refused.
+//! segments' enclosures over the parts of the range they cover. A curve on a surface
+//! and an iso curve are enclosed by evaluating the surface (a plane by its affine
+//! form at the clamped parameters, a B-spline surface by its interval Taylor jet on
+//! every knot span the parameter box meets, end spans extrapolated as its evaluation
+//! does) over the enclosure of the parameter curve. A pair involving either is
+//! bounded by a mean-value (centred) form on parameter cells, refined level by level
+//! in a fixed order, from rate enclosures (chain rule through the surface partials).
+//! A tangent field is enclosed by the Thales spheres of its projection (the
+//! projection of `v` onto a plane through 0 lies on the sphere with diameter `v`)
+//! over the hull of its two stored tangents, and by those tangents exactly inside its
+//! end zones. Offset, projected and in-volume curves have no enclosure here and are
+//! refused.
 //!
-//! Deviations: the only recursion is into a composite's segments, refused past
-//! `MAX_GEOMETRY_NESTING` (32) composites, the construction limit. Other work is
-//! bounded by the stored knot and segment counts and the kernel's NURBS degree
-//! limit. Curves without an implemented exact enclosure, non-positive weights,
-//! extrapolation and non-finite bounds are refused.
+//! Deviations: the recursion is into a composite's segments and an on-surface or
+//! tangent-field curve's parameter curve, refused past `MAX_GEOMETRY_NESTING` (32)
+//! levels, the construction limit. The centred pair bound encloses at most 4096
+//! cells, halving a starting cell at most 24 times; a surface curve's range is halved
+//! at most 6 times where a rational surface's weight is not proved positive. Other work is bounded by the
+//! stored knot and segment counts and the kernel's NURBS degree limit. Curves without
+//! an implemented exact enclosure, surfaces other than planes and B-splines (and the
+//! power-basis B-spline form), non-positive weights, extrapolation of curves and
+//! non-finite bounds are refused.
 
+use crate::blend::fillet_section::certificate::{
+    curve_derivs_over, knot_cuts, nurbs_partials_within_span_centred, partials_hull, NurbsCurve,
+};
 use crate::blend::fillet_section::interval::Ivl;
+use crate::blend::fillet_section::series::V3;
+use crate::blend::fillet_section::station::{Nurbs as SurfaceNet, Partials};
 use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::conic::{Conic, ConicType};
+use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::hermite_curve::HermiteCurve;
+use crate::curve::iso_curve::IsoCurve;
 use crate::curve::line::Line;
+use crate::curve::tangent_field::TangentFieldCurve;
 use crate::geom::extent1d::Extent1d;
-use crate::math::Point3;
+use crate::math::{Point3, EFF_ZERO};
+use crate::nurbs::b_spline_surface::{BSplineSurfaceForm, SurfParamType};
 use crate::nurbs::crv_basic::Curve as Nurbs;
 use crate::nurbs::knots::MAX_DEGREE;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
-use crate::surface::surface::p2::MAX_GEOMETRY_NESTING;
+use crate::surface::plane::Plane;
+use crate::surface::surface::p2::{Surface, SurfaceKind, MAX_GEOMETRY_NESTING};
 use crate::{Result, SolidError};
 
 const OP: &str = "heal::stitch::bounds";
@@ -53,7 +76,8 @@ fn unsupported() -> SolidError {
         operation: OP,
         reason: "stitch gap enclosure is implemented for lines, positive-weight B-splines, \
                  the ellipses, circles, hyperbolas and parabolas evaluated through them, \
-                 planar conics, Hermite curves and composites of these only",
+                 planar conics, Hermite curves, curves on and iso curves of planes and \
+                 B-spline surfaces, tangent fields and composites of these only",
     }
 }
 
@@ -138,6 +162,15 @@ fn checked_range(range: [f64; 2]) -> Result<Ivl> {
         return Err(invalid("non-finite curve interval"));
     }
     Ok(Ivl::new(range[0].min(range[1]), range[0].max(range[1])))
+}
+
+/// A control point's Euclidean box: its homogeneous coordinates over its weight.
+fn control_point_box(c: CPoint) -> Result<Box3> {
+    let h = homogeneous(c)?;
+    let w = at(&h, 3)?;
+    Ok(core::array::from_fn(|i| {
+        h.get(i).copied().unwrap_or(Ivl::whole()) / w
+    }))
 }
 
 fn homogeneous(c: CPoint) -> Result<Box4> {
@@ -237,6 +270,19 @@ fn piece(n: &Nurbs, span: usize, t: Ivl) -> Result<Box3> {
 fn spline_box(n: &Nurbs, range: Ivl) -> Result<Box3> {
     validate(n, range)?;
     let mut result: Option<Box3> = None;
+    // A B-spline curve evaluation's end shortcut returns the end control point on a
+    // natural end: the end piece's value there only on a clamped end (equal to it
+    // otherwise), so it is hulled in.
+    let count = n.cpts().len();
+    for (end, index) in [
+        (at(n.knots(), n.degree())?, 0),
+        (at(n.knots(), count)?, count - 1),
+    ] {
+        if range.lo <= end && end <= range.hi {
+            let point = control_point_box(at(n.cpts(), index)?)?;
+            result = Some(result.map_or(point, |old| hull3(old, point)));
+        }
+    }
     for (span, pair) in n.knots().windows(2).enumerate() {
         let [a, b] = pair else {
             continue;
@@ -679,6 +725,482 @@ fn rational_base(curve: &Curve) -> Result<Option<&Nurbs>> {
         .ok_or_else(|| invalid("missing spline data"))
 }
 
+/// A surface's point and first partials over a uv box: `value` holds `S(u, v)` for
+/// every `(u, v)` of the box. Where the partials were asked for, `su` and `sv` hold
+/// `dE/du` and `dE/dv` of a continuously differentiable extension `E` of the
+/// evaluation over the box, and `slack` bounds `|S - E|` there: a B-spline surface is
+/// its own extension (slack 0); a plane that clamps its parameters extends to its
+/// unclamped affine map.
+struct SurfaceJet {
+    value: Box3,
+    su: Box3,
+    sv: Box3,
+    slack: f64,
+}
+
+fn v3_box(v: V3<Ivl>) -> Box3 {
+    [v.x, v.y, v.z]
+}
+
+fn hull3(a: Box3, b: Box3) -> Box3 {
+    core::array::from_fn(|i| axis(a, i).hull(axis(b, i)))
+}
+
+/// The span `KnotVector::find_span` evaluates at and past one end of the knots: the last
+/// (`end`) or first span at least `1e-12` wide, its `knot_tol`.
+fn end_span(knots: &[f64], p: usize, n: usize, end: bool) -> Result<usize> {
+    const KNOT_TOL: f64 = 1.0e-12;
+    let last = n
+        .checked_sub(1)
+        .filter(|&l| l >= p)
+        .ok_or_else(|| invalid("invalid surface knots"))?;
+    let narrow = |i: usize| -> Result<bool> { Ok(at(knots, i + 1)? < at(knots, i)? + KNOT_TOL) };
+    let mut i = if end { last } else { p };
+    if end {
+        while narrow(i)? && i > p {
+            i -= 1;
+        }
+    } else {
+        while narrow(i)? && i < last {
+            i += 1;
+        }
+    }
+    Ok(i)
+}
+
+/// The parts of `t` with the polynomial piece the B-spline surface evaluation takes on
+/// each: past either end of the knots (and on it) the end span `find_span` picks, so
+/// the evaluation's extrapolation is enclosed; inside, every piece whose closed span
+/// meets `t` ([`knot_cuts`], both pieces at a knot). A knot line where the surface is
+/// discontinuous is refused inside `t`; at `t`'s upper end the piece right of it, which
+/// the evaluation takes there, is added. On an end knot itself the evaluation takes the end control row
+/// (`KnotVector::basis_eval_into`), which is that piece's value only when the end is
+/// clamped and its span is the one `find_span` picks; otherwise a box reaching the end
+/// is refused.
+fn surface_parts(knots: &[f64], p: usize, n: usize, t: Ivl) -> Result<Vec<(f64, f64, usize)>> {
+    let first = at(knots, p)?;
+    let last = at(knots, n)?;
+    if first.partial_cmp(&last) != Some(core::cmp::Ordering::Less) || !finite(t) {
+        return Err(invalid("invalid surface knots or parameter enclosure"));
+    }
+    let multiplicity = |k: f64| knots.iter().filter(|&&x| x == k).count();
+    let mut parts = Vec::new();
+    if t.lo <= first {
+        let span = end_span(knots, p, n, false)?;
+        if span != p || multiplicity(first) <= p {
+            return Err(unsupported());
+        }
+        parts.push((t.lo, t.hi.min(first), span));
+    }
+    if t.hi >= last {
+        let span = end_span(knots, p, n, true)?;
+        if span + 1 != n || multiplicity(last) <= p {
+            return Err(unsupported());
+        }
+        parts.push((t.lo.max(last), t.hi, span));
+    }
+    // The piece right of a jump at the box's upper end (on a point, `knot_cuts` already
+    // returns both pieces).
+    if first < t.hi && t.hi < last && t.lo < t.hi && multiplicity(t.hi) > p {
+        parts.extend(knot_cuts(knots, p, n, t.hi, t.hi, 0)?);
+    }
+    let (lo, hi) = (t.lo.max(first), t.hi.min(last));
+    if lo <= hi {
+        parts.extend(knot_cuts(knots, p, n, lo, hi, 0)?);
+    }
+    Ok(parts)
+}
+
+/// Encloses a surface's point (and with `partials` its first partials) over the uv box
+/// `u` x `v`, where `Surface::evaluate_point` evaluates it: a B-spline surface (not in
+/// the power-basis form) by its rational pieces ([`nurbs_partials_within_span_centred`], exact
+/// point derivatives at the part's middle and their Taylor enclosure, the weights proved
+/// positive), the extrapolated end pieces included, or `None` where a piece's weight is
+/// not proved positive over the box; a plane by its affine map, on the analytic domain
+/// it clamps to. Other surface kinds are refused.
+fn surface_jet(surface: &Surface, u: Ivl, v: Ivl, partials: bool) -> Result<Option<SurfaceJet>> {
+    if !finite(u) || !finite(v) {
+        return Err(invalid("non-finite surface parameter enclosure"));
+    }
+    let lk = usize::from(partials);
+    match surface.kind() {
+        SurfaceKind::BSpline(s) => {
+            if s.form() == BSplineSurfaceForm::Polynomial {
+                return Err(unsupported());
+            }
+            // The evaluation takes the net's rationality from its first point and a
+            // surface's points are 3D: refuse other storage outright.
+            let (_, _, cps) = s.control_points()?;
+            let rational = cps.first().is_some_and(|c| c.w != NOW);
+            if cps.iter().any(|c| (c.w != NOW) != rational || c.z == NOZ) {
+                return Err(invalid("mixed homogeneous coordinate storage"));
+            }
+            let net = SurfaceNet::of(s).map_err(|_| invalid("invalid surface data"))?;
+            let us = surface_parts(&net.u, net.p, net.nu, u)?;
+            let vs = surface_parts(&net.v, net.q, net.nv, v)?;
+            let mut out: Option<Partials<Ivl>> = None;
+            for &(a0, a1, ku) in &us {
+                for &(b0, b1, kv) in &vs {
+                    // A weight not proved positive over this box: a smaller box may prove it.
+                    let Ok(p) =
+                        nurbs_partials_within_span_centred(&net, ku, kv, a0, a1, b0, b1, lk)
+                    else {
+                        return Ok(None);
+                    };
+                    out = Some(match out {
+                        None => p,
+                        Some(h) => partials_hull(h, &p, lk),
+                    });
+                }
+            }
+            let jet = out.ok_or_else(|| invalid("no surface piece covers the parameters"))?;
+            let result = SurfaceJet {
+                value: v3_box(jet.at(0, 0)),
+                su: v3_box(jet.at(1, 0)),
+                sv: v3_box(jet.at(0, 1)),
+                slack: 0.0,
+            };
+            let used = [result.value].into_iter().chain(
+                partials
+                    .then_some([result.su, result.sv])
+                    .into_iter()
+                    .flatten(),
+            );
+            if !used.flatten().all(finite) {
+                return Err(invalid("surface enclosure overflows"));
+            }
+            Ok(Some(result))
+        }
+        SurfaceKind::Plane(plane) => plane_jet(plane, u, v).map(Some),
+        _ => Err(unsupported()),
+    }
+}
+
+/// A plane's point and partials over `u` x `v`: `origin + u su X + v sv Y` at the
+/// parameters clamped to the analytic domain (`Plane::evaluate_point`, unless its
+/// out-of-bounds evaluation is enabled). Clamping is monotone, so the clamped box's ends
+/// are the clamped ends. The partials are those of the unclamped affine map `E`, and
+/// `|S - E| = |su X (c(u) - u) + sv Y (c(v) - v)|`, where `|c(u) - u|` is `u`'s distance
+/// from the domain, at most the box's overshoot past it: that bounds the slack.
+fn plane_jet(plane: &Plane, u: Ivl, v: Ivl) -> Result<SurfaceJet> {
+    let position = plane.position();
+    let scale = plane.uv_scale();
+    let o = point_box(position.origin())?;
+    let x = point_box(position.x_axis())?;
+    let y = point_box(position.y_axis())?;
+    if !scale.x.is_finite() || !scale.y.is_finite() {
+        return Err(invalid("non-finite plane scale"));
+    }
+    let (mut cu, mut cv) = (u, v);
+    let (mut over_u, mut over_v) = (0.0_f64, 0.0_f64);
+    if !plane.is_out_of_bounds_enabled() {
+        let d = plane.step_uv_domain();
+        let (u0, u1, v0, v1) = (d.u_min(), d.u_max(), d.v_min(), d.v_max());
+        if !(u0 <= u1 && v0 <= v1) {
+            return Err(invalid("invalid plane domain"));
+        }
+        let clamp = |t: Ivl, lo: f64, hi: f64| Ivl::new(t.lo.max(lo).min(hi), t.hi.max(lo).min(hi));
+        let over = |t: Ivl, lo: f64, hi: f64| {
+            (Ivl::from(lo) - Ivl::from(t.lo))
+                .hi
+                .max((Ivl::from(t.hi) - Ivl::from(hi)).hi)
+                .max(0.0)
+        };
+        over_u = over(u, u0, u1);
+        over_v = over(v, v0, v1);
+        cu = clamp(u, u0, u1);
+        cv = clamp(v, v0, v1);
+    }
+    let (sx, sy) = (Ivl::from(scale.x), Ivl::from(scale.y));
+    let partial =
+        |axis_box: Box3, s: Ivl| -> Box3 { core::array::from_fn(|i| s * axis(axis_box, i)) };
+    let value: Box3 =
+        core::array::from_fn(|i| axis(o, i) + cu * sx * axis(x, i) + cv * sy * axis(y, i));
+    let (su, sv) = (partial(x, sx), partial(y, sy));
+    let slack =
+        (Ivl::from(norm(su)?) * Ivl::from(over_u) + Ivl::from(norm(sv)?) * Ivl::from(over_v)).hi;
+    if !slack.is_finite() {
+        return Err(invalid("plane enclosure overflows"));
+    }
+    let result = SurfaceJet {
+        value,
+        su,
+        sv,
+        slack,
+    };
+    if ![result.value, result.su, result.sv]
+        .into_iter()
+        .flatten()
+        .all(finite)
+    {
+        return Err(invalid("plane enclosure overflows"));
+    }
+    Ok(result)
+}
+
+/// The uv box of a curve on a surface over `t`: its parameter curve's enclosure.
+fn uv_box(c: &CrvOnSurf, t: Ivl, depth: usize) -> Result<[Ivl; 2]> {
+    if depth >= MAX_GEOMETRY_NESTING {
+        return Err(invalid("curve nesting exceeds the geometry limit"));
+    }
+    let uv = curve_box_at(c.uv_curve(), t, depth + 1)?;
+    Ok([axis(uv, 0), axis(uv, 1)])
+}
+
+/// Encloses a curve on a surface over `t`: the surface over the box of its parameter
+/// curve there (`CrvOnSurf::evaluate_point`).
+fn on_surface_box(c: &CrvOnSurf, t: Ivl, depth: usize) -> Result<Box3> {
+    split_surface_box(t, depth, |t| {
+        let [u, v] = uv_box(c, t, depth)?;
+        Ok(surface_jet(c.surface(), u, v, false)?.map(|j| j.value))
+    })
+}
+
+/// The most halvings of a parameter range [`split_surface_box`] makes.
+const SURFACE_SPLITS: usize = 6;
+
+/// The hull of `enclose` over `t`, or over halves of `t` where a box is not enclosed
+/// (a rational surface's weight not proved positive over it), at most
+/// [`SURFACE_SPLITS`] halvings deep, from an explicit stack in a fixed order. Only an
+/// outermost curve (`depth` 0) is split, so nested surface curves cannot multiply the
+/// work: the calls stay at most `2^(SURFACE_SPLITS+1)` times the nesting depth.
+fn split_surface_box(
+    t: Ivl,
+    depth: usize,
+    enclose: impl Fn(Ivl) -> Result<Option<Box3>>,
+) -> Result<Box3> {
+    let limit = if depth == 0 { SURFACE_SPLITS } else { 0 };
+    let mut stack = vec![(t, 0_usize)];
+    let mut out: Option<Box3> = None;
+    while let Some((t, level)) = stack.pop() {
+        if let Some(b) = enclose(t)? {
+            out = Some(out.map_or(b, |h| hull3(h, b)));
+            continue;
+        }
+        let m = 0.5 * (t.lo + t.hi);
+        if level >= limit || !(t.lo < m && m < t.hi) {
+            return Err(invalid("surface weights not proved positive"));
+        }
+        stack.push((Ivl::new(m, t.hi), level + 1));
+        stack.push((Ivl::new(t.lo, m), level + 1));
+    }
+    out.ok_or_else(|| invalid("no surface box encloses the curve"))
+}
+
+/// The uv box of an iso curve over `t`: `(iso, t)` for constant `u`, else `(t, iso)`.
+fn iso_uv(c: &IsoCurve, t: Ivl) -> Result<[Ivl; 2]> {
+    let iso = c.iso_parameter();
+    if !iso.is_finite() || !finite(t) {
+        return Err(invalid("non-finite iso parameter"));
+    }
+    Ok(if c.surf_param() == SurfParamType::U {
+        [Ivl::from(iso), t]
+    } else {
+        [t, Ivl::from(iso)]
+    })
+}
+
+/// Encloses an iso curve over `t`: its surface over the iso line's uv box
+/// (`IsoCurve::evaluate_point`).
+fn iso_box(c: &IsoCurve, t: Ivl, depth: usize) -> Result<Box3> {
+    split_surface_box(t, depth, |t| {
+        let [u, v] = iso_uv(c, t)?;
+        Ok(surface_jet(c.surface(), u, v, false)?.map(|j| j.value))
+    })
+}
+
+/// Encloses a tangent field over `t` (`field_point`): the start tangent below its
+/// natural interval's start plus `1e-8 + EFF_ZERO`, the end tangent above its end less
+/// that, and between them the projection `v - (v.n) n` of `v = s dt + e (1 - dt)`,
+/// `dt` in `[0, 1]`, onto the plane of a unit normal `n`. That projection `p` is
+/// orthogonal to `v - p`, so it lies on the sphere with diameter `v` (Thales): within
+/// `|v|/2` of `v/2`, whatever the normal. As `v` lies on the segment from `s` to `e`,
+/// each coordinate is within `max(|s|, |e|)/2` of the segment's half, a box that holds
+/// the field for every surface and parameter curve. It is widened by `1e-12` of that
+/// radius, past a normal of norm `1 +- 4e-13` and the evaluation's rounding.
+fn tangent_field_box(c: &TangentFieldCurve, t: Ivl) -> Result<Box3> {
+    const PARAM_TOL: f64 = 1.0e-8;
+    let m = c.members();
+    let s = point_box(m.start_tangent)?;
+    let e = point_box(m.end_tangent)?;
+    let natural = c.base().uv_curve().natural_interval();
+    if !finite(t) || !natural.min().is_finite() || !natural.max().is_finite() {
+        return Err(invalid("non-finite tangent field interval"));
+    }
+    // The comparisons `field_point` makes, in the same floating-point operations.
+    let below = natural.min() + PARAM_TOL + EFF_ZERO;
+    let above = natural.max() - PARAM_TOL - EFF_ZERO;
+    // `field_point` takes `s` for t < below, else `e` for t > above, else the projection.
+    let starts = t.lo < below;
+    let ends = t.hi >= below && t.hi > above;
+    let between = t.lo.max(below) <= t.hi.min(above);
+    let mut out: Option<Box3> = None;
+    for (taken, b) in [(starts, s), (ends, e)] {
+        if taken {
+            out = Some(out.map_or(b, |o| hull3(o, b)));
+        }
+    }
+    if between {
+        out = Some(match out {
+            Some(o) => hull3(o, projection_box(c, s, e)?),
+            None => projection_box(c, s, e)?,
+        });
+    }
+    let out = out.ok_or_else(|| invalid("empty tangent field parameter enclosure"))?;
+    if !out.into_iter().all(finite) {
+        return Err(invalid("tangent field enclosure overflows"));
+    }
+    Ok(out)
+}
+
+/// The Thales box of a tangent field's projections (see [`tangent_field_box`]), for a
+/// surface whose `evaluate_normal` is proved at most `1 + 4e-13` long: a B-spline
+/// surface's (`base_evaluate_normal` divides every candidate by its length, or returns
+/// zero) or a plane's stored axis, checked here. Other kinds are refused.
+fn projection_box(c: &TangentFieldCurve, s: Box3, e: Box3) -> Result<Box3> {
+    match c.base().surface().kind() {
+        SurfaceKind::Plane(plane) => {
+            if norm(point_box(plane.evaluate_normal())?)? > 1.0 + 4.0e-13 {
+                return Err(invalid("plane normal not of unit length"));
+            }
+        }
+        SurfaceKind::BSpline(_) => {}
+        _ => return Err(unsupported()),
+    }
+    let radius = Ivl::from(norm(s)?.max(norm(e)?));
+    let reach = radius / Ivl::from(2.0) + radius * Ivl::from(1.0e-12);
+    let half = Ivl::from(0.5);
+    Ok(core::array::from_fn(|i| {
+        let (a, b) = (axis(s, i) * half, axis(e, i) * half);
+        let lo = a.hull(b) - reach;
+        let hi = a.hull(b) + reach;
+        Ivl::new(lo.lo, hi.hi)
+    }))
+}
+
+/// The rate `dP/dt` of a line over `t` (the slope of [`line_box`]'s map), after its
+/// checks.
+fn line_rate(line: &Line, t: Ivl) -> Result<Box3> {
+    line_box(line, t)?;
+    let natural = line.natural_interval();
+    let step = line.step_interval();
+    let slope = if line.is_bounded() {
+        let length = Ivl::from(natural.max()) - Ivl::from(natural.min());
+        let direction = if line.inside_out() { -1.0 } else { 1.0 };
+        Ivl::from(direction) * (Ivl::from(step.max()) - Ivl::from(step.min())) / length
+    } else if line.inside_out() {
+        Ivl::from(-1.0)
+    } else {
+        Ivl::from(1.0)
+    };
+    let v = point_box(line.line_vector())?;
+    let scale = Ivl::from(line.line_scale());
+    Ok(core::array::from_fn(|i| slope * axis(v, i) * scale))
+}
+
+/// The rate of a Hermite curve over `t`: its derivative cubic `D1 + 2 C t + 3 D t^2`,
+/// enclosed by its Bernstein hull.
+fn hermite_rate(h: &HermiteCurve, t: Ivl) -> Result<Box3> {
+    let c = hermite_cubic(h, t)?;
+    let (two, three) = (Ivl::from(2.0), Ivl::from(3.0));
+    let derivative: Cubic = [
+        coefficient(&c, 1),
+        coefficient(&c, 2).map(|x| two * x),
+        coefficient(&c, 3).map(|x| three * x),
+        [Ivl::from(0.0); 3],
+    ];
+    bernstein_hull(&reparameterize(&derivative, t.lo, t.hi))
+}
+
+/// The rate of a positive-weight B-spline over `t` inside its knots, where it is
+/// continuous over `t` (no knot strictly inside of multiplicity above the degree):
+/// each piece's homogeneous derivatives at the part's middle, their Taylor enclosure
+/// and the quotient rule ([`curve_derivs_over`]); `None` across a discontinuity.
+fn spline_rate(n: &Nurbs, t: Ivl) -> Result<Option<Box3>> {
+    validate(n, t)?;
+    let p = n.degree();
+    let knots = n.knots();
+    let (first, last) = (at(knots, p)?, at(knots, n.cpts().len())?);
+    let multiplicity = |k: f64| knots.iter().filter(|&&x| x == k).count();
+    // Discontinuous where a knot inside the range, or at its upper end (the evaluation
+    // takes the next piece there), has multiplicity above the degree; and on an
+    // unclamped natural end, where the evaluation fails or is the end control point.
+    if knots
+        .iter()
+        .any(|&k| k > t.lo && k <= t.hi && k < last && multiplicity(k) > p)
+        || (t.lo <= first && multiplicity(first) <= p)
+        || (t.hi >= last && multiplicity(last) <= p)
+    {
+        return Ok(None);
+    }
+    let mut pw = Vec::new();
+    for &c in n.cpts() {
+        let h = homogeneous(c)?;
+        pw.extend(h.iter().map(|x| x.lo));
+    }
+    let cn = NurbsCurve {
+        p,
+        n: n.cpts().len(),
+        u: knots.to_vec(),
+        pw,
+    };
+    let d = curve_derivs_over(&cn, t, 1, None).map_err(|_| invalid("unproved spline rate"))?;
+    let rate = v3_box(
+        d.get(1)
+            .copied()
+            .ok_or_else(|| invalid("missing spline rate"))?,
+    );
+    if !rate.into_iter().all(finite) {
+        return Err(invalid("spline rate overflows"));
+    }
+    Ok(Some(rate))
+}
+
+/// For a curve `P` that is continuous over `t`, a continuous, piecewise differentiable
+/// extension `E` of it there given by an enclosure of `dE/dt` over every parameter of
+/// `t` where `E` is differentiable, and a bound on `|P - E|` over `t`. Lines, Hermite
+/// curves and positive-weight B-splines (and the conics evaluated through them) are
+/// their own extension (bound 0). A curve on a surface takes the chain rule
+/// `Eu u' + Ev v'` over the parameter curve's boxes (that curve its own extension) and an
+/// iso curve `Ev` for constant `u`, else `Eu`, with the surface's slack
+/// ([`SurfaceJet`]). `None` for other kinds, or where the curve may be discontinuous over
+/// `t`.
+fn curve_rate(curve: &Curve, t: Ivl, depth: usize) -> Result<Option<(Box3, f64)>> {
+    match curve.kind() {
+        CurveKind::Line(l) => return line_rate(l, t).map(|r| Some((r, 0.0))),
+        CurveKind::Hermite(h) => return hermite_rate(h, t).map(|r| Some((r, 0.0))),
+        CurveKind::CrvOnSurf(c) => {
+            let [u, v] = uv_box(c, t, depth)?;
+            let Some((r, 0.0)) = curve_rate(c.uv_curve(), t, depth + 1)? else {
+                return Ok(None);
+            };
+            let Some(jet) = surface_jet(c.surface(), u, v, true)? else {
+                return Ok(None);
+            };
+            let (du, dv) = (axis(r, 0), axis(r, 1));
+            let rate = core::array::from_fn(|i| axis(jet.su, i) * du + axis(jet.sv, i) * dv);
+            return Ok(Some((rate, jet.slack)));
+        }
+        CurveKind::Iso(c) => {
+            let [u, v] = iso_uv(c, t)?;
+            let Some(jet) = surface_jet(c.surface(), u, v, true)? else {
+                return Ok(None);
+            };
+            let rate = if c.surf_param() == SurfParamType::U {
+                jet.sv
+            } else {
+                jet.su
+            };
+            return Ok(Some((rate, jet.slack)));
+        }
+        _ => {}
+    }
+    match rational_base(curve)? {
+        Some(n) => Ok(spline_rate(n, t)?.map(|r| (r, 0.0))),
+        None => Ok(None),
+    }
+}
+
 fn curve_box(curve: &Curve, range: Ivl) -> Result<Box3> {
     curve_box_at(curve, range, 0)
 }
@@ -690,6 +1212,9 @@ fn curve_box_at(curve: &Curve, range: Ivl, depth: usize) -> Result<Box3> {
         CurveKind::Conic(c) => return conic_box(c, range),
         CurveKind::Hermite(h) => return hermite_box(h, range),
         CurveKind::Composite(c) => return composite_box(c, range, depth),
+        CurveKind::CrvOnSurf(c) => return on_surface_box(c, range, depth),
+        CurveKind::Iso(c) => return iso_box(c, range, depth),
+        CurveKind::TangentField(c) => return tangent_field_box(c, range),
         _ => {}
     }
     match rational_base(curve)? {
@@ -725,7 +1250,10 @@ pub(crate) fn curve_cover(curve: &Curve, a: f64, b: f64, parts: u32) -> Result<V
         CurveKind::Line(_)
         | CurveKind::Conic(_)
         | CurveKind::Hermite(_)
-        | CurveKind::Composite(_) => None,
+        | CurveKind::Composite(_)
+        | CurveKind::CrvOnSurf(_)
+        | CurveKind::Iso(_)
+        | CurveKind::TangentField(_) => None,
         _ => Some(rational_base(curve)?.ok_or_else(unsupported)?),
     };
     let mut out = Vec::new();
@@ -799,6 +1327,115 @@ pub(crate) fn curve_to_point(curve: &Curve, interval: &Extent1d, point: Point3) 
     ))
 }
 
+/// Cells the mean-value pair bound starts from, the most it encloses, and its most
+/// halvings of a starting cell.
+const CENTRED_CELLS: u32 = 32;
+const CENTRED_BUDGET: usize = 4096;
+const CENTRED_DEPTH: u32 = 24;
+
+/// Bounds `|P(x(s)) - Q(y(s))|` over `s` in `[0, 1]`, `x` and `y` the affine maps from
+/// `a` and `b`, by a mean-value (centred) form on parameter cells: on a cell `S` with
+/// middle `m`, every coordinate of `g = P(x) - Q(y)` is `g(m) + g'(xi) (s - m)` for
+/// some `xi` in `S` (`g` is continuous and piecewise differentiable there, so it is the
+/// integral of its derivative), and `g' = P' (a1 - a0) - Q' (b1 - b0)` is enclosed from
+/// the curves' rate enclosures ([`curve_rate`]); a curve enclosed through an extension
+/// `E` within `e` of it adds `2 e` (at `s` and at `m`). Each cell's bound is the smaller of that
+/// and the plain difference of the cell's boxes, so it is never worse than the cell
+/// enclosure. Cells are refined level by level, in a fixed order (the result is
+/// deterministic and the loop bounded): a cell whose derivative term is not small
+/// against its bound and whose bound exceeds every accepted one is halved, while the
+/// cells enclosed stay within [`CENTRED_BUDGET`] and the halvings within
+/// [`CENTRED_DEPTH`]; every cell's bound is valid whether or not it is halved, so the
+/// largest bound of the cells kept is the result. A cell where either rate is not
+/// enclosed (a curve without one, or one discontinuous there) takes the plain bound and
+/// is halved like any other.
+fn centred(
+    first: &Curve,
+    a: [f64; 2],
+    ar: Ivl,
+    second: &Curve,
+    b: [f64; 2],
+    br: Ivl,
+) -> Result<f64> {
+    let mapped = |range: [f64; 2], s: Ivl, clip: Ivl| {
+        let x = Ivl::from(range[0]) * (Ivl::from(1.0) - s) + Ivl::from(range[1]) * s;
+        // Clip only the rounding spill of the affine parameter map.
+        Ivl::new(x.lo.max(clip.lo), x.hi.min(clip.hi))
+    };
+    let da = Ivl::from(a[1]) - Ivl::from(a[0]);
+    let db = Ivl::from(b[1]) - Ivl::from(b[0]);
+    let cell = |s0: f64, s1: f64| -> Result<(f64, bool)> {
+        let s = Ivl::new(s0, s1);
+        let (x, y) = (mapped(a, s, ar), mapped(b, s, br));
+        let plain = norm(difference(curve_box(first, x)?, curve_box(second, y)?))?;
+        let at_m = Ivl::from(0.5 * (s0 + s1));
+        let rates = (
+            curve_rate(first, x, 0).ok().flatten(),
+            curve_rate(second, y, 0).ok().flatten(),
+        );
+        let (Some((p, sp)), Some((q, sq))) = rates else {
+            return Ok((plain, false));
+        };
+        let gm = difference(
+            curve_box(first, mapped(a, at_m, ar))?,
+            curve_box(second, mapped(b, at_m, br))?,
+        );
+        let ds = s - at_m;
+        let slope: Box3 = core::array::from_fn(|i| (axis(p, i) * da - axis(q, i) * db) * ds);
+        // P - Q = (E - F) + (P - E) - (Q - F) at s and at m: twice each slack.
+        let w = ((Ivl::from(sp) + Ivl::from(sq)) * Ivl::from(2.0)).hi;
+        let centred: Box3 =
+            core::array::from_fn(|i| axis(gm, i) + axis(slope, i) + Ivl::new(-w, w));
+        Ok(match (norm(slope), norm(centred)) {
+            (Ok(spread), Ok(centred)) => {
+                let bound = plain.min(centred);
+                (bound, spread <= 1.0e-3 * bound)
+            }
+            _ => (plain, false),
+        })
+    };
+    let mut cells: Vec<(f64, f64)> = (0..CENTRED_CELLS)
+        .map(|i| {
+            (
+                f64::from(i) / f64::from(CENTRED_CELLS),
+                f64::from(i + 1) / f64::from(CENTRED_CELLS),
+            )
+        })
+        .collect();
+    let mut upper = 0.0_f64;
+    let mut used = 0_usize;
+    for level in 0..=CENTRED_DEPTH {
+        // Level by level, so the budget refines the whole range evenly.
+        let mut split = Vec::new();
+        for (s0, s1) in cells {
+            used += 1;
+            let (bound, small) = cell(s0, s1)?;
+            let m = 0.5 * (s0 + s1);
+            if small || level == CENTRED_DEPTH || !(s0 < m && m < s1) {
+                upper = upper.max(bound);
+            } else {
+                split.push((s0, m, s1, bound));
+            }
+        }
+        // A cell no larger than an accepted bound cannot raise the maximum.
+        split.retain(|&(_, _, _, bound)| bound > upper);
+        if used + 2 * split.len() > CENTRED_BUDGET {
+            for &(_, _, _, bound) in &split {
+                upper = upper.max(bound);
+            }
+            break;
+        }
+        cells = split
+            .iter()
+            .flat_map(|&(s0, m, s1, _)| [(s0, m), (m, s1)])
+            .collect();
+        if cells.is_empty() {
+            break;
+        }
+    }
+    Ok(upper)
+}
+
 /// Bounds both directed curve gaps under the stated endpoint correspondence.
 pub(crate) fn curves(first: &Curve, a: [f64; 2], second: &Curve, b: [f64; 2]) -> Result<f64> {
     let ar = checked_range(a)?;
@@ -860,6 +1497,13 @@ pub(crate) fn curves(first: &Curve, a: [f64; 2], second: &Curve, b: [f64; 2]) ->
                 core::array::from_fn(|k| difference(coefficient(&p, k), coefficient(&q, k)));
             return norm(bernstein_hull(&delta)?);
         }
+    }
+    // A curve on a surface or an iso curve: the mean-value form on bisected cells.
+    if [first, second]
+        .iter()
+        .any(|c| matches!(c.kind(), CurveKind::CrvOnSurf(_) | CurveKind::Iso(_)))
+    {
+        return centred(first, a, ar, second, b, br);
     }
     // Affine curves attain the maximum norm of their difference at an endpoint.
     // Otherwise enclose every parameter cell, never only its sample stations.
@@ -1555,5 +2199,317 @@ mod tests {
         // Read forward the two run in opposite directions: the ends are 1 apart.
         let crossed = curves(&h, [0.0, 1.0], &back, [0.0, 1.0]).unwrap();
         assert!(crossed >= 1.0, "{crossed}");
+    }
+
+    /// A 2D parameter curve (`z` and `w` unset) through `points`.
+    fn uv_spline(points: &[(f64, f64)], degree: usize, knots: Vec<f64>) -> Curve {
+        let points = points
+            .iter()
+            .map(|&(x, y)| CPoint {
+                x,
+                y,
+                z: NOZ,
+                w: NOW,
+            })
+            .collect();
+        BSplineCurve::from_nurb(Nurbs::new(points, degree, knots).unwrap(), 2, true).into()
+    }
+
+    /// A rational biquadratic patch over [0, 1]^2 with an inner u knot at 0.4: curved in
+    /// both directions, one weight above one.
+    fn patch() -> Surface {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+        let net = (0..4)
+            .map(|i| {
+                (0..3)
+                    .map(|j| {
+                        let (x, y) = (f64::from(i) / 3.0, f64::from(j) / 2.0);
+                        let z = 0.3 * f64::from((i + j) % 3) - 0.2 * f64::from(i * j);
+                        let w = if i == 1 && j == 1 { 1.5 } else { 1.0 };
+                        CPoint::new(x * w, y * w, z * w, w)
+                    })
+                    .collect()
+            })
+            .collect();
+        let nurb = NurbSurface::new(
+            net,
+            2,
+            2,
+            vec![0.0, 0.0, 0.0, 0.4, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        Surface::from(BSplineSurface::from_nurb(nurb, false))
+    }
+
+    /// The plane z = 0 with `(u, v) -> (2u, v)` on the analytic domain [0, 1]^2.
+    fn flat() -> Surface {
+        use crate::geom::extent2d::Extent2d;
+        use crate::math::{Point2, Vec2};
+        Surface::from(Plane::new(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Vec2::new(2.0, 1.0),
+            &Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0)),
+        ))
+    }
+
+    /// `curve` at 201 parameters of `range` and its ends lies in its enclosure over
+    /// `range`, and the box at each single parameter holds that point.
+    fn holds_samples(k: &Kernel, curve: &Curve, range: [f64; 2]) {
+        let b = curve_box(curve, checked_range(range).unwrap()).unwrap();
+        for i in 0..=200 {
+            let t = range[0] + (range[1] - range[0]) * f64::from(i) / 200.0;
+            let p = curve.evaluate_point(k, t).unwrap();
+            assert!(contains(b, p), "{t}: {p:?} outside {b:?}");
+            let at = curve_box(curve, Ivl::from(t)).unwrap();
+            assert!(contains(at, p), "{t}: {p:?} outside {at:?}");
+        }
+    }
+
+    #[test]
+    fn iso_and_on_surface_enclosures_hold_their_evaluations() {
+        use crate::curve::crv_on_surf::CrvOnSurf;
+        let k = Kernel::default();
+        let quadratic = || {
+            uv_spline(
+                &[(0.1, 0.2), (0.5, 0.9), (0.9, 0.3)],
+                2,
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            )
+        };
+        let mut cases: Vec<Curve> = Vec::new();
+        for (param, iso) in [
+            (SurfParamType::U, 0.4),
+            (SurfParamType::U, 0.0),
+            (SurfParamType::V, 0.7),
+            (SurfParamType::V, 1.0),
+        ] {
+            cases.push(
+                IsoCurve::from_surface(&k, patch(), param, iso, true, false)
+                    .unwrap()
+                    .into(),
+            );
+            cases.push(
+                IsoCurve::from_surface(&k, flat(), param, iso, true, false)
+                    .unwrap()
+                    .into(),
+            );
+        }
+        // Along an edge (u = 0), across the inner knot, and reaching past the domain on
+        // both ends: the B-spline extrapolates there, the plane clamps.
+        let lines = [
+            ((0.0, 0.0), (0.0, 1.0)),
+            ((0.2, 0.9), (0.6, 0.1)),
+            ((-0.3, 0.5), (1.2, 1.4)),
+        ];
+        for surface in [patch(), flat()] {
+            cases.push(
+                CrvOnSurf::new(&k, quadratic(), surface.clone(), None, 0)
+                    .unwrap()
+                    .into(),
+            );
+            for &((u0, v0), (u1, v1)) in &lines {
+                let uv = uv_spline(&[(u0, v0), (u1, v1)], 1, vec![0.0, 0.0, 1.0, 1.0]);
+                cases.push(
+                    CrvOnSurf::new(&k, uv, surface.clone(), None, 0)
+                        .unwrap()
+                        .into(),
+                );
+            }
+        }
+        for c in &cases {
+            for range in [[0.0, 1.0], [0.3, 0.35], [0.5, 0.5], [0.95, 1.0]] {
+                holds_samples(&k, c, range);
+            }
+        }
+    }
+
+    #[test]
+    fn a_tangent_field_lies_in_the_box_of_its_thales_spheres() {
+        use crate::curve::tangent_field::{TangentDirType, TangentFieldCurve};
+        let k = Kernel::default();
+        let uv = uv_spline(
+            &[(0.1, 0.2), (0.5, 0.9), (0.9, 0.3)],
+            2,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        );
+        let (s, e) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.2, 1.0, 0.5));
+        let field: Curve =
+            TangentFieldCurve::new(&k, uv, patch(), TangentDirType::Interpolate, s, e, None)
+                .unwrap()
+                .into();
+        for range in [[0.0, 1.0], [0.2, 0.3], [0.0, 1e-9], [1.0 - 1e-9, 1.0]] {
+            holds_samples(&k, &field, range);
+        }
+        // Within 1e-8 of an end the field is that end's stored tangent, exactly.
+        let start = curve_box(&field, Ivl::new(0.0, 1e-9)).unwrap();
+        assert_eq!(start, point_box(s).unwrap());
+        let end = curve_box(&field, Ivl::new(1.0 - 1e-9, 1.0)).unwrap();
+        assert_eq!(end, point_box(e).unwrap());
+    }
+
+    #[test]
+    fn on_surface_pairs_are_bounded_by_their_mean_value_form() {
+        use crate::curve::crv_on_surf::CrvOnSurf;
+        let k = Kernel::default();
+        // On `flat`, the parameter line (0, 0.25) -> (0.5, 0.25) is the segment
+        // (0, 0.25, 0) -> (1, 0.25, 0): exactly the line below, at every parameter.
+        let uv = uv_spline(&[(0.0, 0.25), (0.5, 0.25)], 1, vec![0.0, 0.0, 1.0, 1.0]);
+        let on: Curve = CrvOnSurf::new(&k, uv, flat(), None, 0).unwrap().into();
+        let iso: Curve = IsoCurve::from_surface(&k, flat(), SurfParamType::V, 0.25, true, false)
+            .unwrap()
+            .into();
+        let line = |z: f64| -> Curve {
+            Line::from_points(Vec3::new(0.0, 0.25, z), Vec3::new(1.0, 0.25, z), 3).into()
+        };
+        let reversed: Curve =
+            Line::from_points(Vec3::new(1.0, 0.25, 0.0), Vec3::new(0.0, 0.25, 0.0), 3).into();
+        let span = |c: &Curve| [c.natural_interval().min(), c.natural_interval().max()];
+        let (l0, back) = (span(&line(0.0)), span(&reversed));
+        // Equal curves differ by rounding only: each midpoint box is a few ulps of 1 wide
+        // (|x| <= 1) and the derivative term is the rounding of equal rates (a few ulps)
+        // times a cell's half-width; 1e-14 is above both by two orders.
+        let gap = curves(&on, [0.0, 1.0], &line(0.0), l0).unwrap();
+        assert!(gap < 1e-14, "{gap}");
+        let gap = curves(&iso, [0.0, 0.5], &line(0.0), l0).unwrap();
+        assert!(gap < 1e-14, "{gap}");
+        let gap = curves(&on, [0.0, 1.0], &reversed, [back[1], back[0]]).unwrap();
+        assert!(gap < 1e-14, "{gap}");
+        // Lifted by 1/2 the gap is exactly 1/2: the bound holds it and adds rounding only.
+        let lifted = curves(&on, [0.0, 1.0], &line(0.5), l0).unwrap();
+        assert!((0.5..0.5 + 1e-14).contains(&lifted), "{lifted}");
+        // Read against the line run the other way, the ends are 1 apart.
+        let crossed = curves(&on, [0.0, 1.0], &reversed, back).unwrap();
+        assert!(crossed >= 1.0, "{crossed}");
+    }
+
+    /// A bilinear surface over `u_knots` (degree 1 in v over [0, 1]) whose rows step in
+    /// z, so every u knot of multiplicity two is a jump.
+    fn stepped(u_knots: Vec<f64>, degree: usize) -> Surface {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+        let rows = u32::try_from(u_knots.len() - degree - 1).unwrap();
+        let net = (0..rows)
+            .map(|i| {
+                let x = f64::from(i) / f64::from(rows - 1);
+                let z = if 2 * i < rows { 0.0 } else { 0.5 };
+                vec![
+                    CPoint::new(x, 0.0, z, NOW),
+                    CPoint::new(x, 1.0, z + 0.1, NOW),
+                ]
+            })
+            .collect();
+        let nurb = NurbSurface::new(net, degree, 1, u_knots, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
+        Surface::from(BSplineSurface::from_nurb(nurb, false))
+    }
+
+    #[test]
+    fn unclamped_ends_are_held_or_refused() {
+        let k = Kernel::default();
+        // A quadratic parameter curve on unclamped knots.
+        let uv = uv_spline(
+            &[(0.1, 0.2), (0.5, 0.9), (0.9, 0.3), (0.6, 0.1)],
+            2,
+            vec![0.0, 0.1, 0.2, 0.5, 0.8, 0.9, 1.0],
+        );
+        // `basis_eval` fails on its natural ends; the box there holds both the end
+        // control point and the end piece's value.
+        assert!(uv.evaluate_point(&k, 0.2).is_err() && uv.evaluate_point(&k, 0.8).is_err());
+        let end = curve_box(&uv, Ivl::from(0.2)).unwrap();
+        assert!(contains(end, Vec3::new(0.1, 0.2, 0.0)), "{end:?}");
+        for range in [[0.21, 0.79], [0.3, 0.6]] {
+            holds_samples(&k, &uv, range);
+        }
+        let on: Curve = CrvOnSurf::new(&k, uv, flat(), None, 0).unwrap().into();
+        for range in [[0.21, 0.79], [0.3, 0.6]] {
+            holds_samples(&k, &on, range);
+        }
+        // Its mean-value rate would be the end piece's: refused on an unclamped end.
+        let uv = uv_spline(
+            &[(0.1, 0.2), (0.5, 0.9), (0.9, 0.3), (0.6, 0.1)],
+            2,
+            vec![0.0, 0.1, 0.2, 0.5, 0.8, 0.9, 1.0],
+        );
+        assert!(curve_rate(&uv, Ivl::new(0.2, 0.5), 0).unwrap().is_none());
+        assert!(curve_rate(&uv, Ivl::new(0.3, 0.6), 0).unwrap().is_some());
+        // An iso curve reaching an unclamped surface end is refused; inside it is held.
+        let surface = stepped(vec![0.0, 0.1, 0.2, 0.5, 0.8, 0.9, 1.0], 2);
+        let iso: Curve = IsoCurve::from_surface(&k, surface, SurfParamType::V, 0.5, true, false)
+            .unwrap()
+            .into();
+        assert!(curve_box(&iso, Ivl::new(0.2, 0.5)).is_err());
+        assert!(curve_box(&iso, Ivl::new(0.6, 0.8)).is_err());
+        holds_samples(&k, &iso, [0.3, 0.6]);
+    }
+
+    #[test]
+    fn a_jump_at_a_range_end_holds_the_piece_after_it() {
+        let k = Kernel::default();
+        // The evaluation takes the piece right of a jump on it: z = 0.5 at u = 0.5,
+        // while the left piece ends at z = 0.
+        let surface = stepped(vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0], 1);
+        let iso: Curve = IsoCurve::from_surface(&k, surface, SurfParamType::V, 0.5, true, false)
+            .unwrap()
+            .into();
+        holds_samples(&k, &iso, [0.2, 0.5]);
+        holds_samples(&k, &iso, [0.2, 0.45]);
+        holds_samples(&k, &iso, [0.5, 0.8]);
+        let uv = uv_spline(
+            &[(0.1, 0.1), (0.3, 0.3), (0.7, 0.2), (0.9, 0.9)],
+            1,
+            vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0],
+        );
+        assert!(curve_rate(&uv, Ivl::new(0.2, 0.5), 0).unwrap().is_none());
+        assert!(curve_rate(&uv, Ivl::new(0.2, 0.45), 0).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_short_tangent_field_holds_both_stored_tangents() {
+        use crate::curve::tangent_field::{TangentDirType, TangentFieldCurve};
+        let k = Kernel::default();
+        // Shorter than its two end zones: `s` below 1e-8 + EFF_ZERO, `e` from there.
+        let uv = uv_spline(&[(0.1, 0.2), (0.9, 0.3)], 1, vec![0.0, 0.0, 1e-8, 1e-8]);
+        let (s, e) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.2, 1.0, 0.5));
+        let field: Curve =
+            TangentFieldCurve::new(&k, uv, patch(), TangentDirType::Interpolate, s, e, None)
+                .unwrap()
+                .into();
+        let b = curve_box(&field, Ivl::new(0.5e-8, 1.5e-8)).unwrap();
+        assert!(contains(b, s) && contains(b, e), "{b:?}");
+        for t in [0.5e-8, 1e-8, 1.5e-8] {
+            assert!(contains(b, field.evaluate_point(&k, t).unwrap()), "{t}");
+        }
+    }
+
+    #[test]
+    fn nested_surface_curves_are_not_split() {
+        use core::cell::Cell;
+        let calls = Cell::new(0_usize);
+        let refuse = |_| {
+            calls.set(calls.get() + 1);
+            Ok(None)
+        };
+        assert!(split_surface_box(Ivl::new(0.0, 1.0), 0, refuse).is_err());
+        // The first box splits depth-first down one side, SURFACE_SPLITS deep.
+        assert_eq!(calls.get(), SURFACE_SPLITS + 1);
+        calls.set(0);
+        assert!(split_surface_box(Ivl::new(0.0, 1.0), 1, refuse).is_err());
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn surface_curve_nesting_is_refused_past_the_geometry_limit() {
+        use crate::curve::crv_on_surf::CrvOnSurf;
+        let k = Kernel::default();
+        let uv = uv_spline(&[(0.1, 0.2), (0.9, 0.3)], 1, vec![0.0, 0.0, 1.0, 1.0]);
+        let c: Curve = CrvOnSurf::new(&k, uv, flat(), None, 0).unwrap().into();
+        let t = Ivl::new(0.0, 1.0);
+        // One level below the limit still reaches the parameter curve; at it, refused.
+        assert!(curve_box_at(&c, t, MAX_GEOMETRY_NESTING - 1).is_ok());
+        assert!(curve_box_at(&c, t, MAX_GEOMETRY_NESTING).is_err());
+        assert!(curve_rate(&c, t, MAX_GEOMETRY_NESTING).is_err());
     }
 }

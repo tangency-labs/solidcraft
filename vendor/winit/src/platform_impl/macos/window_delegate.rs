@@ -24,6 +24,12 @@ use objc2_foundation::{
     NSObjectNSDelayedPerforming, NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSPoint,
     NSRect, NSSize, NSString,
 };
+#[cfg(feature = "rwh_06")]
+use objc2::rc::Weak;
+#[cfg(feature = "rwh_06")]
+use objc2_app_kit::{NSEvent, NSWindow};
+#[cfg(feature = "rwh_06")]
+use objc2_foundation::NSRunLoopCommonModes;
 use tracing::{trace, warn};
 
 use super::app_state::ApplicationDelegate;
@@ -84,6 +90,10 @@ pub(crate) struct State {
     app_delegate: Retained<ApplicationDelegate>,
 
     window: Retained<WinitWindow>,
+    #[cfg(feature = "rwh_06")]
+    suspend_owner_during_drag: bool,
+    #[cfg(feature = "rwh_06")]
+    suspended_owner: RefCell<Option<Weak<NSWindow>>>,
 
     // During `windowDidResize`, we use this to only send Moved if the position changed.
     //
@@ -179,6 +189,32 @@ declare_class!(
         fn window_did_end_live_resize(&self, _: Option<&AnyObject>) {
             trace_scope!("windowDidEndLiveResize:");
             self.set_resize_increments_inner(NSSize::new(1., 1.));
+        }
+
+        #[cfg(feature = "rwh_06")]
+        #[method(windowWillMove:)]
+        fn window_will_move(&self, _: Option<&AnyObject>) {
+            if !self.ivars().suspend_owner_during_drag
+                || unsafe { NSEvent::pressedMouseButtons() } & 1 == 0
+            {
+                return;
+            }
+            let window = self.window();
+            let Some(owner) = (unsafe { window.parentWindow() }) else {
+                return;
+            };
+            self.ivars().suspended_owner.replace(Some(Weak::new(&owner)));
+            // AppKit's attached-child dragging can stutter. Keep the same stacking
+            // order while the window moves independently.
+            unsafe {
+                owner.removeChildWindow(window);
+                let owner_number = owner.windowNumber();
+                // Relative ordering with window number zero would raise it globally.
+                if owner_number > 0 && owner.isVisible() {
+                    window.orderWindow_relativeTo(NSWindowOrderingMode::NSWindowAbove, owner_number);
+                }
+            }
+            self.schedule_owner_restoration();
         }
 
         // This won't be triggered if the move was part of a resize.
@@ -430,8 +466,26 @@ declare_class!(
         }
     }
 
-    // Key-Value Observing
     unsafe impl WindowDelegate {
+        #[cfg(feature = "rwh_06")]
+        #[method(winitRestoreOwnerAfterMove:)]
+        fn restore_owner_after_move(&self, _: Option<&AnyObject>) {
+            if unsafe { NSEvent::pressedMouseButtons() } & 1 != 0 {
+                self.schedule_owner_restoration();
+                return;
+            }
+            let Some(owner) = self.ivars().suspended_owner.take().and_then(|owner| owner.load())
+            else {
+                return;
+            };
+            let window = self.window();
+            // Reattach only the original parent, and only while both windows are open.
+            if unsafe { window.delegate().is_some() && owner.delegate().is_some() } {
+                unsafe { owner.addChildWindow_ordered(window, NSWindowOrderingMode::NSWindowAbove) };
+            }
+        }
+
+        // Key-Value Observing
         #[method(observeValueForKeyPath:ofObject:change:context:)]
         fn observe_value(
             &self,
@@ -673,6 +727,20 @@ fn new_window(
 }
 
 impl WindowDelegate {
+    #[cfg(feature = "rwh_06")]
+    fn schedule_owner_restoration(&self) {
+        // AppKit may consume the mouse-up event while the system is tracking a window drag.
+        // Check for release on the run loop without changing AppKit's drag events.
+        unsafe {
+            self.performSelector_withObject_afterDelay_inModes(
+                sel!(winitRestoreOwnerAfterMove:),
+                None,
+                0.016,
+                &NSArray::from_id_slice(&[NSRunLoopCommonModes.copy()]),
+            );
+        }
+    }
+
     pub(super) fn new(
         app_delegate: &ApplicationDelegate,
         attrs: WindowAttributes,
@@ -682,7 +750,16 @@ impl WindowDelegate {
             .ok_or_else(|| os_error!(OsError::CreationError("couldn't create `NSWindow`")))?;
 
         #[cfg(feature = "rwh_06")]
-        match attrs.parent_window.map(|handle| handle.0) {
+        let parent_window = attrs
+            .parent_window
+            .as_ref()
+            .map(|handle| Ok(handle.0))
+            .or_else(|| attrs.owned_by.as_ref().map(|owner| owner.window.raw_window_handle_rwh_06()))
+            .transpose()
+            .map_err(|_| os_error!(OsError::CreationError("couldn't get owner window handle")))?;
+
+        #[cfg(feature = "rwh_06")]
+        match parent_window {
             Some(rwh_06::RawWindowHandle::AppKit(handle)) => {
                 // SAFETY: Caller ensures the pointer is valid or NULL
                 // Unwrap is fine, since the pointer comes from `NonNull`.
@@ -721,6 +798,10 @@ impl WindowDelegate {
             app_delegate: app_delegate.retain(),
             window: window.retain(),
             previous_position: Cell::new(flip_window_screen_coordinates(window.frame())),
+            #[cfg(feature = "rwh_06")]
+            suspend_owner_during_drag: attrs.parent_window.is_none() && attrs.owned_by.is_some(),
+            #[cfg(feature = "rwh_06")]
+            suspended_owner: RefCell::new(None),
             previous_scale_factor: Cell::new(scale_factor),
             resize_increments: Cell::new(resize_increments),
             decorations: Cell::new(attrs.decorations),

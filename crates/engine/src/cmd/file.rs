@@ -2669,6 +2669,7 @@ fn write_bytes(
     // Atomic, keeping the version being replaced as `<file>.bak`; a watched save reports how far
     // the write is and stops on Cancel until the file is replaced.
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, true).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    super::component_link::forget_file_digests();
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
