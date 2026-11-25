@@ -1115,6 +1115,23 @@ mod tests {
         assert_eq!(s.doc.features.len(), features);
     }
 
+    /// To Next passes through a component's envelope: the box a Bounding Solid makes around the
+    /// part (here from z = 6, 4 below it) is no geometry. The 6 wide wall runs on to the part's
+    /// underside at z = 10: 6 x 10, not 6 x 6.
+    #[test]
+    fn surface_extrude_to_next_passes_component_envelopes() {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Bought"}));
+        run(&mut s, "solid.box", json!({"corner": [-5, -5, 10], "length": 10, "width": 10, "height": 2, "body_name": "Part"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "solid.bounding_solid", json!({"component": "Bought", "margin": 4, "body_name": "Envelope"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        run(&mut s, "sketch.line", json!({"points": [[-3, 0], [3, 0]], "ids": ["wall"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["wall"], "to_next": true, "body_name": "Wall"}));
+        assert!((area(&s, "Wall") - 60.0).abs() < 60.0 * 1e-6, "{}", area(&s, "Wall"));
+    }
+
     #[test]
     fn surface_extrude_profile_walls_stitch_into_the_solid() {
         let mut s = Session::default();
