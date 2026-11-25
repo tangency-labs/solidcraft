@@ -1365,7 +1365,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                 let file = match load(&model.path) {
                     Ok(file) => file,
                     Err(reason) => {
-                        warnings.push(format!("{}: {}", model_label(&model.path), short_reason(&reason)));
+                        warnings.push(load_failure(&model.path, &reason, Path::new(file).parent()));
                         continue;
                     }
                 };
@@ -1486,6 +1486,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
         }
     }
     report_import(5);
+    let warnings = collapse_repeats(warnings);
     let body_names: Vec<String> = meshes.iter().map(|mesh| mesh.name.clone()).collect();
     let file_name = Path::new(file).file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
     let feature = crate::MeshFeature {
@@ -1534,6 +1535,71 @@ fn unzip_stpz(bytes: &[u8]) -> std::result::Result<Vec<u8>, String> {
         return Err("the model file is too large".into());
     }
     Ok(out)
+}
+
+/// The warning for a model that could not be read. The loader's reason starts with the path it
+/// tried (`<path>: no such file or directory (os error 2)`): a missing file says which folder was
+/// searched, in words rather than the operating system's, so the reader knows where to look.
+fn load_failure(reference: &str, reason: &str, board_folder: Option<&Path>) -> String {
+    let label = model_label(reference);
+    // One variable that is not set leaves out every model that names it: one line for all of them.
+    if reason.starts_with("unresolved environment variable") {
+        return format!("{reason}: the models that name it are left out (set it in the environment or in KiCad's Configure Paths)");
+    }
+    if let Some((head, tail)) = reason.split_once(": ")
+        && (head.contains('\\') || head.contains('/'))
+        && is_missing_file(tail)
+    {
+        let searched = Path::new(head).parent();
+        // A folder under the board's own is named from the board, so a long personal path is not repeated.
+        let folder = match (searched, board_folder.filter(|dir| !dir.as_os_str().is_empty())) {
+            (Some(dir), Some(board)) => match dir.strip_prefix(board) {
+                Ok(rest) if rest.as_os_str().is_empty() => "the board's folder".to_string(),
+                Ok(rest) => format!("the board's folder, {}", rest.to_string_lossy()),
+                Err(_) => dir.to_string_lossy().into_owned(),
+            },
+            (Some(dir), None) => dir.to_string_lossy().into_owned(),
+            (None, _) => String::new(),
+        };
+        if !folder.is_empty() {
+            return format!("{label}: not found in {folder}");
+        }
+    }
+    format!("{label}: {}", short_reason(reason))
+}
+
+/// Whether an operating system's or the browser's error says the file is not there, whatever the
+/// platform's words: Linux and macOS say "no such file or directory", Windows "cannot find the file
+/// specified" (or "cannot find the path"), the browser "no such file in this browser", and all of
+/// them carry the code `os error 2` or `3` where the system gives one.
+fn is_missing_file(tail: &str) -> bool {
+    let tail = tail.to_ascii_lowercase();
+    tail.starts_with("no such file")
+        || tail.contains("cannot find the file")
+        || tail.contains("cannot find the path")
+        || tail.contains("(os error 2)")
+        || tail.contains("(os error 3)")
+}
+
+/// Identical warnings said once, with how many there were: a board with fifty footprints of one
+/// missing model gives one line, not fifty. The first occurrence keeps its place.
+fn collapse_repeats(warnings: Vec<String>) -> Vec<String> {
+    let mut order: Vec<String> = Vec::new();
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for warning in warnings {
+        let count = counts.entry(warning.clone()).or_insert(0);
+        if *count == 0 {
+            order.push(warning);
+        }
+        *count += 1;
+    }
+    order
+        .into_iter()
+        .map(|warning| match counts.get(&warning).copied().unwrap_or(1) {
+            1 => warning,
+            n => format!("{warning} (x{n})"),
+        })
+        .collect()
 }
 
 /// A model's name as a warning shows it: its file name, not the whole resolved path.
