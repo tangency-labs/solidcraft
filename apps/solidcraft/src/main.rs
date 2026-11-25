@@ -278,8 +278,8 @@ fn changes_settings(event: &egui::Event) -> bool {
 
 /// Input that can change a setting but comes in every frame while it lasts: a wheel (a value
 /// stepped over its box) or a pinch. The settings are compared once [`PrefsWriter::INTERVAL`]
-/// after it, not in each of its frames: reading them out costs a few milliseconds, more than
-/// the rest of a zooming frame.
+/// after it, not in each of its frames: reading them out takes about 2 ms, as long as the rest
+/// of a zooming frame.
 fn settles_settings_later(event: &egui::Event) -> bool {
     matches!(event, egui::Event::MouseWheel { .. } | egui::Event::Zoom(_) | egui::Event::Rotate(_))
 }
