@@ -1686,7 +1686,8 @@ fn edge_end_edit_certified(
 /// [`SolidError::NotFound`] for a dangling id; those of
 /// [`crate::topology::edge::set_curve`] and [`crate::topology::edge::set_interval`];
 /// [`SolidError::Cancelled`] or [`SolidError::OutOfFuel`] from [`point_on_curve`]'s solve
-/// (the edge it was solving for is not edited). Any other failed edit of a curve leaves
+/// (the edge it was solving for is not edited; edges
+/// before it in the walk may already be). Any other failed edit of a curve leaves
 /// its edge as it is.
 pub(crate) fn carry_far_edge_ends(
     k: &Kernel,
@@ -1729,10 +1730,10 @@ pub(crate) fn carry_far_edge_ends(
         }
         let old = (&curve, &interval);
         let mut kept: Option<(Curve, Extent1d)> = None;
-        let on_curve = if far[0] != far[1] {
-            point_on_curve(k, &curve, at, tol)?
-        } else {
+        let on_curve = if far[0] == far[1] {
             None
+        } else {
+            point_on_curve(k, &curve, at, tol)?
         };
         let retrim = on_curve
             .map(|t| seam_parameter(k, &curve, far, t, at, tol))
@@ -3267,10 +3268,7 @@ mod tests {
             key_of: &crate::topology::loopuse::notify_ref,
         };
         let r = carry_far_edge_ends(&k, &mut b, v[1], &mut env);
-        assert!(
-            matches!(r, Err(crate::error::SolidError::Cancelled { .. })),
-            "{r:?}"
-        );
+        assert!(matches!(r, Err(SolidError::Cancelled { .. })), "{r:?}");
         // the B-spline edge still starts at its old point
         let c1 = b.edge(e[1]).unwrap().curve.as_ref().unwrap();
         assert_eq!(c1.evaluate_point(&k, 0.0).unwrap(), p0);
