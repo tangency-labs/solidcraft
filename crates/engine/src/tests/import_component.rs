@@ -971,6 +971,7 @@ fn step_source_link_is_recorded_saved_relative_updated_and_broken() {
     assert_eq!(s.doc.links[&comp].step_names.as_deref(), Some("auto"));
     assert!(std::path::Path::new(&s.doc.links[&comp].path).is_absolute());
     assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["changed"], false);
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["importer"], json!({"format": "step"}));
     let saved = dir.join("assembly.sc");
     run(&mut s, "file.save", json!({"path": saved}));
     let (doc, _) = solidcraft_io::read_design_file(&saved.to_string_lossy(), None::<fn(solidcraft_io::DesignPreview)>).unwrap();
@@ -1186,4 +1187,32 @@ fn deleting_a_component_of_an_imported_assembly_deletes_its_bodies() {
     assert_eq!(holding(&mut again), expected, "reopened");
     assert_eq!(shown_boxes(&again), [pin_box]);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_link_names_its_importer_and_older_designs_load_without_one() {
+    use solidcraft_doc::{DesignLink, LinkImporter};
+    let importer =
+        LinkImporter { format: "kic.convert".into(), plugin: Some("kic".into()), version: Some("1.2".into()), options: json!({"layers": ["top"]}) };
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    s.doc_mut().links.insert(1, DesignLink { path: "board.kic".into(), feature: 1, importer: Some(importer.clone()), ..Default::default() });
+    s.doc_mut().links.insert(2, DesignLink { path: "part.sc".into(), feature: 2, ..Default::default() });
+    let text = solidcraft_io::write_design(&s.doc).unwrap();
+    let read = solidcraft_io::read_design(&text).unwrap();
+    assert_eq!(read.links[&1].importer, Some(importer));
+    assert!(read.links[&1].path == "board.kic" && !read.links[&1].is_design());
+    assert!(read.links[&2].importer.is_none() && read.links[&2].is_design());
+    // A link saved before the field has no importer, is a design link, and saves without one.
+    let old: DesignLink = serde_json::from_value(json!({"path": "part.sc", "feature": 3})).unwrap();
+    assert!(old.importer.is_none() && old.is_design());
+    assert!(serde_json::to_value(&old).unwrap().get("importer").is_none());
+    // A build that does not know the field ignores it: the design opens with its linked bodies.
+    let mut written: serde_json::Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    for link in written["links"].as_object_mut().unwrap().values_mut() {
+        link.as_object_mut().unwrap().remove("importer");
+    }
+    let unaware = solidcraft_io::read_design(written.to_string().as_bytes()).unwrap();
+    assert!(unaware.links.values().all(|l| l.importer.is_none()) && unaware.links.len() == 2);
+    assert_eq!(unaware.features.len(), s.doc.features.len(), "the bodies' features are kept");
 }
