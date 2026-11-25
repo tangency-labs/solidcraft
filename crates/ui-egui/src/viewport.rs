@@ -519,6 +519,14 @@ pub enum Hit {
         id: String,
         at: Vec2,
     },
+    /// A point of a component sketch on another copy of its part than the one the sketch is
+    /// edited at (`path`, [`solidcraft_engine::doc::SketchCopy`]); `at` is where it is there.
+    PlacedSketchPoint {
+        sketch: u64,
+        id: String,
+        path: Vec<u64>,
+        at: Vec3,
+    },
     /// A selectable line midpoint, before any associated helper point has been made.
     SketchMidpoint {
         sketch: u64,
@@ -784,6 +792,22 @@ fn picture_far(app: &SolveApp, cam: &Camera) -> f64 {
 pub(crate) fn visible_sketches(app: &SolveApp) -> Vec<u64> {
     let st = crate::open_meshing::shown_world(app);
     st.sketches.iter().filter(|s| solidcraft_engine::view::sketch_shown(&app.session, s.feature)).map(|s| s.feature).collect()
+}
+
+/// The other placements of a component sketch it is drawn at: each copy of its part that is
+/// shown, with its own eye and Sketches folder ([`solidcraft_engine::view::sketch_shown_at`]).
+/// Only a joint's origin picks points there ([`placed_sketch_hits`]); everything else works on
+/// the sketch where it is edited.
+pub(crate) fn sketch_copies_shown(app: &SolveApp, st: &solidcraft_engine::doc::ModelState, sid: u64) -> Vec<solidcraft_engine::doc::SketchCopy> {
+    st.sketch_copies.get(&sid).map_or_else(Vec::new, |copies| {
+        copies.iter().filter(|c| solidcraft_engine::view::sketch_shown_at(&app.session, sid, &c.path)).cloned().collect()
+    })
+}
+
+/// Each place a sketch is drawn at, as a move from where it is edited: there (the identity) when
+/// `own` (it is shown there, [`visible_sketches`]), and each copy [`sketch_copies_shown`] gives.
+pub(crate) fn sketch_frames(app: &SolveApp, st: &solidcraft_engine::doc::ModelState, sid: u64, own: bool) -> Vec<solidcraft_engine::doc::Mat> {
+    own.then_some(solidcraft_engine::doc::IDENTITY).into_iter().chain(sketch_copies_shown(app, st, sid).into_iter().map(|c| c.delta)).collect()
 }
 
 /// The sketches that failed for lost projections, each built for the result it failed with and
@@ -3440,14 +3464,24 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     let typed = crate::dim_view::preview_world(app);
     let ppp = app.viewport.pixels_per_point();
     let (failing, _) = failed_sketches(app);
-    let shown: Vec<(u64, &solidcraft_engine::doc::SolvedSketch, bool)> = visible_sketches(app)
-        .into_iter()
-        .filter_map(|sid| {
-            typed.as_ref().filter(|_| crate::sketch_view::active_sketch(app) == Some(sid)).unwrap_or(&st).sketch(sid).map(|ss| (sid, ss, false))
+    // Each sketch where it is edited, if shown there (the identity), and on the other copies of
+    // its part that are shown.
+    let own: std::collections::HashSet<u64> = visible_sketches(app).into_iter().collect();
+    let shown: Vec<(u64, &solidcraft_engine::doc::SolvedSketch, bool, Vec<solidcraft_engine::doc::Mat>)> = st
+        .sketches
+        .iter()
+        .filter_map(|ss| {
+            let sid = ss.feature;
+            let frames = sketch_frames(app, &st, sid, own.contains(&sid));
+            (!frames.is_empty()).then(|| {
+                let ss = typed.as_ref().filter(|_| crate::sketch_view::active_sketch(app) == Some(sid)).and_then(|t| t.sketch(sid)).unwrap_or(ss);
+                (sid, ss, false, frames)
+            })
         })
-        .chain(failing.iter().map(|ss| (ss.feature, &**ss, true)))
+        .chain(failing.iter().map(|ss| (ss.feature, &**ss, true, vec![solidcraft_engine::doc::IDENTITY])))
         .collect();
-    for (sid, ss, failed) in shown {
+    for (sid, ss, failed, frames) in shown {
+        let at = |m: &solidcraft_engine::doc::Mat, p: Vec3| solidcraft_engine::doc::apply_point(m, p).to_f32();
         // A budget per sketch, so one large sketch leaves the next its curves (#6524).
         let mut uncached = crate::sketch_display::Uncached::default();
         let active = crate::sketch_view::active_sketch(app) == Some(sid);
@@ -3479,8 +3513,10 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
                 cached.as_ref()
             };
             for tri in display.as_ref().map_or_else(Vec::new, |region| crate::sketch_display::fill_triangles(region, &mut fill_budget)) {
-                for q in tri {
-                    sc.trans_tri((ss.plane.to_world(q) + lift).to_f32(), [0.0; 3], profile_fill);
+                for m in &frames {
+                    for q in tri {
+                        sc.trans_tri(at(m, ss.plane.to_world(q) + lift), [0.0; 3], profile_fill);
+                    }
                 }
             }
         }
@@ -3516,14 +3552,16 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         // can opt into the same behaviour in Preferences.
         let through = active || app.preferences.reference_geometry_through_bodies;
         let halo = sc.color(c4(tk.sketch_halo));
-        for (segs, _, width, _) in strokes.iter().filter(|stroke| stroke.3) {
-            for (a, b) in segs {
-                sc.line(a.to_f32(), b.to_f32(), halo, width + SKETCH_HALO_WIDTH, through);
+        for m in &frames {
+            for (segs, _, width, _) in strokes.iter().filter(|stroke| stroke.3) {
+                for (a, b) in segs {
+                    sc.line(at(m, *a), at(m, *b), halo, width + SKETCH_HALO_WIDTH, through);
+                }
             }
-        }
-        for (segs, color, width, _) in &strokes {
-            for (a, b) in segs {
-                sc.line(a.to_f32(), b.to_f32(), *color, *width, through);
+            for (segs, color, width, _) in &strokes {
+                for (a, b) in segs {
+                    sc.line(at(m, *a), at(m, *b), *color, *width, through);
+                }
             }
         }
         // A selected spline's tangent guides follow the selection, which this cached scene does
@@ -4703,6 +4741,9 @@ pub fn same_target(a: &Hit, b: &Hit) -> bool {
         | (Hit::SketchPoint { sketch: s, id: i, .. }, Hit::SketchPoint { sketch: t, id: j, .. })
         | (Hit::SketchPoint3d { sketch: s, id: i, .. }, Hit::SketchPoint3d { sketch: t, id: j, .. })
         | (Hit::SketchCurve { sketch: s, id: i, .. }, Hit::SketchCurve { sketch: t, id: j, .. }) => s == t && i == j,
+        (Hit::PlacedSketchPoint { sketch: s, id: i, path: p, .. }, Hit::PlacedSketchPoint { sketch: t, id: j, path: q, .. }) => {
+            s == t && i == j && p == q
+        }
         (Hit::Vertex { body: a, point: p }, Hit::Vertex { body: b, point: q }) => a == b && p.dist(*q) < 1e-9,
         (Hit::Edge { body: a, index: i, .. }, Hit::Edge { body: b, index: j, .. })
         | (Hit::Face { body: a, index: i, .. }, Hit::Face { body: b, index: j, .. }) => a == b && i == j,
@@ -4930,6 +4971,29 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
                 let rank = (dd, prefer_free && locked_points.get(index).copied().unwrap_or(false));
                 if dd < 8.0 && best.wants(rank) {
                     best.offer(rank, Hit::SketchPoint { sketch: sid, id: point.id.clone(), at: mirror });
+                }
+            }
+        }
+    }
+    // A joint's origin also takes the points of component sketches on the other copies of their
+    // parts shown: picked there, the joint holds that copy (each copy shows its part's sketches).
+    if app.dialog.as_ref().is_some_and(crate::dialogs_assembly::takes_snaps) && !crate::render_workspace::active(app) {
+        for ss in &st.sketches {
+            let copies = sketch_copies_shown(app, &st, ss.feature);
+            if copies.is_empty() {
+                continue;
+            }
+            let visible = solidcraft_engine::view::SketchPointVisibility::new(&ss.sketch);
+            for p in ss.sketch.points.iter().filter(|p| visible.takes(p)) {
+                let world = ss.plane.to_world(p.pos);
+                for copy in &copies {
+                    let at = solidcraft_engine::doc::apply_point(&copy.delta, world);
+                    let Some(sp) = proj.to_screen(at) else { continue };
+                    let dd = sp.distance(pos);
+                    let rank = (dd, false);
+                    if dd < 8.0 && best.wants(rank) {
+                        best.offer(rank, Hit::PlacedSketchPoint { sketch: ss.feature, id: p.id.clone(), path: copy.path.clone(), at });
+                    }
                 }
             }
         }
@@ -5417,8 +5481,9 @@ pub fn section_hatch(app: &SolveApp) -> bool {
     }
 }
 
-/// Visible geometry belonging to a timeline feature. Body creators retain their whole-body
-/// feedback; modifiers use persistent face names, which survive later edits and placement.
+/// Visible geometry belonging to a timeline feature. Features light their constituent faces
+/// using persistent face names, which survive later edits and placement, leaving subsequent
+/// features unhighlighted.
 /// Do not expand these faces into surface patches: neighbouring faces can belong to another
 /// feature even when they share a surface.
 fn feature_geometry(app: &SolveApp, id: u64) -> Vec<Sel> {
@@ -5437,16 +5502,34 @@ fn feature_parts(app: &SolveApp, id: u64, shown_only: bool) -> Vec<Sel> {
         if shown_only && (!app.body_visible(&b.name) || app.preview.effective_replaced().contains(&b.name)) {
             continue;
         }
-        if b.feature == id {
-            out.push(Sel::Body { name: b.name.clone() });
-            continue;
-        }
         let names = solidcraft_engine::doc::naming::face_names(b);
         let m = b.mesh();
-        for (index, _) in names.iter().enumerate().filter(|(_, n)| solidcraft_engine::doc::persistent_name::made_by(n) == Some(id)) {
-            if let Some(point) = first_triangle_point(&m, index) {
-                out.push(Sel::Face { body: b.name.clone(), index, point });
+        let target_indices: std::collections::HashSet<usize> =
+            names.iter().enumerate().filter(|(_, n)| solidcraft_engine::doc::persistent_name::made_by(n) == Some(id)).map(|(i, _)| i).collect();
+        let mut found_face = false;
+        if !target_indices.is_empty() {
+            let mut face_points: std::collections::HashMap<usize, solidcore_record::Vec3> = std::collections::HashMap::new();
+            for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+                let fi = *f as usize;
+                if target_indices.contains(&fi)
+                    && !face_points.contains_key(&fi)
+                    && let Some([a, b, c]) = m.tri(t)
+                {
+                    face_points.insert(fi, (a + b + c) / 3.0);
+                    if face_points.len() == target_indices.len() {
+                        break;
+                    }
+                }
             }
+            for index in 0..names.len() {
+                if let Some(&point) = face_points.get(&index) {
+                    out.push(Sel::Face { body: b.name.clone(), index, point });
+                    found_face = true;
+                }
+            }
+        }
+        if !found_face && b.feature == id {
+            out.push(Sel::Body { name: b.name.clone() });
         }
     }
     if out.is_empty() {
@@ -5803,6 +5886,7 @@ pub fn hit_sel(h: &Hit) -> Option<Sel> {
         Hit::SketchPoint3d { sketch, id, .. } => Sel::SketchPoint { id: format!("{sketch}:{id}") },
         Hit::SketchMidpoint { id, .. } => Sel::SketchMidpoint { id: id.clone() },
         Hit::SketchPoint { id, .. } => Sel::SketchPoint { id: id.clone() },
+        Hit::PlacedSketchPoint { sketch, id, path, .. } => Sel::PlacedSketchPoint { sketch: *sketch, id: id.clone(), path: path.clone() },
         Hit::SketchCurve { id, .. } => Sel::SketchCurve { id: id.clone(), sketch: None },
         Hit::Vertex { body, point } => Sel::Vertex { body: body.clone(), point: *point },
         Hit::Edge { body, index, mid, .. } => Sel::Edge { body: body.clone(), index: *index, point: *mid },
@@ -5849,6 +5933,9 @@ pub(crate) fn sel_hit(app: &SolveApp, sel: &Sel) -> Option<Hit> {
         Sel::SketchCurve { id, sketch } => curve((*sketch).or(active)?, id)?,
         Sel::ExternalSketchCurve { sketch, id } => curve(*sketch, id)?,
         Sel::ExternalSketchPoint { sketch, id } => Hit::SketchPoint { sketch: *sketch, id: id.clone(), at: point(*sketch, id)? },
+        Sel::PlacedSketchPoint { sketch, id, path } => {
+            Hit::PlacedSketchPoint { sketch: *sketch, id: id.clone(), path: path.clone(), at: st.placed_sketch_point(*sketch, path, id)?.0 }
+        }
         // A point of another sketch is picked as `sketch:id`.
         Sel::SketchPoint { id } => {
             let (sketch, id) = match id.split_once(':').and_then(|(s, p)| Some((s.parse().ok()?, p))) {
@@ -7667,6 +7754,15 @@ pub(crate) fn seg_dist(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     p.distance(a + ab * t)
 }
 
+/// Raw point on the active sketch plane under screen `pos` without snapping.
+pub(crate) fn sketch_plane_cursor(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec2> {
+    let sid = app.session.active_sketch?;
+    let st = crate::open_meshing::shown_world(app);
+    let ss = st.sketch(sid)?;
+    let (o, d) = proj.ray(pos);
+    crate::sketch_cursor_readout::plane_point(&ss.plane, o, d)
+}
+
 /// Point on the active sketch plane under the cursor (sketch coordinates), snapped to sketch
 /// points within a few pixels and otherwise to a fine grid. Returns the snapped point and the
 /// id of the sketch point it snapped to.
@@ -8207,8 +8303,9 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     let card = app.viewport.card;
     let notice = app.viewport.window.unwrap_or(rect);
     let overlay_rect = crate::shell::bottom_readout_rect(app, notice);
+    let mut legends = Vec::new();
     if !card {
-        crate::viewport_details::legacy_legends(app, ui, overlay_rect);
+        legends.extend(crate::viewport_details::legacy_legends(app, ui, overlay_rect));
         placement_note(app, &painter, overlay_rect);
         crate::frame_rate::paint(app, ui, &painter, overlay_rect);
     }
@@ -8223,7 +8320,8 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     // A tool's click that moved on the way (#2448) clicks where the button is let go.
     if app.viewport.tool_click && resp.drag_stopped() {
         app.viewport.tool_click = false;
-        if let Some(p) = ui.input(|i| i.pointer.latest_pos()).filter(|p| rect.contains(*p))
+        if !crate::dim_view::consumed_outside_press()
+            && let Some(p) = ui.input(|i| i.pointer.latest_pos()).filter(|p| rect.contains(*p))
             && app.tool.is_some()
         {
             crate::tools::on_hover(app, &proj, p, mods.shift);
@@ -8364,6 +8462,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.viewport.draw_drag = app.tool.as_ref().is_some_and(|t| t.pts.len() == 1).then_some(a);
         } else if app.tool.is_some()
             && !app.viewport.trim_drag
+            && !crate::dim_view::consumed_outside_press()
             && !held
             && primary_nav.is_none()
             && mode.is_none()
@@ -8394,7 +8493,13 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             dialog.restore_value_focus = true;
         }
-        if resp.clicked() && !held && !reference_pick && !joint_handle_pointer && !app.viewport.draw_drag_handled {
+        let dim_accept = resp.clicked_by(egui::PointerButton::Primary)
+            && !held
+            && !reference_pick
+            && !joint_handle_pointer
+            && !app.viewport.draw_drag_handled
+            && crate::dim_view::accept_outside_click(app);
+        if resp.clicked() && !held && !reference_pick && !dim_accept && !joint_handle_pointer && !app.viewport.draw_drag_handled {
             if crate::browser_canvas::click(app, &proj, p) {
                 // Calibrate Canvas: the click sets Point A or B on the image (#9108).
             } else if app.tool.is_some() {
@@ -8711,41 +8816,58 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             q = if mirrored { offset - q } else { q + offset };
             let from = grab.map_or(q, |point| if mirrored { offset - point } else { point + offset });
             let with = dragged_with(app, &id);
-            // Snap the dragged point (or the line's ends) to other geometry, like drawing.
-            let snap = {
+            let q_raw = q;
+            // Snap the dragged point (or the line's ends / curve tangency) near the cursor.
+            let (snap, snap_mm_px) = {
                 let st = crate::open_meshing::shown_world(app);
-                crate::sketch_view::active_sketch(app).and_then(|s| st.sketch(s)).and_then(|ss| {
+                let found = crate::sketch_view::active_sketch(app).and_then(|s| st.sketch(s)).and_then(|ss| {
                     let sk = &ss.sketch;
                     let (own, exclude) = crate::drag_snap::moving_points(sk, std::iter::once(id.as_str()).chain(with.iter().map(String::as_str)));
                     if own.iter().any(|&p| sk.point_locked(p)) {
-                        return crate::drag_snap::find(sk, &[], &[], 0.0);
+                        return Some((crate::drag_snap::find(sk, &[], &[], 0.0), 0.0));
                     }
-                    let a = proj.to_screen(ss.plane.to_world(q))?;
-                    let b = proj.to_screen(ss.plane.to_world(q + Vec2::X))?;
+                    let a = proj.to_screen(ss.plane.to_world(q_raw))?;
+                    let b = proj.to_screen(ss.plane.to_world(q_raw + Vec2::X))?;
                     let mm_px = 1.0 / (a.distance(b) as f64).max(1e-9);
-                    let d = q - from;
+                    let d = q_raw - from;
                     let moving: Vec<(usize, Vec2)> =
-                        own.iter().filter_map(|&p| if grab.is_some() { sk.point(p).map(|x| (p, x + d)) } else { Some((p, q)) }).collect();
-                    crate::drag_snap::find(sk, &moving, &exclude, mm_px)
-                })
+                        own.iter().filter_map(|&p| if grab.is_some() { sk.point(p).map(|x| (p, x + d)) } else { Some((p, q_raw)) }).collect();
+                    Some((crate::drag_snap::find_for_drag(sk, &id, q_raw, d, &moving, &exclude, mm_px), mm_px))
+                });
+                found.unwrap_or((None, 0.0))
             };
-            if let Some(s) = snap {
+            if let Some(s) = &snap {
                 q += s.offset;
             }
             // Each frame re-solves the sketch only (`live`); the model follows when the drag ends.
-            let params = json!({"entity": id, "with": with, "from": [from.x, from.y], "to": [q.x, q.y], "live": true});
-            let at = match app.session.execute("sketch.drag", &params) {
-                Ok(r) => {
-                    app.session.undo.truncate(depth + 1);
-                    // Budget-limited progress continues even when the mouse stops. A stalled
-                    // search asks for no more frames; release gets one bounded final attempt.
-                    if r.get("retry").and_then(serde_json::Value::as_bool) == Some(true) && !resp.drag_stopped() {
-                        ui.ctx().request_repaint();
+            let run_drag = |app: &mut SolveApp, drag_from: Vec2, target: Vec2| -> Vec2 {
+                let params = json!({"entity": id, "with": with, "from": [drag_from.x, drag_from.y], "to": [target.x, target.y], "live": true});
+                match app.session.execute("sketch.drag", &params) {
+                    Ok(r) => {
+                        app.session.undo.truncate(depth + 1);
+                        // Budget-limited progress continues even when the mouse stops. A stalled
+                        // search asks for no more frames; release gets one bounded final attempt.
+                        if r.get("retry").and_then(serde_json::Value::as_bool) == Some(true) && !resp.drag_stopped() {
+                            ui.ctx().request_repaint();
+                        }
+                        r.get("at").and_then(solidcraft_engine::params::vec2).unwrap_or(target)
                     }
-                    r.get("at").and_then(solidcraft_engine::params::vec2).unwrap_or(q)
+                    Err(_) => drag_from,
                 }
-                Err(_) => from,
             };
+            let mut at = run_drag(app, from, q);
+            // If an existing constraint prevented the geometry from reaching the snap target,
+            // fall back to the unsnapped drag position and drop the snap so it never flickers.
+            if let Some(s) = &snap {
+                let st = crate::open_meshing::session_world(&app.session);
+                let satisfied = crate::sketch_view::active_sketch(app)
+                    .and_then(|sid| st.sketch(sid))
+                    .is_some_and(|ss| crate::drag_snap::satisfied_after_drag(&ss.sketch, s, snap_mm_px));
+                if !satisfied {
+                    crate::drag_snap::clear();
+                    at = run_drag(app, at, q_raw);
+                }
+            }
             // The grab stays on the geometry: what it could not follow this frame it catches up
             // with on the next one instead of lagging the cursor for the rest of the drag.
             // `grab` is where the pointer is, `at` where the point got to: back through the offset
@@ -8903,13 +9025,15 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::browser::dims_overlay(app, &painter, &proj);
     paint_device_pivot(app, &painter, &proj);
     draw_notes(app, &painter, &proj);
+    if !primary_down && !ui.input(|i| i.pointer.primary_pressed()) {
+        crate::dim_view::clear_consumed_outside_press();
+    }
     crate::dim_view::show(app, ui, &painter, &proj);
     crate::sketch_text_handles::show(app, ui, &painter, &proj, hover);
     crate::sketch3d::show(app, &painter, &proj);
     let tracking_cursor = hover.filter(|_| inside && !navigating && !app.esc_handled && !ui.input(|i| i.key_pressed(egui::Key::Escape)));
     crate::inference::track_and_show(app, &painter, &proj, tracking_cursor);
     crate::inference::show(app, &painter, &proj);
-    crate::drag_snap::show(app, &painter, &proj);
     crate::insert_handles::show(app, ui, &proj);
     crate::sketch_transform_ui::refresh(app);
     crate::sketch_transform_ui::show(app, ui, &proj);
@@ -8937,6 +9061,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     crate::canvas::show(app, ui, &painter, &proj);
     crate::sketch_tools::show(app, ui, &painter, &proj);
+    crate::drag_snap::show(app, &painter, &proj);
     crate::sketch_line_arc::paint_mode(app, ui, &painter, &proj);
     crate::design_properties::overlay(app, &painter, &proj);
     crate::sketch_dims::show(app, ui, &proj);
@@ -8954,6 +9079,20 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     let readout = if card { None } else { quick_measure_readout(app, ui, overlay_rect) };
     let mut toasts = if card { Vec::new() } else { transient_messages(app, ui, notice, readout) };
     toasts.extend(app.operations.rect.filter(|_| !card));
+    // The scale bar in the opposite corner, clear of all of the above (#375).
+    if !card {
+        let scale_bar = {
+            let mut taken = crate::shell::covered_rects(app);
+            if let Some(layout) = &app.viewport.layout {
+                taken.extend([layout.navigation, layout.axis_view]);
+            }
+            taken.extend(readout);
+            taken.extend(toasts.iter().copied());
+            taken.extend(legends);
+            crate::scale_bar::show(app, ui, &proj, crate::shell::content_rect(app, overlay_rect), &taken)
+        };
+        toasts.extend(scale_bar);
+    }
     if !card
         && app.preferences.space_mouse_in_view
         && app.space_mouse.calibrating.is_none()
@@ -8989,6 +9128,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !crate::shell::covered(app, *p)
     });
     crate::tool_cursor::show(app, &painter, badge_at);
+    crate::sketch_tools::paint_constraint_cursor(app, &painter, &proj, badge_at, mods.shift);
     // With no tool running, where the pointer is in the open sketch (#11070).
     crate::sketch_cursor_readout::show(app, &painter, &proj, badge_at);
 }
@@ -9274,6 +9414,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
     {
         crate::scenario::publish_rect("toast:placement", r);
         obstacles.push(r);
+        shown.push(r);
         free.max.y = r.top() - t.space_8;
     }
     if let Some((msg, at, error)) =
@@ -10079,13 +10220,15 @@ fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     // the design: a highlight there would trace a curve where none is drawn. Other sketches are
     // drawn where they are.
     let previewed = crate::dim_view::previewed_sketch(app);
+    let dragging = app.viewport.point_drag.is_some();
     let col = Tokens::get().hover_profile_edge;
     let st = crate::open_meshing::shown_world(app);
     let hover = app.viewport.hover.as_ref().filter(|h| {
         !matches!(h, Hit::SketchCurve { sketch, .. } | Hit::SketchMidpoint { sketch, .. } | Hit::SketchPoint { sketch, .. } if previewed == Some(*sketch))
+            && !(dragging && matches!(h, Hit::SketchMidpoint { .. }))
     });
     match hover {
-        Some(Hit::SketchPoint3d { at, .. }) => {
+        Some(Hit::SketchPoint3d { at, .. } | Hit::PlacedSketchPoint { at, .. }) => {
             if let Some(p) = proj.to_screen(*at) {
                 painter.circle_stroke(p, 6.0, Stroke::new(2.0, col));
             }
@@ -10351,26 +10494,34 @@ fn midpoint_marker(painter: &egui::Painter, at: Pos2, color: Color32) {
 /// drawn too (#3267). Not the sketch's origin, or its points while it hides them.
 pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
     let st = crate::open_meshing::shown_world(app);
+    let own: std::collections::HashSet<u64> = visible_sketches(app).into_iter().collect();
     let mut out = Vec::new();
-    for sid in visible_sketches(app) {
+    for ss in &st.sketches {
+        let sid = ss.feature;
         if crate::sketch_view::active_sketch(app) == Some(sid) {
             continue;
         }
-        let Some(ss) = st.sketch(sid) else { continue };
         let sk = &ss.sketch;
         if sk.view.hide_points {
             continue;
         }
+        // On every copy of its part shown, too.
+        let frames = sketch_frames(app, &st, sid, own.contains(&sid));
+        if frames.is_empty() {
+            continue;
+        }
+        let mut points = Vec::new();
         if app.preferences.select_3d_curve_points {
-            out.extend(sk.wires.iter().flat_map(|wire| wire.fit.iter().copied()));
+            points.extend(sk.wires.iter().flat_map(|wire| wire.fit.iter().copied()));
         }
         let used: std::collections::HashSet<usize> = sk.curves.iter().flat_map(|c| c.kind.point_ids()).collect();
         let visible = solidcraft_engine::view::SketchPointVisibility::new(sk);
         for (i, p) in sk.points.iter().enumerate().skip(1) {
             if !used.contains(&i) && !(p.link.is_some() && sk.view.hide_projected) && visible.takes(p) {
-                out.push(ss.plane.to_world(p.pos));
+                points.push(ss.plane.to_world(p.pos));
             }
         }
+        out.extend(frames.iter().flat_map(|m| points.iter().map(|p| solidcraft_engine::doc::apply_point(m, *p))));
     }
     out
 }
@@ -10411,6 +10562,15 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             && let Some(ss) = st.sketch(*sketch)
             && let Some(point) = ss.sketch.resolve_point(id).and_then(|i| ss.sketch.point(i))
             && let Some(pos) = proj.to_screen(ss.plane.to_world(point))
+        {
+            painter.circle_stroke(pos, 6.0, Stroke::new(2.0, t.sel_edge));
+        }
+    }
+    // A point picked on another copy of its part, where that copy has it.
+    for item in app.dialog.iter().flat_map(|d| d.inputs.iter().flat_map(|i| i.items.iter())) {
+        if let Sel::PlacedSketchPoint { sketch, id, path } = item
+            && let Some((at, _)) = st.placed_sketch_point(*sketch, path, id)
+            && let Some(pos) = proj.to_screen(at)
         {
             painter.circle_stroke(pos, 6.0, Stroke::new(2.0, t.sel_edge));
         }
@@ -10511,7 +10671,8 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             painter.rect_filled(Rect::from_center_size(sp, vec2(5.0, 5.0)), 0.0, c);
         }
     }
-    // The markers and the status line are drawn straight onto the view: its side's colours (#4146).
+    // The markers are drawn straight onto the view: its side's colours (#4146). The sketch status
+    // shows in the sketch panel and the status bar, not over the view.
     let v = Tokens::view();
     for selected in &app.session.selection {
         if let Sel::SketchMidpoint { id } = selected
@@ -10523,23 +10684,6 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         }
     }
     loose_end_markers(sk, &ss.ends, &ss.plane, painter, proj, &v);
-    // Sketch status, unless the status bar shows it (#7243). In the free corner of the view, not under the floating ribbon.
-    if let Some(r) = app.viewport.layout.as_ref().map(|l| l.drawable).filter(|r| r.is_finite() && r.is_positive() && !crate::status_bar::shown(app)) {
-        let status = if !ss.report.shown_ok() {
-            solidcraft_ui_text::tr("sketch.status_conflict").to_string()
-        } else if !crate::sketch_palette::has_geometry(sk) {
-            solidcraft_ui_text::tr("ui.no_geometry_yet").to_string()
-        } else if ss.report.shown_dof() == 0 {
-            solidcraft_ui_text::tr("sketch.status_fully_constrained").to_string()
-        } else if ss.report.shown_dof() == 1 {
-            solidcraft_ui_text::tr("ui.1_degree_of_freedom").to_string()
-        } else {
-            solidcraft_ui_text::format("sketch.degrees_of_freedom", &[("count", &ss.report.shown_dof().to_string())])
-        };
-        let msg = format!("{} — {status}", crate::i18n::tr_name(&ss.name));
-        let c = if ss.report.shown_ok() { v.sketch_accent } else { v.error };
-        painter.text(pos2(r.left() + 12.0, r.top() + 12.0), Align2::LEFT_TOP, msg, FontId::proportional(t.font_button), c);
-    }
 }
 
 /// The curves and points of a sketch that its failing constraints hold (the solve's `failing`:
@@ -12955,6 +13099,33 @@ mod tests {
         crate::sketch_palette::set_mode(&mut h.app, 0);
     }
 
+    #[test]
+    fn hover_highlight_hides_midpoint_triangle_while_dragging_point() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let r = h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"infer":false})).unwrap();
+        let id = r["curves"][0].as_str().unwrap().to_string();
+        let sketch = h.app.session.active_sketch.unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.settle();
+        let proj = display_proj(&h.app);
+        h.app.viewport.hover = Some(Hit::SketchMidpoint { sketch, id, at: Vec2::new(10.0, 0.0) });
+
+        let has_mid = |app: &SolveApp| {
+            let ctx = crate::fonts::test_context();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                hover_highlight(app, &ui.ctx().layer_painter(egui::LayerId::background()), &proj);
+            });
+            output.textures_delta.clear();
+            !output.shapes.is_empty()
+        };
+
+        assert!(has_mid(&h.app), "idle hover over midpoint should show MID marker");
+        h.app.viewport.point_drag = Some(("p1".into(), 0, None, Vec2::ZERO, true));
+        assert!(!has_mid(&h.app), "dragging a point must suppress midpoint triangle and MID label");
+        h.app.viewport.point_drag = None;
+    }
+
     /// Headless pictures of the view (`ui.render`, the agent's view image) are drawn in the
     /// window's theme (#974) and colour vision mode (#778). The light theme's tokens are the engine's own colours, so a
     /// light picture in Off is unchanged; otherwise each part takes the token the window draws it
@@ -13155,8 +13326,8 @@ mod tests {
             assert_eq!(build_highlight(&h.app).merged().tris.len(), triangles * 3 * crate::gpu::TRI_SIZE);
             let bounds = selection_bounds(&h.app).unwrap();
             assert!(bounds.max.x <= 2.01 && bounds.max.y <= 2.01 && bounds.max.z > 19.99, "{bounds:?}");
-            // Creator features retain whole-body feedback, while hidden bodies stay hidden.
-            assert_eq!(feature_geometry(&h.app, base), vec![Sel::Body { name: body.clone() }]);
+            // Creator features light their own constituent faces, while hidden bodies stay hidden.
+            assert!(feature_geometry(&h.app, base).iter().all(|s| matches!(s, Sel::Face { body: b, .. } if b == body)));
             h.app.session.visibility.hidden_bodies.push(body.clone());
             assert!(feature_geometry(&h.app, id).is_empty());
             assert!(selection_bounds(&h.app).is_none());
@@ -21162,5 +21333,23 @@ mod feature_highlight_tests {
         let copy = parts.iter().any(|p| matches!(p, Sel::Face { point, .. } if point.y > 40.0));
         let turned = parts.iter().any(|p| matches!(p, Sel::Face { point, .. } if point.x < 0.0));
         assert!(copy && turned, "{parts:?}");
+    }
+
+    /// #14718: hovering or selecting an initial creator feature lights only its constituent faces,
+    /// leaving subsequent features (e.g. joined boss, fillets) unlit.
+    #[test]
+    fn a_base_creator_feature_lights_only_its_constituent_faces_leaving_subsequent_features_unlit() {
+        let mut s = solidcraft_engine::Session::default();
+        let base = s.execute("solid.box", &json!({"length": 40, "width": 40, "height": 10, "name": "Base"})).unwrap()["feature"].as_u64().unwrap();
+        let fillet = s.execute("solid.fillet", &json!({"edges": [[0, 0, 5]], "radius": 2, "name": "Round"})).unwrap()["feature"].as_u64().unwrap();
+        let app = SolveApp::new(s, crate::Services::default());
+        let base_parts = feature_parts(&app, base, true);
+        let fillet_parts = feature_parts(&app, fillet, true);
+        assert!(!base_parts.is_empty(), "base feature lights constituent faces");
+        assert!(base_parts.iter().all(|p| matches!(p, Sel::Face { .. })), "base lights faces rather than whole body: {base_parts:?}");
+        // The fillet face belongs to fillet_parts, not base_parts
+        for f in &fillet_parts {
+            assert!(!base_parts.contains(f), "base does not light subsequent fillet face: {f:?}");
+        }
     }
 }
