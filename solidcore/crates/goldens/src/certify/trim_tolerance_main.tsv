@@ -40,6 +40,7 @@
 # intersect.surface_drop_lib_p1: main's file with trim0351 and trim0384 dropping cleanly across a closed U-seam (#20836): both move from 0 curves ([0.0, 0.0, 0.0, 0.0]) to 2 UV pieces meeting on opposite U-seam sides (n=182 and n=196); no tolerance moves
 # offset.offset_executive_p2: a rounded offset's tube that folds over itself is refused (#13685): this branch's file, 20 lines moved, none a ROWS case. 4 move from status 1000 to 1001 (extrude_holes1_face0_outset24_7_rounded and _unstitched, extrude_holes1_face3_outset24_7_rounded, fill_gap_extrudeHoles1_face0_round_d13, each unsound on main), and 16 refused on main stay 1001 with the smaller partial offset an earlier refusal records; proved by tests/issue_13685_tube_folds.rs and the unit's soundness probe
 # sweep.rotational_sweep_geometry: a nearly flat cone keeps its cone (#18005) moves gen0175 (its swept face a cone, not a surface of revolution; its two profile edges lines, not B-splines); no tolerance moves; the digest is the branch file
+# primitive.primitive_creation_p2, sweep.api_brep: a partial revolve whose turn is under the circle builder's 1e-6 degrees is refused, PrimitiveFailure::SweepAngleTooSmall, status 1001 (#21672, #22014): the digests are this branch's files (no ROWS case in either unit). 17 lines move, each a turn of 0, 1e-13 or 2e-12 degrees, which create_circle_segment's conic_data made a full circle while the caps kept the exact rotation (a full ring with both caps on its seam): sweep.api_brep review_rot_angle0 0 -> 1001; primitive_creation_p2 gen0049, gen0077, gen0094, gen0110, gen0179, gen0186, gen0201 and gen0214 0 -> 1001, gen0009, gen0048 and gen0180 1025 -> 1001, gen0097, gen0197 and ub215_partial_torus_tiny_circle_tiny_turn 1006 -> 1001, gen0188 and ub215_degenerate_face_top_line_5e-7_tiny_turn 1007 -> 1001 (record[1] 0 -> 1 where create_partial_sphere or create_partial_torus turned editing on before the refusal); no tolerance moves; proved by issue_21672_a_revolve_by_almost_nothing_is_refused
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -221,7 +222,7 @@ primitive.api_primitives	98e4ee4eda091d2b
 primitive.api_surface_ops	ac33d130cc4294e6
 primitive.api_trim_ops	853b9688cca8e37b
 primitive.primitive_creation_p1	1ee2418a9fa4c07b
-primitive.primitive_creation_p2	8640deb9c3135a46
+primitive.primitive_creation_p2	5fddc1e928e21573
 primitive.primitive_creation_p3	c500973c4b28e328
 query.api_queries	b6aa5ea7b8b4c704
 query.brep	8effe3f69fdd2520
@@ -277,7 +278,7 @@ surface.twist_volume	185622854f391b03
 surface.unbend_volume	94c42caa7f6f0475
 surface.volume_p1	abd24d71681331bd
 surface.volume_p2	0583bf0698f07807
-sweep.api_brep	abe07b0a735b1602
+sweep.api_brep	f2133129f161ce93
 sweep.api_surfaces	a46bb969a19dac47
 sweep.rotational_sweep_geometry	69725113a029b9c4
 sweep.topology_sweep	58b44a27822309c7
