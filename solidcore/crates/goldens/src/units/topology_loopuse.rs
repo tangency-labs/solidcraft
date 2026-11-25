@@ -315,7 +315,7 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
 fn output_of(op: &Resolved, body: &[f64]) -> Output {
     if body.first() == Some(&NOT_RUN) && body.len() == 1 {
         // only on paths the Rust side defers; compared, it fails the case
-        return Output::err("not_run_by_cpp");
+        return Output::harness("not_run_by_cpp");
     }
     let ints = |v: &[f64]| -> Vec<i64> { v.iter().map(|&x| x as i64).collect() };
     match op {
@@ -500,7 +500,7 @@ fn put_use_state(o: &mut Vec<f64>, b: &Brep) {
 fn status(r: Result<(), SolidError>) -> Result<Option<f64>, Fail> {
     match r {
         Ok(()) => Ok(Some(0.0)),
-        Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => Ok(Some(f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1)))),
+        Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => Ok(Some(f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1))))),
         Err(e) => slot(Err(e)).map(|_: Option<()>| None),
     }
 }

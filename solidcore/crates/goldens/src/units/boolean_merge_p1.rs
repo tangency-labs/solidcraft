@@ -1195,7 +1195,7 @@ impl UnitDiff for Runner {
                     "status_{}",
                     match e {
                         SolidError::Upstream { .. } | SolidError::Failed(_) => {
-                            e.sm_status().unwrap_or(-1)
+                            crate::status::kind_slot(&e, e.sm_status().unwrap_or(-1))
                         }
                         _ => -1,
                     }

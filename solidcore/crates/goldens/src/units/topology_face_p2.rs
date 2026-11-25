@@ -1357,8 +1357,8 @@ fn idx<I: Copy>(o: Option<I>, f: impl Fn(I) -> u32) -> f64 {
 /// An upstream status of a failed op: the `SmStatus` of an upstream error.
 fn status_of(e: SolidError) -> Result<f64, Fail> {
     match e {
-        e if solidcore::error::upstream_status(&e).is_some() => {
-            Ok(f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)))
+        e if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
+            Ok(f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))))
         }
         other => Err(other.into()),
     }

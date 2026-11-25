@@ -907,7 +907,7 @@ fn fail(e: &SolidError) -> Fail {
 fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
     match r {
         Ok(_) => Ok(0.0),
-        Err(up_err) if solidcore::error::upstream_status(up_err).is_some() => Ok(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
+        Err(up_err) if crate::status::is_kernel(up_err, solidcore::error::upstream_status(up_err).is_some()) => Ok(f64::from(crate::status::kind_slot(up_err, solidcore::error::upstream_status(up_err).unwrap_or(-1)))),
         Err(e) => Err(fail(e)),
     }
 }
@@ -1066,7 +1066,7 @@ fn put_samples(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
             }
             Err(e) => {
                 o.push(match e {
-                    up_err if solidcore::error::upstream_status(&up_err).is_some() => f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1)),
+                    up_err if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1))),
                     _ => -1.0,
                 });
                 o.extend([0.0, 0.0, 0.0]);
@@ -2079,7 +2079,7 @@ fn run_rust(i: &OpIn) -> Result<Output, HarnessError> {
                 }
             };
             let Some(op) = resolve_op(i, counts(&b)) else {
-                return Ok(Output::err("no_entity_of_that_kind"));
+                return Ok(Output::harness("no_entity_of_that_kind"));
             };
             run_rust_brep(&mut k, &mut b, &op)
         }
@@ -2100,7 +2100,7 @@ fn run_rust(i: &OpIn) -> Result<Output, HarnessError> {
                 }
             };
             let Some(op) = resolve_op(i, counts(&b)) else {
-                return Ok(Output::err("no_entity_of_that_kind"));
+                return Ok(Output::harness("no_entity_of_that_kind"));
             };
             run_rust_brep(&mut k, &mut b, &op)
         }

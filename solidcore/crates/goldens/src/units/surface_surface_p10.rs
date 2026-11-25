@@ -406,6 +406,11 @@ fn build_cache(surface: &Surface, nodes: &[NodeIn]) -> Result<SurfaceCache<H>, H
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {

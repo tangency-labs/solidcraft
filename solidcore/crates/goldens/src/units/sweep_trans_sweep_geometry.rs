@@ -79,6 +79,11 @@ fn v(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
 }
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::upstream_status(e).is_some() => {
             f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))

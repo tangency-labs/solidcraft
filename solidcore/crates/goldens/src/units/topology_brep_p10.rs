@@ -235,6 +235,11 @@ fn operation_output(items: &[Item], i: &Inputs) -> Result<Output, HarnessError> 
 
 /// Upstream status of a Rust error: the guard's `-2` for `InvalidInput`.
 fn status(e: &SolidError) -> i64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> i64 {
     match e {
         e if solidcore::error::upstream_status(e).is_some() => {
             i64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
@@ -1279,7 +1284,7 @@ impl UnitDiff for Runner {
         let inputs: Inputs = case.parse()?;
         match rust(&inputs)? {
             Ok(items) => operation_output(&items, &inputs),
-            Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+            Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),
         }
     }
 

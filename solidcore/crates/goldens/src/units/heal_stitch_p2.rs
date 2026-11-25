@@ -294,8 +294,8 @@ fn idx<I: ArenaId>(id: I) -> f64 {
 
 fn guarded_output(o: Vec<f64>) -> Output {
     match o.first() {
-        Some(&s) if s == NULL_DEREF => Output::err("null_dereference_guard"),
-        Some(&s) if s == NO_RETURN => Output::err("no_return_guard"),
+        Some(&s) if s == NULL_DEREF => Output::harness("null_dereference_guard"),
+        Some(&s) if s == NO_RETURN => Output::harness("no_return_guard"),
         _ => Output::new().values("out", o),
     }
 }
@@ -324,6 +324,11 @@ fn prepare_rust(k: &mut Kernel, i: &Inputs) -> Result<Result<(Brep, Resolved), O
 /// stitch itself marks a null dereference upstream (`-2`), from a callee it is
 /// `SM_ERR_INVALID_INPUT`.
 fn status_of(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status_of(e))
+}
+
+/// [`status_of`] as recorded before kinds.
+fn legacy_status_of(e: &SolidError) -> f64 {
     match e {
         err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
         SolidError::InvalidInput { operation, .. } | SolidError::PortInvariant { operation, .. }

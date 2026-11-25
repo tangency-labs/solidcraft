@@ -206,7 +206,7 @@ fn lookup(name: &str) -> Result<Op, HarnessError> {
 fn status_code(e: &SolidError) -> Option<f64> {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Some(1007.0),
-        err if solidcore::error::upstream_status(err).is_some() => Some(f64::from(solidcore::error::upstream_status(err).unwrap_or(-1))),
+        err if crate::status::is_kernel(err, solidcore::error::upstream_status(err).is_some()) => Some(f64::from(crate::status::kind_slot(err, solidcore::error::upstream_status(err).unwrap_or(-1)))),
         _ => None,
     }
 }
@@ -586,7 +586,7 @@ fn rust_op(op: Op, args: &[f64]) -> Result<Output, HarnessError> {
         Err(e) => match status_code(&e) {
             Some(s) => Ok(finish(&[s])),
             None => Ok(Output::unported(&e)
-                .unwrap_or_else(|| Output::err(format!("rust_error: {e}")))),
+                .unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}")))),
         },
     }
 }

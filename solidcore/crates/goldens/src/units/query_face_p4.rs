@@ -732,7 +732,7 @@ fn failed_as_build(o: &Output) -> Output {
 /// The deferral or failure output of a Rust error the shim's case setup cannot ignore:
 /// an unported callee defers the case, anything else is a Rust error.
 pub(super) fn setup_error(e: &SolidError) -> Output {
-    Output::unported(e).unwrap_or_else(|| Output::err(format!("rust_error: {e}")))
+    Output::unported(e).unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}")))
 }
 
 /// Whether the shim ignores a status of the case setup's props calls (it discards
@@ -968,7 +968,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                     SM_ERR_INVALID_INPUT
                 }
                 e if solidcore::error::upstream_status(e) == Some(SM_ERR) => f64::from(SM_ERR),
-                _ => return Ok(Output::err(format!("rust_error: {e}"))),
+                _ => return Ok(Output::kernel(&e, format!("rust_error: {e}"))),
             }
         }
     };

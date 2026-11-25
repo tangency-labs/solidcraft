@@ -591,9 +591,9 @@ fn rust_status(e: &SolidError) -> Output {
         return o;
     }
     match e {
-        e if solidcore::error::upstream_status(e).is_some() => status_output(f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))),
+        e if crate::status::is_kernel(e, solidcore::error::upstream_status(e).is_some()) => status_output(f64::from(crate::status::kind_slot(e, solidcore::error::upstream_status(e).unwrap_or(-1)))),
         // the kernel's refusal of the input (a damaged B-rep it will not walk)
-        other => Output::err(other.to_string()),
+        other => Output::kernel(&other, other.to_string()),
     }
 }
 

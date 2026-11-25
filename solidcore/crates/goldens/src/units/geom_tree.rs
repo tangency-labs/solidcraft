@@ -266,6 +266,11 @@ fn flag(b: bool) -> i64 {
 
 /// Upstream status of a Rust error.
 fn status_of(e: &SolidError) -> i64 {
+    crate::status::kind_slot(e, legacy_status_of(e))
+}
+
+/// [`status_of`] as recorded before kinds.
+fn legacy_status_of(e: &SolidError) -> i64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
         err if solidcore::error::upstream_status(err).is_some() => i64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
@@ -522,7 +527,7 @@ fn run_subdiv_rust(
 }
 
 fn rust_err(e: &SolidError) -> Output {
-    Output::unported(e).unwrap_or_else(|| Output::err(format!("rust_error: {e}")))
+    Output::unported(e).unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}")))
 }
 
 // ---- generation -------------------------------------------------------

@@ -274,6 +274,11 @@ fn pv(o: &mut Vec<f64>, v: Vec3) {
 }
 
 fn status_code(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status_code(e))
+}
+
+/// [`status_code`] as recorded before kinds.
+fn legacy_status_code(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),

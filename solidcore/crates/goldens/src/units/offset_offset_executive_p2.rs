@@ -595,7 +595,7 @@ fn operation<T>(result: solidcore::Result<T>) -> RResult<(i32, Option<T>)> {
         Ok(value) => Ok((NATIVE_SUCCESS, Some(value))),
         Err(SolidError::Upstream { code, .. }) => Ok((code, None)),
         // a failure in solidcore's terms (#2615): its C++ comparison status
-        Err(e @ SolidError::Failed(_)) => Ok((e.sm_status().unwrap_or(solidcore::error::SM_ERR), None)),
+        Err(e @ SolidError::Failed(_)) => Ok((crate::status::kind_slot(&e, e.sm_status().unwrap_or(solidcore::error::SM_ERR)), None)),
         Err(error) => Err(RunError::Kernel(error)),
     }
 }
@@ -1896,7 +1896,7 @@ impl UnitDiff for Runner {
             Ok(output) => Ok(output),
             Err(RunError::Harness(error)) => Err(error),
             Err(RunError::Kernel(error)) => Ok(Output::unported(&error)
-                .unwrap_or_else(|| Output::err(format!("Rust operation: {error}")))),
+                .unwrap_or_else(|| Output::kernel(&error, format!("Rust operation: {error}")))),
         }
     }
     fn cases(&self, context: &CaseContext) -> HResult<Vec<Case>> {

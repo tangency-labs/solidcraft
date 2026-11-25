@@ -222,7 +222,7 @@ fn status_of(r: &Result<(), SolidError>) -> Option<i64> {
 }
 
 fn rust_err(e: &SolidError) -> Output {
-    Output::unported(e).unwrap_or_else(|| Output::err(format!("rust_error: {e}")))
+    Output::unported(e).unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}")))
 }
 
 // ---- boxes --------------------------------------------------------------------------------
@@ -462,10 +462,10 @@ fn run_edge_on(i: &EdgeOnInput) -> Result<Output, HarnessError> {
         Vec3::new(qx, qy, qz),
     ) {
         Ok(c) => Curve::from(c),
-        Err(e) if solidcore::error::upstream_status(&e).is_some() => {
+        Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
             return Ok(Output::err(format!(
                 "line_segment_status_{}",
-                f64::from(solidcore::error::upstream_status(&e).unwrap_or_default())
+                f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or_default()))
             )))
         }
         Err(e) => return Ok(rust_err(&e)),
@@ -488,8 +488,8 @@ fn run_edge_on(i: &EdgeOnInput) -> Result<Output, HarnessError> {
     Ok(match r {
         Ok(c) => edge_on_output(0, c.inside, c.possible_problem, c.problem as i64),
         // the seeded outputs survive a failure
-        Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-            edge_on_output(i64::from(solidcore::error::upstream_status(&e).unwrap_or_default()), true, true, 7)
+        Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
+            edge_on_output(i64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or_default())), true, true, 7)
         }
         Err(e) => rust_err(&e),
     })
@@ -532,7 +532,7 @@ fn run_curve(k: &Kernel, input: &CurveInput) -> Result<Output, HarnessError> {
             Ok(curve_output(0, values))
         }
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(curve_output(1007, values)),
-        Err(e) if solidcore::error::upstream_status(&e).is_some() => Ok(curve_output(solidcore::error::upstream_status(&e).unwrap_or_default(), values)),
+        Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => Ok(curve_output(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or_default()), values)),
         Err(e) => Ok(rust_err(&e)),
     }
 }

@@ -322,6 +322,11 @@ fn push_v(o: &mut Vec<f64>, v: Vec3) {
 /// The `SmStatus` of a Rust error (`InvalidInput` is `SM_ERR_INVALID_INPUT`); `-1` for
 /// one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
             f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
@@ -761,7 +766,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut o = Vec::new();
     match rust_cone(&k, &i.cone) {
         Err(e) if e.is_unported() => {
-            return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())));
+            return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())));
         }
         Err(e) => {
             o.push(status(&e));
@@ -770,7 +775,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(mut s) => {
             o.push(SUCCESS);
             if let Err(e) = rust_op(&k, &mut s, &i.op, &mut o) {
-                return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())));
+                return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())));
             }
         }
     }

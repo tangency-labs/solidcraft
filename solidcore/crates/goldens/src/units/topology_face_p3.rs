@@ -461,8 +461,8 @@ fn put_samples(c: &SmCurve, out: &mut Vec<f64>) -> Result<(), SolidError> {
     for k in 0..=2u8 {
         match c.evaluate_point(&crate::runner_kernel(), ivl.evaluate(f64::from(k) / 2.0)) {
             Ok(p) => out.extend([0.0, p.x, p.y, p.z]),
-            Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-                out.extend([f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)), 0.0, 0.0, 0.0]);
+            Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
+                out.extend([f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))), 0.0, 0.0, 0.0]);
             }
             Err(e) => return Err(e),
         }
@@ -529,7 +529,7 @@ fn status_of(e: SolidError) -> Result<Result<i32, Output>, HarnessError> {
         return Ok(Err(o));
     }
     match e {
-        e if solidcore::error::upstream_status(&e).is_some() => Ok(Ok(solidcore::error::upstream_status(&e).unwrap_or(-1))),
+        e if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => Ok(Ok(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1)))),
         e => Err(harness(format!("rust: {e}"))),
     }
 }
@@ -634,7 +634,7 @@ fn own_brep(i: &Inputs) -> Result<crate::own_builder::RustBrep<(Brep, [usize; 10
             Ok((*b, c))
         }
         Own::Failed(e) => Err(Output::unported(&e).unwrap_or_else(|| {
-            Output::err(format!("brep_build_status_{}", build_status(&e)))
+            Output::kernel(&e, format!("brep_build_status_{}", build_status(&e)))
         })),
     })
 }

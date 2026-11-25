@@ -248,6 +248,11 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
 /// Status of a Rust error: the NLib number, `1000` for upstream's bare error flags
 /// (the recursion limit of the Bezier arc length), `-1` for anything else.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
         SolidError::NotConverged { operation, .. } if operation.starts_with("nurbs::bezier") => {

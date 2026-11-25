@@ -156,7 +156,7 @@ fn tcv_inputs(
 }
 
 fn rust_err(e: &SolidError) -> Output {
-    Output::unported(e).unwrap_or_else(|| Output::err(format!("rust_error: {e}")))
+    Output::unported(e).unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}")))
 }
 
 /// The shared topology fixture of a shape's B-rep (`None` without one).

@@ -251,8 +251,8 @@ fn record(i: &Inputs) -> (Op, Vec<f64>) {
 /// The status slot as a guard error, or the values.
 fn values_output(o: Vec<f64>) -> Output {
     match o.first() {
-        Some(&s) if s == NULL_DEREF => Output::err("null_deref"),
-        Some(&s) if s == SHORT_BOX => Output::err("box_edge_count"),
+        Some(&s) if s == NULL_DEREF => Output::harness("null_deref"),
+        Some(&s) if s == SHORT_BOX => Output::harness("box_edge_count"),
         _ => Output::new().values("out", o),
     }
 }
@@ -1456,6 +1456,11 @@ const P2_OP: &str = "blend::fillet_executive::p2";
 
 /// The `SmStatus` of a Rust error.
 fn status_of(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status_of(e))
+}
+
+/// [`status_of`] as recorded before kinds.
+fn legacy_status_of(e: &SolidError) -> f64 {
     match e {
         SolidError::Upstream {
             operation, code, ..
@@ -1484,7 +1489,7 @@ fn law_linear(start: f64, end: f64, map: Option<[f64; 2]>) -> Output {
         end_radius: e,
     } = law.kind
     else {
-        return Output::err("not a linear law");
+        return Output::harness("not a linear law");
     };
     values_output(vec![
         0.0,
@@ -1525,11 +1530,11 @@ fn law_elliptic(
         extended_law,
     } = &law.kind
     else {
-        return Output::err("not a B-spline law");
+        return Output::harness("not a B-spline law");
     };
     let mut o = vec![0.0, law.edge_map.min(), law.edge_map.max()];
     let Some(nurb) = law_curve.gw_nurb() else {
-        return Output::err("law_without_curve");
+        return Output::harness("law_without_curve");
     };
     o.push(1.0);
     let cpts = nurb.cpts();

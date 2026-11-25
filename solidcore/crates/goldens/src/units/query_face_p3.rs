@@ -466,7 +466,7 @@ fn rust_err(e: &SolidError) -> Output {
     }
     match solidcore::error::upstream_status(e) {
         Some(code) => status_err(f64::from(code)),
-        None => Output::err(format!("rust_error: {e}")),
+        None => Output::kernel(&e, format!("rust_error: {e}")),
     }
 }
 

@@ -362,6 +362,11 @@ fn options_of(o: Option<[bool; 5]>) -> Option<SweepOptions> {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -627,7 +632,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             if let (Inputs::FromBoxFace { .. }, Swept::CurveSweep(c)) = (i, &mut s) {
                 return Ok(match box_volume(&k, &mut c.brep) {
                     Ok((st, v)) => out.int("volume_status", st).scalar("volume", v),
-                    Err(e) => Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())),
+                    Err(e) => Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())),
                 });
             }
             if !observes(i) {
@@ -647,7 +652,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 .len();
             match rust_observation(&k, body, rotational(i)) {
                 Ok(flat) => decode_observation(out, &flat, nv, ne, rotational(i)),
-                Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+                Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),
             }
         }
         Err(e) => match Output::unported(&e) {

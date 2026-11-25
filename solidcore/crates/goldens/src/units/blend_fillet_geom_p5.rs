@@ -1143,7 +1143,7 @@ impl UnitDiff for Runner {
         match rust(&i)? {
             Rec::Flat(flat) => to_output(&i, &flat),
             Rec::Deferred(e) => {
-                Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())))
+                Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())))
             }
         }
     }

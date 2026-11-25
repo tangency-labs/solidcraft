@@ -573,8 +573,8 @@ fn rust(i: &Input) -> ScResult<Output> {
         }
     }
     let status = result.as_ref().err().map_or(0., |e| match e {
-        e if solidcore::error::upstream_status(e).is_some() => {
-            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        e if crate::status::is_kernel(e, solidcore::error::upstream_status(e).is_some()) => {
+            f64::from(crate::status::kind_slot(e, solidcore::error::upstream_status(e).unwrap_or(-1)))
         }
         _ => 1007.,
     });

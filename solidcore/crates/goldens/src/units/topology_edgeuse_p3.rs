@@ -156,7 +156,7 @@ pub fn scene(case: &Case) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
 fn output_of(body: &[f64]) -> Output {
     let first = body.first().copied().unwrap_or(f64::NAN);
     if first == NULL_DEREF {
-        return Output::err("null_deref");
+        return Output::harness("null_deref");
     }
     Output::new()
         .int("status", first as i64)
@@ -168,7 +168,7 @@ fn output_of(body: &[f64]) -> Output {
 /// The status a failed Rust op reports (`None`: not an upstream status).
 fn status_of(e: &SolidError) -> Option<f64> {
     match e {
-        up_err if solidcore::error::upstream_status(up_err).is_some() => Some(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
+        up_err if crate::status::is_kernel(up_err, solidcore::error::upstream_status(up_err).is_some()) => Some(f64::from(crate::status::kind_slot(up_err, solidcore::error::upstream_status(up_err).unwrap_or(-1)))),
         _ => None,
     }
 }

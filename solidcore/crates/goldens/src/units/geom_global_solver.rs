@@ -234,7 +234,7 @@ impl From<HarnessError> for RunError {
 fn status(r: Result<(), SolidError>) -> Result<i64, RunError> {
     match r {
         Ok(()) => Ok(0),
-        Err(err) if solidcore::error::upstream_status(&err).is_some() => Ok(i64::from(solidcore::error::upstream_status(&err).unwrap_or(-1))),
+        Err(err) if crate::status::is_kernel(&err, solidcore::error::upstream_status(&err).is_some()) => Ok(i64::from(crate::status::kind_slot(&err, solidcore::error::upstream_status(&err).unwrap_or(-1)))),
         Err(e) => Err(RunError::Rust(e)),
     }
 }
@@ -894,7 +894,7 @@ impl UnitDiff for Runner {
         match run_rust(&i.ops) {
             Ok((oi, of)) => Ok(Output::new().ints("ints", oi).values("floats", of)),
             Err(RunError::Rust(e)) => {
-                Ok(Output::unported(&e).unwrap_or_else(|| Output::err(format!("rust_error: {e}"))))
+                Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}"))))
             }
             Err(RunError::Harness(e)) => Err(e),
         }

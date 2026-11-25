@@ -117,7 +117,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                         }
                         Err(e) => {
                             return Ok(Output::unported(&e)
-                                .unwrap_or_else(|| Output::err(e.to_string())));
+                                .unwrap_or_else(|| Output::kernel(&e, e.to_string())));
                         }
                     }
                 }
@@ -127,7 +127,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
                     Output::new().values("out", vec![create_status, SM_ERR_INVALID_INPUT])
                 }
-                Err(e) => Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())),
+                Err(e) => Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())),
             })
         }
     }

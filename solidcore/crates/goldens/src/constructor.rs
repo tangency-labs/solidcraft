@@ -79,8 +79,8 @@ fn outcome(e: &SolidError, notes: &mut Vec<String>) -> Result<Outcome, Deferred>
         SolidError::InvalidInput { .. } => {
             Outcome::Code(f64::from(solidcore::error::SM_ERR_INVALID_INPUT))
         }
-        up_err if solidcore::error::upstream_status(up_err).is_some() => Outcome::Code(f64::from(
-            solidcore::error::upstream_status(up_err).unwrap_or(-1),
+        up_err if crate::status::is_kernel(up_err, solidcore::error::upstream_status(up_err).is_some()) => Outcome::Code(f64::from(
+            crate::status::kind_slot(up_err, solidcore::error::upstream_status(up_err).unwrap_or(-1)),
         )),
         other => {
             if notes.len() < 20 {

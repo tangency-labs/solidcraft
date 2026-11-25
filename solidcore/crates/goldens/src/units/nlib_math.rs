@@ -293,9 +293,9 @@ fn rust_err(e: &SolidError) -> Output {
     }
     match e {
         e if nlib_number(e).is_some() => {
-            Output::err(format!("nlib_{}", nlib_number(e).unwrap_or_default()))
+            Output::kernel(&e, format!("nlib_{}", nlib_number(e).unwrap_or_default()))
         }
-        other => Output::err(format!("rust: {other}")),
+        other => Output::kernel(&other, format!("rust: {other}")),
     }
 }
 
@@ -405,7 +405,7 @@ fn point_ops_rust(i: &Inputs) -> Result<Output, SolidError> {
         i2,
     } = i
     else {
-        return Ok(Output::err("not point_ops"));
+        return Ok(Output::harness("not point_ops"));
     };
     let (a, b, c, d) = (cpt_arr(*a), cpt_arr(*b), cpt_arr(*c), cpt_arr(*d));
     let (pa, pb, pc, pd) = (pt_arr(*pa), pt_arr(*pb), pt_arr(*pc), pt_arr(*pd));
@@ -537,7 +537,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let (mn, mm) = mx.max_index();
             let mut meta = meta_of(&mx);
             if Some(&(mn as i64)) != meta.first() || Some(&(mm as i64)) != meta.get(1) {
-                return Ok(Output::err("max_index mismatch"));
+                return Ok(Output::harness("max_index mismatch"));
             }
             meta.push(i64::from(was_null));
             Ok(Output::new().ints("meta", meta))

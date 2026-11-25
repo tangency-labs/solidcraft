@@ -308,7 +308,7 @@ fn rust_volume_case(i: &Inputs) -> Result<Output, HarnessError> {
     match tol::scaled_zero_of_volume(&k, &volume) {
         Ok(v) => Ok(Output::new().values("scaled_zero_of_volume", vec![v])),
         Err(e) => {
-            Ok(Output::unported(&e).unwrap_or_else(|| Output::err(format!("rust_error: {e}"))))
+            Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}"))))
         }
     }
 }
@@ -364,7 +364,7 @@ fn rust_brep(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(v) => r.push(v),
         Err(e) => {
             return Ok(Output::unported(&e)
-                .unwrap_or_else(|| Output::err(format!("rust_error: {e}"))))
+                .unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}"))))
         }
     }
     Ok(Output::new().values("r", r))
@@ -599,7 +599,7 @@ const SM_SUCCESS: i64 = 1000;
 fn status(r: &solidcore::Result<()>) -> i64 {
     match r {
         Ok(()) => SM_SUCCESS,
-        Err(err) if solidcore::error::upstream_status(err).is_some() => i64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
+        Err(err) if crate::status::is_kernel(err, solidcore::error::upstream_status(err).is_some()) => i64::from(crate::status::kind_slot(err, solidcore::error::upstream_status(err).unwrap_or(-1))),
         Err(_) => -1,
     }
 }
@@ -656,7 +656,7 @@ fn rust_curve_case(i: &Inputs) -> Result<Output, HarnessError> {
     match r {
         Ok(v) => Ok(Output::new().values("r", v)),
         Err(e) => {
-            Ok(Output::unported(&e).unwrap_or_else(|| Output::err(format!("rust_error: {e}"))))
+            Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}"))))
         }
     }
 }
@@ -678,7 +678,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     match rust_values(op, i)? {
         Ok(v) => Ok(Output::new().values("r", v)),
         Err(e) => {
-            Ok(Output::unported(&e).unwrap_or_else(|| Output::err(format!("rust_error: {e}"))))
+            Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}"))))
         }
     }
 }

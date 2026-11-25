@@ -280,7 +280,7 @@ impl UnitDiff for Runner {
                     return Ok(out);
                 }
                 match e {
-                    up_err if solidcore::error::upstream_status(&up_err).is_some() => status = solidcore::error::upstream_status(&up_err).unwrap_or(-1),
+                    up_err if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => status = crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1)),
                     _ => return Err(HarnessError::new(e.to_string())),
                 }
                 break;

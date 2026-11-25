@@ -41,8 +41,8 @@ pub(crate) fn put_trim_curve(
     for i in 0..=2u8 {
         match c.evaluate_point(k, ivl.evaluate(f64::from(i) / 2.0)) {
             Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
-            Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => o.push(
-                f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1)),
+            Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => o.push(
+                f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1))),
             ),
             Err(e) => return Err(e),
         }

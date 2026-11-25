@@ -316,6 +316,11 @@ fn push_v(o: &mut Vec<f64>, v: Vec3) {
 /// The `SmStatus` of a Rust error (`InvalidInput` is `SM_ERR_INVALID_INPUT`); `-1` for
 /// one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
             f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
@@ -1000,7 +1005,7 @@ pub(super) fn const_make_rust(value: Value) -> Result<Output, HarnessError> {
         eval(&k, &surface, t.evaluate(0.3, 0.6), &mut out)?;
         Ok(())
     })();
-    if let Err(e) = result { return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))); }
+    if let Err(e) = result { return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))); }
     const_make_output(&out)
 }
 
@@ -1057,7 +1062,7 @@ pub(super) fn const_make_nurb_rust(k: &Kernel, built: solidcore::Result<solidcor
     }
     let mut surface = match built {
         Ok(s) => s,
-        Err(e) if e.is_unported() => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+        Err(e) if e.is_unported() => return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),
         Err(e) => return nurb_output(&[status(&e)]),
     };
     let mut out = vec![0.0];
@@ -1102,7 +1107,7 @@ pub(super) fn const_make_nurb_rust(k: &Kernel, built: solidcore::Result<solidcor
         eval(k, &surface, t.evaluate(0.3, 0.6), &mut out)?;
         Ok(())
     })();
-    if let Err(e) = result { return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))); }
+    if let Err(e) = result { return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))); }
     nurb_output(&out)
 }
 
@@ -1157,7 +1162,7 @@ pub(super) fn common_rust(value: Value, database: Option<&Value>, lazy: bool, su
             }
             Ok(())
         })();
-        if let Err(e) = result { return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))); }
+        if let Err(e) = result { return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))); }
         return to_output(&i, &out);
     }
     if lazy {

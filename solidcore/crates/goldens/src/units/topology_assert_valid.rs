@@ -516,11 +516,11 @@ fn update_rust(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> Result<Output, Harne
                 }
             }
         }
-        Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => {
-            out.push(f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1)));
+        Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => {
+            out.push(f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1))));
             return update_output(&out);
         }
-        Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+        Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),
     }
     put_reports(&mut out, &reports);
     let vertices: Vec<VertexId> = b.vertices().ids().collect();
@@ -535,7 +535,7 @@ fn update_rust(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> Result<Output, Harne
     }
     let check = match validation::check_brep_with_keys(k, b, level, &key) {
         Ok(c) => c,
-        Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+        Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),
     };
     out.push(f64::from(check.pointers_status));
     put_reports(&mut out, &check.pointer_reports);
@@ -622,7 +622,7 @@ fn capi_level(i: &Inputs) -> Result<validation::CheckLevel, HarnessError> {
 fn capi_output(check: solidcore::Result<validation::BrepCheck>) -> Result<Output, HarnessError> {
     let check = match check {
         Ok(c) => c,
-        Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+        Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),
     };
     let mut out = vec![0.0];
     out.push(f64::from(check.pointers_status));
@@ -681,7 +681,7 @@ fn copy_check(k: &mut Kernel, src: &Brep, i: &Inputs) -> Result<Output, HarnessE
             Ok(c) => c,
             Err(e) => {
                 return Ok(copy_summary(
-                    Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())),
+                    Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())),
                 ))
             }
         };
@@ -689,7 +689,7 @@ fn copy_check(k: &mut Kernel, src: &Brep, i: &Inputs) -> Result<Output, HarnessE
         Ok(Ok(b)) => b,
         Ok(Err(e)) => {
             return Ok(copy_summary(
-                Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())),
+                Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())),
             ))
         }
         Err(e) => return Err(e),
@@ -865,7 +865,7 @@ impl UnitDiff for Runner {
         if i.tests {
             return match level2_tests(&mut k, &mut b) {
                 Ok(out) => tests_output(&out),
-                Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+                Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),
             };
         }
         if i.capi {
@@ -883,7 +883,7 @@ impl UnitDiff for Runner {
             &key,
         ) {
             Ok(v) => v,
-            Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+            Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),
         };
         out.push(f64::from(rtn));
         put_reports(&mut out, &reports);

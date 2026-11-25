@@ -775,6 +775,11 @@ pub(crate) fn face_brep(k: &Kernel, face: &FaceIn) -> Result<(Brep, FaceId), Har
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::upstream_status(e).is_some() => {
             f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))

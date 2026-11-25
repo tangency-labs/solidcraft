@@ -564,7 +564,7 @@ fn resolve(k: &Kernel, s: &Scene, op: &OpIn) -> Option<Resolved> {
 }
 
 fn no_entity() -> Output {
-    Output::err("no_entity_of_that_kind")
+    Output::harness("no_entity_of_that_kind")
 }
 
 // ---- Rust side --------------------------------------------------------------------

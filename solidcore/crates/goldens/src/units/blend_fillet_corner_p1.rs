@@ -409,7 +409,7 @@ pub(super) fn rust_err(e: &SolidError) -> Output {
     }
     match status_of(e) {
         Some(st) => Output::new().values("status", vec![st]),
-        None => Output::err(format!("rust: {e}")),
+        None => Output::kernel(&e, format!("rust: {e}")),
     }
 }
 
@@ -1930,10 +1930,10 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
                                 .map_err(h)?
                                 .and_then(|eu| eu1::edge(b, eu).ok().flatten());
                             let Some(fe) = fe else {
-                                return Ok(Output::err("refused"));
+                                return Ok(Output::harness("refused"));
                             };
                             if freed.contains(&fe) {
-                                return Ok(Output::err("refused"));
+                                return Ok(Output::harness("refused"));
                             }
                             let rail = rm
                                 .fb
@@ -1952,7 +1952,7 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
                             deletes = false;
                         }
                         if deletes && surviving == del {
-                            return Ok(Output::err("refused"));
+                            return Ok(Output::harness("refused"));
                         }
                     }
                 }

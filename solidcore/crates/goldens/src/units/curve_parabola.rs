@@ -158,6 +158,11 @@ fn harness(msg: &str) -> HarnessError {
 }
 
 fn status_code(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status_code(e))
+}
+
+/// [`status_code`] as recorded before kinds.
+fn legacy_status_code(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
@@ -264,6 +269,11 @@ fn arg3(args: &[f64], i: usize) -> Result<Vec3, HarnessError> {
 }
 
 fn st<T>(r: &solidcore::Result<T>) -> f64 {
+    crate::status::slot(r, legacy_st(r))
+}
+
+/// [`st`] as recorded before kinds.
+fn legacy_st<T>(r: &solidcore::Result<T>) -> f64 {
     match r {
         Ok(_) => 0.0,
         Err(e) => status_code(e),
@@ -455,7 +465,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     match rust_values(i)? {
         Ok(v) => Ok(Output::new().values("r", v)),
         Err(e) => Ok(Output::unported(&e)
-            .unwrap_or_else(|| Output::err(format!("status_{}", status_code(&e) as i64)))),
+            .unwrap_or_else(|| Output::kernel(&e, format!("status_{}", status_code(&e) as i64)))),
     }
 }
 

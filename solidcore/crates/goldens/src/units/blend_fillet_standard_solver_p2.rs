@@ -376,7 +376,7 @@ fn eu_setup(brep: &BrepIn, eu: i64) -> Result<Result<Setup, Output>, HarnessErro
 fn eu_output(body: &[f64]) -> Output {
     let first = body.first().copied().unwrap_or(f64::NAN);
     if first == -2.0 {
-        return Output::err("null_deref");
+        return Output::harness("null_deref");
     }
     Output::new()
         .int("status", first as i64)
@@ -591,8 +591,8 @@ fn rust_cr_eu_body(
         Ok(fs) => fs,
         Err(e) if e.is_unported() => return Err(e),
         // the tangent-surface exits (SM_ERR only signalled upstream)
-        Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-            return Ok(vec![f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1))]);
+        Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
+            return Ok(vec![f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1)))]);
         }
         Err(e) => return Err(e),
     };
@@ -817,6 +817,11 @@ fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e => solidcore::error::upstream_status(e).map_or(-1.0, f64::from),

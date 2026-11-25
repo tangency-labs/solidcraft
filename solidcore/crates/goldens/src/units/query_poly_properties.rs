@@ -62,6 +62,11 @@ fn output(flat: Vec<f64>) -> Output {
 
 /// The `SmStatus` of a Rust error.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::upstream_status(e).is_some() => solidcore::error::upstream_status(e).map_or(-1.0, f64::from),
         // SM_ERR_INVALID_INPUT
@@ -221,7 +226,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         _ => {
             let faces = match b.poly_faces(None) {
                 Ok(f) => f,
-                Err(e) => return Ok(Output::err(e.to_string())),
+                Err(e) => return Ok(Output::kernel(&e, e.to_string())),
             };
             v.extend([0.0, faces.len() as f64]);
             let mut r = Ok(());

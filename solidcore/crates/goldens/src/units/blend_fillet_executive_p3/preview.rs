@@ -76,6 +76,11 @@ impl FilletPreview {
 
 /// The upstream status of a Rust error (`-1` for one upstream cannot return).
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } => 1007.0,
         // every error carrying its exact C++ status (SolidError::sm_status)
@@ -160,7 +165,7 @@ pub(super) fn rust(input: &FilletPreview) -> Result<Output, HarnessError> {
             out.push(surfaces.len() as f64);
             for s in &surfaces {
                 if let Err(e) = surface(&mut out, &k, s.as_ref()) {
-                    return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())));
+                    return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())));
                 }
             }
             Output::new().values("preview", out)

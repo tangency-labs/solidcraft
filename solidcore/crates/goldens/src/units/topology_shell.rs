@@ -256,7 +256,7 @@ fn rust_ray(brep: &solidcore::topology::Brep, input: &RayInput) -> Result<Output
                 let mate = brep.faceuse(faceuse).map_err(failure)?.mate;
                 if let Some(mate) = mate {
                     if brep.faceuse(mate).map_err(failure)?.shell != Some(id) {
-                        return Ok(Output::err("rejected_input"));
+                        return Ok(Output::harness("rejected_input"));
                     }
                 }
             }
@@ -296,7 +296,7 @@ fn rust_ray(brep: &solidcore::topology::Brep, input: &RayInput) -> Result<Output
                     return Ok(deferred);
                 }
                 match error {
-                    up_err if solidcore::error::upstream_status(&up_err).is_some() => solidcore::error::upstream_status(&up_err).unwrap_or(-1),
+                    up_err if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1)),
                     error => return Err(failure(error)),
                 }
             }
@@ -560,7 +560,7 @@ fn rust_transfer_records(
         let members = match &mut brep.shell_mut(original).map_err(failure)?.members {
             ShellMembers::Faceuses(members) if members.len() >= 2 => members,
             // the reference shim refused this fixture (`SC_ERR_ARG`): `rejected_input`
-            _ => return Ok(Output::err("rejected_input")),
+            _ => return Ok(Output::harness("rejected_input")),
         };
         let moved = members.remove(0);
         let target = brep.shell_mut(extra).map_err(failure)?;
@@ -613,7 +613,7 @@ fn rust_transfer_records(
     // candidate filter) are recorded as `rejected_input`, as the reference shim refused
     // them.
     let mut kernel = solidcore::kernel::Kernel::default();
-    let rejected = || Output::err("rejected_input");
+    let rejected = || Output::harness("rejected_input");
     let crashes_wire_edges =
         |brep: &solidcore::topology::Brep, id: ShellId| -> Result<bool, HarnessError> {
             let shell = brep.shell(id).map_err(failure)?;
@@ -630,7 +630,7 @@ fn rust_transfer_records(
         let to = ShellId::from_index(u32::try_from(to).map_err(failure)?);
         pre_status.push(match transfer_children(&mut kernel, brep, from, to, None) {
             Ok(()) => 0,
-            Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => i64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1)),
+            Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => i64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1))),
             Err(error) => return Output::unported(&error).ok_or_else(|| failure(error)),
         });
     }
@@ -672,7 +672,7 @@ fn rust_transfer_records(
     let status =
         match transfer_children(&mut kernel, brep, source, recipient, candidates.as_deref()) {
             Ok(()) => 0,
-            Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => i64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1)),
+            Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => i64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1))),
             Err(error) => return Output::unported(&error).ok_or_else(|| failure(error)),
         };
     let transfer_marks = mark_delta(&kernel, counters);

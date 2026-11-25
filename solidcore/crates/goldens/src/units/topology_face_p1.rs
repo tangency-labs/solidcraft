@@ -257,7 +257,7 @@ fn fail(e: &SolidError) -> Fail {
 fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
     match r {
         Ok(_) => Ok(0.0),
-        Err(up_err) if solidcore::error::upstream_status(up_err).is_some() => Ok(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
+        Err(up_err) if crate::status::is_kernel(up_err, solidcore::error::upstream_status(up_err).is_some()) => Ok(f64::from(crate::status::kind_slot(up_err, solidcore::error::upstream_status(up_err).unwrap_or(-1)))),
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(SM_ERR_INVALID_INPUT),
         Err(e) => Err(fail(e)),
     }

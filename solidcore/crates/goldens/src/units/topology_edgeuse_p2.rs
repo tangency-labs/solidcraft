@@ -354,11 +354,11 @@ fn analytic_evaluators(s: &Setup) -> Option<Output> {
 fn output_of(op: &OpIn, body: &[f64]) -> Output {
     let first = body.first().copied().unwrap_or(f64::NAN);
     if first == NULL_DEREF {
-        return Output::err("null_deref");
+        return Output::harness("null_deref");
     }
     if first == NOT_RUN {
         // only on paths the Rust side defers; compared, it fails the case
-        return Output::err("not_run_by_cpp");
+        return Output::harness("not_run_by_cpp");
     }
     match op {
         OpIn::Tangent { .. } | OpIn::Convex { .. } => Output::new().int("result", first as i64),
@@ -474,7 +474,7 @@ fn run_rust_op(
             });
             let code = match status {
                 Ok(()) => Ok(0.0),
-                Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => Ok(f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1))),
+                Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => Ok(f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1)))),
                 Err(e) => Err(e),
             };
             code.map(|c| {
@@ -489,7 +489,7 @@ fn run_rust_op(
         OpIn::Rebuild { .. } => {
             let status = match eu2::rebuild_uv_trim_curve(&k, b, eu) {
                 Ok(()) => Ok(0.0),
-                Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => Ok(f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1))),
+                Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => Ok(f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1)))),
                 Err(e) => Err(e),
             };
             status.and_then(|s| {

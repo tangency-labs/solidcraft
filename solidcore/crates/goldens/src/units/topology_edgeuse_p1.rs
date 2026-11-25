@@ -535,7 +535,7 @@ fn resolve(op: &OpIn, c: [usize; 10]) -> Option<OpIn> {
 
 /// The output when the B-rep has no entity of the kind an op needs.
 fn no_entity() -> Output {
-    Output::err("no_entity_of_that_kind")
+    Output::harness("no_entity_of_that_kind")
 }
 
 fn is_brep_op(op: &OpIn) -> bool {
@@ -563,7 +563,7 @@ fn trim_sample_output(body: &[f64]) -> Output {
     match body.split_first() {
         Some((&0.0, values)) => Output::new().values("sample", values.to_vec()),
         Some((&status, _)) => Output::err(format!("trim_sample_status_{status}")),
-        None => Output::err("trim_sample_empty"),
+        None => Output::harness("trim_sample_empty"),
     }
 }
 
@@ -838,6 +838,11 @@ fn eu_state(k: &Kernel, b: &Brep, eu: Option<EdgeuseId>, out: &mut Vec<f64>) -> 
 }
 
 fn status_of(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status_of(e))
+}
+
+/// [`status_of`] as recorded before kinds.
+fn legacy_status_of(e: &SolidError) -> f64 {
     match e {
         up_err if solidcore::error::upstream_status(up_err).is_some() => f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1)),
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => NULL_DEREF as f64,

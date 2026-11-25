@@ -86,6 +86,11 @@ fn entity_id(e: Option<E>) -> i64 {
     }
 }
 fn status(e: &SolidError) -> i64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> i64 {
     match e {
         e if solidcore::error::upstream_status(e).is_some() => {
             i64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
@@ -1188,7 +1193,7 @@ impl UnitDiff for Runner {
         let i: Input = c.parse()?;
         Ok(match rust(&i) {
             Ok(output) => output,
-            Err(e) => Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())),
+            Err(e) => Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())),
         })
     }
     fn cases(&self, ctx: &CaseContext) -> std::result::Result<Vec<Case>, HarnessError> {

@@ -97,6 +97,11 @@ fn dump(o: &mut Vec<f64>, c: &Curve) {
 
 /// The NLib status of a Rust error (`NL_ERROR.eno`).
 fn nl_status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_nl_status(e))
+}
+
+/// [`nl_status`] as recorded before kinds.
+fn legacy_nl_status(e: &SolidError) -> f64 {
     match e {
         e if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
         _ => -1.0,
@@ -105,6 +110,11 @@ fn nl_status(e: &SolidError) -> f64 {
 
 /// The `SmStatus` of a Rust error.
 fn sm_status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_sm_status(e))
+}
+
+/// [`sm_status`] as recorded before kinds.
+fn legacy_sm_status(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
             f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
@@ -138,7 +148,7 @@ fn bspline_result(o: &mut Vec<f64>, r: solidcore::Result<BSplineCurve>) -> Optio
             o.push(c.dim() as f64);
             match c.get_or_create_gw_nurb() {
                 Ok(nurb) => dump(o, nurb),
-                Err(e) => return Some(Output::err(e.to_string())),
+                Err(e) => return Some(Output::kernel(&e, e.to_string())),
             }
         }
         Err(e) => {

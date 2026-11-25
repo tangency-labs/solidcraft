@@ -302,6 +302,11 @@ fn options(mask: u8) -> MergeOptions {
     )
 }
 fn status(error: &SolidError) -> i64 {
+    crate::status::kind_slot(error, legacy_status(error))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(error: &SolidError) -> i64 {
     match error {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
         SolidError::Upstream { .. } | SolidError::Failed(_) => error.sm_status().map_or(-1, i64::from),
@@ -1098,7 +1103,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     match result {
         Ok(()) => output(&values, i.family),
         Err(error) => Ok(Output::unported(&error)
-            .unwrap_or_else(|| Output::err(format!("status={}", status(&error))))),
+            .unwrap_or_else(|| Output::kernel(&error, format!("status={}", status(&error))))),
     }
 }
 impl UnitDiff for Runner {

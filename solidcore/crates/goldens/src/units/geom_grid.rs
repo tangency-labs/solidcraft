@@ -155,6 +155,11 @@ fn put_ext(o: &mut Vec<f64>, e: &Extent3d) {
 
 /// Upstream status of a Rust error.
 fn status_of(e: &SolidError) -> i64 {
+    crate::status::kind_slot(e, legacy_status_of(e))
+}
+
+/// [`status_of`] as recorded before kinds.
+fn legacy_status_of(e: &SolidError) -> i64 {
     match e {
         SolidError::InvalidInput { .. } => 1007,
         err if solidcore::error::upstream_status(err).is_some() => i64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
@@ -690,7 +695,7 @@ impl UnitDiff for Runner {
         match run_rust(&i, &mut Stats::default()) {
             Ok((oi, of)) => Ok(Output::new().ints("ints", oi).values("floats", of)),
             Err(e) => {
-                Ok(Output::unported(&e).unwrap_or_else(|| Output::err(format!("rust_error: {e}"))))
+                Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}"))))
             }
         }
     }

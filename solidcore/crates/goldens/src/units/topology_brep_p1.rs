@@ -551,7 +551,7 @@ fn brep_block(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
 /// the case counts as `both_errored`, not as a value comparison.
 fn guarded_output(o: Vec<f64>) -> Output {
     if o.first() == Some(&NULL_DEREF) {
-        Output::err("null_dereference_guard")
+        Output::harness("null_dereference_guard")
     } else {
         Output::new().values("out", o)
     }
@@ -652,6 +652,11 @@ const SM_ERR_INVALID_INPUT: f64 = 1007.0;
 /// unit itself marks a null dereference upstream (`-2`), from a callee it is that
 /// callee's `SM_ERR_INVALID_INPUT`.
 fn status_of(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status_of(e))
+}
+
+/// [`status_of`] as recorded before kinds.
+fn legacy_status_of(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
             f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))

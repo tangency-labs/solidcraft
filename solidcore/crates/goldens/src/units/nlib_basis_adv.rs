@@ -110,9 +110,9 @@ fn rust_err(e: &SolidError) -> Output {
     }
     match e {
         e if nlib_number(e).is_some() => {
-            Output::err(format!("nlib_{}", nlib_number(e).unwrap_or_default()))
+            Output::kernel(&e, format!("nlib_{}", nlib_number(e).unwrap_or_default()))
         }
-        other => Output::err(format!("rust: {other}")),
+        other => Output::kernel(&other, format!("rust: {other}")),
     }
 }
 

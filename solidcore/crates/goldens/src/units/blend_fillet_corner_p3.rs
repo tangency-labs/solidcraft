@@ -387,7 +387,7 @@ fn create_output(rec: &[f64]) -> Result<Output, HarnessError> {
         return Ok(Output::rejected("upstream would dereference null"));
     }
     if first == NOT_RUN {
-        return Ok(Output::err("not_run_by_cpp"));
+        return Ok(Output::harness("not_run_by_cpp"));
     }
     let mut out = Output::new().int("corner", first as i64);
     if first == 0.0 {
@@ -571,7 +571,7 @@ fn create_rust(
         Ok(c) => c,
         Err(e) => {
             return Ok(Output::unported(&e)
-                .unwrap_or_else(|| Output::err(format!("rust_error_{}", status(&e)))))
+                .unwrap_or_else(|| Output::kernel(&e, format!("rust_error_{}", status(&e)))))
         }
     };
     let Some(c) = c else {
@@ -695,7 +695,7 @@ fn corner_output(rec: &[f64]) -> Result<Output, HarnessError> {
         return Ok(Output::rejected("upstream would dereference null"));
     }
     if first == NOT_RUN {
-        return Ok(Output::err("not_run_by_cpp"));
+        return Ok(Output::harness("not_run_by_cpp"));
     }
     let get = |i: usize| {
         rec.get(i)
@@ -1093,7 +1093,7 @@ fn corner_rust_status_gs(
     let st = match r {
         Ok(v) => v,
         Err(e) if e.is_unported() => {
-            return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())))
+            return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())))
         }
         Err(e) => status(&e),
     };

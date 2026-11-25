@@ -334,7 +334,7 @@ fn run_rust(ctor: &Sizes, ops: &[Op]) -> solidcore::Result<(Vec<i64>, Vec<f64>)>
 }
 
 fn rust_err(e: &SolidError) -> Output {
-    Output::unported(e).unwrap_or_else(|| Output::err(format!("rust_error: {e}")))
+    Output::unported(e).unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}")))
 }
 
 // ---- generation -------------------------------------------------------
