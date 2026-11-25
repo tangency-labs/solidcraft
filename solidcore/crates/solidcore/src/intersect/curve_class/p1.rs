@@ -160,6 +160,7 @@ use crate::math::{max2, Point2, Point3, Vec2, Vec3, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::math::gamma;
+use crate::surface::implicit::AnalyticSupport;
 use crate::surface::normal_cone::intersection_reach;
 use crate::surface::surface::p1::map_to_2d_on_curve;
 use crate::surface::surface::p2::surface_cache;
@@ -626,6 +627,17 @@ pub struct CurveClassification<O> {
     /// witness ([`super::witness`]) make a range of the curve on a boundary edge a
     /// single point, where the two faces' surfaces show the contact is one point.
     pub(super) tangency_partner: Option<O>,
+    /// Explicit ordinary face classification policy, retained with that face's result.
+    pub(super) native_material_face: Option<O>,
+    pub(super) native_foreign_support: Option<NativeForeignSupport<O>>,
+}
+
+/// A genuine SSI's opposite defining support, tied to the face classified against.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct NativeForeignSupport<O> {
+    pub(super) classified_face: O,
+    pub(super) support: AnalyticSupport,
+    pub(super) zone: f64,
 }
 
 /// Not upstream: how far across itself a classified curve is known (docs/booleans.md,
@@ -770,6 +782,8 @@ impl<O: ClassObject> CurveClassification<O> {
             source_reach: None,
             seam_hint: None,
             tangency_partner: None,
+            native_material_face: None,
+            native_foreign_support: None,
             tgt_loops_only: false,
             tgt_loops: Vec::new(),
             other_classification: None,
@@ -835,6 +849,17 @@ impl<O: ClassObject> CurveClassification<O> {
             doing_fillets: self.doing_fillets,
             ok_to_set_tolerance: self.ok_to_set_tolerance,
             source_reach: self.source_reach,
+            native_material_face: self.native_material_face.map(&mut *f).transpose()?,
+            native_foreign_support: self
+                .native_foreign_support
+                .map(|s| {
+                    f(s.classified_face).map(|face| NativeForeignSupport {
+                        classified_face: face,
+                        support: s.support,
+                        zone: s.zone,
+                    })
+                })
+                .transpose()?,
             seam_hint: self
                 .seam_hint
                 .map(|(h, s)| f(h).map(|h| (h, s)))
@@ -1058,17 +1083,70 @@ impl<O: ClassObject> CurveClassification<O> {
 
     /// `SetSurface1`.
     pub fn set_surface1(&mut self, surface1: Option<O>) {
+        if self.surface1 != surface1 {
+            self.native_foreign_support = None;
+        }
         self.surface1 = surface1;
     }
 
     /// `SetSurface2`.
     pub fn set_surface2(&mut self, surface2: Option<O>) {
+        if self.surface2 != surface2 {
+            self.native_foreign_support = None;
+        }
         self.surface2 = surface2;
     }
 
     /// `SetFace`.
     pub fn set_face(&mut self, face: Option<O>) {
+        if self
+            .native_foreign_support
+            .is_some_and(|s| face != Some(s.classified_face))
+        {
+            self.native_foreign_support = None;
+        }
+        if self.face != face {
+            self.native_material_face = None;
+        }
         self.face = face;
+    }
+
+    /// Marks this face's classification as ordinary, excluding explicit gap repair.
+    pub(crate) fn set_native_material_contacts(&mut self, ordinary: bool) {
+        self.native_material_face = ordinary.then_some(self.face).flatten();
+    }
+
+    /// Whether retained face classifications permit native material contact proofs.
+    pub(crate) fn native_material_contacts(&self) -> bool {
+        !self.doing_fillets && self.face.is_some() && self.native_material_face == self.face
+    }
+
+    /// Records an opposite native support only for a genuine surface intersection.
+    pub(crate) fn set_native_foreign_support(
+        &mut self,
+        face: O,
+        support: AnalyticSupport,
+        zone: f64,
+    ) {
+        self.native_foreign_support = Some(NativeForeignSupport {
+            classified_face: face,
+            support,
+            zone,
+        });
+    }
+
+    /// Independent native support evidence for the current ordinary SSI classification.
+    pub(crate) fn native_foreign_support(&self) -> Option<(&AnalyticSupport, f64)> {
+        self.native_foreign_support
+            .as_ref()
+            .filter(|s| {
+                self.native_material_contacts()
+                    && self.face == Some(s.classified_face)
+                    && self.is_curve_current
+                    && s.zone.is_finite()
+                    && s.zone >= 0.0
+            })
+            .map(|s| (&s.support, s.zone))
     }
 
     /// `SetIgnoreTangency`.
@@ -1180,6 +1258,10 @@ impl<O: ClassObject> CurveClassification<O> {
     /// Sets the curve (`SetCurve`; upstream default `bIsCurveOwned = FALSE`); the curve
     /// becomes current.
     pub fn set_curve(&mut self, curve: Option<O>, is_curve_owned: bool) {
+        if self.curve != curve {
+            self.native_material_face = None;
+            self.native_foreign_support = None;
+        }
         // when needed - free old curve (nothing to free for a handle)
 
         // make assignment
@@ -1198,6 +1280,9 @@ impl<O: ClassObject> CurveClassification<O> {
         is_curve_current: bool,
         ti: Option<O>,
     ) {
+        if self.surface1 != surface1 || self.surface2 != surface2 || !is_curve_current {
+            self.native_foreign_support = None;
+        }
         self.surface1 = surface1;
         self.surface2 = surface2;
         self.is_curve_current = is_curve_current;
@@ -1210,6 +1295,7 @@ impl<O: ClassObject> CurveClassification<O> {
     pub fn set_is_curve_current(&mut self, current: bool) {
         self.is_curve_current = current;
         if !current {
+            self.native_foreign_support = None;
             self.uv_curve1 = None;
             self.uv_curve2 = None;
         }

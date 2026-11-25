@@ -1157,7 +1157,7 @@
   "ai.prefs.control_listening": "Escoltant a 127.0.0.1:{port}",
   "ai.prefs.control_not_listening": "No està escoltant",
   "ai.prefs.control_port": "Port",
-  "ai.prefs.control_port_note": "El port al qual es connecten els agents d'IA en aquest equip (127.0.0.1). 27878 és el predeterminat: quan està en ús, es pren el següent lliure. Qualsevol altre port s'usa exactament. Apunteu el vostre client MCP al mateix port, per exemple solidcraft-cli mcp --connect 127.0.0.1:7878.",
+  "ai.prefs.control_port_note": "El port al qual es connecten els agents d'IA en aquest equip (127.0.0.1). 27878 és el predeterminat: quan està en ús, es pren el següent lliure. Qualsevol altre port s'usa exactament. Apunteu el vostre client MCP al mateix port, per exemple solidcraft-cli mcp --connect 127.0.0.1:27878.",
   "ai.prefs.control_port_taken": "El port {port} està en ús per un altre programa (o una altra finestra de SolidCraft). Trieu un altre port.",
   "ai.prefs.follow_camera": "Girar la càmera cap als bocets",
   "ai.prefs.follow_camera_off": "El seguiment automàtic de la càmera està desactivat.",

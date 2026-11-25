@@ -374,7 +374,9 @@ impl State<'_> {
                 // A general weighted spline has no Seg2 form. Its display chords pull an
                 // on-curve point off the spline, including points used as Break/Trim boundaries.
                 if let Some(record) = nurbs.as_ref().and_then(|n| n.rational_record(&p, *degree)) {
-                    let Some(hit) = solidcore_ops::curve::closest_point(&record, [q.x, q.y, 0.0], 1e-9).ok().flatten() else { return f64::INFINITY };
+                    let Some(hit) = solidcraft_kernel::services::curve::closest_point(&record, [q.x, q.y, 0.0], 1e-9).ok().flatten() else {
+                        return f64::INFINITY;
+                    };
                     let Some((_, tangent)) = solidcraft_geom::brep::eval::CurveEval::new(&record).ok().and_then(|c| c.derivs(hit.parameter)) else {
                         return f64::INFINITY;
                     };

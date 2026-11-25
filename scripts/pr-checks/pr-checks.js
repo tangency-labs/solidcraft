@@ -52,10 +52,11 @@ function parseDefaults(body, { ownerApproved = false } = {}) {
   const m = stripNoise(body, { inlineCode: false }).replace(/\*\*/g, '').match(/^[ \t]*(?:[-*][ \t]+)?Changes a default:[ \t]*(.*?)[ \t]*$/im);
   if (!m) return { status: 'missing' };
   const value = m[1].replace(/\*\*/g, '').trim().replace(/^`([^`]*)`$/, '$1').trim();
-  // `no` may end in a full stop or be followed by a note after a separator: `no.`, `no, only a fix`,
-  // `no — a new button`, `no. Only a fix.`
-  if (/^no\b[ \t]*(?:[.!]*|(?:—|–|->|→|-{1,2}|:|,|;|\.)[ \t]*\S.*)$/i.test(value)) return { status: 'no' };
-  const yes = value.match(/^yes\b[ \t]*(?:—|–|->|→|-{1,2}|:|,|;)[ \t]*(.+)$/i);
+  // `no` may end in a full stop or be followed by a note after any punctuation: `no.`, `no, only a fix`,
+  // `no — a new button`, `no. Only a fix.`, `no (only a fix)`, `no) …`. `yes` likewise takes any punctuation
+  // before what changes.
+  if (/^no\b[ \t]*(?:[.!]*|[\p{P}\p{S}]+[ \t]*\S.*)$/iu.test(value)) return { status: 'no' };
+  const yes = value.match(/^yes\b[ \t]*[\p{P}\p{S}]+[ \t]*(.+)$/iu);
   if (yes) {
     const pref = yes[1].match(/^(.*?)[ ,;]*\bold (?:behaviou?r|value) kept behind (?:preference|pref|setting)[ \t]+`?([\w.:/-]+)`?\.?$/i);
     if (pref && pref[1].trim() && !/^<.*>$/.test(pref[2])) {
@@ -68,7 +69,7 @@ function parseDefaults(body, { ownerApproved = false } = {}) {
   }
   // The owner-approved label is the owner's approval: any `yes` line passes with it, whatever follows.
   if (ownerApproved && /^yes\b/i.test(value)) {
-    const detail = value.replace(/^yes\b[ \t]*(?:—|–|->|→|-{1,2}|:|,|;|\.)?[ \t]*/i, '').replace(/[ \t.]+$/, '');
+    const detail = value.replace(/^yes\b[ \t]*[\p{P}\p{S}]*[ \t]*/iu, '').replace(/[ \t.]+$/, '');
     return { status: 'yes', detail, approvedByOwner: true };
   }
   return { status: 'malformed', detail: value };

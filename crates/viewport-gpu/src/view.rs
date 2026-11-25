@@ -1512,6 +1512,17 @@ pub struct Frame {
     pub clip: [[f32; 4]; MAX_SECTION_PLANES],
     /// Each clip plane's hatch, an index into `solidcraft_viewport::SECTION_HATCH_ANGLES`.
     pub clip_hatch: [usize; MAX_SECTION_PLANES],
+    /// Every shown body is selected (a whole-body `select.all`): `fs_solid` colours each body
+    /// with [`Frame::selection_tint`] instead of its own, so one uniform covers the whole model
+    /// without a highlight entry per body.
+    ///
+    /// It matches one body's selection tint to a mean of 5.6 of 255 (`6ed8b279a4`), with the
+    /// residual on the silhouette: about half of the differing pixels lie within 2 px of it,
+    /// where the highlight pass biases toward the eye (`highlight_depth`) while the model pass
+    /// biases away by `FACE_BIAS`, so the two win slightly different samples. Making them
+    /// identical would mean drawing the selection as a second biased pass, which is the per-body
+    /// geometry this flag exists to avoid.
+    pub selection_all: bool,
     /// Colour of the inside of cut bodies (straight sRGB, 0..1); alpha 1 hatches it, 0 leaves it plain in the body's colour.
     pub cap: [f32; 4],
     /// Canvases and decals.
@@ -4889,6 +4900,9 @@ pub fn frame_key(cb: &Frame) -> u64 {
     // picture cached under the previous theme's colours is not shown (#5802).
     cb.hover_tint.map(f32::to_bits).hash(&mut h);
     cb.selection_tint.map(f32::to_bits).hash(&mut h);
+    // Selecting every body tints them through the uniform alone: the picture must be drawn again
+    // when that toggles, or a cached untinted frame would be shown.
+    cb.selection_all.hash(&mut h);
     cb.hatch.iter().flatten().for_each(|v| v.to_bits().hash(&mut h));
     cb.sky.map(f32::to_bits).hash(&mut h);
     cb.outline.hash(&mut h);
@@ -6222,7 +6236,9 @@ fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: boo
     v.extend([if reversed { 1.0 } else { 0.0 }, FACE_STEPS as f32, FACE_SLOPE, first_moved]);
     v.extend(model.iter().flatten());
     v.extend([cb.hover_tint[0], cb.hover_tint[1], cb.hover_tint[2], 0.0]);
-    v.extend([cb.selection_tint[0], cb.selection_tint[1], cb.selection_tint[2], 0.0]);
+    // The fourth: 1 when every shown body is selected, so the solid shaders take the selection
+    // colour as the body's own (`u.sel.w`), with no per-body geometry.
+    v.extend([cb.selection_tint[0], cb.selection_tint[1], cb.selection_tint[2], if cb.selection_all { 1.0 } else { 0.0 }]);
     for [r, g, b] in cb.hatch {
         v.extend([r, g, b, 1.0]);
     }
@@ -6843,6 +6859,7 @@ mod tests {
             analysis_colors: [0.0; 36],
             access: None,
             hover_tint: [0.0; 3],
+            selection_all: false,
             selection_tint: [0.0; 3],
             hatch: Default::default(),
             moving: None,
@@ -7585,6 +7602,7 @@ mod glass_tests {
             sky: [0.0; 4],
             ssaa: 1.0,
             hover_tint: [0.0; 3],
+            selection_all: false,
             selection_tint: [0.0; 3],
             hatch: Default::default(),
             moving: None,
@@ -7782,6 +7800,7 @@ mod glass_tests {
             analysis_colors: [0.0; 36],
             access: None,
             hover_tint: [0.0; 3],
+            selection_all: false,
             selection_tint: [0.0; 3],
             hatch: Default::default(),
             moving: None,

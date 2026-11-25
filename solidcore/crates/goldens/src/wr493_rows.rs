@@ -707,9 +707,10 @@ fn sphere_point_rows_are_closer_to_the_sphere() {
 ///   309.8221903199704, 1.2e-5 (both CLOSER, by a margin far beyond the closed form's
 ///   rounding);
 /// - `Solids__revolution_mold.smb`: its committed line stays main's (the run agrees with
-///   it to the goldens' `1e-9`); the values the run gives are pinned here, and its moved
-///   entries are classified against certified enclosures in
-///   `heal_edge_tolerance_covers_edge_face_gap.rs`;
+///   it to the goldens' `1e-9`); the values the run gives with the WR-450 retirement's
+///   seams at main's choices are pinned here (that retirement moves the row below the
+///   comparator as well: `wr450_rows::BELOW_COMPARATOR`), and its moved entries are
+///   classified against certified enclosures in `heal_edge_tolerance_covers_edge_face_gap.rs`;
 /// - `ss_plane_sph1..4`: the plane face is the square of side 5, area 25 exactly: the row
 ///   is 25, as main's committed row (unmoved); the sphere face's row,
 ///   25.14456696301113 (sph1, sph4) and 25.144566963011123 (sph2, sph3), is in the face
@@ -759,7 +760,12 @@ fn corpus_parity_rows_are_closer() {
     let same = |a: f64, b: f64| a.to_bits() == b.to_bits() || (a.is_nan() && b.is_nan());
     let mut moved = Vec::new();
     for (case, area, volume) in rows {
-        let out = run_in_process(&regression_case(&Runner, case)).unwrap();
+        // (`revolution_mold`, which the WR-450 retirement moves below the comparator too,
+        // with main's choices at its seams: the WR-493 values alone)
+        let out = crate::wr450_rows::with_mains_choices_for(Runner.id(), case, || {
+            run_in_process(&regression_case(&Runner, case))
+        })
+        .unwrap();
         for (key, row) in [
             ("area", area),
             ("rt_area", area),
@@ -823,9 +829,17 @@ fn box_w_slot_geometry_moves_only_on_the_found_spheres() {
         [96.1129828979684, 154.29581589814254, 11030.81247736941],
     ];
     let runner = blend_fillet_executive_p3::Runner;
-    let now = run(&runner, CASE).values["result_geometry"].clone();
-    let (main, replaced) =
-        crate::refit::with_fitted_spheres(|| run(&runner, CASE).values["result_geometry"].clone());
+    // (the WR-450 retirement moves this row too: every run here has main's choices at its
+    // seams, so this is the WR-493 move alone; `wr450_rows` replays the WR-450 move)
+    let unit = runner.id();
+    let now = crate::wr450_rows::with_mains_choices_for(unit, CASE, || run(&runner, CASE)).values
+        ["result_geometry"]
+        .clone();
+    let (main, replaced) = crate::refit::with_fitted_spheres(|| {
+        crate::wr450_rows::with_mains_choices_for(unit, CASE, || run(&runner, CASE)).values
+            ["result_geometry"]
+            .clone()
+    });
     assert!(replaced > 0, "{CASE}: no sphere refit");
     let blocks: Vec<[f64; 3]> = main
         .chunks(BLOCK)
@@ -842,7 +856,9 @@ fn box_w_slot_geometry_moves_only_on_the_found_spheres() {
     assert_eq!(blocks, MAIN, "{CASE}: the refit build is not main's");
 
     let mut k = solidcore::Kernel::default();
-    let body = blend_fillet_executive_p3::result_body_of(&mut k, CASE);
+    let body = crate::wr450_rows::with_mains_choices_for(unit, CASE, || {
+        blend_fillet_executive_p3::result_body_of(&mut k, CASE)
+    });
     let (vertices, edges, faces) = (
         p1::vertices(&body, None).unwrap(),
         p1::edges(&body, None).unwrap(),
