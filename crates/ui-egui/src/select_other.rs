@@ -170,8 +170,6 @@ pub struct Popup {
     pub hovered_occurrence: Option<Vec<u64>>,
     /// Active category filter (`None` = All).
     pub filter: Option<Category>,
-    /// Whether to nest rows by component/occurrence/body/sketch when multiple groups exist.
-    pub grouped: bool,
     /// Collapsed group keys (`GroupSeg::key`).
     pub collapsed: HashSet<String>,
     /// The model and dialog it was made for: it closes when they change.
@@ -199,8 +197,6 @@ pub struct State {
     /// The current press belongs to Select Other (it opened or closed the list): the viewport
     /// doesn't also click, drag or box-select with it.
     held: bool,
-    /// User toggled Select Other to flat mode during this session (default false = grouped tree).
-    flat: bool,
     cycle: Option<Cycle>,
 }
 
@@ -673,7 +669,6 @@ fn open_with(app: &mut SolveApp, proj: &Proj, at: Pos2, held: Held) -> bool {
         hovered: None,
         hovered_occurrence: None,
         filter: None,
-        grouped: !app.viewport.select_other.flat,
         collapsed: HashSet::new(),
         revision: app.session.revision,
         dialog: app.dialog.is_some(),
@@ -734,7 +729,7 @@ pub fn describe(app: &SolveApp) -> Value {
         None => json!({ "open": false }),
         Some(p) => {
             let counts = category_counts(&p.rows);
-            let (display, can_group) = build_display_rows(&p.rows, p.filter, p.grouped, &p.collapsed);
+            let (display, grouped) = build_display_rows(&p.rows, p.filter, &p.collapsed);
             let visible_rows: Vec<usize> = display
                 .iter()
                 .filter_map(|d| match d {
@@ -761,8 +756,7 @@ pub fn describe(app: &SolveApp) -> Value {
                 "hovered": p.hovered,
                 "total": p.total,
                 "filter": p.filter.map(Category::key),
-                "grouped": p.grouped && can_group,
-                "can_group": can_group,
+                "grouped": grouped,
                 "categories": counts.iter().map(|(c, n)| json!({ "key": c.key(), "count": n })).collect::<Vec<_>>(),
                 "visible_rows": visible_rows,
                 "groups": groups,
@@ -780,8 +774,8 @@ pub fn describe(app: &SolveApp) -> Value {
 
 /// The control channel's `ui.selectOther`: `{x, y}` opens the list there, `{pick: i, add?}`
 /// picks a row, `{hover: i}` lights one up, `{filter: "edges" | "all"}` filters by category,
-/// `{grouped: true | false}` switches tree/flat view, `{toggle_group: key}` collapses/expands a
-/// group, `{close: true}` closes it; it answers with the list.
+/// `{toggle_group: key}` collapses/expands a group, `{close: true}` closes it; it answers with
+/// the list.
 pub fn control(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     if p.get("close").and_then(Value::as_bool) == Some(true) {
         close(app);
@@ -815,12 +809,6 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
         pop.hovered = None;
         pop.hovered_occurrence = None;
         hover_override(app);
-        return Ok(describe(app));
-    }
-    if let Some(grouped) = p.get("grouped").and_then(Value::as_bool) {
-        app.viewport.select_other.flat = !grouped;
-        let Some(pop) = app.viewport.select_other.popup.as_mut() else { return Err("Select Other is not open".into()) };
-        pop.grouped = grouped;
         return Ok(describe(app));
     }
     if let Some(key) = p.get("toggle_group").and_then(Value::as_str) {
@@ -1146,12 +1134,12 @@ fn can_group_rows(rows: &[Row], filtered: &[usize]) -> bool {
     top_counts.len() >= 2 && top_counts.values().any(|&n| n >= 2)
 }
 
-/// Build the visible display rows for `rows`, applying `filter`, `grouped` and `collapsed`.
-/// Returns `(display_rows, can_group)`.
-fn build_display_rows(rows: &[Row], filter: Option<Category>, grouped: bool, collapsed: &HashSet<String>) -> (Vec<DisplayRow>, bool) {
+/// Build the visible display rows for `rows`, applying `filter` and `collapsed`.
+/// Returns `(display_rows, grouped)`.
+fn build_display_rows(rows: &[Row], filter: Option<Category>, collapsed: &HashSet<String>) -> (Vec<DisplayRow>, bool) {
     let filtered: Vec<usize> = rows.iter().enumerate().filter(|(_, r)| filter.is_none_or(|cat| r.category == cat)).map(|(i, _)| i).collect();
-    let can_group = can_group_rows(rows, &filtered);
-    if !grouped || !can_group {
+    let grouped = can_group_rows(rows, &filtered);
+    if !grouped {
         let flat = filtered
             .into_iter()
             .filter_map(|i| {
@@ -1159,7 +1147,7 @@ fn build_display_rows(rows: &[Row], filter: Option<Category>, grouped: bool, col
                 Some(DisplayRow::Item { row_idx: i, label: r.label.clone(), tooltip: r.label.clone(), icon: r.icon, depth: 0, toggle: None })
             })
             .collect();
-        return (flat, can_group);
+        return (flat, false);
     }
     let mut entries: Vec<TopEntry> = Vec::new();
     for idx in filtered {
@@ -1188,7 +1176,7 @@ fn build_display_rows(rows: &[Row], filter: Option<Category>, grouped: bool, col
             }
         }
     }
-    (out, can_group)
+    (out, true)
 }
 
 struct ChipSpec {
@@ -1258,8 +1246,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let t = Tokens::get();
     let counts = category_counts(&p.rows);
     let show_filters = counts.len() >= 2;
-    let (display_rows, can_group) = build_display_rows(&p.rows, p.filter, p.grouped, &p.collapsed);
-    let show_tree = p.grouped && can_group;
+    let (display_rows, show_tree) = build_display_rows(&p.rows, p.filter, &p.collapsed);
 
     let chip_font = FontId::proportional(t.font_small);
     let chips: Vec<ChipSpec> = if show_filters {
@@ -1285,7 +1272,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 
     let screen = ctx.content_rect();
     let margins = crate::ui_kit::Menu::frame().total_margin().sum();
-    let base_w = if show_filters || can_group { WIDE_LIST_W } else { crate::ui_kit::LIST_W };
+    let base_w = if show_filters || show_tree { WIDE_LIST_W } else { crate::ui_kit::LIST_W };
     let width = base_w.min(screen.width());
     let w = (width - margins.x).max(0.0);
     let (chip_rects, filter_bar_h) = layout_chips(ctx, w, &chip_font, t.text, &chips);
@@ -1302,11 +1289,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut picked = None;
     let mut picked_occ: Option<Vec<u64>> = None;
     let mut next_filter: Option<Option<Category>> = None;
-    let mut toggle_grouped = false;
     let mut toggled_group: Option<String> = None;
-
-    let tree_label = app.tr(if show_tree { "ui.select_other.view_flat" } else { "ui.select_other.view_tree" }).to_string();
-    let tree_tip = app.tr(if show_tree { "ui.select_other.view_flat_tip" } else { "ui.select_other.view_tree_tip" }).to_string();
 
     let resp = Container::new(ctx, Surface::Popup)
         .area(egui::Id::unique("sc_select_other"))
@@ -1317,32 +1300,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             // Area remembers the preceding list's size, which must not limit a longer list.
             ui.set_max_height(size.y);
             crate::ui_kit::Menu::show(ui, width, |ui| {
-                // Header: title (+ total when capped) and optional Tree/Flat view toggle.
+                // Header: title (+ total when capped).
                 let (r, _) = ui.allocate_exact_size(vec2(w, header), Sense::hover());
                 let title = solidcraft_ui_text::tr_label("Select Other").to_uppercase();
                 let title = if p.total > p.rows.len() { format!("{title} · {} / {}", p.rows.len(), p.total) } else { title };
                 ui.painter().text(pos2(r.left() + 8.0, r.center().y), Align2::LEFT_CENTER, title, FontId::proportional(t.font_panel), t.text_dim);
-                if can_group {
-                    let toggle_font = FontId::proportional(t.font_small);
-                    let tw = ui.fonts_mut(|f| f.layout_no_wrap(tree_label.clone(), toggle_font.clone(), t.text_dim).size().x);
-                    let btn_w = tw + 12.0;
-                    let btn_rect = Rect::from_min_size(pos2(r.right() - btn_w - 6.0, r.center().y - 9.0), vec2(btn_w, 18.0));
-                    let btn_resp =
-                        ui.interact(btn_rect, ui.scope_id().with("select_other_tree_toggle"), Sense::click()).backing_on_hover_text(&tree_tip);
-                    crate::scenario::publish_handle("select_other:toggle_tree", btn_rect.center());
-                    let bg = if btn_resp.hovered() { t.hover } else { t.panel_header };
-                    ui.painter().rect(btn_rect, t.radius_sm, bg, Stroke::new(1.0, t.border), StrokeKind::Inside);
-                    ui.painter().text(
-                        btn_rect.center(),
-                        Align2::CENTER_CENTER,
-                        &tree_label,
-                        toggle_font,
-                        if btn_resp.hovered() { t.text } else { t.text_dim },
-                    );
-                    if btn_resp.clicked() {
-                        toggle_grouped = true;
-                    }
-                }
 
                 // Category filter chips bar (shown when 2+ categories are present).
                 if show_filters && filter_bar_h > 0.0 {
@@ -1498,7 +1460,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             });
         });
     crate::scenario::publish_rect("select_other", resp.response.rect);
-    let mut new_flat = None;
     if let Some(pop) = app.viewport.select_other.popup.as_mut() {
         let mut changed = false;
         if pop.hovered != hovered {
@@ -1515,11 +1476,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             pop.hovered_occurrence = None;
             changed = true;
         }
-        if toggle_grouped {
-            pop.grouped = !pop.grouped;
-            new_flat = Some(!pop.grouped);
-            changed = true;
-        }
         if let Some(key) = toggled_group {
             if !pop.collapsed.remove(&key) {
                 pop.collapsed.insert(key);
@@ -1529,9 +1485,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         if changed {
             ctx.request_repaint();
         }
-    }
-    if let Some(flat) = new_flat {
-        app.viewport.select_other.flat = flat;
     }
     let (pressed, pointer, mods) = ctx.input(|i| (i.pointer.any_pressed(), i.pointer.interact_pos(), i.modifiers));
     if let Some(i) = picked {

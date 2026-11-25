@@ -6,11 +6,7 @@
     "ui.select_other.cat_faces": "Faces",
     "ui.select_other.cat_sketch": "Sketch",
     "ui.select_other.cat_vertices": "Vertices",
-    "ui.select_other.filter_all": "All",
-    "ui.select_other.view_flat": "Flat",
-    "ui.select_other.view_flat_tip": "Show flat list",
-    "ui.select_other.view_tree": "Tree",
-    "ui.select_other.view_tree_tip": "Group by component and body"
+    "ui.select_other.filter_all": "All"
   },
   "ar": {
     "ui.select_other.cat_bodies": "أجسام",
@@ -19,11 +15,7 @@
     "ui.select_other.cat_faces": "وجوه",
     "ui.select_other.cat_sketch": "رسم",
     "ui.select_other.cat_vertices": "رؤوس",
-    "ui.select_other.filter_all": "الكل",
-    "ui.select_other.view_flat": "مسطّح",
-    "ui.select_other.view_flat_tip": "عرض قائمة مسطّحة",
-    "ui.select_other.view_tree": "شجرة",
-    "ui.select_other.view_tree_tip": "تجميع حسب المكوّن والجسم"
+    "ui.select_other.filter_all": "الكل"
   },
   "de": {
     "ui.select_other.cat_bodies": "Körper",
@@ -32,11 +24,7 @@
     "ui.select_other.cat_faces": "Flächen",
     "ui.select_other.cat_sketch": "Skizze",
     "ui.select_other.cat_vertices": "Eckpunkte",
-    "ui.select_other.filter_all": "Alle",
-    "ui.select_other.view_flat": "Flach",
-    "ui.select_other.view_flat_tip": "Flache Liste anzeigen",
-    "ui.select_other.view_tree": "Baum",
-    "ui.select_other.view_tree_tip": "Nach Komponente und Körper gruppieren"
+    "ui.select_other.filter_all": "Alle"
   },
   "he": {
     "ui.select_other.cat_bodies": "גופים",
@@ -45,11 +33,7 @@
     "ui.select_other.cat_faces": "פאות",
     "ui.select_other.cat_sketch": "סקיצה",
     "ui.select_other.cat_vertices": "קודקודים",
-    "ui.select_other.filter_all": "הכול",
-    "ui.select_other.view_flat": "שטוח",
-    "ui.select_other.view_flat_tip": "הצג רשימה שטוחה",
-    "ui.select_other.view_tree": "עץ",
-    "ui.select_other.view_tree_tip": "קבץ לפי רכיב וגוף"
+    "ui.select_other.filter_all": "הכול"
   },
   "ja": {
     "ui.select_other.cat_bodies": "ボディ",
@@ -58,11 +42,7 @@
     "ui.select_other.cat_faces": "面",
     "ui.select_other.cat_sketch": "スケッチ",
     "ui.select_other.cat_vertices": "頂点",
-    "ui.select_other.filter_all": "すべて",
-    "ui.select_other.view_flat": "フラット",
-    "ui.select_other.view_flat_tip": "フラット一覧を表示",
-    "ui.select_other.view_tree": "ツリー",
-    "ui.select_other.view_tree_tip": "コンポーネントとボディでグループ化"
+    "ui.select_other.filter_all": "すべて"
   },
   "ko": {
     "ui.select_other.cat_bodies": "본체",
@@ -71,11 +51,7 @@
     "ui.select_other.cat_faces": "면",
     "ui.select_other.cat_sketch": "스케치",
     "ui.select_other.cat_vertices": "꼭짓점",
-    "ui.select_other.filter_all": "전체",
-    "ui.select_other.view_flat": "목록",
-    "ui.select_other.view_flat_tip": "평면 목록 표시",
-    "ui.select_other.view_tree": "트리",
-    "ui.select_other.view_tree_tip": "구성 요소 및 본체별로 그룹화"
+    "ui.select_other.filter_all": "전체"
   },
   "vi": {
     "ui.select_other.cat_bodies": "Khối",
@@ -84,11 +60,7 @@
     "ui.select_other.cat_faces": "Mặt",
     "ui.select_other.cat_sketch": "Phác thảo",
     "ui.select_other.cat_vertices": "Đỉnh",
-    "ui.select_other.filter_all": "Tất cả",
-    "ui.select_other.view_flat": "Phẳng",
-    "ui.select_other.view_flat_tip": "Hiển thị danh sách phẳng",
-    "ui.select_other.view_tree": "Cây",
-    "ui.select_other.view_tree_tip": "Nhóm theo thành phần và khối"
+    "ui.select_other.filter_all": "Tất cả"
   },
   "zh": {
     "ui.select_other.cat_bodies": "实体",
@@ -97,10 +69,6 @@
     "ui.select_other.cat_faces": "面",
     "ui.select_other.cat_sketch": "草图",
     "ui.select_other.cat_vertices": "顶点",
-    "ui.select_other.filter_all": "全部",
-    "ui.select_other.view_flat": "平铺",
-    "ui.select_other.view_flat_tip": "显示平铺列表",
-    "ui.select_other.view_tree": "树状",
-    "ui.select_other.view_tree_tip": "按组件和实体分组"
+    "ui.select_other.filter_all": "全部"
   }
 }

@@ -33,7 +33,6 @@ fn select_other_feedback_is_local_when_the_browser_hover_expires() {
         hovered: Some(0),
         hovered_occurrence: None,
         filter: None,
-        grouped: true,
         collapsed: std::collections::HashSet::new(),
         revision: h.app.session.revision,
         dialog: false,
@@ -1286,7 +1285,7 @@ fn category_filter_chips_narrow_rows_without_closing_and_hide_for_single_categor
 }
 
 #[test]
-fn multi_body_tree_nests_bodies_front_to_back_and_toggles_collapse_and_flat() {
+fn multi_body_tree_nests_bodies_front_to_back_and_toggles_collapse() {
     let mut h = Harness::new();
     h.app.set_origin_shown(false);
     h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0],"body_name":"Far"})).unwrap();
@@ -1298,7 +1297,6 @@ fn multi_body_tree_nests_bodies_front_to_back_and_toggles_collapse_and_flat() {
     h.frames(2);
 
     let desc = super::describe(&h.app);
-    assert_eq!(desc["can_group"], true, "{desc}");
     assert_eq!(desc["grouped"], true, "{desc}");
     let group_names: Vec<&str> = desc["groups"].as_array().unwrap().iter().filter_map(|g| g["name"].as_str()).collect();
     assert_eq!(group_names, ["Near", "Far"], "nearest body group appears first: {desc}");
@@ -1313,21 +1311,12 @@ fn multi_body_tree_nests_bodies_front_to_back_and_toggles_collapse_and_flat() {
     let after_collapse = collapsed["visible_rows"].as_array().unwrap().len();
     assert!(after_collapse < before_count, "collapsing Near hides its children: {after_collapse} vs {before_count}");
 
-    // Switching to Flat view shows all rows without nesting, and persists across reopen.
-    h.step(&json!({"click": {"handle": "select_other:toggle_tree"}})).unwrap();
+    // Expanding Near again restores its rows.
+    h.step(&json!({"click": {"handle": "select_other:toggle:body:Near"}})).unwrap();
     h.frames(2);
-    assert!(super::is_open(&h.app));
-    let flat = super::describe(&h.app);
-    assert_eq!(flat["grouped"], false);
-    assert_eq!(flat["visible_rows"].as_array().unwrap().len(), before_count);
-    h.step(&json!({"key": "Escape"})).unwrap();
-    h.step(&json!({"hold": pt})).unwrap();
-    h.frames(2);
-    assert_eq!(super::describe(&h.app)["grouped"], false, "Flat choice persists for the session");
+    assert_eq!(super::describe(&h.app)["visible_rows"].as_array().unwrap().len(), before_count);
 
-    // Switching back to Tree and clicking the Near body row selects Body Near.
-    h.step(&json!({"click": {"handle": "select_other:toggle_tree"}})).unwrap();
-    h.frames(2);
+    // Hovering and clicking the Near body row lights up and selects Body Near.
     let rows = super::describe(&h.app)["rows"].as_array().unwrap().clone();
     let near_body_idx =
         rows.iter().position(|r| matches!(serde_json::from_value::<Sel>(r["sel"].clone()).ok(), Some(Sel::Body { name }) if name == "Near")).unwrap();
