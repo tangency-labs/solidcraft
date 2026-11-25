@@ -1794,6 +1794,37 @@ fn sketch_status_shows_in_the_panel_and_not_over_the_view() {
     }
 }
 
+/// Tile and mode chrome only tells views apart (`ui_kit::disambiguates`): with one view, sketching
+/// draws no green frame round the view, no "Model · Sketch1" label and no "Editing" pill, and the
+/// view's tab keeps its own name and colour. Overlay removed by owner decision.
+#[test]
+fn a_single_view_shows_no_tile_or_sketch_mode_chrome() {
+    fn walk<'a>(shape: &'a egui::Shape, out: &mut Vec<&'a egui::Shape>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
+            shape => out.push(shape),
+        }
+    }
+    for mode in [LayoutMode::Docked, LayoutMode::Floating] {
+        let mut h = Harness::new();
+        h.call("ui.set", json!({"layout":mode}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        assert_eq!(crate::view_windows::strip_views(&h.app).len(), 1, "{mode:?}: one view");
+        assert!(!crate::ui_kit::disambiguates(1) && crate::ui_kit::disambiguates(2));
+        let texts = painted_texts(&h);
+        assert!(!texts.iter().any(|t| t == "Editing" || t.contains(" · Sketch1")), "{mode:?}: no sketch label or pill: {texts:?}");
+        let t = solidcraft_theme::Tokens::get();
+        let mut shapes = Vec::new();
+        h.shapes.iter().for_each(|s| walk(&s.shape, &mut shapes));
+        let frame = shapes.iter().find(|shape| {
+            matches!(shape, egui::Shape::Rect(rect) if rect.stroke.color == t.sketch_accent && rect.rect.width() > 300.0 && rect.rect.height() > 200.0)
+        });
+        assert!(frame.is_none(), "{mode:?}: no green frame round the view: {frame:?}");
+        assert!(rect_of(&format!("view:title:{}", h.app.docs.views.active().id)).is_none(), "{mode:?}: no view name pill");
+    }
+}
+
 #[test]
 fn status_bar_names_what_is_edited_and_the_sketch_state() {
     use crate::status_bar::SketchState;

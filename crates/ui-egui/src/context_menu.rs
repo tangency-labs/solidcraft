@@ -1570,6 +1570,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     if doc.links.get(&id).is_some_and(|link| link.step_names.is_none()) {
         own.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
+        own.push(act("ui.relinkSourceNames", "Relink Source and Use Its Names…", "update").with(json!({"component": id})));
     } else if id != 0 && app.session.can_extract(id) {
         own.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));
     }
@@ -2189,6 +2190,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.relinkSource" | "ui.relinkPlacement" => {
             if let Some(component) = id_of(&p, "component") {
                 crate::linked_source::start(app, component, id_of(&p, "occurrence"));
+            }
+        }
+        "ui.relinkSourceNames" => {
+            if let Some(component) = id_of(&p, "component") {
+                crate::linked_source::start_with(app, component, None, true);
             }
         }
         "ui.extractComponent" => {

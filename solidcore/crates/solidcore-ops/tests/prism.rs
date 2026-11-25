@@ -13,8 +13,9 @@
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_3, FRAC_PI_4, PI, TAU};
 
 use solidcore_ops::prism::{
-    extrude_planar_regions, fitted_loop, loop_holds, planar_regions_boolean, prism_equivalent,
-    prism_section, region_area, PrismSection,
+    extrude_planar_regions, fill_channel, fitted_loop, loop_holds, planar_regions_boolean,
+    prism_equivalent, prism_section, region_area, Contour, FillFailure, FillOptions, FillSide,
+    PrismSection,
 };
 use solidcore_ops::{make_box, make_cylinder, session, Body, BooleanOp, CheckLevel, Error};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
@@ -2320,6 +2321,64 @@ fn a_direction_on_the_edge_of_a_band_is_within_the_zone() {
         let e = c.face_straying(&co, face, d).unwrap().unwrap();
         assert!(e <= zone, "{run:?}: {e} > {zone}");
     }
+}
+
+#[test]
+fn a_channel_is_filled_in_the_records_types_and_a_refusal_comes_back_with_its_fit() {
+    // a 60 degree V, 6 deep with a gap of 1: the walls from the toes (±(0.5 + 6 tan 30), 0)
+    let top = 0.5 + 6.0 * (PI / 6.0).tan();
+    let right = [Seg2::Line {
+        a: v(top, 0.0),
+        b: v(0.5, -6.0),
+    }];
+    let left = [Seg2::Line {
+        a: v(-top, 0.0),
+        b: v(-0.5, -6.0),
+    }];
+    let options = |face| FillOptions {
+        face,
+        second_face: None,
+        depth: None,
+    };
+    let filled = fill_channel(&left, &right, None, &options(Contour::Flat))
+        .unwrap()
+        .unwrap();
+    let want = 6.0 + 36.0 * (PI / 6.0).tan();
+    assert!((area(&filled.region) - want).abs() <= 1e-9 * want);
+    assert!(filled.through && (filled.channel_depth - 6.0).abs() <= 1e-12);
+    // a concave face past what it touches: refused, as a value, with a depth that builds
+    let refusal = fill_channel(
+        &left,
+        &right,
+        None,
+        &options(Contour::Concave { depth: 3.0 }),
+    )
+    .unwrap()
+    .unwrap_err();
+    assert!(
+        matches!(
+            refusal.why,
+            FillFailure::ConcaveFaceCrossesWall {
+                side: FillSide::Face,
+                ..
+            }
+        ),
+        "{refusal:?}"
+    );
+    let fit = refusal.fit.unwrap();
+    assert!(fill_channel(
+        &left,
+        &right,
+        None,
+        &options(Contour::Concave { depth: fit })
+    )
+    .unwrap()
+    .is_ok());
+    // input the kernel refuses stays an error
+    assert!(matches!(
+        fill_channel(&left, &[], None, &options(Contour::Flat)),
+        Err(Error::Refused { .. })
+    ));
 }
 
 /// An extruded rectangle on a sketch plane that is not axis-aligned reads its record back, also
