@@ -174,6 +174,100 @@ fn wedges_of_a_grooved_ring_unite_and_wedges_apart_pair_no_faces() {
     assert!(near(volume(&u), want), "{}, closed form {want}", volume(&u));
 }
 
+/// A plate 42 x 42 x 5 at `x0` along x with a pocket 2 deep cut into its top: a 41 x 41 square
+/// with corners rounded to 4, 0.5 in from each side (tangency-labs/solidcraft#22034). Its
+/// volume is 42² · 5 − 2 (41² − (4 − π) 4²) = 5586 − 32π.
+fn pocketed_plate(x0: f64) -> Body {
+    let v = |x: f64, y: f64| Vec2::new(x0 + x, y);
+    let (r, a, b) = (4.0, 0.5, 41.5);
+    let arc = |c: Vec2, start: f64| Seg2::Arc {
+        center: c,
+        radius: r,
+        start,
+        sweep: PI / 2.0,
+    };
+    let line = |p: Vec2, q: Vec2| Seg2::Line { a: p, b: q };
+    let pocket = Loop2 {
+        segs: vec![
+            line(v(a + r, a), v(b - r, a)),
+            arc(v(b - r, a + r), -PI / 2.0),
+            line(v(b, a + r), v(b, b - r)),
+            arc(v(b - r, b - r), 0.0),
+            line(v(b - r, b), v(a + r, b)),
+            arc(v(a + r, b - r), PI / 2.0),
+            line(v(a, b - r), v(a, a + r)),
+            arc(v(a + r, a + r), PI),
+        ],
+    };
+    let region = Region2 {
+        outer: pocket,
+        holes: vec![],
+    };
+    let tool = extrude_planar_regions(&Plane::XY, &[region], 3.0, 5.0).unwrap();
+    let plate = make_box([x0, 0.0, 0.0], [42.0, 42.0, 5.0]).unwrap();
+    boolean(plate, tool, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// tangency-labs/solidcraft#22034: a join of copies of a pocketed plate side by side. Each union
+/// carries the trims of the faces it copies from the other operand, and proves each carried
+/// trim within its edge's tolerance at equal parameters first (`copy_uv_trim_curves_of_other_face`).
+/// Every such trim is an exact copy with its edge's own structure: an arc of the pocket's
+/// floor (a trim on a plane with the arc's knots and weights), an arc of a rounded corner along
+/// its cylinder's first or last row, a line of a corner along its first or last column. So
+/// each is proved from its control points at once, and none is bisected
+/// (`same_parameter_bisections`): bisected, each was cut down to pieces whose bound came just
+/// under its tolerance, and a join of 16 copies gated 768 such trims. The join is the four
+/// plates' volumes, `4 (5586 − 32π)`, as one solid.
+#[test]
+fn a_join_of_pocketed_plates_proves_its_carried_trims_without_bisecting_them() {
+    all_fixes();
+    let plates: Vec<Body> = (0..4)
+        .map(|i| pocketed_plate(42.0 * f64::from(i)))
+        .collect();
+    let one = 5586.0 - 32.0 * PI;
+    assert!(near(volume(&plates[0]), one), "{}", volume(&plates[0]));
+
+    let mut k = solidcore::Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        ..solidcore::Kernel::default()
+    };
+    let mut held: Vec<_> = plates
+        .iter()
+        .map(|p| {
+            let record = p.to_record().unwrap().0;
+            solidcore_convert::brep::to_kernel(&mut k, &record, true)
+                .unwrap()
+                .0
+        })
+        .collect();
+    k.work_counters.reset();
+    // (the union of each pair of neighbours, then of the two pairs, as `union_all` pairs them)
+    while held.len() > 1 {
+        let mut next = Vec::new();
+        let mut it = held.into_iter();
+        while let (Some(a), Some(b)) = (it.next(), it.next()) {
+            next.push(solidcore::boolean::api_brep::boolean_union(&mut k, a, b).unwrap());
+        }
+        held = next;
+    }
+    assert!(
+        k.work_counters.trim_deviation_bounds() > 0,
+        "no carried trim was gated"
+    );
+    assert_eq!(
+        k.work_counters.same_parameter_bisections(),
+        0,
+        "of {} carried trims gated",
+        k.work_counters.trim_deviation_bounds()
+    );
+
+    let u = union_all(plates).unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 1);
+    assert!(near(volume(&u), 4.0 * one), "{}", volume(&u));
+}
+
 /// The box the boolean pairs faces by holds the face (`proved_bounding_box`): it holds every
 /// vertex of the face and the face's tight box (`SmFace::CalculateTightBoundingBox`, the face's
 /// extreme points inside its trim), on faces whose trims do not bound them alone: a ball's
