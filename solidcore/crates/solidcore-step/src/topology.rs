@@ -771,13 +771,15 @@ impl<'b, 'a> Builder<'b, 'a> {
     }
 
     /// An ORIENTED_EDGE (or a bare EDGE_CURVE) as a loop uses it: its schema edge and whether
-    /// the loop runs along it.
+    /// the loop runs along it. A SEAM_EDGE (ISO 10303-42, an oriented edge with one more
+    /// attribute, the PCURVE of its use) reads the same: its pcurve, like every PCURVE of the
+    /// file, is not used.
     fn oriented_edge(&mut self, id: u64, depth: usize) -> R<(u32, bool)> {
         if depth > MAX_NESTING {
             return Err("oriented edges nested too deeply".into());
         }
         let e = entity(self.ex, id)?;
-        if e.name() == "ORIENTED_EDGE" {
+        if matches!(e.name(), "ORIENTED_EDGE" | "SEAM_EDGE") {
             let p = e.params();
             let (edge, along) = self.oriented_edge(rid(p.get(3), "oriented edge element")?, depth + 1)?;
             let orientation = flag(p.get(4), "oriented edge orientation")?;
