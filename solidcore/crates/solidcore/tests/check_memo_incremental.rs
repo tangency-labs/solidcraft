@@ -225,18 +225,13 @@ fn move_vertex(b: &mut Brep, v: solidcore::topology::VertexId, dx: f64) {
 
 /// A plate checked clean, then the same plate with one corner moved off its faces: the
 /// moved vertex's neighbourhoods have other digests and are tested again, so the check
-/// reports what the full check reports. The corner moves along x off the face it bounds
-/// there, by ten times the gap the check allows a vertex (its tolerance, floored by the
-/// body's intersection tolerance), and by 0.5.
+/// reports what the full check reports. The check may grow a vertex's tolerance to cover
+/// a gap below Test #82's limit (`LARGE_SMALL_SIZE_RATIO` times the body's tolerance) and
+/// passes such a plate; past twice that limit it refuses it. So the small moves only need
+/// the same lines, and the moves of ten times the limit and of 0.5 must be reported.
 #[test]
 fn a_moved_vertex_is_tested_again_after_its_shape_was_clean() {
-    let allowed = {
-        let b = plate(2);
-        let v = b.vertex_list()[0];
-        let floor =
-            solidcore::topology::vertex::corner::xsect_tol_3d_of_brep(&Kernel::default(), &b);
-        floor.max(b.vertex(v).unwrap().tolerance)
-    };
+    let limit = solidcore::geom::tol::LARGE_SMALL_SIZE_RATIO * plate(2).tolerance();
     let moved = |dx: f64| {
         move || {
             let mut b = plate(2);
@@ -247,10 +242,17 @@ fn a_moved_vertex_is_tested_again_after_its_shape_was_clean() {
     };
     let mut k = Kernel::default();
     assert!(on(&mut k, &|| plate(2)).is_empty());
-    for dx in [10.0 * allowed, 0.5] {
+    for (dx, reported) in [
+        (2e-4, false),
+        (1e-3, false),
+        (10.0 * limit, true),
+        (0.5, true),
+    ] {
         let make = moved(dx);
         let want = full(&make);
-        assert!(!want.is_empty(), "moved {dx}: valid");
+        if reported {
+            assert!(!want.is_empty(), "moved {dx}: valid");
+        }
         assert_eq!(on(&mut k, &make), want, "moved {dx}");
     }
 }
