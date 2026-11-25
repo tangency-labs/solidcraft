@@ -95,7 +95,7 @@ const OP_GAP: &str = "prism::extrude::plane_gap";
 /// Halvings of a free-form span past which [`span_extremes`] refuses: at 2^-60 of the span's
 /// parameter a piece's enclosure has long reached its rounding (it shrinks to about a quarter
 /// with each halving), so a span still apart there is not one the search can settle.
-const MAX_HALVINGS: u32 = 60;
+const MAX_HALVINGS: usize = 60;
 
 /// Pieces of one free-form span [`span_extremes`] looks at before it refuses. It keeps only the
 /// pieces near an extreme, a few at each halving, so this bounds the work and is not reached by
@@ -275,10 +275,20 @@ fn affine_extremes(level: Level, regions: &[Region2], op: &'static str) -> Resul
 /// points of the span. The level's values at the span's control points enclose it (the convex
 /// hull property, the weights positive), so a piece is halved (de Casteljau) until its
 /// enclosure lies within the rounding of those values of the extremes found at the ends of its
-/// pieces, which lie on the curve. That rounding is `gamma(8)` of the largest
-/// `|slope.x q.x| + |slope.y q.y|` over the piece's control points `q` (a coordinate's division
-/// by its weight, then a dot product of two, Higham §3.1). What is returned is a value the
-/// curve takes, within that rounding of its true extreme.
+/// pieces, which lie on the curve.
+///
+/// That rounding is taken from the whole span, never from the piece: near an extreme where the
+/// level is 0 a piece's coordinates shrink with its enclosure, and a rounding that shrank with
+/// them would never let the search settle. Every piece's points lie in the hull of the span's,
+/// so `|at0| + |slope.x| X + |slope.y| Y` (`X`, `Y` the span's largest `|q.x|`, `|q.y|`) bounds
+/// each level it evaluates; that takes `gamma(8)` (a coordinate's division by its weight, then
+/// a dot product of two, Higham §3.1). A halving of degree `k` averages each homogeneous
+/// coordinate `k` times, and an average rounds at most once by the span's largest magnitude of
+/// that coordinate, so after `d` halvings a coordinate is off by `k d u` of it, and its point
+/// by `2 k d u rho` of the span's largest (`rho` the span's largest weight over its least,
+/// dividing by a weight). Together the rounding at depth `d` is
+/// `gamma(8 + 2 k d) rho (|at0| + |slope.x| X + |slope.y| Y)`. What is returned is a value the
+/// curve takes, within twice the deepest piece's rounding of its true extreme.
 ///
 /// # Errors
 ///
@@ -286,13 +296,33 @@ fn affine_extremes(level: Level, regions: &[Region2], op: &'static str) -> Resul
 /// [`MAX_HALVINGS`] or [`MAX_PIECES`].
 fn span_extremes(level: Level, span: Vec<H2>, op: &'static str) -> Result<(f64, f64)> {
     let malformed = || SolidError::invalid_input(op, "a malformed profile segment");
+    if span
+        .iter()
+        .any(|q| !(q[2] > 0.0 && q.iter().all(|x| x.is_finite())))
+    {
+        return Err(malformed());
+    }
+    let degree = span.len().saturating_sub(1);
+    let (mut x, mut y, mut w_lo, mut w_hi) = (0.0_f64, 0.0_f64, f64::INFINITY, 0.0_f64);
+    for q in &span {
+        let at = point_of(*q);
+        x = x.max(at.x.abs());
+        y = y.max(at.y.abs());
+        w_lo = w_lo.min(q[2]);
+        w_hi = w_hi.max(q[2]);
+    }
+    let size =
+        (w_hi / w_lo) * (level.at0.abs() + level.slope.x.abs() * x + level.slope.y.abs() * y);
+    if !size.is_finite() {
+        return Err(malformed());
+    }
     let ends = |c: &[H2]| -> Result<(f64, f64)> {
         let first = c.first().ok_or_else(malformed)?;
         let last = c.last().ok_or_else(malformed)?;
         let (a, b) = (level.at(point_of(*first)), level.at(point_of(*last)));
         Ok((a.min(b), a.max(b)))
     };
-    let mut todo = vec![(span, 0u32)];
+    let mut todo = vec![(span, 0usize)];
     let (mut least, mut most) = (f64::INFINITY, f64::NEG_INFINITY);
     let mut pieces = 0u32;
     while let Some((c, depth)) = todo.pop() {
@@ -311,15 +341,13 @@ fn span_extremes(level: Level, span: Vec<H2>, op: &'static str) -> Result<(f64, 
         let (lo, hi) = ends(&c)?;
         least = least.min(lo);
         most = most.max(hi);
-        let (mut hull_lo, mut hull_hi, mut scale) = (f64::INFINITY, f64::NEG_INFINITY, 0.0_f64);
+        let (mut hull_lo, mut hull_hi) = (f64::INFINITY, f64::NEG_INFINITY);
         for q in &c {
-            let q = point_of(*q);
-            let v = level.at(q);
+            let v = level.at(point_of(*q));
             hull_lo = hull_lo.min(v);
             hull_hi = hull_hi.max(v);
-            scale = scale.max((level.slope.x * q.x).abs() + (level.slope.y * q.y).abs());
         }
-        let rounding = gamma(8) * scale;
+        let rounding = gamma(8 + 2 * degree * depth) * size;
         if hull_lo >= least - rounding && hull_hi <= most + rounding {
             continue;
         }
