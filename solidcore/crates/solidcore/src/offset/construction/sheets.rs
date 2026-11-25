@@ -43,8 +43,9 @@
 //! `Q = w^4 (X'^4 - d X' H' + d^2 w^2 K')`: the bracket, of the same sign, is what is
 //! bounded, of degree `4 deg w` less in each parameter (#2487: a G2 round's rational
 //! bicubic-by-septic net reaches degree 112 in Q and 80 in the bracket; the tangent bound's
-//! product reaches 100, within the Bernstein forms' cap of 128). A face not certified regular is refused (D5), naming the largest
-//! wall that works: the smallest radius of curvature on the displaced side.
+//! product reaches 100, within the Bernstein forms' cap of 128). A face not certified
+//! regular is refused (D5), naming the largest wall that works: the smallest radius of
+//! curvature on the displaced side.
 //!
 //! Deviations: not upstream. Bounds: at most [`MAX_ROUNDS`] refinement rounds and
 //! [`MAX_SPANS`] spans per direction for the offset; at most [`MAX_REGULARITY_PATCHES`]
@@ -352,9 +353,10 @@ fn bounded_patch(patch: &Patch) -> (Bounded3, Option<Bounded>) {
 /// regularity forms are the same polynomials in any frame (`A_u` and `A_v` do not change,
 /// nor the second forms `P_uu w - P w_uu`, ...). Each coefficient is one fused
 /// multiply-add, rounded once on its own value, so the move costs `gamma(1)` of the moved
-/// net, and the forms' rounding follows the patch's size, not its distance from the
-/// origin (`docs/definitions-and-certificates.md` §7, invariant 5). A coefficient that
-/// overflows leaves an infinite bound, which certifies nothing.
+/// net (and `f64::MIN_POSITIVE` for underflow), and the forms' rounding follows the
+/// patch's size, not its distance from the origin (`docs/definitions-and-certificates.md`
+/// §7, invariant 5). A coefficient that overflows leaves an infinite bound, which
+/// certifies nothing.
 ///
 /// # Errors
 ///
@@ -384,7 +386,7 @@ fn own_frame(patch: &Patch) -> Result<(Bounded3, Option<Bounded>)> {
     }
     let moved = |c: &Bernstein2, k: usize| -> Result<Bounded> {
         let mid = match (lo.get(k), hi.get(k)) {
-            (Some(&l), Some(&h)) => 0.5 * (l + h),
+            (Some(&l), Some(&h)) => 0.5 * l + 0.5 * h,
             _ => 0.0,
         };
         let coefficients = c
@@ -397,7 +399,7 @@ fn own_frame(patch: &Patch) -> Result<(Bounded3, Option<Bounded>)> {
         let f = Bernstein2::new(du, dv, coefficients)?;
         let size = f.max_abs_coefficient();
         let err = if size.is_finite() {
-            gamma(1) * size
+            gamma(1) * size + f64::MIN_POSITIVE
         } else {
             f64::INFINITY
         };
@@ -1082,7 +1084,7 @@ impl RegularityForms {
             x_min * q1_max
         };
         let q0_min = self.q0.f.min_coefficient() - self.q0.err;
-        if q0_min - worst > gamma(8) * (q0_min.abs() + worst.abs()) {
+        if q0_min - worst > gamma(8) * (q0_min.abs() + worst.abs()) + f64::MIN_POSITIVE {
             return Ok(true);
         }
         self.tangent_certified(b)
@@ -1146,7 +1148,7 @@ impl RegularityForms {
         }
         let slack = gamma(2) * scale * (t.f.max_abs_coefficient() + t.err);
         let least = r.f.min_coefficient();
-        Ok(least - r.err - slack > gamma(4) * (least.abs() + r.err + slack))
+        Ok(least - r.err - slack > gamma(4) * (least.abs() + r.err + slack) + f64::MIN_POSITIVE)
     }
 
     /// `Q` at the middle of the patch.

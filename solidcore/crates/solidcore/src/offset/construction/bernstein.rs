@@ -530,9 +530,12 @@ pub fn product_rounding(du: usize, dv: usize) -> usize {
 
 /// `x` raised past the rounding of the few operations that computed it from nonnegative
 /// terms (at most 8, each within the unit roundoff of its value), so a bound computed in
-/// floating point is a bound.
+/// floating point is a bound, and past underflow. Below the normal range a rounding is
+/// absolute, at most half the least subnormal, in the operation counted as well as in the
+/// bound's own arithmetic; one `f64::MIN_POSITIVE` (2^-1022) covers far more of them than
+/// any form takes (2^51 times the least subnormal).
 fn rounded_up(x: f64) -> f64 {
-    x * (1.0 + gamma(16))
+    x * (1.0 + gamma(16)) + f64::MIN_POSITIVE
 }
 
 /// A polynomial as floating point computed it, and `err`, a bound of every coefficient's
@@ -910,6 +913,20 @@ mod tests {
                 }
             }
             assert!(rounded > 0);
+        }
+    }
+
+    /// Below the normal range a rounding is absolute, not relative: half the least
+    /// subnormal `t` rounds to 0. The half split of `[t, t]` (exactly `t` on the square)
+    /// gives its second coefficient as 0, and the bound covers that.
+    #[test]
+    fn a_rounding_below_the_normal_range_is_counted() {
+        let t = f64::from_bits(1);
+        let f = Bounded::exact(Bernstein2::new(1, 0, vec![t, t]).unwrap());
+        let q = f.quarter(false, false);
+        assert_eq!(q.f.coefficients(), &[t, 0.0]);
+        for &c in q.f.coefficients() {
+            assert!((c - t).abs() <= q.err, "{c} {}", q.err);
         }
     }
 

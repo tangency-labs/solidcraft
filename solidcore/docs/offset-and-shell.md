@@ -198,7 +198,8 @@ close linearly as a patch shrinks; the tangent bound is one polynomial and close
 so a wall close to a round's radius is certified without subdividing. Where q1 changes sign or is
 negative, only the ranges apply. Each patch's bound is subdivided into quarters on an explicit
 stack, at most `MAX_REGULARITY_PATCHES` (20,000); a patch whose middle value is negative is a
-fold, and a
+fold once the face's own partials prove it in interval arithmetic (otherwise it is subdivided),
+and a
 budget run out is refused too, since a face not proved regular is not built. A pole (a normal that
 vanishes) never certifies, so it is refused the same way.
 
