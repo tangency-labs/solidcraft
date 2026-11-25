@@ -131,12 +131,18 @@ fn replay(unit_id: &str) -> usize {
         let case = all
             .get(name)
             .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
-        let (line, refit) = run_refit(u.as_ref(), case);
+        // (a row the WR-450 retirement moves too: main's run had main's choices at its seams)
+        let (line, refit) = crate::wr450_rows::with_mains_choices_for(unit_id, name, || {
+            run_refit(u.as_ref(), case)
+        });
         if refit.reads == 0 || refit.replaced == 0 || !refit.failures.is_empty() {
             failures.push(format!("{name}: {refit:?}"));
         }
         if hash(&line) != old_hash {
-            failures.push(format!("{name}: refit row is not main's row"));
+            failures.push(format!(
+                "{name}: refit row is not main's row ({:#018x})",
+                hash(&line)
+            ));
         }
         let line = run(u.as_ref(), case);
         if golden.get(name) != Some(&line) {

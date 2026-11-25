@@ -472,9 +472,9 @@ fn numbered_round_face_projection_recovers_the_whole_face() {
     assert!(result.error.is_none(), "{result:?}");
     let projected = &state.sketch(3).expect("the saved projection should rebuild").sketch;
     assert_eq!(projected.links[0].face_name.as_deref(), Some("F2:side:c1#1"));
-    assert_eq!(projected.link_curves("j1").len(), 2);
+    // The round wall seen across its axis: its two rims and its two silhouettes (#21295).
+    assert_eq!(projected.link_curves("j1").len(), 4);
 
-    // The edge-on projection of the round wall can retain its saved geometry with a warning.
     // The numbered reference must evaluate the same way as the whole face's existing name.
     let mut exact_doc = doc.clone();
     exact_doc.sketch_mut(3).unwrap().links[0].face_name = Some("F2:side:c1".into());
@@ -1290,3 +1290,72 @@ fn a_projected_plane_of_another_component_lands_where_the_two_planes_meet() {
 
 /// Where the part of the test above stands: turned half about X and lifted 100 mm.
 const PART_FRAME: crate::Mat = [[1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 100.0, 0.0, 1.0]];
+
+#[test]
+fn a_pick_named_by_position_past_the_depth_limit_survives_deleting_unrelated_features() {
+    // #20956: 400 unrelated boxes put the naming depth past its limit, so the box made after them
+    // names its faces by position (`Cleat:face:k`) and a chamfer picked on it stores that name.
+    // Deleting the first boxes brings the depth back under the limit: the box is named from its
+    // history again, and the stored name must still find the edge picked.
+    let pick = Vec3::new(25., 100., 20.);
+    let design = |first: usize, chamfer: Option<&str>| {
+        let mut features: Vec<serde_json::Value> = (first..400)
+            .map(|i| {
+                serde_json::json!({
+                    "id": i + 1, "name": format!("B{i}"), "type": "box", "body_names": [format!("B{i}")], "corner": [20 * i, 0, 0],
+                    "length": "10", "width": "10", "height": "10", "operation": "new_body"
+                })
+            })
+            .collect();
+        features.push(serde_json::json!({
+            "id": 401, "name": "Cleat", "type": "box", "body_names": ["Cleat"], "corner": [0, 100, 0],
+            "length": "50", "width": "20", "height": "20", "operation": "new_body"
+        }));
+        if let Some(name) = chamfer {
+            features.push(serde_json::json!({
+                "id": 402, "name": "Bevel", "type": "chamfer", "distance": "5", "body": "Cleat", "edges": [[pick.x, pick.y, pick.z]],
+                "edge_names": [name], "edge_refs": [{"dir": [1., 0., 0.], "min": [0., 100., 0.], "max": [50., 120., 20.]}]
+            }));
+        }
+        let doc = Document { features: serde_json::from_value(serde_json::Value::Array(features)).unwrap(), ..Document::default() };
+        let mut model = crate::Model::new();
+        model.evaluate(&doc);
+        model
+    };
+    let past = design(0, None);
+    let state = past.state();
+    let cleat = state.body("Cleat").unwrap();
+    let edge = crate::naming::edge_names(cleat)
+        .into_iter()
+        .enumerate()
+        .find(|(i, _)| solidcraft_kernel::edge_distance(&cleat.body, *i, pick).ok().flatten().is_some_and(|d| d < 1e-6))
+        .map(|(_, n)| n)
+        .unwrap();
+    assert!(edge.starts_with("Cleat:face:"), "past the limit the box is named by position: {edge}");
+    // Its top face, saved by position too.
+    let top = Vec3::new(25., 110., 20.);
+    let face = crate::naming::face_names(cleat)
+        .iter()
+        .find(|n| crate::name_lookup::locate_face(&state, n, top).is_some_and(|hit| hit.on_point))
+        .cloned()
+        .unwrap();
+    assert!(face.starts_with("Cleat:face:"), "{face}");
+
+    let under = design(10, None);
+    let state = under.state();
+    let cleat = state.body("Cleat").unwrap();
+    assert!(crate::naming::face_names(cleat).iter().all(|n| n.starts_with("F401:")), "{:?}", crate::naming::face_names(cleat));
+
+    // The chamfer saved past the limit builds under it, on the edge picked.
+    let model = design(10, Some(&edge));
+    let result = model.result(402).unwrap();
+    assert!(result.error.is_none(), "{:?}", result.error);
+    assert_eq!(model.state().body("Cleat").unwrap().body.face_count(), 7, "one chamfer face added");
+    // The same name at a point on no edge between those faces still finds nothing.
+    assert!(crate::name_lookup::locate_projected_edge(cleat, &edge, Vec3::new(25., 110., 20.)).is_err());
+    // A face saved by position is found by its number where the saved point lies on it.
+    let hit = crate::name_lookup::locate_face(&state, &face, top).unwrap();
+    assert_eq!(state.bodies[hit.body].name, "Cleat");
+    assert_eq!(crate::naming::face_names(cleat)[hit.face], "F401:+z");
+    assert!(crate::name_lookup::locate_face(&state, &face, Vec3::new(25., 100., 10.)).is_none(), "a point on another face finds nothing");
+}

@@ -526,7 +526,18 @@ impl<'t> Assembly<'t> {
     /// torus) the edge's distance from it is measured along the edge before its pcurve is made,
     /// and the edge's tolerance covers it. A spline face's gaps are measured on the pcurves its
     /// kernel makes (`raise_edges`): an iterative nearest point may settle elsewhere on it.
-    fn measure_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>]) -> R<()> {
+    ///
+    /// `form_box` is the face's box on its NURBS form where it has one (`form::surface_within`).
+    /// The form ends on a quarter line its boundary runs past by up to the file's tolerance, so
+    /// an edge that runs past lies off the face as the record keeps it (the label over the
+    /// form's box) by more than off the label: that gap is measured too, to the label's point at
+    /// the nearest parameters in the box, and the edge's pcurve tolerance covers it, as it covers
+    /// a gap to the label ([`Self::cover_edge`]), up to the file's tolerance: the form ends short
+    /// of the boundary by no more than that, and pcurves are never made looser than the file
+    /// states. Its closed-form pcurve then has its ends put in the box, which the pcurves'
+    /// construction asks for; the record's tolerances cover the move as before (`onto_form`,
+    /// `raise_edges`).
+    fn measure_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], form_box: Option<[[f64; 2]; 2]>) -> R<()> {
         // Only where the nearest point is in closed form: on a spline the search may settle on
         // another part of the surface, or on its boundary for a point a hair past it, and report a
         // gap the edge does not have (2.9 mm on Poppy Humanoid's leg shells, whose edges lie within
@@ -545,6 +556,41 @@ impl<'t> Assembly<'t> {
         }
         let on = SurfaceEval::new(surface).map_err(|m| m.to_string())?;
         let starts = crate::kernel::Starts::default();
+        let period = on.domain().period;
+        // The form's box in the label's angles, along the directions that are angles (a cylinder's
+        // or cone's height is the form's own parameter, and its form does not end short of it).
+        let angular = match surface {
+            BSurface::Cylinder { .. } | BSurface::Cone { .. } => [true, false],
+            BSurface::Sphere { .. } | BSurface::Torus { .. } => [true, true],
+            _ => [false, false],
+        };
+        let bounds = form_box.map(|d| {
+            [0, 1].map(|k| match (angular.get(k), d.get(k)) {
+                (Some(true), Some(&[a, b])) => Some([crate::kernel::form::angle(a), crate::kernel::form::angle(b)]),
+                _ => None,
+            })
+        });
+        // `q` moved to the nearest parameters in the box, where it lies past it.
+        let in_box = |q: [f64; 2]| -> Option<[f64; 2]> {
+            let bounds = bounds.as_ref()?;
+            let mut c = q;
+            let mut moved = false;
+            for ((x, range), p) in c.iter_mut().zip(bounds).zip(period) {
+                let Some([lo, hi]) = *range else { continue };
+                let y = crate::kernel::unwrap(*x, 0.5 * (lo + hi), p);
+                let z = if y < lo {
+                    lo
+                } else if y > hi {
+                    hi
+                } else {
+                    y
+                };
+                if z != y {
+                    (*x, moved) = (z, true);
+                }
+            }
+            moved.then_some(c)
+        };
         for l in edge_loops {
             for &(e, _) in l {
                 let edge = self.edges.get(e as usize).ok_or("edge reference")?;
@@ -553,14 +599,22 @@ impl<'t> Assembly<'t> {
                     None => (&edge.curve, edge.interval),
                 };
                 let eval = CurveEval::new(curve).map_err(|m| m.to_string())?;
-                let mut gap = 0.0f64;
+                let (mut gap, mut off_form) = (0.0f64, 0.0f64);
                 for t in gap_samples(curve, [t0, t1], matches!(surface, BSurface::Plane { .. } | BSurface::PlaneThrough { .. })) {
                     let Some(p) = eval.point(t) else { continue };
                     // A point with no nearest point is the pcurves' to refuse, with why.
-                    let Some(s) = on.project_with(&starts, p, None, f64::INFINITY).and_then(|q| on.point(q)) else { continue };
+                    let Some(q) = on.project_with(&starts, p, None, f64::INFINITY) else { continue };
+                    let Some(s) = on.point(q) else { continue };
                     gap = gap.max(s.dist(p));
+                    if let Some(s) = in_box(q).and_then(|c| on.point(c)) {
+                        off_form = off_form.max(s.dist(p));
+                    }
                 }
                 self.cover_edge(e, gap, pcurve::SURFACE_GAP_MARGIN)?;
+                let allowance = (pcurve::SURFACE_GAP_MARGIN * off_form).min(self.tol);
+                if let Some(x) = self.edges.get_mut(e as usize) {
+                    x.pcurve_tolerance = x.pcurve_tolerance.max(allowance);
+                }
             }
         }
         Ok(())
@@ -688,6 +742,10 @@ impl<'t> Assembly<'t> {
         let twins = self.merge_twin_edges()?;
         if twins > 0 {
             notes.push(format!("{twins} edges the file writes twice (two edges on the same vertices and one curve, each used by one face) made one"));
+        }
+        let paired = self.pair_slit_edges()?;
+        if paired > 0 {
+            notes.push(format!("{paired} loops of no area written on two coincident edges rewritten to run out and back on one"));
         }
         // A face bounded by a slit alone is the whole of its closed surface, closed by its seams
         // (a sphere's frame put on the slit), before anything is measured on the frame or split
@@ -1362,6 +1420,83 @@ impl<'t> Assembly<'t> {
         Ok(redirect.len())
     }
 
+    /// A two-edge loop that runs out along one line on one edge and back on another edge of the
+    /// same vertices, curve record and interval (a bore that touches a flat face along a line
+    /// writes the loop so), where each of the two edges is also used by exactly one other face.
+    /// The loop is a slit of no area, so it is rewritten to use one edge twice, and the other
+    /// faces then share the other edge: the pairing a file that writes the slit as one edge has.
+    /// Without this the loop is not seen as a slit and the shell reads as contradictory.
+    /// Returns how many loops were rewritten.
+    fn pair_slit_edges(&mut self) -> R<usize> {
+        let mut uses: HashMap<u32, Vec<(usize, usize, usize)>> = HashMap::new();
+        for (fi, face) in self.faces.iter().enumerate() {
+            for (li, l) in face.loops.iter().enumerate() {
+                if let Bound::Edges(es) = l {
+                    for (pos, (e, _)) in es.iter().enumerate() {
+                        uses.entry(*e).or_default().push((fi, li, pos));
+                    }
+                }
+            }
+        }
+        // (face, loop, the loop's use of x, the loop's use of y, x, y, y runs against x)
+        let mut work: Vec<(usize, usize, usize, usize, u32, u32, bool)> = Vec::new();
+        let mut touched: HashSet<u32> = HashSet::new();
+        for (fi, face) in self.faces.iter().enumerate() {
+            for (li, l) in face.loops.iter().enumerate() {
+                let Bound::Edges(es) = l else { continue };
+                let [(x, dx), (y, dy)] = es.as_slice() else { continue };
+                let (x, y) = (*x, *y);
+                if x == y {
+                    continue;
+                }
+                let (ex, ey) = (self.edges.get(x as usize).ok_or("edge reference")?, self.edges.get(y as usize).ok_or("edge reference")?);
+                let [a, b] = ex.vertices;
+                let against = ex.vertices[0] != ey.vertices[0];
+                let same_ends = a != b && ((ey.vertices == [a, b]) || (ey.vertices == [b, a]));
+                if !same_ends || ex.curve != ey.curve || ex.interval != ey.interval {
+                    continue;
+                }
+                // Out along one, back along the other: the two uses run against each other on
+                // the line.
+                if (dx == dy) != against {
+                    continue;
+                }
+                let (Some(ux), Some(uy)) = (uses.get(&x), uses.get(&y)) else { continue };
+                if ux.len() != 2 || uy.len() != 2 || touched.contains(&x) || touched.contains(&y) {
+                    continue;
+                }
+                // Each edge's other use is a different face's, and not this loop's twin.
+                let other = |u: &Vec<(usize, usize, usize)>| u.iter().find(|&&(f, l, _)| !(f == fi && l == li)).copied();
+                let (Some(ox), Some(oy)) = (other(ux), other(uy)) else { continue };
+                if ox.0 == fi || oy.0 == fi || ox.0 == oy.0 {
+                    continue;
+                }
+                touched.insert(x);
+                touched.insert(y);
+                work.push((fi, li, 0, 1, x, y, against));
+            }
+        }
+        let count = work.len();
+        for (fi, li, px, _py, x, y, against) in work {
+            let Some(oy) = uses.get(&y).and_then(|u| u.iter().find(|&&(f, l, _)| !(f == fi && l == li)).copied()) else { continue };
+            // The other face that used y now uses x, run the way its vertices run against x's.
+            let face = self.faces.get_mut(oy.0).ok_or("face reference")?;
+            if let Some(Bound::Edges(es)) = face.loops.get_mut(oy.1)
+                && let Some(u) = es.get_mut(oy.2)
+            {
+                *u = (x, u.1 != against);
+            }
+            // This loop's use of x becomes a use of y, so the loop is y out and y back.
+            let face = self.faces.get_mut(fi).ok_or("face reference")?;
+            if let Some(Bound::Edges(es)) = face.loops.get_mut(li)
+                && let Some(u) = es.get_mut(px)
+            {
+                *u = (y, u.1 != against);
+            }
+        }
+        Ok(count)
+    }
+
     /// Orient a closed manifold shell by exact shared-edge parity. Across an edge,
     /// the two physical traversals oppose: equal directions require opposite flips.
     /// An already coherent shell keeps its sides, including a nonmanifold shell and one whose
@@ -1556,7 +1691,7 @@ impl<'t> Assembly<'t> {
         let wound = extent.is_some_and(crate::kernel::form::winds);
         let mut extended = false;
         // How far each edge lies off this surface, so its closed form is checked at that.
-        self.measure_edges(&label, &edge_loops)?;
+        self.measure_edges(&label, &edge_loops, box_on_form.filter(|_| !wound))?;
         // Closed forms where the geometry has them; the kernel makes the rest (`trims`).
         let fit = self.pcurve_tolerance();
         let mut exact = pcurve::exact_pcurves(&surface, &uses_of(&self.edges, &edge_loops, None)?, fit, box_on_form).map_err(|e| e.to_string())?;

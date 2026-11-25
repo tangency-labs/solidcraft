@@ -55,4 +55,38 @@ mod tests {
         let back: Prefs = serde_json::from_str(&saved.to_string()).unwrap();
         assert_eq!(back, prefs);
     }
+
+    /// Each page file keeps its fields in alphabetical order, so new preferences spread out
+    /// instead of all landing at the end of a file.
+    #[test]
+    fn page_files_keep_their_fields_sorted() {
+        for (file, source) in [
+            ("general.rs", include_str!("general.rs")),
+            ("appearance.rs", include_str!("appearance.rs")),
+            ("layout.rs", include_str!("layout.rs")),
+            ("graphics.rs", include_str!("graphics.rs")),
+            ("design.rs", include_str!("design.rs")),
+            ("security.rs", include_str!("security.rs")),
+            ("sketch.rs", include_str!("sketch.rs")),
+            ("tools.rs", include_str!("tools.rs")),
+            ("navigation.rs", include_str!("navigation.rs")),
+            ("mouse3d.rs", include_str!("mouse3d.rs")),
+            ("shortcuts.rs", include_str!("shortcuts.rs")),
+            ("assistant.rs", include_str!("assistant.rs")),
+            ("plugins.rs", include_str!("plugins.rs")),
+            ("unpaged.rs", include_str!("unpaged.rs")),
+        ] {
+            let names: Vec<&str> = source
+                .lines()
+                .filter_map(|line| line.strip_prefix("            "))
+                .filter(|line| !line.starts_with(char::is_whitespace) && !line.starts_with("//") && !line.starts_with('#'))
+                .filter_map(|line| line.split_once(':').map(|(name, _)| name))
+                .filter(|name| !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'))
+                .collect();
+            assert!(!names.is_empty(), "no fields found in {file}");
+            let mut sorted = names.clone();
+            sorted.sort_unstable();
+            assert_eq!(names, sorted, "{file} keeps its fields in alphabetical order");
+        }
+    }
 }

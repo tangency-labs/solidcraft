@@ -3,9 +3,9 @@ use solidcraft_geom::Vec3Geom;
 
 use super::{
     BodyFeaturesParams, BodyListParams, ClassifyPointsParams, ClassifyPointsResult, ColoredComponentsParams, ColoredComponentsResult, CommandEntry,
-    CommandsParams, DescribeParams, DocumentInspectParams, DocumentInspectResult, DocumentRevisionParams, MaterialAssignParams, MaterialAssignResult,
-    MaterialListParams, MaterialListResult, MeasureParams, MeasureResult, ModelBodyFeatures, ModelEdges, ModelFaces, ModelThreads,
-    ModelThreadsParams, RevisionResult, SketchInspectParams, SketchInspected,
+    CommandsParams, DescribeParams, DocInfoParams, DocInfoResult, DocumentInspectParams, DocumentInspectResult, DocumentRevisionParams,
+    MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams, MeasureResult, ModelBodyFeatures, ModelEdges,
+    ModelFaces, ModelThreads, ModelThreadsParams, RevisionResult, SketchInspectParams, SketchInspected,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -19,6 +19,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ModelThreadsParams>(), &[]);
     assert_keys(input_schema_for::<BodyFeaturesParams>(), &["body"]);
     assert_keys(input_schema_for::<ColoredComponentsParams>(), &["enabled"]);
+    assert_keys(input_schema_for::<DocInfoParams>(), &[]);
 }
 
 #[test]
@@ -108,7 +109,7 @@ fn describe_returns_both_schemas() {
 #[test]
 fn inspect_schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<DocumentInspectParams>(), &["bodies", "measure", "sketch_counts", "timeline"]);
-    assert_keys(input_schema_for::<MeasureParams>(), &["bodies", "items", "names_only"]);
+    assert_keys(input_schema_for::<MeasureParams>(), &["bodies", "items", "mode", "names_only", "within"]);
     assert_keys(input_schema_for::<CommandsParams>(), &[]);
     assert_keys(input_schema_for::<MaterialListParams>(), &[]);
     assert_keys(input_schema_for::<MaterialAssignParams>(), &["bodies", "material"]);
@@ -493,6 +494,54 @@ fn document_revision_replies_match_its_schema() {
     matches::<RevisionResult>("document.revision", &after, false);
     assert_eq!(after["document_id"], first["document_id"], "{first} {after}");
     assert_ne!(after["revision"], first["revision"], "{first} {after}");
+}
+
+#[test]
+fn doc_info_answers_for_the_open_designs_file() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let untitled = run(&mut s, "doc.info", json!({}));
+    matches::<DocInfoResult>("doc.info", &untitled, false);
+    matches::<DocInfoResult>("doc.info", &run(&mut s, "doc.info", json!({"pth": "a.sc"})), true);
+    let id = s.document_id.clone();
+    assert_eq!(untitled, json!({"path": null, "read_only": false, "unsaved": false, "disk": null, "document_id": id}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    assert_eq!(run(&mut s, "doc.info", json!({}))["unsaved"], true);
+    let dir = std::env::temp_dir().join(format!("solidcraft-doc-info-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("Bracket.sc").to_string_lossy().into_owned();
+    run(&mut s, "file.save_as", json!({"path": file}));
+    let saved = run(&mut s, "doc.info", json!({}));
+    matches::<DocInfoResult>("doc.info", &saved, false);
+    assert_eq!(
+        (saved["path"].as_str(), saved["read_only"].as_bool(), saved["unsaved"].as_bool()),
+        (Some(file.as_str()), Some(false), Some(false)),
+        "{saved}"
+    );
+    assert_eq!(saved["document_id"], untitled["document_id"], "a save keeps the id");
+    assert_eq!(saved["disk"]["len"].as_u64(), std::fs::metadata(&file).ok().map(|m| m.len()), "{saved}");
+    let ns = saved["disk"]["modified_ns"].as_str().unwrap_or_default();
+    assert!(!ns.is_empty() && ns.bytes().all(|b| b.is_ascii_digit()), "{saved}");
+    assert_eq!(run(&mut s.scratch().scratch(), "doc.info", json!({})), saved, "a copy of a copy has no path and still names the file");
+    // As in a plugin run: the snapshot answers while the copy is that design, however it changes...
+    let mut in_run = s.scratch();
+    in_run.plugin_state.caller_design = Some(s.doc_info());
+    run(&mut in_run, "solid.box", json!({"length": 5, "width": 5, "height": 5}));
+    assert_eq!(run(&mut in_run, "doc.info", json!({})), saved, "the design as it was before the run");
+    // ...and a design the run opens answers for itself.
+    run(&mut in_run, "doc.open", json!({"path": file, "read_only": true}));
+    let reopened = run(&mut in_run, "doc.info", json!({}));
+    assert_eq!((reopened["read_only"].as_bool(), reopened["unsaved"].as_bool()), (Some(true), Some(false)), "{reopened}");
+    assert_ne!(reopened["document_id"], saved["document_id"], "{reopened}");
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": file, "read_only": true}));
+    let read_only = run(&mut opened, "doc.info", json!({}));
+    assert_eq!(
+        (read_only["path"].as_str(), read_only["read_only"].as_bool(), read_only["unsaved"].as_bool()),
+        (opened.path.as_deref(), Some(true), Some(false)),
+        "{read_only}"
+    );
+    assert_ne!(read_only["document_id"], saved["document_id"]);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// `inspect.measure` in each form: bodies (with sheet metal and a material), names only, one

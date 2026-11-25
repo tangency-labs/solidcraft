@@ -52,7 +52,8 @@
      ]
     ],
     "radius": 1.0,
-    "tangent_chain": true
+    "tangent_chain": true,
+    "turn": "mitre"
    }
   }
  ]

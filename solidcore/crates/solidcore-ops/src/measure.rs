@@ -22,6 +22,7 @@ use solidcore::query::api_queries::{
 };
 use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects, Ray};
 use solidcore::query::face::p1 as face_p1;
+use solidcore::topology::brep::mirror::transform_matrix;
 use solidcore::topology::brep::outward_solid_failure;
 use solidcore::topology::brep::p3::{
     brep_copy_mapped, merge_brep, notify_serial, topology_ref, with_kernel_callbacks,
@@ -50,6 +51,7 @@ impl Answer for Vec<Option<f64>> {}
 impl Answer for Vec<Vec<Option<f64>>> {}
 impl Answer for Vec<Result<PointClass>> {}
 impl Answer for Vec<f64> {}
+impl Answer for Vec<solidcore::query::FaceLineHit> {}
 
 /// A kernel measure that has a read-only form, under one lock of the body
 /// ([`read_else_edit`]): `read`, which leaves the body (and its proof) as it is; where the
@@ -377,6 +379,17 @@ pub struct EdgeRayPoint {
     pub distance: f64,
 }
 
+/// A point where a ray meets a face ([`Body::face_hits_by_ray`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FaceHit {
+    /// The record face.
+    pub face: usize,
+    /// The point on the ray where it meets the face.
+    pub point: [f64; 3],
+    /// The distance from the ray's origin to the point, along the ray.
+    pub distance: f64,
+}
+
 /// The first face a ray meets ([`Body::face_hit_by_ray`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FaceRayHit {
@@ -388,6 +401,17 @@ pub struct FaceRayHit {
     pub uv: [f64; 2],
     /// The distance from the ray's origin to the point, along the ray.
     pub distance: f64,
+}
+
+/// A place where a line meets a face ([`Body::face_line_hits`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FaceLineHit {
+    /// The point on the line, at `parameter`.
+    pub point: [f64; 3],
+    /// The face's (u, v) there, as [`crate::face_surface::FaceSurface`] evaluates them.
+    pub uv: [f64; 2],
+    /// The signed distance along the line's unit direction from its given point.
+    pub parameter: f64,
 }
 
 /// An edge's curve over the edge's own interval, copied out of its body ([`Body::edge_curve`]) to
@@ -474,13 +498,13 @@ pub struct PointSetSummary {
 }
 
 /// The arithmetic centroid and mean radial distance of a non-empty point set.
-pub fn point_set_summary(points: &[[f64; 2]]) -> Result<PointSetSummary> {
+pub fn centroid_and_mean_radius(points: &[[f64; 2]]) -> Result<PointSetSummary> {
     let points = points
         .iter()
         .copied()
         .map(point2)
         .collect::<Result<Vec<_>>>()?;
-    let summary = q::point_set_summary(&points).map_err(status)?;
+    let summary = solidcore::math::centroid_and_mean_radius(&points).map_err(status)?;
     Ok(PointSetSummary {
         centroid: summary.centroid.to_array(),
         mean_distance: summary.mean_distance,
@@ -683,6 +707,32 @@ impl Body {
         Ok((lo, hi))
     }
 
+    /// How far the body reaches along the normal of the plane through `origin` with axes `x`
+    /// and `y` (`x × y` made unit), measured from that plane: the least and the greatest level
+    /// of its points, `[low, high]`. A copy of the body is moved rigidly into the plane's own
+    /// frame ([`solidcore::Transform::into_plane_frame`]: the normal becomes Z) and its exact box
+    /// read there ([`Body::bounds`]'s), so the span is the body's own, not the shadow of its
+    /// world box. The body is unchanged.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an entry that is not finite, an axis of no length or axes along
+    /// one line (the kernel's refusal); [`Error::Status`] `SM_ERR_INVALID_INPUT` for no box;
+    /// the kernel's error.
+    pub fn levels_along(&self, origin: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Result<[f64; 2]> {
+        let to_plane = solidcore::Transform::into_plane_frame(point(origin)?, point(x)?, point(y)?)
+            .map_err(|_| Error::Argument)?
+            .m;
+        let span = measure_body("levels_along", self, |k, b| {
+            transform_matrix(k, b, &to_plane, true)?;
+            brep_bounding_box(k, b, true)
+        })?;
+        let (lo, hi) = (span.min().z, span.max().z);
+        if !(lo.is_finite() && hi.is_finite() && lo <= hi) {
+            return Err(Error::Status(crate::error::INVALID_INPUT));
+        }
+        Ok([lo, hi])
+    }
+
     /// The samples of the kernel's edge/face gap for record edge `edge` and record face `face`
     /// (`order`): the edge's curve over its interval against the face's surface over that
     /// surface's own domain. Each sample gives its points, their distance and, where the kernel
@@ -871,6 +921,110 @@ impl Body {
             uv: [hit.uv.x, hit.uv.y],
             distance: hit.distance,
         }))
+    }
+
+    /// Every point where the ray from `origin` along `direction` meets a face, nearest first
+    /// (the kernel's `query::brep::face_hits`): the face, the point and the distance. A hit is a
+    /// point on the body within its zone tolerance, as for [`Body::face_hit_by_ray`]. A face the
+    /// ray crosses twice gives two hits, a crossing on its seam or pole one; a ray through an
+    /// edge or a vertex meets each face there at one point and distance, those hits in `order`'s
+    /// face order, of which [`Body::face_hit_by_ray`] names one. A hit at the origin is at
+    /// distance 0; a stretch along a face is no hit. Empty where the ray meets no face. The
+    /// kernel's solves may add UV trim curves to the body.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a coordinate that is not finite or a direction of no length;
+    /// [`Error::Exception`] for a hit face `order` does not list (an order of another body); any
+    /// other kernel error.
+    pub fn face_hits_by_ray(
+        &self,
+        order: &Order,
+        origin: [f64; 3],
+        direction: [f64; 3],
+    ) -> Result<Vec<FaceHit>> {
+        let ray = Ray::new(point(origin)?, point(direction)?).map_err(|_| Error::Argument)?;
+        let hits = with_body("face_hits_by_ray", self, |k, b| {
+            solidcore::query::brep::face_hits(k, b, ray)
+        })?;
+        let mut hits = hits
+            .into_iter()
+            .map(|hit| {
+                let face = order
+                    .faces
+                    .iter()
+                    .position(|&f| f == hit.face)
+                    .ok_or(Error::Exception)?;
+                Ok(FaceHit {
+                    face,
+                    point: array(hit.point),
+                    distance: hit.distance,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        // ties (one point, one distance) in the record's face order
+        hits.sort_by(|p, q| p.distance.total_cmp(&q.distance).then(p.face.cmp(&q.face)));
+        Ok(hits)
+    }
+
+    /// Where the whole line through `through` along `direction` (both ways) meets record face
+    /// `face` within its trim, ordered along the line: the kernel's
+    /// (`solidcore::query::face_line_hits`) on the face's exact surface, whatever its kind
+    /// (plane, cylinder, cone, sphere, torus, B-spline), each place once (a place on a periodic
+    /// surface's seam too). A stretch of the line lying on the face is no single place and is
+    /// left out. The kernel's solve may add UV trim curves to the body, as a point
+    /// classification does.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces, a coordinate that is not finite or a
+    /// direction of no length; the kernel's refusal of a face without a surface; any other
+    /// kernel error.
+    pub fn face_line_hits(
+        &self,
+        order: &Order,
+        face: usize,
+        through: [f64; 3],
+        direction: [f64; 3],
+    ) -> Result<Vec<FaceLineHit>> {
+        let f = order::face(order, face)?;
+        let (through, direction) = (point(through)?, point(direction)?);
+        // A direction the ray refuses is the caller's, not the kernel's.
+        Ray::new(through, direction).map_err(|_| Error::Argument)?;
+        let hits = with_body("face_line_hits", self, |k, b| {
+            solidcore::query::face_line_hits(k, b, f, through, direction)
+        })?;
+        Ok(hits
+            .into_iter()
+            .map(|h| FaceLineHit {
+                point: array(h.point),
+                uv: [h.uv.x, h.uv.y],
+                parameter: h.parameter,
+            })
+            .collect())
+    }
+
+    /// Where the line through `through` along `direction` meets record face `face`, of its
+    /// meetings ([`Body::face_line_hits`]) the nearest `through` on either side. Meetings as near
+    /// as each other within `tie` are a tie, which goes to the one furthest along `direction`:
+    /// ahead of `through` rather than behind it (a line through a cylinder's axis meets its side
+    /// ahead). `None` where the line misses the face or only runs along it.
+    ///
+    /// # Errors
+    /// As [`Body::face_line_hits`].
+    pub fn face_line_nearest(
+        &self,
+        order: &Order,
+        face: usize,
+        through: [f64; 3],
+        direction: [f64; 3],
+        tie: f64,
+    ) -> Result<Option<[f64; 3]>> {
+        let f = order::face(order, face)?;
+        let (through, direction) = (point(through)?, point(direction)?);
+        Ray::new(through, direction).map_err(|_| Error::Argument)?;
+        let hits = with_body("face_line_nearest", self, |k, b| {
+            solidcore::query::face_line_hits(k, b, f, through, direction)
+        })?;
+        Ok(solidcore::query::nearest_line_hit(&hits, tie).map(|h| array(h.point)))
     }
 
     /// Record edge `edge`'s curve over the edge's own interval, copied out of the body to measure
@@ -1608,6 +1762,28 @@ impl Body {
         Ok(Some(SquareFaceLevel { level, tolerance }))
     }
 
+    /// How far record face `face` strays across `direction`, when the kernel proves a bound
+    /// ([`solidcore::prism::measure::face_straying`]): the face lies within it of a surface swept
+    /// along `direction`, taken over the face's own size. Within the zone tolerance
+    /// ([`crate::sweep::zone_tolerance`]) the face runs straight along `direction`. `None` where
+    /// no bound is proved (see the kernel's list), or for a `direction` of no length.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces or a `direction` that is not finite; the
+    /// errors of the session.
+    pub fn face_straying(
+        &self,
+        order: &Order,
+        face: usize,
+        direction: [f64; 3],
+    ) -> Result<Option<f64>> {
+        let f = order::face(order, face)?;
+        let d = point(direction)?;
+        read_body("face_straying", self, |k, b| {
+            Ok(solidcore::prism::measure::face_straying(k, b, f, d))
+        })
+    }
+
     /// The length of record edge `edge` (`SmApiEdgeComputeLength`) at `relative_accuracy`, as
     /// the kernel's contract takes it (ops passes it on as given).
     ///
@@ -1878,6 +2054,45 @@ fn across(b: &Brep, e: EdgeId, set: &[FaceId]) -> solidcore::Result<Result<FaceI
     })
 }
 
+/// `direction` made unit at any finite length, `None` for a coordinate that is not finite or a
+/// direction of no length (`solidcore::query::line_unit_direction`).
+#[must_use]
+pub fn unit_direction(direction: [f64; 3]) -> Option<[f64; 3]> {
+    let direction = point(direction).ok()?;
+    solidcore::query::line_unit_direction(direction).map(array)
+}
+
+/// Of a line's two nearest meetings with something, `ahead` along its unit direction and `behind`
+/// it (each a distance, not negative), the nearer as a signed distance along the direction
+/// (behind negative); the one ahead on a tie (`solidcore::query::nearer_line_meeting`).
+#[must_use]
+pub fn nearer_line_meeting(ahead: Option<f64>, behind: Option<f64>) -> Option<f64> {
+    solidcore::query::nearer_line_meeting(ahead, behind)
+}
+
+/// The point `parameter` along the line from `through` along its unit `direction`
+/// (`solidcore::query::point_along_line`); `None` for a coordinate that is not finite.
+#[must_use]
+pub fn point_along_line(
+    through: [f64; 3],
+    direction: [f64; 3],
+    parameter: f64,
+) -> Option<[f64; 3]> {
+    let (through, direction) = (point(through).ok()?, point(direction).ok()?);
+    Some(array(solidcore::query::point_along_line(
+        through, direction, parameter,
+    )))
+}
+
+/// How far `q` lies from `point`, measured across a surface whose nearest point to `point` is
+/// `foot` (`solidcore::query::distance_across_surface`); `None` for a coordinate that is not
+/// finite.
+#[must_use]
+pub fn distance_across_surface(point_: [f64; 3], foot: [f64; 3], q: [f64; 3]) -> Option<f64> {
+    let (p, f, q) = (point(point_).ok()?, point(foot).ok()?, point(q).ok()?);
+    Some(solidcore::query::distance_across_surface(p, f, q))
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1974,8 +2189,8 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn point_set_summary_and_displacement_adapt_kernel_results() {
-        let summary = point_set_summary(&[[0.0, 0.0], [6.0, 0.0], [0.0, 6.0]]).unwrap();
+    fn centroid_and_mean_radius_and_displacement_adapt_kernel_results() {
+        let summary = centroid_and_mean_radius(&[[0.0, 0.0], [6.0, 0.0], [0.0, 6.0]]).unwrap();
         assert_eq!(summary.centroid, [2.0, 2.0]);
         // (2√2 + 4√5) / 3, evaluated independently.
         let expected = 3.924_233_011_581_783;
@@ -1984,12 +2199,15 @@ pub(crate) mod tests {
             point_displacement([2.0, 2.0], [5.0, 6.0]).unwrap(),
             [3.0, 4.0]
         );
-        assert_eq!(point_set_summary(&[[f64::NAN, 0.0]]), Err(Error::Argument));
+        assert_eq!(
+            centroid_and_mean_radius(&[[f64::NAN, 0.0]]),
+            Err(Error::Argument)
+        );
         assert_eq!(
             point_displacement([0.0, 0.0], [f64::INFINITY, 0.0]),
             Err(Error::Argument)
         );
-        assert!(point_set_summary(&[]).is_err());
+        assert!(centroid_and_mean_radius(&[]).is_err());
     }
 
     #[test]
@@ -2568,6 +2786,41 @@ pub(crate) mod tests {
             area += ball.face_area(&o, f, 1e-8).unwrap();
         }
         assert!(rel(area, 36.0 * PI), "{area}");
+    }
+
+    /// A box's reach along a plane's normal, from the plane: away from the origin, and on a
+    /// plane whose normal is not a world axis's direction (its world box would overstate it).
+    /// The box itself does not move; axes that make no plane are refused.
+    #[test]
+    fn levels_along_a_plane_are_the_bodys_own() {
+        all_fixes();
+        let b = make_box([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+        let [lo, hi] = b
+            .levels_along([3.0, 4.0, 5.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+            .unwrap();
+        assert!(
+            (lo + 5.0).abs() < 1e-9 && (hi - 5.0).abs() < 1e-9,
+            "{lo} {hi}"
+        );
+        // x = Z and y = (1, -1, 0)/√2 make the normal x × y = (1, 1, 0)/√2: the box's corners
+        // reach from 0 to 20/√2 along it.
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let [lo, hi] = b
+            .levels_along([0.0; 3], [0.0, 0.0, 1.0], [s, -s, 0.0])
+            .unwrap();
+        assert!(lo.abs() < 1e-9 && (hi - 20.0 * s).abs() < 1e-9, "{lo} {hi}");
+        let (min, max) = b.bounds().unwrap();
+        assert!(
+            min.iter().all(|v| v.abs() < 1e-9) && max.iter().all(|v| (v - 10.0).abs() < 1e-9),
+            "{min:?} {max:?}"
+        );
+        for (x, y) in [
+            ([0.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+            ([1.0, 0.0, 0.0], [-2.0, 0.0, 0.0]),
+            ([f64::NAN, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        ] {
+            assert_eq!(b.levels_along([0.0; 3], x, y), Err(Error::Argument));
+        }
     }
 
     /// A box's faces square to +Z: the top and the bottom, at their closed-form levels measured
