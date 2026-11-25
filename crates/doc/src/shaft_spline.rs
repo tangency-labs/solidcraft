@@ -1,5 +1,5 @@
 //! Shaft Spline (#17693): the numbers of a spline on a shaft and in its hub, checked and planned by the kernel
-//! (`solidcore_ops::shaft_spline`), before any body is touched. The rebuild of a `shaft_spline` feature
+//! (`solidcraft_kernel::services::shaft_spline`), before any body is touched. The rebuild of a `shaft_spline` feature
 //! (`eval_shaft_spline.rs`), the command that adds one and the dialog's drawing all go through [`plan`], so they
 //! cannot disagree about a value, and every refusal names the parameter to change in the same words.
 //!
@@ -15,16 +15,16 @@
 
 use solidcore_record::shaft_spline::{PlanRefusal, ProfileWhy, RequiredUnit, SplineQuantity, SplineRefusal as Refused, ToothWhy};
 
-pub(crate) use solidcore_ops::round_face::{end_carried, end_run_out, end_run_past, far_end, shut_end};
-pub(crate) use solidcore_ops::shaft_spline::{
-    axis_gap, chamfer_plane, chamfer_section, copy_turn, lies_inward, lies_turned_back, moved_out, off_cylinder, points_apart, quarter_turn_in,
-    seat_frame, start_candidates, tool_margin, tooth_at, turn_tells_sense,
-};
-pub use solidcore_ops::shaft_spline::{fit_to_shaft_within, module_for_major_radius, same_size};
 pub use solidcore_record::shaft_spline::{
     MasterArc, MasterPlaced, OutlinePiece, SpaceSection, SplineCorner, SplineForm, SplineMade, SplineMake, SplineMaster, SplineNumbers, SplinePlan,
     ToothOutline, ToothRole,
 };
+pub(crate) use solidcraft_kernel::services::round_face::{end_carried, end_run_out, end_run_past, far_end, shut_end};
+pub(crate) use solidcraft_kernel::services::shaft_spline::{
+    axis_gap, chamfer_plane, chamfer_section, copy_turn, lies_inward, lies_turned_back, moved_out, off_cylinder, points_apart, quarter_turn_in,
+    seat_frame, start_candidates, tool_margin, tooth_at, turn_tells_sense,
+};
+pub use solidcraft_kernel::services::shaft_spline::{fit_to_shaft_within, module_for_major_radius, same_size};
 
 /// Why the numbers make nothing, as the app says it: the parameter to change, where the refusal names one, and the
 /// words.
@@ -330,7 +330,7 @@ pub fn plan(n: &SplineNumbers) -> Result<SplinePlan, SplineRefusal> {
     if let Some(made) = hit {
         return made;
     }
-    let made = solidcore_ops::shaft_spline::plan(n).map_err(SplineRefusal::from);
+    let made = solidcraft_kernel::services::shaft_spline::plan(n).map_err(SplineRefusal::from);
     let mut kept = KEPT.lock().unwrap_or_else(PoisonError::into_inner);
     if kept.len() >= 8 {
         drop(kept.remove(0));
@@ -345,7 +345,7 @@ pub fn plan(n: &SplineNumbers) -> Result<SplinePlan, SplineRefusal> {
 ///
 /// The kernel's refusal of an outline that gives no points.
 pub fn outline_points(outline: &ToothOutline, turn: f64) -> Result<Vec<[f64; 2]>, SplineRefusal> {
-    solidcore_ops::shaft_spline::outline_points(outline, turn).map_err(SplineRefusal::from)
+    solidcraft_kernel::services::shaft_spline::outline_points(outline, turn).map_err(SplineRefusal::from)
 }
 
 /// A spline as the Bezier pieces between its knots.
@@ -354,7 +354,7 @@ pub fn outline_points(outline: &ToothOutline, turn: f64) -> Result<Vec<[f64; 2]>
 ///
 /// The kernel's refusal of knots and control points that are not a spline.
 pub fn bezier_pieces(degree: usize, knots: &[f64], control: &[[f64; 2]]) -> Result<Vec<Vec<[f64; 2]>>, SplineRefusal> {
-    solidcore_ops::shaft_spline::bezier_pieces(degree, knots, control).map_err(SplineRefusal::from)
+    solidcraft_kernel::services::shaft_spline::bezier_pieces(degree, knots, control).map_err(SplineRefusal::from)
 }
 
 /// One tooth space of the shaft's outline as a section out to `out_to` from the axis.
@@ -363,7 +363,7 @@ pub fn bezier_pieces(degree: usize, knots: &[f64], control: &[[f64; 2]]) -> Resu
 ///
 /// The kernel's refusal of an outline with no such space.
 pub fn space_section(outline: &ToothOutline, tooth_at: f64, out_to: f64) -> Result<SpaceSection, SplineRefusal> {
-    solidcore_ops::shaft_spline::space_section(outline, tooth_at, out_to).map_err(SplineRefusal::from)
+    solidcraft_kernel::services::shaft_spline::space_section(outline, tooth_at, out_to).map_err(SplineRefusal::from)
 }
 
 /// The radius of a cutter of `diameter` whose section reaches from `root` out to `out_to`, with `margin` to spare.
@@ -372,7 +372,7 @@ pub fn space_section(outline: &ToothOutline, tooth_at: f64, out_to: f64) -> Resu
 ///
 /// The kernel's refusal of a cutter too small, by the parameter `cutter_diameter`.
 pub(crate) fn cutter_radius(diameter: f64, root: f64, out_to: f64, margin: f64) -> Result<f64, SplineRefusal> {
-    solidcore_ops::shaft_spline::cutter_radius(diameter, root, out_to, margin).map_err(SplineRefusal::from)
+    solidcraft_kernel::services::shaft_spline::cutter_radius(diameter, root, out_to, margin).map_err(SplineRefusal::from)
 }
 
 /// A whole outline as one closed loop of profile segments, turned by `turn`.
@@ -381,7 +381,7 @@ pub(crate) fn cutter_radius(diameter: f64, root: f64, out_to: f64, margin: f64) 
 ///
 /// The kernel's refusal of an outline that cannot be made into a profile.
 pub(crate) fn outline_loop(outline: &ToothOutline, turn: f64) -> Result<solidcore_record::shaft_spline::OutlineLoop, SplineRefusal> {
-    solidcore_ops::shaft_spline::outline_loop(outline, turn).map_err(SplineRefusal::from)
+    solidcraft_kernel::services::shaft_spline::outline_loop(outline, turn).map_err(SplineRefusal::from)
 }
 
 /// The section a cutter takes out of one tooth space where it leaves the shaft; `None` for a space too wide for
@@ -396,7 +396,7 @@ pub(crate) fn cutter_section(
     cutter_radius: f64,
     out_to: f64,
 ) -> Result<Option<solidcore_record::shaft_spline::CutterSection>, SplineRefusal> {
-    solidcore_ops::shaft_spline::cutter_section(space, root, cutter_radius, out_to).map_err(SplineRefusal::from)
+    solidcraft_kernel::services::shaft_spline::cutter_section(space, root, cutter_radius, out_to).map_err(SplineRefusal::from)
 }
 
 /// The whole cross-section of one tooth space out to the circle of `out_to` about the axis: what a space that ends
@@ -406,7 +406,7 @@ pub(crate) fn cutter_section(
 ///
 /// The kernel's refusal of a floor that cannot be made into a profile.
 pub(crate) fn space_region(space: &SpaceSection, out_to: f64) -> Result<solidcore_record::shaft_spline::SpaceRegion, SplineRefusal> {
-    solidcore_ops::shaft_spline::space_region(space, out_to).map_err(SplineRefusal::from)
+    solidcraft_kernel::services::shaft_spline::space_region(space, out_to).map_err(SplineRefusal::from)
 }
 
 #[cfg(test)]

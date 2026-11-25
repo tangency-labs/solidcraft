@@ -789,13 +789,19 @@ The ordered list of a design's features, which SolidCraft computes from first to
 
 How two rounds of a fillet continue where they turn round a sharp corner edge between them, such
 as the rounds along a boss's base at its upright edges: in a mitre, or swept round the corner
-edge as a torus.
+edge as a torus, where the rolling ball can pass the edge and the rounds are one radius round a
+straight edge square to them.
 
-- **In SolidCraft:** the `turn` parameter of `solid.fillet` and its design-file key, `mitre`
-  (the default) or `swept`; the Fillet dialog's Turns row.
+- **In SolidCraft:** the `turn` parameter of `solid.fillet` and its design-file key: `auto` (the
+  default for a new fillet, "Auto": swept where the swept turn is built, mitred
+  elsewhere), `mitre` (a fillet saved without the key, as older designs are) or `swept`; the
+  Fillet dialog's Turns row. A fillet at per-edge radii (`radii`) is the exception: it is
+  mitred when it names no turn, since a swept turn takes one radius, so a caller that wants
+  Auto there says `turn: auto`.
 - **Don't use:** corner (that is what fills a corner where three rounded edges meet, `corner`).
 - **Elsewhere:** mitred corner, swept corner, corner sweep.
-- **For translators:** "Mitre" and "Swept" name the two shapes, not a direction of travel.
+- **For translators:** "Mitre" and "Swept" name the two shapes, not a direction of travel;
+  "Auto" names the choice between them, made at each corner.
 
 ### view angles
 
