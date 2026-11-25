@@ -102,6 +102,8 @@ pub struct Plugin {
     pub pictures: Vec<(String, String)>,
     /// The GitHub `owner/repo` its updates come from (`plugin_updates`).
     pub updates: Option<String>,
+    /// Its colour themes (`themes@0.1`): key `plugin:id/theme`, name and theme file.
+    pub themes: Vec<(String, String, String)>,
 }
 
 /// A folder under the plugins directory that is not a plugin.
@@ -175,6 +177,7 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
         shader_settings: Default::default(),
         pictures: Vec::new(),
         updates: None,
+        themes: Vec::new(),
     })
 }
 
@@ -241,6 +244,14 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
                 .filter_map(|texture| texture.choose.as_ref().map(|label| (format!("{}/{}/{}", parsed.id, shader.id, texture.name), label.clone())))
         })
         .collect();
+    let themes = parsed
+        .themes
+        .iter()
+        .map(|theme| {
+            let name = crate::plugin_themes::name(&dir.to_string_lossy(), &theme.source, &theme.id);
+            (format!("plugin:{}/{}", parsed.id, theme.id), name, theme.source.clone())
+        })
+        .collect();
     let mut plugin = check(Manifest { id: parsed.id, name: parsed.name, version: parsed.version, description: parsed.description }, folder)?;
     plugin.path = dir.to_string_lossy().into_owned();
     plugin.approval = approval;
@@ -250,6 +261,7 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
     plugin.shader_settings = shader_settings;
     plugin.pictures = pictures;
     plugin.updates = parsed.updates.map(|updates| updates.github);
+    plugin.themes = themes;
     let executable = parsed.runtime.is_some();
     if let Some(runtime) = parsed.runtime {
         plugin.entries = runtime.entries;
@@ -577,6 +589,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context, wait: bool) {
 /// like any other, and its reply, should it ever come, has nowhere to go (the job worked on a copy of
 /// the session, so nothing of it reaches this one).
 fn tick_at(app: &mut SolveApp, ctx: &egui::Context, wait: bool, now: web_time::Instant) {
+    crate::plugin_themes::sync(app);
     let Some(job) = app.prefs_window.plugin_job.take() else { return };
     let result = if wait {
         job.done.recv().unwrap_or_else(|e| Err(e.to_string()))
@@ -606,6 +619,7 @@ fn tick_at(app: &mut SolveApp, ctx: &egui::Context, wait: bool, now: web_time::I
             // Take in grants another program changed or revoked in the shared store since the job
             // started: a revoked record must not come back with this job's grant.
             sync_policy(app);
+            app.plugin_themes.signature = None;
             // Preferences can change while package I/O runs. Keep a newer decision for this id.
             // A write to the stored grants during the job counts as a newer decision, unless the record this
             // job started from is still exactly as it was (an unrelated write).
@@ -1001,6 +1015,13 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
         ui.horizontal_wrapped(|ui| {
             ui.add_space(t.space_12);
             ui.label(RichText::new(text).size(t.font_small).color(t.text_dim));
+        });
+    }
+    if !plugin.themes.is_empty() {
+        let names: Vec<&str> = plugin.themes.iter().map(|(_, name, _)| name.as_str()).collect();
+        ui.horizontal_wrapped(|ui| {
+            ui.add_space(t.space_12);
+            ui.label(RichText::new(crate::plugin_themes::hint(&names)).size(t.font_small).color(t.text_dim));
         });
     }
     crate::scenario::publish_target(&format!("prefs:plugin:{}:folder", plugin.id), folder.rect);
@@ -2288,6 +2309,7 @@ mod tests {
             shader_settings: Default::default(),
             pictures: Vec::new(),
             updates: None,
+            themes: Vec::new(),
             id: "ftc-frc-parts".into(),
             name: "FTC and FRC parts".into(),
             version: "0.1.0".into(),

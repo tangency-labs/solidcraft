@@ -206,6 +206,11 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
     if !panels.is_empty() {
         lines.push(format("plugin_install.panel_shaders", &[("names", &panels.join(", "))]));
     }
+    let themes = plugin.get("themes").and_then(Value::as_array).into_iter().flatten().filter_map(|t| t.get("id").and_then(Value::as_str));
+    let themes: Vec<&str> = themes.collect();
+    if !themes.is_empty() {
+        lines.push(format("plugin_install.themes", &[("names", &themes.join(", "))]));
+    }
     lines
 }
 

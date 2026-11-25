@@ -822,6 +822,10 @@ exporters; `evaluate@0.2` lets an importer check its result, `storage@0.1` keeps
 (below), and `ui@0.1` adds host-drawn docked panels. `viewport` arrives later as its own versioned
 interface. While a version is 0.x, a minor version may break the one before it.
 
+`themes@0.1` lets a plugin add colour themes to Preferences > Appearance > Theme from
+`solidcraft-theme/1` files it ships; it needs no runtime. A plugin that does not list it is not
+affected. See [plugin themes](plugin-themes.md).
+
 0.2 added one error, `plugin-error.unsupported(string)`: the input is valid, but this plugin does
 not handle it, such as a file with no solids or a newer version of its format. Use it instead of
 `invalid-input`, which means the input is broken; SolidCraft then says "Sample does not support

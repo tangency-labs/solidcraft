@@ -43,6 +43,7 @@ pub const MAX_MEMORY_MIB: usize = 4096;
 pub const MAX_APPROVED_FUEL: u64 = 10_000_000_000_000;
 
 pub mod shader;
+pub mod theme;
 
 pub type Result<T> = std::result::Result<T, HostError>;
 
@@ -179,6 +180,7 @@ pub const CAPABILITIES: &[(&str, (u32, u32))] = &[
     ("forms", (0, 1)),
     ("shaders", (0, 2)),
     ("storage", (0, 1)),
+    ("themes", (0, 1)),
     ("ui", (0, 1)),
 ];
 /// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
@@ -665,6 +667,9 @@ pub struct Manifest {
     /// View backgrounds and tints (`shaders@0.2`); a plugin may ship shaders and no runtime.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shaders: Vec<shader::Shader>,
+    /// Colour themes for the theme picker (`themes@0.1`); a plugin may ship themes and no runtime.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub themes: Vec<theme::ThemeDecl>,
     /// Where newer versions are published. SolidCraft before 0.49 refuses the field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updates: Option<Updates>,
@@ -1127,6 +1132,15 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
             ));
         }
         shader::validate(&manifest.shaders)?;
+    }
+    let themed = manifest.capabilities.iter().any(|capability| capability.starts_with("themes@"));
+    if !manifest.themes.is_empty() {
+        if !themed {
+            return Err(invalid("capabilities", "a plugin with themes needs the themes capability: \"capabilities\": [\"themes@0.1\"]"));
+        }
+        theme::validate(&manifest.themes)?;
+    } else if themed {
+        return Err(invalid("themes", "the themes capability needs at least one theme"));
     }
     Ok(manifest)
 }

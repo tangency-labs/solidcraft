@@ -1428,7 +1428,49 @@ pub fn read_builtin(sources: &[(&str, &str)]) -> Result<Vec<ThemeFile>, String> 
 /// The theme a `theme` preference names: built in, or imported. `None` for dark, light, system
 /// or an unknown id.
 pub fn find<'a>(id: &str, custom: &'a [ThemeFile]) -> Option<&'a ThemeFile> {
-    builtin().iter().find(|t| t.id == id).or_else(|| custom.iter().find(|t| t.id == id))
+    builtin().iter().find(|t| t.id == id).or_else(|| custom.iter().find(|t| t.id == id)).or_else(|| plugin_theme(id))
+}
+
+thread_local! {
+    /// The plugin themes on offer to this thread's window: `(id, file text, theme)`, the id
+    /// `plugin:<plugin>/<theme>`.
+    static PLUGIN_THEMES: std::cell::RefCell<Vec<(String, String, &'static ThemeFile)>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// Every plugin theme read so far, never cleared: a theme is leaked once per distinct id and
+    /// file text, so [`find`] can return a reference to it and turning a plugin off and on leaks nothing.
+    static INTERNED: std::cell::RefCell<Vec<(String, String, &'static ThemeFile)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn plugin_theme(id: &str) -> Option<&'static ThemeFile> {
+    PLUGIN_THEMES.with(|offered| offered.borrow().iter().find(|(key, _, _)| key == id).map(|(_, _, theme)| *theme))
+}
+
+/// Replaces the offer with `offers`, `(id, theme file text)`; a file that does not read is left out and named.
+pub fn set_plugin_themes(offers: Vec<(String, String)>) -> Vec<String> {
+    let mut errors = Vec::new();
+    let mut kept = Vec::new();
+    for (id, text) in offers {
+        let interned =
+            INTERNED.with(|interned| interned.borrow().iter().find(|(key, old, _)| *key == id && *old == text).map(|(_, _, theme)| *theme));
+        if let Some(theme) = interned {
+            kept.push((id, text, theme));
+            continue;
+        }
+        match parse(&text) {
+            Ok(theme) => {
+                let leaked: &'static ThemeFile = Box::leak(Box::new(ThemeFile { id: id.clone(), ..theme }));
+                INTERNED.with(|interned| interned.borrow_mut().push((id.clone(), text.clone(), leaked)));
+                kept.push((id, text, leaked));
+            }
+            Err(error) => errors.push(format!("{id}: {error}")),
+        }
+    }
+    PLUGIN_THEMES.with(|offered| *offered.borrow_mut() = kept);
+    errors
+}
+
+/// The plugin themes on offer, `(id, name)`, in the order they were set.
+pub fn plugin_theme_choices() -> Vec<(String, String)> {
+    PLUGIN_THEMES.with(|offered| offered.borrow().iter().map(|(key, _, theme)| (key.clone(), theme.name.clone())).collect())
 }
 
 /// Retired built-in cards now select a contrast value on their light/dark family.
@@ -2453,5 +2495,18 @@ mod tests {
         assert!(follow_path(&"x".repeat(MAX_FOLLOW_PATH + 1)).is_err() && follow_path("a\nb").is_err());
         assert!(follow_path("a\u{7}b").is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_plugin_theme_turned_off_and_on_again_is_not_leaked_again() {
+        let id = "plugin:tints/night".to_owned();
+        let text = r##"{"format":"solidcraft-theme/1","name":"Night","base":"dark","colors":{"accent":"#44d62c"}}"##.to_owned();
+        assert!(set_plugin_themes(vec![(id.clone(), text.clone())]).is_empty());
+        let custom: Vec<ThemeFile> = Vec::new();
+        let first = find(&id, &custom).unwrap();
+        assert!(set_plugin_themes(Vec::new()).is_empty());
+        assert!(find(&id, &custom).is_none() && plugin_theme_choices().is_empty());
+        assert!(set_plugin_themes(vec![(id.clone(), text)]).is_empty());
+        assert!(std::ptr::eq(first, find(&id, &custom).unwrap()));
     }
 }
