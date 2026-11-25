@@ -94,7 +94,8 @@ pub struct ExtrudeParams {
     #[serde(default)]
     pub exact_regions: Option<bool>,
     /// A point on a planar body face to extrude instead of a sketch profile.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "Point3")]
     pub face: Option<Point3>,
     /// Several coplanar faces of one body to extrude together, by a point on each. Not with
     /// `face`, `sketch` or `profiles`.
@@ -1148,7 +1149,8 @@ pub struct MoveParams {
     pub axis: Option<Point3>,
     /// The edge or round face of the model the turn was picked on, `{edge|face: [x,y,z], body?}`:
     /// the move keeps turning about it where it is, when an earlier step moves the body
-    /// (#17974). `axis` and `origin` give the line where it is now and the turn's sense.
+    /// (#17974). `axis` gives the turn's sense, and with `origin` the line used when the edge
+    /// is not found.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "GeoRefParam")]
     pub about: Option<GeoRefParam>,

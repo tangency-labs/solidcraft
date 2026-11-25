@@ -421,6 +421,20 @@ fn command_dialog_value_memory_is_off_by_default_and_resets_each_time() {
     assert!(matches!(&recalled.kind, Kind::PatternRect { count, .. } if count == "3"));
 }
 
+#[test]
+fn new_fillet_opens_at_the_last_applied_radius_without_remember_dialog_values() {
+    let mut h = Harness::new();
+    assert!(!h.app.preferences.remember_dialog_values);
+    let first = Dialog::for_command(&h.app, "solid.fillet").unwrap();
+    let Kind::Fillet { radius, chamfer: false, .. } = &first.kind else { panic!("a fillet dialog") };
+    let shipped = radius.clone();
+    h.app.last_fillet_radius = "5 mm".into();
+
+    let next = Dialog::for_command(&h.app, "solid.fillet").unwrap();
+    assert!(matches!(&next.kind, Kind::Fillet { radius, chamfer: false, .. } if radius == "5 mm"));
+    assert_ne!(shipped, "5 mm");
+}
+
 fn fixture() -> Harness {
     let mut h = Harness::new();
     for (name, x) in [("A", 0), ("B", 30), ("C", 60), ("D", 90)] {
@@ -636,6 +650,8 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         | "Bend Line Position" | "From Snap" | "To Snap" | "Joint" | "Joint 1" | "Joint 2" | "Gear 1" | "Gear 2" | "Pinion" | "Rack" | "Screw"
         | "Nut" | "Cam" | "Follower" | "Anchor" | "Bolt Pattern" => Role::ComboBox,
         "Inset By" | "Extent Type" => Role::ComboBox,
+        "Thickness Placement" if command == "frame.gusset" => return None, // icon buttons, checked by the gusset interaction test
+        "Outline" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
@@ -656,6 +672,7 @@ form_case!(shell, "solid.shell", ["Thickness", "Direction"]);
 form_case!(draft, "solid.draft", ["Angle"]);
 form_case!(mirror, "solid.mirror", ["Operation"]);
 form_case!(end_cap, "frame.end_cap", ["Thickness", "Direction", "Offset", "Corner Chamfer"]);
+form_case!(gusset, "frame.gusset", ["Outline", "First Leg", "Second Leg", "Thickness", "Corner Relief", "Joint Offset", "Thickness Placement"]);
 
 /// The Motion Study's and Motion Trace's hints read in the user's language: the dialogs drew them
 /// as they got them, in English.
@@ -1069,10 +1086,18 @@ fn new_cards_settle_before_the_first_click_in_both_layouts() {
             let mut h = fixture();
             h.call("ui.set", json!({"layout":mode}));
             h.call("ui.resize", json!({"width":1400,"height":950}));
-            h.app.dialog = Some(representative(&h, command));
+            // The system's fallback faces are read on a thread (slow where large CJK faces are
+            // installed) and the fonts are set up again once they are in, which can change the
+            // card's text: on CI that landed between the two reads below (#21495). Read them now
+            // (this waits for that thread's search) and let the app set its fonts up with them.
+            crate::fonts::setup_fonts_for(&h.ctx, "en", &h.app.preferences.ui_font);
             h.frames(2);
+            h.app.dialog = Some(representative(&h, command));
+            // The card settles on its own; its preview (joint.create's is an error row here)
+            // comes from a worker, which a loaded machine can finish a frame later.
+            h.frames_after_preview(2);
             let first = scenario::rect_of("dialog:footer").unwrap();
-            h.frames(1);
+            h.frames_after_preview(1);
             let settled = scenario::rect_of("dialog:footer").unwrap();
             assert_eq!(first, settled, "{command} {mode:?}: footer moved under the first click");
         }
