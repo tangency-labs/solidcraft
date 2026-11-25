@@ -49,6 +49,7 @@ mod drawing_check;
 mod drawing_dimension;
 pub(crate) mod drawing_export;
 mod drawing_fill;
+mod drawing_hardware_callout;
 mod drawing_image;
 mod drawing_model_dimensions;
 mod drawing_note;
@@ -714,6 +715,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(drawing_centre_mark::COMMANDS.iter());
     v.extend(drawing_check::COMMANDS.iter());
     v.extend(drawing_image::COMMANDS.iter());
+    v.extend(drawing_hardware_callout::COMMANDS.iter());
     v.extend(drawing_note::COMMANDS.iter());
     v.extend(drawing_symbol::COMMANDS.iter());
     v.extend(drawing_dimension::COMMANDS.iter());

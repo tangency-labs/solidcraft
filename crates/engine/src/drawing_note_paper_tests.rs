@@ -9,7 +9,7 @@ use super::*;
 const LINE_MM: f64 = 0.25;
 
 fn note(at: [f64; 2], cap_mm: Option<f64>) -> Note {
-    Note { id: 9, anchor: Anchor::Sheet(1), at, content: Content(vec![Part::Text("ROUND".into())]), cap_mm, align: None, branches: Vec::new() }
+    Note { id: 9, anchor: Anchor::Sheet(1), at, content: Content(vec![Part::Text("ROUND".into())]), cap_mm, align: None, branches: Vec::new(), hardware: None }
 }
 
 /// `note` reading `text`, in the built-in font, in English.

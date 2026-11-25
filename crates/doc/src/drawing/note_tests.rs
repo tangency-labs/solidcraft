@@ -51,6 +51,7 @@ fn noted() -> (Drawing, [u64; 3]) {
             cap_mm: None,
             align: None,
             branches: Vec::new(),
+            hardware: None,
         })]);
     }
     d.validate().unwrap();

@@ -908,12 +908,13 @@ impl Annotation {
     }
 
     /// Whether what it shows reads the document as well as the model, so it is read again after any
-    /// change to it: a note's text with a field reads the drawing's and the design's fields, and a
+    /// change to it: a note's text with a field reads the drawing's and the design's fields, a hardware callout's its
+    /// drawing's unit and language, and a
     /// balloon's number its parts list and the design's parts.
     fn reads_document(&self) -> bool {
         match self {
             Annotation::Dimension(_) => false,
-            Annotation::Note(note, _) => note.content.0.iter().any(|part| matches!(part, Part::Field { .. })),
+            Annotation::Note(note, _) => note.hardware.is_some() || note.content.0.iter().any(|part| matches!(part, Part::Field { .. })),
             Annotation::Balloon(_) => true,
         }
     }
@@ -1267,10 +1268,18 @@ fn drawn_notes(
             return DrawnDimension { why: Some(NO_PLACE.to_string()), ..base };
         }
         let (Some(resolved), Some((frame, group))) = (resolved, frame(view)) else { return base };
-        let text =
-            d.sheet_of(&note.anchor).and_then(|at| title_block_text::read(s, tree, d, at, std::iter::once(&note.content)).pop()).unwrap_or_default();
-        let tips: Vec<Vec2> =
+        // A hardware callout says what its hole's record says now; lost, it keeps the text it had.
+        let text = crate::drawing_hardware_callout::text(s, d, note).unwrap_or_else(|| {
+            d.sheet_of(&note.anchor).and_then(|at| title_block_text::read(s, tree, d, at, std::iter::once(&note.content)).pop()).unwrap_or_default()
+        });
+        let mut tips: Vec<Vec2> =
             std::iter::once(&resolved.anchor).chain(&resolved.branches).filter_map(|end| end.point).map(|p| frame.to_paper(p)).collect();
+        // On a flat pattern view its leader ends on its hole's centre in the flat.
+        if resolved.anchor.status == dimension::Status::Ok
+            && let Some(at) = crate::drawing_hardware_callout::flat_tip(s, d, note, "drawing.scene")
+        {
+            tips.insert(0, frame.paper_map().apply(at));
+        }
         // Centred on the view, as its frame is: the scene moves it to the view's centre.
         let paper = crate::drawing_note_paper::note_group(note, &text, &tips, LineKind::Thin.width_mm(group), lettering);
         DrawnDimension { group: Some(Arc::new(paper.group)), fonts: paper.fonts, why: paper.why, pending: paper.pending, ..base }

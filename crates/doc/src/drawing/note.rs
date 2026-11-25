@@ -35,6 +35,7 @@ use solidcraft_geom::paper::MAX_SIDE_MM;
 
 use super::by_id::Record;
 use super::dimension::{Lookup, ModelEdge, ModelPoint, Reference, Status, check_edge, check_point};
+use super::hardware_callout::{self, HardwareRef};
 use super::{Drawing, require};
 use crate::{DocError, Document, Model, Result, ids};
 
@@ -156,6 +157,11 @@ pub struct Note {
     /// Its leaders beside its anchor's, in order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub branches: Vec<Branch>,
+    /// The press-in hardware hole it reads (#20112): its text is then the hardware record's now
+    /// ([`super::hardware_callout`]), and `content` is the text it last had, kept for when the hole is lost.
+    /// A flat pattern view's leader ends on that hole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hardware: Option<HardwareRef>,
 }
 
 impl Note {
@@ -226,6 +232,10 @@ impl Drawing {
                 Branch::Corner(point) => check_point(point)?,
             }
         }
+        if let Some(hole) = &n.hardware {
+            hole.validate()?;
+            require(n.anchor.view().is_some(), || "a hardware callout is on a view".into())?;
+        }
         require(!n.content.0.is_empty(), || "it has some text".into())?;
         n.content.validate().map_err(|e| DocError::Invalid(e.0.into()))?;
         let can_read = |part: &Part| !matches!(part, Part::Field { source: Source::Prompt | Source::Row, .. });
@@ -279,6 +289,7 @@ impl Document {
     /// doesn't have.
     pub fn resolve_notes(&self, model: &Model, drawing: &Drawing, wanted: &[u64]) -> Result<Vec<Resolved>> {
         let mut lookup = Lookup::new(self, model);
+        let state = model.state();
         wanted
             .iter()
             .map(|id| {
@@ -292,6 +303,13 @@ impl Document {
                     Branch::Edge(edge) => End::edge(&mut lookup, edge),
                     Branch::Corner(point) => End::corner(&mut lookup, point),
                 };
+                let mut anchor = anchor;
+                if let Some(hole) = &n.hardware
+                    && let Err(why) = hardware_callout::read(&state.surface_sheets, hole)
+                {
+                    anchor.status = Status::lost(why);
+                    anchor.point = None;
+                }
                 Ok(Resolved { anchor, branches: n.branches.iter().map(&mut branch).collect() })
             })
             .collect()

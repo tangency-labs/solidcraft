@@ -231,6 +231,14 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
     let Some((view, scale, style)) = resolved else {
         return ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
     };
+    // The press-in hardware holes a flat pattern view can have a callout of (#20112).
+    let holes = app
+        .session
+        .drawing("drawing.inspect")
+        .ok()
+        .map(|drawing| solidcraft_engine::drawing_hardware_callout::holes(&app.session, drawing, view))
+        .unwrap_or_default();
+    let mut callout = None;
     let mut edit =
         app.drawing_workspace.view_edit.take().filter(|edit| edit.view == view).unwrap_or_else(|| ViewEdit { view, scale: scale.to_string(), style });
     let styles = VisualStyle::ALL;
@@ -252,6 +260,16 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
         ui_kit::section_heading(ui, tr("ui.scale"));
         ui_kit::text_row(ui, tr("ui.scale"), &mut edit.scale, "1:1");
         let valid = edit.scale.trim().parse::<Scale>().is_ok();
+        if !holes.is_empty() {
+            ui_kit::section_heading(ui, tr("ui.drawing_panel.press_in_hardware"));
+            for (feature, copy, label) in &holes {
+                ui.push_id((feature, copy), |ui| {
+                    if ui_kit::button(ui, label.as_str(), Button::Normal).clicked() {
+                        callout = Some((*feature, *copy));
+                    }
+                });
+            }
+        }
         ui.separator();
         ui.horizontal(|ui| {
             let cancel = ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
@@ -263,6 +281,14 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
     });
     if cancel {
         return true;
+    }
+    if let Some((feature, copy)) = callout {
+        let params = json!({"view": ids::encode(view), "feature": feature, "copy": copy, "at": [0, 0]});
+        if let Err(error) = app.run("drawing.hardware_callout.add", params) {
+            app.set_status(error, true);
+        }
+        app.drawing_workspace.view_edit = Some(edit);
+        return false;
     }
     let mut settings = serde_json::Map::new();
     if let Ok(value) = edit.scale.trim().parse::<Scale>()

@@ -102,7 +102,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let branches = request.branches.iter().map(|pick| branch(s, pick, ADD)).collect::<Result<Vec<_>>>()?;
     let align = Some(request.align.unwrap_or(HAlign::Left));
-    let mut note = Note { id: 0, anchor, at: request.at, content: request.content.0, cap_mm: request.cap_mm, align, branches };
+    let mut note = Note { id: 0, anchor, at: request.at, content: request.content.0, cap_mm: request.cap_mm, align, branches, hardware: None };
     if let Some(view) = note.anchor.view() {
         check_drawn(&record, view, note.paths(), ADD)?;
     }
@@ -187,7 +187,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Note `id` of the open drawing as the model has it now.
-fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
+pub(super) fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     let d = s.drawing(cmd)?;
     let note = d.notes.by_id(id).ok_or_else(|| bad(cmd, format!("the drawing has no note {}", ids::encode(id))))?;
     let resolved = crate::drawing_view::ViewSessions::new(s)
@@ -199,6 +199,8 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     let read = |values: &Values| (values.text(&note.content), fields(values, &note.content));
     let at = d.sheet_of(&note.anchor).ok_or_else(|| bad(cmd, format!("note {} is on no sheet", ids::encode(id))))?;
     let (text, fields) = crate::title_block_text::with_values(s, &mut Tree::new(&s.doc, &state), d, at, std::iter::once(&note.content), read);
+    // A hardware callout says what its hole's record says now.
+    let text = crate::drawing_hardware_callout::text(s, d, note).unwrap_or(text);
     let mut warnings = note.anchor.view().map(|view| drawn_warning(d, view, note.paths())).unwrap_or_default();
     warnings.extend(off_paper(d, note, &text, at));
     let reply = NoteResult {

@@ -1,26 +1,34 @@
 {
   "ar": {
-    "ui.drawing_panel.press_in_hardware": "قطع التثبيت بالكبس"
+    "ui.drawing_panel.press_in_hardware": "قطع التثبيت بالكبس",
+    "cmd.drawing_hardware_callout_add": "إضافة وسم لقطع التثبيت"
   },
   "de": {
-    "ui.drawing_panel.press_in_hardware": "Einpresselemente"
+    "ui.drawing_panel.press_in_hardware": "Einpresselemente",
+    "cmd.drawing_hardware_callout_add": "Beschriftung für Einpresselement hinzufügen"
   },
   "en": {
-    "ui.drawing_panel.press_in_hardware": "Press-in hardware"
+    "ui.drawing_panel.press_in_hardware": "Press-in hardware",
+    "cmd.drawing_hardware_callout_add": "Add Hardware Callout"
   },
   "he": {
-    "ui.drawing_panel.press_in_hardware": "חומרת לחיצה"
+    "ui.drawing_panel.press_in_hardware": "חומרת לחיצה",
+    "cmd.drawing_hardware_callout_add": "הוספת הערת חומרה"
   },
   "ja": {
-    "ui.drawing_panel.press_in_hardware": "圧入ハードウェア"
+    "ui.drawing_panel.press_in_hardware": "圧入ハードウェア",
+    "cmd.drawing_hardware_callout_add": "ハードウェア引出線を追加"
   },
   "ko": {
-    "ui.drawing_panel.press_in_hardware": "압입 하드웨어"
+    "ui.drawing_panel.press_in_hardware": "압입 하드웨어",
+    "cmd.drawing_hardware_callout_add": "하드웨어 지시선 추가"
   },
   "vi": {
-    "ui.drawing_panel.press_in_hardware": "Phụ kiện ép"
+    "ui.drawing_panel.press_in_hardware": "Phụ kiện ép",
+    "cmd.drawing_hardware_callout_add": "Thêm chú thích phụ kiện"
   },
   "zh": {
-    "ui.drawing_panel.press_in_hardware": "压铆件"
+    "ui.drawing_panel.press_in_hardware": "压铆件",
+    "cmd.drawing_hardware_callout_add": "添加压铆件标注"
   }
 }

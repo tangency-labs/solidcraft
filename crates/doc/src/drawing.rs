@@ -80,6 +80,7 @@ pub mod dimension;
 pub mod fields;
 mod fill;
 pub mod fold;
+pub mod hardware_callout;
 pub mod hatch;
 pub mod hole_callout;
 pub mod image;
