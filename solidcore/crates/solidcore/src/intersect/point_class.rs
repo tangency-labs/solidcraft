@@ -382,6 +382,16 @@ pub trait ClassObject: Copy + PartialEq {
 pub trait ClassGeometry<O> {
     /// The curve of a [`ClassObjectKind::Curve`] handle.
     fn curve(&self, o: O) -> Option<&Curve>;
+    /// Not upstream (tangency-labs/solidcraft#11574): a curve that is the curve of
+    /// handle `o`, parameter for parameter, in a form the curve/curve intersection
+    /// solves in closed form (a seam's ruling,
+    /// [`Surface::seam_ruling`](crate::surface::surface::Surface::seam_ruling)), which a
+    /// classification's edge intersection takes in the curve's place. Nothing else reads
+    /// it. `None` (the default): the curve itself.
+    fn intersect_curve(&self, o: O) -> Option<&Curve> {
+        let _ = o;
+        None
+    }
     /// The surface of a [`ClassObjectKind::Surface`] handle.
     fn surface(&self, o: O) -> Option<&Surface>;
     /// The volume of a [`ClassObjectKind::Volume`] handle.
