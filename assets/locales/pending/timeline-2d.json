@@ -213,7 +213,7 @@
     "ui.timeline_2d_deactivate_group": "Désactiver le groupe",
     "ui.timeline_2d_delete_group_all": "Supprimer le groupe et son contenu",
     "ui.timeline_2d_delete_group_expand": "Supprimer le groupe en développant son contenu",
-    "ui.timeline_2d_group_selection": "Sélection du groupe ({count} fonctions)",
+    "ui.timeline_2d_group_selection": "Grouper la sélection ({count} fonctions)",
     "ui.timeline_2d_group_tip_active": "Actif",
     "ui.timeline_2d_group_tip_features": "Fonctions de ce groupe :",
     "ui.timeline_2d_group_tip_hint": "Double-cliquez pour ouvrir ou fermer. Faites un clic droit pour afficher les options du groupe.",
