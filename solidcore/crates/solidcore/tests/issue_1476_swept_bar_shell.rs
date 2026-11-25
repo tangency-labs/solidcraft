@@ -29,6 +29,9 @@
 //! `Unported(topology.face_p2)`; it now goes through the result's face services. With the
 //! kernel's defaults two marched edges between the inner planar walls become lines; with
 //! SolidCraft's fixes none does; the volumes stay as above.
+//!
+//! Since WR-495's exact mate is the only path (#21301), `MateEdges` itself makes those two
+//! edges lines before that step runs; the count stays 18.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

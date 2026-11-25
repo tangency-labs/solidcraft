@@ -25,7 +25,7 @@
 //! `ok_to_make_uv_trim_curve = FALSE`, so the `const` validation no longer stores a
 //! new UV trim curve on a neighbour that had none. The 3D evaluation, its drop onto
 //! the existing face and every status are kept.
-use super::{invalid, required, Object, Reports, ERROR, SUCCESS};
+use super::{invalid, required, Object, Reports};
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result};
 use crate::geom::assert_array::{AssertArray, AssertReport, ReportSpec};
@@ -359,10 +359,31 @@ fn preflight(b: &Brep, r: &mut Reports<'_>, cache: &mut Lists) -> Result<bool> {
     Ok(true)
 }
 
+/// What [`validate_pointers`] concluded about a body's topology links.
+///
+/// Ordinary failed checks are reports in the report array, not a different result: a pass
+/// that only added reports is still [`PointerCheck::Passed`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PointerCheck {
+    /// Every required link was walked; failed checks, if any, are in the reports.
+    Passed,
+    /// A required link was missing before the walk (the preflight, or an edgeuse owned by
+    /// nothing live), or the geometric vertex exclusion failed with no report array to hold it.
+    Failed,
+    /// The walk stopped at a missing link it had just reported, before checking the rest.
+    StoppedEarly,
+}
+
+impl PointerCheck {
+    /// Whether the check passed.
+    pub fn is_passed(self) -> bool {
+        self == PointerCheck::Passed
+    }
+}
+
 /// Runs `SmBrep::ValidatePointers`, appending its failed reports in native order.
-/// `walk` skips `CheckFace`'s loop checks, as `SM_WALK` does. The returned integer
-/// preserves native `SM_SUCCESS` (1000), required-pointer failure (1001), and the
-/// early boolean return (0). Ordinary failed checks are reports, not an error status.
+/// `walk` skips `CheckFace`'s loop checks, as `SM_WALK` does. Ordinary failed checks
+/// are reports, not a failed result; see [`PointerCheck`] for what each result means.
 /// Geometric exclusion also returns failure when the caller omits the report array.
 /// `keys` supplies the caller's topology identities used by curve-owner checks.
 /// `level` is the native `SM_LEVEL_0` through `SM_LEVEL_GIVEN` (0 through 4).
@@ -373,7 +394,7 @@ pub fn validate_pointers(
     level: u8,
     walk: bool,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
-) -> Result<i32> {
+) -> Result<PointerCheck> {
     Ok(validate_pointers_excluding(k, b, reports, level, walk, keys, true)?.0)
 }
 
@@ -393,7 +414,7 @@ pub(crate) fn validate_pointers_excluding(
     walk: bool,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
     repair_ends: bool,
-) -> Result<(i32, bool)> {
+) -> Result<(PointerCheck, bool)> {
     validate_pointers_traced(k, b, reports, level, walk, keys, &mut true, repair_ends)
 }
 
@@ -410,7 +431,7 @@ pub(crate) fn validate_pointers_traced(
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
     faces_whole: &mut bool,
     repair_ends: bool,
-) -> Result<(i32, bool)> {
+) -> Result<(PointerCheck, bool)> {
     if level > 4 {
         return Err(invalid("invalid assert test level"));
     }
@@ -420,7 +441,7 @@ pub(crate) fn validate_pointers_traced(
     };
     let mut cache = Lists::new(b);
     if !preflight(b, &mut r, &mut cache)? {
-        return Ok((ERROR, false));
+        return Ok((PointerCheck::Failed, false));
     }
     r.check(
         b,
@@ -452,7 +473,7 @@ pub(crate) fn validate_pointers_traced(
             };
             if !ok {
                 r.check(b, 98, false, EntityRef::Edgeuse(eu))?;
-                return Ok((ERROR, false));
+                return Ok((PointerCheck::Failed, false));
             }
         }
     }
@@ -538,7 +559,7 @@ pub(crate) fn validate_pointers_traced(
         }
         let Some(fu) = face.faceuse else {
             r.check(b, 12, false, EntityRef::Face(f))?;
-            return Ok((0, false));
+            return Ok((PointerCheck::StoppedEarly, false));
         };
         r.check(b, 13, true, EntityRef::Faceuse(fu))?;
         r.check(
@@ -549,7 +570,7 @@ pub(crate) fn validate_pointers_traced(
         )?;
         let Some(fum) = b.faceuse(fu)?.mate else {
             r.check(b, 15, false, EntityRef::Faceuse(fu))?;
-            return Ok((0, false));
+            return Ok((PointerCheck::StoppedEarly, false));
         };
         for (i, ok, owner) in [
             (16, true, EntityRef::Faceuse(fum)),
@@ -572,11 +593,11 @@ pub(crate) fn validate_pointers_traced(
         }
         let Some(s1) = b.faceuse(fu)?.shell else {
             r.check(b, 23, false, EntityRef::Faceuse(fu))?;
-            return Ok((0, false));
+            return Ok((PointerCheck::StoppedEarly, false));
         };
         let Some(s2) = b.faceuse(fum)?.shell else {
             r.check(b, 24, false, EntityRef::Faceuse(fum))?;
-            return Ok((0, false));
+            return Ok((PointerCheck::StoppedEarly, false));
         };
         for (i, ok, s) in [
             (25, true, s1),
@@ -595,11 +616,11 @@ pub(crate) fn validate_pointers_traced(
             r.check(b, 29, loop_face == f, EntityRef::Loop(l))?;
             let Some(lu) = b.loop_(l)?.loopuse else {
                 r.check(b, 30, false, EntityRef::Loop(l))?;
-                return Ok((0, false));
+                return Ok((PointerCheck::StoppedEarly, false));
             };
             let Some(lum) = b.loopuse(lu)?.mate else {
                 r.check(b, 31, false, EntityRef::Loop(l))?;
-                return Ok((0, false));
+                return Ok((PointerCheck::StoppedEarly, false));
             };
             for (i, owner) in [
                 (32, EntityRef::Loop(l)),
@@ -664,7 +685,7 @@ pub(crate) fn validate_pointers_traced(
                 }
                 if !matches!(b.loopuse(this)?.start, LoopuseStart::Edgeuse(Some(_))) {
                     r.check(b, missing, false, EntityRef::Loopuse(this))?;
-                    return Ok((0, false));
+                    return Ok((PointerCheck::StoppedEarly, false));
                 }
                 for eu in cache.walk(b, this)? {
                     r.check(b, offset, true, EntityRef::Edgeuse(eu))?;
@@ -784,7 +805,7 @@ pub(crate) fn validate_pointers_traced(
             let list = &b.faceuse(this)?.loopuses;
             let Some(&first) = list.first() else {
                 r.check(b, missing, false, EntityRef::Faceuse(this))?;
-                return Ok((0, false));
+                return Ok((PointerCheck::StoppedEarly, false));
             };
             r.check(
                 b,
@@ -850,9 +871,9 @@ pub(crate) fn validate_pointers_traced(
     r.failed |= !topology_intact;
     // Without a report array the status is the caller's only refusal signal.
     if exclusion_failed && r.array.is_none() {
-        return Ok((ERROR, true));
+        return Ok((PointerCheck::Failed, true));
     }
-    Ok((SUCCESS, exclusion_failed))
+    Ok((PointerCheck::Passed, exclusion_failed))
 }
 
 fn check_edges(
@@ -2891,7 +2912,7 @@ mod issue_891_tests {
 
     /// `ValidatePointers` on [`half_disc`]: its status and the arc trims' middle
     /// control points before and after.
-    fn validate_half_disc() -> (i32, Vec<Vec3>, Vec<Vec3>) {
+    fn validate_half_disc() -> (PointerCheck, Vec<Vec3>, Vec<Vec3>) {
         let mut k = Kernel::default();
         let mut b = half_disc(&mut k);
         let before = rational_trim_middles(&mut b);
@@ -2908,7 +2929,7 @@ mod issue_891_tests {
     #[test]
     fn issue_891_kernel_fix_keeps_the_exact_trim() {
         let (status, before, after) = validate_half_disc();
-        assert_eq!(status, SUCCESS);
+        assert_eq!(status, PointerCheck::Passed);
         assert_eq!(before.len(), 2);
         assert_eq!(after, before);
         assert_eq!(after[0], middle_control_point(&mut trim()));
@@ -3102,10 +3123,10 @@ mod issue_891_tests {
                 .collect()
         }
 
-        type ReversalRun = (i32, Vec<EdgeuseId>, Vec<(EdgeuseId, Vec<Vec3>)>);
+        type ReversalRun = (PointerCheck, Vec<EdgeuseId>, Vec<(EdgeuseId, Vec<Vec3>)>);
 
         struct Run {
-            status: i32,
+            status: PointerCheck,
             before: Vec<EdgeuseId>,
             after: Vec<EdgeuseId>,
             arc_before: Vec<(EdgeuseId, Vec<Vec3>)>,
@@ -3155,7 +3176,7 @@ mod issue_891_tests {
             }
 
             let no_new = run();
-            assert_eq!(no_new.status, SUCCESS);
+            assert_eq!(no_new.status, PointerCheck::Passed);
 
             // No chord trim is made, and nothing present is removed.
             assert_eq!(
@@ -3214,7 +3235,7 @@ mod issue_891_tests {
         fn wr446_all_trims_present_is_inert() {
             let (s0, t0, g0) = all_present_run();
             let (s1, t1, g1) = all_present_run();
-            assert_eq!(s0, SUCCESS);
+            assert_eq!(s0, PointerCheck::Passed);
             assert_eq!(s0, s1);
             assert_eq!(t0, t1);
             assert_eq!(g0, g1);
@@ -3230,7 +3251,7 @@ mod issue_891_tests {
             let before = b.edgeuses().iter().count();
             let mut reports = AssertArray::new();
             let status = validate_pointers(&k, &mut b, Some(&mut reports), 2, true, &key).unwrap();
-            assert_eq!(status, SUCCESS);
+            assert_eq!(status, PointerCheck::Passed);
             assert!(reports.is_empty(), "{:?}", reports.reports());
             assert!(
                 trimmed_edgeuses(&b).is_empty(),

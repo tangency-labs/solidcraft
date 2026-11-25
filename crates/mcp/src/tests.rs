@@ -882,6 +882,37 @@ fn measure_summary_keeps_only_the_check_fields() {
     assert_eq!(raw_tool(&mut s, "measure", json!({"summary": "yes"}))["error"]["code"], -32602);
 }
 
+#[test]
+fn measure_region_filters_bodies_and_totals_in_tools_and_batches() {
+    let mut s = server();
+    for (name, x) in [("Inside", 0), ("Touching", 10), ("Outside", 30)] {
+        tool(&mut s, "execute", json!({"command":"solid.box","params":{"length":10,"width":10,"height":10,"corner":[x,0,0],"body_name":name}}));
+    }
+    let within = json!({"min":[0,0,0],"max":[10,10,10]});
+    let full = tool(&mut s, "measure", json!({}));
+    assert_eq!(full["body_count"], 3);
+    let intersects = tool(&mut s, "measure", json!({"summary":true,"within":within}));
+    assert_eq!(intersects["body_count"], 2, "{intersects}");
+    assert!((intersects["total"]["volume_mm3"].as_f64().unwrap() - 2000.0).abs() < 1e-6);
+    let inside = tool(&mut s, "measure", json!({"summary":true,"within":within,"mode":"inside"}));
+    assert_eq!(inside["body_count"], 1, "{inside}");
+    assert_eq!(inside["bodies"][0]["name"], "Inside");
+    let batch = tool(&mut s, "batch", json!({"commands":[{"command":"measure","params":{"summary":true,"within":within,"mode":"inside"}}]}));
+    assert_eq!(batch["results"][0], inside, "{batch}");
+    let empty = tool(&mut s, "measure", json!({"within":within,"body":"Outside"}));
+    assert_eq!(empty["body_count"], 0, "{empty}");
+    assert_eq!(tool(&mut s, "measure", json!({})), full);
+    for args in [json!({"within":null}), json!({"within":within,"mode":null})] {
+        let direct = raw_tool(&mut s, "measure", args.clone());
+        assert_eq!(direct["result"]["isError"], true, "{direct}");
+        let reply = raw_tool(&mut s, "batch", json!({"commands":[{"command":"measure","params":args}]}));
+        assert_eq!(reply["result"]["isError"], true, "{reply}");
+        let batch: Value = serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(batch["completed"], 0, "{batch}");
+        assert!(batch["failed"].is_object(), "{batch}");
+    }
+}
+
 /// `open` hands `up` and `names` to the STEP import, and the tool's schema refuses other values.
 #[test]
 fn open_stands_a_y_up_step_file_up() {
@@ -3758,6 +3789,16 @@ fn batch_does_not_resend_after_a_transport_error() {
     assert_eq!(methods(&b), ["engine.batch"]);
     assert!(is_error);
     assert!(body.as_str().is_some_and(|t| t.contains("may have run") && t.contains("timed out")), "{body}");
+}
+
+/// A batch the user declined ran nothing: it is not reported as one that may have run.
+#[test]
+fn batch_declined_by_the_user_says_it_did_not_run() {
+    let (b, body, is_error) =
+        recorded_batch(Err("not run: the user declined this call".into()), json!({"commands": [{"command": "a.one"}, {"command": "a.two"}]}));
+    assert_eq!(methods(&b), ["engine.batch"]);
+    assert!(is_error);
+    assert_eq!(body.as_str(), Some("not run: the user declined this call"), "{body}");
 }
 
 /// A batch longer than one control line goes step by step instead of being refused unrun.

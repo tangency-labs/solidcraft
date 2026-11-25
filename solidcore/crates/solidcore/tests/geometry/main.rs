@@ -93,6 +93,8 @@ mod issue_16669_pole_trace_span_certified;
 mod issue_1672_torus_minus_z;
 #[path = "../issue_16735_trims_past_domain.rs"]
 mod issue_16735_trims_past_domain;
+#[path = "../issue_17062_ellipse_rounding_only_interval.rs"]
+mod issue_17062_ellipse_rounding_only_interval;
 #[path = "../issue_1767_bspline_surface_part.rs"]
 mod issue_1767_bspline_surface_part;
 #[path = "../issue_1799_tight_box_divides_at_knots.rs"]
@@ -173,6 +175,8 @@ mod public_copy_transforms;
 mod public_scale_ownership;
 #[path = "../query_normal_definition.rs"]
 mod query_normal_definition;
+#[path = "../recognise_analytic.rs"]
+mod recognise_analytic;
 #[path = "../section_frames.rs"]
 mod section_frames;
 #[path = "../sphere_drop_spans_certified.rs"]
