@@ -483,7 +483,7 @@ impl LoopEnd {
 #[derive(Clone, Copy)]
 enum TrimUse {
     Support { arm: Arm, face: FaceId },
-    OtherFace,
+    OtherFace { opening: Option<(Arm, FaceId)> },
 }
 
 struct TrimSegment {
@@ -519,22 +519,33 @@ fn segment(
             return Ok(None);
         };
         let lifted = match use_ {
-            TrimUse::Support { arm, face } => {
-                let Some(lifted) = placed.support_trim(
+            TrimUse::Support { arm, face }
+            | TrimUse::OtherFace {
+                opening: Some((arm, face)),
+            } => {
+                let spatial = if matches!(use_, TrimUse::OtherFace { .. }) {
+                    let Some(spatial) = trim::line_endpoints(line, &edge::interval(b, e)?) else {
+                        return Ok(None);
+                    };
+                    Some(spatial)
+                } else {
+                    None
+                };
+                let Some(actual) = placed.support_trim(
                     k,
                     b,
                     arm,
                     (face, eu, e, line),
                     [(u, a), (v, z)],
-                    lifted,
+                    (lifted, spatial),
                 )?
                 else {
                     return Ok(None);
                 };
-                Some(lifted)
+                Some(actual)
             }
-            // The placed foreign check already budgets both zones.
-            TrimUse::OtherFace => None,
+            // The general placed foreign check already budgets both zones.
+            TrimUse::OtherFace { opening: None } => None,
         };
         (point_bounds(a), point_bounds(z), lifted)
     } else {
@@ -545,7 +556,7 @@ fn segment(
             (Some(a), Some(z)) => cardinal(coords(a), coords(z)),
             _ => None,
         };
-        let other_face = matches!(use_, TrimUse::OtherFace);
+        let other_face = matches!(use_, TrimUse::OtherFace { .. });
         let exact = if let Some((along, _)) = cardinal_bounds {
             binds_cardinal_trim(b, eu, e, plane, line, [u, v], [a, z], along)?
         } else {
@@ -575,7 +586,8 @@ fn segment(
         OrientType::Opposite => (v, u, subtract(a, z)),
         OrientType::Unknown => return Ok(None),
     };
-    let lifted = if let (TrimUse::OtherFace, Some([from, to])) = (use_, lifted) {
+    let lifted = if let (TrimUse::OtherFace { .. }, None, Some([from, to])) = (use_, placed, lifted)
+    {
         // Close only the arithmetic difference where the certified trim and
         // its independent carrier intersection describe the same point.
         let snap = |[fx, fy, fz]: PointBounds, [x, y, z]: PointBounds, roundoff| {
@@ -1469,9 +1481,42 @@ pub(super) fn check_corridor(
             clear = false;
             continue;
         };
-        if !matches!(surface.kind(), SurfaceKind::Plane(_)) {
+        let path = if matches!(surface.kind(), SurfaceKind::Plane(_)) {
+            let opening = if face == opening_a {
+                Some((z, face))
+            } else if face == opening_b {
+                Some((a, face))
+            } else {
+                None
+            };
+            planar_polygon(
+                k,
+                b,
+                face,
+                TrimUse::OtherFace { opening },
+                placed,
+                &envelope,
+            )?
+        } else {
+            None
+        };
+        let Some(path) = path else {
+            // A foreign face need not admit a placed polygon if its certified
+            // surface domain is disjoint from both arms.
+            let Some(surface) = face2::surface(b, face)? else {
+                clear = false;
+                continue;
+            };
             let zone = face2::tolerance(b, face)?.max(b.tolerance());
-            let bounds = surface.certified_bounding_box(k, &face2::uv_domain(b, face)?)?;
+            let domain = face2::uv_domain(b, face)?;
+            let bounds = if let SurfaceKind::Plane(plane) = surface.kind() {
+                let [lo, hi] = [domain.min(), domain.max()];
+                let uv = [Ivl::new(lo.x, hi.x), Ivl::new(lo.y, hi.y)];
+                let [boundary, _] = trim::uv_bounds(plane, [uv; 2]);
+                bounds_extent(boundary)
+            } else {
+                surface.certified_bounding_box(k, &domain)?
+            };
             if !bounds
                 .and_then(|bounds| with_zone(&bounds, zone))
                 .is_some_and(|bounds| {
@@ -1481,10 +1526,6 @@ pub(super) fn check_corridor(
             {
                 clear = false;
             }
-            continue;
-        }
-        let Some(path) = planar_polygon(k, b, face, TrimUse::OtherFace, placed, &envelope)? else {
-            clear = false;
             continue;
         };
         let Some(bounds) = polygon_bounds(
@@ -1501,16 +1542,21 @@ pub(super) fn check_corridor(
                 continue;
             }
             let contact = if let Some(placed) = placed {
-                placed.foreign_contact(arm, bounds, face == opposite_opening)
+                placed.foreign_contact(
+                    arm,
+                    bounds,
+                    (face == opposite_opening).then_some(path.lifted).flatten(),
+                )
             } else {
                 arm.contacts(bounds)
             };
             match contact {
                 Some(true) => return Ok(Clearance::Obstructed),
                 Some(false) => {
-                    if path
-                        .lifted
-                        .is_some_and(|bounds| arm.contacts(bounds) != Some(false))
+                    if placed.is_none()
+                        && path
+                            .lifted
+                            .is_some_and(|bounds| arm.contacts(bounds) != Some(false))
                     {
                         clear = false;
                     }

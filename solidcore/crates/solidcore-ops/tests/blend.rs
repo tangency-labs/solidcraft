@@ -654,6 +654,49 @@ fn post_foot_blends_clear_distant_pockets_at_the_same_level_after_rotation() {
 }
 
 #[test]
+fn post_foot_blends_clear_a_distant_ramped_pocket_after_rotation() {
+    use solidcore_ops::affine::{apply_point, rotation};
+    use solidcore_ops::{boolean::boolean, BooleanOp};
+
+    all_fixes();
+    // A shallow ramp meets the plate top and has the same dominant normal
+    // axis. The pocket is well outside both blend arms.
+    let a = [30.0, 30.0, 2.0];
+    let b = [35.0, 30.0, 3.0];
+    let c = [35.0, 30.0, 5.0];
+    let d = [30.0, 30.0, 5.0];
+    let profile = [(a, b), (b, c), (c, d), (d, a)].map(|(start, end)| Curve::Line { start, end });
+    let pocket = extrude(
+        &profile,
+        [0.0, 1.0, 0.0],
+        4.0,
+        0.0,
+        DraftCorner::default(),
+        true,
+    )
+    .unwrap();
+    let original = boolean(post_foot(true), pocket, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let cut_volume = 5.0 * 4.0 * (2.0 + 1.0) / 2.0;
+    assert!(rel(volume(&original), 12_900.0 - cut_volume) < 1e-9);
+    let map = rotation([0.0; 3], [0.0, 0.0, 1.0], PI / 6.0).unwrap();
+    original.transform(&map).unwrap();
+    let width = 4.2_f64;
+    for (kind, section) in [(Blend::Chamfer, 0.5), (Blend::Round, 1.0 - PI / 4.0)] {
+        let body = original.copy().unwrap();
+        let edges =
+            [[10.0, 5.0, 4.0], [5.0, 10.0, 4.0]].map(|p| edge_at(&body, apply_point(&map, p)));
+        let result = blend(&body, kind, &edges, &[width], &[], Corners::Filled)
+            .unwrap_or_else(|error| panic!("{kind:?}: {error:?}"));
+        assert_eq!(result.dropped, [false, false]);
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+        let expected = 12_900.0 - cut_volume + 20.0 * section * width.powi(2);
+        assert!(rel(volume(&body), expected) < 1e-9, "{kind:?}");
+    }
+}
+
+#[test]
 fn post_foot_blends_leave_the_body_intact_when_the_opening_is_too_short() {
     all_fixes();
     for (kind, fit_kind, section) in [

@@ -14,6 +14,8 @@ struct Support {
     face: FaceId,
     axis: usize,
     coordinate: Ivl,
+    range: Ivl,
+    zone: f64,
     parent: usize,
 }
 
@@ -42,11 +44,23 @@ fn representative(faces: &[Support], mut current: usize) -> Option<usize> {
     }
 }
 
-fn link(faces: &mut [Support], first: usize, second: usize) -> Option<()> {
+/// A shared fan can carry multiple faces with the same dominant axis.
+/// Join only supports whose complete chart domains agree with a shared level.
+fn link(faces: &mut [Support], frame: &Frame, first: usize, second: usize) -> Option<bool> {
     let a = representative(faces, first)?;
     let b = representative(faces, second)?;
+    if a == b {
+        return Some(true);
+    }
+    let (first, second) = (faces.get(a)?, faces.get(b)?);
+    let gap = frame.plane_gap(first.axis, first.range, second.coordinate.mid())?;
+    let reverse = frame.plane_gap(second.axis, second.range, first.coordinate.mid())?;
+    let zone = first.zone.min(second.zone);
+    if !(zone.is_finite() && gap.max(reverse) <= zone) {
+        return Some(false);
+    }
     faces.get_mut(a.max(b))?.parent = a.min(b);
-    Some(())
+    Some(true)
 }
 
 impl Levels {
@@ -55,15 +69,26 @@ impl Levels {
         reserve(&mut supports, b.face_list().len())?;
         for &face in b.face_list() {
             k.check_cancelled(OP)?;
-            let Some((axis, coordinate)) =
-                read_plane(b, face)?.and_then(|plane| frame.plane_coordinate(plane))
-            else {
+            let Some(plane) = read_plane(b, face)? else {
                 continue;
             };
+            let domain = face2::uv_domain(b, face)?;
+            let Some((axis, coordinate, range)) = frame.plane_coordinate(plane, &domain) else {
+                continue;
+            };
+            let zone = face2::tolerance(b, face)?.min(b.tolerance());
+            if !frame
+                .plane_gap(axis, range, coordinate.mid())
+                .is_some_and(|gap| zone.is_finite() && gap <= zone)
+            {
+                continue;
+            }
             supports.push(Support {
                 face,
                 axis,
                 coordinate,
+                range,
+                zone,
                 parent: 0,
             });
         }
@@ -74,7 +99,7 @@ impl Levels {
 
         let mut fans = Vec::new();
         reserve(&mut fans, b.vertex_list().len())?;
-        for &v in b.vertex_list() {
+        'vertices: for &v in b.vertex_list() {
             k.check_cancelled(OP)?;
             let mut axes = [None; 3];
             let tagged = vertex::faces(b, v)?;
@@ -96,8 +121,11 @@ impl Levels {
                     return Ok(None);
                 };
                 if let Some(first) = *slot {
-                    if link(&mut supports, first, index).is_none() {
-                        return Ok(None);
+                    match link(&mut supports, frame, first, index) {
+                        Some(true) => {}
+                        // This fan cannot supply a unique placed point.
+                        Some(false) => continue 'vertices,
+                        None => return Ok(None),
                     }
                 } else {
                     *slot = Some(index);
@@ -125,11 +153,10 @@ impl Levels {
                 };
                 coordinate
             };
-            let zone = face2::tolerance(b, support.face)?.min(b.tolerance());
-            let Some(gap) = frame.plane_gap(support.axis, support.coordinate, coordinate) else {
+            let Some(gap) = frame.plane_gap(support.axis, support.range, coordinate) else {
                 return Ok(None);
             };
-            if !(zone.is_finite() && gap <= zone) {
+            if !(support.zone.is_finite() && gap <= support.zone) {
                 return Ok(None);
             }
             faces.push(coordinate);

@@ -3,12 +3,13 @@
 mod levels;
 
 use self::levels::Levels;
-use super::{cardinal, coords, expansion_span, trim, Arm, Corridor, PointBounds, Segment};
+use super::{cardinal, coords, expansion_span, trim, Arm, Corridor, PointBounds, Segment, Span};
 use crate::blend::fillet_section::interval::Ivl;
 use crate::curve::line::Line;
 use crate::error::Result;
 use crate::geom::certified::{next_down, next_up};
 use crate::geom::expansion;
+use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
@@ -217,7 +218,11 @@ impl Frame {
 
     /// Identify the common axis of the plane. Edges and lifted UV trims must
     /// subsequently certify the entire face boundary against this level.
-    pub(super) fn plane_coordinate(&self, plane: &Plane) -> Option<(usize, Ivl)> {
+    pub(super) fn plane_coordinate(
+        &self,
+        plane: &Plane,
+        domain: &Extent2d,
+    ) -> Option<(usize, Ivl, Ivl)> {
         let frame = plane.position();
         let normal = frame.z_axis();
         let bounds = self.axes.map(|axis| axis.projection(normal));
@@ -240,7 +245,19 @@ impl Frame {
                     .enumerate()
                     .all(|(j, other)| *i == j || lower > other.mag())
         })?;
-        Some((i, basis.coordinate(frame.origin())?))
+        let level = basis.coordinate(frame.origin())?;
+        // Project the affine chart before enclosing the domain. Projecting
+        // an XYZ box would lose the correlation along each tangent.
+        let project = |direction, scale, domain: crate::geom::extent1d::Extent1d| {
+            let slope = bounded_dot(direction, basis.direction)?
+                .div_ulp(basis.length_squared)
+                .mul_ulp(Ivl::from(scale));
+            Some(slope.mul_ulp(Ivl::new(domain.min(), domain.max())))
+        };
+        let u = project(frame.x_axis(), plane.uv_scale().x, domain.u_interval())?;
+        let v = project(frame.y_axis(), plane.uv_scale().y, domain.v_interval())?;
+        let range = level.add_ulp(u).add_ulp(v);
+        range.is_finite().then_some((i, level, range))
     }
 
     pub(super) fn world(&self, [x, y, z]: [f64; 3]) -> PointBounds {
@@ -364,11 +381,12 @@ impl Placed {
         arm: Arm,
         (face, eu, e, line): (FaceId, EdgeuseId, EdgeId, &Line),
         endpoints: [(VertexId, Point3); 2],
-        raw: Segment,
+        (raw, spatial): (Segment, Option<Segment>),
     ) -> Result<Option<Segment>> {
         let [wall, floor] = arm.rail_faces;
         let [near_a, near_z] = arm.near_caps;
-        let on_rail = arm.rail_faces.contains(&face);
+        let opening = spatial.is_some();
+        let checks_caps = arm.rail_faces.contains(&face) || opening;
         let (Some(&axial), Some(&near)) = (arm.spans.get(arm.along), arm.origin.get(arm.along))
         else {
             return Ok(None);
@@ -377,9 +395,9 @@ impl Placed {
         let boundaries = [
             (wall, arm.across, arm.origin.get(arm.across).copied()),
             (floor, arm.above, arm.origin.get(arm.above).copied()),
-            (near_a, arm.along, on_rail.then_some(near)),
-            (near_z, arm.along, on_rail.then_some(near)),
-            (arm.far_cap, arm.along, on_rail.then_some(far)),
+            (near_a, arm.along, checks_caps.then_some(near)),
+            (near_z, arm.along, checks_caps.then_some(near)),
+            (arm.far_cap, arm.along, checks_caps.then_some(far)),
         ];
         let Some(plane) = read_plane(b, face)? else {
             return Ok(None);
@@ -387,6 +405,15 @@ impl Placed {
         let interval = edge::interval(b, e)?;
         let project = |point| self.frame.axes.map(|axis| axis.coordinate_bounds(point));
         let mut projected = raw.map(project);
+        // The opposite opening wall is foreign to this arm. Keep both
+        // representations until a shared cap certifies their contact.
+        if let Some(spatial) = spatial {
+            for (lifted, spatial) in projected.iter_mut().zip(spatial.map(project)) {
+                for (lifted, spatial) in lifted.iter_mut().zip(spatial) {
+                    *lifted = lifted.hull(spatial);
+                }
+            }
+        }
         let uv = trim::uv_terms(b, eu)?;
         let mut regenerated = None;
         for (end, ((bounds, (vertex, nominal)), parameter)) in projected
@@ -425,6 +452,13 @@ impl Placed {
                     return Ok(None);
                 };
                 if !reaches_cap((spatial, rounding), (lifted, uv_rounding)) {
+                    continue;
+                }
+                // The opposite opening wall is already identified by the
+                // corner fan. An enclosed common axial or side endpoint
+                // only establishes contact at that face of the arm.
+                if opening && axis != arm.above {
+                    *value = Ivl::from(level);
                     continue;
                 }
                 let same_support = |peer| self.levels.same_support(peer, other);
@@ -466,8 +500,8 @@ impl Placed {
     pub(super) fn foreign_contact(
         &self,
         arm: Arm,
-        bounds: [super::Span; 3],
-        opening_wall: bool,
+        bounds: [Span; 3],
+        opening_trim: Option<[Span; 3]>,
     ) -> Option<bool> {
         if arm.contacts(bounds)? {
             return Some(true);
@@ -480,10 +514,12 @@ impl Placed {
         if !meets {
             return Some(false);
         }
+        // A nominal contact is not enough to clear a margin-expanded opening.
+        let actual = opening_trim?;
         let stops_at_start = |axis: usize| {
             let start = *arm.origin.get(axis)?;
             let swept = arm.spans.get(axis)?;
-            let shape = bounds.get(axis)?;
+            let shape = actual.get(axis)?;
             Some(if start == swept.lo {
                 shape.hi <= start
             } else {
@@ -492,11 +528,12 @@ impl Placed {
         };
         let side = *arm.origin.get(arm.across)?;
         let across = bounds.get(arm.across)?;
-        (opening_wall
-            && across.lo == side
+        let actual_across = actual.get(arm.across)?;
+        let on_side = actual_across.lo == side && actual_across.hi == side;
+        (across.lo == side
             && across.hi == side
             && stops_at_start(arm.along)?
-            && stops_at_start(arm.above)?)
+            && (on_side || stops_at_start(arm.above)?))
         .then_some(false)
     }
 
@@ -523,6 +560,43 @@ mod tests {
     use crate::geom::extent1d::Extent1d;
     use crate::geom::extent2d::Extent2d;
     use crate::math::Vec2;
+
+    #[test]
+    fn an_opening_wall_needs_its_actual_trim_to_stop_at_the_start() {
+        let axes = [Vec3::X, Vec3::Y, Vec3::Z].map(|axis| Axis::new(axis).unwrap());
+        let frame = Frame { axes };
+        let levels = Levels::build(&Kernel::default(), &Brep::default(), &frame)
+            .unwrap()
+            .unwrap();
+        let zone = 1e-4;
+        let placed = Placed {
+            frame,
+            levels,
+            zone,
+        };
+        let arm = Arm::new(
+            Point3::ZERO,
+            Point3::X,
+            Point3::Y,
+            Point3::Z,
+            1.0,
+            [FaceId::from_index(0); 5],
+        )
+        .unwrap();
+        let nominal = [
+            Span::between(0.0, 0.0),
+            Span::between(-2.0, 0.0),
+            Span::between(-2.0, 0.0),
+        ];
+        assert_eq!(placed.foreign_contact(arm, nominal, None), None);
+        assert_eq!(
+            placed.foreign_contact(arm, nominal, Some(nominal)),
+            Some(false)
+        );
+        let mut advanced = nominal;
+        advanced[2].hi = zone / 2.0;
+        assert_eq!(placed.foreign_contact(arm, nominal, Some(advanced)), None);
+    }
 
     #[test]
     fn a_long_edge_does_not_hide_an_offset_across_a_cardinal_cap() {
