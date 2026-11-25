@@ -1274,6 +1274,89 @@ impl BSplineCurve {
         self.refresh_analytics()
     }
 
+    /// Not upstream (#21511): makes the curve pass through one control point at `t`
+    /// without changing its shape. An interior `t` is inserted as a knot until its
+    /// multiplicity reaches the degree (knot insertion is exact up to rounding); an end of
+    /// the clamped natural interval already has it. Returns `false`, changing nothing, for
+    /// a `t` outside the natural interval or a curve of degree 0.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without a NURB; those of [`Self::insert_one_knot`].
+    pub(crate) fn make_point_knot(&mut self, t: f64) -> Result<bool> {
+        let natural = self.natural_interval();
+        if !(natural.min() <= t && t <= natural.max()) {
+            return Ok(false);
+        }
+        let nurb = self.get_or_create_gw_nurb()?;
+        let p = nurb.degree();
+        if p == 0 {
+            return Ok(false);
+        }
+        if t == natural.min() || t == natural.max() {
+            return Ok(true);
+        }
+        let r = nurb.knots().iter().filter(|&&u| u == t).count();
+        if r < p {
+            self.insert_one_knot(t, p - r)?;
+        }
+        Ok(true)
+    }
+
+    /// Not upstream (#21511): moves the control point the curve passes through at the knot
+    /// `t` (multiplicity at least the degree, [`Self::make_point_knot`]) to `point`, as
+    /// [`Self::edit_end_point`] moves an end (a rational point is projected with its old
+    /// weight): the right limit's point when `from_right` (where a parameter interval
+    /// starts), else the left limit's. With the multiplicity `r >= p` of `t` starting at
+    /// knot index `s`, that is `P[s + r - p - 1]` from the right and `P[s - 1]` from the
+    /// left (the natural start is `P[0]`, the natural end `P[n]`). The curve then has
+    /// `point` at `t` exactly, before rounding; only spans in that control point's
+    /// support change. Returns `false`, changing nothing, when `t` is not such a knot or
+    /// has no limit on that side.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without a NURB.
+    pub(crate) fn move_point_at_knot(
+        &mut self,
+        t: f64,
+        from_right: bool,
+        point: Point3,
+    ) -> Result<bool> {
+        let nurb = self.get_or_create_gw_nurb()?;
+        let p = nurb.degree();
+        let knots = nurb.knots();
+        let Some(s) = knots.iter().position(|&u| u == t) else {
+            return Ok(false);
+        };
+        let r = knots.iter().skip(s).take_while(|&&u| u == t).count();
+        if p == 0 || r < p {
+            return Ok(false);
+        }
+        let idx = if from_right {
+            (s + r).checked_sub(p + 1)
+        } else {
+            s.checked_sub(1)
+        };
+        let Some(pw) = idx.and_then(|i| nurb.cpts_mut().get_mut(i)) else {
+            return Ok(false);
+        };
+        pw.x = point.x;
+        pw.y = point.y;
+        if pw.z != NOZ {
+            pw.z = point.z;
+        }
+        if pw.w != NOW {
+            pw.x *= pw.w;
+            pw.y *= pw.w;
+            if pw.z != NOZ {
+                pw.z *= pw.w;
+            }
+        }
+        self.refresh_analytics()?;
+        Ok(true)
+    }
+
     /// Fixes up the knots with tolerance `tol` (`FixupKnotVector`; upstream default
     /// `SM_EFF_ZERO`): close knots become equal, near knots are spread apart.
     ///
@@ -2034,11 +2117,7 @@ mod tests {
                     None => CPoint::new(x, y, NOZ, NOW),
                 })
                 .collect();
-            let curve = BSplineCurve::from_nurb(
-                Curve::new(pw, 2, knots.clone()).unwrap(),
-                2,
-                true,
-            );
+            let curve = BSplineCurve::from_nurb(Curve::new(pw, 2, knots.clone()).unwrap(), 2, true);
             for (t, expected) in [0.2, 0.8].into_iter().zip(expected) {
                 let point = curve.evaluate_point(t).unwrap();
                 assert!((point - expected).length() < 1e-12, "{t}: {point:?}");
