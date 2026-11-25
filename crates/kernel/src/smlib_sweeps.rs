@@ -446,29 +446,26 @@ mod imp {
             .collect()
     }
 
-    /// SMLib's cylinder (`smlib_make_cylinder`), built at the origin and rigidly placed onto
-    /// `plane` spanning `[lo, hi]` along `plane.normal()` with its seam at
-    /// [`crate::build::SEAM_ANGLE`]. Carries the same cap/wall history and construction sources as
-    /// extruding `region` from `lo` to `hi`.
+    /// Cylinder built via `Brep::extrude` of the single circle arc on `plane` spanning `[lo, hi]`
+    /// along `plane.normal()` with its seam at [`crate::build::SEAM_ANGLE`]. Produces the exact
+    /// same B-rep as general `extrude` (with `solidcore`'s ray-free `stitch_solid` for a single
+    /// right cylinder) while skipping `number_regions`, `broken_at_seams`, and `roles()` curve
+    /// sampling. Carries the exact same cap/wall history and construction sources.
     pub(crate) fn cylinder(plane: &Plane, radius: f64, lo: f64, hi: f64, region: &Region2) -> Result<Body> {
         let distance = hi - lo;
         let base = plane.offset(lo);
         let top = plane.offset(hi);
         let n = plane.normal();
-        let (s, c) = crate::build::SEAM_ANGLE.sin_cos();
-        // `plane` is verified orthonormal by `frame_ok`: rotating `(x, y)` in-plane by `SEAM_ANGLE`
-        // keeps `(u, v, n)` right-handed and orthonormal.
-        let u = plane.x * c + plane.y * s;
-        let v = plane.y * c - plane.x * s;
-        let o = base.origin;
-        // Row-vector convention (`p' = p·A + t`): rows 0–2 are the images of +X, +Y, +Z,
-        // row 3 is the translation.
-        let matrix = [[u.x, u.y, u.z, 0.0], [v.x, v.y, v.z, 0.0], [n.x, n.y, n.z, 0.0], [o.x, o.y, o.z, 1.0]];
-        let brep = Brep::make_cylinder([0.0; 3], radius, distance)
-            .map_err(|e| failed("cylinder", e))?
-            .transformed(&matrix)
-            .map_err(|e| failed("cylinder", e))?;
-        let body = body_of(brep, "cylinder")?;
+        let circle = Curve::Arc {
+            center: p(base.origin),
+            axis: p(n),
+            reference: p(plane.x),
+            radius,
+            start: crate::build::SEAM_ANGLE,
+            end: crate::build::SEAM_ANGLE + std::f64::consts::TAU,
+        };
+        let brep = Brep::extrude(&[circle], p(n), distance, 0.0, DraftCorner::default(), true).map_err(|e| failed("extrude", e))?;
+        let body = body_of(brep, "extrude")?;
         let r = body.record();
         let size = body.size().max(1e-9);
         let tol = (size * 1e-5 + 1e-9).min(0.25 * distance);
