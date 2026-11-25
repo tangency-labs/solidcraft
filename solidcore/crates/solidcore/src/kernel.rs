@@ -213,6 +213,8 @@ pub struct WorkCounters {
     contact_stretch_certifications: Cell<u64>,
     uv_trim_builds: Cell<u64>,
     trim_deviation_bounds: Cell<u64>,
+    band_face_solves: Cell<u64>,
+    band_edge_solves: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -440,11 +442,28 @@ impl WorkCounters {
     }
 
     /// Certified bounds on a new UV trim's distance from its edge
-    /// (`topology::edgeuse::p3::trim_deviation_bound`): each bisection the bound starts, the
-    /// costly part of building a trim. Not the fork's (#21105).
+    /// (`topology::edgeuse::p3::trim_deviation_bound`, and its same-parameter form
+    /// `trim_same_parameter_deviation_bound` that gates a boolean's carried trims): each
+    /// bisection the bound starts, the costly part of building a trim. Not the fork's (#21105).
     #[must_use]
     pub fn trim_deviation_bounds(&self) -> u64 {
         self.trim_deviation_bounds.get()
+    }
+
+    /// Intersections of a convex blend's section with a face of the part, run to learn whether
+    /// the blend cuts the part or breaks through it
+    /// (`blend::fillet_executive::session::band_cuts`). Not the fork's (#21434).
+    #[must_use]
+    pub fn band_face_solves(&self) -> u64 {
+        self.band_face_solves.get()
+    }
+
+    /// Intersections of an edge of the part with a station's plane, run to learn whether a
+    /// convex blend cuts the part (`blend::fillet_executive::session::band_cuts`). Not the
+    /// fork's (#21434).
+    #[must_use]
+    pub fn band_edge_solves(&self) -> u64 {
+        self.band_edge_solves.get()
     }
 
     /// Zeroes every count (`SmWorkCounters::Reset`).
@@ -475,6 +494,20 @@ impl WorkCounters {
         self.contact_stretch_certifications.set(0);
         self.uv_trim_builds.set(0);
         self.trim_deviation_bounds.set(0);
+        self.band_face_solves.set(0);
+        self.band_edge_solves.set(0);
+    }
+
+    /// Counts one intersection of a blend's section with a face.
+    pub(crate) fn add_band_face_solve(&self) {
+        self.band_face_solves
+            .set(self.band_face_solves.get().saturating_add(1));
+    }
+
+    /// Counts one intersection of an edge with a station's plane.
+    pub(crate) fn add_band_edge_solve(&self) {
+        self.band_edge_solves
+            .set(self.band_edge_solves.get().saturating_add(1));
     }
 
     /// Counts one UV trim curve built.
@@ -1000,9 +1033,9 @@ pub struct Kernel {
     /// the kernel copies an operation makes.
     #[cfg(test)]
     pub(crate) strip_probe: Arc<std::sync::Mutex<StripProbe>>,
-    /// Not upstream, test only (feature `wr57-replay`): the seam of the goldens' WR-57
-    /// substitution replay ([`crate::surface::surface::replay`]). No hook by default, and
-    /// then it changes nothing. Shared with the kernel copies an operation makes for its
+    /// Not upstream, test only (feature `wr57-replay`): the seam of the goldens' WR-450
+    /// and WR-587 replays and target bound tests ([`crate::surface::surface::replay`]).
+    /// No hook by default, and then it changes nothing. Shared with the kernel copies an operation makes for its
     /// caches, which call through the same seam.
     #[cfg(feature = "wr57-replay")]
     pub replay: crate::surface::surface::replay::ReplaySeam,
