@@ -27,7 +27,7 @@ pub mod exchange;
 pub mod modelling;
 
 pub use cell_grid::{CellGrid, CellGridLimits};
-pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirWritten, Exchange};
+pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
 
 /// A kernel's stable name: what build features, the support matrix and reports call it.

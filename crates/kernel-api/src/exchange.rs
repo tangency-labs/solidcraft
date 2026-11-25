@@ -67,6 +67,12 @@ pub struct CadirWritten {
     pub edges: Vec<Option<EdgeId>>,
 }
 
+/// Why a record could not be written into CADIR ([`Exchange::write_cadir`]): what CADIR cannot
+/// hold or refuses, in the kernel's words.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct CadirRefused(pub String);
+
 /// The exchange helpers of one kernel ([`crate::OpKind::Exchange`]).
 pub trait Exchange: Backend {
     /// `text` as a STEP string literal: quoted, with its quotes and backslashes escaped and the
@@ -76,6 +82,6 @@ pub trait Exchange: Backend {
     /// this kernel's STEP import makes them.
     fn read_cadir(&self, ir: &CadIr) -> CadirBodies;
     /// `record` appended to `model` as one body named `name`, its ids `<id_prefix>:<kind>#<key>`.
-    /// A record CADIR cannot hold, or a value it refuses, is the kernel's error.
-    fn write_cadir(&self, model: &mut Model, record: &Brep, id_prefix: &str, name: Option<&str>) -> Result<CadirWritten, Self::Error>;
+    /// A record CADIR cannot hold, or a value it refuses, is [`CadirRefused`] with why.
+    fn write_cadir(&self, model: &mut Model, record: &Brep, id_prefix: &str, name: Option<&str>) -> Result<CadirWritten, CadirRefused>;
 }

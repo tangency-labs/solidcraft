@@ -459,7 +459,7 @@ pub use solidcore_ops::member_turn::parallel_turn;
 /// SolidCraft's kernel interface: the trait each kernel's adapter implements, its operations,
 /// inputs and errors.
 pub use solidcraft_kernel_api as api;
-pub use solidcraft_kernel_api::{CadirBodies, CadirFailure, CadirRead, CadirWritten};
+pub use solidcraft_kernel_api::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten};
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;

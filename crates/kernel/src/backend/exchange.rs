@@ -4,10 +4,9 @@
 
 use cadmpeg_ir::document::{CadIr, Model};
 use solidcore_record::brep::Brep;
-use solidcraft_kernel_api::{CadirBodies, CadirFailure, CadirRead, CadirWritten, Exchange};
+use solidcraft_kernel_api::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 
 use super::Solidcore;
-use crate::{KernelError, Result};
 
 impl Exchange for Solidcore {
     fn step_string(&self, text: &str) -> String {
@@ -35,8 +34,8 @@ impl Exchange for Solidcore {
         }
     }
 
-    fn write_cadir(&self, model: &mut Model, record: &Brep, id_prefix: &str, name: Option<&str>) -> Result<CadirWritten> {
-        let w = solidcore_cadir::write_body(model, record, id_prefix, name).map_err(|e| KernelError::Exchange(e.to_string()))?;
+    fn write_cadir(&self, model: &mut Model, record: &Brep, id_prefix: &str, name: Option<&str>) -> Result<CadirWritten, CadirRefused> {
+        let w = solidcore_cadir::write_body(model, record, id_prefix, name).map_err(|e| CadirRefused(e.to_string()))?;
         Ok(CadirWritten { body: w.body, regions: w.regions, faces: w.faces, edges: w.edges })
     }
 }

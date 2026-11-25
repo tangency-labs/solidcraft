@@ -2,10 +2,9 @@
 
 use cadmpeg_ir::document::{CadIr, Model};
 use solidcore_record::brep::Brep;
-use solidcraft_kernel_api::{CadirBodies, CadirWritten, Exchange, OpKind};
+use solidcraft_kernel_api::{CadirBodies, CadirRefused, CadirWritten, Exchange, OpKind};
 
 use super::{Which, which};
-use crate::Result;
 use crate::backend::Solidcore;
 
 /// `text` as a STEP string literal, quoted and escaped.
@@ -24,8 +23,8 @@ pub fn read_cadir(ir: &CadIr) -> CadirBodies {
 }
 
 /// `record` appended to `model` as one body named `name`, its ids `<id_prefix>:<kind>#<key>`. A
-/// record CADIR cannot hold is [`crate::KernelError::Exchange`] with the kernel's words.
-pub fn write_cadir(model: &mut Model, record: &Brep, id_prefix: &str, name: Option<&str>) -> Result<CadirWritten> {
+/// record CADIR cannot hold is [`CadirRefused`] with the kernel's words.
+pub fn write_cadir(model: &mut Model, record: &Brep, id_prefix: &str, name: Option<&str>) -> Result<CadirWritten, CadirRefused> {
     match which(OpKind::Exchange) {
         Which::Solidcore => Solidcore.write_cadir(model, record, id_prefix, name),
     }
@@ -52,6 +51,6 @@ mod tests {
         let mut bad = record.clone();
         bad.faces.clear();
         let words = solidcore_cadir::write_body(&mut Model::default(), &bad, "solidcraft:part-2", None).unwrap_err().to_string();
-        assert_eq!(write_cadir(&mut Model::default(), &bad, "solidcraft:part-2", None).unwrap_err(), crate::KernelError::Exchange(words));
+        assert_eq!(write_cadir(&mut Model::default(), &bad, "solidcraft:part-2", None).unwrap_err(), CadirRefused(words));
     }
 }
