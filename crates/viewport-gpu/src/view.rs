@@ -90,7 +90,7 @@ pub const MAX_PALETTE: usize = 1 << 20;
 pub struct Palette {
     entries: Vec<[u8; 4]>,
     /// The interned entries by colour and motion slot.
-    lookup: std::collections::HashMap<([u8; 4], u32), u32>,
+    lookup: std::collections::HashMap<([u8; 4], u32), u32, std::hash::BuildHasherDefault<PaletteHasher>>,
     stable_len: usize,
     /// Per entry, 1 + its body's hatch, or 0 for the cap's own (empty: 0 for every entry).
     hatches: Vec<u8>,
@@ -135,14 +135,7 @@ impl Material {
 impl Palette {
     /// A palette whose entries are all stable (the model scene's body/face slots).
     pub fn with_stable(entries: Vec<[u8; 4]>) -> Palette {
-        Palette {
-            stable_len: entries.len(),
-            entries,
-            lookup: std::collections::HashMap::new(),
-            hatches: Vec::new(),
-            motions: Vec::new(),
-            materials: Vec::new(),
-        }
+        Palette { stable_len: entries.len(), entries, lookup: Default::default(), hatches: Vec::new(), motions: Vec::new(), materials: Vec::new() }
     }
 
     /// This palette with each entry's motion slot by index (entries past `motions` have none).
@@ -451,6 +444,46 @@ impl std::hash::Hasher for WeldHasher {
 
     fn write_u32(&mut self, x: u32) {
         self.0 = (self.0.rotate_left(5) ^ u64::from(x)).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+}
+
+/// A multiply-and-rotate hasher for [`Palette`]'s lookup, whose keys are four colour bytes and a
+/// slot: the standard SipHash cost about 2% of a frame on a busy design, since every face and
+/// edge is interned each build. The table is never iterated for output (only rekeyed), so the
+/// hash order cannot reach the picture.
+#[derive(Default)]
+pub(crate) struct PaletteHasher(u64);
+
+impl PaletteHasher {
+    const K: u64 = 0x51_7c_c1_b7_27_22_0a_95;
+
+    fn add(&mut self, x: u64) {
+        self.0 = (self.0.rotate_left(5) ^ x).wrapping_mul(Self::K);
+    }
+}
+
+impl std::hash::Hasher for PaletteHasher {
+    fn finish(&self) -> u64 {
+        // The multiply leaves its entropy in the high bits; the table reads the low ones too.
+        self.0.rotate_left(26)
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        let (chunks, rest) = bytes.as_chunks::<8>();
+        for c in chunks {
+            self.add(u64::from_le_bytes(*c));
+        }
+        for b in rest {
+            self.add(u64::from(*b));
+        }
+    }
+
+    fn write_u32(&mut self, x: u32) {
+        self.add(u64::from(x));
+    }
+
+    fn write_usize(&mut self, x: usize) {
+        self.add(x as u64);
     }
 }
 
@@ -6312,6 +6345,71 @@ pub fn analysis_colors(c: &solidcraft_color::AnalysisColors) -> [f32; 36] {
 
 #[cfg(test)]
 mod tests {
+    /// The (colour, slot) -> index lookups of a fixed pseudo-random stream: the new hasher must
+    /// intern exactly what the standard one does. Also the timing the PR quotes
+    /// (`cargo test -p solidcraft-viewport-gpu --release palette_hasher -- --nocapture --ignored`).
+    fn stream() -> Vec<([u8; 4], u32)> {
+        let mut x = 0x2545_f491_4f6c_dd1du64;
+        (0..400_000)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                let c = (x % 600) as u32;
+                ([(c * 7) as u8, ((c * 13) >> 2) as u8, (c % 251) as u8, 255], (x >> 40) as u32 % 3)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn palette_lookup_interns_the_same_entries_as_the_standard_hasher() {
+        use super::*;
+        let mut reference: std::collections::HashMap<([u8; 4], u32), u32> = Default::default();
+        let mut entries: Vec<[u8; 4]> = Vec::new();
+        let mut palette = Palette::default();
+        for (rgba, slot) in stream() {
+            let want = *reference.entry((rgba, slot)).or_insert_with(|| {
+                entries.push(rgba);
+                entries.len() as u32 - 1
+            });
+            assert_eq!(palette.intern_moved(rgba, slot).0, want);
+        }
+        assert_eq!(palette.entries(), entries.as_slice());
+    }
+
+    #[test]
+    #[ignore = "timing"]
+    fn palette_hasher_timing() {
+        use super::*;
+        let keys = stream();
+        let mut std_map: std::collections::HashMap<([u8; 4], u32), u32> = Default::default();
+        let mut fast: std::collections::HashMap<([u8; 4], u32), u32, std::hash::BuildHasherDefault<PaletteHasher>> = Default::default();
+        for (i, k) in keys.iter().enumerate() {
+            std_map.insert(*k, i as u32);
+            fast.insert(*k, i as u32);
+        }
+        for _ in 0..3 {
+            let t = std::time::Instant::now();
+            let mut sum = 0u64;
+            for _ in 0..20 {
+                for k in &keys {
+                    sum += u64::from(*std_map.get(k).unwrap_or(&0));
+                }
+            }
+            let a = t.elapsed();
+            let t = std::time::Instant::now();
+            let mut sum2 = 0u64;
+            for _ in 0..20 {
+                for k in &keys {
+                    sum2 += u64::from(*fast.get(k).unwrap_or(&0));
+                }
+            }
+            let b = t.elapsed();
+            assert_eq!(sum, sum2);
+            println!("lookups: {} ; siphash {:?} ; palette hasher {:?}", keys.len() * 20, a, b);
+        }
+    }
+
     #[test]
     fn retaining_live_picture_slots_releases_closed_active_and_parked_uploads() {
         use super::*;

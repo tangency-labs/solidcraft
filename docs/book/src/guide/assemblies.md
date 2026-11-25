@@ -606,6 +606,16 @@ new linked component; the other occurrences keep the old source. Scripts pass th
 `component.relink {component, occurrence, path}`, and the reply's `component` is then the one
 the occurrence shows and `previous_component` the one it showed.
 
+Relink Source leaves the linked bodies' names as they are, unless the new source has another
+number of bodies, when they take the source's names. **Relink Source and Use Its Names…**
+(in the same menu) gives the bodies the new source's names instead: what the design keeps under
+the old names (materials, appearances, later features that name the body) follows each body to
+its new name, and the linked feature takes the source design's name when it still had its
+component's. The component's own name stays yours, and a body whose new name another body
+already has keeps its name and is reported in the warnings. Scripts pass `names: "keep"`
+(the default) or `names: "sync"`; it applies when the whole component is relinked, not to one
+placement shown by `occurrence`, which shows a component made from the new source.
+
 Scripts use `component.relink {component, path}`. The reply includes `previous_path`, `path`,
 `warnings`, `joint_errors` and `joint_conflicts`. Changed geometry can invalidate a joint's
 face reference: relinking reports those joints in the reply and UI status/message history;

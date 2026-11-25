@@ -1336,6 +1336,28 @@ fn a_loss_report_is_bounded_printable_text() {
 }
 
 #[test]
+fn font_annotation_is_a_string_hint_and_does_not_restrict_input() {
+    let property = json!({"type":"string","x-solidcraft-font":true});
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"font":property}}}]);
+    let entry = parse(&value).unwrap().runtime.unwrap().entries.remove(0);
+    assert_eq!(strict_input_schema(&entry.input_schema)["properties"]["font"][FONT_KEY], true);
+    for font in ["Liberation Sans", "Unknown family", "", "/fonts/custom.ttf"] {
+        assert_eq!(check_input(&entry.input_schema, &json!({"font":font})), Ok(()));
+    }
+    assert!(check_input(&entry.input_schema, &json!({"font":17})).is_err());
+    for property in [
+        json!({"type":"number","x-solidcraft-font":true}),
+        json!({"type":"string","x-solidcraft-font":"true"}),
+        json!({"type":"string","x-solidcraft-font":false}),
+        json!({"type":"string","x-solidcraft-font":{}}),
+    ] {
+        value["runtime"]["entries"][0]["input_schema"]["properties"]["font"] = property;
+        assert!(parse(&value).is_err(), "malformed font hint must be rejected");
+    }
+}
+
+#[test]
 fn entry_arguments_are_checked_as_strictly_as_app_commands() {
     let schema = json!({"type":"object","required":["teeth"],"properties":{
         "teeth":{"type":"integer","minimum":6,"maximum":200},

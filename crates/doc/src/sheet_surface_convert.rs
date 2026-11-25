@@ -3673,6 +3673,28 @@ fn pushed(plane: &Plane, seg: &Seg2, id: &str, width: f64, flip: bool, (z0, z1):
     }
 }
 
+/// The surfaces of a contour flange's profile `segs` drawn `depth` into the material from the
+/// face the surfaces are (see [`SurfaceSheet::contour`]), through the kernel's
+/// [`solidcraft_develop::offset_contour`]: each line shifted, each arc's radius changed, end to
+/// end again, the material on the right of the travel or on the left when `flip`. Its refusals
+/// are worded here.
+fn offset_profile(segs: &[Seg2], depth: f64, thickness: f64, flip: bool) -> Result<Vec<Seg2>> {
+    use solidcraft_develop::ContourRefusal as R;
+    solidcraft_develop::offset_contour(segs, depth, thickness, flip, SMOOTH).map_err(|why| {
+        DocError::Invalid(
+            match why {
+                R::ZeroLength => "a zero-length curve in the contour",
+                R::TurnsBack => "a contour flange turns back on itself",
+                R::CornersMiss => "the shifted curves at a sharp corner of a contour flange do not meet",
+                R::LineTooShort => "a contour line is shorter than its shifted corners",
+                R::RadiusTooSmall => "a contour arc's radius is no larger than the sheet is thick",
+                R::ArcTooShort => "a contour arc is shorter than its shifted corners",
+            }
+            .into(),
+        )
+    })
+}
+
 /// Why no contour flange is made along the sketch curve `id`, neither a line nor a circular arc:
 /// its panel would be free-form, and a free-form panel's flat has no closed form (#15743).
 pub(crate) fn free_form_contour(id: &str) -> DocError {
@@ -3792,6 +3814,14 @@ impl SurfaceSheet {
     /// sketch curve each piece was drawn on and the piece's key: the curve's id, with the piece's
     /// place on it where it was drawn in several (`s3.2`); each panel's key is the feature's and
     /// its piece's (see [`PanelMade::Contour`]).
+    ///
+    /// `depth` is how far into the material the drawn profile lies from the face the sheet's
+    /// surfaces are (0 on that face, half the thickness through the middle, the thickness on the
+    /// other face): each surface lies that far from the profile on the side away from the
+    /// material, so a drawn line's panel is the line shifted, a drawn arc's roll has its radius
+    /// less or more by it, and the virtual sharp of two lines is where their shifted lines meet,
+    /// while the bends' setbacks follow from the surfaces. `symmetric` takes `width` each way
+    /// across the plane, twice the width in all.
     #[allow(clippy::too_many_arguments)]
     pub fn contour(
         body: &str,
@@ -3800,6 +3830,8 @@ impl SurfaceSheet {
         plane: &Plane,
         segs: &[Seg2],
         width: f64,
+        depth: f64,
+        symmetric: bool,
         flip: bool,
         feature: u64,
         curves: &[(String, String)],
@@ -3824,6 +3856,13 @@ impl SurfaceSheet {
                 return err("a contour flange's profile crosses itself");
             }
         }
+        if !(depth.is_finite() && depth >= 0.0 && depth <= rule.thickness) {
+            return err("the contour flange's profile lies outside the sheet's thickness");
+        }
+        let segs = &*offset_profile(segs, depth, rule.thickness, flip)?;
+        // A symmetric flange runs `width` each way across the plane: from a plane a width back.
+        let back = Plane { origin: plane.origin - plane.normal() * width, x: plane.x, y: plane.y };
+        let (plane, width) = if symmetric { (&back, width * 2.0) } else { (plane, width) };
         let normal = plane.normal();
         let side = if flip { -1.0 } else { 1.0 };
         // Where a joint between two pieces runs, as heights above the plane: up its normal, or
