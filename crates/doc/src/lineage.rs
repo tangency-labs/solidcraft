@@ -870,8 +870,9 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
 /// and its side is the face of the body its panel away from the corner was, the one the corner's
 /// two bends do not share. Each corner's walls are so named apart from every other corner's, and
 /// numbered among themselves (see `FaceNamer::part`). Where a side is not known, the walls are
-/// `relief` alone. A hole's wall is `side:<curve>` of the cut that made it. None for a panel
-/// nothing says what made.
+/// `relief` alone. A hole's wall is `side:<curve>` of the cut that made it, and a bead's face
+/// `<face>:<curve>` of the bead feature, after its centreline (`crown.top:<curve>`, see
+/// `sheet_surface_bead::face_role`). None for a panel nothing says what made.
 fn sheet_role(
     part: &crate::sheet_surface_convert::SheetPart,
     place: Option<usize>,
@@ -1002,6 +1003,9 @@ fn sheet_role(
         }
         SheetPart::Drill { feature, role } => {
             Some(GrownFace { role: role.clone(), feature: Some(*feature), on: Vec::new(), across: Vec::new(), ordinal: place })
+        }
+        SheetPart::Bead { feature, curve, face } => {
+            Some(GrownFace { role: format!("{face}:{curve}"), feature: Some(*feature), on: Vec::new(), across: Vec::new(), ordinal: place })
         }
     }
 }

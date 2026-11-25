@@ -105,9 +105,11 @@ use crate::heal::stitch::p2::{ClosedGap, MinGapRequest};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::query::face::p2 as query_face2;
+use crate::surface::surface::assert_valid::fails_internal_pole_test;
 use crate::topology::brep::p1::{self as brep1, LockBrepBox};
 use crate::topology::brep::p2::{self as brep2, NotifyArg};
 use crate::topology::edge::{self, NotifyEnv};
@@ -2078,6 +2080,86 @@ pub fn shrink_geometry(k: &Kernel, b: &mut Brep) -> Result<()> {
         if surf_domain.max().y - max.y < tol {
             max.y = surf_domain.max().y;
         }
+        // (not upstream) a face domain ending just past an interior knot of its surface
+        // (within the snapping tolerance), where the surface trimmed to it would have an
+        // internal pole (`SmBSplineSurface` test #2: the span left past the knot so thin that
+        // its control points coincide, as a tangent rail's trims straying by rounding past
+        // the surface it was extended from leave it), runs on to the snapping tolerance past
+        // the knot. Strays the trim's own knot snapping takes care of are left alone. The
+        // face only gains surface; its trims stay as they are.
+        let surface = deref(face2::surface(b, f)?, OP_SHRINK)?;
+        // each bound within the snapping tolerance past an interior knot: (direction, low
+        // end, knot)
+        let mut near: Vec<(SurfParamType, bool, f64)> = Vec::new();
+        for (param, lo, hi, s_lo, s_hi) in [
+            (
+                SurfParamType::U,
+                min.x,
+                max.x,
+                surf_domain.min().x,
+                surf_domain.max().x,
+            ),
+            (
+                SurfParamType::V,
+                min.y,
+                max.y,
+                surf_domain.min().y,
+                surf_domain.max().y,
+            ),
+        ] {
+            let Some((knots, _)) = ignored(surface.knots_with_nurb(k, param, None))? else {
+                continue;
+            };
+            for &knot in knots.iter().filter(|&&t| t > s_lo && t < s_hi) {
+                if lo < knot && knot - lo < tol {
+                    near.push((param, true, knot));
+                }
+                if hi > knot && hi - knot < tol {
+                    near.push((param, false, knot));
+                }
+            }
+        }
+        if !near.is_empty() {
+            // the surface trimmed as it would be, with one bound at the face's (the others
+            // the surface's own) or with all of them, tested
+            let poled = |domain: Extent2d| -> Result<bool> {
+                let mut domain = surf_domain.intersect(&domain)?;
+                let mut trial = surface.copy(k)?;
+                match ignored(trial.trim_with_domain(k, &mut domain))? {
+                    Some(()) => fails_internal_pole_test(k, &trial),
+                    None => Ok(false),
+                }
+            };
+            if poled(Extent2d::from_points(min, max))? {
+                for (param, low, knot) in near {
+                    let (mut a, mut z) = (surf_domain.min(), surf_domain.max());
+                    let (end, run_on) = match (param, low) {
+                        (SurfParamType::U, true) => {
+                            (&mut a.x, (knot - tol).max(surf_domain.min().x))
+                        }
+                        (SurfParamType::U, false) => {
+                            (&mut z.x, (knot + tol).min(surf_domain.max().x))
+                        }
+                        (_, true) => (&mut a.y, (knot - tol).max(surf_domain.min().y)),
+                        (_, false) => (&mut z.y, (knot + tol).min(surf_domain.max().y)),
+                    };
+                    *end = match (param, low) {
+                        (SurfParamType::U, true) => min.x,
+                        (SurfParamType::U, false) => max.x,
+                        (_, true) => min.y,
+                        (_, false) => max.y,
+                    };
+                    if poled(Extent2d::from_points(a, z))? {
+                        match (param, low) {
+                            (SurfParamType::U, true) => min.x = min.x.min(run_on),
+                            (SurfParamType::U, false) => max.x = max.x.max(run_on),
+                            (_, true) => min.y = min.y.min(run_on),
+                            (_, false) => max.y = max.y.max(run_on),
+                        }
+                    }
+                }
+            }
+        }
         let new_domain = Extent2d::from_points(min, max);
         face2::set_uv_domain(b, f, &new_domain)?;
     }
@@ -2201,6 +2283,77 @@ fn destroy_records(k: &mut Kernel, b: &mut Brep) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// (not upstream) A face whose domain ends a hair past an interior knot of its surface (a
+    /// tangent rail's trims straying by rounding past the surface it was extended from) keeps
+    /// the snapping tolerance's span past that knot when the surface is shrunk to it. The
+    /// surface runs 0.1 a unit of v: trimmed at 5e-6 past the knot v = 1, beyond the trim's
+    /// own knot snapping (1e-6 (1 + v), 2e-6 here), the last span's two control points along
+    /// v would lie 5e-7 apart, within test #2's 1e-6: test #2 reads them at the interior knot
+    /// u = 0.5 and finds an internal pole. A face ending 1e-4 past the knot leaves points 1e-5
+    /// apart, no pole, and is trimmed where it ends, as before.
+    #[test]
+    fn shrinking_past_an_interior_knot_leaves_no_sliver_span() {
+        use crate::geom::tol::USE_DEFAULT;
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        use crate::surface::surface::Surface;
+        use crate::topology::brep::p2::ArenaNotifyState;
+        use crate::topology::brep::p3::new_brep;
+        use crate::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
+        use crate::topology::brep_cache::{arena_identity, CacheObject};
+        use crate::topology::topology_traverser::Marks;
+
+        for (hair, runs_on) in [(5e-6, true), (1e-4, false)] {
+            // the 1 x 0.1 rectangle in z = 0 run on to v = 2 (y = 0.2), bilinear, with knots at
+            // u = 0.5 and v = 1
+            let net = (0..3)
+                .map(|i| {
+                    (0..3)
+                        .map(|j| CPoint::new(0.5 * f64::from(i), 0.1 * f64::from(j), 0.0, NOW))
+                        .collect()
+                })
+                .collect();
+            let nurb = NlSurface::new(
+                net,
+                1,
+                1,
+                vec![0.0, 0.0, 0.5, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 2.0, 2.0],
+            )
+            .unwrap();
+            let surface = Surface::from(BSplineSurface::from_nurb(nurb, false));
+            let mut k = Kernel::default();
+            let mut b = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
+            let domain = Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0 + hair));
+            let face = {
+                let mut state = ArenaNotifyState::new(&b);
+                let mut env = state.env(None);
+                let mut marks = Marks::default();
+                let keys = |f| arena_identity(CacheObject::Face(f));
+                let mut fenv = FaceBuildEnv {
+                    env: &mut env,
+                    marks: &mut marks,
+                    this_face: &keys,
+                };
+                create_face_from_surface(&mut k, &mut b, Some(surface), &domain, &mut fenv).unwrap()
+            };
+            shrink_geometry(&k, &mut b).unwrap();
+            let shrunk = face2::surface(&b, face)
+                .unwrap()
+                .unwrap()
+                .natural_uv_domain_with_nurb(&k)
+                .unwrap();
+            // the snapping tolerance: a thousandth of the face domain's diagonal
+            let tol = (1.0 + (1.0 + hair) * (1.0 + hair)).sqrt() / 1000.0;
+            let end = if runs_on { 1.0 + tol } else { 1.0 + hair };
+            assert!((shrunk.max().y - end).abs() < 1e-12, "{hair}: {shrunk:?}");
+            let kept = face2::surface(&b, face).unwrap().unwrap();
+            assert!(!fails_internal_pole_test(&k, kept).unwrap(), "{hair}");
+            assert_eq!(shrunk.min().y, 0.0);
+        }
+    }
 
     /// `delete pEU` / `delete pShell` / `delete pFace` (#556): each destructor notifies
     /// `SM_NO_DESTRUCTION` once per installed callback, the record leaves its arena and

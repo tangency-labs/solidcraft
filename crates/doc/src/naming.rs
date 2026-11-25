@@ -87,6 +87,10 @@ impl NameCell {
     pub(crate) fn depth(&self) -> Option<usize> {
         self.origin.as_ref().map(|o| o.depth).or(self.saved_depth)
     }
+    /// Saved names of a body made again with `depth` features before it now.
+    pub(crate) fn saved_at(&mut self, depth: usize) {
+        self.saved_depth = Some(depth);
+    }
     /// Identity of the names: clones of a cell share them.
     pub(crate) fn id(&self) -> usize {
         Arc::as_ptr(&self.names) as usize
@@ -178,6 +182,16 @@ pub use crate::piece_names::parent_piece;
 
 /// Deeper chains than this are named by position only (bounded work and stack).
 const MAX_DEPTH: usize = 400;
+
+/// How deep the bodies a feature makes on `before` are in the chain of features that named them.
+pub(crate) fn depth_after(before: &ModelState) -> usize {
+    before.bodies.iter().filter_map(|b| b.names.depth()).max().unwrap_or(0) + 1
+}
+
+/// Whether the bodies a feature makes on `before` are past [`MAX_DEPTH`], named by position.
+pub(crate) fn past_limit(before: &ModelState) -> bool {
+    depth_after(before) >= MAX_DEPTH
+}
 
 /// Up to this many sample points per face.
 const SAMPLES: usize = 9;
@@ -1201,19 +1215,9 @@ pub fn find_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<Vec3, String> 
 
 /// Names of the edges nearest each point on a body (for storing references).
 pub fn edge_names_at(b: &ModelBody, pts: &[Vec3]) -> Vec<String> {
-    let m = b.mesh();
     let names = edge_names(b);
-    pts.iter()
-        .map(|p| {
-            m.edges
-                .iter()
-                .enumerate()
-                .map(|(i, e)| (e.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::MAX, f64::min), i))
-                .min_by(|a, b| a.0.total_cmp(&b.0))
-                .and_then(|(_, i)| names.get(i).cloned())
-                .unwrap_or_default()
-        })
-        .collect()
+    let lines = b.edge_lines();
+    pts.iter().map(|p| lines.nearest(*p).and_then(|i| names.get(i).cloned()).unwrap_or_default()).collect()
 }
 
 /// Incident face indices (sorted, deduplicated) for each B-rep vertex in `record`.
@@ -1299,6 +1303,9 @@ pub(crate) fn vertex_index_at(b: &ModelBody, at: Vec3) -> Option<usize> {
 pub fn face_names_at(st: &ModelState, pts: &[Vec3]) -> Vec<String> {
     pts.iter()
         .map(|p| {
+            // Exact distances of a point on two faces at once (walls touching along a line) differ
+            // only by rounding: within `ON` the first body's face is the one, as it is at 0.
+            const ON: f64 = 1e-9;
             let mut best: Option<(f64, String)> = None;
             for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
                 // A point on a body's face, found by exact geometry, names that face (#20260).
@@ -1307,13 +1314,12 @@ pub fn face_names_at(st: &ModelState, pts: &[Vec3]) -> Vec<String> {
                     break;
                 }
                 let tol = (b.body.size() * 1e-3).max(1e-3);
-                let idx = FaceIndex::new(&b.mesh(), face_count(b));
-                if let Some((d, f)) = idx.face_and_dist_at(*p, tol)
-                    && best.as_ref().is_none_or(|(bd, _)| d < *bd)
+                if let Some((d, f)) = b.body.face_and_dist_at(*p, tol)
+                    && best.as_ref().is_none_or(|(bd, _)| d < *bd - ON)
                 {
                     let name = face_names(b).get(f).cloned().unwrap_or_default();
                     best = Some((d, name));
-                    if d == 0.0 {
+                    if d <= ON {
                         break;
                     }
                 }
@@ -1328,13 +1334,11 @@ pub fn face_name_at_body(body: &ModelBody, point: Vec3) -> Option<String> {
     if body.body.is_mesh() || !point.is_finite() {
         return None;
     }
-    let mesh = body.mesh();
-    let count = face_count(body);
-    if mesh.triangles.len() > 2_000_000 || count > 50_000 {
+    if body.body.face_count() > 50_000 {
         return None;
     }
     let tolerance = (body.body.size() * 1e-3).max(1e-3);
-    let index = FaceIndex::new(&mesh, count).face_at(point, tolerance)?;
+    let index = body.body.face_at(point, tolerance)?;
     face_names(body).get(index).filter(|name| !name.is_empty()).cloned()
 }
 
