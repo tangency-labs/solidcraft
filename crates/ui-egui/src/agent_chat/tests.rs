@@ -555,6 +555,11 @@ fn show_in_model_highlights_only_the_assistants_features() {
     assert_eq!(app.highlighted(), [target.clone()], "changing selection keeps the separate model highlight");
     app.home.open = true;
     assert!(!app.highlighted().contains(&target), "Home does not show the model");
+    let _ = crate::fonts::test_context().run_ui(egui::RawInput::default(), |ui| app.ui(ui));
+    assert!(app.home.open, "the Home frame did not leave Home");
+    app.home.open = false;
+    assert!(!app.highlighted().contains(&target), "returning from Home does not restore the highlight");
+    app.home.open = true;
     show(&mut app);
     app.home.open = false;
     assert!(!app.highlighted().contains(&target), "the control does not arm from Home");

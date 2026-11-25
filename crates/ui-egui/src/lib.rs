@@ -4980,6 +4980,7 @@ impl SolveApp {
         if self.home.open {
             let workspace = ui.available_rect_before_wrap();
             panel_runtime::hide_app_host(self);
+            self.agent_chat.clear_model_changes();
             app_bar_custom::home_escape(self, ui.ctx());
             home::show(self, ui);
             if self.home.open {
