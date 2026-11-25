@@ -686,7 +686,9 @@ fn refused(r: DraftRefusal) -> Error {
 /// where its neighbours meet; [`Error::NoEffect`] for a draft that moved no face;
 /// [`Error::OffsetRefused`] for a face the kernel refuses with a reason (a drafted cone that
 /// would reach a cavity's wall: [`OffsetRefusal::DraftClosesWall`], the largest angle that keeps
-/// the wall); the kernel's other errors; those of [`finish`].
+/// the wall); [`Error::DraftCutsThrough`] for a draft the kernel refuses whose drafted face
+/// would cut through a face it does not meet ([`drafted_through`]); the kernel's other errors;
+/// those of [`finish`].
 pub fn draft(
     body: &Body,
     order: &Order,
@@ -731,9 +733,20 @@ pub fn draft(
         }
         // the marks live for this call only: put on the picked faces, read and removed once the
         // kernel has moved them (a refused call puts the body back as it came in, unmarked)
+        // a face the drafted faces would cut through (a hole's wall within the draft of the
+        // side), read before the kernel edits the body and named if it then refuses; best
+        // effort: a check that fails itself leaves the kernel's own refusal, and never refuses
+        // a draft the kernel builds
+        let through = drafted_through(k, b, &picked, &surfaces).ok().flatten();
         mark_moved(b, &picked)?;
         if let Err(e) = local_operation_simple(k, b, &picked, surfaces) {
-            return Ok(Err(status(e, &in_order(order))));
+            return Ok(Err(match through {
+                Some(t) => Error::DraftCutsThrough {
+                    at: [t.at.x, t.at.y, t.at.z],
+                    depth: t.depth,
+                },
+                None => status(e, &in_order(order)),
+            }));
         }
         if !moved_faces(b)? {
             return Ok(Err(Error::NoEffect));
