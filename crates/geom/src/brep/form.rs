@@ -271,6 +271,26 @@ pub fn turned(s: &Surface, angle: f64) -> Option<Surface> {
     })
 }
 
+/// `s` with its frame turned about its own axis to share `reference`'s quarter grid (its x axis
+/// aligned with `reference`'s x axis projected perpendicular to `s`'s axis), when `s` is a
+/// cylinder, cone, sphere or torus about the same axis as `reference` (origin on `reference`'s
+/// axis, axes parallel or anti-parallel, within `tol`). `None` for another surface or axis.
+pub fn aligned_to_frame(s: &Surface, reference: &Frame, tol: f64) -> Option<Surface> {
+    let own = match s {
+        Surface::Cylinder { frame, .. } | Surface::Cone { frame, .. } | Surface::Sphere { frame, .. } | Surface::Torus { frame, .. } => frame,
+        _ => return None,
+    };
+    let (o, x, y, z) = axes(own)?;
+    let (ro, rx, _, rz) = axes(reference)?;
+    let d = o - ro;
+    if !((d - rz * d.dot(rz)).len() <= tol && (z.dot(rz).abs() - 1.0).abs() <= 1e-9) {
+        return None;
+    }
+    let nx = (rx - z * rx.dot(z)).normalized()?;
+    let angle = nx.dot(y).atan2(nx.dot(x));
+    turned(s, angle)
+}
+
 /// How many quarters a torus face over `[u, v]` (its box on the label, as for
 /// [`surface_within`]) spans along its tube on the label's quarter grid ([`turn_quarters`] for
 /// the tube angle): five when the face does not start on a quarter line of the tube and more
