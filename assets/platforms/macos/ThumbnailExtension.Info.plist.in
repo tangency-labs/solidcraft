@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template: packaging/macos/package.sh substitutes @VERSION@ and @SHORT_VERSION@ as in
+     Info.plist.in. Finder icons from the picture a desktop save keeps in a design (apps/solidcraft-quicklook/src/thumbnail.rs). -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleDisplayName</key>
+  <string>SolidCraft Thumbnail</string>
+  <key>CFBundleName</key>
+  <string>SolidCraft Thumbnail</string>
+  <key>CFBundleExecutable</key>
+  <string>solidcraft-thumbnail-extension</string>
+  <key>CFBundleIdentifier</key>
+  <string>io.tangencylabs.solidcraft.thumbnail</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundlePackageType</key>
+  <string>XPC!</string>
+  <key>CFBundleShortVersionString</key>
+  <string>@SHORT_VERSION@</string>
+  <key>CFBundleVersion</key>
+  <string>@SHORT_VERSION@</string>
+  <key>SolidCraftVersion</key>
+  <string>@VERSION@</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>11.0</string>
+  <key>NSExtension</key>
+  <dict>
+    <key>NSExtensionPointIdentifier</key>
+    <string>com.apple.quicklook.thumbnail</string>
+    <key>NSExtensionPrincipalClass</key>
+    <string>SolidCraftThumbnailProvider</string>
+    <key>NSExtensionAttributes</key>
+    <dict>
+      <key>QLSupportedContentTypes</key>
+      <array><string>io.tangencylabs.solidcraft.design</string></array>
+      <!-- Finder icons only from this size up: below it the generic design icon reads better. -->
+      <key>QLThumbnailMinimumDimension</key>
+      <integer>32</integer>
+    </dict>
+  </dict>
+</dict>
+</plist>

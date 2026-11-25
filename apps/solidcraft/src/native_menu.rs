@@ -6,7 +6,7 @@
 //! `ui.prefs {open}` (Settings and Keyboard Shortcuts), `ui.agent_chat {toggle}`, `ui.help {item}`. Undo and Redo are the commands
 //! `edit.undo` and `edit.redo`. The other entries' ids are defined here: `ui.file.new`,
 //! `ui.file.new_drawing`, `ui.file.open`, `ui.file.open_recent {path}`, `ui.file.clear_recent`, `ui.file.save`,
-//! `ui.file.save_as`, `ui.file.save_json`, `ui.file.export {format}`,
+//! `ui.file.save_as`, `ui.file.revert`, `ui.file.save_json`, `ui.file.export {format}`,
 //! `ui.file.export_mesh {format}`. Menus are `menu.file`, `menu.file.recent`, `menu.edit`,
 //! `menu.window` and `menu.help`.
 //!
@@ -60,6 +60,7 @@ const FIXED: &[FileAction] = &[
     FileAction::ClearRecent,
     FileAction::Save,
     FileAction::SaveAs,
+    FileAction::Revert,
     FileAction::SaveJson,
     FileAction::VerifySignature,
     DESIGN_PROPERTIES,
@@ -106,6 +107,7 @@ fn id_of(action: &FileAction) -> (String, Option<Value>) {
         FileAction::ClearRecent => fixed("ui.file.clear_recent"),
         FileAction::Save => fixed("ui.file.save"),
         FileAction::SaveAs => fixed("ui.file.save_as"),
+        FileAction::Revert => fixed("ui.file.revert"),
         FileAction::SaveJson => fixed("ui.file.save_json"),
         FileAction::VerifySignature => fixed("file.verify"),
         FileAction::Export(format) => ("ui.file.export".into(), Some(json!({ "format": format }))),
@@ -173,6 +175,7 @@ fn menu_bar(app: &SolveApp, recent: &[String]) -> MenuBar {
         Item::sep(),
         item(app.tr("ui.save"), &FileAction::Save),
         item(&more("ui.save_as"), &FileAction::SaveAs),
+        item(app.tr("ui.revert_to_saved"), &FileAction::Revert),
         item(app.tr_label("Save As JSON\u{2026}"), &FileAction::SaveJson),
         item(app.tr("cmd.file.verify"), &FileAction::VerifySignature),
         Item::sep(),
@@ -347,8 +350,8 @@ mod tests {
         leaves(&bar.menus, &mut entries);
         entries.retain(|i| i.id != "-");
         // App menu 2 + Quit; File: New, New Drawing, Open, 1 recent, Clear, 3 inserts, Save, Save As,
-        // JSON, Verify Signature, 8 exports, Properties; Edit 2; Window 1; Help 7.
-        assert_eq!(entries.len(), 3 + 5 + 3 + 4 + 8 + 1 + 2 + 1 + 7, "{:?}", entries.iter().map(|i| &i.id).collect::<Vec<_>>());
+        // Revert, JSON, Verify Signature, 8 exports, Properties; Edit 2; Window 1; Help 7.
+        assert_eq!(entries.len(), 3 + 5 + 3 + 4 + 1 + 8 + 1 + 2 + 1 + 7, "{:?}", entries.iter().map(|i| &i.id).collect::<Vec<_>>());
         for item in &entries {
             assert!(entry_of(&item.id, item.params.as_ref()).is_some(), "`{}` {:?} runs nothing", item.id, item.params);
         }

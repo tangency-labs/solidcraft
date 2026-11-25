@@ -913,6 +913,42 @@ fn emboss_text_wraps_onto_a_half_tube() {
 }
 
 #[test]
+fn emboss_text_wraps_across_a_rounded_edge_onto_the_faces_beside_it() {
+    let mut flat = Session::default();
+    run(&mut flat, "solid.box", json!({"length": 60, "width": 60, "height": 20, "body_name": "Flat"}));
+    let flat_before = volume(&mut flat);
+    run(&mut flat, "sketch.create", json!({"plane": {"origin": [20, 20, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Text"}));
+    run(&mut flat, "sketch.text", json!({"text": "Emboss", "at": [-14, -3], "height": 6}));
+    run(&mut flat, "sketch.finish", json!({}));
+    run(&mut flat, "solid.emboss", json!({"sketch": "Text", "depth": 1}));
+    let area = volume(&mut flat) - flat_before;
+    // A box with one upright edge rounded at radius 8, the text tangent to the round at 45°: it
+    // runs off the round onto the box's faces either side.
+    let h = std::f64::consts::FRAC_1_SQRT_2;
+    let on = 32.0 + 8.0 * h;
+    let mut change = Vec::new();
+    for mode in ["emboss", "deboss"] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Part"}));
+        run(&mut s, "solid.fillet", json!({"edges": [[40, 40, 10]], "radius": 8}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [on, on, 0], "x_dir": [-h, h, 0], "y_dir": [0, 0, 1]}, "name": "Text"}));
+        run(&mut s, "sketch.text", json!({"text": "Emboss", "at": [-14, 7], "height": 6}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = volume(&mut s);
+        run(&mut s, "solid.emboss", json!({"sketch": "Text", "face": [on, on, 10.0], "depth": 1, "mode": mode}));
+        assert_eq!(s.model.state().body("Part").unwrap().body.shell_count(), 1);
+        change.push(volume(&mut s) - before);
+    }
+    // Raised, the part on the round adds (81 − 64) / 16 of its area per mm, sunk (64 − 49) / 16:
+    // the two add up to twice the area wherever the letters lie, and differ by an eighth of the
+    // part on the round.
+    let (raised, sunk) = (change[0], -change[1]);
+    assert!((raised + sunk - 2.0 * area).abs() < 1e-4 * area, "{raised} + {sunk} vs {}", 2.0 * area);
+    let on_round = (raised - sunk) / 0.125;
+    assert!(on_round > 0.1 * area && on_round < 0.9 * area, "{on_round} of {area} on the round");
+}
+
+#[test]
 fn concave_cylinder_emboss_and_deboss_with_sketch_profile_and_text() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 60, "width": 60, "height": 40, "body_name": "Part"}));
@@ -4033,4 +4069,29 @@ fn a_draft_on_a_pocket_wall_beside_rounds_never_fails_with_a_bare_status() {
         }
         Err(e) => assert!(!e.to_string().contains("status 1001"), "{e}"),
     }
+}
+
+/// #18541: a 3° draft of the side of an extruded closed spline outline is refused, and the
+/// refusal says what about the face it cannot handle: the side is neither a plane nor a cone or
+/// cylinder. It used to read "not supported yet: SMLib draft for this geometry". The body is
+/// left as it was.
+#[test]
+fn a_draft_of_a_spline_side_is_refused_naming_what_the_face_is() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
+    let outline = [[30.0, 0.0], [22.7, 15.1], [0.0, 18.0], [-22.7, 15.1], [-30.0, 0.0], [-19.7, -13.1], [0.0, -22.0], [19.7, -13.1]];
+    run(&mut s, "sketch.spline.fit_point", json!({"points": outline, "periodic": true}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Outline", "distance": 25, "operation": "new", "body_name": "Base"}));
+    let shape = |s: &Session| {
+        let state = s.model.state();
+        let b = &state.body("Base").unwrap().body;
+        [b.shell_count(), b.face_count(), b.edge_count(), b.vertex_count()]
+    };
+    let (before, volume) = (shape(&s), body_volume(&s, "Base"));
+    let draft = json!({"faces": [[-30, 0, 12.5]], "angle": "3 deg", "neutral": "XY", "body": "Base"});
+    let e = s.execute("solid.draft", &draft).unwrap_err().to_string();
+    assert!(e.contains("a drafted face is neither a plane nor a cone or cylinder"), "{e}");
+    assert!(!e.contains("for this geometry"), "{e}");
+    assert_eq!(shape(&s), before);
+    assert_eq!(body_volume(&s, "Base"), volume);
 }

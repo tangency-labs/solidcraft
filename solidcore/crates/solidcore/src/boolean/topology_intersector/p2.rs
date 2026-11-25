@@ -87,6 +87,10 @@
 //!   [`SolidError::Unported`] and [`SolidError::InvalidInput`]; the ignored call's
 //!   outputs keep their initial values (a failed `DropPoint` is "no drop point", a
 //!   failed coincidence check "not coincident").
+//! - **Face-pair interval edges** (not upstream, #18927): a failed step of
+//!   `FindOrCreateProtoEdge` for an interval of a face pair's intersection refuses with
+//!   [`BooleanFailure::IntervalEdgeNotMade`], its error the cause, where upstream leaves
+//!   the intersection without that edge (`find_or_create_needed_proto_edge`).
 //! - **Curve ownership.** `EdgeFaceCoincidence` resets the curve's owner to the
 //!   original edge after `MakeEdgeInFace`; the port has no curve owners (the curve
 //!   copy is a new handle), so there is nothing to reset.
@@ -160,14 +164,16 @@ use crate::topology::proto_topology::p3::Mates;
 use crate::topology::proto_topology::{
     ProtoBrep, ProtoEdgeId, ProtoTopologyManager, ProtoVertexId,
 };
+use crate::EntityRef;
 
 use super::coincident_strip::{crossing_inside_coincident_pair, strip_contacts};
 use super::curved_strip::drop_strip_crossings;
+use super::duplicate_edge_run::drop_duplicate_edge_runs;
 use super::p1::{
     add_unique, brep_make_edge_in_face, can_imprint, cc_insert_topology_intersections, contains,
     eval_curve_point, face_face_intersect_curves, find_common_elements, ignore_soft,
     intersect_shell_vertices, intersect_wire_lamina_edges, new_curve_classification,
-    set_edge_class, solve_with_face_caches, surface_coincidence_check,
+    set_edge_class, solve_with_face_caches, split_soft, surface_coincidence_check,
     surface_solve_with_face_caches, FaceIntersectOutputs, IntersectionCurves, IntersectionResults,
     IntersectorBrep, TopologyIntersector,
 };
@@ -1596,7 +1602,36 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
             Ok(out)
         };
-        let (boxes1, boxes2) = (face_boxes(&faces1)?, face_boxes(&faces2)?);
+        let (mut boxes1, mut boxes2) = (face_boxes(&faces1)?, face_boxes(&faces2)?);
+        // Not upstream: those boxes narrowed to what each face holds
+        // (`query::face::p1::proved_bounding_box`). The box above of a curved face is its
+        // surface's whole control net, so a sliver of a whole turn was paired with every
+        // face round its ring, and each such pair cost a surface intersection that found
+        // nothing. Only the faces those boxes pair are boxed again, and nothing is made or
+        // written on the operands (a UV trim made here, before the intersections that would
+        // make it, would change what they make).
+        {
+            let (paired1, paired2) = loosely_paired(&boxes1, &boxes2, self.this_approx_tol_3d());
+            for (faces, paired, boxes) in [
+                (&faces1, paired1, &mut boxes1),
+                (&faces2, paired2, &mut boxes2),
+            ] {
+                for ((&f, paired), b) in faces.iter().zip(paired).zip(boxes.iter_mut()) {
+                    k.check_cancelled(OP_INTERSECT_TOPOLOGY)?;
+                    if !paired {
+                        continue;
+                    }
+                    if let Some((arena, EntityRef::Face(face))) = brep.topology_entity(f) {
+                        if let Some(proved) =
+                            crate::query::face::p1::proved_bounding_box(k, arena, face)?
+                        {
+                            // both hold the face: so does their common part
+                            *b = b.intersect(&proved).unwrap_or(proved);
+                        }
+                    }
+                }
+            }
+        }
         // (the fork's tangency-labs/smlib@84a7998) the other B-rep's faces whose box may
         // lie within the tolerance of a face's box: a superset of the pairs the box test
         // below keeps, in ascending order. The pairs it leaves out reach nothing before
@@ -1724,6 +1759,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         super::curved_strip::probe(k, &*brep, &intersections)?;
         drop_strip_crossings(k, &*brep, &mut intersections, approx_tol)?;
 
+        // Not upstream (WR-647): a curve's run along part of an edge that another curve of
+        // the same pair is from end to end is a second copy of that edge, no event
+        // (module docs of `duplicate_edge_run`).
+        drop_duplicate_edge_runs(k, &*brep, &mut intersections)?;
+
         // Not upstream: the contact points the strip rule proves (module docs of
         // `coincident_strip`), declared before any proto vertex of a face pair is made.
         let contacts = strip_contacts(k, brep, &intersections, approx_tol)?;
@@ -1756,16 +1796,34 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 for ll in 0..num_ivls {
                     let mut ci1 = *cc1.at(ll)?;
                     let mut ci2 = *cc2.at(ll)?;
-                    // (status unchecked)
-                    let found = ignore_soft(mgr.find_or_create_proto_edge(
-                        k, brep, approx_tol, cc1, &mut ci1, cc2, &mut ci2,
-                    ))?;
+                    // (status unchecked upstream). Not upstream (#18927): a failed step of
+                    // making the interval's edge (any but the geometric quits, which make
+                    // no edge) refuses the Boolean, which would otherwise build a body
+                    // lacking that edge or its definition; that holds too where another
+                    // face pair made the edge already.
+                    let (found, _was_created) = match split_soft(
+                        mgr.find_or_create_needed_proto_edge(
+                            k, brep, approx_tol, cc1, &mut ci1, cc2, &mut ci2,
+                        ),
+                    )? {
+                        Ok(r) => r,
+                        // (a preparation request is retried by its caller, as it is)
+                        Err(cause @ SolidError::PreparationRequired { .. }) => return Err(cause),
+                        Err(cause) => {
+                            return Err(Failure::new(
+                                OP_INTERSECT_TOPOLOGY,
+                                BooleanFailure::IntervalEdgeNotMade,
+                            )
+                            .caused_by(cause)
+                            .into_error())
+                        }
+                    };
                     *cc1.at_mut(ll)? = ci1;
                     *cc2.at_mut(ll)? = ci2;
 
                     // remember pNewPE is part of the trim boundary of this
                     // coincident face pair
-                    if let Some((Some(pe), _was_created)) = found {
+                    if let Some(pe) = found {
                         if are_coincident {
                             add_unique(&mut coinc_pes, pe);
                         }
@@ -1820,10 +1878,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // Not upstream: proto vertices that a point's uncertainty region does not tell
         // apart are one (docs/booleans.md, "One point or two")
-        mgr.combine_proto_vertices_not_proved_apart(
-            k,
-            k.fixes.ssi_proto_topology_statuses_pass_on,
-        )?;
+        mgr.combine_proto_vertices_with_incidence(k, &*brep)?;
 
         // 1. for every ProtoEdge pair - split ProtoEdges at ProtoEdge/ProtoEdge XSects
         // (the list is re-read after each split: splitting appends proto edges)
@@ -3037,6 +3092,25 @@ fn line_edge<O: ClassObject>(
         return None;
     }
     Some((curve, ProtoBrep::edge_interval(brep, e)?))
+}
+
+/// Which faces of each side the boxes `boxes1` and `boxes2` pair with a face of the other
+/// side (their boxes within `tol`), as the face-pair loop of `intersect_topology` pairs them.
+fn loosely_paired(boxes1: &[Extent3d], boxes2: &[Extent3d], tol: f64) -> (Vec<bool>, Vec<bool>) {
+    let search = SpatialIndex::new(boxes2.iter().copied().map(Some));
+    let mut paired1 = vec![false; boxes1.len()];
+    let mut paired2 = vec![false; boxes2.len()];
+    for (box1, p1) in boxes1.iter().zip(paired1.iter_mut()) {
+        for jj in search.boxes_in_box(box1, tol) {
+            if let (Some(box2), Some(p2)) = (boxes2.get(jj), paired2.get_mut(jj)) {
+                if !box1.are_disjoint(box2, tol) {
+                    *p1 = true;
+                    *p2 = true;
+                }
+            }
+        }
+    }
+    (paired1, paired2)
 }
 
 /// The smallest distance between two distinct vertices of `b` (by their points);
