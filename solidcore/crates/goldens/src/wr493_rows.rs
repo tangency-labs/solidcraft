@@ -535,21 +535,14 @@ const E1_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.
 const E4_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 40);
 
 /// The result-geometry blocks of `case` that move beyond their sums' rounding bounds: the
-/// blocks holding the moved round edge (`e1-r0.5` block 3; `e4-r0.5` blocks 2 and 3) and
-/// block 0, the vertex records' block, in the four `e1`/`e4` rows: the round's end vertices
-/// kept on or put on the sphere's seam (tangency-labs/solidcraft#21421, each vertex within
-/// `1000 * EFF_ZERO` of the seam and its row's mass properties certified by
-/// `blend_fillet_executive_p3::end_to_end::issue_21421_round_ends_on_the_sphere_seam`;
-/// `e4-r0.5`'s block 0 moved before that too, measured, not attributed entry by entry).
+/// blocks holding the moved round edge (`e1-r0.5` block 3; `e4-r0.5` blocks 2 and 3) and,
+/// in `e4-r0.5`, block 0, the vertex records' block (measured; not attributed entry by
+/// entry).
 fn geometry_beyond_rounding(case: &str) -> &'static [usize] {
     if case == E1_R05.0 {
-        &[0, 3]
+        &[3]
     } else if case == E4_R05.0 {
         &[0, 2, 3]
-    } else if case == "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1"
-        || case == "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1"
-    {
-        &[0]
     } else {
         &[]
     }
