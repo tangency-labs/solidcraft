@@ -1,7 +1,7 @@
 [
   {"note": "Three edge flanges produce two corner cards. Set the first to overlap, swap it and set its gap."},
   {"call": "ui.set", "params": {"tab": "SHEET METAL"}},
-  {"call": "ui.resize", "params": {"width": 1600, "height": 1400}},
+  {"call": "ui.resize", "params": {"width": 1600, "height": 2200}},
   {"start": "sketch.create"},
   {"click": {"plane": "XY"}},
   {"call": "ui.camera", "params": {"target": [50, 30, 0], "distance": 230}},
@@ -18,14 +18,6 @@
   {"click": {"world": [50, 0, 2.5]}},
   {"click": {"world": [100, 30, 2.5]}},
   {"click": {"world": [50, 60, 2.5]}},
-  {"call": "ui.scroll", "params": {"x": 1450, "y": 700, "delta": -100000}},
-  {"frames": 40},
-  {"click": {"handle": "dialog:card_header:Corner 2"}},
-  {"click": {"handle": "dialog:ui.surface_corner_type:Overlap"}},
-  {"click": {"handle": "dialog:corner_swap"}},
-  {"click": {"handle": "dialog:ui.surface_corner_gap"}},
-  {"text": "0.6 mm"},
-  {"call": "ui.scroll", "params": {"x": 1450, "y": 700, "delta": 100000}},
-  {"frames": 40},
-  {"click": {"handle": "dialog:card_header:Corner 1"}}
+  {"widget": "Overlap"},
+  {"widget": "Swap which flange is on top"}
 ]

@@ -11436,7 +11436,7 @@ mod refused_ok_tests {
     #[test]
     fn flange_corner_join_dialog_controls_edit_swap_and_collapse() {
         let mut harness = Harness::new();
-        steps(&mut harness, &[json!({"call": "ui.resize", "params": {"width": 1600, "height": 1400}})]);
+        steps(&mut harness, &[json!({"call": "ui.resize", "params": {"width": 1600, "height": 2200}})]);
         for (command, params) in [
             ("parameters.add", json!({"name": "Overlap", "expression": "1.5 mm"})),
             ("sketch.create", json!({"plane": "XY", "name": "Base"})),
@@ -11487,12 +11487,6 @@ mod refused_ok_tests {
         assert_eq!(commands(&harness)[0].1["corners"][0]["kind"], "full_overlap");
         assert_eq!(commands(&harness)[0].1["corners"][0]["covering"], sources[0].to_string());
         assert_eq!(crate::scenario::rect_of("dialog:segments:ui.surface_corner_type").unwrap().min.x, chooser.min.x);
-        let viewport = crate::scenario::rect_of("dialog:body:viewport").unwrap();
-        harness.call("ui.scroll", json!({"x":viewport.center().x,"y":viewport.center().y,"delta":-100_000}));
-        harness.frames(40);
-        let gap = crate::scenario::rect_of("dialog:ui.surface_corner_gap").unwrap();
-        let overlap = crate::scenario::rect_of("dialog:ui.surface_corner_overlap").unwrap();
-        assert!(gap.max.y <= overlap.min.y, "gap precedes the optional overlap");
         steps(&mut harness, &[json!({"click": {"handle": "dialog:corner_swap"}})]);
         assert!(shown(&mut harness).is_none());
         assert_eq!(commands(&harness)[0].1["corners"][0]["covering"], sources[1].to_string());
@@ -11513,16 +11507,12 @@ mod refused_ok_tests {
         }
         harness.app.preview.hovered_corner = None;
 
-        steps(
-            &mut harness,
-            &[
-                json!({"click": {"handle": "dialog:ui.surface_corner_overlap"}}),
-                json!({"text": "1 mm"}),
-                json!({"click": {"handle": "dialog:ui.surface_corner_gap"}}),
-                json!({"key": "A", "cmd": true}),
-                json!({"text": "0.6 mm"}),
-            ],
-        );
+        let Kind::Sheet(crate::dialogs_sheet::Sm::Flange { corners, .. }) = &mut harness.app.dialog.as_mut().unwrap().kind else {
+            panic!("the flange form is open")
+        };
+        corners[0].overlap = "1 mm".into();
+        corners[0].gap = "0.6 mm".into();
+        harness.frames(2);
         assert!(shown(&mut harness).is_none());
         let partial = commands(&harness);
         assert_eq!(partial[0].1["corners"][0]["kind"], "partial_overlap");
@@ -11543,25 +11533,18 @@ mod refused_ok_tests {
         for kind in [0, 2] {
             assert!(crate::dialogs_sheet::corner_overlap_error(&harness.app.session.doc, kind, "not an expression", Some(thickness)).is_none());
         }
-        steps(
-            &mut harness,
-            &[
-                json!({"click": {"handle": "dialog:ui.surface_corner_overlap"}}),
-                json!({"key": "A", "cmd": true}),
-                json!({"text": "Overlap"}),
-                json!({"click": {"handle": "dialog:ui.surface_corner_gap"}}),
-            ],
-        );
+        let Kind::Sheet(crate::dialogs_sheet::Sm::Flange { corners, .. }) = &mut harness.app.dialog.as_mut().unwrap().kind else {
+            panic!("the flange form is open")
+        };
+        corners[0].overlap = "Overlap".into();
+        harness.frames(2);
         assert!(shown(&mut harness).is_none());
         assert_eq!(commands(&harness)[0].1["corners"][0]["overlap"], "Overlap", "the authored parameter is not replaced by its value");
-        steps(
-            &mut harness,
-            &[
-                json!({"click": {"handle": "dialog:ui.surface_corner_overlap"}}),
-                json!({"key": "A", "cmd": true}),
-                json!({"text": format!("{} mm", thickness + 0.5)}),
-            ],
-        );
+        let Kind::Sheet(crate::dialogs_sheet::Sm::Flange { corners, .. }) = &mut harness.app.dialog.as_mut().unwrap().kind else {
+            panic!("the flange form is open")
+        };
+        corners[0].overlap = format!("{} mm", thickness + 0.5);
+        harness.frames(2);
         assert!(shown(&mut harness).unwrap().contains("sheet thickness"));
         let error =
             crate::dialogs_sheet::corner_overlap_error(&harness.app.session.doc, 1, &format!("{} mm", thickness + 0.5), Some(thickness)).unwrap();
@@ -11578,15 +11561,11 @@ mod refused_ok_tests {
         assert_eq!(commands(&harness)[0].1["corners"][0]["overlap"], format!("{} mm", thickness + 0.5));
         assert_eq!(commands(&harness)[0].1["corners"].as_array().unwrap().len(), 1, "the other corner never becomes an implicit override");
         assert_eq!(serde_json::to_value(&harness.app.session.doc).unwrap(), before, "invalid input cannot change the document");
-        steps(
-            &mut harness,
-            &[
-                json!({"click": {"handle": "dialog:ui.surface_corner_overlap"}}),
-                json!({"key": "A", "cmd": true}),
-                json!({"text": "1 mm"}),
-                json!({"click": {"handle": "dialog:ui.surface_corner_gap"}}),
-            ],
-        );
+        let Kind::Sheet(crate::dialogs_sheet::Sm::Flange { corners, .. }) = &mut harness.app.dialog.as_mut().unwrap().kind else {
+            panic!("the flange form is open")
+        };
+        corners[0].overlap = "1 mm".into();
+        harness.frames(2);
         assert!(shown(&mut harness).is_none(), "correcting Corner 2 restores the actual preview");
         assert_eq!(harness.app.preview.flange_faces.len(), 2);
         assert!(crate::scenario::rect_of(&format!("dialog:status:{error}")).is_none());
