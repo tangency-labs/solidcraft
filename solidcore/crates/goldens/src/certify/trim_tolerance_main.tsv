@@ -6,6 +6,7 @@
 # offset.offset_executive_p2: main's file with the offset-role attribute (#3138): the `attributes` key of its 30 cases that mark roles, the attribute-only rows
 # blend.feature_executive, blend.fillet_executive_p3, corpus.parity, topology.brep_p10, topology.face_p3: main's files with the rows #17739's healed vertex tolerances move (a vertex covers twice its gap, tangency-labs/solidcraft#18667)
 # blend.fillet_executive_p3: main's file with the halved span's early stop (#13692): sweep5-nurb_box1-all-r0.5's edge [0, 18.0943] listed 24th instead of 1st, the topology and geometry blocks that follow it, and four mass-properties entries an ulp or two off (summation order)
+# blend.fillet_executive_p3: main's file with the 66 rows the WR-459 retirement moves (the clean-up keeps the target's own faces, `fillet_cleanup_keeps_target_faces`): 62 rows by their stored UV trim counts only (`wr459_rows`), and the four `stubs4-delete-edge-sphere_diff_3cylinders-e1/e4-r0.1/r0.5` rows' topology (`end_to_end::wr459_sphere_rows`); 12 of the 62 are tolerance rows, each still certified by its own test here. Blessed again on top of the clamped-sliver drop rule (#21353): the four rows keep its three moved mass_properties entries (drop_clamped_sliver_moved_mass_rows pairs them with this branch's rows)
 # offset.offset_executive_p2, surface.surface_cache_p1: main's files with the three rows the retired zero-row-batch flags move (surface_cache_p1 gen0168 and gen0222, the lowest continuity of the V knots; offset_executive_p2 boolean_domain_problemShell12_face0_round, result.geometry[3] by 1.3e-16)
 # surface.surface_p5: main's file with five fixed parameters outside the requested region refused (#20378)
 # surface.surface_point_solve_p2: main's file without the lines of gen0072 and gen0546, Solve maxima a witness grid refutes, now known failing (#13684)
@@ -43,7 +44,7 @@ blend.fillet_corner_p3	41ff3e1d687449c4
 blend.fillet_custom_solver	d5a7b6227772dc0a
 blend.fillet_executive_p1	29550c0f9b47966c
 blend.fillet_executive_p2	c14f791e96f99dd6
-blend.fillet_executive_p3	7a68859b0b936a47
+blend.fillet_executive_p3	fe508f7c401609c3
 blend.fillet_geom_p1	555c086725065e34
 blend.fillet_geom_p2	4a54b5291270572a
 blend.fillet_geom_p3	15646cd3bfb41d7e

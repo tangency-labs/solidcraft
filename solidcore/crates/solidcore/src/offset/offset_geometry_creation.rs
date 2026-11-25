@@ -497,6 +497,7 @@ fn ignore_soft<T>(r: Result<T>) -> Result<Option<T>> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput {
                 operation: UNDEFINED_UPSTREAM,
                 ..
@@ -2890,7 +2891,11 @@ fn exact_edge(
     // leaves the edge marched rather than fail the shell.
     match grow_along_axis(k, &mut s1, margin).and_then(|()| grow_along_axis(k, &mut s2, margin)) {
         Ok(()) => {}
-        Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(err),
+        Err(
+            err @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => return Err(err),
         Err(_) => return Ok(None),
     }
     let domain1 = s1.natural_uv_domain_with_nurb(k)?;
@@ -2911,12 +2916,20 @@ fn exact_edge(
         Some(deg20_rad),
     ) {
         Ok(exact) => exact,
-        Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(err),
+        Err(
+            err @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => return Err(err),
         Err(_) => return Ok(None),
     };
     let trimmed = match topo_edge::create_trimmed_nurbs_curve(k, b, e) {
         Ok(Some(trimmed)) => trimmed,
-        Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(err),
+        Err(
+            err @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => return Err(err),
         Ok(None) | Err(_) => return Ok(None),
     };
     let Some(mut found) = exact_piece(k, &trimmed, &exact.curves_3d, tol, None)? else {
@@ -3611,9 +3624,11 @@ impl OffsetGeometryCreation {
             // unported callee stays unported)
             let sphere = match BSplineSurface::create_sphere_from_arcs(k, &curves, tolerance) {
                 Ok(sphere) => sphere,
-                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                    return Err(e)
-                }
+                Err(
+                    e @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }),
+                ) => return Err(e),
                 Err(e) => {
                     return Err(
                         Failure::new(OP_VERTEX, OffsetFailure::VertexArcsNotOneSphere)
@@ -3726,6 +3741,7 @@ impl OffsetGeometryCreation {
             Err(
                 e @ (SolidError::Unported { .. }
                 | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }
                 | SolidError::InvalidInput { .. }
                 | SolidError::PortInvariant { .. }),
             ) => return Err(e),
@@ -7822,9 +7838,11 @@ impl OffsetGeometryCreation {
                     out.trim_orientations = trimmed.trim_orientations;
                     new_surface = Some(trimmed.plane);
                 }
-                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                    return Err(e)
-                }
+                Err(
+                    e @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }),
+                ) => return Err(e),
                 // any other failure is upstream's `!= SM_SUCCESS` (e.g. the `SM_ERR` of
                 // `Unitize` on the zero cross product of two collinear-derivative rails):
                 // the ruled surface between the rails instead

@@ -12,6 +12,9 @@ macro_rules! plugins_preferences {
             background_shader: String = String::new(), PAGE_PLUGINS;
             /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
             disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
+            /// A plugin's shader for see-through panels' backgrounds, `plugin-id/shader-id` (`shaders@0.2`);
+            /// empty for none.
+            panel_shader: String = String::new(), PAGE_PLUGINS;
             /// Show the global fuel and memory controls on Preferences > Plugins (#18764).
             /// Off keeps advanced controls folded; on exposes the prior always-visible controls.
             plugin_limits_expanded: bool = false, PAGE_PLUGINS;
@@ -21,6 +24,10 @@ macro_rules! plugins_preferences {
             /// Remember a moved plugin command window's position for the current design, until the
             /// application closes (#18684). Off keeps the previously centred reopen behaviour.
             plugin_remember_dialog_position: bool = false, PAGE_PLUGINS;
+            /// Plugin shaders' slider values, keyed `plugin-id/shader-id/setting-id`; a missing one is its default.
+            shader_settings: std::collections::BTreeMap<String, f32> = Default::default(), PAGE_PLUGINS;
+            /// A plugin's tint for the ribbon and panels, `plugin-id/shader-id` (`shaders@0.2`); empty for none.
+            tint_shader: String = String::new(), PAGE_PLUGINS;
         }
     };
 }

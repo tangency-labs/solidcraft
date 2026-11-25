@@ -1083,7 +1083,8 @@ impl Body {
     /// makes it again). A refusal of the record is kept too, as `smlib`'s is: the same
     /// record is refused the same way again. A refusal of the moment is not kept, so a later
     /// query tries again: a call from inside a kernel call or from solidcore-ops' failure
-    /// callback ([`solidcore_ops::Error::Reentered`]), or a cancelled one. None for a mesh body.
+    /// callback ([`solidcore_ops::Error::Reentered`]), a cancelled one, or one that ran out of
+    /// the fuel its caller gave it. None for a mesh body.
     pub(crate) fn ops_body(&self) -> Option<OpsForm> {
         if self.is_mesh() || self.ops.refusal().is_some() {
             return None;
@@ -1097,7 +1098,7 @@ impl Body {
         // Converted outside the cell, and without taking the turn to make it: a failure callback
         // that asked about this body again would otherwise wait for the form it is part of making.
         match solidcraft_smlib::stop::unstoppable(|| solidcore_ops::Body::from_record(&self.record, true)) {
-            Err(solidcore_ops::Error::Reentered | solidcore_ops::Error::Cancelled) => None,
+            Err(solidcore_ops::Error::Reentered | solidcore_ops::Error::Cancelled | solidcore_ops::Error::OutOfFuel { .. }) => None,
             Err(_) => {
                 self.ops.refuse(());
                 None
@@ -1106,10 +1107,43 @@ impl Body {
         }
     }
 
+    /// Every edge of `self` drawn as a polyline within a thousandth of the body's size, for
+    /// finding the edge nearest a point ([`EdgeLines::nearest`]). Empty for a mesh body.
+    pub fn edge_lines(&self) -> EdgeLines {
+        if self.is_mesh() {
+            return EdgeLines::default();
+        }
+        let chord = (self.size() * 1e-3).max(1e-4);
+        EdgeLines(self.record.edges.iter().enumerate().filter_map(|(i, e)| edge_points(e, chord).ok().map(|pts| (i, pts))).collect())
+    }
+
     /// The face of `self` nearest `p` and its exact distance, or `None` for a mesh body or empty body.
     pub fn nearest_face(&self, p: Vec3) -> Option<(f64, usize)> {
         let reach = self.size().max(1.0) * 100.0;
         self.nearest_face_query(p, reach).ok().flatten()
+    }
+
+    /// The face of `self` nearest `p` within `tol`, or `None`.
+    pub fn face_at(&self, p: Vec3, tol: f64) -> Option<usize> {
+        self.face_and_dist_at(p, tol).map(|(_, f)| f)
+    }
+
+    /// The face of `self` nearest `p` within `tol` and its exact distance, or `None`.
+    pub fn face_and_dist_at(&self, p: Vec3, tol: f64) -> Option<(f64, usize)> {
+        if !p.is_finite() {
+            return None;
+        }
+        let form = self.ops_body()?;
+        let (ops, order) = &*form;
+        let dists = ops.face_distances_within(order, &[[p.x, p.y, p.z]], tol).ok()?;
+        dists
+            .into_iter()
+            .enumerate()
+            .filter_map(|(f, row)| {
+                let d = row.first().copied().flatten()?;
+                (d <= tol).then_some((d, f))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
     }
 
     /// The face holding `p` within the body's modelling tolerance. Distances are to the exact
@@ -2481,6 +2515,25 @@ fn edge_chord(e: &brep::Edge, chord: f64) -> f64 {
         return chord;
     }
     chord.min((b.diagonal() * 1e-3).max(1e-9))
+}
+
+/// A body's edges as polylines ([`Body::edge_lines`]), by record edge index.
+#[derive(Clone, Debug, Default)]
+pub struct EdgeLines(Vec<(usize, Vec<Vec3>)>);
+
+impl EdgeLines {
+    /// The edge nearest `p` (the first of equally near ones), or `None` when there is none or
+    /// `p` is not a finite point.
+    pub fn nearest(&self, p: Vec3) -> Option<usize> {
+        if !p.is_finite() {
+            return None;
+        }
+        self.0
+            .iter()
+            .map(|(i, pts)| (pts.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::MAX, f64::min), *i))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, i)| i)
+    }
 }
 
 /// Points of an edge's curve over its interval, within `chord` of it: lines by their ends, the

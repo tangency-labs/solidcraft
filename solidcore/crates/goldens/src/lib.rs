@@ -56,6 +56,8 @@ pub mod util;
 #[cfg(test)]
 pub(crate) mod wr450_rows;
 #[cfg(test)]
+mod wr459_rows;
+#[cfg(test)]
 pub(crate) mod wr493_rows;
 #[cfg(test)]
 mod wr495_rows;
