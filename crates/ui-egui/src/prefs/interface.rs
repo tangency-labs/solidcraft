@@ -1,6 +1,7 @@
 //! Appearance and Layout settings composition, using shared controls and previews.
 use super::*;
 
+/// Renders the Appearance preferences page, configuring theme, viewport background, and visual styling.
 pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     ui_kit::settings_page(ui, |ui| {
         ui_kit::settings_heading_with_tag(
@@ -212,6 +213,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     });
 }
 
+/// Renders the Layout & Panels preferences page, configuring interface density, window layout, dock placement, and timeline display style.
 pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui_kit::settings_page(ui, |ui| {

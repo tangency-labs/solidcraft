@@ -705,7 +705,8 @@ pub(super) fn link_bodies_with_images(
     strict: bool,
 ) -> Result<(Linked, super::LinkedImages, BTreeMap<String, String>, BTreeMap<String, String>)> {
     if !drives(link) && !(strict && !link.parameters_kept.is_empty()) {
-        return super::design_bodies(file, bytes, configuration, s.validation()).map(|(l, images)| (l, images, BTreeMap::new(), BTreeMap::new()));
+        return super::design_bodies(&super::Source::File(file.to_path_buf()), bytes, configuration, s.validation())
+            .map(|(l, images)| (l, images, BTreeMap::new(), BTreeMap::new()));
     }
     // The command that called this reports the drive's warnings with the bodies (each in its
     // `warnings`), so this thread's report, which is for value edits, is left as it was.
@@ -1149,11 +1150,24 @@ pub(super) fn same_drive(a: &DesignLink, b: &DesignLink) -> bool {
     a.parameters == b.parameters && a.parameters_by_name == b.parameters_by_name && a.parameters_kept == b.parameters_kept
 }
 
+/// Whether `link` can be passed values: only a link to a design file can. A linked STEP file has
+/// no parameters, and a design inserted from the session has no file to build again.
+fn takes_values(link: &DesignLink) -> std::result::Result<(), &'static str> {
+    if link.step_names.is_some() {
+        return Err("that component is linked to a STEP file, which has no parameters");
+    }
+    if link.path.is_empty() {
+        return Err("that component's design has no file; save the design and insert it from its file to pass it values");
+    }
+    Ok(())
+}
+
 /// `component.link_parameters`.
 pub(super) fn link_parameters(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.link_parameters";
     let comp = component_key(s, p, "component", cmd)?;
     let link = s.doc.links.get(&comp).cloned().ok_or_else(|| bad(cmd, "that component is not linked to a design"))?;
+    takes_values(&link).map_err(|why| bad(cmd, why))?;
     let by_name = by_name_of(cmd, p)?;
     let kept = kept_of(cmd, p)?;
     let update = match p.get("update") {
@@ -1297,6 +1311,7 @@ pub(super) fn design_parameters(s: &mut Session, p: &Value) -> Result<Value> {
         (None, Some(_)) => {
             let comp = component_key(s, p, "component", cmd)?;
             let link = s.doc.links.get(&comp).cloned().ok_or_else(|| bad(cmd, "that component is not linked to a design"))?;
+            takes_values(&link).map_err(|why| bad(cmd, why))?;
             let (_, file, bytes) = read_linked(s, comp, &link).map_err(|e| bad(cmd, e.to_string()))?;
             (file, bytes, Some(link))
         }

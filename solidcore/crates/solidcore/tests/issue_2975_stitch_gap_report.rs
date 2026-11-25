@@ -167,9 +167,39 @@ fn an_interior_vertex_split_reports_the_original_curve_gap() {
 }
 
 /// Two adjacent squares, with one shared edge represented by an exact cubic
-/// Hermite line. Stitching can compare it; this certificate does not support it.
-fn unsupported_shared_edge() -> (Kernel, Brep) {
+/// Hermite line over [0, 1].
+fn hermite_shared_edge() -> (Kernel, Brep) {
     use solidcore::curve::hermite_curve::HermiteCurve;
+    shared_edge_as(|a, z| HermiteCurve::new(a, z - a, z, z - a, 3).into())
+}
+
+/// Two adjacent squares, with one shared edge represented by the zero offset of the
+/// line's B-spline in the squares' plane. Stitching can compare it; this certificate
+/// does not support it (#13724 part (c) takes offset curves; the kind only has to be
+/// unsupported here and writable for the exact binary restore check).
+fn unsupported_shared_edge() -> (Kernel, Brep) {
+    use solidcore::curve::offset_curve::OffsetCurve;
+    use solidcore::geom::extent1d::Extent1d;
+    use solidcore::nurbs::b_spline_curve::BSplineCurve;
+    shared_edge_as(|a, z| {
+        OffsetCurve::new(
+            3,
+            BSplineCurve::create_line_segment(3, a, z).unwrap().into(),
+            Extent1d::from_min_max(0.0, 1.0),
+            Vec3::Z,
+            0.0,
+            true,
+        )
+        .unwrap()
+        .into()
+    })
+}
+
+/// Two adjacent squares, with the shared edge replaced by `make(start, end)` over
+/// [0, 1].
+fn shared_edge_as(
+    make: impl Fn(solidcore::math::Point3, solidcore::math::Point3) -> solidcore::curve::curve::Curve,
+) -> (Kernel, Brep) {
     let mut k = Kernel::default();
     let mut b = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
     add_square(&mut k, &mut b, 0.0, 0.0);
@@ -199,7 +229,7 @@ fn unsupported_shared_edge() -> (Kernel, Brep) {
     let old = data.curve.as_ref().unwrap();
     let a = old.evaluate_point(&k, data.interval.min()).unwrap();
     let z = old.evaluate_point(&k, data.interval.max()).unwrap();
-    let mut curve: solidcore::curve::curve::Curve = HermiteCurve::new(a, z - a, z, z - a, 3).into();
+    let mut curve = make(a, z);
     curve.set_owner(
         old.owner(),
         Some(solidcore::topology::brep::p2::brep_ref(&b)),
@@ -300,6 +330,30 @@ fn certificate_failure_propagates_and_rolls_back_earlier_closures_with_flags_off
             ids
         );
     }
+}
+
+#[test]
+fn a_hermite_shared_edge_reports_a_certified_gap() {
+    // The Hermite edge is the exact line its neighbour's edge is (its stored cubic
+    // coefficients are zero), so the closed-form gap is 0; the bound holds it and stays
+    // within rounding of it. Before Hermite enclosures this closure was refused.
+    // Rounding: the squares' coordinates and the cubic's coefficients are at most 4
+    // in magnitude, every interval operation widens by at most |x| 2.3e-16 + 1e-300,
+    // and the pair bound takes well under 100 operations per axis (shift, hull,
+    // difference, norm), so its excess over 0 is under 100 * 4 * 2.3e-16 * sqrt(3)
+    // < 2e-13; 1e-12 is the floor the line-edge tests above use.
+    let (mut k, mut b) = hermite_shared_edge();
+    let gaps = stitch_and_orient_reported(&mut k, &mut b, &StitchAndOrientOptions::default())
+        .expect("a Hermite edge has a certified enclosure");
+    for entry in &gaps {
+        check_accounting(entry);
+    }
+    let edges = edge_closures(&gaps);
+    assert_eq!(edges.len(), 1, "{gaps:?}");
+    let (entry, _, _) = edges[0];
+    assert!(entry.gap >= 0.0 && entry.gap < 1e-12, "{entry:?}");
+    b.refresh_cached_topology();
+    assert_eq!(b.edge_list().len(), 7);
 }
 
 /// The edge closures of a report, with their kept and deleted edges.

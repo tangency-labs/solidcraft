@@ -1480,6 +1480,24 @@ fn setting_a_legacy_links_parameters_records_the_file_it_read() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// Saving without linked bodies (`linked_bodies: false`) keeps the bodies of a link that passes
+/// values, and says so: reading the file again as it is would give the design's own sizes.
+#[test]
+fn a_save_without_linked_bodies_keeps_the_bodies_of_a_driven_link() {
+    let dir = folder("driven-left-out");
+    let part = dir.join("plate.sc");
+    save_plate(&part);
+    let mut s = driven_assembly(&part);
+    run(&mut s, "component.link_parameters", json!({"component": "Plate", "set": {"h": "lift"}}));
+    let file = dir.join("assembly.sc");
+    let saved = run(&mut s, "file.save", json!({"path": file, "linked_bodies": false}));
+    assert!(saved.to_string().contains("passes it parameter values"), "{saved}");
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": file}));
+    assert!((volume(&mut opened) - 2400.0).abs() < 1e-6, "the plate at the 12 mm its link passes, not its own 5 mm");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A value that brings in a body the design had switched off: the body comes with its own
 /// material, as it does when the design is inserted with that value (review of PR #1: a value
 /// edit's drive left it on the default material).

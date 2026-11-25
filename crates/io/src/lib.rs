@@ -49,6 +49,7 @@ pub use design::file_kind;
 pub use design::has_design_provenance;
 pub use design::is_design_container;
 pub use design::large_file_text;
+pub use design::read_container_bytes;
 pub use design::read_design_file;
 pub use design::read_design_file_once;
 pub use design::read_design_geometry;
@@ -65,6 +66,7 @@ pub use design::read_design_with_model;
 pub use design::read_drawing;
 pub use design::read_drawing_file;
 pub use design::write_design_container;
+pub use design::write_design_container_reusing;
 pub use design::write_design_container_with_cache;
 pub use design::write_design_container_with_compression;
 pub use design::write_design_container_with_preview;
@@ -125,6 +127,7 @@ pub mod safe_zip;
 pub mod sdf;
 mod sketch2d;
 mod svg;
+mod svg_out;
 /// Explicit development-test seams; absent from ordinary production builds.
 #[cfg(any(test, feature = "dxf-legacy-baseline-tests"))]
 pub mod test_support {
@@ -219,6 +222,9 @@ pub use svg::read_svg;
 pub use svg::read_svg_drawing;
 pub use svg::svg_nothing_to_import;
 pub use svg::svg_sheet;
+pub use svg_out::SvgShape;
+pub use svg_out::svg_unit;
+pub use svg_out::write_svg;
 mod gltf_in;
 pub use gltf_in::GltfImport;
 pub use gltf_in::Loader;
@@ -1479,6 +1485,10 @@ fn obj_export(sel: &[&solidcraft_doc::ModelBody], mtl_name: &str, quality: MeshQ
 /// chord from `size`, with its notes, each led by the body's name. A mesh it cannot make is an
 /// error led by the body's name too, so an export of several bodies says whose face it is.
 fn body_mesh(b: &solidcraft_doc::ModelBody, (body, size, part): &Placed, quality: MeshQuality) -> Result<(Mesh, Vec<String>)> {
+    #[cfg(test)]
+    if test_unmeshable::is(&b.name) {
+        return Err(IoError::Invalid(format!("{}: tessellation: face 7 (cylinder): boundary crosses itself", b.name)));
+    }
     let named = |e: IoError| match e {
         IoError::Kernel(k) => IoError::Invalid(format!("{}: {k}", b.name)),
         other => other,
@@ -1892,7 +1902,7 @@ pub fn step_assembly(doc: &Document, local: &ModelState, name: &str) -> Result<V
         let Some(p) = index.get(&comp).and_then(|i| products.get_mut(*i)) else { continue };
         p.bodies.push(ExportBody { name: b.name.clone(), body: framed.as_ref().unwrap_or(&b.body), color: b.body.color() });
     }
-    for o in &doc.occurrences {
+    for o in doc.active_occurrences() {
         let (Some(&parent), Some(&child)) = (index.get(&o.parent), index.get(&o.component)) else { continue };
         if let Some(p) = products.get_mut(parent) {
             p.children.push((child, o.transform, o.name.clone()));
@@ -2024,6 +2034,22 @@ pub fn civil(secs: u64) -> (i64, i64, i64, u64, u64, u64) {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     (yoe + era * 400 + i64::from(m <= 2), m, d, rem / 3600, rem % 3600 / 60, rem % 60)
+}
+
+/// Tests: the name of a body that [`body_mesh`] fails on, as a body the kernel cannot tessellate does.
+#[cfg(test)]
+mod test_unmeshable {
+    static NAME: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+    pub(super) fn set(name: Option<&str>) {
+        if let Ok(mut n) = NAME.lock() {
+            *n = name.map(str::to_string);
+        }
+    }
+
+    pub(super) fn is(name: &str) -> bool {
+        NAME.lock().is_ok_and(|n| n.as_deref() == Some(name))
+    }
 }
 
 #[cfg(test)]
@@ -2375,6 +2401,28 @@ mod tests {
         });
         assert!(err_res.is_err(), "single failing body must fail the export");
         Ok(())
+    }
+
+    /// A body that cannot be meshed does not stop the export: the file is written with the other
+    /// bodies and the note names the one left out (#19215), in each mesh format.
+    #[test]
+    fn an_unmeshable_body_is_named_and_the_rest_is_still_written() {
+        let (_, m) = model();
+        let mut state = (*m.state()).clone();
+        let mut broken = state.bodies[0].clone();
+        broken.name = "BrokenSliver".into();
+        state.bodies.push(broken);
+        let alone = export(&m.state(), &[], Format::StlBinary, "t").unwrap();
+        test_unmeshable::set(Some("BrokenSliver"));
+        for format in [Format::StlBinary, Format::StlAscii, Format::Obj, Format::ThreeMf, Format::ThreeMfTagged] {
+            let (bytes, notes) = export_with_parts_noted(&state, &[], &[], format, "t", &Metadata::default(), MeshQuality::default(), None)
+                .unwrap_or_else(|e| panic!("{format:?}: {e}"));
+            assert!(!bytes.is_empty(), "{format:?}");
+            assert!(notes.iter().any(|n| n.starts_with("BrokenSliver: skipped: meshing failed") && n.contains("face 7")), "{format:?}: {notes:?}");
+        }
+        let (stl, _) = export_with_parts_noted(&state, &[], &[], Format::StlBinary, "t", &Metadata::default(), MeshQuality::default(), None).unwrap();
+        assert_eq!(read_stl(&stl).unwrap().len(), read_stl(&alone).unwrap().len(), "only the body that meshed is in the file");
+        test_unmeshable::set(None);
     }
 
     #[test]

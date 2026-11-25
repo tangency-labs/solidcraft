@@ -106,6 +106,9 @@ pub struct AppState {
     /// The plugin whose run is under way, when it keeps data in designs (`storage@0.1`): the only
     /// one that may change plugin data, and only its own. Set by the host for that run alone.
     pub storage_caller: Option<storage::StorageCaller>,
+    /// The design a plugin run started on, as it was before the run: what `doc.info` reports in it.
+    /// Set by the host for that run alone, like `storage_caller`.
+    pub caller_design: Option<crate::schema::inspect::DocInfoResult>,
     /// Set when `grants` is kept in the plugins folder's grant store between sessions (the command
     /// line and headless MCP with `--keep-plugin-approvals`): what this session last read from or wrote to it. `None`: the
     /// grants live only in this session, or the app keeps them itself (the desktop app).
@@ -241,7 +244,7 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
 /// The sensitive command groups. Each reaches past the open design and is refused unless the
 /// manifest asks for it and the user grants it, as file folders are:
 /// - `file`: reads or writes files (save, export, import, insert from a file, libraries);
-/// - `doc`: opens, creates, recovers or switches designs;
+/// - `doc`: opens, creates, recovers or switches designs, or reads the open one's file (`doc.info`);
 /// - `app`: app settings, the window and diagnostics, outside any design;
 /// - `plugin`: reviews, installs, removes, inspects or runs plugins.
 pub const COMMAND_GROUPS: &[&str] = &["app", "doc", "file", "plugin"];
@@ -261,6 +264,7 @@ const FILE_COMMANDS: &[&str] = &[
     "sheet.export_bend_table",
     "sheet.export_dxf",
     "sketch.export_dxf",
+    "sketch.export_svg",
     "timeline.export_script",
 ];
 
@@ -287,6 +291,24 @@ fn approved_file_folders(granted: &[FileGrant], requested: &[craft_plugin::FileP
         .filter(|g| g.read && (!write || g.write) && requested.iter().any(|r| r.name == g.name && r.read && (!write || r.write)))
         .map(|g| g.folder.clone())
         .collect()
+}
+
+/// `params` with each string written `grant:<name>/…` replaced by that file's path in the folder
+/// granted as `<name>` ([`solidcraft_io::vfs::grant_path`]), at any depth, so a plugin's `file`
+/// and `doc` commands name a file without knowing where its folder is. Other strings stay as they
+/// are. Parsed JSON is at most 128 levels deep (serde_json's limit), which bounds the recursion.
+fn resolve_grant_paths(params: &Value, grants: &[(&str, &Path)]) -> std::io::Result<Value> {
+    Ok(match params {
+        Value::String(text) => match solidcraft_io::vfs::grant_path(text, grants) {
+            Some(path) => Value::String(path?),
+            None => params.clone(),
+        },
+        Value::Array(items) => Value::Array(items.iter().map(|item| resolve_grant_paths(item, grants)).collect::<std::io::Result<_>>()?),
+        Value::Object(fields) => Value::Object(
+            fields.iter().map(|(key, value)| resolve_grant_paths(value, grants).map(|value| (key.clone(), value))).collect::<std::io::Result<_>>()?,
+        ),
+        _ => params.clone(),
+    })
 }
 
 /// The sensitive group of a command, or `None` when it acts on the open design alone.
@@ -508,6 +530,8 @@ fn run_package(
         panels::register_package(&mut scratch, &package)?;
         scratch.plugin_state.ui_caller = Some(package.manifest.id.clone());
         scratch.plugin_state.file_grants = grants.folders;
+        // Only `doc.info` reads it, and only with `doc`: skip the dirty check for every other run.
+        scratch.plugin_state.caller_design = groups.contains("doc").then(|| session.doc_info());
         scratch.plugin_state.storage_caller =
             rt.data_format.filter(|_| package.manifest.capabilities.iter().any(|c| c.starts_with("storage@"))).map(|data_format| {
                 storage::StorageCaller {
@@ -734,13 +758,24 @@ impl PluginHost for SolidCraftHost {
         }
         // Read-only grants apply only to known input readers. File writers retain their
         // previous read-and-write scope; unknown commands default to that stricter scope.
-        let scope = match group {
+        let (scope, granted_params) = match group {
             Some("file" | "doc") => {
                 let folders = if input_only_command(name) { &self.file_read_folders } else { &self.file_folders };
-                solidcraft_io::vfs::PathScope::new(folders.iter().cloned())
+                // `grant:<name>/…` names a file in one of these folders by its grant's name.
+                let named: Vec<(&str, &Path)> = self
+                    .session
+                    .plugin_state
+                    .file_grants
+                    .iter()
+                    .filter(|g| folders.contains(&g.folder))
+                    .map(|g| (g.name.as_str(), g.folder.as_path()))
+                    .collect();
+                let resolved = resolve_grant_paths(params, &named).map_err(|e| HostError::PermissionDenied { permission: e.to_string() })?;
+                (solidcraft_io::vfs::PathScope::new(folders.iter().cloned()), Some(resolved))
             }
-            _ => Default::default(),
+            _ => (Default::default(), None),
         };
+        let params = granted_params.as_ref().unwrap_or(params);
         let s = self.transaction.as_mut().ok_or_else(|| HostError::CommandFailed { command: name.into(), reason: "no active transaction".into() })?;
         let finish_sequence = s.sketch_finish_sequence;
         let camera_before = s.camera;
@@ -849,7 +884,10 @@ impl PluginHost for SolidCraftHost {
     }
     fn authorize_file_path(&self, path: &Path, write: bool) -> craft_plugin::Result<()> {
         if let Some(scope) = solidcraft_io::vfs::current_scope() {
-            return scope.check(&path.to_string_lossy()).map_err(|e| HostError::PermissionDenied { permission: e.to_string() });
+            // A write may make folders that do not exist yet (`write-file`): its nearest existing
+            // ancestor must be in scope, as with `check_new`. A read needs the whole path to exist.
+            let allowed = if write { scope.check_new(&path.to_string_lossy()) } else { scope.check(&path.to_string_lossy()) };
+            return allowed.map_err(|e| HostError::PermissionDenied { permission: e.to_string() });
         }
         grant_covers(&self.session.plugin_state.file_grants, path, write)
     }
