@@ -17,8 +17,9 @@ use solidcraft_engine::sketch::{LinearAxis, in_sector, linear_axis};
 use solidcraft_engine::{
     doc::{drawing::dimension::EdgePick, ids},
     drawing_scene,
-    geom::{Seg2Geom, Vec2Geom, hlr::Source},
+    geom::{Seg2Geom, Vec2Geom},
 };
+use solidcraft_kernel::hlr::Source;
 use solidcraft_theme::Tokens;
 
 use super::close_panel;
