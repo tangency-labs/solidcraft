@@ -309,6 +309,7 @@ fn bits(m: &Mat) -> [u64; 16] {
 /// quarters along it, and each one's tool once built, its real shape when `coped` (the frame fitted to it copes) and
 /// grown by `gap` (that frame's weld gap).
 struct Members {
+    groups: Vec<Members>,
     segments: Vec<(String, Vec3, Vec3)>,
     regions: Vec<Region2>,
     axes: Vec<Axes>,
@@ -323,6 +324,23 @@ struct Members {
 
 impl Members {
     fn of(doc: &Document, vals: &BTreeMap<String, Value>, g: &Feature, st: &ModelState, (coped, gap): (bool, f64)) -> Result<Members> {
+        if let Some(features) = crate::frame::group_features(g)? {
+            let groups = features.iter().map(|f| Self::of(doc, vals, f, st, (coped, gap))).collect::<Result<Vec<_>>>()?;
+            let segments = groups.iter().flat_map(|g| g.segments.iter().cloned()).collect();
+            let points = groups.iter().flat_map(|g| g.points.iter().copied()).collect();
+            return Ok(Members {
+                groups,
+                segments,
+                points,
+                regions: Vec::new(),
+                axes: Vec::new(),
+                ats: Vec::new(),
+                ends: Vec::new(),
+                tools: Vec::new(),
+                coped,
+                gap,
+            });
+        }
         let FeatureKind::FrameMember { corner, corners, gap: own_gap, .. } = &g.kind else {
             return Err(DocError::Invalid("not a frame member feature".into()));
         };
@@ -350,17 +368,29 @@ impl Members {
             (ends, segments.iter().enumerate().map(|(m, (_, a, b))| [0.25, 0.5, 0.75].map(|t| along(m, *a, *b, t))).collect())
         };
         let tools = vec![None; segments.len()];
-        Ok(Members { segments, regions, axes, ats, ends, points, tools, coped, gap })
+        Ok(Members { groups: Vec::new(), segments, regions, axes, ats, ends, points, tools, coped, gap })
     }
 
     /// How far member m's tool reaches from its line: its section, and its ends built past the line's.
-    fn reach(&self, m: usize) -> f64 {
+    fn reach(&self, mut m: usize) -> f64 {
+        for group in &self.groups {
+            if m < group.segments.len() {
+                return group.reach(m);
+            }
+            m = m.saturating_sub(group.segments.len());
+        }
         let ext = self.ends.get(m).map_or(0.0, |e| e.iter().flatten().map(|c| c.1).fold(0.0, f64::max));
         section_reach(&self.regions, self.ats.get(m).copied().unwrap_or(Vec2::ZERO)) + ext
     }
 
     /// Member m's tool, built the first time it is asked for.
-    fn tool(&mut self, m: usize) -> Result<&kernel::Body> {
+    fn tool(&mut self, mut m: usize) -> Result<&kernel::Body> {
+        for group in &mut self.groups {
+            if m < group.segments.len() {
+                return group.tool(m);
+            }
+            m = m.saturating_sub(group.segments.len());
+        }
         let slot = self.tools.get_mut(m).ok_or_else(|| DocError::Invalid(format!("no member {m}")))?;
         if slot.is_none() {
             #[cfg(test)]

@@ -48,6 +48,8 @@ impl Walk for std::collections::BTreeMap<String, String> {}
 impl Walk for crate::frame::Anchor {}
 impl Walk for crate::frame::UpAxis {}
 impl Walk for crate::frame::CornerType {}
+impl Walk for crate::frame::Side {}
+impl Walk for crate::frame::TrimEnd {}
 impl Walk for solidcraft_sketch::Sketch {}
 impl Walk for solidcraft_sketch::PatternAlignment {}
 impl Walk for solidcraft_kernel::StepNode {}
@@ -57,6 +59,7 @@ impl Walk for crate::document::Operation {}
 impl Walk for solidcraft_kernel::Continuity {}
 impl Walk for solidcraft_kernel::DraftCorner {}
 impl Walk for crate::document::Direction {}
+impl Walk for crate::document::PatternDistance {}
 impl Walk for crate::document::CellGridMode {}
 impl Walk for solidcore_record::cell_grid::CellShape {}
 impl Walk for solidcore_record::cell_grid::DotGrid {}
@@ -68,9 +71,11 @@ impl Walk for crate::document::MeshData {}
 impl Walk for crate::document::RevolveConvention {}
 impl Walk for crate::document::RailFit {}
 impl Walk for crate::document::CoilSection {}
+impl Walk for crate::document::CoilEndCut {}
 impl Walk for crate::document::ThinSide {}
 impl Walk for crate::document::PickedPlacement {}
 impl Walk for crate::document::ExtendMode {}
+impl Walk for crate::document::SplitSheet {}
 impl Walk for crate::document::RuledMode {}
 impl Walk for crate::document::RuledCorners {}
 impl Walk for crate::document::ExtrudeConvention {}

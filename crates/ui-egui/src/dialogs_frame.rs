@@ -2,12 +2,15 @@
 //! pairs of points. Lines and points are picked in the view into the path, where consecutive points
 //! pair up in pick order; the section is a built-in profile with its dimensions, or the profiles
 //! picked in another sketch. Anchor, angle, mirror and the up axis place the section on each member.
+//!
+//! Trim/Extend (`frame.trim`): members picked in the view trimmed or extended to other members
+//! (butt joints), planar faces or planes, with the end that moves and a weld gap.
 
 use serde_json::{Map, Value, json};
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::doc::frame::{self, CornerType, MemberProfile};
+use solidcraft_engine::doc::frame::{self, CornerType, MemberProfile, TrimEnd, TrimMemberRef, TrimTarget};
 use solidcraft_engine::doc::frame_corners::CORNER_TOL;
-use solidcraft_engine::doc::{FeatureKind, ProfileSel};
+use solidcraft_engine::doc::{FeatureKind, PlaneRef, ProfileSel};
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::CurveKind;
 use solidcraft_engine::{Sel, Session};
@@ -15,9 +18,10 @@ use solidcraft_engine::{Sel, Session};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, check, curves_sketch, form_row, input_rows_range, profile_indices, put, shown_expr};
 use crate::selection::{
-    CONSTRUCTION_POINTS, EXTERNAL_POINTS, ORIGIN, POINTS, PROFILES, SKETCH_LINES, SNAP_POINTS, SelInput, SelectionExt as _, VERTICES, is_point,
+    BODIES, CONSTRUCTION_POINTS, EXTERNAL_POINTS, ORIGIN, PLANAR_FACES, PLANES, POINTS, PROFILES, SKETCH_LINES, SNAP_POINTS, SelInput,
+    SelectionExt as _, VERTICES, is_point,
 };
-use crate::ui_kit::{choice_row, expr_row, hint_row, text_row};
+use crate::ui_kit::{Button, button, choice_row, expr_row, hint_row, row_height, sized_row, text_row};
 use crate::viewport::Hit;
 
 /// The anchors as `frame.member` names them, and their labels.
@@ -82,11 +86,26 @@ fn corner_index(corner: &CornerType) -> usize {
 /// The up axes as `frame.member` names them, and their labels: world +Z (the default) first.
 const UP_AXES: &[(&str, &str)] = &[("Z", "Z"), ("Y", "Y"), ("X", "X"), ("-Z", "-Z"), ("-Y", "-Y"), ("-X", "-X")];
 
+/// A group of lines and how its members sit on them, while another group is shown.
+#[derive(Clone, Debug, Default)]
+pub struct Group {
+    pub lines: Vec<Sel>,
+    pub anchor: usize,
+    /// The located profile point (`frame.member`'s `locate`), which the dialog has no field for:
+    /// kept with its group so an edit leaves the group's members where they are attached.
+    pub locate: Option<[f64; 2]>,
+    pub angle: String,
+    pub mirror: bool,
+    pub name: String,
+}
+
 /// The Frame Member dialog's values (the picks are its selection inputs).
 #[derive(Clone, Debug)]
 pub struct Member {
     /// Every line of the frame sketch, now and as lines are added, not only the lines picked.
     pub all: bool,
+    /// The picked curves, in pick order, make one continuous member along a tangent path.
+    pub continuous: bool,
     /// The built-in profile (an index into `frame::profile_kinds`), used when no section is picked.
     pub kind: usize,
     /// Each built-in profile's dimensions, its required ones then its optional ones; kept per
@@ -96,11 +115,14 @@ pub struct Member {
     /// a feature made that way keeps it while no section is picked.
     pub whole: Option<u64>,
     pub anchor: usize,
+    pub locate: Option<[f64; 2]>,
     pub angle: String,
     pub mirror: bool,
     /// The world axis that is up for the profile (an index into `UP_AXES`; 0, Z, is the default).
     pub up: usize,
     pub name: String,
+    pub groups: Vec<Group>,
+    pub current: usize,
     /// The path's items as last synced ([`Member::sync`]); `refs` and `pair_ids` are parallel to it.
     pub path: Vec<Sel>,
     /// For each path item, the lasting point reference (GeoRef JSON) sent back verbatim: the one an
@@ -342,6 +364,7 @@ pub(crate) fn remove_tubes(app: &mut SolveApp, ids: &[String]) {
     for t in all.iter().filter(|t| ids.contains(&t.id)) {
         match t.pair {
             Some(k) => gone.extend(pairs.get(k).into_iter().flat_map(|(a, b)| [*a, *b])),
+            None if m.continuous && t.id == "$path" => gone.extend(lines.iter().copied()),
             None => gone.extend(lines.iter().filter(|i| line_id(path.items.get(**i)) == Some(t.id.as_str()))),
         }
     }
@@ -425,14 +448,18 @@ impl Member {
         let kind = frame::profile_kinds().iter().position(|k| k.kind == "rect_tube").unwrap_or(0);
         Member {
             all: false,
+            continuous: false,
             kind,
             dims,
             whole: None,
             anchor: 0,
+            locate: None,
             angle: String::new(),
             mirror: false,
             up: 0,
             name: String::new(),
+            groups: vec![Group::default()],
+            current: 0,
             path: Vec::new(),
             refs: Vec::new(),
             pair_ids: Vec::new(),
@@ -498,6 +525,60 @@ impl Member {
             })
             .unzip()
     }
+    /// The shown group as it stands, its lines from the Lines input.
+    fn shown(&self, inputs: &[SelInput]) -> Group {
+        let lines = crate::selection::items(inputs, 0).to_vec();
+        Group { lines, anchor: self.anchor, locate: self.locate, angle: self.angle.clone(), mirror: self.mirror, name: self.name.clone() }
+    }
+
+    /// Every group as it stands, the shown one included (none is while `current` is past the end).
+    pub fn all_groups(&self, inputs: &[SelInput]) -> Vec<Group> {
+        let mut groups = self.groups.clone();
+        if let Some(g) = groups.get_mut(self.current) {
+            *g = self.shown(inputs);
+        }
+        groups
+    }
+
+    /// Show group `k`: the shown one is kept, `k`'s lines go into the Lines input.
+    pub fn show(&mut self, k: usize, inputs: &mut [SelInput]) {
+        let groups = self.all_groups(inputs);
+        let Some(g) = groups.get(k).cloned() else { return };
+        self.groups = groups;
+        self.current = k;
+        self.pending = None;
+        self.anchor = g.anchor;
+        self.locate = g.locate;
+        self.angle = g.angle;
+        self.mirror = g.mirror;
+        self.name = g.name;
+        if let Some(i) = inputs.first_mut() {
+            i.items = g.lines;
+            self.sync(&i.items);
+        }
+    }
+
+    /// A new, empty group after the others, shown.
+    pub fn add_group(&mut self, inputs: &mut [SelInput]) {
+        self.groups = self.all_groups(inputs);
+        self.groups.push(Group::default());
+        self.all = false;
+        self.show(self.groups.len() - 1, inputs);
+    }
+
+    /// The shown group taken out (never the last one), its neighbour shown.
+    pub fn remove_group(&mut self, inputs: &mut [SelInput]) {
+        let mut groups = self.all_groups(inputs);
+        if groups.len() < 2 || self.current >= groups.len() {
+            return;
+        }
+        groups.remove(self.current);
+        let k = self.current.min(groups.len() - 1);
+        self.groups = groups;
+        // The removed group must not be written back over its neighbour.
+        self.current = usize::MAX;
+        self.show(k, inputs);
+    }
 }
 
 /// What the path takes: sketch lines, and the points pairs join.
@@ -505,8 +586,14 @@ const PATH: crate::selection::Accept = SKETCH_LINES | VERTICES | POINTS | CONSTR
 const NEEDS_PARTNER: &str = "A point needs another point after it";
 const PICK_SECOND: &str = "Pick the second point";
 
-/// The dialog for Frame Member.
+/// The dialog for Frame Member or Trim/Extend.
 pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
+    if id == "frame.trim" {
+        return Some((
+            Kind::FrameTrim(Trim::default()),
+            vec![SelInput::new("Members", BODIES, true), SelInput::new("ui.frame_trim.to", BODIES | PLANAR_FACES | PLANES, true)],
+        ));
+    }
     (id == "frame.member").then(|| {
         let inputs = vec![
             SelInput::new("Path", PATH, true).ordered_points(),
@@ -845,7 +932,7 @@ fn tr(text: &str) -> &str {
 /// pressed in a value.
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
     let Kind::Frame(m) = &mut d.kind else { return false };
-    let mut enter = member_rows(app, ui, m, &d.inputs);
+    let mut enter = member_rows(app, ui, m, &mut d.inputs);
     ui.separator();
     let labels = CORNER_TYPES.map(|c| c.1);
     choice_row(ui, "Corner Type", "frame_corner", &mut m.corner, &labels);
@@ -1108,11 +1195,50 @@ fn kept_crossings(s: &Session, d: &Dialog) -> Vec<bool> {
         .collect()
 }
 
+fn group_rows(ui: &mut egui::Ui, m: &mut Member, inputs: &mut [SelInput]) {
+    let count = m.groups.len().max(1);
+    let mut show = None;
+    let (mut add, mut remove) = (false, false);
+    // A regular form row clips to one line. Reserve a line for every chip and action so their
+    // paint and click targets stay inside the row at the default dialog width.
+    let lines = count + 1 + usize::from(count > 1);
+    let height = row_height() * lines as f32 + ui.spacing().item_spacing.y * (lines - 1) as f32;
+    sized_row(ui, solidcraft_ui_text::tr("ui.frame_member.groups"), height, |ui| {
+        ui.vertical(|ui| {
+            for k in 0..count {
+                let label = solidcraft_ui_text::format("ui.frame_member.group", &[("number", &(k + 1).to_string())]);
+                let style = if k == m.current { Button::SmallSelected } else { Button::Small };
+                ui.horizontal(|ui| {
+                    if button(ui, label, style).clicked() && k != m.current {
+                        show = Some(k);
+                    }
+                });
+            }
+            ui.horizontal(|ui| add = button(ui, solidcraft_ui_text::tr("ui.frame_member.new_group"), Button::Small).clicked());
+            if count > 1 {
+                ui.horizontal(|ui| remove = button(ui, solidcraft_ui_text::tr("ui.frame_member.remove_group"), Button::Small).clicked());
+            }
+        });
+    });
+    if let Some(k) = show {
+        m.show(k, inputs);
+    } else if add {
+        m.add_group(inputs);
+    } else if remove {
+        m.remove_group(inputs);
+    }
+}
+
 /// The Frame Member rows proper: the section, its placement and the name.
-fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &[SelInput]) -> bool {
+fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &mut [SelInput]) -> bool {
     let mut enter = false;
     m.sync(crate::selection::items(inputs, 0));
-    form_row(ui, "All Lines", |ui| check(ui, &mut m.all));
+    if m.groups.len() == 1 {
+        form_row(ui, "All Lines", |ui| check(ui, &mut m.all));
+    }
+    group_rows(ui, m, inputs);
+    let continuous_label = app.tr("ui.frame.continuous").to_string();
+    form_row(ui, &continuous_label, |ui| check(ui, &mut m.continuous));
     let picked = !crate::selection::items(inputs, 1).is_empty();
     if let Some(sketch) = m.whole.filter(|_| !picked) {
         let name = app.session.doc.feature(sketch).map(|f| f.name.clone()).unwrap_or_default();
@@ -1144,7 +1270,71 @@ fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &[SelI
 }
 
 /// The command the dialog's OK runs (`extra`: parameters kept from the feature being edited).
+/// Group placement uses the same path/profile reader as an ordinary frame. Unsupported joined
+/// groups are refused, preserving the selected corner and finishing controls for the user.
 pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
+    if m.groups.len() <= 1 {
+        return flat_commands(app, m, inputs, extra);
+    }
+    if m.continuous {
+        return Err("not supported yet: continuous members cannot be combined with groups; use separate Frame Members".into());
+    }
+    if m.corner != NONE
+        || !m.overrides.is_empty()
+        || !crate::selection::items(inputs, 2).is_empty()
+        || extra.get("corners").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
+    {
+        return Err("not supported yet: frame member groups with joined corners; use corner none without corner overrides".into());
+    }
+    if m.flip || m.coped || !m.gap.trim().is_empty() || extra.get("fit_ends").and_then(Value::as_bool) == Some(true) {
+        return Err("not supported yet: frame member groups with finishing options; use separate Frame Members for finishing".into());
+    }
+    if extra.get("pairs").and_then(Value::as_array).is_some_and(|a| !a.is_empty()) {
+        return Err("not supported yet: frame member groups with point pairs; use a separate Frame Member for pairs".into());
+    }
+    let mut common: Option<Value> = None;
+    let mut grouped = Vec::new();
+    for group in m.all_groups(inputs) {
+        if group.lines.iter().any(is_point) {
+            return Err("not supported yet: frame member groups with point pairs; use a separate Frame Member for pairs".into());
+        }
+        let mut shown = m.clone();
+        shown.all = false;
+        shown.groups = vec![Group::default()];
+        shown.current = 0;
+        shown.anchor = group.anchor;
+        shown.locate = group.locate;
+        shown.angle = group.angle;
+        shown.mirror = group.mirror;
+        shown.name = group.name;
+        let mut picks = inputs.to_vec();
+        let path = picks.first_mut().ok_or("select lines for the path first")?;
+        path.items = group.lines;
+        shown.sync(&path.items);
+        let mut kept = extra.clone();
+        kept.remove("locate");
+        let mut flat = flat_commands(app, &shown, &picks, &kept)?.into_iter().next().ok_or("select lines for the path first")?.1;
+        let mut placement = Map::new();
+        for key in ["lines", "anchor", "locate", "angle", "mirror", "body_name"] {
+            if let Some(value) = flat.as_object_mut().and_then(|o| o.remove(key)) {
+                placement.insert(key.into(), value);
+            }
+        }
+        if let Some(before) = &common {
+            if before.get("sketch") != flat.get("sketch") {
+                return Err("the groups' lines must be in one sketch".into());
+            }
+        } else {
+            common = Some(flat);
+        }
+        grouped.push(Value::Object(placement));
+    }
+    let mut p = common.ok_or("select lines for the path first")?;
+    p["groups"] = json!(grouped);
+    Ok(vec![("frame.member".into(), p)])
+}
+
+fn flat_commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let section = crate::selection::items(inputs, 1).profiles();
     let section_sketch = section.first().map(|x| x.0).or(m.whole);
     if section.iter().any(|x| Some(x.0) != section_sketch) {
@@ -1223,6 +1413,12 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
     if !pairs.is_empty() {
         p["pairs"] = json!(pairs);
     }
+    if m.continuous {
+        if m.all {
+            return Err(app.tr("ui.frame.continuous_requires_selection").into());
+        }
+        p["continuous"] = json!(true);
+    }
     if let Some(ps) = section_sketch {
         p["profile_sketch"] = json!(ps);
         if !section.is_empty() {
@@ -1245,6 +1441,9 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
         p["anchor"] = json!(anchor);
     }
     put(&mut p, &[("angle", &m.angle), ("body_name", m.name.trim())]);
+    if let Some(locate) = m.locate {
+        p["locate"] = json!(locate);
+    }
     if m.mirror {
         p["mirror"] = json!(true);
     }
@@ -1368,7 +1567,9 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
     let FeatureKind::FrameMember {
         path_sketch,
         lines,
+        continuous,
         pairs,
+        groups,
         profile,
         anchor,
         locate,
@@ -1392,6 +1593,7 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
     let st = app.session.model.state();
     let mut m = Member::new();
     m.all = lines.is_empty() && path_sketch.is_some();
+    m.continuous = *continuous;
     // The sketch's lines (without the pairs' ids, which come after them, or an Auto frame's later pieces).
     let ids = if m.all {
         let (ids, later) = frame::member_parts(&st, kind).unwrap_or_default();
@@ -1440,6 +1642,7 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
     m.mirror = *mirror;
     let up = serde_json::to_value(up).ok();
     m.up = UP_AXES.iter().position(|(a, _)| up.as_ref().and_then(Value::as_str) == Some(*a)).unwrap_or(0);
+    m.locate = *locate;
     m.name = body_name.clone().unwrap_or_default();
     // The dialog has no field for a located point: an edit keeps it, so the member stays where it
     // is attached.
@@ -1488,7 +1691,174 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
     if !missing.is_empty() {
         extra.insert("corners".into(), json!(missing));
     }
+    if !groups.is_empty() {
+        let path = path_sketch.as_ref()?;
+        // Keep unsupported saved settings visible to command validation rather than dropping
+        // them when the shown group's line picks replace the flat path input.
+        if !pairs.is_empty() {
+            extra.insert("pairs".into(), json!(pairs));
+            extra.insert("next_pair".into(), json!(next_pair));
+        }
+        if *fit_ends {
+            extra.insert("fit_ends".into(), json!(true));
+        }
+        m.groups = groups
+            .iter()
+            .map(|g| {
+                let value = serde_json::to_value(g.anchor).ok();
+                let ids = if g.lines.is_empty() { frame::member_line_ids(&st, kind).unwrap_or_default() } else { g.lines.clone() };
+                Group {
+                    lines: ids.into_iter().map(|id| Sel::ExternalSketchCurve { sketch: path.0, id }).collect(),
+                    anchor: ANCHORS.iter().position(|(a, _)| value.as_ref().and_then(Value::as_str) == Some(*a)).unwrap_or(0),
+                    locate: g.locate,
+                    angle: g.angle.as_deref().map(|a| shown_expr(a, ValueKind::Angle)).unwrap_or_default(),
+                    mirror: g.mirror,
+                    name: g.body_name.clone().unwrap_or_default(),
+                }
+            })
+            .collect();
+        m.current = usize::MAX;
+        m.all = matches!(groups.as_slice(), [one] if one.lines.is_empty());
+        m.show(0, &mut inputs);
+        extra.remove("locate");
+    }
     Some((Kind::Frame(m), inputs, extra))
+}
+
+/// Which end of each member moves, as `frame.trim` names it, and its label.
+const ENDS: [(&str, &str); 3] = [("auto", "ui.frame_trim.nearer_end"), ("start", "ui.frame_trim.start"), ("end", "ui.frame_trim.end")];
+
+/// The Trim/Extend dialog's values (the members and targets are its selection inputs).
+#[derive(Clone, Debug, Default)]
+pub struct Trim {
+    /// An index into [`ENDS`].
+    pub end: usize,
+    pub gap: String,
+    /// Targets of the feature being edited that a pick can't show (a member's chosen side, a
+    /// face or plane kept as the design saved it), passed back as they are while kept.
+    pub kept: Vec<Value>,
+    pub keep: bool,
+}
+
+/// The Trim/Extend rows (after the selection inputs); true when Enter was pressed in a value.
+pub fn trim_rows(ui: &mut egui::Ui, t: &mut Trim) -> bool {
+    let ends: Vec<&str> = ENDS.iter().map(|e| e.1).collect();
+    choice_row(ui, "ui.frame_trim.end", "frame_trim_end", &mut t.end, &ends);
+    let enter = hint_row(ui, "Gap", &mut t.gap, "0 mm");
+    if !t.kept.is_empty() {
+        let label = solidcraft_ui_text::format("ui.frame_trim.more_targets", &[("count", &t.kept.len().to_string())]);
+        form_row(ui, "ui.frame_trim.keep", |ui| crate::ui_kit::checkbox(ui, &label, &mut t.keep));
+    }
+    enter
+}
+
+/// The body a pick names, when it is a member's.
+fn member_body(app: &SolveApp, pick: &Sel) -> Option<String> {
+    let body = match pick {
+        Sel::Body { name } => name,
+        Sel::Face { body, .. } => body,
+        _ => return None,
+    };
+    app.session.model.state().frame_member(body).is_some().then(|| body.clone())
+}
+
+/// The command Trim/Extend's OK runs (`extra`: parameters kept from the feature being edited).
+pub fn trim_commands(app: &SolveApp, t: &Trim, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
+    let mut members: Vec<String> = Vec::new();
+    for pick in crate::selection::items(inputs, 0) {
+        let body = member_body(app, pick).ok_or_else(|| solidcraft_ui_text::tr("ui.frame_trim.pick_members").to_string())?;
+        if !members.contains(&body) {
+            members.push(body);
+        }
+    }
+    if members.is_empty() {
+        return Err(solidcraft_ui_text::tr("ui.frame_trim.pick_members_first").to_string());
+    }
+    let mut to: Vec<Value> = Vec::new();
+    for pick in crate::selection::items(inputs, 1) {
+        let member = member_body(app, pick).filter(|name| {
+            // A face picked on a changed member follows that actual face, rather than using
+            // a stale sketch/profile side. Picking the whole body still gives the refusal.
+            if !matches!(pick, Sel::Face { .. }) {
+                return true;
+            }
+            let st = app.session.model.state();
+            st.frame_member(name).zip(st.body(name)).is_some_and(|(r, b)| !b.transferred && r.is_unchanged(&b.body))
+        });
+        let target = match (member, pick) {
+            // A member, or a face of one: a butt joint against it.
+            (Some(body), _) => json!(body),
+            // The exact face (its body, index and path), as Start Sketch picks one.
+            (None, face @ Sel::Face { point, .. }) => json!({
+                "plane": crate::sketch_attachment_ui::face_plane(app, face).unwrap_or_else(|| json!({"face": [point.x, point.y, point.z]}))
+            }),
+            (None, Sel::Plane { name }) => json!({"plane": name}),
+            _ => return Err(solidcraft_ui_text::tr("ui.frame_trim.target_kinds").to_string()),
+        };
+        if !to.contains(&target) {
+            to.push(target);
+        }
+    }
+    if t.keep {
+        to.extend(t.kept.iter().cloned());
+    }
+    if to.is_empty() {
+        return Err(solidcraft_ui_text::tr("ui.frame_trim.pick_targets").to_string());
+    }
+    let mut p = json!({"members": members, "to": to});
+    if let Some((end, _)) = ENDS.get(t.end).filter(|_| t.end != 0) {
+        p["end"] = json!(end);
+    }
+    put(&mut p, &[("gap", &t.gap)]);
+    if let Value::Object(o) = &mut p {
+        for (key, v) in extra {
+            o.entry(key.clone()).or_insert_with(|| v.clone());
+        }
+    }
+    Ok(vec![("frame.trim".to_string(), p)])
+}
+
+/// The body of a member in the current model, by its feature and line.
+fn body_of(app: &SolveApp, r: &TrimMemberRef) -> Option<String> {
+    let id = app.session.doc.find_feature(&r.feature)?.id;
+    let st = app.session.model.state();
+    let record = st.frame_members.iter().find(|m| m.feature == id && m.line == r.line)?;
+    st.body(&record.body).filter(|b| b.feature == id).map(|b| b.name.clone())
+}
+
+/// The Trim/Extend dialog editing a trim feature, filled from it.
+pub fn trim_for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
+    let FeatureKind::FrameTrim { members, to, end, gap } = kind else { return None };
+    let (_, mut inputs) = start(app, "frame.trim")?;
+    let mut t = Trim::default();
+    if let Some(i) = inputs.get_mut(0) {
+        i.items = members.iter().filter_map(|m| body_of(app, m)).map(|name| Sel::Body { name }).collect();
+    }
+    let mut picks = Vec::new();
+    for target in to {
+        match target {
+            TrimTarget::Member { member, side: None } if let Some(name) = body_of(app, member) => picks.push(Sel::Body { name }),
+            TrimTarget::Plane { plane: PlaneRef::Origin { name } } => picks.push(Sel::Plane { name: name.clone() }),
+            TrimTarget::Plane { plane: PlaneRef::Construction { feature, placement: None } } if let Some(f) = app.session.doc.feature(feature.0) => {
+                picks.push(Sel::Plane { name: f.name.clone() })
+            }
+            TrimTarget::Member { member, side } => {
+                t.kept.push(json!({"member": {"feature": member.feature.to_string(), "line": member.line}, "side": side}))
+            }
+            TrimTarget::Plane { plane } => t.kept.push(json!({"plane_ref": plane})),
+        }
+    }
+    if let Some(i) = inputs.get_mut(1) {
+        i.items = picks;
+    }
+    t.keep = !t.kept.is_empty();
+    t.end = match end {
+        TrimEnd::Auto => 0,
+        TrimEnd::Start => 1,
+        TrimEnd::End => 2,
+    };
+    t.gap = gap.as_deref().map(|g| shown_expr(g, ValueKind::Length)).unwrap_or_default();
+    Some((Kind::FrameTrim(t), inputs, Map::new()))
 }
 
 #[cfg(test)]

@@ -141,9 +141,7 @@ fn a_corner_too_sharp_for_its_mitre_is_refused() {
         let e = turn(&mut Kernel::default(), a, 0.).err();
         assert_eq!(
             e.as_ref().and_then(SolidError::primitive_failure),
-            Some(&PrimitiveFailure::Failed(
-                "the path turns back on itself at a corner"
-            )),
+            Some(&PrimitiveFailure::PathTurnsBack),
             "a {a}: {e:?}"
         );
     }
@@ -154,7 +152,7 @@ fn a_corner_too_sharp_for_its_mitre_is_refused() {
         let e = turn(&mut Kernel::default(), a, 0.).err();
         assert_eq!(
             e.as_ref().and_then(SolidError::primitive_failure),
-            Some(&PrimitiveFailure::Failed("the sweep does not close")),
+            Some(&PrimitiveFailure::SweepDoesNotClose),
             "a {a}: {e:?}"
         );
     }
@@ -237,9 +235,7 @@ fn a_closed_path_turning_back_where_it_closes_is_refused() {
     let e = ring(0.1).err();
     assert_eq!(
         e.as_ref().and_then(SolidError::primitive_failure),
-        Some(&PrimitiveFailure::Failed(
-            "the path turns back on itself at a corner"
-        )),
+        Some(&PrimitiveFailure::PathTurnsBack),
         "{e:?}"
     );
     let mut b = ring(10.).unwrap();

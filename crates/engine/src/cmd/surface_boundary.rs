@@ -24,7 +24,7 @@ const CONTRACT: TypedContract<BoundaryParams> = TypedContract::new();
 /// (the kernel's own caps).
 use solidcraft_kernel::{MAX_CHAIN_CURVES as MAX_CHAIN, MAX_EDGE_PICKS as MAX_PICKS};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("surface.boundary", "Boundary Surface", crate::checked!("surface.boundary", boundary))
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("surface.boundary", "Boundary Surface", crate::checked!("surface.boundary", boundary)).begins_edit()
     .at("SURFACE", "CREATE")
     .icon("surface_boundary")
     .contract(&CONTRACT)

@@ -2,14 +2,26 @@
 //! boolean's operand (#14830), counted by the kernel's volume-sign decisions (feature
 //! `profile`: `mass::enclosure::volume_sign`, one call per decision).
 //!
-//! brep-bench's boolean/drilled-plate: a plate cut by nine drills, one after another. Each cut
-//! decides the sign of its two operands' volumes and of its result's: 9 cuts, 27 decisions.
-//! The first operand of cuts 2 to 9 is the cut before's result, which that cut's result
-//! contract proved: those 8 are taken from the proof, so 19 decisions remain (the plate, the 9
-//! drills, the 9 results). A primitive is not proved at creation, so its proof stays.
+//! A proved cut ([`Contract::Proved`]) decides a volume's sign only where it proves a body (the
+//! validity check, then one `volume_sign`): once for each operand that brings neither a proof
+//! that stands nor a template, and once for its solid result. The boolean itself decides none:
+//! it is the one the default contract runs, which decides none at all
+//! (`a_boolean_under_the_default_contract_proves_nothing`).
+//! A primitive operand (the plate, each drill) takes its facing from the template it was built
+//! from (`is_outward_primitive`: a certificate from the template's closed form, no volume).
+//! It certifies here: its bound is the template's volume (20000 for the plate, 48 pi for a
+//! drill) less terms of rounding size, the box's faces being planes through its own corners and
+//! the cylinder's only off by its rational circle's rounding. An operand a proved cut made
+//! brings that cut's proof.
+//!
+//! brep-bench's boolean/drilled-plate: a plate cut by nine drills, one after another. Each of
+//! the 9 cuts decides its result's sign: 9 decisions. The first operand of cuts 2 to 9 is the
+//! cut before's result, which holds that cut's proof; edited in between (which drops the proof),
+//! each of those 8 is decided again: 9 + 8 = 17. The 8 between the two are the proofs taken.
 #![cfg(feature = "profile")]
 #![allow(clippy::unwrap_used)]
 
+use solidcore_ops::bead::{beads, Joint};
 use solidcore_ops::boolean::boolean_with;
 use solidcore_ops::session::{self, CallProfile};
 use solidcore_ops::{make_box, make_cylinder, Body, BooleanOp, Contract};
@@ -80,9 +92,12 @@ fn a_drilled_plate_proves_each_cut_result_once() {
     all_fixes();
     let (kept, reused) = drilled(false);
     let (edited, every) = drilled(true);
-    assert_eq!(every, 27, "each cut proves both operands and its result");
     assert_eq!(
-        reused, 19,
+        every, 17,
+        "each cut proves its result, cuts 2 to 9 their edited first operand too"
+    );
+    assert_eq!(
+        reused, 9,
         "the 8 results proved by the cut before are not proved again"
     );
     // the same body either way
@@ -93,7 +108,8 @@ fn a_drilled_plate_proves_each_cut_result_once() {
     );
 }
 
-/// The decisions of cutting drill 2 from `first`, the plate less drill 1.
+/// The decisions of cutting drill 2 from `first`, the plate less drill 1: the result's, and
+/// `first`'s where it brings no proof that stands (drill 2 brings its template: none).
 fn second_cut(first: Body) -> u64 {
     let d = drill(2);
     let (_, calls) = session::profiled(|| cut(first, d));
@@ -103,11 +119,11 @@ fn second_cut(first: Body) -> u64 {
 #[test]
 fn a_proved_body_changed_since_is_proved_again() {
     all_fixes();
-    // unchanged: the result's proof stands, so the operand drill and the result are decided
-    assert_eq!(second_cut(cut(plate(), drill(1))), 2);
+    // unchanged: the first cut's proof stands, so only the result is decided
+    assert_eq!(second_cut(cut(plate(), drill(1))), 1);
     // transformed (here by the identity: any edit, through the body's lock, drops the proof
-    // whatever it changes): decided again
-    assert_eq!(second_cut(unproved(cut(plate(), drill(1)))), 3);
+    // whatever it changes): decided again, then the result
+    assert_eq!(second_cut(unproved(cut(plate(), drill(1)))), 2);
 }
 
 /// A copy of a proved body brings its proof: cut from, it is decided as often as the body
@@ -155,5 +171,203 @@ fn a_proof_made_under_other_fixes_is_not_taken() {
     session::set_thread_fixes(names.iter().copied().filter(|n| *n != dropped)).unwrap();
     let decided = second_cut(first);
     all_fixes();
-    assert_eq!(decided, 3);
+    // `first` decided again, then the result: one more than under the proof's own fixes
+    assert_eq!(decided, 2);
+}
+
+/// A named read of a body.
+type Read = (&'static str, Box<dyn Fn(&Body)>);
+
+/// A pure read of the proved plate less drill 1, each of the measures that read the body
+/// through a shared reference, with the record order of an identically built body (a body's
+/// own `to_record` is an edit, which drops its proof).
+fn reads() -> Vec<Read> {
+    let (_, order) = cut(plate(), drill(1)).to_record().unwrap();
+    let order2 = order.clone();
+    let order3 = order.clone();
+    let order4 = order.clone();
+    let order5 = order.clone();
+    vec![
+        (
+            "bounds",
+            Box::new(|b: &Body| {
+                b.bounds().unwrap();
+            }),
+        ),
+        (
+            "is_manifold_solid",
+            Box::new(|b: &Body| {
+                b.is_manifold_solid().unwrap();
+            }),
+        ),
+        (
+            "solid_count",
+            Box::new(|b: &Body| {
+                b.solid_count().unwrap();
+            }),
+        ),
+        (
+            "classify_point",
+            Box::new(|b: &Body| {
+                b.classify_point([50.0, 10.0, 5.0]).unwrap();
+            }),
+        ),
+        (
+            "classify_points",
+            Box::new(|b: &Body| {
+                b.classify_points(&[[50.0, 10.0, 5.0]]).unwrap();
+            }),
+        ),
+        (
+            "edge_length",
+            Box::new(move |b: &Body| {
+                b.edge_length(&order, 0, 1e-9).unwrap();
+            }),
+        ),
+        (
+            "edge_middle",
+            Box::new(move |b: &Body| {
+                b.edge_middle(&order2, 0).unwrap();
+            }),
+        ),
+        (
+            "vertex_distance",
+            Box::new(move |b: &Body| {
+                b.vertex_distance(&order3, 0, [1.0, 2.0, 3.0]).unwrap();
+            }),
+        ),
+        // the mass measures read a body whose UV trims exist (a boolean's result has them)
+        // through the shared door; one without makes them through the edit door
+        (
+            "mass_properties",
+            Box::new(|b: &Body| {
+                b.mass_properties(1e-9).unwrap();
+            }),
+        ),
+        (
+            "area",
+            Box::new(|b: &Body| {
+                b.area(1e-9).unwrap();
+            }),
+        ),
+        (
+            "face_area",
+            Box::new(move |b: &Body| {
+                b.face_area(&order4, 0, 1e-9).unwrap();
+            }),
+        ),
+        (
+            "face_centroid",
+            Box::new(move |b: &Body| {
+                b.face_centroid(&order5, 0, 1e-9).unwrap();
+            }),
+        ),
+    ]
+}
+
+/// A body without its UV trim curves (dropped through the edit door) measures as one with
+/// them: the mass measures make the trims through the edit door, then read as before.
+#[test]
+fn a_body_without_uv_trims_still_measures() {
+    all_fixes();
+    let with = cut(plate(), drill(1));
+    let without = cut(plate(), drill(1));
+    {
+        let mut b = without.kernel();
+        let uses: Vec<_> = b.edgeuses().ids().collect();
+        for u in uses {
+            b.edgeuse_mut(u).unwrap().uv_trim_curve = None;
+        }
+    }
+    let (m, n) = (
+        with.mass_properties(1e-9).unwrap(),
+        without.mass_properties(1e-9).unwrap(),
+    );
+    let near = |a: f64, b: f64| (a - b).abs() <= 1e-9 * b.abs().max(1.0);
+    assert!(
+        near(m.volume, n.volume) && near(m.area, n.area),
+        "{m:?} {n:?}"
+    );
+    for i in 0..3 {
+        assert!(near(m.centroid[i], n.centroid[i]), "{m:?} {n:?}");
+    }
+    assert!(near(with.area(1e-9).unwrap(), without.area(1e-9).unwrap()));
+    // the trims are made (each edge use's, or its mate's): the edit door ran
+    let b = without.kernel();
+    assert_eq!(
+        solidcore::mass::integrator::properties::missing_uv_trim(&b, None).unwrap(),
+        None
+    );
+}
+
+/// A read through the shared door leaves the proof beside the body standing: the next proved
+/// operation on it decides only its result (it dropped the proof when it went through the
+/// edit door, and decided the body again).
+#[test]
+fn a_read_of_a_proved_body_keeps_its_proof() {
+    all_fixes();
+    for (name, read) in reads() {
+        let first = cut(plate(), drill(1));
+        read(&first);
+        assert_eq!(second_cut(first), 1, "{name} dropped the proof");
+    }
+}
+
+/// A read hands back the same body: its content is what it was, and its counts, volume and
+/// bounds read the same after.
+#[test]
+fn a_read_leaves_the_body_as_it_was() {
+    all_fixes();
+    for (name, read) in reads() {
+        let b = cut(plate(), drill(1));
+        let (counts, volume, bounds) = (
+            b.counts().unwrap(),
+            b.volume(1e-9).unwrap().to_bits(),
+            b.bounds().unwrap(),
+        );
+        let record = format!("{:?}", b.copy().unwrap().to_record().unwrap().0);
+        read(&b);
+        assert_eq!(b.counts().unwrap(), counts, "{name}");
+        assert_eq!(b.volume(1e-9).unwrap().to_bits(), volume, "{name}");
+        assert_eq!(b.bounds().unwrap(), bounds, "{name}");
+        assert_eq!(
+            format!("{:?}", b.copy().unwrap().to_record().unwrap().0),
+            record,
+            "{name}: its record changed"
+        );
+    }
+}
+
+/// The plate with a block across it, united under the proved contract: a body that holds
+/// its proof, with straight inside corners along y at x = 45 and 55, z = 10.
+fn stepped() -> Body {
+    let block = make_box([45.0, 0.0, 10.0], [10.0, 20.0, 10.0]).unwrap();
+    boolean_with(plate(), block, BooleanOp::Union, Contract::Proved)
+        .unwrap()
+        .unwrap()
+}
+
+/// Beads read their part on a copy (#21560): the part's proof stands, so the next proved cut
+/// decides as often as it does on a part no bead was laid on. Laid through the body's lock
+/// instead, the beads would drop the proof and the cut would prove the part again.
+#[test]
+fn beads_leave_the_part_s_proof_standing() {
+    all_fixes();
+    let edge = |b: &Body| {
+        solidcore_ops::pick::edges(b, &[[45.0, 10.0, 10.0]], 1e-6)
+            .unwrap()
+            .unwrap()[0]
+    };
+    let untouched = stepped();
+    edge(&untouched);
+    let bare = second_cut(untouched);
+    let part = stepped();
+    let joint = Joint::Edge {
+        body: 0,
+        edge: edge(&part),
+        legs: [3.0, 3.0],
+        along: None,
+    };
+    assert_eq!(beads(&[&part], &[joint], 0.0).unwrap().len(), 1);
+    assert_eq!(second_cut(part), bare, "the beads dropped the part's proof");
 }

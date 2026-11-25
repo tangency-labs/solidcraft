@@ -206,6 +206,13 @@ pub use native::run::EframePumpStatus;
 #[cfg(feature = "persistence")]
 pub use native::file_storage::storage_dir;
 
+// SolidCraft: for SolidCraft's tests of the whole-file settings save and read (#4164).
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(feature = "glow", feature = "wgpu_no_default_features"))]
+#[cfg(feature = "persistence")]
+#[doc(hidden)]
+pub use native::file_storage::{read_settings, save_to_disk};
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod icon_data;
 

@@ -178,6 +178,38 @@ fn an_arc_squeezed_into_a_line_fails_instead_of_breaking_the_curve() {
 /// New ids, made one at a time or by a batch (an SVG or DXF insert), never take a 3D
 /// constraint's id, also when a damaged counter starts over and the probe goes past a taken id.
 #[test]
+fn a_solved_control_spline_stays_the_spline_over_its_control_points() {
+    let mut sk = Sketch::new();
+    let ctrl = [v(0.0, 0.0, 0.0), v(10.0, 20.0, 5.0), v(30.0, 25.0, -10.0), v(50.0, 0.0, 15.0)];
+    let w = sk.add_drawn_control_in(&ctrl, 3, WireSpace::Component).unwrap();
+    // Its points take refs as any drawn curve's do; it is no line, and has no through point.
+    assert_eq!(sk.wire_point(&format!("{w}.start")), Some(WirePoint { wire: w.clone(), index: 0 }));
+    assert_eq!(sk.wire_point(&format!("{w}.end")), Some(WirePoint { wire: w.clone(), index: 3 }));
+    assert_eq!(sk.wire_point(&format!("{w}.2")), Some(WirePoint { wire: w.clone(), index: 2 }));
+    assert_eq!(sk.wire_point(&format!("{w}.through")), None);
+    assert!(!sk.is_drawn_line(&w));
+    assert_eq!(sk.solve_wires(None).dof, 12);
+    // A control point held on the XY plane, and its start a set distance from a fixed point.
+    let p = WirePoint { wire: w.clone(), index: 2 };
+    sk.add_wire_constraint(WireConstraintKind::OnPlane { p: p.clone(), plane: OriginPlane::Xy }).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    assert_eq!(rep.dof, 11);
+    let moved = at(&sk, &format!("{w}.2"));
+    assert!(moved.z.abs() < 1e-9 && close(moved, v(30.0, 25.0, 0.0)), "{moved:?}");
+    let wire = sk.wires.iter().find(|x| x.id == w).unwrap();
+    let mut want = ctrl;
+    want[2] = moved;
+    assert_eq!(wire.fit, want.to_vec());
+    assert_eq!(wire.control, Some(crate::WireControl { degree: 3 }));
+    assert_eq!(wire.pts, crate::control_polyline(&want, 3));
+    // The curve's middle is where the four control points put it, not on a curve through them.
+    let mid = (want[0] + want[1] * 3.0 + want[2] * 3.0 + want[3]) * 0.125;
+    assert!(close(wire.pts[12], mid), "{:?} is not {mid:?}", wire.pts[12]);
+    sk.validate_wires().unwrap();
+}
+
+#[test]
 fn a_new_id_never_takes_a_3d_constraint_s_id() {
     let mut sk = Sketch::new();
     let a = line(&mut sk, v(0.0, 0.0, 0.0), v(10.0, 0.0, 0.0));
