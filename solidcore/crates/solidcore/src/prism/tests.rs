@@ -3040,11 +3040,11 @@ fn half_slope() -> Frame {
 }
 
 /// `frame` moved by `dz` along the world z axis.
-fn raised(frame: Frame, dz: f64) -> Frame {
+fn raised(frame: &Frame, dz: f64) -> Frame {
     let [x, y, z] = frame.origin;
     Frame {
         origin: [x, y, z + dz],
-        ..frame
+        ..*frame
     }
 }
 
@@ -3102,16 +3102,16 @@ fn a_plane_meets_the_line_along_the_extrusion_at_its_closed_form_level() {
     assert!(close(level, 3.0), "{level}");
     // Measured from a frame two above the origin: 3 - 2.
     let level =
-        level_on_plane(&raised(xy(), 2.0), Vec3::new(4.0, 7.0, 0.0), &half_slope()).unwrap();
+        level_on_plane(&raised(&xy(), 2.0), Vec3::new(4.0, 7.0, 0.0), &half_slope()).unwrap();
     assert!(close(level, 1.0), "{level}");
     // The same part 1e8 above the world origin: the origins cancel first, so the level is as
     // exact as near the origin (a sum of `point` and the step along the normal before taking
     // off the frame's origin rounds to 1.5e-8 there).
     let far = 1e8;
     let level = level_on_plane(
-        &raised(xy(), far),
+        &raised(&xy(), far),
         Vec3::new(4.0, 7.0, far - 3.0),
-        &raised(half_slope(), far),
+        &raised(&half_slope(), far),
     )
     .unwrap();
     assert!(close(level, 3.0), "{level}");
@@ -3236,9 +3236,9 @@ fn the_gap_between_two_planes_over_a_profile_turns_negative_only_where_they_cros
     // Both planes and the sketch 1e8 above the origin: the same gap.
     let far = 1e8;
     let g = plane_gap(
-        &raised(xy(), far),
-        &raised(xy(), far),
-        &raised(half_slope(), far),
+        &raised(&xy(), far),
+        &raised(&xy(), far),
+        &raised(&half_slope(), far),
         &[rectangle(p(-2.0, 0.0), p(1.0, 1.0))],
     )
     .unwrap();
