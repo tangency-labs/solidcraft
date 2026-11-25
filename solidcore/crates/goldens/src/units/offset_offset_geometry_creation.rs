@@ -4783,7 +4783,7 @@ mod tests {
     /// piece is within the tolerance, but the piece runs outside the domain (an end 1.47,
     /// 1.47 and 5.30 outside). Before, the lift moved the offset edge's curve up to 4.84,
     /// 4.84 and 6.75 off the edge (gen0039 and gen0545 through `EdgeuseOffset`, recorded
-    /// as status 0) and check_brep Level 2 gained 4, 4 and 8 lines (bad edge, endpoints
+    /// as status 0) and `check_brep` Level 2 gained 4, 4 and 8 lines (bad edge, endpoints
     /// outside the face domain, loop gaps).
     ///
     /// The certificate of each moved row: replayed to the op, `ExtendTrimEdges` with the
