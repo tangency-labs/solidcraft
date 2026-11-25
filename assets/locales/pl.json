@@ -5538,7 +5538,6 @@
   "sketch_finish.edit": "Edytuj szkic",
   "sketch_finish.finished": "Zakończono {name}",
   "sketch_mode.announcement": "{view}, tryb szkicu",
-  "sketch_mode.editing": "Edycja",
   "sketch_mode.model_card_unavailable": "Przed rozpoczęciem szkicu tutaj otwórz widok Model",
   "sketch_mode.view_name": "{view} · {sketch}",
   "sketch_panel.attached": "Dołączony do {body} / {path}",

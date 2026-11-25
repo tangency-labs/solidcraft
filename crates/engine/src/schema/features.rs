@@ -18,8 +18,8 @@ use super::motion::require;
 use super::types::{
     AngleExpr, AxisDir, AxisDirExpr, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation,
     FaceRefs, FacesParam, FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName,
-    LengthExpr, NumberExpr, OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam,
-    ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint, TouchingParam, feature_common, present,
+    LengthExpr, NumberExpr, OffsetEdgesParam, OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3,
+    ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint, ToolFacesParam, TouchingParam, feature_common, present,
 };
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
@@ -571,6 +571,10 @@ pub struct SurfaceSweepParams {
     pub path_edges: Option<PathEdgePoints>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub shape: SweepShape,
+    /// A result whose shells close stays a surface body, which Stitch makes a solid. Default:
+    /// true. False makes a solid of it, as features saved before it keep.
+    #[serde(default)]
+    pub stays_surface: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -699,6 +703,21 @@ pub struct CombineParams {
     /// Keep the tool bodies as they are. Default: false (the combine uses them up).
     #[serde(default)]
     pub keep_tools: Option<bool>,
+    /// A cut only: how far each tool is grown along its faces' outward normals before it cuts
+    /// (negative: shrunk, for a press fit), so the cut leaves that clearance round it. The tool
+    /// bodies themselves are not changed. Default: 0.
+    #[serde(default)]
+    pub offset: Option<LengthExpr>,
+    /// With `offset`: what the grown tool's convex edges become. Default: sharp.
+    #[serde(default)]
+    pub offset_edges: Option<OffsetEdgesParam>,
+    /// With `offset`: points on the tool faces that move; the other faces, and tools with none
+    /// of them, cut as they are. Default: every face of every tool.
+    #[serde(default)]
+    pub offset_faces: Option<ToolFacesParam>,
+    /// With `offset_edges: round`: the radius of the rounds. Default: the offset's size.
+    #[serde(default)]
+    pub offset_radius: Option<LengthExpr>,
     /// Move the result into a new component, made for it. Default: false.
     #[serde(default)]
     pub new_component: Option<bool>,
@@ -1061,7 +1080,7 @@ fn alignment_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<sol
     serde_json::from_value(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole(format!("`{key}` must be left, center or right"))))
 }
 
-/// A pattern's flip under `key`, as `cmd::reversed_param` reads it, with its message. `null` is
+/// A reversal flag under `key`, as `cmd::reversed_param` reads it, with its message. `null` is
 /// refused, as the reader refuses it.
 fn reversed_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<bool>, D::Error> {
     serde_json::from_value(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole(format!("`{key}` must be true or false"))))
@@ -1076,7 +1095,7 @@ fn pattern_alignment2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<solidcra
     alignment_at(d, "alignment2")
 }
 
-fn pattern_reversed<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+pub(super) fn reversed_flag<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
     reversed_at(d, "reversed")
 }
 
@@ -1111,7 +1130,7 @@ pub struct PatternCircularParams {
     #[schemars(schema_with = "super::sketch_modify::alignment_schema")]
     pub alignment: Option<solidcraft_sketch::PatternAlignment>,
     /// Flip the pattern's direction; for an even count centred, selects the extra side.
-    #[serde(default, deserialize_with = "pattern_reversed", skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "reversed_flag", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub reversed: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
@@ -1305,7 +1324,7 @@ pub struct PatternRectangularParams {
     #[schemars(schema_with = "super::sketch_modify::alignment_schema")]
     pub alignment2: Option<solidcraft_sketch::PatternAlignment>,
     /// Flip the first direction; for an even count centred, selects the extra side.
-    #[serde(default, deserialize_with = "pattern_reversed", skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "reversed_flag", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub reversed: Option<bool>,
     /// Flip the second direction.

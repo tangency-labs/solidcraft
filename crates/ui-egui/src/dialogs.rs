@@ -14,7 +14,7 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::{
-    AxisRef, Direction, FeatureKind, FilletStyle, HoleKind, Operation, PatternDistance, PatternKind, PlaneRef, ProfileSel, ThinSide,
+    AxisRef, Direction, DomeShape, FeatureKind, FilletStyle, HoleKind, Operation, PatternDistance, PatternKind, PlaneRef, ProfileSel, ThinSide,
 };
 use solidcraft_engine::geom::Aabb3;
 
@@ -86,6 +86,8 @@ pub const MODIFIERS: &[ToolModifiers] = &[
 
 pub(crate) const OPS: [&str; 4] = ["new", "join", "cut", "intersect"];
 pub(crate) const OP_LABELS: [&str; 4] = ["New Body", "Join", "Cut", "Intersect"];
+/// A pipe's section: a solid rod or a hollow tube, which has a wall (#18344).
+pub(crate) const PIPE_TYPES: [&str; 2] = ["Solid", "Hollow"];
 const DIRS: [&str; 5] = ["positive", "negative", "symmetric", "positive", "negative"];
 /// The "Two sides" direction (a second distance the other way).
 pub const TWO_SIDES: usize = 3;
@@ -106,6 +108,9 @@ pub(crate) const SPLIT_SHEETS: [&str; 3] = ["ui.split_body.cut_with.extended", "
 const SPLIT_SHEET_PARAMS: [&str; 3] = ["extended", "faces", "body"];
 /// Split Body's input for the tool body's other faces, shown when the picked faces cut.
 pub(crate) const SPLIT_TOOL_FACES: &str = "ui.split_body.tool_faces";
+/// Split Body's input for more surface bodies that cut with the tool's, shown when the whole
+/// surface body cuts (#13303).
+pub(crate) const SPLIT_TOOL_BODIES: &str = "ui.split_body.tool_bodies";
 /// What an extrude's first input picks: profiles or planar faces, or curves too when thin.
 const EXTRUDE_ACCEPT: Accept = PROFILES | PLANAR_FACES;
 const THIN_ACCEPT: Accept = PROFILES | CURVES;
@@ -137,6 +142,13 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::Shell { thickness, .. }) {
             thickness: String = "2 mm".into() => shown_expr(thickness, ValueKind::Length),
         } => json!({"thickness": thickness});
+        // One planar face, raised into a dome of `height` along its outward normal (#19532).
+        Dome("solid.dome", "DOME", [("Face", FACES, false)],
+            FeatureKind::Dome { height, shape, reverse, .. }) {
+            height: String = "5 mm".into() => shown_expr(height, ValueKind::Length),
+            spherical: bool = false => *shape == DomeShape::Spherical,
+            reverse: bool = false => *reverse,
+        } => json!({"height": height, "shape": if *spherical { "spherical" } else { "elliptical" }, "reverse": reverse});
         Draft("solid.draft", "DRAFT", [("Faces", FACES, true), ("Neutral plane", PLANES | PLANAR_FACES, false)],
             FeatureKind::Draft { angle, .. }) {
             angle: String = "5 deg".into() => shown_expr(angle, ValueKind::Angle),
@@ -178,6 +190,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::Pipe { diameter, wall, operation, .. }) {
             diameter: String = "5 mm".into() => shown_expr(diameter, ValueKind::Length),
             wall: String = String::new() => wall.as_deref().map(|e| shown_expr(e, ValueKind::Length)).unwrap_or_default(),
+            // A pipe is a solid rod or a hollow tube: a tube has a wall (#18344).
+            hollow: usize = 0 => usize::from(wall.is_some()),
             operation: usize = 0 => op_index(operation),
         } => json!({"diameter": diameter, "operation": OPS.get(*operation).copied().unwrap_or("new")});
         Emboss("solid.emboss", "EMBOSS", [("Profiles", PROFILES, true), ("Target Face (optional)", FACES, false)],
@@ -427,6 +441,14 @@ crate::dialog_descriptor::dialog_descriptors! {
             Combine {
                 operation: usize,
                 keep_tools: bool,
+                /// A cut's offset: how far the tools grow before they cut (an expression).
+                offset: String,
+                /// With an offset: round the grown tools' convex edges.
+                round_edges: bool,
+                /// Only the faces picked in the Offset Faces input move, not every face.
+                picked_faces: bool,
+                /// With round edges: the rounds' radius (an expression); empty: the offset's.
+                radius: String,
             },
             EditParam {
                 name: String,
@@ -496,6 +518,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             /// Insert Part from the standard parts library (`dialogs_parts`).
             Part(crate::dialogs_parts::Pt),
             PartSize(crate::dialogs_part_size::Resize),
+            /// Insert Pulley: a timing-belt pulley (`dialogs_pulley`).
+            Pulley(crate::dialogs_pulley::Pulley),
             /// Edit Text: a sketch text's content and placement (`sketch_text`).
             Text(Box<crate::sketch_text::Tx>),
             TextMove(crate::sketch_text_move::TextMove),
@@ -505,10 +529,12 @@ crate::dialog_descriptor::dialog_descriptors! {
             SketchIntersect {
                 bodies: bool,
                 projection_link: bool,
+                construction: bool,
             },
             SketchProject {
                 bodies: bool,
                 projection_link: bool,
+                construction: bool,
             },
         }
     }
@@ -905,6 +931,11 @@ pub(crate) fn fits(a: Accept, s: &Sel) -> bool {
     }
 }
 
+/// Feature forms that keep a saved whole-sketch selection until it is edited.
+fn tracks_profile_selection(kind: &Kind) -> bool {
+    matches!(kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. } | Kind::Primitive { cmd: "solid.coil", .. })
+}
+
 impl Dialog {
     /// The command this dialog runs, whose icon and label its header shows.
     pub(crate) fn command(&self) -> Option<&'static str> {
@@ -982,7 +1013,7 @@ impl Dialog {
                 }
             }
         }
-        let Some(inp) = d.inputs.iter_mut().find(|i| i.accept == BODIES && (i.multi || i.items.is_empty())) else {
+        let Some(inp) = d.inputs.iter_mut().find(|i| takes_only_bodies(i) && (i.multi || i.items.is_empty())) else {
             return;
         };
         for name in names {
@@ -1010,14 +1041,14 @@ impl Dialog {
             "sketch.intersect" => {
                 let bodies = s.selection.iter().any(|sel| matches!(sel, Sel::Body { .. }));
                 Dialog::new(
-                    Kind::SketchIntersect { bodies, projection_link: true },
+                    Kind::SketchIntersect { bodies, projection_link: true, construction: s.project_construction },
                     vec![SelInput::new("ui.sketch_intersect_geometry", if bodies { BODIES } else { INTERSECT_GEOMETRY }, true)],
                 )
             }
             "sketch.project" => {
                 let bodies = s.selection.iter().any(|sel| matches!(sel, Sel::Body { .. }));
                 Dialog::new(
-                    Kind::SketchProject { bodies, projection_link: true },
+                    Kind::SketchProject { bodies, projection_link: true, construction: s.project_construction },
                     vec![SelInput::new("ui.sketch_project_geometry", if bodies { BODIES } else { PROJECT_GEOMETRY }, true)],
                 )
             }
@@ -1042,7 +1073,8 @@ impl Dialog {
                     wall2: length_default(s, "1"),
                 },
                 vec![SelInput::new("Profiles", EXTRUDE_ACCEPT, true)],
-            ),
+            )
+            .named(s.doc.unique_name("Extrude")),
             "solid.revolve" => Dialog::new(
                 Kind::Revolve { angle: "360 deg".into(), operation: 0, axis: None },
                 vec![SelInput::new("Profile", PROFILES | PLANAR_FACES, true), SelInput::new("Axis", AXIS_PICKS, false)],
@@ -1076,7 +1108,7 @@ impl Dialog {
             ),
             "face.delete" => Dialog::new(Kind::DeleteFaces, vec![SelInput::new("Faces", FACES, true)]),
             "solid.boundary_fill" => {
-                Dialog::new(Kind::BoundaryFill { operation: 0, cells: Vec::new(), of: Vec::new() }, vec![SelInput::new("Tools", BODIES, true)])
+                Dialog::new(Kind::BoundaryFill { operation: 0, cells: Vec::new(), of: Vec::new() }, vec![SelInput::new("Tools", FILL_TOOLS, true)])
             }
             "solid.align" => {
                 let components = s.selection.iter().any(|x| matches!(x, Sel::Occurrence { .. }));
@@ -1266,10 +1298,17 @@ impl Dialog {
                     at: None,
                     refs: Default::default(),
                 },
-                vec![SelInput::new("Profile", PROFILES, false)],
+                vec![SelInput::new("Profile", PROFILES, false), SelInput::new("Axis", AXIS_PICKS, false)],
             ),
             "solid.combine" => Dialog::new(
-                Kind::Combine { operation: 1, keep_tools: false },
+                Kind::Combine {
+                    operation: 1,
+                    keep_tools: false,
+                    offset: "0 mm".into(),
+                    round_edges: false,
+                    picked_faces: false,
+                    radius: String::new(),
+                },
                 vec![SelInput::new("Target Body", BODIES, false), SelInput::new("Tool Bodies", BODIES, true)],
             ),
             _ => {
@@ -1291,6 +1330,7 @@ impl Dialog {
                     .or_else(|| crate::dialogs_motion::start(app, id))
                     .or_else(|| crate::dialogs_parts::start(app, id))
                     .or_else(|| crate::dialogs_part_size::start(app, id))
+                    .or_else(|| crate::dialogs_pulley::start(app, id))
                     .or_else(|| crate::sketch_text::start(app, id))
                     .or_else(|| crate::sketch_text_move::start(app, id))
                     .or_else(|| crate::sketch_modify_ui::start(app, id))?;
@@ -1380,7 +1420,7 @@ impl Dialog {
                 _ => None,
             };
             if let Some(b) = as_body
-                && let Some(inp) = d.inputs.iter_mut().find(|i| i.accept == BODIES && (i.multi || i.items.is_empty()))
+                && let Some(inp) = d.inputs.iter_mut().find(|i| takes_only_bodies(i) && (i.multi || i.items.is_empty()))
             {
                 if !inp.items.contains(&b) {
                     inp.items.push(b);
@@ -1390,7 +1430,7 @@ impl Dialog {
             // A selected component is its bodies when the command takes bodies. One selected
             // placement still starts component Move before this dialog is built.
             if let Sel::Occurrence { path } = sel
-                && let Some(inp) = d.inputs.iter_mut().find(|i| i.accept == BODIES && (i.multi || i.items.is_empty()))
+                && let Some(inp) = d.inputs.iter_mut().find(|i| takes_only_bodies(i) && (i.multi || i.items.is_empty()))
             {
                 if let Ok(names) = s.occurrence_bodies(path, true) {
                     for name in names {
@@ -1415,6 +1455,7 @@ impl Dialog {
             };
             let takes = |i: &SelInput| {
                 fits(i.accept, sel)
+                    && (i.accept != AXIS_PICKS || id != "solid.coil")
                     && (i.multi || i.items.is_empty())
                     && (planar_ok || i.accept & FACES != 0 || !matches!(sel, Sel::Face { .. }))
                     && (i.accept != AXIS_PICKS || takes_as_axis(s, sel))
@@ -1550,8 +1591,14 @@ impl Dialog {
         Dialog::new(Kind::EditParam { name: name.into(), expr: s.doc.param(name).map(|p| p.expr.clone()).unwrap_or_default() }, vec![])
     }
 
-    /// An Extrude or Revolve started from inside a sketch takes that sketch's profile, as it would
-    /// had the sketch stayed open, and keeps the sketch shown while it is open (#14128).
+    /// The Name row's text (Extrude): what the feature is called, or will be.
+    fn named(mut self, name: String) -> Self {
+        self.extra.insert("name_default".into(), json!(name.clone()));
+        self.extra.insert("name".into(), json!(name));
+        self
+    }
+
+    /// Extrude and Revolve take the sketch they start from (#14128).
     pub(crate) fn take_sketch_profile(&mut self, s: &Session, sketch: u64) {
         if !matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. }) {
             return;
@@ -1565,9 +1612,11 @@ impl Dialog {
         }
     }
 
-    /// Make the first single input still empty (after the filled ones) active.
+    /// Make the first single input still empty (after the filled ones) active. Coil's Axis is
+    /// optional and stays unvisited, so another profile click replaces the profile.
     fn advance(&mut self) {
-        if let Some(i) = self.inputs.iter().position(|i| i.items.is_empty()) {
+        let optional = |index: usize| index == 1 && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. });
+        if let Some(i) = self.inputs.iter().enumerate().position(|(index, i)| i.items.is_empty() && !optional(index)) {
             self.active = i;
         } else {
             self.active = self.active.min(self.inputs.len().saturating_sub(1));
@@ -1584,6 +1633,7 @@ impl Dialog {
             Kind::Plastic(k) => return k.previews(),
             Kind::Frame(_) | Kind::EndCap(_) | Kind::RotateMember(_) | Kind::FramePlate(_) | Kind::FrameTrim(_) | Kind::Gusset(_) => return true,
             Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) | Kind::InsertAirfoil(_) => return true,
+            Kind::Pulley(_) => return true,
             // Web previews run synchronously; a modelled thread can take seconds.
             Kind::Thread { .. } => return !cfg!(target_arch = "wasm32") && self.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false),
             _ => {}
@@ -1594,6 +1644,7 @@ impl Dialog {
                 | Kind::Revolve { .. }
                 | Kind::Fillet { .. }
                 | Kind::Shell { .. }
+                | Kind::Dome { .. }
                 | Kind::Draft { .. }
                 | Kind::Mirror
                 | Kind::Split { .. }
@@ -1646,6 +1697,7 @@ impl Dialog {
                 (label, ValueKind::Length, radius)
             }
             Kind::Shell { thickness } => ("Thickness", ValueKind::Length, thickness),
+            Kind::Dome { height, .. } => ("Height", ValueKind::Length, height),
             Kind::Draft { angle } => ("Angle", ValueKind::Angle, angle),
             Kind::Hole { diameter, opts, .. } => {
                 // A thread or a bolt size sets the diameter: nothing to type on the canvas.
@@ -2015,7 +2067,7 @@ impl Dialog {
         self.restore_value_focus = true;
     }
 
-    /// A sketch clicked in the Browser or the History while Extrude, Revolve or Emboss is open
+    /// A sketch clicked in the Browser or History while a profile-based feature form is open
     /// (#6106): Profiles takes every profile of what was drawn (`drawn_profiles`), as when the
     /// sketch is selected before the command starts. The island inside another profile's hole is
     /// left out, or it would fill the hole. False when the click is not one of those (the caller
@@ -2040,6 +2092,9 @@ impl Dialog {
             return false;
         }
         input.items = profiles;
+        if !input.multi {
+            self.advance();
+        }
         self.profile_selection_changed = true;
         self.focus = true;
         self.error = None;
@@ -2101,7 +2156,7 @@ impl Dialog {
             *sketch = None;
             self.extra.remove("path");
         }
-        if self.active == 0 && matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. }) {
+        if self.active == 0 && tracks_profile_selection(&self.kind) {
             self.profile_selection_changed = true;
         }
         let measure = matches!(self.kind, Kind::Measure { .. });
@@ -2187,7 +2242,7 @@ impl Dialog {
             *sketch = None;
             self.extra.remove("path");
         }
-        if self.active == 0 && matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. }) {
+        if self.active == 0 && tracks_profile_selection(&self.kind) {
             self.profile_selection_changed = true;
         }
         let measure = matches!(self.kind, Kind::Measure { .. });
@@ -2365,7 +2420,7 @@ impl Dialog {
         if empty && self.listed == Some(i) {
             self.listed = None;
         }
-        if i == 0 && matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. }) {
+        if i == 0 && tracks_profile_selection(&self.kind) {
             self.profile_selection_changed = true;
         }
         self.list_hover = None;
@@ -3163,6 +3218,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Motion(k) => k.title(),
         Kind::Part(_) => "INSERT PART",
         Kind::PartSize(_) => "Change Part Size",
+        Kind::Pulley(_) => "ui.pulley.title",
         Kind::Text(_) => "EDIT TEXT",
         Kind::TextMove(_) => "MOVE/COPY TEXT",
         Kind::SketchModify(k) => k.title(),
@@ -3659,6 +3715,9 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::pref
 
 /// Saved planes/vectors/axes are real inputs even when they have no selection chip.
 fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> {
+    if matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && index == 1 {
+        return Some("axis");
+    }
     if matches!(d.kind, Kind::Split { .. }) && index == 1 {
         return Some("split_tool_mode");
     }
@@ -3697,7 +3756,22 @@ fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> 
     }
 }
 
-/// An explicit revolve axis as its dialog holds it, in the world: the origin evaluated with the
+/// A saved Coil sketch line that could not refill its pick. Keep it in the command parameters
+/// until the user supplies a replacement, while presenting empty controls for the axis.
+fn unresolved_coil_axis(d: &Dialog, s: &Session) -> bool {
+    if !matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. }) || d.inputs.get(1).is_none_or(|input| !input.items.is_empty()) {
+        return false;
+    }
+    let Some(FeatureKind::Coil { axis_ref: Some(AxisRef::SketchLine { curve, sketch }), .. }) =
+        d.editing.and_then(|(id, _)| s.doc.feature(id)).map(|f| &f.kind)
+    else {
+        return false;
+    };
+    let owner = sketch.map(Value::from);
+    d.extra.get("axis").is_some_and(|axis| axis.get("curve").and_then(Value::as_str) == Some(curve.as_str()) && axis.get("sketch") == owner.as_ref())
+}
+
+/// An explicit axis as its dialog holds it, in the world: the origin evaluated with the
 /// parameters (an untouched axis is restored as saved, expressions included:
 /// `solidcraft_engine::frames::to_local`). An origin that cannot be evaluated is kept as saved.
 pub(crate) fn line_axis_value(s: &Session, frame: &solidcraft_engine::doc::Mat, origin: &solidcraft_engine::doc::PointExpr, dir: Vec3) -> Value {
@@ -3706,6 +3780,16 @@ pub(crate) fn line_axis_value(s: &Session, frame: &solidcraft_engine::doc::Mat, 
         Ok(at) => json!({"origin": pt(solidcraft_engine::doc::apply_point(frame, at)), "dir": dir_world}),
         Err(_) => json!({"origin": origin, "dir": dir_world}),
     }
+}
+
+/// A Coil's saved axis line in world coordinates, its origin still written as the expressions it
+/// was given so that editing another field leaves it following its parameters.
+fn coil_line_axis_value(frame: &solidcraft_engine::doc::Mat, origin: &solidcraft_engine::doc::PointExpr, dir: Vec3) -> Value {
+    let mut origin = origin.clone();
+    if !solidcraft_engine::doc::is_identity(frame) {
+        solidcraft_engine::doc::map_point_expr(frame, &mut origin);
+    }
+    json!({"origin": origin, "dir": pt(solidcraft_engine::doc::apply_vector(frame, dir))})
 }
 
 fn stored_revolve_axis(kind: &Kind) -> Option<&Value> {
@@ -3738,10 +3822,13 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let mut toggle_list: Option<usize> = None;
     let mut hovered: Option<(usize, Sel)> = None;
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
+    let unresolved_axis = unresolved_coil_axis(d, s);
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
         let alignment = crate::dialogs_assembly::stored_alignment(&d.kind, i);
-        let stored_reference =
-            stored_input_reference_key(d, i).and_then(|key| d.extra.get(key)).or(alignment.as_ref()).filter(|_| inp.items.is_empty());
+        let stored_reference = stored_input_reference_key(d, i)
+            .and_then(|key| d.extra.get(key))
+            .or(alignment.as_ref())
+            .filter(|_| inp.items.is_empty() && !(i == 1 && unresolved_axis));
         form_row(ui, inp.label, |ui| {
             ui.horizontal(|ui| {
                 let active = i == d.active && !text_focus;
@@ -4004,6 +4091,15 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
     {
         d.refuse(app, error);
     }
+    // An Extrude's taken name is refused by `apply_commands` before any preview runs (#18668), so
+    // it is said here; its other refusals (a missing profile) keep their own way of showing.
+    if matches!(d.kind, Kind::Extrude { .. })
+        && d.previews()
+        && let Err(error) = apply_commands(app, d)
+        && error.starts_with("another feature is called")
+    {
+        d.refuse(app, error);
+    }
     let shown_id = egui::Id::unique("sc_dialog_refusal_shown");
     if d.error.is_none() && app.preview.error.is_none() {
         ui.data_mut(|m| m.remove::<String>(shown_id));
@@ -4204,7 +4300,8 @@ fn update_fill_cells(app: &SolveApp, d: &mut Dialog) {
         Some((id, _)) => app.session.model.state_before(id),
         None => crate::open_meshing::session_world(&app.session),
     };
-    let found = fill_cells(&st, &names);
+    let planes = fill_planes(&app.session, &tools);
+    let found = fill_cells(&st, &names, &planes);
     let kept: Vec<String> = cells.iter().filter(|c| c.2).map(|c| c.1.clone()).collect();
     *cells = found.into_iter().map(|(p, label)| (p, label.clone(), kept.is_empty() || kept.contains(&label))).collect();
     *of = tools;
@@ -4212,7 +4309,11 @@ fn update_fill_cells(app: &SolveApp, d: &mut Dialog) {
 
 /// The cells a set of tool bodies makes: each region inside some of them and outside the rest,
 /// as a point inside it and which tools hold it. Found by sampling a grid over the tools.
-pub(crate) fn fill_cells(st: &solidcraft_engine::doc::ModelState, tools: &[String]) -> Vec<(Vec3, String)> {
+pub(crate) fn fill_cells(
+    st: &solidcraft_engine::doc::ModelState,
+    tools: &[String],
+    planes: &[(String, solidcore_record::Plane)],
+) -> Vec<(Vec3, String)> {
     let bodies: Vec<_> = tools.iter().filter_map(|n| st.body(n).map(|b| (n.clone(), b.mesh()))).take(16).collect();
     if bodies.is_empty() {
         return Vec::new();
@@ -4220,6 +4321,10 @@ pub(crate) fn fill_cells(st: &solidcraft_engine::doc::ModelState, tools: &[Strin
     let indexes: Vec<_> = bodies.iter().map(|(_, m)| m.inside_index()).collect();
     let bb = bodies.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |b, (_, m)| b.union(&m.bounds()));
     let n = 20;
+    if !planes.is_empty() {
+        let names: Vec<&str> = bodies.iter().map(|(name, _)| name.as_str()).collect();
+        return fill_cells_between(&names, &indexes, &bb, planes, n);
+    }
     let at = |i: usize, lo: f64, hi: f64| lo + (hi - lo) * (i as f64 + 0.5) / n as f64;
     // Signature (which tools hold the point) → the points with it.
     let mut groups: Vec<(u32, Vec<Vec3>)> = Vec::new();
@@ -4249,6 +4354,167 @@ pub(crate) fn fill_cells(st: &solidcraft_engine::doc::ModelState, tools: &[Strin
             Some((rep, format!("Inside {}", inside.join(", "))))
         })
         .collect()
+}
+
+/// What Boundary Fill's Tools take: bodies, and planes that close them.
+const FILL_TOOLS: selection::Accept = BODIES | PLANES;
+
+/// An input that takes bodies and nothing else a pick could be but a body's face, edge, vertex or
+/// component, which stand for their body there. Boundary Fill's Tools also take planes, and keep
+/// that.
+fn takes_only_bodies(i: &SelInput) -> bool {
+    i.accept == BODIES || i.accept == FILL_TOOLS
+}
+
+/// The origin and construction planes among the Boundary Fill tools, by name, as they lie.
+fn fill_planes(s: &Session, tools: &[Sel]) -> Vec<(String, solidcore_record::Plane)> {
+    tools
+        .iter()
+        .filter_map(|t| match t {
+            Sel::Plane { name } => plane_by_name(s, name).map(|pl| (name.clone(), pl)),
+            _ => None,
+        })
+        .take(16)
+        .collect()
+}
+
+/// The names of the planes among the Boundary Fill tools.
+pub(crate) fn fill_plane_names(tools: &[Sel]) -> Vec<String> {
+    tools.iter().filter_map(|t| if let Sel::Plane { name } = t { Some(name.clone()) } else { None }).collect()
+}
+
+/// Which tools hold a point (the low bits) and which side of each plane it is on (from bit 16).
+fn fill_signature(indexes: &[solidcraft_engine::geom::InsideIndex<'_>], planes: &[(String, solidcore_record::Plane)], p: Vec3) -> u32 {
+    let held = indexes.iter().enumerate().fold(0u32, |acc, (t, ix)| if ix.contains(p) { acc | (1 << t) } else { acc });
+    planes.iter().enumerate().fold(held, |acc, (t, (_, pl))| if pl.height(p) > 0.0 { acc | (1 << (16 + t)) } else { acc })
+}
+
+/// The label of the found cell each stored point lies in: the cell with the point's own signature
+/// (the tools that hold it and its side of each plane), the nearest of those to the point. A point
+/// in no found cell takes the nearest cell.
+pub(crate) fn fill_cells_holding(
+    st: &solidcraft_engine::doc::ModelState,
+    tools: &[String],
+    planes: &[(String, solidcore_record::Plane)],
+    stored: &[Vec3],
+    found: &[(Vec3, String)],
+) -> Vec<String> {
+    let bodies: Vec<_> = tools.iter().filter_map(|n| st.body(n).map(|b| b.mesh())).take(16).collect();
+    let indexes: Vec<_> = bodies.iter().map(|m| m.inside_index()).collect();
+    let reps: Vec<u32> = found.iter().map(|(p, _)| fill_signature(&indexes, planes, *p)).collect();
+    stored
+        .iter()
+        .filter_map(|c| {
+            let sig = fill_signature(&indexes, planes, *c);
+            let nearest = |same: bool| {
+                found
+                    .iter()
+                    .zip(&reps)
+                    .filter(|(_, r)| !same || **r == sig)
+                    .min_by(|a, b| a.0.0.dist(*c).total_cmp(&b.0.0.dist(*c)))
+                    .map(|(x, _)| x.1.clone())
+            };
+            nearest(true).or_else(|| nearest(false))
+        })
+        .collect()
+}
+
+/// [`fill_cells`] with plane tools: a plane cuts space like an infinite plane, so the cells are the
+/// connected regions of one signature (the tools that hold a point and its side of each plane).
+/// A region outside every tool is a cell only when it does not reach the edge of the sampled box
+/// (the tools and planes close it off).
+fn fill_cells_between(
+    names: &[&str],
+    indexes: &[solidcraft_engine::geom::InsideIndex<'_>],
+    bb: &Aabb3,
+    planes: &[(String, solidcore_record::Plane)],
+    n: usize,
+) -> Vec<(Vec3, String)> {
+    let at = |i: usize, lo: f64, hi: f64| lo + (hi - lo) * (i as f64 + 0.5) / n as f64;
+    let cell_count = n * n * n;
+    // The box reaches past the tools, so a cavity a plane closes at the tools' own edge stays inside
+    // it, and only a region open to the outside reaches the box's edge.
+    let pad = ((bb.max.x - bb.min.x).max(bb.max.y - bb.min.y).max(bb.max.z - bb.min.z) * 0.25).max(1e-3);
+    let lo = Vec3::new(bb.min.x - pad, bb.min.y - pad, bb.min.z - pad);
+    let hi = Vec3::new(bb.max.x + pad, bb.max.y + pad, bb.max.z + pad);
+    let point = |c: usize| Vec3::new(at(c / (n * n), lo.x, hi.x), at(c / n % n, lo.y, hi.y), at(c % n, lo.z, hi.z));
+    // Which tools hold a point (the low bits) and which side of each plane it is on (from bit 16).
+    let signature = |p: Vec3| fill_signature(indexes, planes, p);
+    let sigs: Vec<u32> = (0..cell_count).map(|c| signature(point(c))).collect();
+    let mut seen = vec![false; cell_count];
+    let mut out: Vec<(Vec3, String)> = Vec::new();
+    let mut labels: Vec<String> = Vec::new();
+    for start in 0..cell_count {
+        if seen.get(start).copied().unwrap_or(true) {
+            continue;
+        }
+        let sig = sigs.get(start).copied().unwrap_or(0);
+        let mut stack = vec![start];
+        let mut members: Vec<usize> = Vec::new();
+        let mut reaches_edge = false;
+        if let Some(s) = seen.get_mut(start) {
+            *s = true;
+        }
+        while let Some(c) = stack.pop() {
+            members.push(c);
+            let (i, j, k) = (c / (n * n), c / n % n, c % n);
+            reaches_edge |= [i, j, k].iter().any(|&x| x == 0 || x + 1 == n);
+            let mut neighbours: Vec<usize> = Vec::new();
+            if i > 0 {
+                neighbours.push(c - n * n);
+            }
+            if i + 1 < n {
+                neighbours.push(c + n * n);
+            }
+            if j > 0 {
+                neighbours.push(c - n);
+            }
+            if j + 1 < n {
+                neighbours.push(c + n);
+            }
+            if k > 0 {
+                neighbours.push(c - 1);
+            }
+            if k + 1 < n {
+                neighbours.push(c + 1);
+            }
+            for nb in neighbours {
+                if sigs.get(nb) == Some(&sig) && seen.get(nb) == Some(&false) {
+                    if let Some(s) = seen.get_mut(nb) {
+                        *s = true;
+                    }
+                    stack.push(nb);
+                }
+            }
+        }
+        let held = sig & 0xffff;
+        // Outside every tool and open to the edge of the box: not enclosed.
+        if held == 0 && reaches_edge {
+            continue;
+        }
+        let pts: Vec<Vec3> = members.iter().map(|&c| point(c)).collect();
+        let centre = pts.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / pts.len().max(1) as f64);
+        let Some(rep) = pts.iter().min_by(|a, b| a.dist(centre).total_cmp(&b.dist(centre))).copied() else { continue };
+        let inside: Vec<&str> = names.iter().enumerate().filter(|(t, _)| held & (1 << t) != 0).map(|(_, name)| *name).collect();
+        let base = if inside.is_empty() { "Enclosed by the tools and planes".to_string() } else { format!("Inside {}", inside.join(", ")) };
+        let sides: Vec<String> = planes
+            .iter()
+            .enumerate()
+            .map(|(t, (name, _))| format!("{} {name}", if sig & (1 << (16 + t)) != 0 { "above" } else { "below" }))
+            .collect();
+        let mut label = format!("{base}, {}", sides.join(", "));
+        // A region apart from another of the same signature gets its own number.
+        let same = labels.iter().filter(|l| **l == label).count();
+        labels.push(label.clone());
+        if same > 0 {
+            label = format!("{label} #{}", same + 1);
+        }
+        out.push((rep, label));
+        if out.len() >= 64 {
+            break;
+        }
+    }
+    out
 }
 
 /// Measure again when the picked items changed.
@@ -5124,6 +5390,7 @@ fn rememberable(kind: &Kind) -> bool {
             | Kind::Primitive { .. }
             | Kind::Combine { .. }
             | Kind::Shell { .. }
+            | Kind::Dome { .. }
             | Kind::Draft { .. }
             | Kind::OffsetPlane { .. }
             | Kind::AnglePlane { .. }
@@ -5170,7 +5437,7 @@ fn remembered_extra_keys(kind: &Kind) -> &'static [&'static str] {
         Some("solid.boundary_fill") => &["remove_tools"],
         Some("solid.thread") => &["modeled"],
         Some("solid.move") => &["copy"],
-        Some("solid.coil") => &["section", "section_position", "start_angle", "clockwise"],
+        Some("solid.coil") => &["section", "section_position", "start_angle", "clockwise", "reversed"],
         _ => &[],
     }
 }
@@ -5336,13 +5603,15 @@ pub(crate) fn confirm(app: &mut SolveApp) {
 }
 
 /// A right-click in the viewport with a dialog open confirms its active input (#6159): it goes
-/// on to the next input that is still empty, and once every input holds something, runs OK as
-/// Enter does. An empty input the dialog can't make its feature without stays active, and the
-/// status line says what to pick.
+/// on to the next input that is still empty, and when there is none, runs OK as Enter does.
+/// An empty input the dialog can't make its feature without stays active, and the status line
+/// says what to pick.
 pub(crate) fn right_click(app: &mut SolveApp) {
     let Some(mut d) = app.dialog.take() else { return };
     if enter_applies(&d) && app.applying.is_none() {
-        let empty = |i: &usize| d.inputs.get(*i).is_some_and(|input| input.items.is_empty());
+        // Coil can use its own section and direction, so empty pick fields do not stop OK.
+        let coil = matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. });
+        let empty = |i: &usize| !coil && d.inputs.get(*i).is_some_and(|input| input.items.is_empty());
         let next = (d.active.saturating_add(1)..d.inputs.len()).chain(0..d.active.min(d.inputs.len())).find(empty);
         match d.active_input().filter(|input| input.items.is_empty()) {
             // An empty input is optional when the dialog makes its feature without it.
@@ -5470,6 +5739,35 @@ pub(crate) fn set_object_accepting(inputs: &mut Vec<SelInput>, active: &mut usiz
             *active -= 1;
         }
         *active = (*active).min(inputs.len().saturating_sub(1));
+    }
+}
+
+/// Whether `text` is a plain zero, with or without a unit (`0`, `0 mm`, `0.0in`): no parameter
+/// or expression a later change could make non-zero.
+pub(crate) fn literal_zero(text: &str) -> bool {
+    let number = text.trim().trim_end_matches(|c: char| c.is_ascii_alphabetic()).trim();
+    number.trim_start_matches('(').trim_end_matches(')').trim().parse::<f64>().is_ok_and(|v| v == 0.0)
+}
+
+/// Combine's pick input for the tool faces a cut's offset moves.
+pub(crate) const COMBINE_OFFSET_FACES: &str = "ui.combine_offset_faces";
+
+/// Show Combine's Offset Faces input while a cut moves picked faces only, and remove it (with its
+/// picks) otherwise. Showing it makes it the active input: the next picks are faces.
+pub(crate) fn set_combine_offset_faces(inputs: &mut Vec<SelInput>, active: &mut usize, on: bool) {
+    let at = inputs.iter().position(|i| i.label == COMBINE_OFFSET_FACES);
+    match (at, on) {
+        (None, true) => {
+            inputs.push(SelInput::new(COMBINE_OFFSET_FACES, FACES, true));
+            *active = inputs.len() - 1;
+        }
+        (Some(at), false) => {
+            inputs.remove(at);
+            if *active >= at {
+                *active = (*active).saturating_sub(1).min(inputs.len().saturating_sub(1));
+            }
+        }
+        _ => {}
     }
 }
 
@@ -6240,6 +6538,16 @@ fn section_from_geometry(d: &mut Dialog, plane: solidcraft_engine::SectionPlane,
     d.extra.insert("plane".into(), json!({"origin": base, "normal": canonical}));
 }
 
+/// Load the section on show into the open Section Analysis dialog (its last plane, as Edit does),
+/// so the dialog's preview and OK stand for it rather than for the plane it opened with.
+pub(crate) fn load_shown_section(app: &SolveApp, d: &mut Dialog) {
+    let mut planes: Vec<solidcraft_engine::SectionPlane> = app.session.section.iter().chain(&app.session.section_hidden).copied().collect();
+    planes.sort_by_key(|c| c.id);
+    let Some(plane) = planes.last().copied() else { return };
+    let edit = (planes.len() > 1).then_some(plane.id);
+    section_from_geometry(d, plane, app.session.section_hatch, edit);
+}
+
 /// What the Section Analysis dialog's OK made for one plane (its id): its distance, flip and
 /// plane pick, and the cut (origin, normal) they made, so Edit reopens the dialog where it was
 /// while that plane stands there.
@@ -6281,16 +6589,22 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
         return Ok(vec![("timeline.delete".into(), json!({ "feature": id }))]);
     }
     let mut normalized = d.clone();
+    // The Name row (#18668): left blank it is the default name when making a feature and the name
+    // it has when editing one; an edit that gives another name renames it after the rebuild.
+    let rename = extrude_rename(app, &mut normalized)?;
     normalized.sync_material(&app.session);
     for value in crate::length_input::fields(&app.session.doc, &mut normalized.kind) {
         *value = crate::length_input::expression(&app.session.doc, value, ValueKind::Length);
     }
     crate::length_input::extra(&mut normalized.extra, |e| crate::length_input::expression(&app.session.doc, e, ValueKind::Length));
+    // The unticked bodies of a Cut's list are the window's own, not a command parameter.
+    normalized.extra.remove(crate::cut_bodies::SKIPPED);
     let mut cmds = dialog_commands(app, &normalized)?;
     for (command, params) in &mut cmds {
         crate::sketch_tools::projection_policy(app, command, params);
     }
     exact_regions(d, &mut cmds);
+    crate::cut_bodies::scope(app, d, &mut cmds)?;
     crate::op_auto::scope_targets(app, d, &mut cmds)?;
     if crate::hole_folder::active(d) {
         return crate::hole_folder::commands(app, d, cmds);
@@ -6302,6 +6616,7 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
                 FeatureKind::Extrude { sketch, profiles: ProfileSel::All, thin: None, .. }
                 | FeatureKind::Revolve { sketch, profiles: ProfileSel::All, .. }
                 | FeatureKind::Emboss { sketch, profiles: ProfileSel::All, .. }
+                | FeatureKind::Coil { sketch: Some(sketch), profiles: ProfileSel::All, .. }
                 | FeatureKind::SheetTab { sketch, profiles: ProfileSel::All, .. } => Some(*sketch),
                 _ => None,
             };
@@ -6344,9 +6659,48 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
                 }
             }
         }
-        return Ok(vec![("timeline.redefine".into(), json!({"feature": id, "command": cmd, "params": params}))]);
+        let mut cmds = vec![("timeline.redefine".into(), json!({"feature": id, "command": cmd, "params": params}))];
+        if let Some(name) = rename {
+            cmds.push(("timeline.rename".into(), json!({"feature": id, "name": name})));
+        }
+        return Ok(cmds);
     }
     Ok(cmds)
+}
+
+/// An Extrude dialog's Name row: a blank name, or the default the window suggested, is not sent
+/// (making one, the engine names it, so a name taken meanwhile cannot collide; editing one, it
+/// keeps its name), and the new name of an edited feature is returned to be applied as a rename,
+/// which `timeline.redefine` does not do. A name another feature has is refused here, before any
+/// command runs, so the edit is not half done.
+fn extrude_rename(app: &SolveApp, d: &mut Dialog) -> Result<Option<String>, String> {
+    if !matches!(d.kind, Kind::Extrude { .. }) {
+        return Ok(None);
+    }
+    let name = d.extra.get("name").and_then(Value::as_str).map(|n| n.trim().to_string()).unwrap_or_default();
+    let suggested = d.extra.remove("name_default").and_then(|v| v.as_str().map(str::to_string));
+    d.extra.remove("name");
+    if name.is_empty() {
+        return Ok(None);
+    }
+    match d.editing {
+        None => {
+            if suggested.as_deref() != Some(name.as_str()) {
+                d.extra.insert("name".into(), json!(name));
+            }
+            Ok(None)
+        }
+        Some((id, _)) => {
+            let Some(feature) = app.session.doc.feature(id) else { return Ok(None) };
+            if feature.name == name {
+                return Ok(None);
+            }
+            if app.session.doc.features.iter().any(|f| f.name == name && f.id != id) {
+                return Err(format!("another feature is called `{name}`"));
+            }
+            Ok(Some(name))
+        }
+    }
 }
 
 /// A dialog highlights exactly the profile regions it picks, so its commands build exactly those:
@@ -6375,6 +6729,20 @@ pub fn preview_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value
     }
     if matches!(d.kind, Kind::Move { .. }) {
         crate::dialogs_move::preview(app, d, &mut cmds);
+    }
+    // A standard part's modelled thread takes seconds to cut: the preview shows where the part
+    // goes and how big it is, with its thread left cosmetic; OK cuts it.
+    if let Kind::PartSize(k) = &d.kind {
+        crate::dialogs_part_size::preview(k, &mut cmds);
+    }
+    if matches!(d.kind, Kind::Part(_)) {
+        for (_, p) in &mut cmds {
+            if p.get("thread").and_then(Value::as_str) == Some("modeled")
+                && let Value::Object(m) = p
+            {
+                m.insert("thread".into(), json!("cosmetic"));
+            }
+        }
     }
     Ok(cmds)
 }
@@ -6595,9 +6963,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             // handle follow the pick's sketch, and a bare id would revolve about whatever line
             // the profile sketch happens to number the same.
             let axis = match sels(d, 1).first() {
-                Some(Sel::Axis { name }) => json!(name),
-                Some(curve @ Sel::SketchCurve { .. }) => sketch_curve_axis(app, curve, sketch.as_u64())?,
-                Some(x) => axis_param(app, x)?,
+                Some(pick) => selected_axis_param(app, pick, sketch.as_u64())?,
                 None => stored_axis.clone().ok_or("select an axis")?,
             };
             let mut p = json!({"axis": axis, "angle": angle, "operation": OPS.get(*operation).copied().unwrap_or("new")});
@@ -6716,6 +7082,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             ("solid.shell", p)
         }
+        Kind::Dome { .. } => {
+            need(0, "the face")?;
+            let [Sel::Face { body, .. }] = sels(d, 0) else { return Err("pick one planar face".into()) };
+            let Some(point) = face_points(0).into_iter().next() else { return Err("pick one planar face".into()) };
+            ("solid.dome", json!({"body": body, "face": point}))
+        }
         Kind::Draft { .. } => {
             need(0, "faces")?;
             need(1, "the neutral plane")?;
@@ -6808,7 +7180,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 return Err("pick profiles in two or more sketches, or a profile and a sketch point".into());
             }
             let mut p = json!({"sections": sections, "operation": OPS.get(*operation).copied().unwrap_or("new")});
-            crate::dialogs_sweep::rail_params(app, *rail_fit, [sels(d, 1), sels(d, 2)], &mut p)?;
+            let rails: Vec<&[Sel]> = (1..d.inputs.len()).map(|i| sels(d, i)).collect();
+            crate::dialogs_sweep::rail_params(app, *rail_fit, &rails, &mut p)?;
             ("solid.loft", p)
         }
         Kind::Sweep { operation, opts } => {
@@ -6860,7 +7233,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 p["path_sketch"] = json!(path_sketch);
                 p["path"] = json!(path);
             }
-            crate::dialogs_sweep::params(app, opts, sels(d, 2).first(), [sels(d, 3), sels(d, 4)], &mut p)?;
+            crate::dialogs_sweep::params(app, opts, sels(d, 2).first(), &[sels(d, 3), sels(d, 4)], &mut p)?;
             ("solid.sweep", p)
         }
         Kind::OffsetPlane { .. } => {
@@ -7120,11 +7493,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             pattern_objects(s, sels(d, 0), &mut p);
             ("solid.pattern.path", p)
         }
-        Kind::Pipe { wall, .. } => {
+        Kind::Pipe { wall, hollow, .. } => {
             need(0, "the path")?;
             let path = sels(d, 0).curve_ids();
             let sketch = picks_sketch(app, sels(d, 0), None).ok_or("the path curves must be in one sketch")?;
             let mut p = json!({"path_sketch": sketch, "path": path});
+            // A pipe is a solid rod or a hollow tube (#18344). A tube needs a wall, and the wall the
+            // window holds is the pipe's wall: a thickness typed in it is never dropped.
+            if *hollow == 1 && wall.trim().is_empty() {
+                return Err("type a wall thickness for a hollow pipe".into());
+            }
             put(&mut p, &[("wall", wall)]);
             ("solid.pipe", p)
         }
@@ -7156,6 +7534,24 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                             }
                         }
                         p["tool_faces"] = json!(points);
+                    }
+                    // More surface bodies, each whole (#13303): a body, or a face picked on one.
+                    if *sheet == 2 {
+                        let others = d.inputs.iter().find(|inp| inp.label == SPLIT_TOOL_BODIES).map(|inp| inp.items.as_slice()).unwrap_or_default();
+                        let mut names: Vec<&str> = Vec::new();
+                        for sel in others {
+                            let name = match sel {
+                                Sel::Body { name } => name.as_str(),
+                                Sel::Face { body: o, .. } => o.as_str(),
+                                _ => return Err("pick the other surface bodies".into()),
+                            };
+                            if name != b.as_str() && !names.contains(&name) {
+                                names.push(name);
+                            }
+                        }
+                        if !names.is_empty() {
+                            p["tool_bodies"] = json!(names);
+                        }
                     }
                     p
                 }
@@ -7489,13 +7885,24 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             for (k, v) in fields {
                 p.insert((*k).into(), json!(v));
             }
-            if *cmd == "solid.coil"
-                && let Some((sketch, index)) = sels(d, 0).profiles().first().copied()
-            {
-                p.insert("sketch".into(), json!(sketch));
-                p.insert("profiles".into(), json!([index]));
-                p.remove("diameter");
-                p.remove("section_size");
+            if *cmd == "solid.coil" {
+                let (sketch, selected_profiles) = profiles();
+                // Like Revolve's qualified pick, keep the original owner when the profile
+                // changes. The saved axis and base remain in effect until the axis is replaced.
+                if let Some((id, _)) = d.editing
+                    && let Some(FeatureKind::Coil { sketch: Some(original), axis_ref: Some(AxisRef::SketchLine { curve, sketch: None }), .. }) =
+                        s.doc.feature(id).map(|f| &f.kind)
+                    && sketch.as_u64() != Some(original.0)
+                    && d.extra.get("axis") == Some(&json!({"curve": curve}))
+                {
+                    p.insert("axis".into(), json!({"sketch": original.0, "curve": curve}));
+                }
+                if !sketch.is_null() {
+                    p.insert("sketch".into(), sketch);
+                    p.insert("profiles".into(), selected_profiles);
+                    p.remove("diameter");
+                    p.remove("section_size");
+                }
             }
             if let Some((point, normal)) = *at {
                 match *cmd {
@@ -7504,7 +7911,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     }
                     "solid.cylinder" | "solid.coil" | "solid.cone" => {
                         p.insert("base".into(), pt(point));
-                        if let Some(n) = normal {
+                        if let Some(n) = normal.filter(|_| *cmd != "solid.coil" || !d.extra.contains_key("axis")) {
                             // An axis of expressions (#18822) that still points along the face's
                             // normal is kept as written, so it goes on following its parameters.
                             let written = d
@@ -7535,11 +7942,24 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     p.insert("references".into(), json!(references));
                 }
             }
-            // Flip winds the coil the other way along its axis, downward from a sketch profile
-            // (#17870): the reversed axis keeps the coil's hand, where a negative pitch mirrors it.
-            if *cmd == "solid.coil" && coil_flipped(&d.extra) {
-                let axis = p.get("axis").or_else(|| d.extra.get("axis")).and_then(solidcraft_engine::params::vec3).unwrap_or(Vec3::Z);
-                p.insert("axis".into(), pt3(-axis));
+            // A refilled reference already carries its saved axis and base. A new pick
+            // clears the saved axis and supplies its own origin.
+            if *cmd == "solid.coil"
+                && !d.extra.contains_key("axis")
+                && let Some(sel) = sels(d, 1).first()
+            {
+                let profile_sketch = sels(d, 0).profiles().first().map(|(sketch, _)| *sketch);
+                let mut axis = coil_axis_param(app, sel, profile_sketch)?;
+                if axis.get("type").and_then(Value::as_str) == Some("placed_edge")
+                    && d.editing.and_then(|(id, _)| s.doc.feature(id)).is_none_or(|f| f.component == s.active_component)
+                    && let Some(path) = &s.active_occurrence_path
+                {
+                    axis["author_path"] = json!(path);
+                }
+                p.insert("axis".into(), axis);
+                if let Some((origin, _)) = axis_of(app, sel) {
+                    p.insert("base".into(), pt(origin));
+                }
             }
             p.insert("operation".into(), json!(OPS.get(*operation).copied().unwrap_or("new")));
             (cmd, Value::Object(p))
@@ -7552,24 +7972,42 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             (
                 "solid.boundary_fill",
-                json!({"tools": sels(d, 0).body_names(), "cells": picked, "operation": OPS.get(*operation).copied().unwrap_or("new")}),
+                json!({"tools": sels(d, 0).body_names(), "planes": fill_plane_names(sels(d, 0)), "cells": picked, "operation": OPS.get(*operation).copied().unwrap_or("new")}),
             )
         }
-        Kind::Combine { operation, keep_tools } => {
+        Kind::Combine { operation, keep_tools, offset, round_edges, picked_faces, radius } => {
             need(0, "the target body")?;
             need(1, "tool bodies")?;
             let target = sels(d, 0).body_names().into_iter().next().unwrap_or_default();
             let tools: Vec<String> = sels(d, 1).body_names().into_iter().filter(|n| *n != target).collect();
-            (
-                "solid.combine",
-                json!({"target": target, "tools": tools, "operation": OPS.get(*operation).copied().unwrap_or("join"), "keep_tools": keep_tools}),
-            )
+            let op = OPS.get(*operation).copied().unwrap_or("join");
+            let mut p = json!({"target": target, "tools": tools, "operation": op, "keep_tools": keep_tools});
+            // Only a cut takes an offset. A literal zero is the same as none; an expression that
+            // is zero now (a parameter) is kept, so the cut follows it when it changes.
+            let offset = offset.trim();
+            if op == "cut" && !offset.is_empty() && !literal_zero(offset) {
+                p["offset"] = json!(offset);
+                if *round_edges {
+                    p["offset_edges"] = json!("round");
+                    if !radius.trim().is_empty() {
+                        p["offset_radius"] = json!(radius.trim());
+                    }
+                }
+                if *picked_faces {
+                    let faces = d.inputs.iter().find(|i| i.label == COMBINE_OFFSET_FACES).map(|i| i.items.face_points()).unwrap_or_default();
+                    if faces.is_empty() {
+                        return Err("select the tool faces to offset".into());
+                    }
+                    p["offset_faces"] = json!(faces.iter().map(|f| [f.x, f.y, f.z]).collect::<Vec<_>>());
+                }
+            }
+            ("solid.combine", p)
         }
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
         Kind::RenameGroup { group, name } => ("timeline.rename_group", json!({"group": group, "name": name})),
         Kind::ConfirmDelete { features, groups, .. } => ("timeline.delete", crate::timeline::delete_params(features, groups)),
-        Kind::SketchIntersect { projection_link, .. } => {
+        Kind::SketchIntersect { projection_link, construction, .. } => {
             need(0, "geometry or bodies")?;
             let refs = sels(d, 0)
                 .iter()
@@ -7581,13 +8019,13 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     _ => Err("select geometry or bodies".to_string()),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            ("sketch.intersect", json!({"refs": refs, "projection_link": projection_link}))
+            ("sketch.intersect", json!({"refs": refs, "projection_link": projection_link, "construction": construction}))
         }
-        Kind::SketchProject { projection_link, .. } => {
+        Kind::SketchProject { projection_link, construction, .. } => {
             need(0, "geometry or bodies")?;
             let refs =
                 crate::tools::projection_preselection(sels(d, 0)).ok_or_else(|| "select geometry or bodies that can be projected".to_string())?;
-            ("sketch.project", json!({"refs": refs, "projection_link": projection_link}))
+            ("sketch.project", json!({"refs": refs, "projection_link": projection_link, "construction": construction}))
         }
         Kind::Sketch | Kind::Measure { .. } => return Ok(Vec::new()),
         Kind::Assembly(k) => return crate::dialogs_assembly::commands(app, k, &d.inputs),
@@ -7609,6 +8047,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Motion(k) => return crate::dialogs_motion::commands(app, k, &d.inputs),
         Kind::Part(k) => return crate::dialogs_parts::commands(app, k, &d.inputs),
         Kind::PartSize(k) => return crate::dialogs_part_size::commands(app, k),
+        Kind::Pulley(k) => return crate::dialogs_pulley::commands(app, k),
         Kind::Text(k) => return crate::sketch_text::commands(app, k),
         Kind::TextMove(k) => return crate::sketch_text_move::commands(app, k),
     };
@@ -7617,24 +8056,18 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     if let Value::Object(m) = &mut params {
         // A fillet option that doesn't apply with the others is never sent.
         let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
-        let coil = matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. });
-        let coil_from_sketch = coil && m.contains_key("sketch");
-        // The dialog has no end cut control to clear one an edited coil kept.
-        let profile_coil = matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && m.contains_key("sketch");
+        let coil_profile = cmd == "solid.coil" && m.contains_key("sketch");
         for (k, v) in &d.extra {
             // Saved selection mode is editor state, not a command parameter.
             if matches!(d.kind, Kind::Split { .. }) && k == "split_tool_mode" {
                 continue;
             }
-            if profile_coil && k == "end_cut" {
-                continue;
-            }
             if fillet && !dense::fillet_option_applies(&d.extra, k) {
                 continue;
             }
-            // Flip is the dialog's own (it reverses the axis); a sketch profile brings its own
-            // section, so the primitive section's options are never sent with it (#17870).
-            if coil && (k == "flip" || (coil_from_sketch && COIL_SECTION_OPTIONS.contains(&k.as_str()))) {
+            // Keep the primitive section in the dialog while a sketch supplies the profile. The
+            // dialog has no end cut control to clear one an edited coil kept.
+            if coil_profile && matches!(k.as_str(), "diameter" | "section_size" | "section" | "section_position" | "start_angle" | "end_cut") {
                 continue;
             }
             m.entry(k.clone()).or_insert_with(|| v.clone());
@@ -7953,14 +8386,64 @@ pub(crate) fn sketch_curve_axis(app: &SolveApp, sel: &Sel, profile_sketch: Optio
     if !origin.is_finite() || !dir.is_finite() {
         return Err(AXIS_PICK.into());
     }
-    let same = profile_sketch.and_then(|sketch| profile_axis_line(app, sketch, id)).is_some_and(|line| same_axis(line, (origin, dir)));
-    if same {
-        Ok(json!(id))
-    } else if let Some(owner) = sketch.filter(|owner| Some(*owner) != profile_sketch) {
-        Ok(json!({"sketch": owner, "curve": id}))
-    } else {
-        Ok(json!({"origin": pt(origin), "dir": pt(dir)}))
+    if let Some(owner) = sketch.filter(|owner| Some(*owner) != profile_sketch) {
+        return Ok(json!({"sketch": owner, "curve": id}));
     }
+    let same = profile_sketch.and_then(|sketch| profile_axis_line(app, sketch, id)).is_some_and(|line| same_axis(line, (origin, dir)));
+    if same { Ok(json!(id)) } else { Ok(json!({"origin": pt(origin), "dir": pt(dir)})) }
+}
+
+/// The shared axis-pick serializer for Revolve and Coil. Sketch lines keep their owner so
+/// repeated curve ids in different sketches cannot select a different axis on evaluation.
+fn selected_axis_param(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -> Result<Value, String> {
+    match sel {
+        Sel::Axis { name } => Ok(json!(name)),
+        Sel::SketchCurve { .. } => sketch_curve_axis(app, sel, profile_sketch),
+        _ => axis_param(app, sel),
+    }
+}
+
+/// A picked world axis is a persistent reference. A typed X, Y or Z is a direction at the base.
+fn coil_axis_param(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -> Result<Value, String> {
+    match sel {
+        Sel::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => Ok(json!({"type":"world","axis":name})),
+        Sel::Edge { body, index, point } => {
+            let s = &app.session;
+            let state = s.model.state();
+            let doc = s.placed_document();
+            let (_, source, _, path, frame) = doc.body_frames_with_source(&state).into_iter().find(|(world, ..)| world == body).ok_or(AXIS_PICK)?;
+            let source_body = state.body(&source).ok_or(AXIS_PICK)?;
+            if source_body.body.is_mesh() {
+                return axis_param(app, sel);
+            }
+            let name =
+                solidcraft_engine::doc::naming::edge_names(source_body).into_iter().nth(*index).filter(|name| !name.is_empty()).ok_or(AXIS_PICK)?;
+            let inverse = solidcraft_kernel::services::affine::inverse(&frame).map_err(|_| AXIS_PICK)?;
+            let at = solidcraft_kernel::services::affine::apply_point(&inverse, (*point).into());
+            Ok(json!({"type":"placed_edge", "body":source, "path":path, "at":at, "name":name}))
+        }
+        Sel::SketchCurve { id, .. } => {
+            let owner = picks_sketch(app, std::slice::from_ref(sel), None);
+            let state = crate::open_meshing::session_world(&app.session);
+            if owner.and_then(|owner| state.sketch(owner)).is_some_and(|sketch| sketch.sketch.wire_index(id).is_some()) {
+                // A straight 3D wire supplies its line in world coordinates.
+                axis_param(app, sel)
+            } else {
+                sketch_curve_axis(app, sel, profile_sketch)
+            }
+        }
+        _ => selected_axis_param(app, sel, profile_sketch),
+    }
+}
+
+/// Preview a picked Coil model edge with the same world direction as evaluation.
+pub(crate) fn coil_axis_preview(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
+    let (origin, dir) = axis_of(app, sel)?;
+    let dir = match sel {
+        Sel::Edge { body, .. } if !is_mesh_body(&app.session, body) => solidcraft_engine::doc::construct::canonical_dir(dir),
+        _ => dir,
+    };
+    Some((origin, dir))
 }
 
 /// The world line of curve `id` on `sketch`, when that curve is a line.
@@ -8363,6 +8846,36 @@ pub(crate) fn angle_pivot(d: &Dialog) -> Option<&Sel> {
     d.inputs.iter().find(|i| i.label == "Pivot").and_then(|i| i.items.first())
 }
 
+/// The axis the Plane at Angle dialog turns about, as the command reads it: the picked axis, a
+/// sketch line or an edge, or the axis an edited feature stored (numbers, a name, or a saved
+/// reference).
+pub(crate) fn angle_axis(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
+    if let Some(sel) = d.inputs.get(1).and_then(|i| i.items.first()) {
+        return axis_of(app, sel);
+    }
+    let stored = d.extra.get("axis")?;
+    // The numbers an edited feature stored: an origin and a direction.
+    if let (Some(origin), Some(dir)) = (stored.get("origin"), stored.get("dir"))
+        && let (Ok(o), Ok(v)) = (serde_json::from_value::<[f64; 3]>(origin.clone()), serde_json::from_value::<[f64; 3]>(dir.clone()))
+    {
+        return Some((Vec3::new(o[0], o[1], o[2]), Vec3::new(v[0], v[1], v[2])));
+    }
+    // A name, or a saved reference the dialog keeps until a new pick replaces it.
+    let sel = match stored {
+        Value::String(name) => Some(Sel::Axis { name: name.clone() }),
+        other => {
+            use solidcraft_engine::doc::construct::GeoRef;
+            let reference = serde_json::from_value::<GeoRef>(other.clone()).ok()?;
+            match &reference {
+                GeoRef::Axis { name } => Some(Sel::Axis { name: name.to_string() }),
+                GeoRef::World { axis } => Some(Sel::Axis { name: axis.clone() }),
+                _ => model_axis_sel(&app.session, &reference),
+            }
+        }
+    }?;
+    axis_of(app, &sel)
+}
+
 /// A stored point reference back into a dialog pick: a body vertex, sketch point or construction point.
 fn point_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
     use solidcraft_engine::doc::construct::GeoRef;
@@ -8390,6 +8903,19 @@ pub(crate) fn model_axis_sel(s: &Session, g: &solidcraft_engine::doc::construct:
         GeoRef::Edge { .. } => edge_sel(s, at),
         GeoRef::Face { .. } => face_sel(s, at),
         _ => None,
+    }
+}
+
+/// Refill the same axis selection for Revolve and Coil when editing a feature.
+pub(crate) fn axis_reference_pick(s: &Session, axis: &AxisRef, profile_sketch: Option<u64>) -> Option<Sel> {
+    match axis {
+        AxisRef::World { axis } => Some(Sel::Axis { name: axis.to_ascii_uppercase() }),
+        AxisRef::SketchAxis { axis } => Some(Sel::Axis { name: axis.to_ascii_lowercase() }),
+        AxisRef::SketchLine { curve, sketch } => Some(crate::selection::curve_pick(curve, sketch.or(profile_sketch)?, s.active_sketch)),
+        AxisRef::Model { geo: solidcraft_engine::doc::construct::GeoRef::Datum { datum } } => Some(Sel::Axis { name: datum.key() }),
+        AxisRef::Model { geo } => model_axis_sel(s, geo),
+        AxisRef::Construction { name } => Some(Sel::Axis { name: name.to_string() }),
+        AxisRef::Line { .. } => None,
     }
 }
 
@@ -8503,15 +9029,6 @@ fn world_axis(d: Vec3) -> Option<String> {
 
 fn pt3(v: Vec3) -> Value {
     json!([v.x, v.y, v.z])
-}
-
-/// The Coil dialog's options that shape the primitive section, which `solid.coil` refuses with a
-/// sketch profile (#17870).
-const COIL_SECTION_OPTIONS: [&str; 3] = ["section", "section_position", "start_angle"];
-
-/// Whether the Coil dialog's Flip is on: the coil winds the other way along its axis (#17870).
-fn coil_flipped(extra: &serde_json::Map<String, Value>) -> bool {
-    extra.get("flip").and_then(Value::as_bool).unwrap_or(false)
 }
 
 /// The reference edges of cylinder `id`, as OK sends them when the window didn't place it on its
@@ -8654,15 +9171,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let Some(inp) = d.inputs.get_mut(0) {
                 inp.items = items.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
             }
-            let ax = match axis {
-                AxisRef::World { axis } => Some(Sel::Axis { name: axis.to_ascii_uppercase() }),
-                AxisRef::SketchAxis { axis } => Some(Sel::Axis { name: axis.to_ascii_lowercase() }),
-                AxisRef::SketchLine { curve, sketch: Some(owner) } => Some(crate::selection::curve_pick(curve, *owner, s.active_sketch)),
-                AxisRef::SketchLine { curve, sketch: None } => Some(crate::selection::curve_pick(curve, sketch.0, s.active_sketch)),
-                AxisRef::Model { geo } => model_axis_sel(s, geo),
-                AxisRef::Construction { name } => Some(Sel::Axis { name: name.to_string() }),
-                AxisRef::Line { .. } => None,
-            };
+            let ax = axis_reference_pick(s, axis, Some(sketch.0));
             if let Some(inp) = d.inputs.get_mut(1) {
                 inp.items = ax.into_iter().collect();
             }
@@ -8812,6 +9321,20 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         })
                         .collect();
                 }
+            }
+            d
+        }
+        FeatureKind::Dome { face, .. } => {
+            let mut d = start("solid.dome")?;
+            d.kind = Kind::simple_restore(&f.kind)?;
+            if let Some(inp) = d.inputs.get_mut(0) {
+                inp.items = f
+                    .face_names
+                    .first()
+                    .and_then(|name| named_refill(s, f.kind.face_body(), name, face.0, false))
+                    .or_else(|| face_sel(s, face.0))
+                    .into_iter()
+                    .collect();
             }
             d
         }
@@ -9040,6 +9563,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         FeatureKind::Coil {
             base,
             axis,
+            axis_ref,
+            reversed,
             sketch,
             profiles,
             diameter,
@@ -9054,7 +9579,15 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             operation,
             targets,
         } => {
+            use solidcraft_engine::doc::construct::GeoRef;
+
             let mut d = start("solid.coil")?;
+            // An edit starts from the saved Coil, including when the new dialog uses preselection.
+            for input in &mut d.inputs {
+                input.items.clear();
+            }
+            d.extra.clear();
+            d.profile_selection_changed = false;
             d.kind = Kind::Primitive {
                 cmd: "solid.coil",
                 fields: vec![
@@ -9075,6 +9608,51 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d.extra.insert("base".into(), pt_expr(base));
             d.extra.insert("axis".into(), pt3(axis.0));
+            if let Some(reference) = axis_ref {
+                let profile_sketch = sketch.map(|id| id.0);
+                let pick = match reference {
+                    AxisRef::Model { geo: geo @ GeoRef::PlacedEdge { .. } } => {
+                        solidcraft_engine::doc::construct::placed_edge_pick(&s.placed_document(), &s.model.state(), geo)
+                            .map(|(body, index, point)| Sel::Edge { body, index, point })
+                    }
+                    AxisRef::Model { geo: GeoRef::Edge { at, name: Some(name) } } => {
+                        solidcraft_engine::doc::construct::named_edge_pick(&st, *at, name).map(|(body, index, point)| Sel::Edge {
+                            body,
+                            index,
+                            point,
+                        })
+                    }
+                    _ => axis_reference_pick(s, reference, profile_sketch),
+                };
+                let (axis, pick) = match (reference, pick) {
+                    (AxisRef::SketchAxis { .. }, pick) => (serde_json::to_value(reference).ok()?, pick),
+                    (AxisRef::SketchLine { curve, sketch }, pick) => {
+                        // A deleted line leaves the field empty so a new pick can replace the saved reference.
+                        let axis = match sketch {
+                            Some(owner) => json!({"sketch": owner, "curve": curve}),
+                            None => json!({"curve": curve}),
+                        };
+                        let pick = pick.filter(|pick| coil_axis_param(app, pick, profile_sketch).is_ok());
+                        (axis, pick)
+                    }
+                    (AxisRef::Model { geo: geo @ (GeoRef::Edge { .. } | GeoRef::Face { .. } | GeoRef::PlacedEdge { .. }) }, pick) => {
+                        (serde_json::to_value(geo).ok()?, pick)
+                    }
+                    (_, Some(pick)) => (coil_axis_param(app, &pick, profile_sketch).ok()?, Some(pick)),
+                    (AxisRef::Line { origin, dir }, None) => (coil_line_axis_value(&feature_frame(s, f.component), origin, dir.0), None),
+                    (AxisRef::Model { geo }, None) => (serde_json::to_value(geo).ok()?, None),
+                    _ => return None,
+                };
+                if let Some(pick) = pick
+                    && let Some(input) = d.inputs.get_mut(1)
+                {
+                    input.items = vec![pick];
+                }
+                d.extra.insert("axis".into(), axis);
+            }
+            if *reversed {
+                d.extra.insert("reversed".into(), json!(true));
+            }
             if *section == solidcraft_engine::doc::CoilSection::Square {
                 d.extra.insert("section".into(), json!("square"));
             }
@@ -9114,14 +9692,21 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.extra.insert("axis".into(), pt3(axis.0));
             d
         }
-        FeatureKind::BoundaryFill { tools, cells, operation, remove_tools } => {
+        FeatureKind::BoundaryFill { tools, planes, cells, operation, remove_tools } => {
             let mut d = start("solid.boundary_fill")?;
             // The cells again, ticked where a stored cell point lies in the same cell.
             let before = s.model.state_before(f.id);
-            let found = fill_cells(&before, &solidcraft_engine::doc::plain(tools));
-            let filled: Vec<String> =
-                cells.iter().filter_map(|c| found.iter().min_by(|a, b| a.0.dist(c.0).total_cmp(&b.0.dist(c.0))).map(|x| x.1.clone())).collect();
-            let items: Vec<Sel> = tools.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
+            let mut items: Vec<Sel> = tools.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
+            // A component's origin plane is kept by its datum key, as Offset Plane refills it.
+            items.extend(planes.iter().filter_map(|pl| match pl {
+                PlaneRef::Datum { datum } => Some(Sel::Plane { name: datum.key() }),
+                other => plane_sel(s, other),
+            }));
+            let tool_names = solidcraft_engine::doc::plain(tools);
+            let fill_on = fill_planes(s, &items);
+            let found = fill_cells(&before, &tool_names, &fill_on);
+            let stored: Vec<Vec3> = cells.iter().map(|c| c.0).collect();
+            let filled: Vec<String> = fill_cells_holding(&before, &tool_names, &fill_on, &stored, &found);
             d.kind = Kind::BoundaryFill {
                 operation: op_index(operation),
                 cells: found.into_iter().map(|(p, l)| (p, l.clone(), filled.contains(&l))).collect(),
@@ -9135,9 +9720,21 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Combine { target, tools, operation, keep_tools } => {
+        FeatureKind::Combine { target, tools, operation, keep_tools, offset, offset_edges, offset_faces, offset_radius } => {
             let mut d = start("solid.combine")?;
-            d.kind = Kind::Combine { operation: op_index(operation).max(1), keep_tools: *keep_tools };
+            d.kind = Kind::Combine {
+                operation: op_index(operation).max(1),
+                keep_tools: *keep_tools,
+                offset: offset.as_ref().map_or_else(|| "0 mm".to_string(), |e| e.as_str().to_string()),
+                round_edges: *offset_edges == solidcraft_engine::doc::OffsetEdges::Round,
+                picked_faces: !offset_faces.is_empty(),
+                radius: offset_radius.as_ref().map(|e| e.as_str().to_string()).unwrap_or_default(),
+            };
+            if !offset_faces.is_empty() {
+                let mut input = SelInput::new(COMBINE_OFFSET_FACES, FACES, true);
+                input.items = offset_faces.iter().filter_map(|p| face_sel(&app.session, p.0)).collect();
+                d.inputs.push(input);
+            }
             if let Some(inp) = d.inputs.get_mut(0) {
                 inp.items = vec![Sel::Body { name: target.to_string() }];
             }
@@ -9325,9 +9922,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         FeatureKind::Loft { sections, operation, targets, rails, rail_fit } => {
             let mut d = start("solid.loft")?;
             d.kind = Kind::Loft { operation: op_index(operation), rail_fit: crate::dialogs_sweep::rail_fit_index(*rail_fit) };
-            for (inp, items) in d.inputs.iter_mut().skip(1).zip(crate::dialogs_sweep::rail_sels(rails, s.active_sketch)) {
-                inp.items = items;
-            }
+            crate::dialogs_sweep::fill_rails(&mut d.inputs, 1, crate::dialogs_sweep::rail_sels(rails, s.active_sketch));
+            crate::dialogs_sweep::grow_loft_rails(&mut d);
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = sections
                     .iter()
@@ -9367,8 +9963,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let Some(inp) = d.inputs.get_mut(2) {
                 inp.items = direction.into_iter().collect();
             }
-            for (inp, items) in d.inputs.iter_mut().skip(3).zip(crate::dialogs_sweep::rail_sels(rails, s.active_sketch)) {
-                inp.items = items;
+            let mut sweep_rails = crate::dialogs_sweep::rail_sels(rails, s.active_sketch).into_iter();
+            for inp in d.inputs.iter_mut().skip(3) {
+                inp.items = sweep_rails.next().unwrap_or_default();
             }
             let items = st.sketch(sketch.0).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
             if let Some(inp) = d.inputs.get_mut(0) {
@@ -9548,7 +10145,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Split { body, plane, tool, tool_plane, tool_sheet, tool_faces, sketch, line } => {
+        FeatureKind::Split { body, plane, tool, tool_plane, tool_sheet, tool_faces, tool_bodies, sketch, line } => {
             let mut d = start("solid.split_body")?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = vec![Sel::Body { name: body.to_string() }];
@@ -9609,6 +10206,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                             None => face_sel_on(s, Some(t.body.as_ref()), p.0),
                         })
                         .collect();
+                    d.inputs.push(more);
+                }
+                if sheet == 2 && !tool_bodies.is_empty() {
+                    let mut more = SelInput::new(SPLIT_TOOL_BODIES, BODIES, true);
+                    more.items = tool_bodies.iter().map(|b| Sel::Body { name: b.to_string() }).collect();
                     d.inputs.push(more);
                 }
             }
@@ -9802,6 +10404,10 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 _ => break,
             }
         }
+    }
+    // Extrude shows the name it has, to read and to change (#18668).
+    if matches!(f.kind, FeatureKind::Extrude { .. }) {
+        d.extra.insert("name".into(), json!(f.name));
     }
     d.editing = Some((id, marker));
     d.active = 0;
@@ -10396,6 +11002,23 @@ mod right_click_tests {
             assert!(std::time::Instant::now() < deadline, "OK did not finish");
             h.frames(1);
         }
+    }
+
+    #[test]
+    fn a_right_click_confirms_a_primitive_coil_without_picks() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.right_click_confirms = true;
+        h.app.start("solid.coil");
+        h.frames(2);
+        assert!(h.app.dialog.as_ref().unwrap().inputs.iter().all(|input| input.items.is_empty()));
+        right_click(&mut h, json!({"world": [-30, -30, 0]}));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while let Some(dialog) = &h.app.dialog {
+            assert!(std::time::Instant::now() < deadline, "right click did not run OK: {:?}", dialog.error);
+            h.frames(1);
+        }
+        assert!(h.app.session.doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Coil { sketch: None, .. })));
     }
 
     #[test]

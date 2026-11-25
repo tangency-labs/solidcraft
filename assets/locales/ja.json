@@ -5554,7 +5554,6 @@
   "sketch_finish.edit": "スケッチを編集",
   "sketch_finish.finished": "{name} が完了しました",
   "sketch_mode.announcement": "{view}、スケッチモード",
-  "sketch_mode.editing": "編集中",
   "sketch_mode.model_card_unavailable": "ここでスケッチを開始する前にモデルビューを開いてください",
   "sketch_mode.view_name": "{view} · {sketch}",
   "sketch_panel.attached": "接続先: {body} / {path}",

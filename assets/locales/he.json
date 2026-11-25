@@ -5554,7 +5554,6 @@
   "sketch_finish.edit": "עריכת סקיצה",
   "sketch_finish.finished": "{name} הושלמה",
   "sketch_mode.announcement": "{view}, מצב סקיצה",
-  "sketch_mode.editing": "בעריכה",
   "sketch_mode.model_card_unavailable": "יש לפתוח תצוגת מודל לפני התחלת סקיצה כאן",
   "sketch_mode.view_name": "{view} · {sketch}",
   "sketch_panel.attached": "מוצמד ל־{body} / {path}",

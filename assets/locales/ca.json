@@ -5527,7 +5527,6 @@
   "sketch.status_fully_constrained": "totalment restringit",
   "sketch.untied_ends": "Sense vincular {count}",
   "sketch_mode.announcement": "{view}, mode bocet",
-  "sketch_mode.editing": "Editant",
   "sketch_mode.model_card_unavailable": "Obriu una vista de Model abans de començar un bocet aquí",
   "sketch_mode.view_name": "{view} · {sketch}",
   "sketch_panel.attached": "Vinculat a {body} / {path}",

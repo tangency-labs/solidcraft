@@ -27,8 +27,8 @@ use solidcore_record::develop::{
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 
 pub use solidcore::develop::{
-    BeadAgainst, BeadRefusal, JointRefusal, PanelRefusal, Refusal, RuleRefusal, MAX_JOINTS,
-    MAX_PANELS, MIN_BEAD_RADIUS,
+    BeadAgainst, BeadRefusal, ContourRefusal, JointRefusal, PanelRefusal, Refusal, RuleRefusal,
+    MAX_JOINTS, MAX_PANELS, MIN_BEAD_RADIUS,
 };
 
 /// Lays the sheet out flat ([`solidcore::develop::develop`]): `anchors` says where some panels'
@@ -71,6 +71,23 @@ pub fn crossings(a: &[Seg2], b: &[Seg2]) -> Vec<(usize, f64, usize, f64, Vec2)> 
         .into_iter()
         .map(|(ia, u, ib, v, p)| (ia, u, ib, v, record_vec2(p)))
         .collect()
+}
+
+/// The surfaces of a contour flange's profile `segs`, `depth` into the material from them
+/// ([`solidcore::develop::offset_contour`]): each line shifted and each arc's radius changed,
+/// meeting again at every corner; the material lies right of the travel, or left when `flip`.
+/// Corners turning less than `smooth` radians meet on the common normal.
+///
+/// # Errors
+/// The kernel's [`ContourRefusal`]: why the shifted profile does not hold together.
+pub fn offset_contour(
+    segs: &[Seg2],
+    depth: f64,
+    thickness: f64,
+    flip: bool,
+    smooth: f64,
+) -> Result<Vec<Seg2>, ContourRefusal> {
+    k::offset_contour(&cv::segs(segs), depth, thickness, flip, smooth).map(|s| cv::record_segs(&s))
 }
 
 /// A curve through `points` in order ([`solidcore::develop::curve_through`]): a line where they
@@ -518,4 +535,54 @@ pub fn segment_in_region(region: &Region2, a: Vec2, b: Vec2) -> Option<bool> {
 /// The kernel's [`BeadRefusal`]: a crown width not at least 0 and less than the width.
 pub fn bead_flank_angle(depth: f64, width: f64, crown_width: f64) -> Result<f64, BeadRefusal> {
     k::bead_flank_angle(depth, width, crown_width)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A contour's surfaces come back as record segments: an L of two lines shifted 1 with the
+    /// material on the right meets at (9, 1); lines that turn back are the kernel's refusal.
+    #[test]
+    fn a_contour_offset_comes_back_as_record_segments() {
+        let at = |x: f64, y: f64| Vec2 { x, y };
+        let ell = [
+            Seg2::Line {
+                a: Vec2::ZERO,
+                b: at(10.0, 0.0),
+            },
+            Seg2::Line {
+                a: at(10.0, 0.0),
+                b: at(10.0, 10.0),
+            },
+        ];
+        let out = offset_contour(&ell, 1.0, 2.0, false, 1e-6);
+        assert_eq!(
+            out,
+            Ok(vec![
+                Seg2::Line {
+                    a: at(0.0, 1.0),
+                    b: at(9.0, 1.0)
+                },
+                Seg2::Line {
+                    a: at(9.0, 1.0),
+                    b: at(9.0, 10.0)
+                },
+            ])
+        );
+        let back = [
+            Seg2::Line {
+                a: Vec2::ZERO,
+                b: at(10.0, 0.0),
+            },
+            Seg2::Line {
+                a: at(10.0, 0.0),
+                b: Vec2::ZERO,
+            },
+        ];
+        assert_eq!(
+            offset_contour(&back, 1.0, 2.0, false, 1e-6),
+            Err(ContourRefusal::TurnsBack)
+        );
+    }
 }

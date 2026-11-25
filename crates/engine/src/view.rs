@@ -682,9 +682,6 @@ fn sketch_lines_in(
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
     for (i, c) in sk.curves.iter().enumerate() {
-        if c.spline_handle_of.is_some() {
-            continue;
-        }
         if !sketch_curve_visible(sk, i) {
             continue;
         }
@@ -742,7 +739,7 @@ fn sketch_lines_in(
 /// screen is never clickable, and geometry on screen always is.
 pub fn sketch_curve_visible(sk: &Sketch, i: usize) -> bool {
     let Some(c) = sk.curves.get(i) else { return false };
-    if c.spline_handle_of.is_some() {
+    if c.spline_handle_of.is_some() || (c.spline_control_polygon_of.is_some() && sk.view.hide_control_polygons) {
         return false;
     }
     if c.link.is_some() && !sk.is_text_curve(i) {
@@ -1610,6 +1607,18 @@ fn plane_face_anchor<'a>(
         },
         _ => None,
     }
+}
+
+/// Parse a typed axis reference for the primitive Coil marker as the command reads it.
+/// Numeric directions leave the marker at the Coil base.
+pub fn coil_axis_reference(s: &Session, axis: &serde_json::Value) -> Option<solidcraft_doc::AxisRef> {
+    if crate::cmd::axis_dir_form(axis).is_ok() {
+        return None;
+    }
+    if let Some(geo) = crate::cmd::coil_placed_edge(s, Some(axis), "solid.coil").ok()? {
+        return Some(solidcraft_doc::AxisRef::Model { geo });
+    }
+    crate::cmd::axis_param(s, 0, &serde_json::json!({ "axis": axis }), "solid.coil").ok()
 }
 
 /// Construction axes, as evaluated: (feature id, name, origin, unit direction).
