@@ -682,9 +682,6 @@ fn sketch_lines_in(
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
     for (i, c) in sk.curves.iter().enumerate() {
-        if c.spline_handle_of.is_some() {
-            continue;
-        }
         if !sketch_curve_visible(sk, i) {
             continue;
         }
@@ -715,7 +712,8 @@ fn sketch_lines_in(
         }
     }
     // 3D curves are in world coordinates already.
-    for w in sk.wires.iter().filter(|w| !w.fit.is_empty() || !sk.view.hide_projected) {
+    let hidden_link = |w: &solidcraft_sketch::Wire| w.link.as_deref().and_then(|l| sk.link(l)).is_some_and(|l| l.hidden);
+    for w in sk.wires.iter().filter(|w| (!w.fit.is_empty() || !sk.view.hide_projected) && !hidden_link(w)) {
         // Curves drawn in a 3D sketch look like the sketch's own; included ones are references.
         let col = if w.fit.is_empty() {
             p.sketch_projected
@@ -741,11 +739,12 @@ fn sketch_lines_in(
 /// screen is never clickable, and geometry on screen always is.
 pub fn sketch_curve_visible(sk: &Sketch, i: usize) -> bool {
     let Some(c) = sk.curves.get(i) else { return false };
-    if c.spline_handle_of.is_some() {
+    if c.spline_handle_of.is_some() || (c.spline_control_polygon_of.is_some() && sk.view.hide_control_polygons) {
         return false;
     }
     if c.link.is_some() && !sk.is_text_curve(i) {
-        return !sk.view.hide_projected;
+        // A hidden link is left out of the view only (it still bounds profiles).
+        return !sk.view.hide_projected && !c.link.as_deref().and_then(|l| sk.link(l)).is_some_and(|l| l.hidden);
     }
     !(c.construction && sk.view.hide_construction)
 }
@@ -815,8 +814,14 @@ impl<'a> SketchPointVisibility<'a> {
             .filter(|l| l.kind == solidcraft_sketch::LinkKind::Text)
             .map(|l| l.id.as_str())
             .collect();
-        let mut hidden: std::collections::HashSet<&str> =
-            sk.points.iter().filter(|p| p.link.as_deref().is_some_and(|l| text.contains(l))).map(|p| p.id.as_str()).collect();
+        // Points of hidden links are not shown or picked either.
+        let concealed: std::collections::HashSet<&str> = sk.links.iter().filter(|l| l.hidden).map(|l| l.id.as_str()).collect();
+        let mut hidden: std::collections::HashSet<&str> = sk
+            .points
+            .iter()
+            .filter(|p| p.link.as_deref().is_some_and(|l| text.contains(l) || concealed.contains(l)))
+            .map(|p| p.id.as_str())
+            .collect();
         for curve in sk.curves.iter().filter(|c| outputs.contains(c.id.as_str())) {
             let ends = curve.kind.ends();
             let interior = curve.kind.point_ids().into_iter().filter(|i| ends.is_none_or(|(a, b)| *i != a && *i != b));
@@ -1602,6 +1607,18 @@ fn plane_face_anchor<'a>(
         },
         _ => None,
     }
+}
+
+/// Parse a typed axis reference for the primitive Coil marker as the command reads it.
+/// Numeric directions leave the marker at the Coil base.
+pub fn coil_axis_reference(s: &Session, axis: &serde_json::Value) -> Option<solidcraft_doc::AxisRef> {
+    if crate::cmd::axis_dir_form(axis).is_ok() {
+        return None;
+    }
+    if let Some(geo) = crate::cmd::coil_placed_edge(s, Some(axis), "solid.coil").ok()? {
+        return Some(solidcraft_doc::AxisRef::Model { geo });
+    }
+    crate::cmd::axis_param(s, 0, &serde_json::json!({ "axis": axis }), "solid.coil").ok()
 }
 
 /// Construction axes, as evaluated: (feature id, name, origin, unit direction).

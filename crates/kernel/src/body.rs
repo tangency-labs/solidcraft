@@ -1105,6 +1105,26 @@ impl Body {
         }
     }
 
+    /// The first face of `self` met by the ray from `origin` along `dir`, as `(distance, face_index)`.
+    pub fn raycast_face(&self, origin: Vec3, dir: Vec3) -> Option<(f64, usize)> {
+        let form = self.ops_body()?;
+        let (ops, order) = &*form;
+        let hit = ops.face_hit_by_ray(order, [origin.x, origin.y, origin.z], [dir.x, dir.y, dir.z]).ok()??;
+        Some((hit.distance, hit.face))
+    }
+
+    /// Whether `p` lies inside or on the boundary of `self` (for a B-rep body).
+    pub fn contains(&self, p: Vec3) -> bool {
+        let Some(form) = self.ops_body() else {
+            return false;
+        };
+        let (ops, _) = &*form;
+        let Ok(mut res) = ops.classify_points(&[[p.x, p.y, p.z]]) else {
+            return false;
+        };
+        matches!(res.pop().and_then(std::result::Result::ok), Some(solidcore_ops::PointClass::Inside | solidcore_ops::PointClass::OnBoundary))
+    }
+
     /// Every edge of `self` drawn as a polyline within a thousandth of the body's size, for
     /// finding the edge nearest a point ([`EdgeLines::nearest`]). Empty for a mesh body.
     pub fn edge_lines(&self) -> EdgeLines {
@@ -1621,16 +1641,17 @@ impl Body {
     /// is its triangles'. Measured once per record: a boolean asks for the box of every body it
     /// meets, and the same bodies come back feature after feature. A failure is not kept.
     pub fn exact_bounds(&self) -> Result<Aabb3> {
-        if self.is_mesh() {
-            return Ok(self.outline_bounds());
-        }
         // Held while measuring, so callers on other threads wait for this measurement.
         let mut slot = self.bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(b) = *slot {
             return Ok(b);
         }
-        let (lo, hi) = self.smlib()?.bounds().map_err(|e| KernelError::smlib("SMLib bounds", e))?;
-        let b = Aabb3 { min: v3(lo), max: v3(hi) };
+        let b = if self.is_mesh() {
+            self.outline_bounds()
+        } else {
+            let (lo, hi) = self.smlib()?.bounds().map_err(|e| KernelError::smlib("SMLib bounds", e))?;
+            Aabb3 { min: v3(lo), max: v3(hi) }
+        };
         *slot = Some(b);
         Ok(b)
     }
@@ -2220,6 +2241,31 @@ impl Body {
         }
     }
 
+    /// The unit normal of face `face_index` at `point`, a point of that face (within the body's
+    /// modelling tolerance): exact, from the face's own surface and trim
+    /// ([`solidcore_ops::Body::face_normal_at_point`]), no mesh. It points out of the material,
+    /// or for a face of a surface body to the side its surface faces. `None` for a point off
+    /// the face, a mesh body, an index out of range or a point that is not finite.
+    ///
+    /// # Errors
+    ///
+    /// [`KernelError::Invalid`] where the face has no normal (a pole, an apex) or no side that
+    /// faces out (material on both sides); [`KernelError::Failed`] for the kernel's failure.
+    pub fn face_normal_at(&self, face_index: usize, point: Vec3) -> Result<Option<Vec3>> {
+        let Some(form) = self.ops_body() else { return Ok(None) };
+        let (body, order) = &*form;
+        if face_index >= self.record.faces.len() {
+            return Ok(None);
+        }
+        match body.face_normal_at_point(order, face_index, [point.x, point.y, point.z]) {
+            Ok(found) => Ok(found.map(|n| Vec3::from(n.value))),
+            Err(solidcore_ops::Error::Argument) => Ok(None),
+            Err(solidcore_ops::Error::Degenerate) => Err(KernelError::Invalid("the face has no normal at that point".into())),
+            Err(solidcore_ops::Error::Unsupported(why)) => Err(KernelError::Invalid(format!("the face has no side that faces out: {why}"))),
+            Err(e) => Err(KernelError::Failed(format!("face normal: {e}"))),
+        }
+    }
+
     /// Exact material classes, boundary face indices and outward normals for all points.
     /// The entire request, including optional face selection, uses one ops rollback scope
     /// and cached kernel face boxes; no per-point or per-face body snapshots, no mesh.
@@ -2316,6 +2362,23 @@ impl Body {
         let at: Vec<[f64; 3]> = points.iter().map(|p| [p.x, p.y, p.z]).collect();
         let classes = self.smlib()?.classify_points(&at).map_err(|e| KernelError::smlib("SMLib point classification", e))?;
         classes.into_iter().map(|c| c.map(point_class).map_err(|e| KernelError::smlib("SMLib point classification", e))).collect()
+    }
+
+    /// Whether the forward ray from `origin` along `dir` meets this body's exact bounding box
+    /// (with a conservative tolerance margin). Returns `true` when exact bounds are unavailable
+    /// or empty so callers using this for culling never skip a body prematurely.
+    pub fn ray_meets_exact_bounds(&self, origin: Vec3, dir: Vec3) -> bool {
+        let Ok(bb) = self.exact_bounds() else { return true };
+        if bb.is_empty() {
+            return true;
+        }
+        solidcore_ops::affine::ray_meets_box(
+            [bb.min.x, bb.min.y, bb.min.z],
+            [bb.max.x, bb.max.y, bb.max.z],
+            [origin.x, origin.y, origin.z],
+            [dir.x, dir.y, dir.z],
+            self.record.tolerance,
+        )
     }
 
     /// Where the ray from `origin` along `dir` first meets the body, decided exactly on its faces'

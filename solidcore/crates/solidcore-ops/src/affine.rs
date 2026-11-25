@@ -6,13 +6,16 @@
 //! [`solidcore::Transform::uniform_scaling`], [`solidcore::Transform::reflection`],
 //! [`solidcore::Transform::concat`], [`solidcore::Transform::inverse`]); ops checks the
 //! numbers and passes them on. Beside them, how far a point or a box reaches along a direction
-//! ([`distance_along`], [`span_along`]), as the kernel measures it, a point under a map
-//! ([`apply_point`]), parallelograms on a plane ([`rect_of_aspect`], [`fit_aspect`],
-//! [`offset_quad`], [`parallelogram_point`]), and a direction turned to the sense of another
-//! ([`same_sense`]).
+//! ([`distance_along`], [`span_along`]), as the kernel measures it, a placed body's box along a
+//! direction ([`extent_along`], [`along_own_axes`]), a placed flat face's offset
+//! ([`square_plane_offset`]), whether a forward ray meets a padded box ([`ray_meets_box`]), a
+//! point under a map ([`apply_point`]), parallelograms on a plane ([`rect_of_aspect`],
+//! [`fit_aspect`], [`offset_quad`], [`parallelogram_point`]), and a direction turned to the
+//! sense of another ([`same_sense`]).
 
 use solidcore::geom::certified::Verdict;
 use solidcore::geom::extent3d::Extent3d;
+use solidcore::math::AxisRefusal;
 use solidcore::{Transform, Vec3};
 
 use crate::body::REGULAR_RATIO;
@@ -56,6 +59,28 @@ pub fn rotation(point: [f64; 3], axis: [f64; 3], angle: f64) -> Result<Matrix> {
     taken(Transform::rotation(vec3(point), vec3(axis), angle))
 }
 
+/// Whether a map is a rotation or reflection and a translation, with the caller's
+/// axis and homogeneous-entry tolerances. Non-finite maps or invalid tolerances are false.
+pub fn is_rigid(matrix: &Matrix, axis_tol: f64, affine_tol: f64) -> bool {
+    Transform { m: *matrix }.is_rigid(axis_tol, affine_tol)
+}
+
+/// The change between two source placements in a sketch's orthonormal plane frame.
+/// Returns none for an unchanged map, a singular source frame, a tilt or an in-plane
+/// reflection. A normal translation does not change the projected shape.
+pub fn projection_motion(
+    seen: &Matrix,
+    now: &Matrix,
+    origin: [f64; 3],
+    x: [f64; 3],
+    y: [f64; 3],
+) -> Option<([[f64; 2]; 2], [f64; 2])> {
+    let inverse = Transform { m: *seen }.inverse().ok()?;
+    let moved = inverse.concat(&Transform { m: *now });
+    let (a, b) = moved.plane_motion(vec3(origin), vec3(x), vec3(y), 1e-9, 1e-12)?;
+    Some((a, b.to_array()))
+}
+
 /// The orthonormal axes along `x` and in the plane of `x` and `y` (on `y`'s side),
 /// using the kernel's [`Transform::orthonormal_frame`]. If `y` is parallel to `x` or has
 /// no length, the kernel chooses a perpendicular direction. This restores a unit frame after
@@ -79,6 +104,18 @@ pub fn orthonormal_axes(x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2]> {
 pub fn axis_squared_axes(x: [f64; 3], y: [f64; 3], noise: f64) -> Option<[[f64; 3]; 2]> {
     let [x, y] = Transform::axis_squared_frame(vec3(x), vec3(y), noise)?;
     Some([[x.x, x.y, x.z], [y.x, y.y, y.z]])
+}
+
+/// Signed angle about unit `normal`, from unit `start` to unit `end`, in radians.
+/// Calls [`Vec3::signed_unit_angle`], including its positive choice for a half turn.
+///
+/// # Errors
+/// [`Error::Refused`] for non-finite, non-unit or non-perpendicular directions,
+/// retaining the kernel routine and reason.
+pub fn signed_unit_angle(normal: [f64; 3], start: [f64; 3], end: [f64; 3]) -> Result<f64> {
+    vec3(normal)
+        .signed_unit_angle(vec3(start), vec3(end))
+        .map_err(crate::error::status)
 }
 
 /// Carry planar axes by a rigid `matrix`, keeping UV scales and keeping square source
@@ -158,6 +195,66 @@ pub fn inverse(matrix: &Matrix) -> Result<Matrix> {
         return Err(Error::Argument);
     }
     taken(map.inverse())
+}
+
+/// Express a line's point and direction in the local coordinates of a frame that maps
+/// local coordinates to world coordinates. The kernel applies translation only to the point.
+/// # Errors
+/// Returns an argument error for an invalid frame or a non-finite mapped coordinate.
+pub fn line_in_frame(
+    frame: &Matrix,
+    origin: [f64; 3],
+    direction: [f64; 3],
+) -> Result<([f64; 3], [f64; 3])> {
+    let map = Transform { m: inverse(frame)? };
+    let (origin, direction) = map.transform_line(vec3(origin), vec3(direction));
+    let origin = [origin.x, origin.y, origin.z];
+    let direction = [direction.x, direction.y, direction.z];
+    if !finite(&origin) || !finite(&direction) {
+        return Err(Error::Argument);
+    }
+    Ok((origin, direction))
+}
+
+/// Orient an undirected axis by its largest component.
+pub fn canonical_axis_direction(direction: [f64; 3]) -> [f64; 3] {
+    vec3(direction).canonical_axis_direction().to_array()
+}
+
+/// The unit direction of an undirected axis, oriented by its largest component as
+/// [`canonical_axis_direction`] orients it. `None` for a direction no longer than
+/// `min_length` or one that is not finite.
+#[must_use]
+pub fn unit_axis_direction(direction: [f64; 3], min_length: f64) -> Option<[f64; 3]> {
+    vec3(direction)
+        .unit_axis_direction(min_length)
+        .map(Vec3::to_array)
+}
+
+/// Carry a definition's axis into world coordinates, orient it there, and express it in the
+/// authoring frame using the supplied world-to-author map.
+/// # Errors
+/// Returns an argument error for coordinates or a direction the kernel refuses.
+pub fn placed_axis(
+    definition_to_world: &Matrix,
+    world_to_author: &Matrix,
+    origin: [f64; 3],
+    direction: [f64; 3],
+) -> Result<([f64; 3], [f64; 3])> {
+    let (origin, direction) = (Transform {
+        m: *definition_to_world,
+    })
+    .transform_canonical_axis(vec3(origin), vec3(direction))
+    .map_err(|_| Error::Argument)?;
+    let (origin, direction) = (Transform {
+        m: *world_to_author,
+    })
+    .transform_line(origin, direction);
+    let (origin, direction) = (origin.to_array(), direction.to_array());
+    if !finite(&origin) || !finite(&direction) {
+        return Err(Error::Argument);
+    }
+    Ok((origin, direction))
 }
 
 /// How far `point` stands from `origin` along `direction`: the dot product of `point - origin`
@@ -247,6 +344,105 @@ pub fn span_along(
         return Err(Error::Argument);
     }
     Ok(span)
+}
+
+/// The operation name of the refusals of [`extent_along`], [`along_own_axes`] and
+/// [`square_plane_offset`].
+const OP_AXIS: &str = "affine";
+
+/// The reason of [`Error::Refused`] for a number not finite.
+pub const REFUSED_NOT_FINITE: &str = "a number is not finite";
+/// The reason of [`Error::Refused`] for an axis with no direction.
+pub const REFUSED_ZERO_AXIS: &str = "the axis is zero";
+/// The reason of [`Error::Refused`] for a placement that flattens space.
+pub const REFUSED_FLAT_MAP: &str = "the placement flattens space";
+
+/// The refusal as ops states it.
+fn refused(why: AxisRefusal) -> Error {
+    let reason = match why {
+        AxisRefusal::NotFinite => REFUSED_NOT_FINITE,
+        AxisRefusal::ZeroAxis => REFUSED_ZERO_AXIS,
+        AxisRefusal::FlatMap => REFUSED_FLAT_MAP,
+    };
+    Error::Refused {
+        operation: OP_AXIS,
+        reason,
+    }
+}
+
+/// How far the box from `min` to `max` (a body's own box) reaches along `axis`, a direction of
+/// the outer frame (any length), once the body is placed by `placement`: the kernel's
+/// [`solidcore::math::box_extent_along`]. Tight when `axis` runs along one of the body's own
+/// axes ([`along_own_axes`]).
+///
+/// # Errors
+/// [`Error::Refused`] with [`REFUSED_NOT_FINITE`] for a number not finite, [`REFUSED_ZERO_AXIS`]
+/// for a zero `axis`, [`REFUSED_FLAT_MAP`] for a `placement` that flattens space.
+pub fn extent_along(
+    min: [f64; 3],
+    max: [f64; 3],
+    placement: &Matrix,
+    axis: [f64; 3],
+) -> Result<f64> {
+    solidcore::math::box_extent_along(
+        vec3(min),
+        vec3(max),
+        &Transform { m: *placement },
+        vec3(axis),
+    )
+    .map_err(refused)
+}
+
+/// Whether `axis`, a direction of the outer frame, runs along one of the own axes of a body placed
+/// by `placement`, through [`solidcore::math::axis_along_own_axes`].
+///
+/// # Errors
+/// As [`extent_along`].
+pub fn along_own_axes(placement: &Matrix, axis: [f64; 3]) -> Result<bool> {
+    solidcore::math::axis_along_own_axes(&Transform { m: *placement }, vec3(axis)).map_err(refused)
+}
+
+/// Where a flat face (through `origin`, normal `normal`, in a body's own frame) of a body placed
+/// by `placement` cuts `axis`, if square to it: `Some` of its offset along the unit `axis` from
+/// the outer origin, `None` when it is not square to `axis` (or `origin` or `normal` is not
+/// finite or the placed normal has no direction), through
+/// [`solidcore::math::plane_offset_square_to`].
+///
+/// # Errors
+/// As [`extent_along`], less the flat placement (it is not inverted).
+pub fn square_plane_offset(
+    placement: &Matrix,
+    origin: [f64; 3],
+    normal: [f64; 3],
+    axis: [f64; 3],
+) -> Result<Option<f64>> {
+    solidcore::math::plane_offset_square_to(
+        &Transform { m: *placement },
+        vec3(origin),
+        vec3(normal),
+        vec3(axis),
+    )
+    .map_err(refused)
+}
+
+/// Whether the forward ray from `origin` along `direction` (`t >= 0`) meets the box from `min` to
+/// `max` inflated by a conservative margin derived from its size and `tolerance`, through
+/// [`Extent3d::meets_ray`]. Conservative on non-finite inputs (returns `true`).
+#[must_use]
+pub fn ray_meets_box(
+    min: [f64; 3],
+    max: [f64; 3],
+    origin: [f64; 3],
+    direction: [f64; 3],
+    tolerance: f64,
+) -> bool {
+    let [min_x, min_y, min_z] = min;
+    let [max_x, max_y, max_z] = max;
+    Extent3d::from_bounds(min_x, min_y, min_z, max_x, max_y, max_z).meets_ray(
+        vec3(origin),
+        vec3(direction),
+        tolerance,
+    )
 }
 
 /// The axis-aligned box around the corners of the box `lo`..`hi` moved by `matrix`, through
@@ -347,6 +543,38 @@ mod tests {
     }
 
     #[test]
+    fn projection_motion_undoes_seen_before_applying_now() {
+        let seen = translation([3.0, 4.0, 0.0]).unwrap();
+        let now = [
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [10.0, 20.0, 0.0, 1.0],
+        ];
+        let motion = |seen: &Matrix, now: &Matrix| {
+            projection_motion(seen, now, [0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+        };
+        let (a, b) = motion(&seen, &now).unwrap();
+        // Old point (3,4) is the source origin. It now projects to (10,20).
+        assert_eq!(a, [[0.0, -1.0], [1.0, 0.0]]);
+        assert_eq!(b, [14.0, 17.0]);
+        assert_eq!(
+            [
+                a[0][0] * 3.0 + a[0][1] * 4.0 + b[0],
+                a[1][0] * 3.0 + a[1][1] * 4.0 + b[1]
+            ],
+            [10.0, 20.0]
+        );
+        assert!(motion(&seen, &seen).is_none());
+        let mut singular = seen;
+        singular[0] = [0.0; 4];
+        assert!(motion(&singular, &now).is_none());
+        let mut hostile = now;
+        hostile[3][1] = f64::INFINITY;
+        assert!(motion(&seen, &hostile).is_none());
+    }
+
+    #[test]
     fn a_direction_takes_the_sense_of_another_and_none_without_length() {
         assert_eq!(
             same_sense([0.0, -2.0, 0.0], [0.1, 1.0, 0.0]),
@@ -364,6 +592,30 @@ mod tests {
         assert_eq!(same_sense([0.0; 3], [0.0, 1.0, 0.0]), None);
         assert_eq!(same_sense([0.0, 1.0, 0.0], [0.0; 3]), None);
         assert_eq!(same_sense([f64::NAN, 1.0, 0.0], [0.0, 1.0, 0.0]), None);
+    }
+
+    #[test]
+    fn signed_unit_angle_keeps_the_axis_order_and_half_turn_direction() {
+        let (normal, start, end) = ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        assert_eq!(
+            signed_unit_angle(normal, start, end).unwrap(),
+            std::f64::consts::FRAC_PI_2
+        );
+        assert_eq!(
+            signed_unit_angle(normal, end, start).unwrap(),
+            -std::f64::consts::FRAC_PI_2
+        );
+        assert_eq!(
+            signed_unit_angle(normal, start, [-1.0, -5e-13, 0.0]).unwrap(),
+            std::f64::consts::PI
+        );
+        assert_eq!(
+            signed_unit_angle(start, normal, start),
+            Err(Error::Refused {
+                operation: "geom::vector3d::Vec3::signed_unit_angle",
+                reason: "expected unit directions perpendicular to a unit normal",
+            })
+        );
     }
 
     /// The mirror in the plane y = 0.
@@ -392,6 +644,169 @@ mod tests {
 
     fn regular(m: &Matrix) -> bool {
         Transform { m: *m }.is_regular(REGULAR_RATIO) == Verdict::Yes
+    }
+
+    #[test]
+    fn a_box_reaches_its_own_length_along_its_own_axis() {
+        let (lo, hi) = ([0.0, 0.0, 0.0], [4.0, 2.0, 1.0]);
+        assert_eq!(
+            extent_along(lo, hi, &IDENTITY, [1.0, 0.0, 0.0]).unwrap(),
+            4.0
+        );
+        assert_eq!(
+            extent_along(lo, hi, &IDENTITY, [0.0, 5.0, 0.0]).unwrap(),
+            2.0
+        );
+        assert!(along_own_axes(&IDENTITY, [0.0, 0.0, -3.0]).unwrap());
+        // a move does not change how far it reaches
+        let moved = translation([7.0, -3.0, 2.0]).unwrap();
+        assert_eq!(extent_along(lo, hi, &moved, [1.0, 0.0, 0.0]).unwrap(), 4.0);
+    }
+
+    #[test]
+    fn a_turned_box_is_read_along_the_axis_it_has() {
+        let (lo, hi) = ([0.0, 0.0, 0.0], [4.0, 2.0, 1.0]);
+        // a quarter turn about z takes the body's x to the outer y
+        let turn = rotation([0.0; 3], [0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_2).unwrap();
+        assert!((extent_along(lo, hi, &turn, [0.0, 1.0, 0.0]).unwrap() - 4.0).abs() < 1e-12);
+        assert!((extent_along(lo, hi, &turn, [1.0, 0.0, 0.0]).unwrap() - 2.0).abs() < 1e-12);
+        assert!(along_own_axes(&turn, [0.0, 1.0, 0.0]).unwrap());
+        // a slanted axis runs along none of the body's axes
+        assert!(!along_own_axes(&turn, [1.0, 1.0, 0.0]).unwrap());
+        assert!(!along_own_axes(&IDENTITY, [1.0, 1.0, 1.0]).unwrap());
+    }
+
+    #[test]
+    fn a_zero_not_finite_axis_or_singular_placement_is_refused_by_the_extent_ops() {
+        let (lo, hi) = ([0.0; 3], [1.0; 3]);
+        let refusal = |e: Error| match e {
+            Error::Refused { reason, .. } => reason,
+            _ => "other",
+        };
+        let flat: Matrix = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        assert_eq!(
+            refusal(extent_along(lo, hi, &IDENTITY, [0.0; 3]).unwrap_err()),
+            REFUSED_ZERO_AXIS
+        );
+        assert_eq!(
+            refusal(along_own_axes(&IDENTITY, [0.0; 3]).unwrap_err()),
+            REFUSED_ZERO_AXIS
+        );
+        assert_eq!(
+            refusal(extent_along(lo, hi, &flat, [1.0, 0.0, 0.0]).unwrap_err()),
+            REFUSED_FLAT_MAP
+        );
+        assert_eq!(
+            refusal(along_own_axes(&flat, [1.0, 0.0, 0.0]).unwrap_err()),
+            REFUSED_FLAT_MAP
+        );
+        assert_eq!(
+            refusal(extent_along(lo, hi, &IDENTITY, [f64::NAN, 0.0, 1.0]).unwrap_err()),
+            REFUSED_NOT_FINITE
+        );
+        assert_eq!(
+            refusal(
+                extent_along([f64::NAN, 0.0, 0.0], hi, &IDENTITY, [1.0, 0.0, 0.0]).unwrap_err()
+            ),
+            REFUSED_NOT_FINITE
+        );
+        let mut bad = IDENTITY;
+        bad[3][0] = f64::INFINITY;
+        assert!(along_own_axes(&bad, [1.0, 0.0, 0.0]).is_err());
+    }
+
+    #[test]
+    fn a_plane_square_to_the_axis_gives_its_offset_and_one_that_is_not_gives_none() {
+        let z = [0.0, 0.0, 1.0];
+        let at = |m: &Matrix, origin, normal, axis| {
+            square_plane_offset(m, origin, normal, axis).unwrap()
+        };
+        // a face at z = 3 with a normal along z, any length of axis
+        assert_eq!(
+            at(
+                &IDENTITY,
+                [1.0, 1.0, 3.0],
+                [0.0, 0.0, -2.0],
+                [0.0, 0.0, 4.0]
+            ),
+            Some(3.0)
+        );
+        // sideways to the axis: not square
+        assert_eq!(at(&IDENTITY, [0.0; 3], [1.0, 0.0, 0.0], z), None);
+        assert_eq!(at(&IDENTITY, [0.0; 3], [0.0, 1.0, 1.0], z), None);
+        // a placement that moves and turns: the face z = 1 of a body turned a quarter about x
+        // faces along -y, and the body moved by 5 along y puts it at y = 5 - 1
+        let turn = rotation([0.0; 3], [1.0, 0.0, 0.0], std::f64::consts::FRAC_PI_2).unwrap();
+        let placed = then(&turn, &translation([0.0, 5.0, 0.0]).unwrap()).unwrap();
+        let off = at(&placed, [0.0, 0.0, 1.0], z, [0.0, 1.0, 0.0]).unwrap();
+        assert!((off - 4.0).abs() < 1e-12);
+        assert_eq!(at(&placed, [0.0, 0.0, 1.0], z, [0.0, 0.0, 1.0]), None);
+        // no direction to the normal, or not finite: not a face to take
+        assert_eq!(at(&IDENTITY, [0.0; 3], [0.0; 3], z), None);
+        assert_eq!(at(&IDENTITY, [f64::NAN, 0.0, 0.0], z, z), None);
+        // a zero or not finite axis is refused
+        assert!(square_plane_offset(&IDENTITY, [0.0; 3], z, [0.0; 3]).is_err());
+        assert!(square_plane_offset(&IDENTITY, [0.0; 3], z, [f64::NAN, 0.0, 1.0]).is_err());
+    }
+
+    #[test]
+    fn a_line_uses_the_frames_inverse_and_only_its_point_is_translated() {
+        let frame = [
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [10.0, 20.0, 30.0, 1.0],
+        ];
+        let origin = [8.0, 21.0, 33.0];
+        let direction = [-5.0, 4.0, 6.0];
+        assert_eq!(
+            line_in_frame(&IDENTITY, origin, direction).unwrap(),
+            (origin, direction)
+        );
+        assert_eq!(
+            line_in_frame(&frame, origin, direction).unwrap(),
+            ([1.0, 2.0, 3.0], [4.0, 5.0, 6.0])
+        );
+        assert_eq!(
+            line_in_frame(&[[0.0; 4]; 4], origin, direction),
+            Err(Error::Argument)
+        );
+    }
+
+    #[test]
+    fn a_placed_axis_is_oriented_in_world_before_entering_the_author_frame() {
+        let source = [
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [10.0, 20.0, 30.0, 1.0],
+        ];
+        let target_inverse = [
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [8.0, 21.0, -33.0, 1.0],
+        ];
+        let point = [1.0, 2.0, 3.0];
+        for direction in [[-4.0, 0.0, 0.0], [4.0, 0.0, 0.0]] {
+            assert_eq!(
+                placed_axis(&source, &target_inverse, point, direction).unwrap(),
+                ([0.0; 3], [0.0, -1.0, 0.0])
+            );
+        }
+        assert_eq!(
+            placed_axis(&source, &target_inverse, point, [0.0; 3]),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            placed_axis(&source, &target_inverse, [f64::NAN; 3], [1.0; 3]),
+            Err(Error::Argument)
+        );
     }
 
     #[test]
@@ -632,5 +1047,66 @@ mod tests {
             span_along([0.0; 3], [f64::MAX; 3], o, d),
             Err(Error::Argument)
         );
+    }
+
+    /// An axis comes out unit and pointing its largest component positive, whichever way it
+    /// was given; a direction too short or not finite has none.
+    #[test]
+    fn unit_axis_direction_is_unit_and_oriented() {
+        assert_eq!(
+            unit_axis_direction([0.0, -2.0, 0.0], 1e-9),
+            Some([0.0, 1.0, 0.0])
+        );
+        assert_eq!(
+            unit_axis_direction([0.0, 0.0, 4.0], 1e-9),
+            Some([0.0, 0.0, 1.0])
+        );
+        let d = unit_axis_direction([-3.0, 4.0, 0.0], 1e-9).unwrap_or([0.0; 3]);
+        assert!(near(d, [-0.6, 0.8, 0.0], 1e-15), "{d:?}");
+        assert_eq!(unit_axis_direction([0.0; 3], 1e-9), None);
+        assert_eq!(unit_axis_direction([1e-10, 0.0, 0.0], 1e-9), None);
+        assert_eq!(unit_axis_direction([f64::NAN, 1.0, 0.0], 1e-9), None);
+        assert_eq!(unit_axis_direction([f64::INFINITY, 0.0, 0.0], 1e-9), None);
+    }
+
+    #[test]
+    fn ray_meets_box_handles_hits_misses_and_non_finite_inputs() {
+        let (min, max) = ([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
+        assert!(ray_meets_box(
+            min,
+            max,
+            [5.0, 5.0, 50.0],
+            [0.0, 0.0, -1.0],
+            1e-6
+        ));
+        assert!(ray_meets_box(
+            min,
+            max,
+            [5.0, 5.0, 5.0],
+            [1.0, 0.0, 0.0],
+            1e-6
+        ));
+        assert!(!ray_meets_box(
+            min,
+            max,
+            [5.0, 5.0, 50.0],
+            [0.0, 0.0, 1.0],
+            1e-6
+        ));
+        assert!(!ray_meets_box(
+            min,
+            max,
+            [25.0, 5.0, 50.0],
+            [0.0, 0.0, -1.0],
+            1e-6
+        ));
+        let nan_min = [f64::NAN, 0.0, 0.0];
+        assert!(ray_meets_box(
+            nan_min,
+            max,
+            [5.0, 5.0, 50.0],
+            [0.0, 0.0, -1.0],
+            1e-6
+        ));
     }
 }
