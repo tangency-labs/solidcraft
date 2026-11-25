@@ -1993,7 +1993,7 @@ fn freecad_feature_name(s: &Session, label: &str) -> String {
 /// about it (more than 1e-9 rad).
 fn freecad_datum_has_in_plane_rotation(source: &solidcraft_io::FreeCadSketch) -> bool {
     let Some((_, _, datum)) = &source.datum else { return false };
-    solidcore_ops::plane_placement::normal_offset(datum, &source.plane).is_some_and(|offset| offset.rotation.abs() > 1e-9)
+    solidcraft_kernel::services::plane_placement::normal_offset(datum, &source.plane).is_some_and(|offset| offset.rotation.abs() > 1e-9)
 }
 
 fn freecad_sketch_plane(
@@ -2004,7 +2004,7 @@ fn freecad_sketch_plane(
 ) -> Result<solidcraft_doc::PlaneRef> {
     use solidcraft_doc::{FeatureKind, PlaneRef};
     let Some((source_name, label, datum)) = &source.datum else { return Ok(freecad_explicit_plane(source.plane)) };
-    let Some(solidcore_ops::plane_placement::NormalOffset { distance, .. }) = solidcore_ops::plane_placement::normal_offset(datum, &source.plane)
+    let Some(solidcraft_kernel::services::plane_placement::NormalOffset { distance, .. }) = solidcraft_kernel::services::plane_placement::normal_offset(datum, &source.plane)
     else {
         return Ok(freecad_explicit_plane(source.plane));
     };

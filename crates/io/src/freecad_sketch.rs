@@ -720,7 +720,7 @@ fn recover_plane(object: &RawObject, objects: &HashMap<&str, &RawObject>, parent
         Some(frame) => {
             sketch.plane = frame;
             if let Some((_, _, datum)) = &sketch.datum
-                && solidcore_ops::plane_placement::normal_offset(datum, &frame).is_none()
+                && solidcraft_kernel::services::plane_placement::normal_offset(datum, &frame).is_none()
             {
                 warn(
                     &mut sketch.warnings,

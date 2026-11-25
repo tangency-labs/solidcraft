@@ -35,6 +35,7 @@ pub use solidcore_ops::hatch;
 pub use solidcore_ops::hole_stacks;
 pub use solidcore_ops::import_geometry;
 pub use solidcore_ops::outline;
+pub use solidcore_ops::plane_placement;
 pub use solidcore_ops::path_export;
 pub use solidcore_ops::pcurve;
 pub use solidcore_ops::pick;

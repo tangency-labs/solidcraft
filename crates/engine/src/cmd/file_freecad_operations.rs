@@ -155,9 +155,9 @@ fn kind(
             let (axis, origin, direction) = axis(s, sketch, source_axis)?;
             let state = s.model.state();
             let solved = state.sketch(sketch.id).ok_or("The revolution's sketch could not be evaluated.")?;
-            let planar = solidcore_ops::plane_placement::axis_in_plane(&solved.plane, origin, direction).map_err(|off| match off {
-                solidcore_ops::plane_placement::AxisOffPlane::NoDirection => "The revolution axis has no direction.",
-                solidcore_ops::plane_placement::AxisOffPlane::OffPlane => "The revolution axis does not lie in the sketch plane.",
+            let planar = solidcraft_kernel::services::plane_placement::axis_in_plane(&solved.plane, origin, direction).map_err(|off| match off {
+                solidcraft_kernel::services::plane_placement::AxisOffPlane::NoDirection => "The revolution axis has no direction.",
+                solidcraft_kernel::services::plane_placement::AxisOffPlane::OffPlane => "The revolution axis does not lie in the sketch plane.",
             })?;
             let (local_origin, local_dir) = (planar.origin, planar.direction);
             let mut signs = BTreeSet::new();
