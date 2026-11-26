@@ -5813,3 +5813,258 @@ fn inspect_design_lists_repeated_body_placements_and_filters_their_world_names()
         assert_eq!(after, before, "no document/history mutation: {opts:?}");
     }
 }
+
+#[test]
+fn batch_dry_run_simulates_edits_and_measure_then_rolls_back_completely() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 20, "width": 10, "height": 10, "corner": [0, 0, 0]}}));
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5, "corner": [80, 0, 0]}}));
+    tool(&mut s, "undo", json!({}));
+    assert!(rel(volume(&mut s), 2000.0) < 1e-9);
+    let before = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    assert_eq!((&before["undo"], &before["redo"]), (&json!(1), &json!(1)), "{before}");
+
+    let r = tool(
+        &mut s,
+        "batch",
+        json!({
+            "dry_run": true,
+            "commands": [
+                {"command": "parameters.add", "params": {"name": "cut_w", "expression": "10 mm"}},
+                {"command": "solid.box", "params": {"length": "cut_w", "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "cut"}},
+                {"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5, "corner": [50, 0, 0], "body_name": "Probe"}},
+                {"command": "measure", "params": {"summary": true}},
+                {"command": "inspect.measure", "params": {}},
+            ],
+        }),
+    );
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["dry_run"], true, "{r}");
+    assert_eq!(r["rolled_back"], true, "{r}");
+    assert_eq!(r["completed"], 5, "{r}");
+    assert_eq!(r["results"][3]["body_count"], 2, "{r}");
+    assert!(rel(r["results"][3]["total"]["volume_mm3"].as_f64().unwrap(), 1125.0) < 1e-6, "{r}");
+    assert_eq!(r["results"][4]["body_count"], 2, "{r}");
+    assert!(rel(r["results"][4]["total"]["volume_mm3"].as_f64().unwrap(), 1125.0) < 1e-6, "{r}");
+
+    // Document, model, parameters, undo stack and redo stack are all untouched.
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1);
+    assert!(rel(volume(&mut s), 2000.0) < 1e-9);
+    let after = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    assert_eq!(after["undo"], before["undo"], "{after}");
+    assert_eq!(after["redo"], before["redo"], "{after}");
+    assert_eq!(after["timeline"].as_array().unwrap().len(), before["timeline"].as_array().unwrap().len(), "{after}");
+    assert_eq!(after["params"], before["params"], "{after}");
+
+    // `expect` is evaluated on the simulated design before rollback.
+    let probe = json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "corner": [50, 0, 0]}});
+    let met = tool(&mut s, "batch", json!({"dry_run": true, "commands": [probe.clone()], "expect": {"volume_mm3": 3000, "bodies": 2}}));
+    assert_eq!((&met["dry_run"], &met["rolled_back"], &met["expectation"]["ok"]), (&json!(true), &json!(true), &json!(true)), "{met}");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1);
+    assert!(rel(volume(&mut s), 2000.0) < 1e-9);
+
+    let miss = raw_tool(&mut s, "batch", json!({"dry_run": true, "commands": [probe.clone()], "expect": {"bodies": 5}}));
+    assert_eq!(miss["result"]["isError"], true, "{miss}");
+    let note = miss["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(note.contains("expectation not met") && note.contains("dry run was rolled back"), "{note}");
+    let miss_body: Value = serde_json::from_str(miss["result"]["content"][1]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        (&miss_body["dry_run"], &miss_body["rolled_back"], &miss_body["expectation"]["ok"]),
+        (&json!(true), &json!(true), &json!(false)),
+        "{miss_body}"
+    );
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1);
+
+    // A failing step inside a dry run still rolls back cleanly and tags the reply with `dry_run: true`.
+    let failed = raw_tool(
+        &mut s,
+        "batch",
+        json!({
+            "dry_run": true,
+            "commands": [probe, {"command": "solid.extrude", "params": {"distance": "bogus +"}}],
+        }),
+    );
+    assert_eq!(failed["result"]["isError"], true, "{failed}");
+    let failed_body: Value = serde_json::from_str(failed["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        (&failed_body["ok"], &failed_body["dry_run"], &failed_body["rolled_back"], &failed_body["failed"]["index"], &failed_body["applied"]),
+        (&json!(false), &json!(true), &json!(true), &json!(1), &json!([])),
+        "{failed_body}"
+    );
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1);
+    let end = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    assert_eq!((&end["undo"], &end["redo"]), (&before["undo"], &before["redo"]), "{end}");
+}
+
+#[test]
+fn batch_dry_run_refuses_disk_writing_and_external_steps_without_touching_disk_or_design() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+    let before = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    let dir = tempfile::tempdir_in(solidcraft_engine::io::vfs::temp_dir()).unwrap();
+    let sc_path = dir.path().join("dry.sc");
+    let step_path = dir.path().join("dry.step");
+    let stl_path = dir.path().join("dry.stl");
+    let csv_path = dir.path().join("dry.csv");
+    let extra_box = json!({"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5, "corner": [40, 0, 0]}});
+
+    for (step, expected_cmd) in [
+        (json!({"command": "save", "params": {"path": sc_path.to_string_lossy()}}), "file.save"),
+        (json!({"command": "file.save", "params": {"path": sc_path.to_string_lossy()}}), "file.save"),
+        (json!({"command": "file.save_as", "params": {"path": sc_path.to_string_lossy()}}), "file.save_as"),
+        (json!({"command": "export", "params": {"path": step_path.to_string_lossy()}}), "file.export"),
+        (json!({"command": "file.export", "params": {"path": step_path.to_string_lossy()}}), "file.export"),
+        (json!({"command": "file.export_stl", "params": {"path": stl_path.to_string_lossy()}}), "file.export_stl"),
+        (json!({"command": "execute", "params": {"command": "FILE.SAVE", "params": {"path": sc_path.to_string_lossy()}}}), "file.save"),
+        (json!({"command": "parameters.export", "params": {"path": csv_path.to_string_lossy()}}), "parameters.export"),
+        (json!({"command": "assembly.bom", "params": {"path": csv_path.to_string_lossy()}}), "assembly.bom"),
+        (json!({"command": "panel.open", "params": {}}), "panel.open"),
+    ] {
+        let r = raw_tool(&mut s, "batch", json!({"dry_run": true, "commands": [extra_box.clone(), step.clone()]}));
+        assert_eq!(r["result"]["isError"], true, "{step}: {r}");
+        let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            (&body["ok"], &body["dry_run"], &body["completed"], &body["rolled_back"], &body["failed"]["index"], &body["applied"]),
+            (&json!(false), &json!(true), &json!(0), &json!(true), &json!(1), &json!([])),
+            "{step}: {body}"
+        );
+        assert_eq!(body["not_run"], json!([0, 1]), "{step}: {body}");
+        let err = body["failed"]["error"].as_str().unwrap();
+        assert!(err.contains(expected_cmd) && err.contains("dry_run"), "{step}: {err}");
+    }
+    for path in [&sc_path, &step_path, &stl_path, &csv_path] {
+        assert!(!path.exists(), "dry_run must never write {}", path.display());
+    }
+
+    // `dry_run: true` cannot be combined with `rollback: false`.
+    let conflict = raw_tool(&mut s, "batch", json!({"dry_run": true, "rollback": false, "commands": [extra_box]}));
+    assert_eq!(conflict["result"]["isError"], true, "{conflict}");
+    assert!(conflict["result"]["content"][0]["text"].as_str().unwrap().contains("rollback: false"), "{conflict}");
+
+    // In-memory `parameters.export` (no `path`) has no disk side effect and works inside a dry run.
+    let mem = tool(
+        &mut s,
+        "batch",
+        json!({
+            "dry_run": true,
+            "commands": [
+                {"command": "parameters.add", "params": {"name": "w", "expression": "12 mm"}},
+                {"command": "parameters.export", "params": {"format": "csv"}},
+            ],
+        }),
+    );
+    assert_eq!((&mem["ok"], &mem["dry_run"], &mem["rolled_back"]), (&json!(true), &json!(true), &json!(true)), "{mem}");
+    assert!(mem["results"][1].to_string().contains("12 mm"), "{mem}");
+
+    // Original design and undo stack remain completely untouched.
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1);
+    assert!(rel(volume(&mut s), 1000.0) < 1e-9);
+    let after = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    assert_eq!(after["undo"], before["undo"], "{after}");
+    assert_eq!(after["params"], before["params"], "{after}");
+}
+
+#[test]
+fn batch_dry_run_default_and_false_preserve_normal_behavior() {
+    let def = tool_definitions().into_iter().find(|d| d["name"] == "batch").unwrap();
+    assert_eq!(def["inputSchema"]["properties"]["dry_run"]["type"], "boolean", "{def}");
+
+    let mut s = server();
+    let bad = raw_tool(&mut s, "batch", json!({"dry_run": "yes", "commands": []}));
+    assert_eq!(bad["error"]["code"], -32602, "{bad}");
+
+    // Omitted `dry_run` defaults to false and keeps edits.
+    let r1 = tool(&mut s, "batch", json!({"commands": [{"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}]}));
+    assert_eq!((&r1["ok"], &r1["completed"]), (&json!(true), &json!(1)), "{r1}");
+    assert!(r1.get("dry_run").is_none() && r1.get("rolled_back").is_none(), "{r1}");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1);
+    assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["undo"], 1);
+
+    // Explicit `dry_run: false` keeps edits and allows `save`.
+    let dir = tempfile::tempdir_in(solidcraft_engine::io::vfs::temp_dir()).unwrap();
+    let saved = dir.path().join("kept.sc");
+    let r2 = tool(
+        &mut s,
+        "batch",
+        json!({
+            "dry_run": false,
+            "commands": [
+                {"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]}},
+                {"command": "save", "params": {"path": saved.to_string_lossy()}},
+            ],
+        }),
+    );
+    assert_eq!((&r2["ok"], &r2["completed"]), (&json!(true), &json!(2)), "{r2}");
+    assert!(r2.get("dry_run").is_none() && r2.get("rolled_back").is_none(), "{r2}");
+    assert!(saved.exists(), "save should write when dry_run is false");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 2);
+    assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["undo"], 2);
+}
+
+#[test]
+fn batch_dry_run_works_on_bridged_app_with_and_without_engine_batch_and_reports_restore_failure() {
+    // Bridged app WITH `engine.batch`: takes checkpoint, runs one `engine.batch`, then restores checkpoint.
+    let reply = json!({"completed": 2, "results": [{"feature": 1}, {"body_count": 1}], "undone": 0});
+    let steps = json!([{"command": "solid.box"}, {"command": "inspect.measure"}]);
+    let (b, body, is_error) = recorded_batch(Ok(reply), json!({"dry_run": true, "commands": steps}));
+    assert!(!is_error, "{body}");
+    assert_eq!(
+        (&body["ok"], &body["dry_run"], &body["rolled_back"], &body["completed"]),
+        (&json!(true), &json!(true), &json!(true), &json!(2)),
+        "{body}"
+    );
+    assert_eq!(methods(&b), ["engine.execute", "engine.batch", "engine.execute"]);
+    assert_eq!(b.calls[0].1["command"], "edit.checkpoint");
+    assert_eq!(b.calls[2].1, json!({"command": "edit.restore_checkpoint", "params": {"checkpoint": 3}}));
+
+    // Bridged app WITH `engine.batch` and `expect`: measures BEFORE restoring checkpoint.
+    let mut b = Recorder { calls: Vec::new(), batch: Ok(json!({"completed": 1, "results": [{"feature": 1}], "undone": 0})) };
+    let r = crate::tools::call_tool(&mut b, "batch", &json!({"dry_run": true, "commands": [{"command": "solid.box"}], "expect": {"bodies": 0}}));
+    assert_ne!(r["isError"], true, "{r}");
+    assert_eq!(methods(&b), ["engine.execute", "engine.batch", "engine.execute", "engine.execute"]);
+    assert_eq!(b.calls[0].1["command"], "edit.checkpoint");
+    assert_eq!(b.calls[2].1["command"], "inspect.measure");
+    assert_eq!(b.calls[3].1, json!({"command": "edit.restore_checkpoint", "params": {"checkpoint": 3}}));
+
+    // Bridged app WITHOUT `engine.batch`: falls back step-by-step reusing the same checkpoint.
+    let (b, body, is_error) = recorded_batch(
+        Err("unknown method `engine.batch`".into()),
+        json!({"dry_run": true, "commands": [{"command": "parameters.add"}, {"command": "parameters.list"}]}),
+    );
+    assert!(!is_error, "{body}");
+    assert_eq!(
+        (&body["ok"], &body["dry_run"], &body["rolled_back"], &body["completed"]),
+        (&json!(true), &json!(true), &json!(true), &json!(2)),
+        "{body}"
+    );
+    let exec_cmds: Vec<&str> = b.calls.iter().filter(|(m, _)| m == "engine.execute").map(|(_, p)| p["command"].as_str().unwrap_or("")).collect();
+    assert_eq!(exec_cmds, ["edit.checkpoint", "parameters.add", "parameters.list", "edit.restore_checkpoint"]);
+    assert_eq!(b.calls.last().unwrap().1, json!({"command": "edit.restore_checkpoint", "params": {"checkpoint": 3}}));
+
+    // App without `edit.checkpoint`: refuses before running anything.
+    let mut no_cp = Answers {
+        calls: Vec::new(),
+        answer: Box::new(|_, p| if p["command"] == "edit.checkpoint" { Err("unknown command `edit.checkpoint`".into()) } else { Ok(json!({})) }),
+    };
+    let r = crate::tools::call_tool(&mut no_cp, "batch", &json!({"dry_run": true, "commands": [{"command": "solid.box"}]}));
+    assert_eq!(r["isError"], true, "{r}");
+    assert!(r["content"][0]["text"].as_str().unwrap().contains("edit.checkpoint"), "{r}");
+    assert_eq!(no_cp.calls.len(), 1, "nothing ran after missing checkpoint: {:?}", no_cp.calls);
+
+    // Restore failure: fails loudly with `rolled_back: false` and `restore_error`.
+    let mut bad_restore = Answers {
+        calls: Vec::new(),
+        answer: Box::new(|method, p| match (method, p["command"].as_str()) {
+            ("engine.execute", Some("edit.checkpoint")) => Ok(json!({"checkpoint": 7})),
+            ("engine.batch", _) => Ok(json!({"completed": 1, "results": [{"feature": 1}], "undone": 0})),
+            ("engine.execute", Some("edit.restore_checkpoint")) => Err("busy: request still running".into()),
+            _ => Err("unexpected call".into()),
+        }),
+    };
+    let r = crate::tools::call_tool(&mut bad_restore, "batch", &json!({"dry_run": true, "commands": [{"command": "solid.box"}]}));
+    assert_eq!(r["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((&body["dry_run"], &body["rolled_back"]), (&json!(true), &json!(false)), "{body}");
+    assert!(body["restore_error"].as_str().unwrap().contains("still running"), "{body}");
+    assert!(body["note"].as_str().unwrap().contains("STILL HOLD"), "{body}");
+}
