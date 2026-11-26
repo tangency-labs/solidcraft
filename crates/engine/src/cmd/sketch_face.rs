@@ -146,6 +146,8 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool, use_index
     let mut curved = false;
     // The first body whose faces the kernel could not be asked, for when no other body has the face.
     let mut unread: Option<String> = None;
+    // A flat face that a default placement cannot anchor: refused only when no other face is chosen.
+    let mut needs_fixed: Option<String> = None;
     let mut work = state.bodies.len().saturating_add(doc.occurrences.len());
     for (component, path, placement) in placements {
         let Some(bodies) = by_component.get(&component) else {
@@ -211,7 +213,9 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool, use_index
                             // A default placement anchors to the face's history, which a flat blend
                             // or revolution gives no exact anchor for; a fixed plane takes the plane.
                             if !fixed {
-                                return Err(bad(cmd, "this face is flat but has no exact plane it can follow; use a fixed plane"));
+                                needs_fixed
+                                    .get_or_insert_with(|| "this face is flat but has no exact plane it can follow; use a fixed plane".to_string());
+                                continue;
                             }
                             plane
                         }
@@ -245,6 +249,9 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool, use_index
         }
     }
     let Some((body, index, path, plane)) = chosen else {
+        if let Some(message) = needs_fixed {
+            return Err(bad(cmd, message));
+        }
         if curved {
             return Err(bad(cmd, "the selected face is curved or is not an exact plane; choose a flat face or an explicit fixed plane"));
         }
