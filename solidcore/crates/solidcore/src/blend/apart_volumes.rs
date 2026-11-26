@@ -8,15 +8,17 @@
 /// below the `original` by more than the slack), and the `result` is at most each body's and at
 /// least what is left once each group takes off its own, `original - sum(original - alone)`.
 /// The slack is a thousandth of the least volume a group takes off, and never below a
-/// millionth of the original (the volumes' own accuracy is a billionth): a small blend on a
-/// large body is judged by what it takes off, not by the body's size.
+/// hundred-millionth of the original (the volumes' own accuracy is a billionth): a small blend
+/// on a large body is judged by what it takes off, not by the body's size. Volumes cannot tell a
+/// result that lost one group's whole cut from that group's partner alone; the caller checks
+/// that every group's faces are in the result.
 #[must_use]
 pub fn apart_volumes_fit(original: f64, alone: &[f64], result: f64) -> bool {
     let least_taken = alone
         .iter()
         .map(|&v| original - v)
         .fold(f64::INFINITY, f64::min);
-    let slack = (1e-3 * least_taken).max(1e-6 * original);
+    let slack = (1e-3 * least_taken).max(1e-8 * original);
     if alone.is_empty() || least_taken <= slack {
         return false;
     }
@@ -47,15 +49,15 @@ mod tests {
         assert!(!apart_volumes_fit(original, &[], original));
     }
 
-    /// Two small rims on a large plate (100 000): each takes 1 off, together 2. A result that
-    /// lost one group's cut (99 999) or kept the plate whole is refused, though both are within
-    /// a thousandth of the plate.
+    /// Two small rims on a large plate (100 000): each takes 1 off, apart, so together 2. The
+    /// plate kept whole, or a result that lost more than both take off, is refused, though both
+    /// are within a thousandth of the plate.
     #[test]
     fn small_blends_on_a_large_body_are_judged_by_what_they_take_off() {
         let original = 100_000.0;
         let alone = [original - 1.0, original - 1.0];
         assert!(apart_volumes_fit(original, &alone, original - 2.0));
-        assert!(!apart_volumes_fit(original, &alone, original - 1.0 + 0.01));
         assert!(!apart_volumes_fit(original, &alone, original));
+        assert!(!apart_volumes_fit(original, &alone, original - 2.5));
     }
 }

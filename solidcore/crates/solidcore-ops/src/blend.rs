@@ -1883,11 +1883,11 @@ fn blend_impl(
 /// The attribute id of [`MadeBy`]: ops' own, next below [`PICKED_ID`].
 const MADE_BY_ID: u64 = ids::USER_1 - 2;
 
-/// What made a face of one group's blend in [`blends_apart`], put on it before the groups'
-/// bodies are intersected and handed on through the boolean, so afterwards the faces carrying
-/// it are the blend's faces in the result.
+/// What made a face of one group's blend in [`build_apart`], and the group, put on it before
+/// the groups' bodies are intersected and handed on through the boolean, so afterwards the faces
+/// carrying it are the blend's faces in the result, and every group's are there.
 #[derive(Debug, Clone, PartialEq)]
-struct MadeBy(BlendFaceKind);
+struct MadeBy(BlendFaceKind, usize);
 
 impl AttributeHandlers for MadeBy {}
 
@@ -2029,6 +2029,7 @@ fn apart_bodies(
     let mut ids = group.clone();
     ids.sort_unstable();
     ids.dedup();
+    let groups = ids.len();
     let mut v0_body = intact.clone_standing_for_self_keeping_definitions()?;
     let Some(v0) = soft(volume_of(k, &mut v0_body))? else {
         return Ok(None);
@@ -2092,7 +2093,7 @@ fn apart_bodies(
         }
         for made in log.iter().flat_map(|l| l.sessions.iter().flatten()) {
             if alone.face_list().contains(&made.face) {
-                let tag = Attribute::application(MADE_BY_ID, Behavior::Copy, MadeBy(made.kind));
+                let tag = Attribute::application(MADE_BY_ID, Behavior::Copy, MadeBy(made.kind, id));
                 if soft(alone.add_attribute(EntityRef::Face(made.face), tag))?.is_none() {
                     return Ok(None);
                 }
@@ -2126,20 +2127,26 @@ fn apart_bodies(
     if !apart_volumes_fit(v0, &volumes, v) || soft(is_manifold_solid(&result))? != Some(true) {
         return Ok(None);
     }
-    // the blend's faces in the result, the tags off
+    // the blend's faces in the result, the tags off, and the groups they come from
     let mut made = Vec::new();
+    let mut seen = HashSet::new();
     for f in result.face_list().to_vec() {
         let tag = result
             .entity_attributes(EntityRef::Face(f))
             .into_iter()
             .find(|(_, a)| a.attribute_id() == MADE_BY_ID)
-            .and_then(|(h, a)| a.application_value::<MadeBy>().map(|m| (h, m.0)));
-        if let Some((h, kind)) = tag {
+            .and_then(|(h, a)| a.application_value::<MadeBy>().map(|m| (h, m.0, m.1)));
+        if let Some((h, kind, from)) = tag {
             if soft(result.remove_attribute(EntityRef::Face(f), h))?.is_none() {
                 return Ok(None);
             }
             made.push(MadeBlendFace { face: f, kind });
+            seen.insert(from);
         }
+    }
+    // every group's cut is in the result (volumes alone cannot tell one lost whole)
+    if seen.len() != groups {
+        return Ok(None);
     }
     k.blend_face_log = Some(BlendFaceLog {
         sessions: vec![made],
