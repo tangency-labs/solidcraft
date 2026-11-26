@@ -498,6 +498,19 @@ them. The *first moments* are the mass times the centre of mass.
 - **Elsewhere:** moment of inertia, inertia tensor, mass moment of inertia.
 - **For translators:** not the second moment of area of a cross-section, a different quantity.
 
+### motion model
+
+What a 3D mouse's cap moves: the model, or a camera that looks at the point the view turns about.
+
+With **Object** the model goes the way the cap is pushed, tilted or twisted. With **Target camera**
+the camera goes that way, so the model goes the other way along every axis.
+
+- **In SolidCraft:** the `space_mouse_motion` preference (`object`, `target_camera`);
+  Preferences › Input › 3D mouse › Motion model.
+- **Don't use:** navigation mode (the mouse mappings), camera mode.
+- **Elsewhere:** object mode, camera mode, target camera mode, navigation mode.
+- **For translators:** how the 3D mouse moves the view, not a 3D model and not a motion study.
+
 ### movable corridor
 
 The range of timeline steps where the selected feature can move without coming before a feature
@@ -853,6 +866,26 @@ The space left between frame members where they meet, for a weld to fill.
 - **Elsewhere:** weld gap, root gap, root opening.
 - **For translators:** not a sheet metal hem gap and not a clearance.
 
+### weld symbol
+
+A mark identifying the type of weld required at a joint.
+
+- **In SolidCraft:** `solidcraft_geom::weld::Kind` and the elementary strokes drawn by
+  `Weld::draw`.
+- **For translators:** ISO calls this an elementary symbol; it forms part of a *welding symbol*.
+
+### welding symbol
+
+A drawing annotation giving the location and requirements for joining parts by welding.
+
+The arrow side and other side describe joint requirements; the selected convention controls
+their placement. The backend record needs no modelled weld bead. A leader and sheet/view
+placement complete the annotation later.
+
+- **In SolidCraft:** `solidcraft_geom::weld::Weld` backend records; see the
+  [supported subset and limits](../../../weld-symbols.md).
+- **For translators:** the whole annotation, including its reference line and any elementary marks.
+
 ## Words with more than one meaning
 
 An English word that means two things can be translated correctly for only one of them while both
@@ -878,6 +911,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
 | | a minimum distance field | clearance | the Interference and plastic rules dialogs |
 | | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
+| | the room a Combine cut leaves round its tools | offset (Combine) | the Combine dialog's Offset, `ui.combine_offset` |
 | Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |
 | | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |
 | Flat | a hole's flat bottom | flat bottom | the Hole dialog's tip |

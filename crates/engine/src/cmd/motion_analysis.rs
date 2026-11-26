@@ -87,7 +87,7 @@ fn step_of(m: &MotionStudy, k: usize, n: usize) -> f64 {
 fn play(s: &Session, m: &MotionStudy, n: usize, contact: bool, mut each: impl FnMut(&Session, usize) -> Result<bool>) -> Result<Stopped> {
     let mut t = s.scratch();
     // Played from where the parts are placed: moves only shown are not where joints are solved.
-    t.pending_moves.clear();
+    t.clear_pending_moves();
     if !contact {
         t.doc_mut().assembly.contact_enabled = false;
     }

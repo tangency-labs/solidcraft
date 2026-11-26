@@ -672,6 +672,49 @@ pub fn points_meet(a: [f64; 3], b: [f64; 3], tol: f64) -> Result<bool> {
     Ok(point_distance(a, b)?.value <= tol)
 }
 
+/// Why [`turn_to_parallel`] cannot answer a turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParallelTurnError {
+    /// The given normal is not square to the axis.
+    NotASide,
+    /// The axis, normal or line is a zero or non-finite vector.
+    NotALine,
+    /// The line runs along the axis: turning about the axis never makes a perpendicular direction
+    /// parallel to it.
+    AlongAxis,
+}
+
+/// A normal is square to the axis within this (a dot product of unit vectors).
+const SQUARE_NORMAL_TOL: f64 = 1e-6;
+/// A line this close to the axis (radians) is along it.
+const ALONG_AXIS_TOL: f64 = 1e-9;
+
+/// The turn (radians, in (-PI/2, PI/2]) about `axis` that makes a direction square to `axis`
+/// (with normal `face_normal`) parallel to `line`.
+///
+/// # Errors
+///
+/// [`ParallelTurnError`], see its variants.
+pub fn turn_to_parallel(
+    axis: [f64; 3],
+    face_normal: [f64; 3],
+    line: [f64; 3],
+) -> std::result::Result<f64, ParallelTurnError> {
+    let m = solidcore::query::edge_turn::turn_to_parallel(
+        Vec3::from(axis),
+        Vec3::from(face_normal),
+        Vec3::from(line),
+    )
+    .map_err(|_| ParallelTurnError::NotALine)?;
+    if m.normal_along_axis > SQUARE_NORMAL_TOL {
+        return Err(ParallelTurnError::NotASide);
+    }
+    if m.line_off_axis < ALONG_AXIS_TOL {
+        return Err(ParallelTurnError::AlongAxis);
+    }
+    Ok(m.turn)
+}
+
 impl Body {
     /// Mass properties at `relative_accuracy` (the kernel's rule: finite and positive, clamped
     /// to [1e-8, 1e-1]): the sum over the body's material regions, so several lumps, or lumps
@@ -1605,7 +1648,8 @@ impl Body {
 
     /// The loops of record face `face`, each as the record edges it runs along (through `order`),
     /// in the order the loop runs: the loops as the kernel lists them on the face's primary use,
-    /// the outer loop first and then the holes. A loop of a lone vertex has no edges. An
+    /// the outer loop first and then the holes. An edge a loop runs along twice (a seam) is
+    /// listed once, where the loop first meets it. A loop of a lone vertex has no edges. An
     /// application that names a hole by a pick reads the hole's edges here, and measures them
     /// with [`Body::edge_closest_point`].
     ///
@@ -3940,6 +3984,26 @@ pub(crate) mod tests {
         assert_eq!(outer, vec![0, 1, 2, 3]);
         assert_eq!(loops[1], vec![4]);
         assert_eq!(b.face_loops(&o, o.faces.len()), Err(Error::Argument));
+        // each loop of the block's faces runs edge to edge: consecutive edges, the last and the
+        // first included, share a vertex (a loop with a closed edge, a circle or a seam's
+        // neighbours, is left out)
+        let (record, ro) = b.to_record().unwrap();
+        let ends = |e: usize| record.edges[e].vertices;
+        for f in 0..ro.faces.len() {
+            for l in b.face_loops(&ro, f).unwrap() {
+                if l.len() < 2 || l.iter().any(|&e| ends(e)[0] == ends(e)[1]) {
+                    continue;
+                }
+                for (i, &e) in l.iter().enumerate() {
+                    let next = l[(i + 1) % l.len()];
+                    let shared = ends(e).iter().any(|v| ends(next).contains(v));
+                    assert!(
+                        shared,
+                        "face {f}: edges {e} and {next} of {l:?} do not meet"
+                    );
+                }
+            }
+        }
         all_fixes();
         let bx = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
         let bo = kernel_order(&bx);
@@ -4027,5 +4091,33 @@ pub(crate) mod tests {
             .unwrap()
             .unwrap();
         assert!((cc[0] - 2.0).abs() < 1e-9 && cc[1].abs() < 1e-9);
+    }
+
+    #[test]
+    fn turn_to_parallel_cases() {
+        use core::f64::consts::PI;
+        let z = [0.0, 0.0, 1.0];
+        let x = [1.0, 0.0, 0.0];
+        let ok = |l: [f64; 3], want: f64| {
+            let got = turn_to_parallel(z, x, l).unwrap();
+            assert!((got - want).abs() < 1e-12, "{l:?}: {got} vs {want}");
+        };
+        ok([0.0, 1.0, 0.0], 0.0);
+        ok([1.0, 1.0, 0.0], -PI / 4.0);
+        ok([1.0, 1.0, 5.0], -PI / 4.0);
+        ok([1.0, 0.0, 0.0], PI / 2.0);
+        assert_eq!(turn_to_parallel(z, x, z), Err(ParallelTurnError::AlongAxis));
+        assert_eq!(
+            turn_to_parallel(z, z, [0.0, 1.0, 0.0]),
+            Err(ParallelTurnError::NotASide)
+        );
+        assert_eq!(
+            turn_to_parallel(z, x, [f64::NAN, 0.0, 0.0]),
+            Err(ParallelTurnError::NotALine)
+        );
+        assert_eq!(
+            turn_to_parallel(z, x, [0.0; 3]),
+            Err(ParallelTurnError::NotALine)
+        );
     }
 }

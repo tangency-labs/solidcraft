@@ -120,6 +120,7 @@ const NAMES_A_FILE: &[&str] = &["path", "paths", "file", "files", "dir", "folder
 const ANSWERED_ON_A_COPY: &[&str] = &[
     "file.export",
     "file.export_3mf",
+    "file.export_mjcf",
     "file.export_obj",
     "file.export_sdf",
     "file.export_step",
@@ -952,6 +953,14 @@ impl SolveApp {
                 if let Some(exits) = reply.get("sketch_exits").and_then(Value::as_array) {
                     for sketch in exits {
                         self.sketch_closed(sketch.as_u64());
+                    }
+                }
+                if let Some(messages) = reply.get("messages").and_then(Value::as_array) {
+                    for m in messages {
+                        let level = m.get("level").and_then(Value::as_str).unwrap_or("info");
+                        let text = m.get("message").and_then(Value::as_str).unwrap_or_default();
+                        let error = level == "error";
+                        self.messages.push(text, error, crate::now_ms());
                     }
                 }
                 crate::render_workspace::apply_command(self, "plugin.run", &reply)?;
