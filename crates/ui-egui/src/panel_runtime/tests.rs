@@ -15484,6 +15484,37 @@ fn drag_out_refuses_a_panel_that_cannot_pop_out_and_a_host_without_native_window
 }
 
 #[test]
+fn a_popped_out_panel_drags_back_by_its_grip_onto_a_shown_dock_target_only() {
+    let (mut service, _, _) = drag_out_fixture();
+    let reservations = fixture_complete_reservations(&service);
+    let destination = super::popout_destination(&service, &id("moving"), Point { x: 0.0, y: 30.0 }, &reservations).unwrap();
+    apply_fixture(&mut service, vec![Mutation::Move { instance: id("moving"), destination }]);
+    assert_eq!(service.layout().containing(&id("moving")).unwrap().location.zone(), Zone::Window);
+    let host = allocate_fixture(&service, Size { width: 1400.0, height: 900.0 }, Direction::Ltr, &fixture_metric_policy(&service));
+    let scope = fixture_scope(&service);
+    let before = service.inspect();
+    assert!(HostInteraction::default().begin_window_move(&service, &scope, &host, &id("one")).is_err(), "a docked panel has no grip drag");
+
+    // Released where no target was shown: nothing changes, the window stays.
+    let mut drag = HostInteraction::default();
+    drag.begin_window_move(&service, &scope, &host, &id("moving")).unwrap();
+    let target = middle(host.sections.iter().find(|card| card.instance == id("one")).unwrap().outer);
+    assert!(drag.update(&service, &scope, &host, HostPointerEvent::Release { at: target }).candidate.is_none());
+    assert_eq!(service.inspect(), before);
+
+    // Over the app the host shows a dock target; release docks the panel there.
+    drag.begin_window_move(&service, &scope, &host, &id("moving")).unwrap();
+    let preview = fixture_move(&service, &host, &mut drag, target);
+    assert!(preview.rejection.is_none() && preview.window.is_none() && preview.target.is_some());
+    assert_eq!(service.inspect(), before);
+    let candidate = drag.update(&service, &scope, &host, HostPointerEvent::Release { at: target }).candidate.expect("a shown dock target commits");
+    assert!(candidate.window_landing().is_none());
+    fixture_commit(&mut service, &host, candidate);
+    assert!(service.layout().containing(&id("moving")).unwrap().location.zone().docked());
+    assert!(service.layout().sections.iter().all(|section| section.location.zone() != Zone::Window), "the window's host is released");
+}
+
+#[test]
 fn a_dropped_window_opens_at_the_shown_place_kept_on_its_monitor() {
     use super::{DesktopNativeAdapter, NativeMonitor};
 
@@ -15601,6 +15632,651 @@ fn a_dropped_window_opens_at_the_shown_place_kept_on_its_monitor() {
 }
 
 #[test]
+fn a_dropped_window_with_the_app_title_bar_has_no_os_frame_and_is_the_window_kept_on_release() {
+    use super::{DesktopNativeAdapter, NativeMonitor};
+    use crate::window_chrome::TitleBar;
+
+    let mut adapter = DesktopNativeAdapter::default();
+    let monitor = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(2000.0, 1600.0));
+    let monitors = || vec![NativeMonitor { name: Some("Primary".into()), bounds: monitor, scale: 2.0, primary: true }];
+    let ctx = egui::Context::default();
+    let instance = InstanceId::new("drop-panel").unwrap();
+    let bounds = (Size { width: 200.0, height: 100.0 }, Size { width: 900.0, height: 900.0 });
+    let preferred = Size { width: 360.0, height: 440.0 };
+    let content = egui::vec2(preferred.width, preferred.height);
+    let corner = egui::pos2(100.0, 80.0);
+    adapter.update_monitors(monitors);
+    adapter.landing(&ctx, &instance, corner, preferred, bounds).unwrap();
+    adapter.update_monitors(monitors);
+    // The system's window, as with the preference off: the OS frame is around the content.
+    assert_eq!(adapter.title_bar(), None);
+    let framed = adapter.landing(&ctx, &instance, corner, preferred, bounds).unwrap();
+    assert!(framed.height() > content.y, "{framed:?}");
+
+    // With the app's own title bar the window has no OS frame: its content is the
+    // whole landing, and the app's bar is the window's title bar.
+    adapter.set_title_bar(Some(TitleBar { traffic_lights: true, caption_buttons: false, hide_caption_buttons: false }));
+    let landing = adapter.landing(&ctx, &instance, corner, preferred, bounds).unwrap();
+    assert_eq!(landing, egui::Rect::from_min_size(corner, content));
+    let (dropped, shown) = adapter.drop_window(&ctx, &instance, "Panel".into(), landing);
+    assert_eq!((shown.position, shown.inner_size), (Some(landing.min), Some(content)));
+    assert_eq!((shown.mouse_passthrough, shown.window_level, shown.active), (Some(true), Some(egui::WindowLevel::AlwaysOnTop), Some(false)));
+    assert_eq!((shown.fullsize_content_view, shown.titlebar_shown, shown.title_shown), (Some(true), Some(false), Some(false)));
+
+    // On release the panel's host keeps that window: an ordinary window again,
+    // with the same title bar settings, at the same place and size.
+    let host = HostId::new("drop-opened").unwrap();
+    let create = [HostEffect::CreateNative { host: host.clone(), section: SectionId::new("opened-section").unwrap() }];
+    adapter.prepare(&create).unwrap();
+    adapter.commit(&create);
+    assert_eq!(adapter.adopt(&host, &instance), Some(dropped));
+    assert_eq!(adapter.viewport_id(&host), Some(dropped));
+    adapter.place(&ctx, &instance, landing);
+    let kept = adapter.builder(&ctx, &host, &instance, "Panel".into(), preferred, bounds).unwrap();
+    assert_eq!((kept.mouse_passthrough, kept.window_level), (Some(false), Some(egui::WindowLevel::Normal)));
+    assert_eq!(
+        (kept.decorations, kept.fullsize_content_view, kept.titlebar_shown, kept.title_shown),
+        (shown.decorations, shown.fullsize_content_view, shown.titlebar_shown, shown.title_shown)
+    );
+    assert_eq!((kept.position, kept.inner_size), (Some(landing.min), Some(content)));
+
+    // A window keeps the title bar it was created with. When the preference
+    // changes, the open window is opened anew, as the system's window here.
+    adapter.set_title_bar(Some(TitleBar { traffic_lights: true, caption_buttons: false, hide_caption_buttons: false }));
+    assert_eq!(adapter.viewport_id(&host), Some(dropped), "the same title bar keeps the window");
+    adapter.set_title_bar(None);
+    assert_ne!(adapter.viewport_id(&host), Some(dropped));
+    let system = adapter.builder(&ctx, &host, &instance, "Panel".into(), preferred, bounds).unwrap();
+    assert_eq!((system.decorations, system.fullsize_content_view, system.titlebar_shown, system.title_shown), (None, None, None, None));
+    assert_eq!(system.inner_size, Some(content));
+    // The app's own window had no OS frame to measure, and that is not taken for the
+    // system's frame: a landing counts the frame again, as before the app's look.
+    assert_eq!(adapter.landing(&ctx, &instance, corner, preferred, bounds), Some(framed));
+
+    // Where the app draws the caption buttons itself, the window has no OS decorations.
+    adapter.set_title_bar(Some(TitleBar { traffic_lights: false, caption_buttons: true, hide_caption_buttons: false }));
+    assert_eq!(adapter.drop_window(&ctx, &instance, "Panel".into(), landing).1.decorations, Some(false));
+}
+
+#[test]
+fn a_panel_that_takes_another_panels_window_place_opens_there_at_its_own_size() {
+    use super::{DesktopNativeAdapter, NativeMonitor};
+
+    let mut adapter = DesktopNativeAdapter::default();
+    let monitor = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(4000.0, 2400.0));
+    let monitors = || vec![NativeMonitor { name: Some("Primary".into()), bounds: monitor, scale: 2.0, primary: true }];
+    let ctx = egui::Context::default();
+    let (history, timeline) = (InstanceId::new("history").unwrap(), InstanceId::new("timeline-2d").unwrap());
+    let bounds = (Size { width: 200.0, height: 100.0 }, Size { width: 1800.0, height: 900.0 });
+    // The monitors are read once a landing has asked for them.
+    adapter.update_monitors(monitors);
+    adapter.landing(&ctx, &history, egui::pos2(0.0, 0.0), Size { width: 250.0, height: 480.0 }, bounds).unwrap();
+    adapter.update_monitors(monitors);
+    let open = |adapter: &mut DesktopNativeAdapter, host: &str, section: &str, instance: &InstanceId, preferred: Size| {
+        let host = HostId::new(host).unwrap();
+        let create = [HostEffect::CreateNative { host: host.clone(), section: SectionId::new(section).unwrap() }];
+        adapter.prepare(&create).unwrap();
+        adapter.commit(&create);
+        adapter.builder(&ctx, &host, instance, "Panel".into(), preferred, bounds).unwrap()
+    };
+    // History's window, where the user put it.
+    let slim = egui::Rect::from_min_size(egui::pos2(1200.0, 300.0), egui::vec2(250.0, 480.0));
+    adapter.place(&ctx, &history, slim);
+    let frame = adapter.landing(&ctx, &history, slim.min, Size { width: 250.0, height: 480.0 }, bounds).unwrap().size() - slim.size();
+
+    // The 2D timeline has had no window: it opens at History's corner, at its own size.
+    let wide = Size { width: 700.0, height: 268.0 };
+    adapter.take_place(&history, &timeline, false);
+    let first = open(&mut adapter, "timeline-host", "timeline-section", &timeline, wide);
+    assert_eq!((first.position, first.inner_size), (Some(slim.min), Some(egui::vec2(wide.width, wide.height))));
+
+    // With a window size of its own from before, it keeps that size and takes the other's corner.
+    let own = egui::Rect::from_min_size(egui::pos2(100.0, 700.0), egui::vec2(600.0, 300.0));
+    adapter.place(&ctx, &timeline, own);
+    adapter.take_place(&history, &timeline, false);
+    let again = open(&mut adapter, "timeline-host-2", "timeline-section-2", &timeline, wide);
+    assert_eq!((again.position, again.inner_size), (Some(slim.min), Some(own.size() - frame)));
+
+    // A panel whose window has no known place gives none: the other opens as it would alone.
+    let other = InstanceId::new("other").unwrap();
+    adapter.take_place(&other, &history, false);
+    let kept = open(&mut adapter, "history-host", "history-section", &history, Size { width: 250.0, height: 480.0 });
+    assert_eq!(kept.position, Some(slim.min));
+
+    // As a strip, a panel keeps the other window's width and drops the size of its own last
+    // window: the caller sizes it one row high from that width.
+    assert_eq!(adapter.strip_width(&history), None);
+    adapter.take_place(&timeline, &history, true);
+    let width = own.width() - frame.x;
+    assert_eq!(adapter.strip_width(&history), Some(width));
+    let strip = open(&mut adapter, "history-host-2", "history-section-2", &history, Size { width, height: 120.0 });
+    assert_eq!((strip.position, strip.inner_size), (Some(slim.min), Some(egui::vec2(width, 120.0))));
+
+    // A panel that takes a full-screen window's place opens at that window's ordinary place and
+    // goes full screen from there, so that it has that place again when it leaves full screen.
+    // `observe` answers whether it asked for full screen.
+    let observe = |adapter: &DesktopNativeAdapter, host: &str, instance: &InstanceId, full_screen: bool| {
+        let host = HostId::new(host).unwrap();
+        let viewport = adapter.viewport_id(&host).unwrap();
+        let info = egui::ViewportInfo { fullscreen: Some(full_screen), ..Default::default() };
+        let input = egui::RawInput { viewport_id: viewport, viewports: [(viewport, info)].into_iter().collect(), ..Default::default() };
+        let mut output = egui::Context::default().run_ui(input, |ui| adapter.observe(ui.ctx(), &host, instance));
+        output.textures_delta.clear();
+        let commands = output.viewport_output.get(&viewport).map(|shown| shown.commands.clone()).unwrap_or_default();
+        commands.contains(&egui::ViewportCommand::Fullscreen(true))
+    };
+    adapter.place(&ctx, &history, slim);
+    assert!(!observe(&adapter, "history-host-2", &history, true));
+    adapter.take_place(&history, &timeline, false);
+    let full = open(&mut adapter, "timeline-host-3", "timeline-section-3", &timeline, wide);
+    assert_eq!((full.fullscreen, full.position), (None, Some(slim.min)));
+    // Once that window is open it asks for full screen, once: what it took is used up.
+    assert!(observe(&adapter, "timeline-host-3", &timeline, false));
+    assert!(!observe(&adapter, "timeline-host-3", &timeline, true));
+    // A window that is not full screen gives no such state.
+    observe(&adapter, "history-host-2", &history, false);
+    adapter.place(&ctx, &history, slim);
+    adapter.take_place(&history, &timeline, false);
+    open(&mut adapter, "timeline-host-4", "timeline-section-4", &timeline, wide);
+    assert!(!observe(&adapter, "timeline-host-4", &timeline, false));
+}
+
+/// The buttons of a painted frame, by accessible name.
+fn frame_buttons(output: &egui::FullOutput) -> Vec<(String, egui::Rect)> {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.role() == egui::accesskit::Role::Button)
+        .filter_map(|(_, node)| {
+            let bounds = node.bounds()?;
+            let bounds = egui::Rect::from_min_max(egui::pos2(bounds.x0 as f32, bounds.y0 as f32), egui::pos2(bounds.x1 as f32, bounds.y1 as f32));
+            Some((node.label()?.to_owned(), bounds))
+        })
+        .collect()
+}
+
+/// What one frame of a panel's desktop window drew, as the app paints it.
+struct PaintedWindow {
+    /// Where the panel's body drew.
+    body: egui::Rect,
+    /// Where the panel's own content drew in the title's place, if it did; it
+    /// draws before the body.
+    title: Option<egui::Rect>,
+    /// The window's buttons by accessible name.
+    buttons: Vec<(String, egui::Rect)>,
+}
+
+/// One frame of a panel's desktop window, as the app paints it. `root` is the
+/// app's panel host.
+fn paint_panel_window(
+    h: &mut PanelMountHarness,
+    host: &HostId,
+    window: egui::Rect,
+    root: Option<&WorkspacePanelHost>,
+    card: Option<super::NativeCardWindow>,
+) -> PaintedWindow {
+    paint_native_panel_window(h, host, window, root, card, None)
+}
+
+/// As `paint_panel_window`, in the OS window with the handle `native`.
+fn paint_native_panel_window(
+    h: &mut PanelMountHarness,
+    host: &HostId,
+    window: egui::Rect,
+    root: Option<&WorkspacePanelHost>,
+    card: Option<super::NativeCardWindow>,
+    native: Option<u64>,
+) -> PaintedWindow {
+    #[derive(Default)]
+    struct Slots {
+        body: Option<egui::Rect>,
+        title: Option<egui::Rect>,
+    }
+    impl FramePanelContent for Slots {
+        fn render(
+            &mut self,
+            slot: ContentSlot,
+            ui: &mut egui::Ui,
+            _context: &PanelContext,
+            _content: &mut dyn PanelController,
+            _services: &mut ContentServices<'_>,
+        ) -> PanelResult<()> {
+            match slot {
+                ContentSlot::Title => {
+                    assert!(self.body.is_none(), "the title's place draws before the body");
+                    self.title = Some(ui.max_rect());
+                    // A control of the panel's own there, as a search box is.
+                    ui.interact(ui.max_rect(), ui.scope_id().with("title-control"), egui::Sense::click());
+                }
+                ContentSlot::Body => self.body = Some(ui.max_rect()),
+                _ => {}
+            }
+            Ok(())
+        }
+    }
+    let section = h.runtime.layout().layout().containing(&id("editor")).unwrap().clone();
+    let ctx = crate::fonts::test_context();
+    ctx.enable_accesskit();
+    let mut slots = Slots::default();
+    let mut input = egui::RawInput { screen_rect: Some(window), focused: true, ..Default::default() };
+    if let (Some(native), Some(viewport)) = (native, input.viewports.get_mut(&egui::ViewportId::ROOT)) {
+        // The app installs this when it starts: the bar a window lays out is published
+        // when the pass ends.
+        crate::window_chrome::install(&ctx);
+        viewport.native_window = Some(native);
+    }
+    let mut output = ctx.run_ui(input, |ui| {
+        let mut services = ContentServices { models: &h.models, commands: &mut h.commands, local: &mut h.local };
+        super::paint_native_window(&mut h.runtime, &mut services, &mut slots, host, &section, ui, true, root, card).unwrap();
+    });
+    output.textures_delta.clear();
+    PaintedWindow { body: slots.body.expect("the window mounts the panel's body"), title: slots.title, buttons: frame_buttons(&output) }
+}
+
+/// One frame of the window a drag shows for a panel with `actions`: its buttons
+/// by accessible name.
+fn paint_drop_window(
+    window: egui::Rect,
+    look: Option<super::NativeCardWindow>,
+    title: &str,
+    title_content: Option<f32>,
+    actions: &[super::NativeWindowControl],
+) -> Vec<(String, egui::Rect)> {
+    let ctx = crate::fonts::test_context();
+    ctx.enable_accesskit();
+    let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(window), focused: true, ..Default::default() }, |ui| {
+        super::paint_native_drop(ui, None, 30.0, look, &id("editor"), title, false, title_content, actions);
+    });
+    output.textures_delta.clear();
+    frame_buttons(&output)
+}
+
+/// A panel with two actions (`apply`, `cancel`) in a desktop window of its own, and
+/// that window's host.
+fn editor_window_with_two_actions() -> (PanelMountHarness, HostId) {
+    let mut h = PanelMountHarness::without_content(true).unwrap();
+    let environment = h.runtime.environment().clone();
+    let mut registry = PanelRegistry::default();
+    for spec in synthetic_registry().unwrap().specs() {
+        let mut spec = spec.clone();
+        if spec.kind.0 == "fixture.editor" {
+            spec.header_actions = ["apply", "cancel"]
+                .map(|id| HeaderActionSpec { id: ControlId::new(id).unwrap(), label_key: "ui.panel".into(), icon: "list".into() })
+                .into();
+        }
+        registry.register(spec).unwrap();
+    }
+    let capabilities = HostCapabilities { native_windows: true, max_native_hosts: 8, persistence: true };
+    let service = LayoutService::new(registry, Layout::empty(environment.workspace.clone()), capabilities).unwrap();
+    h.runtime = PanelRuntime::new(service, environment).unwrap();
+    bind_synthetic_controllers(&mut h.runtime, &h.probe).unwrap();
+    open_editor(&mut h);
+    h.dispatch(vec![native_placement("editor", "editor-window", "editor-host", 0)]).unwrap();
+    h.tick().unwrap();
+    (h, HostId::new("editor-host").unwrap())
+}
+
+#[test]
+fn panel_windows_have_the_app_title_bar_and_card_layout_unless_the_preference_keeps_the_system_window() {
+    // By default panel windows show the app's own title bar; the preference keeps
+    // the system's window.
+    let app_bar = crate::window_chrome::TitleBar { traffic_lights: true, caption_buttons: false, hide_caption_buttons: false };
+    let mut prefs = crate::prefs::Prefs::default();
+    assert!(prefs.panel_window_title_bar);
+    assert_eq!(super::app::window_title_bar(&prefs, app_bar), Some(app_bar));
+    prefs.panel_window_title_bar = false;
+    assert_eq!(super::app::window_title_bar(&prefs, app_bar), None);
+
+    let (mut h, host) = editor_window_with_two_actions();
+    let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 500.0));
+    let bar = crate::toolbar::APP_BAR_HEIGHT;
+    let title = h.runtime.instance_presentation(&id("editor")).unwrap().title;
+    let menu = solidcraft_ui_text::tr("ui.panel_host.menu");
+    let named = |buttons: &[(String, egui::Rect)], name: &str| buttons.iter().find(|(label, _)| label == name).map(|(_, bounds)| *bounds);
+
+    // With the preference off, the window is the system's: its content has no title
+    // bar, grip or menu, the actions are in a row from the leading edge at its top, in
+    // their declared order, and the body runs from that row to the window's edges.
+    let PaintedWindow { body, buttons, .. } = paint_panel_window(&mut h, &host, window, None, None);
+    assert!(named(&buttons, menu).is_none() && named(&buttons, &title).is_none(), "{buttons:?}");
+    let (apply, cancel) = (named(&buttons, "apply").unwrap(), named(&buttons, "cancel").unwrap());
+    assert!(apply.left() < window.center().x && apply.right() <= cancel.left() && cancel.right() < window.center().x, "{apply:?} {cancel:?}");
+    let chrome = super::native_window_chrome(&crate::fonts::test_context(), None, true);
+    assert!(apply.bottom() <= chrome && chrome < bar, "the row of actions is the window's only chrome: {apply:?} {chrome}");
+    assert!((body.top() - chrome).abs() < 0.5, "the fitted height counts what the earlier layout draws: {body:?} {chrome}");
+    assert_eq!((body.left(), body.right(), body.bottom()), (window.left(), window.right(), window.bottom()), "{body:?}");
+    // So is the window a drag shows: nothing but the panel's paint.
+    let actions = super::native_window_actions(&h.runtime, &id("editor"), None).unwrap();
+    assert_eq!(actions.len(), 2);
+    assert!(paint_drop_window(window, None, &title, None, &actions).is_empty());
+
+    // By default: the app's title bar with the panel's title and grip, and the
+    // panel's menu at its trailing end. The panel's actions fit beside the title,
+    // so they are in the title bar too, in their declared order up to the menu, as
+    // in a docked header: they take no row. The body has the card's inset, under
+    // the content header and above the footer's reserve.
+    use super::{NativeActionPlace as ActionPlace, native_action_place as action_place, native_bar_holds_actions as bar_holds_actions};
+    let ctx = crate::fonts::test_context();
+    let card = super::NativeCardWindow::of(crate::window_chrome::TitleBar::default(), None);
+    let metrics = card.metrics;
+    // Where a window that wide shows the panel's actions; text is measured in a frame.
+    let place = |h: &PanelMountHarness, width: f32| {
+        let mut place = None;
+        let mut output = crate::fonts::test_context().run_ui(egui::RawInput::default(), |ui| {
+            place = Some(action_place(ui.ctx(), &h.runtime, None, card, &id("editor"), width));
+        });
+        output.textures_delta.clear();
+        place.unwrap()
+    };
+    assert_eq!(place(&h, window.width()), ActionPlace::TitleBar);
+    let PaintedWindow { body: inset, title: none, buttons } = paint_panel_window(&mut h, &host, window, None, Some(card));
+    assert_eq!(none, None, "the panel asked for nothing in the title's place");
+    let grip = named(&buttons, &title).expect("the title bar has the panel's title and grip");
+    assert!(grip.bottom() <= bar && grip.right() < window.center().x, "{grip:?}");
+    let button = named(&buttons, menu).expect("the title bar has the panel's menu");
+    assert!(button.bottom() <= bar && button.left() > window.center().x, "{button:?}");
+    let (apply, cancel) = (named(&buttons, "apply").unwrap(), named(&buttons, "cancel").unwrap());
+    assert!((cancel.right() - button.left()).abs() < 1e-3 && (apply.right() - cancel.left()).abs() < 1e-3, "{apply:?} {cancel:?} {button:?}");
+    assert!((apply.center().y - button.center().y).abs() < 1e-3 && (apply.height() - metrics.control_extent).abs() < 1e-3, "{apply:?}");
+    assert!(grip.right() <= apply.left(), "the title keeps its width beside the actions: {grip:?} {apply:?}");
+    let card_body = egui::Rect::from_min_max(
+        egui::pos2(window.left(), bar + metrics.content_header_height),
+        egui::pos2(window.right(), window.bottom() - metrics.footer_height),
+    );
+    assert_eq!(inset, super::content_inset(card_body));
+    let chrome = super::native_window_chrome(&ctx, Some(card), false);
+    assert!((chrome - (card_body.top() + metrics.footer_height)).abs() < 1e-3, "{chrome} {card_body:?}");
+    // The window a drag shows has that same title bar, the actions in it, so it is
+    // the window kept on release.
+    let shown = paint_drop_window(window, Some(card), &title, None, &actions);
+    assert_eq!(
+        (named(&shown, &title), named(&shown, "apply"), named(&shown, "cancel"), named(&shown, menu)),
+        (Some(grip), Some(apply), Some(cancel), Some(button)),
+        "{shown:?}"
+    );
+    // With the panel's own content in the title's place, the actions are placed by
+    // that place's width, as in the panel's window: here they fit beside the title
+    // but not beside the content, so the drag's window leaves them to the card's row
+    // and nothing moves on release.
+    let wide_content = window.width() - 2.0 * metrics.control_extent;
+    assert!(!bar_holds_actions(card, window.width(), super::native_bar_title_extent(&ctx, card, &title, Some(wide_content)), 2));
+    let shown = paint_drop_window(window, Some(card), &title, Some(wide_content), &actions);
+    assert!(named(&shown, "apply").is_none() && named(&shown, "cancel").is_none() && named(&shown, menu) == Some(button), "{shown:?}");
+
+    // A window too narrow for the actions beside the title has them in the card's
+    // action row under the title bar, from the trailing edge, and the body under
+    // that row.
+    let narrow = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(160.0, 500.0));
+    assert_eq!(place(&h, narrow.width()), ActionPlace::Row);
+    let PaintedWindow { body: under_row, buttons, .. } = paint_panel_window(&mut h, &host, narrow, None, Some(card));
+    let margin = ((metrics.header_height - metrics.control_extent) / 2.0).max(0.0);
+    let (apply, cancel) = (named(&buttons, "apply").unwrap(), named(&buttons, "cancel").unwrap());
+    assert!((cancel.right() - (narrow.right() - margin)).abs() < 1e-3 && (apply.right() - cancel.left()).abs() < 1e-3, "{apply:?} {cancel:?}");
+    assert!((apply.top() - bar).abs() < 1e-3 && (apply.height() - metrics.control_extent).abs() < 1e-3, "{apply:?}");
+    let row_body = egui::Rect::from_min_max(
+        egui::pos2(narrow.left(), bar + metrics.control_extent + metrics.content_header_height),
+        egui::pos2(narrow.right(), narrow.bottom() - metrics.footer_height),
+    );
+    assert_eq!(under_row, super::content_inset(row_body));
+    let chrome = super::native_window_chrome(&ctx, Some(card), true);
+    assert!((chrome - (row_body.top() + metrics.footer_height)).abs() < 1e-3, "{chrome} {row_body:?}");
+    // The window a drag shows then has no action in its title bar either: the card's
+    // paint brings its row.
+    let shown = paint_drop_window(narrow, Some(card), &title, None, &actions);
+    assert!(named(&shown, "apply").is_none() && named(&shown, "cancel").is_none() && named(&shown, menu).is_some(), "{shown:?}");
+
+    // The rule, as a docked header's: the title, the actions and the menu side by
+    // side. The OS's window controls take their part of the bar. A panel with no
+    // action has none to place.
+    let needed = 100.0 + 3.0 * metrics.control_extent + card.gutter + margin + solidcraft_theme::Tokens::get().space_2;
+    assert!(bar_holds_actions(card, needed + 0.5, 100.0, 2) && !bar_holds_actions(card, needed - 0.5, 100.0, 2));
+    let lights = super::NativeCardWindow {
+        title_bar: crate::window_chrome::TitleBar { traffic_lights: true, caption_buttons: false, hide_caption_buttons: false },
+        ..card
+    };
+    let reserve = crate::window_chrome::TRAFFIC_LIGHTS;
+    assert!(!bar_holds_actions(lights, needed + 0.5, 100.0, 2) && bar_holds_actions(lights, needed + reserve + 0.5, 100.0, 2));
+    assert!(!bar_holds_actions(card, 4000.0, 100.0, 0));
+
+    // A panel's window opens at least as wide as its title bar needs to hold the
+    // actions, also beside the OS's window controls: one point narrower, and the
+    // actions take their row.
+    use super::{native_bar_width_for_actions as bar_width_for_actions, native_width_for_actions as width_for_actions};
+    for look in [card, lights] {
+        let width = bar_width_for_actions(look, 100.0, 2);
+        assert!(bar_holds_actions(look, width, 100.0, 2) && !bar_holds_actions(look, width - 1.0, 100.0, 2), "{width}");
+    }
+    assert_eq!(bar_width_for_actions(lights, 100.0, 2) - bar_width_for_actions(card, 100.0, 2), reserve);
+    let mut opens = None;
+    let mut output = crate::fonts::test_context().run_ui(egui::RawInput::default(), |ui| {
+        opens = width_for_actions(ui.ctx(), &h.runtime, None, card, &id("editor"));
+    });
+    output.textures_delta.clear();
+    let opens = opens.expect("the panel has actions");
+    assert_eq!((place(&h, opens), place(&h, opens - 1.0)), (ActionPlace::TitleBar, ActionPlace::Row), "{opens}");
+
+    // As in the docked header, the panel's own content takes the title's place when
+    // the app's host says so (a search box): the title bar keeps the grip alone, the
+    // content draws between it and the menu, before the body, and the header action
+    // the host hides (the one that opened the box) is left out.
+    let mut root = WorkspacePanelHost::new(HostOptions::default()).unwrap();
+    root.set_header_content(id("editor"), Some(120.0));
+    root.set_header_action_visible(id("editor"), ControlId::new("apply").unwrap(), false);
+    let searching = paint_panel_window(&mut h, &host, window, Some(&root), Some(card));
+    let only_grip = named(&searching.buttons, &title).expect("the grip stays, named as the panel");
+    assert!(only_grip.width() < grip.width() && only_grip.left() == grip.left(), "{only_grip:?} {grip:?}");
+    let slot = searching.title.expect("the panel's content draws in the title's place");
+    assert!(named(&searching.buttons, "apply").is_none(), "{:?}", searching.buttons);
+    let kept = named(&searching.buttons, "cancel").expect("the action the host shows stays before the menu");
+    assert!((kept.right() - button.left()).abs() < 1e-3 && kept.bottom() <= bar, "{kept:?}");
+    assert!(slot.left() >= only_grip.right() && slot.right() <= kept.left() && slot.top() >= 0.0 && slot.bottom() <= bar, "{slot:?}");
+    assert!(slot.width() >= 120.0, "{slot:?}");
+    assert_eq!(named(&searching.buttons, menu), Some(button));
+    assert_eq!(searching.body, inset, "the body keeps its place");
+    // The system's window has no title's place: the panel keeps that content in its
+    // body, and its actions stay as they are there.
+    let system = paint_panel_window(&mut h, &host, window, Some(&root), None);
+    assert_eq!(system.title, None);
+    assert!(named(&system.buttons, "apply").is_some() && named(&system.buttons, "cancel").is_some(), "{:?}", system.buttons);
+    assert_eq!(system.body, body);
+
+    // What a dragged-out window has in place of its card's header: the title bar, or
+    // in the system's window the row of actions, which a side card has in its paint.
+    assert_eq!(super::native_drop_chrome(&ctx, Some(card), true, false), bar);
+    assert_eq!(super::native_drop_chrome(&ctx, Some(card), false, true), bar);
+    assert_eq!(super::native_drop_chrome(&ctx, None, true, false), super::native_window_chrome(&ctx, None, true));
+    assert_eq!(super::native_drop_chrome(&ctx, None, true, true), 0.0);
+    assert_eq!(super::native_drop_chrome(&ctx, None, false, false), 0.0);
+
+    // The card's action row: from the trailing edge, in their declared order,
+    // mirrored right to left.
+    let metrics = HostMetrics::default();
+    let row = egui::Rect::from_min_size(egui::pos2(10.0, 50.0), egui::vec2(300.0, metrics.control_extent));
+    let margin = ((metrics.header_height - metrics.control_extent) / 2.0).max(0.0);
+    let ltr = super::native_card_action_row(row, 3, metrics, false);
+    assert_eq!(ltr.len(), 3);
+    assert!((ltr[2].right() - (row.right() - margin)).abs() < 1e-3, "{ltr:?}");
+    assert!(ltr.windows(2).all(|pair| (pair[0].right() - pair[1].left()).abs() < 1e-3), "{ltr:?}");
+    let rtl = super::native_card_action_row(row, 3, metrics, true);
+    assert!((rtl[2].left() - (row.left() + margin)).abs() < 1e-3, "{rtl:?}");
+    assert!(rtl.windows(2).all(|pair| (pair[1].right() - pair[0].left()).abs() < 1e-3), "{rtl:?}");
+    assert!(super::native_card_action_row(row, 0, metrics, false).is_empty());
+}
+
+#[test]
+fn a_panel_windows_bare_title_bar_is_the_systems_caption_and_its_controls_stay_the_uis() {
+    // Where the system answers a window's hit test from the bar its UI published
+    // (Windows), a panel window publishes its title bar as every window that draws the
+    // app's bar does. Bare, the bar is the system's caption, which drags the window. The
+    // grip, the panel's actions and the menu stay the UI's controls.
+    use crate::window_chrome::caption::{self, CaptionHit};
+    const WINDOW: u64 = 0x5C17_6760;
+    let (mut h, host) = editor_window_with_two_actions();
+    let own = super::NativeCardWindow::of(
+        crate::window_chrome::TitleBar { traffic_lights: false, caption_buttons: true, hide_caption_buttons: false },
+        None,
+    );
+    let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(700.0, 500.0));
+    let bar = crate::toolbar::APP_BAR_HEIGHT;
+    let title = h.runtime.instance_presentation(&id("editor")).unwrap().title;
+    let named = |buttons: &[(String, egui::Rect)], name: &str| buttons.iter().find(|(label, _)| label == name).map(|(_, bounds)| *bounds);
+    let scale = crate::fonts::test_context().pixels_per_point();
+    let hit = |at: egui::Pos2| caption::hit(WINDOW, (at.x * scale) as i32, (at.y * scale) as i32);
+    caption::hooked(WINDOW);
+
+    let painted = paint_native_panel_window(&mut h, &host, window, None, Some(own), Some(WINDOW));
+    let grip = named(&painted.buttons, &title).expect("the title bar has the panel's title and grip");
+    let (apply, cancel) = (named(&painted.buttons, "apply").unwrap(), named(&painted.buttons, "cancel").unwrap());
+    let menu = named(&painted.buttons, solidcraft_ui_text::tr("ui.panel_host.menu")).expect("the title bar has the panel's menu");
+    assert!(apply.bottom() <= bar && apply.left() - grip.right() > 8.0, "the actions are in the bar after a bare stretch: {grip:?} {apply:?}");
+    let bare = egui::pos2((grip.right() + apply.left()) / 2.0, bar / 2.0);
+    assert_eq!(hit(bare), CaptionHit::Drag);
+    for control in [grip, apply, cancel, menu] {
+        assert_eq!(hit(control.center()), CaptionHit::Client, "{control:?}");
+    }
+    assert_eq!(hit(painted.body.center()), CaptionHit::Outside);
+
+    // So does the panel's own content in the title's place: a search box takes its clicks.
+    let mut root = WorkspacePanelHost::new(HostOptions::default()).unwrap();
+    root.set_header_content(id("editor"), Some(120.0));
+    let searching = paint_native_panel_window(&mut h, &host, window, Some(&root), Some(own), Some(WINDOW));
+    let slot = searching.title.expect("the panel's content draws in the title's place");
+    assert_eq!(hit(slot.center()), CaptionHit::Client, "{slot:?}");
+    caption::closed(WINDOW);
+}
+
+#[test]
+fn a_dragged_cards_copy_leaves_out_its_action_row_under_a_title_bar_that_holds_the_actions() {
+    // A card's paint below its header: a row of actions 28 high, then the body.
+    let copied = egui::Rect::from_min_size(egui::pos2(100.0, 200.0), egui::vec2(300.0, 400.0));
+    let dot = |y: f32| egui::epaint::ClippedShape::new(copied, egui::Shape::circle_filled(egui::pos2(150.0, y), 2.0, egui::Color32::WHITE));
+    let card = super::WindowCard::of(copied, vec![dot(214.0), dot(260.0)], 28.0);
+    let dots = |body: bool, target: egui::Rect| {
+        let mut output = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
+            if body {
+                card.paint_body(ui, target);
+            } else {
+                card.paint(ui, target);
+            }
+        });
+        output.textures_delta.clear();
+        let dots = output.shapes.iter().filter(|shape| matches!(shape.shape, egui::Shape::Circle(_)));
+        dots.map(|shape| (shape.clip_rect, shape.shape.visual_bounding_rect().center().y)).collect::<Vec<_>>()
+    };
+    // Whole, in the content of a window whose title bar has no room for the
+    // actions: the row, then the body.
+    let whole = egui::Rect::from_min_size(egui::pos2(0.0, 36.0), copied.size());
+    assert_eq!(dots(false, whole).iter().map(|(_, y)| *y).collect::<Vec<_>>(), vec![50.0, 96.0]);
+    // Under a title bar that holds the actions, the window is lower by that row:
+    // the body starts at the top of the content, and the row is clipped away.
+    let body = egui::Rect::from_min_size(whole.min, copied.size() - egui::vec2(0.0, 28.0));
+    let painted = dots(true, body);
+    assert_eq!(painted.iter().map(|(_, y)| *y).collect::<Vec<_>>(), vec![22.0, 68.0]);
+    assert!(painted.iter().all(|(clip, _)| body.contains_rect(*clip)), "{painted:?}");
+    assert!(painted[0].1 < body.top() && body.y_range().contains(painted[1].1), "only the body's dot is in view: {painted:?}");
+}
+
+#[test]
+fn raw_host_drags_a_popped_out_panel_back_by_its_window_grip_and_offers_its_window_menu() {
+    let mut h = PanelMountHarness::new(true).unwrap();
+    open_editor(&mut h);
+    let key = editor_key(&h);
+    h.probe.edit(&key, |state| state.draft = "torn-off draft".into()).unwrap();
+    let mut raw = RawPanelHost::new(h, 1.0);
+    raw.inner_origin = Some(egui::pos2(200.0, 100.0));
+    raw.frame(Vec::new(), false);
+    let docked = raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location.clone();
+    raw.content.dispatch(vec![native_placement("editor", "editor-window", "editor-host", 0)]).unwrap();
+    raw.frame(Vec::new(), false);
+    assert_eq!(raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location.zone(), Zone::Window);
+
+    // A grip drag queued before the host's context changes never starts in the new one.
+    let target = egui::pos2(200.0 + 20.0, 100.0 + 500.0);
+    raw.host.queue_window_drag(WindowDragEvent::Begin { instance: id("editor"), at: Point { x: target.x, y: target.y } });
+    raw.host.invalidate_context();
+    raw.frame(Vec::new(), false);
+    assert!(raw.host.frame().unwrap().preview.is_none());
+
+    // Its window's menu offers the dock places and the app's panels to join, then
+    // Close, each an action the layout accepts.
+    let menu = raw.host.window_menu(&raw.content.runtime, &id("editor"));
+    let labels: Vec<Vec<&str>> = menu.iter().map(|group| group.iter().map(|entry| entry.label.as_str()).collect()).collect();
+    assert_eq!(labels.last(), Some(&vec![solidcraft_ui_text::tr("ui.panel_host.close")]), "{labels:?}");
+    for key in ["ui.panel_host.left", "ui.panel_host.right", "ui.panel_host.floating"] {
+        assert!(labels[0].contains(&solidcraft_ui_text::tr(key)), "{key}: {labels:?}");
+    }
+    for entry in menu.iter().flatten() {
+        assert!(raw.content.runtime.layout().prepare(entry.action.clone()).is_ok(), "{}", entry.label);
+    }
+
+    let at = Point { x: target.x, y: target.y };
+    let in_window = |raw: &RawPanelHost| raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location.zone() == Zone::Window;
+    // A release in the same pass as the event that reached its dock target commits
+    // nothing: no paint showed that target.
+    raw.host.queue_window_drag(WindowDragEvent::Begin { instance: id("editor"), at });
+    raw.host.queue_window_drag(WindowDragEvent::Release { at });
+    raw.frame(Vec::new(), false);
+    raw.frame(Vec::new(), false);
+    assert!(in_window(&raw) && raw.host.frame().unwrap().preview.is_none() && !raw.host.has_pending());
+
+    // Cancelling the host's gestures ends a grip drag too: its later release commits nothing.
+    raw.host.queue_window_drag(WindowDragEvent::Begin { instance: id("editor"), at });
+    raw.frame(Vec::new(), false);
+    assert!(raw.host.frame().unwrap().preview.is_some());
+    raw.host.cancel_gesture();
+    assert!(raw.host.frame().unwrap().preview.is_none());
+    raw.host.queue_window_drag(WindowDragEvent::Release { at });
+    raw.frame(Vec::new(), false);
+    raw.frame(Vec::new(), false);
+    assert!(in_window(&raw) && raw.host.frame().unwrap().preview.is_none() && !raw.host.has_pending());
+
+    // Away from the place the panel left, the dock targets are the app's own: its right edge here.
+    let edge = Point { x: 200.0 + raw.capacity.origin.x + raw.capacity.size.width - 4.0, y: 100.0 + 300.0 };
+    raw.host.queue_window_drag(WindowDragEvent::Begin { instance: id("editor"), at: edge });
+    raw.frame(Vec::new(), false);
+    let elsewhere = raw.host.frame().unwrap().preview.clone().expect("the app shows where the panel would dock");
+    assert_eq!(elsewhere.target, Some(HostDropTargetId::Dock { zone: Zone::Right, before: None }), "{elsewhere:?}");
+    raw.host.queue_window_drag(WindowDragEvent::Cancel);
+    raw.frame(Vec::new(), false);
+    raw.frame(Vec::new(), false);
+    assert!(in_window(&raw) && raw.host.frame().unwrap().preview.is_none());
+
+    // Back: the grip's screen positions become this host's drop target; release docks. Over the
+    // place the panel left, that place is the target, far from the app's edge too: the preview
+    // is the card it would be again if its window were closed.
+    let returned = {
+        let frame = raw.host.frame().unwrap();
+        let host = HostId::new("editor-host").unwrap();
+        let close = transaction(vec![Mutation::NativeClose { host }]);
+        let scope = super::runtime_scope(&raw.content.runtime);
+        let closed = prepare_host_layout(raw.content.runtime.layout(), &scope, &frame.layout, close).unwrap();
+        closed.layout().sections.iter().find(|card| card.instance == id("editor")).unwrap().outer
+    };
+    let home = Point { x: returned.origin.x + returned.size.width - 8.0, y: returned.origin.y + returned.size.height / 2.0 };
+    assert!(home.x > 100.0, "past the bands of the app's edge: {returned:?}");
+    let target = egui::pos2(200.0 + home.x, 100.0 + home.y);
+    raw.host.queue_window_drag(WindowDragEvent::Begin { instance: id("editor"), at: Point { x: target.x, y: target.y } });
+    raw.frame(Vec::new(), false);
+    let preview = raw.host.frame().unwrap().preview.clone().expect("the app shows where the panel would dock");
+    assert!(preview.rejection.is_none() && preview.window.is_none(), "{preview:?}");
+    assert_eq!((preview.target.clone(), preview.bounds), (Some(HostDropTargetId::Return), returned), "{preview:?}");
+    raw.host.queue_window_drag(WindowDragEvent::Release { at: Point { x: target.x, y: target.y } });
+    raw.frame(Vec::new(), false);
+    raw.frame(Vec::new(), false);
+    let location = raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location.clone();
+    assert!(location.zone().docked(), "{location:?} (was {docked:?})");
+    let landed = raw.host.frame().unwrap().layout.sections.iter().find(|card| card.instance == id("editor")).unwrap().outer;
+    assert_eq!(landed, returned, "the panel is back where closing its window puts it");
+    let state = raw.content.probe.state(&key).unwrap();
+    assert_eq!(state.draft.as_str(), "torn-off draft");
+    assert_eq!((state.applies, state.cancels), (0, 0));
+}
+
+#[test]
 fn raw_host_paints_a_panel_dragged_out_of_the_bottom_strip_as_a_side_card_for_its_window() {
     let mut h = PanelMountHarness::new(true).unwrap();
     // Another panel already fills the left column.
@@ -15645,6 +16321,97 @@ fn raw_host_paints_a_panel_dragged_out_of_the_bottom_strip_as_a_side_card_for_it
         vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }],
         false,
     );
+}
+
+#[test]
+fn a_bottom_card_with_a_body_keeps_its_shape_in_its_window() {
+    // The window's shape: the card's size in the strip, with the window's chrome in
+    // place of the card's header, so the body keeps its size: the app's title bar, or
+    // in the system's window the row of the panel's actions. Wider than high, the
+    // panel lays out wide there, as in the strip.
+    let bar = crate::toolbar::APP_BAR_HEIGHT;
+    let ctx = crate::fonts::test_context();
+    let look = super::NativeCardWindow::of(crate::window_chrome::TitleBar::default(), None);
+    let row = super::native_drop_chrome(&ctx, None, true, false);
+    assert!(row > 0.0 && super::native_drop_chrome(&ctx, Some(look), true, false) == bar, "{row}");
+    for chrome in [bar, row] {
+        let shape = super::app::card_window_size(Size { width: 900.0, height: 266.0 }, 27.0, chrome);
+        assert_eq!(shape, Size { width: 900.0, height: 266.0 - 27.0 + chrome });
+        assert_eq!(responsive(Zone::Window, shape, None).unwrap().0, Flow::Wide);
+    }
+
+    // A panel of the bottom strip, as a card with a body or as a strip of one row.
+    let dragged_out = |strip_of_one_row: bool, keeps_card: bool| {
+        let mut h = PanelMountHarness::new(true).unwrap();
+        let environment = h.runtime.environment().clone();
+        let mut registry = PanelRegistry::default();
+        for spec in synthetic_registry().unwrap().specs() {
+            // Low enough for a strip of one row.
+            let mut spec = spec.clone();
+            spec.min_size.height = 40.0;
+            registry.register(spec).unwrap();
+        }
+        let capabilities = HostCapabilities { native_windows: true, max_native_hosts: 8, persistence: true };
+        let service = LayoutService::new(registry, Layout::empty(environment.workspace.clone()), capabilities).unwrap();
+        h.runtime = PanelRuntime::new(service, environment).unwrap();
+        bind_synthetic_controllers(&mut h.runtime, &h.probe).unwrap();
+        let height = if strip_of_one_row { 64.0 } else { 240.0 };
+        h.dispatch(vec![
+            fixture_open("fixture.editor", "editor", "editor-section", Zone::Bottom, 0).unwrap(),
+            Mutation::SetSize { section: section("editor-section"), size: Size { width: 800.0, height } },
+        ])
+        .unwrap();
+        let mut raw = RawPanelHost::new(h, 1.0);
+        raw.inner_origin = Some(egui::pos2(200.0, 100.0));
+        raw.host.set_live_drag(true);
+        raw.host.set_window_keeps_card(keeps_card);
+        raw.frame(Vec::new(), false);
+        let docked = raw.host.frame().unwrap().layout.sections.iter().find(|card| card.instance == id("editor")).unwrap().clone();
+        assert!(docked.zone == Zone::Bottom && docked.inline == strip_of_one_row, "{docked:?}");
+        let start = raw.at(HostControlTarget::Pointer(HostPointerTarget::Header { instance: id("editor") }));
+        let outside = egui::pos2(1500.0, 400.0);
+        raw.pointer(start, true, false);
+        raw.frame(vec![egui::Event::PointerMoved(outside)], false);
+        raw.frame(vec![egui::Event::PointerMoved(outside)], false);
+        assert!(raw.host.window_landing_preview().is_some(), "past the edge, the Window target is offered");
+        (raw, docked)
+    };
+
+    // Dragged out of the app, a card with a body stays the card it is: no side card
+    // stands in for it, and its window's preview shows its own body.
+    let (raw, docked) = dragged_out(false, true);
+    assert!(raw.host.leaving_side_card().is_none());
+    let body = egui::Rect::from_min_size(egui::pos2(0.0, bar), egui::vec2(docked.outer.size.width, docked.outer.size.height));
+    let mut output = egui::Context::default()
+        .run_ui(egui::RawInput::default(), |ui| raw.host.window_card().expect("the card's body goes with it").paint_body(ui, body));
+    output.textures_delta.clear();
+    assert!(!output.shapes.is_empty(), "the card's body is painted in its window's preview");
+    // A strip of one row has no body: it is laid out as a side card for its window,
+    // whatever the host was asked.
+    for keeps_card in [true, false] {
+        let (raw, _) = dragged_out(true, keeps_card);
+        let side = raw.host.leaving_side_card().expect("a strip of one row is painted as a side card");
+        assert!(side.zone.side() && !side.inline && side.body.is_some(), "{side:?}");
+    }
+    // A host that was not asked (the default) lays a card with a body out so too.
+    let (raw, _) = dragged_out(false, false);
+    assert!(raw.host.leaving_side_card().is_some());
+}
+
+#[test]
+fn a_dropped_window_with_nothing_to_measure_takes_the_least_vertical_height() {
+    // A window dropped from the bottom strip starts at the dock's height and fits its
+    // panel's content once measured. A panel with nothing to measure (an empty
+    // History) gets the least height that keeps the vertical layout, within its bounds.
+    let bounds = (Size { width: 40.0, height: 28.0 }, Size { width: MAX_LOGICAL, height: MAX_LOGICAL });
+    let least = super::app::unmeasured_window_height(250.0, bounds);
+    assert_eq!(least, super::app::portrait(Size { width: 250.0, height: 0.0 }).height);
+    assert!(least < 700.0, "shorter than a dock's height: {least}");
+    assert_eq!(responsive(Zone::Window, Size { width: 250.0, height: least }, None).unwrap().0, Flow::Tall);
+    let low = (bounds.0, Size { width: MAX_LOGICAL, height: 200.0 });
+    assert_eq!(super::app::unmeasured_window_height(250.0, low), 200.0);
+    let high = (Size { width: 40.0, height: 500.0 }, bounds.1);
+    assert_eq!(super::app::unmeasured_window_height(250.0, high), 500.0);
 }
 
 #[test]

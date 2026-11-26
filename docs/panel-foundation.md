@@ -342,13 +342,19 @@ On the desktop, the area outside the app window is one more drop target,
 follows the same prepare, preview and commit path as the dock targets, and uses
 the same destination as **Pop out to window**. While it is selected, the window
 the panel will open in is shown at that screen place, with the panel's body as
-painted in that frame. Its content has the panel's size in the app. A panel in
+painted in that frame. Its content has the panel's size in the app: a card of
+the bottom strip that has a body under its header (the 2D timeline) keeps its
+shape too, as wide as in the strip, with the window's chrome in place of its
+header, and **Pop out to window** opens that shape as wide as the app's dock
+area. A strip of one row in
 the bottom strip has no body there to show: with live drag paint, which hides it
 in the app, its body is laid out once as the side card the app's left edge would
 dock it as (a new column of the dock's full height), and its window takes that
 card's shape and paint, kept taller than wide so the panel keeps that vertical
 layout. Before its content is measured, that card has the dock's height, and the
-window fits its content once measured, as a side card does. Like live drag
+window fits its content once measured, as a side card does. A panel with
+nothing to measure (an empty History) takes the least height that keeps that
+layout, not the dock's. Like live drag
 paint, it runs no second body and changes no layout. Release opens the panel
 there, only after that window was shown, and the panel keeps that same window.
 Release over the app, Escape, focus loss or a changed app window cancels and
@@ -356,6 +362,39 @@ closes it. The window is the one **Pop out to window** opens, and closing it
 docks the panel where it was. Where the platform does not report the app
 window's screen position, or on the web, a drag past the app's edge keeps the
 panel in the app.
+
+With the Layout preference **Use the app's title bar in panel windows** (desktop
+only, on by default), a panel window has the app's own title bar (the shared
+window chrome) in place of the system's. That title bar holds the panel's title
+with its grip: dragging the grip over the app shows the normal dock target, and
+release docks the panel there. Over the place the panel left, that place is the
+target, the whole card it had there: the preview shows it at its old place and
+size, and release returns it as closing its window does. Release commits only a
+target the app has shown, and whatever cancels the app's own drags cancels this
+one. At its trailing end it has the panel's menu with
+the dock places and the app's panels to join, as the docked menu offers them,
+then Close. As in the docked header, a panel's own content takes the title's
+place when the app's host gives it that place (`set_header_content`, the
+Browser's search box): the title bar keeps the grip alone, the panel draws its
+`ContentSlot::Title` between the grip and the menu, before its body, and a
+header action the host hides is left out. The panel's actions sit in the title
+bar too, before the menu, when they fit beside the title, by the rule of a
+docked header; a narrower window has them in a row under the title bar, as the
+docked card's action row. **Pop out to window** opens the window at least wide
+enough for the title bar to hold them. The body has the docked card's metrics and content
+inset. The window shown
+while a panel is dragged out has the same title bar,
+actions and layout, with the title's place kept free for the panel's content, so
+nothing moves on release. History and the 2D timeline are one timeline in two
+views, and the view switch keeps it where it is: in its own window, the other
+view opens in a window at the same place, and docked, it docks, also when that
+view was last in a window. The 2D timeline opens at its own size; History, from
+the 2D timeline's wide window, stays the bar of one row it is in the bottom
+strip, in a window of that width. A view switched in a full-screen window goes
+full screen too, from that window's ordinary place, where it is again when it
+leaves full screen. With that preference off, a
+panel window is the system's window with the earlier layout, also during a drag
+out; it has no title's place, so such content stays in the panel's body.
 
 Panels in the workspace use the ribbon's theme fill and backdrop blur. The
 system's Reduce Transparency setting keeps the panels opaque. Explicit opacity

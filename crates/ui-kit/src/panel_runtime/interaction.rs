@@ -206,10 +206,22 @@ pub enum HostPointerEvent {
 /// desktop window there.
 #[derive(Clone, Debug, PartialEq)]
 pub enum HostDropTargetId {
-    Dock { zone: Zone, before: Option<SectionId> },
-    Tab { section: SectionId, before: Option<InstanceId> },
-    Relative { section: SectionId, placement: RelativePlacement },
+    Dock {
+        zone: Zone,
+        before: Option<SectionId>,
+    },
+    Tab {
+        section: SectionId,
+        before: Option<InstanceId>,
+    },
+    Relative {
+        section: SectionId,
+        placement: RelativePlacement,
+    },
     Window,
+    /// Where a panel in its own desktop window was docked before it left the app: dropped
+    /// there, it returns as closing its window returns it, to that place at that size.
+    Return,
 }
 
 /// The app window, for a drag that may leave it. Only a desktop host with
@@ -977,6 +989,39 @@ impl HostInteraction {
         }
     }
 
+    /// Drag a popped-out panel back by the grip in its desktop window. The press
+    /// happened in that window, so the drag is already past its threshold; the
+    /// drop targets are this host's, and release commits only a shown one.
+    pub fn begin_window_move(&mut self, service: &LayoutService, scope: &LocalScope, layout: &HostLayout, instance: &InstanceId) -> PanelResult<()> {
+        self.cancel();
+        validate_context(service, scope, layout)?;
+        service.availability(instance).require()?;
+        let section = service.layout().containing(instance)?;
+        if section.location.zone() != Zone::Window {
+            return Err(error(Rule::Placement, "only a panel in a desktop window drags back by its grip"));
+        }
+        let mut targets = host_drop_targets(service, layout, instance)?;
+        // The place the panel left is the nearest target: the dock targets alone are the
+        // app's edges and the other cards, and none of them puts it back as it was.
+        targets.extend(return_drop_target(service, layout, instance).ok());
+        self.capture = Some(Gesture {
+            kind: GestureKind::Move { instance: instance.clone(), section: section.id.clone(), click_activates: false, targets, detached: None },
+            scope: scope.clone(),
+            revision: layout.revision,
+            direction: layout.direction,
+            capacity: layout.capacity,
+            metrics: layout.metrics,
+            render_domain: layout.render_domain,
+            chrome_obstacles: layout.chrome_obstacles.clone(),
+            policy: layout.geometry_policy.clone(),
+            reference: layout.clone(),
+            pressed_target: HostPointerTarget::Header { instance: instance.clone() },
+            start: layout.capacity.origin,
+            dragging: true,
+        });
+        Ok(())
+    }
+
     /// The panel and the screen point where its desktop window would open.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn window_landing(&self) -> Option<(&InstanceId, Point)> {
@@ -1292,10 +1337,14 @@ fn validate_capture(capture: &Gesture, service: &LayoutService, scope: &LocalSco
     match &capture.kind {
         GestureKind::Move { instance, section, .. } => {
             service.availability(instance).require()?;
-            if service.layout().containing(instance)?.id != *section
-                || !layout.sections.iter().any(|presented| {
-                    presented.section == *section && (presented.instance == *instance || presented.tabs.iter().any(|tab| tab.instance == *instance))
-                })
+            let source = service.layout().containing(instance)?;
+            // A desktop window presents its own panel, not this host.
+            if source.id != *section
+                || (source.location.zone() != Zone::Window
+                    && !layout.sections.iter().any(|presented| {
+                        presented.section == *section
+                            && (presented.instance == *instance || presented.tabs.iter().any(|tab| tab.instance == *instance))
+                    }))
             {
                 return Err(error(Rule::MissingTarget, "pointer source is no longer presented"));
             }
@@ -1569,7 +1618,10 @@ fn move_preview(
             });
         }
         let live = detached.is_some();
-        let candidate = move_action(service, layout, instance, &target.destination, live)?;
+        let candidate = match target.id {
+            HostDropTargetId::Return => return_action(service, layout, instance)?,
+            _ => move_action(service, layout, instance, &target.destination, live)?,
+        };
         let proposed = project_reserved(service, layout, candidate.clone())?;
         let projected = resolve_host_projected(service, &proposed, layout)?;
         let target_section = proposed.containing(instance)?;
@@ -1653,6 +1705,52 @@ fn move_action(
     }
     service.layout().instance(instance)?;
     Ok(action(layout.revision, mutations))
+}
+
+/// A panel alone in its desktop window goes back to the dock place its window remembers, as
+/// closing the window does.
+fn return_action(service: &LayoutService, layout: &HostLayout, instance: &InstanceId) -> PanelResult<LayoutAction> {
+    let section = service.layout().containing(instance)?;
+    match &section.location {
+        SectionLocation::Window { host, .. } if section.tabs.len() == 1 => {
+            Ok(action(layout.revision, vec![Mutation::NativeClose { host: host.clone() }]))
+        }
+        _ => Err(error(Rule::Placement, "only a panel alone in a desktop window returns to its dock place")),
+    }
+}
+
+/// The `Return` target of a panel in its desktop window: the card it would be again in the
+/// app, at its old place and size (`return_action`). The whole card is the target, and
+/// inside it this target comes before every other (`selected_target`).
+fn return_drop_target(service: &LayoutService, layout: &HostLayout, instance: &InstanceId) -> PanelResult<HostDropTarget> {
+    let proposed = project_reserved(service, layout, return_action(service, layout, instance)?)?;
+    let projected = resolve_host_projected(service, &proposed, layout)?;
+    let section = proposed.containing(instance)?;
+    let card = projected
+        .sections
+        .iter()
+        .find(|card| card.section == section.id)
+        .ok_or_else(|| error(Rule::Bounds, "the return place cannot be presented"))?;
+    // What the return amounts to, for the preview: the panel's own card again, or a tab of
+    // the card it left.
+    let destination = match section.tabs.iter().position(|tab| tab == instance) {
+        Some(index) if section.tabs.len() > 1 => Destination::JoinTab { section: section.id.clone(), index },
+        _ => Destination::NewSection {
+            section: section.id.clone(),
+            index: proposed.sections.iter().position(|entry| entry.id == section.id).unwrap_or(0),
+            location: section.location.clone(),
+            size: section.size,
+        },
+    };
+    Ok(HostDropTarget {
+        id: HostDropTargetId::Return,
+        bounds: card.outer,
+        destination,
+        rejection: None,
+        priority: 0,
+        edge: None,
+        stable_key: "return".into(),
+    })
 }
 
 /// Invisible physical regions. Geometry is logical already: do not multiply by
@@ -1930,6 +2028,10 @@ fn clear_below_end(layout: &HostLayout, card: LogicalRect) -> f32 {
 fn selected_target<'a>(targets: &'a [HostDropTarget], layout: &HostLayout, at: Point) -> Option<&'a HostDropTarget> {
     if !layout.render_domain.contains(at) || layout.chrome_obstacles.iter().any(|bounds| bounds.contains(at)) {
         return None;
+    }
+    // Over the place a popped-out panel left, that place is the target.
+    if let Some(home) = targets.iter().find(|target| target.id == HostDropTargetId::Return && target.bounds.contains(at)) {
+        return Some(home);
     }
     let distance = |target: &HostDropTarget| target.edge.map_or(0.0, |(horizontal, edge)| ((if horizontal { at.x } else { at.y }) - edge).abs());
     let visible = |target: &HostDropTarget| match &target.id {
