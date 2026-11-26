@@ -12963,29 +12963,12 @@ fn has_a_new_surface(old: &Body, new: &Body) -> bool {
 }
 
 /// For each face of `new`, whether it lies on a surface no face of `old` lies on, compared as
-/// [`has_a_new_surface`] compares them.
+/// [`has_a_new_surface`] compares them: over the larger body's size ([`kernel::same_surface`]).
 fn new_surface_faces(old: &Body, new: &Body) -> Vec<bool> {
     use kernel::FaceSurface as S;
-    let tol = (old.size().max(new.size()) * 1e-7).max(1e-7);
-    let parallel = |a: Vec3, b: Vec3| a.cross(b).len() <= 1e-9;
-    let same_axis = |o: Vec3, a: Vec3, p: Vec3, b: Vec3| {
-        let off = p - o;
-        parallel(a, b) && (off - a * off.dot(a)).len() <= tol
-    };
-    let same = |a: &S, b: &S| match (a, b) {
-        (S::Plane { normal: n, point: p }, S::Plane { normal: m, point: q }) => parallel(n.vec(), m.vec()) && (*q - *p).dot(n.vec()).abs() <= tol,
-        (S::Cylinder { origin: o, axis: a, radius: r }, S::Cylinder { origin: p, axis: b, radius: s }) => {
-            (r - s).abs() <= tol && same_axis(*o, a.vec(), *p, b.vec())
-        }
-        (S::Cone { apex: o, axis: a, half_angle: h }, S::Cone { apex: p, axis: b, half_angle: k }) => {
-            o.dist(*p) <= tol && a.vec().dot(b.vec()) > 1.0 - 1e-12 && (h - k).abs() <= 1e-9
-        }
-        (S::Sphere { center: c, radius: r }, S::Sphere { center: d, radius: s }) => (r - s).abs() <= tol && c.dist(*d) <= tol,
-        (S::Torus { center: c, axis: a, major: r, minor: t }, S::Torus { center: d, axis: b, major: s, minor: u }) => {
-            c.dist(*d) <= tol && parallel(a.vec(), b.vec()) && (r - s).abs() <= tol && (t - u).abs() <= tol
-        }
-        _ => false,
-    };
+    let reach = old.size().max(new.size());
+    let tol = (reach * 1e-7).max(1e-7);
+    let same = |a: &S, b: &S| kernel::same_surface(a, b, tol, reach);
     let (old_rec, new_rec) = (old.record(), new.record());
     let olds: Vec<(Option<S>, Option<&solidcore_record::brep::Surface>)> =
         (0..old.face_count()).map(|fi| (kernel::face_surface(old, fi), old_rec.faces.get(fi).map(|f| &f.surface))).collect();

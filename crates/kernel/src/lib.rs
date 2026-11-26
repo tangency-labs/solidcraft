@@ -560,6 +560,7 @@ pub use surface_kind::axial_face_section;
 pub use surface_kind::edge_circle;
 pub use surface_kind::face_edge_indices;
 pub use surface_kind::face_surface;
+pub use surface_kind::same_surface;
 pub use surface_offset::offset_surface;
 pub use surface_ruled::Ruled;
 pub use surface_ruled::RuledCorners;
