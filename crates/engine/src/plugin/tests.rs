@@ -3648,6 +3648,326 @@ mod importers {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// Insert Design with an importer's file: the importer's design comes in as a linked component
+    /// and the link names the importer, so the file is read again by it.
+    #[test]
+    fn an_importers_file_inserts_as_a_linked_component_that_names_its_importer() {
+        let (mut s, root) = installed("insert-linked", &[("smp", &["smp"], false)]);
+        let file = put(&root, "bracket.smp", &design());
+        assert!(crate::cmd::runs_plugin_importer(&s, "component.insert_design", &json!({"path": file})));
+        assert!(!crate::cmd::runs_plugin_importer(&s, "component.insert_design", &json!({"path": "part.sc"})));
+        let before = s.doc.name.clone();
+        let inserted = s.execute("component.insert_design", &json!({"path": file, "name": "Bracket"})).unwrap();
+        assert_eq!(inserted["bodies"].as_array().map(Vec::len), Some(1), "{inserted}");
+        assert_eq!(s.doc.name, before, "the open design stays the open design");
+        assert!(s.path.is_none());
+        let comp = inserted["component"].as_u64().unwrap();
+        let link = &s.doc.links[&comp];
+        let importer = link.importer.as_ref().unwrap();
+        assert_eq!((importer.format.as_str(), importer.plugin.as_deref(), importer.version.as_deref()), ("smp.convert", Some("smp"), Some("1")));
+        assert!(importer.options.is_null() && link.step_names.is_none() && !link.is_design());
+        assert_eq!(link.file_sha256, Some(solidcraft_doc::DesignLink::file_digest(&std::fs::read(&file).unwrap())));
+        let listed = s.execute("component.links", &json!({})).unwrap();
+        assert_eq!(listed["links"][0]["importer"], json!({"format": "smp.convert", "plugin": "smp", "version": "1", "available": true}), "{listed}");
+        assert_eq!(listed["links"][0]["changed"], false, "{listed}");
+        // The file's own bytes decide whether it changed, not the design the importer made.
+        let mut bigger = design();
+        bigger.push(b' ');
+        std::fs::write(&file, bigger).unwrap();
+        assert_eq!(s.execute("component.links", &json!({})).unwrap()["links"][0]["changed"], true);
+        // A design has configurations and an importer's file has none; options are for importers.
+        let refused = s.execute("component.insert_design", &json!({"path": file, "configuration": "A"})).unwrap_err().to_string();
+        assert!(refused.contains("configuration"), "{refused}");
+        let refused = s.execute("component.insert_design", &json!({"path": "part.sc", "options": {}})).unwrap_err().to_string();
+        assert!(refused.contains("options"), "{refused}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A design's file bytes with a box of the given size: what the fixture hands back.
+    fn sized_design(length: f64) -> Vec<u8> {
+        let mut made = Session::new(solidcraft_doc::Document::new("Bracket"));
+        made.execute("solid.box", &json!({"length": length, "width": 20, "height": 5})).unwrap();
+        solidcraft_io::write_design(&made.doc).unwrap()
+    }
+    fn total_volume(s: &mut Session) -> f64 {
+        s.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap()
+    }
+
+    /// Update Links asks the importer that read the file to read it again: the bodies change, and
+    /// the component keeps its placement and its bodies' names, as one undo step.
+    #[test]
+    fn update_links_reads_a_changed_importer_file_again_through_the_importer() {
+        let (mut s, root) = installed("update-linked", &[("smp", &["smp"], false)]);
+        let file = put(&root, "bracket.smp", &sized_design(10.0));
+        let inserted = s.execute("component.insert_design", &json!({"path": file, "translate": [100, 0, 0]})).unwrap();
+        let (comp, occurrence) = (inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
+        let placed = s.doc.occurrences.iter().find(|o| o.id == occurrence).unwrap().transform;
+        let names = |s: &Session| s.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+        let before = names(&s);
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6);
+        let unchanged = s.execute("component.update_links", &json!({})).unwrap();
+        assert_eq!(
+            (unchanged["updated"].as_array().map(Vec::len), unchanged["unchanged"].as_array().map(Vec::len)),
+            (Some(0), Some(1)),
+            "{unchanged}"
+        );
+        std::fs::write(&file, sized_design(30.0)).unwrap();
+        assert_eq!(s.execute("component.links", &json!({})).unwrap()["links"][0]["changed"], true);
+        let undo = s.undo.len();
+        let updated = s.execute("component.update_links", &json!({})).unwrap();
+        assert_eq!(updated["updated"].as_array().map(Vec::len), Some(1), "{updated}");
+        assert_eq!(s.undo.len(), undo + 1, "one undo step");
+        assert!((total_volume(&mut s) - 3000.0).abs() < 1e-6, "{}", total_volume(&mut s));
+        assert_eq!(names(&s), before);
+        assert_eq!(s.doc.occurrences.iter().find(|o| o.id == occurrence).unwrap().transform, placed);
+        assert_eq!(s.execute("component.links", &json!({})).unwrap()["links"][0]["changed"], false);
+        assert!(s.doc.links[&comp].importer.is_some());
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6);
+        // A file the importer refuses keeps the bodies the link has.
+        std::fs::write(&file, b"T").unwrap();
+        let refused = s.execute("component.update_links", &json!({"component": comp})).unwrap_err().to_string();
+        assert!(refused.contains("Sample Importer"), "{refused}");
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The plugin a link needs is uninstalled, turned off or another version that refuses the file:
+    /// the link says which plugin and version it needs and the component keeps its last bodies.
+    #[test]
+    fn a_link_whose_plugin_is_missing_says_which_one_it_needs_and_keeps_its_bodies() {
+        let (mut s, root) = installed("missing-plugin", &[("smp", &["smp"], false)]);
+        let file = put(&root, "bracket.smp", &sized_design(10.0));
+        let comp = s.execute("component.insert_design", &json!({"path": file})).unwrap()["component"].as_u64().unwrap();
+        let listed = |s: &mut Session| s.execute("component.links", &json!({})).unwrap()["links"][0]["importer"].clone();
+        assert_eq!(listed(&mut s)["available"], true);
+        std::fs::write(&file, sized_design(30.0)).unwrap();
+        // Turned off.
+        s.disabled_plugins.insert("smp".into());
+        let off = listed(&mut s);
+        assert_eq!((off["available"].clone(), off["installed_version"].clone()), (json!(false), json!("1")), "{off}");
+        assert!(off["needs"].as_str().unwrap().contains("`smp` version 1") && off["needs"].as_str().unwrap().contains("turned off"), "{off}");
+        let refused = s.execute("component.update_links", &json!({"component": comp})).unwrap_err().to_string();
+        assert!(refused.contains("`smp` version 1") && refused.contains("keeps its last bodies"), "{refused}");
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6, "the last good bodies stay");
+        s.disabled_plugins.clear();
+        // Another version reads the file: the link takes the new version.
+        let manifest = root.join("plugins/smp/plugin.json");
+        let text = std::fs::read_to_string(&manifest).unwrap();
+        std::fs::write(&manifest, text.replace("\"version\":\"1\"", "\"version\":\"2\"")).unwrap();
+        let other = listed(&mut s);
+        assert_eq!((other["available"].clone(), other["installed_version"].clone()), (json!(true), json!("2")), "{other}");
+        // Another version that refuses the file says which version the link was read with.
+        std::fs::write(&file, b"T").unwrap();
+        let refused = s.execute("component.update_links", &json!({"component": comp})).unwrap_err().to_string();
+        assert!(refused.contains("version 1") && refused.contains("version 2 is installed"), "{refused}");
+        std::fs::write(&file, sized_design(30.0)).unwrap();
+        s.execute("component.update_links", &json!({"component": comp})).unwrap();
+        assert!((total_volume(&mut s) - 3000.0).abs() < 1e-6);
+        assert_eq!(s.doc.links[&comp].importer.as_ref().unwrap().version.as_deref(), Some("2"));
+        // Uninstalled.
+        std::fs::remove_dir_all(root.join("plugins/smp")).unwrap();
+        let gone = listed(&mut s);
+        assert_eq!((gone["available"].clone(), gone["installed_version"].clone()), (json!(false), Value::Null), "{gone}");
+        assert!(gone["needs"].as_str().unwrap().contains("not installed"), "{gone}");
+        std::fs::write(&file, sized_design(40.0)).unwrap();
+        let refused = s.execute("component.update_links", &json!({"component": comp})).unwrap_err().to_string();
+        assert!(refused.contains("`smp` version 2") && refused.contains("not installed"), "{refused}");
+        assert!((total_volume(&mut s) - 3000.0).abs() < 1e-6);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Break Link keeps an importer's bodies, forgets the file and the importer, and undo brings the
+    /// link back with its importer.
+    #[test]
+    fn break_link_keeps_an_importers_bodies_and_forgets_the_file_and_the_importer() {
+        let (mut s, root) = installed("break-linked", &[("smp", &["smp"], false)]);
+        let file = put(&root, "bracket.smp", &sized_design(10.0));
+        let comp = s.execute("component.insert_design", &json!({"path": file})).unwrap()["component"].as_u64().unwrap();
+        let broken = s.execute("component.break_link", &json!({"component": comp})).unwrap();
+        assert_eq!(broken["component"], comp, "{broken}");
+        assert!(s.doc.links.is_empty());
+        assert_eq!(s.execute("component.links", &json!({})).unwrap()["links"], json!([]));
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6, "the bodies stay");
+        // The file can change and nothing reads it: there is no link to update.
+        std::fs::write(&file, sized_design(30.0)).unwrap();
+        let reply = s.execute("component.update_links", &json!({})).unwrap();
+        assert_eq!((reply["updated"].as_array().map(Vec::len), reply["unchanged"].as_array().map(Vec::len)), (Some(0), Some(0)), "{reply}");
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6);
+        let refused = s.execute("component.break_link", &json!({"component": comp})).unwrap_err().to_string();
+        assert!(refused.contains("not linked"), "{refused}");
+        s.execute("edit.undo", &json!({})).unwrap();
+        let again = s.doc.links[&comp].importer.as_ref().unwrap();
+        assert_eq!((again.format.as_str(), again.version.as_deref()), ("smp.convert", Some("1")));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A batch goes on past a link whose plugin is turned off: that one is named in `failed` with
+    /// what it needs and keeps its bodies, and the others are updated.
+    #[test]
+    fn a_batch_names_the_link_whose_plugin_is_off_and_updates_the_others() {
+        let (mut s, root) = installed("batch-off", &[("smp", &["smp"], false), ("oth", &["oth"], false)]);
+        let (a, b) = (put(&root, "a.smp", &sized_design(10.0)), put(&root, "b.oth", &sized_design(10.0)));
+        let first = s.execute("component.insert_design", &json!({"path": a, "name": "A"})).unwrap()["component"].as_u64().unwrap();
+        let second =
+            s.execute("component.insert_design", &json!({"path": b, "name": "B", "translate": [100, 0, 0]})).unwrap()["component"].as_u64().unwrap();
+        std::fs::write(&a, sized_design(30.0)).unwrap();
+        std::fs::write(&b, sized_design(30.0)).unwrap();
+        s.disabled_plugins.insert("smp".into());
+        let reply = s.execute("component.update_links", &json!({"components": [first, second]})).unwrap();
+        assert_eq!(reply["updated"], json!(["B"]), "{reply}");
+        assert_eq!((reply["failed"][0]["component"].as_u64(), reply["failed"][0]["name"].as_str()), (Some(first), Some("A")), "{reply}");
+        let error = reply["failed"][0]["error"].as_str().unwrap();
+        assert!(error.contains("`smp` version 1") && error.contains("turned off"), "{error}");
+        assert!((total_volume(&mut s) - 4000.0).abs() < 1e-6, "A keeps 1000, B has 3000: {}", total_volume(&mut s));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An unchanged file is not read by the plugin again: with the plugin uninstalled or off, or at
+    /// another version, Update Links reports it unchanged and keeps the bodies, with no error.
+    #[test]
+    fn an_unchanged_importer_file_runs_no_plugin_and_needs_none() {
+        let (mut s, root) = installed("unchanged-linked", &[("smp", &["smp"], false)]);
+        let file = put(&root, "bracket.smp", &sized_design(10.0));
+        let comp = s.execute("component.insert_design", &json!({"path": file})).unwrap()["component"].as_u64().unwrap();
+        let unchanged = |s: &mut Session| {
+            let reply = s.execute("component.update_links", &json!({})).unwrap();
+            assert_eq!((reply["unchanged"].as_array().map(Vec::len), reply["updated"].as_array().map(Vec::len)), (Some(1), Some(0)), "{reply}");
+            assert!(reply["failed"].as_array().is_none_or(|f| f.is_empty()), "{reply}");
+        };
+        // Another version of the plugin: nothing changed in the file, so nothing runs.
+        let manifest = root.join("plugins/smp/plugin.json");
+        let text = std::fs::read_to_string(&manifest).unwrap();
+        std::fs::write(&manifest, text.replace("\"version\":\"1\"", "\"version\":\"2\"")).unwrap();
+        unchanged(&mut s);
+        assert_eq!(s.doc.links[&comp].importer.as_ref().unwrap().version.as_deref(), Some("1"), "the bodies are still the first version's");
+        // Turned off, then uninstalled.
+        s.disabled_plugins.insert("smp".into());
+        unchanged(&mut s);
+        s.disabled_plugins.clear();
+        std::fs::remove_dir_all(root.join("plugins/smp")).unwrap();
+        unchanged(&mut s);
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6);
+        // A failed update leaves the design and its undo history as they were; undo takes the
+        // component back out.
+        std::fs::write(&file, sized_design(30.0)).unwrap();
+        let undo = s.undo.len();
+        s.execute("component.update_links", &json!({"component": comp})).unwrap_err();
+        assert_eq!(s.undo.len(), undo, "a failed update is no undo step");
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6);
+        for _ in 0..6 {
+            if !s.doc.links.is_empty() {
+                s.execute("edit.undo", &json!({})).unwrap();
+            }
+        }
+        assert!(s.doc.links.is_empty(), "undo took back the insert");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A design that came from elsewhere may name any file: an importer's link outside the design's
+    /// folder is not read, not even hashed, and no plugin runs, until its folder is allowed.
+    #[test]
+    fn an_importers_file_outside_the_designs_folder_waits_for_its_folder_to_be_allowed() {
+        let (mut s, root) = installed("consent-linked", &[("smp", &["smp"], false)]);
+        let file = put(&root, "bracket.smp", &sized_design(10.0));
+        let comp = s.execute("component.insert_design", &json!({"path": file})).unwrap()["component"].as_u64().unwrap();
+        // As a design opened later: this session did not name the file.
+        s.plugin_state.linked_files.clear();
+        // The plugin traps on this one: it would say so, naming itself, if it ran.
+        std::fs::write(&file, b"T").unwrap();
+        let listed = s.execute("component.links", &json!({})).unwrap();
+        let link = &listed["links"][0];
+        assert_eq!(link["state"], "not_allowed", "{listed}");
+        assert!(link["changed"].is_null() && link["reason"].as_str().unwrap().contains("not allowed yet"), "{listed}");
+        let refused = s.execute("component.update_links", &json!({"component": comp})).unwrap_err().to_string();
+        assert!(refused.contains("outside the design's folder") && !refused.contains("Sample Importer"), "{refused}");
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6);
+        // A link kept for a file in some other folder is refused the same way.
+        s.doc_mut().links.get_mut(&comp).unwrap().path = "../../.ssh/id_rsa".into();
+        let refused = s.execute("component.update_links", &json!({"component": comp})).unwrap_err().to_string();
+        assert!(refused.contains("outside the design's folder"), "{refused}");
+        s.doc_mut().links.get_mut(&comp).unwrap().path = file.clone();
+        // The user allows the folder: it is read, and the plugin runs.
+        std::fs::write(&file, sized_design(30.0)).unwrap();
+        s.plugin_state.link_folders.push(root.join("files"));
+        assert_eq!(s.execute("component.links", &json!({})).unwrap()["links"][0]["changed"], true);
+        s.execute("component.update_links", &json!({"component": comp})).unwrap();
+        assert!((total_volume(&mut s) - 3000.0).abs() < 1e-6);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An importer's link reads the file the path really opens: a link in the design's folder that
+    /// is a symlink to a file outside it is not read and runs no plugin, and a folder alias that
+    /// stays inside is read.
+    #[cfg(unix)]
+    #[test]
+    fn an_importers_symlink_out_of_the_designs_folder_is_not_read() {
+        let (mut s, root) = installed("symlink-linked", &[("smp", &["smp"], false)]);
+        let (inside, outside) = (root.join("files"), root.join("outside"));
+        std::fs::create_dir_all(inside.join("sub")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        s.path = Some(inside.join("main.sc").to_string_lossy().into_owned());
+        let link = inside.join("part.smp");
+        std::fs::write(&link, sized_design(10.0)).unwrap();
+        let comp = s.execute("component.insert_design", &json!({"path": link})).unwrap()["component"].as_u64().unwrap();
+        // As a design opened later: this session did not name the file. The plugin traps on "T".
+        s.plugin_state.linked_files.clear();
+        // The file is now a symlink to one outside the design's folder.
+        std::fs::write(outside.join("real.smp"), b"T").unwrap();
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(outside.join("real.smp"), &link).unwrap();
+        // Nothing is read, and the plugin (which would trap on this file, naming itself) never runs.
+        let refused = s.execute("component.update_links", &json!({"component": comp})).unwrap_err().to_string();
+        assert!(refused.contains("outside the design's folder") && !refused.contains("Sample Importer"), "{refused}");
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6);
+        // A folder alias that stays inside the design's folder is read: the file is really there.
+        std::os::unix::fs::symlink(inside.join("sub"), inside.join("alias")).unwrap();
+        std::fs::write(inside.join("sub/part.smp"), sized_design(30.0)).unwrap();
+        s.doc_mut().links.get_mut(&comp).unwrap().path = inside.join("alias/part.smp").to_string_lossy().into_owned();
+        let reply = s.execute("component.update_links", &json!({"component": comp})).unwrap();
+        assert_eq!(reply["updated"].as_array().map(Vec::len), Some(1), "{reply}");
+        assert!((total_volume(&mut s) - 3000.0).abs() < 1e-6);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A record that names no plugin, or another plugin than the one that offers its format, is
+    /// refused with a clear message and runs nothing.
+    #[test]
+    fn a_crafted_importer_record_is_refused_and_runs_nothing() {
+        let (mut s, root) = installed("crafted-linked", &[("smp", &["smp"], false), ("oth", &["oth"], false)]);
+        let file = put(&root, "bracket.smp", &sized_design(10.0));
+        let comp = s.execute("component.insert_design", &json!({"path": file})).unwrap()["component"].as_u64().unwrap();
+        std::fs::write(&file, b"T").unwrap();
+        let listed = |s: &mut Session| s.execute("component.links", &json!({})).unwrap()["links"][0]["importer"].clone();
+        s.doc_mut().links.get_mut(&comp).unwrap().importer.as_mut().unwrap().plugin = None;
+        let refused = s.execute("component.update_links", &json!({"component": comp})).unwrap_err().to_string();
+        assert!(refused.contains("names no importer plugin") && !refused.contains("Sample Importer"), "{refused}");
+        let shown = listed(&mut s);
+        assert!(shown["available"] == false && shown["needs"].as_str().unwrap().contains("names no importer plugin"), "{shown}");
+        // Another installed plugin does not offer `smp.convert`.
+        s.doc_mut().links.get_mut(&comp).unwrap().importer.as_mut().unwrap().plugin = Some("oth".into());
+        let refused = s.execute("component.update_links", &json!({"component": comp})).unwrap_err().to_string();
+        assert!(refused.contains("`oth` version 1") && refused.contains("not offering") && !refused.contains("Sample Importer"), "{refused}");
+        assert_eq!(listed(&mut s)["available"], false);
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Options the importer's own schema refuses are refused before anything is inserted.
+    #[test]
+    fn options_the_importers_schema_refuses_insert_nothing() {
+        let (mut s, root) = conditional_importer("insert-options");
+        let file = put(&root, "bracket.smp", &design());
+        let components = s.doc.components.len();
+        let refused = s.execute("component.insert_design", &json!({"path": file, "options": {"mode": false, "size": "small"}}));
+        assert!(refused.is_err(), "{refused:?}");
+        assert!(s.doc.links.is_empty() && s.doc.components.len() == components, "nothing came in");
+        let kept = s.execute("component.insert_design", &json!({"path": file, "options": {"mode": false, "size": "large"}})).unwrap();
+        let comp = kept["component"].as_u64().unwrap();
+        assert_eq!(s.doc.links[&comp].importer.as_ref().unwrap().options, json!({"mode": false, "size": "large"}));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     const STORE_OPTIONS: &str = "i32.const 512 i32.const 5 i32.const 2048 i32.const 2 i32.const 128 call $set";
 
     fn storage_importer(name: &str, code: &str, capability: bool) -> (Session, std::path::PathBuf) {
@@ -4336,6 +4656,13 @@ mod exporters {
         assert_eq!(s.execute("file.export", &json!({"path": at(&root, "own.json")})).unwrap()["format"], "Design");
         assert!(s.execute("file.export", &json!({"path": at(&root, "own.stl"), "options": {}})).is_err(), "options are a plugin's");
         assert!(s.execute("file.export", &json!({"path": at(&root, "b.smp"), "bodies": ["Box"]})).is_err());
+        // A plugin writes its own mesh: SolidCraft's mesh controls are refused, not dropped (#20393).
+        for key in [json!({"quality": "fine"}), json!({"chord": 0.05})] {
+            let mut p = json!({"path": at(&root, "c.smp")});
+            p.as_object_mut().unwrap().extend(key.as_object().unwrap().clone());
+            let e = s.execute("file.export", &p).unwrap_err().to_string();
+            assert!(e.contains("own formats"), "{p}: {e}");
+        }
         assert_eq!(files(&root), ["bracket.smp", "copy.json", "own.json"]);
         // A disabled plugin writes nothing.
         s.disabled_plugins.insert("smp".into());

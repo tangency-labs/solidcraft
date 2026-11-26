@@ -117,6 +117,13 @@ pub struct AppState {
     /// Where `plugin.install` writes and `plugin.list` looks; `None`: the per-user
     /// `plugins` folder ([`crate::recovery::data_dir`]).
     pub plugins_dir: Option<PathBuf>,
+    /// Folders the user allowed linked files to be read from (Preferences, General), set by the host
+    /// and never by a design. A file an importer plugin reads for a link outside the design's own
+    /// folder is read only from one of these.
+    pub link_folders: Vec<PathBuf>,
+    /// Files a caller named to Insert Design in this session: its own choice, so Update Links may
+    /// read them again whatever their folder. Never saved with a design.
+    pub linked_files: BTreeSet<PathBuf>,
     /// The plugin whose run is under way, when it keeps data in designs (`storage@0.1`): the only
     /// one that may change plugin data, and only its own. Set by the host for that run alone.
     pub storage_caller: Option<storage::StorageCaller>,
@@ -695,8 +702,8 @@ pub use package::{remove, store_grants, validate_grants};
 
 pub use export::{describe as describe_exporters, export_file, exporter_for, exporters};
 pub use import::{
-    FormatSlot, ImportDialog, Importer, describe as describe_importers, file_facts, format_slots, import_dialog, import_file, importer_for,
-    importers, open_filters,
+    FormatSlot, ImportDialog, ImportedBytes, Importer, ImporterStatus, describe as describe_importers, file_facts, format_slots, import_design_bytes,
+    import_dialog, import_file, importer_for, importer_status, importers, open_filters,
 };
 pub use messages::PluginFailure;
 #[cfg(test)]

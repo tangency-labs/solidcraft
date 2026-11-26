@@ -56,6 +56,7 @@ mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
+pub mod dialogs_capture;
 pub mod dialogs_constrain;
 pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
@@ -2964,6 +2965,10 @@ impl SolveApp {
             sketch_palette::toggle_construction(self);
             return;
         }
+        if id == "sketch.merge_lines" {
+            sketch_modify_ui::merge_selected_lines(self);
+            return;
+        }
         if id == "doc.open" {
             self.file_load.home_at_start = self.home.open;
         }
@@ -3532,6 +3537,7 @@ impl SolveApp {
                         FeatureKind::BodyTransfer { .. } => language.text("ui.feature_kind.body_transfer"),
                         FeatureKind::ConstructionAxis { .. } => language.text("ui.feature_kind.construction_axis"),
                         FeatureKind::ConstructionPoint { .. } => language.text("ui.feature_kind.construction_point"),
+                        FeatureKind::CapturePosition { .. } => language.text("cmd.component_capture_position"),
                         _ => f.kind.base_name(),
                     };
                     self.set_status(language.format("ui.feature_nothing_to_edit", &[("kind", kind)]), false);
@@ -4670,6 +4676,9 @@ impl SolveApp {
             prefs::take_theme_drops(self, ctx);
             // Files dropped on the agent chat attach to its next message instead.
             agent_chat::take_drops(self, ctx);
+            // Files dropped on the tab bar open in tabs of their own there.
+            #[cfg(not(target_arch = "wasm32"))]
+            documents::take_file_drops(self, ctx);
             for f in ctx.input(|i| i.raw.dropped_files.clone()) {
                 let p = f.path().to_string_lossy().to_string();
                 if !p.is_empty() {
@@ -4861,6 +4870,13 @@ impl SolveApp {
         let host = self.view_windows.current_window();
         let opening_host = self.view_windows.opening_host(Some(host));
         plugins::tick(self, ui.ctx(), false);
+        // The folders the user allowed linked files to be read from (Preferences, General): an importer
+        // plugin's link outside its design's folder is read only from one of them. The user's own
+        // setting, never the design's.
+        let allowed: Vec<std::path::PathBuf> = self.preferences.linked_file_folders.iter().map(std::path::PathBuf::from).collect();
+        if self.session.plugin_state.link_folders != allowed {
+            self.session.plugin_state.link_folders = allowed;
+        }
         documents::give_up_renames_of_other_designs(self);
         params_dialog::install_expressions(ui.ctx());
         ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());

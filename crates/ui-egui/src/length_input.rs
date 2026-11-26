@@ -184,13 +184,31 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],
         D::OffsetFaces { distance } => vec![distance],
         D::MeshConvert { tolerance } => vec![tolerance],
-        D::Thread { length, .. } | D::Emboss { depth: length, .. } => vec![length],
+        D::Thread { length, .. } => vec![length],
+        D::Emboss { depth, offset_x, offset_y, .. } => vec![depth, offset_x, offset_y],
         D::Rib { thickness, depth, .. } => vec![thickness, depth],
         D::PathPattern { spacing, start, fraction: false, .. } => vec![spacing, start],
         D::PathPattern { spacing, .. } => vec![spacing],
         D::Pipe { diameter, wall, .. } => vec![diameter, wall],
         D::Stock { margin } => vec![margin],
         D::Move { x, y, z, .. } => vec![x, y, z],
+        D::CapturePosition(c) => {
+            let mut values = Vec::new();
+            for m in &mut c.moves {
+                values.extend([&mut m.x, &mut m.y, &mut m.z]);
+                if m.has_origin {
+                    values.extend([&mut m.ox, &mut m.oy, &mut m.oz]);
+                }
+            }
+            for j in &mut c.joints {
+                for (i, v) in j.dofs.iter_mut().enumerate() {
+                    if !j.is_angle.get(i).copied().unwrap_or(false) && j.initial_dofs.get(i).is_some_and(|init| init != v) {
+                        values.push(v);
+                    }
+                }
+            }
+            values
+        }
         D::Hole { diameter, depth, cb_diameter, cb_depth, cs_diameter, opts, .. } => {
             vec![diameter, depth, cb_diameter, cb_depth, cs_diameter, &mut opts.bridge]
         }
@@ -291,7 +309,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
 /// direction vectors are already in model coordinates and must not be converted.
 pub(crate) fn extra(extra: &mut serde_json::Map<String, serde_json::Value>, mut convert: impl FnMut(&str) -> String) {
     use serde_json::{Value, json};
-    for key in ["radius2", "start_offset", "to_offset", "distance2", "thickness", "thickness2"] {
+    for key in ["radius2", "start_offset", "to_offset", "distance2", "thickness", "thickness2", "coil_height"] {
         if let Some(value) = extra.get_mut(key) {
             let text = value.as_str().map(str::to_string).or_else(|| value.as_number().map(ToString::to_string));
             if let Some(text) = text {

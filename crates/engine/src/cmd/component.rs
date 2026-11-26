@@ -4,13 +4,13 @@
 //! share contents, "paste new" copies them) and can be grounded and moved.
 
 use solidcraft_geom::prelude::*;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::bom;
 use solidcraft_doc::metadata::{BOM_QUANTITY, VIRTUAL};
-use solidcraft_doc::{Document, Feature, FeatureKind, Mat, Occurrence};
+use solidcraft_doc::{CapturedJoint, CapturedOccurrenceMove, Document, Expr, Feature, FeatureKind, Mat, MoveSpace, Occurrence};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, name_or_id_values, str_, string_list, vec3};
@@ -436,21 +436,125 @@ fn kept_move(
 /// Move the occurrences whose expressed moves a parameter change moved (#8192), pending moves of
 /// them included. True when one moved.
 pub(crate) fn follow_expressed_moves(s: &mut Session) -> bool {
+    let mut moved_any = false;
     let shifts = s.doc.expressed_move_shifts();
-    if shifts.is_empty() {
+    if !shifts.is_empty() {
+        let before: Vec<(u64, Mat)> = shifts
+            .iter()
+            .filter(|x| x.shift != Vec3::ZERO)
+            .filter_map(|x| s.doc.occurrences.iter().find(|o| o.id == x.occurrence).map(|o| (o.id, o.transform)))
+            .collect();
+        for shift in shifts.iter().filter(|x| x.shift != Vec3::ZERO) {
+            if let Some(m) = s.pending_moves.get_mut(&shift.occurrence) {
+                *m = solidcraft_doc::mat_mul(&translation(shift.shift), m);
+            }
+            // The exploded view's entry is what makes a pending move display only: it moves with it.
+            if let Some(m) = s.exploded.get_mut(&shift.occurrence) {
+                *m = solidcraft_doc::mat_mul(&translation(shift.shift), m);
+            }
+        }
+        s.doc_mut().apply_expressed_shifts(&shifts);
+        for (id, prev) in before {
+            if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == id) {
+                let next = o.transform;
+                o.adjust_base_for_direct_move(&prev, &next);
+            }
+        }
+        moved_any |= shifts.iter().any(|x| x.shift != Vec3::ZERO);
+    }
+    if replay_pending_move_records(s) {
+        moved_any = true;
+    }
+    moved_any
+}
+
+fn replay_pending_move_records(s: &mut Session) -> bool {
+    if s.pending_move_records.is_empty() {
         return false;
     }
-    for shift in shifts.iter().filter(|x| x.shift != Vec3::ZERO) {
-        if let Some(m) = s.pending_moves.get_mut(&shift.occurrence) {
-            *m = solidcraft_doc::mat_mul(&translation(shift.shift), m);
-        }
-        // The exploded view's entry is what makes a pending move display only: it moves with it.
-        if let Some(m) = s.exploded.get_mut(&shift.occurrence) {
-            *m = solidcraft_doc::mat_mul(&translation(shift.shift), m);
+    let (vals, _) = s.doc.param_values();
+    let occs = s.doc.occurrences.clone();
+    let mut transforms: HashMap<u64, Mat> = occs.iter().map(|o| (o.id, o.transform)).collect();
+    let mut first_of: HashMap<u64, usize> = HashMap::with_capacity(occs.len());
+    let mut by_id: HashMap<u64, usize> = HashMap::with_capacity(occs.len());
+    for (idx, occ) in occs.iter().enumerate() {
+        by_id.entry(occ.id).or_insert(idx);
+        first_of.entry(occ.component).or_insert(idx);
+    }
+    let mut latest: BTreeMap<u64, Mat> = BTreeMap::new();
+    let mut changed = false;
+    for record in &mut s.pending_move_records {
+        let Some(&idx) = by_id.get(&record.occurrence) else { continue };
+        let Some(occ) = occs.get(idx) else { continue };
+        let Ok(delta) = record.step.eval_delta(&vals) else {
+            transforms.insert(record.occurrence, record.after);
+            latest.insert(record.occurrence, record.after);
+            continue;
+        };
+        let cur = transforms.get(&record.occurrence).copied().unwrap_or(occ.transform);
+        let local_delta = if record.step.space == MoveSpace::Local || occ.parent == 0 {
+            delta
+        } else {
+            let parent_world = record
+                .step
+                .path
+                .as_deref()
+                .and_then(|path| {
+                    let (&last, prefix) = path.split_last()?;
+                    if last != occ.id {
+                        return None;
+                    }
+                    let (mut m, mut c) = (solidcraft_doc::IDENTITY, 0);
+                    for id in prefix {
+                        let o = occs.iter().find(|o| o.id == *id && o.parent == c)?;
+                        let t = transforms.get(&o.id).copied().unwrap_or(o.transform);
+                        m = solidcraft_doc::mat_mul(&m, &t);
+                        c = o.component;
+                    }
+                    (c == occ.parent).then_some(m)
+                })
+                .unwrap_or_else(|| {
+                    let mut m = solidcraft_doc::IDENTITY;
+                    let mut c = occ.parent;
+                    for _ in 0..solidcraft_doc::MAX_PLACEMENT_DEPTH {
+                        if c == 0 {
+                            break;
+                        }
+                        let Some(&p_idx) = first_of.get(&c) else { break };
+                        let Some(p_occ) = occs.get(p_idx) else { break };
+                        let t = transforms.get(&p_occ.id).copied().unwrap_or(p_occ.transform);
+                        m = solidcraft_doc::mat_mul(&t, &m);
+                        c = p_occ.parent;
+                    }
+                    m
+                });
+            let Some(inv) = solidcraft_doc::mat_inverse(&parent_world) else {
+                transforms.insert(record.occurrence, record.after);
+                latest.insert(record.occurrence, record.after);
+                continue;
+            };
+            solidcraft_doc::mat_mul(&solidcraft_doc::mat_mul(&inv, &delta), &parent_world)
+        };
+        let next = solidcraft_doc::mat_mul(&local_delta, &cur);
+        if solidcraft_doc::is_placement(&next) {
+            if record.after != next {
+                record.after = next;
+                changed = true;
+            }
+            transforms.insert(record.occurrence, next);
+            latest.insert(record.occurrence, next);
         }
     }
-    s.doc_mut().apply_expressed_shifts(&shifts);
-    shifts.iter().any(|x| x.shift != Vec3::ZERO)
+    for (id, next) in latest {
+        if s.pending_moves.get(&id) != Some(&next) {
+            s.pending_moves.insert(id, next);
+            changed = true;
+        }
+    }
+    if changed {
+        s.revision += 1;
+    }
+    changed
 }
 
 pub(super) fn valid_position(m: &Mat) -> bool {
@@ -542,7 +646,7 @@ fn from_bodies(s: &mut Session, p: &Value) -> Result<Value> {
 fn edit_in_place(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.edit_in_place";
     let id = component(s, p, "component", cmd)?;
-    if !s.doc.links.get(&id).is_some_and(|link| link.step_names.is_none()) {
+    if !s.doc.links.get(&id).is_some_and(|link| link.is_design()) {
         return Err(bad(cmd, "that component is not linked to a design"));
     }
     let path = match p.get("path") {
@@ -1021,6 +1125,22 @@ pub(super) fn occurrence_path(s: &Session, p: &Value, id: u64, cmd: &str) -> Res
     Ok(path)
 }
 
+fn raw_point_exprs(p: &Value, key: &str, fallback: Vec3) -> [Expr; 3] {
+    let from_val = |v: Option<&Value>, f: f64| match v {
+        Some(Value::String(s)) => Expr::new(s.trim()),
+        _ => crate::occurrences::format_mm_expr(f),
+    };
+    match p.get(key) {
+        Some(Value::Array(a)) if a.len() == 3 => [from_val(a.first(), fallback.x), from_val(a.get(1), fallback.y), from_val(a.get(2), fallback.z)],
+        Some(Value::Object(o)) => [from_val(o.get("x"), fallback.x), from_val(o.get("y"), fallback.y), from_val(o.get("z"), fallback.z)],
+        _ => [
+            crate::occurrences::format_mm_expr(fallback.x),
+            crate::occurrences::format_mm_expr(fallback.y),
+            crate::occurrences::format_mm_expr(fallback.z),
+        ],
+    }
+}
+
 fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "occurrence.move";
     let id = occurrence(s, p, cmd)?;
@@ -1042,10 +1162,21 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         let name = s.doc.components.iter().find(|c| c.id == group).map(|c| c.name.clone()).unwrap_or_default();
         return Err(bad(cmd, format!("{} is held in {name} by a rigid group: move {name}, or Unlock Contents (component.unlock) first", o.name)));
     }
+    let space = match p.get("space") {
+        None => "local",
+        Some(Value::String(space)) => space.as_str(),
+        _ => return Err(bad(cmd, "space must be local or world")),
+    };
+    if !matches!(space, "local" | "world") {
+        return Err(bad(cmd, "space must be local or world"));
+    }
+    let move_space = if space == "world" { MoveSpace::World } else { MoveSpace::Local };
+    let capture = bool_(p, "capture").unwrap_or(true);
     let target = absolute_target(s, p, cmd)?;
     // Expressions in `translate`, `origin` or the translation column of `matrix` that name
     // parameters: the occurrence keeps them and follows them.
     let mut expressed: Option<solidcraft_doc::ExpressedMove> = None;
+    let mut pending_builder: Option<([Expr; 3], Option<[Expr; 3]>, Option<[f64; 3]>, Option<Expr>, Option<Mat>)> = None;
     let delta = if target.is_some() {
         solidcraft_doc::IDENTITY
     } else if let Some(m) = p.get("matrix") {
@@ -1056,6 +1187,15 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         let delta = matrix::rigid(&numbers, matrix::tolerance(p, cmd)?, cmd)?;
         if kept.iter().any(Option::is_some) {
             expressed = Some(kept_move(kept, [delta[3][0], delta[3][1], delta[3][2]], Default::default(), [0.0; 3], solidcraft_doc::IDENTITY));
+        }
+        if !capture {
+            let raw_exprs = matrix::translation_exprs(m);
+            let translate =
+                std::array::from_fn(|i| raw_exprs[i].as_deref().map(Expr::new).unwrap_or_else(|| crate::occurrences::format_mm_expr(delta[3][i])));
+            let mut rot = delta;
+            rot[3] = [0.0, 0.0, 0.0, 1.0];
+            let rotation = (!solidcraft_doc::is_identity(&rot)).then_some(rot);
+            pending_builder = Some((translate, None, None, None, rotation));
         }
         delta
     } else {
@@ -1073,32 +1213,29 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         if angle != 0.0 && axis.normalized().is_none() {
             return Err(bad(cmd, "rotation axis must have a finite nonzero length"));
         }
+        let has_origin_expr = origin_kept.iter().any(Option::is_some);
         if kept.iter().chain(&origin_kept).any(Option::is_some) {
             let mut turn = solidcraft_doc::rigid(Vec3::ZERO, Vec3::ZERO, axis, angle);
             turn[3] = [0.0, 0.0, 0.0, 1.0];
             // Only an origin that follows a parameter needs the turn and where it is kept.
-            let follows = origin_kept.iter().any(Option::is_some);
-            let (rotation, at) = if follows { (turn, [origin.x, origin.y, origin.z]) } else { (solidcraft_doc::IDENTITY, [0.0; 3]) };
+            let (rotation, at) = if has_origin_expr { (turn, [origin.x, origin.y, origin.z]) } else { (solidcraft_doc::IDENTITY, [0.0; 3]) };
             expressed = Some(kept_move(kept, [t.x, t.y, t.z], origin_kept, at, rotation));
+        }
+        if !capture {
+            let translate = raw_point_exprs(p, "translate", t);
+            let angle_expr = match p.get("angle") {
+                Some(Value::String(e)) => Some(Expr::new(e.trim())),
+                Some(Value::Number(_)) if angle != 0.0 => Some(Expr::new(format!("{angle} rad"))),
+                _ => None,
+            };
+            let rotate_axis = angle_expr.as_ref().map(|_| [axis.x, axis.y, axis.z]);
+            let origin_exprs = (p.get("origin").is_some() && (angle_expr.is_some() || has_origin_expr)).then(|| raw_point_exprs(p, "origin", origin));
+            pending_builder = Some((translate, origin_exprs, rotate_axis, angle_expr, None));
         }
         solidcraft_doc::rigid(t, origin, axis, angle)
     };
-    let space = match p.get("space") {
-        None => "local",
-        Some(Value::String(space)) => space.as_str(),
-        _ => return Err(bad(cmd, "space must be local or world")),
-    };
-    if !matches!(space, "local" | "world") {
-        return Err(bad(cmd, "space must be local or world"));
-    }
-    let capture = bool_(p, "capture").unwrap_or(true);
-    if expressed.is_some() {
-        if !capture {
-            return Err(bad(cmd, "a move by expressions is captured: leave out `capture: false`, or give numbers"));
-        }
-        if o.expressed_moves.len() >= solidcraft_doc::MAX_EXPRESSED_MOVES {
-            return Err(bad(cmd, format!("{} already follows {} moves by expressions", o.name, solidcraft_doc::MAX_EXPRESSED_MOVES)));
-        }
+    if expressed.is_some() && capture && o.expressed_moves.len() >= solidcraft_doc::MAX_EXPRESSED_MOVES {
+        return Err(bad(cmd, format!("{} already follows {} moves by expressions", o.name, solidcraft_doc::MAX_EXPRESSED_MOVES)));
     }
     let path = if p.get("path").is_some() || space == "world" { Some(occurrence_path(s, p, id, cmd)?) } else { None };
     if let Some(target) = target {
@@ -1109,7 +1246,13 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         } else {
             target
         };
-        return place_occurrence(s, p, id, local, None, cmd);
+        let pending_step = if !capture {
+            let cur = s.uncaptured_moves().get(&id).copied().unwrap_or(o.transform);
+            crate::occurrences::captured_delta_move(id, &cur, &local)
+        } else {
+            None
+        };
+        return place_occurrence(s, p, id, local, None, pending_step, cmd);
     }
     // Takes a translation along the axes it was given in into the parent's frame.
     let mut frame = solidcraft_doc::IDENTITY;
@@ -1134,7 +1277,17 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         grounded_ok: o.grounded && bool_(p, "move_grounded") == Some(true),
         ..m
     });
-    place_occurrence(s, p, id, next, kept, cmd)
+    let pending_step = pending_builder.map(|(translate, origin, rotate_axis, angle, rotation)| CapturedOccurrenceMove {
+        occurrence: id,
+        space: move_space,
+        translate,
+        origin,
+        rotate_axis,
+        angle,
+        rotation,
+        path,
+    });
+    place_occurrence(s, p, id, next, kept, pending_step, cmd)
 }
 
 /// `occurrence.move`'s target pose in `space` (#12150): `to: {position, axis?, angle?}` or
@@ -1181,24 +1334,44 @@ fn absolute_target(s: &Session, p: &Value, cmd: &str) -> Result<Option<Mat>> {
 /// Make `next` the occurrence's placement in its parent: captured (and the joints solved) or
 /// pending, as `capture` says. `expressed` is the move's expressions (#8192), kept on the
 /// occurrence with a captured move.
-fn place_occurrence(s: &mut Session, p: &Value, id: u64, next: Mat, expressed: Option<solidcraft_doc::ExpressedMove>, cmd: &str) -> Result<Value> {
+fn place_occurrence(
+    s: &mut Session,
+    p: &Value,
+    id: u64,
+    next: Mat,
+    expressed: Option<solidcraft_doc::ExpressedMove>,
+    pending_step: Option<CapturedOccurrenceMove>,
+    cmd: &str,
+) -> Result<Value> {
     if !valid_position(&next) {
         return Err(bad(cmd, "move transform exceeds supported numeric range"));
     }
     let capture = bool_(p, "capture").unwrap_or(true);
     if capture {
-        s.pending_moves.remove(&id);
+        s.clear_pending_move(id);
         let kept = expressed.is_some();
+        let mut prev_move = None;
         if let Some(x) = s.doc_mut().occurrences.iter_mut().find(|x| x.id == id) {
+            let prev = x.transform;
+            let prev_base = x.base_transform;
             x.transform = next;
+            x.adjust_base_for_direct_move(&prev, &next);
             x.expressed_moves.extend(expressed);
+            prev_move = Some((prev, prev_base));
         }
         if !s.doc.assembly.joints.is_empty() {
             let result = after_joints(s, p, id, next, cmd);
-            if kept && result.reverted {
+            if result.reverted {
                 // The joints put it back: the move doesn't hold, so nothing follows it.
                 if let Some(x) = s.doc_mut().occurrences.iter_mut().find(|x| x.id == id) {
-                    x.expressed_moves.pop();
+                    if let Some((prev, prev_base)) = prev_move {
+                        let now = x.transform;
+                        x.base_transform = prev_base;
+                        x.adjust_base_for_direct_move(&prev, &now);
+                    }
+                    if kept {
+                        x.expressed_moves.pop();
+                    }
                 }
             }
             repin_after_move(s, id);
@@ -1206,7 +1379,13 @@ fn place_occurrence(s: &mut Session, p: &Value, id: u64, next: Mat, expressed: O
         }
         repin_after_move(s, id);
     } else {
+        let doc_transform = s.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.transform).unwrap_or(solidcraft_doc::IDENTITY);
+        let prior_uncaptured = s.uncaptured_moves().get(&id).copied();
+        let base_opt = p.get("base_transform").map(base_transform).transpose().map_err(|message| bad(cmd, message))?;
         s.pending_moves.insert(id, next);
+        if let Some(step) = pending_step {
+            s.record_pending_move(id, doc_transform, prior_uncaptured, base_opt, next, step);
+        }
         s.revision += 1;
     }
     reply(MoveResult { occurrence: id, transform: next, pending: !capture, reverted: false, warning: None, param_warnings: Vec::new() })
@@ -1295,19 +1474,308 @@ fn ground(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 
-fn capture(s: &mut Session, _p: &Value) -> Result<Value> {
+fn capture(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.capture_position";
+    let explicit = p.get("moves").is_some_and(|v| !v.is_null()) || p.get("joints").is_some_and(|v| !v.is_null());
+    let has_name = p.get("name").is_some_and(|v| !v.is_null());
+    let params = if explicit || has_name {
+        serde_json::from_value::<CapturePositionParams>(p.clone()).map_err(|e| bad(cmd, e.to_string()))?
+    } else {
+        CapturePositionParams::default()
+    };
+    if let Some(ref name) = params.name
+        && name.len() > 256
+    {
+        return Err(bad(cmd, "feature name is too long"));
+    }
+    let feature_name = params.name.as_deref().map(str::trim).filter(|n| !n.is_empty());
+
+    if explicit {
+        let raw_moves = params.moves.unwrap_or_default();
+        let raw_joints = params.joints.unwrap_or_default();
+        if raw_moves.is_empty() && raw_joints.is_empty() {
+            return Err(bad(cmd, "explicit capture requires at least one move or joint"));
+        }
+        if raw_moves.len() > solidcraft_doc::MAX_PLACEMENTS {
+            return Err(bad(cmd, format!("too many moves (at most {})", solidcraft_doc::MAX_PLACEMENTS)));
+        }
+        if raw_joints.len() > 10_000 {
+            return Err(bad(cmd, "too many joints (at most 10000)"));
+        }
+        let mut captured_moves = Vec::with_capacity(raw_moves.len());
+        for m in raw_moves {
+            if !s.doc.occurrences.iter().any(|o| o.id == m.occurrence) {
+                return Err(bad(cmd, format!("no occurrence `{}`", m.occurrence)));
+            }
+            if let Some(ref path) = m.path {
+                if path.0.last() != Some(&m.occurrence) {
+                    return Err(bad(cmd, "path and occurrence disagree"));
+                }
+                s.occurrence_placement(&path.0).map_err(|e| bad(cmd, e.to_string()))?;
+            }
+            if let Some(rot) = m.rotation
+                && (!solidcraft_doc::is_placement(&rot) || rot[3][..3].iter().any(|v| v.abs() >= 1e-9))
+            {
+                return Err(bad(cmd, "invalid rotation matrix"));
+            }
+            let space = match m.space {
+                Some(crate::schema::component::MoveSpace::World) => MoveSpace::World,
+                _ => MoveSpace::Local,
+            };
+            let translate = m.translate.map(|[x, y, z]| [x.0, y.0, z.0]).unwrap_or_else(|| [Expr::new("0"), Expr::new("0"), Expr::new("0")]);
+            let origin = m.origin.map(|[x, y, z]| [x.0, y.0, z.0]);
+            let rotate_axis = m.rotate_axis.map(|v| [v.0.x, v.0.y, v.0.z]);
+            let angle = m.angle.map(|a| a.0);
+            captured_moves.push(CapturedOccurrenceMove {
+                occurrence: m.occurrence,
+                space,
+                translate,
+                origin,
+                rotate_axis,
+                angle,
+                rotation: m.rotation,
+                path: m.path.map(|p| p.0),
+            });
+        }
+        let mut captured_joints = Vec::with_capacity(raw_joints.len());
+        for j in raw_joints {
+            let Some(doc_joint) = s.doc.assembly.joints.iter().find(|dj| dj.id == j.joint) else {
+                return Err(bad(cmd, format!("no joint `{}`", j.joint)));
+            };
+            if doc_joint.kind == solidcraft_doc::joints::JointKind::Rigid {
+                return Err(bad(cmd, format!("joint `{}` is rigid", doc_joint.name)));
+            }
+            if j.values.len() > 64 || j.exprs.len() > 64 {
+                return Err(bad(cmd, "joint values exceed supported DOF count"));
+            }
+            if j.values.iter().any(|v| !v.is_finite() || v.abs() >= 1e9) {
+                return Err(bad(cmd, "joint values must be finite and within range"));
+            }
+            if j.exprs.iter().flatten().any(|e| e.trim().is_empty() || e.len() > 4096) {
+                return Err(bad(cmd, "joint expressions must be non-empty and at most 4096 characters"));
+            }
+            captured_joints.push(CapturedJoint { joint: j.joint, values: j.values, exprs: j.exprs });
+        }
+        let (vals, _) = s.doc.param_values();
+        let updates = s.doc.compute_capture_position_step(&vals, &captured_moves).map_err(|e| bad(cmd, e.to_string()))?;
+        let resolved_joints: Vec<CapturedJoint> = captured_joints
+            .iter()
+            .map(|cj| solidcraft_doc::eval_captured_joint(&s.doc, &vals, cj))
+            .collect::<std::result::Result<_, _>>()
+            .map_err(|e| bad(cmd, e.to_string()))?;
+
+        let occ_ids: BTreeSet<u64> = captured_moves.iter().map(|m| m.occurrence).collect();
+        for id in &occ_ids {
+            s.clear_pending_move(*id);
+        }
+        let active_component = s.active_component;
+        let mut pending_bases = std::mem::take(&mut s.pending_joint_bases);
+        let feature_id = {
+            let doc = s.doc_mut();
+            for o in &mut doc.occurrences {
+                if occ_ids.contains(&o.id) {
+                    o.base_transform.get_or_insert(o.transform);
+                }
+            }
+            for (idx, next) in updates {
+                if let Some(o) = doc.occurrences.get_mut(idx) {
+                    o.transform = next;
+                }
+            }
+            for cj in &resolved_joints {
+                if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == cj.joint) {
+                    let dofs = j.kind.dofs().len();
+                    if j.base_values.is_none() {
+                        let (base_vals, base_exprs) =
+                            pending_bases.remove(&j.id).unwrap_or_else(|| (j.values.clone(), crate::normalize_joint_exprs(&j.exprs.values, dofs)));
+                        j.base_values = Some(base_vals);
+                        j.base_exprs = base_exprs;
+                    } else {
+                        pending_bases.remove(&j.id);
+                    }
+                    let mut q = cj.values.clone();
+                    q.resize(dofs, 0.0);
+                    solidcraft_doc::joints::clamp(j, &mut q);
+                    j.captured = Some(cj.values.clone());
+                    if j.values.len() < dofs {
+                        j.values.resize(dofs, 0.0);
+                    }
+                    for (i, val) in q.into_iter().enumerate() {
+                        if let Some(slot) = j.values.get_mut(i) {
+                            *slot = val;
+                        }
+                        j.exprs.set_value(i, cj.exprs.get(i).and_then(|e| e.clone()));
+                    }
+                }
+            }
+            let feature_id = doc.add_feature(FeatureKind::CapturePosition { moves: captured_moves, joints: captured_joints }, feature_name)?;
+            if active_component != 0
+                && let Some(f) = doc.feature_mut(feature_id)
+            {
+                f.component = active_component;
+            }
+            feature_id
+        };
+        s.pending_joint_bases = pending_bases;
+        s.revision += 1;
+        return reply(CapturePositionResult {
+            captured: occ_ids.len(),
+            joints: resolved_joints.len(),
+            feature: Some(feature_id),
+            param_warnings: Vec::new(),
+        });
+    }
+
+    // Interactive Capture Pos. `{}`:
     // The exploded view is shown, never captured: it stays shown, the design keeps its placements.
-    let moves = s.uncaptured_moves().into_owned();
-    s.pending_moves.retain(|id, _| !moves.contains_key(id));
-    let n = moves.len();
-    for (id, m) in moves {
+    let uncaptured = s.uncaptured_moves().into_owned();
+    let (vals, _) = s.doc.param_values();
+    let mut captured_moves: Vec<CapturedOccurrenceMove> =
+        s.pending_move_records.iter().filter(|r| uncaptured.contains_key(&r.occurrence)).map(|r| r.step.clone()).collect();
+    let close = |a: &Mat, b: &Mat| a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() <= 1e-6);
+    let fast_ok = s.doc.compute_capture_position_step(&vals, &captured_moves).ok().is_some_and(|updates| {
+        let step_ok: BTreeMap<u64, Mat> = updates.into_iter().filter_map(|(idx, mat)| s.doc.occurrences.get(idx).map(|o| (o.id, mat))).collect();
+        uncaptured.iter().all(|(&id, target_mat)| step_ok.get(&id).is_some_and(|m| close(m, target_mat)))
+    });
+    if !fast_ok {
+        let mut working = (*s.doc).clone();
+        let mut failed_occs: BTreeSet<u64> = BTreeSet::new();
+        for m in &captured_moves {
+            if failed_occs.contains(&m.occurrence) {
+                continue;
+            }
+            if working.apply_capture_position_step(&vals, std::slice::from_ref(m)).is_err() {
+                failed_occs.insert(m.occurrence);
+                if let (Some(o), Some(&target_mat)) = (working.occurrences.iter_mut().find(|o| o.id == m.occurrence), uncaptured.get(&m.occurrence)) {
+                    o.transform = target_mat;
+                }
+            }
+        }
+        let replace_with_delta = |doc: &Document, moves: &mut Vec<CapturedOccurrenceMove>, id: u64, target_mat: &Mat| {
+            let first_pos = moves.iter().position(|m| m.occurrence == id);
+            moves.retain(|m| m.occurrence != id);
+            if let Some(o) = doc.occurrences.iter().find(|o| o.id == id)
+                && let Some(delta_step) = crate::occurrences::captured_delta_move(id, &o.transform, target_mat)
+            {
+                let pos = first_pos.map_or(moves.len(), |p| p.min(moves.len()));
+                moves.insert(pos, delta_step);
+            }
+        };
+        for (&id, &target_mat) in &uncaptured {
+            let matched =
+                !failed_occs.contains(&id) && working.occurrences.iter().find(|o| o.id == id).is_some_and(|o| close(&o.transform, &target_mat));
+            if !matched {
+                replace_with_delta(&s.doc, &mut captured_moves, id, &target_mat);
+            }
+        }
+        if let Ok(updates) = s.doc.compute_capture_position_step(&vals, &captured_moves) {
+            let final_ok: BTreeMap<u64, Mat> = updates.into_iter().filter_map(|(idx, mat)| s.doc.occurrences.get(idx).map(|o| (o.id, mat))).collect();
+            for (&id, &target_mat) in &uncaptured {
+                if !final_ok.get(&id).is_some_and(|m| close(m, &target_mat)) {
+                    replace_with_delta(&s.doc, &mut captured_moves, id, &target_mat);
+                }
+            }
+        } else {
+            let mut verify = (*s.doc).clone();
+            let mut extra_failed: BTreeSet<u64> = BTreeSet::new();
+            for m in &captured_moves {
+                if extra_failed.contains(&m.occurrence) {
+                    continue;
+                }
+                if verify.apply_capture_position_step(&vals, std::slice::from_ref(m)).is_err() {
+                    extra_failed.insert(m.occurrence);
+                    if let (Some(o), Some(&target_mat)) =
+                        (verify.occurrences.iter_mut().find(|o| o.id == m.occurrence), uncaptured.get(&m.occurrence))
+                    {
+                        o.transform = target_mat;
+                    }
+                }
+            }
+            for (&id, &target_mat) in &uncaptured {
+                let matched =
+                    !extra_failed.contains(&id) && verify.occurrences.iter().find(|o| o.id == id).is_some_and(|o| close(&o.transform, &target_mat));
+                if !matched {
+                    replace_with_delta(&s.doc, &mut captured_moves, id, &target_mat);
+                }
+            }
+        }
+    }
+
+    let current_joints = solidcraft_doc::joints::joint_values(&s.doc.assembly);
+    let resolved_joints = s.doc.has_capture_position_timeline().then(|| s.model.resolved_joints());
+    let mut captured_joints = Vec::new();
+    let mut any_joint_changed = false;
+    for j in s.doc.assembly.joints.iter().filter(|j| j.kind != solidcraft_doc::joints::JointKind::Rigid) {
+        let dofs = j.kind.dofs().len();
+        let mut q = current_joints.get(&j.id).cloned().unwrap_or_else(|| j.values.clone());
+        q.resize(dofs, 0.0);
+        let mut e = crate::normalize_joint_exprs(&j.exprs.values, dofs);
+        for (i, slot) in e.iter_mut().enumerate() {
+            if s.doc.assembly.links.iter().any(|l| (l.b, l.ib) == (j.id, i)) {
+                *slot = None;
+            }
+        }
+        let exprs = crate::normalize_joint_exprs(&e, dofs);
+        let prev_exprs: Vec<Option<String>> = if let Some(cj) = resolved_joints.and_then(|m| m.get(&j.id)) {
+            crate::normalize_joint_exprs(&cj.exprs, dofs)
+        } else if let Some((_, base_exprs)) = s.pending_joint_bases.get(&j.id) {
+            crate::normalize_joint_exprs(base_exprs, dofs)
+        } else if j.base_values.is_none() && j.captured.is_some() {
+            exprs.clone()
+        } else {
+            Vec::new()
+        };
+        if j.captured.as_ref() != Some(&q) || exprs != prev_exprs {
+            any_joint_changed = true;
+        }
+        captured_joints.push(CapturedJoint { joint: j.id, values: q, exprs });
+    }
+
+    if uncaptured.is_empty() && !any_joint_changed {
+        return reply(CapturePositionResult { captured: 0, joints: 0, feature: None, param_warnings: Vec::new() });
+    }
+
+    let n = uncaptured.len();
+    s.pending_moves.retain(|id, _| !uncaptured.contains_key(id));
+    s.pending_move_records.retain(|r| !uncaptured.contains_key(&r.occurrence));
+    for (&id, &m) in &uncaptured {
         if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == id) {
+            o.base_transform.get_or_insert(o.transform);
             o.transform = m;
         }
     }
+    if !captured_joints.is_empty() {
+        let mut pending_bases = std::mem::take(&mut s.pending_joint_bases);
+        let doc = s.doc_mut();
+        for cj in &captured_joints {
+            if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == cj.joint) {
+                let dofs = j.kind.dofs().len();
+                if j.base_values.is_none() {
+                    let (base_vals, base_exprs) =
+                        pending_bases.remove(&j.id).unwrap_or_else(|| (j.values.clone(), crate::normalize_joint_exprs(&j.exprs.values, dofs)));
+                    j.base_values = Some(base_vals);
+                    j.base_exprs = base_exprs;
+                } else {
+                    pending_bases.remove(&j.id);
+                }
+            }
+        }
+        s.pending_joint_bases = pending_bases;
+    }
     let joints = super::joints::capture_values(s);
+    let active_component = s.active_component;
+    let feature_id = {
+        let doc = s.doc_mut();
+        let id = doc.add_feature(FeatureKind::CapturePosition { moves: captured_moves, joints: captured_joints }, feature_name)?;
+        if active_component != 0
+            && let Some(f) = doc.feature_mut(id)
+        {
+            f.component = active_component;
+        }
+        id
+    };
     s.revision += 1;
-    reply(CapturePositionResult { captured: n, joints, param_warnings: Vec::new() })
+    reply(CapturePositionResult { captured: n, joints, feature: Some(feature_id), param_warnings: Vec::new() })
 }
 
 fn revert(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1322,10 +1790,10 @@ fn revert(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad("component.revert_position", "no occurrence"));
         }
         for id in ids {
-            s.pending_moves.remove(&id);
+            s.clear_pending_move(id);
         }
     } else {
-        s.pending_moves.clear();
+        s.clear_pending_moves();
     }
     let n = before - s.pending_moves.len();
     // Every occurrence going back takes the joints back too; a revert of some occurrences

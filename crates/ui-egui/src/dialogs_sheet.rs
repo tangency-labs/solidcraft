@@ -1793,7 +1793,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                         i.multi = false;
                         i.items = vec![face_sel(s, at).unwrap_or(Sel::Face { body: String::new(), index: 0, point: at })];
                     }
-                    extra.insert("direction".into(), pt(direction.0));
+                    extra.insert("direction".into(), crate::dialogs::pt_expr(direction));
                     extra.insert("single_point".into(), json!({"point": pt(at), "sketch": sp.sketch.0, "id": id}));
                 }
                 Some(sp) => {
@@ -1811,7 +1811,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                         i.multi = false;
                         i.items = vec![face_sel(s, position.0).unwrap_or(Sel::Face { body: String::new(), index: 0, point: position.0 })];
                     }
-                    extra.insert("direction".into(), pt(direction.0));
+                    extra.insert("direction".into(), crate::dialogs::pt_expr(direction));
                 }
             }
             return Some((Kind::Sheet(k), ins, extra));
