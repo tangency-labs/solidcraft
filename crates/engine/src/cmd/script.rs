@@ -1107,7 +1107,7 @@ fn rebuilt_part(doc: &Document, comp: u64, part: &solidcraft_doc::StandardPart, 
     Ok(fresh)
 }
 
-/// A component's part properties and free-text properties as one
+/// A component's part properties, free-text properties and name split rule as one
 /// `component.metadata.set` step (the constructors seed defaults the design
 /// may have edited), with the keys the command would refuse listed out. The
 /// well-known keys the constructors seed and the design dropped are cleared.
@@ -1128,7 +1128,7 @@ fn component_metadata_step(c: &solidcraft_doc::Component) -> Result<(Option<Valu
             values.insert((*key).to_string(), Value::Null);
         }
     }
-    if values.is_empty() && c.properties.is_empty() {
+    if values.is_empty() && c.properties.is_empty() && c.name_split.is_none() {
         return Ok((None, odd));
     }
     let mut params = Map::new();
@@ -1136,6 +1136,9 @@ fn component_metadata_step(c: &solidcraft_doc::Component) -> Result<(Option<Valu
     params.insert("values".into(), Value::Object(values));
     if !c.properties.is_empty() {
         params.insert("properties".into(), json!(c.properties));
+    }
+    if let Some(rule) = &c.name_split {
+        params.insert("name_split".into(), json!(rule));
     }
     Ok((Some(step("component.metadata.set", Value::Object(params))), odd))
 }

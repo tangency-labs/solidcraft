@@ -796,6 +796,9 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     if id == 0 {
         return Err(bad(cmd, "the design itself can't be deleted"));
     }
+    // Pin surviving features' evaluated body names before removing this component, so even a
+    // design loaded in memory without `Session::opened_at` keeps disambiguated names stable.
+    s.pin_body_names();
     let imported = imported_bodies_within(s, id);
     let body_owners: Vec<(String, u64, u64)> =
         s.model.state().bodies.iter().map(|b| (b.name.clone(), b.feature, s.doc.model_body_component(b))).collect();
@@ -1843,7 +1846,7 @@ pub fn pin_picked_placements(s: &Session, kind: &mut FeatureKind) {
 pub fn pin_picked_placements_in(s: &Session, kind: &mut FeatureKind, own: u64, state: &solidcraft_doc::ModelState) {
     let FeatureKind::Extrude { extent, .. } = kind else { return };
     extent.picked_placements.clear();
-    if (extent.to.is_none() && extent.from.is_none()) || s.doc.occurrences.is_empty() {
+    if (extent.to.is_none() && extent.from.is_none() && extent.to2.is_none()) || s.doc.occurrences.is_empty() {
         return;
     }
     let doc = s.design_document();

@@ -449,6 +449,17 @@ pub struct Extent {
     /// `start_offset`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<FacePick>,
+    /// Two Sides: the second side runs through all bodies instead of `distance2`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub through_all2: bool,
+    /// Two Sides: the second side ends at the face (or vertex/point) at this point instead of
+    /// `distance2` (To Object for the second side).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to2: Option<FacePick>,
+    /// Offset past the second side's To Object face (expression; negative stops short).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "To offset 2")]
+    pub to_offset2: Option<Expr>,
     /// From Object on a face at a slant to the extrusion starts on a plane parallel to the
     /// sketch, at the level where the face meets the middle of the profiles, instead of on the
     /// face. Designs saved before From Object followed a slanted face open with it set, so they
@@ -944,6 +955,9 @@ impl FoldSide {
 }
 
 /// Feature definitions.
+// A Shaft Spline keeps every number of its teeth as an expression (28 of them), so it is larger than the
+// other variants. Boxing them would cost an allocation each, and a design holds one value per feature.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FeatureKind {
@@ -1193,6 +1207,11 @@ pub enum FeatureKind {
         /// one id per matrix. Kept across count changes so survivors keep their identity (#12116).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         occurrences: Vec<u64>,
+        /// Join the bodies it copies from and their copies where they touch or overlap (#21625):
+        /// a part made of one patterned sector is one body, whatever the count. Copies that touch
+        /// nothing stay bodies of their own. Off: every copy is a body of its own, as before.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        join: bool,
     },
     /// Mirror copies of other features' results in a plane. The copied features are named by
     /// id (#1134).
@@ -1277,6 +1296,11 @@ pub enum FeatureKind {
         /// Hole keeps it.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         old_surface_start: bool,
+        /// Press-in hardware this hole is the mounting hole of (#17752): a self-clinching nut,
+        /// stud or standoff in a sheet. The hole is a plain through hole of the hardware's
+        /// size; it has no `thread` of its own, the hardware has the thread.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hardware: Option<Hardware>,
     },
     /// A thread on a cylindrical face. Cosmetic by default (no geometry change; drawn and
     /// exported as an annotation); `modeled` cuts the real helical ISO profile into the face.
@@ -1889,6 +1913,153 @@ pub enum FeatureKind {
         /// Target body names (empty = the feature's participants, else all bodies of its component).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
+    },
+    /// A spline on a shaft, in a bore, or both (#17693): tooth spaces cut into the picked round faces, or, with
+    /// no face picked, a new splined shaft and hub at the origin. The teeth come from the kernel's tooth outlines
+    /// (`solidcraft_kernel::services::shaft_spline`), so every number here is one of their inputs and stays a parameter.
+    ShaftSpline {
+        /// A point on the outside of the shaft the tooth spaces are cut into.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shaft: Option<FacePick>,
+        /// A point on the face the shaft's teeth start from (its end, a shoulder, a chamfer): they start at the
+        /// end of the shaft's round face nearest it and run into the face. None: the end nearest `shaft`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shaft_start: Option<FacePick>,
+        /// A point on the bore the hub's tooth spaces are cut into.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bore: Option<FacePick>,
+        /// A point on the face the hub's teeth start from, as `shaft_start` is for the shaft. None: the end
+        /// of the bore nearest `bore`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bore_start: Option<FacePick>,
+        /// The kind of teeth.
+        form: crate::shaft_spline::SplineForm,
+        /// With no face picked: which new part is made.
+        #[serde(default)]
+        make: crate::shaft_spline::SplineMake,
+        #[walk(unitless = "Teeth")]
+        teeth: Expr,
+        #[walk(length = "Length")]
+        length: Expr,
+        // involute teeth
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Module")]
+        module: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Pressure angle")]
+        pressure_angle: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Addendum")]
+        addendum: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Dedendum")]
+        dedendum: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Root fillet")]
+        root_fillet: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Profile shift")]
+        profile_shift: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Thinning")]
+        thinning: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Hub addendum")]
+        hub_addendum: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Tip clearance")]
+        tip_clearance: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Form clearance")]
+        form_clearance: Option<Expr>,
+        // straight-sided teeth and serrations
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Major diameter")]
+        major_diameter: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Minor diameter")]
+        minor_diameter: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Tooth width")]
+        tooth_width: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Flank angle")]
+        flank_angle: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Root round")]
+        root_round: Option<Expr>,
+        #[serde(default)]
+        tip_corner: crate::shaft_spline::SplineCorner,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Tip size")]
+        tip_size: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Major clearance")]
+        major_clearance: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Minor clearance")]
+        minor_clearance: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Hub tip round")]
+        hub_tip_round: Option<Expr>,
+        // every kind
+        #[walk(length = "Side clearance")]
+        side_clearance: Expr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Hub root round")]
+        hub_root_round: Option<Expr>,
+        /// The outside of a new hub's body (only with no bore picked).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Hub diameter")]
+        hub_diameter: Option<Expr>,
+        #[serde(default)]
+        master: crate::shaft_spline::SplineMaster,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Master angle")]
+        master_angle: Option<Expr>,
+        /// The cutter's diameter: each tooth space cut into a picked shaft ends in the cutter's curve. Without it
+        /// the spaces end square.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Cutter diameter")]
+        cutter_diameter: Option<Expr>,
+        /// The chamfer on the ends of the shaft's teeth: how far it runs down the shaft, and, with nothing else
+        /// given, as far in from the major diameter (45 degrees; `end_chamfer_distance2` or `end_chamfer_angle`
+        /// set how far in). On a picked shaft it goes on the end the teeth start from, and on the far end where
+        /// the teeth run the whole face; on a new shaft, on both ends. Cut by the spline itself, so it is made
+        /// again at the shaft's size and tooth count whenever they change. Without it the teeth end square.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "End chamfer")]
+        end_chamfer: Option<Expr>,
+        /// The chamfer where the teeth run out of the hub's bore: how far it runs into the bore, and, with
+        /// nothing else given, as far out from the tops of the hub's teeth (45 degrees;
+        /// `entry_chamfer_distance2` or `entry_chamfer_angle` set how far out). In a picked bore it goes at the
+        /// entry the teeth start from, and at the far end where the teeth run the whole bore; in a new hub, at
+        /// both ends. Without it the hub's teeth end square.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Entry chamfer")]
+        entry_chamfer: Option<Expr>,
+        /// How far the end chamfer runs across the end, in from the major diameter, where that is not its size
+        /// along the shaft (a chamfer of two distances). Only with `end_chamfer`, and not with
+        /// `end_chamfer_angle`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "End chamfer distance 2")]
+        end_chamfer_distance2: Option<Expr>,
+        /// The end chamfer's angle to the shaft's surface: it runs `end_chamfer` along the shaft and as far
+        /// across the end as that angle takes it. Only with `end_chamfer`, and not with `end_chamfer_distance2`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "End chamfer angle")]
+        end_chamfer_angle: Option<Expr>,
+        /// How far the entry chamfer runs across the bore's end, out from the tops of the hub's teeth, where that
+        /// is not its size along the bore (a chamfer of two distances). Only with `entry_chamfer`, and not with
+        /// `entry_chamfer_angle`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Entry chamfer distance 2")]
+        entry_chamfer_distance2: Option<Expr>,
+        /// The entry chamfer's angle to the bore: it runs `entry_chamfer` into the bore and as far across the end
+        /// as that angle takes it. Only with `entry_chamfer`, and not with `entry_chamfer_distance2`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Entry chamfer angle")]
+        entry_chamfer_angle: Option<Expr>,
     },
     /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
     /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).
@@ -2834,8 +3005,7 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         records: Option<std::sync::Arc<solidcraft_kernel::ImportRecords>>,
     },
-    /// Rebuild an upstream mesh as a solid: analytic planar/cylindrical faces for a
-    /// constant-section part, planar facets for any other closed mesh.
+    /// Rebuild a closed mesh as a solid with analytic faces where certified and planar facets otherwise.
     MeshConvert {
         body: BodyName,
         #[walk(length = "Tolerance")]
@@ -3366,6 +3536,9 @@ pub struct Component {
     /// Free text properties of the definition (material grade, finish, supplier…), by name.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub properties: std::collections::BTreeMap<String, String>,
+    /// Derives two drawing properties from the current name. Explicit properties take precedence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_split: Option<ComponentNameSplit>,
     /// Keeps this component's features (and its children's) out of the History bar (#10393).
     /// The features still rebuild and the component still shows in the Browser; imported copies
     /// whose features only exist to rebuild the copy can carry this flag.
@@ -3374,6 +3547,39 @@ pub struct Component {
     /// Mass values that replace those worked out from its bodies, for robot exports.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub physical_override: Option<PhysicalOverride>,
+}
+
+/// An opt-in rule for deriving two custom drawing properties from a component name.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComponentNameSplit {
+    /// Literal separator, with the first occurrence dividing the name.
+    pub separator: String,
+    /// Property that reads the text before the separator.
+    pub left_property: String,
+    /// Property that reads the text after the separator, including any further separators.
+    pub right_property: String,
+}
+
+impl ComponentNameSplit {
+    /// The property value for `key`, where both halves of the name contain text.
+    pub fn property<'a>(&self, name: &'a str, key: &str) -> Option<&'a str> {
+        if self.separator.is_empty() || self.left_property == self.right_property {
+            return None;
+        }
+        let (left, right) = name.split_once(self.separator.as_str())?;
+        let (left, right) = (left.trim(), right.trim());
+        if left.is_empty() || right.is_empty() {
+            return None;
+        }
+        if key == self.left_property {
+            Some(left)
+        } else if key == self.right_property {
+            Some(right)
+        } else {
+            None
+        }
+    }
 }
 
 /// What a body looks like to a simulator.
@@ -3555,6 +3761,20 @@ pub enum HoleKind {
         #[walk(angle = "Tip angle")]
         tip_angle: Option<Expr>,
     },
+}
+
+/// The press-in hardware a sheet metal hole is for (#17752), kept so that a drawing's hole
+/// callout or table can name it: its kind, its thread as written (`M3`), its length when it has
+/// one (a stud's or a standoff's) and the id of the part (`nut.m3`, see
+/// [`crate::hardware_catalog::HardwareSize::part`]) that a component can stand for it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct Hardware {
+    pub kind: crate::hardware_catalog::HardwareKind,
+    pub thread: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Hardware length")]
+    pub length: Option<Expr>,
+    pub part: String,
 }
 
 /// A Single hole's reference edge (#37): a point on a straight edge of the hole's face, and the
@@ -3935,6 +4155,7 @@ impl FeatureKind {
             FeatureKind::SheetRecognize { .. } => "RecognizeSheetMetalFeature",
             FeatureKind::Coil { .. } => "CoilFeature",
             FeatureKind::CellGrid { .. } => "CellGridFeature",
+            FeatureKind::ShaftSpline { .. } => "ShaftSplineFeature",
             FeatureKind::Rib { web: false, .. } => "RibFeature",
             FeatureKind::Rib { .. } => "WebFeature",
             FeatureKind::ReplaceFace { .. } => "ReplaceFaceFeature",
@@ -4014,6 +4235,7 @@ impl FeatureKind {
             FeatureKind::Align { .. } => "align",
             FeatureKind::Coil { .. } => "coil",
             FeatureKind::CellGrid { .. } => "cell_grid",
+            FeatureKind::ShaftSpline { .. } => "shaft_spline",
             FeatureKind::SheetBase { .. } => "sheet_base",
             FeatureKind::SheetContour { .. } => "sheet_contour",
             FeatureKind::SheetFlange { .. } => "sheet_flange",
@@ -4129,6 +4351,7 @@ impl FeatureKind {
             "RecognizeSheetMetalFeature" => "sheet_recognize",
             "CoilFeature" => "coil",
             "CellGridFeature" => "cell_grid",
+            "ShaftSplineFeature" => "shaft_spline",
             "RibFeature" | "WebFeature" => "rib",
             "ReplaceFaceFeature" => "replace_face",
             "AlignFeature" => "align",
@@ -4228,6 +4451,7 @@ impl FeatureKind {
             FeatureKind::SheetRecognize { .. } => "RecognizeSheetMetal",
             FeatureKind::Coil { .. } => "Coil",
             FeatureKind::CellGrid { .. } => "CellGrid",
+            FeatureKind::ShaftSpline { .. } => "Shaft Spline",
             FeatureKind::Rib { web: false, .. } => "Rib",
             FeatureKind::Rib { .. } => "Web",
             FeatureKind::ReplaceFace { .. } => "ReplaceFace",
@@ -4303,6 +4527,13 @@ pub struct Feature {
     /// mean that numbering.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub kernel_piece_order: bool,
+    /// The pieces this feature splits a body into take its body names in the order of each
+    /// piece's least face name alone, as builds before #21552 named them, instead of first by
+    /// the faces the feature cut them apart with (`lineage::order_lumps`), which an upstream edit
+    /// does not take away. Set on the features of designs saved before then, whose stored body
+    /// names mean that order.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub least_face_piece_order: bool,
     /// This body Pattern reads its stored `body_names` in the order it makes its copies, as builds
     /// before #12114 read them, instead of by source and copy number. Set on the Patterns of
     /// several bodies in designs saved before then, whose stored names mean that order. The
@@ -5250,12 +5481,16 @@ impl Document {
 
     /// This design with `other`'s part properties, or `None` when they are this design's
     /// already (then nothing is copied). The part properties are the fields that change no
-    /// geometry: the design's metadata, each component's metadata and free properties, each
-    /// placement's bill of materials type and the saved item numbers. A field that joins them is
+    /// geometry: the design's metadata, each component's metadata, free properties and name split,
+    /// each placement's bill of materials type and the saved item numbers. A field that joins them is
     /// compared and copied here, and nowhere else.
     fn with_part_properties_of(&self, other: &Document) -> Option<Document> {
         let same = self.metadata == other.metadata
-            && self.components.iter().zip(&other.components).all(|(c, o)| c.metadata == o.metadata && c.properties == o.properties)
+            && self
+                .components
+                .iter()
+                .zip(&other.components)
+                .all(|(c, o)| c.metadata == o.metadata && c.properties == o.properties && c.name_split == o.name_split)
             && self.occurrences.iter().zip(&other.occurrences).all(|(c, o)| c.bom_type == o.bom_type)
             && self.assembly.item_numbers == other.assembly.item_numbers;
         if same {
@@ -5269,6 +5504,7 @@ impl Document {
         for (c, o) in out.components.iter_mut().zip(&other.components) {
             c.metadata.clone_from(&o.metadata);
             c.properties.clone_from(&o.properties);
+            c.name_split.clone_from(&o.name_split);
         }
         for (c, o) in out.occurrences.iter_mut().zip(&other.occurrences) {
             c.bom_type = o.bom_type;
@@ -5790,6 +6026,7 @@ impl Document {
             participants: Vec::new(),
             shell_piece_order: false,
             kernel_piece_order: false,
+            least_face_piece_order: false,
             pattern_names_in_order: false,
             inserted: false,
             link_faces: Vec::new(),
@@ -6442,13 +6679,13 @@ impl Document {
     }
 
     /// Give the texts of a sketch the numbers and words their expressions come to (in place): a
-    /// text's height, place and angle that were typed as expressions, and its words built from
+    /// text's height, place, angle and spacing that were typed as expressions, and its words built from
     /// text parameters. A text's outlines are rebuilt from them when the sketch's links are
     /// refreshed, so this comes before that. What was typed as such is left as it is.
     pub fn apply_text_values(&self, vals: &std::collections::BTreeMap<String, expr::Value>, sk: &mut Sketch) -> Result<()> {
         use crate::eval::val;
         for link in &mut sk.links {
-            let solidcraft_sketch::LinkSource::Text { text, at, height, angle, exprs, .. } = &mut link.source else { continue };
+            let solidcraft_sketch::LinkSource::Text { text, at, height, angle, style, exprs, .. } = &mut link.source else { continue };
             let number = |e: &Option<String>, kind: Kind, what: &str| -> Result<Option<f64>> {
                 match e {
                     None => Ok(None),
@@ -6469,6 +6706,18 @@ impl Document {
             }
             if exprs.height.is_some() && !(*height > 1e-6 && *height < 1e5) {
                 return Err(DocError::Invalid("a text's height must be positive".into()));
+            }
+            if let Some(v) = number(&exprs.letter_spacing, Kind::Length, "text letter spacing")? {
+                style.letter_spacing = v;
+            }
+            if let Some(v) = number(&exprs.line_spacing, Kind::Unitless, "text line spacing")? {
+                style.line_spacing = v;
+            }
+            if exprs.letter_spacing.is_some() && !style.letter_spacing.is_finite() {
+                return Err(DocError::Invalid("a text's letter spacing must be a finite length".into()));
+            }
+            if exprs.line_spacing.is_some() && !(style.line_spacing.is_finite() && style.line_spacing > 0.0) {
+                return Err(DocError::Invalid("a text's line spacing must be a positive factor".into()));
             }
             if let Some(e) = &exprs.text {
                 let words = self.eval_words(e, vals).map_err(|error| DocError::Expr(format!("text: {error}")))?;

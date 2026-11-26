@@ -96,7 +96,30 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             h["references"] = json!([{"edge": o, "distance": "hole.reference1"}, {"edge": o, "distance": "hole.reference2"}]);
             h
         }),
+        ("hole_hardware", {
+            let mut h = hole(json!({"type": "simple"}));
+            h["hardware"] = json!({"kind": "stud", "thread": "M3", "length": "hole.hardware_length", "part": "stud.m3"});
+            h
+        }),
         ("thread", json!({"type": "thread", "face": o, "length": "thread.length"})),
+        (
+            "shaft_spline",
+            json!({"type": "shaft_spline", "shaft": o, "shaft_start": o, "bore": o, "bore_start": o, "form": "involute",
+                "teeth": "shaft_spline.teeth", "length": "shaft_spline.length",
+                "module": "shaft_spline.module", "pressure_angle": "shaft_spline.pressure_angle", "addendum": "shaft_spline.addendum",
+                "dedendum": "shaft_spline.dedendum", "root_fillet": "shaft_spline.root_fillet", "profile_shift": "shaft_spline.profile_shift",
+                "thinning": "shaft_spline.thinning", "hub_addendum": "shaft_spline.hub_addendum", "tip_clearance": "shaft_spline.tip_clearance",
+                "form_clearance": "shaft_spline.form_clearance", "major_diameter": "shaft_spline.major_diameter",
+                "minor_diameter": "shaft_spline.minor_diameter", "tooth_width": "shaft_spline.tooth_width", "flank_angle": "shaft_spline.flank_angle",
+                "root_round": "shaft_spline.root_round", "tip_size": "shaft_spline.tip_size", "major_clearance": "shaft_spline.major_clearance",
+                "minor_clearance": "shaft_spline.minor_clearance", "hub_tip_round": "shaft_spline.hub_tip_round",
+                "side_clearance": "shaft_spline.side_clearance", "hub_root_round": "shaft_spline.hub_root_round",
+                "hub_diameter": "shaft_spline.hub_diameter", "master_angle": "shaft_spline.master_angle",
+                "cutter_diameter": "shaft_spline.cutter_diameter", "end_chamfer": "shaft_spline.end_chamfer",
+                "entry_chamfer": "shaft_spline.entry_chamfer", "end_chamfer_distance2": "shaft_spline.end_chamfer_distance2",
+                "end_chamfer_angle": "shaft_spline.end_chamfer_angle", "entry_chamfer_distance2": "shaft_spline.entry_chamfer_distance2",
+                "entry_chamfer_angle": "shaft_spline.entry_chamfer_angle"}),
+        ),
         ("loft", json!({"type": "loft", "sections": []})),
         ("sweep", json!({"type": "sweep", "sketch": 1, "profiles": {"type": "all"}, "path_sketch": 2, "path": ["l1"]})),
         (
