@@ -841,7 +841,9 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     let pv = &mut app.preview;
     // A plugin preview waits until its inputs stand still (#22297).
     let now = crate::now_ms();
-    let waiting = plugin.is_some() && pv.shown_key != Some(key) && !pv.plugin_quiet(key, now);
+    // The inputs are noted even when their result is the one shown: a return to them restarts
+    // the wait for the next change.
+    let waiting = plugin.is_some() && !pv.plugin_quiet(key, now) && pv.shown_key != Some(key);
     if pv.running.is_none() && pv.shown_key != Some(key) && !waiting {
         pv.started = now;
         pv.running_stream_key = stream_key;
