@@ -269,23 +269,28 @@ pub(crate) fn close_open_blocks(doc: &mut solidcraft_doc::Document) {
         .map(|f| f.id)
         .collect();
     for id in open {
-        if let Ok(sk) = doc.sketch_mut(id) {
-            sk.close_open_blocks();
-        }
+        close_in(doc, id);
     }
 }
 
 /// Close the open block of the sketch being edited, as leaving the sketch does.
 pub(crate) fn close_on_leaving(s: &mut Session) {
-    let Some(id) = s.active_sketch else { return };
+    let Some(id) = super::sketch_store::active(s) else { return };
     if !super::sketch_store::read(&s.doc, id).is_ok_and(|sk| sk.open_block_now().is_some()) {
         return;
     }
     let mut doc = (*s.doc).clone();
-    if let Ok(sk) = doc.sketch_mut(id) {
-        sk.close_open_blocks();
+    if close_in(&mut doc, id) {
         s.set_doc(doc);
     }
+}
+
+/// Close the open blocks of model sketch `id` in `doc`; false when there is no such sketch.
+fn close_in(doc: &mut solidcraft_doc::Document, id: u64) -> bool {
+    let Ok(sk) = super::sketch_store::read(doc, id) else { return false };
+    let mut sk = sk.clone();
+    sk.close_open_blocks();
+    super::sketch_store::write(doc, id, sk).is_ok()
 }
 
 /// What an edit of a sketch with blocks must not do, checked from the sketch as it was before the
@@ -370,9 +375,7 @@ pub(crate) fn close_unedited(s: &mut Session) {
     }
     let doc = s.doc_mut();
     for id in model {
-        if let Ok(sk) = doc.sketch_mut(id) {
-            sk.close_open_blocks();
-        }
+        close_in(doc, id);
     }
     if drawn {
         for d in &mut doc.drawings {

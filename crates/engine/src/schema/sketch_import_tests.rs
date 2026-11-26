@@ -37,6 +37,7 @@ fn schemas_and_the_key_check_agree() {
         "angle",
         "at",
         "block",
+        "dpi",
         "fixed",
         "height",
         "name",
@@ -57,7 +58,7 @@ fn schemas_and_the_key_check_agree() {
         &["angle", "at", "chord", "flip", "format", "name", "path", "pivot", "plane", "sketch", "text", "tolerance"],
     );
     assert_keys(input_schema_for::<ExportDxfParams>(), &["join", "layer", "layers", "path", "sketch", "units"]);
-    assert_keys(input_schema_for::<DrawingBoundsParams>(), &["format", "path", "text"]);
+    assert_keys(input_schema_for::<DrawingBoundsParams>(), &["dpi", "format", "path", "text"]);
 }
 
 /// Strict gives the handlers' messages for the calls they refuse for a key (a missing `path` and

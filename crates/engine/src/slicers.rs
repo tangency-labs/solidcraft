@@ -121,6 +121,10 @@ impl Target {
         ready: None,
     };
 
+    /// The formats of a slicer that also reads STEP: PrusaSlicer since 2.4 and the slicers built on
+    /// it (SuperSlicer, Bambu Studio and its forks), which mesh the exact bodies themselves.
+    pub const WITH_STEP: &'static [&'static str] = &["3mf", "stl", "3mf-tagged", "step"];
+
     pub fn accepts(&self, format: &str) -> bool {
         self.formats.contains(&format)
     }
@@ -138,6 +142,7 @@ const TARGETS: &[Target] = &[
         name: "PrusaSlicer",
         keys: &["prusaslicer"],
         exes: &["prusa-slicer", "PrusaSlicer", "prusa-slicer.exe"],
+        formats: Target::WITH_STEP,
         single_instance: Some("--single-instance"),
         on_url_swap_below: Some(3),
         ready: Some(PRUSA_READY),
@@ -148,9 +153,17 @@ const TARGETS: &[Target] = &[
         name: "Bambu Studio",
         keys: &["bambustudio"],
         exes: &["bambu-studio", "BambuStudio", "bambu-studio.exe"],
+        formats: Target::WITH_STEP,
         ..Target::SLICER
     },
-    Target { id: "orca", name: "OrcaSlicer", keys: &["orcaslicer"], exes: &["orca-slicer", "OrcaSlicer", "orca-slicer.exe"], ..Target::SLICER },
+    Target {
+        id: "orca",
+        name: "OrcaSlicer",
+        keys: &["orcaslicer"],
+        exes: &["orca-slicer", "OrcaSlicer", "orca-slicer.exe"],
+        formats: Target::WITH_STEP,
+        ..Target::SLICER
+    },
     Target {
         id: "cura",
         name: "UltiMaker Cura",
@@ -164,6 +177,7 @@ const TARGETS: &[Target] = &[
         name: "SuperSlicer",
         keys: &["superslicer"],
         exes: &["superslicer", "SuperSlicer", "superslicer.exe"],
+        formats: Target::WITH_STEP,
         single_instance: Some("--single-instance"),
         ..Target::SLICER
     },
@@ -197,7 +211,14 @@ const TARGETS: &[Target] = &[
         ..Target::SLICER
     },
     // QIDI Studio is a Bambu Studio fork and takes what it takes.
-    Target { id: "qidi", name: "QIDI Studio", keys: &["qidistudio"], exes: &["qidi-studio", "QIDIStudio", "qidi-studio.exe"], ..Target::SLICER },
+    Target {
+        id: "qidi",
+        name: "QIDI Studio",
+        keys: &["qidistudio"],
+        exes: &["qidi-studio", "QIDIStudio", "qidi-studio.exe"],
+        formats: Target::WITH_STEP,
+        ..Target::SLICER
+    },
     // The resin slicers read STL.
     Target {
         id: "chitubox",
@@ -1367,6 +1388,7 @@ mod tests {
         let chitubox = found.iter().find(|f| f.base_id() == "chitubox").unwrap();
         assert_eq!(chitubox.target().default_format, "stl");
         assert!(!chitubox.target().accepts("3mf"));
+        assert!(!chitubox.target().accepts("step"));
         std::fs::remove_dir_all(root).unwrap();
     }
 

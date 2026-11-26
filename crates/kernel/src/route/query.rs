@@ -6,7 +6,7 @@ use solidcore_record::Vec3;
 use solidcore_record::brep::Brep;
 use solidcraft_kernel_api::{OpKind, Queries};
 
-pub use solidcraft_kernel_api::query::{OutlineStretch, QueryRefused};
+pub use solidcraft_kernel_api::query::{OutlineStretch, QueryRefused, SurfacePoint};
 
 use super::{Which, which};
 use crate::backend::Solidcore;
@@ -132,6 +132,38 @@ impl<'a> Query<'a> {
     }
 }
 
+/// A body face's exact surface, in the kernel's own form: the point of it nearest a given point.
+#[derive(Debug)]
+pub struct FaceSurface {
+    form: <Solidcore as Queries>::FaceSurface,
+}
+
+impl FaceSurface {
+    /// Face `face` of `record`'s exact surface.
+    ///
+    /// # Errors
+    /// The kernel's refusal, in its words: a face past the record's, a record it cannot convert, a
+    /// face whose (u, v) are not the kernel's, a blend whose definition is not certified.
+    pub fn of(record: &Brep, face: usize) -> Result<FaceSurface, QueryRefused> {
+        Ok(FaceSurface { form: kernel().face_surface(record, face)? })
+    }
+
+    /// The face's parameter box, `[[u0, u1], [v0, v1]]`, in its own (u, v).
+    #[must_use]
+    pub fn domain(&self) -> [[f64; 2]; 2] {
+        kernel().face_surface_domain(&self.form)
+    }
+
+    /// The point of the face's surface nearest `p`, from the guess `guess` (the face's (u, v)),
+    /// within the face's parameter box.
+    ///
+    /// # Errors
+    /// The kernel's refusal: no convergence within its steps, a degenerate point.
+    pub fn closest_point(&self, p: [f64; 3], guess: [f64; 2]) -> Result<SurfacePoint, QueryRefused> {
+        kernel().face_surface_closest(&self.form, p, guess)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,5 +185,26 @@ mod tests {
         // a refusal carries solidcore's words whole
         let words = direct.outline_stretches(Vec3::new(0.0, 0.0, 2.0), 10.0).unwrap_err().to_string();
         assert_eq!(routed.outline_stretches(Vec3::new(0.0, 0.0, 2.0), 10.0), Err(QueryRefused(words)));
+    }
+
+    #[test]
+    fn a_routed_face_surface_is_solidcores() {
+        use solidcore_ops::face_surface::FaceSurface as Direct;
+        let b = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(2.0, 3.0, 4.0)).unwrap();
+        for f in 0..b.record().faces.len() {
+            let (Ok(routed), Ok(direct)) = (FaceSurface::of(b.record(), f), Direct::of(b.record(), f)) else {
+                assert_eq!(FaceSurface::of(b.record(), f).is_ok(), Direct::of(b.record(), f).is_ok());
+                continue;
+            };
+            assert_eq!(routed.domain(), direct.domain());
+            let [[u0, u1], [v0, v1]] = routed.domain();
+            let guess = [(u0 + u1) / 2.0, (v0 + v1) / 2.0];
+            let r = routed.closest_point([1.0, 1.0, 1.0], guess).ok().map(|c| (c.uv, c.point, c.distance));
+            let d = direct.closest_point([1.0, 1.0, 1.0], guess).ok().map(|c| (c.uv, c.point, c.distance));
+            assert_eq!(r, d);
+        }
+        // a refusal carries solidcore's words whole
+        let words = Direct::of(b.record(), 99).unwrap_err().to_string();
+        assert_eq!(FaceSurface::of(b.record(), 99).unwrap_err(), QueryRefused(words));
     }
 }
