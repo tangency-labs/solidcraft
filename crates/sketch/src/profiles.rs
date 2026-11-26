@@ -2110,7 +2110,7 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         }
         match e.seg {
             Seg2::Line { a, b } => a.dist(b) > tol,
-            Seg2::Arc { radius, sweep, .. } => radius * sweep.abs() > tol,
+            Seg2::Arc { radius, sweep, .. } => (sweep.abs() >= TAU - 1e-6 && radius > MERGE_TOL) || radius * sweep.abs() > tol,
             _ => true,
         }
     });

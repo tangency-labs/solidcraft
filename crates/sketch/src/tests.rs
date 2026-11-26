@@ -3593,4 +3593,15 @@ fn merge_regions_preserves_narrow_slivers_and_steps() {
         }
         assert!((merged9[0].area() - (33.0 * 95.0 - 29.25 * 90.75 - 2.0 * d)).abs() < 1e-8);
     }
+
+    // (3) A full circle cut at one point with radius in (MERGE_TOL, tol / TAU] stays a closed
+    // profile (matching `has_width`, which keeps circles wider than `MERGE_TOL`).
+    let mut sk = Sketch::new();
+    let r = 1.2e-6;
+    sk.add_circle(v(0.0, 0.0), r, None, None).unwrap();
+    sk.add_line(v(r, -1.0), v(r, 1.0), None, None, None).unwrap();
+    let ps = find_profiles(&sk);
+    assert_eq!(ps.len(), 1, "tiny circle touched at one point should stay a profile: {ps:?}");
+    let expected_area = std::f64::consts::PI * r * r;
+    assert!((ps[0].area - expected_area).abs() < 1e-16, "area={} expected={expected_area}", ps[0].area);
 }
