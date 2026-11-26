@@ -248,6 +248,8 @@ pub struct WorkCounters {
     band_face_solves: Cell<u64>,
     band_edge_solves: Cell<u64>,
     shells: Cell<u64>,
+    booleans: Cell<u64>,
+    apart_unions: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -667,6 +669,21 @@ impl WorkCounters {
         self.shells.get()
     }
 
+    /// Booleans of two B-reps run (`boolean::api_brep`'s `merge_boolean_by`, under every
+    /// two-B-rep entry point): a union of many bodies runs one for each pair of operands it
+    /// intersects. Not the fork's.
+    #[must_use]
+    pub fn booleans(&self) -> u64 {
+        self.booleans.get()
+    }
+
+    /// Unions of two solids proved apart made side by side, without a boolean
+    /// (`boolean::apart::union_apart`). Not the fork's.
+    #[must_use]
+    pub fn apart_unions(&self) -> u64 {
+        self.apart_unions.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -719,6 +736,8 @@ impl WorkCounters {
         self.band_face_solves.set(0);
         self.band_edge_solves.set(0);
         self.shells.set(0);
+        self.booleans.set(0);
+        self.apart_unions.set(0);
     }
 
     /// Counts one intersection of a blend's section with a face.
@@ -736,6 +755,17 @@ impl WorkCounters {
     /// Counts one shell of a whole body.
     pub(crate) fn add_shell(&self) {
         self.shells.set(self.shells.get().saturating_add(1));
+    }
+
+    /// Counts one boolean of two B-reps.
+    pub(crate) fn add_boolean(&self) {
+        self.booleans.set(self.booleans.get().saturating_add(1));
+    }
+
+    /// Counts one union of two solids made side by side.
+    pub(crate) fn add_apart_union(&self) {
+        self.apart_unions
+            .set(self.apart_unions.get().saturating_add(1));
     }
 
     /// Counts one UV trim curve built.

@@ -647,7 +647,9 @@ uses its first placement; `occurrence.properties` selects a specific instance. R
 measures the complete assembly. A placement that counts as a reference (a bill of materials
 type, below) adds nothing, nor does anything inside it; the component or occurrence measured
 counts whatever its type. Volumes are summed, including overlapping bodies, rather than
-measuring their union. The same workflow is available through `component.properties` and
+measuring their union. A placement's Properties also shows where it sits: **Position** and
+**Rotation** (angle, then axis), with **Frame** choosing between **In parent** and **World**, and
+**Copy matrix** for the matrix `occurrence.move` takes. The same workflow is available through `component.properties` and
 `occurrence.properties`; see
 [placement and measurement details](https://github.com/tangency-labs/solidcraft/blob/main/docs/assembly-properties.md).
 
