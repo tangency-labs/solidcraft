@@ -509,6 +509,31 @@ mod tests {
     }
 
     #[test]
+    fn opening_or_scrolling_a_long_timeline_checks_the_visible_steps_first() {
+        let mut h = Harness::new();
+        h.app.preferences.timeline_2d = true;
+        h.app.run("solid.box", json!({"name": "First", "length": 5, "width": 5, "height": 5})).unwrap();
+        let doc = std::sync::Arc::make_mut(&mut h.app.session.doc);
+        let first = doc.features[0].clone();
+        for i in 1..256 {
+            doc.features.push(solidcraft_engine::doc::Feature { id: first.id + i, name: format!("Step {i}"), ..first.clone() });
+        }
+        let checked = || canvas::FEATURES_CHECKED.with(std::cell::Cell::get);
+        let start = checked();
+        h.frame();
+        assert!(crate::scenario::handle_at("timeline_2d:First").is_some());
+        assert!(checked() - start < 256, "opening the dock must not analyze the entire model");
+
+        let uid = Some(h.app.session.uid);
+        let mut state = state::Timeline2DState::load_scoped(&h.ctx, uid);
+        state.scroll_x = 256.0 * canvas::COL_WIDTH;
+        state.store_scoped(&h.ctx, uid);
+        h.frame();
+        assert!(crate::scenario::handle_at("timeline_2d:Step 255").is_some());
+        assert!(checked() - start < 256, "jumping to the last columns must not analyze the intervening steps");
+    }
+
+    #[test]
     fn component_tracks_keep_changed_and_removed_bodies_after_a_reorder() {
         use std::sync::Arc;
         let mut h = Harness::new();

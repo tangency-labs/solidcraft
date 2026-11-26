@@ -6,11 +6,11 @@ use crate::SolveApp;
 use crate::ui_kit::Menu;
 use egui::{FontId, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use solidcraft_engine::Session;
-use solidcraft_engine::doc::{Document, Feature, FeatureKind, Model, ModelBody};
+use solidcraft_engine::doc::{Document, Feature, FeatureKind, Model, ModelBody, ModelState};
 use solidcraft_engine::geom::Vec3Geom;
 use solidcraft_theme::Tokens;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub const HEADER_BANNER_HEIGHT: f32 = 26.0;
 pub const HEADER_T1_HEIGHT: f32 = 22.0;
@@ -28,49 +28,93 @@ pub const VIRTUAL_GROUP_HEIGHT: f32 = DOCK_TOTAL_HEIGHT;
 
 /// Discovers component IDs and names for the 2D timeline tracks.
 pub fn discover_component_tracks(app: &SolveApp) -> (Vec<u64>, BTreeMap<u64, String>) {
-    ComponentTracks::new(&app.session.doc, &app.session.model).rows(&app.session.doc)
+    let mut tracks = ComponentTracks::new(&app.session);
+    let final_state = app.session.model.state();
+    for index in 0..app.session.doc.features.len() {
+        tracks.check(&app.session, &final_state, index);
+    }
+    tracks.rows(&app.session.doc)
 }
 
 struct ComponentTracks {
-    /// Component IDs in first-use order, including any absent from the component list.
-    referenced: Vec<u64>,
-    affected: BTreeMap<u64, Vec<u64>>,
+    /// Indices into this revision's evaluated results, without keeping body snapshots alive.
+    states: HashMap<u64, (Option<usize>, usize)>,
+    first_use: BTreeMap<u64, usize>,
+    affected: Vec<Option<Vec<u64>>>,
+    next: usize,
 }
 
 impl ComponentTracks {
-    fn new(doc: &Document, model: &Model) -> Self {
+    fn new(session: &Session) -> Self {
         // The state before a result is the last one that was not skipped (Model::state_before).
-        let mut states = HashMap::with_capacity(model.results.len());
-        let mut before: &[ModelBody] = &[];
-        for result in &model.results {
-            let after = result.state.bodies.as_slice();
-            states.entry(result.id).or_insert((before, after));
+        let mut states = HashMap::with_capacity(session.model.results.len());
+        let mut before = None;
+        for (i, result) in session.model.results.iter().enumerate() {
+            states.entry(result.id).or_insert((before, i));
             if !result.skipped {
-                before = after;
+                before = Some(i);
             }
         }
-        let final_state = model.state();
-        let mut tracks = Self { referenced: Vec::new(), affected: BTreeMap::new() };
-        let mut seen = HashSet::new();
-        for f in &doc.features {
-            let affected = affected_components(doc, f, states.get(&f.id).copied(), Some(&final_state.bodies));
-            for &id in &affected {
-                if seen.insert(id) {
-                    tracks.referenced.push(id);
+        Self { states, first_use: BTreeMap::new(), affected: vec![None; session.doc.features.len()], next: 0 }
+    }
+
+    fn check(&mut self, session: &Session, final_state: &ModelState, i: usize) {
+        if self.affected[i].is_some() {
+            return;
+        }
+        let f = &session.doc.features[i];
+        let results = &session.model.results;
+        let states = self
+            .states
+            .get(&f.id)
+            .map(|&(before, after)| (before.map_or(&[][..], |b| results[b].state.bodies.as_slice()), results[after].state.bodies.as_slice()));
+        let affected = affected_components(&session.doc, f, states, Some(final_state));
+        for &cid in &affected {
+            let first = self.first_use.entry(cid).or_insert(i);
+            *first = (*first).min(i);
+        }
+        self.affected[i] = Some(affected);
+    }
+
+    fn prepare(&mut self, session: &Session, graph: &DependencyGraph, visible: &[VisualColumn], ctx: &egui::Context) {
+        if self.next == self.affected.len() {
+            return;
+        }
+        let final_state = session.model.state();
+        for col in visible {
+            if let VisualColumn::Features { features, .. } = col {
+                for id in features {
+                    if let Some(&i) = graph.id_to_index.get(id) {
+                        self.check(session, &final_state, i);
+                    }
                 }
             }
-            tracks.affected.insert(f.id, affected);
         }
-        tracks
+        // Hidden steps can introduce undeclared rows. Discover them between paints, leaving
+        // time for input instead of walking a large assembly's entire history on the first frame.
+        let began = web_time::Instant::now();
+        let end = (self.next + visible.len().max(1)).min(self.affected.len());
+        while self.next < end {
+            self.check(session, &final_state, self.next);
+            self.next += 1;
+            if began.elapsed() >= std::time::Duration::from_millis(2) {
+                break;
+            }
+        }
+        if self.next < self.affected.len() {
+            ctx.request_repaint();
+        }
     }
 
     fn rows(&self, doc: &Document) -> (Vec<u64>, BTreeMap<u64, String>) {
         let (mut ids, mut names) = super::assembly::collect_component_ids_and_names(doc);
-        for &id in &self.referenced {
-            names.entry(id).or_insert_with(|| {
-                ids.push(id);
-                format!("Component {id}")
-            });
+        // An old design can reference an undeclared row. Keep first-use order even when a
+        // later column was visited first. A feature's affected IDs are in ascending order.
+        let mut extra: Vec<_> = self.first_use.iter().filter(|(id, _)| !names.contains_key(id)).map(|(&id, &i)| (i, id)).collect();
+        extra.sort_unstable();
+        for (_, id) in extra {
+            ids.push(id);
+            names.insert(id, format!("Component {id}"));
         }
         (ids, names)
     }
@@ -80,7 +124,7 @@ impl ComponentTracks {
 /// closed designs out of memory and lets scrolling and selection reuse the same analysis.
 struct TimelineAnalysis {
     key: (u64, u64),
-    tracks: ComponentTracks,
+    tracks: Mutex<ComponentTracks>,
     graph: DependencyGraph,
 }
 
@@ -93,7 +137,7 @@ impl TimelineAnalysis {
         {
             return cached;
         }
-        let data = Arc::new(Self { key, tracks: ComponentTracks::new(&session.doc, &session.model), graph: DependencyGraph::from_doc(&session.doc) });
+        let data = Arc::new(Self { key, tracks: Mutex::new(ComponentTracks::new(session)), graph: DependencyGraph::from_doc(&session.doc) });
         ctx.data_mut(|d| d.insert_temp(id, data.clone()));
         data
     }
@@ -152,8 +196,6 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
 
     let analysis = TimelineAnalysis::get(ui.ctx(), &app.session);
     let dep_graph = &analysis.graph;
-    let (component_ids, component_names) = analysis.tracks.rows(&app.session.doc);
-    let feature_components_map = &analysis.tracks.affected;
     let total_features = app.session.doc.features.len();
     let marker_slot = app.session.doc.marker.unwrap_or(total_features);
 
@@ -201,10 +243,8 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
         num_columns
     };
 
-    // 3b. Discover assembly joints for post-modeling track view
-    let visual_joints = super::assembly::build_visual_joints(&app.session.doc, &component_ids, &component_names);
     let has_assembly_section = true;
-    let num_joints = visual_joints.len();
+    let num_joints = app.session.doc.assembly.joints.len();
 
     // 4. Compute layout dimensions and split sections
     let grid_origin_x = total_rect.left() + PINNED_LEFT_WIDTH;
@@ -269,12 +309,6 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
     let a_max_scroll_x = assembly_rect.map(|r| (assembly_content_width - r.width()).max(0.0)).unwrap_or(0.0);
     state.assembly_scroll_x = state.assembly_scroll_x.clamp(0.0, a_max_scroll_x);
 
-    let num_tracks = component_ids.len();
-    let content_height = HEADER_TOTAL_HEIGHT + num_tracks as f32 * ROW_HEIGHT + SCROLLBAR_RESERVE_HEIGHT;
-    let _grid_viewport_height = (total_rect.height() - HEADER_TOTAL_HEIGHT).max(0.0);
-    let max_scroll_y = (content_height - total_rect.height()).max(0.0);
-    state.scroll_y = state.scroll_y.clamp(0.0, max_scroll_y);
-
     // 5. Handle mouse wheel scrolling and rubberband overscroll
     let scroll_delta = ui.input(|i| {
         i.events
@@ -287,22 +321,54 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
     });
     let pointer_in_asm = ui.input(|i| i.pointer.hover_pos().is_some_and(|pos| assembly_rect.is_some_and(|r| r.contains(pos))));
 
-    if ui.rect_contains_pointer(total_rect) {
-        if scroll_delta.x.abs() > 0.0 {
+    let over_timeline = ui.rect_contains_pointer(total_rect);
+    let shift = ui.input(|i| i.modifiers.shift);
+    let pan = over_timeline && ui.input(|i| i.pointer.button_down(egui::PointerButton::Middle));
+    let drag_delta = ui.input(|i| i.pointer.delta());
+    if over_timeline {
+        let mut scroll = |delta: f32| {
             if pointer_in_asm {
-                state.assembly_scroll_x = (state.assembly_scroll_x - scroll_delta.x).clamp(0.0, a_max_scroll_x);
+                state.assembly_scroll_x = (state.assembly_scroll_x - delta).clamp(0.0, a_max_scroll_x);
             } else {
-                state.scroll_x = (state.scroll_x - scroll_delta.x).clamp(0.0, m_max_scroll_x);
+                state.scroll_x = (state.scroll_x - delta).clamp(0.0, m_max_scroll_x);
             }
+        };
+        scroll(scroll_delta.x);
+        if shift {
+            scroll(scroll_delta.y);
         }
+        if pan {
+            scroll(drag_delta.x);
+        }
+    }
+
+    let grid_rect = modeling_rect.map_or(Rect::NOTHING, |r| Rect::from_min_max(pos2(grid_origin_x, r.top() + HEADER_TOTAL_HEIGHT), r.right_bottom()));
+    // Read the pan before choosing columns so a long drag shows the correct chips in this frame.
+    let background_pan = modeling_rect.and_then(|_| {
+        let response = ui.interact(grid_rect, ui.scope_id().with("modeling_bg_pan"), Sense::drag());
+        let marker_dragged = ["marker_head_2d", "marker_line_2d"].iter().any(|id| ui.ctx().is_being_dragged(ui.scope_id().with(id)));
+        (response.dragged() && state.drag.is_none() && !marker_dragged).then(|| response.drag_delta())
+    });
+    if let Some(delta) = background_pan {
+        state.scroll_x = (state.scroll_x - delta.x).clamp(0.0, m_max_scroll_x);
+    }
+    let visible = modeling_rect.filter(|r| r.width() > 0.0).map_or(&[][..], |rect| {
+        let first = ((state.scroll_x / COL_WIDTH).ceil() as usize).saturating_sub(1).min(num_columns);
+        let end = (((state.scroll_x + rect.width()) / COL_WIDTH) as usize + 1).min(num_columns);
+        visual_columns.get(first..end).unwrap_or_default()
+    });
+    let mut tracks = analysis.tracks.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    tracks.prepare(&app.session, dep_graph, visible, ui.ctx());
+    let (component_ids, component_names) = tracks.rows(&app.session.doc);
+    let affected = |id: &u64| tracks.affected.get(*dep_graph.id_to_index.get(id)?)?.as_deref();
+    let visual_joints = super::assembly::build_visual_joints(&app.session.doc, &component_ids, &component_names);
+    let num_tracks = component_ids.len();
+    let content_height = HEADER_TOTAL_HEIGHT + num_tracks as f32 * ROW_HEIGHT + SCROLLBAR_RESERVE_HEIGHT;
+    let max_scroll_y = (content_height - total_rect.height()).max(0.0);
+    state.scroll_y = state.scroll_y.clamp(0.0, max_scroll_y);
+    if over_timeline {
         if scroll_delta.y.abs() > 0.0 {
-            if ui.input(|i| i.modifiers.shift) {
-                if pointer_in_asm {
-                    state.assembly_scroll_x = (state.assembly_scroll_x - scroll_delta.y).clamp(0.0, a_max_scroll_x);
-                } else {
-                    state.scroll_x = (state.scroll_x - scroll_delta.y).clamp(0.0, m_max_scroll_x);
-                }
-            } else {
+            if !shift {
                 let target_y = state.scroll_y - scroll_delta.y;
                 if target_y < 0.0 {
                     state.overscroll_y = target_y * 0.35;
@@ -321,15 +387,8 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
     }
 
     // 5b. Middle-button grab-and-drag pan gesture across entire timeline
-    let is_middle_drag = ui.input(|i| i.pointer.button_down(egui::PointerButton::Middle));
-    if is_middle_drag && ui.rect_contains_pointer(total_rect) {
-        let delta = ui.input(|i| i.pointer.delta());
-        if pointer_in_asm {
-            state.assembly_scroll_x = (state.assembly_scroll_x - delta.x).clamp(0.0, a_max_scroll_x);
-        } else {
-            state.scroll_x = (state.scroll_x - delta.x).clamp(0.0, m_max_scroll_x);
-        }
-        state.scroll_y = (state.scroll_y - delta.y).clamp(0.0, max_scroll_y);
+    if pan {
+        state.scroll_y = (state.scroll_y - drag_delta.y).clamp(0.0, max_scroll_y);
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         ui.ctx().request_repaint();
     }
@@ -340,23 +399,12 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
     let grid_right = modeling_rect.map(|r| r.right()).unwrap_or(grid_origin_x);
     let m_is_open = modeling_rect.is_some();
 
-    let grid_rect = if let Some(m_r) = modeling_rect {
-        Rect::from_min_max(pos2(grid_origin_x, m_r.top() + HEADER_TOTAL_HEIGHT), m_r.right_bottom())
-    } else {
-        Rect::NOTHING
-    };
     let grid_painter = ui.painter().with_clip_rect(grid_rect);
     let grid_line_color = t.border.gamma_multiply(0.25);
 
     if m_is_open {
         // Background grab-and-drag pan gesture on empty modeling grid
-        let bg_resp = ui.interact(grid_rect, ui.scope_id().with("modeling_bg_pan"), Sense::drag());
-        let marker_head_id = ui.scope_id().with("marker_head_2d");
-        let marker_line_id = ui.scope_id().with("marker_line_2d");
-        let is_marker_dragged = ui.ctx().is_being_dragged(marker_head_id) || ui.ctx().is_being_dragged(marker_line_id);
-        if bg_resp.dragged() && state.drag.is_none() && !is_marker_dragged {
-            let delta = bg_resp.drag_delta();
-            state.scroll_x = (state.scroll_x - delta.x).clamp(0.0, m_max_scroll_x);
+        if let Some(delta) = background_pan {
             state.scroll_y = (state.scroll_y - delta.y).clamp(0.0, max_scroll_y);
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             ui.ctx().request_repaint();
@@ -413,8 +461,9 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
                     continue;
                 }
 
+                let occupied = visual_columns.get(c).and_then(|col| occupied_rows(col, affected, &component_ids));
                 for t_idx in 0..num_tracks {
-                    if cell_is_occupied(c, t_idx, &visual_columns, feature_components_map, &component_ids, &app.session.doc) {
+                    if occupied.as_ref().is_some_and(|rows| rows.contains(&t_idx)) {
                         continue;
                     }
                     let cy =
@@ -499,7 +548,7 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
 
                 for &fid in features {
                     if let Some(f) = app.session.doc.feature(fid) {
-                        let affected = feature_components_map.get(&fid).cloned().unwrap_or_else(|| vec![f.component]);
+                        let affected = affected(&fid).unwrap_or(std::slice::from_ref(&f.component));
                         let mut tracks: Vec<usize> = affected.iter().filter_map(|cid| component_ids.iter().position(|id| id == cid)).collect();
                         if tracks.is_empty() {
                             let default_track = component_ids.iter().position(|&cid| cid == f.component).unwrap_or(0);
@@ -2042,7 +2091,7 @@ pub fn feature_affected_components(doc: &Document, model: Option<&Model>, f: &Fe
     let after = model.and_then(|m| m.result(f.id));
     let states = before.as_ref().zip(after).map(|(a, b)| (a.bodies.as_slice(), b.state.bodies.as_slice()));
     let final_state = model.map(Model::state);
-    affected_components(doc, f, states, final_state.as_ref().map(|s| s.bodies.as_slice()))
+    affected_components(doc, f, states, final_state.as_deref())
 }
 
 #[cfg(test)]
@@ -2050,7 +2099,7 @@ thread_local! {
     pub(super) static FEATURES_CHECKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-fn affected_components(doc: &Document, f: &Feature, states: Option<(&[ModelBody], &[ModelBody])>, model_bodies: Option<&[ModelBody]>) -> Vec<u64> {
+fn affected_components(doc: &Document, f: &Feature, states: Option<(&[ModelBody], &[ModelBody])>, final_state: Option<&ModelState>) -> Vec<u64> {
     #[cfg(test)]
     FEATURES_CHECKED.with(|n| n.set(n.get() + 1));
     let mut comps = BTreeSet::new();
@@ -2096,8 +2145,8 @@ fn affected_components(doc: &Document, f: &Feature, states: Option<(&[ModelBody]
         if trimmed.is_empty() || trimmed == "*" {
             return None;
         }
-        if let Some(bodies) = model_bodies
-            && let Some(mb) = bodies.iter().find(|body| body.name.trim() == trimmed)
+        if let Some(state) = final_state
+            && let Some(mb) = state.bodies.iter().find(|body| body.name.trim() == trimmed)
         {
             return Some(doc.model_body_component(mb));
         }
@@ -2155,13 +2204,14 @@ fn affected_components(doc: &Document, f: &Feature, states: Option<(&[ModelBody]
             {
                 comps.insert(cid);
             }
-            if let Some(bodies) = model_bodies {
-                for p in edges {
-                    for b in bodies {
+            if let Some(state) = final_state
+                && !edges.is_empty()
+            {
+                for (b, owner) in state.bodies.iter().zip(doc.model_body_components(state)) {
+                    if !comps.contains(&owner) {
                         let mesh = b.mesh();
-                        let is_near = mesh.edges.iter().any(|e| e.windows(2).any(|w| p.0.dist_to_segment(w[0], w[1]) < 0.05));
-                        if is_near {
-                            comps.insert(doc.model_body_component(b));
+                        if edges.iter().any(|p| mesh.edges.iter().any(|e| e.windows(2).any(|w| p.0.dist_to_segment(w[0], w[1]) < 0.05))) {
+                            comps.insert(owner);
                         }
                     }
                 }
@@ -2224,63 +2274,36 @@ fn affected_components(doc: &Document, f: &Feature, states: Option<(&[ModelBody]
     comps.into_iter().collect()
 }
 
-/// Helper to determine whether a grid cell (col_idx, track_idx) is occupied by an action chip,
-/// a multi-component vertical connector, or a folded group card.
-fn cell_is_occupied(
-    col_idx: usize,
-    track_idx: usize,
-    visual_columns: &[VisualColumn],
-    feature_components_map: &BTreeMap<u64, Vec<u64>>,
+/// Chips and their connector occupy the rows between the first and last affected component.
+fn occupied_rows<'a>(
+    column: &VisualColumn,
+    affected: impl Fn(&u64) -> Option<&'a [u64]>,
     component_ids: &[u64],
-    doc: &solidcraft_engine::doc::Document,
-) -> bool {
-    let Some(col) = visual_columns.get(col_idx) else {
-        return false;
+) -> Option<std::ops::RangeInclusive<usize>> {
+    // The folded card covers its members. While their tracks are being discovered, keep
+    // its column clear of dots instead of inferring a connector from incomplete data.
+    if let VisualColumn::FoldedGroup { features, .. } = column
+        && features.iter().any(|id| affected(id).is_none())
+    {
+        return Some(0..=component_ids.len().saturating_sub(1));
+    }
+    let mut rows = column.feature_ids().iter().filter_map(affected).flatten().filter_map(|cid| component_ids.iter().position(|id| id == cid));
+    let Some(first) = rows.next() else {
+        return matches!(column, VisualColumn::FoldedGroup { .. }).then_some(0..=0);
     };
-    match col {
-        VisualColumn::Features { features, .. } => {
-            let mut tracks: Vec<usize> = Vec::new();
-            for &fid in features {
-                if let Some(f) = doc.feature(fid) {
-                    let affected = feature_components_map.get(&fid).cloned().unwrap_or_else(|| vec![f.component]);
-                    for &cid in &affected {
-                        if let Some(pos) = component_ids.iter().position(|&id| id == cid) {
-                            tracks.push(pos);
-                        }
-                    }
-                }
-            }
-            tracks.sort_unstable();
-            tracks.dedup();
-            if tracks.contains(&track_idx) {
-                return true;
-            }
-            if tracks.len() > 1 {
-                let min_t = tracks.first().copied().unwrap_or(0);
-                let max_t = tracks.last().copied().unwrap_or(0);
-                if track_idx >= min_t && track_idx <= max_t {
-                    return true;
-                }
-            }
-            false
-        }
-        VisualColumn::FoldedGroup { features, .. } => {
-            let mut tracks: Vec<usize> = Vec::new();
-            for &fid in features {
-                if let Some(f) = doc.feature(fid) {
-                    let affected = feature_components_map.get(&fid).cloned().unwrap_or_else(|| vec![f.component]);
-                    for &cid in &affected {
-                        if let Some(pos) = component_ids.iter().position(|&id| id == cid) {
-                            tracks.push(pos);
-                        }
-                    }
-                }
-            }
-            tracks.sort_unstable();
-            tracks.dedup();
-            let min_t = tracks.first().copied().unwrap_or(0);
-            let max_t = tracks.last().copied().unwrap_or(0);
-            track_idx >= min_t && track_idx <= max_t
-        }
+    let (low, high) = rows.fold((first, first), |(low, high), i| (low.min(i), high.max(i)));
+    Some(low..=high)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_folded_column_keeps_dots_clear_until_all_its_tracks_are_known() {
+        let col = VisualColumn::FoldedGroup { group_id: 1, features: vec![2, 3] };
+        let rows = [0, 10, 20, 30];
+        assert_eq!(occupied_rows(&col, |&id| (id == 2).then_some(&[10][..]), &rows), Some(0..=3));
+        assert_eq!(occupied_rows(&col, |&id| Some(if id == 2 { &[10] } else { &[30] }), &rows), Some(1..=3));
     }
 }
