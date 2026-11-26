@@ -1378,21 +1378,52 @@ fn parse_kicad_color(v: &Value) -> Option<[u8; 3]> {
     Some(out)
 }
 
-fn add_kicad(s: &mut Session, path: &str, name: Option<&str>, options: &solidcraft_io::KicadOptions) -> Result<Value> {
-    add_kicad_with(s, path, name, options, &KicadPaths::current())
+/// The options a KiCad link keeps, as `doc.open` takes them, so the board is read again with the
+/// same ones.
+fn kicad_options_record(options: &solidcraft_io::KicadOptions) -> Value {
+    let mut record = json!({
+        "components": options.components,
+        "copper": options.copper.as_str(),
+        "silkscreen": options.silkscreen,
+    });
+    if let Some(thickness) = options.thickness {
+        record["thickness"] = json!(thickness);
+    }
+    if let Some(color) = options.color {
+        record["color"] = json!(color);
+    }
+    // The default (a solid board) is left out; a board opened as meshes is read again as meshes.
+    if options.representation == solidcraft_io::KicadRepresentation::Mesh {
+        record["representation"] = json!("mesh");
+    }
+    record
 }
 
-/// [`add_kicad`] with the KiCad variables and library given (the tests' entry point).
-fn add_kicad_with(s: &mut Session, path: &str, name: Option<&str>, options: &solidcraft_io::KicadOptions, paths: &KicadPaths) -> Result<Value> {
+/// A KiCad board read: its contents, the `.kicad_pcb` it came from, that file's bytes, and the
+/// folders of the models an agent's folders refused.
+struct KicadRead {
+    imported: solidcraft_io::KicadImport,
+    board_path: String,
+    bytes: Vec<u8>,
+    refused: Vec<String>,
+}
+
+fn read_board(path: &str, options: &solidcraft_io::KicadOptions, paths: &KicadPaths) -> Result<KicadRead> {
     let board_path = solidcraft_io::kicad_board_path(std::path::Path::new(path)).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let board_path = board_path.to_string_lossy();
+    let board_path = board_path.to_string_lossy().into_owned();
     let bytes =
         solidcraft_io::vfs::read(&board_path, solidcraft_io::MAX_KICAD_BYTES).map_err(|e| EngineError::Other(format!("{board_path}: {e}")))?;
-    let model_dir = std::path::Path::new(board_path.as_ref()).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    board_from_bytes(board_path, bytes, options, paths)
+}
+
+/// A KiCad board from the `bytes` of the `.kicad_pcb` at `board_path`, already read (and, for a
+/// link, already judged) by the caller: the board file is not opened again.
+fn board_from_bytes(board_path: String, bytes: Vec<u8>, options: &solidcraft_io::KicadOptions, paths: &KicadPaths) -> Result<KicadRead> {
+    let model_dir = std::path::Path::new(&board_path).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
     let libraries = paths.libraries();
-    let access = KicadModelAccess { board: board_path.as_ref(), libraries: &libraries };
+    let access = KicadModelAccess { board: board_path.as_str(), libraries: &libraries };
     // The folders of the models the agent's folders refused: the warning a model gets is a few
-    // words, so the folders and how to allow them are told once, below.
+    // words, so the folders and how to allow them are told once, by the caller.
     let refused_folders = std::cell::RefCell::new(Vec::<String>::new());
     let mut load = |model: &str| {
         let resolved = paths.resolve(model, &model_dir).map_err(|e| e.to_string())?;
@@ -1414,6 +1445,26 @@ fn add_kicad_with(s: &mut Session, path: &str, name: Option<&str>, options: &sol
     };
     let imported =
         solidcraft_io::read_kicad(&bytes, &board_path, options, &mut load).map_err(|e| EngineError::Other(format!("{board_path}: {e}")))?;
+    Ok(KicadRead { imported, board_path, bytes, refused: refused_folders.take() })
+}
+
+fn add_kicad(s: &mut Session, path: &str, name: Option<&str>, options: &solidcraft_io::KicadOptions, keep_link: bool) -> Result<Value> {
+    add_kicad_with(s, path, name, options, keep_link, &KicadPaths::current())
+}
+
+/// [`add_kicad`] with the KiCad variables and library given (the tests' entry point). `keep_link`:
+/// the component stays linked to the `.kicad_pcb`, with `options`, so Update Links reads the board
+/// again.
+fn add_kicad_with(
+    s: &mut Session,
+    path: &str,
+    name: Option<&str>,
+    options: &solidcraft_io::KicadOptions,
+    keep_link: bool,
+    paths: &KicadPaths,
+) -> Result<Value> {
+    let keep_link = keep_link && !cfg!(target_arch = "wasm32");
+    let KicadRead { imported, board_path, bytes, refused } = read_board(path, options, paths)?;
     let feature = imported.feature;
     let feature_name = name.filter(|n| !n.trim().is_empty()).unwrap_or(&feature.name).to_string();
     let component_name = import::component_name(path, name);
@@ -1431,9 +1482,25 @@ fn add_kicad_with(s: &mut Session, path: &str, name: Option<&str>, options: &sol
     if let Some(step) = imported.board_step {
         features.push(import::add_step_in_component(s, placed.component, "board.step", step, &feature_name)?);
     }
+    if keep_link {
+        s.doc_mut().links.insert(
+            placed.component,
+            solidcraft_doc::DesignLink {
+                path: super::design_link::absolute(std::path::Path::new(&board_path)).to_string_lossy().into_owned(),
+                feature: id,
+                file_sha256: Some(solidcraft_doc::DesignLink::file_digest(&bytes)),
+                importer: Some(solidcraft_doc::LinkImporter {
+                    format: solidcraft_doc::LinkImporter::KICAD.into(),
+                    plugin: None,
+                    version: None,
+                    options: kicad_options_record(options),
+                }),
+                ..Default::default()
+            },
+        );
+    }
     let bodies: Vec<String> = features.iter().flat_map(|feature| created_bodies(s, *feature)).collect();
     let mut warnings = json!(feature.warnings);
-    let refused = refused_folders.take();
     if !refused.is_empty()
         && let Some(list) = warnings.as_array_mut()
     {
@@ -1455,6 +1522,56 @@ fn add_kicad_with(s: &mut Session, path: &str, name: Option<&str>, options: &sol
         out["board_solid"] = json!(true);
     }
     Ok(out)
+}
+
+/// What Update Links took from a changed KiCad board.
+pub(super) struct KicadReplaced {
+    /// The digest of the board file that was read.
+    pub digest: String,
+    pub warnings: Vec<String>,
+}
+
+/// Build the `.kicad_pcb` at `board`, whose `bytes` the caller read (once, after its trust
+/// checks on that very file), with the `options` record a link kept, and put its
+/// bodies in the linked component `comp` in place of the ones it has: its features, the
+/// components and placements made below it, and what refers to them go, and the board is built
+/// again in `comp`, which keeps its own placements, its name and its link (whose feature moves to
+/// the new one). Nothing changes when the board can't be read or built.
+pub(super) fn replace_kicad(s: &mut Session, comp: u64, board: &str, bytes: Vec<u8>, record: &Value) -> Result<KicadReplaced> {
+    let options = kicad_options(record, "component.update_links")?;
+    let KicadRead { imported, bytes, refused, .. } = board_from_bytes(board.to_string(), bytes, &options, &KicadPaths::current())?;
+    let old_name = s.doc.links.get(&comp).and_then(|l| s.doc.feature(l.feature)).map(|f| f.name.clone());
+    let warnings = imported.feature.warnings.clone();
+    let before = DesignSnapshot::of(s);
+    let built = (|| -> Result<u64> {
+        s.doc_mut().remove_component_contents(comp)?;
+        let top_occ = s.doc.occurrence_of(comp).map(|o| o.id);
+        let feature = imported.feature;
+        let feature_name = old_name.filter(|n| !n.trim().is_empty()).unwrap_or(feature.name);
+        let tree = if imported.plan.places.is_empty() { import::Tree::Flat(None) } else { import::Tree::Mesh(&imported.plan) };
+        let (id, _) = import::add_into_component(s, comp, top_occ, feature.kind, &feature_name, feature.body_names, &[], tree)?;
+        if let Some(step) = imported.board_step {
+            import::add_step_in_component(s, comp, "board.step", step, &feature_name)?;
+        }
+        if let Some(link) = s.doc_mut().links.get_mut(&comp) {
+            link.feature = id;
+        }
+        Ok(id)
+    })();
+    match built {
+        Ok(_) => {
+            let mut warnings = warnings;
+            if !refused.is_empty() {
+                let folders = refused.iter().map(|f| format!("`{f}`")).collect::<Vec<_>>().join(", ");
+                warnings.push(format!("component models in {folders} are outside the folders this agent may use, so those components have no model"));
+            }
+            Ok(KicadReplaced { digest: solidcraft_doc::DesignLink::file_digest(&bytes), warnings })
+        }
+        Err(e) => {
+            before.restore(s);
+            Err(e)
+        }
+    }
 }
 
 /// Move an import's component so that the board's lower-left corner `corner` sits at the origin,
@@ -1838,7 +1955,11 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
             // KiCad is read into a fresh design here, as a mesh file is.
             let mut fresh = Session::new(Document::new(&stem));
             fresh.set_validation(s.validation());
-            let r = add_kicad(&mut fresh, path, None, &kicad_options(p, "doc.open")?)?;
+            let r = add_kicad(&mut fresh, path, None, &kicad_options(p, "doc.open")?, true)?;
+            // The caller named this board: Update Links may read it again in this session.
+            if let Some(board) = r["board_path"].as_str() {
+                super::component_link::allow_linked_file(s, std::path::Path::new(board));
+            }
             (fresh, r)
         } else if solidcraft_io::is_step_path(path) {
             open_step(path, p, import_cache().as_ref(), s.validation())?
@@ -1917,7 +2038,7 @@ pub fn runs_plugin_importer(s: &Session, command: &str, params: &Value) -> bool 
     }
     if command.eq_ignore_ascii_case("component.update_links") {
         // Update Links reads again with the importer a link recorded, so it runs that plugin.
-        return s.doc.links.values().any(|link| link.importer.is_some());
+        return s.doc.links.values().any(|link| link.importer.as_ref().is_some_and(|i| !i.is_kicad()));
     }
     if !command.eq_ignore_ascii_case("doc.open") {
         return false;
@@ -4402,7 +4523,7 @@ mod tests {
             let scope = PathScope::new([]).with_design_file(&board.to_string_lossy());
             let mut s = Session::default();
             let reply = scoped(Some(scope), || {
-                add_kicad_with(&mut s, &board.to_string_lossy(), None, &solidcraft_io::KicadOptions::default(), &paths).unwrap()
+                add_kicad_with(&mut s, &board.to_string_lossy(), None, &solidcraft_io::KicadOptions::default(), false, &paths).unwrap()
             });
             reply["warnings"].as_array().cloned().unwrap_or_default().iter().filter_map(|w| w.as_str().map(str::to_owned)).collect::<Vec<_>>()
         };
