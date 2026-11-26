@@ -153,3 +153,28 @@ fn interned_names_are_kept_and_bounded() {
     assert!(std::ptr::eq(a, intern("smlib_boolean")));
     assert_eq!(a, "smlib_boolean");
 }
+
+#[test]
+fn trace_events_carry_args() {
+    let _s = serial();
+    reset();
+    set_enabled(true);
+    {
+        let _span = span("import", "step.check").with_arg("part", "bracket").with_arg("item", 42);
+        spin(2);
+    }
+    set_enabled(false);
+    let mut out = Vec::new();
+    assert!(write_chrome_trace(&mut out).is_ok());
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap_or_default();
+    let events = v["traceEvents"].as_array();
+    assert!(events.is_some());
+    if let Some(events) = events {
+        let check_ev = events.iter().find(|e| e["name"] == "step.check");
+        assert!(check_ev.is_some());
+        if let Some(ev) = check_ev {
+            assert_eq!(ev["args"]["part"], "bracket");
+            assert_eq!(ev["args"]["item"], "42");
+        }
+    }
+}

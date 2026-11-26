@@ -73,7 +73,14 @@ pub(super) fn workers() -> usize {
 }
 
 pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
-    let _span = solidcraft_profile::span("import", "step.body");
+    let item_num = match &job.source {
+        Source::Item { item, .. } => Some(*item),
+        Source::Oriented(_) => None,
+    };
+    let _span = match item_num {
+        Some(item) => solidcraft_profile::span("import", "step.body").with_arg("item", item),
+        None => solidcraft_profile::span("import", "step.body"),
+    };
     let (part, read) = match &job.source {
         Source::Oriented(part) => (part.clone(), None),
         Source::Item { item, units } => {
@@ -96,11 +103,17 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
         false => (body, 0),
         true if job.placement == IDENTITY => {
             let body = body.keeping_plans();
-            let missing = solidcraft_profile::scope("import", "step.mesh_check", || body.unmeshed_display_faces());
+            let missing = match item_num {
+                Some(item) => solidcraft_profile::scope_with_arg("import", "step.mesh_check", "item", item, || body.unmeshed_display_faces()),
+                None => solidcraft_profile::scope("import", "step.mesh_check", || body.unmeshed_display_faces()),
+            };
             (body, missing)
         }
         true => {
-            let missing = solidcraft_profile::scope("import", "step.mesh_check", || part.body.unmeshed_faces());
+            let missing = match item_num {
+                Some(item) => solidcraft_profile::scope_with_arg("import", "step.mesh_check", "item", item, || part.body.unmeshed_faces()),
+                None => solidcraft_profile::scope("import", "step.mesh_check", || part.body.unmeshed_faces()),
+            };
             (body, missing)
         }
     };
@@ -157,7 +170,7 @@ pub(super) fn placed(body: &Body, m: &M4) -> crate::Result<Body> {
 /// and brought back as a body: the part SMLib made of the file. A solid the reader or SMLib
 /// refuses fails with the reason ([`surface_part`] then imports what it can of it).
 pub(super) fn smlib_part(ex: &Exchange, item: u64, units: Units) -> std::result::Result<(Part, Vec<Note>), Failure> {
-    let solid = solidcraft_profile::scope("import", "step.read_solid", || {
+    let solid = solidcraft_profile::scope_with_arg("import", "step.read_solid", "item", item, || {
         solidcore_step::topology::read_solid_with(ex, item, units, &solidcraft_smlib::pcurves::SmlibImportTrims)
     })
     .map_err(|msg| Failure { read: true, msg })?;
@@ -330,7 +343,7 @@ const MAX_LEFT_OUT_ROUNDS: usize = 8;
 /// Where SMLib cannot stitch them either, or there is no face to import, the solid stays refused
 /// with the reason it was: a B-rep SMLib refuses is never kept as a mesh of its faces.
 fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std::result::Result<(Part, Vec<Note>), Failure> {
-    let _span = solidcraft_profile::span("import", "step.refused_surfaces");
+    let _span = solidcraft_profile::span("import", "step.refused_surfaces").with_arg("item", item);
     let trims = &solidcraft_smlib::pcurves::SmlibImportTrims;
     let Ok(faces) = solidcore_step::topology::read_faces_with(ex, item, units, trims) else { return Err(refused) };
     let of_solid: std::collections::HashSet<u64> = faces.iter().map(|f| f.face).collect();

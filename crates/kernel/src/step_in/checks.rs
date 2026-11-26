@@ -158,7 +158,8 @@ impl Outcome {
 
 /// Check `job`'s body under the token and validation mode of this thread.
 pub(super) fn check(job: &Job) -> Outcome {
-    let _span = solidcraft_profile::span("import", "step.check");
+    let name = if !job.part.is_empty() { &job.part } else { &job.label };
+    let _span = solidcraft_profile::span("import", "step.check").with_arg("part", name).with_arg("item", job.item);
     check_body(&job.body)
 }
 
@@ -216,7 +217,11 @@ fn to_heal(jobs: &[Job], outcomes: &[Outcome]) -> Vec<(u64, Vec<usize>)> {
 /// for display (the file's colours and names, a shared mesh: nothing the check reads); with no
 /// such job it is checked here, on `part.body`.
 fn heal_item(jobs: &[Job], outcomes: &[Outcome], item: u64, of: &[usize], heals: &Heals) -> ItemHeal {
-    let _span = solidcraft_profile::span("import", "step.heal");
+    let part_name = of.first().and_then(|k| jobs.get(*k)).map(|j| if !j.part.is_empty() { &j.part } else { &j.label });
+    let _span = match part_name {
+        Some(name) => solidcraft_profile::span("import", "step.heal").with_arg("part", name).with_arg("item", item),
+        None => solidcraft_profile::span("import", "step.heal").with_arg("item", item),
+    };
     let Some(first) = of.first().and_then(|k| jobs.get(*k)) else { return ItemHeal::default() };
     let part = &first.source;
     let own = match of.iter().find(|k| jobs.get(**k).is_some_and(|j| j.m == IDENTITY)) {
