@@ -18,7 +18,7 @@ Fill in the template's `Changes a default:` line (`pr-checks.yml` fails a PR des
 - `Changes a default: no`
 - `Changes a default: yes - <what changes>, old behaviour kept behind setting <name>`, where `<name>` is the tool option or the legacy value in the format. The check reads this exact form.
 
-A `yes` waits for a maintainer's decision. Fixing janky or unintended behaviour is a bug fix, so `no` (a drag that cancelled now floats). Don't add a setting to keep old behaviour nobody would choose. `yes` is only for a deliberate change to established, intentional behaviour users rely on (sketch endpoints now merge instead of getting a coincident constraint).
+A `yes` waits for a maintainer's decision. It is only for a deliberate change to intentional behaviour users rely on (sketch endpoints merging instead of a coincident constraint); a jank fix is `no`.
 
 ## Adding a preference (rarely)
 Settings live in the `preference_settings!` table in `crates/ui-egui/src/prefs.rs`: the field, its default, the page whose reset restores it, an optional accepted range for the control channel, and the form control. Add one row there.
