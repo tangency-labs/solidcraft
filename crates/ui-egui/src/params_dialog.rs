@@ -130,6 +130,8 @@ struct Row {
     favorite: bool,
     /// A text parameter's text.
     text: Option<String>,
+    /// Read-only evaluated parameter (e.g. driven sketch dimension, #14426).
+    read_only: bool,
 }
 
 impl Row {
@@ -175,7 +177,7 @@ fn rows(app: &mut SolveApp) -> Vec<Row> {
             let name = s(r, "name");
             let source = s(r, "source");
             let group = match source.as_str() {
-                "feature" => s(r, "feature"),
+                "feature" | "driven" => s(r, "feature"),
                 "sketch" => owner.get(&name).cloned().unwrap_or_else(|| "Sketch".into()),
                 _ => String::new(),
             };
@@ -191,6 +193,7 @@ fn rows(app: &mut SolveApp) -> Vec<Row> {
                 comment: s(r, "comment"),
                 favorite: r.get("favorite").and_then(Value::as_bool).unwrap_or(false),
                 text: r.get("text").and_then(Value::as_str).map(str::to_string),
+                read_only: r.get("read_only").and_then(Value::as_bool).unwrap_or(false),
                 source,
                 group,
                 name,
@@ -702,8 +705,10 @@ impl ui_kit::GridSource for ParamGrid<'_> {
     }
 
     fn kind(&self, row: usize, col: usize) -> Option<ui_kit::CellKind> {
+        let r = self.row(row)?;
         // A model parameter's unit is the dimension's: shown, not chosen.
-        (col == UNIT && self.row(row).is_some_and(|r| r.source != "user")).then_some(ui_kit::CellKind::ReadOnly)
+        // A driven dimension's expression is measured, not edited (#14426).
+        ((col == UNIT && r.source != "user") || (col == EXPRESSION && r.read_only)).then_some(ui_kit::CellKind::ReadOnly)
     }
 
     fn message(&self, row: usize, col: usize) -> Option<(std::borrow::Cow<'_, str>, bool)> {
@@ -717,6 +722,7 @@ impl ui_kit::GridSource for ParamGrid<'_> {
         match col {
             NAME if text.trim().is_empty() => Err(solidcraft_ui_text::tr("parameters.grid_name_required").to_owned()),
             UNIT => unit_from(text).map(|_| ()),
+            EXPRESSION if r.read_only => Err(String::new()),
             // Applied as you go, an expression is checked before it is handed back, so a wrong one
             // keeps its box open; held for Apply, it is checked when it is held (#9279).
             EXPRESSION if self.app.preferences.parameters_apply_live => {
@@ -782,6 +788,7 @@ impl ui_kit::GridSource for ParamGrid<'_> {
                 Some(response)
             }
             UNIT if r.source != "user" => Some(ui_kit::text(ui, unit_label(&r.unit), ui_kit::Text::MonoCell)),
+            EXPRESSION if r.read_only => Some(ui_kit::text(ui, &r.expression, ui_kit::Text::MonoCell)),
             VALUE => {
                 let (shown, error) = self.shown(r);
                 Some(ui_kit::text(ui, &shown, ui_kit::Text::Value(&format!("value:{}", r.name), error)).backing_on_hover_text(&shown))
@@ -1055,6 +1062,7 @@ fn apply_grid(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, row
             ui_kit::RowRef::Existing(name) => {
                 let Some(r) = find(name) else { continue };
                 match edit.col() {
+                    EXPRESSION if r.read_only => {}
                     EXPRESSION if !live => {
                         // Kept in `editing` for Apply or OK, checked now (#9279).
                         held_error = held_error.or(check(app, text, &r.unit).err());
