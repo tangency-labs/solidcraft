@@ -750,8 +750,26 @@ mod tests {
             )
             .unwrap()
         };
+        // The test's curve itself, in plain numbers: along +y, the plate's binormal into it has
+        // the part `-x' / |T|`. At the old samples t = k/8 that is at most -0.0285, at t =
+        // 0.5625 it is 0.0106: the samples pass the edge, the plate runs on between them.
+        let part = |p1: [f64; 2], p2: [f64; 2], t: f64| {
+            let q = [[0.0, 10.0], p1, p2, [2.5855, 13.0]];
+            let d = |i: usize| {
+                let (a, b, c, e) = (q[0][i], q[1][i], q[2][i], q[3][i]);
+                let u = 1.0 - t;
+                3.0 * (u * u * (b - a) + 2.0 * u * t * (c - b) + t * t * (e - c))
+            };
+            -d(0) / d(0).hypot(d(1))
+        };
+        let samples = (1..8).map(|k| f64::from(k) / 8.0);
+        let sampled = samples
+            .map(|t| part([3.1535, 11.0], [0.682, 12.0], t))
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(sampled < -0.028, "{sampled}");
+        assert!(part([3.1535, 11.0], [0.682, 12.0], 0.5625) > 0.01);
         // each use of the curve's edge on the plate at z = 0 (the side face's use runs along +z,
-        // square to +y): the old samples' largest part, and the proof's answer
+        // square to +y): the proof's answer
         let along = Vec3::new(0.0, 1.0, 0.0);
         let answers = |body: &Body| {
             with_body("test", body, |k, b| {
@@ -774,20 +792,7 @@ mod tests {
                         }
                     }
                     for eu in uses {
-                        let mut sampled = f64::NEG_INFINITY;
-                        for s in [0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875] {
-                            let t = ivl.evaluate(s);
-                            let at = solidcore::topology::edgeuse::p3::evaluate_binormal(
-                                k,
-                                b,
-                                eu,
-                                t,
-                                true,
-                                &Default::default(),
-                            )?;
-                            sampled = sampled.max(at.binormal.dot(along));
-                        }
-                        out.push((sampled, side_along(k, b, eu, along, ON_PAST)?));
+                        out.push(side_along(k, b, eu, along, ON_PAST)?);
                     }
                 }
                 Ok(Some(out))
@@ -798,19 +803,15 @@ mod tests {
         let folded = answers(&plate([3.1535, 11.0], [0.682, 12.0]));
         assert!(!folded.is_empty());
         assert!(
-            folded.iter().all(|(sampled, _)| *sampled <= ON_PAST),
-            "{folded:?}"
-        );
-        assert!(
-            folded.iter().any(
-                |(_, side)| matches!(side, SideAlong::RunsOn { at } if (0.53..0.595).contains(at))
-            ),
+            folded
+                .iter()
+                .any(|side| matches!(side, SideAlong::RunsOn { at } if (0.53..0.595).contains(at))),
             "{folded:?}"
         );
         let plain = answers(&plate([1.0, 11.0], [2.0, 12.0]));
         assert!(!plain.is_empty());
         assert!(
-            plain.iter().all(|(_, side)| *side == SideAlong::Within),
+            plain.iter().all(|side| *side == SideAlong::Within),
             "{plain:?}"
         );
     }
