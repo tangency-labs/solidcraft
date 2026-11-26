@@ -251,7 +251,9 @@ pub fn is_knife_edge(
         Err(e)
             if matches!(
                 e,
-                SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
             ) || e.is_not_certified() =>
         {
             return Err(e);

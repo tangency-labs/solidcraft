@@ -29,6 +29,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use solidcore::query::edge_turn::{convex_at, turn_at};
 use solidcore::query::tangent_edge::{tangent_all_along, Tangency};
+use solidcore::topology::edgeuse::{p1 as eu1, p3 as eu3};
 use solidcore::topology::{edge, face, vertex};
 use solidcore::{Brep, EdgeId, FaceId, Kernel};
 
@@ -61,10 +62,28 @@ impl Smooth {
         if let Some(t) = self.known.get(&e) {
             return Ok(*t);
         }
+        give_trims(k, b, e)?;
         let t = tangent_all_along(k, b, e, angle)?;
         self.known.insert(e, t);
         Ok(t)
     }
+}
+
+/// Gives each of edge `e`'s face uses that has no UV trim curve (pcurve) the one the kernel
+/// builds from the exact edge and surface (`GetOrCreateUVTrimCurve`), as the smoothness and
+/// convexity measures read them: a body a boolean left without trims (it builds them
+/// lazily) is walked as one with them. The walks run on a copy, so the caller's body is
+/// unchanged.
+///
+/// # Errors
+/// The kernel's, including its status when it cannot build a trim.
+fn give_trims(k: &Kernel, b: &mut Brep, e: EdgeId) -> solidcore::Result<()> {
+    for eu in edge::edgeuses(b, e, None, None)? {
+        if eu1::face(b, eu)?.is_some() && eu1::uv_trim_curve(b, eu)?.0.is_none() {
+            eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
+        }
+    }
+    Ok(())
 }
 
 /// An angle a chain takes: finite, strictly between 0 and a right angle.
@@ -132,6 +151,8 @@ pub(crate) fn edge_walk(
                 if !turn_at(k, b, e, f, v)?.is_some_and(|turn| turn < angle) {
                     continue;
                 }
+                give_trims(k, b, e)?;
+                give_trims(k, b, f)?;
                 let turns_over = matches!(
                     (convex_at(k, b, e, v, angle)?, convex_at(k, b, f, v, angle)?),
                     (Some(a), Some(c)) if a != c

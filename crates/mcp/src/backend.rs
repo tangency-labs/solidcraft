@@ -189,6 +189,7 @@ impl Headless {
             "engine.script" => s.run_script(&p).map(Value::from).map_err(|e| e.to_string()),
             "engine.commands" => s.execute("engine.commands", &json!({})).map_err(|e| e.to_string()),
             "document.inspect" => s.execute("document.inspect", &p).map_err(|e| e.to_string()),
+            "document.selection" => Ok(json!({"selection": solidcraft_engine::selection_context::selection_reply(s)})),
             "ui.help" if p.get("item").is_none_or(Value::is_null) => {
                 Ok(json!({"version": env!("CARGO_PKG_VERSION"), "commit": solidcraft_engine::io::SOURCE_COMMIT}))
             }

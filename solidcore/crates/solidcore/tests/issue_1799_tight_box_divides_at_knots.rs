@@ -885,3 +885,86 @@ fn check_spline_round_bounds(case: &str, curve: &Curve) {
         "{case}: control points read {read}, whole nets {net}"
     );
 }
+
+/// A round's face trimmed by a plane the round runs on past, its net's knots off the dyadic
+/// points of its domain: acid-9's twisted tower (the loft with straight rulings from the
+/// 40 x 40 square at z = 0 to the same square turned 45 degrees at z = 100, bored by a
+/// cylinder of radius 18.47 and kept inside the sphere of radius 55 about (0, 0, 50)), its
+/// R 1 round where the sphere meets a twisted face beside the top plane z = 100, the face on
+/// its own as a sheet (`data/twisted_tower_round_at_top_plane.smb`, written from the rounded
+/// body). It is a procedural blend; its net is rational, 55 x 3 control points with 19 knots
+/// along the spine. The top plane trims it along a curve the round crosses rising, so in +z
+/// the face's top is that trim, and every cell over the trim is above it outside the face and
+/// below it inside; its mitre at the tower's corner ruling does the same in -x and +y.
+///
+/// The face's top is the plane: a round takes material off, so it lies inside the body
+/// before the round, which lies below its top plane z = 100, and its top edge lies on that
+/// plane, to its edges' tolerance. The search divides its cells at the net's knots, as at a
+/// B-spline's (WR-651): the net is what decides a cell (its subpatch read monotone, which a
+/// rational patch is only within one span). Halved at their middles alone, the cells over a
+/// knot line along the trim never came to lie within one span: they went to the cell limit
+/// in -x, +y and +z (16 385 cells and up to 32 000 exact solves each, minutes) and counted
+/// with the solver's greatest outside the face, z max 100.93. As
+/// `a_notched_spline_round_bounds_cells_before_solving_them`, the search reads no more
+/// than 50 whole nets.
+#[test]
+fn a_round_trimmed_by_a_plane_it_runs_past_is_boxed_to_the_plane() {
+    use solidcore::geom::attribute::AttributeStore;
+    use solidcore::kernel::UpstreamFixes;
+    use solidcore::nurbs::b_spline_surface::SurfParamType;
+    use solidcore::topology::api_files::read_brep_from_file;
+    use solidcore::topology::brep::p10::TopologyEnv;
+    use solidcore::topology::brep::p3::topology_ref;
+    use solidcore::topology::topology::NotifyRecords;
+
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let bytes = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/twisted_tower_round_at_top_plane.smb"
+    ))
+    .unwrap();
+    let mut attributes = AttributeStore::new();
+    let mut records = NotifyRecords::new();
+    let mut env = TopologyEnv {
+        all_attributes: &[],
+        attributes: &mut attributes,
+        key_of: &|e| topology_ref(0, e),
+        records: &mut records,
+        next_key: 1 << 50,
+    };
+    let mut b = read_brep_from_file(&mut k, Some(bytes), false, false, &mut env).unwrap();
+    b.refresh_cached_topology();
+    let f = faces(&b, None).unwrap()[0];
+    let surface = b.face(f).unwrap().surface.as_ref().unwrap();
+    assert!(matches!(
+        surface.kind(),
+        solidcore::surface::surface::SurfaceKind::ProceduralBlend(_)
+    ));
+    let net = surface.number_control_points(&k, SurfParamType::U)
+        * surface.number_control_points(&k, SurfParamType::V);
+    let tol = b
+        .edge_list()
+        .iter()
+        .map(|&e| solidcore::topology::edge::tolerance(&b, e).unwrap())
+        .fold(0.0_f64, f64::max);
+    k.work_counters.reset();
+    let bx = calculate_tight_bounding_box(&k, &b, f).unwrap();
+    let read = k.work_counters.face_extreme_control_points();
+    eprintln!(
+        "box {:?} .. {:?}, control points read {read}, whole nets {net}",
+        bx.min(),
+        bx.max()
+    );
+    assert!(
+        (bx.max().z - 100.0).abs() <= tol,
+        "z max {}, the top plane 100 (tolerance {tol})",
+        bx.max().z
+    );
+    assert!(
+        read <= 50 * net as u64,
+        "control points read {read}, whole nets {net}"
+    );
+}

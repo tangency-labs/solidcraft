@@ -133,8 +133,8 @@
           # neither.
           doCheck = false;
 
-          #zstd is used by Freecad and Rhino import crates
-          #and pkg-config is used by zstd to link against the system zstd instead of compiling zstd
+          # zstd is used by the native-format import crates; pkg-config lets them link
+          # the system zstd instead of building it.
           nativeBuildInputs = [
             pkgs.makeWrapper
             pkgs.pkg-config

@@ -85,9 +85,24 @@
 //!   curves on surfaces, ...) adds nothing, so no uncertified figure becomes a tolerance and
 //!   such an end stays as upstream leaves it. Upstream
 //!   leaves a split's new vertex smaller than that until a later UV-trim build covers it,
-//!   if one runs. Ends outside the neighbourhood (an `sss_point` move off the edges,
-//!   #21511) are left as upstream leaves them. The opaque-handle
+//!   if one runs. The opaque-handle
 //!   [`PointClassification::merge_into_object`] reaches no edges and is unchanged.
+//! - **The surf/surf/surf point carries the edge ends (#21511).** `MergeIntoObject` moves a
+//!   vertex to its `m_vSSSPoint` and leaves its edges ending where they did, up to tens of
+//!   units off a vertex of tolerance `1e-7`, which `AssertValid`'s edge-end test refuses.
+//!   [`PointClassification::merge_into_brep`] moves each such end (one outside the vertex's
+//!   ball) to the vertex (`vertex::carry_far_edge_ends`). When the curve passes the point
+//!   inside its natural interval (one traversal; a bounded line is not extended), the edge
+//!   is re-trimmed: its curve kept exactly and only the far end's parameter moved there, so
+//!   a line or conic through the point (an intersection edge of exact surfaces) keeps its
+//!   class. Otherwise only a wire edge (no face uses it) may have its curve edited:
+//!   a line becomes the line to its kept end, a B-spline or conic a B-spline with that end's
+//!   control point moved (both ends knots it passes through). An edge a face uses is never
+//!   edited that way, so a face's conic never becomes a spline. The change is notified,
+//!   deleting the edge uses' UV trim curves as upstream's own surf/surf/surf edge edit does
+//!   (`sm_SetXSectEdgeThroughPoint`), and kept only when certified to put the end within
+//!   half the vertex tolerance without pushing another valid end out; otherwise, and for a
+//!   curve kind neither edit applies to, the edge stays as upstream leaves it.
 //! - **Mutable topology.** [`BrepMerge`] supplies an arena, resolved target,
 //!   handle mapping and notification environment for [`PointClassification::merge_into_brep`],
 //!   and [`CombineBrep`] the arena and notifications
@@ -240,6 +255,8 @@ impl<'a, 'env, O> From<BrepMerge<'a, 'env, O>> for BrepMergeWithIdentity<'a, 'en
 /// The arena [`PointClassification::combine_in_brep`] writes a propagated surf/surf/surf
 /// point to.
 pub struct CombineBrep<'a, 'env, O> {
+    /// Kernel reference for geometric checks and curve evaluations.
+    pub k: &'a Kernel,
     /// Arena graph containing the classified object.
     pub brep: &'a mut Brep,
     /// Resolved target in that graph (a vertex for an `SM_PC_VERTEX` classification).
@@ -372,6 +389,16 @@ pub trait ClassObject: Copy + PartialEq {
 pub trait ClassGeometry<O> {
     /// The curve of a [`ClassObjectKind::Curve`] handle.
     fn curve(&self, o: O) -> Option<&Curve>;
+    /// Not upstream (tangency-labs/solidcraft#11574): a curve that is the curve of
+    /// handle `o`, parameter for parameter, in a form the curve/curve intersection
+    /// solves in closed form (a seam's ruling,
+    /// [`Surface::seam_ruling`](crate::surface::surface::Surface::seam_ruling)), which a
+    /// classification's edge intersection takes in the curve's place. Nothing else reads
+    /// it. `None` (the default): the curve itself.
+    fn intersect_curve(&self, o: O) -> Option<&Curve> {
+        let _ = o;
+        None
+    }
     /// The surface of a [`ClassObjectKind::Surface`] handle.
     fn surface(&self, o: O) -> Option<&Surface>;
     /// The volume of a [`ClassObjectKind::Volume`] handle.
@@ -504,6 +531,113 @@ pub struct PointClassification<O> {
     sss_point_flag: bool,
     /// `m_vSSSPoint`.
     sss_point: Point3,
+}
+
+/// A regular chart marker together with the complete material trim that it marks.
+pub(crate) struct PeriodicTrimWitness<'a> {
+    point: Point3,
+    zone: f64,
+    curve: &'a Curve,
+    interval: Extent1d,
+    curve_zone: f64,
+}
+
+impl PeriodicTrimWitness<'_> {
+    /// Both the marker and its entire trim must be excluded by the same source evidence.
+    pub(crate) fn excluded_by(
+        &self,
+        k: &Kernel,
+        source: &crate::curve::contact::NativeSupport<'_>,
+        source_zone: f64,
+        marker_zone: f64,
+        foreign: Option<(&crate::surface::implicit::AnalyticSupport, f64)>,
+    ) -> bool {
+        use crate::curve::contact::NativeSupport;
+        let Some(source_zone) = source.zone(source_zone) else {
+            return false;
+        };
+        if ![self.zone, self.curve_zone, marker_zone]
+            .iter()
+            .all(|z| z.is_finite() && *z >= 0.0)
+        {
+            return false;
+        }
+        let foreign = foreign.filter(|(_, zone)| zone.is_finite() && *zone >= 0.0);
+        let marker_zone = marker_zone.max(self.zone);
+        let point_apart = source.disjoint(
+            k,
+            source_zone,
+            &NativeSupport::point(self.point),
+            marker_zone,
+        );
+        let surface_apart = foreign.is_some_and(|(support, zone)| {
+            NativeSupport::point(self.point).outside_surface(
+                k,
+                marker_zone,
+                support,
+                zone.max(source_zone),
+            )
+        });
+        if !(point_apart || surface_apart) {
+            return false;
+        }
+        let Some(trim) = NativeSupport::curve(self.curve, &self.interval) else {
+            return false;
+        };
+        (point_apart && source.disjoint(k, source_zone, &trim, self.curve_zone))
+            || (surface_apart
+                && foreign.is_some_and(|(support, zone)| {
+                    trim.outside_surface(k, self.curve_zone, support, zone.max(source_zone))
+                }))
+    }
+
+    /// A native marker cannot veto a merge when its complete rim crosses the support.
+    pub(crate) fn outside_surface(
+        &self,
+        k: &Kernel,
+        support: &crate::surface::implicit::AnalyticSupport,
+        zone: f64,
+    ) -> bool {
+        if ![self.zone, self.curve_zone]
+            .iter()
+            .all(|z| z.is_finite() && *z >= 0.0)
+        {
+            return false;
+        }
+        crate::curve::contact::NativeSupport::point(self.point).outside_surface(
+            k,
+            self.zone.max(self.curve_zone),
+            support,
+            zone,
+        ) && crate::curve::contact::NativeSupport::curve(self.curve, &self.interval)
+            .is_some_and(|trim| trim.outside_surface(k, self.curve_zone, support, zone))
+    }
+}
+
+/// Resolves a chart marker without eagerly allocating its curve's control hull.
+pub(crate) fn periodic_trim_witness<'a, O: ClassObject>(
+    k: &Kernel,
+    geometry: &'a impl ClassGeometry<O>,
+    marker: O,
+) -> Result<Option<PeriodicTrimWitness<'a>>> {
+    let Some((brep, EntityRef::Vertex(vertex))) = geometry.topology_entity(marker) else {
+        return Ok(None);
+    };
+    let Some(edge) = vertex::regular_periodic_trim_edge(k, brep, vertex)? else {
+        return Ok(None);
+    };
+    let Some(curve) = edge::curve(brep, edge)? else {
+        return Ok(None);
+    };
+    let zone = object_zone_tol_3d(k, geometry, Some(marker))?;
+    let curve_zone = edge::tolerance(brep, edge)?;
+    Ok(Some(PeriodicTrimWitness {
+        point: vertex::point(brep, vertex)?,
+        zone,
+        curve,
+        interval: edge::interval(brep, edge)?,
+        curve_zone,
+    }))
 }
 
 impl<O: ClassObject> PointClassification<O> {
@@ -1124,12 +1258,14 @@ impl<O: ClassObject> PointClassification<O> {
         context: CombineBrep<'_, '_, O>,
     ) -> Result<Precedence> {
         let CombineBrep {
+            k,
             brep,
             target,
             handle,
             notifications,
         } = context;
-        self.combine_with(
+        let mut moved_vertex = None;
+        let precedence = self.combine_with(
             other,
             Some(&mut |object: Option<O>, point: Point3| {
                 if object.is_some_and(|object| handle(target) != object) {
@@ -1155,9 +1291,16 @@ impl<O: ClassObject> PointClassification<O> {
                     notifications.context.as_deref_mut(),
                     this,
                     &|vu| key_of(EntityRef::Vertexuse(vu)),
-                )
+                )?;
+                moved_vertex = Some(v);
+                Ok(())
             }),
-        )
+        )?;
+        if let Some(v) = moved_vertex {
+            vertex::carry_far_edge_ends(k, brep, v, notifications)?;
+            vertex::cover_merged_ends(k, brep, v)?;
+        }
+        Ok(precedence)
     }
 
     /// `Combine(other)` with the caller's `SmVertex::SetPoint`: a surf/surf/surf point
@@ -1778,9 +1921,13 @@ impl<O: ClassObject> PointClassification<O> {
         // vertex whose ends all lie inside that ball is raised to twice the farthest
         // end's bound ([`vertex::edge_end_reach`]; doubling is exact). This is grow-only
         // and at most doubles the tolerance, and later merges and classifications read the
-        // larger radius (a later point within it joins this vertex). Ends outside the ball (the
-        // `sss_point` move can carry a vertex off its edges) are not the merge's
-        // neighbourhood and stay as upstream leaves them (#21511).
+        // larger radius (a later point within it joins this vertex). Ends outside the ball are
+        // not the merge's neighbourhood: the `sss_point` move can carry a vertex off its
+        // edges, and those edges' ends are moved to the vertex first (#21511,
+        // [`vertex::carry_far_edge_ends`]), so the vertex still bounds them.
+        if self.sss_point_flag {
+            vertex::carry_far_edge_ends(k, b, vertex_id, env)?;
+        }
         vertex::cover_merged_ends(k, b, vertex_id)?;
         Ok(outputs)
     }
