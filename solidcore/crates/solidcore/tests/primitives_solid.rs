@@ -383,8 +383,10 @@ fn linear_sweep_preserves_edges_and_gaps_between_one_and_two_zone_tolerances() {
             [-14.625 - d, -1.0],
         ]);
         let sliver_refs: Vec<Option<&Curve>> = sliver_curves.iter().map(Some).collect();
-        let mut k = Kernel::default();
-        k.fixes = solidcore::kernel::UpstreamFixes::all();
+        let mut k = Kernel {
+            fixes: solidcore::kernel::UpstreamFixes::all(),
+            ..Default::default()
+        };
         let mut b = create_linear_sweep(&mut k, &sliver_refs, Vec3::Z, 10.0, true).unwrap();
         assert_solid(
             &format!("sliver d={d:e}"),
@@ -410,8 +412,10 @@ fn linear_sweep_preserves_edges_and_gaps_between_one_and_two_zone_tolerances() {
             [-14.625 - d, -1.0],
         ]));
         let hole_refs: Vec<Option<&Curve>> = hole_curves.iter().map(Some).collect();
-        let mut k = Kernel::default();
-        k.fixes = solidcore::kernel::UpstreamFixes::all();
+        let mut k = Kernel {
+            fixes: solidcore::kernel::UpstreamFixes::all(),
+            ..Default::default()
+        };
         let mut b = create_linear_sweep(&mut k, &hole_refs, Vec3::Z, 10.0, true).unwrap();
         assert_solid(
             &format!("sliver hole d={d:e}"),
