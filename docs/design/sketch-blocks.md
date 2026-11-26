@@ -202,15 +202,63 @@ the pose. Exact placement comes later:
 The seed is checked automatically, because in tests every solve also runs without the seed and
 must give the same status and DOF (`solver.rs:2839-2857`).
 
-### Size
+### Size: members left out of the solve (phase 4b)
 
-A 300-point block has about 600 variables. Above `SPARSE_MIN_VARS` (64) LM uses sparse
-Cholesky. In the per-point structure only O and X touch every row, so minimum-degree ordering
-removes each member point with fill only among O and X.
+With every member point in the solve, an unplaced block is one connected group of 2N + 4
+unknowns. The solver takes at most `MAX_COMPONENT_VARS` (4000) in one group, so a block of more
+than about 2000 points could not be solved unless both axis ends were fixed, and the Full
+analysis of an unpinned block ran a dense RREF on about 2N columns (1 ms at 300 points, 9.5 ms
+at 1000).
 
-The Full analysis is the cost to watch. If nothing pins O and X first, the dense RREF runs on
-about 600 columns. A test should time this next to `large_sketch_solves_fast` (`tests.rs:1437`).
-The phase-4 seed removes it, since `pinned` then takes almost everything out.
+`crates/sketch/src/carried.rs` leaves out of the solve every member that only its own block's
+rows read:
+
+- **Which.** A member point is left out when the only rows that read it are its own two frame
+  rows: no driving constraint names it, no other block lists it, it is no axis end, and it is not
+  held (a dragged point is a constant, so its frame rows stay in and the drag moves the axis). A
+  member radius is left out when only its `FrameRadius` row reads it. An `Arc` or `Closure` row
+  whose points are all left out of one block goes with them: a block keeps its shape up to a
+  similarity, which keeps both, so the row is a combination of their frame rows. Leaving one out
+  can make another row read nothing left in, so the choice runs to a fixpoint (each unknown is
+  closed once).
+- **Placed after the solve.** The left-out points and radii are put where the solved axis puts
+  them, `P = O + u·d + v·perp(d)` and `r = k·L0` or `k·|d|`, and the left-out arc rows are
+  checked there. The constructive seed leaves their frame ties out too
+  (`loci::read_leaving_out`): it would only place them where the solve puts them anyway.
+- **The analysis, on the smaller group.** A left-out point's two rows are the only ones that
+  read its columns, with the identity there, so the rank rises by exactly two for it (one for a
+  radius): it adds no freedom. It is determined when every null vector of the rows left in moves
+  it by nothing, read on the axis ends' columns (`linalg::Reduced::null_on`, on the reduction the
+  rank analysis made), and, as for other unknowns, a short step along the freedoms (`Nearby`) is
+  checked too: a member at the point a block turns about is determined. A redundant constraint is
+  redundant with or without the left-out rows (rows that alone read their columns never take part
+  in a combination of other rows), but the checks that are capped at `MAX_REDUNDANCY_VARS` (400)
+  unknowns per group, the redundancy check and `Nearby`, now run on the group the members leave
+  behind: a block of 200 to 1000 points that kept in was past the cap is now checked, so a
+  constraint on it can be reported redundant where it was not before. `determined_by`, which
+  explains a redundant constraint, reads the same reduced rows (`carried::carry`), so it names
+  what the solve found.
+- **Least motion kept.** LM damps a step by how far it moves the unknowns. Left out, the members
+  would no longer weigh on a move of the axis, and an unplaced block dragged by one member would
+  swing about its axis. Each block adds a row-less `Block::Carried` on its axis ends that adds to
+  LM's damped matrix the quadratic form of its members' moves, `Σ|(1 − w)·δO + w·δX|²` with
+  `w = u + iv` (plus `Σk²·(d̂·δd)²` for a free block's radii), at `λ/(1 + λ)`, the weight a member
+  kept in the solve took. Determined results agree with the solve that keeps the members to its
+  tolerance; where freedoms are left the two iterations take slightly different paths (a block
+  moved 11 mm onto the origin turns by 2° either way, and the turns differ by 3e-5 rad).
+- **Precision.** An axis end off by ε puts a member off by up to `reach`·ε, `reach` being the
+  largest `|1 − w| + |w|` of the block's left-out points. A component that places left-out
+  members is iterated up to three more times (`polish`), until its residual is a hundredth of the
+  usual tolerance divided by `reach`, but not below 64 units in the last place of its largest
+  coordinate, and within the solve's numeric budget.
+
+A block whose members other constraints also hold keeps those members in its group, so more than
+about 2000 of them can still make a group too large to solve; `SolveReport::oversized_block`
+then says so. In this crate's tests every solve of a sketch with blocks (up to 1000 points) is
+repeated with the members kept in, and must give the same status, conflicts and turned-over
+constraints; when solved, the same freedoms and positions where fully determined; and the same
+determined and redundant flags where the kept-in solve ran its capped checks
+(`assert_same_as_whole`).
 
 ## Commands
 
@@ -267,10 +315,8 @@ How each existing command treats a block member:
   axis length row the two Fixes are one row more than a rigid block's 3 degrees of freedom, but
   no Fix is wholly redundant, so none is reported; a block later made Free is held exactly.
   Exploding such a block leaves its curves free and only the leftover axis line fixed.
-- **Size, for now.** An unfixed block is one connected group for the solver, which takes at most
-  `MAX_COMPONENT_VARS` (4000) unknowns at once, about 2000 points. Until the solver handles a
-  larger block (phase 4b), an unfixed insert above that is refused, and a fixed one that loses an
-  axis Fix fails to solve with a message about the block.
+- **Size.** A drawing of any size comes in as an unfixed block: its members follow the axis
+  outside the solver (see "Size: members left out of the solve").
 - **Dialog.** `crates/ui-egui/src/dialogs_insert_drawing.rs` gets an **Insert as block** row after
   Angle, held on `Place` while the window is open and sent by `commands()`. The live preview is
   the drawing alone (`preview_placement` leaves `block` out): the axis takes its length from the
@@ -337,6 +383,8 @@ records what each side of the change sees:
    #18276, which moves `sketch_tools.rs` glyph code into `constraint_glyphs/`.
 3. **Insert as block** for DXF and SVG, with the dialog row. This closes #22102.
 4. **Exact seeding** and the large-block performance budget.
+   - **4b.** Members nothing else reads are left out of the solve, so a block of any size solves
+     and drags without being fixed.
 5. **Later:**
    - one block per DXF `BLOCK`
    - patterns of blocks

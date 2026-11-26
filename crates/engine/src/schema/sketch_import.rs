@@ -97,9 +97,6 @@ pub struct InsertDrawingKeys {
     /// puts the file's origin (with `align` "center", the drawing's middle; with `size_from`
     /// "viewbox" as well, the sheet's middle) and its axis runs along `angle`, about as long as
     /// the drawing is large. Text stays outside the block (blocks of text are not supported yet).
-    /// For now a block whose points and radii come to more unknowns than the solver takes at once
-    /// (`MAX_COMPONENT_VARS`, about 2000 points) solves only while both axis ends are fixed:
-    /// without `fixed` it is refused, and removing one of those Fixes leaves the sketch unsolved.
     /// The reply's `block` gives the block. Default: false.
     #[serde(default)]
     pub block: Option<bool>,
@@ -617,8 +614,7 @@ pub struct DrawingInserted {
 }
 
 /// The block an insert with `block: true` made: its id, with the axis and origin `sketch.block`
-/// also replies with. A block of more than about 2000 points stays solvable only while both
-/// ends of its axis stay fixed.
+/// also replies with.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct InsertedBlock {
     /// The block's id.

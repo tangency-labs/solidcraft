@@ -171,9 +171,55 @@ pub fn rref_counted(a: &mut Mat, tol: f64, ops: &mut f64, budget: f64) -> Option
 /// For each column of `j`: is that variable fixed by the constraints (zero in every null-space
 /// vector)? Also returns the rank.
 pub fn determined_vars(j: &Mat, tol: f64) -> (Vec<bool>, usize) {
-    let mut a = j.clone();
-    let pivots = rref(&mut a, tol);
-    determined_from(&a, pivots, tol)
+    Reduced::of(j, tol).determined()
+}
+
+/// A matrix row-reduced once ([`rref`]), read for what its null space fixes and moves.
+pub struct Reduced {
+    a: Mat,
+    pivots: Vec<usize>,
+    tol: f64,
+}
+
+impl Reduced {
+    /// `j` reduced with pivot tolerance `tol`.
+    pub fn of(j: &Mat, tol: f64) -> Reduced {
+        let mut a = j.clone();
+        let pivots = if a.rows > 0 { rref(&mut a, tol) } else { Vec::new() };
+        Reduced { a, pivots, tol }
+    }
+
+    /// [`determined_vars`] of the matrix.
+    pub fn determined(&self) -> (Vec<bool>, usize) {
+        determined_from(&self.a, self.pivots.clone(), self.tol)
+    }
+
+    /// The null space read on the columns `cols`: per free column, the entries on `cols` of the
+    /// null vector that is 1 there (as [`Reduced::determined`] reads them), leaving out those
+    /// that are zero on all of `cols`.
+    pub fn null_on(&self, cols: &[usize]) -> Vec<Vec<f64>> {
+        let mut row_of = vec![None; self.a.cols];
+        for (r, c) in self.pivots.iter().enumerate() {
+            if let Some(slot) = row_of.get_mut(*c) {
+                *slot = Some(r);
+            }
+        }
+        let mut out = Vec::new();
+        for f in (0..self.a.cols).filter(|c| row_of.get(*c).is_some_and(Option::is_none)) {
+            let v: Vec<f64> = cols
+                .iter()
+                .map(|&c| match row_of.get(c).copied().flatten() {
+                    _ if c == f => 1.0,
+                    Some(r) => -self.a.get(r, f),
+                    None => 0.0,
+                })
+                .collect();
+            if v.iter().any(|e| *e != 0.0) {
+                out.push(v);
+            }
+        }
+        out
+    }
 }
 
 /// One vector of `j`'s null space that mixes all of it: the sum of the null-space basis vectors

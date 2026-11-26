@@ -3060,6 +3060,11 @@ fn a_block_made_at_a_point_and_angle_keeps_its_members_and_searches_no_ids() {
 /// A profile as an import brings it: a closed polyline of `n` points around a wavy circle, made
 /// one rigid block. Returns the block and the polyline's points in order.
 fn polyline_block(n: usize) -> (Sketch, BlockMade, Vec<usize>) {
+    polyline_block_of(n, BlockScale::Fixed)
+}
+
+/// [`polyline_block`] made one block of `scale`.
+fn polyline_block_of(n: usize, scale: BlockScale) -> (Sketch, BlockMade, Vec<usize>) {
     let mut sk = Sketch::new();
     let pts: Vec<usize> = (0..n)
         .map(|i| {
@@ -3070,7 +3075,7 @@ fn polyline_block(n: usize) -> (Sketch, BlockMade, Vec<usize>) {
         .collect();
     let lines: Vec<usize> = (0..n).map(|i| sk.add_line_pts(pts[i], pts[(i + 1) % n], None).unwrap()).collect();
     let ids = block_ids(&sk, &lines);
-    let made = sk.make_block(&ids, BlockScale::Fixed, None, None).unwrap();
+    let made = sk.make_block(&ids, scale, None, None).unwrap();
     (sk, made, pts)
 }
 
@@ -3142,6 +3147,299 @@ fn a_profile_block_of_three_hundred_points_is_constructed_dragged_and_moved() {
     assert!(rep_moved.ok() && rep_moved.dof == 3, "{rep_moved:?}");
     assert!(moved.points.iter().zip(&after_move).all(|(a, b)| a.pos.dist(*b) < 1e-9), "a moved block is solved where it was put");
     assert!(place_ms + plain_ms + 20.0 * drag_ms + move_ms < 10_000.0);
+}
+
+/// A block of any size moves, turns and (when free) scales as a whole without being fixed: its
+/// members follow its axis outside the solve, so the solver's group holds only the axis. Placed
+/// by its origin and an angle (and a free one by its axis length) it is fully determined;
+/// unplaced it keeps three freedoms, or four; a member held at the cursor drags it whole, and a
+/// moved block solves where it was put.
+#[test]
+fn an_unfixed_block_of_five_thousand_points_is_placed_dragged_and_moved() {
+    for (scale, freedoms) in [(BlockScale::Fixed, 3), (BlockScale::Free, 4)] {
+        let (sk, made, pts) = polyline_block_of(5000, scale);
+        let o = sk.point_index(&made.origin).unwrap();
+        let axis = sk.curve_index(&made.axis).unwrap();
+        let (_, x) = line_pts_ids(&sk, axis);
+        let l0 = sk.blocks[0].length;
+        let probe: Vec<usize> = pts.iter().step_by(250).copied().collect();
+        let shape = spans(&sk, &probe);
+        // Every span `size` times what it was: the shape kept.
+        let shaped = |sk: &Sketch, size: f64| spans(sk, &probe).iter().zip(&shape).all(|(a, b)| (a - b * size).abs() < 1e-7 * b.max(1.0));
+        assert_eq!(crate::solver::left_out_points(&sk), pts, "every member is left out of the solve");
+
+        let mut unplaced = sk.clone();
+        let rep = solve(&mut unplaced);
+        assert!(rep.ok() && rep.oversized.is_none(), "{scale:?}: {rep:?}");
+        assert_eq!(rep.dof, freedoms, "{scale:?}");
+        assert!(pts.iter().all(|p| !rep.point_determined[*p]), "{scale:?}: a block free to move determines no member");
+        assert!(unplaced.points.iter().zip(&sk.points).all(|(a, b)| a.pos.dist(b.pos) < 1e-9), "{scale:?}: a solved block stays put");
+
+        let mut placed = sk.clone();
+        placed.add_constraint(ConstraintKind::Coincident { p: o, q: 0 }, None).unwrap();
+        placed.add_constraint(ConstraintKind::LineAngle { l: axis, value: 40f64.to_radians() }, None).unwrap();
+        let grown = if scale == BlockScale::Free {
+            placed.add_constraint(ConstraintKind::Length { l: axis, value: 1.5 * l0 }, None).unwrap();
+            1.5
+        } else {
+            1.0
+        };
+        let rep = solve(&mut placed);
+        assert!(rep.ok() && rep.dof == 0, "{scale:?}: {rep:?}");
+        assert!(rep.point_determined.iter().all(|d| *d) && rep.curve_determined.iter().all(|d| *d), "{scale:?}");
+        assert!(placed.points[o].pos.dist(v(0.0, 0.0)) < 1e-12 && shaped(&placed, grown), "{scale:?}");
+        let (a, b) = (placed.points[o].pos, placed.points[x].pos);
+        assert!(((b - a).angle() - 40f64.to_radians()).abs() < 1e-12 && (a.dist(b) - grown * l0).abs() < 1e-9, "{scale:?}");
+        let frame = placed.frame_rows().remove(0);
+        let d = b - a;
+        for (p, [u, w]) in &frame.points {
+            assert!(placed.points[*p].pos.dist(a + d * *u + d.perp() * *w) < 1e-9, "{scale:?}: member {p} off its place");
+        }
+
+        // A member held at the cursor, as a drag holds it, frame after frame.
+        let mut dragged = sk.clone();
+        let grip = pts[0];
+        let start = dragged.points[grip].pos;
+        for f in 1..=5 {
+            let before: Vec<Vec2> = dragged.points.iter().map(|p| p.pos).collect();
+            dragged.points[grip].pos = start + v(f as f64 * 2.0, f as f64 * -1.5);
+            let hold = Hold { points: vec![grip], radii: vec![] };
+            let frame = solve_with(&mut dragged, &hold, Some(&before), Analysis::StatusOnly, Some(&mut Budget::frame()));
+            assert!(frame.ok(), "{scale:?} frame {f}: {frame:?}");
+        }
+        assert!(dragged.points[grip].pos.dist(start + v(10.0, -7.5)) < 1e-12, "{scale:?}");
+        let size = dragged.points[o].pos.dist(dragged.points[x].pos) / l0;
+        assert!(shaped(&dragged, size), "{scale:?}: the drag moves the block whole");
+        // A rigid block follows the member by moving (turning it about the member moves the rest
+        // further); a free one by stretching too, as a drag of one point of it always did.
+        if scale == BlockScale::Fixed {
+            assert!((size - 1.0).abs() < 1e-9);
+            let moved_by = dragged.points[pts[2500]].pos - sk.points[pts[2500]].pos;
+            assert!(moved_by.dist(v(10.0, -7.5)) < 1e-6, "{moved_by:?}");
+        }
+
+        // Turned and shifted as Move moves a whole block, then solved.
+        let mut moved = sk.clone();
+        let (turn, shift) = (Vec2::from_angle(30f64.to_radians()), v(15.0, -4.0));
+        for p in pts.iter().copied().chain([o, x]) {
+            let q = moved.points[p].pos;
+            moved.points[p].pos = v(q.x * turn.x - q.y * turn.y, q.x * turn.y + q.y * turn.x) + shift;
+        }
+        let put: Vec<Vec2> = moved.points.iter().map(|p| p.pos).collect();
+        let rep = solve(&mut moved);
+        assert!(rep.ok() && rep.dof == freedoms, "{scale:?}: {rep:?}");
+        assert!(moved.points.iter().zip(&put).all(|(a, b)| a.pos.dist(*b) < 1e-9), "{scale:?}: a moved block is solved where it was put");
+        assert!(shaped(&moved, 1.0));
+    }
+}
+
+/// A block placed by its origin and an angle, with a horizontal on its axis too: the horizontal
+/// is redundant, and what it is redundant to is the angle. With its members left out of the solve
+/// the group is the axis alone, so a 300-point block (600 unknowns kept in, past what the
+/// redundancy check takes) is checked as a 100-point one is, and the explanation reads the same
+/// rows as the solve.
+#[test]
+fn a_redundant_constraint_on_a_large_block_is_found_and_explained() {
+    for n in [100, 300] {
+        let (mut sk, made, _) = polyline_block(n);
+        let o = sk.point_index(&made.origin).unwrap();
+        let axis = sk.curve_index(&made.axis).unwrap();
+        sk.add_constraint(ConstraintKind::Coincident { p: o, q: 0 }, None).unwrap();
+        let angle = sk.add_constraint(ConstraintKind::LineAngle { l: axis, value: 0.0 }, None).unwrap();
+        let level = sk.add_constraint(ConstraintKind::Horizontal { l: axis }, None).unwrap();
+        let (_, rep) = same_as_kept_in_where_checked(&sk);
+        assert!(rep.ok() && rep.dof == 0, "{n}: {rep:?}");
+        assert_eq!(rep.redundant, vec![level.clone()], "{n}");
+        let ci = sk.constraints.iter().position(|c| c.id == level).unwrap();
+        let by: Vec<String> = crate::determined_by(&sk, ci).iter().map(|k| sk.constraints[*k].id.clone()).collect();
+        assert_eq!(by, vec![angle.clone()], "{n}: the explanation names what the solve found");
+    }
+}
+
+/// [`same_as_kept_in`], comparing what is redundant only where the solve that keeps the members
+/// checks it (its group within `MAX_REDUNDANCY_VARS`).
+fn same_as_kept_in_where_checked(sk: &Sketch) -> (Sketch, SolveReport) {
+    let mut out = sk.clone();
+    let rep = seeded(false, || solve(&mut out));
+    let mut kept = sk.clone();
+    let whole = crate::solver::carried_switch::without(|| seeded(false, || solve(&mut kept)));
+    assert_eq!((rep.status, rep.dof, &rep.point_determined), (whole.status, whole.dof, &whole.point_determined), "{rep:?}");
+    let checked = !crate::solver::kept_in_skips_checks(sk, &Hold::default());
+    if checked {
+        assert_eq!(rep.redundant, whole.redundant);
+    } else {
+        assert!(whole.redundant.is_empty(), "kept in, a group this large is not checked: {whole:?}");
+    }
+    for (a, b) in out.points.iter().zip(&kept.points) {
+        assert!(a.pos.dist(b.pos) < 1e-8, "left out {:?}, kept in {:?}", a.pos, b.pos);
+    }
+    (out, rep)
+}
+
+/// A block's members that other constraints also hold stay in the solve with its axis, so a
+/// block of more than 2000 of them is one group too large to solve: the solve fails and says why.
+/// Fixing both ends of its axis splits that group into one per member.
+#[test]
+fn a_block_whose_members_are_all_held_by_other_constraints_can_still_be_too_large() {
+    let (mut sk, made, pts) = polyline_block(2100);
+    for p in &pts {
+        let q = sk.add_point(sk.points[*p].pos + v(1.0, 0.0), None).unwrap();
+        sk.add_constraint(ConstraintKind::DistanceX { p: *p, q, value: 1.0 }, None).unwrap();
+    }
+    let rep = solve(&mut sk);
+    assert!(!rep.ok() && rep.oversized.is_some() && rep.oversized_block, "{:?} {:?}", rep.status, rep.oversized);
+    let why = rep.failure(|f| f.to_string());
+    assert!(why.contains("a block joins to its axis") && why.contains("fix both ends of its axis"), "{why}");
+    let axis = sk.curve_index(&made.axis).unwrap();
+    let (o, x) = line_pts_ids(&sk, axis);
+    sk.add_constraint(ConstraintKind::Fix { p: o }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Fix { p: x }, None).unwrap();
+    let rep = solve(&mut sk);
+    assert!(rep.ok() && rep.oversized.is_none(), "{:?} {:?}", rep.status, rep.oversized);
+}
+
+/// Solve `sk` from the plain start (no seed) with block members left out of the solve and kept
+/// in it: the same outcome and, when it is fully determined, the same positions and radii to
+/// 1e-8 (the solve that keeps them stops once every row holds to 1e-9, and an axis end off by
+/// that puts a member a few axis lengths away off by a few times it; the one that leaves them
+/// out solves the axis to a thousandth of that). Where freedoms are left, the iterations take
+/// different paths to the pose they settle on (see the drag below): a block moved 11 mm onto
+/// the origin turns by 2° to move least either way, and the two turns differ by 3e-5 rad: to
+/// 1e-2. Returns the solved sketch and its report.
+fn same_as_kept_in(sk: &Sketch) -> (Sketch, SolveReport) {
+    let (mut out, mut kept) = (sk.clone(), sk.clone());
+    let rep = seeded(false, || solve(&mut out));
+    let whole = crate::solver::carried_switch::without(|| seeded(false, || solve(&mut kept)));
+    assert_eq!(
+        (rep.status, rep.dof, &rep.point_determined, &rep.curve_determined, &rep.redundant),
+        (whole.status, whole.dof, &whole.point_determined, &whole.curve_determined, &whole.redundant),
+        "{rep:?}"
+    );
+    let tol = if rep.dof == 0 { 1e-8 } else { 1e-2 };
+    for (a, b) in out.points.iter().zip(&kept.points) {
+        assert!(a.pos.dist(b.pos) < tol, "left out {:?}, kept in {:?}", a.pos, b.pos);
+    }
+    for (a, b) in out.curves.iter().zip(&kept.curves) {
+        if let (CurveKind::Circle { r: ra, .. }, CurveKind::Circle { r: rb, .. }) = (&a.kind, &b.kind) {
+            assert!((ra - rb).abs() < tol, "radius {ra} left out, {rb} kept in");
+        }
+    }
+    (out, rep)
+}
+
+/// Leaving block members out of the solve changes no result: the rect-and-circle block placed
+/// by its origin and angle (rigid) or by its origin, axis direction and one length (free); a
+/// member with a constraint to something outside stays in the solve; points two blocks share
+/// stay in it; and an unplaced block keeps its freedoms. (Every solve in this crate's tests
+/// also checks this for sketches of up to a thousand points.)
+#[test]
+fn leaving_block_members_out_of_the_solve_changes_no_result() {
+    for scale in [BlockScale::Fixed, BlockScale::Free] {
+        let (sk, l, c, o, axis) = profile_block(scale);
+        let members = member_points(&sk);
+        let (corner, _) = line_pts_ids(&sk, l[0]);
+        let center = match sk.curves[c].kind {
+            CurveKind::Circle { c, .. } => c,
+            _ => panic!("a circle"),
+        };
+
+        let (_, rep) = same_as_kept_in(&sk);
+        assert!(rep.ok() && rep.dof == if scale == BlockScale::Fixed { 3 } else { 4 }, "{scale:?}: {rep:?}");
+        assert_eq!(crate::solver::left_out_points(&sk), {
+            let mut m = members.clone();
+            m.sort_unstable();
+            m
+        });
+
+        // Dragged by a member from the plain start: the freedom the held member leaves is taken
+        // the same way, the members' moves still weighing on the axis. Not to the last digit:
+        // kept in, a member lags its axis within each step and the iteration takes another path
+        // to the same kind of pose (a rigid block's turn about the member differs by about 1e-6
+        // rad). With the seed both follow the member exactly.
+        let before: Vec<Vec2> = sk.points.iter().map(|p| p.pos).collect();
+        let (mut out, mut kept) = (sk.clone(), sk.clone());
+        for d in [&mut out, &mut kept] {
+            d.points[corner].pos += v(3.0, -2.0);
+        }
+        let hold = Hold { points: vec![corner], radii: vec![] };
+        let rep = seeded(false, || solve_with(&mut out, &hold, Some(&before), Analysis::StatusOnly, None));
+        let whole =
+            crate::solver::carried_switch::without(|| seeded(false, || solve_with(&mut kept, &hold, Some(&before), Analysis::StatusOnly, None)));
+        assert!(rep.ok() && whole.ok(), "{rep:?} {whole:?}");
+        for (a, b) in out.points.iter().zip(&kept.points) {
+            assert!(a.pos.dist(b.pos) < 1e-3, "{scale:?} dragged: left out {:?}, kept in {:?}", a.pos, b.pos);
+        }
+
+        let mut placed = sk.clone();
+        placed.add_constraint(ConstraintKind::Coincident { p: o, q: 0 }, None).unwrap();
+        placed.add_constraint(ConstraintKind::LineAngle { l: axis, value: 25f64.to_radians() }, None).unwrap();
+        if scale == BlockScale::Free {
+            placed.add_constraint(ConstraintKind::Length { l: l[0], value: 80.0 }, None).unwrap();
+        }
+        let (solved, rep) = same_as_kept_in(&placed);
+        assert!(rep.ok() && rep.dof == 0, "{scale:?}: {rep:?}");
+        if scale == BlockScale::Free {
+            assert!((solved.radius(c).unwrap() - 10.0).abs() < 1e-9, "the radius scales with the block");
+            assert!(!crate::solver::left_out_points(&placed).contains(&corner), "a member a length reads stays in");
+        }
+
+        // A member tied to a fixed point outside the block stays in the solve; the rest follow.
+        let mut tied = sk.clone();
+        let g = tied.add_point(v(-50.0, -12.0), None).unwrap();
+        tied.add_constraint(ConstraintKind::Fix { p: g }, None).unwrap();
+        tied.add_constraint(ConstraintKind::Coincident { p: o, q: 0 }, None).unwrap();
+        match scale {
+            BlockScale::Fixed => {
+                let reach = sk.points[corner].pos.dist(sk.points[o].pos);
+                tied.add_constraint(ConstraintKind::Distance { p: corner, q: g, value: (v(-50.0, -12.0).len() - reach).abs() + 5.0 }, None).unwrap();
+            }
+            BlockScale::Free => {
+                tied.add_constraint(ConstraintKind::Coincident { p: corner, q: g }, None).unwrap();
+            }
+        }
+        let left_out = crate::solver::left_out_points(&tied);
+        assert!(!left_out.contains(&corner) && left_out.contains(&center) && left_out.len() == members.len() - 1, "{left_out:?}");
+        let (_, rep) = same_as_kept_in(&tied);
+        assert!(rep.ok() && rep.dof == 0, "{scale:?}: {rep:?}");
+
+        // A block turning about its origin, a member on the origin: that member stays put, so it
+        // alone is determined.
+        let mut turning = Sketch::new();
+        let (tl, tc) = block_profile(&mut turning);
+        let mut ids = block_ids(&turning, &tl);
+        ids.push(turning.curves[tc].id.clone());
+        let (on_origin, _) = line_pts_ids(&turning, tl[0]);
+        let made = turning.make_block(&ids, scale, Some(on_origin), None).unwrap();
+        let to = turning.point_index(&made.origin).unwrap();
+        turning.add_constraint(ConstraintKind::Coincident { p: to, q: 0 }, None).unwrap();
+        assert!(crate::solver::left_out_points(&turning).contains(&on_origin));
+        let (_, rep) = same_as_kept_in(&turning);
+        assert!(rep.ok() && rep.dof == if scale == BlockScale::Fixed { 1 } else { 2 }, "{scale:?}: {rep:?}");
+        assert!(rep.point_determined[on_origin], "{scale:?}: {rep:?}");
+        assert_eq!(member_points(&turning).iter().filter(|p| rep.point_determined[**p]).count(), 1, "{scale:?}: {rep:?}");
+
+        // Two blocks of one rectangle, sharing two corners: the shared corners stay in.
+        let mut sk2 = Sketch::new();
+        let r = rect(&mut sk2, [v(10.0, 5.0), v(50.0, 5.0), v(50.0, 25.0), v(10.0, 25.0)]);
+        let first = sk2.make_block(&block_ids(&sk2, &r[..2]), scale, None, None).unwrap();
+        sk2.make_block(&block_ids(&sk2, &r[2..]), scale, None, None).unwrap();
+        let (a, _) = line_pts_ids(&sk2, r[0]);
+        let (b, cc) = line_pts_ids(&sk2, r[1]);
+        let (_, d) = line_pts_ids(&sk2, r[2]);
+        let left_out = crate::solver::left_out_points(&sk2);
+        assert!(left_out.contains(&b) && left_out.contains(&d) && !left_out.contains(&a) && !left_out.contains(&cc), "{left_out:?}");
+        let (_, rep) = same_as_kept_in(&sk2);
+        assert!(rep.ok() && rep.dof == if scale == BlockScale::Fixed { 3 } else { 4 }, "{scale:?}: {rep:?}");
+        let o1 = sk2.point_index(&first.origin).unwrap();
+        let axis1 = sk2.curve_index(&first.axis).unwrap();
+        sk2.add_constraint(ConstraintKind::Coincident { p: o1, q: 0 }, None).unwrap();
+        sk2.add_constraint(ConstraintKind::LineAngle { l: axis1, value: 10f64.to_radians() }, None).unwrap();
+        if scale == BlockScale::Free {
+            sk2.add_constraint(ConstraintKind::Length { l: axis1, value: 30.0 }, None).unwrap();
+        }
+        let (_, rep) = same_as_kept_in(&sk2);
+        assert!(rep.ok() && rep.dof == 0, "{scale:?}: {rep:?}");
+    }
 }
 
 /// The point indices of line `l`'s ends.

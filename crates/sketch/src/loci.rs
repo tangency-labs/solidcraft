@@ -838,15 +838,28 @@ fn direction(ends: Option<(usize, usize)>, pos: &dyn Fn(usize) -> Option<Vec2>) 
     (pos(b)? - pos(a)?).normalized()
 }
 
+/// [`read_leaving_out`] leaving nothing out.
+#[cfg(test)]
+pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve: &[(usize, usize)], radius: &[Option<f64>]) -> Reading {
+    read_leaving_out(sk, before, on_curve, radius, &[])
+}
+
 /// Read the driving constraints of `sk`; `before(i)` is point `i`'s position in the reference
 /// layout (`None`, or out of range: unknown, and whatever it would decide is not read);
 /// `on_curve` the sketch's point-on-curve pairs ([`crate::solver::points_on_curves`]), `radius`
-/// its radii ([`radii`]).
+/// its radii ([`radii`]). The frame ties of the block members the solve leaves out (`left_out`,
+/// per point) are not read: the solve places them from their block's axis.
 ///
 /// Every constraint on a line is read as a tie; a tie on a horizontal or vertical line is
 /// then lowered to the relations between two points it amounts to (a row, a column, an offset
 /// across it), which the decomposition builds clusters on.
-pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve: &[(usize, usize)], radius: &[Option<f64>]) -> Reading {
+pub(crate) fn read_leaving_out(
+    sk: &Sketch,
+    before: &dyn Fn(usize) -> Option<Vec2>,
+    on_curve: &[(usize, usize)],
+    radius: &[Option<f64>],
+    left_out: &[bool],
+) -> Reading {
     use ConstraintKind::*;
     let n = sk.points.len();
     let m = sk.curves.len();
@@ -1034,7 +1047,8 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
         {
             rel(o, x, Rel::Dist(l0));
         }
-        ties.extend(f.points.into_iter().filter(|(p, _)| *p < n).map(|(p, [u, v])| Tie::Frame { p, o, x, u, v }));
+        let kept = |p: usize| p < n && !left_out.get(p).copied().unwrap_or(false);
+        ties.extend(f.points.into_iter().filter(|(p, _)| kept(*p)).map(|(p, [u, v])| Tie::Frame { p, o, x, u, v }));
     }
     for (l, ends) in lines.iter().enumerate() {
         if let (Some((a, b)), Some(d)) = (*ends, length.get(l).copied().flatten()) {

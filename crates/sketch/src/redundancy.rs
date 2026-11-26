@@ -35,7 +35,12 @@ pub const CONSISTENT: f64 = 1e-6;
 pub(super) fn block_constraint(b: &Block) -> Option<usize> {
     match b {
         Block::User(ci, _) | Block::TangentAt(ci, _, _) => Some(*ci),
-        Block::Closure { .. } | Block::Arc { .. } | Block::Frame { .. } | Block::FrameLength { .. } | Block::FrameRadius { .. } => None,
+        Block::Closure { .. }
+        | Block::Arc { .. }
+        | Block::Frame { .. }
+        | Block::FrameLength { .. }
+        | Block::FrameRadius { .. }
+        | Block::Carried(_) => None,
     }
 }
 
@@ -223,7 +228,9 @@ pub fn determined_by(sk: &Sketch, ci: usize) -> Vec<usize> {
     let lay = layout(sk, &Hold::default());
     let mut x = initial_x(sk, &lay);
     let on_curve = points_on_curves(sk);
-    let (blocks, _) = build_blocks(sk, &lay, &on_curve);
+    let (blocks, constant) = build_blocks(sk, &lay, &on_curve);
+    // The rows the solve reads: without the block members it leaves out, as it judged redundancy.
+    let (blocks, _, _) = super::carried::carry(sk, &lay, blocks, constant);
     let Some(t) = blocks.iter().position(|(b, _)| block_constraint(b) == Some(ci)) else { return Vec::new() };
     let mut parent: Vec<usize> = (0..lay.n).collect();
     for (_, vars) in &blocks {

@@ -38,13 +38,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch_dxf")
         .contract(&INSERT_DXF_CONTRACT)
         .output(output_schema_for::<DrawingInserted>)
-        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the size of the drawn geometry's bounds before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); block?: bool (default false: the curves it adds become one block, as sketch.block makes one, with Fixed scale: its origin where `at` puts the file's origin (or the drawing's middle with align center), its axis along `angle` and about the drawing's size; text stays outside the block; for now a block of more than about 2000 points solves only while it is fixed: without `fixed` it is refused, and removing one of its axis Fixes leaves the sketch unsolved; the reply's `block` gives its id, axis and origin); fixed?: bool (a Fix constraint on every point the drawing adds, as sketch.constraint.fix puts one; a circle's or ellipse's radius stays free; with block, only the block's two axis ends and the points no curve holds, so Explode Block then leaves its curves free and only the axis line fixed; default false); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the size of the drawn geometry's bounds before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); block?: bool (default false: the curves it adds become one block, as sketch.block makes one, with Fixed scale: its origin where `at` puts the file's origin (or the drawing's middle with align center), its axis along `angle` and about the drawing's size; text stays outside the block; the reply's `block` gives its id, axis and origin); fixed?: bool (a Fix constraint on every point the drawing adds, as sketch.constraint.fix puts one; a circle's or ellipse's radius stays free; with block, only the block's two axis ends and the points no curve holds, so Explode Block then leaves its curves free and only the axis line fixed; default false); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.insert_svg", "Insert SVG", crate::checked!("sketch.insert_svg", insert_svg))
         .at("SKETCH", "INSERT")
         .icon("svg")
         .contract(&INSERT_SVG_CONTRACT)
         .output(output_schema_for::<DrawingInserted>)
-        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); size_from?: \"geometry\" (default: width and height are the bounds of the drawn geometry) | \"viewbox\" (the SVG sheet: its viewBox, else its width and height; a drawing smaller than its sheet then comes out smaller than width or height say); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's (or sheet's) middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); block?: bool (default false: the curves it adds become one block, as sketch.block makes one, with Fixed scale: its origin where `at` puts the file's origin (or the drawing's middle with align center, the sheet's middle with size_from viewbox too), its axis along `angle` and about the drawing's size; text stays outside the block; for now a block of more than about 2000 points solves only while it is fixed: without `fixed` it is refused, and removing one of its axis Fixes leaves the sketch unsolved; the reply's `block` gives its id, axis and origin); fixed?: bool (every point it adds gets a Fix constraint, so the drawing stays where it is put; with block, only the block's two axis ends and the points no curve holds, so Explode Block then leaves its curves free and only the axis line fixed); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); size_from?: \"geometry\" (default: width and height are the bounds of the drawn geometry) | \"viewbox\" (the SVG sheet: its viewBox, else its width and height; a drawing smaller than its sheet then comes out smaller than width or height say); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's (or sheet's) middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); block?: bool (default false: the curves it adds become one block, as sketch.block makes one, with Fixed scale: its origin where `at` puts the file's origin (or the drawing's middle with align center, the sheet's middle with size_from viewbox too), its axis along `angle` and about the drawing's size; text stays outside the block; the reply's `block` gives its id, axis and origin); fixed?: bool (every point it adds gets a Fix constraint, so the drawing stays where it is put; with block, only the block's two axis ends and the points no curve holds, so Explode Block then leaves its curves free and only the axis line fixed); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.insert_airfoil", "Insert Airfoil", crate::checked!("sketch.insert_airfoil", insert_airfoil))
         .at("SKETCH", "INSERT")
         .icon("airfoil")
@@ -514,7 +514,6 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         )));
     }
     let fixed = bool_(p, "fixed").unwrap_or(false);
-    let has_lines = geom.iter().any(|g| matches!(g, Geom2::Line(..)));
     // `sketch::edit`, but keeping the solve as a typed value for the reply.
     let target = sketch_store::target(s, p, cmd)?;
     let ((curves, texts, n_fixed, made), report) = edit_solved(s, target, false, Analysis::Freedom, |sk, _| {
@@ -537,18 +536,6 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         } else {
             None
         };
-        // A block that is not fixed is one connected group of its points, its axis ends and its
-        // radii, which the solver takes only up to a size; fixed, each member stands alone.
-        if let (Some(m), false) = (&made, fixed) {
-            let unknowns = sk.blocks.iter().find(|b| b.id == m.block).map_or(0, |b| 2 * (b.points.len() + 2) + b.radii.len());
-            let most = solidcraft_sketch::MAX_COMPONENT_VARS;
-            if unknowns > most {
-                let simplify = if has_lines { "; a raised Simplify (`simplify`) brings runs of short lines in with fewer points" } else { "" };
-                return Err(EngineError::Other(format!(
-                    "as one block the drawing has {unknowns} unknowns (point coordinates and radii), more than the {most} the sketch solver takes in one block for now: untick Insert as block (leave out `block`), or in a script insert it with `fixed: true` so the block is held by its axis{simplify}"
-                )));
-            }
-        }
         // Fixed where it is put: a Fix constraint on every point the drawing added (a circle's
         // or ellipse's radius stays free); for a block, on its axis ends and on the points no
         // member holds. Refused as a whole when the constraints would not fit.
@@ -1927,43 +1914,45 @@ EOF
         assert!(as_block < 3.0 * plain + 2.0, "{as_block} s as a block, {plain} s without");
     }
 
-    /// A block that is not fixed is one connected group for the solver, which takes at most
-    /// `MAX_COMPONENT_VARS` unknowns at once: up to that it solves, past it the insert is refused
-    /// and names what helps, leaving nothing behind.
+    /// A drawing of any size comes in as a block without being fixed: its members follow the
+    /// block's axis outside the solver, which takes at most `MAX_COMPONENT_VARS` unknowns at once
+    /// (a group that size was the most an unfixed block could be). It solves with the block's
+    /// three freedoms, and a fixed block that loses one of its axis Fixes still solves.
     #[test]
-    fn an_unfixed_block_larger_than_the_solver_takes_is_refused() {
-        // n lines, n + 1 points, and the axis's two: 2 (n + 3) unknowns.
-        let fits = solidcraft_sketch::MAX_COMPONENT_VARS / 2 - 3;
+    fn a_large_drawing_comes_in_as_an_unfixed_block() {
+        // n lines, n + 1 points, and the axis's two: 2 (n + 3) unknowns, five times the most.
+        let n = 5 * solidcraft_sketch::MAX_COMPONENT_VARS / 2;
         let mut s = Session::default();
         s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
-        let r = s.execute("sketch.insert_dxf", &json!({"text": zigzag_dxf(fits), "block": true})).unwrap();
-        assert_eq!((r["info"]["dof"].as_u64(), r["info"]["solved"].as_bool()), (Some(3), Some(true)), "{r}");
-        let mut s = Session::default();
-        let e = s.execute("sketch.insert_dxf", &json!({"text": zigzag_dxf(fits + 1), "block": true})).unwrap_err();
-        assert!(matches!(e, crate::EngineError::Other(_)), "not a parameter's fault: {e:?}");
-        let e = e.to_string();
-        assert!(e.contains("unknowns") && e.contains("Insert as block") && e.contains("`fixed: true`") && e.contains("Simplify"), "{e}");
-        assert!(s.active_sketch.is_none() && s.doc.features.is_empty(), "nothing is left behind");
-        // Simplify is offered only where it helps: a drawing of circles has no runs of lines.
-        let circles: String = (0..1400).map(|i| format!("0\nCIRCLE\n10\n{}\n20\n0\n40\n1\n", i * 3)).collect();
+        let r = s.execute("sketch.insert_dxf", &json!({"text": zigzag_dxf(n), "block": true})).unwrap();
+        assert_eq!((r["curves"].as_u64(), r["info"]["dof"].as_u64(), r["info"]["solved"].as_bool()), (Some(n as u64), Some(3), Some(true)), "{r}");
+        let sk = solved_sketch(&s);
+        assert_eq!(sk.blocks[0].points.len(), n + 1);
+        // Placed by its origin and axis, it is fully constrained.
+        let origin = r["block"]["origin"].as_str().unwrap().to_string();
+        let axis = r["block"]["axis"].as_str().unwrap().to_string();
+        s.execute("sketch.constraint.fix", &json!({"entity": origin, "fixed": true})).unwrap();
+        s.execute("sketch.constraint.horizontal_vertical", &json!({"line": axis, "mode": "horizontal"})).unwrap();
+        let st = s.model.state();
+        let report = &st.sketch(s.active_sketch.unwrap()).unwrap().report;
+        assert!(report.ok() && report.dof == 0, "{:?} dof {}", report.status, report.dof);
+        // A drawing of circles: its radii follow the block as well.
+        let circles: String = (0..2500).map(|i| format!("0\nCIRCLE\n10\n{}\n20\n0\n40\n1\n", i * 3)).collect();
         let circles = format!("0\nSECTION\n2\nENTITIES\n{circles}0\nENDSEC\n0\nEOF\n");
-        let e = s.execute("sketch.insert_dxf", &json!({"text": circles, "block": true})).unwrap_err().to_string();
-        assert!(e.contains("unknowns") && !e.contains("Simplify"), "{e}");
-        let r = s.execute("sketch.insert_dxf", &json!({"text": zigzag_dxf(fits + 1), "block": true, "fixed": true})).unwrap();
-        assert_eq!((r["info"]["dof"].as_u64(), r["info"]["solved"].as_bool()), (Some(0), Some(true)), "{r}");
-        // A fixed block well past the limit that loses one of its axis Fixes: the delete is
-        // accepted, and the sketch then says why it can't solve.
+        let mut s = Session::default();
         s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
-        s.execute("sketch.insert_dxf", &json!({"text": zigzag_dxf(2 * fits), "block": true, "fixed": true})).unwrap();
+        let r = s.execute("sketch.insert_dxf", &json!({"text": circles, "block": true})).unwrap();
+        assert_eq!((r["info"]["dof"].as_u64(), r["info"]["solved"].as_bool()), (Some(3), Some(true)), "{r}");
+        // A fixed block that loses one of its axis Fixes turns about the other end.
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.insert_dxf", &json!({"text": zigzag_dxf(n), "block": true, "fixed": true})).unwrap();
         let sk = solved_sketch(&s);
         let fix = sk.constraints.last().map(|c| c.id.clone()).unwrap();
         let deleted = s.execute("sketch.delete", &json!({"entities": [fix]})).unwrap();
-        assert_eq!(deleted["sketch"]["solved"], json!(false), "{deleted}");
+        assert_eq!(deleted["sketch"]["solved"], json!(true), "{deleted}");
         let st = s.model.state();
         let report = &st.sketch(s.active_sketch.unwrap()).unwrap().report;
-        assert!(!report.ok() && report.oversized_block, "{:?} {:?}", report.status, report.oversized);
-        let why = report.failure(|f| f.to_string());
-        assert!(why.contains("a block joins all its points") && !why.contains("copies"), "{why}");
+        assert!(report.ok() && report.dof == 1 && report.oversized.is_none(), "{:?} dof {} {:?}", report.status, report.dof, report.oversized);
     }
 
     /// A file origin far from its drawing still places the block's origin there, but the axis
