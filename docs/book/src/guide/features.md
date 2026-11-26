@@ -377,6 +377,11 @@ and `dot_grid` are not used by a sketched cell. `clip` defaults to `whole` for a
 (`snap` for the built-in shapes), `free` trims the cells at the edge, and `snap` is refused.
 A cell sketch with no closed profile, or with several, is refused with the sketch's name.
 
+In the Cell Grid dialog, choose **Shape: Sketch**, pick one profile of the cell sketch, and fill in
+**Pitch X**, **Pitch Y**, **Stagger**, **Cell angle** and **Flip alternate cells**. Cell size and
+Snap are not offered, and the cell's origin is the profile's centroid (set `cell_origin` through the
+command to move it).
+
 ## Section Analysis
 
 Section Analysis cuts the view, not the design: what lies beyond the section's planes is hidden
