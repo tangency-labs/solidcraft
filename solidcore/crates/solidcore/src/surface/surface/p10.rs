@@ -166,6 +166,40 @@ fn foot_in(
     uv
 }
 
+/// Not upstream (#22030): whether the line runs along `surface` from the root `a` to the
+/// root `b` (each `(t, (u, v))`): its points a quarter, half and three quarters of the way
+/// drop within `tol` of the surface, as [`opening_drops`] joins two ranges. A drop that
+/// fails, or errs, leaves them apart.
+fn joined_along(
+    k: &Kernel,
+    surface: &Surface,
+    domain: &Extent2d,
+    line: &Curve,
+    a: (f64, Point2),
+    b: (f64, Point2),
+    tol: f64,
+) -> bool {
+    let mut ivls = [Extent1d::new(), Extent1d::new(), Extent1d::new()];
+    for (t, uv) in [a, b] {
+        let [t_ivl, u_ivl, v_ivl] = &mut ivls;
+        t_ivl.add_value(t);
+        u_ivl.add_value(uv.x);
+        v_ivl.add_value(uv.y);
+    }
+    let [t_ivl, u_ivl, v_ivl] = &ivls;
+    opening_drops(
+        k,
+        surface,
+        domain,
+        line,
+        [t_ivl, u_ivl, v_ivl],
+        tol,
+        3,
+        0.25,
+    )
+    .unwrap_or(false)
+}
+
 /// `sm_ClassifyCurveSurfaceXSectPoint` (`surface::surface::p4`); `edge_tolerance` is
 /// the tolerance of the curve's owning edge, when the caller resolves it.
 #[allow(clippy::too_many_arguments)]
@@ -711,7 +745,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         // of the roots found in this leaf; and whether the second crossing was searched for
         let mut foot_at: Option<usize> = None;
         let mut second_at: Vec<usize> = Vec::new();
-        let mut roots: Vec<f64> = Vec::new();
+        let mut roots: Vec<(f64, Point2)> = Vec::new();
         let mut searched = false;
 
         // for every Guess (more than 1 when LineGuess does not drop to SurfaceDomain)
@@ -753,13 +787,20 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             };
 
             // Not upstream (#22030): a second-crossing guess that ends on a root already
-            // found in this leaf (within the tolerance along the line) adds nothing
+            // found in this leaf (within the tolerance along the line), or on one the line
+            // runs along the surface to (a coincident stretch, which main's combination
+            // keeps as one range), adds nothing
             let (hit_t, line_length) = (hit.t, self.line_vector.length());
             let apart = move |t: f64| (t - hit_t).abs() * line_length;
-            if second_at.contains(&index)
-                && roots.iter().any(|&t| apart(t) <= self.base.tolerance_3d)
-            {
-                continue;
+            if second_at.contains(&index) {
+                let tol = self.base.tolerance_3d;
+                let (surface, domain, line) = (leaf.eval, &leaf.domain, &leaf.line);
+                if roots.iter().any(|&(t, uv)| {
+                    apart(t) <= tol
+                        || joined_along(k, surface, domain, line, (t, uv), (hit.t, hit.uv), tol)
+                }) {
+                    continue;
+                }
             }
 
             // process intersections
@@ -785,7 +826,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             )? {
                 continue;
             }
-            roots.push(hit.t);
+            roots.push((hit.t, hit.uv));
 
             // for points within the surface's trim boundary
             if self.is_point_valid(k, leaf.owner, cache, hit.uv)? {
