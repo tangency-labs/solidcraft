@@ -1,4 +1,4 @@
-# RFC 0017: Marketplace, finding and installing plugins, part generators and content packs
+# RFC 0017: Marketplace, finding and installing plugins, generators and themes
 
 | | |
 |---|---|
@@ -7,9 +7,9 @@
 | Apps | SolidCraft (the index and the shared client crate are app-agnostic, so other Craft apps can use them) |
 | Discussion | [#22331](https://github.com/tangency-labs/solidcraft/issues/22331) |
 | Extends | [RFC 0002](0002-plugins.md) (plugins; this RFC is its phase 6, "curated, signed index") |
-| Related | [RFC 0015](0015-plugin-ui-workspaces.md) (plugin UI), [#20425](https://github.com/tangency-labs/solidcraft/pull/20425) (`min_host_version` and `optional_capabilities`), [#5586](https://github.com/tangency-labs/solidcraft/pull/5586) (install from a GitHub link), [#7558](https://github.com/tangency-labs/solidcraft/issues/7558) (extras and accessory packs: what users want) |
+| Related | [RFC 0015](0015-plugin-ui-workspaces.md) (plugin UI), [#20425](https://github.com/tangency-labs/solidcraft/pull/20425) (`min_host_version` and `optional_capabilities`), [#5586](https://github.com/tangency-labs/solidcraft/pull/5586) (install from a GitHub link), [#7558](https://github.com/tangency-labs/solidcraft/issues/7558) (extras and accessory packs: what users want), [RFC 0018 / #22338](https://github.com/tangency-labs/solidcraft/pull/22338) (Send to App; the same `solidcraft://` link handler) |
 
-People should be able to find a plugin, a theme, a material library or a part generator inside SolidCraft, read who made it and what it may do, and install it in a few clicks, without us shipping every one of them and without us pretending to have vetted code we have not. This RFC says how, in three trust tiers, on top of the sandbox, permissions and approval screen RFC 0002 already built.
+People should be able to find a plugin, a part generator or a theme inside SolidCraft, and to install one from a button in its repository, read who made it and what it may do, and install it in a few clicks, without us shipping every one of them and without us pretending to have vetted code we have not. This RFC says how, in three trust tiers, on top of the sandbox, permissions and approval screen RFC 0002 already built.
 
 Today there is a plugin runtime, an install flow from a `.zip`, a "Update to x.y.z" check against a plugin's own GitHub releases, and Preferences > Plugins to enable, disable and remove. There is no place to discover anything, no signing, no list of who is trusted, and no way to pull a bad plugin back.
 
@@ -19,7 +19,7 @@ Today there is a plugin runtime, an install flow from a `.zip`, a "Update to x.y
 
 These are proposed here and are open for comment until the RFC is accepted.
 
-1. **Three kinds of installable:** plugins, content packs and part generators (section 2). Each is a package with one manifest. What a package may contain decides its kind; there is no second packaging format.
+1. **Three kinds of installable:** plugins, generators and themes (section 2). Each is a package with one manifest. What a package may contain decides its kind; there is no second packaging format. More kinds (materials, sample designs, templates, tables) come later, each as its own kind.
 2. **Three trust tiers:** Verified (reviewed and signed), Listed (in the index, checked by machine only, not reviewed) and Custom (any GitHub `owner/repo` or URL the user types) (section 3). The user always sees which tier an item is in.
 3. **The index is a public Git repository** of small JSON files, built into one signed snapshot. SolidCraft downloads the snapshot and reads it. It never calls a server of ours that holds user data (section 4).
 4. **Artifacts stay on GitHub Releases** in the author's own repository, as RFC 0002 section 5 already prefers. The index points at them and pins their hashes. We do not host packages in v1.
@@ -29,6 +29,7 @@ These are proposed here and are open for comment until the RFC is accepted.
 8. **Offline is the normal case.** An installed package works with no network. The index is cached. Browsing offline shows the cache with its date (section 10).
 9. **Listed items follow our clean-room and licence rules** (section 12). Custom items are the user's own risk, and the app says so.
 10. **No new Preferences rows.** Marketplace settings live on the marketplace's own page.
+11. **An "Install in SolidCraft" button** in a repository opens the item's install screen in the app through one opt-in `solidcraft://` handler, shared with RFC 0018. Nothing installs without a click in the app (section 13.1).
 
 ## 1. Goals and non-goals
 
@@ -48,36 +49,32 @@ These are proposed here and are open for comment until the RFC is accepted.
 
 ## 2. The three kinds
 
-We took Home Assistant's split as the model: code that runs inside the host and is described by a manifest the host reads before loading any code (its integrations); heavier things that run beside the host (its add-ons), which we do not copy; and the community content that a store such as HACS also carries, which is data and configuration (themes, templates, dashboard parts). SolidCraft's three kinds are:
+We took Home Assistant's split as the model: code that runs inside the host and is described by a manifest the host reads before loading any code (its integrations); heavier things that run beside the host (its add-ons), which we do not copy; and the community content that a store such as HACS also carries, which is data and configuration (themes, templates, dashboard parts). SolidCraft starts with three kinds, plugins, generators and themes:
 
 | Kind | What it is | Runs code | Exists today |
 |---|---|---|---|
 | **Plugin** | Commands, importers, exporters, panels, workspaces: a sandboxed WebAssembly component with a `runtime` in its manifest (RFC 0002, RFC 0015) | Yes | Yes, in `crates/craft-plugin` |
-| **Content pack** | Data only: colour themes, view shaders, material and appearance libraries, sample designs, drawing templates and title blocks, render studios and environments, profile and fastener tables | No | Themes and shaders: yes (`themes@0.1`, `shaders@0.2`, a package with no runtime). The rest need a capability each (section 2.2). |
+| **Theme** | Data only: colour themes and the view backgrounds and tints that go with them | No | Yes (`themes@0.1`, `shaders@0.2`, a package with no runtime) |
 | **Part generator** | Builds a part from a vendor ordering code or from parameters (section 2.3) | Yes (a plugin with a `generators` declaration) | No |
 
-A package may be more than one thing, as a plugin that ships its own theme already may. The marketplace shows its **primary kind** (the first that applies in the order generator, plugin, content pack, so a plugin that declares `generators` is shown as a generator) and lists the rest as contents.
+A package may be more than one thing, as a plugin that ships its own theme already may. The marketplace shows its **primary kind** (the first that applies in the order generator, plugin, theme, so a plugin that declares `generators` is shown as a generator) and lists the rest as contents.
 
 ### 2.1 Plugins
 
 No change to the package. The marketplace adds a listing around it (section 4.2). A plugin keeps every field RFC 0002 defines: `id`, `name`, `version`, `capabilities`, `runtime` with entries, permissions, limits, listeners and slots.
 
-### 2.2 Content packs
+### 2.2 Themes
 
-A content pack is a package whose manifest has no `runtime` and one or more data sections, each behind a capability the host negotiates the way it does for `themes@0.1` today:
+A theme is a package whose manifest has no `runtime` and one or both of two data sections, each behind a capability the host already serves:
 
 | Section | Capability | Contents |
 |---|---|---|
 | `themes` | `themes@0.1` (exists) | Colour themes for the theme picker |
-| `shaders` | `shaders@0.2` (exists) | View backgrounds and tints |
-| `materials` | `materials@0.1` (new) | Engineering material data and visual appearances, in the formats the appearance and material work already defines |
-| `samples` | `samples@0.1` (new) | Sample designs shown on Start under Samples, each with its own picture |
-| `templates` | `templates@0.1` (new) | Drawing sheets, borders, title blocks, design templates |
-| `tables` | `tables@0.1` (new) | Standard-size tables for the profile and fastener commands |
+| `shaders` | `shaders@0.2` (exists) | View backgrounds and tints, shown with the theme |
 
-The new capabilities are separate small proposals, one per section. They are not part of the first marketplace phase. Themes and shaders are enough to ship the first content packs, and the marketplace must not wait on the rest. Each new section follows the existing rules: it is data, a host that predates the section refuses the package with a clear reason ("needs a newer SolidCraft"), because the manifest keeps its strict field set (`deny_unknown_fields`) and an unknown field or an unserved capability is refused before anything is used; the index records each release's required capabilities and `min_host_version`, so the marketplace does not offer such a package to an older host in the first place, it adds no code, and it is checked by the host against schemas and size caps before it is used.
+A theme is data: no code, no network, nothing to grant. Its approval screen is short: name, publisher, licence, what it adds, and nothing to grant. A host that predates a section refuses the package with a clear reason ("needs a newer SolidCraft"), because the manifest keeps its strict field set (`deny_unknown_fields`) and an unserved capability is refused before anything is used; the index records each release's required capabilities and `min_host_version`, so the marketplace does not offer such a package to an older host in the first place.
 
-Because a content pack runs no code, its approval screen is short: name, publisher, licence, what it adds, and nothing to grant.
+**Later kinds.** Materials and appearance libraries, sample designs (shown on Start under Samples), drawing and design templates, and standard-size tables for the profile and fastener commands are not part of this RFC's first phases. Each becomes its own kind, with its own capability (`materials@0.1`, `samples@0.1`, `templates@0.1`, `tables@0.1` are placeholder names) and its own small proposal. A new kind follows the rules a theme follows: it is data, it adds no code, the host checks it against schemas and size caps before use, an older host refuses it with a reason, and the three tiers, the index, the install link (section 13.1) and the commands handle it with one new value of `kind`. The marketplace does not wait on them.
 
 ### 2.3 Part generators
 
@@ -167,7 +164,7 @@ An author adds one file to the index repository. It is deliberately short, becau
 - `id` must equal the package manifest's `id`. `repo` is where the releases are. The two must also agree with the package's `updates.github` (RFC 0002 section 5), so a package cannot claim another repository's updates.
 - Everything else (name, version, description, capabilities, permissions, entries, `min_host_version`) is read from the released package by the index build and copied into the snapshot, never typed twice.
 - The listing lives in the index repository, not inside the package, for two reasons: reviewers and the revocation tooling edit it without the author's release, and the installed manifest keeps its current strict field set (`deny_unknown_fields`) so SolidCraft before this RFC still loads the package. The inert `extensions` map in the manifest can carry optional extra metadata, such as a long description file name, that the host ignores.
-- A listing for a content pack names its sections in the build output, not the listing.
+- A listing for a theme names its sections in the build output, not the listing. The listing's `kind` is `plugin`, `generator` or `theme`.
 
 ### 4.3 What the index build checks
 
@@ -175,7 +172,7 @@ Failing any check fails the pull request with a message that names the field and
 
 1. The listing parses and the id is unused or is the same repository's.
 2. A stable release exists, tagged as a `major.minor.patch` version, with an asset `<id>.zip` or `<id>-<version>.zip` and a GitHub-listed sha256 digest (the rule `updates.github` already uses).
-3. The package passes `plugin check` (and the content-pack equivalent): manifest, schemas, size caps (`MAX_MANIFEST_BYTES`, `MAX_COMPONENT_BYTES` and the rest of `craft-plugin`), safe archive rules, an icon that passes the image checks.
+3. The package passes `plugin check` (and the theme equivalent): manifest, schemas, size caps (`MAX_MANIFEST_BYTES`, `MAX_COMPONENT_BYTES` and the rest of `craft-plugin`), safe archive rules, an icon that passes the image checks.
 4. The manifest's id, version and `updates.github` agree with the listing and the tag.
 5. The licence in the listing is on the allowed list and matches the repository's licence file (section 12).
 6. Every non-code asset has an attribution row (section 12).
@@ -186,7 +183,7 @@ Every release the build sees is re-checked on every run, so a release whose dige
 
 ## 5. Manifests, versions and compatibility
 
-**Per kind, what the host reads.** The installed package's manifest is the one in `crates/craft-plugin`: `id`, `name`, `version`, `min_host_version`, `description`, `capabilities`, `optional_capabilities`, `runtime`, `shaders`, `themes`, `updates` and the inert `extensions`. A plugin fills `runtime`; a content pack fills only its data sections; a generator fills `runtime` and `generators`. The listing (section 4.2) adds the marketplace-only facts. Nothing in the listing can widen what the package may do.
+**Per kind, what the host reads.** The installed package's manifest is the one in `crates/craft-plugin`: `id`, `name`, `version`, `min_host_version`, `description`, `capabilities`, `optional_capabilities`, `runtime`, `shaders`, `themes`, `updates` and the inert `extensions`. A plugin fills `runtime`; a theme fills only its data sections; a generator fills `runtime` and `generators`. The listing (section 4.2) adds the marketplace-only facts. Nothing in the listing can widen what the package may do.
 
 **`min_host_version`.** A complete semantic version, the oldest SolidCraft the package supports. The host already refuses a package that needs a newer SolidCraft, with that reason, before publishing it. The index build records it for every release.
 
@@ -198,7 +195,7 @@ Every release the build sees is re-checked on every run, so a release whose dige
 
 **API compatibility.** The WIT version the package was built for is part of its required capabilities (`commands@0.1` and so on), so a package built for an older API keeps loading, as RFC 0002 requires. The index shows the oldest and newest host versions each release runs on, and the author is told at listing time when a host release is about to drop a capability their package needs (a deprecation list in the index).
 
-**Content-pack format versions.** Each data section carries its capability version, so a newer pack is refused or skipped by an older host with a clear message, never half-loaded.
+**Theme format versions.** Each data section carries its capability version, so a newer theme is refused by an older host with a clear message, never half-loaded.
 
 ## 6. Permissions and the sandbox, per tier
 
@@ -214,7 +211,7 @@ What exists and stays exactly as it is (RFC 0002, `docs/plugins.md`): permission
 | High-risk grants (write access to a folder, the `file` command group, application settings or other plugins' command groups, fuel or memory above the app's default ceilings, `input_folder`) | One confirmation | A second step: the user must tick each high-risk grant on its own line | Same as Listed |
 | Install with no folder, no command group and default limits | One confirmation | One confirmation | One confirmation |
 | Headless install (`plugin.install` and the new market commands) | Needs `approval` and `archive` from a dry run, as today | Same, plus `"accept_unreviewed": true` | Same |
-| Content pack | Nothing to grant | Nothing to grant | Nothing to grant |
+| Theme | Nothing to grant | Nothing to grant | Nothing to grant |
 
 A second step for the riskiest grants on unreviewed items is the only added friction, so a harmless theme or a read-only importer installs in one click while a plugin that wants to write to a folder makes the user stop and look.
 
@@ -232,7 +229,7 @@ Three separate things need to be true: the index is ours, the package is the one
 4. **Source must be public and reproducible enough to read.** Verified plugins are open source (RFC 0002 section 5 already says so). A component with no public source is not eligible.
 5. **Developer keys.** Trusted developers are identified by their GitHub account or organization in `developers.json`, not by a key of theirs. Per-author signing keys come later; they add a second thing to lose and a second thing to revoke.
 
-The approval hash the user sees binds the manifest and the component: if the manifest or component changes after review, `package_hash` changes, the stored approval no longer matches, and the plugin stops until approved again, the existing behaviour. `package_hash` does not cover other package files, such as a content pack's data files or images. Those are pinned by the `archive` hash in the index at install and update time, and a content pack grants nothing, so an edited data file on disk gains no permission. Whether to hash data files into the approval too is a design question for the content-pack phase (phase 3), and would update `docs/plugins.md` with it.
+The approval hash the user sees binds the manifest and the component: if the manifest or component changes after review, `package_hash` changes, the stored approval no longer matches, and the plugin stops until approved again, the existing behaviour. `package_hash` does not cover other package files, such as a theme's data files or images. Those are pinned by the `archive` hash in the index at install and update time, and a content pack grants nothing, so an edited data file on disk gains no permission. Whether to hash data files into the approval too is a design question for the content-pack phase (phase 3), and would update `docs/plugins.md` with it.
 
 What this does not give: it does not prove a verified plugin is free of bugs or of a later malicious update that passes review. That is why Verified updates that change permissions or entries are reviewed again, and why revocation exists.
 
@@ -247,7 +244,7 @@ What the marketplace adds:
 - **Verified updates: diff review, not silent trust.** Every Verified release is reviewed before the index admits it with the Verified badge, as in section 3. The review is lighter for a trusted developer when the declared permissions, command groups, entries, slots and limits equal the previous reviewed release's (compared on the manifest): a maintainer reads the diff of the code. A release that changes any of them gets the full review. Until a release is reviewed it is not admitted as Verified: it is shown as an update that is "not yet reviewed" and the user is told, and the previous reviewed release stays the one offered. RFC 0002's rule stands: a code-only update never adds an entry or surface silently, and a change in what was approved stops the plugin until the user approves again.
 - **Never silent.** Updates are offered, never installed without the user's click and the confirmation. There is no auto-update in v1. A later "update trusted plugins automatically" choice, if people want it, is a separate decision with its own page, never a Preferences row.
 - **Rollback.** The previous version is kept until the next update, so "Restore previous version" works offline. It is the same package and the same approval hash, so nothing new runs.
-- **Content packs** update the same way. A pack that adds a theme and a plugin updates as one package.
+- **Themes** update the same way. A package that adds a theme and a plugin updates as one package.
 
 ## 9. Ratings and reports
 
@@ -287,7 +284,7 @@ Two actions, kept apart, because one hides and the other stops.
 The browser has no plugins folder, and RFC 0002 leaves plugin hosting in the web build to its phase 5. The marketplace follows it, in three steps:
 
 1. **Browse only.** The snapshot is a static file; the index build publishes it with permissive CORS headers on project Pages, so the web build can read it, verify the signature (the verifier is plain Rust and builds for wasm) and show items. Install is replaced by "Open in the desktop app" and by a link to the item's repository.
-2. **Content packs.** Themes, shaders and later materials, samples and templates are data. They can be stored in the browser's own storage and used. GitHub's release downloads do not allow cross-origin reads from a page, so packs for the web are mirrored by the index build onto the Pages site, with their hashes in the signed snapshot. This is redistribution, which is why Verified and Listed content packs must carry an open licence that allows it (section 12). Custom items cannot be installed on the web.
+2. **Themes.** A theme is data, as later kinds will be. It can be stored in the browser's own storage and used. GitHub's release downloads do not allow cross-origin reads from a page, so themes for the web are mirrored by the index build onto the Pages site, with their hashes in the signed snapshot. This is redistribution, which is why Verified and Listed themes must carry an open licence that allows it (section 12). Custom items cannot be installed on the web.
 3. **Plugins and generators** wait for the web plugin host (RFC 0002 phase 5) and use the same mirror and the same approvals.
 
 The client crate follows the repository's wasm rules: no thread spawning or `std::time::Instant` in code that runs on the web (`web_time` instead), no filesystem outside the host's storage trait, and `cargo xtask wasm` and `cargo xtask web-offline-test` cover it. A web page never fetches an arbitrary URL on a package's behalf; the only URLs it reads are the index's own.
@@ -329,8 +326,8 @@ Listed and Verified items are shown under our name, so they must follow the rule
 
 **Proposal.** Samples is the last block of the Start body, so the page has room beneath it, and the rail has room after its last groups. We use both, with one page behind them:
 
-1. **A Marketplace rail entry** in `rail()`, between Recover and the design entries (or just above Settings; a layout question for the review of the picture), that opens a new `Section::Marketplace` whose body is the browse page. The browse page has a search box, kind filter chips (Plugins, Generators, Themes, Materials, Samples, Templates), a tier filter, and cards. Each card shows the picture if cached, name, publisher, the one-line summary, a tier badge, and Install, Update or Installed.
-2. **A "Get more" row under Samples** on the Start body: a short row of the most relevant items (for example sample designs from the index, matched to Samples, and "Browse all"), so a person who looks at Samples finds more of them. It is the same cards, drawn by the same code.
+1. **A Marketplace rail entry** in `rail()`, between Recover and the design entries (or just above Settings; a layout question for the review of the picture), that opens a new `Section::Marketplace` whose body is the browse page. The browse page has a search box, kind filter chips (Plugins, Generators, Themes; each later kind adds a chip), a tier filter, and cards. Each card shows the picture if cached, name, publisher, the one-line summary, a tier badge, and Install, Update or Installed.
+2. **A "Get more" row under Samples** on the Start body: a short row of the most relevant items (for example the newest Verified items of any kind, and "Browse all"; when a samples kind exists, sample designs from the index), so a person who looks at Samples finds more of them. It is the same cards, drawn by the same code.
 3. **An item page** in the same body, with the long description, screenshots, what the item adds, requested permissions in the approval screen's words, versions, licence, source link, tier, "Report a problem", and the install button. Install opens the existing confirmation screen, with the tier header (section 6).
 4. **Add a source** (Custom) is a field on the browse page: type `owner/repo` or a URL, the app looks the repository up and shows the same item page with the Custom banner. Added sources are listed on the marketplace page with a remove button.
 5. **Installed and Updates** is one more view on the same page (Installed, Updates available, Revoked), which links to Preferences > Plugins for enable, disable and the plugin's own settings, which stay where they are.
@@ -339,12 +336,58 @@ The marketplace page's own settings (index source, "show pre-releases for this i
 
 **Rules this follows (RFC 0015's shared rules):** the host draws every widget with theme tokens, so no item can draw its own page; every new widget exists in the web build before it is used; each widget kind and the new rail entry go through the one-time review with 1280x720 pictures; screenshots for the PR include a German locale one beside the English one, in landscape; all strings go in `assets/locales/pending/<slug>.json` with `cargo xtask lists`-sorted entries; the one outer UI container and the one camera path are untouched; no hard-coded colours.
 
+### 13.1 The "Install in SolidCraft" button
+
+A repository's README can show a button that opens the item's install screen in SolidCraft, ready to go. We took the idea from the "open your instance" badge that Home Assistant's own link service offers: a badge links to a static web page that hands the visitor to their own installation. Only the idea is used here.
+
+**The badge.** The project hosts one badge image, original artwork with a row in ATTRIBUTION.md, as a static file. The author copies one line of Markdown into their README:
+
+```markdown
+[![Install in SolidCraft](https://solidcraft.example/badge/install.svg)](https://solidcraft.example/install?repo=owner/repo&kind=plugin)
+```
+
+`solidcraft.example` is a placeholder. The maintainers pick the real host. A listed item may use `id=` in place of `repo=`.
+
+**The redirect page.** `https://<host>/install` is one static page.
+- It has no tracking, no login, no cookies, no storage, no third-party script, font or image, and no server code: the parameters are read in the visitor's browser and never sent anywhere. It is served with `Referrer-Policy: no-referrer` and a content security policy that allows only itself. The badge image is fetched from the same host, and we do not count its requests.
+- It validates the parameters with the grammar below. An invalid link shows a plain message naming the problem and does nothing else.
+- For a valid link it shows what will be opened (the repository or id, the kind, the version if given) and three things: **Open in SolidCraft** (a button, never an automatic redirect, that opens the `solidcraft://` link below), **Open in the web app** (section 11: today only themes can be installed there; for a plugin or generator the web app shows the item's details and says it needs the desktop app), and **Get SolidCraft** (the download page).
+- If SolidCraft is not installed, nothing happens when the button is pressed. The page therefore also shows the manual steps: install SolidCraft, open Marketplace, choose Add custom source, paste `owner/repo`.
+
+**The link.** The button opens `solidcraft://install?...` with the same parameters.
+
+```
+install-link = "solidcraft://install?" param *( "&" param )     ; each name at most once; order free
+param        = repo / id / kind / ref
+repo         = "repo=" owner "/" name        ; "/" may be written %2F
+id           = "id=" 1*64( lowercase-letter / digit / "-" / "_" )
+kind         = "kind=" ( "plugin" / "generator" / "theme" )
+ref          = "ref=" 1*64( letter / digit / "." / "-" / "_" / "+" )
+owner        = 1*39( letter / digit / "-" )      ; not starting with "-"
+name         = 1*100( letter / digit / "-" / "_" / "." )     ; not "." or ".."
+```
+
+- Exactly one of `repo` and `id` is required, and `kind` is required. `ref` is optional and names a release tag; it must be a version tag (`v1.2.3` or `1.2.3`, as the update check requires). Without `ref`, the newest compatible release is used (section 5).
+- `repo` always means a repository on `github.com`. A full URL, another host, a path beyond `owner/repo`, a query inside a value and any percent-escape other than `%2F` are refused. The owner and name rules are the ones the plugin manifest's `updates.github` check already uses (`valid_github_repo`).
+- `id` must be a listed item's id, found in the cached index; an `id` the index does not know is refused. `kind` must equal the item's kind when the index knows it.
+- Unknown parameters, repeated parameters, an empty value and a link over 256 bytes are refused, with a message that names the parameter. Nothing is fetched while a link is being checked: the check is syntax and the cached index only.
+
+**One handler for both RFCs.** The `solidcraft://` handler that [RFC 0018](0018-send-to-app.md) proposes for reporting back from a local program is the same operating-system registration this RFC needs. We register it once. It dispatches on the route in the link (`app-report` for RFC 0018, `install` here), and each route has its own rules:
+- RFC 0018's security rules apply to every route. The handler is opt-in (the installer asks, and the marketplace page has a button to register it later; no new Preferences row). Any web page or program can open such a link, so a link only ever asks the app to show something. It never runs a command, installs anything, opens a design or changes a setting. Links are rate limited (one pending install screen at a time, the rest dropped), and a link that fails validation is dropped with a message in the window.
+- The `app-report` route is ignored when SolidCraft is not running, as RFC 0018 says. The `install` route may start SolidCraft, or bring the running window forward, because opening the install screen is the whole point of the button and it only shows information. That difference is stated in the route table of the handler, not left to each route.
+
+**What the app does with a valid link.** It opens the Marketplace's item screen, ready to go: the item's name, its kind, its tier (Verified, Listed or Custom, as the index says; a repository the index does not list is Custom), the version, the permissions it asks for, and **Install** and **Cancel**.
+- For a Verified or Listed item the screen is filled from the cached signed index, so nothing is fetched to show it. **Install** downloads the package, checks it against the pinned hashes, and shows the existing approval screen with the package's own manifest. If the package asks for more than the screen showed, the app stops and shows the difference.
+- A **Custom** link (a repository that is not in the index) gets a second confirmation: the first screen shows only the repository, the kind, the tier ("Custom, not reviewed") and a **Look up on GitHub** button. Only that click fetches the repository's release, and the full screen with permissions follows, with the second step for high-risk grants that section 6 already requires.
+- Nothing installs without the click on Install, and an install from a link needs exactly the approvals an install from the Marketplace needs.
+- Links are commands too: `market.show` takes the same `{id}` or `{repo, kind, ref?}`, so a script does what the link does, with no dialog.
+
 **Everything is a command.** Browsing and installing have command forms with input and output schemas, so an agent or a script does what the page does, with no dialog:
 
 | Command | Does |
 |---|---|
 | `market.search` | `{query?, kind?, tier?}` returns cards from the cached snapshot |
-| `market.show` | `{id}` or `{repo}` returns the item page data for an index item or a Custom source |
+| `market.show` | `{id}` or `{repo}`, with `kind` and optional `ref`, returns the item page data for an index item or a Custom source (what an install link opens) |
 | `market.install` | `{id \| repo, version?, approval, archive, approve?, accept_unreviewed?}` the same dry-run, pin and approve rules as `plugin.install`, with the index's pins checked |
 | `market.updates` | Lists available updates and held-back ones, and why |
 | `market.refresh` | Fetches and verifies a new snapshot (the one network action; refuses if checks are off by policy) |
@@ -359,11 +402,11 @@ Installing and removing still run as separate `engine.execute` requests as `plug
 | Phase | Delivers |
 |---|---|
 | 0 | The `craft-market` crate: index and listing types and schema, signature verification, snapshot rules (sequence, expiry), the compatibility chooser, tests with fixed snapshots. `solidcraft-cli market check <dir>` for authors. The index repository with its build workflow, empty. |
-| 1 | The Marketplace rail entry and browse, item and installed pages on desktop. Listed and Custom install through the existing install flow, with tier headers and the second step for high-risk grants. `market.*` commands. Index-based update checks. Themes and shaders as the first content packs. |
+| 1 | The Marketplace rail entry and browse, item and installed pages on desktop. Listed and Custom install through the existing install flow, with tier headers and the second step for high-risk grants. `market.*` commands. Index-based update checks. The Install in SolidCraft button: the badge, the redirect page and the shared `solidcraft://` handler (section 13.1). Themes (with their shaders) as the first data kind. |
 | 2 | Verified tier: signed snapshot in releases, developers list, review checklist, attestation shown on the page, revocation list applied at start and daily. |
-| 3 | Content-pack sections `materials`, `samples`, `templates`, `tables`, each its own small RFC or issue; the "Get more" row under Samples fills with sample designs. |
+| 3 | Later kinds: `materials`, `samples`, `templates`, `tables`, each its own small RFC or issue; the "Get more" row under Samples fills with sample designs once a samples kind exists. |
 | 4 | Part generators: the `generators` declaration, `generator.find`, the insert-by-code form, design records and fallbacks. Index checks for `sources`. |
-| 5 | Web build: browse, then content packs from the Pages mirror, then plugins and generators with RFC 0002 phase 5. |
+| 5 | Web build: browse, then themes from the Pages mirror, then plugins and generators with RFC 0002 phase 5. |
 | 6 | Whatever people ask for: ratings, in-app attestation checks, a catalog-only generator, an automatic-update choice. |
 
 Phases 0 and 1 are one topic each and one PR each, per the project's rules. A phase is done when its tests pass, the screenshots (English and German, landscape) are in the PR, and, for phase 0, the schema and the signing choices were reviewed in the PR the way RFC 0002 reviews its phase 1.
@@ -382,5 +425,5 @@ Two questions are for the maintainers:
 - **Vendor data.** Dimensions and ordering codes from public datasheets are usable facts. Vendor CAD files and logos are not (section 12).
 - **Ratings** are facts only in v1 (section 9).
 - **Per-author signing keys** come later. v1 identifies trusted developers by their GitHub account or organization (section 7).
-- **The Home Assistant mapping** is as in section 2: integrations are plugins, community content is content packs, add-ons are not copied.
-- **Also decided here, open to comment:** build attestations are recorded and checked in the index build and in review, not inside the app, in v1; Custom is GitHub only in v1; the "could not check" notice for a stale revocation list appears after 30 days; the high-risk grants in section 6 start with folder writes, the `file` group, settings, other plugins and raised limits; the new content-pack capability names and formats are placeholders for their own proposals.
+- **The Home Assistant mapping** is as in section 2: integrations are plugins, community content is themes (and later kinds), add-ons are not copied.
+- **Also decided here, open to comment:** build attestations are recorded and checked in the index build and in review, not inside the app, in v1; Custom is GitHub only in v1; the "could not check" notice for a stale revocation list appears after 30 days; the high-risk grants in section 6 start with folder writes, the `file` group, settings, other plugins and raised limits; the capability names and formats of the later kinds are placeholders for their own proposals.
