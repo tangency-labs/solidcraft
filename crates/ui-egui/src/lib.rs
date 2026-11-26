@@ -264,6 +264,7 @@ pub mod new_window;
 pub use navigation::WebWheelGestures;
 pub mod network_prompt;
 pub mod op_auto;
+pub mod opacity_menu;
 pub mod open_elsewhere;
 pub(crate) mod open_meshing;
 pub mod operations;
@@ -2583,6 +2584,10 @@ impl SolveApp {
             }
             return;
         }
+        if id == "browser.opacity" {
+            opacity_menu::ask_for_selection(self);
+            return;
+        }
         // Dialog OK runs OK in the open dialog and starts nothing (#17416).
         if id == "ui.dialog_ok" {
             dialogs::confirm(self);
@@ -3775,7 +3780,32 @@ impl SolveApp {
     /// Visibility in the editor's scene: hidden face-profile sources are temporarily shown
     /// without changing the session's visibility or either history stack.
     pub(crate) fn body_visible(&self, name: &str) -> bool {
-        self.session.body_visible(name) || self.dialog.as_ref().is_some_and(|d| d.edit_source_bodies.iter().any(|source| source == name))
+        self.session.body_visible(name) || self.edits_source(name)
+    }
+
+    /// How much of its appearance's opacity the modelling view draws a body with, 0 to 1
+    /// (`browser.opacity`). The Render workspace draws bodies as their appearances say, and a body
+    /// at 0% that the open dialog takes its source from is drawn so too.
+    #[inline]
+    pub(crate) fn display_opacity(&self, name: &str) -> f64 {
+        if self.session.visibility.opacity.is_empty() || render_workspace::active(self) {
+            return 1.0;
+        }
+        match self.session.display_opacity(name) {
+            shown if shown <= 0.0 && self.edits_source(name) => 1.0,
+            shown => shown,
+        }
+    }
+
+    /// Does the open dialog take its source from this body, shown for it though it is hidden?
+    fn edits_source(&self, name: &str) -> bool {
+        self.dialog.as_ref().is_some_and(|d| d.edit_source_bodies.iter().any(|source| source == name))
+    }
+
+    /// Is a body drawn in the view, and picked there? A shown body at 0% ([`Self::display_opacity`])
+    /// is neither, though the Browser shows it as shown.
+    pub(crate) fn body_drawn(&self, name: &str) -> bool {
+        self.body_visible(name) && self.display_opacity(name) > 0.0
     }
 
     /// Everything shown as selected: the selection plus the open dialog's inputs.
@@ -5068,6 +5098,7 @@ impl SolveApp {
         context_menu::show(self, ui.ctx());
         mouse_gesture::show(self, ui.ctx());
         delete::show(self, ui.ctx());
+        opacity_menu::show(self, ui.ctx());
         easyprint_ui::show(self, ui.ctx());
         plugin_install::show(self, ui.ctx());
         import_report::show(self, ui.ctx());
@@ -5375,6 +5406,7 @@ mod test_support;
 /// `start`.
 const STARTED_WITH_VALUES: &[&str] = &[
     "body.print_face",
+    "browser.opacity",
     "browser.visibility",
     "component.move_features",
     "component.relink",

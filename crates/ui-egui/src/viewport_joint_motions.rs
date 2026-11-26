@@ -230,7 +230,7 @@ impl DragMotions {
             }
             let Some(body) = self.world.bodies.get(i) else { continue };
             let bounds = boxes.get(i).map_or(Aabb3::EMPTY, |(_, bb)| *bb);
-            if !app.body_visible(&body.name) || bounds.is_empty() {
+            if !app.body_drawn(&body.name) || bounds.is_empty() {
                 continue;
             }
             match carrier {
@@ -239,8 +239,8 @@ impl DragMotions {
                     self.slotless |= slot == UNMOVED_SLOT;
                     // A look of its own on a face may be see-through too; a painted face that is
                     // opaque is drawn as the body is.
-                    self.see_through |=
-                        self.doc.model_body_opacity(body) < 0.999 || self.doc.face_colors(body).iter().any(|(_, l)| l.opacity < 0.999);
+                    self.see_through |= self.doc.model_body_opacity(body) * app.display_opacity(&body.name) < 0.999
+                        || self.doc.face_colors(body).iter().any(|(_, l)| l.opacity < 0.999);
                     self.bodies.push(Moving { carrier, slot, bounds });
                 }
                 None => {

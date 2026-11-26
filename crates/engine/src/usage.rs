@@ -90,7 +90,7 @@ impl Drop for SourceGuard {
 /// the background of whatever the person does.
 pub fn counted(id: &str) -> bool {
     const BACKGROUND: [&str; 6] = ["select.", "view.", "camera.", "hover.", "navigation.", "ui."];
-    !BACKGROUND.iter().any(|prefix| id.starts_with(prefix)) && id != "browser.visibility"
+    !BACKGROUND.iter().any(|prefix| id.starts_with(prefix)) && !matches!(id, "browser.visibility" | "browser.opacity")
 }
 
 /// Who ran `id` and the id it counts as: a plugin's command is `plugin`, from a script.

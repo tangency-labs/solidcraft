@@ -3156,6 +3156,10 @@ fn what_an_isolate_hid_shows_see_through_or_as_edges_and_can_be_picked() {
         assert!(!crate::viewport::body_shown(&h.app, "B"), "clicks go through");
         h.app.run("view.isolate_others", json!({"pick": true})).unwrap();
         assert!(!crate::viewport::body_shown(&h.app, "C"), "hidden before the Isolate: never picked");
+        h.app.run("browser.opacity", json!({"percent": 0, "bodies": ["B"]})).unwrap();
+        assert!(crate::viewport::isolate_ghost(&h.app, "B").is_none(), "at 0%: not drawn at all");
+        assert!(!crate::viewport::body_shown(&h.app, "B"), "nor picked");
+        h.app.run("browser.opacity", json!({"percent": 100, "bodies": ["B"]})).unwrap();
     }
     h.app.run("view.isolate_others", json!({"show": "hidden"})).unwrap();
     assert_eq!(h.app.preferences.isolate_others, IsolateShow::Hidden);

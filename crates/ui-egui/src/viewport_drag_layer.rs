@@ -242,7 +242,7 @@ pub(super) fn scenes(app: &mut SolveApp) -> Option<MovingLayer> {
         if ground {
             let shown = layer.from.world.bodies.iter().zip(layer.boxes.iter()).enumerate();
             let corners = shown
-                .filter(|(_, (b, (_, bb)))| !bb.is_empty() && app.body_visible(&b.name))
+                .filter(|(_, (b, (_, bb)))| !bb.is_empty() && app.body_drawn(&b.name))
                 .flat_map(|(i, (_, (_, bb)))| {
                     let moved = layer.moving.get(i).copied().unwrap_or(false);
                     super::box_corners(bb).map(|p| if moved { solidcraft_engine::doc::apply_point(&layer.delta, p) } else { p })

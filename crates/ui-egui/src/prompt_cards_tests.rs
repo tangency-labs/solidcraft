@@ -284,6 +284,148 @@ fn save_prompt_frames_dont_save_and_clicking_it_discards_for_close_and_quit() {
     }
 }
 
+/// A box and the Custom Opacity card open for it.
+fn custom_opacity(percent: u8) -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+    h.app.run("browser.opacity", json!({"percent": percent, "bodies": ["Block"]})).unwrap();
+    let body = crate::context_menu::Target::Body { name: "Block".into() };
+    let item = crate::context_menu::entries(&h.app, &body).into_iter().find(|i| i.label == "Custom Opacity").unwrap();
+    crate::context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+    card_is_drawn(&mut h);
+    h
+}
+
+/// The rows of the box's Opacity menu with the check.
+fn checked_opacity(h: &Harness) -> Vec<String> {
+    let body = crate::context_menu::Target::Body { name: "Block".into() };
+    let opacity = crate::context_menu::items(&h.app, &body).into_iter().find(|i| i.label == "Opacity").unwrap();
+    opacity.children.into_iter().filter(|i| i.shortcut == "current").map(|i| i.label).collect()
+}
+
+fn block_opacity(h: &Harness) -> u8 {
+    h.app.session.visibility.opacity.body("Block")
+}
+
+#[test]
+fn custom_opacity_takes_a_whole_percentage_typed_over_the_current_one() {
+    let mut h = custom_opacity(70);
+    assert!(scenario::handle_at("dialog:Custom opacity %").is_some(), "the field says what it asks for");
+    assert_eq!(h.app.menu.opacity.as_ref().map(|p| p.text.as_str()), Some("70"), "it starts at the current one");
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"text": "35"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.menu.opacity.as_ref().map(|p| p.text.as_str()), Some("35"), "typing replaces it");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(3);
+    assert!(h.app.menu.opacity.is_none() && block_opacity(&h) == 35);
+    assert_eq!(checked_opacity(&h), ["Custom Opacity"]);
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+}
+
+#[test]
+fn custom_opacity_refuses_what_is_not_a_percentage_and_stays_open() {
+    let mut h = custom_opacity(70);
+    for wrong in ["101", "1.5", "-4", "abc"] {
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        h.step(&json!({"text": wrong})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(3);
+        assert!(h.app.menu.opacity.is_some() && block_opacity(&h) == 70, "{wrong}");
+        assert!(scenario::rect_of("dialog:report:opacity_error").is_some(), "{wrong}: it says why");
+    }
+    h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    h.step(&json!({"text": "0"})).unwrap();
+    press(&mut h, "OK");
+    assert!(h.app.menu.opacity.is_none() && block_opacity(&h) == 0);
+    assert_eq!(checked_opacity(&h), ["0%"], "typed or picked, a percentage with a row of its own checks that row");
+}
+
+#[test]
+fn custom_opacity_is_left_alone_by_escape_cancel_close_and_another_design() {
+    for leave in ["Escape", "Cancel", "close"] {
+        let mut h = custom_opacity(70);
+        h.step(&json!({"text": "20"})).unwrap();
+        match leave {
+            "Escape" => h.step(&json!({"key": "Escape"})).unwrap(),
+            "close" => h.step(&json!({"click": {"handle": "dialog:close"}})).unwrap(),
+            button => press(&mut h, button),
+        }
+        h.frames(3);
+        assert!(h.app.menu.opacity.is_none() && block_opacity(&h) == 70, "{leave}");
+    }
+    let mut h = custom_opacity(70);
+    h.app.run("file.new", json!({"name": "Other"})).unwrap();
+    h.frames(3);
+    assert!(h.app.menu.opacity.is_none(), "it was asked for another design");
+}
+
+/// Started without a menu (the command search, a key) it asks for the selection, and with nothing
+/// selected it says so; run with parameters it never asks.
+#[test]
+fn opacity_started_on_its_own_asks_for_the_selection() {
+    let mut h = custom_opacity(70);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    h.app.run("select.clear", json!({})).unwrap();
+    h.app.start("browser.opacity");
+    assert!(h.app.menu.opacity.is_none() && h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
+    h.app.run("select.set", json!({"items": [Sel::Body { name: "Block".into() }]})).unwrap();
+    h.app.start("browser.opacity");
+    assert!(h.app.menu.opacity.is_some());
+    h.app.menu.opacity = None;
+    h.app.run("browser.opacity", json!({"percent": 10, "bodies": ["Block"]})).unwrap();
+    assert!(h.app.menu.opacity.is_none() && block_opacity(&h) == 10);
+}
+
+/// With a feature dialog open under the card, Escape and Enter answer the card alone.
+#[test]
+fn custom_opacity_over_a_feature_dialog_takes_escape_and_enter_for_itself() {
+    // With the viewport's status off, nothing else keeps Escape from the dialog under a card.
+    for (status, key, percent) in [(true, "Escape", 70), (true, "Enter", 25), (false, "Escape", 70), (false, "Enter", 25)] {
+        let mut h = custom_opacity(70);
+        h.app.menu.opacity = None;
+        h.app.preferences.viewport_analysis_status = status;
+        h.app.preferences.viewport_section_status = status;
+        h.step(&json!({"start": "solid.fillet"})).unwrap();
+        let item = {
+            let body = crate::context_menu::Target::Body { name: "Block".into() };
+            crate::context_menu::entries(&h.app, &body).into_iter().find(|i| i.label == "Custom Opacity").unwrap()
+        };
+        crate::context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+        card_is_drawn(&mut h);
+        h.step(&json!({"text": "25"})).unwrap();
+        h.frames(2);
+        let features = h.app.session.doc.features.len();
+        h.step(&json!({ "key": key })).unwrap();
+        h.frames(3);
+        assert!(h.app.menu.opacity.is_none(), "{key} answers the card");
+        assert!(h.app.dialog.is_some(), "{key} leaves the dialog open (status {status})");
+        assert_eq!((block_opacity(&h), h.app.session.doc.features.len()), (percent, features), "{key}");
+    }
+}
+
+/// Opacity on a selection of a placement and another body sets both, and a body selected inside
+/// the placement only through it.
+#[test]
+fn opacity_of_a_mixed_selection_sets_the_placement_and_the_other_bodies() {
+    let mut h = custom_opacity(100);
+    h.app.menu.opacity = None;
+    let part = h.app.run("component.create", json!({"name": "K"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0], "body_name": "Inner"})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let picked = vec![Sel::Body { name: "Block".into() }, Sel::Body { name: "Inner".into() }, Sel::Occurrence { path: vec![part] }];
+    h.app.run("select.set", json!({ "items": picked })).unwrap();
+    h.app.start("browser.opacity");
+    card_is_drawn(&mut h);
+    h.step(&json!({"text": "40"})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(3);
+    let set = &h.app.session.visibility.opacity;
+    assert_eq!((set.body("Block"), set.body("Inner"), set.placement(&[part])), (40, 100, 40), "{set:?}");
+}
+
 #[test]
 fn needs_capture_ignores_explode_show_and_prompts_for_driven_joints_with_revert_and_cancel() {
     let mut h = Harness::new();

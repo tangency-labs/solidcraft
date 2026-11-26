@@ -237,8 +237,10 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, format!("moving {} would break {}: {error}", o.name, f.name)));
         }
     }
+    let names = s.placed_body_names();
     s.accept_computed(scratch)?;
     follow_visibility(s, &old_path, &new_path);
+    s.follow_moved_body_opacity(&names, &[(old_path, new_path.clone())]);
     Ok(json!({"occurrence": id, "parent": to, "path": new_path, "transform": transform}))
 }
 
@@ -249,6 +251,11 @@ pub(super) fn follow_visibility(s: &mut Session, old_path: &[u64], new_path: &[u
         if let Some(moved) = rebased(hidden, old_path, new_path) {
             *hidden = moved;
         }
+    }
+    let mut opacity = (*s.visibility.opacity).clone();
+    opacity.move_placements(|path| rebased(path, old_path, new_path));
+    if opacity != *s.visibility.opacity {
+        s.visibility.opacity = opacity.into();
     }
     let (old_scope, new_scope) = (Session::folder_scope(old_path), Session::folder_scope(new_path));
     for key in &mut s.visibility.hidden_folders {

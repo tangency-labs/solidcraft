@@ -21,11 +21,18 @@ pub(crate) struct Source {
     mesh: Arc<Mesh>,
     placement: Mat,
     inverse: Mat,
+    /// How much of its lines' opacity is shown.
+    shown: f64,
 }
 
 impl Source {
     pub fn new(mesh: Arc<Mesh>, placement: Mat) -> Option<Self> {
-        Some(Self { mesh, inverse: mat_inverse(&placement)?, placement })
+        Some(Self { mesh, inverse: mat_inverse(&placement)?, placement, shown: 1.0 })
+    }
+
+    /// The same, its lines shown with `shown` of their opacity.
+    pub fn shown(self, shown: f64) -> Self {
+        Self { shown, ..self }
     }
 
     fn view(&self, view: SilhouetteView) -> SilhouetteView {
@@ -55,6 +62,8 @@ pub(crate) struct Outlines {
     body: usize,
     edge: usize,
     segments: Vec<[Vec3; 2]>,
+    /// How much of each segment's opacity is shown, in their order.
+    shown: Vec<f64>,
     generation: u64,
 }
 
@@ -81,6 +90,7 @@ impl Outlines {
         self.edge = 0;
         self.source = None;
         self.segments.clear();
+        self.shown.clear();
         self.generation = self.generation.wrapping_add(1);
     }
 
@@ -88,8 +98,14 @@ impl Outlines {
         self.generation
     }
 
+    #[cfg(test)]
     pub fn segments(&self) -> &[[Vec3; 2]] {
         &self.segments
+    }
+
+    /// The segments, each with how much of its opacity is shown.
+    pub fn lines(&self) -> impl Iterator<Item = ([Vec3; 2], f64)> + '_ {
+        self.segments.iter().copied().zip(self.shown.iter().copied())
     }
 
     pub fn busy(&self) -> bool {
@@ -153,6 +169,7 @@ impl Outlines {
                         let segment = segment.map(|p| apply_point(&current.placement, p));
                         if segment.iter().all(|p| [p.x, p.y, p.z].iter().all(|v| v.is_finite() && v.abs() <= f64::from(f32::MAX))) {
                             self.segments.push(segment);
+                            self.shown.push(current.shown);
                         }
                     }
                 } else {

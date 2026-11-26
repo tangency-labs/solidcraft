@@ -251,7 +251,7 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool, own:
         (doc.saved_sections.is_empty(), "saved section analyses"),
         (doc.browser_groups.is_empty() && doc.browser_order.is_empty(), "Browser folders and order"),
         (doc.timeline_groups.is_empty(), "timeline folders"),
-        (doc.visibility.is_empty(), "hidden items"),
+        (doc.visibility.is_empty(), "hidden items and display opacity"),
     ] {
         if !empty {
             omitted.push(what.to_string());

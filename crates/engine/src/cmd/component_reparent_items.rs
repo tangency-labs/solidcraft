@@ -144,9 +144,11 @@ pub(super) fn reparent_items(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // The steps above are this command's one undo step.
     sc.undo.clear();
+    let names = s.placed_body_names();
     s.accept_computed(sc)?;
     for (old, new) in &followed {
         follow_visibility(s, old, new);
     }
+    s.follow_moved_body_opacity(&names, &followed);
     Ok(json!({"component": dest, "occurrences": moved_placements, "features": moved_features, "bodies": bodies_to_move}))
 }

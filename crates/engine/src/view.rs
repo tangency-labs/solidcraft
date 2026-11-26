@@ -1064,6 +1064,11 @@ fn build_scene(
     // Where the section cuts each closed solid body, by its mesh in `sc.meshes`: their hatches.
     let mut cuts: Vec<(usize, u64, Vec<(Vec3, Vec3)>)> = Vec::new();
     for body in st.bodies.iter().filter(|b| s.body_visible(&b.name)) {
+        // How much of its opacity the body is shown with (`browser.opacity`): none is not drawn.
+        let shown = s.display_opacity(&body.name) as f32;
+        if shown <= 0.0 {
+            continue;
+        }
         let selected = selected_occurrences.contains(&body.name) || s.selection.iter().any(|x| matches!(x, Sel::Body { name } if *name == body.name));
         let mesh = body.mesh();
         // The body's appearance (or imported colour) and faces with looks of their own, as in
@@ -1082,14 +1087,15 @@ fn build_scene(
             s.doc.face_colors(body).into_iter().map(|(f, l)| (f as u32, Rgb(l.color[0], l.color[1], l.color[2]))).collect()
         };
         // A see-through appearance is drawn see-through, as the viewport draws it; a selected
-        // body is drawn solid, so the selection colour reads.
+        // body is drawn solid but for its display opacity, so the selection colour reads.
         let opacity = if selected { 1.0 } else { s.doc.model_body_opacity(body) as f32 };
-        let cut_solid = !section.is_empty() && body.is_closed() && opacity >= solidcraft_viewport::SEE_THROUGH;
+        let cut_solid = !section.is_empty() && body.is_closed() && opacity * shown >= solidcraft_viewport::SEE_THROUGH;
         sc.meshes.push(SceneMesh {
             mesh: Arc::clone(&mesh),
             color,
             face_colors,
             opacity,
+            shown,
             closed: body.is_closed(),
             hatch: Default::default(),
             values: None,
@@ -1097,6 +1103,7 @@ fn build_scene(
         let at = sc.meshes.len() - 1;
         if cosmetic_threads
             && thread_budget.available()
+            && shown >= solidcraft_viewport::SEE_THROUGH
             && s.doc.model_body_opacity(body) >= 0.999
             && s.doc.face_colors(body).iter().all(|(_, l)| l.opacity >= 0.999)
         {
@@ -1108,7 +1115,7 @@ fn build_scene(
             if !mesh.shaded_edge_visible(i) {
                 continue;
             }
-            sc.lines.push(SceneLine { points: e.clone(), color: p.edge, alpha: 1.0, width: 1.2, on_top: false });
+            sc.lines.push(SceneLine { points: e.clone(), color: p.edge, alpha: shown, width: 1.2, on_top: false });
         }
         // The outline of the body where each section plane cuts what the section keeps, and
         // where two planes' cuts meet.
@@ -1117,7 +1124,7 @@ fn build_scene(
             let cut = section_segments(&mesh, c.origin, c.normal);
             let creases = if section.len() > 1 { section_creases(&cut, &section, i, section_nudge(&mesh)) } else { Vec::new() };
             for (a, b) in cut.into_iter().filter_map(|(a, b)| outline_part(a, b, &section, i)).chain(creases) {
-                sc.lines.push(SceneLine { points: vec![a, b], color: p.edge, alpha: 1.0, width: 1.6, on_top: false });
+                sc.lines.push(SceneLine { points: vec![a, b], color: p.edge, alpha: shown, width: 1.6, on_top: false });
                 segments.push((a, b));
             }
         }
