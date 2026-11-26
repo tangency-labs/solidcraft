@@ -16,7 +16,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 use super::check::whole;
-use super::types::{FaceRefs, FeatureCommon, PlaneParam, SketchRef, ToolFace, feature_common};
+use super::types::{FaceRefs, FeatureCommon, PlaneParam, Point3, SketchRef, ToolFace, feature_common};
 
 /// Cut a body into pieces along a plane, a face of another body (its surface extended), or a
 /// straight sketch line (along the sketch's normal). Each piece becomes a body.
@@ -34,6 +34,18 @@ pub struct SplitBodyParams {
     /// remain planar. Default: false, use its extended surface and its sheet.
     #[serde(default)]
     pub tool_plane: Option<bool>,
+    /// With `tool`: what of the tool body cuts. `extended` (the default): the face's surface
+    /// extended. `faces`: the `tool` face and the faces at `tool_faces`, exactly as they are, not
+    /// extended. `body`: every face of the tool's surface body, exactly as it is.
+    #[serde(default)]
+    pub tool_sheet: Option<ToolSheet>,
+    /// With `tool_sheet` `faces`: a point on each other face of the tool body that cuts.
+    #[serde(default)]
+    pub tool_faces: Option<Vec<Point3>>,
+    /// With `tool_sheet` `body`: more surface bodies, by name, that cut with the tool's body,
+    /// each whole and exactly as it is. Each cuts the pieces it crosses through and must cut one.
+    #[serde(default)]
+    pub tool_bodies: Option<Vec<String>>,
     /// With `line`: the sketch, by feature id (not its name), whose line splits the body.
     #[serde(default)]
     pub sketch: Option<SketchFeatureId>,
@@ -79,6 +91,18 @@ pub struct SplitFaceParams {
     pub plane: Option<PlaneParam>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
+}
+
+/// What of Split Body's tool body cuts (`tool_sheet`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolSheet {
+    /// The tool face's surface, extended.
+    Extended,
+    /// The picked faces, exactly as they are.
+    Faces,
+    /// Every face of the tool's surface body, exactly as it is.
+    Body,
 }
 
 /// Split Body's `body`, with the handler's message for anything that isn't text.

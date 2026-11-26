@@ -66,12 +66,21 @@
 //! `InvertPointNearSingularity` refuses an answer proven farther from the test point
 //! than its guess, the evaluations' rounding bounded from the net (upstream reports it
 //! found); a maximize keeps the farthest drop, or its guess reported unconverged.
+//! Solutions carry a contact upstream has none of
+//! ([`crate::geom::solution_array::Contact`]): the line solve's removal of repeated
+//! solutions leaves the one kept with the [`Contact::merged`] of both, a crossing for two
+//! crossings only where one lies in the other's certified unique box, and its join across a
+//! coincident stretch gives the range it builds or extends the [`Contact::absorbed`] of
+//! both (unclassified only when both are).
+//! The solutions of the line solve carry the side record of its certified pass
+//! ([`crate::geom::solution_array::SideRecord`]), scaled back with them and, for a ray,
+//! kept to what starts before the one solution it keeps; nothing reads it yet.
 //! Unported callees return [`SolidError::Unported`], also where upstream ignores the
 //! status. Recursion: none.
 
 use super::p1::{
-    get_surface_cache, is_node_valid, is_point_valid_with as is_point_valid, OperandDomain,
-    SolveOperands, SurfaceSolveContext,
+    get_surface_cache, is_node_valid, is_point_valid_with as is_point_valid, LentSurfaceCache,
+    OperandDomain, SolveOperands, SurfaceSolveContext,
 };
 use super::p2::{
     original_surface, CrossSectionValues, DerivSurfDefinition, LsiGlobalSolver, Surface,
@@ -98,7 +107,8 @@ use crate::geom::global_solver::{GlobalSolve, SolutionRequested, SolveRequest, S
 use crate::geom::local_solve_nd::TerminationReason;
 use crate::geom::polar_box::{PolarBox, PolarBoxState};
 use crate::geom::solution_array::{
-    OperandObject, Solution, SolutionArray, SolutionObject, SolutionType, SortKey,
+    Contact, OperandObject, SideRecord, Solution, SolutionArray, SolutionObject, SolutionType,
+    SortKey,
 };
 use crate::geom::tol::are_same;
 use crate::geom::vector2d::{Point2, Vec2};
@@ -116,7 +126,7 @@ use crate::nurbs::knots::Side;
 use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
 use crate::surface::plane::Coincidence;
 use crate::surface::surface::p7::SpGlobalSolver;
-use crate::surface::surface_cache::p1::SurfaceCache;
+use crate::surface::surface_cache::p1::{SolveModes, SurfaceCache};
 use crate::surface::surface_cache::BezierPatch;
 use std::borrow::Cow;
 use std::sync::OnceLock;
@@ -160,6 +170,17 @@ pub trait FaceSolveCache<O> {
     ///
     /// Those of `SmFace::PointClassify`.
     fn point_test(&mut self, k: &Kernel, uv: Point2) -> Result<bool>;
+
+    /// The fast drop's trim test of the face's surface in a point solve the line solve
+    /// makes on it (`pFace->PointClassify(uv, src_tol, TRUE, FALSE, ..)` in
+    /// `SmSurface::GlobalPointSolve`, upstream through the surface's `GetFace`): whether
+    /// the solution at `uv` is kept (true when the test does not run: the cache is not
+    /// trimmed, point testing is off or the face was modified).
+    ///
+    /// # Errors
+    ///
+    /// Those of `SmFace::PointClassify` that upstream does not ignore.
+    fn fast_drop_test(&mut self, k: &Kernel, uv: Point2, src_tol: f64) -> Result<bool>;
 }
 
 const OP_KNOTS: &str = "surface::surface::p8::Surface::find_knots_by_max_continuity";
@@ -312,13 +333,31 @@ fn evaluate_3x3_into(
 /// shows nothing) when either cannot be evaluated there. Upstream ignores both statuses
 /// and compares whatever the arrays held; the fork passes them on and fails the whole
 /// check (WR-663, tangency-labs/smlib 21dcf69).
+///
+/// Not upstream (#16870): `false` too where one surface's parameterisation is singular at its
+/// sample (one first derivative vanishing against the other: a sphere's pole) and the other's
+/// is not. Normal curvatures are read from the first fundamental form, which is degenerate at
+/// the singular one, so its readings say nothing of its shape to compare with the regular
+/// one's: at a sphere's pole the curvature along a cylinder's axis read so is 0, the
+/// cylinder's, and a cylinder whose rim is a great circle of the sphere through its poles was
+/// taken for the sphere itself. Where both are singular (a surface with a pole against itself)
+/// the sample is compared as upstream compares it.
 fn evaluate_pair(
     k: &Kernel,
     (sa, uva, pa): (&Surface, Point2, &mut [[Vec3; 3]; 3]),
     (sb, uvb, pb): (&Surface, Point2, &mut [[Vec3; 3]; 3]),
 ) -> Result<bool> {
     Ok(ignored(evaluate_3x3_into(k, sa, uva, pa))?.is_some()
-        && ignored(evaluate_3x3_into(k, sb, uvb, pb))?.is_some())
+        && ignored(evaluate_3x3_into(k, sb, uvb, pb))?.is_some()
+        && regular(pa) == regular(pb))
+}
+
+/// Whether a surface sampled into `p` ([`evaluate_3x3_into`]: `p[1][0]` is `S_u`, `p[0][1]`
+/// is `S_v`) is regular there: neither first derivative vanishes against the other, to the
+/// square root of effective zero.
+fn regular(p: &[[Vec3; 3]; 3]) -> bool {
+    let (su, sv) = (p[1][0].length(), p[0][1].length());
+    su.min(sv) > EFF_ZERO_SQRT * su.max(sv)
 }
 
 /// The B-spline part of a curve of a kind derived from `SmBSplineCurve`.
@@ -1560,6 +1599,23 @@ impl Surface {
         }
     }
 
+    /// [`Surface::solve_cache_from_context`] for a solve that only reads the cache: the
+    /// context's lent cache ([`SurfaceSolveContext::lend_surface_cache`]).
+    fn lent_cache_from_context<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        handle: Option<O>,
+        op: &'static str,
+        context: Option<&mut dyn SurfaceSolveContext<O>>,
+    ) -> Result<LentSurfaceCache<O>> {
+        match context {
+            None => self
+                .solve_cache_of(k, handle, op)
+                .map(LentSurfaceCache::Owned),
+            Some(context) => context.lend_surface_cache(k, self, handle),
+        }
+    }
+
     /// Intersections of the line `line_point + t * line_vector` with the surface over
     /// `uv_domain` (`GlobalLineIntersect`): the plane override for a plane, else
     /// [`Surface::base_global_line_intersect`]. `surface` is this surface's handle in
@@ -1614,30 +1670,19 @@ impl Surface {
         fire_ray: bool,
         distance_tolerance: f64,
     ) -> Result<SolutionArray<O>> {
-        match self.kind() {
-            SurfaceKind::Plane(p) => p.global_line_intersect_in(
-                k,
-                surface,
-                cache,
-                uv_domain,
-                line_point,
-                line_vector,
-                line_interval,
-                fire_ray,
-                distance_tolerance,
-            ),
-            _ => self.base_global_line_intersect_in(
-                k,
-                surface,
-                cache,
-                uv_domain,
-                line_point,
-                line_vector,
-                line_interval,
-                fire_ray,
-                distance_tolerance,
-            ),
-        }
+        self.global_line_intersect_under(
+            k,
+            surface,
+            cache,
+            None,
+            None,
+            uv_domain,
+            line_point,
+            line_vector,
+            line_interval,
+            fire_ray,
+            distance_tolerance,
+        )
     }
 
     /// [`Surface::global_line_intersect`] with caller-supplied topology prepared
@@ -1660,10 +1705,52 @@ impl Surface {
         fire_ray: bool,
         distance_tolerance: f64,
     ) -> Result<SolutionArray<O>> {
-        match self.kind() {
+        self.global_line_intersect_under(
+            k,
+            surface,
+            cache,
+            Some(context),
+            None,
+            uv_domain,
+            line_point,
+            line_vector,
+            line_interval,
+            fire_ray,
+            distance_tolerance,
+        )
+    }
+
+    /// [`Surface::global_line_intersect_in`] (no `context`) or
+    /// [`Surface::global_line_intersect_with_context`], the solve running in `modes`
+    /// (`None`: the surface cache's own, [`SolveModes::of`]). The caller's cache keeps
+    /// its flags.
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's body.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn global_line_intersect_under<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        surface: Option<O>,
+        cache: Option<&mut SurfaceCache<O>>,
+        context: Option<&mut dyn SurfaceSolveContext<O>>,
+        modes: Option<SolveModes>,
+        uv_domain: &Extent2d,
+        line_point: Point3,
+        line_vector: Vec3,
+        line_interval: Option<&Extent1d>,
+        fire_ray: bool,
+        distance_tolerance: f64,
+    ) -> Result<SolutionArray<O>> {
+        let source = match cache {
+            Some(cache) => LineCacheSource::Caller(cache),
+            None => LineCacheSource::Fresh,
+        };
+        match (self.kind(), context) {
             // (the plane's base solve runs on this surface, its face's, with the
             // caller's cache and context)
-            SurfaceKind::Plane(p) => p.global_line_intersect_with_base(
+            (SurfaceKind::Plane(p), Some(context)) => p.global_line_intersect_with_base(
                 uv_domain,
                 line_point,
                 line_vector,
@@ -1674,11 +1761,9 @@ impl Surface {
                     self.base_global_line_intersect_from(
                         k,
                         surface,
-                        match cache {
-                            Some(cache) => LineCacheSource::Caller(cache),
-                            None => LineCacheSource::Fresh,
-                        },
+                        source,
                         Some(context),
+                        modes,
                         uv_domain,
                         line_point,
                         line_vector,
@@ -1688,14 +1773,37 @@ impl Surface {
                     )
                 },
             ),
-            _ => self.base_global_line_intersect_from(
+            // (without a context, `Plane::global_line_intersect_in`: the base solve
+            // runs on the bare plane)
+            (SurfaceKind::Plane(p), None) => p.global_line_intersect_with_base(
+                uv_domain,
+                line_point,
+                line_vector,
+                line_interval,
+                fire_ray,
+                distance_tolerance,
+                |sub_interval| {
+                    Surface::from(p.clone()).base_global_line_intersect_from(
+                        k,
+                        surface,
+                        source,
+                        None,
+                        modes,
+                        uv_domain,
+                        line_point,
+                        line_vector,
+                        Some(sub_interval),
+                        fire_ray,
+                        distance_tolerance,
+                    )
+                },
+            ),
+            (_, context) => self.base_global_line_intersect_from(
                 k,
                 surface,
-                match cache {
-                    Some(cache) => LineCacheSource::Caller(cache),
-                    None => LineCacheSource::Fresh,
-                },
-                Some(context),
+                source,
+                context,
+                modes,
                 uv_domain,
                 line_point,
                 line_vector,
@@ -1772,6 +1880,7 @@ impl Surface {
             k,
             surface,
             source,
+            None,
             None,
             uv_domain,
             line_point,
@@ -1884,6 +1993,7 @@ impl Surface {
                 Some(surface),
                 LineCacheSource::Held(held),
                 context,
+                None,
                 uv_domain,
                 line_point,
                 line_vector,
@@ -1935,6 +2045,7 @@ impl Surface {
                 Some(surface),
                 LineCacheSource::Face(face_cache),
                 None,
+                None,
                 uv_domain,
                 line_point,
                 line_vector,
@@ -1946,7 +2057,7 @@ impl Surface {
     }
 
     /// The body of [`Surface::base_global_line_intersect_in`] with the cache from
-    /// `source`.
+    /// `source`, the solve running in `modes` (`None`: the cache's own).
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn base_global_line_intersect_from<O: SolutionObject>(
         &self,
@@ -1954,6 +2065,7 @@ impl Surface {
         surface: Option<O>,
         source: LineCacheSource<'_, O>,
         mut context: Option<&mut dyn SurfaceSolveContext<O>>,
+        modes: Option<SolveModes>,
         uv_domain: &Extent2d,
         line_point: Point3,
         line_vector: Vec3,
@@ -2015,7 +2127,7 @@ impl Surface {
                 }
             }
             LineCacheSource::Fresh => {
-                built = self.solve_cache_from_context(
+                built = self.lent_cache_from_context(
                     k,
                     surface,
                     OP_LINE,
@@ -2027,10 +2139,18 @@ impl Surface {
                 // delays its tree builds it now
                 // The context already performed the owning face's virtual GetTree.
                 // Re-entering the bare base cache cannot rebuild a face-owned tree.
-                if context.is_some() && built.tree().is_some() {
-                    &built
+                // (only a context lends a shared cache, and with its tree)
+                let ready = match &built {
+                    LentSurfaceCache::Shared(_) => true,
+                    LentSurfaceCache::Owned(c) => context.is_some() && c.tree().is_some(),
+                };
+                if ready {
+                    &*built
                 } else {
-                    Self::held_cache(k, &mut built, OP_LINE)?
+                    match &mut built {
+                        LentSurfaceCache::Owned(c) => Self::held_cache(k, c, OP_LINE)?,
+                        LentSurfaceCache::Shared(c) => &**c,
+                    }
                 }
             }
             LineCacheSource::Held(kept) => {
@@ -2052,6 +2172,12 @@ impl Surface {
         let face_queries = context
             .as_deref()
             .and_then(SurfaceSolveContext::face_queries);
+        // (not upstream) the searches of the certified pass the operation keeps (none with
+        // the memos off: every solve searches)
+        let line_passes = context
+            .as_deref()
+            .and_then(SurfaceSolveContext::line_passes)
+            .filter(|_| k.memoize_curve_caches);
         let tree = cache.tree().ok_or_else(|| {
             Failure::new(
                 OP_LINE,
@@ -2097,8 +2223,20 @@ impl Surface {
             distance_tolerance,
         );
         gs.surface_cache = Some(cache);
+        gs.modes = modes;
         gs.face_queries = face_queries;
-        gs.face_cache = face_cache;
+        gs.face_cache = match face_cache.as_mut() {
+            Some(f) => Some(&mut **f),
+            None => None,
+        };
+        // (not upstream) the net the certified pass runs on, for the kinds whose net is
+        // the surface; a net that cannot be made leaves the guesses alone, as upstream
+        let net = match super::certified_line::LineNet::of(k, cache.surface()) {
+            Ok(net) => net,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => None,
+        };
+        let mut gs = super::p10::CertifiedLsi::new(gs, net, line_passes);
 
         // traverse curve and surface sub-division trees
         // for each sub-division leaf pair that has intersecting boundaries
@@ -2113,6 +2251,13 @@ impl Surface {
             },
             &mut sols,
         )?;
+        // (not upstream) the certified pass: the crossings the leaves' guesses left
+        // (`surface::surface::p10`, module docs), added to the solve's solutions
+        // with what it left undecided beside them, the side record
+        std::mem::swap(&mut gs.solver.base.solutions, &mut sols);
+        let certified = gs.certified_pass(k);
+        std::mem::swap(&mut gs.solver.base.solutions, &mut sols);
+        sols.set_side_record(certified?);
         // restore the original scaling to solution parameters
         for sol in sols.as_mut_slice() {
             *sol.start.param_mut(0)? /= scale;
@@ -2120,10 +2265,17 @@ impl Surface {
                 *sol.end.param_mut(0)? /= scale;
             }
         }
+        // (not upstream) and to the side record's
+        let record = sols.take_side_record().unscaled(scale);
+        sols.set_side_record(record);
 
         // If we are rayfiring then we need only the solution closest to the start of
         // the line.
         if fire_ray && !sols.is_empty() {
+            // (not upstream) the side record keeps what starts before that solution
+            let first = sols.get_at(0)?.start.param(0)?;
+            let record = sols.take_side_record().before(first);
+            sols.set_side_record(record);
             sols.set_size(1);
         }
 
@@ -2148,42 +2300,7 @@ impl Surface {
             ),
         ];
 
-        // for every pair of solutions - find and remove repeated solutions
-        let mut ii = 0;
-        while ii < sols.len() {
-            let mut jj = ii + 1;
-            while jj < sols.len() {
-                let si = sols.get_at(ii)?;
-                let sj = sols.get_at(jj)?;
-                let mut same = si.solution_type == sj.solution_type;
-                for (kk, tol) in param_tol.iter().enumerate() {
-                    if !same {
-                        break;
-                    }
-                    // check type and params to see if they are the same
-                    if (si.start.param(kk)? - sj.start.param(kk)?).abs() > *tol
-                        || (si.solution_type == SolutionType::RangeOfValues
-                            && (si.end.param(kk)? - sj.end.param(kk)?).abs() > *tol)
-                    {
-                        same = false;
-                    }
-                }
-
-                // remove duplicates
-                if same {
-                    // save the best solution
-                    if si.start.solution_value > sj.start.solution_value {
-                        sols.set_at(ii, &sj)?;
-                    }
-
-                    // remove the worst duplicate
-                    sols.remove_at(jj, 1);
-                } else {
-                    jj += 1;
-                }
-            }
-            ii += 1;
-        }
+        remove_repeated_solutions(&mut sols, &param_tol)?;
         // Now classify SolutionPoints to exclude a total coincident case.
         //  Points are not coincident when
         //   1. line tangent is not perp to surface normal,
@@ -2245,9 +2362,11 @@ impl Surface {
             let line = Curve::from(line);
 
             // Check Surface/LineSegment Coincidence (its point solve reaches the
-            // surface's face through the caller's context, when there is one)
+            // surface's face through the caller's context, when there is one, else
+            // through the caller holding the face: upstream's surface knows its face)
+            // (its fast drop tests the face only when the solve's point testing is on)
             let found = if let Some(context) = context.as_deref_mut() {
-                self.simple_coincidence_checker_with_context::<O>(
+                self.simple_coincidence_checker_from::<O>(
                     k,
                     uv_domain,
                     &line,
@@ -2256,7 +2375,20 @@ impl Surface {
                     true, // bAllowPartialCoinc [B122]
                     [None, surface],
                     Some(cache),
-                    context,
+                    Some(context),
+                    modes.is_some_and(|m| !m.point_test_enabled),
+                    None,
+                )?
+            } else if let Some(face) = face_cache {
+                self.simple_coincidence_checker_face_tested::<O>(
+                    k,
+                    uv_domain,
+                    &line,
+                    &line_interval_used,
+                    distance_tolerance,
+                    true, // bAllowPartialCoinc [B122]
+                    [None, surface],
+                    &mut |k, uv, tol| face.fast_drop_test(k, uv, tol),
                 )?
             } else {
                 self.simple_coincidence_checker::<O>(
@@ -2272,7 +2404,20 @@ impl Surface {
 
             // Put the end points of the intersection into separate solutions
             if found.is_some() {
+                // (not upstream) the side record outlives the reset: a pass that ran stays
+                // a pass that ran. The points it added go with the guesses', as upstream
+                // replaces every point by the coincident ranges (each point here has the
+                // line square to the normal within EFF_ZERO_RAD, so a crossing the pass
+                // certified, of a regular Jacobian, reaches here only that near tangency),
+                // and what it typed was typed against those points: nothing it decided
+                // stands for the ranges, so the whole line is undecided (a crossing dropped
+                // is never read as absent). A pass that did not run stays not run.
+                let record = match sols.take_side_record() {
+                    SideRecord::NotRun => SideRecord::NotRun,
+                    _ => SideRecord::undecided(Vec::new()),
+                };
                 sols.reset();
+                sols.set_side_record(record);
 
                 // (the drop's trace gets the surface's cache, `smsurf_GetSurfaceCache`:
                 // the caller's, else the face's through a face-aware context)
@@ -2484,52 +2629,8 @@ impl Surface {
             // Part 2: Arrive here when Line BetweenIvl is classified as
             // Coincident/NotCoincident
             if do_combine {
-                // BetweenIvl Solution locals
-                let mut last_sol = last_sol;
-                let last_original_type = last_sol.solution_type;
-
-                // Set last solution to range
-                last_sol.solution_type = SolutionType::RangeOfValues;
-
-                // if CurrSol is a range
-                if curr_sol.solution_type == SolutionType::RangeOfValues {
-                    // When LastEnd < rCurrStart - set LastEnd = CurrStart
-                    //  note: need to check because may have opposite sorting due to
-                    //  tolerances
-                    if last_end.param(0)? < curr_start.param(0)? {
-                        last_sol.end = curr_sol.end;
-                        let (start, end) = (last_sol.start.param(0)?, last_sol.end.param(0)?);
-                        if start > end {
-                            return Err(SolidError::surface(
-                                OP_LINE,
-                                SurfaceFailure::MergedRangeReversed { start, end },
-                            ));
-                        }
-                    }
-                } else {
-                    // if CurrSol is a point
-
-                    // shortIvl tolerance: Note, SM_EFF_ZERO is too small to use here.
-                    let tol =
-                        line_interval.map_or(EFF_ZERO * 100.0, |i| EFF_ZERO * 100.0 * i.length());
-
-                    // when interval is too short - don't create really short range
-                    // solution
-                    if (last_sol.start.param(0)? - curr_sol.start.param(0)?).abs() < tol {
-                        // restore last interval
-                        last_sol.solution_type = last_original_type;
-                    } else {
-                        // set LastSolution end value
-                        last_sol.end = curr_sol.start;
-
-                        // If have opposite sorting because of tolerancing, swap the
-                        // ends of rLastSol.
-                        if last_sol.start.param(0)? > last_sol.end.param(0)? {
-                            std::mem::swap(&mut last_sol.end, &mut last_sol.start);
-                        }
-                    }
-                }
-                sols.set_at(processed_end, &last_sol)?;
+                let joined = join_across_coincidence(last_sol, &curr_sol, line_interval)?;
+                sols.set_at(processed_end, &joined)?;
             } else {
                 // Move current solution down to end of processed list - increment
                 // processed count
@@ -2610,6 +2711,7 @@ impl Surface {
             handles,
             cache,
             None,
+            None,
             uv_domain,
             curve,
             interval,
@@ -2640,6 +2742,7 @@ impl Surface {
             handles,
             cache,
             Some(context),
+            None,
             uv_domain,
             curve,
             interval,
@@ -2647,19 +2750,31 @@ impl Surface {
         )
     }
 
+    /// [`Surface::global_curve_intersect_in`] (no `context`) or
+    /// [`Surface::global_curve_intersect_with_context`], the solve running in `modes`
+    /// (`None`: the surface cache's own, [`SolveModes::of`]): its tree solves, line
+    /// solve and point solves read them, and the caller's cache keeps its flags. The
+    /// point solves' fast drop tests the face only when the solve's point testing is
+    /// on and the cache's is too.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::global_curve_intersect`].
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
-    fn global_curve_intersect_from<O: SolutionObject>(
+    pub(crate) fn global_curve_intersect_from<O: SolutionObject>(
         &self,
         k: &Kernel,
         handles: [Option<O>; 2],
         mut cache: Option<&mut SurfaceCache<O>>,
         mut context: Option<&mut dyn SurfaceSolveContext<O>>,
+        modes: Option<SolveModes>,
         uv_domain: &Extent2d,
         curve: &Curve,
         interval: &Extent1d,
         distance_tolerance: f64,
     ) -> Result<SolutionArray<O>> {
         let [curve_handle, surface_handle] = handles;
+        let point_test_off = modes.is_some_and(|m| !m.point_test_enabled);
 
         // Special case DegenerateCurve/Surface intersections
         if curve.is_degenerate(k, EFF_ZERO, Some(interval))? {
@@ -2669,7 +2784,13 @@ impl Surface {
             // call found before failing stays in the solutions)
             let mut sols: SolutionArray<O> = SolutionArray::new();
             let solve = if let Some(context) = context {
-                self.global_point_solve_into_with_context(
+                let point_solve = if point_test_off {
+                    Self::global_point_solve_into_with_context_point_test_off
+                } else {
+                    Self::global_point_solve_into_with_context
+                };
+                point_solve(
+                    self,
                     k,
                     surface_handle,
                     cache.as_deref(),
@@ -2731,32 +2852,19 @@ impl Surface {
                 let line_point = p0 - interval.min() * d1;
 
                 // pass call to global surface/line intersect
-                let mut sols = if let Some(context) = context {
-                    self.global_line_intersect_with_context(
-                        k,
-                        surface_handle,
-                        cache,
-                        context,
-                        uv_domain,
-                        line_point,
-                        d1,
-                        Some(interval),
-                        false,
-                        distance_tolerance,
-                    )?
-                } else {
-                    self.global_line_intersect_in(
-                        k,
-                        surface_handle,
-                        cache,
-                        uv_domain,
-                        line_point,
-                        d1,
-                        Some(interval),
-                        false,
-                        distance_tolerance,
-                    )?
-                };
+                let mut sols = self.global_line_intersect_under(
+                    k,
+                    surface_handle,
+                    cache,
+                    context,
+                    modes,
+                    uv_domain,
+                    line_point,
+                    d1,
+                    Some(interval),
+                    false,
+                    distance_tolerance,
+                )?;
 
                 // for every solution set the object values
                 for sol in sols.as_mut_slice() {
@@ -2782,6 +2890,7 @@ impl Surface {
             interval,
             distance_tolerance,
             true,
+            point_test_off,
         )?;
 
         // the parts of the curve the general solve looks at: all of it, unless parts
@@ -2840,7 +2949,7 @@ impl Surface {
                 Self::held_cache(k, c, OP_CURVE)?
             }
         } else {
-            built = self.solve_cache_from_context(
+            built = self.lent_cache_from_context(
                 k,
                 surface_handle,
                 OP_CURVE,
@@ -2848,7 +2957,7 @@ impl Surface {
                     .as_mut()
                     .map(|context| &mut **context as &mut dyn SurfaceSolveContext<O>),
             )?;
-            &built
+            &*built
         };
         let face_queries = context
             .as_deref()
@@ -2916,6 +3025,7 @@ impl Surface {
             );
             gs.curve = Some(curve);
             gs.surface_cache = Some(surface_cache);
+            gs.modes = modes;
             gs.face_queries = face_queries;
             gs.operands = Some(operands);
 
@@ -2983,6 +3093,7 @@ impl Surface {
     /// `SimpleCoincidenceChecker` of `curve` over `interval` against this surface,
     /// under the caller's face solve `context` when there is one: whether its samples
     /// lie on the surface (all of them, or with `partial_coincidence_ok` enough of them).
+    /// `point_test_off`: the solve's point testing is off.
     #[allow(clippy::too_many_arguments)] // the solve's operands and options
     fn curve_coincidence_found<'c, O: SolutionObject>(
         &self,
@@ -2995,9 +3106,10 @@ impl Surface {
         interval: &Extent1d,
         distance_tolerance: f64,
         partial_coincidence_ok: bool,
+        point_test_off: bool,
     ) -> Result<bool> {
         let coincidence = if let Some(context) = context {
-            self.simple_coincidence_checker_with_context(
+            self.simple_coincidence_checker_from(
                 k,
                 uv_domain,
                 curve,
@@ -3006,7 +3118,9 @@ impl Surface {
                 partial_coincidence_ok,
                 handles,
                 cache,
-                context,
+                Some(context),
+                point_test_off,
+                None,
             )?
         } else {
             self.simple_coincidence_checker::<O>(
@@ -3215,6 +3329,167 @@ fn coincident_range<O: SolutionObject>(
     range_solution(handles, [end(ivl.min())?, end(ivl.max())?], dist_to_surface)
 }
 
+/// The post-solve removal of repeated solutions of [`Surface::global_line_intersect`]:
+/// of two solutions of one type whose line and surface parameters (and a range's ends)
+/// agree within `param_tol`, the one with the smaller value is kept, in the first's
+/// place. (Not upstream) the solution kept carries the [`Contact::merged`] of both (two
+/// crossings undecided), and stays a crossing for two crossings only where one lies in the
+/// unique box of the other's certified root and neither carries a shared contact id (a seam
+/// pair's point merged is not shown that seam point any more: the one kept never keeps an
+/// id, [`crate::geom::solution_array::ContactId`]): otherwise they may be two contacts, and one
+/// solution standing for both would turn a full line's parity. Two such solutions are
+/// still merged, as upstream merges them, so that no result but the contact changes; not
+/// merging two crossings in unique boxes apart is the consumers' change. A solution kept
+/// that is not a crossing keeps no unique box (it carries no root any more).
+fn remove_repeated_solutions<O: SolutionObject>(
+    sols: &mut SolutionArray<O>,
+    param_tol: &[f64; 3],
+) -> Result<()> {
+    // for every pair of solutions - find and remove repeated solutions
+    let mut ii = 0;
+    while ii < sols.len() {
+        let mut jj = ii + 1;
+        while jj < sols.len() {
+            let si = sols.get_at(ii)?;
+            let sj = sols.get_at(jj)?;
+            let mut same = si.solution_type == sj.solution_type;
+            for (kk, tol) in param_tol.iter().enumerate() {
+                if !same {
+                    break;
+                }
+                // check type and params to see if they are the same
+                if (si.start.param(kk)? - sj.start.param(kk)?).abs() > *tol
+                    || (si.solution_type == SolutionType::RangeOfValues
+                        && (si.end.param(kk)? - sj.end.param(kk)?).abs() > *tol)
+                {
+                    same = false;
+                }
+            }
+            // (not upstream) two crossings are one contact only where one lies in the unique
+            // box of the other's certified root (that box holds one root)
+            let one = |a: &Solution<O>, b: &Solution<O>| -> Result<bool> {
+                let Some([[u0, u1], [v0, v1]]) = b.unique else {
+                    return Ok(false);
+                };
+                let (u, v) = (a.start.param(1)?, a.start.param(2)?);
+                Ok(u0 <= u && u <= u1 && v0 <= v && v <= v1)
+            };
+            let one_contact = one(&si, &sj)? || one(&sj, &si)?;
+
+            // remove duplicates
+            if same {
+                // save the best solution
+                let mut kept = if si.start.solution_value > sj.start.solution_value {
+                    sj
+                } else {
+                    si
+                };
+                // (a seam pair's point merged is not shown that seam point any more: its
+                // shared contact is cleared, and it stays a crossing only off every pair)
+                let paired = si.shared_contact.is_some() || sj.shared_contact.is_some();
+                kept.contact = match (si.contact, sj.contact) {
+                    (Contact::Crossing, Contact::Crossing) if one_contact && !paired => {
+                        Contact::Crossing
+                    }
+                    (a, b) => a.merged(b),
+                };
+                kept.shared_contact = None;
+                // (a unique box is a crossing's, by the root it carries: a solution merged
+                // into anything else carries none)
+                if kept.contact != Contact::Crossing {
+                    kept.unique = None;
+                }
+                sols.set_at(ii, &kept)?;
+
+                // remove the worst duplicate
+                sols.remove_at(jj, 1);
+            } else {
+                jj += 1;
+            }
+        }
+        ii += 1;
+    }
+    Ok(())
+}
+
+/// The post-solve join of [`Surface::global_line_intersect`]: `last_sol` and the next
+/// solution `curr_sol` bracket a stretch of the line found coincident with the
+/// surface, so `last_sol` becomes the range over both (a range `curr_sol` extends
+/// it), unless `curr_sol` is a point too close to `last_sol`'s start for a range,
+/// which `last_sol` then absorbs unchanged. (Not upstream) a range made or extended here,
+/// or one that absorbs the point, takes the [`Contact::absorbed`] of both (unclassified
+/// when both are, undecided otherwise: a stretch is neither of its ends' contacts), and a
+/// point that absorbs another takes the [`Contact::merged`] of both. Either way the solution
+/// made keeps no shared contact id (nothing shows it is still that one contact).
+fn join_across_coincidence<O: SolutionObject>(
+    mut last_sol: Solution<O>,
+    curr_sol: &Solution<O>,
+    line_interval: Option<&Extent1d>,
+) -> Result<Solution<O>> {
+    let last_original_type = last_sol.solution_type;
+    let last_original_contact = last_sol.contact;
+    let last_end = if last_original_type == SolutionType::RangeOfValues {
+        last_sol.end
+    } else {
+        last_sol.start
+    };
+    let curr_start = curr_sol.start;
+
+    // Set last solution to range
+    last_sol.solution_type = SolutionType::RangeOfValues;
+    last_sol.contact = last_original_contact.absorbed(curr_sol.contact);
+    let last_original_unique = last_sol.unique;
+    last_sol.unique = None;
+    // (no point merged or absorbed is shown the seam point it was identified as)
+    last_sol.shared_contact = None;
+
+    // if CurrSol is a range
+    if curr_sol.solution_type == SolutionType::RangeOfValues {
+        // When LastEnd < rCurrStart - set LastEnd = CurrStart
+        //  note: need to check because may have opposite sorting due to
+        //  tolerances
+        if last_end.param(0)? < curr_start.param(0)? {
+            last_sol.end = curr_sol.end;
+            let (start, end) = (last_sol.start.param(0)?, last_sol.end.param(0)?);
+            if start > end {
+                return Err(SolidError::surface(
+                    OP_LINE,
+                    SurfaceFailure::MergedRangeReversed { start, end },
+                ));
+            }
+        }
+    } else {
+        // if CurrSol is a point
+
+        // shortIvl tolerance: Note, SM_EFF_ZERO is too small to use here.
+        let tol = line_interval.map_or(EFF_ZERO * 100.0, |i| EFF_ZERO * 100.0 * i.length());
+
+        // when interval is too short - don't create really short range
+        // solution
+        if (last_sol.start.param(0)? - curr_sol.start.param(0)?).abs() < tol {
+            // restore last interval
+            last_sol.solution_type = last_original_type;
+            // (not upstream) a range takes the point in; a point stands for both
+            last_sol.unique = last_original_unique;
+            last_sol.contact = if last_original_type == SolutionType::RangeOfValues {
+                last_original_contact.absorbed(curr_sol.contact)
+            } else {
+                last_original_contact.merged(curr_sol.contact)
+            };
+        } else {
+            // set LastSolution end value
+            last_sol.end = curr_sol.start;
+
+            // If have opposite sorting because of tolerancing, swap the
+            // ends of rLastSol.
+            if last_sol.start.param(0)? > last_sol.end.param(0)? {
+                std::mem::swap(&mut last_sol.end, &mut last_sol.start);
+            }
+        }
+    }
+    Ok(last_sol)
+}
+
 /// The range solution of a curve and a surface from the curve parameter and surface
 /// point at its two ends, at the distance `dist_to_surface`.
 fn range_solution<O: SolutionObject>(
@@ -3280,7 +3555,8 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
         let tree1 = self.base.tree(1)?;
 
         // If the classification of the node is outside then we can quit here
-        if !is_node_valid(tree1.owner(), cache, &surface_node)? {
+        let modes = SolveModes::of(cache, self.modes);
+        if !is_node_valid(tree1.owner(), cache, modes, &surface_node)? {
             return Ok(false);
         }
 
@@ -3394,7 +3670,7 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
             tol,
             op,
             solve_for_surface,
-            cache.process_boundary_curves(),
+            modes.process_boundary_curves,
         )?;
 
         // For every solution, set some solution parameters, and then check whether to
@@ -3420,6 +3696,7 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
                 k,
                 self.base.tree(1)?.owner(),
                 cache,
+                modes,
                 uv_found,
                 None,
                 self.face_queries,
@@ -3505,15 +3782,7 @@ impl Surface {
         tol: f64,
         farthest: bool,
     ) -> Result<SingularityInversion> {
-        let body =
-            || self.invert_near_singularity_body(k, test_pt, uv_domain, uv_guess, tol, farthest);
-        // (test-only seam of the WR-57 substitution replay, feature `wr57-replay`)
-        #[cfg(feature = "wr57-replay")]
-        let body = || {
-            let input = super::replay::invert_input(test_pt, uv_domain, uv_guess, tol);
-            super::replay::wrap(k, self, super::replay::Seam::Invert, &input, farthest, body)
-        };
-        body()
+        self.invert_near_singularity_body(k, test_pt, uv_domain, uv_guess, tol, farthest)
     }
 
     /// [`Surface::invert_point_near_singularity_for`]'s work.
@@ -4548,6 +4817,150 @@ mod tests {
         (s, o + Vec3::new(0.2, 0.06, 0.02) + n)
     }
 
+    /// A line solve's point solution `[t, u, v]` at distance `value`.
+    fn line_point(value: f64, tuv: [f64; 3], contact: Contact) -> Solution<NoObject> {
+        let mut s = Solution::new();
+        s.solution_type = SolutionType::SingleValue;
+        s.num_variables = 3;
+        s.start.solution_value = value;
+        s.start.parameters[..3].copy_from_slice(&tuv);
+        s.contact = contact;
+        s
+    }
+
+    /// The line solve's removal of repeated solutions keeps the closer of two, with
+    /// the merged contact of both; a solution it does not merge keeps its own.
+    #[test]
+    fn a_repeated_line_solution_merges_its_contact_into_the_kept_one() {
+        for (a, b, want) in [
+            (Contact::Crossing, Contact::Touching, Contact::Undecided),
+            (Contact::Touching, Contact::Touching, Contact::Touching),
+            (Contact::Unclassified, Contact::Crossing, Contact::Undecided),
+            (
+                Contact::Unclassified,
+                Contact::Unclassified,
+                Contact::Unclassified,
+            ),
+            (Contact::Crossing, Contact::Undecided, Contact::Undecided),
+        ] {
+            let mut sols = SolutionArray::new();
+            sols.add(&line_point(2e-9, [0.5, 0.2, 0.3], a));
+            sols.add(&line_point(1e-9, [0.5 + 1e-6, 0.2, 0.3 - 1e-6], b));
+            sols.add(&line_point(1e-9, [0.7, 0.2, 0.3], Contact::Crossing));
+            remove_repeated_solutions(&mut sols, &[1e-4; 3]).unwrap();
+            let got: Vec<_> = sols
+                .as_slice()
+                .iter()
+                .map(|s| (s.start.parameters[0], s.start.solution_value, s.contact))
+                .collect();
+            assert_eq!(
+                got,
+                [(0.5 + 1e-6, 1e-9, want), (0.7, 1e-9, Contact::Crossing)],
+                "{a:?} {b:?}"
+            );
+        }
+        // two crossings are one contact where one lies in the other's unique box: merged as
+        // before, the one kept a crossing with its box; with unique boxes apart, or one with
+        // none, the one kept is undecided and keeps no box (it carries no root)
+        for (second, want) in [
+            (Some([[0.21, 0.3], [0.2, 0.4]]), Contact::Undecided),
+            (None, Contact::Undecided),
+            (Some([[0.1, 0.3], [0.2, 0.4]]), Contact::Crossing),
+        ] {
+            let mut sols = SolutionArray::new();
+            let mut a = line_point(2e-9, [0.5, 0.2, 0.3], Contact::Crossing);
+            a.unique = Some([[0.1, 0.2], [0.2, 0.4]]);
+            let mut b = line_point(1e-9, [0.5 + 1e-6, 0.2 + 1e-6, 0.3], Contact::Crossing);
+            b.unique = second;
+            sols.add(&a);
+            sols.add(&b);
+            remove_repeated_solutions(&mut sols, &[1e-4; 3]).unwrap();
+            assert_eq!(sols.len(), 1, "{second:?}");
+            assert_eq!(sols.as_slice()[0].contact, want, "{second:?}");
+            let boxed = if want == Contact::Crossing {
+                second
+            } else {
+                None
+            };
+            assert_eq!(sols.as_slice()[0].unique, boxed, "{second:?}");
+        }
+        // a point of a seam pair (a shared contact id) merged with a third point: the one
+        // kept loses the id and is undecided, even where one lies in the other's unique box
+        // (it is not shown the seam point any more); its twin keeps its crossing and the id,
+        // counted once
+        let id = core::num::NonZeroU32::new(1).map(crate::geom::solution_array::ContactId);
+        let mut sols = SolutionArray::new();
+        let mut p = line_point(2e-9, [0.5, 0.2, 0.3], Contact::Crossing);
+        p.shared_contact = id;
+        let mut r = line_point(1e-9, [0.5 + 1e-6, 0.2 + 1e-6, 0.3], Contact::Crossing);
+        r.unique = Some([[0.1, 0.3], [0.2, 0.4]]);
+        let mut q = line_point(1e-9, [0.5, 0.9, 0.3], Contact::Crossing);
+        q.shared_contact = id;
+        for s in [p, r, q] {
+            sols.add(&s);
+        }
+        remove_repeated_solutions(&mut sols, &[1e-4; 3]).unwrap();
+        let got: Vec<_> = sols
+            .as_slice()
+            .iter()
+            .map(|s| (s.contact, s.shared_contact))
+            .collect();
+        assert_eq!(got, [(Contact::Undecided, None), (Contact::Crossing, id)]);
+    }
+
+    /// The join across a coincident stretch: a range built from two points, or extended by
+    /// a range, is unclassified when both were and undecided once either was typed; a point
+    /// too close for a range is absorbed, and the point kept takes the merged contact of
+    /// both (a range absorbing it, their absorbed contact).
+    #[test]
+    fn a_range_joined_from_points_is_unclassified() {
+        let unit = Extent1d::from_min_max(0.0, 1.0);
+        for (contact, want) in [
+            (Contact::Crossing, Contact::Undecided),
+            (Contact::Unclassified, Contact::Unclassified),
+        ] {
+            let last = line_point(0.0, [0.2, 0.1, 0.1], contact);
+            let curr = line_point(0.0, [0.6, 0.5, 0.1], contact);
+            let joined = join_across_coincidence(last, &curr, Some(&unit)).unwrap();
+            assert_eq!(joined.solution_type, SolutionType::RangeOfValues);
+            assert_eq!(
+                (joined.start.parameters[0], joined.end.parameters[0]),
+                (0.2, 0.6)
+            );
+            assert_eq!(joined.contact, want);
+
+            // (a range extended by another range is a stretch too)
+            let mut extended = curr;
+            extended.solution_type = SolutionType::RangeOfValues;
+            extended.end.parameters[0] = 0.9;
+            let joined = join_across_coincidence(last, &extended, Some(&unit)).unwrap();
+            assert_eq!((joined.end.parameters[0], joined.contact), (0.9, want));
+        }
+
+        // a point closer than the shortest range: the point kept stands for both
+        for (a, b, want) in [
+            (Contact::Crossing, Contact::Touching, Contact::Undecided),
+            (Contact::Unclassified, Contact::Touching, Contact::Undecided),
+            (Contact::Touching, Contact::Touching, Contact::Touching),
+        ] {
+            let last = line_point(0.0, [0.2, 0.1, 0.1], a);
+            let near = line_point(0.0, [0.2 + EFF_ZERO, 0.1, 0.1], b);
+            let kept = join_across_coincidence(last, &near, Some(&unit)).unwrap();
+            assert_eq!(kept.solution_type, SolutionType::SingleValue);
+            assert_eq!(kept.contact, want, "{a:?} {b:?}");
+        }
+        // a shared contact id is lost by a range and by a point that absorbs another
+        let id = core::num::NonZeroU32::new(1).map(crate::geom::solution_array::ContactId);
+        let mut last = line_point(0.0, [0.2, 0.1, 0.1], Contact::Crossing);
+        last.shared_contact = id;
+        let far = line_point(0.0, [0.6, 0.5, 0.1], Contact::Crossing);
+        let near = line_point(0.0, [0.2 + EFF_ZERO, 0.1, 0.1], Contact::Crossing);
+        for curr in [far, near] {
+            let joined = join_across_coincidence(last, &curr, Some(&unit)).unwrap();
+            assert_eq!(joined.shared_contact, None);
+        }
+    }
+
     /// WR-57 (#17856): a guess that is the closest point, on a net far from the
     /// origin, is its own answer, never refused as farther than itself. The search
     /// drops onto the guess's iso curve, so the answer and the guess are the same
@@ -4770,6 +5183,49 @@ mod tests {
         assert!(u.is_empty() && v.is_empty());
     }
 
+    /// A line lying in a flat B-spline is totally coincident with it: its solutions become
+    /// the coincident range, and the side record the certified pass made before that
+    /// survives the rebuild as a pass that ran (never `NotRun`, which says no pass ran),
+    /// undecided over the whole line, since what the pass typed was typed against the
+    /// points the range replaced.
+    #[test]
+    fn a_total_coincidence_keeps_a_pass_that_ran() {
+        let k = Kernel::default();
+        let s = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(2.0, 0.0, 0.0),
+                Vec3::new(0.0, 3.0, 0.0),
+                Vec3::new(2.0, 3.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let sols = s
+            .base_global_line_intersect::<NoObject>(
+                &k,
+                NoObject,
+                &domain,
+                Vec3::new(0.5, 1.0, 0.0),
+                Vec3::new(1.0, 0.5, 0.0),
+                Some(&Extent1d::from_min_max(0.0, 1.0)),
+                false,
+                1e-6,
+            )
+            .unwrap();
+        assert!(
+            sols.as_slice()
+                .iter()
+                .any(|x| x.solution_type == SolutionType::RangeOfValues),
+            "{:?}",
+            sols.as_slice()
+        );
+        assert_eq!(
+            sols.side_record(),
+            &SideRecord::Undecided(vec![[f64::NEG_INFINITY, f64::INFINITY]])
+        );
+    }
+
     #[test]
     fn zero_line_vector_is_rejected() {
         let k = Kernel::default();
@@ -4941,6 +5397,10 @@ mod tests {
     impl crate::surface::surface_cache::face_context::FaceQueries<NoObject> for NumericalTrimContext {
         fn face_zone_tol_3d(&self, _face: NoObject) -> Result<f64> {
             Ok(1e-5)
+        }
+
+        fn face_has_loopuses(&self, _face: NoObject) -> Result<bool> {
+            Ok(true)
         }
 
         fn face_point_classify(

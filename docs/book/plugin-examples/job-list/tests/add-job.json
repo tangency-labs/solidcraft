@@ -1,0 +1,7 @@
+{
+  "entry": "add",
+  "params": {"name": "Face", "tool": 50},
+  "expect": {
+    "reply": {"result": {"jobs": 1}}
+  }
+}

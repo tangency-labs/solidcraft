@@ -14,8 +14,11 @@ workspace = true
 test-support = ["dep:image"]
 
 [dependencies]
+# The same palette-role SVG parser used by plugin validation.
+solidcraft-icon-svg = { workspace = true }
 # The token contract every control draws with.
 solidcraft-theme = { workspace = true }
+solidcraft-panel-layout = { workspace = true }
 # The widget registry (handles, rects, counts) every control publishes into.
 solidcraft-ui-registry = { workspace = true }
 solidcraft-ui-text = { workspace = true }
@@ -43,6 +46,8 @@ arboard = { version = "3.6", default-features = false, features = ["image-data"]
 muda = { version = "0.21.2", default-features = false }
 
 [dev-dependencies]
+# Tests report a context locked inside its own lock (#21091).
+egui = { workspace = true, features = ["lock_nesting_report"] }
 image = { workspace = true }
 # The gallery's coverage test reads the kit's sources; the Preferences ids test walks their string literals.
 syn = { workspace = true, features = ["visit"] }

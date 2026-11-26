@@ -7,6 +7,11 @@
 //!   written in the unit the value is written in (none: the design's), an angle by
 //!   `dimension_step_deg`. Up/Down and the mouse wheel over the field step it too (Shift: ten
 //!   steps, Alt: a tenth, as in the other value fields). An expression is left as typed;
+//! - a row for each user parameter the value names (`corner_r = 6 mm`, #16319), in the same
+//!   expression field, with a note that a change there applies everywhere the parameter is used.
+//!   OK sets the changed parameters through `parameters.change` together with the value, in one
+//!   undo step; Cancel drops them with the value. A dimension's or feature's own parameter
+//!   (`d1`) gets no row;
 //! - a check (OK, also Enter) and a cross (Cancel, also Esc).
 //!
 //! While it is open the sketch shows the value: what it moves is drawn in the preview colour, and
@@ -86,8 +91,61 @@ struct Existing {
     doc: Arc<solidcraft_engine::doc::Document>,
     param: String,
     expr: String,
+    /// The parameter rows' changes it was worked out with (see [`parameter_changes`]).
+    changes: Changes,
     sketch: Option<Arc<solidcraft_engine::doc::SolvedSketch>>,
     error: Option<String>,
+    /// Why `parameters.change` refuses the rows' changes.
+    row_error: Option<String>,
+}
+
+/// What the parameter rows change: parameter name to expression, as `parameters.change` takes it.
+pub(crate) type Changes = serde_json::Map<String, serde_json::Value>;
+
+/// The user parameters a dimension's value `expr` names, each once in the order they first appear
+/// (#16319): what the window offers rows for. Not the dimension's own parameter `own`, the name a
+/// definition (`w = 20`) gives, nor a dimension's or feature's parameter (`d1`).
+pub(super) fn parameter_rows(doc: &solidcraft_engine::doc::Document, own: &str, expr: &str) -> Vec<String> {
+    let text = expr.trim();
+    let (defined, value) = match solidcraft_engine::doc::expr::definition(text) {
+        Some((name, value)) => (Some(name), value),
+        None => (None, text),
+    };
+    solidcraft_engine::doc::expr::references(value)
+        .into_iter()
+        .filter(|name| name != own && Some(name.as_str()) != defined && doc.param(name).is_some_and(|p| !p.model))
+        .collect()
+}
+
+/// A row's typed value as its parameter keeps it: a bare number (`8`) in the parameter's own unit
+/// (`8 mm`, `30 deg`), since `parameters.change` stores a user parameter's expression as given;
+/// a unitless parameter's number, an explicit unit and an expression as typed.
+fn in_unit(text: &str, unit: &str) -> String {
+    let unit = unit.trim();
+    if solidcraft_engine::doc::expr::is_bare_number(text) && unit_info(unit).is_some_and(|(kind, _)| kind != Kind::Unitless) {
+        format!("{text} {unit}")
+    } else {
+        text.to_string()
+    }
+}
+
+/// The rows' typed values (`typed`) that differ from their parameter's expression, for the rows
+/// `expr` still shows, each as its parameter keeps it ([`in_unit`]). None: nothing to change.
+pub(crate) fn parameter_changes(
+    doc: &solidcraft_engine::doc::Document,
+    own: &str,
+    expr: &str,
+    typed: &std::collections::BTreeMap<String, String>,
+) -> Option<Changes> {
+    let changes: Changes = parameter_rows(doc, own, expr)
+        .into_iter()
+        .filter_map(|name| {
+            let param = doc.param(&name)?;
+            let text = typed.get(&name)?.trim();
+            (text != param.expr.trim()).then(|| (name, serde_json::Value::String(in_unit(text, &param.unit))))
+        })
+        .collect();
+    (!changes.is_empty()).then_some(changes)
 }
 
 thread_local! {
@@ -109,22 +167,51 @@ pub(super) fn forget() {
     EXISTING.with(|e| *e.borrow_mut() = None);
 }
 
-fn existing(app: &SolveApp, param: &str, expr: &str) -> (Option<Arc<solidcraft_engine::doc::SolvedSketch>>, Option<String>) {
+/// What OK would make of the typed value `expr` with the rows' `changes`: the sketch it gives, why
+/// the value is refused, and why the rows' changes are.
+fn existing(
+    app: &SolveApp,
+    param: &str,
+    expr: &str,
+    changes: &Changes,
+) -> (Option<Arc<solidcraft_engine::doc::SolvedSketch>>, Option<String>, Option<String>) {
     EXISTING.with(|cell| {
         let mut cell = cell.borrow_mut();
-        let current = cell.as_ref().is_some_and(|x| Arc::ptr_eq(&x.doc, &app.session.doc) && x.param == param && x.expr == expr);
+        let current =
+            cell.as_ref().is_some_and(|x| Arc::ptr_eq(&x.doc, &app.session.doc) && x.param == param && x.expr == expr && &x.changes == changes);
         if !current {
             let expression = crate::length_input::expression(&app.session.doc, expr, kind(&app.session.doc, param));
             let mut scratch = app.session.scratch();
-            let (sketch, error) = match scratch.execute("parameters.change", &json!({"name": param, "expression": expression})) {
-                Ok(_) => {
-                    (app.session.active_sketch.and_then(|id| scratch.world_state().ok()?.sketches.iter().find(|s| s.feature == id).cloned()), None)
-                }
-                Err(e) => (None, Some(shown_error("parameters.change", &e.to_string()))),
+            let rows = if changes.is_empty() {
+                Ok(())
+            } else {
+                scratch
+                    .execute("parameters.change", &json!({"changes": changes}))
+                    .map(|_| ())
+                    .map_err(|e| shown_error("parameters.change", &e.to_string()))
             };
-            *cell = Some(Existing { doc: app.session.doc.clone(), param: param.to_string(), expr: expr.to_string(), sketch, error });
+            let (sketch, error, row_error) = match rows {
+                Err(row_error) => (None, None, Some(row_error)),
+                Ok(()) => match scratch.execute("parameters.change", &json!({"name": param, "expression": expression})) {
+                    Ok(_) => (
+                        app.session.active_sketch.and_then(|id| scratch.world_state().ok()?.sketches.iter().find(|s| s.feature == id).cloned()),
+                        None,
+                        None,
+                    ),
+                    Err(e) => (None, Some(shown_error("parameters.change", &e.to_string())), None),
+                },
+            };
+            *cell = Some(Existing {
+                doc: app.session.doc.clone(),
+                param: param.to_string(),
+                expr: expr.to_string(),
+                changes: changes.clone(),
+                sketch,
+                error,
+                row_error,
+            });
         }
-        cell.as_ref().map(|x| (x.sketch.clone(), x.error.clone())).unwrap_or_default()
+        cell.as_ref().map(|x| (x.sketch.clone(), x.error.clone(), x.row_error.clone())).unwrap_or_default()
     })
 }
 
@@ -134,11 +221,12 @@ pub(super) fn paint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     if !on(app) {
         return;
     }
-    let Some((param, expr, draft)) = EDIT.with(|edit| {
+    let Some((param, (expr, changes), draft)) = EDIT.with(|edit| {
         let edit = edit.borrow();
         let e = edit.as_ref()?;
         let draft = e.draft.as_ref().map(|d| (d.sketch, d.preview.clone(), d.error.is_some()));
-        Some((e.param.clone(), e.expr.clone(), draft))
+        let changes = parameter_changes(&app.session.doc, &e.param, &e.expr, &e.params).unwrap_or_default();
+        Some((e.param.clone(), (e.expr.clone(), changes), draft))
     }) else {
         return;
     };
@@ -146,12 +234,12 @@ pub(super) fn paint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let after = match draft {
         Some((id, preview, false)) => preview.sketches.iter().find(|s| s.feature == id).cloned(),
         Some((_, _, true)) => None,
-        None => existing(app, &param, &expr).0,
+        None => existing(app, &param, &expr, &changes).0,
     };
     let state = app.session.world_state().ok();
     let changes = after.and_then(|after| crate::preview::sketch_changes(state.as_ref().and_then(|state| state.sketch(sketch)), &after));
     let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
-    let curves = changes.map_or(0, |changes| crate::preview::paint_sketch(&changes, painter, proj, &mut budget));
+    let curves = changes.map_or(0, |changes| crate::preview::paint_sketch(&changes, painter, proj, &mut budget, None));
     crate::scenario::publish_count("dimwin:preview_curves", curves as f64);
 }
 
@@ -201,10 +289,17 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
     let t = Tokens::get();
     let id = egui::Id::unique("sc_dim_edit");
     let area = egui::Id::unique(AREA);
-    let (kind, error) = match &e.draft {
-        Some(draft) => (kind(&draft.preview_doc, &e.param), draft.error.clone()),
-        None => (kind(&app.session.doc, &e.param), existing(app, &e.param, &e.expr).1),
+    let (kind, error, row_error) = match &e.draft {
+        Some(draft) => (kind(&draft.preview_doc, &e.param), draft.error.clone(), None),
+        None => {
+            let changes = parameter_changes(&app.session.doc, &e.param, &e.expr, &e.params).unwrap_or_default();
+            let (_, error, row_error) = existing(app, &e.param, &e.expr, &changes);
+            (kind(&app.session.doc, &e.param), error, row_error)
+        }
     };
+    // A new dimension's value has no parameter rows: its parameter does not exist yet. Nor has a
+    // drawing's text: it is not an expression.
+    let rows = if e.draft.is_none() && e.sheet.is_none() { parameter_rows(&app.session.doc, &e.param, &e.expr) } else { Vec::new() };
     let (step_mm, step_deg) = steps(app);
     let unit = crate::length_input::unit(&app.session.doc).to_string();
     let step = |text: &str, steps: f64| stepped(text, steps, kind, &unit, step_mm, step_deg);
@@ -214,12 +309,15 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
         crate::prefs::format_length(step_mm, &app.session.doc.units, app.preferences.length_decimals)
     };
     let last = ctx.memory(|m| m.area_rect(area));
-    let width = t.space_24 * 8.0;
+    let arrows = 2.0 * (t.form_close_size - t.space_4) + t.space_2;
+    let width = window_width(ctx, &e.expr, !rows.is_empty(), arrows);
     let guess = egui::vec2(width + t.space_6 * 2.0, t.control_height * 2.0 + t.space_6 * 3.0);
     let anchor = place(app, ctx, &e.param, at, last.map_or(guess, |r| r.size()));
     // A click on the window (an arrow) takes the keyboard from its field, as any click away does;
     // the field takes it back instead of closing.
-    let on_window = ctx.input(|i| i.pointer.any_click() && i.pointer.interact_pos().is_some_and(|p| last.is_some_and(|r| r.contains(p))));
+    let on_window = ctx.input(|i| {
+        (i.pointer.any_pressed() || i.pointer.any_click()) && i.pointer.interact_pos().is_some_and(|p| last.is_some_and(|r| r.contains(p)))
+    });
     let mut answer: Option<bool> = None;
     let mut escaped = false;
     let mut by = 0.0;
@@ -246,7 +344,6 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                 }
                 // The value, with its arrows at its right (the kit's own up and down arrows).
                 let (row, _) = ui.allocate_exact_size(egui::vec2(width, t.control_height), egui::Sense::hover());
-                let arrows = 2.0 * (t.form_close_size - t.space_4) + t.space_2;
                 let (r, up, down) = ui
                     .scope_builder(egui::UiBuilder::new().max_rect(row).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
                         ui.spacing_mut().item_spacing.x = t.space_2;
@@ -256,8 +353,12 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                         if r.has_focus() {
                             e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
                         }
-                        if crate::expression_complete::complete(ui, &r, &mut e.expr) {
+                        let completed = crate::expression_complete::complete(ui, &r, &mut e.expr);
+                        if completed {
                             e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
+                        }
+                        if r.changed() || completed {
+                            e.create_variable = None;
                         }
                         let can_step = step(&e.expr, 1.0).is_some();
                         let tip = |id: &str| {
@@ -291,26 +392,65 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                 } else {
                     ui.data_mut(|d| d.remove::<f32>(wheel));
                 }
-                if let Some(error) = &error {
+                if let Some(error) = e.create_variable.as_ref().map(|offer| &offer.error).or(error.as_ref()) {
                     crate::ui_kit::text(ui, error, crate::ui_kit::Text::Report("dimension_error", true));
+                }
+                let create = super::create_variable_button(ui, e.create_variable.as_ref());
+                // The user parameters the value names, each in its own field (#16319).
+                let row_state = parameter_fields(app, ui, id, width, e, &rows, row_error.is_some());
+                if !rows.is_empty() {
+                    crate::ui_kit::text(
+                        ui,
+                        solidcraft_ui_text::tr("dialog.dimension_parameters_note"),
+                        crate::ui_kit::Text::Note("dimension_parameters_note"),
+                    );
+                }
+                if let Some(error) = &row_error {
+                    crate::ui_kit::text(ui, error, crate::ui_kit::Text::Report("dimension_parameter_error", true));
                 }
                 if e.fresh == FRESH {
                     select_all(ctx, id, e);
                 }
+                // A click on a row's field gives it the keyboard; the value field does not take it back.
+                let on_row =
+                    ctx.input(|i| i.pointer.any_click() && i.pointer.interact_pos().is_some_and(|p| row_state.rects.iter().any(|r| r.contains(p))));
+                let in_row = row_state.focused || on_row;
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let field = if r.lost_focus() && enter {
+                let left = r.lost_focus() || row_state.lost;
+                let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+                let in_viewport =
+                    pointer_pos.is_some_and(|p| app.viewport.rect.is_none_or(|view| view.contains(p)) && !crate::shell::covered(app, p));
+                let left_click_outside = !on_window && in_viewport && ui.input(|i| i.pointer.primary_pressed() || i.pointer.primary_clicked());
+                let press_on_reference = ui.input(|i| i.pointer.primary_pressed())
+                    && pointer_pos.is_some_and(|p| super::hit_while_editing_active(p, &e.param, e.sketch.is_some()).is_some());
+                let lost_or_outside_press =
+                    left || (e.live.is_none() && (r.has_focus() || row_state.focused) && in_viewport && ui.input(|i| i.pointer.primary_pressed()));
+                let field = if left && enter {
                     Some(true)
-                } else if e.fresh > 0 || on_window || by != 0.0 {
+                } else if in_row && !left_click_outside {
+                    None
+                } else if e.fresh > 0 || on_window || by != 0.0 || (lost_or_outside_press && press_on_reference) {
                     if !r.has_focus() {
                         r.request_focus();
                     }
                     None
-                } else if r.lost_focus() {
+                } else if e.live.is_none() && lost_or_outside_press && left_click_outside {
+                    if !ui.input(|i| i.pointer.primary_clicked()) {
+                        super::CONSUMED_OUTSIDE_PRESS.set(true);
+                    }
+                    Some(true)
+                } else if left && !r.has_focus() {
                     Some(false)
                 } else {
                     None
                 };
                 answer = answer.or(field);
+                if create && let Some(offer) = e.create_variable.take() {
+                    e.expr = offer.definition;
+                    e.owned = true;
+                    e.typed = true;
+                    answer = Some(true);
+                }
                 if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     answer = Some(false);
                     escaped = true;
@@ -326,6 +466,7 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
         && let Some(stepped) = step(&e.expr, by)
     {
         e.expr = stepped;
+        e.create_variable = None;
         // The whole new value is selected, so typing replaces it.
         select_all(ctx, id, e);
         ctx.request_repaint();
@@ -334,6 +475,65 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
         forget();
     }
     (answer, escaped)
+}
+
+/// The window's inner width. With parameter rows under the value it widens, up to twice its
+/// usual width, so the value's whole expression shows instead of scrolling; without rows it
+/// keeps its usual width.
+fn window_width(ctx: &egui::Context, expr: &str, rows: bool, arrows: f32) -> f32 {
+    let t = Tokens::get();
+    let usual = t.space_24 * 8.0;
+    if !rows {
+        return usual;
+    }
+    let font = egui::FontId::monospace(t.font_label);
+    let text = ctx.layer_painter(egui::LayerId::background()).layout_no_wrap(expr.to_owned(), font, egui::Color32::PLACEHOLDER).size().x;
+    let needed = text + 2.0 * t.form_inset + t.space_4 + arrows + t.space_2;
+    if needed.is_finite() { needed.ceil().clamp(usual, usual * 2.0) } else { usual }
+}
+
+/// How the parameter rows' fields stand this frame.
+struct RowState {
+    /// One of them has the keyboard.
+    focused: bool,
+    /// One of them gave it up this frame (Enter, a click elsewhere).
+    lost: bool,
+    /// Where they are.
+    rects: Vec<Rect>,
+}
+
+/// One row per user parameter in `rows`, `name = [expression]`, in the expression field the value
+/// uses (units, expressions and completion as there). What is typed waits in `e.params` for OK.
+fn parameter_fields(app: &SolveApp, ui: &mut egui::Ui, id: egui::Id, width: f32, e: &mut Edit, rows: &[String], invalid: bool) -> RowState {
+    let t = Tokens::get();
+    let mut state = RowState { focused: false, lost: false, rects: Vec::new() };
+    for name in rows {
+        let current = app.session.doc.param(name).map(|p| p.expr.clone()).unwrap_or_default();
+        let mut text = e.params.get(name).cloned().unwrap_or_else(|| current.clone());
+        let field_id = id.with(("param", name.as_str()));
+        let (row, _) = ui.allocate_exact_size(egui::vec2(width, t.control_height), egui::Sense::hover());
+        let changed = text.trim() != current.trim();
+        let r = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(row).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+                ui.spacing_mut().item_spacing.x = t.space_4;
+                crate::ui_kit::text(ui, &solidcraft_ui_text::format("dialog.dimension_parameter", &[("name", name)]), crate::ui_kit::Text::Inline);
+                let field = egui::vec2(ui.available_width().max(t.space_24), t.control_height);
+                let r = ui.allocate_ui(field, |ui| crate::ui_kit::cell_editor(ui, field_id, &mut text, "", invalid && changed)).inner;
+                crate::expression_complete::complete(ui, &r, &mut text);
+                r
+            })
+            .inner;
+        crate::scenario::publish_target(&format!("dimwin:param:{name}"), r.rect);
+        state.focused |= ui.memory(|m| m.has_focus(field_id));
+        state.lost |= r.lost_focus();
+        state.rects.push(r.rect);
+        if text.trim() == current.trim() {
+            e.params.remove(name);
+        } else {
+            e.params.insert(name.clone(), text);
+        }
+    }
+    state
 }
 
 /// Select the whole value in the field, so typing replaces it.

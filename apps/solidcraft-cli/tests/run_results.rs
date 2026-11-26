@@ -538,6 +538,26 @@ fn eval_propagates_script_errors_before_writing_a_report() {
     }
 }
 
+/// #20926: `eval` takes `--quiet` as `run` does: nothing on stdout, a `--json-out` report still
+/// written, and the exit status unchanged.
+#[test]
+fn eval_takes_quiet_like_run() {
+    let dir = Scratch::new();
+    let script = dir.script();
+    let report = dir.0.join("report.json");
+    for command in ["eval", "inspect"] {
+        let output = cli().arg(command).arg(&script).arg("--quiet").output().unwrap();
+        assert!(output.status.success(), "{command}: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.stdout.is_empty(), "{command}: {}", String::from_utf8_lossy(&output.stdout));
+        let _ = std::fs::remove_file(&report);
+        let output = cli().arg(command).arg("--quiet").arg(&script).arg("--json-out").arg(&report).output().unwrap();
+        assert!(output.status.success(), "{command}: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.stdout.is_empty());
+        let written: Value = serde_json::from_slice(&std::fs::read(&report).unwrap()).unwrap();
+        assert!(written["body_count"].is_number(), "{written}");
+    }
+}
+
 #[test]
 fn eval_rejects_unknown_options_and_missing_input_values_before_writing_a_report() {
     let dir = Scratch::new();
@@ -671,6 +691,13 @@ fn unknown_command_suggests_the_closest_id() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    // An MCP tool's name suggests the command it stands for (#20925).
+    for (tool, command) in [("set_parameter", "parameters.change"), ("measure", "inspect.measure"), ("inspect-design", "document.inspect")] {
+        let output = cli().args(["exec", tool]).output().unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(&format!("(did you mean `{command}`")), "{tool}: {stderr}");
+    }
 }
 
 /// #1833: `--timings` reports each command's time instead of the measurement, `--profile` adds
@@ -1029,7 +1056,7 @@ fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_p
 fn plugin_approvals_are_kept_between_runs_only_when_asked() {
     let scratch = Scratch::new();
     let plugins = scratch.0.join("plugins");
-    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":1_000_000,"memory_mib":256,"deadline_ms":30000}}});
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":10_000_000_000_000_u64,"memory_mib":256,"deadline_ms":30000}}});
     let zip = scratch.0.join("sample.zip");
     let bytes = solidcraft_engine::io::safe_zip::write(&[("plugin.json", manifest.to_string().as_bytes()), ("plugin.wasm", b"inert bytes")]).unwrap();
     std::fs::write(&zip, bytes).unwrap();
@@ -1044,15 +1071,16 @@ fn plugin_approvals_are_kept_between_runs_only_when_asked() {
     let exec = |command: &str, params: Value| run(true, command, params);
     let inspect = json!({"path": plugins.join("sample")});
     // The default: approved for that run only, nothing stored.
-    json_output(run(false, "plugin.install", json!({"path": zip, "approve": {"memory_mib": 256}})));
+    json_output(run(false, "plugin.install", json!({"path": zip, "approve": {"fuel":10_000_000_000_000_u64,"memory_mib": 256}})));
     assert!(plugins.join("sample").is_dir() && !plugins.join(".grants").exists());
     assert_eq!(json_output(run(false, "plugin.inspect", inspect.clone()))["within_host_limits"], false);
-    json_output(exec("plugin.install", json!({"path": zip, "replace": true, "approve": {"memory_mib": 256}})));
+    json_output(exec("plugin.install", json!({"path": zip, "replace": true, "approve": {"fuel":10_000_000_000_000_u64,"memory_mib": 256}})));
     assert!(plugins.join(".grants/sample.json").is_file());
     assert_eq!(json_output(run(false, "plugin.inspect", inspect.clone()))["within_host_limits"], false, "not read without the flag");
-    assert_eq!(json_output(exec("plugin.inspect", inspect.clone()))["within_host_limits"], true, "the approved memory, in a later run");
+    assert_eq!(json_output(exec("plugin.inspect", inspect.clone()))["within_host_limits"], true, "the approved fuel and memory, in a later run");
     let listed = json_output(exec("plugin.grants", json!({})));
     assert_eq!((listed["grants"][0]["status"].as_str(), listed["grants"][0]["memory_mib"].as_u64()), (Some("current"), Some(256)));
+    assert_eq!(listed["grants"][0]["fuel"], 10_000_000_000_000_u64);
     assert_eq!(json_output(exec("plugin.revoke", json!({"id": "sample"})))["revoked"], true);
     assert_eq!(json_output(exec("plugin.inspect", inspect))["within_host_limits"], false, "revoked: the app's ceiling again");
     assert_eq!(json_output(exec("plugin.grants", json!({})))["grants"], json!([]));

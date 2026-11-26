@@ -62,6 +62,15 @@ fn folder_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error>
     value.as_bool().map(Some).ok_or_else(|| D::Error::custom(whole(FOLDER_MESSAGE)))
 }
 
+/// `link`: true or false, `null` as left out, with the handler's refusal message.
+fn link_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    let value = Value::deserialize(d)?;
+    if value.is_null() {
+        return Ok(None);
+    }
+    value.as_bool().map(Some).ok_or_else(|| D::Error::custom(whole("`link` must be a boolean")))
+}
+
 /// `flatten`: true or false, `null` as left out, with the handler's message for anything else.
 fn flatten_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
     let value = Value::deserialize(d)?;
@@ -144,10 +153,15 @@ pub struct InsertStepKeys {
     #[serde(default, deserialize_with = "flatten_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
     pub flatten: Option<bool>,
-    /// For a STEP (`.step`, `.stp`), FreeCAD or Rhino file (ignored for other files): which
-    /// reader reads it, `solidcraft` (the default) or `cadmpeg`.
+    /// For a STEP (`.step`, `.stp`), IGES (`.igs`, `.iges`), FreeCAD or Rhino file (ignored for
+    /// other files): which reader reads it, `solidcraft` (the default) or `cadmpeg`.
     #[serde(default)]
     pub reader: Option<ReaderParam>,
+    /// Keep a STEP source link for Update Links (default true). False keeps an independent
+    /// copy; without a disk path the web app keeps a copy.
+    #[serde(default, deserialize_with = "link_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<bool>")]
+    pub link: Option<bool>,
     /// Where the import goes in the active component, as a rigid move applied after `up`: a
     /// row-major 3×4 (12 numbers) or 4×4 (16 numbers) matrix, flat or as rows, as
     /// `occurrence.move` takes it; its translation column may be length expressions that name
@@ -177,7 +191,7 @@ fn leave_unread(value: &mut Value) {
     };
     if !solidcraft_io::is_step_path(path) {
         // A file of another kind is refused before any other key is read.
-        for key in ["name", "up", "names", "folder", "history", "flatten", "reader", "matrix", "tolerance", "envelope"] {
+        for key in ["name", "up", "names", "folder", "history", "flatten", "reader", "matrix", "tolerance", "envelope", "link"] {
             keys.remove(key);
         }
         return;
@@ -259,11 +273,13 @@ pub struct StepInserted {
     pub created_bodies: Vec<String>,
     /// What the file reader noticed and put right.
     pub warnings: Vec<String>,
-    /// A FreeCAD file only: `"features"` when its sketches and features were rebuilt; absent
-    /// when its solids came in as one Import feature.
+    /// A FreeCAD file only: `"features"` when its sketches and features were rebuilt;
+    /// `"sketches"` when its solids came in as one Import feature with its sketches beside them;
+    /// absent when its solids came in alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history: Option<String>,
-    /// FreeCAD only, with `history: features`: the ids of the features the rebuild added.
+    /// FreeCAD only, with `history: features` or `sketches`: the ids of the features the rebuild
+    /// added (with `sketches`, the sketches).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub features_added: Option<Vec<u64>>,
     /// The program the file's header names as writing it.

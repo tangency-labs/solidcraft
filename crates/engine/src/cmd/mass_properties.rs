@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use serde_json::Value;
 use solidcore_record::Vec3;
 use solidcraft_doc::joints::{self, JointKind, MAX_JOINTS};
-use solidcraft_doc::{Document, IDENTITY, MAX_PLACEMENTS, Mat, ModelState, apply_point, mat_inverse, mat_mul};
+use solidcraft_doc::{Document, IDENTITY, MAX_PLACEMENTS, Mat, ModelState, WorldNames, apply_point, mat_inverse, mat_mul};
 use solidcraft_geom::inertia::{self, Tensor3};
 
 use super::CommandSpec;
@@ -175,7 +175,7 @@ impl Session {
     /// Mass, centre of mass and inertia of every occurrence and rigid group of the design, as
     /// `assembly.mass_properties` returns them (kg, mm, kg·mm²), pending moves included.
     pub fn mass_properties(&self) -> Result<AssemblyMassResult> {
-        let mut doc = (*self.doc).clone();
+        let mut doc = self.doc.active_assembly().into_owned();
         for occurrence in &mut doc.occurrences {
             if let Some(transform) = self.pending_moves.get(&occurrence.id) {
                 occurrence.transform = *transform;
@@ -235,12 +235,13 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
 
     // Each placed body measured once, on worker threads.
     let owners = doc.model_body_components(state);
+    let world_names = WorldNames::new(doc, state);
     let placed: HashSet<u64> =
         ids.iter().map(|id| if *id == 0 { 0 } else { doc.occurrences.iter().find(|o| o.id == *id).map_or(u64::MAX, |o| o.component) }).collect();
     let measured: Vec<usize> = (0..state.bodies.len()).filter(|i| owners.get(*i).is_some_and(|c| placed.contains(c))).collect();
     let shapes = solidcraft_kernel::map_on_threads(&measured, 16, |&i| -> Result<Shape> {
         let body = state.bodies.get(i).ok_or_else(|| EngineError::Other("body index out of range".into()))?;
-        let closed = crate::cmd::inspect::encloses_volume(&body.body);
+        let closed = body.is_closed();
         if !closed {
             return Ok(Shape { closed, volume: 0.0, centroid: Vec3::ZERO, gyration: None });
         }
@@ -283,7 +284,7 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
             let Some(s) = shape.get(&k) else { continue };
             let density = doc.density(&body.name);
             let mut entry = BodyMassEntry {
-                name: body.name.clone(),
+                name: world_names.name(&body.name, component, &path),
                 material: doc.body_material(&body.name),
                 density_g_cm3: density,
                 closed: s.closed,
@@ -301,14 +302,14 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
                     return Err(out_of_range());
                 }
                 if inertia.is_none() {
-                    warnings.push(format!("body `{}`: its mesh does not close, so its inertia is unknown", body.name));
+                    warnings.push(format!("body `{}`: its mesh does not close, so its inertia is unknown", entry.name));
                 }
                 parts.push(part);
                 entry.volume_mm3 = Some(volume);
                 entry.mass_kg = Some(mass);
             } else {
                 skipped += 1;
-                warnings.push(format!("body `{}` is not a closed solid: it adds no mass", body.name));
+                warnings.push(format!("body `{}` is not a closed solid: it adds no mass", entry.name));
             }
             bodies.push(entry);
         }

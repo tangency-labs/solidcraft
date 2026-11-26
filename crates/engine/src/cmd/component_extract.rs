@@ -20,7 +20,9 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::{DesignLink, Document, FeatureKind, ModelBody, ModelState};
 
-use super::{absolute, component_key, file_sha256, inherit_properties, link_refused, link_target, reply, resolve, session_bodies, stored};
+use super::{
+    absolute, component_key, file_sha256, inherit_properties, link_mesh_feature, link_refused, link_target, reply, resolve, session_bodies, stored,
+};
 use crate::params::{bad, str_};
 use crate::schema::component_link::{CopiesResult, CopyInfo, ExtractResult, ReplaceWithLinkResult};
 use crate::{EngineError, Result, Session};
@@ -467,7 +469,7 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
                 local_path(&mut face.path, &sc.own);
                 local_path(&mut face.author_path, &sc.own);
             }
-            FeatureKind::Sketch { plane, .. } => {
+            FeatureKind::Sketch { plane, .. } | FeatureKind::FramePlate { plane, .. } => {
                 if let Some(anchor) = crate::cmd::sketch::face::anchor_mut(plane) {
                     anchor.component = to_root(anchor.component);
                     local_path(&mut anchor.path, &sc.own);
@@ -494,6 +496,7 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
     part.body_offsets.retain(|b, _| moved.contains_key(b));
     keep_component_looks(&mut part, &sc.owners, &BTreeSet::from([comp]));
     part.materials.retain(|b, _| bodies.contains(b));
+    part.collision_shapes.retain(|b, _| bodies.contains(b));
     part.appearances.bodies.retain(|b, _| bodies.contains(b));
     part.appearances.faces.retain(|f| bodies.contains(&f.body));
     part.appearances.components.retain(|c, _| sc.children.contains(c));
@@ -518,6 +521,8 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
         g.features.retain(|f| sc.inside.contains(f));
     }
     part.named_views.clear();
+    part.home_view = None;
+    part.saved_sections.clear();
     part.configs = Default::default();
     part.assembly = Default::default();
     let features: BTreeMap<u64, u64> = sc.inside.iter().chain(&sc.carried).map(|f| (*f, *f)).collect();
@@ -609,7 +614,7 @@ fn clear_history(s: &mut Session, sc: &Scope) {
         s.active_component = 0;
         s.active_occurrence_path = None;
     }
-    s.selection.clear();
+    s.clear_selection();
 }
 
 /// The design as it was before a swap, to check the swap against.
@@ -671,12 +676,20 @@ impl Before {
     }
 }
 
+/// Every body in `state` that the link `link` of component `linked` brings in: its solids, and its
+/// design's mesh bodies, which the Mesh Import feature beside them holds. A component with fewer
+/// bodies is no copy of it.
+fn linked_bodies<'a>(s: &Session, state: &'a ModelState, linked: u64, link: &DesignLink) -> Vec<&'a ModelBody> {
+    let meshes = link_mesh_feature(s, linked, link.feature).map(|(id, _)| id);
+    state.bodies.iter().filter(|b| b.feature == link.feature || Some(b.feature) == meshes).collect()
+}
+
 /// The components other than `linked`, a linked component, whose design on its own builds the
 /// same bodies as its link.
 fn copies_of(s: &Session, linked: u64) -> Result<Vec<u64>> {
     let Some(link) = s.doc.links.get(&linked) else { return Ok(Vec::new()) };
     let state = s.model.state();
-    let reference: Vec<&ModelBody> = state.bodies.iter().filter(|b| b.feature == link.feature).collect();
+    let reference = linked_bodies(s, &state, linked, link);
     let volume = |bodies: &[&ModelBody]| bodies.iter().filter_map(|b| solidcraft_kernel::measure(&b.body).ok()).map(|m| m.volume).sum::<f64>();
     let expected = volume(&reference);
     let mut out = Vec::new();
@@ -714,7 +727,18 @@ impl Session {
     /// Whether component `id` can leave the design for a file of its own or a link: what
     /// `component.extract` and `component.replace_with_link` check before they build anything.
     pub fn can_extract(&self, id: u64) -> bool {
-        scope(self, id, CMD).is_ok()
+        self.extract_refusal(id).is_none()
+    }
+
+    /// Why component `id` can't be extracted, as a sentence for a disabled menu entry's hover
+    /// text (#18623), or `None` when it can: the same check as [`Session::can_extract`].
+    pub fn extract_refusal(&self, id: u64) -> Option<String> {
+        let why = match scope(self, id, CMD).err()? {
+            EngineError::BadParams { msg, .. } => msg,
+            other => other.to_string(),
+        };
+        let mut chars = why.chars();
+        Some(chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or(why))
     }
 }
 
@@ -734,7 +758,8 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
 
     // This design: the component's history becomes an Import feature of the new design's bodies
     let shown = file.display().to_string();
-    let (_, sf, faces, _, properties) = session_bodies(&part, &shown)?;
+    // No mesh bodies: `scope` refuses a component that holds one.
+    let (_, sf, faces, _, properties, _) = session_bodies(&part, &shown)?;
     // The link has a body per piece: a body in pieces keeps its name on the first
     let mut solids: Vec<String> = Vec::new();
     for b in part.world_state()?.bodies.iter().filter(|b| !b.body.is_mesh()) {
@@ -775,7 +800,7 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     part.path = s.path.clone();
     part.execute("file.save", &json!({"path": shown}))?;
     // The link keeps what the new file holds, as Insert Design's does (#9739).
-    if let Some(read) = file_sha256(&file, s.path.as_deref())
+    if let Some(read) = file_sha256(&file, s.path.as_deref(), false)
         && let Some(link) = s.doc_mut().links.get_mut(&comp)
     {
         link.file_sha256 = Some(read);
@@ -855,7 +880,7 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
         let sc = scope(s, t, cmd)?;
         let (part, _) = part_design(s, &sc, &sc.name, cmd)?;
         let state = s.model.state();
-        let reference: Vec<&ModelBody> = state.bodies.iter().filter(|b| b.feature == link.feature).collect();
+        let reference = linked_bodies(s, &state, linked, &link);
         let world = part.world_state()?;
         let built: Vec<&ModelBody> = world.bodies.iter().collect();
         if !same_solids(&reference, &built)? {
@@ -875,6 +900,7 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
         d.remove_configuration_components(&[t]);
         d.appearances.components.remove(&t);
         d.materials.retain(|b, _| !sc.bodies.contains(b));
+        d.collision_shapes.retain(|b, _| !sc.bodies.contains(b));
         d.appearances.bodies.retain(|b, _| !sc.bodies.contains(b));
         d.appearances.faces.retain(|f| !sc.bodies.contains(&f.body));
         d.browser_groups.retain(|g| g.component != t);
@@ -1295,6 +1321,33 @@ mod tests {
         // Not the same: refused, nothing changes
         let before = serde_json::to_value(&*s.doc).unwrap();
         let err = s.execute("component.replace_with_link", &json!({"component": "Taller", "with": plate})).unwrap_err().to_string();
+        assert!(err.contains("not the same"), "{err}");
+        assert_eq!(serde_json::to_value(&*s.doc).unwrap(), before);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #20050: a linked design's mesh bodies are part of what its link brings in, so a component
+    /// with only the same solids is no copy of it and can't be replaced by it.
+    #[test]
+    fn a_component_with_only_the_solids_of_a_link_with_mesh_bodies_is_no_copy() {
+        let dir = folder("mesh-copies");
+        let (board, stl) = (dir.join("board.solidcraft"), dir.join("Chip.stl"));
+        std::fs::write(&stl, super::super::tests::tetra_stl()).unwrap();
+        {
+            let mut b = Session::default();
+            run(&mut b, "solid.box", json!({"length": 10, "width": 20, "height": 2, "body_name": "Board"}));
+            run(&mut b, "file.insert_mesh", json!({"path": stl}));
+            run(&mut b, "file.save", json!({"path": board}));
+        }
+        let mut s = Session::default();
+        let linked = run(&mut s, "component.insert_design", json!({"path": board}))["component"].as_u64().unwrap();
+        run(&mut s, "component.create", json!({"name": "Bare"}));
+        // Its own name: a second Board would be renamed here and come out as Board on its own
+        run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 2, "body_name": "Plank"}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        assert_eq!(run(&mut s, "component.copies", json!({"component": linked}))["copies"], json!([]));
+        let before = serde_json::to_value(&*s.doc).unwrap();
+        let err = s.execute("component.replace_with_link", &json!({"component": "Bare", "with": linked})).unwrap_err().to_string();
         assert!(err.contains("not the same"), "{err}");
         assert_eq!(serde_json::to_value(&*s.doc).unwrap(), before);
         let _ = std::fs::remove_dir_all(&dir);

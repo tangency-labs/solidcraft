@@ -21,9 +21,9 @@ use crate::schema::browser::{
     BodyRenameParams, BodyRenamed, BrowserFoldParams, BrowserFoldResult, BrowserGroupMade, BrowserGroupParams, BrowserGroupRenamed,
     BrowserMoveParams, BrowserMoved, BrowserOrderParams, BrowserOrdered, BrowserRenameGroupParams, BrowserUngroupParams, BrowserUngrouped,
     BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, FindParams, FindResult, FlipAxis, Isolated,
-    PlaneFrame, RedefineAttachment, RedefineSketchParams, RedefineSketchResult, RenamedBody, RepairDone, RepairFace, RepairHole, RepairParams,
-    RepairResult, RepairSewn, ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult, ViewRenameParams, ViewRenamed,
-    ViewSaveParams, ViewSaved, VisibilityState,
+    PlaneFrame, PlaneSizeParams, PlaneSized, RedefineAttachment, RedefineSketchParams, RedefineSketchResult, RenamedBody, RepairDone, RepairFace,
+    RepairHole, RepairParams, RepairResult, RepairSewn, ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewHome, ViewListParams, ViewListResult,
+    ViewRenameParams, ViewRenamed, ViewResetHomeParams, ViewSaveParams, ViewSaved, ViewSetHomeParams, VisibilityState,
 };
 use crate::schema::view_navigation::CameraReply;
 use crate::schema::{TypedContract, output_schema_for};
@@ -40,6 +40,7 @@ const MOVE_CONTRACT: TypedContract<BrowserMoveParams> = TypedContract::new();
 const ORDER_CONTRACT: TypedContract<BrowserOrderParams> = TypedContract::new();
 const VISIBILITY_CONTRACT: TypedContract<BrowserVisibilityParams> = TypedContract::new();
 const TOGGLE_CONTRACT: TypedContract<crate::schema::browser::BrowserToggleParams> = TypedContract::new();
+const ISOLATE_CONTRACT: TypedContract<crate::schema::browser::BrowserIsolateParams> = TypedContract::new();
 const FOLD_CONTRACT: TypedContract<BrowserFoldParams> = TypedContract::new();
 const REDEFINE_SKETCH_CONTRACT: TypedContract<RedefineSketchParams> = TypedContract::new();
 const VIEW_SAVE_CONTRACT: TypedContract<ViewSaveParams> = TypedContract::new();
@@ -47,6 +48,9 @@ const VIEW_RENAME_CONTRACT: TypedContract<ViewRenameParams> = TypedContract::new
 const VIEW_DELETE_CONTRACT: TypedContract<ViewDeleteParams> = TypedContract::new();
 const VIEW_LIST_CONTRACT: TypedContract<ViewListParams> = TypedContract::new();
 const VIEW_APPLY_CONTRACT: TypedContract<ViewApplyParams> = TypedContract::new();
+const VIEW_SET_HOME_CONTRACT: TypedContract<ViewSetHomeParams> = TypedContract::new();
+const VIEW_RESET_HOME_CONTRACT: TypedContract<ViewResetHomeParams> = TypedContract::new();
+const PLANE_SIZE_CONTRACT: TypedContract<PlaneSizeParams> = TypedContract::new();
 
 /// A reply as JSON: the commands here build their replies from the types their output schemas
 /// describe, so the two can't drift apart.
@@ -73,7 +77,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane")
         .contract(&REDEFINE_SKETCH_CONTRACT)
         .output(output_schema_for::<RedefineSketchResult>)
-        .params("sketch: id or name; plane: as sketch.create; flip?: bool | \"x\" | \"y\" as sketch.create (not on a face; default: when the new plane faces the other way, it is turned so the sketch keeps facing the way it did and stays upright, and the reply's `flip` says about which axis; false keeps the new plane's own side); frame?: as sketch.create; author_path?: exact owner occurrence ids; explicitly rebinds or freezes the plane while preserving geometry and dimension names"),
+        .params("sketch: id or name; plane: as sketch.create; flip?: bool | \"x\" | \"y\" as sketch.create (not on a face; default: when the new plane faces the other way, it is turned so the sketch keeps facing the way it did and stays upright, and the reply's `flip` says about which axis; false keeps the new plane's own side); frame?: as sketch.create; author_path?: exact owner occurrence ids; explicitly rebinds or freezes the plane while preserving geometry and dimension names; a construction plane later in the timeline that the sketch can't use where it is moves the sketch to just after that plane in the same step (note says so), refused with why when the plane uses the sketch or the move breaks a feature"),
     CommandSpec::new("browser.group", "New Group", crate::checked!("browser.group", group))
         .icon("folder")
         .contract(&GROUP_CONTRACT)
@@ -104,6 +108,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&VIEW_SAVE_CONTRACT)
         .output(output_schema_for::<ViewSaved>)
         .params("name?; camera: {target: [x,y,z], yaw, pitch, distance, fov?, roll?, up?: z|y} (replaces a view of the same name)"),
+    CommandSpec::new("view.plane_size", "Resize Plane", crate::checked!("view.plane_size", plane_size))
+        .icon("scale")
+        .contract(&PLANE_SIZE_CONTRACT)
+        .output(output_schema_for::<PlaneSized>)
+        .params(
+            "plane: construction plane name; extent: [x0, y0, x1, y1] (mm, in the plane's own x and y about its origin) | null (back to a size that follows the zoom). Display only",
+        ),
     CommandSpec::new("view.rename", "Rename Named View", crate::checked!("view.rename", view_rename))
         .icon("rename")
         .contract(&VIEW_RENAME_CONTRACT)
@@ -114,6 +125,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&VIEW_DELETE_CONTRACT)
         .output(output_schema_for::<ViewDeleted>)
         .params("view: name"),
+    CommandSpec::new("view.set_home", "Set Current View as Home", crate::checked!("view.set_home", view_set_home))
+        .icon("home")
+        .contract(&VIEW_SET_HOME_CONTRACT)
+        .output(output_schema_for::<ViewHome>)
+        .params("camera: {target: [x,y,z], yaw, pitch, distance, fov?, roll?, up?: z|y} (Home goes to it, saved with the design; replaces the Home view set before)"),
+    CommandSpec::new("view.reset_home", "Reset Home View", crate::checked!("view.reset_home", view_reset_home))
+        .icon("home")
+        .contract(&VIEW_RESET_HOME_CONTRACT)
+        .output(output_schema_for::<ViewHome>)
+        .enabled(has_home_view)
+        .params("(none) Home frames the model from the iso view again"),
     CommandSpec::new("view.list", "List Named Views", crate::checked!("view.list", view_list))
         .icon("list")
         .noundo()
@@ -143,8 +165,25 @@ pub static COMMANDS: &[CommandSpec] = &[
          or features?: [feature id or name] (the bodies they made; path?: [occurrence ids] for only that placement's); \
          or folder?: bodies|sketches|construction|origin|joints|all (all of it; showing also shows its browser folders and groups, and `all` takes in the occurrence hides too); \
          or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, o:4/origin, c0/g7, c0/joints, c0/canvases, c0/point_clouds] (the folder or group itself: its items keep their own state; component origin items use o:4/origin/XY etc. in items); \
-         or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (with paths or items of bodies, and visible:true: everything else is hidden, other placements as placements). Saved with the design and undone like any other change (the camera is not)",
+         or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (with paths or items of bodies, and visible:true: everything else is hidden, other placements as placements); \
+         or unisolate?: bool (with visible:true and no target: put back what the isolates since the last unisolate hid, or show everything). Saved with the design and undone like any other change (the camera is not)",
     ),
+    CommandSpec::new("browser.isolate", "Isolate", crate::checked!("browser.isolate", isolate_selection))
+        .icon("body")
+        .key("Ctrl+I")
+        .contract(&ISOLATE_CONTRACT)
+        .output(output_schema_for::<BrowserVisibilityResult>)
+        .params(
+        "clear?: bool. Without it, hides everything except the selection: the selected components' placements, or else the selected \
+         bodies and the bodies of the selected faces, edges and vertices, as browser.visibility with isolate:true; nothing selected is \
+         an error. clear:true ends the Isolate in effect instead, as browser.unisolate (the viewport status pill's close)",
+    ),
+    CommandSpec::new("browser.unisolate", "Exit Isolation", crate::checked!("browser.unisolate", unisolate_all))
+        .icon("unisolate")
+        .key("Ctrl+Shift+I")
+        .contract(&TOGGLE_CONTRACT)
+        .output(output_schema_for::<BrowserVisibilityResult>)
+        .params("(no parameters) as browser.visibility with visible:true and unisolate:true: puts back what the isolates hid; with nothing isolated it is an error and shows nothing"),
     CommandSpec::new("browser.toggle_planes", "Show/Hide Planes", crate::checked!("browser.toggle_planes", toggle_planes))
         .icon("eye")
         .contract(&TOGGLE_CONTRACT)
@@ -634,6 +673,8 @@ fn isolate_bodies(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
     // A hidden Bodies folder or group a picked body is in would keep it hidden: those show
     // again. Their other bodies are hidden one by one above, as the root's are.
     let shown_folders = folders_holding(s, &keep);
+    // Kept only now, once nothing above can fail, for Unisolate.
+    remember_before_isolate(s);
     s.visibility.hidden_folders.retain(|k| !shown_folders.contains(k));
     s.visibility.hidden_occurrences = hidden;
     s.visibility.hidden_bodies = hidden_bodies;
@@ -675,9 +716,86 @@ fn folders_holding(s: &Session, world: &[String]) -> std::collections::BTreeSet<
     keys
 }
 
+/// Unisolate: puts back what the Isolates since the last Unisolate hid, and leaves alone what was
+/// changed since (locks, sketches, dimensions). With no Isolate in effect, shows everything.
+/// Keeps what an Isolate is about to change, with the bodies on screen now, unless an earlier
+/// Isolate is still in effect (#8120).
+fn remember_before_isolate(s: &mut Session) {
+    if s.visibility.before_isolate.is_some() {
+        return;
+    }
+    let shown =
+        s.world_state().map(|world| world.bodies.iter().filter(|b| s.body_visible(&b.name)).map(|b| b.name.clone()).collect()).unwrap_or_default();
+    s.visibility.remember_before_isolate();
+    if let Some(before) = s.visibility.before_isolate.as_mut() {
+        before.shown_bodies = shown;
+    }
+}
+
+/// `browser.isolate`: Isolate on the selection, for its key (#3504): placements when components
+/// are selected, else the bodies the selection names.
+fn isolate_selection(s: &mut Session, p: &Value) -> Result<Value> {
+    if bool_(p, "clear").unwrap_or(false) {
+        return unisolate_all(s, &json!({}));
+    }
+    // Select All's whole-body scope counts as its bodies.
+    let selection = s.selected_items()?;
+    let paths: Vec<Vec<u64>> =
+        selection.iter().filter_map(|item| if let crate::Sel::Occurrence { path } = item { Some(path.clone()) } else { None }).collect();
+    if !paths.is_empty() {
+        return visibility(s, &json!({"visible": true, "paths": paths, "isolate": true}));
+    }
+    let mut bodies: Vec<String> = Vec::new();
+    for name in selection.iter().filter_map(crate::Sel::body_name) {
+        if !bodies.iter().any(|b| b == name) {
+            bodies.push(name.to_owned());
+        }
+    }
+    if bodies.is_empty() {
+        return Err(bad("browser.isolate", "select a body or component to isolate"));
+    }
+    visibility(s, &json!({"visible": true, "items": bodies, "isolate": true}))
+}
+
+/// `browser.unisolate`: Unisolate, for its key (#3504). With no Isolate in effect it refuses and
+/// changes nothing; it never falls back to showing everything, as `unisolate: true` does.
+fn unisolate_all(s: &mut Session, _p: &Value) -> Result<Value> {
+    if s.visibility.before_isolate.is_none() {
+        return Err(bad("browser.unisolate", "nothing is isolated"));
+    }
+    visibility(s, &json!({"visible": true, "unisolate": true}))
+}
+
+fn unisolate(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
+    let cmd = "browser.visibility";
+    if !visible {
+        return Err(bad(cmd, "unisolate requires visible:true"));
+    }
+    if ["items", "folder", "features", "joints", "paths", "tree_folders", "isolate"].iter().any(|k| p.get(*k).is_some()) {
+        return Err(bad(cmd, "unisolate takes no targets"));
+    }
+    let Some(before) = s.visibility.before_isolate.take() else {
+        return visibility(s, &json!({ "folder": "all", "visible": true }));
+    };
+    s.visibility.hidden_bodies = before.hidden_bodies;
+    s.visibility.hidden_occurrences = before.hidden_occurrences;
+    // Isolate only ever shows folders: hide those again, and keep a folder hidden while isolating.
+    for key in before.hidden_folders {
+        if !s.visibility.hidden_folders.contains(&key) {
+            s.visibility.hidden_folders.push(key);
+        }
+    }
+    s.refresh_display();
+    let visibility = VisibilityState::from(&s.visibility);
+    reply(cmd, BrowserVisibilityResult { visible: true, changed: None, isolated: None, visibility, param_warnings: Vec::new() })
+}
+
 fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "browser.visibility";
     let visible = bool_(p, "visible").ok_or_else(|| bad(cmd, "`visible` must be true or false"))?;
+    if bool_(p, "unisolate").unwrap_or(false) {
+        return unisolate(s, p, visible);
+    }
     if let Some(value) = p.get("tree_folders") {
         if ["items", "folder", "joints", "paths"].iter().any(|k| p.get(*k).is_some()) {
             return Err(bad(cmd, "give `tree_folders`, `items`, `folder`, `joints` or `paths`, not several"));
@@ -772,6 +890,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             let mut root_bodies: Vec<String> =
                 s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == 0).map(|b| b.name.clone()).collect();
             root_bodies.extend(ancestor_bodies);
+            remember_before_isolate(s);
             s.visibility.hidden_occurrences = hidden;
             s.visibility.hidden_bodies = root_bodies;
             s.refresh_display();
@@ -851,8 +970,9 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     // Showing all of a kind also shows the browser folders and groups that hold it.
     if visible && let Some(f) = str_(p, "folder") {
         if f == "all" {
-            // Everything includes the folders and groups themselves.
+            // Everything includes the folders and groups themselves, and nothing is isolated.
             s.visibility.hidden_folders.clear();
+            s.visibility.before_isolate = None;
         } else {
             let groups: Vec<String> = s.doc.browser_groups.iter().filter(|g| g.folder == f).map(|g| format!("/g{}", g.id)).collect();
             let own = format!("/{f}");
@@ -1283,8 +1403,15 @@ fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
 /// handler refuses it with.
 pub(crate) fn saved_view_form(c: &Value) -> std::result::Result<solidcraft_doc::NamedView, String> {
     let v: solidcraft_doc::NamedView = serde_json::from_value(c.clone()).map_err(|e| format!("bad camera: {e}"))?;
-    let ok = [v.target.x, v.target.y, v.target.z, v.yaw, v.pitch, v.distance, v.fov, v.roll].iter().all(|x| x.is_finite()) && v.distance > 0.0;
-    if ok { Ok(v) } else { Err("the camera must be finite with a positive distance".into()) }
+    let values = [v.target.x, v.target.y, v.target.z, v.yaw, v.pitch, v.distance, v.fov, v.roll];
+    if !(values.iter().all(|x| x.is_finite()) && v.distance > 0.0) {
+        return Err("the camera must be finite with a positive distance".into());
+    }
+    // Within what a design file may hold, or the design would save and not open again.
+    if values.iter().any(|x| x.abs() > solidcraft_doc::format::MAX_REAL) {
+        return Err("the camera's values must be within ±1e9".into());
+    }
+    Ok(v)
 }
 
 /// The camera `view.apply` turns to for a `camera` it is given, as the handler reads it (and
@@ -1335,21 +1462,88 @@ fn view_save(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, ViewSaved { view: name, param_warnings: Vec::new() })
 }
 
+fn view_set_home(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.set_home";
+    let c = p.get("camera").ok_or_else(|| bad(cmd, "`camera` is required"))?;
+    let v = saved_view_form(c).map_err(|e| bad(cmd, e))?;
+    // Home must be a camera `view.apply` can go to: a field of view below 0 is refused here,
+    // and the Home kept so far stays.
+    if !usable_camera(&camera_of(&v)) {
+        return Err(bad(cmd, "the camera's field of view must be 0 or more"));
+    }
+    s.doc_mut().home_view = Some(solidcraft_doc::NamedView { name: String::new(), ..v });
+    reply(cmd, ViewHome { home: s.doc.home_view.clone(), param_warnings: Vec::new() })
+}
+
+/// `view.reset_home` has something to reset only while the design keeps a Home view of its own.
+fn has_home_view(s: &Session) -> std::result::Result<(), String> {
+    match s.doc.home_view {
+        Some(_) => Ok(()),
+        None => Err("the design has no Home view of its own: Home already frames the model from the iso view".into()),
+    }
+}
+
+fn view_reset_home(s: &mut Session, _p: &Value) -> Result<Value> {
+    s.doc_mut().home_view = None;
+    reply("view.reset_home", ViewHome { home: None, param_warnings: Vec::new() })
+}
+
+/// Most a plane's drawn rectangle reaches from its origin, mm.
+const MAX_PLANE_EXTENT: f64 = 1e7;
+
+/// The size a construction plane is drawn at: a rectangle of its own (dragged by its edges and
+/// corners in the view), or (`extent: null`) a square that follows the zoom.
+fn plane_size(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.plane_size";
+    let name = str_(p, "plane").ok_or_else(|| bad(cmd, "`plane` must name a construction plane"))?;
+    let id = crate::view::construction_planes(s)
+        .into_iter()
+        .find(|(_, n, _)| n == name)
+        .map(|(id, _, _)| id)
+        .ok_or_else(|| bad(cmd, format!("no construction plane `{name}`")))?;
+    let extent = match p.get("extent") {
+        None => return Err(bad(cmd, "`extent` must be [x0, y0, x1, y1] or null")),
+        Some(Value::Null) => None,
+        Some(v) => {
+            let e: [f64; 4] = serde_json::from_value(v.clone()).map_err(|_| bad(cmd, "`extent` must be [x0, y0, x1, y1] or null"))?;
+            if !e.iter().all(|x| x.is_finite() && x.abs() <= MAX_PLANE_EXTENT) || e[2] - e[0] < 1e-3 || e[3] - e[1] < 1e-3 {
+                return Err(bad(cmd, "`extent` must be finite, within 10 km of the plane's origin, with x1 > x0 and y1 > y0"));
+            }
+            Some(e)
+        }
+    };
+    if s.doc.plane_extents.get(&id).copied() == extent {
+        return Err(bad(cmd, "the plane already has that size"));
+    }
+    let d = s.doc_mut();
+    match extent {
+        Some(e) => d.plane_extents.insert(id, e),
+        None => d.plane_extents.remove(&id),
+    };
+    reply(cmd, PlaneSized { plane: name.to_string(), extent, param_warnings: Vec::new() })
+}
+
 fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.apply";
     let cam = match (str_(p, "view"), p.get("camera")) {
         (Some(_), Some(_)) => return Err(bad(cmd, "give `view` or `camera`, not both")),
         (None, None) => return Err(bad(cmd, "`view` (a name) or `camera` is required")),
         (None, Some(c)) => applied_camera_form(c).map_err(|e| bad(cmd, e))?,
-        // Standard view names come first, as in the browser's Named Views folder.
-        (Some(name), None) => match solidcraft_viewport::StandardView::parse(name) {
-            Some(sv) => {
-                let mut c = crate::view::home_camera(s)?;
-                c.set_view(sv);
-                c.fit(&solidcraft_render::view_bounds(&crate::view::bounds(s)?));
-                c
-            }
-            None => s.doc.named_views.iter().find(|v| v.name == name).map(camera_of).ok_or_else(|| bad(cmd, format!("no named view `{name}`")))?,
+        (Some(name), None) => match crate::view::home_view(s).filter(|_| name.eq_ignore_ascii_case("home")) {
+            // The design's own Home view, when it keeps one (#19972).
+            Some(home) => home,
+            // Standard view names come first, as in the browser's Named Views folder.
+            None => match solidcraft_viewport::StandardView::parse(name) {
+                Some(sv) => {
+                    let mut c = crate::view::home_camera(s)?;
+                    c.set_view(sv);
+                    c.fit(&solidcraft_render::view_bounds(&crate::view::bounds(s)?));
+                    c
+                }
+                None => {
+                    s.doc.named_views.iter().find(|v| v.name == name).map(camera_of).ok_or_else(|| bad(cmd, format!("no named view `{name}`")))?
+                }
+            },
         },
     };
     if !usable_camera(&cam) {
@@ -1360,7 +1554,7 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// The full orbit camera of a named view, including its saved roll and up direction.
-fn camera_of(v: &solidcraft_doc::NamedView) -> solidcraft_viewport::Camera {
+pub(crate) fn camera_of(v: &solidcraft_doc::NamedView) -> solidcraft_viewport::Camera {
     solidcraft_viewport::Camera { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: v.distance, fov: v.fov, roll: v.roll, up: v.up }
 }
 
@@ -1398,7 +1592,7 @@ fn view_list(s: &mut Session, _p: &Value) -> Result<Value> {
 
 /// The keys whose strings name bodies, alone or in a list (`body`, `targets`…), at any depth of a
 /// feature: its own fields and the face, edge and link references inside it.
-const BODY_KEYS: [&str; 6] = ["body", "bodies", "target", "target_bodies", "targets", "tools"];
+const BODY_KEYS: [&str; 7] = ["body", "bodies", "member", "target", "target_bodies", "targets", "tools"];
 
 /// Replace the body name `old` with `new` where a string names a body (the value of one of
 /// [`BODY_KEYS`]); other strings equal to it (sketch text, plane and feature names, expressions)
@@ -1549,6 +1743,7 @@ fn repair_body(s: &mut Session, p: &Value) -> Result<Value> {
 /// The longest body name `body.rename` gives.
 const MAX_BODY_NAME: usize = 128;
 
+/// Rename a body and update the later references that identify it, including exact gusset faces.
 fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "body.rename";
     fn new_name<'a>(cmd: &str, p: &'a Value) -> Result<&'a str> {
@@ -1644,7 +1839,7 @@ fn numbered_names(s: &Session, olds: &[String], name: &str) -> Vec<String> {
 }
 
 /// Rename the body `given` (or the body a placed copy's name shows) to `name`.
-fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<BodyRenamed> {
+pub(super) fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<BodyRenamed> {
     // A placed copy's name (`KB (K:2)`, the name the browser lists a pasted placement's body by)
     // means the body it shows, as appearance.assign takes it (#9740): renaming it renames that body,
     // in every placement of its component (#10017).
@@ -1768,9 +1963,38 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
                 }
             }
         }
+        if let FeatureKind::FramePlate { plane, .. } = &mut f.kind
+            && let Some(anchor) = super::sketch::face::anchor_mut(plane)
+            && anchor.target.body == old
+        {
+            let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+            let bodies = std::collections::BTreeMap::from([(old.clone(), name.to_string())]);
+            anchor.remap_target(&ids, &bodies)?;
+        }
         if let FeatureKind::FrameEndCap { ends, .. } = &mut f.kind {
             for end in ends {
                 if let Some(anchor) = super::sketch::face::anchor_mut(&mut end.plane)
+                    && anchor.target.body == old
+                {
+                    let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+                    anchor.remap_target(&ids, &std::collections::BTreeMap::from([(old.clone(), name.to_string())]))?;
+                }
+            }
+        }
+        if let FeatureKind::FrameTrim { to, .. } = &mut f.kind {
+            for target in to {
+                if let solidcraft_doc::frame::TrimTarget::Plane { plane } = target
+                    && let Some(anchor) = super::sketch::face::anchor_mut(plane)
+                    && anchor.target.body == old
+                {
+                    let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+                    anchor.remap_target(&ids, &std::collections::BTreeMap::from([(old.clone(), name.to_string())]))?;
+                }
+            }
+        }
+        if let FeatureKind::FrameGusset { supports, .. } = &mut f.kind {
+            for support in supports {
+                if let Some(anchor) = super::sketch::face::anchor_mut(&mut support.plane)
                     && anchor.target.body == old
                 {
                     let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
@@ -1825,6 +2049,80 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("plane").is_none() {
         return Err(bad(cmd, "`plane` is required"));
     }
+    let later = later_plane(s, id, p, cmd)?;
+    let out = match redefine_in_place(s, id, p, cmd) {
+        Ok(out) => out,
+        // A construction plane made after the sketch may be built from features that come after
+        // the sketch too, which redefine can't see where the sketch is (#14675). The sketch moves
+        // to just after the plane first, in the same step.
+        Err(error) => match later {
+            Some(plane) => redefine_after(s, id, plane, p, cmd)?,
+            None => return Err(error),
+        },
+    };
+    reply(cmd, out)
+}
+
+/// The construction plane `p` names, as its feature id, when it comes after sketch `id` in the
+/// timeline.
+fn later_plane(s: &Session, id: u64, p: &Value, cmd: &str) -> Result<Option<u64>> {
+    let Some(v @ (Value::String(_) | Value::Number(_))) = p.get("plane") else { return Ok(None) };
+    let solidcraft_doc::PlaneRef::Construction { feature, .. } = super::features::plane_param(s, Some(v), cmd)? else { return Ok(None) };
+    let sketch = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "sketch disappeared"))?;
+    Ok(s.doc.feature_index(feature.0).filter(|at| *at > sketch).map(|_| feature.0))
+}
+
+/// Redefine sketch `id` onto construction plane `plane`, which comes after it: the sketch moves to
+/// just after the plane in the timeline, then goes on it. Refused, with why, when the plane uses
+/// the sketch or the move breaks a feature that worked.
+fn redefine_after(s: &mut Session, id: u64, plane: u64, p: &Value, cmd: &str) -> Result<RedefineSketchResult> {
+    let name = |s: &Session, id: u64| s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
+    let (sketch, plane_name) = (name(s, id), name(s, plane));
+    let to = s.doc.feature_index(plane).ok_or_else(|| bad(cmd, "plane disappeared"))?;
+    let from = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "sketch disappeared"))?;
+    let later = format!("{plane_name} comes after {sketch} in the timeline");
+    if s.doc.marker.is_some_and(|marker| from < marker && to >= marker) {
+        return Err(bad(cmd, format!("{later} and after the history marker: move the marker past {plane_name} first")));
+    }
+    let mut moved = s.scratch();
+    super::edit::reorder(&mut moved, &json!({"feature": id, "position": to, "allow_errors": true}))
+        .map_err(|error| bad(cmd, format!("{later}, and {sketch} can't move after it: {error}")))?;
+    // Over the whole history: a feature behind the history marker that the move breaks counts too,
+    // and one that failed before the move doesn't.
+    let broken: Vec<(String, String)> = super::edit::newly_broken_in_history(&s.doc, &s.model, &moved.doc, &moved.model)
+        .into_iter()
+        // The sketch itself gets its new plane next.
+        .filter(|(feature, _)| *feature != sketch)
+        .collect();
+    if broken.iter().any(|(feature, _)| *feature == plane_name) {
+        return Err(bad(
+            cmd,
+            format!("{plane_name} uses {sketch}, directly or through a feature made from it, so {sketch} can't go on {plane_name}"),
+        ));
+    }
+    if !broken.is_empty() {
+        let list: Vec<String> = broken.iter().map(|(feature, error)| format!("{feature} ({error})")).collect();
+        return Err(bad(
+            cmd,
+            format!(
+                "{later}, so {sketch} would have to move after {plane_name}, and that breaks {}; move those features after {plane_name} first",
+                list.join("; ")
+            ),
+        ));
+    }
+    let mut out = redefine_in_place(&mut moved, id, p, cmd)?;
+    s.doc = moved.doc;
+    s.pending_moves = moved.pending_moves;
+    let note = format!("{sketch} moved after {plane_name} in the timeline, because {later}");
+    out.note = Some(match out.note.take() {
+        Some(frame) => format!("{note}; {frame}"),
+        None => note,
+    });
+    Ok(out)
+}
+
+/// Redefine sketch `id` where it is in the timeline: its new plane may only use what comes before it.
+fn redefine_in_place(s: &mut Session, id: u64, p: &Value, cmd: &str) -> Result<RedefineSketchResult> {
     let feature = s.doc.feature(id).ok_or_else(|| bad(cmd, "sketch disappeared"))?;
     let component = feature.component;
     let index = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "sketch disappeared"))?;
@@ -1851,7 +2149,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         })
         .cloned();
-    let mut plane = super::sketch::plane_ref_numbers(&trial, p, cmd)?;
+    let mut plane = super::sketch::plane_ref_numbers_with(&trial, p, cmd, super::sketch::face::IndexMode::MayBeStale)?;
     if super::sketch::face::is_face(p) {
         super::sketch::face::capture_positions(&mut trial, &plane)?;
     }
@@ -1917,6 +2215,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     trial.refresh();
     s.doc = trial.doc;
     s.pending_moves = trial.pending_moves;
+    s.pending_move_records = trial.pending_move_records;
 
     let attachment = s.doc.feature(id).and_then(|feature| match &feature.kind {
         FeatureKind::Sketch { plane, .. } => {
@@ -1927,7 +2226,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let note = frame.and_then(|f| super::sketch::frame_note(Some(f), &placement)).map(str::to_string);
     let frame = frame.and_then(PlaneFrame::from_name);
     let flip = flipped.map(|about_y| if about_y { FlipAxis::Y } else { FlipAxis::X });
-    reply(cmd, RedefineSketchResult { sketch: id, attachment, flip, frame, note, created: None, param_warnings: Vec::new() })
+    Ok(RedefineSketchResult { sketch: id, attachment, flip, frame, note, created: None, param_warnings: Vec::new() })
 }
 
 /// Moved onto a plane whose normal points against the one it is on now, a sketch would come
@@ -2064,6 +2363,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// In a window, a feature's result shows before SMLib's check of it ends
+    /// ([`Session::set_background_checks`]). The join on the block (refused by the check, as in
+    /// the test above) can show at once; a command that reads the model next reads it checked: the
+    /// join failed with the check's error, and no check left running, also for the evaluation the
+    /// refusal needed before it.
+    #[test]
+    fn a_command_that_reads_the_model_reads_it_checked_in_a_window() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-bg-checks-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("block.step");
+        std::fs::write(&path, include_str!("../../../../tests/step-regressions/block_edge_off_its_face.step")).unwrap();
+        let mut s = Session::default();
+        let r = run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy()}));
+        let id = r["feature"].as_u64().unwrap_or_else(|| panic!("{r}"));
+        s.model.result(id).and_then(|f| f.import_report.clone()).expect("the import's check").settled().expect("the check ends");
+        s.set_background_checks(true);
+        let joined =
+            s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [18, 28, 8], "operation": "join", "targets": ["Bloco"]}));
+        let measured = s.execute("inspect.measure", &json!({}));
+        assert!(measured.is_ok(), "{measured:?}");
+        assert!(!s.model.checking_features(), "the command read the model with no check left running");
+        // Refused at once (the check ended in time) or once settled: the same error either way.
+        let error = match joined {
+            Err(e) => e.to_string(),
+            Ok(_) => s.model.results.last().and_then(|r| r.error.clone()).expect("the join fails once its check is settled"),
+        };
+        assert!(error.contains("SMLib's check refuses the result"), "{error}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn repair_part_patches_a_missing_face_as_one_undoable_feature() {
         let mut s = Session::default();
@@ -2164,6 +2493,93 @@ mod tests {
             Ok(v) => v,
             Err(e) => panic!("selection.delete: {e}"),
         }
+    }
+
+    /// #3504: Ctrl+I isolates the selection (a face names its body) and Ctrl+Shift+I puts back what
+    /// it hid; with nothing selected Isolate refuses rather than hiding everything.
+    #[test]
+    fn the_isolate_keys_act_on_the_selection() {
+        let mut s = Session::default();
+        two_boxes(&mut s);
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "body_name": "C"}));
+        let spec = |id: &str| crate::find_command(id).unwrap_or_else(|| panic!("{id}"));
+        assert_eq!((spec("browser.isolate").shortcut, spec("browser.unisolate").shortcut), (Some("Ctrl+I"), Some("Ctrl+Shift+I")));
+        s.clear_selection();
+        assert!(s.execute("browser.isolate", &json!({})).is_err(), "nothing selected");
+        // Select All's whole-body scope isolates its bodies: nothing to hide, nothing refused.
+        s.selection_all_bodies = true;
+        run(&mut s, "browser.isolate", json!({}));
+        assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.before_isolate.is_some());
+        run(&mut s, "browser.unisolate", json!({}));
+        s.clear_selection();
+        assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.before_isolate.is_none());
+        s.selection = vec![crate::Sel::Face { body: "B".into(), index: 0, point: Default::default() }];
+        run(&mut s, "browser.isolate", json!({}));
+        assert_eq!(s.visibility.hidden_bodies, ["A", "C"]);
+        // The bodies on screen when it began, for drawing what it hid see-through or as edges.
+        let shown: Vec<&str> = s.visibility.before_isolate.as_ref().unwrap().shown_bodies.iter().map(String::as_str).collect();
+        assert_eq!(shown, ["A", "B", "C"]);
+        // #8120: the Isolate is a viewport status, ended by its own command, as Zebra is.
+        let status = s.status_items().into_iter().find(|item| item.id == crate::status_items::StatusId::Isolate).expect("an Isolate status");
+        assert_eq!(status.setting, crate::status_items::StatusSetting::Isolate { hidden: 2 });
+        assert_eq!((status.clear.command.as_str(), status.clear.params.clear), ("browser.isolate", true));
+        run(&mut s, &status.clear.command, json!({"clear": true}));
+        assert!(s.status_items().iter().all(|item| item.id != crate::status_items::StatusId::Isolate), "ended");
+        run(&mut s, "browser.isolate", json!({}));
+        run(&mut s, "browser.unisolate", json!({}));
+        assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.before_isolate.is_none());
+        // With nothing isolated, Ctrl+Shift+I leaves what the user hid alone.
+        run(&mut s, "browser.visibility", json!({"items": ["C"], "visible": false}));
+        assert!(s.execute("browser.unisolate", &json!({})).is_err(), "nothing is isolated");
+        assert_eq!(s.visibility.hidden_bodies, ["C"], "and nothing is shown");
+    }
+
+    /// #8120: a body hidden before the Isolate and renamed during it stays hidden after Unisolate,
+    /// and a folder hidden during it stays hidden.
+    #[test]
+    fn unisolate_follows_renames_and_keeps_later_folder_hides() {
+        let mut s = Session::default();
+        two_boxes(&mut s);
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "body_name": "C"}));
+        run(&mut s, "browser.visibility", json!({"items": ["C"], "visible": false}));
+        run(&mut s, "browser.visibility", json!({"items": ["A"], "visible": true, "isolate": true}));
+        run(&mut s, "body.rename", json!({"body": "C", "name": "D"}));
+        assert!(!s.visibility.before_isolate.as_ref().unwrap().shown_bodies.contains("C"), "C was hidden before the Isolate");
+        run(&mut s, "body.rename", json!({"body": "B", "name": "E"}));
+        assert!(s.visibility.before_isolate.as_ref().unwrap().shown_bodies.contains("E"), "a rename follows into what was on screen");
+        run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/sketches"], "visible": false}));
+        run(&mut s, "browser.unisolate", json!({}));
+        assert_eq!(s.visibility.hidden_bodies, ["D"], "the renamed body stays hidden");
+        assert!(s.visibility.hidden_folders.iter().any(|k| k == "c0/sketches"), "the folder hidden while isolating stays hidden");
+    }
+
+    /// #8120: Unisolate puts back what the Isolates hid, as it was before the first one, is one
+    /// undo step, and is never saved with the design.
+    #[test]
+    fn unisolate_restores_what_isolate_hid() {
+        let mut s = Session::default();
+        two_boxes(&mut s);
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "body_name": "C"}));
+        let hidden = |s: &Session| s.visibility.hidden_bodies.clone();
+        run(&mut s, "browser.visibility", json!({"items": ["C"], "visible": false}));
+        run(&mut s, "browser.visibility", json!({"items": ["A"], "visible": true, "isolate": true}));
+        run(&mut s, "browser.visibility", json!({"items": ["B"], "visible": true, "isolate": true}));
+        assert_eq!(hidden(&s).len(), 2, "only B is shown");
+        assert!(!serde_json::to_string(&s.visibility).unwrap().contains("isolate"), "the snapshot is not saved");
+        let undo = s.undo.len();
+        run(&mut s, "browser.visibility", json!({"visible": true, "unisolate": true}));
+        assert_eq!(hidden(&s), ["C"], "back to before the first Isolate, C still hidden by hand");
+        assert!(s.visibility.before_isolate.is_none());
+        assert_eq!(s.undo.len(), undo + 1);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(hidden(&s).len(), 2, "undo brings the isolation back");
+        assert!(s.visibility.before_isolate.is_some(), "and Unisolate with it");
+        run(&mut s, "edit.redo", json!({}));
+        // With no Isolate in effect, Unisolate shows everything.
+        run(&mut s, "browser.visibility", json!({"visible": true, "unisolate": true}));
+        assert!(hidden(&s).is_empty());
+        assert!(s.execute("browser.visibility", &json!({"visible": false, "unisolate": true})).is_err());
+        assert!(s.execute("browser.visibility", &json!({"visible": true, "unisolate": true, "items": ["A"]})).is_err());
     }
 
     #[test]
@@ -2987,6 +3403,121 @@ mod tests {
         }
     }
 
+    /// The names of the design's features in timeline order.
+    fn order(s: &Session) -> Vec<String> {
+        s.doc.features.iter().map(|f| f.name.clone()).collect()
+    }
+
+    /// A sketch named `name` on `plane` holding one line from `a` to `b`; returns the line's id.
+    fn line_sketch(s: &mut Session, name: &str, plane: Value, a: [f64; 2], b: [f64; 2]) -> String {
+        run(s, "sketch.create", json!({"plane": plane, "name": name}));
+        let line = run(s, "sketch.line", json!({"points": [a, b]}))["curves"][0].as_str().unwrap().to_string();
+        run(s, "sketch.finish", json!({}));
+        line
+    }
+
+    #[test]
+    fn redefine_onto_a_plane_built_from_a_later_sketch_moves_the_sketch_after_that_plane() {
+        // #14675: Plane5 is a plane along a line of Sketch5, which comes after Sketch4. Redefine
+        // used to fail with "unknown sketch <id of Sketch5>"; it now moves Sketch4 after Plane5.
+        let mut s = Session::default();
+        line_sketch(&mut s, "Sketch4", json!("XY"), [0.0, 0.0], [10.0, 0.0]);
+        let path = line_sketch(&mut s, "Sketch5", json!("XZ"), [0.0, 0.0], [0.0, 40.0]);
+        run(&mut s, "construct.plane.along_path", json!({"path": {"sketch": "Sketch5", "curve": path}, "t": 0.5, "name": "Plane5"}));
+        let before = order(&s);
+        assert_eq!(before, ["Sketch4", "Sketch5", "Plane5"]);
+        let out = run(&mut s, "sketch.redefine", json!({"sketch": "Sketch4", "plane": "Plane5"}));
+        assert_eq!(order(&s), ["Sketch5", "Plane5", "Sketch4"]);
+        let note = out["note"].as_str().unwrap_or_default();
+        assert!(note.contains("Sketch4 moved after Plane5"), "{out}");
+        let plane = s.doc.find_feature("Plane5").unwrap().id;
+        let solidcraft_doc::FeatureKind::Sketch { plane: on, .. } = &s.doc.find_feature("Sketch4").unwrap().kind else { panic!("a sketch") };
+        // Facing the other way, the plane is turned so the sketch keeps facing the way it did.
+        let on = match on {
+            solidcraft_doc::PlaneRef::Flipped { base, .. } => base.as_ref(),
+            on => on,
+        };
+        assert!(matches!(on, solidcraft_doc::PlaneRef::Construction { feature, .. } if feature.0 == plane), "{on:?}");
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "every feature builds");
+        // One undo puts both the order and the plane back.
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(order(&s), before);
+        assert!(matches!(
+            &s.doc.find_feature("Sketch4").unwrap().kind,
+            solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Origin { .. }, .. }
+        ));
+        // A later plane the sketch can use where it is (built from nothing in the model) moves
+        // nothing, as before.
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 25, "name": "Shelf"}));
+        let before = order(&s);
+        let out = run(&mut s, "sketch.redefine", json!({"sketch": "Sketch4", "plane": "Shelf"}));
+        assert_eq!(order(&s), before);
+        assert!(out["note"].is_null(), "{out}");
+    }
+
+    #[test]
+    fn redefine_onto_a_later_plane_that_uses_the_sketch_says_why_it_cannot() {
+        // A plane along the sketch's own line: the sketch can't come after it.
+        let mut s = Session::default();
+        let own = line_sketch(&mut s, "Sketch4", json!("XY"), [0.0, 0.0], [10.0, 0.0]);
+        run(&mut s, "construct.plane.along_path", json!({"path": {"sketch": "Sketch4", "curve": own}, "t": 0.5, "name": "Plane5"}));
+        let before = order(&s);
+        let e = s.execute("sketch.redefine", &json!({"sketch": "Sketch4", "plane": "Plane5"})).unwrap_err().to_string();
+        assert!(e.contains("Plane5") && e.contains("uses Sketch4") && !e.contains("unknown sketch"), "{e}");
+        assert_eq!(order(&s), before, "nothing moved");
+        // A feature after the sketch that the move would break is named.
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Sketch4"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Sketch4", "distance": 5, "name": "Extrude1"}));
+        let path = line_sketch(&mut s, "Sketch5", json!("XZ"), [0.0, 0.0], [0.0, 40.0]);
+        run(&mut s, "construct.plane.along_path", json!({"path": {"sketch": "Sketch5", "curve": path}, "t": 0.5, "name": "Plane5"}));
+        let before = order(&s);
+        let e = s.execute("sketch.redefine", &json!({"sketch": "Sketch4", "plane": "Plane5"})).unwrap_err().to_string();
+        assert!(e.contains("Plane5") && e.contains("comes after Sketch4") && e.contains("Extrude1"), "{e}");
+        assert_eq!(order(&s), before, "nothing moved");
+    }
+
+    #[test]
+    fn redefine_onto_a_later_plane_ignores_features_that_failed_before_and_keeps_the_history_marker() {
+        // A feature that already failed before the redefine is not one the move breaks.
+        let mut s = Session::default();
+        line_sketch(&mut s, "Sketch4", json!("XY"), [0.0, 0.0], [10.0, 0.0]);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SketchA"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [50, 0], "p1": [60, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "SketchA", "distance": 5, "name": "ExtrudeA"}));
+        run(&mut s, "timeline.reorder", json!({"feature": "ExtrudeA", "position": 1, "allow_errors": true}));
+        let path = line_sketch(&mut s, "Sketch5", json!("XZ"), [0.0, 0.0], [0.0, 40.0]);
+        run(&mut s, "construct.plane.along_path", json!({"path": {"sketch": "Sketch5", "curve": path}, "t": 0.5, "name": "Plane5"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-60, 0, 0], "name": "Box"}));
+        assert_eq!(order(&s), ["Sketch4", "ExtrudeA", "SketchA", "Sketch5", "Plane5", "Box"]);
+        let failed = |s: &Session| -> Vec<String> { s.model.results.iter().filter(|r| r.error.is_some()).map(|r| r.name.clone()).collect() };
+        assert_eq!(failed(&s), ["ExtrudeA"]);
+        // The history marker before Box stays there: Box is still rolled back afterwards.
+        run(&mut s, "timeline.rollback", json!({"position": 5}));
+        run(&mut s, "sketch.redefine", json!({"sketch": "Sketch4", "plane": "Plane5"}));
+        assert_eq!(order(&s), ["ExtrudeA", "SketchA", "Sketch5", "Plane5", "Sketch4", "Box"]);
+        assert_eq!(s.doc.marker, Some(5));
+        assert_eq!(failed(&s), ["ExtrudeA"]);
+        // With the sketch and the plane both rolled back, a rolled-back feature the move would
+        // break still refuses the move.
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Sketch4"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Sketch4", "distance": 5, "name": "Extrude1"}));
+        let path = line_sketch(&mut s, "Sketch5", json!("XZ"), [0.0, 0.0], [0.0, 40.0]);
+        run(&mut s, "construct.plane.along_path", json!({"path": {"sketch": "Sketch5", "curve": path}, "t": 0.5, "name": "Plane5"}));
+        run(&mut s, "timeline.rollback", json!({"position": 0}));
+        let before = order(&s);
+        let e = s.execute("sketch.redefine", &json!({"sketch": "Sketch4", "plane": "Plane5"})).unwrap_err().to_string();
+        assert!(e.contains("Extrude1"), "{e}");
+        assert_eq!(order(&s), before, "nothing moved");
+        assert_eq!(s.doc.marker, Some(0));
+    }
+
     #[test]
     fn design_units_change_without_moving_geometry() {
         let mut s = Session::default();
@@ -3139,9 +3670,17 @@ mod tests {
         assert_eq!(back.named_views[0].target.z, 3.0);
         run(&mut s, "view.delete", json!({"view": "Detail"}));
         assert_eq!(run(&mut s, "view.list", json!({}))["views"].as_array().unwrap().len(), 1);
-        for p in [json!({}), json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": -1}}), json!({"camera": "x"})] {
+        for p in [
+            json!({}),
+            json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": -1}}),
+            json!({"camera": "x"}),
+            // Beyond what a design file holds: the design would save and not open again.
+            json!({"camera": {"target": [1e12, 0, 0], "yaw": 0, "pitch": 0, "distance": 100}}),
+            json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 1e15}}),
+        ] {
             assert!(s.execute("view.save", &p).is_err(), "{p}");
         }
+        solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
         run(&mut s, "edit.undo", json!({}));
         assert_eq!(s.doc.named_views.len(), 2);
     }
@@ -3173,6 +3712,50 @@ mod tests {
             let invalid = json!({"camera":{"target":[0,0,0],"yaw":0,"pitch":0,"distance":100,"roll":roll}});
             assert!(s.execute("view.save", &invalid).is_err());
         }
+    }
+
+    /// The design keeps its own Home view (#19972): set from a camera, saved with the design,
+    /// taken by `view.apply` home, undone in one step and reset to the iso view framing the model.
+    #[test]
+    fn the_home_view_is_set_saved_applied_and_reset() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30}));
+        let framed = run(&mut s, "view.apply", json!({"view": "home"}))["camera"].clone();
+        assert!(crate::view::home_view(&s).is_none());
+        assert!(crate::find_command("view.reset_home").unwrap().allowed(&s).is_err(), "nothing to reset yet");
+        let why = s.execute("view.reset_home", &json!({})).unwrap_err().to_string();
+        assert!(why.contains("no Home view of its own"), "{why}");
+
+        let camera = json!({"target": [1, 2, 3], "yaw": 0.25, "pitch": -0.3, "distance": 150, "fov": 0.1, "roll": 0.6, "up": "y"});
+        let set = run(&mut s, "view.set_home", json!({"camera": camera}));
+        assert_eq!(set["home"]["yaw"], 0.25);
+        let applied = run(&mut s, "view.apply", json!({"view": "Home"}))["camera"].clone();
+        assert_eq!(
+            (&applied["yaw"], &applied["pitch"], &applied["distance"], &applied["roll"]),
+            (&json!(0.25), &json!(-0.3), &json!(150.0), &json!(0.6))
+        );
+        // The standard views still frame the model, and the named views are untouched.
+        assert_ne!(run(&mut s, "view.apply", json!({"view": "iso"}))["camera"], applied);
+        assert!(s.doc.named_views.is_empty());
+
+        let reopened = serde_json::from_str::<solidcraft_doc::Document>(&serde_json::to_string(&*s.doc).unwrap()).unwrap();
+        let mut restored = Session::new(reopened);
+        assert_eq!(run(&mut restored, "view.apply", json!({"view": "home"}))["camera"], applied);
+
+        for p in [json!({}), json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": -1}}), json!({"camera": "x"})] {
+            assert!(s.execute("view.set_home", &p).is_err(), "{p}");
+        }
+        let kept = s.doc.home_view.clone();
+        let unusable = json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 100, "fov": -1}});
+        assert!(s.execute("view.set_home", &unusable).is_err(), "a field of view below 0 is refused");
+        assert_eq!(s.doc.home_view, kept, "and the Home kept so far stays");
+        run(&mut s, "view.reset_home", json!({}));
+        assert!(s.doc.home_view.is_none());
+        assert_eq!(run(&mut s, "view.apply", json!({"view": "home"}))["camera"], framed);
+        run(&mut s, "edit.undo", json!({}));
+        assert!(crate::view::home_view(&s).is_some(), "reset is one undo step");
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.doc.home_view.is_none(), "set is one undo step");
     }
 
     #[test]

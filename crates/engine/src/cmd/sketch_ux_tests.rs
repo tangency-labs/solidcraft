@@ -245,8 +245,9 @@ fn projected_geometry_counts_as_fixed() {
     let id = sk.curves[ci].id.clone();
     assert!(sk.curve_locked(ci));
     let r = run(&mut s, "sketch.constraint.fix", json!({"entity": id}));
-    // Already fixed: the toggle unfixes, which projected geometry ignores.
+    // Already fixed: the toggle unfixes, which projected geometry ignores, and says why.
     assert_eq!(r["result"]["changed"], 0);
+    assert!(r["result"]["note"].as_str().is_some_and(|n| n.contains("Break Link")), "{r}");
     assert!(sketch(&s).curve_locked(ci));
 }
 
@@ -806,6 +807,33 @@ fn dragging_a_circumscribed_polygon_keeps_it_regular() {
             }
         }
     }
+}
+
+/// A circumscribed polygon's radius, typed as an expression over a parameter, is a dimension
+/// driven by it: the polygon follows the parameter. Its sides count, typed as an expression, is
+/// read when the polygon is drawn (#20920).
+#[test]
+fn a_circumscribed_polygon_follows_a_radius_parameter() {
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "r", "expression": "10 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "5", "unit": ""}));
+    let out = run(&mut s, "sketch.polygon.circumscribed", json!({"center": [0, 0], "radius": "r", "sides": "n"}));
+    assert_eq!(out["curves"].as_array().unwrap().len(), 5, "sides read from the parameter n");
+    assert_eq!(out["sketch"]["dof"], 1, "only the turn is free (the centre sits on the origin, the size is driven): {}", out["sketch"]);
+    let (corners, _, r) = polygon_shape(&s, &out);
+    assert!((r - 10.0).abs() < 1e-9);
+    run(&mut s, "parameters.change", json!({"name": "r", "expression": "20 mm"}));
+    let (corners_after, c, r) = polygon_shape(&s, &out);
+    assert!((r - 20.0).abs() < 1e-6, "the polygon follows r: {r}");
+    assert_regular(&corners_after, c, "after r changed");
+    assert_eq!(corners.len(), corners_after.len());
+    // A diameter works the same way.
+    let out = run(&mut s, "sketch.polygon.circumscribed", json!({"center": [60, 0], "diameter": "2 * r", "sides": 4}));
+    run(&mut s, "parameters.change", json!({"name": "r", "expression": "12 mm"}));
+    let (_, _, r) = polygon_shape(&s, &out);
+    assert!((r - 12.0).abs() < 1e-6, "the diameter follows 2 * r: {r}");
+    let bad = s.execute("sketch.polygon.circumscribed", &json!({"center": [0, 0], "radius": 5, "sides": "n * 0.3"}));
+    assert!(bad.is_err(), "a count that is not a whole number is refused");
 }
 
 #[test]
@@ -2494,6 +2522,31 @@ fn undoing_cancel_then_finishing_restores_the_temporary_sketch_marker() {
     assert_eq!(s.active_sketch, None);
     assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 5);
     assert_eq!(s.model.state().bodies.len(), 1);
+}
+
+/// #15414: another edit that finishes the sketch (the Extrude key pressed by mistake) leaves the
+/// sketch's own steps in the history apart: one Undo takes back one change of the sketch, not
+/// the whole session the person had drawn.
+#[test]
+fn undo_after_another_edit_finished_the_sketch_takes_back_one_change() {
+    let (mut s, id) = sketch_below_a_solid();
+    // The person opens the sketch and draws a circle and a line in it.
+    run(&mut s, "sketch.edit", json!({"sketch": id}));
+    run(&mut s, "sketch.circle.center", json!({"center": [40, 30], "radius": 6}));
+    run(&mut s, "sketch.line", json!({"points": [[-20, 20], [-10, 25]]}));
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 6);
+    // The Extrude key by mistake: it finishes the sketch and makes the solid.
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    assert_eq!(s.active_sketch, None, "the sketch is finished");
+    // One Undo takes the extrude back; the sketch keeps every curve the person drew.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 6, "the sketch keeps every curve");
+    // The next Undo takes back ONE change of the sketch, not the whole session.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 5, "one change of the sketch is taken back");
+    // And the next one takes back the other, still one at a time.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 4, "the other change is taken back too");
 }
 
 /// #14010: a sketch with features after it, opened by `sketch.edit` without `restore_marker`

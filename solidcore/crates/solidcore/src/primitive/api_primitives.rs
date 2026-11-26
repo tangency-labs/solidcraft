@@ -9,7 +9,6 @@
 //! | Rust                               | Upstream                                              |
 //! |------------------------------------|-------------------------------------------------------|
 //! | `is_positive_dim` (private)        | `SmApiIsPositiveDim` (static)                         |
-//! | `is_non_zero_radius` (private)     | `SmApiIsNonZeroRadius` (static)                       |
 //! | `cone_dims_valid` (private)        | `SmApiConeDimsValid` (static)                         |
 //! | [`create_plane`]                   | `SmApiCreatePlane` (`SmBrep*&` overload)              |
 //! | [`create_plane_surface`]           | `SmApiCreatePlane` (`SmPlane*&` overload)             |
@@ -47,6 +46,19 @@
 //!   upstream's `NULL` checks (`SM_ERR_INVALID_INPUT`) hold by construction.
 //! - **Statuses.** `SM_ERR_INVALID_INPUT` is [`SolidError::InvalidInput`]; errors of the
 //!   called constructors pass through unchanged.
+//! - **A sphere's radius.** [`create_sphere`], [`create_partial_sphere`] and
+//!   [`create_sphere_no_pole`] refuse a radius that is not finite and above `SM_EFF_ZERO`.
+//!   Upstream's `SmApiIsNonZeroRadius` lets a negative radius through as an inside-out
+//!   sphere, but the body `SmPrimitiveCreation::CreateSphere` builds for it is the
+//!   ordinary sphere of the radius's magnitude, from the mirrored profile (positive
+//!   volume, clean at check level 2), so the sign asks for nothing a caller gets.
+//!   [`PrimitiveCreation::create_partial_sphere`] itself is unchanged.
+//! - **A torus whose tube crosses its axis.** [`create_torus`] and
+//!   [`create_partial_torus`] (no validation upstream) refuse a minor radius above the
+//!   major radius: a spindle torus, whose body upstream builds and its own check then
+//!   fails (the loop's ends on the folded part of the tube are a gap apart in U). The
+//!   horn torus (minor equal to major) is built, and a radius that is not above
+//!   `SM_EFF_ZERO` is refused by [`Torus::create_canonical`] as before.
 //! - [`create_sphere_no_pole_with_tolerance`] additionally exposes an explicit
 //!   B-rep tolerance and the native constructor's boundary-fitting tolerance.
 //! - **Context.** The B-rep entry points take the caller's [`Kernel`] (upstream's API
@@ -90,6 +102,9 @@ const OP_CONE_SURFACE: &str = "primitive::api_primitives::create_cone_surface";
 const OP_PYRAMID: &str = "primitive::api_primitives::create_pyramid";
 const OP_CYLINDRICAL_BOX: &str = "primitive::api_primitives::create_cylindrical_box";
 const OP_SPHERE_NO_POLE: &str = "primitive::api_primitives::create_sphere_no_pole";
+const OP_PARTIAL_SPHERE: &str = "primitive::api_primitives::create_partial_sphere";
+const OP_TORUS: &str = "primitive::api_primitives::create_torus";
+const OP_PARTIAL_TORUS: &str = "primitive::api_primitives::create_partial_torus";
 const OP_OFFSET_PROFILE: &str = "primitive::api_primitives::create_offset_profile";
 
 /// `SmApiIsPositiveDim`: a finite dimension (radius, length, height) above
@@ -98,10 +113,31 @@ fn is_positive_dim(value: f64) -> bool {
     is_valid_double(value) && value > EFF_ZERO
 }
 
-/// `SmApiIsNonZeroRadius`: a finite, non-zero sphere radius (a negative radius is a
-/// valid inside-out sphere).
-fn is_non_zero_radius(radius: f64) -> bool {
-    is_valid_double(radius) && radius.abs() > EFF_ZERO
+/// A solid torus's tube must not cross its axis: with both radii finite and above
+/// `SM_EFF_ZERO`, the minor radius is not above the major radius (equal is the horn
+/// torus, which is built). Other radii pass, for [`Torus::create_canonical`] to refuse.
+fn torus_tube_clears_axis(op: &'static str, radius_major: f64, radius_minor: f64) -> Result<()> {
+    if is_positive_dim(radius_major) && is_positive_dim(radius_minor) && radius_minor > radius_major
+    {
+        return Err(SolidError::invalid_input(
+            op,
+            "radius_minor must not be above radius_major (the tube would cross the axis)",
+        ));
+    }
+    Ok(())
+}
+
+/// A sphere's radius: finite and above `SM_EFF_ZERO` (not `SmApiIsNonZeroRadius`, which
+/// lets a negative radius through; see the Deviations).
+fn sphere_radius_valid(op: &'static str, radius: f64) -> Result<()> {
+    if is_positive_dim(radius) {
+        Ok(())
+    } else {
+        Err(SolidError::invalid_input(
+            op,
+            "radius must be finite and above zero",
+        ))
+    }
 }
 
 /// `SmApiConeDimsValid`: finite radii that are not negative and not both zero, and a
@@ -147,9 +183,9 @@ pub fn create_plane(k: &mut Kernel, origin: Point3, x: f64, y: f64) -> Result<Br
     let frame = xy_frame(origin);
     let mut brep = p1::create_rectangle(k, 1.0e-5, x, y, &frame)?;
     if brep.face_list().is_empty() {
-        return Err(SolidError::primitive_failed(
+        return Err(SolidError::primitive(
             "primitive::api_primitives::create_plane",
-            "the rectangle has no face",
+            crate::error::primitive::PrimitiveFailure::SheetHasNoFace,
         ));
     }
     // (not upstream: the port's cached topology fields, true for the caller)
@@ -182,9 +218,9 @@ pub fn create_planar_circle(k: &mut Kernel, origin: Point3, radius: f64) -> Resu
     let frame = xy_frame(origin);
     let mut brep = p1::create_circle(k, 1.0e-5, radius, &frame)?;
     if brep.face_list().is_empty() {
-        return Err(SolidError::primitive_failed(
+        return Err(SolidError::primitive(
             "primitive::api_primitives::create_planar_circle",
-            "the disc has no face",
+            crate::error::primitive::PrimitiveFailure::SheetHasNoFace,
         ));
     }
     // (not upstream: the port's cached topology fields, true for the caller)
@@ -217,17 +253,15 @@ pub fn create_box(
     Ok(brep)
 }
 
-/// The solid sphere of `radius` (negative: inside out) centred at `origin`, with poles
-/// (`SmApiCreateSphere`: `CreateSphere(radius, 0, 360, frame)`).
+/// The solid sphere of `radius` centred at `origin`, with poles (`SmApiCreateSphere`:
+/// `CreateSphere(radius, 0, 360, frame)`).
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] unless the radius is finite and its magnitude above
-/// `SM_EFF_ZERO`; then [`SolidError::Unported`] (`SmBrep::SmBrep`).
+/// [`SolidError::InvalidInput`] unless the radius is finite and above `SM_EFF_ZERO`
+/// (a negative radius is refused); then [`SolidError::Unported`] (`SmBrep::SmBrep`).
 pub fn create_sphere(k: &mut Kernel, origin: Point3, radius: f64) -> Result<Brep> {
-    if !is_non_zero_radius(radius) {
-        return Err(SolidError::invalid_input(OP_SPHERE, "zero radius"));
-    }
+    sphere_radius_valid(OP_SPHERE, radius)?;
     partial_sphere(k, origin, radius, 0.0, 360.0)
 }
 
@@ -340,13 +374,16 @@ pub fn create_cone_surface(
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] (`SmBrep::SmBrep`).
+/// [`SolidError::InvalidInput`] for a minor radius above the major radius (the tube
+/// would cross the axis); those of [`Torus::create_canonical`] for a radius not above
+/// `SM_EFF_ZERO`; then [`SolidError::Unported`] (`SmBrep::SmBrep`).
 pub fn create_torus(
     k: &mut Kernel,
     origin: Point3,
     radius_major: f64,
     radius_minor: f64,
 ) -> Result<Brep> {
+    torus_tube_clears_axis(OP_TORUS, radius_major, radius_minor)?;
     partial_torus(k, origin, radius_major, radius_minor, 0.0, 360.0)
 }
 
@@ -556,11 +593,13 @@ fn partial_sphere(
 }
 
 /// The solid sphere sector of `radius` centred at `origin` from `start_angle_deg` to
-/// `end_angle_deg` about Z from X (`SmApiCreatePartialSphere`; no input validation).
+/// `end_angle_deg` about Z from X (`SmApiCreatePartialSphere`; upstream validates
+/// nothing, and the angles are not validated here either).
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] (`SmBrep::SmBrep`).
+/// [`SolidError::InvalidInput`] unless the radius is finite and above `SM_EFF_ZERO`;
+/// then [`SolidError::Unported`] (`SmBrep::SmBrep`).
 pub fn create_partial_sphere(
     k: &mut Kernel,
     origin: Point3,
@@ -568,17 +607,17 @@ pub fn create_partial_sphere(
     start_angle_deg: f64,
     end_angle_deg: f64,
 ) -> Result<Brep> {
+    sphere_radius_valid(OP_PARTIAL_SPHERE, radius)?;
     partial_sphere(k, origin, radius, start_angle_deg, end_angle_deg)
 }
 
-/// The solid sphere of `radius` (negative: inside out) centred at `center`, made of
-/// patches without degenerate pole vertices (`SmApiCreateSphereNoPole`, tolerance
-/// `SM_ZONE_TOL_3D`).
+/// The solid sphere of `radius` centred at `center`, made of patches without degenerate
+/// pole vertices (`SmApiCreateSphereNoPole`, tolerance `SM_ZONE_TOL_3D`).
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] unless the radius is finite and its magnitude above
-/// `SM_EFF_ZERO`, or an error constructing, projecting or stitching the patches.
+/// [`SolidError::InvalidInput`] unless the radius is finite and above `SM_EFF_ZERO`
+/// (a negative radius is refused), or an error constructing, projecting or stitching the patches.
 pub fn create_sphere_no_pole(k: &mut Kernel, center: Point3, radius: f64) -> Result<Brep> {
     sphere_no_pole(k, center, radius, None)
 }
@@ -612,9 +651,7 @@ fn sphere_no_pole(
     radius: f64,
     tolerance: Option<f64>,
 ) -> Result<Brep> {
-    if !is_non_zero_radius(radius) {
-        return Err(SolidError::invalid_input(OP_SPHERE_NO_POLE, "zero radius"));
-    }
+    sphere_radius_valid(OP_SPHERE_NO_POLE, radius)?;
     let mut brep = new_brep(k)?;
     if let Some(tolerance) = tolerance {
         brep.set_tolerance(tolerance);
@@ -792,11 +829,14 @@ fn partial_torus(
 
 /// The solid torus sector of `radius_major` and `radius_minor` centred at `origin`
 /// about Z, from `start_angle_deg` to `end_angle_deg` about Z from X
-/// (`SmApiCreatePartialTorus`; no input validation).
+/// (`SmApiCreatePartialTorus`; upstream validates nothing, and the angles are not
+/// validated here either).
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] (`SmBrep::SmBrep`).
+/// [`SolidError::InvalidInput`] for a minor radius above the major radius (the tube
+/// would cross the axis); those of [`Torus::create_canonical`] for a radius not above
+/// `SM_EFF_ZERO`; then [`SolidError::Unported`] (`SmBrep::SmBrep`).
 pub fn create_partial_torus(
     k: &mut Kernel,
     origin: Point3,
@@ -805,6 +845,7 @@ pub fn create_partial_torus(
     start_angle_deg: f64,
     end_angle_deg: f64,
 ) -> Result<Brep> {
+    torus_tube_clears_axis(OP_PARTIAL_TORUS, radius_major, radius_minor)?;
     partial_torus(
         k,
         origin,
@@ -957,8 +998,9 @@ mod tests {
         assert!(!is_positive_dim(EFF_ZERO));
         assert!(!is_positive_dim(f64::NAN));
         assert!(!is_positive_dim(f64::INFINITY));
-        assert!(is_non_zero_radius(-5.0));
-        assert!(!is_non_zero_radius(0.0));
+        assert!(sphere_radius_valid(OP_SPHERE, 5.0).is_ok());
+        assert!(sphere_radius_valid(OP_SPHERE, -5.0).is_err());
+        assert!(sphere_radius_valid(OP_SPHERE, 0.0).is_err());
         assert!(cone_dims_valid(0.0, 1.0, 1.0));
         assert!(!cone_dims_valid(0.0, 0.0, 1.0));
         assert!(!cone_dims_valid(-1.0, 10.0, 20.0));
@@ -1004,6 +1046,111 @@ mod tests {
         ));
     }
 
+    /// Every sphere builder refuses a radius that is not finite and above `SM_EFF_ZERO`,
+    /// as invalid input naming the radius: a negative one too, for which the ordinary
+    /// sphere of its magnitude used to be built.
+    #[test]
+    fn a_sphere_radius_not_above_zero_is_refused_naming_the_radius() {
+        let k = &mut Kernel::default();
+        for radius in [
+            -3.0,
+            -EFF_ZERO,
+            0.0,
+            EFF_ZERO,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            for built in [
+                create_sphere(k, o(), radius),
+                create_partial_sphere(k, o(), radius, 0.0, 90.0),
+                create_sphere_no_pole(k, o(), radius),
+                create_sphere_no_pole_with_tolerance(k, o(), radius, 1e-6),
+            ] {
+                match built {
+                    Err(SolidError::InvalidInput { reason, .. }) => {
+                        assert!(reason.contains("radius"), "{radius}: {reason}");
+                    }
+                    Err(other) => panic!("{radius}: refused as {other:?}"),
+                    Ok(_) => panic!("{radius}: built a body"),
+                }
+            }
+        }
+        // the least radius above the limit is not refused for its radius
+        let least = EFF_ZERO * (1.0 + 2.0 * f64::EPSILON);
+        assert!(sphere_radius_valid(OP_SPHERE, least).is_ok());
+    }
+
+    /// The body a negative radius used to give is still what
+    /// [`PrimitiveCreation::create_partial_sphere`] builds for it (the goldens of the
+    /// booleans build such operands that way): the sphere of the radius's magnitude, with
+    /// its positive volume, a manifold solid.
+    #[test]
+    fn the_primitive_creation_of_a_negative_radius_is_the_sphere_of_its_magnitude() {
+        let k = &mut Kernel::default();
+        let mut inside_out = partial_sphere(k, o(), -3.0, 0.0, 360.0).unwrap();
+        assert!(crate::topology::brep::p2::is_manifold_solid(&inside_out).unwrap());
+        let volume =
+            crate::mass::integrator::properties::brep_volume_default(k, &mut inside_out, 1e-8)
+                .unwrap();
+        let exact = 4.0 / 3.0 * std::f64::consts::PI * 27.0;
+        assert!((volume - exact).abs() <= 1e-6 * exact, "{volume} {exact}");
+    }
+
+    /// Both torus builders refuse a minor radius above the major radius (a spindle torus,
+    /// whose tube crosses the axis), as invalid input naming both radii: the issue's
+    /// (1, 2), the least step above the horn torus, a major radius just above the limit
+    /// under an ordinary tube (the torus of the boolean golden's row
+    /// `torus_guard_major_2x_eff_zero`, which used to be built), and a huge tube.
+    #[test]
+    fn a_torus_whose_tube_crosses_its_axis_is_refused_naming_the_radii() {
+        let k = &mut Kernel::default();
+        for (major, minor) in [
+            (1.0, 2.0),
+            (2.0, 2.0 + 4.0 * f64::EPSILON),
+            (2.0e-12, 0.5),
+            (1.0, 1.0e9),
+        ] {
+            for built in [
+                create_torus(k, o(), major, minor),
+                create_partial_torus(k, o(), major, minor, 0.0, 90.0),
+            ] {
+                match built {
+                    Err(SolidError::InvalidInput { reason, .. }) => assert!(
+                        reason.contains("radius_minor") && reason.contains("radius_major"),
+                        "{major} {minor}: {reason}"
+                    ),
+                    Err(other) => panic!("{major} {minor}: refused as {other:?}"),
+                    Ok(_) => panic!("{major} {minor}: built a body"),
+                }
+            }
+        }
+    }
+
+    /// The horn torus (minor radius equal to the major radius) is still built, as before:
+    /// its tube touches the axis at one point and does not cross it, and its volume is
+    /// the closed form `2 pi^2 R r^2`. A radius that is not above `SM_EFF_ZERO` is still
+    /// refused where it was, by the torus surface, and not as a tube across the axis.
+    #[test]
+    fn the_horn_torus_is_still_built_and_a_radius_not_above_zero_still_refused() {
+        let k = &mut Kernel::default();
+        let mut whole = create_torus(k, o(), 2.0, 2.0).unwrap();
+        let volume =
+            crate::mass::integrator::properties::brep_volume_default(k, &mut whole, 1e-8).unwrap();
+        let exact = 2.0 * std::f64::consts::PI.powi(2) * 2.0 * 4.0;
+        assert!((volume - exact).abs() <= 1e-6 * exact, "{volume} {exact}");
+        let part = create_partial_torus(k, o(), 2.0, 2.0, 0.0, 90.0).unwrap();
+        assert!(!part.face_list().is_empty());
+        for (major, minor) in [(5.0, 0.0), (5.0, -1.0), (-1.0, 0.5), (0.0, 0.5)] {
+            let error = create_torus(k, o(), major, minor).expect_err("a radius not above zero");
+            assert_eq!(
+                error.operation(),
+                "surface::torus::Torus::create_canonical",
+                "{major} {minor}: {error:?}"
+            );
+        }
+    }
+
     #[test]
     fn complete_solids_construct_and_partial_solids_report_dependencies() {
         let k = &mut Kernel::default();
@@ -1014,7 +1161,6 @@ mod tests {
             (create_cone(k, o(), 5.0, 2.0, 10.0), (3, 3, 2)),
             (create_sphere(k, o(), 5.0), (1, 1, 2)),
             (create_sphere_no_pole(k, o(), 5.0), (4, 6, 4)),
-            (create_sphere_no_pole(k, o(), -5.0), (4, 6, 4)),
             (create_torus(k, o(), 10.0, 2.0), (1, 2, 1)),
             (
                 create_cylindrical_box(k, o(), 10.0, 2.0, 5.0, 0.0, 90.0),
@@ -1032,26 +1178,22 @@ mod tests {
         assert!(crate::topology::brep::p2::is_manifold_solid(&sphere).unwrap());
         let cylinder = create_partial_cylinder(k, o(), 5.0, 10.0, 0.0, 90.0).unwrap();
         assert!(crate::topology::brep::p2::is_manifold_solid(&cylinder).unwrap());
-        // with `fixes.revolve_analytic_profile_faces` (WR-448, #545) the swept face is
-        // an analytic torus; upstream's is a B-spline surface
-        for (fix, expected) in [(false, 0), (true, 1)] {
-            k.fixes.revolve_analytic_profile_faces = fix;
-            let torus = create_partial_torus(k, o(), 10.0, 2.0, 0.0, 90.0).unwrap();
-            assert!(crate::topology::brep::p2::is_manifold_solid(&torus).unwrap());
-            let tori = torus
-                .face_list()
-                .iter()
-                .filter(|&&f| {
-                    let surface = torus.face(f).unwrap().surface.as_ref().unwrap();
-                    matches!(
-                        surface.kind(),
-                        crate::surface::surface::SurfaceKind::Torus(_)
-                    )
-                })
-                .count();
-            assert_eq!(tori, expected, "{fix}");
-        }
-        k.fixes.revolve_analytic_profile_faces = false;
+        // the swept face is an analytic torus (WR-448, #545); upstream's is a B-spline
+        // surface
+        let torus = create_partial_torus(k, o(), 10.0, 2.0, 0.0, 90.0).unwrap();
+        assert!(crate::topology::brep::p2::is_manifold_solid(&torus).unwrap());
+        let tori = torus
+            .face_list()
+            .iter()
+            .filter(|&&f| {
+                let surface = torus.face(f).unwrap().surface.as_ref().unwrap();
+                matches!(
+                    surface.kind(),
+                    crate::surface::surface::SurfaceKind::Torus(_)
+                )
+            })
+            .count();
+        assert_eq!(tori, 1);
         // edges without an edge use on their face
         let mut brep = Brep::new_with_infinite_region().unwrap();
         let (edge, face) = (EdgeId::from_index(0), FaceId::from_index(0));
@@ -1108,9 +1250,9 @@ mod tests {
             failures,
             [
                 SolidError::invalid_input("geom::vector2d::Vec2::unitize", "zero-length vector"),
-                SolidError::surface_failed(
+                SolidError::surface(
                     "surface::surface::p6::DerivSurfDefinition::sample_values",
-                    "the reference curve point lies on the boundary curve"
+                    crate::error::surface::SurfaceFailure::ReferencePointOnBoundary
                 ),
             ]
         );
@@ -1118,7 +1260,7 @@ mod tests {
             failures.iter().map(SolidError::kind).collect::<Vec<_>>(),
             [
                 crate::error::ErrorKind::InvalidInput,
-                crate::error::ErrorKind::Failed
+                crate::error::ErrorKind::Degenerate
             ]
         );
 

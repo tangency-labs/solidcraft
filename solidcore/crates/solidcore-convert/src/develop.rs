@@ -146,7 +146,9 @@ pub fn record_corner_relief(c: k::CornerRelief) -> r::CornerRelief {
     }
 }
 
-fn anchor(a: &r::Anchor) -> k::Anchor {
+/// The record's anchor as the kernel's.
+#[must_use]
+pub fn anchor(a: &r::Anchor) -> k::Anchor {
     k::Anchor {
         panel: a.panel,
         origin: vec2(a.origin),
@@ -290,7 +292,9 @@ fn relief(x: r::Relief) -> k::Relief {
     match x {
         r::Relief::None => k::Relief::None,
         r::Relief::Notch => k::Relief::Notch,
+        r::Relief::Outline => k::Relief::Outline,
         r::Relief::Slot { width, depth } => k::Relief::Slot { width, depth },
+        r::Relief::Obround { width, depth } => k::Relief::Obround { width, depth },
         r::Relief::Tear { normal, offset } => k::Relief::Tear {
             normal: vec3(normal),
             offset,
@@ -302,7 +306,9 @@ fn record_relief(x: k::Relief) -> r::Relief {
     match x {
         k::Relief::None => r::Relief::None,
         k::Relief::Notch => r::Relief::Notch,
+        k::Relief::Outline => r::Relief::Outline,
         k::Relief::Slot { width, depth } => r::Relief::Slot { width, depth },
+        k::Relief::Obround { width, depth } => r::Relief::Obround { width, depth },
         k::Relief::Tear { normal, offset } => r::Relief::Tear {
             normal: record_vec3(normal),
             offset,
@@ -510,4 +516,107 @@ pub fn segs(s: &[solidcore_record::Seg2]) -> Vec<solidcore::prism::profile::Seg2
 #[must_use]
 pub fn record_segs(s: &[solidcore::prism::profile::Seg2]) -> Vec<solidcore_record::Seg2> {
     s.iter().map(record_seg2).collect()
+}
+
+/// The record's bead section as the kernel's.
+#[must_use]
+pub fn bead_section(s: &r::BeadSection) -> k::BeadSection {
+    k::BeadSection {
+        depth: s.depth,
+        width: s.width,
+        angle: s.angle,
+        base_radius: s.base_radius,
+        crown_radius: s.crown_radius,
+        end_length: s.end_length,
+    }
+}
+
+/// The record's bead as the kernel's.
+#[must_use]
+pub fn bead(b: &r::Bead) -> k::Bead {
+    k::Bead {
+        panel: b.panel,
+        a: vec2(b.a),
+        b: vec2(b.b),
+        far: b.far,
+        section: bead_section(&b.section),
+    }
+}
+
+/// The kernel's bead face as the record's.
+#[must_use]
+pub fn record_bead_face(f: k::BeadFace) -> r::BeadFace {
+    let part = match f.part {
+        k::BeadPart::Crown => r::BeadPart::Crown,
+        k::BeadPart::Across { left, piece } => r::BeadPart::Across { left, piece },
+        k::BeadPart::Along { start, piece } => r::BeadPart::Along { start, piece },
+    };
+    r::BeadFace { part, top: f.top }
+}
+
+/// The kernel's edge of a bead's face as the record's.
+#[must_use]
+pub fn record_form_edge(e: &k::FormEdge) -> r::FormEdge {
+    match e {
+        k::FormEdge::Line { a, b } => r::FormEdge::Line {
+            a: record_vec3(*a),
+            b: record_vec3(*b),
+        },
+        k::FormEdge::Arc { a, b, mid } => r::FormEdge::Arc {
+            a: record_vec3(*a),
+            b: record_vec3(*b),
+            mid: record_vec3(*mid),
+        },
+        k::FormEdge::Chain { ctrl } => r::FormEdge::Chain {
+            ctrl: ctrl.iter().copied().map(record_vec3).collect(),
+        },
+    }
+}
+
+/// The kernel's surface of a bead's face as the record's.
+#[must_use]
+pub fn record_form_surface(s: &k::FormSurface) -> r::FormSurface {
+    match s {
+        k::FormSurface::Plane => r::FormSurface::Plane,
+        k::FormSurface::Extruded { a, b, mid, dir } => r::FormSurface::Extruded {
+            a: record_vec3(*a),
+            b: record_vec3(*b),
+            mid: record_vec3(*mid),
+            dir: record_vec3(*dir),
+        },
+    }
+}
+
+/// The kernel's bead form as the record's.
+#[must_use]
+pub fn record_bead_form(f: &k::BeadForm) -> r::BeadForm {
+    r::BeadForm {
+        open: f.open.map(record_vec2),
+        centre: record_vec2(f.centre),
+        faces: f
+            .faces
+            .iter()
+            .map(|g| r::FormFace {
+                edges: g.edges.iter().map(record_form_edge).collect(),
+                surface: record_form_surface(&g.surface),
+                point: record_vec3(g.point),
+                out: record_vec3(g.out),
+                face: record_bead_face(g.face),
+            })
+            .collect(),
+    }
+}
+
+/// The kernel's bead outline as the record's.
+#[must_use]
+pub fn record_bead_outline(o: &k::BeadOutline) -> r::BeadOutline {
+    r::BeadOutline {
+        footprint: o.footprint.map(record_vec2),
+        start: record_vec2(o.start),
+        end: record_vec2(o.end),
+        crown_width: o.crown_width,
+        crown_length: o.crown_length,
+        note_angle: o.note_angle,
+        note_side: record_vec2(o.note_side),
+    }
 }
