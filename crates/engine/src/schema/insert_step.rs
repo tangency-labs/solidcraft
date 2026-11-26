@@ -273,11 +273,13 @@ pub struct StepInserted {
     pub created_bodies: Vec<String>,
     /// What the file reader noticed and put right.
     pub warnings: Vec<String>,
-    /// A FreeCAD file only: `"features"` when its sketches and features were rebuilt; absent
-    /// when its solids came in as one Import feature.
+    /// A FreeCAD file only: `"features"` when its sketches and features were rebuilt;
+    /// `"sketches"` when its solids came in as one Import feature with its sketches beside them;
+    /// absent when its solids came in alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history: Option<String>,
-    /// FreeCAD only, with `history: features`: the ids of the features the rebuild added.
+    /// FreeCAD only, with `history: features` or `sketches`: the ids of the features the rebuild
+    /// added (with `sketches`, the sketches).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub features_added: Option<Vec<u64>>,
     /// The program the file's header names as writing it.

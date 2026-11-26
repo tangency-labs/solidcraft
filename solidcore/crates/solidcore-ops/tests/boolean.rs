@@ -174,6 +174,212 @@ fn wedges_of_a_grooved_ring_unite_and_wedges_apart_pair_no_faces() {
     assert!(near(volume(&u), want), "{}, closed form {want}", volume(&u));
 }
 
+/// A plate 42 x 42 x 5 at `x0` along x with a pocket 2 deep cut into its top: a 41 x 41 square
+/// with corners rounded to 4, 0.5 in from each side (tangency-labs/solidcraft#22034). Its
+/// volume is 42² · 5 − 2 (41² − (4 − π) 4²) = 5586 − 32π.
+fn pocketed_plate(x0: f64) -> Body {
+    let v = |x: f64, y: f64| Vec2::new(x0 + x, y);
+    let (r, a, b) = (4.0, 0.5, 41.5);
+    let arc = |c: Vec2, start: f64| Seg2::Arc {
+        center: c,
+        radius: r,
+        start,
+        sweep: PI / 2.0,
+    };
+    let line = |p: Vec2, q: Vec2| Seg2::Line { a: p, b: q };
+    let pocket = Loop2 {
+        segs: vec![
+            line(v(a + r, a), v(b - r, a)),
+            arc(v(b - r, a + r), -PI / 2.0),
+            line(v(b, a + r), v(b, b - r)),
+            arc(v(b - r, b - r), 0.0),
+            line(v(b - r, b), v(a + r, b)),
+            arc(v(a + r, b - r), PI / 2.0),
+            line(v(a, b - r), v(a, a + r)),
+            arc(v(a + r, a + r), PI),
+        ],
+    };
+    let region = Region2 {
+        outer: pocket,
+        holes: vec![],
+    };
+    let tool = extrude_planar_regions(&Plane::XY, &[region], 3.0, 5.0).unwrap();
+    let plate = make_box([x0, 0.0, 0.0], [42.0, 42.0, 5.0]).unwrap();
+    boolean(plate, tool, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// tangency-labs/solidcraft#22034: a join of copies of a pocketed plate side by side. Each union
+/// carries the trims of the faces it copies from the other operand, and proves each carried
+/// trim within its edge's tolerance at equal parameters first (`copy_uv_trim_curves_of_other_face`).
+/// Every such trim is an exact copy with its edge's own structure: an arc of the pocket's
+/// floor (a trim on a plane with the arc's knots and weights), an arc of a rounded corner along
+/// its cylinder's first or last row, a line of a corner along its first or last column. So
+/// each is proved from its control points at once, and none is bisected
+/// (`same_parameter_bisections`): bisected, each was cut down to pieces whose bound came just
+/// under its tolerance, and a join of 16 copies gated 768 such trims. The join is the four
+/// plates' volumes, `4 (5586 − 32π)`, as one solid.
+///
+/// Its counts. One plate is a box less a pocket open at the top. The box has its 6 faces, 12
+/// edges and 8 vertices, its top face holding the pocket's opening as an inner loop. The
+/// pocket adds 9 faces (its floor, 4 straight walls, 4 quarter-cylinder corners, none closed
+/// round so none with a seam), 24 edges (8 round its opening, 8 round its floor, 8 vertical
+/// where a wall meets a corner) and 16 vertices (8 at the opening, 8 at the floor): 15 faces,
+/// 36 edges, 24 vertices (`V − E + F − (L − F) = 24 − 36 + 15 − 1 = 2`). Side by side, each pair
+/// of neighbours touches over a whole 42 x 5 face: both go, and the boolean merges faces
+/// on one surface across an edge both sides of which it keeps, so each plane of the row's
+/// outside (top, bottom, front, back) is one face, each of its edges along the row one
+/// edge and the vertices where the plates met are gone (as the issue's 16 plates give
+/// `6 + 16 · 9 = 150` faces). The row is one box of 6 faces, 12 edges and 8 vertices, its top
+/// holding the 4 openings, with 4 pockets: `6 + 4 · 9 = 42` faces, `12 + 4 · 24 = 108` edges,
+/// `8 + 4 · 16 = 72` vertices (`72 − 108 + 42 − 4 = 2`).
+///
+/// Its trims against their surfaces. Every trim the join holds (each face's trim of an edge,
+/// where the unions carried or made one) is within its edge's tolerance of the edge curve at
+/// equal parameters: `sup |C(t) − S(W(t))| <= tol` over the edge's interval, by the proved
+/// bound that gates a carried trim (`trim_same_parameter_gap_bound_within`), here on the join
+/// itself. A UV line on a plane under a line edge has no exact data for that bound (a UV
+/// line's rounding moves its parameters); there `C(t) − S(W(t))` is affine in `t`, so its
+/// length is largest at an end of the interval, and the gap is the larger end gap plus each
+/// line's evaluation slack (`line_evaluation_slack`).
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's check of its trims, not ops computing geometry
+fn a_join_of_pocketed_plates_proves_its_carried_trims_without_bisecting_them() {
+    use solidcore::curve::curve::CurveKind;
+    use solidcore::query::curve_surface_gap::{
+        line_evaluation_slack, trim_same_parameter_gap_bound_within,
+    };
+    use solidcore::surface::surface::SurfaceKind;
+    use solidcore::topology::edgeuse;
+    use solidcore::Point2;
+
+    all_fixes();
+    let plates: Vec<Body> = (0..4)
+        .map(|i| pocketed_plate(42.0 * f64::from(i)))
+        .collect();
+    let one = 5586.0 - 32.0 * PI;
+    assert!(near(volume(&plates[0]), one), "{}", volume(&plates[0]));
+
+    let mut k = solidcore::Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        ..solidcore::Kernel::default()
+    };
+    let mut held: Vec<_> = plates
+        .iter()
+        .map(|p| {
+            let record = p.to_record().unwrap().0;
+            solidcore_convert::brep::to_kernel(&mut k, &record, true)
+                .unwrap()
+                .0
+        })
+        .collect();
+    k.work_counters.reset();
+    // (the union of each pair of neighbours, then of the two pairs, as `union_all` pairs them)
+    while held.len() > 1 {
+        let mut next = Vec::new();
+        let mut it = held.into_iter();
+        while let (Some(a), Some(b)) = (it.next(), it.next()) {
+            next.push(solidcore::boolean::api_brep::boolean_union(&mut k, a, b).unwrap());
+        }
+        held = next;
+    }
+    assert!(
+        k.work_counters.trim_deviation_bounds() > 0,
+        "no carried trim was gated"
+    );
+    assert_eq!(
+        k.work_counters.same_parameter_bisections(),
+        0,
+        "of {} carried trims gated",
+        k.work_counters.trim_deviation_bounds()
+    );
+
+    // the join's counts, as derived above
+    let joined = &held[0];
+    assert_eq!(
+        [
+            joined.face_list().len(),
+            joined.edge_list().len(),
+            joined.vertex_list().len()
+        ],
+        [42, 108, 72]
+    );
+    // every trim of the join within its edge's tolerance of the edge curve at equal parameters
+    // (each trim once: an edge use without its own reads its mate's)
+    let mut held_by = Vec::new();
+    let mut ends_only = 0;
+    for &e in joined.edge_list() {
+        let rec = joined.edge(e).unwrap();
+        let (tol, ivl) = (rec.tolerance, rec.interval);
+        let range = [ivl.min(), ivl.max()];
+        let curve = rec.curve.as_ref().unwrap();
+        for &eu in &rec.edgeuses {
+            let (Some(trim), Some(holder)) = edgeuse::p1::uv_trim_curve(joined, eu).unwrap() else {
+                continue;
+            };
+            if held_by.contains(&holder) {
+                continue;
+            }
+            held_by.push(holder);
+            let f = edgeuse::p1::face(joined, holder).unwrap().unwrap();
+            let surface = joined.face(f).unwrap().surface.as_ref().unwrap();
+            let gap = trim_same_parameter_gap_bound_within(
+                &k,
+                surface,
+                curve,
+                trim,
+                range,
+                1e-3 * tol,
+                [tol, tol],
+                None,
+            )
+            .unwrap();
+            // A UV line on a plane, under a line edge: the bound has no exact data for a UV
+            // line at equal parameters (its rounding moves its parameters). The plane is
+            // affine in (u, v) and both lines are affine in t, so C(t) − S(W(t)) is affine in
+            // t and its length is largest at an end of the interval: the gap is the larger
+            // end gap, plus each line's evaluation slack.
+            let gap = if let Some(g) = gap {
+                g
+            } else {
+                assert!(
+                    matches!(surface.kind(), SurfaceKind::Plane(_)),
+                    "edge {e:?}: an unbounded trim off a plane"
+                );
+                let (CurveKind::Line(c), CurveKind::Line(w)) = (curve.kind(), trim.kind()) else {
+                    panic!("edge {e:?}: an unbounded trim that is not a line under a line");
+                };
+                ends_only += 1;
+                let end_gap = |t: f64| {
+                    let uv = trim.evaluate_point(&k, t).unwrap();
+                    let on = surface.evaluate_point(&k, Point2::new(uv.x, uv.y)).unwrap();
+                    (curve.evaluate_point(&k, t).unwrap() - on).length()
+                };
+                end_gap(range[0]).max(end_gap(range[1]))
+                    + line_evaluation_slack(c, false).unwrap()
+                    + line_evaluation_slack(w, true).unwrap()
+            };
+            assert!(
+                gap <= tol,
+                "edge {e:?}: a trim {gap} from its curve at tolerance {tol}"
+            );
+        }
+    }
+    // (the join holds a trim where an operation made or carried one; the others are built
+    // when read)
+    assert!(
+        ends_only < held_by.len(),
+        "{} trims, {ends_only} lines bounded by their ends",
+        held_by.len()
+    );
+
+    let u = union_all(plates).unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 1);
+    assert_eq!(u.counts().unwrap(), [42, 108, 72]);
+    assert!(near(volume(&u), 4.0 * one), "{}", volume(&u));
+}
+
 /// The box the boolean pairs faces by holds the face (`proved_bounding_box`): it holds every
 /// vertex of the face and the face's tight box (`SmFace::CalculateTightBoundingBox`, the face's
 /// extreme points inside its trim), on faces whose trims do not bound them alone: a ball's
@@ -239,7 +445,8 @@ fn the_box_a_face_is_paired_by_holds_the_face() {
                     );
                 }
             }
-            let Some(bx) = solidcore::query::face::p1::proved_bounding_box(&k, &b, f).unwrap()
+            let Some(bx) =
+                solidcore::query::face::p1::proved_bounding_box(&k, &b, f, &mut None).unwrap()
             else {
                 continue;
             };
@@ -863,46 +1070,55 @@ fn a_dome_1e_8_off_its_circle_joins_to_its_mirror() {
 /// from a cylinder, the case of tangency-labs/solidcraft#3962, whose check takes seconds (most
 /// of the cut's time, in the edges' curve analyses). Measured in the token's polls, not in
 /// time: a counting token (`CancelToken::after_polls`) first counts the polls of the whole
-/// check, `whole`; a token cancelled from a quarter of them then stops a second check there.
-/// It returns `Cancelled`, and the token is polled exactly once after the poll that cancelled
-/// it: by the session as the call returns, asking whether it was cancelled (`run_with`, after
-/// the kernel's call). Any further poll would be work done after the cancel.
+/// check, `whole`; a token cancelled from a quarter of them then stops the check of the same
+/// cut moved up by 1 there. It returns `Cancelled`, and the token is polled exactly once after
+/// the poll that cancelled it: by the session as the call returns, asking whether it was
+/// cancelled (`run_with`, after the kernel's call). Any further poll would be work done after
+/// the cancel. (The second check is of the moved cut, not of the same one: a check skips the
+/// geometric tests of neighbourhoods an earlier check on the kernel found clean,
+/// `solidcore::geom::check_memo`, so the same cut checked again polls far fewer times. The
+/// moved cut has no neighbourhood in common with it, so its check is as whole as the first.)
 #[test]
 fn the_check_of_a_long_coil_cut_stops_on_cancel() {
     use solidcore_ops::cancel::{within, CancelToken};
     use solidcore_ops::sweep::{screw_sweep, Curve};
-    let corners = [
-        [19.0, 0.0, 12.0],
-        [32.0, 0.0, 12.0],
-        [32.0, 0.0, 25.0],
-        [19.0, 0.0, 25.0],
-    ];
-    let square: Vec<Curve> = (0..4)
-        .map(|i| Curve::Line {
-            start: corners[i],
-            end: corners[(i + 1) % 4],
-        })
-        .collect();
-    let coil = screw_sweep(
-        &square,
-        [0.0; 3],
-        [0.0, 0.0, 1.0],
-        15.24,
-        20.0,
-        None,
-        15.24e-4,
-    )
-    .unwrap();
-    let stock = solidcore_ops::make_cylinder([0.0; 3], 20.0, 304.5).unwrap();
-    let cut = boolean(stock, coil, BooleanOp::Subtract).unwrap().unwrap();
+    // (the cut, moved up by `dz`)
+    let cut_at = |dz: f64| {
+        let corners = [
+            [19.0, 0.0, 12.0 + dz],
+            [32.0, 0.0, 12.0 + dz],
+            [32.0, 0.0, 25.0 + dz],
+            [19.0, 0.0, 25.0 + dz],
+        ];
+        let square: Vec<Curve> = (0..4)
+            .map(|i| Curve::Line {
+                start: corners[i],
+                end: corners[(i + 1) % 4],
+            })
+            .collect();
+        let coil = screw_sweep(
+            &square,
+            [0.0, 0.0, dz],
+            [0.0, 0.0, 1.0],
+            15.24,
+            20.0,
+            None,
+            15.24e-4,
+        )
+        .unwrap();
+        let stock = solidcore_ops::make_cylinder([0.0, 0.0, dz], 20.0, 304.5).unwrap();
+        boolean(stock, coil, BooleanOp::Subtract).unwrap().unwrap()
+    };
+    let cut = cut_at(0.0);
     let probe = CancelToken::after_polls(u64::MAX);
     within(&probe, || cut.check(CheckLevel::All)).unwrap();
     let whole = probe.polls().unwrap();
     let n = whole / 4;
     // cancelled well inside the check, not at its last poll
     assert!(n >= 1 && whole >= 2 * n, "the check polls {whole} times");
+    let moved = cut_at(1.0);
     let token = CancelToken::after_polls(n);
-    let r = within(&token, || cut.check(CheckLevel::All));
+    let r = within(&token, || moved.check(CheckLevel::All));
     eprintln!(
         "the check polls {whole} times; cancelled at {n}, polled {:?}",
         token.polls()
