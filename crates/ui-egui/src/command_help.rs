@@ -246,6 +246,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sketch.line",
     "sketch.line.midpoint",
     "sketch.line3d",
+    "sketch.merge_lines",
     "sketch.mirror",
     "sketch.move",
     "sketch.offset",

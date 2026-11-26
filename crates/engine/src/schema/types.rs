@@ -256,7 +256,7 @@ impl JsonSchema for FacesParam {
     }
 }
 
-/// A direction given as an axis, as `features::axis_dir_param` reads it: X, Y or Z (trimmed, any
+/// A direction given as an axis, as `features::axis_dir_form` reads it: X, Y or Z (trimmed, any
 /// case) or a non-zero `[x, y, z]` (or `{x, y, z}`), with its messages.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AxisDir(pub Vec3);
@@ -280,7 +280,8 @@ impl JsonSchema for AxisDir {
     }
 }
 
-/// Coil's numeric direction or a picked axis, in the same forms as Revolve's axis.
+/// Coil's direction, read as [`AxisDirExpr`] (#21932), or a picked axis, in the same forms as
+/// Revolve's axis.
 /// References are resolved against the design by the command handler.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CoilAxis(pub Value);
@@ -294,7 +295,7 @@ impl<'de> Deserialize<'de> for CoilAxis {
                 None => Ok(Self(value)),
             };
         }
-        match crate::cmd::axis_dir_form(&value) {
+        match crate::cmd::axis_expr_form(&value) {
             Ok(_) => Ok(Self(value)),
             Err(_)
                 if value.as_str().is_some_and(|name| !name.trim().is_empty())
@@ -314,11 +315,11 @@ impl JsonSchema for CoilAxis {
         "CoilAxis".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        let direction = generator.subschema_for::<AxisDir>();
+        let direction = generator.subschema_for::<AxisDirExpr>();
         let reference = generator.subschema_for::<RevolveAxis>();
         let point = generator.subschema_for::<Point3>();
         json_schema!({
-            "description": "X, Y or Z (any case), a non-zero direction [x, y, z], a named or picked axis in the same forms as Revolve, or an edge on a specific occurrence. Use the tagged sketch_axis form for the profile sketch's x or y axis. A placed edge names the definition body and persistent edge and records the pick point in the body's frame.",
+            "description": "X, Y or Z (any case), a non-zero direction [x, y, z] of numbers or unitless expressions, a named or picked axis in the same forms as Revolve, or an edge on a specific occurrence. Use the tagged sketch_axis form for the profile sketch's x or y axis. A placed edge names the definition body and persistent edge and records the pick point in the body's frame.",
             "anyOf": [{
                 "type": "object",
                 "properties": {
@@ -403,7 +404,7 @@ impl JsonSchema for Point2 {
     }
 }
 
-/// A cylinder's axis (#18822), as `features::axis_expr_form` reads it: X, Y or Z (any case), a
+/// A cylinder's, a cone's or a coil's axis (#18822, #21932), as `features::axis_expr_form` reads it: X, Y or Z (any case), a
 /// non-zero `[x, y, z]` of numbers, or `[x, y, z]` (or `{x, y, z}`) whose components are
 /// numbers or unitless expressions. Whether the expressions evaluate, and to a direction that
 /// isn't zero, is checked by the handler, which has the design.
