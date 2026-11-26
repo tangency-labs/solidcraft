@@ -3466,22 +3466,7 @@ fn point_free(sk: &Sketch, p: usize) -> bool {
 /// constraint can hold). Only the starting places change: the solve that follows still decides.
 fn turn_line(sk: &mut Sketch, a: usize, b: usize, horizontal: bool) {
     let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b)) else { return };
-    let d = pb - pa;
-    let length = d.len();
-    if !(length.is_finite() && length > 0.0) {
-        return;
-    }
-    let sign = |v: f64| if v < 0.0 { -1.0 } else { 1.0 };
-    let along = if horizontal { Vec2::new(length * sign(d.x), 0.0) } else { Vec2::new(0.0, length * sign(d.y)) };
-    let (new_a, new_b) = match (point_free(sk, a), point_free(sk, b)) {
-        (true, true) => {
-            let mid = (pa + pb) * 0.5;
-            (mid - along * 0.5, mid + along * 0.5)
-        }
-        (false, true) => (pa, pa + along),
-        (true, false) => (pb - along, pb),
-        (false, false) => return,
-    };
+    let Some((new_a, new_b)) = solidcraft_sketch::turned_to_axis(pa, pb, horizontal, point_free(sk, a), point_free(sk, b)) else { return };
     for (p, at) in [(a, new_a), (b, new_b)] {
         if let Some(pt) = sk.points.get_mut(p) {
             pt.pos = at;
