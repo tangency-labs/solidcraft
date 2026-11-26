@@ -1132,8 +1132,9 @@ pub enum FeatureKind {
         #[serde(with = "point_expr")]
         #[walk(placement)]
         base: PointExpr,
-        #[serde(default = "z_axis")]
-        axis: Dir,
+        #[serde(with = "point_expr", default = "z_axis_expr")]
+        #[walk(direction)]
+        axis: DirExpr,
         #[walk(length = "Radius")]
         radius: Expr,
         #[walk(length = "Top radius")]
@@ -1223,7 +1224,9 @@ pub enum FeatureKind {
         #[walk(placement)]
         at: Option<PointExpr>,
         /// Drilling direction (into the material).
-        direction: Dir,
+        #[serde(with = "point_expr")]
+        #[walk(direction)]
+        direction: DirExpr,
         #[walk(length = "Diameter")]
         diameter: Expr,
         /// Depth to the shoulder; `None` = through all.
@@ -1695,6 +1698,12 @@ pub enum FeatureKind {
         #[walk(length = "Gap")]
         gap: Option<Expr>,
     },
+    /// Cope a round tube against the outside envelopes of straight mating round members.
+    FrameCope {
+        member: BodyName,
+        tools: Vec<BodyName>,
+        end: crate::frame_cope::End,
+    },
     /// A separate mounting or end plate, centred on a persistently identified planar face.
     FramePlate {
         plane: PlaneRef,
@@ -1726,6 +1735,20 @@ pub enum FeatureKind {
         face: Option<EmbossFace>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
+        /// A shift of the picked profiles along the sketch's x before they are laid on the face
+        /// (#20386); the sketch is not changed. `None`: no shift.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Offset X")]
+        offset_x: Option<Expr>,
+        /// The same along the sketch's y.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Offset Y")]
+        offset_y: Option<Expr>,
+        /// A turn of the picked profiles, counter-clockwise in the sketch, about the middle of
+        /// their bounds; the offsets are not turned with them. `None`: no turn.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Angle")]
+        angle: Option<Expr>,
     },
     /// A thin wall from open sketch curves: `thickness` across the sketch plane, filling from
     /// the curves toward the body (to the next face, or `depth`), or with `normal` along the
@@ -1873,8 +1896,9 @@ pub enum FeatureKind {
         #[serde(with = "point_expr")]
         #[walk(placement)]
         base: PointExpr,
-        #[serde(default = "z_axis")]
-        axis: Dir,
+        #[serde(with = "point_expr", default = "z_axis_expr")]
+        #[walk(direction)]
+        axis: DirExpr,
         /// A picked axis, using the same persistent references as Revolve.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         axis_ref: Option<AxisRef>,
@@ -1987,6 +2011,10 @@ pub enum FeatureKind {
         /// virtual sharp (`sheet::HeightFrom`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         height_from: Option<String>,
+        /// The bend relief cut beside the free ends of these flanges' bends, in place of the
+        /// rule's `bend_relief_shape` (rectangular | obround | tear). None follows the rule.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bend_relief_shape: Option<String>,
     },
     /// Flat hems on sheet edges.
     SheetHem {
@@ -2837,7 +2865,57 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         patch_holes: bool,
     },
+    /// Occurrence position changes and non-rigid joint values recorded in the timeline (`component.capture_position`).
+    CapturePosition {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        moves: Vec<CapturedOccurrenceMove>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        joints: Vec<CapturedJoint>,
+    },
 }
+
+fn zero_translate() -> [Expr; 3] {
+    ["0".into(), "0".into(), "0".into()]
+}
+
+/// One occurrence's captured position change inside [`FeatureKind::CapturePosition`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct CapturedOccurrenceMove {
+    pub occurrence: u64,
+    #[serde(default, skip_serializing_if = "crate::MoveSpace::is_local")]
+    pub space: crate::MoveSpace,
+    #[serde(default = "zero_translate")]
+    #[walk(length = ["X distance", "Y distance", "Z distance"])]
+    pub translate: [Expr; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
+    #[walk(placement)]
+    pub origin: Option<PointExpr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotate_axis: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(angle = "Angle")]
+    pub angle: Option<Expr>,
+    /// Pure rigid rotation (`col 3 == [0, 0, 0, 1]`) combined with `translate` for moves from
+    /// `matrix`, `to`, `to_matrix`, `occurrence.align`, or `occurrence.drag`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<crate::Mat>,
+    /// Optional placement path (used for nested occurrences in `MoveSpace::World` when an ancestor
+    /// is instanced).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<Vec<u64>>,
+}
+
+/// One non-rigid joint's captured DOF values inside [`FeatureKind::CapturePosition`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CapturedJoint {
+    pub joint: u64,
+    #[serde(default)]
+    pub values: Vec<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exprs: Vec<Option<String>>,
+}
+
+impl crate::walk::Walk for CapturedJoint {}
 
 /// A fillet corner set back: the vertex at `vertex`, where every edge is rounded, has its corner
 /// patch start `distance` along each of its edges from the vertex, the rounds running whole up to
@@ -2961,6 +3039,8 @@ pub enum ExtendTo {
     Plane(PlaneRef),
     /// The surface of a body's face (extended).
     Face(FaceAt),
+    /// A whole body: where the surface first runs into any of its faces, as they are.
+    Body(BodyName),
     /// The surface's own bounds (natural only): a trim undone.
     Bounds,
 }
@@ -3830,6 +3910,7 @@ impl FeatureKind {
             FeatureKind::FrameGusset { .. } => "GussetFeature",
             FeatureKind::FrameMember { .. } => "FrameMemberFeature",
             FeatureKind::FrameTrim { .. } => "FrameTrimFeature",
+            FeatureKind::FrameCope { .. } => "FrameCopeFeature",
             FeatureKind::FramePlate { .. } => "FramePlateFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
             FeatureKind::Boss { .. } => "BossFeature",
@@ -3881,6 +3962,7 @@ impl FeatureKind {
             FeatureKind::MeshConvert { .. } => "MeshConvertFeature",
             FeatureKind::MeshReduce { .. } => "MeshReduceFeature",
             FeatureKind::Repair { .. } => "RepairFeature",
+            FeatureKind::CapturePosition { .. } => "CapturePositionFeature",
         }
     }
 
@@ -3924,6 +4006,7 @@ impl FeatureKind {
             FeatureKind::FrameGusset { .. } => "frame_gusset",
             FeatureKind::FrameMember { .. } => "frame_member",
             FeatureKind::FrameTrim { .. } => "frame_trim",
+            FeatureKind::FrameCope { .. } => "frame_cope",
             FeatureKind::FramePlate { .. } => "frame_plate",
             FeatureKind::Emboss { .. } => "emboss",
             FeatureKind::Rib { .. } => "rib",
@@ -3976,6 +4059,7 @@ impl FeatureKind {
             FeatureKind::MeshReduce { .. } => "mesh_reduce",
             FeatureKind::MeshImport { .. } => "mesh_import",
             FeatureKind::Repair { .. } => "repair",
+            FeatureKind::CapturePosition { .. } => "capture_position",
         }
     }
 
@@ -4022,6 +4106,7 @@ impl FeatureKind {
             "FrameMemberFeature" => "frame_member",
             "FrameTrimFeature" => "frame_trim",
             "GussetFeature" => "frame_gusset",
+            "FrameCopeFeature" => "frame_cope",
             "FramePlateFeature" => "frame_plate",
             "EmbossFeature" => "emboss",
             "BossFeature" => "boss",
@@ -4070,6 +4155,7 @@ impl FeatureKind {
             "MeshConvertFeature" => "mesh_convert",
             "MeshReduceFeature" => "mesh_reduce",
             "RepairFeature" => "repair",
+            "CapturePositionFeature" => "capture_position",
             _ => return None,
         })
     }
@@ -4118,6 +4204,7 @@ impl FeatureKind {
             FeatureKind::FrameGusset { .. } => "Gusset",
             FeatureKind::FrameMember { .. } => "Member",
             FeatureKind::FrameTrim { .. } => "MemberTrim",
+            FeatureKind::FrameCope { .. } => "Cope",
             FeatureKind::FramePlate { .. } => "MountingPlate",
             FeatureKind::Emboss { .. } => "Emboss",
             FeatureKind::Boss { .. } => "Boss",
@@ -4168,6 +4255,7 @@ impl FeatureKind {
             FeatureKind::MeshConvert { .. } => "ConvertMesh",
             FeatureKind::MeshReduce { .. } => "ReduceMesh",
             FeatureKind::Repair { .. } => "Repair",
+            FeatureKind::CapturePosition { .. } => "CapturePosition",
         }
     }
 }
@@ -4620,6 +4708,10 @@ pub struct Document {
     /// Named views: saved cameras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
+    /// The camera Home goes to, set with `view.set_home` (#19972); none: the iso view framing
+    /// the model. Its name is not used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home_view: Option<NamedView>,
     /// Named Section Analyses: sets of cutting planes that can be shown again (#20649).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub saved_sections: Vec<crate::saved_sections::SavedSection>,
@@ -4979,6 +5071,7 @@ impl Document {
             timeline_groups: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
+            home_view: None,
             saved_sections: Vec::new(),
             plane_extents: std::collections::BTreeMap::new(),
             notes: Vec::new(),
@@ -5114,6 +5207,26 @@ impl Document {
         let mut expected = previous.clone();
         expected.feature_mut(b.id)?.name.clone_from(&b.name);
         (expected == *self).then_some(b.id)
+    }
+
+    /// The parameter renamed from `previous` to this design, as `(old, new)`, when that rename
+    /// ([`Document::rename_param`], with every reference it follows) is all that changed (#611).
+    pub fn param_rename_from(&self, previous: &Document) -> Option<(String, String)> {
+        // Borrowed names: every command that changes the design asks, and most rename nothing.
+        fn names(d: &Document) -> std::collections::BTreeSet<&str> {
+            let stored = d.params.iter().map(|p| p.name.as_str()).chain(d.text_params.iter().map(|p| p.name.as_str()));
+            stored.chain(d.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str))).collect()
+        }
+        let (before, after) = (names(previous), names(self));
+        let mut gone = before.difference(&after);
+        let mut came = after.difference(&before);
+        let (old, new) = (*gone.next()?, *came.next()?);
+        if gone.next().is_some() || came.next().is_some() {
+            return None;
+        }
+        let mut expected = previous.clone();
+        expected.rename_param(old, new).ok()?;
+        (expected == *self).then(|| (old.to_string(), new.to_string()))
     }
 
     /// A complete structural proof: no non-render field is allowed to differ. Keeping this
@@ -5895,6 +6008,9 @@ impl Document {
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
                 used.extend(sketch.dimension_params().into_iter().cloned());
                 used.extend(sketch.text_exprs().into_iter().flat_map(|(_, e)| expr::references(e)));
+            }
+            if let FeatureKind::CapturePosition { joints, .. } = &f.kind {
+                used.extend(joints.iter().flat_map(|cj| cj.exprs.iter().flatten()).flat_map(|e| expr::references(e)));
             }
         }
         for p in &self.params {

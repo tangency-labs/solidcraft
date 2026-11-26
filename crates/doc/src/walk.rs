@@ -50,6 +50,7 @@ impl Walk for crate::frame::UpAxis {}
 impl Walk for crate::frame::CornerType {}
 impl Walk for crate::frame::Side {}
 impl Walk for crate::frame::TrimEnd {}
+impl Walk for crate::frame_cope::End {}
 impl Walk for solidcraft_sketch::Sketch {}
 impl Walk for solidcraft_sketch::PatternAlignment {}
 impl Walk for solidcraft_kernel::StepNode {}
@@ -86,6 +87,7 @@ impl Walk for crate::thread_forms::ThreadForm {}
 impl Walk for crate::thread_forms::ThreadHand {}
 impl Walk for crate::thread_forms::ThreadTip {}
 impl Walk for crate::thread_forms::SteepFlank {}
+impl Walk for crate::MoveSpace {}
 // An Align frame's joint origin: picks in its component's coordinates, found by their names.
 impl Walk for Box<crate::joints::JointOrigin> {}
 
