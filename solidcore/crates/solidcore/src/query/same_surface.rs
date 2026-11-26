@@ -16,13 +16,19 @@
 //! [`crate::surface::surface::Surface::same_analytic_surface`] takes them; any other two kinds are never one surface.
 //! Two cones, two spheres, or two tori are compared by the definitions
 //! [`crate::surface::surface::Surface::same_analytic_surface`] compares them by, the same code
-//! ([`coaxial_cones_agree`], [`balls_agree`], [`tori_agree`]): coaxial within `tol` at the box's
-//! diagonal, radii within `tol` at both ends of the box along the axis (both nappes of a cone
-//! are one surface), centres and radii within `tol`. Its further enclosure of two cones or
+//! ([`coaxial_cones_agree`], [`balls_agree`], [`tori_agree`]): coaxial within `tol`, radii
+//! within `tol` at both ends of the box along the axis (both nappes of a cone are one surface),
+//! centres and radii within `tol`. The axes are read where the box is: each cone's placement is
+//! first moved along its own axis to the point nearest the box's middle (its radius there with
+//! it), and two axes are then one line within `tol` over the box's diagonal from there; a
+//! torus's axis over the farthest corner of the box from its centre, where its ring moves most
+//! when the axis tilts. Its further enclosure of two cones or
 //! spheres that fail that comparison but stay within `tol` over the box (two axes a little
 //! apart) is not run here: an application asks this of every pair of faces of two bodies, and
 //! that search reads up to 256 boxes for every pair it cannot settle. Such a pair is two
 //! surfaces here.
+//!
+//! Identical surfaces (every number the same) are one surface at any tolerance.
 //!
 //! Two planes are one surface when every point of either inside the box lies within `tol` of
 //! the other. The points of plane `B` inside the box lie in the hull of the box's corners
@@ -30,11 +36,15 @@
 //! those eight points: `|(c - p)·n - ((c - q)·m)(m·n)|` for a corner `c`, `p` and `n` the point
 //! and unit normal of `A`, `q` and `m` those of `B`.
 //!
-//! **Rounding.** The plane test counts its rounding: with unit normals, the computed distance is
-//! within `gamma(12) (|c - p| + |c - q|)` of the exact one (two differences, two dot products of
-//! three terms, a product and a difference, and the normals' own rounding to unit length), and
-//! that is added before the comparison, so a pair is one surface only when every corner surely
-//! lies within `tol`. The cone, sphere and torus comparisons are the boolean's, which compare
+//! **Rounding.** The plane test counts its rounding, `gamma(24) (|c - p| + |c - q|)`, and adds it
+//! before the comparison, so a pair is one surface only when every corner surely lies within
+//! `tol`. The count: each normal made unit is within `gamma(4)` of the exact unit normal; `c - p`
+//! rounds once in each coordinate, so `(c - p)·n` is within `gamma(8) |c - p|`; likewise
+//! `(c - q)·m` within `gamma(8) |c - q|`, `m·n` (at most 1 in size) within `gamma(11)`, their
+//! product within `gamma(20) |c - q|`, and the difference adds one rounding of each, `gamma(21)`
+//! in all; the lengths and the sum in the comparison add three more. The rounding grows with the
+//! distance from each plane's given point to the box: a plane given by a point far from the
+//! faces (the foot of the world origin) is known there only to that. The cone, sphere and torus comparisons are the boolean's, which compare
 //! their computed values with `tol` as they come; their rounding is a few units in the last
 //! place of the coordinates and the box's diagonal.
 //!
@@ -142,7 +152,29 @@ pub fn same_surface(a: &Analytic, b: &Analytic, tol: f64, region: &Extent3d) -> 
             "a box that is empty, not finite or of no extent",
         ));
     }
-    Ok(match (kind(a, tol)?, kind(b, tol)?) {
+    let (ka, kb) = (kind(a, tol)?, kind(b, tol)?);
+    if a == b {
+        return Ok(true);
+    }
+    // the point of an axis through `origin` along `z` nearest the box's middle, and how far
+    // along `z` it lies from `origin`
+    let middle = region.mid();
+    let near_middle = |p: &Axis2Placement| {
+        let along = (middle - p.origin()).dot(p.z_axis());
+        (
+            Axis2Placement::from_stored(p.origin() + p.z_axis() * along, p.x_axis(), p.y_axis()),
+            along,
+        )
+    };
+    // the farthest corner of the box from `centre`
+    let farthest = |centre: Vec3| {
+        region
+            .corners()
+            .iter()
+            .map(|&c| (c - centre).length())
+            .fold(0.0, f64::max)
+    };
+    Ok(match (ka, kb) {
         (
             Kind::Plane {
                 point: p,
@@ -154,10 +186,13 @@ pub fn same_surface(a: &Analytic, b: &Analytic, tol: f64, region: &Extent3d) -> 
             },
         ) => planes_agree((p, n), (q, m), tol, region),
         (Kind::Cone(pa, ra, sa), Kind::Cone(pb, rb, sb)) => {
+            let ((pa, ta), (pb, tb)) = (near_middle(&pa), near_middle(&pb));
+            let (ra, rb) = (ra + sa * ta, rb + sb * tb);
             coaxial_cones_agree((&pa, ra, sa), (&pb, rb, sb), tol, region) == Some(true)
         }
         (Kind::Ball(c, r), Kind::Ball(d, s)) => balls_agree((c, r), (d, s), tol),
         (Kind::Torus(pa, ra, ta), Kind::Torus(pb, rb, tb)) => {
+            let reach = farthest(pa.origin()).max(farthest(pb.origin()));
             tori_agree((&pa, ra, ta), (&pb, rb, tb), tol, reach)
         }
         _ => false,
@@ -173,7 +208,7 @@ fn planes_agree(a: (Vec3, Vec3), b: (Vec3, Vec3), tol: f64, region: &Extent3d) -
         region.corners().iter().all(|&c| {
             let (to_p, to_q) = (c - p, c - q);
             let gap = (to_p.dot(n) - to_q.dot(m) * m.dot(n)).abs();
-            gap + gamma(12) * (to_p.length() + to_q.length()) <= tol
+            gap + gamma(24) * (to_p.length() + to_q.length()) <= tol
         })
     };
     within(a, b) && within(b, a)
@@ -313,6 +348,19 @@ mod tests {
     }
 
     #[test]
+    fn an_identical_surface_is_one_surface_at_no_tolerance_however_far_the_box() {
+        let region = cube(v(1e9, -1e9, 1e9), 5.0);
+        for s in [
+            plane(v(0.0, 0.0, 0.0), v(1.0, 2.0, 3.0)),
+            cylinder(v(3.0, 1.0, 2.0), v(1.0, 2.0, 3.0), 4.0),
+            cone(v(-1.0, 0.0, 5.0), v(3.0, -1.0, 2.0), 0.3),
+            torus(v(1e9, -1e9, 1e9), v(3.0, -1.0, 2.0), 5.0, 1.0),
+        ] {
+            assert!(same(s, s, 0.0, &region), "{s:?}");
+        }
+    }
+
+    #[test]
     fn far_from_the_origin_planes_a_hair_apart_compare_by_their_gap() {
         let far = 1e6;
         let region = cube(v(far, far, far), 10.0);
@@ -354,6 +402,24 @@ mod tests {
         let tilted = cylinder(v(1.0, 2.0, 0.0), v(s, 0.0, (1.0 - s * s).sqrt()), 3.0);
         assert!(same(c, tilted, 1e-7, &region));
         assert!(!same(c, tilted, 1e-8, &region));
+        // the same tilt of 5e-8 about the origin, read in a box of half-side 5 about
+        // (0, 0, 1000): the axes are 5e-5 apart there
+        let far = cube(v(0.0, 0.0, 1000.0), 5.0);
+        let z = cylinder(v(0.0, 0.0, 0.0), v(0.0, 0.0, 1.0), 3.0);
+        let s: f64 = 5e-8;
+        let leaning = cylinder(v(0.0, 0.0, 0.0), v(s, 0.0, (1.0 - s * s).sqrt()), 3.0);
+        assert!(!same(z, leaning, 1e-6, &far));
+        assert!(same(z, leaning, 6e-5, &far));
+        // a cylinder given by another point of its axis is the same cylinder
+        let s: f64 = 1e-8;
+        let axis = v(s, 0.0, (1.0 - s * s).sqrt());
+        let low = cylinder(v(0.0, 0.0, 0.0), axis, 5.0);
+        let high = cylinder(axis * 1000.0, axis, 5.0);
+        let near = cube(v(0.0, 0.0, 0.0), 5.0);
+        assert!(same(low, high, 1e-9, &near));
+        // and within 1e-6 of the untilted one of its radius over that box
+        let upright = cylinder(v(0.0, 0.0, 0.0), v(0.0, 0.0, 1.0), 5.0);
+        assert!(same(upright, high, 1e-6, &near));
     }
 
     fn cone(apex: Vec3, axis: Vec3, half_angle: f64) -> Analytic {
@@ -467,6 +533,14 @@ mod tests {
             1e-3,
             &region
         ));
+        // a ring of radius 1000 read in a box of half-side 5 at (1000, 0, 0): an axis tilted
+        // by 5e-8 moves the ring there by 5e-5
+        let ring = cube(v(1000.0, 0.0, 0.0), 5.0);
+        let s: f64 = 5e-8;
+        let big = torus(o, v(0.0, 0.0, 1.0), 1000.0, 2.0);
+        let leaning = torus(o, v(s, 0.0, (1.0 - s * s).sqrt()), 1000.0, 2.0);
+        assert!(!same(big, leaning, 1e-6, &ring));
+        assert!(same(big, leaning, 6e-5, &ring));
         // a torus with no hole is the sphere of its minor radius
         let ball = Analytic::Sphere {
             centre: o,
