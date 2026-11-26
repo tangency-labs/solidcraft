@@ -2,7 +2,7 @@
 
 use solidcraft_geom::prelude::*;
 use std::cell::Cell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
@@ -1490,6 +1490,42 @@ fn centres(s: &Session) -> Vec<(u64, Vec3)> {
     out
 }
 
+/// The unit moves for an automatic exploded view, prepared once for an interactive preview.
+#[derive(Clone, Debug)]
+pub struct AutomaticExplode {
+    moves: Vec<(u64, Mat, Vec3)>,
+}
+
+impl Session {
+    /// Prepare the same view that OK will create. Keep the temporary document and the command's
+    /// model refresh out of subsequent slider updates.
+    pub fn prepare_automatic_explode(&self) -> Result<AutomaticExplode> {
+        let mut scratch = self.scratch();
+        let created = scratch.execute("explode.create", &json!({}))?;
+        let index = view_index(&scratch, &created, "explode.show")?;
+        let view = scratch.doc.assembly.exploded.get(index).ok_or_else(|| bad("explode.show", "view"))?;
+        let placed: BTreeMap<u64, Mat> = scratch.doc.occurrences.iter().filter(|o| o.parent == 0).map(|o| (o.id, o.transform)).collect();
+        let moves = view.moves.iter().filter_map(|(o, t)| Some((*o, *placed.get(o)?, *t))).collect();
+        Ok(AutomaticExplode { moves })
+    }
+}
+
+impl AutomaticExplode {
+    /// The preview placements at `scale`. Apply the translation limit at the scaled distance,
+    /// just as `explode.show` does when called on a view created at that scale.
+    pub fn placements(&self, scale: f64) -> Result<BTreeMap<u64, Mat>> {
+        if !scale.is_finite() || scale.abs() > 100.0 {
+            return Err(bad("explode.create", "`scale` must be a number up to 100"));
+        }
+        let scaled = self.moves.iter().map(|(o, m, t)| (*o, *m, *t * scale)).filter(|(_, _, t)| t.len() < 1e7);
+        let moves = placements_at(scaled, 1.0);
+        if !moves.values().all(solidcraft_doc::is_placement) {
+            return Err(bad("explode.show", "exploded view moves an occurrence out of range"));
+        }
+        Ok(moves)
+    }
+}
+
 fn explode_create(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "explode.create";
     let moves: Vec<(u64, Vec3)> = match p.get("moves") {
@@ -1590,15 +1626,18 @@ pub(crate) fn explode_moves(s: &Session, v: &ExplodedView) -> Vec<(u64, Mat, Vec
 
 /// The pending moves that show `moves` `amount` of the way out: 0 assembled, 1 exploded.
 pub(crate) fn exploded_at(moves: &[(u64, Mat, Vec3)], amount: f64) -> std::collections::BTreeMap<u64, Mat> {
+    placements_at(moves.iter().copied(), amount)
+}
+
+fn placements_at(moves: impl Iterator<Item = (u64, Mat, Vec3)>, amount: f64) -> BTreeMap<u64, Mat> {
     let mut out = std::collections::BTreeMap::new();
-    for (o, m, t) in moves {
-        let mut m = *m;
+    for (o, mut m, t) in moves {
         if let Some(r) = m.get_mut(3) {
             r[0] += t.x * amount;
             r[1] += t.y * amount;
             r[2] += t.z * amount;
         }
-        out.insert(*o, m);
+        out.insert(o, m);
     }
     out
 }

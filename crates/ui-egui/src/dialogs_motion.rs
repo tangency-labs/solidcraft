@@ -1,17 +1,18 @@
 //! Assembly motion dialogs: Contact Sets, Motion Study (keyframes on a timeline with playback),
 //! Exploded View (a scale slider) and Configurations (a table of rows with Activate). What they
 //! show while open (a study's pose, an explosion) is display only: pending occurrence moves,
-//! computed on a scratch copy of the design and put back when the dialog closes.
+//! put back when the dialog closes.
 
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{choice_row, expr_row, text_row};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use egui::{Pos2, RichText, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
-use solidcraft_engine::Session;
-use solidcraft_engine::doc::Mat;
 use solidcraft_engine::doc::joints::JointKind;
+use solidcraft_engine::doc::{Document, Mat, ModelState};
+use solidcraft_engine::{AutomaticExplode, Session};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, combo, form_row};
@@ -66,7 +67,7 @@ pub enum Mo {
     Explode {
         name: String,
         scale: f64,
-        shown: Option<(u64, u64)>,
+        preview: Option<Box<ExplodePreview>>,
         saved: Option<BTreeMap<u64, Mat>>,
         error: Option<String>,
     },
@@ -75,6 +76,15 @@ pub enum Mo {
         error: Option<String>,
         rule_editor: Box<configuration_rules_ui::Editor>,
     },
+}
+
+#[derive(Clone, Debug)]
+pub struct ExplodePreview {
+    doc: Arc<Document>,
+    model: Arc<ModelState>,
+    layout: Result<AutomaticExplode, String>,
+    /// The slider value of the last preview update.
+    shown: Option<u64>,
 }
 
 impl Mo {
@@ -133,7 +143,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
                 SelInput::new("Against", BODIES, true),
             ],
         ),
-        "explode.create" => (Mo::Explode { name: n("Exploded View", "explode.list"), scale: 1.0, shown: None, saved: None, error: None }, vec![]),
+        "explode.create" => (Mo::Explode { name: n("Exploded View", "explode.list"), scale: 1.0, preview: None, saved: None, error: None }, vec![]),
         "config.table" | "config.configure" => (Mo::Configurations { new_row: String::new(), error: None, rule_editor: Default::default() }, vec![]),
         _ => return None,
     };
@@ -437,12 +447,32 @@ pub fn scratch_study(sc: &mut Session, params: &Value) -> Result<Value, String> 
     Ok(sc.execute("motion.study", params).map_err(|e| e.to_string())?["study"].clone())
 }
 
-/// The explosion at `scale`, computed on a scratch copy.
-fn explode_pose(app: &SolveApp, scale: f64) -> Result<BTreeMap<u64, Mat>, String> {
-    let mut sc = app.session.scratch();
-    sc.execute("explode.create", &json!({"name": "__preview", "scale": scale})).map_err(|e| e.to_string())?;
-    sc.execute("explode.show", &json!({ "view": "__preview" })).map_err(|e| e.to_string())?;
-    Ok(sc.pending_moves.clone())
+fn preview_explode(
+    app: &mut SolveApp,
+    scale: f64,
+    preview: &mut Option<Box<ExplodePreview>>,
+    saved: &mut Option<BTreeMap<u64, Mat>>,
+    error: &mut Option<String>,
+) {
+    let s = &app.session;
+    let model = s.model.state();
+    if preview.as_ref().is_none_or(|p| !Arc::ptr_eq(&p.doc, &s.doc) || !Arc::ptr_eq(&p.model, &model)) {
+        let layout = s.prepare_automatic_explode().map_err(|e| e.to_string());
+        *preview = Some(Box::new(ExplodePreview { doc: s.doc.clone(), model, layout, shown: None }));
+    }
+    let Some(preview) = preview.as_mut() else { return };
+    let key = (scale * 1000.0).round() as u64;
+    if preview.shown == Some(key) {
+        return;
+    }
+    match preview.layout.as_ref().map_err(Clone::clone).and_then(|layout| layout.placements(scale).map_err(|e| e.to_string())) {
+        Ok(moves) => {
+            display(app, saved, moves);
+            *error = None;
+        }
+        Err(e) => *error = Some(e),
+    }
+    preview.shown = Some(key);
 }
 
 // ---- rows ----
@@ -524,21 +554,15 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
             }
         }
         Mo::MotionStudy { .. } => enter = motion_study_rows(app, ui, k, inputs, t),
-        Mo::Explode { name, scale, shown, saved, error } => {
+        Mo::Explode { name, scale, preview, saved, error } => {
             text_row(ui, "Name", name, "");
             form_row(ui, "Explode", |ui| {
                 crate::ui_kit::slider(ui, scale, 0.0..=2.0, Default::default());
             });
-            let key = ((*scale * 1000.0).round() as u64, 0);
-            if *shown != Some(key) {
-                match explode_pose(app, *scale) {
-                    Ok(m) => {
-                        display(app, saved, m);
-                        *error = None;
-                    }
-                    Err(e) => *error = Some(e),
-                }
-                *shown = Some(key);
+            let revision = app.session.revision;
+            preview_explode(app, *scale, preview, saved, error);
+            if revision != app.session.revision {
+                ui.ctx().request_repaint();
             }
             if let Some(e) = error {
                 ui.vertical(|ui| {
@@ -989,13 +1013,55 @@ mod tests {
                     analysis: Box::default(),
                 }
             } else {
-                Mo::Explode { name: "E".into(), scale: 1.0, shown: None, saved, error: None }
+                Mo::Explode { name: "E".into(), scale: 1.0, preview: None, saved, error: None }
             };
             let mut d = Dialog::new(Kind::Motion(mo), vec![]);
             closed(&mut app, &mut d, applied);
             assert_eq!(app.session.pending_moves == shown, kept, "{kind} {applied}");
             app.session.pending_moves = before.clone();
         }
+    }
+
+    #[test]
+    fn exploded_view_slider_reuses_the_prepared_layout() {
+        let mut h = crate::scenario::Harness::new();
+        let mut occurrences = Vec::new();
+        for (name, x) in [("Left", 0), ("Right", 30)] {
+            let added = h.app.run("component.create", json!({"name": name})).unwrap();
+            occurrences.push(added["occurrence"].as_u64().unwrap());
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        }
+        let view = h.app.run("explode.create", json!({"moves": [{"occurrence": "Right", "translate": [0, 20, 0]}]})).unwrap();
+        h.app.start("explode.create");
+        assert!(h.app.dialog.is_some());
+        // A programmatic view change before the dialog draws its first preview.
+        h.app.session.execute("explode.show", &json!({"view": view["view"]})).unwrap();
+        let pending = h.app.session.pending_moves.clone();
+        let doc = h.app.session.doc.clone();
+        let prepared = |app: &SolveApp| {
+            let Kind::Motion(Mo::Explode { preview: Some(preview), .. }) = &app.dialog.as_ref().unwrap().kind else {
+                panic!("the prepared explode preview");
+            };
+            std::ptr::from_ref(preview.as_ref())
+        };
+        h.frame();
+        let initial = prepared(&h.app);
+        for next in [0.0, 0.5, 2.0] {
+            let Some(Kind::Motion(Mo::Explode { scale, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("the explode dialog") };
+            *scale = next;
+            h.frame();
+            assert_eq!(prepared(&h.app), initial, "scale {next} reused the prepared layout");
+            assert_eq!(h.app.session.pending_moves.len(), 2);
+            // The two authored box centres are 30 mm apart, giving a 15 mm unit move.
+            for (id, dx) in occurrences.iter().zip([-15.0 * next, 15.0 * next]) {
+                let transform = h.app.session.pending_moves.get(id).unwrap();
+                assert_eq!([transform[3][0], transform[3][1]], [dx, 0.0]);
+            }
+        }
+        assert!(Arc::ptr_eq(&h.app.session.doc, &doc));
+        crate::dialogs::cancel(&mut h.app);
+        assert_eq!(h.app.session.pending_moves, pending);
     }
 
     #[test]
