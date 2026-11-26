@@ -198,6 +198,12 @@ pub(crate) fn reveal_construction(app: &mut SolveApp, id: u64) {
     }
     let (component, sel) = (f.component, solidcraft_engine::browser_find::construction_sel(f));
     let _ = app.run("select.set", json!({ "items": [sel] }));
+    // With the Construction folder hidden ("Hide the Construction folder"), the History lists it.
+    if folder_hidden_by_preference(app, "construction") {
+        app.tree.reveal_construction = None;
+        reveal_in_history(app, id);
+        return;
+    }
     app.ui.show_browser = true;
     reveal_shared_panel(app, "browser");
     app.tree.reveal = None;
@@ -3372,7 +3378,8 @@ fn folder_rows_at(
     }
     // A search lists the folders that hold a match (`folder_level` lists the matches).
     let searching = app.tree.search.on();
-    if folder_hidden_by_preference(app, folder) {
+    // A folder hidden by its own eye stays listed, so that eye can show its items again.
+    if folder_hidden_by_preference(app, folder) && !app.session.folder_hidden(&data.key) {
         return;
     }
     if app.tree.search.hits().is_some_and(|h| !h.folder(path.unwrap_or(&[]), folder)) {

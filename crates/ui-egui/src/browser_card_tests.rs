@@ -2404,3 +2404,24 @@ fn the_construction_folder_hides_when_the_preference_is_on() {
     h.frames(2);
     assert!(handle_at("row:Construction").is_some(), "a search still finds the plane in its folder");
 }
+
+/// With the Construction folder hidden, Find in Browser on a plane goes to its History row instead
+/// of waiting for a folder that is not drawn; and a Construction folder hidden by its own eye
+/// stays listed, so that eye can show its planes again.
+#[test]
+fn a_hidden_construction_folder_leaves_find_and_its_eye_working() {
+    let mut h = Harness::new();
+    let plane = h.app.run("construct.plane.offset", json!({"base":"XY","offset":20,"name":"Lid plane"})).unwrap()["feature"].as_u64().unwrap();
+    h.app.preferences.browser_hide_construction_folder = true;
+    h.settle();
+    reveal_construction(&mut h.app, plane);
+    assert!(h.app.tree.reveal_construction.is_none(), "no request left waiting for the hidden folder");
+    h.settle();
+
+    h.app.run("browser.visibility", json!({"tree_folders": ["c0/construction"], "visible": false})).unwrap();
+    h.settle();
+    assert!(handle_at("row:Construction").is_some(), "hidden by its eye, the folder stays listed");
+    h.app.run("browser.visibility", json!({"tree_folders": ["c0/construction"], "visible": true})).unwrap();
+    h.settle();
+    assert!(handle_at("row:Construction").is_none(), "shown again, the option hides it");
+}
