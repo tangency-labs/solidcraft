@@ -629,7 +629,10 @@ fn check_form_with(command: &str, labels: &[&str], absent: &[&str], set: impl Fn
     assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(1.0), "{command}");
     assert_eq!(apply_commands(&h.app, &d).unwrap(), expected, "{command}: drawing is lossless");
     let mut label_width: Option<f32> = None;
-    for label in d.inputs.iter().map(|i| i.label).chain(labels.iter().copied()) {
+    // Cell Grid's cell profile has a row only with the Sketch shape.
+    let shown = |i: usize| !matches!(&d.kind, Kind::CellGrid(c) if !crate::dialogs_cell_grid::shown_picks(c).contains(&i));
+    let rows = d.inputs.iter().enumerate().filter(|(i, _)| shown(*i)).map(|(_, i)| i.label);
+    for label in rows.chain(labels.iter().copied()) {
         let row = scenario::rect_of(&format!("dialog:row:{label}")).unwrap_or_else(|| panic!("{command}: missing dense row {label}"));
         let label_rect = scenario::rect_of(&format!("dialog:label:{label}")).unwrap();
         let control = scenario::rect_of(&format!("dialog:control:{label}")).unwrap();
