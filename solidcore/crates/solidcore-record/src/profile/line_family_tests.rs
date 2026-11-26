@@ -2,7 +2,7 @@ use std::f64::consts::{FRAC_PI_4, TAU};
 
 use serde_json::json;
 
-use super::LineFamily;
+use super::{LineFamily, Mark};
 use crate::Vec2;
 
 fn continuous() -> LineFamily {
@@ -211,4 +211,15 @@ fn unknown_fields_are_refused() {
     let mut extra_family = family;
     extra_family["delta_z"] = json!(1.0);
     assert!(serde_json::from_value::<LineFamily>(extra_family).is_err());
+}
+
+#[test]
+fn a_mark_keeps_its_serde_names() {
+    let line = Mark::Line {
+        a: Vec2::new(0.0, 0.0),
+        b: Vec2::new(1.0, 0.0),
+    };
+    let json = serde_json::to_string(&line).unwrap();
+    assert!(json.starts_with("{\"line\":"), "{json}");
+    assert_eq!(serde_json::from_str::<Mark>(&json).unwrap(), line);
 }

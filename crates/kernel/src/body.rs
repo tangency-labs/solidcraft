@@ -778,10 +778,10 @@ impl Body {
         }
     }
 
-    /// This body with `result`, the SMLib result of the step `what` (of `operands`) it was decoded
-    /// from, whose check that step left to the end of its feature ([`crate::validation::check_kept`]).
-    pub(crate) fn left_unchecked(self, what: &str, how: crate::validation::Checked, result: solidcraft_smlib::Brep, operands: &[&Body]) -> Body {
-        let unchecked = crate::validation::Unchecked::new(self.record.arc(), what, how, result, operands);
+    /// This body with the step `what` (and `operands`) it was decoded from, whose check that step
+    /// left to the end of its feature ([`crate::validation::check_kept`]).
+    pub(crate) fn left_unchecked(self, what: &str, operands: &[&Body]) -> Body {
+        let unchecked = crate::validation::Unchecked::new(self.record.arc(), what, operands);
         Body { unchecked: Some(std::sync::Arc::new(unchecked)), ..self }
     }
 
@@ -2350,6 +2350,36 @@ impl Body {
             solidcore_ops::Error::Internal(message) => KernelError::Internal(format!("classify points with normals: {message}")),
             e => KernelError::Failed(format!("classify points with normals: {e}")),
         })
+    }
+
+    /// Which sides of the plane through `p` with normal `normal` immediately enter material of
+    /// `self`: `negative` for `-normal`, `positive` for `+normal`
+    /// ([`solidcore_ops::Body::material_sides_at`]). Decided on exact B-rep classification and
+    /// outward face normals (no display mesh); a mesh body's triangles are its exact shape and
+    /// are probed via [`Self::classify_point`].
+    pub fn material_sides_at(&self, p: Vec3, normal: Vec3) -> Result<solidcore_ops::MaterialSides> {
+        if !p.is_finite() || !normal.is_finite() {
+            return Ok(solidcore_ops::MaterialSides::default());
+        }
+        if self.is_mesh() {
+            let Some(unit) = solidcore_ops::unit_direction([normal.x, normal.y, normal.z]) else {
+                return Ok(solidcore_ops::MaterialSides::default());
+            };
+            let step = (self.size() * 1e-5).max(self.record.tolerance * 4.0).max(1e-5);
+            let in_dir = |s: f64| {
+                solidcore_ops::point_along_line([p.x, p.y, p.z], unit, s)
+                    .map(|q| Vec3::new(q[0], q[1], q[2]))
+                    .is_some_and(|q| matches!(self.classify_point(q), Ok(PointClass::Inside)))
+            };
+            return Ok(solidcore_ops::MaterialSides { negative: in_dir(-step), positive: in_dir(step) });
+        }
+        let Some(form) = self.ops_body() else { return Ok(solidcore_ops::MaterialSides::default()) };
+        let (ops, order) = &*form;
+        match ops.material_sides_at(order, [p.x, p.y, p.z], [normal.x, normal.y, normal.z]) {
+            Ok(sides) => Ok(sides),
+            Err(solidcore_ops::Error::Argument) => Ok(solidcore_ops::MaterialSides::default()),
+            Err(e) => Err(KernelError::Failed(format!("material sides: {e}"))),
+        }
     }
 
     /// Where the line through `through` along `direction` meets face `face_index`, of its

@@ -3,10 +3,10 @@ use serde_json::{Value, json};
 
 use super::{
     BendTableFormatParam, BendTableParams, BendTableResult, ConvertParams, DxfCurvesParam, DxfLayersParam, DxfNoteHeight, DxfTextParam,
-    ExportDxfParams, ExportDxfResult, FixedPoint, FlangeEdges, FlangeParams, FlangePosition, FlangeTypeParam, FlatPatternParams, FlatPatternResult,
-    FoldParams, FoldPoints, FoldPosition, FoldStays, HardwareParams, HardwareResult, HeightFromParam, HemParams, MaterialSide, MeasureBodyParams,
-    PathFlangeParams, PerforateParams, PerforationPattern, RecognizeParams, ReliefShapeParam, SheetEdgePoint, SheetPoints, TabParams, ThenSteps,
-    UnfoldParams,
+    DxfUnitsParam, ExportDxfParams, ExportDxfResult, FixedPoint, FlangeEdges, FlangeParams, FlangePosition, FlangeTypeParam, FlatPatternParams,
+    FlatPatternResult, FoldParams, FoldPoints, FoldPosition, FoldStays, HardwareParams, HardwareResult, HeightFromParam, HemParams, MaterialSide,
+    MeasureBodyParams, PathFlangeParams, PerforateParams, PerforationPattern, RecognizeParams, ReliefShapeParam, SheetEdgePoint, SheetPoints,
+    TabParams, ThenSteps, UnfoldParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -90,7 +90,21 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<BendTableParams>(), &["body", "format", "path"]);
     assert_keys(
         input_schema_for::<ExportDxfParams>(),
-        &["bend_lines", "bend_notes", "body", "curves", "hardware_notes", "layers", "note_height", "path", "per_body", "profile", "text"],
+        &[
+            "bend_lines",
+            "bend_notes",
+            "body",
+            "curves",
+            "hardware_notes",
+            "layers",
+            "markings",
+            "note_height",
+            "path",
+            "per_body",
+            "profile",
+            "text",
+            "units",
+        ],
     );
 }
 
@@ -232,6 +246,9 @@ fn the_value_types_match_the_readers() {
     words(&["roles", "ROLES", "single", "Single"], &[json!("one"), json!("0"), json!(""), json!(5), json!(null)], &|v| {
         parse::<DxfLayersParam>(v).is_some()
     });
+    words(&["mm", "MM", "inches", "INCHES"], &[json!("feet"), json!("cm"), json!("mm "), json!(""), json!(4), json!(null)], &|v| {
+        parse::<DxfUnitsParam>(v).is_some()
+    });
     for w in ["exact", "EXACT", "arcs", "Arcs"] {
         assert_eq!(parse::<DxfCurvesParam>(json!(w)).map(|c| c.0), crate::cmd::dxf_curves(w), "{w}");
     }
@@ -240,6 +257,9 @@ fn the_value_types_match_the_readers() {
     }
     for w in ["roles", "ROLES", "single", "Single"] {
         assert_eq!(parse::<DxfLayersParam>(json!(w)).map(|l| l.0), crate::cmd::dxf_layers(w), "{w}");
+    }
+    for w in ["mm", "MM", "inches", "INCHES"] {
+        assert_eq!(parse::<DxfUnitsParam>(json!(w)).map(|u| u.0), crate::cmd::dxf_units(w), "{w}");
     }
     for (v, ok) in [
         (json!(3), true),
@@ -258,6 +278,7 @@ fn the_value_types_match_the_readers() {
         assert_eq!(parse::<DxfNoteHeight>(json!(mm)).map(|h| h.0), crate::cmd::dxf_note_height(mm), "{mm}");
     }
     for (ty, want) in [
+        (input_schema_for::<DxfUnitsParam>(), "^([Mm][Mm]|[Ii][Nn][Cc][Hh][Ee][Ss])$"),
         (input_schema_for::<DxfCurvesParam>(), "^([Ee][Xx][Aa][Cc][Tt]|[Aa][Rr][Cc][Ss])$"),
         (input_schema_for::<DxfTextParam>(), "^([Cc][Uu][Tt]|[Ee][Tt][Cc][Hh])$"),
         (input_schema_for::<DxfLayersParam>(), "^([Rr][Oo][Ll][Ee][Ss]|[Ss][Ii][Nn][Gg][Ll][Ee])$"),
@@ -307,6 +328,7 @@ fn strict_keeps_todays_errors() {
         ("sheet.export_bend_table", json!({"format": " csv", "body": "Nothing"})),
         ("sheet.export_bend_table", json!({"format": "JSON", "body": "Nothing"})),
         // A DXF export reads its words and its note height before it looks for a sheet.
+        ("sheet.export_dxf", json!({"units": "feet"})),
         ("sheet.export_dxf", json!({"curves": "arc"})),
         ("sheet.export_dxf", json!({"curves": " exact"})),
         ("sheet.export_dxf", json!({"text": "engrave"})),

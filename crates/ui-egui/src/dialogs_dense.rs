@@ -87,6 +87,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_sheet::Sm::Recognize { .. } => Some("sheet.recognize"),
             crate::dialogs_sheet::Sm::Rules { .. } => Some("sheet.manage_rules"),
             crate::dialogs_sheet::Sm::FlatPattern { .. } => Some("sheet.flat_pattern"),
+            crate::dialogs_sheet::Sm::ExportDxf { .. } => Some("sheet.export_dxf"),
             crate::dialogs_sheet::Sm::Hardware { .. } => Some("sheet.hardware"),
             _ => k.simple_metadata().map(|(command, _)| command),
         },
@@ -593,6 +594,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 *bodies = selected == 1;
                 input.accept = if *bodies { BODIES } else { super::PROJECT_GEOMETRY };
                 input.items.clear();
+                // Geometry offers Tangent chain for edges; bodies have no edges to chain.
+                input.chain = (!*bodies).then_some(false);
+                input.chain_seeds.clear();
+                input.chain_written.clear();
             }
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
             ui_kit::row(ui, tr("ui.construction"), |ui| ui_kit::checkbox(ui, "", construction));
