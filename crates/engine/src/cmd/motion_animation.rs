@@ -86,7 +86,7 @@ pub(super) fn export_with(s: &Session, p: &Value, renderer: Option<&Renderer>) -
         // Framing both ends: every frame lies between the parts assembled and exploded.
         Motion::Explode(moves, _) => {
             let mut t = s.scratch();
-            t.pending_moves.clear();
+            t.clear_pending_moves();
             let assembled = crate::view::bounds(&t)?;
             t.pending_moves = exploded_at(moves, 1.0);
             let mut c = crate::view::home_camera(&t)?;
@@ -115,7 +115,7 @@ pub(super) fn export_with(s: &Session, p: &Value, renderer: Option<&Renderer>) -
     let mut t = s.scratch();
     // From where the parts are placed: moves only shown (an exploded view, the pose an open
     // Motion Study dialog shows) are not where the joints are solved, nor the assembled placement.
-    t.pending_moves.clear();
+    t.clear_pending_moves();
     let (mut frames, mut bytes, mut drawn_by) = (Vec::new(), 0, "");
     // The frame where the motion stopped short, and what stopped it: a loop, or a contact set.
     let mut stop: Option<(usize, Option<Map<String, Value>>, Option<Map<String, Value>>)> = None;

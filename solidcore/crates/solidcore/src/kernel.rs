@@ -229,6 +229,7 @@ pub struct WorkCounters {
     same_parameter_bisections: Cell<u64>,
     band_face_solves: Cell<u64>,
     band_edge_solves: Cell<u64>,
+    shells: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -511,6 +512,15 @@ impl WorkCounters {
         self.band_edge_solves.get()
     }
 
+    /// Shells made of a whole body (`offset::offset_executive::p2::shell_brep_simple`), built
+    /// or refused: an inward shell refused for a thin feature makes one more for each step
+    /// that takes features off (`offset::thin_features`), each as costly as the first. Not
+    /// the fork's (solidcore#3353).
+    #[must_use]
+    pub fn shells(&self) -> u64 {
+        self.shells.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -544,6 +554,7 @@ impl WorkCounters {
         self.same_parameter_bisections.set(0);
         self.band_face_solves.set(0);
         self.band_edge_solves.set(0);
+        self.shells.set(0);
     }
 
     /// Counts one intersection of a blend's section with a face.
@@ -556,6 +567,11 @@ impl WorkCounters {
     pub(crate) fn add_band_edge_solve(&self) {
         self.band_edge_solves
             .set(self.band_edge_solves.get().saturating_add(1));
+    }
+
+    /// Counts one shell of a whole body.
+    pub(crate) fn add_shell(&self) {
+        self.shells.set(self.shells.get().saturating_add(1));
     }
 
     /// Counts one UV trim curve built.

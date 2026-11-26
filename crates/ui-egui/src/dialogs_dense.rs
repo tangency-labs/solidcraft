@@ -94,6 +94,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::FrameTrim(_) => Some("frame.trim"),
         Kind::Gusset(_) => Some("frame.gusset"),
         Kind::FramePlate(_) => Some("frame.plate"),
+        Kind::CapturePosition(_) => Some("component.capture_position"),
         Kind::Pulley(_) => Some("pulley.insert"),
         Kind::Plastic(k) => match k {
             crate::dialogs_plastic::Pl::SnapFit { .. } => Some("plastic.snap_fit"),
@@ -929,7 +930,33 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         }
         _ => enter |= additional_rows(app, d, ui),
     }
+    enter |= body_name_row(d, ui);
     error_rows(app, ctx, d, ui);
+    enter
+}
+
+/// The Body Name row of a feature that makes a body of its own (New Body): empty names it as the
+/// command always has, a typed name is sent as `body_name` (#20776).
+fn body_name_row(d: &mut Dialog, ui: &mut egui::Ui) -> bool {
+    // Shown for every feature that can make a body, and greyed out unless the operation is New
+    // Body: a window whose operation is still being chosen keeps its size instead of jumping as
+    // the row comes and goes (only New Body sends the name, see `apply_body_name`).
+    let Some(new_body) = body_name_slot(&d.kind) else { return false };
+    let mut name = d.extra.get("body_name").and_then(Value::as_str).unwrap_or_default().to_string();
+    let mut enter = false;
+    form_row(ui, "ui.body_name", |ui| {
+        ui.add_enabled_ui(new_body, |ui| {
+            enter = ui_kit::text_field(ui, &mut name, tr("ui.body_name_hint")).0;
+        });
+    });
+    if !new_body {
+        return false;
+    }
+    if name.trim().is_empty() {
+        d.extra.remove("body_name");
+    } else {
+        d.extra.insert("body_name".into(), json!(name));
+    }
     enter
 }
 
@@ -1001,6 +1028,54 @@ fn round_size_row(ui: &mut egui::Ui, fields: &mut [(&'static str, String)]) {
         field.1 = crate::length_input::scaled(&field.1, diameter);
         field.0 = if diameter { "diameter" } else { "radius" };
     }
+}
+
+/// Which two of a coil's revolutions, height and pitch the dialog takes: 0 revolutions and pitch
+/// (the default, kept out of the parameters), 1 height and pitch, 2 height and revolutions (#20674).
+fn coil_size_by(extra: &serde_json::Map<String, Value>) -> usize {
+    match extra.get("size_by").and_then(Value::as_str) {
+        Some("height_pitch") => 1,
+        Some("height_revolutions") => 2,
+        _ => 0,
+    }
+}
+
+/// The "Size by" choice of the Coil dialog. Choosing a height gives it a starting value.
+fn coil_size_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, default_height: &str) -> bool {
+    const KEYS: &[&str] = &["", "height_pitch", "height_revolutions"];
+    let current = coil_size_by(extra);
+    let mut selected = current;
+    choice_row(
+        ui,
+        "ui.coil_size_by",
+        "coil_size_by",
+        &mut selected,
+        &["ui.coil_by_revolutions_pitch", "ui.coil_by_height_pitch", "ui.coil_by_height_revolutions"],
+    );
+    if selected != current {
+        match KEYS.get(selected) {
+            Some(key) if !key.is_empty() => {
+                extra.insert("size_by".into(), json!(key));
+                extra.entry("coil_height").or_insert_with(|| json!(default_height));
+            }
+            _ => {
+                extra.remove("size_by");
+            }
+        }
+    }
+    false
+}
+
+/// The coil's Height row, its text kept with the dialog's other options.
+fn coil_height_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> bool {
+    let mut height = extra.get("coil_height").and_then(Value::as_str).unwrap_or_default().to_string();
+    let before = height.clone();
+    // The helix's own height, centre line to centre line; the coil's section reaches past it.
+    let enter = expr_row(ui, "ui.coil_path_height", &mut height);
+    if height != before {
+        extra.insert("coil_height".into(), json!(height));
+    }
+    enter
 }
 
 /// The coil's axis, section, where the section sits on the diameter, the way it turns and where
@@ -1252,13 +1327,18 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 ui_kit::options(ui, "feature_options", &mut [("Flip", flip), (extend_label, extend)]);
             }
         }
-        Kind::Emboss { depth, deboss } => {
+        Kind::Emboss { depth, deboss, offset_x, offset_y, angle } => {
             enter |= expr_row(ui, "Depth", depth);
             form_row(ui, "Type", |ui| {
                 let mut i = usize::from(*deboss);
                 ui_kit::segmented(ui, &mut i, &["Emboss", "Deboss"], Default::default());
                 *deboss = i == 1;
             });
+            // Where the profiles go on the face, apart from where the sketch has them (#20386):
+            // along the sketch's x and y, and turned about their middle.
+            enter |= hint_row(ui, "Offset X", offset_x, tr("none"));
+            enter |= hint_row(ui, "Offset Y", offset_y, tr("none"));
+            enter |= hint_row(ui, "Angle", angle, tr("none"));
             ui.add(egui::Label::new(solidcraft_ui_text::tr("ui.emboss_wrap_note")).wrap());
         }
         Kind::Align { flip, components, axes: [ax, ay, az], angle } => {
@@ -1429,8 +1509,17 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             if matches!(*cmd, "solid.cylinder" | "solid.sphere") {
                 round_size_row(ui, fields);
             }
+            let coil_by = if *cmd == "solid.coil" { coil_size_by(&d.extra) } else { 0 };
+            if *cmd == "solid.coil" {
+                enter |= coil_size_row(ui, &mut d.extra, &length_default(&app.session, "20"));
+            }
             for (k, v) in fields.iter_mut() {
                 if from_sketch && (*k == "diameter" || *k == "section_size") {
+                    continue;
+                }
+                // Sized by height: the Height row takes the slot of the field it replaces.
+                if (coil_by == 1 && *k == "revolutions") || (coil_by == 2 && *k == "pitch") {
+                    enter |= coil_height_row(ui, &mut d.extra);
                     continue;
                 }
                 // Revolutions steps by whole turns like the other counts (#7481).
@@ -1515,6 +1604,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::FrameTrim(k) => enter |= crate::dialogs_frame::trim_rows(ui, k),
         Kind::Gusset(k) => enter |= crate::dialogs_gusset::rows(app, ui, k),
         Kind::FramePlate(k) => enter |= crate::dialogs_frame_plate::rows(app, ui, k),
+        Kind::CapturePosition(k) => enter |= crate::dialogs_capture::rows(app, ui, k),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
         Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
         Kind::Section { offset, flip, hatch, add, edit } => {
