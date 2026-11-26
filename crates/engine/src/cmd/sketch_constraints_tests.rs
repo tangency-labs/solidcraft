@@ -2715,6 +2715,52 @@ fn a_block_survives_save_and_open() {
     assert_eq!(back.report.dof, 4);
 }
 
+/// Whether a closed block shows the constraints it holds: off on a new block and not saved
+/// then, set by Edit Block alone (on an open block too) or with Make Block, saved and read back,
+/// undone and redone, kept by a paste, and refused when it is not true or false.
+#[test]
+fn a_blocks_show_constraints_choice_is_saved_undone_and_copied() {
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "fixed");
+    let block = made["block"].as_str().unwrap().to_string();
+    let shows = |s: &Session| sketch(s).blocks.iter().find(|b| b.id == block).map(|b| b.show_held);
+    assert_eq!(shows(&s), Some(false), "hidden by default");
+    assert!(!s.doc.to_json().contains("show_held"), "the default is not saved");
+    let before = s.doc.to_json();
+    let undo = s.undo.len();
+    let shown = run(&mut s, "sketch.block_edit", json!({"block": block, "show_constraints": true}));
+    assert_eq!(shown["held"], made["held"], "showing them changes nothing else: {shown}");
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    assert_eq!(shows(&s), Some(true));
+    let after = s.doc.to_json();
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&after).unwrap());
+    reopened.refresh();
+    let state = reopened.model.state();
+    assert_eq!(state.sketch(s.active_sketch.unwrap()).unwrap().sketch.blocks, sketch(&s).blocks, "saved and read back");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.to_json(), after);
+    for bad in [json!(1), json!("yes"), json!([true])] {
+        assert!(refused(&mut s, "sketch.block_edit", json!({"block": block, "show_constraints": bad})).contains("true or false"));
+        assert!(refused(&mut s, "sketch.block", json!({"curves": ["l1"], "show_constraints": bad})).contains("true or false"));
+    }
+    assert_eq!(s.doc.to_json(), after, "refusals change nothing");
+    run(&mut s, "sketch.copy", json!({"entities": ["l1", "l2", "l3", "l4", "c1"]}));
+    run(&mut s, "sketch.paste", json!({"at": [100, 0]}));
+    assert!(sketch(&s).blocks.get(1).is_some_and(|b| b.show_held), "a pasted block keeps the choice");
+    run(&mut s, "sketch.block_open", json!({"block": block}));
+    run(&mut s, "sketch.block_edit", json!({"block": block, "show_constraints": false}));
+    assert_eq!(shows(&s), Some(false), "an open block takes the choice");
+    assert!(sketch(&s).blocks.iter().any(|b| b.id == block && b.is_open()), "and stays open");
+    run(&mut s, "sketch.block_close", json!({}));
+    assert_eq!(shows(&s), Some(false), "closing keeps it");
+    run(&mut s, "sketch.line", json!({"points": [[0, 60], [20, 60]], "ids": ["q"]}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 60], [20, 70]], "ids": ["r"]}));
+    let other = run(&mut s, "sketch.block", json!({"curves": ["q", "r"], "show_constraints": true}));
+    assert!(sketch(&s).blocks.iter().any(|b| b.id == other["block"] && b.show_held), "Make Block takes it: {other}");
+}
+
 /// A block of 300 points (150 separate lines) is made, placed and solved through the commands.
 #[test]
 fn a_block_of_three_hundred_points_is_made_and_placed() {

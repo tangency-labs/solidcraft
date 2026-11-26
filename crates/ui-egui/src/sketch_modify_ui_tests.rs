@@ -1499,7 +1499,7 @@ fn blocks_are_made_edited_exploded_and_deleted_from_the_ribbon_menu_glyph_and_br
     assert_eq!(d.inputs[0].items.len(), 4, "the selected curves are the members");
     assert_eq!(d.inputs[1].items.len(), 1, "the selected point is the origin");
     match &mut d.kind {
-        Kind::SketchModify(Mod::Block { name, free, editing: false }) => {
+        Kind::SketchModify(Mod::Block { name, free, show: false, editing: false }) => {
             *name = " Dove ".into();
             *free = true;
         }
@@ -1545,7 +1545,7 @@ fn blocks_are_made_edited_exploded_and_deleted_from_the_ribbon_menu_glyph_and_br
     crate::context_menu::run_item(&mut h.app, edit, egui::pos2(0.0, 0.0));
     assert_eq!(h.app.session.doc.to_json(), before, "opening Edit Block commits nothing");
     let d = h.app.dialog.as_mut().expect("Edit Block opens its window");
-    assert!(matches!(&d.kind, Kind::SketchModify(Mod::Block { name, free: true, editing: true }) if name == "Dove"), "{:?}", d.kind);
+    assert!(matches!(&d.kind, Kind::SketchModify(Mod::Block { name, free: true, show: false, editing: true }) if name == "Dove"), "{:?}", d.kind);
     assert_eq!(d.extra["block"], json!(block));
     d.inputs[0].items.retain(|sel| !matches!(sel, Sel::SketchCurve { id, .. } if id == "b4"));
     let d = h.app.dialog.clone().unwrap();
@@ -1754,4 +1754,113 @@ fn a_closed_block_is_selected_whole_and_its_contents_are_edited_from_each_menu()
     h.step(&json!({"click":{"world":[5, 0, 0]},"double":true})).unwrap();
     assert!(open(&h), "a double-click on a member opens Edit Contents: {:?}", h.app.status);
     h.app.run("sketch.block_close", json!({})).unwrap();
+}
+
+/// Sketch blocks (#4069): a closed block hides the constraints and dimensions it holds by
+/// default, so a held dimension's text and a held constraint's glyph are neither drawn nor picked
+/// and leave their places free. The block's menu shows them (faded) and hides them again, in
+/// undoable steps; Edit Block's checkbox sets the same choice, and Make Block's is off unless
+/// ticked. An open block's constraints drive, and show whatever the choice.
+#[test]
+fn a_closed_block_hides_its_constraints_and_dimensions_until_shown() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Blocks"})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[40,0],[40,20],[0,20],[0,0]],"ids":["b1","b2","b3","b4"],"infer":false})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[60,0],[60,20]],"ids":["lone"],"infer":false})).unwrap();
+    let dimension = |h: &mut Harness, line: &str, value: f64| {
+        let param = h.app.run("sketch.dimension", json!({"entities":[line],"value":value})).unwrap()["param"].as_str().unwrap().to_string();
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        sk.constraints.iter().find(|c| c.param.as_deref() == Some(param.as_str())).unwrap().id.clone()
+    };
+    let held_dim = dimension(&mut h, "b1", 40.0);
+    let lone_dim = dimension(&mut h, "lone", 20.0);
+    let held_glyph = h.app.run("sketch.constraint.horizontal_vertical", json!({"line":"b3","mode":"horizontal"})).unwrap()["constraint"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.view", json!({"view": "fit"}));
+    h.settle();
+    h.frames(3);
+    let text_of = |id: &str| crate::dim_view::text_rects().into_iter().find(|(d, _)| d == id).map(|(_, r)| r.center());
+    let glyph_of = |id: &str| crate::sketch_tools::glyph_positions().into_iter().find(|(g, _)| g == id).map(|(_, p)| p);
+    let text = text_of(&held_dim).expect("the dimension shows before the block is made");
+    let glyph = glyph_of(&held_glyph).expect("the horizontal shows before the block is made");
+
+    // Make Block's checkbox is off unless ticked.
+    h.app.session.selection = ["b1", "b2", "b3", "b4"].iter().map(|id| Sel::SketchCurve { id: (*id).into(), sketch: None }).collect();
+    h.app.start("sketch.block");
+    let d = h.app.dialog.clone().expect("Make Block opens its window");
+    assert!(matches!(&d.kind, Kind::SketchModify(Mod::Block { show: false, editing: false, .. })), "{:?}", d.kind);
+    let cmds = apply_commands(&h.app, &d).unwrap();
+    assert!(cmds[0].1.get("show_constraints").is_none(), "{}", cmds[0].1);
+    let block = h.app.run(&cmds[0].0, cmds[0].1.clone()).unwrap()["block"].as_str().unwrap().to_string();
+    h.app.dialog = None;
+    h.app.tool = None;
+    h.app.session.selection.clear();
+    let shows = |h: &Harness| h.app.session.doc.sketch(sid).unwrap().blocks.iter().find(|b| b.id == block).map(|b| b.show_held);
+    let hidden = |h: &mut Harness| {
+        h.frames(3);
+        assert!(text_of(&held_dim).is_none() && crate::dim_view::hit(text) != Some(held_dim.clone()), "the held dimension is not drawn or picked");
+        assert!(glyph_of(&held_glyph).is_none() && crate::sketch_tools::glyph_at(glyph).is_none(), "the held glyph is not drawn or picked");
+        assert!(text_of(&lone_dim).is_some(), "a dimension outside the block still shows");
+    };
+    let shown = |h: &mut Harness| {
+        h.frames(3);
+        assert!(text_of(&held_dim).is_some(), "the held dimension shows");
+        assert!(glyph_of(&held_glyph).is_some(), "the held glyph shows");
+    };
+    assert_eq!(shows(&h), Some(false));
+    hidden(&mut h);
+
+    // The block's menu (its Browser row's and its glyph's; a member's has the same items) shows
+    // them and hides them again.
+    let target = crate::context_menu::Target::SketchBlock { sketch: sid, block: block.clone() };
+    let toggle = |h: &Harness| {
+        crate::context_menu::items(&h.app, &target).into_iter().find(|i| i.id == "sketch.block_edit").expect("the block's menu has the toggle")
+    };
+    let show = toggle(&h);
+    assert!(show.enabled && show.label == "Show Constraints and Dimensions", "{show:?}");
+    assert_eq!(show.params, Some(json!({"sketch": sid, "block": block, "show_constraints": true})));
+    h.app.session.selection = vec![Sel::SketchCurve { id: "b2".into(), sketch: None }];
+    let member = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    assert!(member.iter().any(|i| i.id == "sketch.block_edit" && i.params == show.params), "a member's menu has it too");
+    h.app.session.selection.clear();
+    crate::context_menu::run_item(&mut h.app, &show, egui::pos2(0.0, 0.0));
+    assert_eq!(shows(&h), Some(true), "{:?}", h.app.status);
+    shown(&mut h);
+    let hide = toggle(&h);
+    assert_eq!(hide.label, "Hide Constraints and Dimensions");
+    crate::context_menu::run_item(&mut h.app, &hide, egui::pos2(0.0, 0.0));
+    assert_eq!(shows(&h), Some(false));
+    hidden(&mut h);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(shows(&h), Some(true), "undo shows them again");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(shows(&h), Some(false));
+
+    // Edit Block's checkbox.
+    assert!(crate::sketch_modify_ui::edit_block(&mut h.app, &block));
+    h.frames(3);
+    let label = solidcraft_ui_text::tr("ui.block_show_constraints");
+    h.step(&json!({"click":{"handle":format!("dialog:{label}")}})).unwrap();
+    let d = h.app.dialog.clone().expect("Edit Block is open");
+    assert!(matches!(&d.kind, Kind::SketchModify(Mod::Block { show: true, editing: true, .. })), "the checkbox ticks: {:?}", d.kind);
+    let cmds = apply_commands(&h.app, &d).unwrap();
+    assert_eq!((cmds[0].0.as_str(), &cmds[0].1["show_constraints"]), ("sketch.block_edit", &json!(true)));
+    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+    h.settle();
+    assert_eq!(shows(&h), Some(true), "OK shows them: {:?}", h.app.status);
+    shown(&mut h);
+    h.app.run("sketch.block_edit", json!({"block": block, "show_constraints": false})).unwrap();
+    hidden(&mut h);
+
+    // An open block's constraints drive and show, hidden or not once it closes.
+    h.app.run("sketch.block_open", json!({"block": block})).unwrap();
+    shown(&mut h);
+    assert_eq!(shows(&h), Some(false));
+    h.app.run("sketch.block_close", json!({})).unwrap();
+    hidden(&mut h);
 }

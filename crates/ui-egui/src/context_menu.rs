@@ -1769,11 +1769,17 @@ fn sketch_block_row_items(app: &SolveApp, sketch: u64, block: &str) -> Vec<Item>
     v
 }
 
-/// Edit Block, Edit Contents (Close Block while it is open), Select Block and Explode Block for
-/// block `block` of `sketch`.
+/// Edit Block, Edit Contents (Close Block while it is open), Select Block, Show or Hide its
+/// constraints and dimensions, and Explode Block for block `block` of `sketch`.
 fn block_items(app: &SolveApp, sketch: u64, block: &str, editing: bool) -> Vec<Item> {
     let one = json!({"sketch": sketch, "block": block});
-    let open = app.session.doc.sketch(sketch).ok().and_then(|sk| sk.blocks.iter().find(|b| b.id == block)).is_some_and(|b| b.is_open());
+    let found = app.session.doc.sketch(sketch).ok().and_then(|sk| sk.blocks.iter().find(|b| b.id == block));
+    let open = found.is_some_and(|b| b.is_open());
+    let shown = found.is_some_and(|b| b.show_held);
+    let mut show = cmd(app, "sketch.block_edit", if shown { "Hide Constraints and Dimensions" } else { "Show Constraints and Dimensions" })
+        .with(json!({"sketch": sketch, "block": block, "show_constraints": !shown}))
+        .on(editing);
+    show.icon = "dimension".into();
     let contents = if open {
         act("ui.closeBlock", "Close Block", "c_block").with(one.clone()).on(editing)
     } else {
@@ -1783,6 +1789,7 @@ fn block_items(app: &SolveApp, sketch: u64, block: &str, editing: bool) -> Vec<I
         act("ui.editBlock", "Edit Block", "c_block").with(one.clone()).on(!open),
         contents,
         act("ui.selectBlock", "Select Block", "c_block").with(one).on(editing),
+        show,
         cmd(app, "sketch.explode_block", "Explode Block").with(json!({"block": block})).on(editing),
     ]
 }

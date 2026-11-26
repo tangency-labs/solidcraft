@@ -162,7 +162,7 @@ pub enum Mod {
     /// `sketch.block`, or `sketch.block_edit` on the block the window's `block` extra names
     /// (`editing`): the block's name and whether its scale is free. The Curves input holds its
     /// members; Make Block also takes an optional Origin point.
-    Block { name: String, free: bool, editing: bool },
+    Block { name: String, free: bool, show: bool, editing: bool },
 }
 
 impl Mod {
@@ -327,7 +327,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             radians_trig: false,
         },
         "sketch.point.divide" => Mod::Divide { count: "4".into() },
-        "sketch.block" => Mod::Block { name: String::new(), free: false, editing: false },
+        "sketch.block" => Mod::Block { name: String::new(), free: false, show: false, editing: false },
         _ => return None,
     };
     let i = inputs(&k);
@@ -531,8 +531,12 @@ pub fn edit_block(app: &mut SolveApp, id: &str) -> bool {
     if block.is_open() {
         return true;
     }
-    let kind =
-        Mod::Block { name: block.name.clone().unwrap_or_default(), free: block.scale == solidcraft_engine::sketch::BlockScale::Free, editing: true };
+    let kind = Mod::Block {
+        name: block.name.clone().unwrap_or_default(),
+        free: block.scale == solidcraft_engine::sketch::BlockScale::Free,
+        show: block.show_held,
+        editing: true,
+    };
     let members = block.curves.iter().map(|c| Sel::SketchCurve { id: c.clone(), sketch: None }).collect();
     let mut dialog = Dialog::new(Kind::SketchModify(kind.clone()), inputs(&kind));
     if let Some(input) = dialog.inputs.first_mut() {
@@ -797,13 +801,14 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document, two_parallel_lines: 
             enter |= quantity(ui, doc, "Segments", count, 2, DIVIDE_MAX);
             ui_kit::text(ui, solidcraft_ui_text::tr("sketch.divide_hint"), ui_kit::Text::Note("divide"));
         }
-        Mod::Block { name, free, .. } => {
+        Mod::Block { name, free, show, .. } => {
             enter |= ui_kit::text_row(ui, "Name", name, "").0;
             let mut scale = usize::from(*free);
             let options = [solidcraft_ui_text::tr("ui.block_scale_fixed"), solidcraft_ui_text::tr("ui.block_scale_free")];
             ui_kit::choice_row(ui, "Scale", "block_scale", &mut scale, &options);
             *free = scale == 1;
             ui_kit::text(ui, solidcraft_ui_text::tr("ui.block_scale_note"), ui_kit::Text::Note("block_scale"));
+            ui_kit::checkbox_grid(ui, &mut [(solidcraft_ui_text::tr("ui.block_show_constraints"), show)], 1);
         }
         Mod::Equation { form, x, y, start, end, tolerance, range_unit, radians_trig } => {
             let note = if *radians_trig { "ui.equation_angles_legacy" } else { "ui.equation_angles_degrees" };
@@ -1285,7 +1290,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             }
             ("sketch.pattern.rectangular", p)
         }
-        Mod::Block { name, free, editing } => {
+        Mod::Block { name, free, show, editing } => {
             let curves = curve_ids(inputs, 0);
             if curves.is_empty() {
                 return Err("Select the sketch curves of the block first".into());
@@ -1296,6 +1301,9 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 if !name.trim().is_empty() {
                     p["name"] = json!(name.trim());
                 }
+                if *show {
+                    p["show_constraints"] = json!(true);
+                }
                 if let Some(origin) = picked_point(&app.session, inputs, 1) {
                     p["origin"] = json!(origin);
                 }
@@ -1305,7 +1313,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 let members = block_members(app, block).ok_or("That block is no longer in the sketch")?;
                 let add: Vec<&String> = curves.iter().filter(|c| !members.contains(c)).collect();
                 let remove: Vec<&String> = members.iter().filter(|m| !curves.contains(m)).collect();
-                ("sketch.block_edit", json!({"scale": scale, "name": name.trim(), "add": add, "remove": remove}))
+                ("sketch.block_edit", json!({"scale": scale, "name": name.trim(), "add": add, "remove": remove, "show_constraints": show}))
             }
         }
         Mod::Divide { count } => {

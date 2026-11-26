@@ -3988,7 +3988,8 @@ pub fn dims_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewp
         let centres = chain_centres(sk);
         let n = centres.len().max(1) as f64;
         let middle = centres.iter().fold(Vec2::ZERO, |a, p| a + *p) * (1.0 / n);
-        for c in &sk.constraints {
+        let hidden = crate::sketch_block_canvas::hidden_set(sk);
+        for c in sk.constraints.iter().filter(|c| !hidden.contains(c.id.as_str())) {
             let Some(frame) = crate::dim_view::shown_frame(app.preferences.ellipse_axes, sk, &c.kind, c.text) else { continue };
             let anchor = match frame {
                 DimFrame::Linear { p0, p1, .. } => (p0 + p1) * 0.5,

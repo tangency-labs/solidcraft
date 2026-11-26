@@ -30,7 +30,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&BLOCK_CONTRACT)
         .output(output_schema_for::<BlockResult>)
         .params(
-            "curves: [ids] (from the selection: its curves, and a selected point as the origin); scale?: fixed|free (default fixed: the block keeps its size, 3 degrees of freedom; free: its proportions, one length dimension sets its size, 4); origin?: point id the block origin goes on (default the curves' bounding-box centre); name? (at most 200 characters). The curves keep their shape relative to each other and move as one; a construction line is added as the block's axis, from its origin along sketch +X: place the block with a coincident on the origin and turn it with parallel or an angle on the axis. Nothing moves. The constraints wholly inside the curves are held (kept, not solved) until Explode Block. Refused: curves in another block, projected curves, text, offset outputs, pattern geometry. Returns block, axis, origin, held, dof",
+            "curves: [ids] (from the selection: its curves, and a selected point as the origin); scale?: fixed|free (default fixed: the block keeps its size, 3 degrees of freedom; free: its proportions, one length dimension sets its size, 4); origin?: point id the block origin goes on (default the curves' bounding-box centre); name? (at most 200 characters); show_constraints?: bool (default false: while the block is closed, the constraints and dimensions it holds are hidden). The curves keep their shape relative to each other and move as one; a construction line is added as the block's axis, from its origin along sketch +X: place the block with a coincident on the origin and turn it with parallel or an angle on the axis. Nothing moves. The constraints wholly inside the curves are held (kept, not solved) until Explode Block. Refused: curves in another block, projected curves, text, offset outputs, pattern geometry. Returns block, axis, origin, held, dof",
         ),
     CommandSpec::new("sketch.explode_block", "Explode Block", crate::checked!("sketch.explode_block", explode_block))
         .in_sketch_part()
@@ -45,7 +45,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<BlockResult>)
-        .params("block: id; scale?: fixed|free; name? (empty removes it); add?: [curve ids]; remove?: [member ids]. Captures the block's shape again from where its curves are now; held constraints no longer inside it are released as Explode Block releases them (`dropped` lists those removed). Refused while the block is open (sketch.block_open). Returns as sketch.block"),
+        .params("block: id; scale?: fixed|free; name? (empty removes it); add?: [curve ids]; remove?: [member ids]; show_constraints?: bool (draw the constraints and dimensions the block holds while it is closed, faded; default as it is, and hidden on a new block). Captures the block's shape again from where its curves are now; held constraints no longer inside it are released as Explode Block releases them (`dropped` lists those removed). Refused while the block is open (sketch.block_open), except show_constraints given alone, which changes nothing else. Returns as sketch.block"),
     CommandSpec::new("sketch.block_open", "Edit Contents", crate::checked!("sketch.block_open", open_block))
         .in_sketch_part()
         .icon("c_block")
@@ -87,6 +87,15 @@ fn scale_param(cmd: &str, p: &Value) -> Result<Option<BlockScale>> {
     match p.get("scale") {
         None | Some(Value::Null) => Ok(None),
         Some(v) => scale_of(v).map(Some).ok_or_else(|| bad(cmd, format!("`scale` {SCALE_MESSAGE}"))),
+    }
+}
+
+/// `show_constraints`, refused when it is not true or false.
+fn show_param(cmd: &str, p: &Value) -> Result<Option<bool>> {
+    match p.get("show_constraints") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(b)) => Ok(Some(*b)),
+        Some(_) => Err(bad(cmd, "`show_constraints` must be true or false")),
     }
 }
 
@@ -133,9 +142,14 @@ fn make_block(s: &mut Session, p: &Value) -> Result<Value> {
     let scale = scale_param(cmd, p)?.unwrap_or_default();
     let origin = text_param(cmd, p, "origin")?;
     let name = text_param(cmd, p, "name")?.map(str::to_string);
+    let show = show_param(cmd, p)?.unwrap_or(false);
     let (made, info) = edit(s, p, cmd, true, |sk, _| {
         let at = origin.map(|o| sk.resolve_point(o).ok_or_else(|| bad(cmd, format!("unknown point `{o}`")))).transpose()?;
-        sk.make_block(&curves, scale, at, name).map_err(|e| bad(cmd, e.to_string()))
+        let made = sk.make_block(&curves, scale, at, name).map_err(|e| bad(cmd, e.to_string()))?;
+        if show {
+            sk.set_block_show_held(&made.block, true).map_err(|e| bad(cmd, e.to_string()))?;
+        }
+        Ok(made)
     })?;
     block_reply(cmd, made, Vec::new(), info)
 }
@@ -161,12 +175,23 @@ fn edit_block(s: &mut Session, p: &Value) -> Result<Value> {
     let name = text_param(cmd, p, "name")?.map(|n| Some(n.to_string()));
     let add = string_list(cmd, p, "add")?;
     let remove = string_list(cmd, p, "remove")?;
+    let show = show_param(cmd, p)?;
+    let only_show = show.is_some() && scale.is_none() && name.is_none() && add.is_empty() && remove.is_empty();
     let model_edit = !s.sheet_sketching();
     let ((made, released), info) = edit(s, p, cmd, true, |sk, doc| {
         if !sk.blocks.iter().any(|b| b.id == block) {
             return Err(bad(cmd, format!("unknown sketch block `{block}`")));
         }
-        let out = sk.edit_block(block, scale, name, &add, &remove).map_err(|e| bad(cmd, e.to_string()))?;
+        let out = match show {
+            Some(show) if only_show => (sk.set_block_show_held(block, show).map_err(|e| bad(cmd, e.to_string()))?, Default::default()),
+            _ => {
+                let out = sk.edit_block(block, scale, name, &add, &remove).map_err(|e| bad(cmd, e.to_string()))?;
+                if let Some(show) = show {
+                    sk.set_block_show_held(block, show).map_err(|e| bad(cmd, e.to_string()))?;
+                }
+                out
+            }
+        };
         if model_edit {
             doc.prune_model_params();
         }

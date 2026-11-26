@@ -64,6 +64,8 @@ pub struct SketchBlock {
     pub radii: Vec<(String, f64)>,
     /// The constraints wholly inside the block, kept but not solved while it exists.
     pub held: Vec<String>,
+    /// Whether the held constraints and dimensions are drawn while the block is closed.
+    pub show_held: bool,         // saved only when true
 }
 // Sketch gains
 #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -155,8 +157,9 @@ Without this, every coincident, horizontal or dimension inside an imported or ha
 profile would turn redundant the moment the block exists, and the sketch would fill with
 redundancy marks.
 
-Held constraints are drawn faded, can't be selected and can't be edited until the block is
-opened with Edit Contents or exploded.
+Held constraints are hidden by default, and drawn faded when the block shows them
+(`show_held`). Either way they can't be selected and can't be edited until the block is opened
+with Edit Contents or exploded.
 
 There is one exception. In **Free** scale, a driving length dimension between members is
 allowed after Make Block. It sets the size and takes the fourth freedom, which is the "a separate
@@ -280,14 +283,15 @@ These are ordinary engine commands with I/O schemas, so MCP, scripting and undo 
 
 | Command | Params | Reply |
 |---|---|---|
-| `sketch.block` | `sketch`, `curves: [id]` (or from the selection), `scale?: "fixed" \| "free"` (default fixed), `origin?: point id`, `name?` | `block` id, `axis` line id, `origin` point id, `held: [constraint id]`, `dof` |
+| `sketch.block` | `sketch`, `curves: [id]` (or from the selection), `scale?: "fixed" \| "free"` (default fixed), `origin?: point id`, `name?`, `show_constraints?: bool` (default false) | `block` id, `axis` line id, `origin` point id, `held: [constraint id]`, `dof` |
 | `sketch.explode_block` | `sketch`, `block` | `curves`, `restored: [constraint id]` |
-| `sketch.block_edit` | `sketch`, `block`, `scale?`, `name?`, `add?: [curve id]`, `remove?: [curve id]` | as `sketch.block` |
+| `sketch.block_edit` | `sketch`, `block`, `scale?`, `name?`, `add?: [curve id]`, `remove?: [curve id]`, `show_constraints?: bool` | as `sketch.block` |
 | `sketch.block_open` ("Edit Contents") | `sketch`, `block` | `block`, `restored`, `dropped`, `closed?` (the block that was open before) |
 | `sketch.block_close` ("Close Block") | `sketch`, `block?` (default the open one) | `block`, `held`, `added`, `left_out?`, `removed?`, `dof` |
 
 `sketch.block_edit` re-captures (u, v) from the current shape. In the UI it is reached by
-**Edit Block**; it is refused while the block is open.
+**Edit Block**; it is refused while the block is open. `show_constraints` given alone changes
+nothing else, so it is allowed on an open block too; it only matters once the block is closed.
 
 How each existing command treats a block member:
 
@@ -467,15 +471,16 @@ drive, which is what an open block already does, so saving the state costs older
   Modify, with a `c_block` icon (an original master in `crates/look/icons/design/svg/model/`, with
   an attribution row).
 - **Right-click on a member:** Edit Block, Edit Contents (Close Block while open), Select Block
-  (selects every member) and Explode Block.
+  (selects every member), Show Constraints and Dimensions (Hide … while they show: it sends
+  `sketch.block_edit {block, show_constraints}`) and Explode Block.
   They sit in `sketch_entity_items` (`context_menu.rs:1805`) beside Edit Sketch Pattern and
   Explode Text. Two or more curves in no block offer Make Block instead, just before Merge Lines.
 - **Browser:** each block is a row under its sketch, the way patterns and projections are listed
   (`sketch_pattern_tree.rs`, `sketch_link_tree.rs`, hooked in at `browser.rs:3035`).
   - Click selects the members.
   - Double-click opens Edit Block.
-  - Right-click opens the block's menu: Edit Block, Edit Contents, Select Block, Explode Block and
-    Delete Block.
+  - Right-click opens the block's menu: Edit Block, Edit Contents, Select Block, Show (or Hide)
+    Constraints and Dimensions, Explode Block and Delete Block.
   - Delete after a click deletes the block with its members and its axis, as Delete Block does,
     in one undoable step. Explode Block is only the menu item.
 - **Canvas:**
@@ -489,7 +494,13 @@ drive, which is what an open block already does, so saving the state costs older
   - Members and the axis drawn in the block colour (theme token `sketch_block`) while they are not
     fully constrained; once fully constrained they take the fully constrained colour like any
     other geometry. A light outline shows while the pointer is over a member or the glyph.
-  - Held constraints faded, and not picked.
+  - Held constraints and dimensions hidden by default: a closed block shows its curves, axis and
+    glyph only, and a hidden constraint is not drawn, hovered or picked and takes no glyph slot.
+    With the block's Show Constraints and Dimensions on, they are drawn faded, and not picked.
+    An open block's constraints drive and always show. Show Dimensions on a finished sketch
+    leaves the hidden ones out too.
+- **Make Block and Edit Block windows:** Name, Scale, and a **Show constraints and dimensions**
+  checkbox (off on a new block; Insert as block makes its blocks with it off).
   - A click on a member selects the whole block; a double-click opens Edit Contents.
 - **Strings:** new keys in `assets/locales/pending/sketch-blocks.json` (the required locales) and a
   glossary entry for *block*.
@@ -501,6 +512,7 @@ records what each side of the change sees:
 
 - **What is saved:** `blocks` on the sketch, plus one construction line per block, and `open` on
   a block saved while it was open for Edit Contents (closed again when the design opens).
+  `show_held` is saved only when true; older releases ignore it.
 - **Older designs:** they have no blocks, so nothing changes for them.
 - **The last release opening a new design:** it keeps `blocks` and writes it back, but doesn't
   solve it. There every held constraint drives. A block that was turned or resized conflicts with
@@ -547,7 +559,7 @@ records what each side of the change sees:
    the Rigid Group joint.
 2. **Default scale:** **Fixed**, with Free one click away. #4069 asks for free scale and #22102
    for a fixed shape.
-3. **Constraints inside a block:** kept and faded while the block exists, and restored by Explode
+3. **Constraints inside a block:** kept while the block exists, hidden or, per block, faded, and restored by Explode
    Block where they still hold (see "Constraints inside a block"). Removing them at Make Block
    would lose dimensions inside the block that parameters drive.
 4. **The axis line:** always shown and pickable, because it is the most direct way to place the

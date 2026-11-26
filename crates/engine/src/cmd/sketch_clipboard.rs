@@ -104,6 +104,8 @@ pub struct ClipBlock {
     pub name: Option<String>,
     /// The constraints it holds, as indices into [`SketchClip::constraints`].
     pub held: Vec<usize>,
+    /// Whether it shows the constraints it holds while closed.
+    pub show_held: bool,
 }
 
 /// Sketch geometry copied with `sketch.copy`, in the sketch coordinates it was copied from.
@@ -288,7 +290,7 @@ fn clip_of(doc: &Document, sk: &Sketch, id: u64, ids: &[String], whole: bool, cm
         let members: Option<Vec<usize>> = b.curves.iter().map(|c| sk.curve_index(c).and_then(|i| cmap.get(&i).copied())).collect();
         if let Some(curves) = members.filter(|m| !m.is_empty()) {
             let axis = sk.curve_index(&b.axis).and_then(|i| cmap.get(&i).copied());
-            whole_blocks.push((b, ClipBlock { curves, axis, scale: b.scale, name: b.name.clone(), held: Vec::new() }));
+            whole_blocks.push((b, ClipBlock { curves, axis, scale: b.scale, name: b.name.clone(), held: Vec::new(), show_held: b.show_held }));
         }
     }
     // What each block copied whole holds, an open block's as it will when it closes.
@@ -637,6 +639,9 @@ fn paste_clip(sk: &mut Sketch, doc: &mut Document, clip: &SketchClip, t: Vec2, s
         };
         let held: Vec<String> = b.held.iter().filter_map(|k| pasted.get(*k).cloned().flatten()).collect();
         sk.set_block_held(&block.block, &held);
+        if b.show_held {
+            sk.set_block_show_held(&block.block, true)?;
+        }
     }
     let mut ids = BTreeMap::new();
     for (c, i) in clip.curves.iter().zip(&made) {

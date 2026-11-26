@@ -4,7 +4,8 @@
 //! axis length when the shape was captured, each member point's place in the block's frame
 //! (with `loose`, the points that are members on their own), each member circle's or ellipse's
 //! radius in units of that length, and the constraints it holds (kept, not solved, while the
-//! block exists). A block open for editing its contents (`open`, saved only when the design is
+//! block exists). `show_held`, saved only when true, draws those constraints and dimensions
+//! while the block is closed; older releases ignore it. A block open for editing its contents (`open`, saved only when the design is
 //! saved while its sketch is edited) holds nothing and keeps the constraints inside it that drove
 //! when it was opened, the curves and points that were outside it, and its own points then. A
 //! design with an open block, in a model sketch or a drawing's sketch, opens with the block

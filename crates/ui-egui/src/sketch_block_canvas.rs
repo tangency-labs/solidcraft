@@ -1,8 +1,8 @@
 //! What a sketch block shows on the canvas while its sketch is edited: one glyph beside its
 //! origin, and a light outline round its curves while the pointer is over one of them or over the
 //! glyph. A click on the glyph selects the block's members, a right-click opens the block's menu
-//! and a double-click opens Edit Block. The constraints a block holds are drawn faded, by
-//! [`HELD_FADE`].
+//! and a double-click opens Edit Block. The constraints a block holds are hidden, or drawn faded
+//! by [`HELD_FADE`] when the block shows them ([`hidden_set`]).
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -27,7 +27,13 @@ pub(crate) fn held_set(sk: &solidcraft_engine::sketch::Sketch) -> HashSet<&str> 
     sk.blocks.iter().flat_map(|b| b.held.iter().map(String::as_str)).collect()
 }
 
-/// Whether a glyph draws faded: a block holds every constraint of its `group`.
+/// The ids of the constraints held by blocks that hide them: not drawn, hovered or picked.
+pub(crate) fn hidden_set(sk: &solidcraft_engine::sketch::Sketch) -> HashSet<&str> {
+    sk.blocks.iter().filter(|b| !b.show_held).flat_map(|b| b.held.iter().map(String::as_str)).collect()
+}
+
+/// Whether a block holds every constraint of a glyph's `group` (in [`held_set`] or
+/// [`hidden_set`]).
 pub(crate) fn held(held: &HashSet<&str>, group: &[String]) -> bool {
     !held.is_empty() && !group.is_empty() && group.iter().all(|id| held.contains(id.as_str()))
 }

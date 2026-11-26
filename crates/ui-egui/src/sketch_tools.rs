@@ -2582,7 +2582,8 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         dim_texts.iter().any(|d| d.intersects(r))
     };
     let mut placed: Vec<(String, Pos2, Pos2)> = Vec::new();
-    for c in glyph_constraints(&ss.sketch) {
+    let hidden = crate::sketch_block_canvas::hidden_set(&ss.sketch);
+    for c in glyph_constraints(&ss.sketch).filter(|c| !crate::sketch_block_canvas::held(&hidden, &glyph_group(&ss.sketch, &c.id))) {
         for (at, dir) in glyph_anchors(&ss.sketch, &c.kind) {
             let Some(base) = proj.to_screen(ss.plane.to_world(at)) else { continue };
             // The entity's direction on screen, and its side.

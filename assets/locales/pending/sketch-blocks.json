@@ -26,14 +26,17 @@
     "ui.block_scale_fixed": "Fixed",
     "ui.block_scale_free": "Free",
     "ui.block_scale_note": "Fixed keeps the block's size. Free keeps its proportions, and one length dimension sets its size.",
+    "ui.block_show_constraints": "Show constraints and dimensions",
     "ui.close_block": "Close Block",
     "ui.delete_block": "Delete Block",
     "ui.edit_contents": "Edit Contents",
     "ui.heading_edit_block": "EDIT BLOCK",
     "ui.heading_make_block": "MAKE BLOCK",
+    "ui.hide_block_constraints": "Hide Constraints and Dimensions",
     "ui.insert_as_block": "Insert as block",
     "ui.insert_as_block_tip": "Brings the drawing in as one block that keeps its shape. Its origin is the placed point and its axis follows the angle: constrain them to place and turn the drawing. Text stays outside the block.",
-    "ui.select_block": "Select Block"
+    "ui.select_block": "Select Block",
+    "ui.show_block_constraints": "Show Constraints and Dimensions"
   },
   "ar": {
     "cmd.sketch.block": "إنشاء كتلة",
@@ -62,14 +65,17 @@
     "ui.block_scale_fixed": "ثابت",
     "ui.block_scale_free": "حر",
     "ui.block_scale_note": "الثابت يحافظ على حجم الكتلة. الحر يحافظ على نسبها، ويحدد بُعد طول واحد حجمها.",
+    "ui.block_show_constraints": "إظهار القيود والأبعاد",
     "ui.close_block": "إغلاق الكتلة",
     "ui.delete_block": "حذف الكتلة",
     "ui.edit_contents": "تحرير المحتويات",
     "ui.heading_edit_block": "تحرير الكتلة",
     "ui.heading_make_block": "إنشاء كتلة",
+    "ui.hide_block_constraints": "إخفاء القيود والأبعاد",
     "ui.insert_as_block": "إدراج ككتلة",
     "ui.insert_as_block_tip": "يُدرج الرسم ككتلة واحدة تحافظ على شكلها. أصلها هو النقطة الموضوعة ومحورها يتبع الزاوية: قيّدهما لوضع الرسم وتدويره. يبقى النص خارج الكتلة.",
-    "ui.select_block": "تحديد الكتلة"
+    "ui.select_block": "تحديد الكتلة",
+    "ui.show_block_constraints": "إظهار القيود والأبعاد"
   },
   "de": {
     "cmd.sketch.block": "Block erstellen",
@@ -98,14 +104,17 @@
     "ui.block_scale_fixed": "Fest",
     "ui.block_scale_free": "Frei",
     "ui.block_scale_note": "Fest behält die Größe des Blocks. Frei behält seine Proportionen, und ein Längenmaß legt seine Größe fest.",
+    "ui.block_show_constraints": "Bedingungen und Bemaßungen anzeigen",
     "ui.close_block": "Block schließen",
     "ui.delete_block": "Block löschen",
     "ui.edit_contents": "Inhalt bearbeiten",
     "ui.heading_edit_block": "BLOCK BEARBEITEN",
     "ui.heading_make_block": "BLOCK ERSTELLEN",
+    "ui.hide_block_constraints": "Bedingungen und Bemaßungen ausblenden",
     "ui.insert_as_block": "Als Block einfügen",
     "ui.insert_as_block_tip": "Fügt die Zeichnung als einen Block ein, der seine Form behält. Sein Ursprung ist der platzierte Punkt und seine Achse folgt dem Winkel: Mit Abhängigkeiten daran platzieren und drehen Sie die Zeichnung. Text bleibt außerhalb des Blocks.",
-    "ui.select_block": "Block auswählen"
+    "ui.select_block": "Block auswählen",
+    "ui.show_block_constraints": "Bedingungen und Bemaßungen anzeigen"
   },
   "he": {
     "cmd.sketch.block": "יצירת בלוק",
@@ -134,14 +143,17 @@
     "ui.block_scale_fixed": "קבוע",
     "ui.block_scale_free": "חופשי",
     "ui.block_scale_note": "קבוע שומר על גודל הבלוק. חופשי שומר על הפרופורציות שלו, ומידת אורך אחת קובעת את גודלו.",
+    "ui.block_show_constraints": "הצגת אילוצים ומידות",
     "ui.close_block": "סגירת בלוק",
     "ui.delete_block": "מחיקת בלוק",
     "ui.edit_contents": "עריכת תוכן",
     "ui.heading_edit_block": "עריכת בלוק",
     "ui.heading_make_block": "יצירת בלוק",
+    "ui.hide_block_constraints": "הסתרת אילוצים ומידות",
     "ui.insert_as_block": "הוספה כבלוק",
     "ui.insert_as_block_tip": "מוסיף את השרטוט כבלוק אחד ששומר על צורתו. הראשית שלו היא הנקודה שנבחרה והציר שלו עוקב אחרי הזווית: אילוצים עליהם ממקמים ומסובבים את השרטוט. טקסט נשאר מחוץ לבלוק.",
-    "ui.select_block": "בחירת בלוק"
+    "ui.select_block": "בחירת בלוק",
+    "ui.show_block_constraints": "הצגת אילוצים ומידות"
   },
   "ja": {
     "cmd.sketch.block": "ブロックを作成",
@@ -170,14 +182,17 @@
     "ui.block_scale_fixed": "固定",
     "ui.block_scale_free": "自由",
     "ui.block_scale_note": "固定ではブロックの大きさを保ちます。自由では比率を保ち、長さの寸法 1 つで大きさが決まります。",
+    "ui.block_show_constraints": "拘束と寸法を表示",
     "ui.close_block": "ブロックを閉じる",
     "ui.delete_block": "ブロックを削除",
     "ui.edit_contents": "内容を編集",
     "ui.heading_edit_block": "ブロックを編集",
     "ui.heading_make_block": "ブロックを作成",
+    "ui.hide_block_constraints": "拘束と寸法を非表示",
     "ui.insert_as_block": "ブロックとして挿入",
     "ui.insert_as_block_tip": "図面を形を保つ 1 つのブロックとして取り込みます。原点は配置した点、軸は角度の向きです。これらに拘束を付けて図面を配置・回転します。テキストはブロックに含まれません。",
-    "ui.select_block": "ブロックを選択"
+    "ui.select_block": "ブロックを選択",
+    "ui.show_block_constraints": "拘束と寸法を表示"
   },
   "ko": {
     "cmd.sketch.block": "블록 만들기",
@@ -206,14 +221,17 @@
     "ui.block_scale_fixed": "고정",
     "ui.block_scale_free": "자유",
     "ui.block_scale_note": "고정은 블록의 크기를 유지합니다. 자유는 비율을 유지하며, 길이 치수 하나로 크기가 정해집니다.",
+    "ui.block_show_constraints": "구속조건 및 치수 표시",
     "ui.close_block": "블록 닫기",
     "ui.delete_block": "블록 삭제",
     "ui.edit_contents": "내용 편집",
     "ui.heading_edit_block": "블록 편집",
     "ui.heading_make_block": "블록 만들기",
+    "ui.hide_block_constraints": "구속조건 및 치수 숨기기",
     "ui.insert_as_block": "블록으로 삽입",
     "ui.insert_as_block_tip": "도면을 모양이 유지되는 하나의 블록으로 가져옵니다. 원점은 배치한 점이고 축은 각도를 따릅니다. 여기에 구속 조건을 걸어 도면을 배치하고 회전합니다. 텍스트는 블록에 포함되지 않습니다.",
-    "ui.select_block": "블록 선택"
+    "ui.select_block": "블록 선택",
+    "ui.show_block_constraints": "구속조건 및 치수 표시"
   },
   "vi": {
     "cmd.sketch.block": "Tạo khối",
@@ -242,14 +260,17 @@
     "ui.block_scale_fixed": "Cố định",
     "ui.block_scale_free": "Tự do",
     "ui.block_scale_note": "Cố định giữ nguyên kích thước của khối. Tự do giữ nguyên tỉ lệ, và một kích thước chiều dài đặt kích thước của khối.",
+    "ui.block_show_constraints": "Hiển thị ràng buộc và kích thước",
     "ui.close_block": "Đóng khối",
     "ui.delete_block": "Xóa khối",
     "ui.edit_contents": "Sửa nội dung",
     "ui.heading_edit_block": "SỬA KHỐI",
     "ui.heading_make_block": "TẠO KHỐI",
+    "ui.hide_block_constraints": "Ẩn ràng buộc và kích thước",
     "ui.insert_as_block": "Chèn dưới dạng khối",
     "ui.insert_as_block_tip": "Đưa bản vẽ vào thành một khối giữ nguyên hình dạng. Gốc của khối là điểm đã đặt và trục theo góc: ràng buộc chúng để đặt và xoay bản vẽ. Văn bản nằm ngoài khối.",
-    "ui.select_block": "Chọn khối"
+    "ui.select_block": "Chọn khối",
+    "ui.show_block_constraints": "Hiển thị ràng buộc và kích thước"
   },
   "zh": {
     "cmd.sketch.block": "创建块",
@@ -278,13 +299,16 @@
     "ui.block_scale_fixed": "固定",
     "ui.block_scale_free": "自由",
     "ui.block_scale_note": "固定保持块的大小。自由保持其比例，由一个长度尺寸确定其大小。",
+    "ui.block_show_constraints": "显示约束和尺寸",
     "ui.close_block": "关闭块",
     "ui.delete_block": "删除块",
     "ui.edit_contents": "编辑内容",
     "ui.heading_edit_block": "编辑块",
     "ui.heading_make_block": "创建块",
+    "ui.hide_block_constraints": "隐藏约束和尺寸",
     "ui.insert_as_block": "作为块插入",
     "ui.insert_as_block_tip": "将图纸作为一个保持形状的块插入。块的原点是放置点，轴沿角度方向：约束它们即可放置和旋转图纸。文字不在块内。",
-    "ui.select_block": "选择块"
+    "ui.select_block": "选择块",
+    "ui.show_block_constraints": "显示约束和尺寸"
   }
 }

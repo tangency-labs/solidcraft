@@ -72,6 +72,10 @@ pub struct BlockParams {
     /// The block's name, at most 200 characters. Default: none (it is named by its id).
     #[serde(default)]
     pub name: Option<String>,
+    /// Draw the constraints and dimensions the block holds while it is closed. Default: false
+    /// (they are hidden: the block shows its curves, axis and glyph).
+    #[serde(default)]
+    pub show_constraints: Option<bool>,
 }
 
 /// What `sketch.block` and `sketch.block_edit` return.
@@ -131,7 +135,8 @@ pub struct ExplodeBlockResult {
 
 /// Change a block and capture its shape again from where its curves are now: its scale, its
 /// name and its members. The constraints wholly inside the new members are held, except those
-/// that drove while the block existed.
+/// that drove while the block existed. Whether the constraints it holds are drawn can be changed
+/// on its own, without capturing its shape again.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct BlockEditParams {
@@ -153,6 +158,11 @@ pub struct BlockEditParams {
     /// Members to take out of the block, by id.
     #[serde(default)]
     pub remove: Option<NameList>,
+    /// Draw the constraints and dimensions the block holds while it is closed (true) or hide
+    /// them (false). Default: as it is. Given alone, it changes nothing else, and an open block
+    /// takes it too.
+    #[serde(default)]
+    pub show_constraints: Option<bool>,
 }
 
 /// Open a block to edit its contents in place, without exploding it: it stays where it is (its

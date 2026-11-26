@@ -21,9 +21,9 @@ fn sketch_with_profile(s: &mut Session) {
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<BlockParams>(), &["curves", "name", "origin", "scale", "sketch"]);
+    assert_keys(input_schema_for::<BlockParams>(), &["curves", "name", "origin", "scale", "show_constraints", "sketch"]);
     assert_keys(input_schema_for::<ExplodeBlockParams>(), &["block", "sketch"]);
-    assert_keys(input_schema_for::<BlockEditParams>(), &["add", "block", "name", "remove", "scale", "sketch"]);
+    assert_keys(input_schema_for::<BlockEditParams>(), &["add", "block", "name", "remove", "scale", "show_constraints", "sketch"]);
     assert_keys(input_schema_for::<BlockOpenParams>(), &["block", "sketch"]);
     assert_keys(input_schema_for::<BlockCloseParams>(), &["block", "sketch"]);
 }
@@ -45,6 +45,7 @@ fn strict_keeps_todays_errors() {
         ("sketch.block_edit", json!({"block": "blk9"})),
         ("sketch.block_edit", json!({"block": "blk9", "scale": "big"})),
         ("sketch.block_edit", json!({"block": "blk9", "add": 3})),
+        ("sketch.block_edit", json!({"block": "blk9", "show_constraints": true})),
         ("sketch.block_open", json!({"block": "blk9"})),
         ("sketch.block_open", json!({"block": 9})),
         ("sketch.block_open", json!({})),
@@ -78,6 +79,8 @@ fn block_commands_reply_with_their_schemas() {
     matches(output_schema_for::<BlockResult>(), &made, false);
     let edited = run(&mut s, "sketch.block_edit", json!({"block": made["block"], "scale": "fixed", "remove": ["c1"]}));
     matches(output_schema_for::<BlockResult>(), &edited, false);
+    let shown = run(&mut s, "sketch.block_edit", json!({"block": made["block"], "show_constraints": true}));
+    matches(output_schema_for::<BlockResult>(), &shown, false);
     let opened = run(&mut s, "sketch.block_open", json!({"block": made["block"]}));
     matches(output_schema_for::<BlockOpenResult>(), &opened, false);
     let closed = run(&mut s, "sketch.block_close", json!({}));

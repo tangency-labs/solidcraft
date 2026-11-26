@@ -1224,8 +1224,9 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     // on one of them steps clear of it (#44).
     let mut placed: Vec<Rect> = Vec::new();
     let held = crate::sketch_block_canvas::held_set(&ss.sketch);
+    let hidden = crate::sketch_block_canvas::hidden_set(&ss.sketch);
     for (source, c, is_draft) in constraints {
-        if ss.sketch.view.hide_dimensions && !is_draft {
+        if !is_draft && (ss.sketch.view.hide_dimensions || hidden.contains(c.id.as_str())) {
             continue;
         }
         let sk = &source.sketch;

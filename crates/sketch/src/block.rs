@@ -72,6 +72,10 @@ pub struct SketchBlock {
     /// open), by id; they are among [`SketchBlock::points`] too.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub loose: Vec<String>,
+    /// Whether the constraints and dimensions it holds are drawn while it is closed; hidden by
+    /// default, leaving its curves, axis and glyph.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub show_held: bool,
     /// Set while the block is open for editing its contents ([`Sketch::open_block`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub open: Option<BlockOpen>,
@@ -524,6 +528,7 @@ impl Sketch {
             radii: Vec::new(),
             held: Vec::new(),
             loose: Vec::new(),
+            show_held: false,
             open: None,
         };
         self.capture(&mut block, &members, &[])?;
@@ -558,6 +563,7 @@ impl Sketch {
             radii: Vec::new(),
             held: Vec::new(),
             loose: Vec::new(),
+            show_held: false,
             open: None,
         };
         self.capture(&mut block, &members, &[])?;
@@ -880,6 +886,15 @@ impl Sketch {
         let released = self.release(&gone);
         let origin = self.block_origin(&block);
         Ok((BlockMade { block: block.id, axis: block.axis, origin, held: block.held }, released))
+    }
+
+    /// Show or hide, while block `id` is closed, the constraints and dimensions it holds. Nothing
+    /// else changes, and an open block takes it too.
+    pub fn set_block_show_held(&mut self, id: &str, show: bool) -> Result<BlockMade> {
+        let b = self.blocks.iter_mut().find(|b| b.id == id).ok_or_else(|| SketchError::Unknown(id.into()))?;
+        b.show_held = show;
+        let b = b.clone();
+        Ok(BlockMade { origin: self.block_origin(&b), block: b.id, axis: b.axis, held: b.held })
     }
 
     /// Turn a block back into plain geometry, its axis staying as a plain construction line. Its
