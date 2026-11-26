@@ -195,10 +195,8 @@ pub fn seam_weld(seam: &SeamWeld) -> Result<Seam> {
         let up = scale(n, sense);
         let mut solids = Vec::new();
         for r in radii {
-            let bodies = loops(r, lift)?
-                .iter()
-                .map(|outline| profiles::extrude_curves(outline, up, h, true))
-                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let bodies =
+                loops(r, lift)?.iter().map(|outline| profiles::extrude_curves(outline, up, h, true)).collect::<std::result::Result<Vec<_>, _>>()?;
             solids.push(solidcraft_kernel::union_all(&bodies.iter().collect::<Vec<_>>())?);
         }
         let [core, band, edge] = <[Body; 3]>::try_from(solids).map_err(|_| SeamRefusal::Invalid("a seam zone not built"))?;

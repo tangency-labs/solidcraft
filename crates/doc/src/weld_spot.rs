@@ -47,9 +47,9 @@ use std::f64::consts::{FRAC_PI_2, TAU};
 
 use solidcore_record::brep::Curve as RecordCurve;
 use solidcraft_kernel::api::FaceHit;
+use solidcraft_kernel::curves as curve;
 use solidcraft_kernel::profiles::{self, ProfileCurve as Curve};
 use solidcraft_kernel::{Body, KernelError, affine};
-use solidcraft_kernel::curves as curve;
 
 /// Why a spot is refused.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]

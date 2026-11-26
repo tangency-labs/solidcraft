@@ -2548,7 +2548,13 @@ impl Body {
     /// # Errors
     /// [`KernelError::Invalid`] for an index past either body's faces or edges;
     /// [`KernelError::Failed`] for a mesh body, an edge without a curve and the kernel's failure.
-    pub fn closest_to_edge_of(&self, faces: &[usize], edges: &[usize], other: &Body, edge: usize) -> Result<Option<solidcraft_kernel_api::MembersClosest>> {
+    pub fn closest_to_edge_of(
+        &self,
+        faces: &[usize],
+        edges: &[usize],
+        other: &Body,
+        edge: usize,
+    ) -> Result<Option<solidcraft_kernel_api::MembersClosest>> {
         let theirs = other.exact_form("closest to an edge")?;
         let curve = theirs.0.edge_curve(&theirs.1, edge).map_err(|e| ops_failure("closest to an edge", e))?;
         let form = self.exact_form("closest to an edge")?;

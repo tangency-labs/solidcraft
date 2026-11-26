@@ -67,7 +67,8 @@ pub trait Profiles: Backend {
     ///
     /// The kernel's refusal: a profile that is not closed or not planar, an axis of no length,
     /// a turn out of range, numbers that are not finite.
-    fn revolve_curves(&self, profile: &[ProfileCurve], origin: [f64; 3], axis: [f64; 3], angle: f64, cap: bool) -> Result<Self::Form, ProfileRefused>;
+    fn revolve_curves(&self, profile: &[ProfileCurve], origin: [f64; 3], axis: [f64; 3], angle: f64, cap: bool)
+    -> Result<Self::Form, ProfileRefused>;
     /// The closed `profile` moved `distance` along `direction`, its walls straight; `cap`
     /// closes both ends.
     ///
