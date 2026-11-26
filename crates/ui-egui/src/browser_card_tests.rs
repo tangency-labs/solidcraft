@@ -2322,26 +2322,28 @@ fn a_linked_components_row_shows_the_state_of_its_file() {
 /// badge is only looked at again when the window returns to the front, like every link's.
 #[test]
 fn a_changed_kicad_boards_link_gets_the_changed_badge() {
-    let dir = std::env::temp_dir().join(format!("solidcraft-kicad-badge-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let board = dir.join("board.kicad_pcb");
+    let mut h = Harness::new();
+    h.frames(2);
+    let board = h.dir.join("board.kicad_pcb");
     let write = |width: &str| {
         std::fs::write(&board, format!("(kicad_pcb (general (thickness 1.6)) (gr_rect (start 0 0) (end {width} 10) (layer \"Edge.Cuts\")))"))
             .unwrap();
     };
     write("20");
-    let mut s = solidcraft_engine::Session::default();
-    s.execute("doc.open", &json!({"path": board})).unwrap();
-    let links = s.execute("component.links", &json!({})).unwrap();
-    let (component, badge) = crate::browser_links::badge_of(&links["links"][0]).unwrap();
+    let component = h.app.run("doc.open", json!({"path": board})).unwrap()["component"].as_u64().unwrap();
+    let ctx = h.ctx.clone();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| h.app.logic(ui.ctx()));
+    link_answer(&mut h);
+    let badge = h.app.tree.links.get(component).expect("the board's badge");
     assert_eq!((badge.state, badge.note), (LinkState::Linked, None));
+
     write("30.5");
-    let links = s.execute("component.links", &json!({})).unwrap();
-    let (again, badge) = crate::browser_links::badge_of(&links["links"][0]).unwrap();
-    assert_eq!(again, component);
-    assert_eq!((badge.state, badge.note), (LinkState::Changed, Some("ui.link_changed")));
-    let _ = std::fs::remove_dir_all(&dir);
+    h.frames(2);
+    assert_eq!(h.app.tree.links.get(component).unwrap().note, None, "not looked at until the window returns");
+    h.app.synthetic.push(egui::Event::WindowFocused(true));
+    link_answer(&mut h);
+    let changed = h.app.tree.links.get(component).unwrap();
+    assert_eq!((changed.state, changed.note), (LinkState::Changed, Some("ui.link_changed")));
 }
 
 /// A design opened from its file reads its link next to that file, and asks once.

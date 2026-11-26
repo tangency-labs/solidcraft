@@ -319,3 +319,17 @@ fn the_board_a_caller_named_stays_allowed_when_the_window_takes_the_design() {
     assert_eq!(state(&mut window), (json!(true), json!(null)));
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+#[test]
+fn a_board_opened_as_meshes_is_read_again_as_meshes() {
+    let path = board_file("live-link-mesh", 2.0);
+    let mut s = Session::default();
+    let opened = run(&mut s, "doc.open", json!({"path": path.to_string_lossy(), "representation": "mesh"}));
+    assert_ne!(opened["board_solid"], json!(true), "{opened}");
+    rewrite_board(&path, 30.5);
+    let done = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(done["updated"].as_array().map(Vec::len), Some(1), "{done}");
+    let component = *s.doc.links.keys().next().unwrap();
+    assert_eq!(s.doc.features.iter().filter(|f| f.component == component).count(), 1, "still no solid board beside the meshes");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

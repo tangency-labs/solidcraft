@@ -1392,6 +1392,10 @@ fn kicad_options_record(options: &solidcraft_io::KicadOptions) -> Value {
     if let Some(color) = options.color {
         record["color"] = json!(color);
     }
+    // The default (a solid board) is left out; a board opened as meshes is read again as meshes.
+    if options.representation == solidcraft_io::KicadRepresentation::Mesh {
+        record["representation"] = json!("mesh");
+    }
     record
 }
 
