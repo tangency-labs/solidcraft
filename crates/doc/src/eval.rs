@@ -9958,8 +9958,7 @@ fn feature_tools_with_constructor(
                     if (to - start).abs() < 1e-9 {
                         return Err(DocError::Invalid("the To object is where the extrude starts".into()));
                     }
-                    let moved = |p: &Plane, d: f64| Plane { origin: p.origin + n * d, ..*p };
-                    let (from_plane, to_plane) = (moved(fp, start_offset), moved(tp, to - h));
+                    let (from_plane, to_plane) = (kernel::plane_raised(&ss.plane, fp, start_offset)?, kernel::plane_raised(&ss.plane, tp, to - h)?);
                     // Planes that cross over the profiles would leave out the part of them where
                     // the To plane lies before the From one, chosen by where the middle falls.
                     if planes_cross_over(&from_plane, &to_plane, &ss.plane, &regions, to - start)? {
