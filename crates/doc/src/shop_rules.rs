@@ -691,6 +691,14 @@ fn builtin() -> &'static Result<Vec<Profile>, ShopRulesError> {
     PROFILES.get_or_init(|| read_file(BUILTIN.as_bytes()))
 }
 
+/// The built-in profiles' ids, in the file's order; none when the file does not read.
+pub fn profile_ids() -> Vec<&'static str> {
+    match builtin() {
+        Ok(list) => list.iter().map(|p| p.id.as_str()).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
 /// The built-in profile `id` (ignoring case) as the object a preset starts from: the profile as the
 /// file writes it, without its `id` (a preset takes an id of its own), to be edited and saved.
 pub fn profile_value(id: &str) -> Option<Value> {
