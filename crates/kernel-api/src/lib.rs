@@ -52,7 +52,7 @@ pub use hole_stacks::{HoleStacks, HoleStacksRefused};
 pub use mesh::{MeshRebuilt, MeshRefused, Meshes, ReconstructionKind};
 pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
 pub use planar::{Planar, PlanarRefused};
-pub use points::{Distance, PointSetSummary, Points, PointsRefused};
+pub use points::{ClassifiedPoint, Distance, PointNormalFace, PointSetSummary, Points, PointsRefused, UnitNormal};
 pub use projection::{ProjectionRefused, Projections};
 pub use query::{OutlineStretch, Queries, QueryRefused, SurfacePoint};
 pub use sections::{BlendFrame, FramesRefused, Sections, TurnRefusal};
