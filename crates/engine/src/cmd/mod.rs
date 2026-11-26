@@ -65,6 +65,7 @@ mod envelopes;
 mod face;
 mod features;
 mod features_more;
+mod help_text;
 mod hole_stacks;
 mod join_pieces;
 mod living_hinge;
