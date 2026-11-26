@@ -35,6 +35,7 @@ pub struct CheckMemo {
     clean: HashSet<ContentId>,
     current: Option<Stars>,
     last_clean: [usize; 3],
+    update_skips: usize,
 }
 
 impl std::fmt::Debug for CheckMemo {
@@ -55,6 +56,13 @@ impl CheckMemo {
     #[must_use]
     pub fn last_clean(&self) -> [usize; 3] {
         self.last_clean
+    }
+
+    /// How many edge use pairs the tolerance updates after booleans skipped as found clean before
+    /// ([`crate::topology::brep::validation::update_tolerances_after_boolean`]), all told.
+    #[must_use]
+    pub fn update_skips(&self) -> usize {
+        self.update_skips
     }
 
     /// Whether it keeps none.
@@ -587,4 +595,116 @@ fn vertex_point(b: &Brep, v: VertexId, d: &mut Digest) -> Option<()> {
         d.f64(f.face_uv.y);
     }
     Some(())
+}
+
+// ---- the tolerance update a boolean's result gets ---------------------------------------------
+
+/// What every pair digest of one tolerance update ([`update_pair_digest`]) is taken under: the
+/// kernel's inputs, the update's level and the body's own scalars. `None` when the memo is off
+/// ([`Kernel::memoize_curve_caches`]).
+pub(crate) fn update_salt(k: &Kernel, b: &Brep, level: u8) -> Option<ContentId> {
+    let check = salt(k, level, false)?;
+    let mut d = Digest::new();
+    d.tag(0x0BD7);
+    d.hashed(&check);
+    Some(body_salt(b, d.finish()))
+}
+
+/// The digest of everything the tolerance update reads for edge use `eu` and its mate on face
+/// `f` as it comes to them ([`crate::topology::brep::validation::update_tolerances_after_boolean`]):
+/// the face's surface, tolerance and domain; the two uses' sense, the trim they share and their
+/// edge's curve, interval and tolerance, with the edge/face gaps they cached; the ends' vertices
+/// (point and tolerance) with the UV point and gaps cached on the two end uses themselves; and the
+/// clockwise neighbours of both uses (sense, trim, edge geometry), which the ends' UV points are
+/// solved from. The update measures the pair's vertex/edge, vertex/face and edge/face gaps from
+/// exactly those (a cached gap read as it is) and compares them with the vertices' and the edge's
+/// tolerances. Taken when the update comes to the pair, after what came before it grew, so it
+/// names the tolerances the pair's tests see.
+pub(crate) fn update_pair_digest(
+    b: &Brep,
+    f: FaceId,
+    eu: crate::topology::EdgeuseId,
+    mate: crate::topology::EdgeuseId,
+    salt: ContentId,
+) -> Option<ContentId> {
+    use crate::topology::edgeuse::p1 as eu1;
+    let mut d = Digest::new();
+    d.tag(0x0BA1);
+    d.hashed(&salt);
+    let face = b.face(f).ok()?;
+    face.surface.as_ref()?.content(&mut d)?;
+    d.f64(crate::topology::face::p2::tolerance(b, f).ok()?);
+    face.uv_domain.content(&mut d)?;
+    d.hashed(&face.rectangular_trim);
+    let use_geometry = |x: crate::topology::EdgeuseId, d: &mut Digest| -> Option<()> {
+        d.hashed(&eu1::orientation(b, x).ok()?);
+        d.bool(eu1::is_loop_edgeuse(b, x).ok()?);
+        let (trim, holder) = eu1::uv_trim_curve(b, x).ok()?;
+        trim.content(d)?;
+        d.bool(holder == Some(x));
+        let e = eu1::edge(b, x).ok()??;
+        let edge = b.edge(e).ok()?;
+        edge.curve.as_ref()?.content(d)?;
+        edge.interval.content(d)?;
+        d.f64(crate::topology::edge::tolerance(b, e).ok()?);
+        Some(())
+    };
+    for x in [eu, mate] {
+        use_geometry(x, &mut d)?;
+        let g = b.edgeuse(x).ok()?.max_edge_face_gap;
+        d.f64(g.gap_3d);
+        d.hashed(&g.edgeuse.map(|y| y == x));
+        d.f64(g.edge_t);
+        d.f64(g.face_uv.x);
+        d.f64(g.face_uv.y);
+        let vu = eu1::vertexuse(b, x).ok()??;
+        use_vertex(b, vu, &mut d)?;
+        match b.edgeuse(x).ok()?.cw {
+            Some(cw) => use_geometry(cw, &mut d)?,
+            None => d.bool(false),
+        }
+    }
+    Some(d.finish())
+}
+
+/// Writes vertex use `vu`'s vertex (point and tolerance) and the use's UV point and cached
+/// vertex/edge and vertex/face gaps: what the update reads of the end of an edge use.
+fn use_vertex(b: &Brep, vu: crate::topology::VertexuseId, d: &mut Digest) -> Option<()> {
+    let v = crate::topology::vertexuse::vertex(b, vu).ok()??;
+    let vertex = b.vertex(v).ok()?;
+    vertex.point.content(d)?;
+    d.f64(vertex.tolerance);
+    let u = b.vertexuse(vu).ok()?;
+    d.f64(u.uv_point.x);
+    d.f64(u.uv_point.y);
+    let e = u.vertex_edge_gap;
+    d.f64(e.gap_3d);
+    d.hashed(&e.vertexuse.map(|x| x == vu));
+    d.f64(e.edge_t);
+    let g = u.vertex_face_gap;
+    d.f64(g.gap_3d);
+    d.hashed(&g.vertexuse.map(|x| x == vu));
+    d.f64(g.face_uv.x);
+    d.f64(g.face_uv.y);
+    Some(())
+}
+
+/// Whether a tolerance update found the edge use pair with digest `d` ([`update_pair_digest`]) with no
+/// gap over its tolerance before: the update then grows nothing there and reports nothing.
+pub(crate) fn update_clean(k: &Kernel, d: ContentId) -> bool {
+    let mut memo = k.check_memo.borrow_mut();
+    let clean = memo.clean.contains(&d);
+    if clean {
+        memo.update_skips = memo.update_skips.saturating_add(1);
+    }
+    clean
+}
+
+/// Keeps `d` as an edge use pair a tolerance update found with no gap over its tolerance.
+pub(crate) fn keep_update_clean(k: &Kernel, d: ContentId) {
+    let mut memo = k.check_memo.borrow_mut();
+    if memo.clean.len() >= MOST_CLEAN {
+        memo.clean.clear();
+    }
+    memo.clean.insert(d);
 }

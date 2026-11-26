@@ -209,6 +209,18 @@ if ($Arch -eq 'x64' -and -not $PortableOnly) {
   $Outputs += $Templates
 }
 
+# The CLI runs where the machine can run its build: an x64 machine runs x64 and x86, an Arm64 one
+# (Windows 11's emulation) all three. A machine whose architecture can't be read fails the job
+# rather than skip the check (#22444).
+$HostArch = "$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)".ToLowerInvariant()
+if (-not $HostArch) { $HostArch = "$env:PROCESSOR_ARCHITECTURE".ToLowerInvariant() -replace '^amd64$', 'x64' }
+$CanRun = switch ($HostArch) {
+  'arm64' { $true }
+  'x64' { $Arch -ne 'arm64' }
+  'x86' { $Arch -eq 'x86' }
+  default { throw "cannot tell this machine's architecture ('$HostArch'), so cannot decide whether to run solidcraft-cli --version" }
+}
+
 if ($CanRun) {
   Invoke-Native 'solidcraft-cli --version' { & (Join-Path $Stage 'solidcraft-cli.exe') --version }
 } else {
