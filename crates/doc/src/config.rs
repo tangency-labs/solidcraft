@@ -10,9 +10,11 @@ use crate::{DEFAULT_MATERIAL, DocError, Document, Result};
 #[path = "config_rules.rs"]
 mod rules;
 pub use rules::*;
+pub(crate) use rules::validate_rules_value;
 #[path = "config_styles.rs"]
 mod styles;
 pub use styles::*;
+pub(crate) use styles::{validate_columns_value, validate_face_appearance_value};
 #[path = "config_certificates.rs"]
 mod certificates;
 pub use certificates::*;

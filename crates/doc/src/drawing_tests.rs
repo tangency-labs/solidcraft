@@ -2341,3 +2341,32 @@ fn a_drawing_saved_with_the_old_smallest_symbol_cell_opens() {
     let layout = read.sheets[0].title_block_layout().unwrap().unwrap();
     assert_eq!(layout.cells.iter().filter_map(|c| c.symbol_mm).collect::<Vec<_>>(), [2.5]);
 }
+
+/// Issue #21257: current-version drawings take the direct streaming path without building a
+/// whole-document `serde_json::Value` tree, while keeping legacy v1 upgrades and error contracts.
+#[test]
+fn current_version_drawing_direct_path_matches_round_trip_and_errors() {
+    assert!(!DRAWING.needs_upgrade(DRAWING.current(), None));
+    assert!(DRAWING.needs_upgrade(1, None));
+
+    let d = plate();
+    let text = d.to_json().unwrap();
+    assert_eq!(Drawing::from_json(&text).unwrap(), d);
+
+    // Format 1 drawing still upgrades cleanly via the bounded Value path.
+    let f1 = DRAWING.format_string(1);
+    let legacy = format!(
+        r#"{{"format":"{f1}","id":"0000000000002","name":"Legacy","sources":[],"language":"en","sheets":[{{"id":"0000000000003","name":"S","sheet":{{"size":{{"standard":"a4"}}}}}}]}}"#,
+    );
+    let upgraded = Drawing::from_json(&legacy).unwrap();
+    assert_eq!(upgraded.format, DRAWING.format_string(DRAWING.current()));
+    assert_eq!(upgraded.name, "Legacy");
+
+    // Current-version unknown fields, deep nesting, and out-of-range floats keep exact errors.
+    let current = DRAWING.format_string(DRAWING.current());
+    let deep = format!(r#"{{"format":"{current}","annotations":{}1{}}}"#, "[".repeat(70), "]".repeat(70));
+    assert_eq!(Drawing::from_json(&deep).unwrap_err().to_string(), "damaged drawing: nested too deeply");
+    let huge = format!(r#"{{"format":"{current}","annotations":1e10}}"#);
+    let why = Drawing::from_json(&huge).unwrap_err().to_string();
+    assert!(why.starts_with("damaged drawing: the number ") && why.ends_with(" is out of range"), "{why}");
+}

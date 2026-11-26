@@ -88,36 +88,47 @@ pub fn validate_face_target_json(target: &Value) -> Result<()> {
 
 /// Budget malformed style nodes before decoding their typed representation.
 pub fn validate_styles_json(value: &Value) -> Result<()> {
-    if let Some(columns) = value.get("configs").and_then(|v| v.get("columns")).and_then(Value::as_array) {
-        if columns.len() > super::MAX_COLUMNS {
-            return Err(DocError::Invalid("too many configuration columns".into()));
-        }
-        for column in columns {
-            if let Some(target) = column.get("face_appearance") {
-                validate_face_target_json(target)?;
-            }
-            if let Some(id) = column.get("component_appearance")
-                && id.as_u64().is_none_or(|id| id == 0)
-            {
-                return Err(DocError::Invalid("configuration component ID must be nonzero".into()));
-            }
-        }
+    if let Some(columns) = value.get("configs").and_then(|v| v.get("columns")) {
+        validate_columns_value(columns)?;
     }
     if let Some(faces) = value.get("appearances").and_then(|value| value.get("faces")).and_then(Value::as_array) {
         for face in faces {
-            if let Some(certificate) = face.get("certificate") {
-                super::validate_certificate_json(certificate)?;
-                if !certificate.is_null()
-                    && (face.get("strict_name").and_then(Value::as_bool) != Some(true)
-                        || face.get("body").and_then(Value::as_str).is_none_or(|body| body.is_empty() || body.chars().count() > 128)
-                        || face.get("name").and_then(Value::as_str).is_none_or(|name| name.is_empty() || name.len() > MAX_REFERENCE_NAME_BYTES)
-                        || face.get("point").and_then(Value::as_array).is_none_or(|point| {
-                            point.len() != 3 || point.iter().any(|value| value.as_f64().is_none_or(|value| !value.is_finite() || value.abs() > 1e9))
-                        }))
-                {
-                    return Err(DocError::Invalid("invalid certified face appearance".into()));
-                }
-            }
+            validate_face_appearance_value(face)?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_columns_value(columns: &Value) -> Result<()> {
+    let Some(columns) = columns.as_array() else { return Ok(()) };
+    if columns.len() > super::MAX_COLUMNS {
+        return Err(DocError::Invalid("too many configuration columns".into()));
+    }
+    for column in columns {
+        if let Some(target) = column.get("face_appearance") {
+            validate_face_target_json(target)?;
+        }
+        if let Some(id) = column.get("component_appearance")
+            && id.as_u64().is_none_or(|id| id == 0)
+        {
+            return Err(DocError::Invalid("configuration component ID must be nonzero".into()));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_face_appearance_value(face: &Value) -> Result<()> {
+    if let Some(certificate) = face.get("certificate") {
+        super::validate_certificate_json(certificate)?;
+        if !certificate.is_null()
+            && (face.get("strict_name").and_then(Value::as_bool) != Some(true)
+                || face.get("body").and_then(Value::as_str).is_none_or(|body| body.is_empty() || body.chars().count() > 128)
+                || face.get("name").and_then(Value::as_str).is_none_or(|name| name.is_empty() || name.len() > MAX_REFERENCE_NAME_BYTES)
+                || face.get("point").and_then(Value::as_array).is_none_or(|point| {
+                    point.len() != 3 || point.iter().any(|value| value.as_f64().is_none_or(|value| !value.is_finite() || value.abs() > 1e9))
+                }))
+        {
+            return Err(DocError::Invalid("invalid certified face appearance".into()));
         }
     }
     Ok(())

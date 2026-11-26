@@ -71,6 +71,10 @@ pub struct RuleTrace {
 /// compatible; malformed present data is refused. Runtime evaluation checks it again.
 pub fn validate_rules_json(document: &Value) -> Result<()> {
     let Some(rules) = document.get("configs").and_then(|configs| configs.get("rules")) else { return Ok(()) };
+    validate_rules_value(rules)
+}
+
+pub(crate) fn validate_rules_value(rules: &Value) -> Result<()> {
     let rules = rules.as_array().ok_or_else(|| invalid("rules must be an array"))?;
     if rules.len() > MAX_RULES {
         return Err(invalid("too many rules"));

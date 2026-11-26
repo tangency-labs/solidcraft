@@ -463,6 +463,10 @@ impl PointCloud {
     /// The cloud is whole: as many colours as points, finite coordinates within range, a size
     /// on screen in range and a rigid placement.
     pub fn check(&self) -> Result<()> {
+        self.check_inner(true)
+    }
+
+    fn check_inner(&self, check_complex: bool) -> Result<()> {
         let bad = |what: &str| Err(DocError::Invalid(format!("point cloud `{}`: {what}", self.name)));
         if self.points.len() > MAX_POINTS {
             return bad("too many points");
@@ -492,7 +496,9 @@ impl PointCloud {
         if !rigid(&self.transform) {
             return bad("its placement is not a rigid move");
         }
-        self.complex.check(self.points.len())?;
+        if check_complex {
+            self.complex.check(self.points.len())?;
+        }
         if self.filters.len() > MAX_FILTERS
             || self.filters.iter().any(|f| match &f.keep {
                 Keep::Range { range: [lo, hi] } => !(lo.is_finite() && hi.is_finite() && lo <= hi),
@@ -662,9 +668,17 @@ impl<'de> Deserialize<'de> for Colors {
 
 /// Every cloud of a design is whole ([`PointCloud::check`]) and has its own id.
 pub fn check_all(clouds: &[PointCloud]) -> Result<()> {
+    check_all_inner(clouds, true)
+}
+
+pub(crate) fn check_all_for_read(clouds: &[PointCloud], check_complex: bool) -> Result<()> {
+    check_all_inner(clouds, check_complex)
+}
+
+fn check_all_inner(clouds: &[PointCloud], check_complex: bool) -> Result<()> {
     let mut ids = std::collections::BTreeSet::new();
     for c in clouds {
-        c.check()?;
+        c.check_inner(check_complex)?;
         if !ids.insert(c.id) {
             return Err(DocError::Invalid(format!("two point clouds have the id {}", c.id)));
         }

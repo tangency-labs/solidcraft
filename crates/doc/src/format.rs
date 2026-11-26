@@ -241,6 +241,9 @@
 
 use serde_json::Value;
 
+#[path = "format_stream.rs"]
+mod stream;
+
 use crate::{DocError, Document, Result};
 
 pub use solidcraft_format::{Alias, Newer};
@@ -548,24 +551,42 @@ fn v2_to_v3(v: &mut Value) -> Result<()> {
 }
 
 /// Read a design file's JSON, upgrading older formats.
+///
+/// Current-version files that need no JSON-level upgrade steps are validated and deserialized
+/// directly from `s` without allocating an intermediate whole-document `serde_json::Value` tree.
+/// Legacy migrations and newer-format files still use `Value`, bounded by
+/// [`crate::json_budget::MAX_VALUE_MEMORY_BYTES`].
 pub fn read(s: &str) -> Result<Document> {
-    let mut v: Value = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("not a SolidCraft design: {e}")))?;
-    let drawings = if v.get("drawings").is_some() {
-        #[derive(serde::Deserialize)]
-        struct Inline<'a> {
-            #[serde(borrow)]
-            drawings: &'a serde_json::value::RawValue,
-        }
-        let raw: Inline<'_> = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("not a SolidCraft design: {e}")))?;
-        serde_json::from_str::<Vec<&serde_json::value::RawValue>>(raw.drawings.get()).ok()
-    } else {
-        None
-    };
-    let (version, applied) = DESIGN.take_version(&mut v)?;
-    match DESIGN.newer(version, applied.as_deref()) {
-        Some(newer) => crate::newer_file::read(v, version, applied, newer, drawings.as_deref()),
-        None => decode(v, version, applied.as_deref(), drawings.as_deref()),
+    let header = crate::json_budget::peek_header(&DESIGN, s, true)?;
+    let raw_drawings = header.drawings.and_then(|raw| serde_json::from_str::<Vec<&serde_json::value::RawValue>>(raw.get()).ok());
+    if let Some(newer) = DESIGN.newer(header.version, header.applied.as_deref()) {
+        let mut v = crate::json_budget::from_str_bounded(s, crate::json_budget::MAX_VALUE_MEMORY_BYTES)
+            .map_err(|e| DocError::Invalid(format!("not a SolidCraft design: {e}")))?;
+        let (version, applied) = DESIGN.take_version(&mut v)?;
+        return crate::newer_file::read(v, version, applied, newer, raw_drawings.as_deref());
     }
+    if !DESIGN.needs_upgrade(header.version, header.applied.as_deref()) && header.version >= 10 {
+        let drawings = match header.drawings {
+            None => Vec::new(),
+            Some(_) => {
+                let list = raw_drawings.ok_or_else(|| DocError::Invalid("damaged design: `drawings` is not a list".into()))?;
+                crate::drawing::check_count(list.len()).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+                list.into_iter()
+                    .enumerate()
+                    .map(|(i, d)| {
+                        crate::drawing::Drawing::from_json_inline(d.get()).map_err(|e| DocError::Invalid(format!("drawing {}: {e}", i + 1)))
+                    })
+                    .collect::<Result<Vec<_>>>()?
+            }
+        };
+        stream::validate_raw_streaming(s)?;
+        let d: Document = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
+        return finish_decode(d, drawings, Vec::new());
+    }
+    let mut v = crate::json_budget::from_str_bounded(s, crate::json_budget::MAX_VALUE_MEMORY_BYTES)
+        .map_err(|e| DocError::Invalid(format!("not a SolidCraft design: {e}")))?;
+    let (version, applied) = DESIGN.take_version(&mut v)?;
+    decode(v, version, applied.as_deref(), raw_drawings.as_deref())
 }
 
 /// Whether a design's text says a newer build saved it, read before anything else in it is.
@@ -619,7 +640,11 @@ pub(crate) fn decode(
     let legacy_wires = check_raw(&v, version)?;
     validate_body_transfers(&v)?;
     DESIGN.upgrade(&mut v, version, applied)?;
-    let mut d: Document = serde_json::from_value(v).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
+    let d: Document = serde_json::from_value(v).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
+    finish_decode(d, drawings, legacy_wires)
+}
+
+fn finish_decode(mut d: Document, drawings: Vec<crate::drawing::Drawing>, legacy_wires: Vec<(usize, usize)>) -> Result<Document> {
     check_typed_numbers(&d)?;
     let mut legacy_by_feature = std::collections::BTreeMap::<usize, Vec<usize>>::new();
     for (feature, wire) in legacy_wires {
@@ -648,7 +673,7 @@ pub(crate) fn decode(
     {
         return Err(DocError::Invalid("document too large".into()));
     }
-    crate::point_cloud::check_all(&d.point_clouds)?;
+    crate::point_cloud::check_all_for_read(&d.point_clouds, !crate::render_resources::defer_point_cloud_complex())?;
     let feature_ids: std::collections::BTreeSet<_> = d.features.iter().map(|feature| feature.id).collect();
     let mut group_ids = std::collections::BTreeSet::new();
     let mut grouped_features = std::collections::BTreeSet::new();
@@ -1049,32 +1074,37 @@ fn validate_emboss_targets(value: &Value) -> Result<()> {
             continue;
         }
         let Some(target) = feature.get("face").filter(|target| !target.is_null()) else { continue };
-        let invalid = || DocError::Invalid("damaged design: an emboss face needs a bounded body name and three finite coordinates".into());
-        let object = target.as_object().ok_or_else(invalid)?;
-        if object.keys().any(|key| !matches!(key.as_str(), "body" | "at" | "path" | "author_path")) {
+        validate_emboss_face(target)?;
+    }
+    Ok(())
+}
+
+fn validate_emboss_face(target: &Value) -> Result<()> {
+    let invalid = || DocError::Invalid("damaged design: an emboss face needs a bounded body name and three finite coordinates".into());
+    let object = target.as_object().ok_or_else(invalid)?;
+    if object.keys().any(|key| !matches!(key.as_str(), "body" | "at" | "path" | "author_path")) {
+        return Err(invalid());
+    }
+    let body = object.get("body").and_then(Value::as_str).ok_or_else(invalid)?;
+    let point = object.get("at").and_then(Value::as_array).ok_or_else(invalid)?;
+    if body.trim().is_empty()
+        || body.len() > 512
+        || body.chars().any(char::is_control)
+        || point.len() != 3
+        || point.iter().any(|coordinate| coordinate.as_f64().is_none_or(|number| !number.is_finite() || number.abs() > MAX_REAL))
+    {
+        return Err(invalid());
+    }
+    for path in ["path", "author_path"].into_iter().filter_map(|key| object.get(key)) {
+        let path = path.as_array().ok_or_else(invalid)?;
+        if path.len() > 64 {
             return Err(invalid());
         }
-        let body = object.get("body").and_then(Value::as_str).ok_or_else(invalid)?;
-        let point = object.get("at").and_then(Value::as_array).ok_or_else(invalid)?;
-        if body.trim().is_empty()
-            || body.len() > 512
-            || body.chars().any(char::is_control)
-            || point.len() != 3
-            || point.iter().any(|coordinate| coordinate.as_f64().is_none_or(|number| !number.is_finite() || number.abs() > MAX_REAL))
-        {
-            return Err(invalid());
-        }
-        for path in ["path", "author_path"].into_iter().filter_map(|key| object.get(key)) {
-            let path = path.as_array().ok_or_else(invalid)?;
-            if path.len() > 64 {
+        let mut ids = std::collections::BTreeSet::new();
+        for id in path {
+            let id = id.as_u64().filter(|id| *id != 0).ok_or_else(invalid)?;
+            if !ids.insert(id) {
                 return Err(invalid());
-            }
-            let mut ids = std::collections::BTreeSet::new();
-            for id in path {
-                let id = id.as_u64().filter(|id| *id != 0).ok_or_else(invalid)?;
-                if !ids.insert(id) {
-                    return Err(invalid());
-                }
             }
         }
     }
@@ -1256,42 +1286,47 @@ fn validate_freeform_chain_offsets(value: &Value) -> Result<()> {
             continue;
         }
         let Some(records) = feature.get("sketch").and_then(|sketch| sketch.get("freeform_chain_offsets")) else { continue };
-        let invalid = || DocError::Invalid("damaged design: invalid trimmed chain offset metadata".into());
-        let records = records.as_array().ok_or_else(invalid)?;
-        if records.len() > 128 {
+        validate_freeform_chain_offsets_value(records)?;
+    }
+    Ok(())
+}
+
+fn validate_freeform_chain_offsets_value(records: &Value) -> Result<()> {
+    let invalid = || DocError::Invalid("damaged design: invalid trimmed chain offset metadata".into());
+    let records = records.as_array().ok_or_else(invalid)?;
+    if records.len() > 128 {
+        return Err(invalid());
+    }
+    let mut outputs = std::collections::BTreeSet::new();
+    for record in records {
+        let object = record.as_object().ok_or_else(invalid)?;
+        if object.len() != 3 || object.keys().any(|key| !matches!(key.as_str(), "sources" | "outputs" | "distance")) {
             return Err(invalid());
         }
-        let mut outputs = std::collections::BTreeSet::new();
-        for record in records {
-            let object = record.as_object().ok_or_else(invalid)?;
-            if object.len() != 3 || object.keys().any(|key| !matches!(key.as_str(), "sources" | "outputs" | "distance")) {
+        let sources = record.get("sources").and_then(Value::as_array).ok_or_else(invalid)?;
+        let made = record.get("outputs").and_then(Value::as_array).ok_or_else(invalid)?;
+        if sources.is_empty() || sources.len() > 512 || made.is_empty() || made.len() > 512 {
+            return Err(invalid());
+        }
+        for source in sources {
+            let pair = source.as_array().ok_or_else(invalid)?;
+            if pair.len() != 2 {
                 return Err(invalid());
             }
-            let sources = record.get("sources").and_then(Value::as_array).ok_or_else(invalid)?;
-            let made = record.get("outputs").and_then(Value::as_array).ok_or_else(invalid)?;
-            if sources.is_empty() || sources.len() > 512 || made.is_empty() || made.len() > 512 {
+            let id = pair[0].as_str().ok_or_else(invalid)?;
+            if id.is_empty() || id.len() > 512 || id.chars().any(char::is_control) || pair[1].as_bool().is_none() {
                 return Err(invalid());
             }
-            for source in sources {
-                let pair = source.as_array().ok_or_else(invalid)?;
-                if pair.len() != 2 {
-                    return Err(invalid());
-                }
-                let id = pair[0].as_str().ok_or_else(invalid)?;
-                if id.is_empty() || id.len() > 512 || id.chars().any(char::is_control) || pair[1].as_bool().is_none() {
-                    return Err(invalid());
-                }
-            }
-            for output in made {
-                let id = output.as_str().ok_or_else(invalid)?;
-                if id.is_empty() || id.len() > 512 || id.chars().any(char::is_control) || !outputs.insert(id) {
-                    return Err(invalid());
-                }
-            }
-            let distance = record.get("distance").and_then(Value::as_f64).ok_or_else(invalid)?;
-            if !distance.is_finite() || !(1e-9..=MAX_REAL).contains(&distance.abs()) {
+        }
+        for output in made {
+            let id = output.as_str().ok_or_else(invalid)?;
+            if id.is_empty() || id.len() > 512 || id.chars().any(char::is_control) || !outputs.insert(id) {
                 return Err(invalid());
             }
+        }
+        let distance = record.get("distance").and_then(Value::as_f64).ok_or_else(invalid)?;
+        if !distance.is_finite() || !(1e-9..=MAX_REAL).contains(&distance.abs()) {
+            return Err(invalid());
         }
     }
     Ok(())
@@ -1344,8 +1379,7 @@ fn check_design_numbers(v: &Value) -> Result<()> {
 /// (ids, counters, indexes) stay integers and are never limited, so the field's type decides
 /// what is checked, not its name.
 fn check_typed_numbers(d: &Document) -> Result<()> {
-    let typed = serde_json::to_value(d).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
-    check_design_numbers(&typed)
+    crate::json_budget::check_typed_design_numbers(d)
 }
 
 /// Every non-integer number in a `noun`'s file, outside separately validated engineering cards,
@@ -3454,5 +3488,62 @@ mod tests {
         assert_eq!(serde_json::to_value(&k).unwrap(), new);
         let parallel: SweepOrientation = serde_json::from_value(serde_json::json!("parallel")).unwrap();
         assert_eq!(parallel, SweepOrientation::Parallel);
+    }
+
+    /// Issue #21257: current-version designs skip building a whole-document `serde_json::Value`
+    /// DOM, so a large unknown field full of tiny objects (which expands ~83× in `Value`) reads
+    /// directly without DOM expansion and preserves all validation and legacy upgrade behavior.
+    #[test]
+    fn direct_streaming_path_reads_current_version_without_value_dom_and_keeps_validation() {
+        assert!(!DESIGN.needs_upgrade(FORMAT, Some(&pending_names())));
+        assert!(DESIGN.needs_upgrade(1, None));
+
+        let mut d = Document::new("Streaming");
+        let mut sk = solidcraft_sketch::Sketch::new();
+        sk.add_point(solidcore_record::Vec2::new(12.5, 3.0), None).unwrap();
+        d.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch: sk }, Some("Sk")).unwrap();
+        let base_json = d.to_json();
+        assert_eq!(read(&base_json).unwrap(), d);
+
+        // Inject a large unknown field of 50,000 tiny objects (which expands ~83× in Value).
+        let mut payload = String::with_capacity(base_json.len() + 450_000);
+        let close = base_json.rfind('}').unwrap();
+        payload.push_str(&base_json[..close]);
+        payload.push_str(r#","crafted_padding":["#);
+        for i in 0..50_000 {
+            if i > 0 {
+                payload.push(',');
+            }
+            payload.push_str(r#"{"a":0}"#);
+        }
+        payload.push_str("]}");
+        let reopened = read(&payload).unwrap();
+        assert_eq!(reopened, d);
+
+        // Streaming depth & float range checks preserve exact error contracts.
+        let deep = format!(r#"{{"format":"{}","format_pending":{},"name":"Deep","params":[],"features":[],"x":{}1{}}}"#,
+            format_string(FORMAT), serde_json::to_string(&pending_names()).unwrap(), "[".repeat(70), "]".repeat(70));
+        assert_eq!(read(&deep).unwrap_err().to_string(), "damaged design: nested too deeply");
+
+        let huge_float = format!(r#"{{"format":"{}","format_pending":{},"name":"Huge","params":[],"features":[],"x":1e10}}"#,
+            format_string(FORMAT), serde_json::to_string(&pending_names()).unwrap());
+        let why = read(&huge_float).unwrap_err().to_string();
+        assert!(why.starts_with("damaged design: the number ") && why.ends_with(" is out of range"), "{why}");
+
+        // Header errors match Family::take_version exactly.
+        assert_eq!(read("[]").unwrap_err().to_string(), "not a SolidCraft design (expected a JSON object)");
+        assert_eq!(read(r#"{"format":123}"#).unwrap_err().to_string(), "not a SolidCraft design (format is not a string)");
+        assert_eq!(read(r#"{"format":"solidcraft/0"}"#).unwrap_err().to_string(), "not a SolidCraft design (format 0)");
+        assert_eq!(
+            read(&format!(r#"{{"format":"{}","format_pending":42}}"#, format_string(FORMAT))).unwrap_err().to_string(),
+            "damaged design: `format_pending` is not a short list of names"
+        );
+        assert!(read("{bad json").unwrap_err().to_string().starts_with("not a SolidCraft design: "));
+
+        // Legacy format 1 still upgrades through Value-level migrations identically.
+        let legacy = r#"{"format":"solidcraft/1","name":"Old","params":[],"features":[],"appearances":{"Body1":[51,102,153]}}"#;
+        let upgraded = read(legacy).unwrap();
+        assert_eq!(upgraded.format, format_string(FORMAT));
+        assert_eq!(upgraded.appearances.bodies.get("Body1").map(|l| l.color), Some([51, 102, 153]));
     }
 }

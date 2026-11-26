@@ -139,43 +139,41 @@ fn open_record<R: Read + Seek>(reader: &mut PackageReader<R>, bytes: &[u8]) -> R
     if bytes.len() > MAX_DRAWING_BYTES {
         return Err(invalid(format!("drawing too large (at most {} MiB)", MAX_DRAWING_BYTES >> 20)));
     }
-    let value: Value = serde_json::from_slice(bytes).map_err(|e| invalid(format!("not a SolidCraft drawing: {e}")))?;
+    let meta = extract_drawing_meta(bytes).map_err(|e| invalid(format!("not a SolidCraft drawing: {e}")))?;
     let mut parts = std::collections::BTreeMap::new();
     // Set aside where a release that can't read them looks past them (`image_files`), or, as nightly
     // builds saved them for a while, in `images`.
-    let images = value.get("image_files").or(value.get("images")).and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+    let images = meta.image_files.as_deref().or(meta.images.as_deref()).unwrap_or(&[]);
     if images.len() > drawing::image::MAX_IMAGES {
         return Err(invalid(format!("a drawing has at most {} images", drawing::image::MAX_IMAGES)));
     }
     // The drawing's own budget, kept while the parts are read, before any is held.
     let mut total = 0usize;
     for image in images {
-        let (Some(name), Some(format)) = (image.get("part").and_then(Value::as_str), image.get("format").and_then(Value::as_str)) else { continue };
+        let (Some(name), Some(format)) = (image.part.as_deref(), image.format.as_deref()) else { continue };
         if !matches!(format, "png" | "jpeg") || parts.contains_key(name) {
             continue;
         }
         let room = drawing::image::MAX_IMAGES_BYTES.saturating_sub(total).min(drawing::image::MAX_IMAGE_BYTES);
-        let blob = reader.limited_blob(image, "part", format, room)?;
+        let blob = reader.limited_blob_named(name, format, room)?;
         total += blob.len();
         parts.insert(name.to_string(), solidcraft_doc::blob::Blob::from(blob));
     }
     // A newer record can name other blob types, even in a drawing this build can open.
     // Resolve only parts present in this container and use its usual size and digest checks.
-    if newer_record(&value).is_some() {
-        for name in blob_names(&value) {
-            if !parts.contains_key(name)
-                && reader.has_part(name)
+    if newer_meta(&meta).is_some() {
+        for name in blob_names_in_json(bytes)? {
+            if !parts.contains_key(&name)
+                && reader.has_part(&name)
                 && let Some((_, extension)) = name.rsplit_once('.')
             {
-                let reference = json!({"part": name});
-                let bytes = reader.limited_blob(&reference, "part", extension, super::part_limit(name))?;
-                parts.insert(name.into(), solidcraft_doc::blob::Blob::from(bytes));
+                let blob = reader.limited_blob_named(&name, extension, super::part_limit(&name))?;
+                parts.insert(name, solidcraft_doc::blob::Blob::from(blob));
             }
         }
-        let text = std::str::from_utf8(bytes).map_err(invalid)?;
-        return Ok(solidcraft_doc::blob::with_parts(parts, || Drawing::from_json(text))?);
     }
-    Ok(solidcraft_doc::blob::with_parts(parts, || Drawing::from_value(value))?)
+    let text = std::str::from_utf8(bytes).map_err(invalid)?;
+    Ok(solidcraft_doc::blob::with_parts(parts, || Drawing::from_json(text))?)
 }
 
 /// Write each of the design's drawings to its entry.
@@ -210,7 +208,7 @@ pub(super) fn read<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<(Vec
         let bytes = reader.limited_part(&name, MAX_DRAWING_BYTES)?;
         let d = match open_record(reader, &bytes) {
             Ok(d) => d,
-            Err(why) => match serde_json::from_slice(&bytes).ok().as_ref().and_then(newer_record) {
+            Err(why) => match extract_drawing_meta(&bytes).ok().as_ref().and_then(newer_meta) {
                 Some((label, format)) => {
                     kept.push(keep(reader, &name, &bytes, &label, format, &why)?);
                     continue;
@@ -226,51 +224,370 @@ pub(super) fn read<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<(Vec
     Ok((drawing::in_design(drawings).map_err(invalid)?, kept))
 }
 
+#[derive(Default)]
+struct DrawingImageRef {
+    part: Option<String>,
+    format: Option<String>,
+}
+
+#[derive(Default)]
+struct DrawingMeta {
+    format: Option<String>,
+    format_pending: Option<Vec<String>>,
+    name: Option<String>,
+    image_files: Option<Vec<DrawingImageRef>>,
+    images: Option<Vec<DrawingImageRef>>,
+}
+
 /// The name and format number of a drawing record a newer build saved: a format this build doesn't
 /// read, or changes it doesn't know. `None` for a record this build's own format covers.
-fn newer_record(value: &Value) -> Option<(String, u32)> {
-    let version = value.get("format").and_then(Value::as_str).and_then(|f| DRAWING.version_of(f))?;
-    let applied: Option<Vec<String>> =
-        value.get("format_pending").and_then(Value::as_array).map(|list| list.iter().filter_map(|v| v.as_str().map(String::from)).collect());
-    let newer = DRAWING.newer(version, applied.as_deref())?;
-    let label = value.get("name").and_then(Value::as_str).unwrap_or("unnamed").chars().take(80).collect();
+fn newer_meta(meta: &DrawingMeta) -> Option<(String, u32)> {
+    let version = meta.format.as_deref().and_then(|f| DRAWING.version_of(f))?;
+    let newer = DRAWING.newer(version, meta.format_pending.as_deref())?;
+    let label = meta.name.as_deref().unwrap_or("unnamed").chars().take(80).collect();
     Some((label, newer.format))
 }
 
-fn blob_names(value: &Value) -> std::collections::BTreeSet<&str> {
-    fn named<'a>(value: &'a Value, found: &mut std::collections::BTreeSet<&'a str>) {
-        match value {
-            Value::String(s) if s.starts_with("blobs/") => {
-                found.insert(s);
-            }
-            Value::Array(items) => items.iter().for_each(|v| named(v, found)),
-            Value::Object(map) => {
-                for (key, value) in map {
-                    if key.starts_with("blobs/") {
-                        found.insert(key);
-                    }
-                    named(value, found);
+/// Stream-extract only header and image-part references from a drawing JSON buffer without
+/// allocating an untyped `serde_json::Value` tree.
+fn extract_drawing_meta(bytes: &[u8]) -> std::result::Result<DrawingMeta, serde_json::Error> {
+    use serde::de::{self, DeserializeSeed, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
+
+    struct OptStringSeed;
+    impl<'de> DeserializeSeed<'de> for OptStringSeed {
+        type Value = Option<String>;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<Option<String>, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = Option<String>;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("optional string")
+                }
+                fn visit_str<E: de::Error>(self, v: &str) -> std::result::Result<Option<String>, E> {
+                    Ok(Some(v.to_owned()))
+                }
+                fn visit_string<E: de::Error>(self, v: String) -> std::result::Result<Option<String>, E> {
+                    Ok(Some(v))
+                }
+                fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_unit<E: de::Error>(self) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_none<E: de::Error>(self) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Option<String>, A::Error> {
+                    while seq.next_element::<IgnoredAny>()?.is_some() {}
+                    Ok(None)
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Option<String>, A::Error> {
+                    while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                    Ok(None)
                 }
             }
-            _ => {}
+            d.deserialize_any(V)
         }
     }
+
+    struct PendingSeed;
+    impl<'de> DeserializeSeed<'de> for PendingSeed {
+        type Value = Option<Vec<String>>;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<Option<Vec<String>>, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = Option<Vec<String>>;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("optional pending list")
+                }
+                fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<Self::Value, E> {
+                    Ok(None)
+                }
+                fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<Self::Value, E> {
+                    Ok(None)
+                }
+                fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<Self::Value, E> {
+                    Ok(None)
+                }
+                fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<Self::Value, E> {
+                    Ok(None)
+                }
+                fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<Self::Value, E> {
+                    Ok(None)
+                }
+                fn visit_unit<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(None)
+                }
+                fn visit_none<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(None)
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
+                    while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                    Ok(None)
+                }
+                fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error> {
+                    let mut list = Vec::new();
+                    while let Some(item) = seq.next_element_seed(OptStringSeed)? {
+                        if let Some(s) = item
+                            && list.len() < 1000
+                        {
+                            list.push(s);
+                        }
+                    }
+                    Ok(Some(list))
+                }
+            }
+            d.deserialize_any(V)
+        }
+    }
+
+    struct ImageItemSeed;
+    impl<'de> DeserializeSeed<'de> for ImageItemSeed {
+        type Value = DrawingImageRef;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<DrawingImageRef, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = DrawingImageRef;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("image record")
+                }
+                fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<Self::Value, E> {
+                    Ok(DrawingImageRef::default())
+                }
+                fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<Self::Value, E> {
+                    Ok(DrawingImageRef::default())
+                }
+                fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<Self::Value, E> {
+                    Ok(DrawingImageRef::default())
+                }
+                fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<Self::Value, E> {
+                    Ok(DrawingImageRef::default())
+                }
+                fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<Self::Value, E> {
+                    Ok(DrawingImageRef::default())
+                }
+                fn visit_unit<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(DrawingImageRef::default())
+                }
+                fn visit_none<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(DrawingImageRef::default())
+                }
+                fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error> {
+                    while seq.next_element::<IgnoredAny>()?.is_some() {}
+                    Ok(DrawingImageRef::default())
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
+                    let mut item = DrawingImageRef::default();
+                    while let Some(key) = map.next_key::<String>()? {
+                        match key.as_str() {
+                            "part" => item.part = map.next_value_seed(OptStringSeed)?,
+                            "format" => item.format = map.next_value_seed(OptStringSeed)?,
+                            _ => {
+                                map.next_value::<IgnoredAny>()?;
+                            }
+                        }
+                    }
+                    Ok(item)
+                }
+            }
+            d.deserialize_any(V)
+        }
+    }
+
+    struct ImagesSeed;
+    impl<'de> DeserializeSeed<'de> for ImagesSeed {
+        type Value = Option<Vec<DrawingImageRef>>;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<Option<Vec<DrawingImageRef>>, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = Option<Vec<DrawingImageRef>>;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("images array")
+                }
+                fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<Self::Value, E> {
+                    Ok(None)
+                }
+                fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<Self::Value, E> {
+                    Ok(None)
+                }
+                fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<Self::Value, E> {
+                    Ok(None)
+                }
+                fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<Self::Value, E> {
+                    Ok(None)
+                }
+                fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<Self::Value, E> {
+                    Ok(None)
+                }
+                fn visit_unit<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(None)
+                }
+                fn visit_none<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(None)
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
+                    while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                    Ok(None)
+                }
+                fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error> {
+                    let mut out = Vec::new();
+                    while out.len() <= drawing::image::MAX_IMAGES {
+                        let Some(item) = seq.next_element_seed(ImageItemSeed)? else { break };
+                        out.push(item);
+                    }
+                    while seq.next_element::<IgnoredAny>()?.is_some() {}
+                    Ok(Some(out))
+                }
+            }
+            d.deserialize_any(V)
+        }
+    }
+
+    struct RootVisitor;
+    impl<'de> Visitor<'de> for RootVisitor {
+        type Value = DrawingMeta;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("drawing JSON")
+        }
+        fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<DrawingMeta, E> {
+            Ok(DrawingMeta::default())
+        }
+        fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<DrawingMeta, E> {
+            Ok(DrawingMeta::default())
+        }
+        fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<DrawingMeta, E> {
+            Ok(DrawingMeta::default())
+        }
+        fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<DrawingMeta, E> {
+            Ok(DrawingMeta::default())
+        }
+        fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<DrawingMeta, E> {
+            Ok(DrawingMeta::default())
+        }
+        fn visit_unit<E: de::Error>(self) -> std::result::Result<DrawingMeta, E> {
+            Ok(DrawingMeta::default())
+        }
+        fn visit_none<E: de::Error>(self) -> std::result::Result<DrawingMeta, E> {
+            Ok(DrawingMeta::default())
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<DrawingMeta, A::Error> {
+            while seq.next_element::<IgnoredAny>()?.is_some() {}
+            Ok(DrawingMeta::default())
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<DrawingMeta, A::Error> {
+            let mut meta = DrawingMeta::default();
+            while let Some(key) = map.next_key::<String>()? {
+                match key.as_str() {
+                    "format" => meta.format = map.next_value_seed(OptStringSeed)?,
+                    "format_pending" => meta.format_pending = map.next_value_seed(PendingSeed)?,
+                    "name" => meta.name = map.next_value_seed(OptStringSeed)?,
+                    "image_files" => meta.image_files = map.next_value_seed(ImagesSeed)?,
+                    "images" => meta.images = map.next_value_seed(ImagesSeed)?,
+                    _ => {
+                        map.next_value::<IgnoredAny>()?;
+                    }
+                }
+            }
+            Ok(meta)
+        }
+    }
+
+    let mut de = serde_json::Deserializer::from_slice(bytes);
+    let meta = de.deserialize_any(RootVisitor)?;
+    de.end()?;
+    Ok(meta)
+}
+
+/// Stream-collect every JSON key or string value starting with `"blobs/"` without allocating a
+/// `serde_json::Value` tree.
+fn blob_names_in_json(bytes: &[u8]) -> Result<std::collections::BTreeSet<String>> {
+    use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
+
+    struct BlobSeed<'a>(&'a mut std::collections::BTreeSet<String>);
+
+    impl<'de> DeserializeSeed<'de> for BlobSeed<'_> {
+        type Value = ();
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<(), D::Error> {
+            d.deserialize_any(self)
+        }
+    }
+
+    impl<'de> Visitor<'de> for BlobSeed<'_> {
+        type Value = ();
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("any valid JSON value")
+        }
+        fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_unit<E: de::Error>(self) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_none<E: de::Error>(self) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_str<E: de::Error>(self, v: &str) -> std::result::Result<(), E> {
+            if v.starts_with("blobs/") {
+                self.0.insert(v.to_owned());
+            }
+            Ok(())
+        }
+        fn visit_string<E: de::Error>(self, v: String) -> std::result::Result<(), E> {
+            if v.starts_with("blobs/") {
+                self.0.insert(v);
+            }
+            Ok(())
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<(), A::Error> {
+            while seq.next_element_seed(BlobSeed(self.0))?.is_some() {}
+            Ok(())
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<(), A::Error> {
+            while let Some(key) = map.next_key::<String>()? {
+                if key.starts_with("blobs/") {
+                    self.0.insert(key);
+                }
+                map.next_value_seed(BlobSeed(self.0))?;
+            }
+            Ok(())
+        }
+    }
+
     let mut names = std::collections::BTreeSet::new();
-    named(value, &mut names);
-    names
+    let mut de = serde_json::Deserializer::from_slice(bytes);
+    BlobSeed(&mut names).deserialize(&mut de).and_then(|()| de.end()).map_err(invalid)?;
+    Ok(names)
 }
 
 /// The entry `name` kept as it came, with every container part its record names.
 fn keep<R: Read + Seek>(reader: &mut PackageReader<R>, name: &str, bytes: &[u8], label: &str, format: u32, why: &IoError) -> Result<KeptDrawing> {
-    let value: Value = serde_json::from_slice(bytes).map_err(invalid)?;
-    let names = blob_names(&value);
+    let names = blob_names_in_json(bytes)?;
     let mut parts = vec![(name.to_string(), Arc::from(bytes))];
     for part in names {
-        if !reader.has_part(part) {
+        if !reader.has_part(&part) {
             continue;
         }
-        let bytes = reader.limited_part(part, super::part_limit(part))?;
-        parts.push((part.into(), bytes.into()));
+        let bytes = reader.limited_part(&part, super::part_limit(&part))?;
+        parts.push((part, bytes.into()));
     }
     let note = format!("drawing `{label}` (saved by a newer SolidCraft, drawing format {format}, which this version can't read: {why})");
     Ok(KeptDrawing { parts, note })

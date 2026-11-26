@@ -142,9 +142,15 @@ pub const MAX_KEYS: usize = 256;
 pub const MAX_TOTAL_BYTES: usize = 256 * 1024;
 
 /// A design's or a component's `metadata` object.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct Metadata(pub Map<String, Value>);
+
+impl<'de> Deserialize<'de> for Metadata {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        crate::json_budget::deserialize_bounded_map(deserializer, crate::json_budget::MAX_VALUE_MEMORY_BYTES).map(Metadata)
+    }
+}
 
 /// SolidCraft's keys that may be set in `owner`'s metadata, in [`KEYS`]' order.
 pub fn keys(owner: Owner) -> impl Iterator<Item = &'static Key> {

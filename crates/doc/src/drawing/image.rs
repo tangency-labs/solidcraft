@@ -354,6 +354,117 @@ pub(super) fn take_back(v: &mut serde_json::Value) {
     }
 }
 
+/// Typed equivalent of [`take_back`] for direct streaming deserialization (no whole-document
+/// `serde_json::Value` tree).
+pub(super) fn take_back_typed(
+    drawing: &mut Drawing,
+    image_files: Option<&serde_json::value::RawValue>,
+    placed_images: Option<&serde_json::value::RawValue>,
+    logo_cells: Option<&serde_json::value::RawValue>,
+) -> Result<()> {
+    let Some(files_raw) = image_files else {
+        if placed_images.is_some() {
+            return Err(DocError::Invalid(format!("unknown field `{PLACED}`")));
+        }
+        if logo_cells.is_some() {
+            return Err(DocError::Invalid(format!("unknown field `{LOGOS}`")));
+        }
+        return Ok(());
+    };
+    let sheet_ids: BTreeSet<u64> = drawing.sheets.iter().map(|s| s.id).collect();
+    let mut used: BTreeSet<u64> = BTreeSet::new();
+    let mut placed_out: Vec<Arc<SheetImage>> = Vec::new();
+    if let Some(raw) = placed_images
+        && let Ok(items) = serde_json::from_str::<Vec<&serde_json::value::RawValue>>(raw.get())
+    {
+        #[derive(Deserialize)]
+        struct SheetPeek {
+            #[serde(default)]
+            sheet: Option<String>,
+        }
+        for item in items {
+            let on_sheet = serde_json::from_str::<SheetPeek>(item.get())
+                .ok()
+                .and_then(|p| p.sheet)
+                .and_then(|s| ids::decode(&s))
+                .is_some_and(|id| sheet_ids.contains(&id));
+            if !on_sheet {
+                continue;
+            }
+            let placed: SheetImage = serde_json::from_str(item.get()).map_err(|e| DocError::Invalid(e.to_string()))?;
+            used.insert(placed.image);
+            placed_out.push(Arc::new(placed));
+        }
+    }
+    if let Some(raw) = logo_cells
+        && let Ok(items) = serde_json::from_str::<Vec<&serde_json::value::RawValue>>(raw.get())
+    {
+        #[derive(Deserialize)]
+        struct LogoPeek {
+            #[serde(default)]
+            sheet: Option<String>,
+            #[serde(default)]
+            cell: Option<String>,
+            #[serde(default)]
+            image: Option<String>,
+        }
+        for item in items {
+            let Ok(LogoPeek { sheet: Some(sheet_s), cell: Some(cell_name), image: Some(image_s) }) = serde_json::from_str(item.get()) else {
+                continue;
+            };
+            let Some(sheet_id) = ids::decode(&sheet_s) else { continue };
+            let Some(sheet) = drawing.sheets.iter_mut().find(|s| s.id == sheet_id) else { continue };
+            let has_text_cell = sheet
+                .title_block
+                .as_ref()
+                .and_then(|block| block.cells.iter().find(|c| c.name == cell_name))
+                .is_some_and(|c| matches!(c.kind, CellKind::Text(_)));
+            if !has_text_cell {
+                continue;
+            }
+            let image_id = ids::decode(&image_s).ok_or_else(|| DocError::Invalid(format!("invalid logo image id `{image_s}`")))?;
+            if let Some(CellKind::Text(text)) = Arc::make_mut(sheet)
+                .title_block
+                .as_mut()
+                .and_then(|block| block.cells.iter_mut().find(|c| c.name == cell_name))
+                .map(|c| &mut c.kind)
+            {
+                text.image = Some(image_id);
+                used.insert(image_id);
+            }
+        }
+    }
+    let mut files_out: Vec<Arc<ImageFile>> = Vec::new();
+    if let Ok(items) = serde_json::from_str::<Vec<&serde_json::value::RawValue>>(files_raw.get()) {
+        #[derive(Deserialize)]
+        struct IdPeek {
+            #[serde(default)]
+            id: Option<String>,
+        }
+        for item in items {
+            let needed = serde_json::from_str::<IdPeek>(item.get())
+                .ok()
+                .and_then(|p| p.id)
+                .and_then(|s| ids::decode(&s))
+                .is_some_and(|id| used.contains(&id));
+            if !needed {
+                continue;
+            }
+            let file: ImageFile = serde_json::from_str(item.get()).map_err(|e| DocError::Invalid(e.to_string()))?;
+            files_out.push(Arc::new(file));
+        }
+    }
+    if !files_out.is_empty() {
+        drawing.images = super::by_id::ById::default();
+        drawing.images.extend(files_out);
+    }
+    if !placed_out.is_empty() {
+        drawing.sheet_images = super::by_id::ById::default();
+        drawing.sheet_images.extend(placed_out);
+    }
+    Ok(())
+}
+
 /// A file's own rules, from its record alone: what every edit keeps, without decoding it.
 fn check_image(i: &ImageFile) -> Result<()> {
     require(matches!(i.format.as_str(), "png" | "jpeg"), || "it is a PNG or a JPEG".into())?;

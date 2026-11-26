@@ -651,15 +651,6 @@ fn decode_complex(bytes: &[u8], complex: &mut solidcraft_doc::point_cloud::Compl
     Ok(())
 }
 
-/// Each point cloud's `complex` (segments, triangles and properties), taken out of the metadata
-/// with the cloud's index.
-fn take_cloud_complexes(metadata: &mut Value) -> Vec<(usize, Value)> {
-    let Some(clouds) = metadata.get_mut("point_clouds").and_then(Value::as_array_mut) else {
-        return Vec::new();
-    };
-    clouds.iter_mut().enumerate().filter_map(|(index, cloud)| Some((index, cloud.as_object_mut()?.remove("complex")?))).collect()
-}
-
 fn decode_cloud(bytes: &[u8], cloud: &mut solidcraft_doc::point_cloud::PointCloud) -> Result<()> {
     use solidcraft_doc::point_cloud::{Colors, MAX_POINTS, Points};
     if bytes.get(..8) != Some(POINTS_MAGIC.as_slice()) {
@@ -1171,9 +1162,14 @@ impl RecordsParts {
 
     /// The records of the part the feature `value` names in its `records_blob`.
     fn get<R: Read + Seek>(&mut self, reader: &mut PackageReader<R>, value: &Value) -> Result<Arc<solidcraft_kernel::ImportRecords>> {
-        // Every reference still counts against what a design may expand to.
-        let text = reader.blob(value, "records_blob", "records")?;
         let name = value.get("records_blob").and_then(Value::as_str).ok_or_else(|| invalid("missing `records_blob` reference"))?;
+        self.get_named(reader, name)
+    }
+
+    /// The records of the part named `name`.
+    fn get_named<R: Read + Seek>(&mut self, reader: &mut PackageReader<R>, name: &str) -> Result<Arc<solidcraft_kernel::ImportRecords>> {
+        // Every reference still counts against what a design may expand to.
+        let text = reader.blob_named(name, "records")?;
         if let Some(read) = self.read.get(name) {
             return read.clone().map_err(IoError::Invalid);
         }
@@ -1335,66 +1331,156 @@ fn read_document_within<R: Read + Seek>(reader: &mut PackageReader<R>, record_bo
         return Err(IoError::Invalid("this file is a SolidCraft drawing, not a design: open it as a drawing".into()));
     }
     let bytes = reader.document(max_design())?;
-    let mut metadata: Value = serde_json::from_slice(&bytes).map_err(invalid)?;
-    // What the drawings' images are, for a release that can't read the drawings: this build reads
-    // them from the drawings and writes the list again on every save.
-    let named_drawing_parts = metadata.as_object_mut().and_then(|object| object.remove("drawing_parts")).is_some();
-    // A newer build's file opens whatever it holds: what doesn't read here is kept (`newer_file`).
     let container: Value = serde_json::from_slice(&reader.limited_part("container.json", 4096)?).map_err(invalid)?;
     let newer_container = !is_known_container(&container);
-    let newer = newer_container || std::str::from_utf8(&bytes).is_ok_and(solidcraft_doc::format::says_newer);
-    // HDR's typed JSON representation is deliberately strict: no empty placeholders or
-    // container-only blob fields may reach the document deserializer. A newer build's section that
-    // doesn't pass stays as it is, which the document reader then leaves out.
-    // Their files are the container's parts, handed to the reader as bytes: never text.
-    let mut parts = solidcraft_doc::render_resources::ContainerParts::default();
-    let hydrated = if newer {
-        let mut copy = metadata.clone();
-        let mut found = solidcraft_doc::render_resources::ContainerParts::default();
-        let done = check_hdr_manifest(&bytes).and_then(|()| check_texture_manifest(&bytes)).and_then(|()| {
-            let hdr = hydrate_hdr_resources(&mut copy, reader, &mut found)?;
-            Ok(hydrate_texture_resources(&mut copy, reader, &mut found)? || hdr)
+    let text = std::str::from_utf8(&bytes).map_err(invalid)?;
+    let newer = newer_container || solidcraft_doc::format::says_newer(text);
+
+    let mut doc = if newer {
+        read_newer_document(reader, &bytes, container, newer_container, record_bodies)?
+    } else {
+        read_known_document(reader, &bytes, text, record_bodies)?
+    };
+    let (drawings, kept) = drawing::read(reader)?;
+    doc.drawings = drawings;
+    // A drawing a newer build saved that this build can't read is kept as it came: the rest of the
+    // design opens, the notice names it, and saving writes it and its parts back.
+    if !kept.is_empty() {
+        let file = doc.newer_file.get_or_insert_with(|| {
+            let current = solidcraft_doc::format::FORMAT;
+            Arc::new(solidcraft_doc::newer_file::newer_file(&solidcraft_doc::format::Newer {
+                format: current,
+                reads_up_to: current,
+                unknown_changes: vec!["a newer drawing format".into()],
+            }))
         });
-        if done.is_ok() {
-            metadata = copy;
-            parts = found;
+        let file = Arc::make_mut(file);
+        for drawing in kept {
+            file.not_understood.push(drawing.note);
+            for (name, bytes) in drawing.parts {
+                if !file.parts.iter().any(|(known, _)| *known == name) {
+                    file.parts.push((name, bytes));
+                }
+            }
         }
-        done.unwrap_or(false)
-    } else {
-        check_hdr_manifest(&bytes)?;
-        check_texture_manifest(&bytes)?;
-        let hdr = hydrate_hdr_resources(&mut metadata, reader, &mut parts)?;
-        hydrate_texture_resources(&mut metadata, reader, &mut parts)? || hdr
-    };
-    // A cloud's points are in its blob, so its segments, triangles and properties are read and
-    // checked with them below (`decode_cloud`), not against the empty points the metadata holds
-    // (#14572). The metadata keeps them for what a newer build's file holds. A newer build's file
-    // reads them as before: what doesn't read here is kept whole (`newer_file`), unknown fields too.
-    let complexes = if newer { Vec::new() } else { take_cloud_complexes(&mut metadata) };
-    let hydrated_text;
-    let text = if hydrated || named_drawing_parts || !complexes.is_empty() {
-        hydrated_text = serde_json::to_string(&metadata).map_err(invalid)?;
-        &hydrated_text
-    } else {
-        std::str::from_utf8(&bytes).map_err(invalid)?
-    };
-    // Migrations and all document validation run on the small parametric metadata.
-    // Binary arrays have their own equivalent numeric/index validation below.
+    }
+    Ok(doc)
+}
+
+/// Fast, zero-DOM container document reader for designs this build knows: extracts only the tiny
+/// blob-reference fields from `document.json` without allocating a whole-document `Value` tree.
+fn read_known_document<R: Read + Seek>(
+    reader: &mut PackageReader<R>,
+    bytes: &[u8],
+    text: &str,
+    record_bodies: usize,
+) -> Result<Document> {
+    check_hdr_manifest(bytes)?;
+    check_texture_manifest(bytes)?;
+    let refs = extract_container_refs(bytes)?;
+    let mut parts = solidcraft_doc::render_resources::ContainerParts { defer_point_cloud_complex: true, ..Default::default() };
+    hydrate_hdr_from_refs(&refs.hdr_blobs, reader, &mut parts)?;
+    hydrate_texture_from_refs(&refs.texture_blobs, reader, &mut parts)?;
+    // Migrations and all document validation run directly on the JSON text without an extra Value
+    // round-trip; binary arrays have their own equivalent numeric/index validation below.
     let mut doc = solidcraft_doc::render_resources::with_container_parts(parts, || Document::from_json(text))?;
     if !doc.drawings.is_empty() {
         return Err(invalid("ambiguous drawings in document.json and in their own entries"));
     }
-    for (index, complex) in complexes {
-        if let Some(cloud) = doc.point_clouds.get_mut(index) {
-            // A record with a part has empty numbers; an older one has them inline, base64.
-            cloud.complex = serde::Deserialize::deserialize(&complex).map_err(invalid)?;
-            if let Some(record) = metadata.get("point_clouds").and_then(|v| v.get(index)).filter(|v| v.get("complex_blob").is_some()) {
-                decode_complex(reader.blob(record, "complex_blob", "complex")?, &mut cloud.complex)?;
+    let mut records_parts = RecordsParts::new(false, record_bodies);
+    hydrate_plugin_data(&mut doc, reader);
+    for (index, feature) in doc.features.iter_mut().enumerate() {
+        let fref = refs.features.get(&index);
+        match &mut feature.kind {
+            FeatureKind::Import { step, records, .. } => {
+                if !step.is_empty() {
+                    return Err(invalid("ambiguous embedded STEP and blob"));
+                }
+                let step_name = fref.and_then(|r| r.step_blob.as_deref()).ok_or_else(|| invalid("missing `step_blob` reference"))?;
+                *step = std::str::from_utf8(reader.blob_named(step_name, "step")?).map_err(invalid)?.into();
+                if let Some(BlobField::Present(opt)) = fref.map(|r| &r.records_blob) {
+                    if records.is_some() {
+                        return Err(invalid("ambiguous embedded import records and blob"));
+                    }
+                    let rec_name = opt.as_deref().ok_or_else(|| invalid("missing `records_blob` reference"))?;
+                    *records = Some(records_parts.get_named(reader, rec_name)?);
+                }
             }
+            FeatureKind::MeshImport { meshes, .. } => {
+                for (mi, mesh) in meshes.iter_mut().enumerate() {
+                    if !mesh.positions.is_empty() || !mesh.triangles.is_empty() {
+                        return Err(invalid("ambiguous embedded mesh and blob"));
+                    }
+                    let mesh_name =
+                        fref.and_then(|r| r.meshes.get(&mi)).map(String::as_str).ok_or_else(|| invalid("missing `mesh_blob` reference"))?;
+                    decode_mesh(reader.blob_named(mesh_name, "mesh")?, mesh)?;
+                }
+            }
+            _ => {}
         }
-        if let Some(cloud) = metadata.get_mut("point_clouds").and_then(|v| v.get_mut(index)).and_then(Value::as_object_mut) {
-            cloud.insert("complex".into(), complex);
+    }
+    for (index, canvas) in doc.canvases.iter_mut().enumerate() {
+        if !canvas.data.is_empty() || !matches!(canvas.format.as_str(), "png" | "jpeg") {
+            return Err(invalid("invalid canvas metadata"));
         }
+        let img_name = refs.canvases.get(&index).map(String::as_str).ok_or_else(|| invalid("missing `image_blob` reference"))?;
+        let bytes = reader.blob_named(img_name, &canvas.format)?;
+        if bytes.len() > solidcraft_doc::canvas::MAX_CANVAS_BYTES {
+            return Err(invalid("canvas too large"));
+        }
+        canvas.data = bytes.into();
+    }
+    for (index, cloud) in doc.point_clouds.iter_mut().enumerate() {
+        if !cloud.points.is_empty() || !cloud.colors.is_empty() {
+            return Err(invalid("ambiguous embedded points and blob"));
+        }
+        let cref = refs.point_clouds.get(&index);
+        if let Some(BlobField::Present(opt)) = cref.map(|c| &c.complex_blob) {
+            let complex_name = opt.as_deref().ok_or_else(|| invalid("missing `complex_blob` reference"))?;
+            decode_complex(reader.blob_named(complex_name, "complex")?, &mut cloud.complex)?;
+        }
+        let points_name = cref.and_then(|c| c.points_blob.as_deref()).ok_or_else(|| invalid("missing `points_blob` reference"))?;
+        decode_cloud(reader.blob_named(points_name, "points")?, cloud)?;
+    }
+    Ok(doc)
+}
+
+/// Newer-format container reader: preserves unknown fields, features and parts through `newer_file`,
+/// bounding `Value` heap expansion so a crafted newer-tagged file cannot exhaust memory.
+fn read_newer_document<R: Read + Seek>(
+    reader: &mut PackageReader<R>,
+    bytes: &[u8],
+    container: Value,
+    newer_container: bool,
+    record_bodies: usize,
+) -> Result<Document> {
+    let mut metadata: Value =
+        solidcraft_doc::json_budget::from_slice_bounded(bytes, solidcraft_doc::json_budget::MAX_VALUE_MEMORY_BYTES).map_err(invalid)?;
+    // What the drawings' images are, for a release that can't read the drawings: this build reads
+    // them from the drawings and writes the list again on every save.
+    let named_drawing_parts = metadata.as_object_mut().and_then(|object| object.remove("drawing_parts")).is_some();
+    // HDR's typed JSON representation is deliberately strict: no empty placeholders or
+    // container-only blob fields may reach the document deserializer. A newer build's section that
+    // doesn't pass stays as it is, which the document reader then leaves out.
+    let mut parts = solidcraft_doc::render_resources::ContainerParts::default();
+    let mut found = solidcraft_doc::render_resources::ContainerParts::default();
+    let done = check_hdr_manifest(bytes).and_then(|()| check_texture_manifest(bytes)).and_then(|()| {
+        let hdr = hydrate_hdr_resources(&metadata, reader, &mut found)?;
+        Ok(hydrate_texture_resources(&metadata, reader, &mut found)? || hdr)
+    });
+    if done.is_ok() {
+        parts = found;
+    }
+    let hydrated_text;
+    let text = if named_drawing_parts {
+        hydrated_text = serde_json::to_string(&metadata).map_err(invalid)?;
+        &hydrated_text
+    } else {
+        std::str::from_utf8(bytes).map_err(invalid)?
+    };
+    let mut doc = solidcraft_doc::render_resources::with_container_parts(parts, || Document::from_json(text))?;
+    if !doc.drawings.is_empty() {
+        return Err(invalid("ambiguous drawings in document.json and in their own entries"));
     }
     if newer_container && doc.newer_file.is_none() {
         let current = solidcraft_doc::format::FORMAT;
@@ -1456,30 +1542,640 @@ fn read_document_within<R: Read + Seek>(reader: &mut PackageReader<R>, record_bo
         let value = metadata.get("point_clouds").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing point cloud metadata"))?;
         decode_cloud(reader.blob(value, "points_blob", "points")?, cloud)?;
     }
-    let (drawings, kept) = drawing::read(reader)?;
-    doc.drawings = drawings;
-    // A drawing a newer build saved that this build can't read is kept as it came: the rest of the
-    // design opens, the notice names it, and saving writes it and its parts back.
-    if !kept.is_empty() {
-        let file = doc.newer_file.get_or_insert_with(|| {
-            let current = solidcraft_doc::format::FORMAT;
-            Arc::new(solidcraft_doc::newer_file::newer_file(&solidcraft_doc::format::Newer {
-                format: current,
-                reads_up_to: current,
-                unknown_changes: vec!["a newer drawing format".into()],
-            }))
-        });
-        let file = Arc::make_mut(file);
-        for drawing in kept {
-            file.not_understood.push(drawing.note);
-            for (name, bytes) in drawing.parts {
-                if !file.parts.iter().any(|(known, _)| *known == name) {
-                    file.parts.push((name, bytes));
+    Ok(doc)
+}
+
+#[derive(Default)]
+enum BlobField {
+    #[default]
+    Absent,
+    Present(Option<String>),
+}
+
+#[derive(Default)]
+struct FeatureBlobRefs {
+    step_blob: Option<String>,
+    records_blob: BlobField,
+    meshes: BTreeMap<usize, String>,
+}
+
+impl FeatureBlobRefs {
+    fn is_empty(&self) -> bool {
+        self.step_blob.is_none() && matches!(self.records_blob, BlobField::Absent) && self.meshes.is_empty()
+    }
+}
+
+#[derive(Default)]
+struct PointCloudBlobRefs {
+    points_blob: Option<String>,
+    complex_blob: BlobField,
+}
+
+impl PointCloudBlobRefs {
+    fn is_empty(&self) -> bool {
+        self.points_blob.is_none() && matches!(self.complex_blob, BlobField::Absent)
+    }
+}
+
+#[derive(Default)]
+struct ContainerRefs {
+    hdr_blobs: BTreeMap<solidcraft_doc::render_resources::HdrId, String>,
+    texture_blobs: BTreeMap<solidcraft_doc::render_resources::HdrId, String>,
+    features: BTreeMap<usize, FeatureBlobRefs>,
+    canvases: BTreeMap<usize, String>,
+    point_clouds: BTreeMap<usize, PointCloudBlobRefs>,
+}
+
+/// Stream-extract only container blob reference fields from `document.json`, ignoring all other
+/// sections without allocating a `serde_json::Value` DOM.
+fn extract_container_refs(bytes: &[u8]) -> Result<ContainerRefs> {
+    use serde::de::{self, DeserializeSeed, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
+    use solidcraft_doc::render_resources::HdrId;
+
+    struct OptStringSeed;
+    impl<'de> DeserializeSeed<'de> for OptStringSeed {
+        type Value = Option<String>;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<Option<String>, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = Option<String>;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("optional string")
+                }
+                fn visit_str<E: de::Error>(self, v: &str) -> std::result::Result<Option<String>, E> {
+                    Ok(Some(v.to_owned()))
+                }
+                fn visit_string<E: de::Error>(self, v: String) -> std::result::Result<Option<String>, E> {
+                    Ok(Some(v))
+                }
+                fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_unit<E: de::Error>(self) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_none<E: de::Error>(self) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Option<String>, A::Error> {
+                    while seq.next_element::<IgnoredAny>()?.is_some() {}
+                    Ok(None)
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Option<String>, A::Error> {
+                    while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                    Ok(None)
                 }
             }
+            d.deserialize_any(V)
         }
     }
-    Ok(doc)
+
+    struct MeshItemSeed;
+    impl<'de> DeserializeSeed<'de> for MeshItemSeed {
+        type Value = Option<String>;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<Option<String>, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = Option<String>;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("mesh metadata")
+                }
+                fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_unit<E: de::Error>(self) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_none<E: de::Error>(self) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Option<String>, A::Error> {
+                    while seq.next_element::<IgnoredAny>()?.is_some() {}
+                    Ok(None)
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Option<String>, A::Error> {
+                    let mut blob = None;
+                    while let Some(key) = map.next_key::<String>()? {
+                        if key == "mesh_blob" {
+                            blob = map.next_value_seed(OptStringSeed)?;
+                        } else {
+                            map.next_value::<IgnoredAny>()?;
+                        }
+                    }
+                    Ok(blob)
+                }
+            }
+            d.deserialize_any(V)
+        }
+    }
+
+    struct MeshesSeed;
+    impl<'de> DeserializeSeed<'de> for MeshesSeed {
+        type Value = BTreeMap<usize, String>;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<BTreeMap<usize, String>, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = BTreeMap<usize, String>;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("meshes array")
+                }
+                fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_unit<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_none<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
+                    while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                    Ok(BTreeMap::new())
+                }
+                fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error> {
+                    let mut out = BTreeMap::new();
+                    let mut idx = 0usize;
+                    while let Some(item) = seq.next_element_seed(MeshItemSeed)? {
+                        if let Some(blob) = item
+                            && out.len() < 65_536
+                        {
+                            out.insert(idx, blob);
+                        }
+                        idx += 1;
+                    }
+                    Ok(out)
+                }
+            }
+            d.deserialize_any(V)
+        }
+    }
+
+    struct FeatureItemSeed;
+    impl<'de> DeserializeSeed<'de> for FeatureItemSeed {
+        type Value = FeatureBlobRefs;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<FeatureBlobRefs, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = FeatureBlobRefs;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("feature metadata")
+                }
+                fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<Self::Value, E> {
+                    Ok(FeatureBlobRefs::default())
+                }
+                fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<Self::Value, E> {
+                    Ok(FeatureBlobRefs::default())
+                }
+                fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<Self::Value, E> {
+                    Ok(FeatureBlobRefs::default())
+                }
+                fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<Self::Value, E> {
+                    Ok(FeatureBlobRefs::default())
+                }
+                fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<Self::Value, E> {
+                    Ok(FeatureBlobRefs::default())
+                }
+                fn visit_unit<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(FeatureBlobRefs::default())
+                }
+                fn visit_none<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(FeatureBlobRefs::default())
+                }
+                fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error> {
+                    while seq.next_element::<IgnoredAny>()?.is_some() {}
+                    Ok(FeatureBlobRefs::default())
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
+                    let mut refs = FeatureBlobRefs::default();
+                    while let Some(key) = map.next_key::<String>()? {
+                        match key.as_str() {
+                            "step_blob" => refs.step_blob = map.next_value_seed(OptStringSeed)?,
+                            "records_blob" => refs.records_blob = BlobField::Present(map.next_value_seed(OptStringSeed)?),
+                            "meshes" => refs.meshes = map.next_value_seed(MeshesSeed)?,
+                            _ => {
+                                map.next_value::<IgnoredAny>()?;
+                            }
+                        }
+                    }
+                    Ok(refs)
+                }
+            }
+            d.deserialize_any(V)
+        }
+    }
+
+    struct FeaturesSeed;
+    impl<'de> DeserializeSeed<'de> for FeaturesSeed {
+        type Value = BTreeMap<usize, FeatureBlobRefs>;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<BTreeMap<usize, FeatureBlobRefs>, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = BTreeMap<usize, FeatureBlobRefs>;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("features array")
+                }
+                fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_unit<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_none<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
+                    while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                    Ok(BTreeMap::new())
+                }
+                fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error> {
+                    let mut out = BTreeMap::new();
+                    let mut idx = 0usize;
+                    while idx <= solidcraft_doc::MAX_FEATURES {
+                        let Some(item) = seq.next_element_seed(FeatureItemSeed)? else { break };
+                        if !item.is_empty() {
+                            out.insert(idx, item);
+                        }
+                        idx += 1;
+                    }
+                    while seq.next_element::<IgnoredAny>()?.is_some() {}
+                    Ok(out)
+                }
+            }
+            d.deserialize_any(V)
+        }
+    }
+
+    struct CanvasItemSeed;
+    impl<'de> DeserializeSeed<'de> for CanvasItemSeed {
+        type Value = Option<String>;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<Option<String>, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = Option<String>;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("canvas metadata")
+                }
+                fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_unit<E: de::Error>(self) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_none<E: de::Error>(self) -> std::result::Result<Option<String>, E> {
+                    Ok(None)
+                }
+                fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Option<String>, A::Error> {
+                    while seq.next_element::<IgnoredAny>()?.is_some() {}
+                    Ok(None)
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Option<String>, A::Error> {
+                    let mut blob = None;
+                    while let Some(key) = map.next_key::<String>()? {
+                        if key == "image_blob" {
+                            blob = map.next_value_seed(OptStringSeed)?;
+                        } else {
+                            map.next_value::<IgnoredAny>()?;
+                        }
+                    }
+                    Ok(blob)
+                }
+            }
+            d.deserialize_any(V)
+        }
+    }
+
+    struct CanvasesSeed;
+    impl<'de> DeserializeSeed<'de> for CanvasesSeed {
+        type Value = BTreeMap<usize, String>;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<BTreeMap<usize, String>, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = BTreeMap<usize, String>;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("canvases array")
+                }
+                fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_unit<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_none<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
+                    while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                    Ok(BTreeMap::new())
+                }
+                fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error> {
+                    let mut out = BTreeMap::new();
+                    let mut idx = 0usize;
+                    while let Some(item) = seq.next_element_seed(CanvasItemSeed)? {
+                        if let Some(blob) = item
+                            && out.len() < 65_536
+                        {
+                            out.insert(idx, blob);
+                        }
+                        idx += 1;
+                    }
+                    Ok(out)
+                }
+            }
+            d.deserialize_any(V)
+        }
+    }
+
+    struct CloudItemSeed;
+    impl<'de> DeserializeSeed<'de> for CloudItemSeed {
+        type Value = PointCloudBlobRefs;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<PointCloudBlobRefs, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = PointCloudBlobRefs;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("point cloud metadata")
+                }
+                fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<Self::Value, E> {
+                    Ok(PointCloudBlobRefs::default())
+                }
+                fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<Self::Value, E> {
+                    Ok(PointCloudBlobRefs::default())
+                }
+                fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<Self::Value, E> {
+                    Ok(PointCloudBlobRefs::default())
+                }
+                fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<Self::Value, E> {
+                    Ok(PointCloudBlobRefs::default())
+                }
+                fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<Self::Value, E> {
+                    Ok(PointCloudBlobRefs::default())
+                }
+                fn visit_unit<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(PointCloudBlobRefs::default())
+                }
+                fn visit_none<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(PointCloudBlobRefs::default())
+                }
+                fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error> {
+                    while seq.next_element::<IgnoredAny>()?.is_some() {}
+                    Ok(PointCloudBlobRefs::default())
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
+                    let mut refs = PointCloudBlobRefs::default();
+                    while let Some(key) = map.next_key::<String>()? {
+                        match key.as_str() {
+                            "points_blob" => refs.points_blob = map.next_value_seed(OptStringSeed)?,
+                            "complex_blob" => refs.complex_blob = BlobField::Present(map.next_value_seed(OptStringSeed)?),
+                            _ => {
+                                map.next_value::<IgnoredAny>()?;
+                            }
+                        }
+                    }
+                    Ok(refs)
+                }
+            }
+            d.deserialize_any(V)
+        }
+    }
+
+    struct CloudsSeed;
+    impl<'de> DeserializeSeed<'de> for CloudsSeed {
+        type Value = BTreeMap<usize, PointCloudBlobRefs>;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<BTreeMap<usize, PointCloudBlobRefs>, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = BTreeMap<usize, PointCloudBlobRefs>;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("point_clouds array")
+                }
+                fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_unit<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_none<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
+                    Ok(BTreeMap::new())
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
+                    while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                    Ok(BTreeMap::new())
+                }
+                fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error> {
+                    let mut out = BTreeMap::new();
+                    let mut idx = 0usize;
+                    while let Some(item) = seq.next_element_seed(CloudItemSeed)? {
+                        if !item.is_empty() && out.len() < 65_536 {
+                            out.insert(idx, item);
+                        }
+                        idx += 1;
+                    }
+                    Ok(out)
+                }
+            }
+            d.deserialize_any(V)
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    struct HdrBlobEntry {
+        hdr_blob: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct TextureBlobEntry {
+        texture_blob: String,
+    }
+    #[derive(Default, serde::Deserialize)]
+    struct RenderBlobs {
+        #[serde(default)]
+        resources: BTreeMap<HdrId, HdrBlobEntry>,
+        #[serde(default)]
+        texture_resources: BTreeMap<HdrId, TextureBlobEntry>,
+    }
+
+    struct RootVisitor;
+    impl<'de> Visitor<'de> for RootVisitor {
+        type Value = ContainerRefs;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("document JSON")
+        }
+        fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<ContainerRefs, E> {
+            Ok(ContainerRefs::default())
+        }
+        fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<ContainerRefs, E> {
+            Ok(ContainerRefs::default())
+        }
+        fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<ContainerRefs, E> {
+            Ok(ContainerRefs::default())
+        }
+        fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<ContainerRefs, E> {
+            Ok(ContainerRefs::default())
+        }
+        fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<ContainerRefs, E> {
+            Ok(ContainerRefs::default())
+        }
+        fn visit_unit<E: de::Error>(self) -> std::result::Result<ContainerRefs, E> {
+            Ok(ContainerRefs::default())
+        }
+        fn visit_none<E: de::Error>(self) -> std::result::Result<ContainerRefs, E> {
+            Ok(ContainerRefs::default())
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<ContainerRefs, A::Error> {
+            while seq.next_element::<IgnoredAny>()?.is_some() {}
+            Ok(ContainerRefs::default())
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<ContainerRefs, A::Error> {
+            let mut refs = ContainerRefs::default();
+            while let Some(key) = map.next_key::<String>()? {
+                match key.as_str() {
+                    "render" => {
+                        let render: RenderBlobs = map.next_value()?;
+                        refs.hdr_blobs = render.resources.into_iter().map(|(id, e)| (id, e.hdr_blob)).collect();
+                        refs.texture_blobs = render.texture_resources.into_iter().map(|(id, e)| (id, e.texture_blob)).collect();
+                    }
+                    "features" => refs.features = map.next_value_seed(FeaturesSeed)?,
+                    "canvases" => refs.canvases = map.next_value_seed(CanvasesSeed)?,
+                    "point_clouds" => refs.point_clouds = map.next_value_seed(CloudsSeed)?,
+                    _ => {
+                        map.next_value::<IgnoredAny>()?;
+                    }
+                }
+            }
+            Ok(refs)
+        }
+    }
+
+    let mut de = serde_json::Deserializer::from_slice(bytes);
+    let refs = de.deserialize_any(RootVisitor).and_then(|r| de.end().map(|()| r)).map_err(invalid)?;
+    Ok(refs)
+}
+
+fn hydrate_hdr_from_refs<R: Read + Seek>(
+    blobs: &BTreeMap<solidcraft_doc::render_resources::HdrId, String>,
+    reader: &mut PackageReader<R>,
+    parts: &mut solidcraft_doc::render_resources::ContainerParts,
+) -> Result<()> {
+    use solidcraft_doc::render_resources::{HdrId, MAX_HDR_BYTES, MAX_HDR_RESOURCE_BYTES, MAX_HDR_RESOURCES};
+    if blobs.len() > MAX_HDR_RESOURCES {
+        return Err(invalid("at most 64 embedded HDR resources"));
+    }
+    let mut total = 0usize;
+    for (id, blob_name) in blobs {
+        let remaining = MAX_HDR_RESOURCE_BYTES.saturating_sub(total).min(MAX_HDR_BYTES);
+        let bytes = reader.limited_blob_named(blob_name, "hdr", remaining)?;
+        if HdrId::of(bytes) != *id {
+            return Err(invalid("HDR resource key does not match its blob hash"));
+        }
+        total = total.checked_add(bytes.len()).ok_or_else(|| invalid("HDR resource size overflow"))?;
+        parts.hdr.insert(*id, bytes.to_vec());
+    }
+    Ok(())
+}
+
+fn hydrate_texture_from_refs<R: Read + Seek>(
+    blobs: &BTreeMap<solidcraft_doc::render_resources::HdrId, String>,
+    reader: &mut PackageReader<R>,
+    parts: &mut solidcraft_doc::render_resources::ContainerParts,
+) -> Result<()> {
+    use solidcraft_doc::{
+        render_resources::HdrId,
+        render_texture_resources::{MAX_TEXTURE_BYTES, MAX_TEXTURE_RESOURCE_BYTES, MAX_TEXTURE_RESOURCES},
+    };
+    if blobs.len() > MAX_TEXTURE_RESOURCES {
+        return Err(invalid("at most 32 embedded texture resources"));
+    }
+    let mut total = 0usize;
+    for (id, blob_name) in blobs {
+        let remaining = MAX_TEXTURE_RESOURCE_BYTES.saturating_sub(total).min(MAX_TEXTURE_BYTES);
+        let bytes = reader.limited_blob_named(blob_name, "texture", remaining)?;
+        if HdrId::of(bytes) != *id {
+            return Err(invalid("texture resource key does not match its blob hash"));
+        }
+        total = total.checked_add(bytes.len()).ok_or_else(|| invalid("texture resource size overflow"))?;
+        parts.textures.insert(*id, bytes.to_vec());
+    }
+    Ok(())
 }
 
 /// Admit the resource map before Value allocation or duplicate-key coalescing. Encoded
@@ -1566,21 +2262,21 @@ fn check_hdr_manifest(bytes: &[u8]) -> Result<()> {
 
 /// Takes each HDR's part out for the reader (`parts`), leaving its record `{kind, data: ""}`.
 fn hydrate_hdr_resources<R: Read + Seek>(
-    metadata: &mut Value,
+    metadata: &Value,
     reader: &mut PackageReader<R>,
     parts: &mut solidcraft_doc::render_resources::ContainerParts,
 ) -> Result<bool> {
     use solidcraft_doc::render_resources::{HdrId, MAX_HDR_RESOURCE_BYTES, MAX_HDR_RESOURCES};
 
-    let Some(resources) = metadata.get_mut("render").and_then(|render| render.get_mut("resources")) else {
+    let Some(resources) = metadata.get("render").and_then(|render| render.get("resources")) else {
         return Ok(false);
     };
-    let resources = resources.as_object_mut().ok_or_else(|| invalid("HDR resources must be an object"))?;
+    let resources = resources.as_object().ok_or_else(|| invalid("HDR resources must be an object"))?;
     if resources.len() > MAX_HDR_RESOURCES {
         return Err(invalid("at most 64 embedded HDR resources"));
     }
     let mut total = 0usize;
-    for (key, value) in resources.iter_mut() {
+    for (key, value) in resources {
         let id: HdrId = serde_json::from_value(Value::String(key.clone())).map_err(invalid)?;
         if !value.as_object().is_some_and(|fields| fields.len() == 3)
             || value.get("kind").and_then(Value::as_str) != Some("radiance_hdr")
@@ -1697,7 +2393,7 @@ fn check_texture_manifest(bytes: &[u8]) -> Result<()> {
 }
 /// Takes each texture's part out for the reader (`parts`), as [`hydrate_hdr_resources`].
 fn hydrate_texture_resources<R: Read + Seek>(
-    metadata: &mut Value,
+    metadata: &Value,
     reader: &mut PackageReader<R>,
     parts: &mut solidcraft_doc::render_resources::ContainerParts,
 ) -> Result<bool> {
@@ -1705,15 +2401,15 @@ fn hydrate_texture_resources<R: Read + Seek>(
         render_resources::HdrId,
         render_texture_resources::{MAX_TEXTURE_BYTES, MAX_TEXTURE_RESOURCE_BYTES, MAX_TEXTURE_RESOURCES},
     };
-    let Some(resources) = metadata.get_mut("render").and_then(|render| render.get_mut("texture_resources")) else {
+    let Some(resources) = metadata.get("render").and_then(|render| render.get("texture_resources")) else {
         return Ok(false);
     };
-    let resources = resources.as_object_mut().ok_or_else(|| invalid("texture resources must be an object"))?;
+    let resources = resources.as_object().ok_or_else(|| invalid("texture resources must be an object"))?;
     if resources.len() > MAX_TEXTURE_RESOURCES {
         return Err(invalid("at most 32 embedded texture resources"));
     }
     let mut total = 0usize;
-    for (key, value) in resources.iter_mut() {
+    for (key, value) in resources {
         let id: HdrId = serde_json::from_value(Value::String(key.clone())).map_err(invalid)?;
         if !value.as_object().is_some_and(|fields| fields.len() == 4)
             || value.get("kind").and_then(Value::as_str) != Some("opaque_texture")
@@ -4754,5 +5450,44 @@ mod tests {
             times.sort_by(f64::total_cmp);
         }
         eprintln!("{label}: median atomic-save ms json={:.3} container={:.3}", saves[0][4], saves[1][4]);
+    }
+
+    /// Issue #21257: reading a current-version `.sc` container never builds a whole-document
+    /// `serde_json::Value` tree in `read_document_within` or `format::read`, even when
+    /// `document.json` holds a large unknown array of tiny objects and blob-backed features.
+    #[test]
+    fn container_with_large_unknown_json_field_opens_directly_and_round_trips() {
+        let doc = document();
+        let bytes = write_design_container(&doc).unwrap();
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        let mut entries: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        for i in 0..archive.len() {
+            let mut file = archive.by_index(i).unwrap();
+            let mut buf = Vec::new();
+            file.read_to_end(&mut buf).unwrap();
+            entries.insert(file.name().unwrap().into_owned(), buf);
+        }
+        let orig = String::from_utf8(entries.get("document.json").unwrap().clone()).unwrap();
+        let close = orig.rfind('}').unwrap();
+        let mut padded = String::with_capacity(orig.len() + 450_000);
+        padded.push_str(&orig[..close]);
+        padded.push_str(r#","crafted_padding":["#);
+        for i in 0..50_000 {
+            if i > 0 {
+                padded.push(',');
+            }
+            padded.push_str(r#"{"a":0}"#);
+        }
+        padded.push_str("]}");
+        entries.insert("document.json".into(), padded.into_bytes());
+
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, data) in &entries {
+            writer.start_file(name.as_str(), zip::write::SimpleFileOptions::default()).unwrap();
+            writer.write_all(data).unwrap();
+        }
+        let modified = writer.finish().unwrap().into_inner();
+        let restored = crate::read_design(&modified).unwrap();
+        assert_eq!(restored.to_json(), doc.to_json());
     }
 }

@@ -85,6 +85,118 @@ fn validate_whole_reference(value: &Value) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn validate_sketch_offsets(offsets: &Value, total_roles: &mut usize) -> Result<()> {
+    let offsets = offsets.as_array().ok_or_else(invalid)?;
+    let mut groups = BTreeSet::new();
+    let mut outputs = BTreeSet::new();
+    let mut point_owners = std::collections::BTreeMap::new();
+    let mut sketch_roles = 0usize;
+    for offset in offsets {
+        let Some(topology) = offset.get("topology").filter(|topology| !topology.is_null()) else { continue };
+        if groups.len() >= 128 {
+            return Err(invalid());
+        }
+        exact_keys(topology, &["version", "id", "roles"])?;
+        let group = id(topology.get("id").ok_or_else(invalid)?)?;
+        if !groups.insert(group)
+            || topology.get("version").and_then(Value::as_u64) != Some(1)
+            || offset.get("closed").and_then(Value::as_bool) != Some(true)
+        {
+            return Err(invalid());
+        }
+        let distance = offset.get("distance").and_then(Value::as_f64).ok_or_else(invalid)?;
+        if !distance.is_finite() || distance.abs() <= 1e-9 || distance.abs() >= 1e9 {
+            return Err(invalid());
+        }
+        let sources = offset.get("sources").and_then(Value::as_array).ok_or_else(invalid)?;
+        let roles = topology.get("roles").and_then(Value::as_array).ok_or_else(invalid)?;
+        let active = offset.get("outputs").and_then(Value::as_array).ok_or_else(invalid)?;
+        if roles.is_empty() || roles.len() > 512 || roles.len() != sources.len() || active.len() > roles.len() {
+            return Err(invalid());
+        }
+        *total_roles = total_roles.saturating_add(roles.len());
+        sketch_roles = sketch_roles.saturating_add(roles.len());
+        if *total_roles > 1_000_000 || sketch_roles > 20_000 {
+            return Err(invalid());
+        }
+        let mut active_index = 0;
+        let mut source_ids = BTreeSet::new();
+        for (source, role) in sources.iter().zip(roles) {
+            let source = source.as_array().ok_or_else(invalid)?;
+            if source.len() != 2 || source.get(1).and_then(Value::as_bool).is_none() {
+                return Err(invalid());
+            }
+            let source = id(source.first().ok_or_else(invalid)?)?;
+            if !source_ids.insert(source) {
+                return Err(invalid());
+            }
+            let role_object = role.as_object().ok_or_else(invalid)?;
+            if role_object.keys().any(|key| !matches!(key.as_str(), "output" | "kind" | "start" | "end" | "retired" | "flags")) {
+                return Err(invalid());
+            }
+            if let Some(flags) = role.get("flags") {
+                exact_keys(flags, &["construction", "centerline", "reversed", "fixed"])?;
+                if flags.as_object().is_none_or(|flags| flags.values().any(|flag| flag.as_bool().is_none())) {
+                    return Err(invalid());
+                }
+            }
+            let output = id(role.get("output").ok_or_else(invalid)?)?;
+            if source == output || !outputs.insert(output) {
+                return Err(invalid());
+            }
+            if role.get("start") == role.get("end") {
+                return Err(invalid());
+            }
+            for key in ["start", "end"] {
+                let point = id(role.get(key).ok_or_else(invalid)?)?;
+                if point == output || point == source || point_owners.insert(point, group).is_some_and(|owner| owner != group) {
+                    return Err(invalid());
+                }
+            }
+            let kind = role.get("kind").and_then(Value::as_str).ok_or_else(invalid)?;
+            let retired = role.get("retired").and_then(Value::as_bool).ok_or_else(invalid)?;
+            if !matches!(kind, "line" | "arc") || (retired && kind != "arc") {
+                return Err(invalid());
+            }
+            if !retired {
+                if active.get(active_index).map(id).transpose()?.is_none_or(|id| id != output) {
+                    return Err(invalid());
+                }
+                active_index += 1;
+            }
+        }
+        if active_index != active.len() || active_index < 3 {
+            return Err(invalid());
+        }
+    }
+    if groups.iter().any(|group| outputs.contains(group) || point_owners.contains_key(group))
+        || outputs.iter().any(|output| point_owners.contains_key(output))
+    {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_profile_selection(value: &Value) -> Result<()> {
+    if value.get("type").and_then(Value::as_str) == Some("whole_boundaries") {
+        return validate_whole_reference(value);
+    }
+    if value.get("type").and_then(Value::as_str) == Some("offset_boundaries") {
+        exact_keys(value, &["type", "associations"])?;
+        let ids = value.get("associations").and_then(Value::as_array).ok_or_else(invalid)?;
+        if ids.is_empty() || ids.len() > 128 {
+            return Err(invalid());
+        }
+        let mut seen = BTreeSet::new();
+        for value in ids {
+            if !seen.insert(id(value)?) {
+                return Err(invalid());
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_raw(value: &Value) -> Result<()> {
     let Some(features) = value.get("features").and_then(Value::as_array) else { return Ok(()) };
     let mut total_roles = 0usize;
@@ -93,119 +205,13 @@ pub(crate) fn validate_raw(value: &Value) -> Result<()> {
             continue;
         }
         let Some(offsets) = feature.get("sketch").and_then(|sketch| sketch.get("offsets")) else { continue };
-        let offsets = offsets.as_array().ok_or_else(invalid)?;
-        let mut groups = BTreeSet::new();
-        let mut outputs = BTreeSet::new();
-        let mut point_owners = std::collections::BTreeMap::new();
-        let mut sketch_roles = 0usize;
-        for offset in offsets {
-            let Some(topology) = offset.get("topology").filter(|topology| !topology.is_null()) else { continue };
-            if groups.len() >= 128 {
-                return Err(invalid());
-            }
-            exact_keys(topology, &["version", "id", "roles"])?;
-            let group = id(topology.get("id").ok_or_else(invalid)?)?;
-            if !groups.insert(group)
-                || topology.get("version").and_then(Value::as_u64) != Some(1)
-                || offset.get("closed").and_then(Value::as_bool) != Some(true)
-            {
-                return Err(invalid());
-            }
-            let distance = offset.get("distance").and_then(Value::as_f64).ok_or_else(invalid)?;
-            if !distance.is_finite() || distance.abs() <= 1e-9 || distance.abs() >= 1e9 {
-                return Err(invalid());
-            }
-            let sources = offset.get("sources").and_then(Value::as_array).ok_or_else(invalid)?;
-            let roles = topology.get("roles").and_then(Value::as_array).ok_or_else(invalid)?;
-            let active = offset.get("outputs").and_then(Value::as_array).ok_or_else(invalid)?;
-            if roles.is_empty() || roles.len() > 512 || roles.len() != sources.len() || active.len() > roles.len() {
-                return Err(invalid());
-            }
-            total_roles = total_roles.saturating_add(roles.len());
-            sketch_roles = sketch_roles.saturating_add(roles.len());
-            if total_roles > 1_000_000 || sketch_roles > 20_000 {
-                return Err(invalid());
-            }
-            let mut active_index = 0;
-            let mut source_ids = BTreeSet::new();
-            for (source, role) in sources.iter().zip(roles) {
-                let source = source.as_array().ok_or_else(invalid)?;
-                if source.len() != 2 || source.get(1).and_then(Value::as_bool).is_none() {
-                    return Err(invalid());
-                }
-                let source = id(source.first().ok_or_else(invalid)?)?;
-                if !source_ids.insert(source) {
-                    return Err(invalid());
-                }
-                let role_object = role.as_object().ok_or_else(invalid)?;
-                if role_object.keys().any(|key| !matches!(key.as_str(), "output" | "kind" | "start" | "end" | "retired" | "flags")) {
-                    return Err(invalid());
-                }
-                if let Some(flags) = role.get("flags") {
-                    exact_keys(flags, &["construction", "centerline", "reversed", "fixed"])?;
-                    if flags.as_object().is_none_or(|flags| flags.values().any(|flag| flag.as_bool().is_none())) {
-                        return Err(invalid());
-                    }
-                }
-                let output = id(role.get("output").ok_or_else(invalid)?)?;
-                if source == output || !outputs.insert(output) {
-                    return Err(invalid());
-                }
-                if role.get("start") == role.get("end") {
-                    return Err(invalid());
-                }
-                for key in ["start", "end"] {
-                    let point = id(role.get(key).ok_or_else(invalid)?)?;
-                    if point == output || point == source || point_owners.insert(point, group).is_some_and(|owner| owner != group) {
-                        return Err(invalid());
-                    }
-                }
-                let kind = role.get("kind").and_then(Value::as_str).ok_or_else(invalid)?;
-                let retired = role.get("retired").and_then(Value::as_bool).ok_or_else(invalid)?;
-                if !matches!(kind, "line" | "arc") || (retired && kind != "arc") {
-                    return Err(invalid());
-                }
-                if !retired {
-                    if active.get(active_index).map(id).transpose()?.is_none_or(|id| id != output) {
-                        return Err(invalid());
-                    }
-                    active_index += 1;
-                }
-            }
-            if active_index != active.len() || active_index < 3 {
-                return Err(invalid());
-            }
-        }
-        if groups.iter().any(|group| outputs.contains(group) || point_owners.contains_key(group))
-            || outputs.iter().any(|output| point_owners.contains_key(output))
-        {
-            return Err(invalid());
-        }
-    }
-    fn references(value: &Value) -> Result<()> {
-        if value.get("type").and_then(Value::as_str) == Some("whole_boundaries") {
-            return validate_whole_reference(value);
-        }
-        if value.get("type").and_then(Value::as_str) == Some("offset_boundaries") {
-            exact_keys(value, &["type", "associations"])?;
-            let ids = value.get("associations").and_then(Value::as_array).ok_or_else(invalid)?;
-            if ids.is_empty() || ids.len() > 128 {
-                return Err(invalid());
-            }
-            let mut seen = BTreeSet::new();
-            for value in ids {
-                if !seen.insert(id(value)?) {
-                    return Err(invalid());
-                }
-            }
-        }
-        Ok(())
+        validate_sketch_offsets(offsets, &mut total_roles)?;
     }
     // Only feature profile fields can contain this variant. Do not impose a new
     // document-wide node limit on unrelated legacy sketches or imported payloads.
     for feature in features {
         if let Some(selection) = feature.get("profiles") {
-            references(selection)?;
+            validate_profile_selection(selection)?;
         }
         if let Some(sections) = feature.get("sections").and_then(Value::as_array) {
             if sections.len() > 10_000 {
@@ -213,7 +219,7 @@ pub(crate) fn validate_raw(value: &Value) -> Result<()> {
             }
             for section in sections {
                 if let Some(selection) = section.get("profiles") {
-                    references(selection)?;
+                    validate_profile_selection(selection)?;
                 }
             }
         }

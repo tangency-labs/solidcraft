@@ -502,11 +502,117 @@ impl Drawing {
     /// Read a drawing's JSON (any format this build knows; older ones are upgraded). A drawing
     /// that breaks a rule of the record is damaged and refused, never patched.
     pub fn from_json(s: &str) -> Result<Drawing> {
-        if s.len() > MAX_DRAWING_BYTES {
+        Self::from_json_inner(s, true)
+    }
+
+    /// Read a drawing embedded inline in a plain JSON design (`format::read`), without applying
+    /// [`MAX_DRAWING_BYTES`] independently of the design's size limit.
+    pub(crate) fn from_json_inline(s: &str) -> Result<Drawing> {
+        Self::from_json_inner(s, false)
+    }
+
+    fn from_json_inner(s: &str, check_size: bool) -> Result<Drawing> {
+        if check_size && s.len() > MAX_DRAWING_BYTES {
             return Err(DocError::Invalid(format!("drawing too large (at most {} MiB)", MAX_DRAWING_BYTES >> 20)));
         }
-        let v: Value = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("not a SolidCraft drawing: {e}")))?;
-        Self::read_value(v, Some(s))
+        let header = crate::json_budget::peek_header(&DRAWING, s, false)?;
+        if DRAWING.newer(header.version, header.applied.as_deref()).is_some()
+            || DRAWING.needs_upgrade(header.version, header.applied.as_deref())
+        {
+            let v = crate::json_budget::from_str_bounded(s, crate::json_budget::MAX_VALUE_MEMORY_BYTES)
+                .map_err(|e| DocError::Invalid(format!("not a SolidCraft drawing: {e}")))?;
+            return Self::read_value(v, Some(s));
+        }
+        Self::check_raw_streaming(s)?;
+        let wire: DrawingWire<'_> = serde_json::from_str(s).map_err(damaged)?;
+        let mut d = wire.into_drawing()?;
+        d = Self::finish_decode(d)?;
+        Ok(Drawing { format: DRAWING.format_string(DRAWING.current()), format_pending: DRAWING.pending_names(), ..d })
+    }
+
+    /// Stream-validate numbers, depth, and raw sketch/fill/pattern bounds without building a
+    /// whole-document `serde_json::Value` tree.
+    fn check_raw_streaming(s: &str) -> Result<()> {
+        use serde::de::{Deserializer as _, IgnoredAny, MapAccess, Visitor};
+        use serde_json::value::RawValue;
+
+        struct Root<'a, 'de> {
+            error: &'a mut Option<DocError>,
+            sketches: &'a mut Option<&'de RawValue>,
+            fills: &'a mut Option<&'de RawValue>,
+            patterns: &'a mut Option<&'de RawValue>,
+        }
+        impl<'de> Visitor<'de> for Root<'_, 'de> {
+            type Value = ();
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a drawing JSON object")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<(), A::Error> {
+                while let Some(key) = map.next_key::<crate::json_budget::BorrowedKey<'de>>()? {
+                    match key.0.as_ref() {
+                        "properties" => {
+                            map.next_value::<IgnoredAny>()?;
+                        }
+                        "sketches" => {
+                            let raw = map.next_value::<&'de RawValue>()?;
+                            if let Err(err) = crate::json_budget::check_numbers_str(raw.get(), "drawing", 1) {
+                                *self.error = Some(err);
+                                return Err(serde::de::Error::custom("invalid"));
+                            }
+                            *self.sketches = Some(raw);
+                        }
+                        "fills" => {
+                            let raw = map.next_value::<&'de RawValue>()?;
+                            if let Err(err) = crate::json_budget::check_numbers_str(raw.get(), "drawing", 1) {
+                                *self.error = Some(err);
+                                return Err(serde::de::Error::custom("invalid"));
+                            }
+                            *self.fills = Some(raw);
+                        }
+                        "patterns" => {
+                            let raw = map.next_value::<&'de RawValue>()?;
+                            if let Err(err) = crate::json_budget::check_numbers_str(raw.get(), "drawing", 1) {
+                                *self.error = Some(err);
+                                return Err(serde::de::Error::custom("invalid"));
+                            }
+                            *self.patterns = Some(raw);
+                        }
+                        _ => {
+                            map.next_value_seed(crate::json_budget::NumberDepthSeed { noun: "drawing", depth: 1, error: self.error })?;
+                        }
+                    }
+                }
+                Ok(())
+            }
+        }
+        let (mut error, mut sketches, mut fills, mut patterns) = (None, None, None, None);
+        let mut de = serde_json::Deserializer::from_str(s);
+        let res = de
+            .deserialize_map(Root { error: &mut error, sketches: &mut sketches, fills: &mut fills, patterns: &mut patterns })
+            .and_then(|()| de.end());
+        if let Some(err) = error {
+            return Err(err);
+        }
+        res.map_err(|e| DocError::Invalid(format!("not a SolidCraft drawing: {e}")))?;
+        if let Some(raw) = sketches {
+            let val = crate::json_budget::from_str_bounded(raw.get(), 64 << 20).map_err(damaged)?;
+            let mut wrapper = serde_json::Map::new();
+            wrapper.insert("sketches".into(), val);
+            sketch::check_raw(&Value::Object(wrapper)).map_err(damaged)?;
+        }
+        if fills.is_some() || patterns.is_some() {
+            let mut wrapper = serde_json::Map::new();
+            if let Some(raw) = fills {
+                let val = crate::json_budget::from_str_bounded(raw.get(), 32 << 20).map_err(damaged)?;
+                wrapper.insert("fills".into(), val);
+            }
+            if let Some(raw) = patterns {
+                let val = crate::json_budget::from_str_bounded(raw.get(), 32 << 20).map_err(damaged)?;
+                wrapper.insert("patterns".into(), val);
+            }
+            fill::check_raw(&Value::Object(wrapper)).map_err(damaged)?;
+        }
+        Ok(())
     }
 
     /// Read a drawing from its JSON value, as a plain JSON design holds it: [`Drawing::from_json`]
@@ -534,7 +640,11 @@ impl Drawing {
         image::take_back(&mut v);
         sketch::check_raw(&v).map_err(damaged)?;
         fill::check_raw(&v).map_err(damaged)?;
-        let mut d: Drawing = serde_json::from_value(v).map_err(damaged)?;
+        let d: Drawing = serde_json::from_value(v).map_err(damaged)?;
+        Self::finish_decode(d)
+    }
+
+    fn finish_decode(mut d: Drawing) -> Result<Drawing> {
         d.sources.sort_by_key(|s| s.id);
         let (views, dimensions) = (std::mem::take(&mut d.views), std::mem::take(&mut d.dimensions));
         d.add_views(views);
@@ -1038,6 +1148,108 @@ fn is_language_tag(tag: &str) -> bool {
         && (2..=8).contains(&first.len())
         && first.bytes().all(|b| b.is_ascii_alphabetic())
         && subtags.all(|s| (1..=8).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric()))
+}
+
+/// Direct wire representation of a current-version [`Drawing`], accepting the set-aside image
+/// fields (`image_files`, `placed_images`, `logo_cells`) without constructing a full `Value` tree.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DrawingWire<'a> {
+    format: String,
+    #[serde(default)]
+    format_pending: Vec<String>,
+    #[serde(with = "crate::ids")]
+    id: u64,
+    name: String,
+    sources: Vec<Source>,
+    #[serde(default)]
+    properties: Arc<Metadata>,
+    #[serde(default)]
+    units: Units,
+    #[serde(default)]
+    projection: Projection,
+    #[serde(default)]
+    updates: Updates,
+    language: String,
+    #[serde(default)]
+    font: String,
+    #[serde(default)]
+    line_group: LineGroup,
+    #[serde(default)]
+    view_letters: ViewLetters,
+    sheets: Vec<Arc<Sheet>>,
+    #[serde(default)]
+    views: Vec<Arc<View>>,
+    #[serde(default)]
+    dimensions: Vec<Arc<Dimension>>,
+    #[serde(default)]
+    balloons: ById<Balloon>,
+    #[serde(default)]
+    images: ById<ImageFile>,
+    #[serde(default)]
+    sheet_images: ById<SheetImage>,
+    #[serde(default)]
+    tables: ById<SheetTable>,
+    #[serde(default)]
+    notes: ById<Note>,
+    #[serde(default)]
+    centre_marks: ById<CentreMark>,
+    #[serde(default)]
+    centre_lines: ById<CentreLine>,
+    #[serde(default)]
+    symbols: ById<Symbol>,
+    #[serde(default)]
+    revisions: Arc<RevisionRecord>,
+    #[serde(default)]
+    sketches: Vec<Arc<SheetSketch>>,
+    #[serde(default)]
+    fills: Vec<Arc<SketchFill>>,
+    #[serde(default)]
+    patterns: Vec<Arc<PatternSnapshot>>,
+    #[serde(borrow, default)]
+    image_files: Option<&'a serde_json::value::RawValue>,
+    #[serde(borrow, default)]
+    placed_images: Option<&'a serde_json::value::RawValue>,
+    #[serde(borrow, default)]
+    logo_cells: Option<&'a serde_json::value::RawValue>,
+}
+
+impl DrawingWire<'_> {
+    fn into_drawing(self) -> Result<Drawing> {
+        let mut d = Drawing {
+            format: self.format,
+            format_pending: self.format_pending,
+            id: self.id,
+            name: self.name,
+            sources: self.sources,
+            properties: self.properties,
+            units: self.units,
+            projection: self.projection,
+            updates: self.updates,
+            language: self.language,
+            font: self.font,
+            line_group: self.line_group,
+            view_letters: self.view_letters,
+            sheets: self.sheets,
+            views: self.views,
+            dimensions: self.dimensions,
+            balloons: self.balloons,
+            images: self.images,
+            sheet_images: self.sheet_images,
+            tables: self.tables,
+            notes: self.notes,
+            centre_marks: self.centre_marks,
+            centre_lines: self.centre_lines,
+            symbols: self.symbols,
+            revisions: self.revisions,
+            sketches: self.sketches,
+            fills: self.fills,
+            patterns: self.patterns,
+            newer_file: None,
+        };
+        image::take_back_typed(&mut d, self.image_files, self.placed_images, self.logo_cells).map_err(damaged)?;
+        Ok(d)
+    }
 }
 
 /// A file that breaks a rule of the record.

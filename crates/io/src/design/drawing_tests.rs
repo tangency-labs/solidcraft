@@ -687,3 +687,16 @@ fn a_drawing_file_saved_by_main_reads_back_with_its_images() {
     let again = write_drawing_container(&d).unwrap();
     assert_eq!(read_drawing(&again).unwrap(), d);
 }
+
+/// Issue #21257: `open_record` streams header and image refs without building a whole-document
+/// `Value` tree and still enforces `MAX_IMAGES` cleanly.
+#[test]
+fn drawing_container_streaming_path_enforces_image_cap_without_value_dom() {
+    let d = drawing();
+    let mut entries = parts(&write_drawing_container(&d).unwrap());
+    let mut record: Value = serde_json::from_slice(&entries["drawing.json"]).unwrap();
+    record["image_files"] = Value::Array(vec![json!({}); drawing::image::MAX_IMAGES + 1]);
+    entries.insert("drawing.json".into(), serde_json::to_vec(&record).unwrap());
+    let why = read_drawing(&container(&entries)).unwrap_err().to_string();
+    assert!(why.contains("at most") && why.contains("images"), "{why}");
+}

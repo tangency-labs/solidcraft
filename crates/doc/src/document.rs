@@ -4762,7 +4762,7 @@ pub struct LinkImporter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     /// The options the importer was given, read again with the same ones. Null: none.
-    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null", deserialize_with = "crate::json_budget::deserialize_options_value")]
     pub options: serde_json::Value,
 }
 

@@ -234,7 +234,7 @@ pub type SecondaryAxisRef = AlignmentRef;
 impl<'de> Deserialize<'de> for XRef {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
         use serde::de::Error;
-        let value = serde_json::Value::deserialize(d)?;
+        let value = crate::json_budget::deserialize_bounded_value(d, crate::json_budget::MAX_SMALL_VALUE_BYTES)?;
         if value.get("reference").is_some() {
             let typed: SecondaryAlignmentX = serde_json::from_value(value).map_err(D::Error::custom)?;
             return Ok(Self::Reference { reference: typed.reference, reverse: typed.reverse });

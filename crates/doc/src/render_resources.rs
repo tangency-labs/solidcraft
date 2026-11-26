@@ -26,6 +26,9 @@ fn invalid(message: impl Into<String>) -> DocError {
 pub struct ContainerParts {
     pub hdr: BTreeMap<HdrId, Vec<u8>>,
     pub textures: BTreeMap<HdrId, Vec<u8>>,
+    /// When set, point cloud complexes are validated after the container hydrates `points_blob`
+    /// and `complex_blob` instead of against the empty inline `points` placeholder.
+    pub defer_point_cloud_complex: bool,
 }
 
 thread_local! {
@@ -55,6 +58,11 @@ pub(crate) fn container_part(id: &HdrId, texture: bool) -> Option<Vec<u8>> {
         let held = held.borrow();
         if texture { held.textures.get(id).cloned() } else { held.hdr.get(id).cloned() }
     })
+}
+
+/// Whether the active container read defers point-cloud complex checks until blobs are hydrated.
+pub(crate) fn defer_point_cloud_complex() -> bool {
+    CONTAINER_PARTS.with(|held| held.borrow().defer_point_cloud_complex)
 }
 
 /// Exact SHA-256 of encoded source bytes. A small value keeps numerical GPU intent Copy.
