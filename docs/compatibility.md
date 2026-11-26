@@ -206,8 +206,10 @@ they lie (`F44:top#1`, `F44:top#2`: both caps of an extrude with a start offset)
 numbered them differently (0.47.0 and 0.49.1 swap the caps of some outlines). A fillet or chamfer
 whose stored edge name finds an edge its saved pick does not lie on takes the edge the pick lies on
 instead (exact curve, clear of its ends), when that edge's name differs from the stored one only in
-such numbers, and only while the body's box is still the one the edge was picked on: a pick is not
-updated when an edit moves the body, and could then lie on the other cap's edge. A pick on the
+such numbers, and only while the body's box is still the one the edge was picked on and no Move,
+Align, or pattern or mirror of bodies comes before the fillet in the timeline: a pick is not updated
+when an edit moves the body, and could then lie on the other cap's edge (half a turn about the
+box's centre keeps the box). A pick on the
 named edge, or on an edge named otherwise, keeps the edge the name finds. Other references to such
 a face or edge (a sketch on a cap, a projection, a later feature on the round's faces) still follow
 the number. Test:

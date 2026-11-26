@@ -205,7 +205,8 @@ fn without_face_ties(name: &str) -> Option<crate::persistent_name::EdgeName> {
 /// `top`, and since #21762 the one a design saved by 0.47.0 called `top#1` is `top#2` (#22230).
 /// The point was picked on the edge the name was given to, so it says which one that is, but only
 /// on the body it was picked on: a pick is not updated when an edit moves the body, and then it
-/// can lie on the other cap's edge. The caller checks that the body has not moved.
+/// can lie on the other cap's edge. The caller checks that the body has not moved: its box is the
+/// saved one, and no earlier feature places bodies whole.
 pub(crate) fn retied_edge(b: &ModelBody, m: &Mesh, name: &str, found: usize, near: Vec3) -> Option<usize> {
     if b.body.is_mesh() || !near.is_finite() || edge_near(b, m, found, near) {
         return None;
