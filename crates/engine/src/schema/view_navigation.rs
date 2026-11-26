@@ -654,6 +654,46 @@ pub struct AmbientOcclusionParams {
     pub enabled: Option<bool>,
 }
 
+/// How the view shows what an Isolate hid (#8120): not at all, see-through, or as its edges.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum IsolateShow {
+    /// Hidden, as Isolate always has.
+    #[default]
+    Hidden,
+    /// Drawn faded and see-through; clicks go through it.
+    Transparent,
+    /// Drawn as its edges only, faded; clicks go through it.
+    Wireframe,
+}
+
+/// `view.isolate_others`: how the view shows what an Isolate hid. A display setting the app
+/// keeps; the design is not changed.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct IsolateOthersParams {
+    /// How the parts show: hidden, transparent or wireframe.
+    #[serde(default)]
+    pub show: Option<IsolateShow>,
+    /// Whether a click on a part shown transparent or wireframe selects it (true) or goes
+    /// through it (false).
+    #[serde(default)]
+    pub pick: Option<bool>,
+}
+
+/// What `view.isolate_others` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct IsolateOthersResult {
+    /// What was set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show: Option<IsolateShow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pick: Option<bool>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What `view.ambient_occlusion` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct AmbientOcclusionResult {
@@ -1108,3 +1148,35 @@ fn stage_required(schema: &mut Schema) {
 #[cfg(test)]
 #[path = "view_navigation_tests.rs"]
 mod tests;
+
+/// Select a ground-shadow style, or retain the existing on/off/toggle request.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GroundShadowParams {
+    /// A style choice is used instead of the legacy visibility flag.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "GroundShadowMode")]
+    pub mode: Option<GroundShadowMode>,
+    /// True shows the stored style, false hides it; omitted toggles visibility.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub on: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum GroundShadowMode {
+    Off,
+    Ellipse,
+    Projected,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GroundShadowReply {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<GroundShadowMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

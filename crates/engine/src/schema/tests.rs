@@ -24,6 +24,27 @@ fn messages(issues: &[Issue]) -> Vec<String> {
 }
 
 #[test]
+fn plugin_remove_defaults_to_keeping_user_data_in_the_schema_and_parser() {
+    let schema = input_schema_for::<plugin::RemoveParams>();
+    let root = schema.as_value();
+    assert_eq!(root["required"], json!(["id"]));
+    assert_eq!(root["properties"]["remove_user_data"]["default"], false);
+    for (params, expected) in [
+        (json!({"id":"gears"}), false),
+        (json!({"id":"gears", "remove_user_data":false}), false),
+        (json!({"id":"gears", "remove_user_data":true}), true),
+    ] {
+        assert!(conforms(root, root, &params));
+        assert_eq!(parse::<plugin::RemoveParams>(params).unwrap().remove_user_data, expected);
+    }
+    for value in [json!(null), json!("false"), json!(0)] {
+        let params = json!({"id":"gears", "remove_user_data":value});
+        assert!(!conforms(root, root, &params));
+        assert!(parse::<plugin::RemoveParams>(params).is_none());
+    }
+}
+
+#[test]
 fn expressions_accept_what_params_expr_accepts() {
     for v in [json!(5), json!(-2.5), json!("w / 2"), json!("  30 mm  "), json!(999_999_999.0)] {
         let want = crate::params::expr(&json!({ "v": v.clone() }), "v");
@@ -43,7 +64,7 @@ fn expressions_accept_what_params_expr_accepts() {
     }
 }
 
-/// `AxisDir` accepts what `features::axis_dir_param` reads (X, Y or Z trimmed of what Rust's
+/// `AxisDir` accepts what `features::axis_dir_form` reads (X, Y or Z trimmed of what Rust's
 /// `trim` removes, in any case, or a non-zero vector), and its schema agrees: its string pattern
 /// allows exactly that whitespace (`conforms` doesn't read patterns), and a schema can't refuse
 /// the zero vector. `ScaleFactors` takes exactly three numbers or expressions.
@@ -1380,6 +1401,14 @@ fn step_and_component_link_schema_keys_and_replies() {
         (
             "component.links",
             json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": false, "changed": null}]}),
+        ),
+        (
+            "component.links",
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "importer": {"format": "step"}, "file": "/parts/part.step", "found": true, "changed": false}]}),
+        ),
+        (
+            "component.links",
+            json!({"links": [{"component": 2, "name": "Board", "path": "board.kic", "importer": {"format": "kic.convert", "plugin": "kic", "version": "1.2"}, "file": "/parts/board.kic", "found": true, "changed": true}]}),
         ),
         (
             "component.links",

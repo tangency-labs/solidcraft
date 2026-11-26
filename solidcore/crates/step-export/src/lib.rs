@@ -575,6 +575,36 @@ fn write_curve(
     }
 }
 
+fn write_edge_curve(
+    entities: &mut Entities,
+    points: &mut PointIds,
+    curve: &Curve,
+) -> Result<u64, ExportError> {
+    match curve {
+        Curve::Ellipse {
+            frame,
+            semi1,
+            semi2,
+        } if semi1 < semi2 => {
+            // Turn a quarter turn about `frame.z` so `semi_axis_1 >= semi_axis_2`
+            // while keeping the 3D curve and its direction (`EDGE_CURVE.same_sense`).
+            let rotated = Frame {
+                origin: frame.origin,
+                x: frame.y,
+                y: [-frame.x[0], -frame.x[1], -frame.x[2]],
+                z: frame.z,
+            };
+            let placement = frame_placement(entities, points, &rotated)?;
+            Ok(entities.add(format!(
+                "ELLIPSE('',#{placement},{},{})",
+                number(*semi2)?,
+                number(*semi1)?
+            )))
+        }
+        _ => write_curve(entities, points, curve),
+    }
+}
+
 fn write_bspline_curve(
     entities: &mut Entities,
     points: &mut PointIds,
@@ -656,7 +686,7 @@ fn write_pcurve_edge(
             body.step_id
         ))
     })?;
-    let curve_3d = write_curve(entities, points, &edge.curve)?;
+    let curve_3d = write_edge_curve(entities, points, &edge.curve)?;
     let mut pcurve_ids = Vec::with_capacity(pcurves.len());
     for (surface_id, uv) in pcurves {
         let mut uv_ids = Vec::with_capacity(uv.len());
@@ -918,7 +948,7 @@ fn write_edge(
             body.step_id
         ))
     })?;
-    let curve_id = write_curve(entities, points, &edge.curve)?;
+    let curve_id = write_edge_curve(entities, points, &edge.curve)?;
     let sense = if edge.same_sense { ".T." } else { ".F." };
     Ok(entities.add(format!(
         "EDGE_CURVE('',#{start},#{end},#{curve_id},{sense})"
@@ -2143,6 +2173,45 @@ mod tests {
                 "{text}"
             );
         }
+    }
+
+    #[test]
+    fn normalizes_edge_ellipse_so_semi_axis_1_is_major() {
+        let mut model = triangle();
+        model.bodies[0].edges[0].curve = Curve::Ellipse {
+            frame: Frame {
+                origin: [0.0; 3],
+                x: [1.0, 0.0, 0.0],
+                y: [0.0, 1.0, 0.0],
+                z: [0.0, 0.0, 1.0],
+            },
+            semi1: 5.0,
+            semi2: 8.0,
+        };
+        let text = write(&model).expect("ellipse write");
+        let ex = solidcore_record::step::p21::parse(&text).expect("parse");
+        let ellipse = ex.entities.values().find(|e| e.name() == "ELLIPSE");
+        let ellipse = ellipse.expect("ELLIPSE entity");
+        let semi1 = ellipse.params()[2].as_f64().expect("semi_axis_1");
+        let semi2 = ellipse.params()[3].as_f64().expect("semi_axis_2");
+        assert!((semi1 - 8.0).abs() < 1e-12 && (semi2 - 5.0).abs() < 1e-12);
+        let placement_id = ellipse.params()[1].as_ref_id().expect("placement ref");
+        let placement = ex.get(placement_id).expect("AXIS2_PLACEMENT_3D");
+        let axis_id = placement.params()[2].as_ref_id().expect("axis ref");
+        let ref_id = placement.params()[3]
+            .as_ref_id()
+            .expect("ref_direction ref");
+        let dir = |id: u64| -> Vec<f64> {
+            let entity = ex.get(id).expect("DIRECTION");
+            entity.params()[1]
+                .as_list()
+                .expect("ratios")
+                .iter()
+                .map(|p| p.as_f64().expect("real"))
+                .collect()
+        };
+        assert_eq!(dir(axis_id), vec![0.0, 0.0, 1.0]);
+        assert_eq!(dir(ref_id), vec![0.0, 1.0, 0.0]);
     }
 
     #[test]

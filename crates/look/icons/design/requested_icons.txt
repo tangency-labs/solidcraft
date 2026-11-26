@@ -101,6 +101,7 @@ delete_face	false
 dimension	false
 discord	false
 display	false
+dome	false
 dots	false
 draft	false
 draft_analysis	false
@@ -175,6 +176,7 @@ flange	false
 flat	false
 fold	false
 folder	false
+frame_cope	false
 frame_member	false
 frame_plate	false
 frame_trim	false
@@ -201,6 +203,7 @@ intersect	false
 intersection_curve	false
 iso_analysis	false
 iso_curve	false
+isolate	false
 joint	false
 joint_origin	false
 kofi	false
@@ -213,6 +216,7 @@ loft	false
 lookat	false
 material	false
 measure	false
+merge_lines	false
 mesh_body	false
 mesh_export	false
 mesh_reduce	false
@@ -283,6 +287,7 @@ prefs_plugins	false
 prefs_shortcuts	false
 prefs_sketch	false
 prefs_tools	false
+press_in_hardware	false
 presspull	false
 print_face	false
 project	false
@@ -323,6 +328,7 @@ select_sketch	false
 send	false
 settings	false
 settings_profile	false
+shaft_spline	false
 sheet	false
 sheet_rules	false
 sheet_tab	false
@@ -330,6 +336,7 @@ shell	false
 shield	false
 silhouette	false
 sketch	false
+sketch3d	false
 sketch_break	false
 sketch_cancel	false
 sketch_chamfer	false
@@ -401,6 +408,7 @@ trim	false
 turn_around	false
 undo	false
 unfold	false
+unisolate	false
 update	false
 warning	false
 web	false

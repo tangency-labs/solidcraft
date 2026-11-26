@@ -175,6 +175,77 @@ fn a_complete_sheet_cuts_regions_without_extending_its_faces() {
     assert_eq!(cutter.counts().unwrap()[0], 2);
 }
 
+/// A target of two separate sheets in one body (as a surface extrude of several profiles
+/// makes): the walls x in [0, 10], z in [0, 10] at y = 0 and y = 5, each a shell. The sheet
+/// z = 4 cuts each wall into 10*4 = 40 below and 10*6 = 60 above; a wall with no point picked
+/// is discarded whole. Each kept piece is one rectangle of its wall, its own shell: one face,
+/// four edges and four vertices, at the wall's corners on its side of z = 4 and the two points
+/// where z = 4 crosses the wall's sides x = 0 and x = 10.
+#[test]
+fn a_complete_sheet_trims_a_target_of_several_separate_sheets() {
+    // The corners of wall `y` from height `z0` to `z1`.
+    let corners =
+        |y: f64, z0: f64, z1: f64| vec![[0.0, y, z0], [10.0, y, z0], [10.0, y, z1], [0.0, y, z1]];
+    let wall = |y: f64| {
+        planar_faces(&polygon(&[
+            [0.0, y, 0.0],
+            [10.0, y, 0.0],
+            [10.0, y, 10.0],
+            [0.0, y, 10.0],
+        ]))
+        .unwrap()
+    };
+    let (a, b) = (wall(0.0), wall(5.0));
+    let target = solidcore_ops::stitch::gather(&[&a, &b]).unwrap();
+    assert_eq!(target.counts().unwrap()[0], 2);
+    let cutter = planar_faces(&polygon(&[
+        [-5.0, -5.0, 4.0],
+        [15.0, -5.0, 4.0],
+        [15.0, 10.0, 4.0],
+        [-5.0, 10.0, 4.0],
+    ]))
+    .unwrap();
+    for (points, expected, pieces) in [
+        (vec![[2.0, 0.0, 1.0]], 40.0, vec![corners(0.0, 0.0, 4.0)]),
+        (
+            vec![[2.0, 0.0, 1.0], [2.0, 5.0, 1.0]],
+            80.0,
+            vec![corners(0.0, 0.0, 4.0), corners(5.0, 0.0, 4.0)],
+        ),
+        (
+            vec![[2.0, 0.0, 1.0], [2.0, 5.0, 9.0]],
+            100.0,
+            vec![corners(0.0, 0.0, 4.0), corners(5.0, 4.0, 10.0)],
+        ),
+    ] {
+        let kept = trim_sheet(&target, &cutter, &points).unwrap();
+        assert!(
+            rel(area(&kept), expected) < 1e-9,
+            "{points:?}: {} vs {expected}",
+            area(&kept)
+        );
+        let n = pieces.len();
+        assert_eq!(kept.counts().unwrap(), [n, 4 * n, 4 * n], "{points:?}");
+        let (record, _) = kept.to_record().unwrap();
+        assert_eq!(record.shells.len(), n, "{points:?}: one shell per piece");
+        let mut want: Vec<[f64; 3]> = pieces.concat();
+        for v in &record.vertices {
+            let i = want
+                .iter()
+                .position(|w| (0..3).all(|k| (v.point[k] - w[k]).abs() < 1e-9))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{points:?}: vertex {:?} is no corner of a kept piece",
+                        v.point
+                    )
+                });
+            want.swap_remove(i);
+        }
+        assert!(want.is_empty(), "{points:?}: corners not found {want:?}");
+    }
+    assert_eq!(target.counts().unwrap()[0], 2, "the target stays as it was");
+}
+
 #[test]
 fn whole_sheet_trim_refuses_non_cuts_and_ambiguous_or_hostile_picks() {
     let target = planar_faces(&square(0.0, 10.0, 0.0)).unwrap();
