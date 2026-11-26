@@ -435,18 +435,24 @@ fn enqueue(files: &Rc<Files>, write: Write) {
                     // queue asked the shell to mark unsaved.
                     files.unsaved.borrow_mut().retain(|failed| failed != &path);
                 }
-                let _ = done.send(result.map_err(|e| format!("{path}: {e}")));
+                let shown = solidcraft_ui_egui::display_user_path(&path);
+                let _ = done.send(result.map_err(|e| format_write_error(shown, &e)));
             } else if let Err(e) = result {
                 if disk::route(&path) == disk::WriteTo::Disk {
                     files.failed_disk(&path, &e);
                 } else {
-                    files.say(format!("{path}: {e}"), true);
+                    let shown = solidcraft_ui_egui::display_user_path(&path);
+                    files.say(format_write_error(shown, &e), true);
                 }
             }
             files.wake();
         }
         files.writing.set(false);
     });
+}
+
+fn format_write_error(shown: &str, error: &str) -> String {
+    if error.strip_prefix(shown).is_some_and(|rest| rest.starts_with(": ")) { error.to_string() } else { format!("{shown}: {error}") }
 }
 
 async fn store_opfs(files: &Files, name: &str, bytes: &[u8]) -> SaveOutcome {

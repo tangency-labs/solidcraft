@@ -911,8 +911,9 @@ fn export_flat_with(app: &mut SolveApp, body: &str, extension: &str, hardware_no
             }
             match app.run(command, params) {
                 Ok(_) => {
-                    app.set_status(format!("Exported {path}"), false);
-                    format!("Saved {path}")
+                    let shown = crate::display_user_path(&path);
+                    app.set_status(format!("Exported {shown}"), false);
+                    format!("Saved {shown}")
                 }
                 Err(e) => e,
             }

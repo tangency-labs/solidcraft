@@ -728,7 +728,7 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
                 let (command, params) = request.command();
                 let r = app.run(command, params);
                 if r.is_ok() && !request.path.is_empty() {
-                    app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &request.path)]), false);
+                    app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", crate::display_user_path(&request.path))]), false);
                 }
                 r
             }
@@ -1891,7 +1891,7 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
             }
             Ok(made) if request.kind.exports() && (!request.sheet_in_reply() || !running.cancelled()) => {
                 if !request.path.is_empty() {
-                    app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &request.path)]), false);
+                    app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", crate::display_user_path(&request.path))]), false);
                 }
                 request.answer(Ok(made.result));
             }
