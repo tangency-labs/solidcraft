@@ -587,20 +587,17 @@ impl GridFade {
         ((self.end - d) / (self.end - self.start)) as f32
     }
 
-    /// The pieces the grid's line at the given offset from the middle is drawn in: each with the
-    /// alpha the fade gives it at the distance where it lies. The line runs along the grid's other
-    /// axis; it is drawn whole where the grid is at full strength, and in pieces that fade
-    /// towards its ends.
-    pub fn pieces(&self, offset: f64) -> Vec<(f64, f64, f32)> {
-        let mut out = Vec::new();
+    /// Visit each piece the grid's line at the given offset from the middle is drawn in, without
+    /// allocating a vector per line: `(s0, s1, alpha)` along the grid's other axis.
+    pub fn for_each_piece(&self, offset: f64, mut f: impl FnMut(f64, f64, f32)) {
         let off = offset.abs();
         if !(self.end > 0.0) || off >= self.end {
-            return out;
+            return;
         }
         // Where the grid is still at full strength.
         let solid = if off < self.start { (self.start * self.start - off * off).max(0.0).sqrt() } else { 0.0 };
         if solid > 0.0 {
-            out.push((-solid, solid, 1.0));
+            f(-solid, solid, 1.0);
         }
         // The fading ends, in pieces whose distance from the middle grows evenly, so that the
         // grid dims evenly too.
@@ -611,10 +608,19 @@ impl GridFade {
             let (s0, s1) = ((d0 * d0 - off * off).max(0.0).sqrt(), (d1 * d1 - off * off).max(0.0).sqrt());
             let alpha = self.alpha((d0 + d1) * 0.5);
             if alpha > 0.0 {
-                out.push((s0, s1, alpha));
-                out.push((-s1, -s0, alpha));
+                f(s0, s1, alpha);
+                f(-s1, -s0, alpha);
             }
         }
+    }
+
+    /// The pieces the grid's line at the given offset from the middle is drawn in: each with the
+    /// alpha the fade gives it at the distance where it lies. The line runs along the grid's other
+    /// axis; it is drawn whole where the grid is at full strength, and in pieces that fade
+    /// towards its ends.
+    pub fn pieces(&self, offset: f64) -> Vec<(f64, f64, f32)> {
+        let mut out = Vec::new();
+        self.for_each_piece(offset, |s0, s1, alpha| out.push((s0, s1, alpha)));
         out
     }
 }
@@ -682,9 +688,6 @@ fn sketch_lines_in(
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
     for (i, c) in sk.curves.iter().enumerate() {
-        if c.spline_handle_of.is_some() {
-            continue;
-        }
         if !sketch_curve_visible(sk, i) {
             continue;
         }
@@ -742,7 +745,7 @@ fn sketch_lines_in(
 /// screen is never clickable, and geometry on screen always is.
 pub fn sketch_curve_visible(sk: &Sketch, i: usize) -> bool {
     let Some(c) = sk.curves.get(i) else { return false };
-    if c.spline_handle_of.is_some() {
+    if c.spline_handle_of.is_some() || (c.spline_control_polygon_of.is_some() && sk.view.hide_control_polygons) {
         return false;
     }
     if c.link.is_some() && !sk.is_text_curve(i) {
@@ -1544,6 +1547,12 @@ pub(crate) mod sketch_work {
         #[cfg(not(test))]
         let _ = walked;
     }
+}
+
+/// The camera the design's own Home view goes to, when it keeps one (`view.set_home`, #19972).
+/// Without one, Home frames the model from the iso view ([`home_camera`]).
+pub fn home_view(s: &Session) -> Option<Camera> {
+    s.doc.home_view.as_ref().map(crate::cmd::browser::camera_of)
 }
 
 /// Camera framing the model (iso view).

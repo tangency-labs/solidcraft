@@ -1243,6 +1243,31 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
     Ok(out)
 }
 
+/// The middles of the edges of `body` that a rolling offset rounds where both their faces are
+/// among `moved`: convex edges for a body grown (`grown`), concave ones for a body shrunk. Smooth
+/// edges (faces meeting tangentially) have no corner to round. Decided exactly from the record's
+/// faces, edges and surfaces.
+pub(crate) fn offset_round_edges(body: &Body, moved: &[usize], grown: bool) -> Result<Vec<Vec3>> {
+    let rec = Faces::of(body)?;
+    let mut is_moved = vec![false; rec.rec.faces.len()];
+    for &f in moved {
+        if let Some(slot) = is_moved.get_mut(f) {
+            *slot = true;
+        }
+    }
+    let mut out = Vec::new();
+    for (e, edge) in rec.rec.edges.iter().enumerate() {
+        let faces = rec.faces_of(e);
+        if faces.len() != 2 || !faces.iter().all(|f| is_moved.get(*f as usize).copied().unwrap_or(false)) || smooth_join(&rec, e)? {
+            continue;
+        }
+        if convex_at(&rec, e, edge.vertices[0]) == Some(grown) {
+            out.push(edge_middle(&rec, e).ok_or_else(|| KernelError::Failed("a point on an offset edge".into()))?);
+        }
+    }
+    Ok(out)
+}
+
 /// The point halfway along the edge each of `picks` takes, as a blend takes it ([`blend_edges`]),
 /// one per pick and in their order: where a moved copy of the body finds the same edge again. A
 /// pick itself need not: at the vertex two edges share (the halves of a rim a seam splits) it is
@@ -3674,6 +3699,26 @@ mod tests {
         assert!((got - want).abs() < 1e-6 * want, "{got} vs {want}");
         assert_eq!(out.face_count(), 3);
         assert!(out.validity().is_empty(), "{:?}", out.validity());
+    }
+
+    /// #22188: `solid.chamfer` 1.5 x 45 deg on a vertical edge meeting a widened recess floor
+    /// whose side edge stops short of 1.5 mm while the wall continues past it.
+    #[test]
+    fn chamfer_1_5_by_45_on_an_edge_meeting_a_widened_recess_floor_builds() {
+        for side_edge_len in [1.0, 0.2] {
+            let slab = crate::build::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 5.0)).unwrap();
+            let wall = crate::build::box_solid(Vec3::new(10.0, 10.0, 5.0), Vec3::new(20.0, 20.0, 15.0)).unwrap();
+            let step = crate::boolean(&slab, &wall, crate::BoolOp::Union).unwrap().unwrap();
+            let deeper = crate::build::box_solid(Vec3::new(0.0, 10.0 + side_edge_len, 2.0), Vec3::new(10.0, 20.0, 5.0)).unwrap();
+            let body = crate::boolean(&step, &deeper, crate::BoolOp::Cut).unwrap().unwrap();
+            let before = crate::measure(&body).unwrap().volume;
+            let pick = Vec3::new(10.0, 10.0, 10.0);
+            let out = chamfer_sides_carrying_face(&body, &[pick], 1.5, ChamferSide::Angle(std::f64::consts::FRAC_PI_4), false).unwrap();
+            assert!(out.validity().is_empty(), "len={side_edge_len}: {:?}", out.validity());
+            let after = crate::measure(&out).unwrap().volume;
+            let removed = 10.0 * 0.5 * 1.5 * 1.5;
+            assert!(((before - after) - removed).abs() < 1e-5, "len={side_edge_len}: {} vs {removed}", before - after);
+        }
     }
 }
 

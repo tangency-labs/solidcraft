@@ -258,6 +258,8 @@ fn a_panel_full_of_parts_placed_by_relations_stays_solved() {
                 exprs: Default::default(),
                 offset_xy: [0.0; 2],
                 captured: None,
+                base_values: None,
+                base_exprs: Vec::new(),
                 constraint: None,
                 dynamics: Vec::new(),
             };
@@ -999,8 +1001,9 @@ fn concentric_and_flush_on_fasteners_in_large_loop_group_do_not_jump_to_six_dof(
                 json!({"name": "PlateALeft"}),
             );
         } else {
-            // PlateA floats on Base's XY plane (3 DOF: tx, ty, rz). A vertical concentric
-            // fastener adds tz (4 DOF); adding flush to PlateB removes tz back to 3 DOF.
+            // PlateA floats on Base's XY plane (3 DOF: tx, ty, rz). With only a concentric
+            // joint (2 DOF) on an open branch, tree DOF sums parent + cylindrical (3 + 2 = 5);
+            // closing the loop with a flush to PlateB resolves the exact loop DOF (3).
             constrain(
                 &mut s,
                 "mate",
@@ -1067,7 +1070,7 @@ fn concentric_and_flush_on_fasteners_in_large_loop_group_do_not_jump_to_six_dof(
         assert_eq!(dof_of(&list, &s, "PlateB"), Some(want_plate), "fixed={fixed_plate_a}: {list}");
         assert_eq!(dof_of(&list, &s, "Fastener15"), Some(want_both), "fixed={fixed_plate_a}: {list}");
 
-        // Delete Flush on Fastener15: DOF increases to concentric-only (`2` or `4`).
+        // Delete Flush on Fastener15: open-chain DOF increases to concentric-only (`2` or `5`).
         run(&mut s, "joint.delete", json!({"joint": "FlushFastener15"}));
         let list = run(&mut s, "joint.list", json!({}));
         assert!(clean(&list), "fixed={fixed_plate_a}: {list}");

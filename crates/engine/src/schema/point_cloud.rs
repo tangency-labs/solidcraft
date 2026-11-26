@@ -13,6 +13,16 @@ use super::component::{MatrixParam, MatrixTolerance, refusal};
 use super::file::{CloudUnits, MaxPoints, OpenPath};
 use super::types::IdOrName;
 
+/// The up axis of a point cloud file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum CloudUp {
+    /// Z up, as the design is.
+    Z,
+    /// Y up, as many scanners and phone scanning apps write.
+    Y,
+}
+
 /// Insert a point cloud: the points of a `.ply`, `.pcd`, `.e57`, `.xyz`, `.pts` or `.asc` file
 /// join the design as a reference to model from. They are drawn as points and never become a body;
 /// a PLY's red, green and blue, a PCD's packed `rgb` or an E57 file's colours become the cloud's
@@ -33,6 +43,10 @@ pub struct PointCloudInsertParams {
     /// Default: mm, and m for an E57 file (the format is always in metres).
     #[serde(default)]
     pub units: Option<CloudUnits>,
+    /// The file's up axis: `y` turns the points a quarter turn about X so the file's Y is the
+    /// design's Z, for a scan written with Y up. Default: z (the points as the file has them).
+    #[serde(default)]
+    pub up: Option<CloudUp>,
     /// The most points kept; a file with more is thinned evenly. Default: 5000000.
     #[serde(default)]
     pub max_points: Option<MaxPoints>,
@@ -90,7 +104,8 @@ pub struct PointCloudInsertResult {
 
 /// Edit a point cloud: its name, whether it is drawn, the size of its points, how they are
 /// coloured and which of them are shown. A key left out keeps what the cloud has; the points
-/// themselves change only with `units`, which scales them, and `matrix`, which moves them.
+/// themselves change only with `units`, which scales them, `up`, which turns them, and `matrix`,
+/// which moves them.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PointCloudEditParams {
@@ -124,6 +139,10 @@ pub struct PointCloudEditParams {
     /// The file's length unit: the points are scaled from the unit they were read as to this one.
     #[serde(default)]
     pub units: Option<CloudUnits>,
+    /// The file's up axis: the points are turned from the axis they were read with to this one,
+    /// in the cloud's own frame, so its placement is kept.
+    #[serde(default)]
+    pub up: Option<CloudUp>,
     /// Where the cloud sits: a rigid row-major 3×4 or 4×4 matrix, as `occurrence.move` takes it.
     /// `null` leaves the placement as it is.
     #[serde(default)]
@@ -420,6 +439,8 @@ pub struct PointCloudInfo {
     pub source_points: u64,
     /// The file's length unit: `mm`, `cm`, `m`, `in` or `ft`.
     pub units: String,
+    /// The file's up axis the points were turned from: `z` or `y`.
+    pub up: String,
     /// Whether it is drawn.
     pub visible: bool,
     /// Size of a point on screen (pixels).

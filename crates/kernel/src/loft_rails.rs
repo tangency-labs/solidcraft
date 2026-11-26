@@ -178,7 +178,7 @@ fn raised(c: &CurveN<4>, degree: usize) -> Result<CurveN<4>> {
 /// (Boehm insertion), so that their control points correspond one to one. The weights stay each
 /// curve's own (a line's are all 1, an arc's are not); a station between takes its control
 /// points straight between the sections' and its weights between theirs.
-fn unified(sections: &[Section]) -> Result<Vec<Section>> {
+pub(crate) fn unified(sections: &[Section]) -> Result<Vec<Section>> {
     let n = sections.first().map_or(0, |s| s.curves.len());
     let fail = |m: &str| KernelError::Failed(format!("loft rails: {m}"));
     let mut columns: Vec<Vec<CurveN<4>>> = Vec::with_capacity(n);

@@ -1570,8 +1570,7 @@ mod tests {
 
     /// A cylinder's offset toward its axis folds past its radius, and away from it never: the
     /// bound proves the offset regular at 4.5 toward the axis of a radius 5 cylinder and away
-    /// from it at 20, and not at 5.1 toward it. (Closer to the radius `certify_regular` does
-    /// not certify within its budget, from 4.75 here: not proved, so nothing is proposed.)
+    /// from it at 20, and not at 5.1 toward it.
     #[test]
     fn a_cylinder_s_offset_is_proved_regular_below_its_radius_only() {
         let mut k = Kernel::default();

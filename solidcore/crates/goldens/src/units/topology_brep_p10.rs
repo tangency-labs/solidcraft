@@ -448,12 +448,8 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
         always_heal,
         healer_enabled,
     };
-    crate::refit::before_topology(&k, &mut data, add_analytics);
     match make_topology_from_data(&mut k, &mut b, &mut data, &mut env, options) {
-        Ok(()) => {
-            crate::tolsub::after_read(&mut b);
-            out.push(Item::Int(0));
-        }
+        Ok(()) => out.push(Item::Int(0)),
         Err(e @ SolidError::Unported { .. }) => return Ok(Err(e)),
         Err(e) => {
             out.push(Item::Int(status(&e)));
@@ -464,6 +460,7 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
     out.push(Item::Int(i64::from(data.is_geom_borrowed)));
     let g = Graph::walk(&b).map_err(|e| harness(e.to_string()))?;
     export(&k, &b, &g, &records, &mut out).map_err(|e| harness(e.to_string()))?;
+    crate::dump::body(&k, "uv_trims", &b);
 
     match i.op {
         OpIn::Make => {}

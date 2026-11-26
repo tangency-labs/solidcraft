@@ -54,5 +54,12 @@
     "prefs.background_shader_failed": "배경 효과를 그리지 못했습니다",
     "prefs.background_shader_missing": "해당 플러그인이 설치되어 있지 않거나 꺼져 있습니다",
     "prefs.background_shader_after_loss": "배경 효과 {name}이(가) 재설정의 원인일 수 있어 꺼 두었습니다. 환경 설정 > 플러그인에서 다시 켤 수 있습니다."
+  },
+  "fr": {
+    "plugin_install.shaders": "Effets d’arrière-plan de la vue 3D : {names}",
+    "prefs.background_shader": "Effet d’arrière-plan",
+    "prefs.background_shader_failed": "Impossible de dessiner l’effet d’arrière-plan",
+    "prefs.background_shader_missing": "son plugiciel n’est pas installé ou est désactivé",
+    "prefs.background_shader_after_loss": "L’effet d’arrière-plan {name} a été désactivé au cas où il aurait provoqué la réinitialisation ; réactivez-le dans Préférences > Plugiciels."
   }
 }
