@@ -776,7 +776,7 @@ fn import_snapshot(model: &Model) -> (Vec<(String, u64, u64, i64, Vec<String>)>,
 }
 
 /// Deleting an early independent Import component must not re-evaluate later independent Import
-/// components â€” both in-session and on the first edit after opening a saved design â€” while
+/// components — both in-session and on the first edit after opening a saved design — while
 /// preserving carried face names and linked cosmetic threads. A saved import whose bodies carry a
 /// legacy key safely falls back to evaluating once.
 #[test]
@@ -2351,7 +2351,7 @@ fn a_cut_leaves_bodies_it_cannot_reach_as_they_were() {
 /// `a_cut_leaves_bodies_it_cannot_reach_as_they_were`.)
 #[test]
 fn a_cut_still_runs_where_its_tool_touches_grazes_or_meets_a_curved_face() {
-    // A cylinder whose side is tangent to the face x = 50, one 0.5 Âµm clear of it (far past the
+    // A cylinder whose side is tangent to the face x = 50, one 0.5 µm clear of it (far past the
     // bodies' tolerances, so left out), one 0.1 mm in.
     for (x, cuts, boolean) in [(53.0, false, 1), (53.0005, false, 0), (52.9, true, 1)] {
         let mut doc = Document::new("graze");
@@ -3267,7 +3267,7 @@ fn a_hole_into_a_rim_still_bores_its_sheet_beside_far_ones() {
     let state = work.model.state();
     let sheet = state.surface_sheets.iter().find(|s| s.body == near).expect("the drilled sheet");
     assert!(sheet.bores.len() == 1 && (sheet.bores[0].radius - d / 2.0).abs() < 1e-12, "kept as a bore of the sheet: {:?}", sheet.bores);
-    // It takes the bore's cylinder through the plate's 60: Ï€ (d/2)Â² 60 = 106.03 mmÂ³ (to 2 %, as on
+    // It takes the bore's cylinder through the plate's 60: π (d/2)² 60 = 106.03 mm³ (to 2 %, as on
     // main).
     let removed = whole - volume(&work.model, &near);
     let bore = std::f64::consts::PI * (d / 2.0).powi(2) * 60.0;
@@ -5184,7 +5184,7 @@ fn cold_model(doc: &Document) -> Model {
 }
 
 /// Editing, adding, or deleting an unrelated earlier component or body must skip recomputing
-/// downstream modeled threads â€” both grouped body-qualified threads with `face_names` and legacy
+/// downstream modeled threads — both grouped body-qualified threads with `face_names` and legacy
 /// threads without `target_bodies`, in-session and on the first edit after opening a saved design.
 /// Editing a threaded body or moving an unread body to overlap it must recompute cleanly and stay
 /// identical to a cold evaluation.
@@ -5400,8 +5400,8 @@ fn unrelated_earlier_edits_and_deletes_skip_downstream_modeled_threads() {
 }
 
 /// Cosmetic threads (both body-qualified with `face_names` and legacy) and patterns of cosmetic
-/// threads must stay cached across unrelated earlier edits and deletes â€” both in-session and after
-/// opening a saved design â€” while recomputing when an unrelated body moves into a legacy thread's
+/// threads must stay cached across unrelated earlier edits and deletes — both in-session and after
+/// opening a saved design — while recomputing when an unrelated body moves into a legacy thread's
 /// cylinder reach.
 #[test]
 fn unrelated_earlier_edits_keep_downstream_cosmetic_threads_and_pattern_cached() {
@@ -5815,7 +5815,7 @@ fn unrelated_earlier_edits_keep_downstream_shell_scale_mirror_and_extrude_patter
 }
 
 /// Editing a sketch line referenced via `AxisRef::SketchLine` from another sketch (either in the
-/// same component or in another component) â€” or moving that other component â€” must invalidate both
+/// same component or in another component) — or moving that other component — must invalidate both
 /// the dependent `Revolve` and a `Pattern` of that `Revolve`, while unrelated earlier edits still
 /// keep same-component `Revolve` and `Pattern` features cached.
 #[test]
