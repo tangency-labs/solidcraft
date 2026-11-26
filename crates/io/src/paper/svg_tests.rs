@@ -582,7 +582,10 @@ fn weld_identification_keeps_the_shared_svg_dash_pattern() {
         .unwrap();
     let carrier = drawing.items.into_iter().find(|item| matches!(item, Item::Stroke { pattern: Some(_), .. })).unwrap();
     let (text, _) = svg(&sheet(vec![carrier]));
-    assert!(text.contains("stroke-dasharray=\"2.4 0.6\""), "{text}");
-    assert!(text.contains("stroke-dashoffset=\"0.7\""), "{text}");
+    // The identification line's pattern is 2.4 mm dashes and 0.6 mm gaps from 0.7 mm. Under the
+    // round caps each dash is stroked a line width (0.2 mm) shorter about its middle and each gap
+    // as much longer, so the pattern written is [2.2, 0.8] from 0.6.
+    assert!(text.contains("stroke-dasharray=\"2.2 0.8\""), "{text}");
+    assert!(text.contains("stroke-dashoffset=\"0.6\""), "{text}");
     assert!(text.contains("M0 295L7 295"), "{text}");
 }
