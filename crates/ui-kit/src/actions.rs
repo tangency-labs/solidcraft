@@ -287,6 +287,9 @@ pub struct Footer<'a> {
     /// Nothing to apply yet (nothing changed since the dialog opened or since the last Apply):
     /// Apply is drawn and reported disabled, and clicking it does nothing (#8561).
     pub nothing_to_apply: bool,
+    /// Leave the rule on top of the band out: a section directly above shares the band's fill
+    /// and draws the one rule that opens the whole pinned area.
+    pub no_rule: bool,
 }
 
 pub fn footer(ui: &mut Ui, ok_label: &str, cancel_label: &str, ok_enabled: bool, options: Footer<'_>) -> Action {
@@ -353,7 +356,7 @@ pub(super) fn draw_footer(
     stacked_height: Option<f32>,
     left: impl FnOnce(&mut Ui),
 ) -> Action {
-    let Footer { apply: apply_label, status, selected, danger, confirm, corners, secondary_left, nothing_to_apply } = options;
+    let Footer { apply: apply_label, status, selected, danger, confirm, corners, secondary_left, nothing_to_apply, no_rule } = options;
     let t = Tokens::get();
     let ok_enabled = ok_enabled && !ok_label.is_empty();
     // The footer is a full-width band (the card has no margin of its own): its own fill, a rule
@@ -366,7 +369,9 @@ pub(super) fn draw_footer(
         egui::CornerRadius { nw: 0, ne: 0, sw: corners.sw.saturating_sub(1), se: corners.se.saturating_sub(1) },
         t.dialog_footer,
     );
-    t.secondary_hline(ui.painter(), band.x_range(), band.top(), t.dialog_rule);
+    if !no_rule {
+        t.secondary_hline(ui.painter(), band.x_range(), band.top(), t.dialog_rule);
+    }
     solidcraft_ui_registry::publish_rect("dialog:footer", band);
     solidcraft_ui_registry::publish_count("dialog:ok:enabled", f64::from(ok_enabled && ui.is_enabled()));
     let stacked = stacked_height.is_some();

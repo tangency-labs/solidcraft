@@ -347,6 +347,7 @@ pub(super) struct Measurements {
     pub define: Option<Rect>,
     pub cancel: Option<Rect>,
     pub ok: Option<Rect>,
+    pub apply: Option<Rect>,
 }
 
 /// Scrollable content only; the host supplies the shared tool-panel chrome.

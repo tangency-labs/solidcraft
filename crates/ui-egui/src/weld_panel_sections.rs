@@ -574,25 +574,6 @@ pub(super) fn show_body_measured(ui: &mut Ui, state: &mut WeldPanelState, t: &To
         look::process(ui, state, t, &mut measured);
         look::show(ui, state, t, &mut measured);
         notices(ui, state, t, &mut measured, &mut event);
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.form_footer_height), Sense::hover());
-        rule(ui, t, rect.top());
-        let button = rect.shrink2(vec2(t.space_14, t.space_10));
-        if at_button(ui, &mut measured, button, "new_bead", tr("ui.weld.new_bead"), Button::Normal)
-            .backing_on_hover_text(tr("ui.weld.new_bead_tip"))
-            .clicked()
-        {
-            event = WeldPanelEvent::NewBead;
-        }
-        kit::icons::paint_icon(
-            ui.painter(),
-            Rect::from_center_size(
-                pos2(button.center().x - t.form_label_width, button.center().y),
-                vec2(t.space_16 + t.space_2, t.space_16 + t.space_2),
-            ),
-            "weld_new_bead",
-            1.0,
-        );
-        measured.sections.push(("buttons", rect));
         advanced(ui, state, t, &mut measured);
     });
     (event, measured)
@@ -650,7 +631,16 @@ pub(super) fn show_contents_measured(
     if chrome::symbol_band(ui, symbol_height, state, t, &mut measured) {
         event = WeldPanelEvent::DefineSymbol;
     }
-    let footer = kit::footer(ui, tr("OK"), tr("ui.weld.cancel"), true, kit::Footer::default());
+    // One pinned section: the symbol row and the shared bar share the fill, with no rule between.
+    // New weld bead is the shared Apply slot (OK / Apply / Cancel), so it too stays at the bottom.
+    let footer = kit::footer(
+        ui,
+        tr("OK"),
+        tr("ui.weld.cancel"),
+        true,
+        kit::Footer { apply: Some(tr("ui.weld.new_bead")), no_rule: true, ..Default::default() },
+    );
+    measured.apply = solidcraft_ui_registry::rect_of("dialog:apply");
     measured.footer = solidcraft_ui_registry::rect_of("dialog:footer");
     measured.cancel = solidcraft_ui_registry::rect_of("dialog:cancel");
     measured.ok = solidcraft_ui_registry::rect_of("dialog:ok");
@@ -658,6 +648,8 @@ pub(super) fn show_contents_measured(
         event = WeldPanelEvent::Cancel;
     } else if footer == kit::Action::Ok {
         event = WeldPanelEvent::Done;
+    } else if footer == kit::Action::Apply {
+        event = WeldPanelEvent::NewBead;
     }
     (event, measured)
 }

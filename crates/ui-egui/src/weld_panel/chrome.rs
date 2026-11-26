@@ -57,6 +57,8 @@ pub(super) fn symbol_band_height(t: &Tokens) -> f32 {
 /// The live symbol as a full-width button in its own pinned row; true when clicked.
 pub(super) fn symbol_band(ui: &mut Ui, height: f32, state: &WeldPanelState, t: &Tokens, m: &mut Measurements) -> bool {
     let (band, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    // Same fill as the Cancel / OK bar below it, and one rule on top for the whole pinned area.
+    ui.painter().rect_filled(band, 0, t.dialog_footer);
     rule(ui, t, band.top());
     let rect = band.shrink2(vec2(t.space_12, t.space_8));
     if rect.width() <= 0.0 || rect.height() <= 0.0 {

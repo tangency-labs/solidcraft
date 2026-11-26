@@ -36,7 +36,7 @@ fn weld_panel_fillet_board_section_heights_and_order() {
     let ctx = context();
     let mut state = WeldPanelState::specimen(WeldType::Fillet, false);
     let (_, m) = render(&ctx, &mut state, false, vec![]);
-    let board = ["type", "where", "size", "face", "extent", "process", "look", "notices", "buttons", "advanced"];
+    let board = ["type", "where", "size", "face", "extent", "process", "look", "notices", "advanced"];
     println!(
         "Weld fillet measured heights: {:?}; total {}",
         m.sections.iter().map(|(key, rect)| (*key, rect.height())).collect::<Vec<_>>(),
@@ -192,7 +192,7 @@ fn weld_panel_new_bead_and_advanced_keep_the_local_edits() {
     let mut state = WeldPanelState::specimen(WeldType::Fillet, false);
     state.size.a = "plate_thickness / 2".into();
     let (_, m) = render(&ctx, &mut state, false, vec![]);
-    assert_eq!(click(&ctx, &mut state, section(&m, "buttons").center()), WeldPanelEvent::NewBead);
+    assert_eq!(click(&ctx, &mut state, m.apply.expect("New weld bead is the footer Apply button").center()), WeldPanelEvent::NewBead);
     click(&ctx, &mut state, section(&m, "advanced").center());
     assert!(state.advanced_open);
     let (_, advanced) = render(&ctx, &mut state, false, vec![]);
@@ -460,6 +460,9 @@ fn weld_panel_700_point_card_pins_chrome_while_only_body_scrolls() {
         assert!(body.bottom() <= preview.top());
         assert!(header.bottom() <= body.top());
         assert_eq!(after.define, after.preview);
+        let apply = after.apply.expect("New weld bead button");
+        assert!(footer.contains_rect(apply), "New weld bead stays in the pinned bottom bar");
+        assert!(after.cancel.expect("Cancel").right() <= apply.left() && apply.right() <= after.ok.expect("OK").left());
         let buttons = [after.cancel.expect("Cancel"), after.ok.expect("OK")];
         for button in buttons {
             assert!(footer.contains_rect(button));
