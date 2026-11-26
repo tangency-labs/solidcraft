@@ -4001,15 +4001,12 @@ fn a_swept_tube_wall_with_its_seam_on_the_knots_start_reads_whole() {
     assert!(check.is_valid(), "{check}");
 }
 
-/// A tube of radius 5 and length 8 whose wall is one cubic spline closed round v, in three faces
-/// (#22462; `tests/step-regressions/tube_wavy_edge_across_spline_start.step`). Two of them lie
-/// across the start of the knots, one each side of a wavy edge fitted through points of the wall,
-/// its parameter not the wall's. The control file is the same tube turned so that no face lies
-/// across the start. The two faces were left out and the tube came in open.
+/// A tube whose closed spline wall has two faces across its knots' start, split by a fitted wavy
+/// edge, and the same tube turned clear of the start (#22462): the two faces were left out.
 #[test]
 fn a_fitted_edge_across_a_closed_spline_start_keeps_all_faces() {
-    // The two faces across the start are each cut along the seam, as every face across it is.
     for (name, step, faces) in [
+        // The two faces across the start are each cut along the seam, as every face across it is.
         ("across", include_str!("../../../../tests/step-regressions/tube_wavy_edge_across_spline_start.step"), 7),
         ("control", include_str!("../../../../tests/step-regressions/tube_wavy_edge_control.step"), 5),
     ] {
@@ -4019,7 +4016,6 @@ fn a_fitted_edge_across_a_closed_spline_start_keeps_all_faces() {
         assert!(imp.bodies[0].closed, "{name}: {:?}", imp.warnings);
         let m = measure(&imp.bodies[0].body).unwrap();
         assert_eq!(m.faces, faces, "{name}");
-        // The section's area by its Bézier arcs is 78.539822 mm², times the length 8.
         assert!(rel(m.volume, 628.318_573) < 1e-6, "{name}: volume {}", m.volume);
         assert!(rel(m.area, 408.407_1) < 1e-6, "{name}: area {}", m.area);
         let check = imp.bodies[0].body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();

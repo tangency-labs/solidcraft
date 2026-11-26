@@ -3035,6 +3035,9 @@ fn complete_face_seams_edit(
                 None,
                 &|o: HealLoopHandle| o.as_topology(),
             )?;
+            for &e in &split.edges {
+                drop_split_off_trims(k, b, e)?;
+            }
             for e in split.edges {
                 store_imported_seam_curve(k, b, e, scope.env)?;
                 seams.push(e);
@@ -3155,6 +3158,35 @@ fn imported_internal_seam_needs_replacement(
         }
     }
     Ok(false)
+}
+
+/// The seam split cuts a fitted trim at the edge's parameter, where the trim can miss the seam and
+/// leave the base period (#22462): trims off the domain boundary are remade from their edges.
+fn drop_split_off_trims(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
+    for eu in crate::topology::edge::edgeuses(b, e, None, None)? {
+        let Some(face) = eu1::face(b, eu)? else {
+            continue;
+        };
+        let surface = surface_deref(b, face)?;
+        let domain = surface.natural_uv_domain_with_nurb(k)?;
+        let closed_u = surface
+            .is_closed(k, &domain, SurfParamType::U, None, false)?
+            .0;
+        let closed_v = surface
+            .is_closed(k, &domain, SurfParamType::V, None, false)?
+            .0;
+        if !closed_u && !closed_v {
+            continue;
+        }
+        let Some(trim) = eu1::uv_trim_curve_pointer(b, eu)? else {
+            continue;
+        };
+        if trim.is_domain_boundary(k, &domain, EFF_ZERO)? != SurfParamType::Neither {
+            continue;
+        }
+        eu1::set_uv_trim_curve(b, eu, eu1::UvTrimCurveArg::Null, 0.0, true, None)?;
+    }
+    Ok(())
 }
 
 /// Seam insertion needs the curve-on-surface representation (including its seam identity).
