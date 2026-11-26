@@ -662,7 +662,9 @@ fn hover_edge_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_block(ui, &colour_label, label_width, |ui| {
         let mut selected = usize::from(app.preferences.hover_edge_colour.is_some());
         if ui_kit::settings_segments(ui, &colour_label, &mut selected, &[labels[0].as_str(), labels[1].as_str()]) {
-            app.preferences.hover_edge_colour = (selected == 1).then_some(crate::prefs::HOVER_EDGE_CUSTOM);
+            // Custom starts from the theme's accent, which stands out from the hover colour.
+            let [r, g, b, _] = t.accent.to_array();
+            app.preferences.hover_edge_colour = (selected == 1).then_some([r, g, b]);
         }
         if let Some(mut rgb) = app.preferences.hover_edge_colour {
             let response = ui_kit::color_field(ui, &mut rgb);

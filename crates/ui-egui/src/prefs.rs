@@ -916,8 +916,6 @@ pub const DIMENSION_STEP_DEG: std::ops::RangeInclusive<f64> = 0.001..=180.0;
 pub const DIMENSION_TEXT_SCALE: std::ops::RangeInclusive<f32> = 0.5..=2.5;
 /// The widths Preferences › Graphics offers for the edge under the pointer, in points.
 pub const HOVER_EDGE_WIDTH: std::ops::RangeInclusive<f32> = 1.0..=6.0;
-/// The colour Custom starts from for the edge under the pointer: a bright orange.
-pub const HOVER_EDGE_CUSTOM: [u8; 3] = [0xFF, 0x8C, 0x00];
 
 /// How far the origin planes' squares may be scaled (Preferences › Design › Origin › Origin plane
 /// size, #21191).

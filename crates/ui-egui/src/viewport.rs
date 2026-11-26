@@ -18148,7 +18148,7 @@ mod tests {
         assert_eq!((app.preferences.hover_edge_colour, app.preferences.hover_edge_width), (None, 2.0), "the defaults");
         assert!(has(&app, t.hover_edge) && !has(&app, orange), "the theme's hover colour by default");
         let before = build_highlight(&app).merged().lines;
-        app.preferences.hover_edge_colour = Some(crate::prefs::HOVER_EDGE_CUSTOM);
+        app.preferences.hover_edge_colour = Some([0xFF, 0x8C, 0x00]);
         assert!(has(&app, orange), "the colour set");
         app.preferences.hover_edge_colour = None;
         app.preferences.hover_edge_width = 5.0;
