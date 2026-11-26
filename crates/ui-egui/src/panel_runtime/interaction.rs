@@ -1,9 +1,9 @@
 //! Transient pointer capture. This module prepares candidates but never dispatches
 //! or commits them: the retained runtime owns lifecycle/native side effects.
 
-use solidcraft_engine::panels::*;
+use solidcraft_panel_layout::*;
 
-use super::LocalScope;
+use super::host::LocalScope;
 use super::layout::{
     HostContentMetrics, HostLayout, HostMetrics, bottom, next_host_column_id, next_host_section_id, rect, resolve_host_prepared_with_snapshot,
     resolve_host_projected, resolve_host_projected_with_snapshot, right,

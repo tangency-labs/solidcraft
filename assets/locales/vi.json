@@ -5554,7 +5554,6 @@
   "sketch_finish.edit": "Chỉnh sửa phác thảo",
   "sketch_finish.finished": "Đã hoàn tất {name}",
   "sketch_mode.announcement": "{view}, chế độ phác thảo",
-  "sketch_mode.editing": "Đang chỉnh sửa",
   "sketch_mode.model_card_unavailable": "Mở chế độ xem Mô hình trước khi bắt đầu phác thảo ở đây",
   "sketch_mode.view_name": "{view} · {sketch}",
   "sketch_panel.attached": "Gắn vào {body} / {path}",

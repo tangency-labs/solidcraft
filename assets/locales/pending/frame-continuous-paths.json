@@ -30,5 +30,9 @@
   "zh": {
     "ui.frame.continuous": "单根连续构件",
     "ui.frame.continuous_requires_selection": "按路径顺序选择相连的直线和圆弧；创建连续构件时请关闭所有直线。"
+  },
+  "fr": {
+    "ui.frame.continuous": "Un seul élément de structure continu",
+    "ui.frame.continuous_requires_selection": "Sélectionnez des lignes et des arcs connectés dans l’ordre du chemin ; désactivez Toutes les lignes pour créer un seul élément continu."
   }
 }

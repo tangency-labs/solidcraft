@@ -411,7 +411,7 @@ pub fn copy_for(placed: &Session, choice: &Choice) -> std::result::Result<ViewCo
     use crate::cmd::motion::{drive_with_contact, explode_moves, exploded_at, keyed, values_at};
     // From where the design places its parts: an occurrence move not captured yet is left out.
     let mut copy = placed.scratch();
-    copy.pending_moves.clear();
+    copy.clear_pending_moves();
     // The configuration first: the position and the explode start from the geometry it builds.
     let mut failing = Vec::new();
     if let Some(row) = choice.configuration {
