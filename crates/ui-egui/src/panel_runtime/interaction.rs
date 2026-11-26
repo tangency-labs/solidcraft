@@ -1,9 +1,9 @@
 //! Transient pointer capture. This module prepares candidates but never dispatches
 //! or commits them: the retained runtime owns lifecycle/native side effects.
 
-use solidcraft_engine::panels::*;
+use solidcraft_panel_layout::*;
 
-use super::LocalScope;
+use super::host::LocalScope;
 use super::layout::{
     HostContentMetrics, HostLayout, HostMetrics, bottom, next_host_column_id, next_host_section_id, rect, resolve_host_prepared_with_snapshot,
     resolve_host_projected, resolve_host_projected_with_snapshot, right,
@@ -25,12 +25,35 @@ pub enum HostResizeEdge {
     Right,
     Top,
     Bottom,
+    TopLeft,
+    TopRight,
+    BottomLeft,
     BottomRight,
 }
 
 impl HostResizeEdge {
+    pub(super) fn is_corner(self) -> bool {
+        matches!(self, Self::TopLeft | Self::TopRight | Self::BottomLeft | Self::BottomRight)
+    }
+
+    fn moves_west(self) -> bool {
+        matches!(self, Self::Left | Self::TopLeft | Self::BottomLeft)
+    }
+
+    fn moves_east(self) -> bool {
+        matches!(self, Self::Right | Self::TopRight | Self::BottomRight)
+    }
+
+    pub(super) fn moves_north(self) -> bool {
+        matches!(self, Self::Top | Self::TopLeft | Self::TopRight)
+    }
+
+    fn moves_south(self) -> bool {
+        matches!(self, Self::Bottom | Self::BottomLeft | Self::BottomRight)
+    }
+
     /// Dock targets retain their logical identity when the workspace mirrors.
-    /// Floating corners remain physical because floating rects do not mirror.
+    /// Floating edges and corners remain physical because floating rects do not mirror.
     pub(super) fn physical(self, zone: Zone, direction: Direction) -> Self {
         if zone.docked() && direction == Direction::Rtl {
             match self {
@@ -1398,7 +1421,7 @@ pub(crate) fn keyboard_resize_action(
     let preview = match begin_gesture(service, layout, target, None)? {
         Some(GestureKind::Resize { section, edge, size, outer }) => {
             let horizontal = matches!(edge, HostResizeEdge::Left | HostResizeEdge::Right);
-            if edge != HostResizeEdge::BottomRight && ((horizontal && dx == 0.0) || (!horizontal && dy == 0.0)) {
+            if !edge.is_corner() && ((horizontal && dx == 0.0) || (!horizontal && dy == 0.0)) {
                 return Err(error(Rule::Availability, "resize key is perpendicular to focused edge"));
             }
             let source = service.layout().section(&section)?;
@@ -1994,12 +2017,23 @@ fn resize_preview(
             if width_cap < min.width || height_cap < min.height {
                 return Err(error(Rule::Bounds, "visible floating anchor cannot fit panel minimum"));
             }
-            if edge != HostResizeEdge::BottomRight {
-                return Err(error(Rule::Placement, "floating resize requires its free corner"));
+            let mut origin = outer.origin;
+            let mut size = outer.size;
+            if edge.moves_west() {
+                let cap = max.width.min(right(outer) - layout.capacity.origin.x);
+                size.width = (outer.size.width - dx).clamp(min.width, cap.max(min.width));
+                origin.x = right(outer) - size.width;
+            } else if edge.moves_east() {
+                size.width = (outer.size.width + dx).clamp(min.width, width_cap);
             }
-            let size =
-                Size { width: (outer.size.width + dx).clamp(min.width, width_cap), height: (outer.size.height + dy).clamp(min.height, height_cap) };
-            let candidate = action(layout.revision, vec![Mutation::SetFloatingRect { section: section.clone(), origin: outer.origin, size }]);
+            if edge.moves_north() {
+                let cap = max.height.min(bottom(outer) - layout.capacity.origin.y);
+                size.height = (outer.size.height - dy).clamp(min.height, cap.max(min.height));
+                origin.y = bottom(outer) - size.height;
+            } else if edge.moves_south() {
+                size.height = (outer.size.height + dy).clamp(min.height, height_cap);
+            }
+            let candidate = action(layout.revision, vec![Mutation::SetFloatingRect { section: section.clone(), origin, size }]);
             let projected = project_resize(service, layout, &candidate)?;
             let bounds = projected
                 .sections
@@ -2007,7 +2041,7 @@ fn resize_preview(
                 .find(|card| card.section == *section)
                 .ok_or_else(|| error(Rule::Bounds, "floating resize cannot be presented"))?
                 .outer;
-            if bounds.origin != outer.origin || bounds.size != size {
+            if bounds.origin != origin || bounds.size != size {
                 return Err(error(Rule::Bounds, "floating resize cannot retain its visible anchor"));
             }
             return Ok((candidate, bounds));
@@ -2021,7 +2055,7 @@ fn resize_preview(
             }
             HostResizeEdge::Top => size.height = (outer.size.height - dy).clamp(min.height, max.height),
             HostResizeEdge::Bottom => size.height = (outer.size.height + dy).clamp(min.height, max.height),
-            HostResizeEdge::BottomRight => {
+            HostResizeEdge::TopLeft | HostResizeEdge::TopRight | HostResizeEdge::BottomLeft | HostResizeEdge::BottomRight => {
                 return Err(error(Rule::Placement, "dock resize requires a dock edge"));
             }
         }
