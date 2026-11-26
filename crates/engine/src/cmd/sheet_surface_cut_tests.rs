@@ -1686,7 +1686,8 @@ fn a_sheet_outside_the_shops_stock_is_a_finding() {
 
 /// A hole near a bend, measured as the flat has it: the generic limit is the strictest of
 /// 2 T = 4 and 2 T + R = 6 mm (R = 2), a warning as the shops' pages differ; the hole is in the
-/// bend's zone or its distance to the zone's edge is what the finding says.
+/// bend's zone or the distance from its rim to the zone's edge is what the finding says (the
+/// shops measure from the hole's edge: the centre's distance less the 3 mm radius).
 #[test]
 fn a_hole_near_a_bend_is_a_shop_finding_with_the_zone_distance() {
     let mut s = plate();
@@ -1702,7 +1703,8 @@ fn a_hole_near_a_bend_is_a_shop_finding_with_the_zone_distance() {
     let f = shop_findings(&reply, "hole.to_bend");
     for (_, c) in &circles {
         // The distance to a zone spanning the plate's width, by hand.
-        let d = if (y0..=y1).contains(&c[1]) { 0.0 } else { (c[1] - y0).abs().min((c[1] - y1).abs()) };
+        let centre = if (y0..=y1).contains(&c[1]) { 0.0 } else { (c[1] - y0).abs().min((c[1] - y1).abs()) };
+        let d = (centre - 3.0).max(0.0);
         let found = f
             .iter()
             .find(|x| x["at"][0].as_f64().is_some_and(|x| (x - c[0]).abs() < 1e-6) && x["at"][1].as_f64().is_some_and(|y| (y - c[1]).abs() < 1e-6));
@@ -1712,6 +1714,63 @@ fn a_hole_near_a_bend_is_a_shop_finding_with_the_zone_distance() {
             assert!((found["value"].as_f64().unwrap_or(f64::NAN) - d).abs() < 1e-6, "{found}");
         }
     }
+}
+
+/// The shops measure from the hole's rim: a 4 mm hole 5 mm (centre) from the plate's edge is 3 mm
+/// from it, under the generic 4 mm, though its centre is past 4 mm; a hole 30 mm in is fine.
+#[test]
+fn a_hole_is_measured_from_its_rim_to_the_edge() {
+    let mut s = plate();
+    run(&mut s, "solid.hole", json!({"position": [5, 30, T], "diameter": 4}));
+    run(&mut s, "solid.hole", json!({"position": [50, 30, T], "diameter": 4}));
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "generic"}));
+    let f = shop_findings(&reply, "hole.to_edge");
+    assert_eq!(f.len(), 1, "{reply}");
+    assert!((f[0]["value"].as_f64().unwrap_or(f64::NAN) - 3.0).abs() < 1e-6, "{}", f[0]);
+    assert_eq!(f[0]["limit"].as_f64(), Some(4.0));
+    assert!(f[0]["message"].as_str().unwrap_or("").contains("has its rim 3 mm from the nearest edge"), "{}", f[0]);
+}
+
+/// A perforation field's holes are not measured for spacing: the two spacing rules say so, and the
+/// diameter rule is still looked at.
+#[test]
+fn a_perforation_is_said_not_to_be_measured_for_spacing() {
+    let mut s = plate();
+    run(&mut s, "sheet.perforate", json!({"diameter": "2", "pitch": "10", "margin": "5", "pattern": "square"}));
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "generic"}));
+    let why = |rule: &str| {
+        reply["not_checked"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|n| n["rule"] == rule)
+            .map(|n| n["why"].as_str().unwrap_or("").to_string())
+            .collect::<Vec<_>>()
+    };
+    for rule in ["hole.to_edge", "hole.to_bend"] {
+        assert!(why(rule).iter().any(|w| w.contains("perforation") && w.contains("spacing")), "{rule}: {reply}");
+    }
+    assert!(why("hole.min_diameter").iter().all(|w| !w.contains("perforation")), "{reply}");
+}
+
+/// A thread of another body is not the sheet's: with a profile that wants threads modelled, a
+/// listed (cosmetic) thread in a solid block beside the sheet is no finding of the sheet's check,
+/// and one in the sheet is.
+#[test]
+fn a_thread_of_another_body_is_not_the_sheets() {
+    let mut s = plate();
+    run(&mut s, "solid.box", json!({"corner": [200, 0, 0], "length": 20, "width": 20, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.hole", json!({"position": [210, 10, 20], "thread": "M4", "depth": 8, "name": "Tapped"}));
+    let profile = json!({"name": "Mine", "rules": [{"id": "thread.modelling", "wanted": "modelled",
+        "sources": [{"url": "https://example.com/rules", "read": "2026-11-25", "says": "threads are modelled"}]}]});
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": profile.clone()}));
+    assert!(shop_findings(&reply, "thread.modelling").is_empty(), "the block's thread: {reply}");
+    run(&mut s, "solid.hole", json!({"position": [50, 30, T], "thread": "M4", "name": "InSheet"}));
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": profile}));
+    let f = shop_findings(&reply, "thread.modelling");
+    assert_eq!(f.len(), 1, "{reply}");
+    assert!(f[0]["message"].as_str().unwrap_or("").contains("InSheet"), "{}", f[0]);
 }
 
 /// A flange's reach is measured in the flat, square to the bend, from where the bend starts: the
@@ -1762,7 +1821,7 @@ fn the_flat_dxf_is_checked_for_the_options_it_would_be_exported_with() {
     // By default: two cut layers, the bend line apart from them.
     let single = check(&mut s, "sendcutsend", json!({}), "file.dxf_single_layer");
     assert_eq!(single.len(), 1, "{single:?}");
-    assert!(single[0].contains("on 2 layers (CUT and OUTLINE)") && single[0].contains("export with layers: single"), "{}", single[0]);
+    assert!(single[0].contains("on 2 layers (CUT and OUTLINE)") && single[0].contains("export with layers: cut"), "{}", single[0]);
     assert!(check(&mut s, "sendcutsend", json!({}), "file.dxf_bend_lines").is_empty());
     // With layers: single, the cut layer is one, and the bend line is on it too.
     let one = check(&mut s, "sendcutsend", json!({"layers": "single"}), "file.dxf_single_layer");
@@ -1770,7 +1829,7 @@ fn the_flat_dxf_is_checked_for_the_options_it_would_be_exported_with() {
     assert!(one[0].contains("the 1 bend line(s) are on the cut layer too"), "{}", one[0]);
     let lines = check(&mut s, "sendcutsend", json!({"layers": "single"}), "file.dxf_bend_lines");
     assert_eq!(lines.len(), 1, "{lines:?}");
-    assert!(lines[0].contains("export with layers: roles"), "{}", lines[0]);
+    assert!(lines[0].contains("export with layers: cut") && !lines[0].contains("layers: roles"), "{}", lines[0]);
     // Without the bend lines: one layer is met, and the bend line is missing.
     let off = json!({"layers": "single", "bend_lines": false});
     assert!(check(&mut s, "sendcutsend", off.clone(), "file.dxf_single_layer").is_empty());

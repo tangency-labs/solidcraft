@@ -92,7 +92,11 @@ fn check_shop(s: &mut Session, p: &Value) -> Result<Value> {
     sheet.flat_matches_body()?;
     let bodies: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
     let size = flat_size(&sheet);
-    let mut part = shop_check::part_of(&s.doc, &sheet, bodies, [size.x, size.y]);
+    // The features on this sheet's body: those that built or changed it, and the cosmetic threads
+    // listed on it (a Thread that changes no geometry).
+    let mut owned = s.body_features().remove(&sheet.body).unwrap_or_default();
+    owned.extend(s.model.state().threads.iter().filter(|t| t.body == sheet.body).map(|t| t.feature));
+    let mut part = shop_check::part_of(&s.doc, &sheet, bodies, [size.x, size.y], &owned);
     let (options, dxf) = dxf_checked(request.dxf.as_ref(), &profile);
     part.dxf = Some(dxf_facts(s, &sheet, &options)?);
     let report = shop_check::check(&profile, &part);

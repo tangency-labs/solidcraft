@@ -126,6 +126,89 @@ fn half_the_die_depends_on_the_material_and_is_measured_to_the_bend_line() {
     assert_eq!(rule(&run("sendcutsend", &part), "hole.to_bend")[0].limit, Some(8.0));
 }
 
+/// A bending table ends at its last gauge: a 9.525 mm sheet is past SendCutSend's 6.35 mm, so the
+/// bend and flange rules are not applied to it (and said so), not held to the last row.
+#[test]
+fn a_sheet_past_a_bending_table_is_not_checked_and_never_held_to_its_last_row() {
+    let mut part = bracket();
+    part.thickness = 9.525;
+    part.material = "Aluminium 5052-H32".into();
+    // 5 mm from the bend line: under the 20 mm of the table's last row.
+    part.holes = vec![hole([50.0, 5.0], 6.0, 30.0, 3.0)];
+    part.flanges = vec![flange(1, "left", 10.0)];
+    let r = run("sendcutsend", &part);
+    for id in ["hole.to_bend", "flange.min"] {
+        assert!(rule(&r, id).is_empty(), "{id}: {:?}", rule(&r, id));
+        assert!(r.not_checked.iter().any(|n| n.rule == id && n.why.contains("ends at 6.35 mm")), "{id}: {:?}", r.not_checked);
+    }
+    // At 6.35 mm the last row applies: 20 mm.
+    part.thickness = 6.35;
+    let f = rule(&run("sendcutsend", &part), "hole.to_bend").into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!((f.len(), f[0].limit), (1, Some(20.0)));
+    // A flat part with no bend has nothing to say about a bending table.
+    part.thickness = 9.525;
+    part.holes = vec![Hole { bends: Vec::new(), ..hole([50.0, 30.0], 6.0, 30.0, 0.0) }];
+    part.flanges.clear();
+    assert!(!run("sendcutsend", &part).not_checked.iter().any(|n| n.rule == "hole.to_bend" || n.rule == "flange.min"));
+}
+
+/// PCBWay's raw sheets are smaller for copper (600 by 1500 mm) and aluminium or titanium (1220 by
+/// 2440 mm) than its 3000 by 1500 mm: with a 5 mm margin at each edge, the cuttable areas are
+/// 590 by 1490 and 1210 by 2430 mm. A material that is none of them gets the general size and the
+/// report says the smaller sheets were not applied.
+#[test]
+fn pcbways_flat_size_goes_by_the_material() {
+    let mut part = bracket();
+    part.flat_size = [2000.0, 1000.0];
+    let size = |part: &Part| rule(&run("pcbway", part), "size.max_flat").into_iter().cloned().collect::<Vec<_>>();
+    part.material = "Copper C1100".into();
+    let f = size(&part);
+    // 2000 x 1000 mm is over both of the copper sheet's 1490 x 590.
+    assert_eq!(f.iter().map(|f| f.limit).collect::<Vec<_>>(), [Some(1490.0), Some(590.0)], "{f:?}");
+    assert!(f[0].message.contains("at most 1490 x 590 mm"), "{}", f[0].message);
+    // 1400 x 600 mm: the short side alone is over the copper sheet's 590.
+    part.flat_size = [1400.0, 600.0];
+    let f = size(&part);
+    assert_eq!(f.iter().map(|f| (f.value, f.limit)).collect::<Vec<_>>(), [(Some(600.0), Some(590.0))]);
+    part.flat_size = [1400.0, 500.0];
+    assert!(size(&part).is_empty());
+    part.material = "Aluminium 5052-H32".into();
+    part.flat_size = [2000.0, 1000.0];
+    assert!(size(&part).is_empty());
+    part.flat_size = [2440.0, 1000.0];
+    assert_eq!(size(&part)[0].limit, Some(2430.0));
+    part.flat_size = [2000.0, 1250.0];
+    assert_eq!(size(&part).len(), 1);
+    // Steel has no smaller sheet: the general 3000 x 1500 mm, nothing left unsaid.
+    part.material = "Mild steel".into();
+    part.flat_size = [2900.0, 1400.0];
+    let r = run("pcbway", &part);
+    assert!(rule(&r, "size.max_flat").is_empty());
+    assert!(r.not_checked.iter().any(|n| n.rule == "size.max_flat" && n.why.contains("smaller sheet for")), "{:?}", r.not_checked);
+    // The material is none of them when it is not given: the same note.
+    part.material.clear();
+    assert!(run("pcbway", &part).not_checked.iter().any(|n| n.rule == "size.max_flat"));
+    part.material = "Aluminium 5052-H32".into();
+    assert!(!run("pcbway", &part).not_checked.iter().any(|n| n.rule == "size.max_flat"));
+}
+
+/// SendCutSend's 5052 page gives the hole diameter (1 T) and edge (2 T) for 5052 only: another
+/// grade is held to the general half thickness, and a hole between the two is fine there.
+#[test]
+fn sendcutsends_5052_hole_values_are_for_5052() {
+    let mut part = bracket();
+    // 1.5 mm hole in 2 mm sheet: over half a thickness (1), under one (2).
+    part.holes = vec![hole([50.0, 30.0], 1.5, 30.0, 20.0)];
+    part.material = "Aluminium 5052-H32".into();
+    let f = rule(&run("sendcutsend", &part), "hole.min_diameter").into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!((f.len(), f[0].limit), (1, Some(2.0)));
+    part.material = "Stainless steel 304".into();
+    let r = run("sendcutsend", &part);
+    assert!(rule(&r, "hole.min_diameter").is_empty(), "{:?}", rule(&r, "hole.min_diameter"));
+    // The edge value has only the 5052 page: other grades get it with the gap said.
+    assert!(r.not_checked.iter().any(|n| n.rule == "hole.to_edge" && n.why.contains("304")), "{:?}", r.not_checked);
+}
+
 #[test]
 fn a_flat_over_the_shops_largest_sheet_is_a_finding() {
     let mut part = bracket();
@@ -137,7 +220,15 @@ fn a_flat_over_the_shops_largest_sheet_is_a_finding() {
     // PCBWay: 3000 by 1500 mm, in either way round.
     assert!(rule(&run("pcbway", &part), "size.max_flat").is_empty());
     part.flat_size = [1600.0, 3100.0];
-    assert_eq!(rule(&run("pcbway", &part), "size.max_flat").len(), 1);
+    // Both sides are over: a finding for each, with that side's size and limit.
+    let f = rule(&run("pcbway", &part), "size.max_flat").into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!(f.iter().map(|f| (f.value, f.limit)).collect::<Vec<_>>(), [(Some(3100.0), Some(3000.0)), (Some(1600.0), Some(1500.0))]);
+    // A flat that is 2000 x 1600 is over on its shorter side alone: 1600 against 1500, not 2000
+    // against 3000.
+    part.flat_size = [2000.0, 1600.0];
+    let f = rule(&run("pcbway", &part), "size.max_flat").into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!(f.iter().map(|f| (f.value, f.limit)).collect::<Vec<_>>(), [(Some(1600.0), Some(1500.0))]);
+    assert!(f[0].message.contains("its shorter side is 1600 mm, over 1500 mm"), "{}", f[0].message);
 }
 
 #[test]
@@ -260,8 +351,9 @@ fn cut_contours_on_two_layers_are_a_finding_that_names_the_export_option() {
     let r = run("sendcutsend", &filed(drawn()));
     let f = rule(&r, "file.dxf_single_layer");
     assert_eq!(f.len(), 1);
-    assert!(f[0].message.starts_with("the DXF would put the cut contours on 2 layers (CUT and OUTLINE); SendCutSend wants all cut geometry on one layer: export with layers: single"), "{}", f[0].message);
-    assert!(f[0].message.contains("bend_lines: false"), "{}", f[0].message);
+    assert!(f[0].message.starts_with("the DXF would put the cut contours on 2 layers (CUT and OUTLINE); SendCutSend wants all cut geometry on one layer: export with layers: cut (one cut layer, the bend lines on their own)"), "{}", f[0].message);
+    // SendCutSend also wants the bend lines, so the advice never turns them off.
+    assert!(!f[0].message.contains("bend_lines: false"), "{}", f[0].message);
     assert_eq!(f[0].severity, Severity::Error);
     assert!(f[0].sources.iter().all(|u| u.starts_with("https://")) && !f[0].sources.is_empty());
     let mut one = drawn();
@@ -321,7 +413,7 @@ fn bend_lines_are_wanted_when_the_part_has_bends() {
     single.bend_lines_with_cuts = true;
     let f = rule(&run("sendcutsend", &filed(single.clone())), "file.dxf_bend_lines").into_iter().cloned().collect::<Vec<_>>();
     assert_eq!(f.len(), 1);
-    assert!(f[0].message.contains("export with layers: roles"), "{}", f[0].message);
+    assert!(f[0].message.contains("export with layers: cut") && !f[0].message.contains("layers: roles"), "{}", f[0].message);
     // A shop that would cut the lines.
     let none = Profile::from_value(&serde_json::json!({
         "name": "Acme",

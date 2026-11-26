@@ -324,6 +324,36 @@
                   "says": "largest part 3000 by 1500 mm (capability table); no per-material sizes on this page"
                 }
               ]
+            },
+            {
+              "value": 2430.0,
+              "short_value": 1210.0,
+              "materials": [
+                "aluminium",
+                "aluminum",
+                "titanium"
+              ],
+              "sources": [
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/bending.html",
+                  "read": "2026-11-25",
+                  "says": "raw sheets of aluminium and titanium are at most 1220 by 2440 mm; cutting reserves 5 mm along every sheet edge, so the cuttable area is 1210 by 2430 mm"
+                }
+              ]
+            },
+            {
+              "value": 1490.0,
+              "short_value": 590.0,
+              "materials": [
+                "copper"
+              ],
+              "sources": [
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/bending.html",
+                  "read": "2026-11-25",
+                  "says": "raw copper sheets are at most 600 by 1500 mm; cutting reserves 5 mm along every sheet edge, so the cuttable area is 590 by 1490 mm"
+                }
+              ]
             }
           ]
         },
@@ -957,6 +987,9 @@
             {
               "value": 1.0,
               "relative_to": "thickness",
+              "materials": [
+                "5052"
+              ],
               "sources": [
                 {
                   "url": "https://sendcutsend.com/materials/5052-aluminum/",
@@ -974,6 +1007,9 @@
             {
               "value": 2.0,
               "relative_to": "thickness",
+              "materials": [
+                "5052"
+              ],
               "sources": [
                 {
                   "url": "https://sendcutsend.com/materials/5052-aluminum/",

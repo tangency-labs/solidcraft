@@ -23,9 +23,9 @@ pub struct BendGap {
     pub radius: f64,
     /// The hole's centre is inside the bend.
     pub inside: bool,
-    /// The distance to where the bend starts (mm); 0 inside the bend.
+    /// The distance from the hole's rim to where the bend starts (mm); 0 when the rim reaches it.
     pub from_start: f64,
-    /// The distance to the bend's centre line (mm).
+    /// The distance from the hole's rim to the bend's centre line (mm); 0 when the rim reaches it.
     pub from_line: f64,
 }
 
@@ -34,7 +34,7 @@ pub struct BendGap {
 pub struct Hole {
     pub at: [f64; 2],
     pub diameter: f64,
-    /// The distance to the nearest edge, cut-out or other hole (mm).
+    /// The distance from the hole's rim to the nearest edge, cut-out or other hole (mm).
     pub edge: f64,
     pub bends: Vec<BendGap>,
 }
@@ -133,7 +133,11 @@ pub struct Part {
 
 /// Reads `sheet` of `doc` for the rules: `bodies` are all the design's bodies and `flat_size` the
 /// flat's bounding box.
-pub fn part_of(doc: &Document, sheet: &SurfaceSheet, bodies: Vec<String>, flat_size: [f64; 2]) -> Part {
+///
+/// `owned` are the features the evaluation put on the sheet's body: those that built or changed
+/// it (`Session::body_features`) and the cosmetic threads listed on it. A threaded hole or a thread
+/// of another body is that body's, not the sheet's.
+pub fn part_of(doc: &Document, sheet: &SurfaceSheet, bodies: Vec<String>, flat_size: [f64; 2], owned: &[u64]) -> Part {
     // The flat as it is read, the way a flat pattern is shown.
     let sk = sheet.shown();
     let mut part = Part {
@@ -153,13 +157,21 @@ pub fn part_of(doc: &Document, sheet: &SurfaceSheet, bodies: Vec<String>, flat_s
             };
             let near = clearance(&sk, region, hole, c);
             part.free_form |= near.free_form;
+            // The shops measure from the hole's rim; `clearance` measures from its centre.
+            let rim = |d: f64| (d - r).max(0.0);
             let bends = near
                 .bends
                 .iter()
                 .enumerate()
-                .map(|(i, b)| BendGap { number: i + 1, radius: b.radius, inside: b.inside, from_start: b.from_start, from_line: b.from_line })
+                .map(|(i, b)| BendGap {
+                    number: i + 1,
+                    radius: b.radius,
+                    inside: b.inside,
+                    from_start: rim(b.from_start),
+                    from_line: rim(b.from_line),
+                })
                 .collect();
-            part.holes.push(Hole { at: [c.x, c.y], diameter: 2.0 * r, edge: near.edge, bends });
+            part.holes.push(Hole { at: [c.x, c.y], diameter: 2.0 * r, edge: rim(near.edge), bends });
         }
     }
     part.hardware = sk
@@ -175,6 +187,9 @@ pub fn part_of(doc: &Document, sheet: &SurfaceSheet, bodies: Vec<String>, flat_s
             FeatureKind::Thread { modeled, .. } => *modeled,
             _ => continue,
         };
+        if !owned.contains(&f.id) {
+            continue;
+        }
         part.threads.push(ThreadFact { feature: f.id, name: f.name.clone(), modelled });
     }
     part
@@ -255,11 +270,21 @@ pub struct Report {
     pub not_checked: Vec<NotChecked>,
 }
 
+/// What the shop's other file rules want, so that the advice one rule gives does not break another.
+#[derive(Clone, Copy)]
+struct FileWants {
+    /// All cut geometry on one layer (`file.dxf_single_layer`).
+    single_layer: bool,
+    /// A line at each bend (`file.dxf_bend_lines`, not `absent`).
+    bend_lines: bool,
+}
+
 struct Ctx<'a> {
     shop: &'a str,
     part: &'a Part,
     rule: &'a Rule,
     severity: Severity,
+    wants: FileWants,
 }
 
 impl Ctx<'_> {
@@ -315,6 +340,22 @@ fn unmatched(r: &mut Report, ctx: &Ctx<'_>) {
     not_checked(r, ctx.rule.id, format!("the sheet rule's material ({m}) is not one {} names, so every value it gives was applied", ctx.shop));
 }
 
+/// Lists in `r` each of `limits` whose table of steps ends before the sheet's thickness: that
+/// value was not applied, and the rule was not looked at for it.
+fn past_tables(r: &mut Report, ctx: &Ctx<'_>, limits: &[&Limit]) {
+    let t = ctx.part.thickness;
+    for l in limits {
+        if let Some(end) = l.table_end().filter(|end| t > end + 1e-9) {
+            let who = if l.materials.is_empty() { "any material".to_string() } else { l.materials.join(", ") };
+            not_checked(
+                r,
+                ctx.rule.id,
+                format!("{}'s table for {who} ends at {} mm and the sheet is {} mm thick, so that value was not applied", ctx.shop, mm(end), mm(t)),
+            );
+        }
+    }
+}
+
 fn most(values: impl Iterator<Item = f64>) -> Option<f64> {
     values.fold(None, |a: Option<f64>, v| Some(a.map_or(v, |x| x.max(v))))
 }
@@ -327,6 +368,10 @@ fn least(values: impl Iterator<Item = f64>) -> Option<f64> {
 /// order of the part's holes.
 pub fn check(profile: &Profile, part: &Part) -> Report {
     let mut r = Report::default();
+    let wants = FileWants {
+        single_layer: profile.rule(RuleId::DxfSingleLayer).is_some(),
+        bend_lines: profile.rule(RuleId::DxfBendLines).is_some_and(|b| b.bend_lines.unwrap_or(BendLines::Present) == BendLines::Present),
+    };
     for &id in RuleId::ALL {
         let Some(rule) = profile.rule(id) else {
             not_checked(&mut r, id, format!("{}'s pages give no value for it", profile.name));
@@ -339,7 +384,7 @@ pub fn check(profile: &Profile, part: &Part) -> Report {
         }
         r.checked.push(id.as_str().to_string());
         let severity = if rule.disagreement { Severity::Warning } else { Severity::Error };
-        let ctx = Ctx { shop: &profile.name, part, rule, severity };
+        let ctx = Ctx { shop: &profile.name, part, rule, severity, wants };
         match id {
             RuleId::OneBody => one_body(&ctx, &mut r),
             RuleId::UniformThickness => uniform(&ctx, &mut r),
@@ -423,6 +468,19 @@ fn max_flat(ctx: &Ctx<'_>, r: &mut Report) {
     let (limits, matched) = applicable(&ctx.rule.limits, &ctx.part.material);
     if !matched {
         unmatched(r, ctx);
+    } else if ctx.rule.limits.iter().any(|l| !l.materials.is_empty())
+        && !ctx.rule.limits.iter().any(|l| !l.materials.is_empty() && names(&l.materials, &ctx.part.material))
+    {
+        // The shop gives smaller sheets for some materials; this one is none of them (or unknown),
+        // so only the sizes for any material were held against the flat.
+        let m = if ctx.part.material.is_empty() { "none given".to_string() } else { ctx.part.material.clone() };
+        let listed: Vec<&str> = ctx.rule.limits.iter().flat_map(|l| l.materials.iter().map(String::as_str)).collect();
+        let why = format!(
+            "the sheet rule's material ({m}) is not one of those {} gives a smaller sheet for ({}), so only its size for any material was applied; a flat that fits only a larger sheet was not ruled out",
+            ctx.shop,
+            listed.join(", ")
+        );
+        not_checked(r, ctx.rule.id, why);
     }
     let [x, y] = ctx.part.flat_size;
     let (long, short) = if x >= y { (x, y) } else { (y, x) };
@@ -435,10 +493,18 @@ fn max_flat(ctx: &Ctx<'_>, r: &mut Report) {
             Some(s) => format!("{} x {} mm", mm(long_max.unwrap_or(f64::INFINITY)), mm(s)),
             None => format!("{} mm long", mm(long_max.unwrap_or(f64::INFINITY))),
         };
-        let mut f = ctx.finding(format!("the flat is {} x {} mm; {} takes at most {size}{}", mm(long), mm(short), ctx.who(), ctx.note()));
-        f.value = Some(long);
-        f.limit = long_max;
-        r.findings.push(f);
+        // One finding for each side that is over, with that side's size and limit.
+        for (over, which, value, limit) in [(long_over, "longer", long, long_max), (short_over, "shorter", short, short_max)] {
+            if !over {
+                continue;
+            }
+            let over_by = limit.map_or(String::new(), |m| format!(": its {which} side is {} mm, over {} mm", mm(value), mm(m)));
+            let mut f =
+                ctx.finding(format!("the flat is {} x {} mm; {} takes at most {size}{over_by}{}", mm(long), mm(short), ctx.who(), ctx.note()));
+            f.value = Some(value);
+            f.limit = limit;
+            r.findings.push(f);
+        }
     }
 }
 
@@ -449,6 +515,7 @@ fn strictest(ctx: &Ctx<'_>, r: &mut Report) -> Option<f64> {
     if !matched {
         unmatched(r, ctx);
     }
+    past_tables(r, ctx, &limits);
     most(limits.iter().filter_map(|l| l.needed(ctx.part.thickness, 0.0)))
 }
 
@@ -456,6 +523,18 @@ fn cutouts_note(ctx: &Ctx<'_>, r: &mut Report) {
     let n = ctx.part.cutouts;
     if n > 0 {
         let why = format!("{n} cut-out(s) that are not round were not measured: the rule is checked for round holes only");
+        not_checked(r, ctx.rule.id, why);
+    }
+}
+
+/// The spacing rules look at round holes of the flat; a perforation field's holes are laid out
+/// from its grid and the kernel gives no spacing for them, so say they were not looked at.
+fn perforation_note(ctx: &Ctx<'_>, r: &mut Report) {
+    let n = ctx.part.perforations.len();
+    if n > 0 {
+        let why = format!(
+            "the holes of {n} perforation field(s) were not measured: only their diameter is checked, not their spacing to an edge, a bend or each other"
+        );
         not_checked(r, ctx.rule.id, why);
     }
 }
@@ -504,7 +583,7 @@ fn to_edge(ctx: &Ctx<'_>, r: &mut Report) {
     for h in &ctx.part.holes {
         if h.edge + 1e-9 < need {
             let message = format!(
-                "the hole at {} is {} mm from the nearest edge, cut-out or other hole; {} needs at least {} mm{}",
+                "the hole at {} has its rim {} mm from the nearest edge, cut-out or other hole; {} needs at least {} mm{}",
                 at_text(h.at),
                 mm(h.edge),
                 ctx.who(),
@@ -519,6 +598,7 @@ fn to_edge(ctx: &Ctx<'_>, r: &mut Report) {
         }
     }
     cutouts_note(ctx, r);
+    perforation_note(ctx, r);
     if ctx.part.free_form {
         not_checked(r, ctx.rule.id, "a free-form edge was not measured".to_string());
     }
@@ -530,6 +610,9 @@ fn to_bend(ctx: &Ctx<'_>, r: &mut Report) {
         unmatched(r, ctx);
     }
     let t = ctx.part.thickness;
+    if ctx.part.holes.iter().any(|h| !h.bends.is_empty()) {
+        past_tables(r, ctx, &limits);
+    }
     for h in &ctx.part.holes {
         // The bend and the limit the hole falls shortest of: (shortfall, need, distance, bend, how).
         let mut worst: Option<(f64, f64, f64, &BendGap, Measured)> = None;
@@ -557,7 +640,7 @@ fn to_bend(ctx: &Ctx<'_>, r: &mut Report) {
         } else {
             let to = if from == Measured::BendLine { "the bend line" } else { "where the bend starts" };
             format!(
-                "the hole at {} is {} mm from bend {} (to {to}); {} needs at least {} mm{}",
+                "the hole at {} has its rim {} mm from bend {} (to {to}); {} needs at least {} mm{}",
                 at_text(h.at),
                 mm(d),
                 b.number,
@@ -573,6 +656,7 @@ fn to_bend(ctx: &Ctx<'_>, r: &mut Report) {
         r.findings.push(f);
     }
     cutouts_note(ctx, r);
+    perforation_note(ctx, r);
     if ctx.part.free_form {
         not_checked(r, ctx.rule.id, "a free-form edge was not measured".to_string());
     }
@@ -584,6 +668,9 @@ fn flange_min(ctx: &Ctx<'_>, r: &mut Report) {
         unmatched(r, ctx);
     }
     let t = ctx.part.thickness;
+    if !ctx.part.flanges.is_empty() {
+        past_tables(r, ctx, &limits);
+    }
     for fl in &ctx.part.flanges {
         // The limit the flange falls shortest of: (shortfall, need, reach, how it is measured).
         let mut worst: Option<(f64, f64, f64, Measured)> = None;
@@ -630,14 +717,18 @@ fn layer_list(layers: &[String]) -> String {
 
 fn dxf_single_layer(ctx: &Ctx<'_>, r: &mut Report) {
     let Some(d) = &ctx.part.dxf else { return };
+    // A shop that wants a line at each bend and the cuts on one layer is met by layers: cut alone.
+    let lines_kept = ctx.wants.bend_lines && d.bends > 0;
     if d.cut_layers.len() > 1 {
-        let keep = if d.bend_lines > 0 {
-            " (with bend_lines: false as well, to keep the bend lines off it), or layers: cut to keep them on their own layer"
+        let fix = if lines_kept {
+            "layers: cut (one cut layer, the bend lines on their own)"
+        } else if d.bend_lines > 0 {
+            "layers: single (with bend_lines: false as well, to keep the bend lines off it), or layers: cut to keep them on their own layer"
         } else {
-            ""
+            "layers: single"
         };
         r.findings.push(ctx.finding(format!(
-            "the DXF would put the cut contours on {} layers ({}); {} wants all cut geometry on one layer: export with layers: single{keep}{}",
+            "the DXF would put the cut contours on {} layers ({}); {} wants all cut geometry on one layer: export with {fix}{}",
             d.cut_layers.len(),
             layer_list(&d.cut_layers),
             ctx.who(),
@@ -645,9 +736,14 @@ fn dxf_single_layer(ctx: &Ctx<'_>, r: &mut Report) {
         )));
     } else if d.bend_lines_with_cuts {
         r.findings.push(ctx.finding(format!(
-            "with layers: single the {} bend line(s) are on the cut layer too, where {} would cut them: export with bend_lines: false, or layers: cut to keep them on their own layer{}",
+            "with layers: single the {} bend line(s) are on the cut layer too, where {} would cut them: export with {}{}",
             d.bend_lines,
             ctx.who(),
+            if lines_kept {
+                "layers: cut to keep them on their own layer"
+            } else {
+                "bend_lines: false, or layers: cut to keep them on their own layer"
+            },
             ctx.note()
         )));
     }
@@ -679,16 +775,18 @@ fn dxf_bend_lines(ctx: &Ctx<'_>, r: &mut Report) {
         BendLines::Present => {
             if d.bends > 0 && d.bend_lines == 0 {
                 r.findings.push(ctx.finding(format!(
-                    "the DXF leaves out the {} bend line(s); {} wants a line at the centre of each bend in a flat file: export with bend_lines: true{}",
+                    "the DXF leaves out the {} bend line(s); {} wants a line at the centre of each bend in a flat file: export with bend_lines: true{}{}",
                     d.bends,
                     ctx.who(),
+                    if ctx.wants.single_layer && d.single_layer { " and layers: cut (one cut layer, the bend lines on their own)" } else { "" },
                     ctx.note()
                 )));
             } else if d.bend_lines_with_cuts {
                 r.findings.push(ctx.finding(format!(
-                    "with layers: single the {} bend line(s) are on the cut layer, not apart from the cuts; {} wants them marked as bends: export with layers: roles, or layers: cut for one cut layer{}",
+                    "with layers: single the {} bend line(s) are on the cut layer, not apart from the cuts; {} wants them marked as bends: export with {}{}",
                     d.bend_lines,
                     ctx.who(),
+                    if ctx.wants.single_layer { "layers: cut (one cut layer, the bend lines on their own)" } else { "layers: roles, or layers: cut for one cut layer" },
                     ctx.note()
                 )));
             }

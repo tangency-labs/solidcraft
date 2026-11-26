@@ -83,7 +83,8 @@ A **limit** is `{"value" or "steps", "relative_to"?, "plus_radius"?, "short_valu
   (`2` is 2 T). `plus_radius` adds a multiple of the nearest bend's inside radius (2 T + R is
   `value: 2`, `plus_radius: 1`).
 - `steps` is a list of `{"up_to_mm", "value"}`, in order of `up_to_mm`, for a value that goes by
-  thickness (a die width): the first step the sheet fits; a thicker sheet takes the last.
+  thickness (a die width): the first step the sheet fits. A thicker sheet is past the table: the
+  limit is not applied and the report lists the rule as not checked, never the last step carried on.
 - `short_value` (`size.max_flat` only): the most the shorter side may be; `value` is the longer's.
 - `from` (`hole.to_bend` and `flange.min`): `bend_start` (default: where the flat sheet ends and
   the bend begins, the most generous reading, so a finding is a real one) or `bend_line`.

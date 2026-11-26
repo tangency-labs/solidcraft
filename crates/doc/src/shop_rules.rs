@@ -192,7 +192,8 @@ pub struct Limit {
     #[serde(default)]
     pub value: Option<f64>,
     /// Or a value for each thickness range, in mm, in order of `up_to_mm`: the first step the
-    /// sheet fits is the value; a thicker sheet takes the last.
+    /// sheet fits is the value; a thicker sheet has none (the table ends there: never the last
+    /// step carried on past its range).
     #[serde(default)]
     pub steps: Vec<Step>,
     /// `size.max_flat` only: the most the shorter side may be (mm); `value` is the longer side's.
@@ -214,14 +215,20 @@ pub struct Limit {
 }
 
 impl Limit {
-    /// The limit for a sheet `thickness` thick whose nearest bend has inside radius `radius` (mm).
+    /// The limit for a sheet `thickness` thick whose nearest bend has inside radius `radius` (mm);
+    /// none for a thickness past the last step of a table ([`Limit::table_end`]).
     pub fn needed(&self, thickness: f64, radius: f64) -> Option<f64> {
         let base = match (self.value, self.steps.as_slice()) {
             (Some(v), []) => v * if self.relative_to == Some(Relative::Thickness) { thickness } else { 1.0 },
-            (None, steps) => steps.iter().find(|s| thickness <= s.up_to_mm + 1e-9).or(steps.last())?.value,
+            (None, steps) => steps.iter().find(|s| thickness <= s.up_to_mm + 1e-9)?.value,
             _ => return None,
         };
         Some(base + self.plus_radius.unwrap_or(0.0) * radius)
+    }
+
+    /// The thickest sheet (mm) a table of steps covers; none for a limit that is not a table.
+    pub fn table_end(&self) -> Option<f64> {
+        if self.value.is_some() { None } else { self.steps.last().map(|s| s.up_to_mm) }
     }
 
     /// Where a bend distance is measured from.

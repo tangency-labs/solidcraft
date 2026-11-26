@@ -40,9 +40,11 @@ fn a_limit_works_out_from_the_thickness_and_the_radius() {
     let pcb = profile("pcbway").unwrap().rule(RuleId::HoleToBend).unwrap();
     let needs: Vec<f64> = pcb.limits.iter().filter_map(|l| l.needed(2.0, 1.0)).collect();
     assert_eq!(needs, [4.0, 5.0]);
-    // Half a die: 6 mm up to 2.29 mm of 5052, 8 mm up to 3.18, and the last step for anything thicker.
+    // Half a die: 6 mm up to 2.29 mm of 5052, 8 mm up to 3.18, 20 mm up to the table's end at 6.35;
+    // a thicker sheet is past the table and has no value (the last step is not carried on).
     let scs = &profile("sendcutsend").unwrap().rule(RuleId::HoleToBend).unwrap().limits[0];
-    assert_eq!([2.0, 3.0, 50.0].map(|t| scs.needed(t, 0.0)), [Some(6.0), Some(8.0), Some(20.0)]);
+    assert_eq!([2.0, 3.0, 6.35, 9.525, 50.0].map(|t| scs.needed(t, 0.0)), [Some(6.0), Some(8.0), Some(20.0), None, None]);
+    assert_eq!(scs.table_end(), Some(6.35));
 }
 
 #[test]
