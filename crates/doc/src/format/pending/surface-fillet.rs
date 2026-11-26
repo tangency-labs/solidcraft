@@ -6,3 +6,8 @@
 //! A new feature type: older designs have none, so nothing is rewritten. The last release warns
 //! about the newer format number, cannot build the feature (it reports the unknown feature type)
 //! and keeps it when saving.
+//!
+//! A `SurfaceChamfer` feature (Surface Chamfer, #769) is the same with `distance` (a length
+//! expression) in place of `radius`, and optional `distance2` or `angle` (the second side of the
+//! bevel), `flip` (saved only when true: the other surface is the first). A new feature type, with
+//! the same effect on the last release.

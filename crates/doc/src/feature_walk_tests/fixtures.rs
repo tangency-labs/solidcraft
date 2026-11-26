@@ -246,6 +246,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             "surface_fillet",
             json!({"type": "surface_fillet", "a": {"body": "B", "point": o}, "b": {"body": "B", "point": o}, "radius": "sfil.radius"}),
         ),
+        (
+            "surface_chamfer",
+            json!({"type": "surface_chamfer", "a": {"body": "B", "point": o}, "b": {"body": "B", "point": o}, "distance": "schm.distance",
+                "distance2": "schm.distance2", "angle": "schm.angle"}),
+        ),
         // The Class-A surface family (surface.blend/boundary/match/fair).
         (
             "surface_blend",

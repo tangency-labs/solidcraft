@@ -462,6 +462,12 @@ surface_fillet
   inputs:
     Radius = sfil.radius (Length)
   expressions: sfil.radius
+surface_chamfer
+  inputs:
+    Distance = schm.distance (Length)
+    Distance 2 = schm.distance2 (Length)
+    Angle = schm.angle (Angle)
+  expressions: schm.distance, schm.distance2, schm.angle
 surface_blend
 surface_boundary
 surface_network

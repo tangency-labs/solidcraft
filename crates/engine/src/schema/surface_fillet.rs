@@ -10,7 +10,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 use super::check::whole;
-use super::types::{FeatureCommon, LengthExpr, Point3, feature_common};
+use super::types::{AngleExpr, FeatureCommon, LengthExpr, Point3, feature_common};
 
 /// One of the two faces to round between: a surface body and a point on its (one) face.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -77,4 +77,38 @@ impl<'de> Deserialize<'de> for FilletTrimParam {
             _ => Err(D::Error::custom(whole("`trim` must be both, first or none"))),
         }
     }
+}
+
+/// Bevel the seam between two surface bodies (`surface.chamfer`, #769): each is cut where the
+/// other meets it, keeping the side its point is on; the kept pieces are sewn into `a`'s body
+/// (`b`'s is then gone, with `trim` both) and the seam is bevelled `distance` back along each
+/// surface, or `distance` along the first and `distance2` along the second, or `distance` along
+/// the first at `angle` to it. Each body is one face. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SurfaceChamferParams {
+    /// The first face.
+    pub a: FilletFace,
+    /// The second face.
+    pub b: FilletFace,
+    /// How far back along the first surface the bevel reaches (along both, with neither
+    /// `distance2` nor `angle`).
+    pub distance: LengthExpr,
+    /// How far back along the second surface the bevel reaches. Not with `angle`.
+    #[serde(default)]
+    pub distance2: Option<LengthExpr>,
+    /// The angle the bevel makes with the first surface. Not with `distance2`.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
+    /// Swap which surface is the first (by default the one facing up most). Default: false.
+    #[serde(default)]
+    pub flip: Option<bool>,
+    /// What is left of the two surfaces, as for `surface.fillet`. Default: both.
+    #[serde(default)]
+    pub trim: Option<FilletTrimParam>,
+    /// Extend a surface that stops short of the other to meet it. Default: false.
+    #[serde(default)]
+    pub extend: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
 }

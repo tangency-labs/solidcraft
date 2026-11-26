@@ -2812,6 +2812,29 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         extend: bool,
     },
+    /// A chamfer between two surface bodies (#769): as [`FeatureKind::SurfaceFillet`], the two
+    /// surfaces cut each other where they meet and the seam between them is bevelled `distance`
+    /// back along each surface, or `distance` along the first and `distance2` along the second,
+    /// or `distance` along the first at `angle` to it. `flip` swaps which surface is the first (by
+    /// default the one facing up most). `trim` says what is left of the two surfaces.
+    SurfaceChamfer {
+        a: FaceAt,
+        b: FaceAt,
+        #[walk(length = "Distance")]
+        distance: Expr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Distance 2")]
+        distance2: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Angle")]
+        angle: Option<Expr>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        #[serde(default, skip_serializing_if = "FilletTrim::is_default")]
+        trim: FilletTrim,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        extend: bool,
+    },
     Move {
         bodies: Vec<BodyName>,
         #[walk(length = ["X distance", "Y distance", "Z distance"])]
@@ -3981,6 +4004,7 @@ impl FeatureKind {
             FeatureKind::Thicken { .. } => "ThickenFeature",
             FeatureKind::SurfaceTrim { .. } => "TrimFeature",
             FeatureKind::SurfaceFillet { .. } => "SurfaceFilletFeature",
+            FeatureKind::SurfaceChamfer { .. } => "SurfaceChamferFeature",
             FeatureKind::SurfaceExtend { .. } => "ExtendFeature",
             FeatureKind::SurfaceRuled { .. } => "RuledSurfaceFeature",
             FeatureKind::Unstitch { .. } => "UnstitchFeature",
@@ -4082,6 +4106,7 @@ impl FeatureKind {
             FeatureKind::SurfaceFair { .. } => "surface_fair",
             FeatureKind::SurfaceTrim { .. } => "surface_trim",
             FeatureKind::SurfaceFillet { .. } => "surface_fillet",
+            FeatureKind::SurfaceChamfer { .. } => "surface_chamfer",
             FeatureKind::Move { .. } => "move",
             FeatureKind::Import { .. } => "import",
             FeatureKind::MeshConvert { .. } => "mesh_convert",
@@ -4174,6 +4199,7 @@ impl FeatureKind {
             "ThickenFeature" => "thicken",
             "TrimFeature" => "surface_trim",
             "SurfaceFilletFeature" => "surface_fillet",
+            "SurfaceChamferFeature" => "surface_chamfer",
             "ExtendFeature" => "surface_extend",
             "RuledSurfaceFeature" => "surface_ruled",
             "UnstitchFeature" => "unstitch",
@@ -4274,6 +4300,7 @@ impl FeatureKind {
             FeatureKind::Thicken { .. } => "Thicken",
             FeatureKind::SurfaceTrim { .. } => "Trim",
             FeatureKind::SurfaceFillet { .. } => "SurfaceFillet",
+            FeatureKind::SurfaceChamfer { .. } => "SurfaceChamfer",
             FeatureKind::SurfaceExtend { .. } => "Extend",
             FeatureKind::SurfaceRuled { .. } => "RuledSurface",
             FeatureKind::Unstitch { .. } => "Unstitch",

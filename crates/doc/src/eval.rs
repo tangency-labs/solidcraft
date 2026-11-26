@@ -15476,6 +15476,7 @@ fn eval_feature_kind(
         | FeatureKind::Thicken { .. }
         | FeatureKind::SurfaceTrim { .. }
         | FeatureKind::SurfaceFillet { .. }
+        | FeatureKind::SurfaceChamfer { .. }
         | FeatureKind::SurfaceExtend { .. }
         | FeatureKind::SurfaceExtrude { .. }
         | FeatureKind::Unstitch { .. }

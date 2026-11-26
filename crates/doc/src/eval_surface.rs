@@ -90,7 +90,17 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             if !(r.is_finite() && r > 0.0) {
                 return Err(DocError::Invalid("Surface Fillet: the radius must be positive".into()));
             }
-            fillet_surfaces(st, f, a, b, r, *trim, *extend)
+            // As Fillet builds it, so the round's face is named after the two faces it replaces.
+            let round = |body: &kernel::Body, seams: &[Vec3]| Ok(kernel::fillet_removing(body, seams, r, kernel::FilletTurn::Mitre)?.0);
+            round_seam(st, f, [a, b], *trim, *extend, &round)
+        }
+        FeatureKind::SurfaceChamfer { a, b, distance, distance2, angle, flip, trim, extend } => {
+            let d = val(vals, distance, Kind::Length)?;
+            if !(d.is_finite() && d > 0.0) {
+                return Err(DocError::Invalid("Surface Chamfer: the distance must be positive".into()));
+            }
+            let bevel = |body: &kernel::Body, seams: &[Vec3]| super::chamfer_with(vals, body, seams, d, distance2, angle, *flip);
+            round_seam(st, f, [a, b], *trim, *extend, &bevel)
         }
         FeatureKind::SurfaceTrim { body, plane, tool, tool_body, keep, keep_more, curves, with, keep_with, stitch, extend } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
@@ -1048,12 +1058,20 @@ fn boundary_frames(
     Ok(out)
 }
 
-/// Surface Fillet: the two surfaces of `a` and `b` cut each other (each keeping the side its point
-/// is on) and sewn into one body, the seam between them rounded by `r`. With `trim` both, the
+/// Surface Fillet and Surface Chamfer: the two surfaces of `a` and `b` cut each other (each keeping
+/// the side its point is on) and sewn into one body, the seam between them rounded or bevelled by
+/// `round`. With `trim` both, the
 /// result takes the place of `a`'s body and `b`'s is gone. With `first`, `a`'s body is the cut-back
 /// `a` sewn to the round and `b`'s is as it was; with `none`, both are as they were and the round
 /// alone is a new surface body.
-fn fillet_surfaces(st: &mut ModelState, f: &Feature, a: &FaceAt, b: &FaceAt, r: f64, trim: FilletTrim, extend: bool) -> Result<()> {
+fn round_seam(
+    st: &mut ModelState,
+    f: &Feature,
+    [a, b]: [&FaceAt; 2],
+    trim: FilletTrim,
+    extend: bool,
+    round: &dyn Fn(&kernel::Body, &[Vec3]) -> Result<kernel::Body>,
+) -> Result<()> {
     let i = st.bodies.iter().position(|x| x.name == a.body.0).ok_or_else(|| DocError::Unknown(format!("body `{}`", a.body)))?;
     let before = (trim != FilletTrim::Both).then(|| st.clone());
     mutual_trim(st, i, &b.body.0, kernel::TrimKeep::Side(a.point.0), &[b.point.0], true, extend)?;
@@ -1061,15 +1079,16 @@ fn fillet_surfaces(st: &mut ModelState, f: &Feature, a: &FaceAt, b: &FaceAt, r: 
     // Each surface is one face and they are sewn along their seam: the edges two faces share.
     let seams: Vec<usize> = sewn.body.record().edges.iter().enumerate().filter(|(_, e)| e.uses.len() == 2).map(|(k, _)| k).collect();
     if seams.is_empty() {
-        return Err(DocError::Invalid("Surface Fillet: the two surfaces don't meet along an edge".into()));
+        return Err(DocError::Invalid("Surface Fillet and Chamfer: the two surfaces don't meet along an edge".into()));
     }
     let mut picks = Vec::with_capacity(seams.len());
     for k in seams {
-        let Some(p) = kernel::edge_middle(&sewn.body, k)? else { return Err(DocError::Invalid("Surface Fillet: a seam has no middle".into())) };
+        let Some(p) = kernel::edge_middle(&sewn.body, k)? else {
+            return Err(DocError::Invalid("Surface Fillet and Chamfer: a seam has no middle".into()));
+        };
         picks.push(p);
     }
-    // As Fillet builds it, so the round's face is named after the two faces it replaces.
-    let (rounded, _) = kernel::fillet_removing(&sewn.body, &picks, r, kernel::FilletTurn::Mitre)?;
+    let rounded = round(&sewn.body, &picks)?;
     // The round blends an edge this feature made (the seam), so the sewn body is a stage of the
     // feature: its faces and edges are named first, and the round is named after the faces beside it.
     let rounded = sewn.traced().then(rounded.with_preserved_planar_sources(&sewn.body)?);
