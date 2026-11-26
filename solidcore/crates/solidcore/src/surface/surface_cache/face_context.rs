@@ -16,6 +16,7 @@
 
 use core::fmt::{self, Debug};
 
+use crate::error::surface::SurfaceFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::intersect::point_class::PointClassification;
@@ -32,6 +33,11 @@ use crate::topology::{Brep, FaceId};
 pub trait FaceQueries<O>: Debug {
     /// Returns the face's 3D zone tolerance.
     fn face_zone_tol_3d(&self, face: O) -> Result<f64>;
+
+    /// Whether the face has loop uses ([`crate::topology::face::p4::has_loopuses`]):
+    /// a trimmed cache's point test classifies only on such a face, and keeps every
+    /// point on a face without loop uses.
+    fn face_has_loopuses(&self, face: O) -> Result<bool>;
 
     /// Classifies a UV point against a face, returning its class and optional object.
     fn face_point_classify(
@@ -170,6 +176,10 @@ impl<O: Copy + PartialEq> CacheFace<O> for MappedCacheFace<'_, O> {
         self.handles(self.inner.upward_loopuses()?)
     }
 
+    fn has_loopuses(&self) -> Result<bool> {
+        self.inner.has_loopuses()
+    }
+
     fn loopuse_edgeuses(&self, loopuse: O) -> Result<Vec<O>> {
         self.handles(self.inner.loopuse_edgeuses(self.entity(loopuse)?)?)
     }
@@ -299,6 +309,11 @@ impl<O: Copy + PartialEq> FaceQueries<O> for PreparedFaceQueries<'_, O> {
         crate::topology::face::p2::tolerance(self.brep, self.face)
     }
 
+    fn face_has_loopuses(&self, face: O) -> Result<bool> {
+        self.check_face(face)?;
+        crate::topology::face::p4::has_loopuses(self.brep, self.face)
+    }
+
     fn face_point_classify(
         &self,
         k: &Kernel,
@@ -381,7 +396,7 @@ fn face_surface_cache<O: Copy + PartialEq>(
         .face(face)?
         .surface
         .as_ref()
-        .ok_or_else(|| SolidError::surface_missing(OP, "the face's surface"))?
+        .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::FaceHasNoSurface))?
         .clone_for_evaluation()?;
     let mut mapped = MappedCacheFace::new(BrepCacheFace { b, f: face }, handle_of, entity_of)?;
     let mut cache = get_surface_cache_with_face(k, &surface, Some(surface_handle), &mut mapped)?;

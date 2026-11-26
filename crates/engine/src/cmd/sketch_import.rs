@@ -4,8 +4,8 @@ use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
 use serde_json::{Value, json};
-use solidcore_record::Vec2;
-use solidcraft_io::{AirfoilFormat, DxfEntity, DxfLayer, Geom2, MAX_AIRFOIL_BYTES, MAX_DRAWING_BYTES};
+use solidcore_record::{Seg2, Vec2};
+use solidcraft_io::{AirfoilFormat, DxfEntity, DxfLayer, Geom2, MAX_AIRFOIL_BYTES, MAX_DRAWING_BYTES, SvgShape};
 use solidcraft_sketch::{Analysis, ConstraintKind, CurveKind, LinkKind, LinkSource, Sketch};
 
 use super::CommandSpec;
@@ -14,7 +14,7 @@ use super::sketch_store;
 use crate::params::{bad, bool_, num, str_, vec2};
 use crate::schema::sketch_import::{
     AirfoilInserted, DrawingBoundsParams, DrawingBoundsResult, DrawingBox, DrawingInserted, DxfExported, ExportDxfParams, ExportDxfResult,
-    InsertAirfoilParams, InsertDxfParams, InsertSvgParams, SketchSolve,
+    ExportSvgParams, ExportSvgResult, InsertAirfoilParams, InsertDxfParams, InsertSvgParams, SketchSolve, SvgExported,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -24,6 +24,7 @@ const INSERT_SVG_CONTRACT: TypedContract<InsertSvgParams> = TypedContract::new()
 const INSERT_AIRFOIL_CONTRACT: TypedContract<InsertAirfoilParams> = TypedContract::new();
 const DRAWING_BOUNDS_CONTRACT: TypedContract<DrawingBoundsParams> = TypedContract::new();
 const EXPORT_DXF_CONTRACT: TypedContract<ExportDxfParams> = TypedContract::new();
+const EXPORT_SVG_CONTRACT: TypedContract<ExportSvgParams> = TypedContract::new();
 
 /// A command's reply as JSON, built from the type its output schema describes so the two can't
 /// drift apart.
@@ -37,13 +38,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch_dxf")
         .contract(&INSERT_DXF_CONTRACT)
         .output(output_schema_for::<DrawingInserted>)
-        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the size of the drawn geometry's bounds before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); fixed?: bool (a Fix constraint on every point the drawing adds, as sketch.constraint.fix puts one; a circle's or ellipse's radius stays free; default false); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the size of the drawn geometry's bounds before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); fixed?: bool (a Fix constraint on every point the drawing adds, as sketch.constraint.fix puts one; a circle's or ellipse's radius stays free; default false); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.insert_svg", "Insert SVG", crate::checked!("sketch.insert_svg", insert_svg))
         .at("SKETCH", "INSERT")
         .icon("svg")
         .contract(&INSERT_SVG_CONTRACT)
         .output(output_schema_for::<DrawingInserted>)
-        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); size_from?: \"geometry\" (default: width and height are the bounds of the drawn geometry) | \"viewbox\" (the SVG sheet: its viewBox, else its width and height; a drawing smaller than its sheet then comes out smaller than width or height say); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's (or sheet's) middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); fixed?: bool (every point it adds gets a Fix constraint, so the drawing stays where it is put); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); dpi?: the dots per inch the file's pixels are read at, 1 to 10000 (default 96; a file drawn at 72 dpi comes in at its drawn size with 72; lengths with a unit such as mm keep it); size_from?: \"geometry\" (default: width and height are the bounds of the drawn geometry) | \"viewbox\" (the SVG sheet: its viewBox, else its width and height; a drawing smaller than its sheet then comes out smaller than width or height say); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's (or sheet's) middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); fixed?: bool (every point it adds gets a Fix constraint, so the drawing stays where it is put); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.insert_airfoil", "Insert Airfoil", crate::checked!("sketch.insert_airfoil", insert_airfoil))
         .at("SKETCH", "INSERT")
         .icon("airfoil")
@@ -55,13 +56,19 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo().read_only()
         .contract(&DRAWING_BOUNDS_CONTRACT)
         .output(output_schema_for::<DrawingBoundsResult>)
-        .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); returns min, max, width and height of the drawn geometry in the file's own size, and for an SVG with a viewBox (or width and height) its sheet: {min, max, width, height}"),
+        .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); dpi?: SVG only, the dots per inch its pixels are read at, 1 to 10000 (default 96); returns min, max, width and height of the drawn geometry in the file's own size, how many drawn elements it has (`edges`, about what the insert adds curves for), and for an SVG with a viewBox (or width and height) its sheet: {min, max, width, height}"),
     CommandSpec::new("sketch.export_dxf", "Save As DXF", crate::checked!("sketch.export_dxf", export_dxf))
         .icon("sketch_dxf")
         .noundo()
         .contract(&EXPORT_DXF_CONTRACT)
         .output(output_schema_for::<ExportDxfResult>)
         .params("sketch?: id|name (default active); path?: file to write (else the DXF text is returned); units?: \"design\" | \"in\" | \"inch\" | \"mm\" | \"cm\" | \"m\" | \"ft\" (default mm); layer?: profile layer name (default \"0\"); layers?: \"single\" | \"roles\" (default \"single\": all on `layer`; \"roles\": outer on \"OUTLINE\", holes on \"CUT\"); join?: bool (default false: R12 LINE/ARC; true: closed loops as LWPOLYLINE with arc bulges)"),
+    CommandSpec::new("sketch.export_svg", "Save As SVG", crate::checked!("sketch.export_svg", export_svg))
+        .icon("svg")
+        .noundo()
+        .contract(&EXPORT_SVG_CONTRACT)
+        .output(output_schema_for::<ExportSvgResult>)
+        .params("sketch?: id|name (default active); path?: file to write (else the SVG text is returned); units?: \"mm\" | \"cm\" | \"in\" | \"inch\" (default mm). The file's width and height carry the unit and its viewBox is the same size without one, so it opens 1:1; the Y axis points down as SVG has it, so the picture is the sketch as seen. Each closed profile is one closed path with its holes as sub-paths; circles, arcs and lines stay themselves and other curves are line segments; construction curves are left out"),
 ];
 
 /// The sketch import command for a drawing file name, regardless of extension case.
@@ -280,10 +287,20 @@ type Drawing = (Vec<Geom2>, (Vec2, Vec2), String, Vec<String>);
 
 /// The drawing's geometry and the box around it; a drawing with none is an error that says why
 /// (#9641).
+/// The dots per inch an SVG's pixels are read at: `dpi`, else CSS's 96 (#20240).
+fn dpi_of(p: &Value, cmd: &str, svg: bool) -> Result<f64> {
+    let Some(v) = p.get("dpi").filter(|v| !v.is_null()) else { return Ok(solidcraft_io::SVG_DEFAULT_DPI) };
+    if !svg {
+        return Err(bad(cmd, "`dpi` is for SVG drawings; a DXF has no pixels"));
+    }
+    v.as_f64().filter(|d| (1.0..=10000.0).contains(d)).ok_or_else(|| bad(cmd, "`dpi` must be a number from 1 to 10000 (dots per inch)"))
+}
+
 fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<Drawing> {
     let text = source_text(p, cmd, svg)?;
+    let dpi = dpi_of(p, cmd, svg)?;
     let (geom, warnings) = if svg {
-        solidcraft_io::read_svg_drawing(&text).map(|d| (d.geometry, d.warnings.iter().map(ToString::to_string).collect()))
+        solidcraft_io::read_svg_drawing_at(&text, dpi).map(|d| (d.geometry, d.warnings.iter().map(ToString::to_string).collect()))
     } else {
         solidcraft_io::read_dxf(&text).map(|g| (g, Vec::new()))
     }
@@ -308,19 +325,134 @@ fn drawing_bounds(_s: &mut Session, p: &Value) -> Result<Value> {
         Some(f) => !f.eq_ignore_ascii_case("dxf"),
         None => !name_is_dxf,
     };
-    let (_, bounds, text, _) = read_drawing(p, cmd, svg)?;
+    let (geom, bounds, text, _) = read_drawing(p, cmd, svg)?;
     // Only an SVG names a sheet, and only when it says how big its sheet is.
-    let sheet = svg.then(|| solidcraft_io::svg_sheet(&text)).flatten().map(drawing_box);
-    reply(cmd, DrawingBoundsResult { drawing: drawing_box(bounds), sheet, param_warnings: Vec::new() })
+    let dpi = dpi_of(p, cmd, svg)?;
+    let sheet = svg.then(|| solidcraft_io::svg_sheet_at(&text, dpi)).flatten().map(drawing_box);
+    reply(cmd, DrawingBoundsResult { drawing: drawing_box(bounds), sheet, edges: geom.len(), param_warnings: Vec::new() })
+}
+
+/// The most a drawing may be simplified by, in mm: `simplify` is brought inside this.
+const MAX_SIMPLIFY_MM: f64 = 100.0;
+
+/// Why a drawing was not simplified as far as asked (a run too complex for the work budget):
+/// it is inserted as drawn, never coarser than the tolerance allows.
+fn simplify_short_note() -> &'static str {
+    "part of the drawing has too many edges to simplify within the time allowed; that part was inserted as drawn"
+}
+
+/// `geom` with runs of consecutive lines that meet end to end replaced by fewer lines following
+/// the same outline within `tol` (file units): no removed vertex lies further than `tol` from the
+/// lines kept, so no point of the outline moves by more than that. Every other entity is left
+/// as it is, and ends a run. The second value is false when the work budget ran out, when the
+/// run is kept as drawn.
+fn simplify_lines(geom: &[Geom2], tol: f64, join: f64) -> (Vec<Geom2>, bool) {
+    let mut out: Vec<Geom2> = Vec::with_capacity(geom.len());
+    if !(tol > 0.0 && tol.is_finite()) {
+        out.extend_from_slice(geom);
+        return (out, true);
+    }
+    let mut complete = true;
+    let mut run: Vec<Vec2> = Vec::new();
+    let flush = |run: &mut Vec<Vec2>, out: &mut Vec<Geom2>, complete: &mut bool| {
+        if run.len() >= 2 {
+            let (kept, done) = douglas_peucker(run, tol);
+            *complete &= done;
+            for pair in kept.windows(2) {
+                out.push(Geom2::Line(pair[0], pair[1]));
+            }
+        }
+        run.clear();
+    };
+    for item in geom {
+        match item {
+            Geom2::Line(a, b) => {
+                match run.last() {
+                    // The run goes on through the vertex shared with the line before it.
+                    Some(end) if end.dist(*a) <= join => {}
+                    // A new run: the line before it ended elsewhere (or there is none yet).
+                    None => {}
+                    Some(_) => flush(&mut run, &mut out, &mut complete),
+                }
+                if run.is_empty() {
+                    run.push(*a);
+                }
+                run.push(*b);
+            }
+            other => {
+                flush(&mut run, &mut out, &mut complete);
+                out.push(other.clone());
+            }
+        }
+    }
+    flush(&mut run, &mut out, &mut complete);
+    (out, complete)
+}
+
+/// The points of `points` that keep their outline within `tol`: Douglas-Peucker on a stack (no
+/// recursion, so a drawing of a million vertices cannot overflow it), with a work budget so one
+/// cannot hold an import for long. Its ends are always kept. When the budget runs out, the run
+/// is kept as drawn (never a coarser outline than asked for) and the second value is false.
+fn douglas_peucker(points: &[Vec2], tol: f64) -> (Vec<Vec2>, bool) {
+    let n = points.len();
+    if n <= 2 {
+        return (points.to_vec(), true);
+    }
+    let mut keep = vec![false; n];
+    keep[0] = true;
+    keep[n - 1] = true;
+    let mut stack = vec![(0usize, n - 1)];
+    let budget = n.saturating_mul(64).saturating_add(100_000);
+    let mut work = 0usize;
+    let mut complete = true;
+    while let Some((i, j)) = stack.pop() {
+        if j <= i + 1 {
+            continue;
+        }
+        let (a, b) = (points[i], points[j]);
+        let mut farthest = 0.0;
+        let mut at = i;
+        for (k, q) in points.iter().enumerate().take(j).skip(i + 1) {
+            work += 1;
+            let d = point_segment_distance(*q, a, b);
+            if d > farthest {
+                farthest = d;
+                at = k;
+            }
+        }
+        if farthest > tol {
+            keep[at] = true;
+            stack.push((i, at));
+            stack.push((at, j));
+        }
+        if work > budget {
+            keep.iter_mut().for_each(|k| *k = true);
+            complete = false;
+            break;
+        }
+    }
+    let kept: Vec<Vec2> = points.iter().zip(&keep).filter(|(_, kept)| **kept).map(|(p, _)| *p).collect();
+    (kept, complete)
+}
+
+/// The distance from `p` to the segment `a`–`b` (its nearest point, not its line's): the
+/// projection and the nearest point are the geometry layer's ([`Seg2Geom::closest_param`]).
+fn point_segment_distance(p: Vec2, a: Vec2, b: Vec2) -> f64 {
+    let segment = Seg2::Line { a, b };
+    segment.point_at(segment.closest_param(p)).dist(p)
 }
 
 fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
-    let (geom, (lo, hi), text, warnings) = read_drawing(p, cmd, svg)?;
+    let (geom, (lo, hi), text, mut warnings) = read_drawing(p, cmd, svg)?;
+    // The drawing's own span, for `simplify`'s cap: `size_from` below may replace `lo` and `hi`
+    // with the SVG's sheet, which is not what is simplified.
+    let drawing_span = (hi.x - lo.x).max(hi.y - lo.y);
     // What `width`, `height` and `align: center` refer to: the drawn geometry, or the SVG sheet.
     let (lo, hi) = match str_(p, "size_from") {
         None | Some("geometry") => (lo, hi),
         Some("viewbox") if !svg => return Err(bad(cmd, "`size_from: viewbox` is for SVG drawings; a DXF has no sheet")),
-        Some("viewbox") => solidcraft_io::svg_sheet(&text).ok_or_else(|| bad(cmd, "the SVG has no viewBox or width and height to size by"))?,
+        Some("viewbox") => solidcraft_io::svg_sheet_at(&text, dpi_of(p, cmd, svg)?)
+            .ok_or_else(|| bad(cmd, "the SVG has no viewBox or width and height to size by"))?,
         Some(_) => return Err(bad(cmd, "`size_from` must be \"geometry\" or \"viewbox\"")),
     };
     // A size in millimetres wins over a factor; the aspect ratio is always kept.
@@ -357,10 +489,33 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
     }
     let tol = num(p, "tolerance").filter(|t| t.is_finite() && *t > 0.0).unwrap_or(1e-4).clamp(1e-9, 10.0);
     let f = placement(pivot, Vec2::new(k, k), angle, off);
+    // `simplify` is measured on the drawing as it is drawn, so it means the same at any size
+    // factor: the preview, imported at scale 1, then simplifies exactly as the confirmed command
+    // does. It is never more than a hundredth of the drawing's own span, so a drawing cannot be
+    // simplified away altogether.
+    let simplify = num(p, "simplify").filter(|s| *s > 0.0).map(|s| s.clamp(0.0, MAX_SIMPLIFY_MM)).unwrap_or(0.0);
+    let geom = if simplify > 0.0 {
+        let tol_file = simplify.min(drawing_span * 0.01);
+        let (simplified, complete) = simplify_lines(&geom, tol_file, tol / k);
+        if !complete {
+            warnings.push(simplify_short_note().into());
+        }
+        simplified
+    } else {
+        geom
+    };
     // A dense SVG/DXF (a floorplan) can yield far more entities than a sketch takes; refuse
-    // before adding so the message names the cap (#10874). Scale alone does not shrink the count.
-    if geom.len() > solidcraft_sketch::limits::max_points() {
-        return Err(solidcraft_sketch::SketchError::TooLarge.into());
+    // before adding so the message names the cap and what reduces it (#10874). Scale alone does
+    // not shrink the count; `simplify` does.
+    let limit = solidcraft_sketch::limits::max_points();
+    if geom.len() > limit {
+        // Not a parameter's fault: the drawing itself is too dense (and `simplify`, a parameter,
+        // is what brings it under the cap), so the message stands on its own.
+        return Err(EngineError::Other(format!(
+            "the drawing has {} curves, and a sketch takes at most {limit} points or curves: insert it with `simplify` (mm, the Simplify field) so the drawing is followed with fewer edges, split it across sketches or raise Preferences > Sketch > Largest sketch (up to {}); changing scale does not reduce how many curves it has",
+            geom.len(),
+            solidcraft_sketch::limits::CEILING_POINTS
+        )));
     }
     let fixed = bool_(p, "fixed").unwrap_or(false);
     // `sketch::edit`, but keeping the solve as a typed value for the reply.
@@ -399,6 +554,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
                 &mut sk,
                 LinkKind::Text,
                 LinkSource::Text { text, at, height, angle: own + angle, font: None, style: Default::default(), exprs: Default::default() },
+                None,
             )
             .is_ok()
             {
@@ -538,7 +694,7 @@ fn insert_airfoil(s: &mut Session, p: &Value) -> Result<Value> {
     // The merged points against the spline points that stand for them, and the spline against
     // the straight lines between its points: the kernel bounds both.
     let pieces: Vec<[[f64; 3]; 4]> = solidcraft_sketch::fit_beziers(&spline).iter().map(|piece| piece.map(|c| [c.x, c.y, 0.0])).collect();
-    let fit = solidcore_ops::curve_fit::fit_spline_bounds(&pieces, &near).map_err(|e| airfoil_error(p, e.to_string()))?;
+    let fit = solidcraft_kernel::curves::fit_spline_bounds(&pieces, &near).map_err(|e| airfoil_error(p, e.to_string()))?;
 
     let mut created = None;
     if s.active_sketch.is_none() {
@@ -812,6 +968,66 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
         return reply(cmd, ExportDxfResult { exported, param_warnings: Vec::new() });
     }
     reply(cmd, ExportDxfResult { exported: DxfExported::Text { dxf: text, entities: entity_count }, param_warnings: Vec::new() })
+}
+
+fn export_svg(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.export_svg";
+    let id = sketch_store::target(s, p, cmd)?;
+    let st = s.model.state();
+    let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
+    let sk = &ss.sketch;
+
+    if let Some(v) = p.get("units").filter(|v| !v.is_null())
+        && !v.is_string()
+    {
+        return Err(bad(cmd, "`units` must be a string"));
+    }
+    let (unit, per_mm) = match str_(p, "units") {
+        None => ("mm", 1.0),
+        Some(name) => solidcraft_io::svg_unit(name).ok_or_else(|| bad(cmd, format!("unsupported unit `{name}` (use \"mm\", \"cm\" or \"in\")")))?,
+    };
+    if let Some(v) = p.get("path").filter(|v| !v.is_null())
+        && !v.is_string()
+    {
+        return Err(bad(cmd, "`path` must be a string"));
+    }
+
+    // A profile is drawn as one closed contour with its holes. A profile that fills another's hole
+    // is that hole's inside, not a second outline, so it is left out as `sketch.export_dxf` leaves it.
+    let hole_keys: std::collections::HashSet<Vec<&str>> =
+        ss.profiles.iter().flat_map(|p| p.hole_curves.iter().map(|h| sorted_curve_ids(h))).collect();
+    let mut in_profile = std::collections::HashSet::new();
+    let mut shapes = Vec::new();
+    for prof in &ss.profiles {
+        for id in prof.outer_curves.iter().chain(prof.hole_curves.iter().flatten()) {
+            in_profile.insert(id.as_str());
+        }
+        if !hole_keys.contains(&sorted_curve_ids(&prof.outer_curves)) {
+            shapes.push(SvgShape::Region { outer: &prof.region.outer, holes: prof.region.holes.iter().collect() });
+        }
+    }
+    // Whatever is not part of a profile is drawn on its own, so nothing visible is lost.
+    for (i, c) in sk.curves.iter().enumerate() {
+        if c.construction || in_profile.contains(c.id.as_str()) {
+            continue;
+        }
+        let pt = |k: usize| sk.point(k).unwrap_or_default();
+        shapes.push(match &c.kind {
+            CurveKind::Line { a, b } => SvgShape::Line(pt(*a), pt(*b)),
+            CurveKind::Circle { c, r } => SvgShape::Circle(pt(*c), *r),
+            CurveKind::Arc { c, a, b } => SvgShape::Arc { c: pt(*c), a: pt(*a), b: pt(*b) },
+            _ => SvgShape::Polyline(sk.polyline(i)),
+        });
+    }
+    let elements = shapes.len();
+    let text = solidcraft_io::write_svg(&shapes, unit, per_mm).map_err(|e| bad(cmd, e.to_string()))?;
+
+    if let Some(path) = str_(p, "path").filter(|x| !x.trim().is_empty()) {
+        solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        let exported = SvgExported::Written { path: path.to_string(), elements };
+        return reply(cmd, ExportSvgResult { exported, param_warnings: Vec::new() });
+    }
+    reply(cmd, ExportSvgResult { exported: SvgExported::Text { svg: text, elements }, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]
@@ -1094,6 +1310,183 @@ EOF
         assert!(e.contains("at most 20000"), "{e}");
     }
 
+    /// A dense outline is simplified by the distance asked: the curves kept follow the drawing
+    /// within it, no removed vertex lying further away.
+    #[test]
+    fn simplify_follows_a_dense_outline_within_its_distance() {
+        let n = 2000;
+        let mut path = String::from("M 20 0");
+        // The file's own coordinates, and where they land: the root maps the viewBox "-20 0 40 20"
+        // to 40 x 20 mm with the y axis turned over.
+        let mut original = vec![Vec2::new(40.0, 0.0)];
+        for k in 1..=n {
+            let a = std::f64::consts::PI * k as f64 / n as f64;
+            let p = Vec2::new(20.0 * a.cos(), 20.0 * a.sin());
+            path.push_str(&format!(" L {:.6} {:.6}", p.x, p.y));
+            original.push(Vec2::new(p.x + 20.0, -p.y));
+        }
+        let svg =
+            format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40mm\" height=\"20mm\" viewBox=\"-20 0 40 20\"><path d=\"{path}\"/></svg>");
+        let mut s = Session::default();
+        let r = s.execute("sketch.insert_svg", &json!({"text": svg, "simplify": 0.05})).unwrap();
+        let curves = r["curves"].as_u64().unwrap() as usize;
+        assert!(curves > 1 && curves < n / 4, "most of the dense half circle's edges go: {curves} of {n}");
+        let id = s.active_sketch.unwrap();
+        let sk = super::sketch_store::read(&s.doc, id).unwrap();
+        let lines: Vec<(Vec2, Vec2)> = (0..sk.curves.len())
+            .filter_map(|i| match sk.shape(i)? {
+                solidcraft_sketch::Shape::Line { a, b } => Some((a, b)),
+                _ => None,
+            })
+            .collect();
+        let worst = original
+            .iter()
+            .map(|p| lines.iter().map(|(a, b)| super::point_segment_distance(*p, *a, *b)).fold(f64::INFINITY, f64::min))
+            .fold(0.0_f64, f64::max);
+        assert!(worst <= 0.05 + 1e-9, "no point of the drawing is further than 0.05 mm from the curves kept: {worst}");
+    }
+
+    /// A Simplify distance past a hundredth of the drawing is brought down to it, in the file's
+    /// own units however the drawing is scaled: 100 mm on a 40 mm drawing simplifies exactly as
+    /// 0.4 mm does.
+    #[test]
+    fn simplify_never_takes_more_than_a_hundredth_of_the_drawing() {
+        let n = 400;
+        let mut path = String::from("M 20 0");
+        for k in 1..=n {
+            let a = std::f64::consts::PI * k as f64 / n as f64;
+            path.push_str(&format!(" L {:.5} {:.5}", 20.0 * a.cos(), 20.0 * a.sin()));
+        }
+        let svg =
+            format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40mm\" height=\"20mm\" viewBox=\"-20 0 40 20\"><path d=\"{path}\"/></svg>");
+        let curves = |simplify: f64| {
+            let mut s = Session::default();
+            s.execute("sketch.insert_svg", &json!({"text": svg, "simplify": simplify})).unwrap()["curves"].as_u64().unwrap()
+        };
+        // 1% of the 40 mm span, and the same at any size factor: the window's preview imports at
+        // scale 1 and the confirmed command at the window's scale, and both must keep the same
+        // edges.
+        let at_clamp = curves(0.4);
+        assert_eq!(curves(100.0), at_clamp, "a distance past the clamp is the clamp");
+        assert_eq!(curves(500.0), at_clamp, "a distance past the command's own clamp is the clamp");
+        assert!(at_clamp > 1, "most of the outline still comes in: {at_clamp}");
+    }
+
+    /// `simplify` is measured on the drawing as drawn, so the window's preview (imported at
+    /// scale 1) and the confirmed command (at the window's scale) keep the same edges: the
+    /// confirmed geometry is exactly the preview scaled by that factor.
+    #[test]
+    fn simplify_keeps_the_same_edges_at_any_scale() {
+        let n = 1000;
+        let mut path = String::from("M 20 0");
+        for k in 1..=n {
+            let a = std::f64::consts::PI * k as f64 / n as f64;
+            path.push_str(&format!(" L {:.6} {:.6}", 20.0 * a.cos(), 20.0 * a.sin()));
+        }
+        let svg =
+            format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40mm\" height=\"20mm\" viewBox=\"-20 0 40 20\"><path d=\"{path}\"/></svg>");
+        // The kept outline at `scale`: how many curves, its box, and the first line's start point.
+        let kept = |scale: f64| {
+            let mut s = Session::default();
+            let r = s.execute("sketch.insert_svg", &json!({"text": svg, "simplify": 0.05, "scale": scale})).unwrap();
+            let id = s.active_sketch.unwrap();
+            let sk = super::sketch_store::read(&s.doc, id).unwrap();
+            let (mut lo, mut hi, mut first) = (Vec2::new(f64::MAX, f64::MAX), Vec2::new(f64::MIN, f64::MIN), None);
+            for i in 0..sk.curves.len() {
+                if let Some(solidcraft_sketch::Shape::Line { a, b }) = sk.shape(i) {
+                    for q in [a, b] {
+                        lo = Vec2::new(lo.x.min(q.x), lo.y.min(q.y));
+                        hi = Vec2::new(hi.x.max(q.x), hi.y.max(q.y));
+                        first.get_or_insert(q);
+                    }
+                }
+            }
+            (r["curves"].as_u64().unwrap(), lo, hi, first.unwrap_or_default())
+        };
+        let (one, lo1, hi1, start1) = kept(1.0);
+        let (two, lo2, hi2, start2) = kept(2.0);
+        assert!(one > 1, "the dense half circle keeps some edges: {one}");
+        assert_eq!(one, two, "the same edges are kept at twice the size");
+        let close = |a: Vec2, b: Vec2| (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9;
+        assert!(close(start2, start1 * 2.0), "the same first point, scaled: {start1:?} vs {start2:?}");
+        assert!(close(lo2, lo1 * 2.0) && close(hi2, hi1 * 2.0), "the kept outline is twice the size: {lo1:?}..{hi1:?} vs {lo2:?}..{hi2:?}");
+    }
+
+    /// An SVG with far more edges than the largest sketch takes is refused with its count and
+    /// what reduces it; the same drawing at a Simplify distance goes in, with few enough curves.
+    #[test]
+    fn simplify_takes_a_drawing_past_the_sketch_limit() {
+        let _turn = SKETCH_LIMIT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let n = 60_000;
+        let mut path = String::from("M 20 0");
+        for k in 1..=n {
+            let a = std::f64::consts::TAU * k as f64 / n as f64;
+            path.push_str(&format!(" L {:.6} {:.6}", 20.0 * a.cos(), 20.0 * a.sin()));
+        }
+        let svg =
+            format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40mm\" height=\"40mm\" viewBox=\"-20 -20 40 40\"><path d=\"{path}\"/></svg>");
+        let mut s = Session::default();
+        let refused = s.execute("sketch.insert_svg", &json!({"text": svg})).unwrap_err().to_string();
+        assert!(refused.contains(&format!("{n} curves")) && refused.contains("simplify"), "{refused}");
+        assert!(refused.contains("at most 20000") && refused.contains("Largest sketch") && refused.contains("scale"), "{refused}");
+        let r = s.execute("sketch.insert_svg", &json!({"text": svg, "simplify": 0.05})).unwrap();
+        let curves = r["curves"].as_u64().unwrap();
+        assert!(curves > 0 && curves <= 20_000, "the closed outline comes in with {curves} curves");
+    }
+
+    /// Simplifying moves lines only: an arc, a circle or a spline is drawn as it was, and lines
+    /// meeting it are not followed through it.
+    #[test]
+    fn simplify_leaves_arcs_circles_and_splines_as_drawn() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="40mm" height="20mm" viewBox="0 0 40 20">
+            <path d="M 0 10 L 5 10 L 5.01 10 L 10 10"/>
+            <path d="M 10 10 A 5 5 0 0 1 20 10"/>
+            <circle cx="30" cy="10" r="4"/>
+        </svg>"#;
+        let mut s = Session::default();
+        let r = s.execute("sketch.insert_svg", &json!({"text": svg, "simplify": 0.05})).unwrap();
+        assert_eq!(r["curves"], 3, "one line, one arc and one circle: {r}");
+        let kinds = s.execute("sketch.inspect", &json!({})).unwrap();
+        let types: Vec<&str> = kinds["curves"].as_array().unwrap().iter().filter_map(|c| c["type"].as_str()).collect();
+        assert_eq!(types.iter().filter(|t| **t == "line").count(), 1, "{types:?}");
+        assert_eq!(types.iter().filter(|t| **t == "arc").count(), 1, "{types:?}");
+        assert_eq!(types.iter().filter(|t| **t == "circle").count(), 1, "{types:?}");
+    }
+
+    /// The simplifier keeps runs of lines that meet end to end within the tolerance asked, and
+    /// leaves every other entity where it is.
+    #[test]
+    fn straight_runs_become_one_line_and_gaps_end_a_run() {
+        let line = |a: (f64, f64), b: (f64, f64)| Geom2::Line(Vec2::new(a.0, a.1), Vec2::new(b.0, b.1));
+        // Three lines along one straight run: one line from its first end to its last.
+        let (geom, complete) =
+            super::simplify_lines(&[line((0.0, 0.0), (1.0, 0.0)), line((1.0, 0.0), (2.0, 0.0)), line((2.0, 0.0), (3.0, 0.0))], 0.01, 1e-9);
+        assert!(complete, "a run of three lines is no work at all");
+        assert_eq!(geom, [line((0.0, 0.0), (3.0, 0.0))]);
+        // A gap ends the run: two lines that do not meet stay two.
+        let gap = [line((0.0, 0.0), (1.0, 0.0)), line((2.0, 0.0), (3.0, 0.0))];
+        assert_eq!(super::simplify_lines(&gap, 0.01, 1e-9).0, gap);
+        // Other geometry stays, and the lines before and after it are runs of their own.
+        let arc = Geom2::Arc { c: Vec2::new(5.0, 0.0), a: Vec2::new(4.0, 0.0), b: Vec2::new(6.0, 0.0) };
+        let mixed = [line((0.0, 0.0), (1.0, 0.0)), line((1.0, 0.0), (2.0, 0.0)), arc.clone()];
+        assert_eq!(super::simplify_lines(&mixed, 0.01, 1e-9).0, [line((0.0, 0.0), (2.0, 0.0)), arc]);
+    }
+
+    /// Douglas-Peucker drops a zigzag's middle only where the tolerance reaches past it, and
+    /// always keeps the run's ends.
+    #[test]
+    fn douglas_peucker_keeps_the_ends_and_what_the_tolerance_cannot_reach() {
+        let points = [Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.1), Vec2::new(2.0, 0.0), Vec2::new(3.0, 0.1), Vec2::new(4.0, 0.0)];
+        let (kept, complete) = super::douglas_peucker(&points, 0.05);
+        assert!(complete);
+        assert_eq!(kept, points, "the zigzag is further than 0.05 mm from its chords");
+        let (kept, complete) = super::douglas_peucker(&points, 0.2);
+        assert!(complete);
+        assert_eq!(kept, [points[0], points[4]], "within 0.2 mm the ends are the whole line");
+        let (kept, _) = super::douglas_peucker(&points[..2], 0.2);
+        assert_eq!(kept, &points[..2], "a two-point run keeps both ends");
+    }
+
     /// #9641: an SVG with nothing SolidCraft can draw (here only an embedded picture) is refused
     /// with a message naming the file and saying why, not "invalid parameters … no geometry"; a
     /// UTF-16 SVG file inserts.
@@ -1168,6 +1561,47 @@ EOF
         p.as_object_mut().unwrap().extend(params.as_object().unwrap().clone());
         s.execute("sketch.insert_svg", &p).unwrap();
         span(&s)
+    }
+
+    /// An SVG's pixels are read at 96 dpi unless `dpi` says otherwise (#20240): a file drawn at 72
+    /// dpi comes in at the size it was drawn at. A length with its own unit keeps it, and a DXF has
+    /// no pixels to read.
+    #[test]
+    fn an_svg_is_read_at_the_dpi_it_was_drawn_at() {
+        let size = |svg: &str, params: serde_json::Value| {
+            let mut s = Session::default();
+            s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+            let mut p = json!({"text": svg});
+            p.as_object_mut().unwrap().extend(params.as_object().unwrap().clone());
+            s.execute("sketch.insert_svg", &p).unwrap();
+            let b = span(&s);
+            (b.2 - b.0, b.3 - b.1)
+        };
+        let near = |a: (f64, f64), e: (f64, f64)| assert!((a.0 - e.0).abs() < 1e-6 && (a.1 - e.1).abs() < 1e-6, "{a:?} vs {e:?}");
+        let px = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 72"><rect x="0" y="0" width="72" height="36"/></svg>"#;
+        near(size(px, json!({})), (72.0 * 25.4 / 96.0, 36.0 * 25.4 / 96.0));
+        near(size(px, json!({"dpi": 96})), (72.0 * 25.4 / 96.0, 36.0 * 25.4 / 96.0));
+        near(size(px, json!({"dpi": 72})), (25.4, 12.7));
+        near(size(px, json!({"dpi": 72, "scale": 2})), (50.8, 25.4));
+        near(size(px, json!({"dpi": 72, "width": 10})), (10.0, 5.0));
+        // The sheet is read at the same dpi.
+        near(size(px, json!({"dpi": 72, "size_from": "viewbox"})), (25.4, 12.7));
+        // Measuring takes the same `dpi`, for the drawing and for its sheet.
+        let b = Session::default().execute("sketch.drawing_bounds", &json!({"text": px, "dpi": 72})).unwrap();
+        near((b["width"].as_f64().unwrap(), b["height"].as_f64().unwrap()), (25.4, 12.7));
+        near((b["sheet"]["width"].as_f64().unwrap(), b["sheet"]["height"].as_f64().unwrap()), (50.8, 25.4));
+        // A file with its own size in millimetres is not a matter of pixels.
+        let mm =
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" viewBox="0 0 200 100"><rect width="200" height="100"/></svg>"#;
+        near(size(mm, json!({"dpi": 72})), (100.0, 50.0));
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        for bad in [json!(0), json!(0.5), json!(20000), json!("72")] {
+            let e = s.execute("sketch.insert_svg", &json!({"text": px, "dpi": bad})).unwrap_err().to_string();
+            assert!(e.contains("dpi"), "{bad}: {e}");
+        }
+        let dxf = json!({"text": "0\nSECTION\n2\nENTITIES\n0\nLINE\n8\n0\n10\n0\n20\n0\n11\n10\n21\n0\n0\nENDSEC\n0\nEOF\n", "dpi": 72});
+        assert!(s.execute("sketch.insert_dxf", &dxf).unwrap_err().to_string().contains("DXF"));
     }
 
     /// A drawing can be given a size in millimetres (its aspect kept), turned about its origin and
@@ -1640,5 +2074,78 @@ EOF
                 assert!((len_in - 2.0).abs() < 1e-8 || (len_in - 3.0).abs() < 1e-8, "edge length {len_in}");
             }
         }
+    }
+
+    /// A 30 x 20 rectangle with a 4 mm circle in it, on the sketch being edited.
+    fn rectangle_with_a_round_hole() -> Session {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [30, 20]})).unwrap();
+        s.execute("sketch.circle.center", &json!({"center": [10, 10], "radius": 4})).unwrap();
+        s
+    }
+
+    #[test]
+    fn export_svg_is_one_closed_path_with_the_hole_at_its_real_size() {
+        let mut s = rectangle_with_a_round_hole();
+        let out = s.execute("sketch.export_svg", &json!({})).unwrap();
+        let svg = out["svg"].as_str().unwrap();
+        assert!(svg.contains("width=\"30mm\" height=\"20mm\" viewBox=\"0 0 30 20\""), "{svg}");
+        // The profile with its hole is one element: the outline and the hole are sub-paths of it.
+        assert_eq!(out["elements"], 1, "{out}");
+        let path = svg.lines().find(|l| l.starts_with("<path")).unwrap();
+        assert_eq!((path.matches('M').count(), path.matches('Z').count()), (2, 2), "{path}");
+    }
+
+    #[test]
+    fn export_svg_reads_back_into_a_sketch_with_the_same_profiles() {
+        let mut s = rectangle_with_a_round_hole();
+        let svg = s.execute("sketch.export_svg", &json!({})).unwrap()["svg"].as_str().unwrap().to_string();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        let r = s.execute("sketch.insert_svg", &json!({"text": svg, "at": [100, 0]})).unwrap();
+        let ss = s.model.state().sketch(r["sketch"].as_u64().unwrap()).unwrap().clone();
+        let mut areas: Vec<f64> = ss.profiles.iter().map(|p| p.area).collect();
+        areas.sort_by(|a, b| a.total_cmp(b));
+        assert_eq!(areas.len(), 2, "{areas:?}");
+        assert!((areas[1] - (600.0 - std::f64::consts::PI * 16.0)).abs() < 1e-3, "{areas:?}");
+    }
+
+    #[test]
+    fn export_svg_units_change_the_size_and_a_bad_one_is_refused() {
+        let mut s = rectangle_with_a_round_hole();
+        let cm = s.execute("sketch.export_svg", &json!({"units": "CM"})).unwrap();
+        assert!(cm["svg"].as_str().unwrap().contains("width=\"3cm\" height=\"2cm\" viewBox=\"0 0 3 2\""), "{cm}");
+        let inch = s.execute("sketch.export_svg", &json!({"units": "in"})).unwrap();
+        assert!(inch["svg"].as_str().unwrap().contains("width=\"1.1811in\""), "{inch}");
+        assert!(s.execute("sketch.export_svg", &json!({"units": "furlong"})).is_err());
+        assert!(s.execute("sketch.export_svg", &json!({"units": 5})).is_err());
+        assert!(s.execute("sketch.export_svg", &json!({"path": 5})).is_err());
+    }
+
+    #[test]
+    fn export_svg_draws_loose_curves_and_leaves_construction_ones_out() {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.line", &json!({"points": [[0, 0], [40, 10]]})).unwrap();
+        s.execute("sketch.line", &json!({"points": [[0, 0], [100, 50]], "construction": true})).unwrap();
+        let out = s.execute("sketch.export_svg", &json!({})).unwrap();
+        let svg = out["svg"].as_str().unwrap();
+        assert_eq!(out["elements"], 1, "{out}");
+        assert!(svg.contains("width=\"40mm\" height=\"10mm\""), "the construction line is not in the bounds: {svg}");
+        assert!(svg.contains("<path d=\"M0 10L40 0\"/>"), "{svg}");
+    }
+
+    #[test]
+    fn export_svg_of_an_empty_sketch_is_refused_and_a_path_writes_the_file() {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        assert!(s.execute("sketch.export_svg", &json!({})).is_err());
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [12, 8]})).unwrap();
+        let file = std::env::temp_dir().join(format!("solidcraft-export-svg-{}.svg", std::process::id()));
+        let out = s.execute("sketch.export_svg", &json!({"path": file.to_str().unwrap()})).unwrap();
+        assert_eq!(out["elements"], 1, "{out}");
+        let written = std::fs::read_to_string(&file).unwrap();
+        let _ = std::fs::remove_file(&file);
+        assert!(written.contains("width=\"12mm\" height=\"8mm\""), "{written}");
     }
 }

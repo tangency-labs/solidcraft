@@ -6,7 +6,7 @@
 use std::fmt::Write as _;
 
 use super::*;
-use crate::assembly::{OPEN_DOMAIN_SPAN, face_domain, onto_form, onto_knots, seams};
+use crate::assembly::{OPEN_DOMAIN_SPAN, face_domain, onto_form, onto_knots, onto_seam, seams};
 use crate::p21;
 use solidcore_ops::pcurve::TrimFace;
 use solidcore_record::brep::{Curve2, EdgeUseRef, Face, Loop, Region, Shell};
@@ -769,6 +769,50 @@ fn a_dome_whose_rim_runs_through_both_poles_of_its_sphere() {
     }
 }
 
+/// A rod along x capped at its far end by a half sphere whose sphere has another axis (#19570).
+/// With the sphere's axis z and its reference direction x, the cap is centred on the sphere's
+/// seam and its rim runs through both poles. The cap must read with the file's sense, so the
+/// solid has the volume of the rod plus the half sphere, whichever axis the sphere has.
+#[test]
+fn a_half_sphere_cap_centred_on_its_spheres_seam_keeps_its_sense() {
+    let (r, h) = (1.0, 25.0);
+    let volume = PI * r * r * h + 2.0 / 3.0 * PI * r * r * r;
+    let area = 2.0 * PI * r * h + 3.0 * PI * r * r;
+    let x = [1.0, 0.0, 0.0];
+    for (axis, reference) in [([0.0, 0.0, 1.0], x), ([0.0, 1.0, 0.0], x), ([0.0, 0.0, 1.0], [0.0, 1.0, 0.0]), (x, [0.0, 0.0, 1.0])] {
+        let mut w = W::default();
+        let (vb, vt) = (w.vertex([0.0, 0.0, r]), w.vertex([h, 0.0, r]));
+        let kb = w.circle([0.0; 3], x, [0.0, 0.0, 1.0], r);
+        let kt = w.circle([h, 0.0, 0.0], x, [0.0, 0.0, 1.0], r);
+        let bottom = w.add(format!("EDGE_CURVE('',#{vb},#{vb},#{kb},.T.)"));
+        let top = w.add(format!("EDGE_CURVE('',#{vt},#{vt},#{kt},.T.)"));
+        let side = w.line_edge((vb, [0.0, 0.0, r]), (vt, [h, 0.0, r]), true, 1.0);
+        let a = w.axis([0.0; 3], x, [0.0, 0.0, 1.0]);
+        let cyl = w.add(format!("CYLINDRICAL_SURFACE('',#{a},{})", real(r)));
+        let uses = [w.oe(bottom, true), w.oe(side, true), w.oe(top, false), w.oe(side, false)];
+        let bx = w.bound(&uses, true, true);
+        let wall = w.face(&[bx], cyl, true);
+        let plane = w.plane([0.0; 3], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let o = w.oe(bottom, false);
+        let bx = w.bound(&[o], true, true);
+        let base = w.face(&[bx], plane, true);
+        let a = w.axis([h, 0.0, 0.0], axis, reference);
+        let sphere = w.add(format!("SPHERICAL_SURFACE('',#{a},{})", real(r)));
+        let o = w.oe(top, true);
+        let bx = w.bound(&[o], true, true);
+        let cap = w.face(&[bx], sphere, true);
+        let shell = closed_shell(&mut w, &[wall, base, cap]);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('rod',#{shell})"));
+        let s = one_solid(&w.file(&[solid]));
+        assert!(!s.notes.iter().any(|n| n.contains("turned over")), "axis {axis:?} ref {reference:?}: {:?}", s.notes);
+        let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+        assert!(body.is_manifold_solid().unwrap());
+        let mass = body.mass_properties(1e-6).unwrap();
+        assert!((mass.volume - volume).abs() < 1e-3, "axis {axis:?} ref {reference:?}: {mass:?}, {volume} expected");
+        assert!((mass.area - area).abs() < 1e-3, "axis {axis:?} ref {reference:?}: {mass:?}, {area} expected");
+    }
+}
+
 /// An edge from vertex `va` counterclockwise about +z to vertex `vb` on the circle of radius `r`
 /// round the z axis at height `z`.
 fn arc_about_z(w: &mut W, (va, vb): (u64, u64), r: f64, z: f64) -> u64 {
@@ -1030,6 +1074,52 @@ fn rising_quarters(w: &mut W, r: f64, from: f64, z: f64, rise: f64, pieces: usiz
         weights.join(",")
     ));
     (curve, [at(0), at(2 * pieces)])
+}
+
+/// A cylinder strip between two rational-quadratic helices, 24 turns of pitch 1.25 mm
+/// and 0.5 mm apart. The context's 0.1 mm uncertainty is much coarser than the 0.001 mm
+/// pcurve construction tolerance. Counting at the source tolerance can miss the splits
+/// needed by the tighter fit; count and construct at the same tolerance instead.
+#[test]
+fn a_long_wound_rational_edge_with_coarse_accuracy_is_split_for_its_pcurve_fit() {
+    use crate::assembly::MAX_SPLINE_POINTS;
+    let mut w = W::default();
+    let (radius, rise, pieces) = (4.2, 1.25 / 4.0, 96);
+    let (low_curve, [low_start, low_end]) = rising_quarters(&mut w, radius, 0.0, 0.0, rise, pieces);
+    let (high_curve, [high_start, high_end]) = rising_quarters(&mut w, radius, 0.0, 0.5, rise, pieces);
+    let (ls, le, hs, he) = (w.vertex(low_start), w.vertex(low_end), w.vertex(high_start), w.vertex(high_end));
+    let low = w.add(format!("EDGE_CURVE('',#{ls},#{le},#{low_curve},.T.)"));
+    let high = w.add(format!("EDGE_CURVE('',#{hs},#{he},#{high_curve},.T.)"));
+    let start = w.line_edge((ls, low_start), (hs, high_start), true, 1.0);
+    let end = w.line_edge((le, low_end), (he, high_end), true, 1.0);
+    let axis = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let cylinder = w.add(format!("CYLINDRICAL_SURFACE('',#{axis},{})", real(radius)));
+    let uses = [(low, true), (end, true), (high, false), (start, false)].map(|(e, forward)| w.oe(e, forward));
+    let bound = w.bound(&uses, true, true);
+    let face = w.face(&[bound], cylinder, true);
+    let shell = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('wound strip',(#{shell}))"));
+    // one_solid asserts that import has no refusals and validates the complete record.
+    let s = one_solid(&w.file_with_uncertainty(&[model], 0.1));
+    assert!(s.sheet);
+    assert_eq!(s.brep.tolerance, 0.1);
+    assert_eq!(s.brep.faces.len(), 1);
+    assert!(s.notes.iter().any(|n| n.contains("edges of faces that wind round their axis split")), "{:?}", s.notes);
+    assert!(s.brep.edges.len() > 4, "the long helices need splitting at their construction tolerance");
+    assert!(s.brep.edges.iter().any(|e| matches!(e.curve, BCurve::RationalSpline { .. })));
+    let mut pcurves = 0;
+    for l in &s.brep.faces[0].loops {
+        let Loop::Edges { edges } = l else { panic!("edge loop") };
+        for u in edges {
+            let points = match &u.pcurve {
+                Curve2::Spline { points, .. } => points.len(),
+                Curve2::RationalSpline { homogeneous, .. } => homogeneous.len(),
+            };
+            assert!(points <= MAX_SPLINE_POINTS, "edge {}: {points} pcurve control points", u.edge);
+            pcurves += 1;
+        }
+    }
+    assert_eq!(pcurves, s.brep.edges.len(), "every split edge keeps its pcurve");
 }
 
 /// A thread's crest in a bore: one cylinder face (radius 5) from a circle at z = 0 up to a rim at
@@ -2300,6 +2390,241 @@ fn quarter_circle_spline(quarters: usize) -> Curve {
     }))
 }
 
+/// The seam of the last wall of #21379's swept tube, as its file writes it: a rational cubic
+/// (weights 1 up to rounding) 48 mm long, about 700 mm from the origin. Three of its points lie
+/// on a circle of radius 8.6 km, and the rest of it lies microns off that circle: it is no
+/// circle, and read as one it lay about 4 µm off its wall, which was then started anew a sliver
+/// off its seam. A
+/// rational quadratic quarter circle of radius 500 at the same distance is still its circle. Both
+/// stay so moved 50 m off: the bound is at the spline's own size, wherever it lies. A spline with
+/// a point that is not a number is no circle.
+#[test]
+fn a_nearly_straight_rational_spline_far_from_the_origin_is_not_a_circle() {
+    let moved = |b: &crate::geom::BSplineCurve, by: f64| crate::geom::BSplineCurve {
+        points: b.points.iter().map(|p| [p[0] + by, p[1], p[2]]).collect(),
+        ..b.clone()
+    };
+    let seam = crate::geom::BSplineCurve {
+        degree: 3,
+        points: vec![
+            [681.260037996487, 187.44692670357483, 52.85495796514432],
+            [680.9158873817419, 191.38065431391036, 54.27139725475507],
+            [680.2537941324069, 198.9485961621376, 56.9964316584237],
+            [679.3160225935635, 209.66758248669714, 60.856078497380125],
+            [678.5127273075279, 218.84917330359616, 64.16212726839862],
+            [677.8622207424097, 226.28433846458321, 66.83933124789313],
+            [677.4874017361843, 230.568439785698, 68.3819177764027],
+            [677.3222395706246, 232.45620871116463, 69.06165148653872],
+        ],
+        weights: Some(vec![1.0, 1.0, 1.0000000000000002, 0.9999999999999993, 1.0000000000000002, 0.9999999999999998, 1.0, 1.0]),
+        knots: vec![3.0, 3.262194489040001, 3.5044250097276883, 3.7144522474345854, 3.8741747496344305, 4.0],
+        multiplicities: vec![4, 1, 1, 1, 1, 4],
+        form: crate::geom::CurveForm::Unspecified,
+        closed: crate::geom::Logical::False,
+        self_intersect: crate::geom::Logical::Unknown,
+        knot_spec: crate::geom::KnotSpec::Unspecified,
+    };
+    let (r, o) = (500.0, [700.0, 200.0, 50.0]);
+    let arc = crate::geom::BSplineCurve {
+        degree: 2,
+        points: vec![[o[0] + r, o[1], o[2]], [o[0] + r, o[1] + r, o[2]], [o[0], o[1] + r, o[2]]],
+        weights: Some(vec![1.0, std::f64::consts::FRAC_1_SQRT_2, 1.0]),
+        knots: vec![0.0, 1.0],
+        multiplicities: vec![3, 3],
+        form: crate::geom::CurveForm::Unspecified,
+        closed: crate::geom::Logical::False,
+        self_intersect: crate::geom::Logical::Unknown,
+        knot_spec: crate::geom::KnotSpec::Unspecified,
+    };
+    for by in [0.0, 5e4] {
+        assert!(swept::spline_circle(&moved(&seam, by)).is_none(), "seam moved {by}");
+        let Some((Curve::Circle { position, radius }, swept)) = swept::spline_circle(&moved(&arc, by)) else {
+            panic!("a quarter circle moved {by} is a circle")
+        };
+        assert!((radius - r).abs() <= 1e-9 * r, "moved {by}: radius {radius}");
+        assert!((swept - std::f64::consts::FRAC_PI_2).abs() <= 1e-9, "moved {by}: swept {swept}");
+        let centre = [o[0] + by, o[1], o[2]];
+        assert!(position.origin.iter().zip(centre).all(|(a, b)| (a - b).abs() <= 1e-9 * r), "moved {by}: {:?}", position.origin);
+    }
+    let mut broken = arc.clone();
+    broken.points[1][2] = f64::NAN;
+    assert!(swept::spline_circle(&broken).is_none());
+}
+
+/// A straight edge of #20805's body, as SolidCraft's STEP export writes it: a rational cubic
+/// (weights 1 up to rounding) 3.2 mm long in the plane y = 9.5. It lies within 1e-9 of its size
+/// of a circle of radius about 8.8e8 mm through three of its points, but that arc bows out of
+/// its chord by less than a nanometre: read as that circle, the edge's NURBS form had a control
+/// point 1e9 mm out, and SMLib refused the face, so the body did not import. It stays a spline.
+/// A rational quadratic arc of 0.01 rad on a circle of radius 500 bows out by about 6 µm, and
+/// is still its circle.
+#[test]
+fn a_straight_rational_spline_within_reach_of_a_huge_circle_is_not_a_circle() {
+    let edge = crate::geom::BSplineCurve {
+        degree: 3,
+        points: vec![
+            [16.133668494811765, 9.5, 4.030554845216747],
+            [16.139917155358653, 9.5, 3.998557674207527],
+            [16.152412811677777, 9.5, 3.93457083163494],
+            [16.17115594164661, 9.5, 3.8385932073155997],
+            [16.18989959508731, 9.5, 3.742612681612636],
+            [16.214890770645724, 9.5, 3.6146405817892404],
+            [16.3648384186678, 9.499999999999998, 2.8468048370734045],
+            [16.521034038738428, 9.5, 2.04697515073184],
+            [16.677229505962494, 9.5, 1.2471462484944809],
+            [16.70846881885804, 9.5, 1.0871794216147013],
+            [16.733459628692405, 9.5, 0.9592089735993286],
+            [16.74595542658399, 9.5, 0.8952222206177156],
+            [16.75220388779743, 9.5, 0.8632255139657978],
+        ],
+        weights: Some(vec![
+            1.0,
+            1.0,
+            1.0000000000000002,
+            0.9999999999999999,
+            0.9999999999999998,
+            1.0000000000000002,
+            0.9999999999999982,
+            0.9999999999999997,
+            1.0,
+            0.9999999999999993,
+            1.0,
+            1.0,
+            1.0,
+        ]),
+        knots: vec![
+            1.0,
+            1.0303031031089829,
+            1.0606061639094815,
+            1.0909091782520413,
+            1.1212122050429691,
+            1.1818182528475165,
+            1.8181817601383314,
+            1.8787878080049896,
+            1.9393938500035603,
+            1.9696969063938021,
+            2.0,
+        ],
+        multiplicities: vec![4, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4],
+        form: crate::geom::CurveForm::Unspecified,
+        closed: crate::geom::Logical::False,
+        self_intersect: crate::geom::Logical::Unknown,
+        knot_spec: crate::geom::KnotSpec::Unspecified,
+    };
+    assert!(swept::spline_circle(&edge).is_none(), "{:?}", swept::spline_circle(&edge));
+    let (r, half) = (500.0, 0.005_f64);
+    let arc = crate::geom::BSplineCurve {
+        degree: 2,
+        points: vec![[r * half.cos(), -r * half.sin(), 0.0], [r / half.cos(), 0.0, 0.0], [r * half.cos(), r * half.sin(), 0.0]],
+        weights: Some(vec![1.0, half.cos(), 1.0]),
+        knots: vec![0.0, 1.0],
+        multiplicities: vec![3, 3],
+        form: crate::geom::CurveForm::Unspecified,
+        closed: crate::geom::Logical::False,
+        self_intersect: crate::geom::Logical::Unknown,
+        knot_spec: crate::geom::KnotSpec::Unspecified,
+    };
+    let Some((Curve::Circle { radius, .. }, swept)) = swept::spline_circle(&arc) else { panic!("a 0.01 rad arc is a circle") };
+    assert!((radius - r).abs() <= 1e-6 * r, "radius {radius}");
+    assert!((swept - 2.0 * half).abs() <= 1e-9, "swept {swept}");
+}
+
+/// A circle is accepted on the whole of the spline, not at sample points: a quarter circle with
+/// knots 0.1, 0.101, 0.102 and 0.103 inserted is still its circle, and with the one control
+/// point whose basis function lives on [0.1, 0.103] moved 1 mm out of the circle, or out of its
+/// plane, it is not. That point is zero at every one of the 65 samples k/64 (6/64 < 0.1 and
+/// 0.103 < 7/64), so the moved spline matches the circle at all of them and departs from it
+/// only between two of them.
+#[test]
+fn a_spline_that_departs_from_its_circle_between_the_samples_is_not_a_circle() {
+    let (r, o) = (500.0, [700.0, 200.0, 50.0]);
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let mut knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    let mut h: Vec<[f64; 4]> = vec![[o[0] + r, o[1], o[2], 1.0], [(o[0] + r) * w, (o[1] + r) * w, o[2] * w, w], [o[0], o[1] + r, o[2], 1.0]];
+    // Boehm's insertion of one knot into the degree 2 spline, on homogeneous points.
+    for t in [0.1, 0.101, 0.102, 0.103] {
+        let k = knots.iter().rposition(|u| *u <= t).unwrap();
+        let mut next = Vec::with_capacity(h.len() + 1);
+        for i in 0..=h.len() {
+            next.push(if i + 2 <= k {
+                h[i]
+            } else if i > k {
+                h[i - 1]
+            } else {
+                let a = (t - knots[i]) / (knots[i + 2] - knots[i]);
+                std::array::from_fn(|c| a * h[i][c] + (1.0 - a) * h[i - 1][c])
+            });
+        }
+        h = next;
+        knots.insert(k + 1, t);
+    }
+    let spline = |h: &[[f64; 4]]| crate::geom::BSplineCurve {
+        degree: 2,
+        points: h.iter().map(|q| [q[0] / q[3], q[1] / q[3], q[2] / q[3]]).collect(),
+        weights: Some(h.iter().map(|q| q[3]).collect()),
+        knots: vec![0.0, 0.1, 0.101, 0.102, 0.103, 1.0],
+        multiplicities: vec![3, 1, 1, 1, 1, 3],
+        form: crate::geom::CurveForm::Unspecified,
+        closed: crate::geom::Logical::False,
+        self_intersect: crate::geom::Logical::Unknown,
+        knot_spec: crate::geom::KnotSpec::Unspecified,
+    };
+    let circle = spline(&h);
+    let Some((Curve::Circle { radius, .. }, _)) = swept::spline_circle(&circle) else { panic!("the quarter circle with knots inserted is a circle") };
+    assert!((radius - r).abs() <= 1e-9 * r, "radius {radius}");
+    // Point 3's basis function is the one on knots 0.1 to 0.103.
+    assert_eq!(&knots[3..=6], &[0.1, 0.101, 0.102, 0.103]);
+    let q = h[3];
+    let p = [q[0] / q[3], q[1] / q[3], q[2] / q[3]];
+    let out = [p[0] - o[0], p[1] - o[1]];
+    let reach = out[0].hypot(out[1]);
+    for (name, by) in [("out of the circle", [out[0] / reach, out[1] / reach, 0.0]), ("out of its plane", [0.0, 0.0, 1.0])] {
+        let mut moved = h.clone();
+        moved[3] = [(p[0] + by[0]) * q[3], (p[1] + by[1]) * q[3], (p[2] + by[2]) * q[3], q[3]];
+        let moved = spline(&moved);
+        for k in 0..=64 {
+            let s = f64::from(k) / 64.0;
+            let (a, b) = (circle.point(s).unwrap(), moved.point(s).unwrap());
+            assert!(a.iter().zip(b).all(|(a, b)| (a - b).abs() <= 1e-12 * r), "{name}: sample {k} moved");
+        }
+        let (a, b) = (circle.point(0.1015).unwrap(), moved.point(0.1015).unwrap());
+        assert!(a.iter().zip(b).map(|(a, b)| (a - b) * (a - b)).sum::<f64>() > 0.25, "{name}: the spline departs between the samples");
+        assert!(swept::spline_circle(&moved).is_none(), "a spline moved {name} between the samples is a circle");
+    }
+}
+
+/// A full circle written unclamped, as some writers give a closed rational circle: nine points
+/// of the square's corners and edge midpoints, knots −0.25, 0 (twice) … 1 (twice), 1.25. Over its
+/// domain [0, 1] a degree 2 spline does not use its outermost knots, so it is the circle the
+/// clamped knots give, and it reads as that circle, a full turn. 0.49.0 refused it, as the proof
+/// on its control points took only clamped knots, and a revolved round on it lost its face
+/// (tangency-labs/solidcore#3401).
+#[test]
+fn a_circle_written_with_unclamped_knots_is_a_circle() {
+    let (r, o) = (2.0, [-3.0, -132.0, 152.7]);
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let corners = [(1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (-1.0, 1.0), (-1.0, 0.0), (-1.0, -1.0), (0.0, -1.0), (1.0, -1.0), (1.0, 0.0)];
+    let circle = crate::geom::BSplineCurve {
+        degree: 2,
+        points: corners.iter().map(|(x, z)| [o[0] + r * x, o[1], o[2] + r * z]).collect(),
+        weights: Some((0..9).map(|i| if i % 2 == 1 { w } else { 1.0 }).collect()),
+        knots: vec![-0.25, 0.0, 0.25, 0.5, 0.75, 1.0, 1.25],
+        multiplicities: vec![1, 2, 2, 2, 2, 2, 1],
+        form: crate::geom::CurveForm::Unspecified,
+        closed: crate::geom::Logical::True,
+        self_intersect: crate::geom::Logical::False,
+        knot_spec: crate::geom::KnotSpec::Unspecified,
+    };
+    let Some((Curve::Circle { position, radius }, swept)) = swept::spline_circle(&circle) else { panic!("the unclamped circle is a circle") };
+    assert!((radius - r).abs() <= 1e-9 * r, "radius {radius}");
+    assert!((swept.abs() - std::f64::consts::TAU).abs() <= 1e-9, "swept {swept}");
+    assert!(position.origin.iter().zip(o).all(|(a, b)| (a - b).abs() <= 1e-9 * r), "{:?}", position.origin);
+    // Off its circle it is still refused: the point at its far side moved 1 mm out.
+    let mut off = circle.clone();
+    off.points[4][0] -= 1.0;
+    assert!(swept::spline_circle(&off).is_none(), "a spline off its circle is a circle");
+}
+
 #[test]
 fn a_closed_edge_on_a_spline_that_runs_on_past_a_full_turn_is_the_turn_between_its_passes() {
     // Five quarters from (2, 0): the curve passes (0, 2) at 1 and again at 5, its end. A
@@ -2369,6 +2694,45 @@ fn an_edge_on_a_curve_replica_is_the_moved_curve() {
     // The replica's edge is the plain cube's edge: same curve, same interval.
     assert_eq!(a.edges[0].curve, b.edges[0].curve);
     assert_eq!(a.edges[0].interval, b.edges[0].interval);
+}
+
+/// The cube with its first face's PLANE replaced by a SURFACE_REPLICA of a plane 7 mm lower, moved
+/// up by the operator `op` (#2340: what one writer puts under a solid's repeated face).
+fn replica_face(t: &str, op: &str) -> String {
+    let (head, tail) = t.split_once("=PLANE('',#").expect("a plane");
+    let (_, plane_id) = head.rsplit_once('#').expect("an id");
+    let (placement, _) = tail.split_once(')').expect("the end");
+    let axes = t.split_once(&format!("#{placement}=AXIS2_PLACEMENT_3D('',#")).expect("the placement").1;
+    let (point, axes) = axes.split_once(",#").expect("the axes");
+    let (axes, _) = axes.split_once(')').expect("the end");
+    let pt = t.split_once(&format!("#{point}=CARTESIAN_POINT('',(")).expect("the point").1;
+    let xyz: Vec<f64> = pt.split_once(')').unwrap().0.split(',').map(|v| v.parse().unwrap()).collect();
+    let replaced = t.replacen(&format!("#{plane_id}=PLANE('',#{placement})"), &format!("#{plane_id}=SURFACE_REPLICA('',#9005,#9004)"), 1);
+    format!(
+        "{replaced}#9001=CARTESIAN_POINT('',({},{},{}));#9002=CARTESIAN_POINT('',(0.,0.,7.));#9003=AXIS2_PLACEMENT_3D('',#9001,#{axes});#9005=PLANE('',#9003);#9006=DIRECTION('',(1.,0.,0.));#9007=DIRECTION('',(0.,1.,0.));#9008=DIRECTION('',(0.,0.,1.));#9004=CARTESIAN_TRANSFORMATION_OPERATOR_3D{op};",
+        real(xyz[0]),
+        real(xyz[1]),
+        real(xyz[2] - 7.0)
+    )
+}
+
+#[test]
+fn a_face_on_a_surface_replica_is_the_moved_surface() {
+    let plain = edited(str::to_string);
+    for op in ["('','',#9006,#9007,#9002,1.,#9008)", "('',#9006,#9007,#9002,1.,#9008)", "('',$,$,#9002,$,$)"] {
+        let moved = edited(|t| {
+            let edited = replica_face(t, op);
+            assert!(edited.contains("SURFACE_REPLICA"), "the edit did not apply");
+            edited
+        });
+        assert!(moved.failures.is_empty(), "{op}: {:?}", moved.failures);
+        assert_eq!(moved.solids.len(), 1, "{op}");
+        let (a, b) = (&plain.solids[0].brep, &moved.solids[0].brep);
+        solidcore_ops::record_check::validate(b).unwrap();
+        assert_eq!(counts(a), counts(b), "{op}");
+        // The replica's face lies on the plain cube's plane.
+        assert_eq!(a.faces[0].surface, b.faces[0].surface, "{op}");
+    }
 }
 
 #[test]
@@ -3113,6 +3477,34 @@ fn pcurves_past_a_quarter_line_the_form_ends_on_are_put_on_the_form() {
     }
 }
 
+#[test]
+fn pcurves_a_few_microns_past_the_height_a_cone_form_ends_at_are_put_on_the_form() {
+    // A cone face of half angle 60 degrees over heights 1 to 4: its form ends where the domain
+    // does. A line pcurve fitted 0.4 tol below the bottom (a height that moves the surface by
+    // 0.8 tol along the cone's line) is put on it; one 0.6 tol above the top (1.2 tol) is not.
+    let half_angle = std::f64::consts::FRAC_PI_3;
+    let label = BSurface::Cone {
+        frame: Frame { origin: [1.0, 2.0, 3.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] },
+        radius_at_origin: 5.0,
+        half_angle,
+    };
+    let tol = 1e-3;
+    let domain = [[0.2, 1.0], [1.0, 4.0]];
+    let (f, _) = crate::kernel::form::surface_within(&label, domain, tol).unwrap();
+    let ranges = solidcore_ops::label::surface_natural(&f);
+    assert!(matches!(ranges.get(1), Some(Natural::Range(a, b)) if *a == 1.0 && *b == 4.0), "{ranges:?}");
+    let u = crate::kernel::form::param(0.5);
+    let line = |v0: f64, v1: f64| Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[u, v0], [u, v1]] };
+    let mut pcs = vec![vec![line(1.0 - 0.4 * tol, 2.0)], vec![line(3.0, 4.0 + 0.6 * tol)]];
+    assert_eq!(onto_form(&f, &label, domain, tol, &mut pcs), 1, "only the end within the tolerance moves");
+    assert_eq!(pcs[0][0], line(1.0, 2.0));
+    assert_eq!(pcs[1][0], line(3.0, 4.0 + 0.6 * tol));
+    // The move is the surface's distance between the two heights, within the tolerance.
+    let on = SurfaceEval::new(&f).unwrap();
+    let gap = on.point([u, 1.0]).unwrap().dist(on.point([u, 1.0 - 0.4 * tol]).unwrap());
+    assert!(gap <= tol && (gap - 0.8 * tol).abs() < 1e-9, "{gap}");
+}
+
 /// A kernel making the missing pcurves as SMLib makes some: each a straight line in (u, v)
 /// between the true parameters of its edge's ends on the face's NURBS form, with no regard for
 /// the form's range (a cylinder face; the angle unwrapped to the turn the face's domain is on).
@@ -3160,14 +3552,16 @@ impl Trims for Projected {
 /// A quarter-cylinder wedge (radius 0.2 mm, height 5 mm, 0 to 100 degrees about +z) whose straight
 /// edge runs from 1.9 um before the x axis to 1.9 um past it, 0.6 um outside the cylinder, in a
 /// file of uncertainty 2e-3 mm: the face's extent ends within that of the x axis, so its form
-/// starts there, while the pcurve its kernel projects for the skewed edge starts before it.
-/// Every pcurve of the record lies in its face's domain, as SMLib's check asks
-/// (`SmBrep::ValidatePointers` tests 70 and 71, "Edge endpoints within face domain").
+/// starts there, while the skewed edge starts before it. Off the form cut short at the x axis by
+/// more than half the tolerance, the edge takes its closed form on the form not cut short (its
+/// kernel is not asked), and that pcurve is put on the form's range: every pcurve of the record
+/// lies in its face's domain, as SMLib's check asks (`SmBrep::ValidatePointers` tests 70 and 71,
+/// "Edge endpoints within face domain").
 #[test]
-fn a_projected_pcurve_past_the_quarter_line_a_face_form_ends_on_stays_in_the_face_domain() {
+fn a_skewed_edge_past_the_quarter_line_a_face_form_ends_on_stays_in_the_face_domain() {
     let (r, h, q): (f64, f64, f64) = (0.2, 5.0, 100f64.to_radians());
     // The edge 1.9 um either side of the x axis at the rim, and 0.6 um outside the cylinder: more
-    // than half the tolerance off any line on the form, so its pcurve is the kernel's.
+    // than half the tolerance off any line on the form cut short at the x axis.
     let (eps, rl) = (1.9e-3 / r, r + 0.6e-3);
     let mut w = W::default();
     let v = |w: &mut W, p: V| (w.vertex(p), p);
@@ -3210,7 +3604,7 @@ fn a_projected_pcurve_past_the_quarter_line_a_face_form_ends_on_stays_in_the_fac
     let kernel = Projected(std::sync::atomic::AtomicUsize::new(0));
     let read = read_solids_with(&w.file_with_uncertainty(&[solid], 2e-3), &kernel);
     assert!(read.failures.is_empty(), "{:?}", read.failures);
-    assert!(kernel.0.load(std::sync::atomic::Ordering::Relaxed) > 0, "the skewed edge's pcurve is the kernel's");
+    assert_eq!(kernel.0.load(std::sync::atomic::Ordering::Relaxed), 0, "the skewed edge's pcurve is its closed form");
     let b = &read.solids[0].brep;
     assert_eq!(counts(b), [2, 1, 5, 9, 6]);
     for (i, f) in b.faces.iter().enumerate() {
@@ -3229,6 +3623,116 @@ fn a_projected_pcurve_past_the_quarter_line_a_face_form_ends_on_stays_in_the_fac
     }
     solidcore_ops::record_check::validate(b).unwrap();
     solidcore_ops::record_check::agreement(b).unwrap();
+}
+
+/// A kernel making the missing pcurves of a torus face on its NURBS form: each a straight line
+/// in (u, v) between the true form parameters of its edge's ends (a closed edge a turn round),
+/// with no regard for the form's range, as SMLib's would be. It counts the uses it is asked for.
+struct TubeLines(std::sync::atomic::AtomicUsize);
+
+impl Trims for TubeLines {
+    fn trims(&self, face: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
+        let BSurface::Torus { frame, major_radius, .. } = face.surface else { return Err("not a torus".into()) };
+        let (o, x, y) = (Vec3::from(frame.origin), Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+        let z = x.cross(y);
+        let at = |p: Vec3| -> [f64; 2] {
+            let d = p - o;
+            let (dx, dy, dz) = (d.dot(x), d.dot(y), d.dot(z));
+            let tube = dz.atan2(dx.hypot(dy) - major_radius).rem_euclid(TAU);
+            [crate::kernel::form::param(dy.atan2(dx).rem_euclid(TAU)), crate::kernel::form::param(tube)]
+        };
+        let mut out = Vec::new();
+        for l in &face.loops {
+            let mut pcs = Vec::new();
+            for u in l {
+                if let Some(pc) = &u.pcurve {
+                    pcs.push(pc.clone());
+                    continue;
+                }
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let e = face.edges.get(u.edge as usize).ok_or("edge")?;
+                let eval = CurveEval::new(e.nurbs.unwrap_or(e.curve)).map_err(|m| m.to_string())?;
+                let [t0, t1] = e.interval;
+                let (a, mut b) = (at(eval.point(t0).ok_or("start")?), at(eval.point(t1).ok_or("end")?));
+                if e.vertices[0] == e.vertices[1] {
+                    b[0] = a[0] + 4.0;
+                }
+                pcs.push(Curve2::Spline { knots: vec![t0, t0, t1, t1], points: vec![a, b] });
+            }
+            out.push(pcs);
+        }
+        Ok(out)
+    }
+}
+
+/// A cup (a torus of radii 4 and 1 mm about +z): its wall a quarter of the tube from its top
+/// circle (tube angle 90 degrees, radius 4 mm at z = 1 mm) round to a circle 2e-3 rad past its
+/// inner equator, its seam a tube circle edge in the plane y = 0, closed by a disc on each
+/// circle, in a file of uncertainty 0.01 mm. Every edge lies on the torus exactly. The wall's
+/// boundary ends 2e-3 rad (2e-3 mm along the tube) past the quarter line, within the file's
+/// uncertainty, so its form ends there. The bottom circle and the seam's end there lie
+/// that far off the form: the gap is measured and covered by their pcurve tolerances, so the
+/// two have their closed forms on the form (a parallel, and a line along the tube) and the kernel
+/// is asked for none. Without that, at the fitting tolerance of 1e-3 mm, the circle had none and
+/// the seam's closed form ran past the form's knot range, where its pole query on the rational
+/// net was refused ("off the surface's range ... rational net").
+#[test]
+fn a_torus_face_running_a_hair_past_the_quarter_line_its_form_ends_on_keeps_its_closed_form_pcurves() {
+    let (major, minor, past): (f64, f64, f64) = (4.0, 1.0, 2e-3);
+    let mut w = W::default();
+    let (rb, zb) = (major - minor * past.cos(), -minor * past.sin());
+    let (v_bottom, v_top) = (w.vertex([rb, 0.0, zb]), w.vertex([major, 0.0, minor]));
+    let ring = |w: &mut W, v: u64, r: f64, z: f64| {
+        let k = w.circle([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
+    };
+    let (bottom, top) = (ring(&mut w, v_bottom, rb, zb), ring(&mut w, v_top, major, minor));
+    // The seam: the tube circle at angle 0 about the axis, from the bottom vertex over the inner
+    // equator to the top one (its own angle from pi - past to 3 pi / 2 about +y).
+    let k = w.circle([major, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0], minor);
+    let seam = w.add(format!("EDGE_CURVE('',#{v_bottom},#{v_top},#{k},.T.)"));
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let torus = w.add(format!("TOROIDAL_SURFACE('',#{a},{},{})", real(major), real(minor)));
+    let oes = [w.oe(bottom, true), w.oe(seam, true), w.oe(top, false), w.oe(seam, false)];
+    let wall = w.bound(&oes, true, true);
+    let wall = w.face(&[wall], torus, false);
+    let disc = |w: &mut W, edge: u64, z: f64, up: bool| {
+        let plane = w.plane([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let oe = w.oe(edge, up);
+        let b = w.bound(&[oe], true, true);
+        w.face(&[b], plane, up)
+    };
+    let (floor, lid) = (disc(&mut w, bottom, zb, false), disc(&mut w, top, minor, true));
+    let shell = closed_shell(&mut w, &[wall, floor, lid]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('cup',#{shell})"));
+    let kernel = TubeLines(std::sync::atomic::AtomicUsize::new(0));
+    let read = read_solids_with(&w.file_with_uncertainty(&[solid], 1e-2), &kernel);
+    assert!(read.failures.is_empty(), "{:?}", read.failures);
+    assert_eq!(kernel.0.load(std::sync::atomic::Ordering::Relaxed), 0, "every pcurve of the wall is a closed form");
+    let b = &read.solids[0].brep;
+    assert_eq!(counts(b), [2, 1, 3, 3, 2]);
+    // The wall's form ends on the quarter line at the inner equator (form parameter 2 along the
+    // tube), and every pcurve lies in its face's domain.
+    let wall = b.faces.iter().find(|f| f.loops.iter().any(|l| matches!(l, Loop::Edges { edges } if edges.len() == 4))).unwrap();
+    assert!((wall.domain[1][1] - 2.0).abs() <= 1e-12, "{:?}", wall.domain);
+    for (i, f) in b.faces.iter().enumerate() {
+        let d = f.domain;
+        for l in &f.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let [t0, t1] = u.pcurve.interval().unwrap();
+                for t in [t0, t1] {
+                    let p = solidcore_ops::pcurve::eval(&u.pcurve, t).unwrap();
+                    let out = (d[0][0] - p[0]).max(p[0] - d[0][1]).max(d[1][0] - p[1]).max(p[1] - d[1][1]);
+                    assert!(out <= 1e-9, "face {i}, edge {}: {p:?} lies {out:e} outside the domain {d:?}", u.edge);
+                }
+            }
+        }
+    }
+    solidcore_ops::record_check::validate(b).unwrap();
+    solidcore_ops::record_check::agreement(b).unwrap();
+    let (body, _) = solidcore_ops::body::Body::from_record(b, false).unwrap();
+    body.check_solid().unwrap();
 }
 
 /// A wedge of a cylinder (radius 10 mm, 5 mm high) from -120 to 180 degrees about +z, in a file
@@ -3405,6 +3909,69 @@ fn a_pcurve_a_little_past_a_spline_patchs_knot_range_is_put_on_it() {
     assert_eq!(pcs[0][0], off);
 }
 
+/// A rectangle on a cylinder's side (u its angle, one turn from `lo` to `hi`) from u = hi - 1 to
+/// the seam, v 0.2 to 0.8, whose side on the seam is fitted 2.5e-9 of a turn past it while the
+/// sides beside it end on it, as face #553893 of the Pro Shop file (a period of 0.0215, a seam
+/// use 4.3e-11 past it): that side is put on the seam, the others stay. Left past it, the seam
+/// completion would move it a whole turn, to u = lo, a turn from the sides it joins. A side half
+/// a billionth of a turn past (the base period holds it), one that runs past the seam further
+/// than it misses its neighbours (it crosses the seam), and a loop of one use stay as they are.
+/// So does a side a quarter turn past the seam whose neighbours do not end on it, the next one
+/// starting a whole turn back (a loop lifted past the seam, as at the pole of the sphere faces
+/// #98053 and #98718 of file 211 in #12859): put on the seam it would be a quarter turn from its
+/// edge, and the face was left out.
+#[test]
+fn a_pcurve_its_fit_leaves_past_a_closed_surfaces_seam_is_put_on_it() {
+    let frame = Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] };
+    let cylinder = BSurface::Cylinder { frame, radius: 3.0 };
+    let domain = SurfaceEval::new(&cylinder).unwrap().domain();
+    let ((lo, hi), period) = (domain.range[0].unwrap(), domain.period[0].unwrap());
+    assert!((hi - lo - period).abs() < 1e-12 && period > 6.0, "{lo} {hi} {period}");
+    let side = |a: [f64; 2], b: [f64; 2]| Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![a, b] };
+    // The seam side at `seam`, the sides beside it ending at `to`.
+    let rectangle = |seam: f64, to: f64| {
+        vec![
+            side([hi - 1.0, 0.2], [to, 0.2]),
+            side([seam, 0.2], [seam, 0.8]),
+            side([to, 0.8], [hi - 1.0, 0.8]),
+            side([hi - 1.0, 0.8], [hi - 1.0, 0.2]),
+        ]
+    };
+    let uses: Vec<(u32, bool)> = (0..4).map(|e| (e, true)).collect();
+    // 2.5e-9 of a turn past: on the seam.
+    let past = 2.5e-9 * period;
+    let mut pcs = vec![rectangle(hi + past, hi)];
+    assert_eq!(onto_seam(&cylinder, std::slice::from_ref(&uses), &mut pcs), 1);
+    assert_eq!(pcs[0], rectangle(hi, hi));
+    // Half a billionth of a turn past: the base period holds it.
+    let near = rectangle(hi + 0.5e-9 * period, hi);
+    let mut pcs = vec![near.clone()];
+    assert_eq!(onto_seam(&cylinder, std::slice::from_ref(&uses), &mut pcs), 0);
+    assert_eq!(pcs[0], near);
+    // The loop runs on 0.5 past the seam, its sides meeting there: it crosses the seam.
+    let across = rectangle(hi + 0.5, hi + 0.5);
+    let mut pcs = vec![across.clone()];
+    assert_eq!(onto_seam(&cylinder, std::slice::from_ref(&uses), &mut pcs), 0);
+    assert_eq!(pcs[0], across);
+    // A loop of one use has no neighbour to be put beside.
+    let alone = vec![side([hi - 1.0, 0.2], [hi + past, 0.2])];
+    let mut pcs = vec![alone.clone()];
+    assert_eq!(onto_seam(&cylinder, &[vec![(0, true)]], &mut pcs), 0);
+    assert_eq!(pcs[0], alone);
+    // A loop lifted a quarter turn past the seam: its side there misses the next side by a whole
+    // turn, which starts a turn back, and neither side beside it ends on the seam.
+    let q = hi + 0.25 * period;
+    let lifted = vec![
+        side([hi - 1.0, 0.2], [q, 0.2]),
+        side([q, 0.2], [q, 0.8]),
+        side([lo + 0.25 * period, 0.8], [hi - 1.0, 0.8]),
+        side([hi - 1.0, 0.8], [hi - 1.0, 0.2]),
+    ];
+    let mut pcs = vec![lifted.clone()];
+    assert_eq!(onto_seam(&cylinder, std::slice::from_ref(&uses), &mut pcs), 0);
+    assert_eq!(pcs[0], lifted);
+}
+
 /// A closed spline edge whose end vertex sits a few µm off the curve's seam (its start and end
 /// point) projects a hair past the start: it is at the seam, and the edge runs to the curve's
 /// end, not refused as crossing the seam.
@@ -3457,6 +4024,78 @@ fn a_closed_edge_whose_vertex_is_off_its_closed_splines_seam_starts_there() {
     // A vertex at the seam keeps the curve as it is.
     let m = open_or_closed(square(), [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], true, true, 1e-3).unwrap();
     assert_eq!(m.interval, [0.0, 4.0]);
+}
+
+/// An edge on a very flat ellipse (radii 1000.95 and 0.31 mm, as an Autodesk export writes the
+/// side of a long shallow groove) whose vertices lie 5 µm off it across its minor radius, within
+/// the file's 0.01 mm: each vertex's parameter is the ellipse's point nearest it. Its angle on the
+/// circle the ellipse is scaled from put each vertex 6 mm along the curve from where it is, and
+/// every face on the edge was left out ("a vertex lies 5.7 mm off its curve").
+#[test]
+fn an_edge_on_a_flat_ellipse_takes_its_vertices_nearest_points() {
+    let position = Placement { origin: [0.0; 3], axis: [0.0, 0.0, 1.0], ref_direction: [1.0, 0.0, 0.0] };
+    let (a, b) = (1000.95159085647, 0.310362138249);
+    let ellipse = Curve::Ellipse { position, semi_axis_1: a, semi_axis_2: b };
+    let on = |t: f64| [a * t.cos(), b * t.sin(), 0.0];
+    let off = 5e-3;
+    let (t0, t1) = (PI - 0.6, PI - 0.6 + 3.6e-4);
+    let (ps, pe) = ([on(t0)[0], on(t0)[1] + off, 0.0], [on(t1)[0], on(t1)[1] + off, 0.0]);
+    for same_sense in [true, false] {
+        let (s, e) = if same_sense { (ps, pe) } else { (pe, ps) };
+        let m = map_edge(&ellipse, s, e, same_sense, false, false, 1e-2).unwrap();
+        let c = CurveEval::new(&m.curve).unwrap();
+        // Each vertex within its 5 µm of the curve's point at its parameter: the point at the
+        // vertex's own angle is that far, and the nearest point no farther.
+        for (t, v) in m.interval.into_iter().zip([ps, pe]) {
+            assert!(c.point(t).unwrap().dist(v3(v)) <= off + 1e-9, "{t}: {}", c.point(t).unwrap().dist(v3(v)));
+        }
+        // The short arc between them, not most of a turn, and near the angles they were made at:
+        // the nearest point lies within off / (the curve's speed there, about 565 mm a radian) of
+        // the vertex's own angle, across a curve bent so little there.
+        assert!((m.interval[1] - m.interval[0] - (t1 - t0)).abs() < 1e-6, "{:?}", m.interval);
+        assert!((m.interval[0] - t0).abs() < 1e-4, "{:?}", m.interval);
+    }
+    // A vertex exactly on the ellipse keeps its angle on the circle, to the last digit.
+    let m = map_edge(&ellipse, on(t0), on(t1), true, false, false, 1e-2).unwrap();
+    let scaled = |p: [f64; 3]| (p[1] / b).atan2(p[0] / a);
+    assert_eq!(m.interval[0], scaled(on(t0)));
+}
+
+/// A closed spline whose last control point is its first to the file's uncertainty but not to the
+/// last digit (an Autodesk export writes one first point at x = -24.9475247999999 and the last at
+/// -24.9475248), with its edges' vertices away from its seam: the curve restarts at the vertex.
+/// The restart joins the seam exactly and refused such a curve ("spline seam endpoints do not
+/// coincide"), leaving out every face on it; the reader takes the ends as one point, their mean,
+/// the curve moving by half the gap at most. Polynomial, rational and polyline curves alike.
+#[test]
+fn a_closed_spline_whose_ends_meet_within_the_tolerance_restarts_at_its_vertex() {
+    let gap = 1e-13;
+    let corners = |g: f64| vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0], [g, 0.0, 0.0]];
+    let knots = vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0];
+    let spline = BCurve::Spline { knots: knots.clone(), points: corners(gap) };
+    // The same square as a rational spline, every weight 2: the same points at the same parameters.
+    let rational = BCurve::RationalSpline { knots, homogeneous: corners(gap).iter().map(|p| [p[0] * 2.0, p[1] * 2.0, p[2] * 2.0, 2.0]).collect() };
+    let polyline = BCurve::Polyline { points: corners(gap) };
+    let (mid, far) = ([10.0, 5.0, 0.0], [0.0, 5.0, 0.0]);
+    for curve in [spline, rational, polyline] {
+        // A closed edge whose one vertex is half way round: the whole curve, from the vertex.
+        let m = open_or_closed(curve.clone(), mid, mid, true, true, 1e-3).unwrap_or_else(|e| panic!("{curve:?}: {e}"));
+        assert!((m.interval[1] - m.interval[0] - 4.0).abs() < 1e-12, "{:?}", m.interval);
+        let eval = CurveEval::new(&m.curve).unwrap();
+        for t in m.interval {
+            assert!(eval.point(t).unwrap().dist(v3(mid)) < 1e-12, "{t}");
+        }
+        // The curve's shape kept: the opposite side's middle half way round, the old seam (the
+        // corner) three quarters round, where it moved by half the gap.
+        assert!(eval.point(m.interval[0] + 2.0).unwrap().dist(v3(far)) < 1e-12);
+        assert!(eval.point(m.interval[0] + 2.5).unwrap().dist(v3([0.0, 0.0, 0.0])) <= 0.5 * gap + 1e-15);
+        // An edge from the far side's middle round across the seam to the near side's: the curve
+        // restarts at the far side.
+        let m = open_or_closed(curve.clone(), far, mid, true, false, 1e-3).unwrap_or_else(|e| panic!("{curve:?}: {e}"));
+        let eval = CurveEval::new(&m.curve).unwrap();
+        assert!(eval.point(m.interval[0]).unwrap().dist(v3(far)) < 1e-12 && eval.point(m.interval[1]).unwrap().dist(v3(mid)) < 1e-12);
+        assert!((m.interval[1] - m.interval[0] - 2.0).abs() < 1e-12, "{:?}", m.interval);
+    }
 }
 
 /// A spline surface whose first and last control columns lie within the tolerance of each other
@@ -3612,6 +4251,93 @@ fn a_spline_face_whose_side_closes_to_its_vertex_within_the_tolerance_reads_with
     assert!(check.is_valid(), "{check}");
     let volume = body.mass_properties(1e-6).unwrap().volume;
     assert!((volume - 1000.0 / 6.0).abs() < 1e-3, "{volume}");
+}
+
+/// A kernel making the missing pcurves on the strip of
+/// [`a_strip_whose_end_is_one_vertex_within_its_tolerance_reads`] (u = x / 10, v = y / 0.03): each
+/// the straight line in (u, v) between its edge's ends, as the strip's sides and end are.
+struct Strip;
+
+impl Trims for Strip {
+    fn trims(&self, face: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
+        let at = |p: Vec3| [p.x / 10.0, p.y / 0.03];
+        let mut out = Vec::new();
+        for l in &face.loops {
+            let mut pcs = Vec::new();
+            for u in l {
+                if let Some(pc) = &u.pcurve {
+                    pcs.push(pc.clone());
+                    continue;
+                }
+                let e = face.edges.get(u.edge as usize).ok_or("edge")?;
+                let eval = CurveEval::new(e.nurbs.unwrap_or(e.curve)).map_err(|m| m.to_string())?;
+                let [t0, t1] = e.interval;
+                let (a, b) = (eval.point(t0).ok_or("start")?, eval.point(t1).ok_or("end")?);
+                pcs.push(Curve2::Spline { knots: vec![t0, t0, t1, t1], points: vec![at(a), at(b)] });
+            }
+            out.push(pcs);
+        }
+        Ok(out)
+    }
+}
+
+/// A strip 10 mm long and 0.03 mm wide (a spline, u along x, v across it, quadratic in v) whose
+/// far end an exporter closed with one vertex halfway across, not an edge, as face #563729 of the
+/// Pro Shop file: its two long sides end 0.015 mm from that vertex, which the file's 0.01 mm
+/// uncertainty does not cover, so the vertex's tolerance is raised to cover it, and the loop
+/// jumps across v there. The run across the strip's end lies within that tolerance of the vertex
+/// (certified on the iso-line's piece), so the loop runs along it, as at a pole: one face, three
+/// edges, the record's checks pass. With its far end bowed 5 mm up between its sides (2.5 mm at
+/// the middle), the same jump's run leaves the vertex's tolerance and is refused as before.
+#[test]
+fn a_strip_whose_end_is_one_vertex_within_its_tolerance_reads() {
+    for (bow, reads) in [(0.0, true), (5.0, false)] {
+        let mut w = W::default();
+        let (a0, b0, end) = ([0.0, 0.0, 0.0], [0.0, 0.03, 0.0], [10.0, 0.015, 0.0]);
+        let (va, vb, vend) = (w.vertex(a0), w.vertex(b0), w.vertex(end));
+        // The long sides' lines end at (10, 0) and (10, 0.03), 0.015 from their vertex.
+        let side = |w: &mut W, (v, p): (u64, V)| {
+            let (o, d) = (w.pt(p), w.dir([1.0, 0.0, 0.0]));
+            let vector = w.add(format!("VECTOR('',#{d},1.)"));
+            let line = w.add(format!("LINE('',#{o},#{vector})"));
+            w.add(format!("EDGE_CURVE('',#{v},#{vend},#{line},.T.)"))
+        };
+        let (sa, sb) = (side(&mut w, (va, a0)), side(&mut w, (vb, b0)));
+        let across = w.line_edge((va, a0), (vb, b0), true, 0.03);
+        let net: Vec<String> = [0.0, 10.0]
+            .iter()
+            .map(|&x| {
+                let row: Vec<String> = [[0.0, 0.0], [0.015, if x > 0.0 { bow } else { 0.0 }], [0.03, 0.0]]
+                    .iter()
+                    .map(|&[y, z]| format!("#{}", w.pt([x, y, z])))
+                    .collect();
+                format!("({})", row.join(","))
+            })
+            .collect();
+        let surface = w.add(format!(
+            "B_SPLINE_SURFACE_WITH_KNOTS('',1,2,({}),.UNSPECIFIED.,.F.,.F.,.F.,(2,2),(3,3),(0.,1.),(0.,1.),.UNSPECIFIED.)",
+            net.join(",")
+        ));
+        let uses = [w.oe(sb, true), w.oe(sa, false), w.oe(across, true)];
+        let bound = w.bound(&uses, true, true);
+        let face = w.face(&[bound], surface, false);
+        let open = w.add(format!("OPEN_SHELL('',(#{face}))"));
+        let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('strip',(#{open}))"));
+        let ex = w.file_with_uncertainty(&[model], 0.01);
+        let r = read_solids_with(&ex, &Strip);
+        if reads {
+            assert!(r.failures.is_empty(), "{:?}", r.failures);
+            let s = &r.solids[0];
+            solidcore_ops::record_check::validate(&s.brep).unwrap();
+            solidcore_ops::record_check::agreement(&s.brep).unwrap();
+            assert!(s.sheet);
+            assert_eq!(counts(&s.brep), [1, 1, 1, 3, 3]);
+        } else {
+            assert!(r.solids.is_empty());
+            let why = &r.failures.first().expect("a refusal").message;
+            assert!(why.contains("neither closes nor collapses to a point"), "{why}");
+        }
+    }
 }
 
 /// The range a closed profile is built over for a face whose loops are walked: a loop round the
@@ -3959,4 +4685,362 @@ fn restarted_curve_errors_keep_their_step_messages() {
     assert_eq!(crate::kernel::restart_curve(&closed, 0.).unwrap_err(), "spline restart outside the open domain");
     let open = BCurve::Polyline { points: vec![[0.; 3], [1.; 3], [2.; 3]] };
     assert_eq!(crate::kernel::restart_curve(&open, 0.5).unwrap_err(), "spline seam endpoints do not coincide");
+}
+
+/// The unit box's top is the spline S(u,v) = (u, v + 0.016 u(1-u), 1). Its
+/// horizontal edges have quadratic pcurves v = y - 0.016 u(1-u). A straight pcurve
+/// between their ends misses the edge by 0.004 mm, inside half a 0.01 mm source uncertainty
+/// but outside half the importer's default precision. Supply the exact quadratic when asked.
+struct ParabolicTrims(std::sync::atomic::AtomicUsize);
+
+impl Trims for ParabolicTrims {
+    fn trims(&self, face: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
+        assert!(face.tolerance <= DEFAULT_TOLERANCE);
+        let mut out = Vec::new();
+        for l in &face.loops {
+            let mut pcs = Vec::new();
+            for u in l {
+                if let Some(pc) = &u.pcurve {
+                    pcs.push(pc.clone());
+                    continue;
+                }
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let e = &face.edges[u.edge as usize];
+                assert!(e.tolerance <= DEFAULT_TOLERANCE);
+                let curve = CurveEval::new(e.nurbs.unwrap_or(e.curve)).unwrap();
+                let [a, z] = e.interval;
+                let inverse = |t| {
+                    let p = curve.point(t).unwrap();
+                    [p.x, p.y - 0.016 * p.x * (1.0 - p.x)]
+                };
+                let (p, m, q) = (inverse(a), inverse(0.5 * (a + z)), inverse(z));
+                // A quadratic Bezier's middle coefficient is 2 C(1/2) - (C(0)+C(1))/2.
+                pcs.push(Curve2::Spline { knots: vec![a, a, a, z, z, z], points: vec![p, [0, 1].map(|d| 2.0 * m[d] - 0.5 * (p[d] + q[d])), q] });
+            }
+            out.push(pcs);
+        }
+        Ok(out)
+    }
+}
+
+#[test]
+fn a_spline_face_imported_with_coarse_distance_accuracy_keeps_its_boundary() {
+    for uncertainty in [0.01, 0.005] {
+        let mut w = W::default();
+        let faces = box_faces(&mut w, [0.0; 3], [1.0; 3], BoxStyle::default(), &mut |_, _| Vec::new());
+        let top = w.s.lines().rfind(|l| l.contains("=PLANE(")).unwrap().to_string();
+        let id = top.split_once('=').unwrap().0;
+        let rows: Vec<String> = [(0.0, 0.0), (0.5, 0.008), (1.0, 0.0)]
+            .into_iter()
+            .map(|(x, bump)| {
+                let (a, z) = (w.pt([x, -0.016 + bump, 1.0]), w.pt([x, 1.0 + bump, 1.0]));
+                format!("(#{a},#{z})")
+            })
+            .collect();
+        let spline = format!(
+            "{id}=B_SPLINE_SURFACE_WITH_KNOTS('',2,1,({}),.UNSPECIFIED.,.F.,.F.,.F.,(3,3),(2,2),(0.,1.),(-0.016,1.),.UNSPECIFIED.);",
+            rows.join(",")
+        );
+        w.s = w.s.replace(&top, &spline);
+        let shell = closed_shell(&mut w, &faces);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('spline box',#{shell})"));
+        let trims = ParabolicTrims(std::sync::atomic::AtomicUsize::new(0));
+        let read = read_solids_with(&w.file_with_uncertainty(&[solid], uncertainty), &trims);
+        assert!(read.failures.is_empty(), "{:?}", read.failures);
+        assert_eq!(read.solids.len(), 1);
+        let s = &read.solids[0];
+        assert!(!s.sheet);
+        assert_eq!(counts(&s.brep), [2, 1, 6, 12, 8]);
+        assert_eq!(s.brep.tolerance, uncertainty, "source tolerance is retained for accepting data");
+        assert!(trims.0.load(std::sync::atomic::Ordering::Relaxed) >= 2, "the horizontal boundaries need quadratic pcurves");
+        let f = s.brep.faces.iter().find(|f| matches!(f.surface, BSurface::Spline { .. })).unwrap();
+        let surface = SurfaceEval::new(f.parameters()).unwrap();
+        for l in &f.loops {
+            let Loop::Edges { edges } = l else { panic!("edge loop") };
+            for u in edges {
+                let e = &s.brep.edges[u.edge as usize];
+                let curve = CurveEval::new(e.parameters()).unwrap();
+                for k in 0..=16 {
+                    let t = e.interval[0] + (e.interval[1] - e.interval[0]) * f64::from(k) / 16.0;
+                    let q = solidcore_ops::pcurve::eval(&u.pcurve, t).unwrap();
+                    let gap = surface.point(q).unwrap().dist(curve.point(t).unwrap());
+                    assert!(gap < 1e-9, "accuracy {uncertainty}: the exact boundary lifts with gap {gap}");
+                }
+            }
+        }
+    }
+}
+
+/// A 20 × 30 × 10 mm block (mm, uncertainty 1e-6 mm) whose 12 edges are straight cubic Béziers
+/// on the knots (0, `span`), as Siemens NX writes them (`span` 1.020781457822e-7), and whose edge
+/// from (0, 0, 0) to (20, 0, 0) is split `split` mm from its start: a micro edge and the rest,
+/// both on that edge's curve, in its place in both its faces' loops.
+fn bezier_block(span: f64, split: f64) -> p21::Exchange {
+    let mut w = W::default();
+    let size = [20.0, 30.0, 10.0];
+    let corner = |i: usize| -> V {
+        let c = [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]][i];
+        [f64::from(c[0]) * size[0], f64::from(c[1]) * size[1], f64::from(c[2]) * size[2]]
+    };
+    let vs: Vec<u64> = (0..8).map(|i| w.vertex(corner(i))).collect();
+    let cut = w.vertex([split, 0.0, 0.0]);
+    let pairs = [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7)];
+    let mut edges = Vec::new();
+    for (k, &(a, z)) in pairs.iter().enumerate() {
+        let (p, q) = (corner(a), corner(z));
+        let pts: Vec<u64> = (0..4)
+            .map(|j| {
+                let t = f64::from(j) / 3.0;
+                w.pt([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1]), p[2] + t * (q[2] - p[2])])
+            })
+            .collect();
+        let c = w.add(format!(
+            "B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,(4,4),(0.,{}),.PIECEWISE_BEZIER_KNOTS.)",
+            list(&pts),
+            real(span)
+        ));
+        if k == 0 {
+            edges.push(w.add(format!("EDGE_CURVE('',#{},#{cut},#{c},.T.)", vs[0])));
+            let rest = w.add(format!("EDGE_CURVE('',#{cut},#{},#{c},.T.)", vs[1]));
+            edges.push(rest);
+        } else {
+            edges.push(w.add(format!("EDGE_CURVE('',#{},#{},#{c},.T.)", vs[a], vs[z])));
+        }
+    }
+    // `edges[0]` is the micro edge and `edges[1]` the rest of that edge; the others follow.
+    let e = |k: usize| if k == 0 { 0 } else { k + 1 };
+    // Loops counter-clockwise seen from outside: (edge index into `pairs`, or 12 for the rest of
+    // edge 0; forward), then the plane's origin and normal.
+    let faces: [(&[(usize, bool)], V, V); 6] = [
+        (&[(3, false), (2, false), (1, false), (12, false), (0, false)], [0.0; 3], [0.0, 0.0, -1.0]),
+        (&[(4, true), (5, true), (6, true), (7, true)], [0.0, 0.0, 10.0], [0.0, 0.0, 1.0]),
+        (&[(0, true), (12, true), (9, true), (4, false), (8, false)], [0.0; 3], [0.0, -1.0, 0.0]),
+        (&[(1, true), (10, true), (5, false), (9, false)], [20.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+        (&[(2, true), (11, true), (6, false), (10, false)], [20.0, 30.0, 0.0], [0.0, 1.0, 0.0]),
+        (&[(3, true), (8, true), (7, false), (11, false)], [0.0, 30.0, 0.0], [-1.0, 0.0, 0.0]),
+    ];
+    let mut ids = Vec::new();
+    for (lp, o, n) in faces {
+        let oes: Vec<u64> = lp.iter().map(|&(k, fwd)| w.oe(edges[if k == 12 { 1 } else { e(k) }], fwd)).collect();
+        let bound = w.bound(&oes, true, true);
+        let x = if n[0] == 0.0 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+        let plane = w.plane(o, n, x);
+        ids.push(w.face(&[bound], plane, true));
+    }
+    let shell = closed_shell(&mut w, &ids);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('block',#{shell})"));
+    w.file_with_uncertainty(&[solid], 1e-6)
+}
+
+/// A micro edge cut from the start of a straight cubic Bézier whose knots span 1.02e-7 (Siemens
+/// NX writes both) lies on [0, 6.5e-15] of the file's parameter at 1.283e-6 mm: no more than the
+/// kernel's knot resolution (1e-12), so its trims' end knots were one and the kernel's check
+/// failed the block (and with a 1.26e-3 mm micro edge, [0, 6.4e-12], only 6.4 times it). Such a
+/// curve's parameter is rescaled where it is read, exactly, and every one of these blocks is the
+/// closed 6000 mm³ block the kernel's check passes, as with the knots (0, 20).
+#[test]
+fn a_micro_edge_on_a_bezier_with_a_tiny_knot_span_reads_as_the_block() {
+    for span in [20.0, 1.020781457822e-7] {
+        for split in [1.283e-6, 1.26e-3] {
+            let case = format!("knots (0, {span}), micro edge {split} mm");
+            let s = one_solid(&bezier_block(span, split));
+            assert!(!s.sheet, "{case}");
+            // The record as read, without the kernel's healer (which takes the split vertex off
+            // the straight edge): the kernel's check of the reader's own trims.
+            let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, true).unwrap_or_else(|e| panic!("{case}: {e}"));
+            assert!(body.is_manifold_solid().unwrap(), "{case}");
+            let report = body.check(solidcore_ops::check::CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{case}: {report}");
+            assert_eq!(body.counts().unwrap(), [6, 13, 9], "{case}");
+            let mass = body.mass_properties(1e-9).unwrap();
+            assert!((mass.volume - 6000.0).abs() <= 1e-9 * 6000.0, "{case}: volume {}", mass.volume);
+            // Each edge's curve is its cubic with the file's control points, on the file's knots
+            // (0, 20) as written, and on (0, 1.02e-7) scaled by the least power of two at or above
+            // the curve's speed, its length L over the span (3 |P_{i+1} − P_i| / span, exact
+            // thirds); every edge then spans more than the knot resolution.
+            for e in &s.brep.edges {
+                let solidcore_record::brep::Curve::Spline { knots, points } = &e.curve else { panic!("{case}: {:?}", e.curve) };
+                let (Some(p0), Some(p3)) = (points.first(), points.last()) else { panic!("{case}") };
+                let length = ((p3[0] - p0[0]).powi(2) + (p3[1] - p0[1]).powi(2) + (p3[2] - p0[2]).powi(2)).sqrt();
+                let end = *knots.last().unwrap();
+                assert_eq!(&knots[..4], &[0.0; 4], "{case}");
+                assert!(knots[4..].iter().all(|k| *k == end), "{case}: {knots:?}");
+                if span == 20.0 {
+                    assert_eq!(end, 20.0, "{case}");
+                } else {
+                    let scale = end / span;
+                    assert_eq!(scale, 2f64.powi(scale.log2().round() as i32), "{case}: {knots:?}");
+                    let speed = length / span;
+                    assert!(scale >= speed && scale < 2.0 * speed * (1.0 + 1e-12), "{case}: {scale} for {speed}");
+                }
+                assert!(e.interval[1] - e.interval[0] > 1e-12, "{case}: {:?}", e.interval);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_small_cylinder_imported_with_coarse_distance_accuracy_keeps_its_cylinder() {
+    for uncertainty in [0.01, 0.005] {
+        let mut w = W::default();
+        let (r, h) = (0.05, 0.1);
+        let c = cylinder(&mut w, [0.0; 2], r, [0.0, h]);
+        let wall = side(&mut w, &c, true);
+        let cap = |w: &mut W, k: usize| {
+            let plane = w.plane([0.0, 0.0, k as f64 * h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+            let oe = w.oe(c.circles[k], k == 1);
+            let bound = w.bound(&[oe], true, true);
+            w.face(&[bound], plane, k == 1)
+        };
+        let (bottom, top) = (cap(&mut w, 0), cap(&mut w, 1));
+        let shell = closed_shell(&mut w, &[bottom, wall, top]);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('small cylinder',#{shell})"));
+        let s = one_solid(&w.file_with_uncertainty(&[solid], uncertainty));
+        assert!(!s.sheet);
+        assert_eq!(counts(&s.brep), [2, 1, 3, 3, 2]);
+        assert_eq!(s.brep.tolerance, uncertainty);
+        assert!(s.brep.faces.iter().any(|f| matches!(f.surface, BSurface::Cylinder { .. })));
+    }
+}
+
+/// A 2 um edge/plane gap inside a 10 um declaration still needs a 6 um allowance
+/// (SURFACE_GAP_MARGIN = 3), even though fitting new curves asks for only 1 um.
+#[test]
+fn a_measured_gap_smaller_than_source_uncertainty_keeps_its_pcurve_allowance() {
+    use crate::assembly::{Assembly, Bound, Kind};
+    let mut a = Assembly::new(0.01, None);
+    let points = [[0.0, 0.0, 0.002], [1.0, 0.0, 0.002], [1.0, 1.0, 0.002], [0.0, 1.0, 0.002]];
+    let vs: Vec<u32> = points.iter().map(|&p| a.add_vertex(p).unwrap()).collect();
+    let mut edges = Vec::new();
+    for k in 0..4 {
+        let next = (k + 1) % 4;
+        edges.push(a.add_edge(k as u64, BCurve::Line { start: points[k], end: points[next] }, [0.0, 1.0], [vs[k], vs[next]]).unwrap());
+    }
+    let plane = BSurface::Plane { origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 1.0, 0.0] };
+    let f = a.add_face(1, plane, vec![Bound::Edges(edges)], Some(0), true).unwrap();
+    let s = a.finish(1, "offset boundary".into(), vec![vec![(f, true)]], Kind::Model).unwrap();
+    assert!(s.sheet);
+    assert_eq!(s.brep.tolerance, 0.01);
+    let f = &s.brep.faces[0];
+    let surface = SurfaceEval::new(f.parameters()).unwrap();
+    let Loop::Edges { edges } = &f.loops[0] else { panic!("edge loop") };
+    for u in edges {
+        let e = &s.brep.edges[u.edge as usize];
+        let curve = CurveEval::new(e.parameters()).unwrap();
+        let q = solidcore_ops::pcurve::eval(&u.pcurve, 0.5).unwrap();
+        let gap = surface.point(q).unwrap().dist(curve.point(0.5).unwrap());
+        assert!((gap - 0.002).abs() < 1e-12, "the source geometry keeps its real gap");
+        assert_eq!(e.tolerance, 0.01);
+    }
+}
+
+/// A cubic rational spline with 101 control points 10 mm apart along a 1000 mm line, weights
+/// alternating 1 and 0.9, on uniform knots over [0, 1]: its speed is about 1000, so a 5e-8 mm edge
+/// spans 5e-11 of its parameter, which the kernel resolves, and its knots stay the file's bit for
+/// bit. Its local bound is `3 · 1.9 · 50 / 0.9 / (3 / 98)`, about 1.0e4 (the box of the 6 points
+/// each derivative term spans, 50 mm); the whole curve's box (1000 mm) would give 2.1e5, past the
+/// threshold (5e4), and a 2^18 rescale it does not need. On [0, 1e-7] it is rescaled, exactly.
+#[test]
+fn a_rational_curve_that_resolves_its_edges_keeps_its_knots() {
+    let n = 101;
+    let homogeneous: Vec<[f64; 4]> = (0..n)
+        .map(|i| {
+            let w = if i % 2 == 0 { 1.0 } else { 0.9 };
+            [w * 10.0 * f64::from(i), 0.0, 0.0, w]
+        })
+        .collect();
+    let knots = |end: f64| -> Vec<f64> {
+        let mut k = vec![0.0; 4];
+        k.extend((1..98).map(|j| end * f64::from(j) / 98.0));
+        k.extend([end; 4]);
+        k
+    };
+    let curve = BCurve::RationalSpline { knots: knots(1.0), homogeneous: homogeneous.clone() };
+    assert_eq!(super::resolvable(curve.clone()).unwrap(), curve);
+    let fast = knots(1e-7);
+    let BCurve::RationalSpline { knots: scaled, homogeneous: same } =
+        super::resolvable(BCurve::RationalSpline { knots: fast.clone(), homogeneous: homogeneous.clone() }).unwrap()
+    else {
+        panic!("not a rational spline")
+    };
+    assert_eq!(same, homogeneous);
+    let scale = scaled.last().unwrap() / 1e-7;
+    assert_eq!(scale, 2f64.powi(scale.log2().round() as i32), "{scale}");
+    assert!(scaled.iter().zip(&fast).all(|(s, f)| *s == f * scale), "{scaled:?}");
+}
+
+/// `text` with the reference direction of every conical surface's placement turned about its axis by `angle`.
+fn cone_frames_turned(text: &str, angle: f64) -> String {
+    let refs = |s: &str| -> Vec<u64> {
+        s.split_once('=')
+            .map_or("", |(_, r)| r)
+            .split('#')
+            .skip(1)
+            .filter_map(|t| t.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok())
+            .collect()
+    };
+    let lines: std::collections::HashMap<u64, &str> = text
+        .lines()
+        .filter_map(|l| {
+            let (id, _) = l.strip_prefix('#')?.split_once('=')?;
+            Some((id.trim().parse().ok()?, l))
+        })
+        .collect();
+    let numbers = |l: &str| -> Vec<f64> {
+        l.rsplit_once(",(").map_or(vec![], |(_, r)| r.trim_end_matches([')', ';']).split(',').filter_map(|x| x.trim().parse().ok()).collect())
+    };
+    let mut out = text.to_string();
+    for l in lines.values().filter(|l| l.contains("=CONICAL_SURFACE(")) {
+        let placement = refs(l)[0];
+        let [_, z, x] = refs(lines[&placement])[..] else { panic!("placement {placement}") };
+        let (zd, xd) = (numbers(lines[&z]), numbers(lines[&x]));
+        let y = [zd[1] * xd[2] - zd[2] * xd[1], zd[2] * xd[0] - zd[0] * xd[2], zd[0] * xd[1] - zd[1] * xd[0]];
+        let t: [f64; 3] = std::array::from_fn(|i| xd[i] * angle.cos() + y[i] * angle.sin());
+        out = out.replace(lines[&x], &format!("#{x}=DIRECTION('',({:?},{:?},{:?}));", t[0], t[1], t[2]));
+    }
+    out
+}
+
+/// solidcore#3253: a whole-turn cone face whose seam lies a hair (well within the face's
+/// tolerance, far beyond rounding) beside a quarter line kept its form starting on that
+/// line, a quarter away from the seam, and the block read back without its stepped hole.
+#[test]
+fn whole_turn_cone_faces_close_on_their_seam_beside_a_quarter_line() {
+    let text = include_str!("../tests/fixtures/stepped_tapered_hole.step");
+    let slope = 4.0_f64.to_radians().tan();
+    let frustum = |r: f64, h: f64| std::f64::consts::PI * h * (r * r + r * (r + h * slope) + (r + h * slope).powi(2)) / 3.0;
+    let exact = 9.0 * 24.0 * 18.0 - frustum(1.35, 5.0) - frustum(2.65, 3.5);
+    let wrong: Vec<String> = [0.0, 1e-12, -1e-12, 1e-7, 1e-6, 1e-5, -1e-6, -1e-5]
+        .into_iter()
+        .filter_map(|angle| {
+            let ex = p21::parse(&cone_frames_turned(text, angle)).unwrap();
+            let s = one_solid(&ex);
+            let volume = solidcore_ops::body::Body::from_record(&s.brep, false)
+                .map_err(|e| format!("{e:?}"))
+                .and_then(|(body, _)| body.mass_properties(1e-6).map_err(|e| format!("{e:?}")))
+                .map(|m| m.volume);
+            match volume {
+                Ok(v) if (v - exact).abs() < 1e-6 * exact => None,
+                other => Some(format!("frames turned {angle:e}: {other:?} vs {exact}")),
+            }
+        })
+        .collect();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+#[test]
+fn a_finer_read_holds_only_while_no_edge_gap_reaches_the_shortest_edge() {
+    // A cube 10 x 20 x 30: its shortest edge is 10 mm. Read finer, an edge that lies off its
+    // faces keeps its gap as its tolerance; once a gap is as long as the shortest edge, the finer
+    // read tells nothing apart that the stated one did not (issue #18848: an Inventor plate read at
+    // 1.6e-6 mm for an edge of 6.2e-6 mm kept gaps of 2.6e-4 mm, and the next boolean on its face
+    // failed SMLib's coincident-edge test).
+    let mut brep = one_solid(&cube(BoxStyle::default())).brep;
+    let shortest = shortest_edge(&brep);
+    assert_eq!(shortest, 10.0);
+    assert!(fine_read_holds(&brep, shortest));
+    brep.edges[3].tolerance = 9.99;
+    assert!(fine_read_holds(&brep, shortest));
+    brep.edges[3].tolerance = 10.0;
+    assert!(!fine_read_holds(&brep, shortest));
 }

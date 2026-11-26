@@ -1,7 +1,9 @@
 //! A hook on the result bodies of the units whose rows show UV trims (`boolean.merge_p4`,
-//! `topology.brep_p7`): each calls [`observe`] on a body just before writing it. Only tests
-//! install a hook (`operand_trim_rows`, which blinds or certifies the bodies' trims); with
-//! none, [`observe`] does nothing.
+//! `topology.brep_p7`) or vertex tolerances (`boolean.topology_intersector_p3`,
+//! `topology.brep_p9`): each calls [`observe`] on a body just before writing it. Only tests
+//! install a hook (`operand_trim_rows`, which blinds or certifies the bodies' trims;
+//! `merged_vertex_rows`, which replays the bodies' vertex tolerances); with none, [`observe`]
+//! does nothing.
 
 use solidcore::topology::Brep;
 use std::cell::RefCell;

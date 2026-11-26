@@ -25,9 +25,19 @@ pub mod sweeps;
 pub mod trace;
 pub mod trim;
 
-pub use check::{CheckLevel, CheckReport};
-pub use measure::{MEASURE_ACCURACY, MassProperties, PointClass};
-pub use ops::{Blend, BooleanOp, ChamferSecond, Hole, HoleEdge, MAX_POINTS, MAX_UNION_BREPS, Turn};
+pub use check::CheckLevel;
+pub use check::CheckReport;
+pub use measure::MEASURE_ACCURACY;
+pub use measure::MassProperties;
+pub use measure::PointClass;
+pub use ops::Blend;
+pub use ops::BooleanOp;
+pub use ops::ChamferSecond;
+pub use ops::Hole;
+pub use ops::HoleEdge;
+pub use ops::MAX_POINTS;
+pub use ops::MAX_UNION_BREPS;
+pub use ops::Turn;
 
 /// Why an SMLib call failed.
 #[derive(Clone, Debug, PartialEq)]
@@ -75,6 +85,11 @@ pub enum Error {
     WallFolds { largest: Option<f64> },
     /// SMLib cannot build this operation exactly.
     Unsupported,
+    /// A draft refused by the kernel whose drafted face would cut through a face it does not
+    /// meet (solidcore's `drafted_through`): a hole's wall within the draft of the side. `at` is a
+    /// point of that face between the face's plane and its drafted plane, `depth` how far it
+    /// lies past the drafted plane.
+    DraftCutsThrough { at: [f64; 3], depth: f64 },
     /// A face move whose tangent blends cannot follow the moved faces, with solidcore's reason
     /// (`SmOffsetFacesExecutive`'s refusal comment): `exact` false where the blend cannot be taken
     /// off and put back ([`Error::Unsupported`] without a reason), true where following it needs a
@@ -123,6 +138,13 @@ pub enum Error {
     RefusedWithDiagnostic { refusal: solidcore_ops::Error, diagnostic: String },
     /// solidcore panicked; the guard caught it (the call, then the panic's message).
     Internal(String),
+    /// A classification that needs one nearest point on a face's surface found `found` of them
+    /// (the kernel's `compute_point_parameters`, its `IntersectFailure::NotOneFoot`): the
+    /// point's place on the face is undecided, the operation refuses. Status `SM_ERR`.
+    NotOneFoot {
+        /// How many nearest points the wider solve found.
+        found: usize,
+    },
     /// A step of SMLib solidcore has not ported yet, refused rather than built another way: what
     /// is missing, and the solidcore issue that ports it.
     Unported(&'static str),
@@ -133,7 +155,8 @@ pub enum Error {
 
 /// Why a blend has no room, and what the largest size that builds a refused blend sizes
 /// ([`Error::TooLarge`]): ops' own, as its refusal gives them.
-pub use solidcore_ops::{FitKind, RoomReason};
+pub use solidcore_ops::FitKind;
+pub use solidcore_ops::RoomReason;
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -143,6 +166,7 @@ impl std::fmt::Display for Error {
             Error::Argument => write!(f, "invalid argument for SMLib"),
             Error::Empty => write!(f, "SMLib returned an empty body"),
             Error::NotSolid => write!(f, "SMLib's result is not a closed solid"),
+            Error::NotOneFoot { found } => write!(f, "a classification found {found} nearest points on the face's surface, where one is needed"),
             Error::NoMatch { point } => write!(f, "selection point {} is not near any edge or face", point + 1),
             Error::Ambiguous { point } => write!(f, "selection point {} is equally near to two edges or faces", point + 1),
             Error::NoRoom => write!(f, "there is no room for it: an offset leaves none inside the body, or a blend is larger than its faces allow"),
@@ -183,6 +207,10 @@ impl std::fmt::Display for Error {
                 }
             }
             Error::Unsupported => write!(f, "not supported yet: SMLib cannot build this exactly"),
+            Error::DraftCutsThrough { at: [x, y, z], depth } => write!(
+                f,
+                "a drafted face would cut through the face at ({x:.3}, {y:.3}, {z:.3}), which reaches {depth:.3} past it and meets no edge of it"
+            ),
             Error::CornerUnsupported { why, at } => {
                 write!(f, "not supported yet: a corner of this kind is not supported yet by SMLib's blends")?;
                 if let Some([x, y, z]) = at {
@@ -267,6 +295,22 @@ pub fn hold_a_kernel() -> core::HeldKernel {
 pub fn in_call() -> bool {
     core::in_call()
 }
+
+/// Every pooled kernel's profile (solidcore's `profile` feature), written as JSON Lines: the
+/// scopes and counted work of its calls so far (feature `solidcore-profile`).
+///
+/// # Errors
+///
+/// Those of writing to `w`.
+#[cfg(feature = "solidcore-profile")]
+pub fn write_kernel_profiles(w: &mut impl std::io::Write) -> std::io::Result<()> {
+    core::write_kernel_profiles(w)
+}
+
+/// [`solidcore_ops::session::profiled`], re-exported so the applications can dump each
+/// solidcore-ops call's kernel profile (feature `solidcore-profile`).
+#[cfg(feature = "solidcore-profile")]
+pub use solidcore_ops::session::profiled;
 
 /// A panic inside a solidcore call, which the call catches as it catches any
 /// ([`Error::Internal`], the kernel replaced by a fresh one): the crash-report check

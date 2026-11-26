@@ -1,0 +1,38 @@
+{
+  "en": {
+    "prefs.accent": "Accent",
+    "prefs.accent_theme": "Theme's own",
+    "prefs.accent_locked": "This theme keeps its own accent"
+  },
+  "ar": {
+    "prefs.accent": "لون التمييز",
+    "prefs.accent_theme": "لون السمة",
+    "prefs.accent_locked": "هذه السمة تحتفظ بلون التمييز الخاص بها"
+  },
+  "he": {
+    "prefs.accent": "צבע הדגשה",
+    "prefs.accent_theme": "של ערכת הנושא",
+    "prefs.accent_locked": "ערכת נושא זו שומרת על צבע ההדגשה שלה"
+  },
+  "ja": {
+    "prefs.accent": "アクセント",
+    "prefs.accent_theme": "テーマの色",
+    "prefs.accent_locked": "このテーマは独自のアクセント色を保ちます"
+  },
+  "vi": {
+    "prefs.accent": "Màu nhấn",
+    "prefs.accent_theme": "Của chủ đề",
+    "prefs.accent_locked": "Chủ đề này giữ màu nhấn riêng"
+  },
+  "zh": {
+    "prefs.accent": "强调色",
+    "prefs.accent_theme": "主题自带",
+    "prefs.accent_locked": "此主题保留自己的强调色"
+  },
+  "de": {
+    "prefs.accent_locked": "Dieses Design behält seine eigene Akzentfarbe"
+  },
+  "ko": {
+    "prefs.accent_locked": "이 테마는 자체 강조색을 유지합니다"
+  }
+}

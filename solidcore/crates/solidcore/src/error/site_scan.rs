@@ -58,6 +58,8 @@ pub(in crate::error) enum Builder {
     /// A wrapper shared with the files under a path (path relative to `crates/`, without
     /// `.rs`: the module's file and its children's), named, with its phrase at the index: a
     /// helper there. A wrapper `fn` visible outside its file is listed so, or fails the scan.
+    /// (No scan lists one at present.)
+    #[allow(dead_code)]
     Shared(&'static str, &'static str, Option<usize>),
 }
 
@@ -920,6 +922,50 @@ pub(in crate::error) fn crate_sites(scan: &Scan) -> Vec<(String, Vec<Site>)> {
         .collect()
 }
 
+/// What differs between the files with a site (sites, by path) and the `pinned` counts
+/// (path, count), as a report naming `what` is counted, or `None` when they agree.
+fn pin_report(
+    what: &str,
+    found: &[(String, Vec<Site>)],
+    pinned: &[(&str, usize)],
+) -> Option<String> {
+    use std::fmt::Write as _;
+    let counts: Vec<(&str, usize)> = found.iter().map(|(f, s)| (f.as_str(), s.len())).collect();
+    if counts == pinned {
+        return None;
+    }
+    let mut report = String::new();
+    let pinned_total: usize = pinned.iter().map(|(_, n)| n).sum();
+    let found_total: usize = counts.iter().map(|(_, n)| n).sum();
+    writeln!(report, "{what}: pinned {pinned_total}, found {found_total}").unwrap();
+    if pinned_total == found_total {
+        writeln!(
+            report,
+            "the total is unchanged: if code moved between files, update both pins"
+        )
+        .unwrap();
+    }
+    let mut files: Vec<&str> = pinned.iter().map(|(f, _)| *f).collect();
+    files.extend(counts.iter().map(|(f, _)| *f));
+    files.sort_unstable();
+    files.dedup();
+    for file in files {
+        let pin = pinned
+            .iter()
+            .find(|(f, _)| *f == file)
+            .map_or(0, |(_, n)| *n);
+        let sites = found.iter().find(|(f, _)| f == file).map(|(_, s)| s);
+        let n = sites.map_or(0, Vec::len);
+        if pin != n {
+            writeln!(report, "{file}: pinned {pin}, found {n}").unwrap();
+            for site in sites.into_iter().flatten() {
+                writeln!(report, "    {file}:{}  {}", site.line, site.via).unwrap();
+            }
+        }
+    }
+    Some(report)
+}
+
 /// Panics, with a report of what changed, unless the files with a site `scan` counts
 /// (sites, by path) are exactly `pinned` (path, count; sorted by path, one file per line,
 /// every count above 0). `what` names the count in the report.
@@ -929,40 +975,10 @@ pub(in crate::error) fn assert_pinned(
     pinned: &[(&str, usize)],
 ) {
     use std::fmt::Write as _;
-    let counts: Vec<(&str, usize)> = found.iter().map(|(f, s)| (f.as_str(), s.len())).collect();
-    if counts != pinned {
-        let mut report = String::new();
-        let pinned_total: usize = pinned.iter().map(|(_, n)| n).sum();
-        let found_total: usize = counts.iter().map(|(_, n)| n).sum();
-        writeln!(report, "{what}: pinned {pinned_total}, found {found_total}").unwrap();
-        if pinned_total == found_total {
-            writeln!(
-                report,
-                "the total is unchanged: if code moved between files, update both lines"
-            )
-            .unwrap();
-        }
-        let mut files: Vec<&str> = pinned.iter().map(|(f, _)| *f).collect();
-        files.extend(counts.iter().map(|(f, _)| *f));
-        files.sort_unstable();
-        files.dedup();
-        for file in files {
-            let pin = pinned
-                .iter()
-                .find(|(f, _)| *f == file)
-                .map_or(0, |(_, n)| *n);
-            let sites = found.iter().find(|(f, _)| f == file).map(|(_, s)| s);
-            let n = sites.map_or(0, Vec::len);
-            if pin != n {
-                writeln!(report, "{file}: pinned {pin}, found {n}").unwrap();
-                for site in sites.into_iter().flatten() {
-                    writeln!(report, "    {file}:{}  {}", site.line, site.via).unwrap();
-                }
-            }
-        }
+    if let Some(mut report) = pin_report(what, found, pinned) {
         writeln!(report, "the pinned list, as found:").unwrap();
-        for (file, n) in &counts {
-            writeln!(report, "    (\"{file}\", {n}),").unwrap();
+        for (file, sites) in found {
+            writeln!(report, "    (\"{file}\", {}),", sites.len()).unwrap();
         }
         panic!("{report}");
     }
@@ -973,6 +989,85 @@ pub(in crate::error) fn assert_pinned(
         pinned.windows(2).all(|w| w[0].0 < w[1].0),
         "the {what} list is sorted by path, one file per line"
     );
+}
+
+/// The pins in the folder `src/error/pins/<kind>/` of this crate, as (path, count) sorted
+/// by path. A pin is one file, `<path>.pin`, at the library file's path relative to
+/// `crates/` (`pins/phrase/solidcore/src/blend/hcr.rs.pin` pins
+/// `solidcore/src/blend/hcr.rs`), holding its count as a decimal number. One file per pin,
+/// so changes that lower different files' counts touch different files and merge cleanly.
+/// A missing `pins/<kind>/` folder means no pins (git drops the folder with its last pin).
+/// Panics on any other file in the folder, or a pin that is not a number above 0.
+pub(in crate::error) fn pins(kind: &str) -> Vec<(String, usize)> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/error/pins")
+        .join(kind);
+    let mut pins = Vec::new();
+    // git keeps no empty folder: a kind whose last pin went has no folder, and no sites
+    if !root.exists() {
+        return pins;
+    }
+    let mut dirs = vec![root.clone()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).expect("read pins dir") {
+            let path = entry.expect("pins dir entry").path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            let relative = path
+                .strip_prefix(&root)
+                .expect("under the pins dir")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let Some(file) = relative.strip_suffix(".pin") else {
+                panic!("{}: a pin is named `<path>.pin`", path.display());
+            };
+            let text = std::fs::read_to_string(&path).expect("read pin");
+            let n = match text.trim().parse::<usize>() {
+                Ok(n) if n > 0 => n,
+                _ => panic!(
+                    "{}: holds {:?}; a pin holds its file's count, above 0 (a file whose \
+                     count reaches 0 loses its pin)",
+                    path.display(),
+                    text.trim()
+                ),
+            };
+            pins.push((file.to_owned(), n));
+        }
+    }
+    pins.sort();
+    pins
+}
+
+/// Panics, with a report of what changed and the pin files to write, unless the files with
+/// a site (sites, by path) are exactly the pins in `src/error/pins/<kind>/` ([`pins`]).
+/// `what` names the count in the report.
+pub(in crate::error) fn assert_pins(what: &str, found: &[(String, Vec<Site>)], kind: &str) {
+    use std::fmt::Write as _;
+    let pins = pins(kind);
+    let pinned: Vec<(&str, usize)> = pins.iter().map(|(f, n)| (f.as_str(), *n)).collect();
+    if let Some(mut report) = pin_report(what, found, &pinned) {
+        writeln!(
+            report,
+            "the pins to change, in solidcore/crates/solidcore/src/error/pins/{kind}/:"
+        )
+        .unwrap();
+        for (file, pin) in &pinned {
+            if !found.iter().any(|(f, _)| f == file) {
+                writeln!(report, "    delete {file}.pin (was {pin})").unwrap();
+            }
+        }
+        for (file, sites) in found {
+            let n = sites.len();
+            match pinned.iter().find(|(f, _)| f == file) {
+                Some((_, pin)) if *pin == n => {}
+                Some((_, pin)) => writeln!(report, "    {file}.pin: {pin} -> {n}").unwrap(),
+                None => writeln!(report, "    create {file}.pin holding {n}").unwrap(),
+            }
+        }
+        panic!("{report}");
+    }
 }
 
 #[cfg(test)]

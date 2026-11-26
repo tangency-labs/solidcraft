@@ -398,6 +398,70 @@ fn fit_json_frames_selection_while_home_frames_everything() {
     assert_eq!(h.app.session.undo.len(), undo);
 }
 
+/// #18507: End frames the selection as Fit (and F6) does, and Home goes to the home view. A focused
+/// text field keeps both keys for its caret. They are ordinary shortcuts, so they can be cleared.
+#[test]
+fn end_fits_the_selection_and_home_goes_home_except_in_a_text_field() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.look_at_anim = false;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Near"})).unwrap();
+    h.app.run("solid.box", json!({"corner":[500,0,0],"length":10,"width":10,"height":10,"body_name":"Far"})).unwrap();
+    h.settle();
+    assert_eq!(crate::keymap::keys(&h.app, "view.fit"), ["End"]);
+    assert_eq!(crate::keymap::keys(&h.app, "view.home"), ["Home"]);
+    h.app.run("select.set", json!({"items":[{"type":"body","name":"Near"}]})).unwrap();
+    h.app.cam.set_view(StandardView::Front);
+    h.app.cam.pan(300.0, 200.0, 500.0);
+    let direction = (h.app.cam.yaw, h.app.cam.pitch);
+    h.step(&json!({"key":"End"})).unwrap();
+    h.settle();
+    assert!(h.app.cam.target.dist(Vec3::new(5.0, 5.0, 5.0)) < 5.0, "End frames the selected box: {:?}", h.app.cam.target);
+    assert_eq!((h.app.cam.yaw, h.app.cam.pitch), direction, "End keeps the orientation, as Fit does");
+    let fitted = h.app.cam;
+    h.app.cam.pan(60.0, 0.0, 500.0);
+    h.step(&json!({"key":"F6"})).unwrap();
+    h.settle();
+    assert!(same_cam(&h.app.cam, &fitted), "F6 still fits");
+    h.step(&json!({"key":"Home"})).unwrap();
+    h.settle();
+    assert!(same_cam(&h.app.cam, &home(&h)), "Home goes to the home view");
+
+    // The command search's field has the keyboard: Home and End move its caret, not the view.
+    h.call("ui.palette", json!({"text":"fit"}));
+    h.frames(3);
+    let field = egui::Id::unique("sc_sbox_text");
+    let caret = |h: &Harness| egui::TextEdit::load_state(&h.ctx, field).and_then(|s| s.cursor.char_range()).map(|r| r.primary);
+    h.app.cam.pan(60.0, 0.0, 500.0);
+    let moved = h.app.cam;
+    h.step(&json!({"key":"Home"})).unwrap();
+    h.frames(2);
+    assert_eq!(caret(&h), Some(egui::text::CCursor::new(0)), "Home moves the caret to the start");
+    h.step(&json!({"key":"End"})).unwrap();
+    h.frames(2);
+    assert_eq!(caret(&h), Some(egui::text::CCursor::new(3)), "End moves the caret to the end");
+    assert!(same_cam(&h.app.cam, &moved), "the view stays put while the field has the keys");
+    h.call("ui.palette", json!({"open":false}));
+    h.frames(2);
+    // Any other focused field too: the Preferences search.
+    h.call("ui.prefs", json!({"open":"General"}));
+    h.frames(3);
+    h.step(&json!({"text":"grid"})).unwrap();
+    for key in ["Home", "End"] {
+        h.step(&json!({"key":key})).unwrap();
+        h.frames(2);
+        assert!(same_cam(&h.app.cam, &moved), "{key} in the Preferences search leaves the view");
+    }
+    assert_eq!(h.app.prefs_window.shell.filter, "grid");
+    h.call("ui.prefs", json!({"button":"cancel"}));
+    h.frames(2);
+
+    crate::keymap::bind(&mut h.app, "view.home", "", false).unwrap();
+    h.step(&json!({"key":"Home"})).unwrap();
+    h.settle();
+    assert!(same_cam(&h.app.cam, &moved), "a cleared Home does nothing");
+}
+
 #[test]
 fn navigation_bar_display_menu_runs_grid_and_shadow_commands() {
     let mut h = Harness::new();
@@ -413,6 +477,62 @@ fn navigation_bar_display_menu_runs_grid_and_shadow_commands() {
         let echo = language.format("ui.command_done", &[("command", language.label(crate::command_label(id)))]);
         assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{id} was not run");
     }
+}
+
+/// The Browser tree panel closes from its own host menu, which left no way back; the View menu
+/// and the Layout setting bring it back (#16058).
+#[test]
+fn the_view_menu_brings_the_browser_tree_back() {
+    let mut h = Harness::new();
+    moved_block(&mut h);
+    // The tree is closed, as its own host menu closes it.
+    h.app.ui.show_browser = false;
+    h.settle();
+    assert!(!crate::browser::panel_open(&h.app), "the tree starts closed");
+    let language = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language);
+    let echo = language.format("ui.command_done", &[("command", language.label(crate::command_label("view.browser")))]);
+    h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();
+    assert!(crate::scenario::rect_of("view:browser_tree").is_some(), "the View menu has the Browser tree row");
+    for open in [true, false] {
+        let log = h.app.session.log.len();
+        h.step(&json!({"click":{"handle":"view:browser_tree"}})).unwrap();
+        h.settle();
+        assert_eq!(crate::browser::panel_open(&h.app), open, "the row turns the tree {open}");
+        assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "the row runs the command: {echo}");
+    }
+    // The Layout setting brings the tree back as well.
+    h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();
+    h.call("ui.prefs", json!({"open":"Layout"}));
+    h.frames(4);
+    crate::prefs::reveal_preference(&mut h, "prefs:browser_tree");
+    let log = h.app.session.log.len();
+    h.step(&json!({"click":{"handle":"prefs:browser_tree"}})).unwrap();
+    h.settle();
+    assert!(crate::browser::panel_open(&h.app), "the Layout setting brings the tree back");
+    assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "the setting runs the command: {echo}");
+}
+
+/// Whether the panel layout holds the Browser tree open, and how it is asked to be.
+fn browser_layout_open(app: &crate::SolveApp) -> Option<bool> {
+    app.panel_runtime()
+        .and_then(|runtime| runtime.layout().layout().instances.iter().find(|panel| panel.id.0 == "browser").map(|panel| panel.requested_open))
+}
+
+/// The View menu row runs `view.browser` without parameters, which toggles the tree: two quick
+/// toggles leave it open again, not closed (#16058).
+#[test]
+fn a_double_toggle_of_the_browser_tree_leaves_it_open() {
+    let mut h = Harness::new();
+    moved_block(&mut h);
+    assert_eq!(browser_layout_open(&h.app), Some(true), "the tree starts open in the layout");
+    // The tree closes.
+    h.app.run("view.browser", json!({})).unwrap();
+    assert!(!h.app.ui.show_browser, "the first toggle closes the tree");
+    // The tree opens again: the second toggle reads the closed state, before the panels sync.
+    h.app.run("view.browser", json!({})).unwrap();
+    assert!(h.app.ui.show_browser, "the second toggle leaves the tree open");
+    assert_eq!(browser_layout_open(&h.app), Some(true), "the layout holds it open again");
+    assert!(crate::browser::panel_open(&h.app), "the tree is open again");
 }
 
 #[test]

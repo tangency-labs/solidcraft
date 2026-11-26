@@ -26,11 +26,13 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_ops::sweep::{
     arcs_on_one_circle, curves_meet, extrude, face_section, join_arcs, loft, loft_sheet,
-    loft_to_point, planar_faces, project_curves, revolve, screw_sweep, sweep_placed,
-    sweep_stations, Affine, CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck, SweepFrame,
-    SweepRoute, Verdict,
+    loft_to_point, loft_to_point_through, planar_faces, project_curves, revolve, screw_sweep,
+    sweep_placed, sweep_stations, Affine, CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck,
+    SweepFrame, SweepRoute, Verdict,
 };
-use solidcore_ops::sweep::{loft_with_ends, LoftEnd};
+use solidcore_ops::sweep::{
+    loft_with_ends, screw_sweep_with, LoftEnd, ScrewSweepOptions, ScrewWalls,
+};
 use solidcore_ops::{make_box, Body, CheckLevel, Error};
 
 const Z: [f64; 3] = [0.0, 0.0, 1.0];
@@ -132,6 +134,8 @@ enum Op {
     Sweep(Vec<Curve>, Vec<Curve>, SweepFrame, bool),
     Loft(Vec<Vec<Curve>>, u32, bool),
     LoftToPoint(Vec<Curve>, [f64; 3]),
+    /// A loft from the first section through the rest (stations) to the apex, at the parameters.
+    LoftToPointThrough(Vec<Vec<Curve>>, [f64; 3], Vec<f64>),
     Stations(Vec<Curve>, Vec<Affine>, Ends),
     Screw(Vec<Curve>, [f64; 3], [f64; 3], f64, f64, f64),
     /// A screw sweep with a radial law.
@@ -419,6 +423,29 @@ fn case(name: &str) -> Case {
             Op::LoftToPoint(square(0.0, 0.0, 10.0, 0.0), [5.0, 5.0, 6.0]),
             Expect::Volume(200.0),
         ),
+        // Through the square halved at half height: the pyramid's own station, so the pyramid,
+        // A h / 3.
+        "loft_to_point_through_pyramid" => c(
+            Op::LoftToPointThrough(
+                vec![square(0.0, 0.0, 10.0, 0.0), square(2.5, 2.5, 5.0, 3.0)],
+                [5.0, 5.0, 6.0],
+                vec![0.0, 0.5, 1.0],
+            ),
+            Expect::Volume(200.0),
+        ),
+        // A circle of radius 5 through the circle of 2.5 halfway to an apex 10 up: the cone,
+        // pi r^2 h / 3.
+        "loft_to_point_through_cone" => c(
+            Op::LoftToPointThrough(
+                vec![
+                    vec![circle([0.0; 3], Z, [1.0, 0.0, 0.0], 5.0)],
+                    vec![circle([0.0, 0.0, 5.0], Z, [1.0, 0.0, 0.0], 2.5)],
+                ],
+                [0.0, 0.0, 10.0],
+                vec![0.0, 0.5, 1.0],
+            ),
+            Expect::Volume(PI * 25.0 * 10.0 / 3.0),
+        ),
         // A square of 2 carried up 10: 40.
         "sweep_stations_prism" => c(
             Op::Stations(
@@ -491,6 +518,7 @@ fn run(op: &Op) -> solidcore_ops::Result<Body> {
         Op::Sweep(p, path, frame, cap) => sweep_placed(p, path, *frame, *cap).map(|(b, _, _)| b),
         Op::Loft(s, d, cap) => loft(s, *d, *cap),
         Op::LoftToPoint(s, apex) => loft_to_point(s, *apex),
+        Op::LoftToPointThrough(s, apex, params) => loft_to_point_through(s, *apex, params),
         Op::Stations(p, s, e) => sweep_stations(p, s, *e),
         Op::Screw(p, o, a, pitch, turns, tol) => screw_sweep(p, *o, *a, *pitch, *turns, None, *tol),
         Op::ScrewRadial(p, o, a, pitch, turns, law, tol) => {
@@ -533,6 +561,35 @@ fn check(name: &str) {
     }
 }
 
+/// A square thread with joined walls: its two flanks one face each across the half turns its
+/// cylinder walls come in, the same solid as its pieces (the same volume, every cylinder piece),
+/// and `screw_sweep` is the pieces.
+#[test]
+fn screw_sweep_joined_walls_are_the_pieces_solid() {
+    let thread = polygon(&[
+        [5.0, 0.0, 0.0],
+        [6.0, 0.0, 0.0],
+        [6.0, 0.0, 1.0],
+        [5.0, 0.0, 1.0],
+    ]);
+    let made = |walls| {
+        let options = ScrewSweepOptions {
+            law: None,
+            tolerance: 1e-5,
+            walls,
+        };
+        screw_sweep_with(&thread, [0.0; 3], Z, 2.0, 2.0, &options).unwrap()
+    };
+    let (pieces, joined) = (made(ScrewWalls::Pieces), made(ScrewWalls::Joined));
+    let plain = screw_sweep(&thread, [0.0; 3], Z, 2.0, 2.0, None, 1e-5).unwrap();
+    assert_eq!(plain.counts().unwrap(), pieces.counts().unwrap());
+    // 4 half turns of 4 walls and 2 caps; then 4 of the 2 cylinders, 2 flanks and 2 caps
+    assert_eq!(pieces.counts().unwrap()[0], 18);
+    assert_eq!(joined.counts().unwrap()[0], 12);
+    let (vp, vj) = (pieces.volume(1e-8).unwrap(), joined.volume(1e-8).unwrap());
+    assert!(rel(vp, vj) < 1e-9, "pieces {vp}, joined {vj}");
+}
+
 macro_rules! cases {
     ($($m:ident),* $(,)?) => {$(
         #[test]
@@ -563,6 +620,8 @@ cases!(
     loft_two_squares,
     loft_two_circles,
     loft_to_point_pyramid,
+    loft_to_point_through_pyramid,
+    loft_to_point_through_cone,
     sweep_stations_prism,
     sweep_stations_scaled,
     screw_sweep_square_thread,
@@ -1251,6 +1310,218 @@ fn lofted(sections: &[Vec<Curve>], ends: [LoftEnd; 2]) -> Body {
     b
 }
 
+/// A circle-to-slot loft has exact, mixed-degree rims. The match splits the circle
+/// over the four original slot segments; it must close with independent planar caps.
+#[test]
+fn planar_g1_circle_to_slot_keeps_the_original_caps() {
+    use solidcore_ops::stitch::{open_edges, sew};
+    use solidcore_ops::sweep::{loft_sheet_planar_g1, LoftSection};
+    use solidcore_record::{Loop2, Plane, Seg2, Vec2, Vec3};
+
+    rig_fixes();
+    let section = |y, z, segs| LoftSection {
+        plane: Plane {
+            origin: Vec3::new(0.0, y, z),
+            x: Vec3::new(1.0, 0.0, 0.0),
+            y: Vec3::new(0.0, 1.0, 0.0),
+        },
+        segs,
+    };
+    let v = Vec2::new;
+    let a = section(0.0, 0.0, Loop2::circle(v(0.0, 0.0), 10.0).segs);
+    let b = section(
+        6.0,
+        30.0,
+        vec![
+            Seg2::Line {
+                a: v(-10.0, -8.0),
+                b: v(10.0, -8.0),
+            },
+            Seg2::Arc {
+                center: v(10.0, 0.0),
+                radius: 8.0,
+                start: -FRAC_PI_2,
+                sweep: PI,
+            },
+            Seg2::Line {
+                a: v(10.0, 8.0),
+                b: v(-10.0, 8.0),
+            },
+            Seg2::Arc {
+                center: v(-10.0, 0.0),
+                radius: 8.0,
+                start: FRAC_PI_2,
+                sweep: PI,
+            },
+        ],
+    );
+    let cap = |s: &LoftSection| {
+        let curves = s
+            .segs
+            .iter()
+            .map(|seg| Curve::from_seg2(seg, &s.plane).unwrap())
+            .collect::<Vec<_>>();
+        planar_faces(&curves).unwrap()
+    };
+    let caps = [cap(&a), cap(&b)];
+    for (end, sections) in [(0, [a.clone(), b.clone()]), (1, [b, a])] {
+        let (record, sources) = loft_sheet_planar_g1(&sections, end, 0.0, true).unwrap();
+        assert_eq!(record.faces.len(), 4);
+        assert_eq!(sources.len(), record.faces.len());
+        let mut seen = [false; 4];
+        for (face, sources) in record.faces.iter().zip(sources) {
+            let [solidcore_record::brep::Loop::Edges { edges }] = face.loops.as_slice() else {
+                panic!("expected one edge loop per wall");
+            };
+            let mut slot_rims = edges.iter().filter_map(|edge| {
+                let [a, b] = record.edges[edge.edge as usize]
+                    .vertices
+                    .map(|v| record.vertices[v as usize].point);
+                ((a[2] - 30.0).abs() < 1e-10 && (b[2] - 30.0).abs() < 1e-10).then_some((a, b))
+            });
+            let (a, b) = slot_rims.next().unwrap();
+            assert!(slot_rims.next().is_none());
+            // The slot's four endpoint pairs uniquely identify its source segments.
+            let slot = [(0.0, -2.0), (10.0, 6.0), (0.0, 14.0), (-10.0, 6.0)]
+                .iter()
+                .position(|&(x, y)| {
+                    (a[0] + b[0] - 2.0 * x).abs() < 1e-10 && (a[1] + b[1] - 2.0 * y).abs() < 1e-10
+                })
+                .unwrap();
+            assert!(!std::mem::replace(&mut seen[slot], true));
+            let expected = if end == 0 { [0, slot + 1] } else { [slot, 4] };
+            assert_eq!(sources, expected, "sources for slot segment {slot}");
+        }
+        let (sheet, _) = Body::from_record(&record, true).unwrap();
+        assert_slot_rims(&sheet, &open_edges(&sheet).unwrap());
+        let sewn = sew(&[&sheet, &caps[0], &caps[1]], 1e-5).unwrap();
+        assert!(sewn.closed && sewn.open_edges.is_empty());
+        assert!(sewn.body.check(CheckLevel::All).unwrap().is_valid());
+    }
+}
+
+/// Supporting planes may intersect the other rim even when both finite caps
+/// are separate. Do not require a nonzero projection on the free plane's normal.
+#[test]
+fn planar_g1_keeps_caps_when_their_supporting_planes_cross() {
+    use solidcore_ops::stitch::sew;
+    use solidcore_ops::sweep::{loft_sheet_planar_g1, LoftSection};
+    use solidcore_record::{Loop2, Plane, Vec2, Vec3};
+
+    rig_fixes();
+    let rect = |w: f64| {
+        Loop2::polygon(&[
+            Vec2::new(-2.0, -w),
+            Vec2::new(2.0, -w),
+            Vec2::new(2.0, w),
+            Vec2::new(-2.0, w),
+        ])
+        .segs
+    };
+    let a = LoftSection {
+        plane: Plane {
+            origin: Vec3::ZERO,
+            x: Vec3::new(1.0, 0.0, 0.0),
+            y: Vec3::new(0.0, 1.0, 0.0),
+        },
+        segs: rect(2.0),
+    };
+    let cap = |s: &LoftSection| {
+        planar_faces(
+            &s.segs
+                .iter()
+                .map(|g| Curve::from_seg2(g, &s.plane).unwrap())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap()
+    };
+    let ca = cap(&a);
+    for z in [18.749, 18.751] {
+        let b = LoftSection {
+            plane: Plane {
+                origin: Vec3::new(0.0, 25.0, z),
+                x: Vec3::new(1.0, 0.0, 0.0),
+                y: Vec3::new(0.0, 0.8, 0.6),
+            },
+            segs: rect(2.5),
+        };
+        let cb = cap(&b);
+        for crown in [0.0, 3.0] {
+            let (record, _) =
+                loft_sheet_planar_g1(&[a.clone(), b.clone()], 0, crown, true).unwrap();
+            let (sheet, _) = Body::from_record(&record, true).unwrap();
+            let sewn = sew(&[&sheet, &ca, &cb], 1e-5).unwrap();
+            assert!(sewn.closed && sewn.open_edges.is_empty());
+            assert!(sewn.body.check(CheckLevel::All).unwrap().is_valid());
+        }
+    }
+}
+
+/// Check the entire exported rim, not just the vertices that met during stitching.
+fn assert_slot_rims(sheet: &Body, rims: &[usize]) {
+    use solidcore::curve::curve::CurveKind;
+    use solidcore::curve::from_parameters::from_parameters;
+    use solidcore::nurbs::certificate::{on_circle, turn_about_axis, OnCircle};
+    use solidcore::{Kernel, Vec3};
+
+    let k = Kernel::default();
+    let (r, _) = sheet.to_record().unwrap();
+    assert_eq!(r.shells.len(), 1);
+    let mut angles = [0.0_f64; 3];
+    let mut line_levels = Vec::new();
+    for &i in rims {
+        let e = &r.edges[i];
+        let input = solidcore_convert::curve(e.parameters()).unwrap();
+        let edge = from_parameters(&k, &input, e.interval).unwrap();
+        let CurveKind::BSpline(spline) = edge.curve.kind() else {
+            panic!("expected a spline rim")
+        };
+        let curve = spline.gw_nurb().unwrap();
+        let [a, b] = e.vertices.map(|j| {
+            let [x, y, z] = r.vertices[j as usize].point;
+            Vec3::new(x, y, z)
+        });
+        if (a.z - 30.0).abs() < 1e-10 && (a.y - b.y).abs() < 1e-10 && (a.x - b.x).abs() > 19.0 {
+            // Positive weights put the entire trim in this segment's capsule.
+            assert!(curve.cpts().iter().all(|q| {
+                let p = q.to_euclid();
+                q.w > 0.0
+                    && (p.y - a.y).abs() < 1e-10
+                    && (p.z - 30.0).abs() < 1e-10
+                    && p.x.abs() <= 10.0 + 1e-10
+            }));
+            assert!((a.x.abs() - 10.0).abs() < 1e-10 && (b.x.abs() - 10.0).abs() < 1e-10);
+            line_levels.push(a.y);
+        } else {
+            let (j, c, radius) = if a.z.abs() < 1e-10 {
+                (0, Vec3::ZERO, 10.0)
+            } else if a.x > 0.0 {
+                (1, Vec3::new(10.0, 6.0, 30.0), 8.0)
+            } else {
+                (2, Vec3::new(-10.0, 6.0, 30.0), 8.0)
+            };
+            assert_eq!(
+                on_circle(&k, curve, c, Vec3::Z, radius, 1e-10).unwrap(),
+                OnCircle::Within
+            );
+            let turn = turn_about_axis(curve, c, Vec3::Z, e.interval)
+                .unwrap()
+                .unwrap();
+            let (da, db) = (a - c, b - c);
+            angles[j] += (turn * da.cross(db).z.atan2(da.dot(db))).rem_euclid(TAU);
+        }
+    }
+    assert_eq!(rims.len(), 8);
+    line_levels.sort_by(f64::total_cmp);
+    assert_eq!(line_levels.len(), 2);
+    for (got, want) in line_levels.into_iter().zip([-2.0, 14.0]) {
+        assert!((got - want).abs() < 1e-10);
+    }
+    for (got, want) in angles.into_iter().zip([TAU, PI, PI]) {
+        assert!((got - want).abs() < 1e-10, "sweep {got} != {want}");
+    }
+}
+
 /// Two equal squares, one above the other: every point's straight way to the next section is
 /// square to the planes already, so with weight 1 at both ends each row's Hermite cubic is that
 /// straight way and the loft is the box, its four flat walls planes.
@@ -1401,4 +1672,438 @@ fn a_loft_s_hostile_ends_are_refused() {
     let beside = [square(0.0, 0.0, 10.0, 0.0), square(20.0, 0.0, 10.0, 0.0)];
     assert!(refused(&beside, [square_end(1.0), LoftEnd::Free]));
     assert!(refused(&beside, [LoftEnd::Free, square_end(1.0)]));
+}
+
+/// A loft to a point through a station that bulges out (the base square again, half way up):
+/// a closed solid fuller than the pyramid (200) and inside the prism over the base (600). Rows of
+/// different counts, an apex in the base's plane, a single row, and parameters that do not run
+/// from 0 to 1 by increasing steps, one a row, are refused.
+#[test]
+fn loft_to_point_through_a_bulge_and_its_refusals() {
+    rig_fixes();
+    let base = square(0.0, 0.0, 10.0, 0.0);
+    let apex = [5.0, 5.0, 6.0];
+    let half = [0.0, 0.5, 1.0];
+    let bulge = [base.clone(), square(0.0, 0.0, 10.0, 3.0)];
+    let v = loft_to_point_through(&bulge, apex, &half)
+        .unwrap()
+        .volume(1e-8)
+        .unwrap();
+    assert!(v > 200.0 && v < 600.0, "volume {v}");
+    let fewer = vec![
+        line([2.5, 2.5, 3.0], [7.5, 7.5, 3.0]),
+        line([7.5, 7.5, 3.0], [2.5, 2.5, 3.0]),
+    ];
+    let refused = |sections: &[Vec<Curve>], apex: [f64; 3], params: &[f64]| {
+        loft_to_point_through(sections, apex, params).err() == Some(Error::Argument)
+    };
+    assert!(refused(&[base.clone(), fewer], apex, &half), "counts");
+    assert!(
+        refused(&bulge, [5.0, 5.0, 0.0], &half),
+        "apex in the base's plane"
+    );
+    assert!(refused(&[base], apex, &[0.0, 1.0]), "one row");
+    for params in [
+        &[0.0, 1.0][..],
+        &[0.0, 0.5, 0.9],
+        &[0.1, 0.5, 1.0],
+        &[0.0, 0.0, 1.0],
+        &[0.0, f64::NAN, 1.0],
+    ] {
+        assert!(refused(&bulge, apex, params), "{params:?}");
+    }
+}
+
+/// A square whose corners take different weights from the two lines that meet there (each line
+/// weight 1 at its start and 2 at its end), through the same square halved at half height, to
+/// the apex: neighbouring walls meet on the same curves because each corner keeps one ratio of
+/// weights through the rows, so the walls stitch into the plain pyramid, A h / 3 = 200.
+#[test]
+fn loft_to_point_through_corners_of_different_weights_stitch() {
+    rig_fixes();
+    let weighted = |pts: [[f64; 3]; 4]| -> Vec<Curve> {
+        (0..4)
+            .map(|i| {
+                let (a, b) = (pts[i], pts[(i + 1) % 4]);
+                Curve::Nurbs {
+                    degree: 1,
+                    points: vec![[a[0], a[1], a[2], 1.0], [b[0], b[1], b[2], 2.0]],
+                    knots: vec![0.0, 0.0, 1.0, 1.0],
+                }
+            })
+            .collect()
+    };
+    let base = weighted([
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [0.0, 10.0, 0.0],
+    ]);
+    let half = weighted([
+        [2.5, 2.5, 3.0],
+        [7.5, 2.5, 3.0],
+        [7.5, 7.5, 3.0],
+        [2.5, 7.5, 3.0],
+    ]);
+    let b = loft_to_point_through(&[base, half], [5.0, 5.0, 6.0], &[0.0, 0.5, 1.0]).unwrap();
+    assert!(
+        b.check(CheckLevel::All).unwrap().is_valid(),
+        "a closed valid solid"
+    );
+    let v = b.volume(1e-8).unwrap();
+    assert!(rel(v, 200.0) < 1e-9, "volume {v} vs 200");
+}
+
+/// A circle swept along a line, at a small radius and far from the origin: the record it writes
+/// opens again (tangency-labs/solidcore#3377, where a cap plane was written with axes off square
+/// by 1e-15 to 1e-14 and `from_record` refused it).
+#[test]
+fn a_swept_circle_s_record_opens_again() {
+    let (s, c) = 15f64.to_radians().sin_cos();
+    let mut failed = Vec::new();
+    for (r, start, dir) in [
+        (1.0, [0.0, 0.0, 0.0], [c, s, 0.0]),
+        (0.01, [0.0, 0.0, 0.0], [c, s, 0.0]),
+        (1.0, [10010.0, 9997.58, 10.0], [0.0, 1.0, 0.0]),
+    ] {
+        let end = [0, 1, 2].map(|i| start[i] + 10.0 * dir[i]);
+        let circle = Curve::Arc {
+            center: start,
+            axis: dir,
+            reference: [0.0, 0.0, 1.0],
+            radius: r,
+            start: 0.0,
+            end: TAU,
+        };
+        let (body, _, _) =
+            sweep_placed(&[circle], &[line(start, end)], SweepFrame::Follow, true).unwrap();
+        let (record, _) = body.to_record().unwrap();
+        let again = Body::from_record(&record, true).and_then(|(back, _)| {
+            let (second, _) = back.to_record()?;
+            Body::from_record(&second, true).map(|_| second)
+        });
+        match again {
+            Ok(second) if second == record => {}
+            Ok(_) => failed.push(format!("r {r} from {start:?}: the second record differs")),
+            Err(e) => failed.push(format!("r {r} from {start:?}: {e:?}")),
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A swept circle saved before #21509 squared the record's plane axes: its cap planes' v axes
+/// are off square by about 1.36e-14 times their size (tangency-labs/solidcraft#21752). The
+/// record opens, as the same solid, and the record it writes again opens too.
+#[test]
+fn a_swept_circle_saved_with_its_caps_off_square_opens() {
+    use solidcore_record::brep::Surface;
+    let start = [10010.0, 9997.58, 10.0];
+    let circle = Curve::Arc {
+        center: start,
+        axis: [0.0, 1.0, 0.0],
+        reference: Z,
+        radius: 1.0,
+        start: 0.0,
+        end: TAU,
+    };
+    let end = [start[0], start[1] + 10.0, start[2]];
+    let (body, _, _) =
+        sweep_placed(&[circle], &[line(start, end)], SweepFrame::Follow, true).unwrap();
+    let (mut record, _) = body.to_record().unwrap();
+    let mut skewed = 0;
+    for face in &mut record.faces {
+        if let Surface::Plane { u_axis, v_axis, .. } = &mut face.surface {
+            let size = (0..3).map(|i| v_axis[i] * v_axis[i]).sum::<f64>().sqrt();
+            for i in 0..3 {
+                v_axis[i] += 1.36e-14 * size * u_axis[i];
+            }
+            skewed += 1;
+        }
+    }
+    assert_eq!(skewed, 2, "the two caps");
+    let (back, _) = Body::from_record(&record, true).unwrap();
+    assert!(back.check(CheckLevel::All).unwrap().is_valid());
+    let (again, _) = back.to_record().unwrap();
+    assert_eq!(
+        (again.faces.len(), again.edges.len(), again.vertices.len()),
+        (
+            record.faces.len(),
+            record.edges.len(),
+            record.vertices.len()
+        )
+    );
+    Body::from_record(&again, true).unwrap();
+    let (v, w) = (body.volume(1e-9).unwrap(), back.volume(1e-9).unwrap());
+    assert!(rel(v, w) < 1e-9, "volume {w} vs {v}");
+}
+
+/// A profile's runs of arcs on one circle are found and joined as [`join_arcs`] joins them: a
+/// circle in two halves of one frame is the full circle from its frame's start; two frames
+/// close at the middle of the longer; an open run in a loop with a line is one arc and the line
+/// stays; a profile with no such run is as given.
+#[test]
+fn the_runs_of_a_profile_join_as_join_arcs_joins_them() {
+    rig_fixes();
+    let whole = solidcore_ops::sweep::join_circle_runs(&halves(), JOIN).unwrap();
+    assert_eq!(
+        whole,
+        [join_arcs(&halves(), Join::ClosedAtFrameStart, JOIN).unwrap()]
+    );
+    let framed = solidcore_ops::sweep::join_circle_runs(&two_frames(), JOIN).unwrap();
+    assert_eq!(
+        framed,
+        [join_arcs(&two_frames(), Join::ClosedAtMiddleOfLongest, JOIN).unwrap()]
+    );
+    let d = half_disc();
+    let open = solidcore_ops::sweep::join_circle_runs(&d, JOIN).unwrap();
+    assert_eq!(
+        open,
+        [join_arcs(&d[..2], Join::Open, JOIN).unwrap(), d[2].clone()]
+    );
+    let square = [
+        line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+        line([1.0, 0.0, 0.0], [1.0, 1.0, 0.0]),
+        line([1.0, 1.0, 0.0], [0.0, 1.0, 0.0]),
+        line([0.0, 1.0, 0.0], [0.0, 0.0, 0.0]),
+    ];
+    assert_eq!(
+        solidcore_ops::sweep::join_circle_runs(&square, JOIN).unwrap(),
+        square
+    );
+    assert!(solidcore_ops::sweep::join_circle_runs(&[], JOIN).is_err());
+}
+
+/// A circle in two halves lofted to a point above its centre is a cone: the base and a ruled
+/// wall on each half, volume pi r^2 h / 3; a half disc's arc gets a ruled wall and its line a
+/// triangle.
+#[test]
+fn a_curved_section_lofts_to_a_point_as_a_cone() {
+    rig_fixes();
+    let cone = loft_to_point(&halves(), [0.0, 0.0, 10.0]).unwrap();
+    assert_eq!(faces(&cone), 3, "the base and two walls");
+    assert!(rel(cone.volume(1e-8).unwrap(), 250.0 * PI / 3.0) < 1e-7);
+    let half = loft_to_point(&half_disc(), [0.0, 0.0, 10.0]).unwrap();
+    assert_eq!(faces(&half), 4, "the base, two ruled walls and a triangle");
+    assert!(rel(half.volume(1e-8).unwrap(), 125.0 * PI / 3.0) < 1e-7);
+}
+
+/// A tapered duct of squares lofts with flat sides: six faces, every one a plane (the skin would
+/// make the sides bilinear B-spline surfaces), and the frustum's volume.
+#[test]
+fn a_loft_of_two_squares_has_planar_sides() {
+    rig_fixes();
+    let b = loft(
+        &[square(0.0, 0.0, 20.0, 0.0), square(5.0, 5.0, 10.0, 10.0)],
+        1,
+        true,
+    )
+    .unwrap();
+    assert_eq!(faces(&b), 6);
+    let (record, _) = b.to_record().unwrap();
+    assert!(
+        record.faces.iter().all(|f| matches!(
+            f.surface,
+            solidcore_record::brep::Surface::Plane { .. }
+                | solidcore_record::brep::Surface::PlaneThrough { .. }
+        )),
+        "every face a plane"
+    );
+    assert!(rel(b.volume(1e-8).unwrap(), 7000.0 / 3.0) < 1e-9);
+}
+
+/// The profile of #22184 placed by `p`: a cubic Bézier from (-30, -20) to (30, 15) through
+/// the controls (-10, 20) and its last 0.05 mm from its end at 225 degrees (`leg`; the
+/// issue's ordinary profile has (18, 12)), then two lines back.
+fn bezier_profile(p: impl Fn(f64, f64) -> [f64; 3], leg: [f64; 2]) -> Vec<Curve> {
+    let ctrl = [[-30.0, -20.0], [-10.0, 20.0], leg, [30.0, 15.0]];
+    vec![
+        Curve::Nurbs {
+            degree: 3,
+            points: ctrl
+                .iter()
+                .map(|&[y, z]| {
+                    let q = p(y, z);
+                    [q[0], q[1], q[2], 1.0]
+                })
+                .collect(),
+            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        },
+        Curve::Line {
+            start: p(30.0, 15.0),
+            end: p(30.0, -20.0),
+        },
+        Curve::Line {
+            start: p(30.0, -20.0),
+            end: p(-30.0, -20.0),
+        },
+    ]
+}
+
+/// The last control of #22184's Bézier: 0.05 mm from its end at 225 degrees, so its radius
+/// of curvature falls to 1.2e-4 mm there.
+fn sharp_leg() -> [f64; 2] {
+    let ang = 225.0_f64.to_radians();
+    [30.0 + 0.05 * ang.cos(), 15.0 + 0.05 * ang.sin()]
+}
+
+/// A profile whose cubic Bézier turns sharply at its end (#22184), extruded 10 mm: a closed
+/// solid of the profile's area times 10. By Green's theorem the area is 1559.6287689399
+/// mm^2 (the Bézier's part of the integral exactly, by five-point Gauss on its degree-5
+/// integrand), so 15596.287689399 mm^3.
+#[test]
+fn a_profile_bezier_that_turns_sharply_at_its_end_extrudes_to_a_solid() {
+    rig_fixes();
+    let profile = bezier_profile(|y, z| [2.0, y, z], sharp_leg());
+    let body = extrude(
+        &profile,
+        [1.0, 0.0, 0.0],
+        10.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .expect("the extrude is a solid");
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    let v = body.volume(1e-10).unwrap();
+    assert!((v - 15596.287689399).abs() <= 1e-6, "{v}");
+    // the Bézier is cut at its sharp end: two caps, the two lines' walls and at least two
+    // of the Bézier's
+    assert!(body.counts().unwrap()[0] >= 6);
+}
+
+/// The same profile in the XZ plane, 40 mm out along X (x from 10 to 70), turned a whole
+/// turn about Z: by Pappus the volume is 2 pi times the region's moment about the axis, its
+/// integral of x, by Green's theorem the integral of x^2 / 2 dz round the loop: -85750 along
+/// the line x = 70, 0 along the line z = -20, and 13963.00720844239 along the Bézier
+/// (five-point Gauss, exact on its degree-8 integrand): 71786.9927915576 mm^3 in all, so
+/// 451050.978354522 mm^3.
+#[test]
+fn a_profile_bezier_that_turns_sharply_at_its_end_revolves_to_a_solid() {
+    rig_fixes();
+    let profile = bezier_profile(|y, z| [y + 40.0, 0.0, z], sharp_leg());
+    let body = revolve(&profile, [0.0; 3], Z, TAU, true).expect("the revolve is a solid");
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    let v = body.volume(1e-10).unwrap();
+    assert!(
+        (v - 451050.978354522).abs() <= 1e-9 * 451050.978354522,
+        "{v}"
+    );
+}
+
+/// The issue's ordinary profile (last control (18, 12)) is not cut: its extrusion has a wall
+/// per curve and two caps.
+#[test]
+fn a_profile_bezier_with_an_ordinary_end_extrudes_one_wall_per_curve() {
+    rig_fixes();
+    let profile = bezier_profile(|y, z| [2.0, y, z], [18.0, 12.0]);
+    let body = extrude(
+        &profile,
+        [1.0, 0.0, 0.0],
+        10.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .expect("the extrude is a solid");
+    assert_eq!(body.counts().unwrap()[0], 5);
+}
+
+/// #22184's profile traversed the other way round: its Bézier starts with the sharp turn.
+fn reversed(profile: Vec<Curve>) -> Vec<Curve> {
+    profile
+        .into_iter()
+        .rev()
+        .map(|c| match c {
+            Curve::Nurbs {
+                degree,
+                mut points,
+                knots,
+            } => {
+                // the knots 0, 0, 0, 0, 1, 1, 1, 1 read the same backwards
+                points.reverse();
+                Curve::Nurbs {
+                    degree,
+                    points,
+                    knots,
+                }
+            }
+            Curve::Line { start, end } => Curve::Line {
+                start: end,
+                end: start,
+            },
+            arc @ Curve::Arc { .. } => arc,
+        })
+        .collect()
+}
+
+/// The issue's plate: 100 x 80, 2 mm thick, its top face the plane x = 2 that the profiles
+/// above lie in (y in [-30, 30] and z in [-20, 20] inside it); 16000 mm^3.
+fn plate() -> Body {
+    make_box([0.0, -50.0, -40.0], [2.0, 100.0, 80.0]).unwrap()
+}
+
+/// The same profile with its Bézier's sharp turn at its start: the same closed solid,
+/// 15596.287689399 mm^3 (the area does not depend on the direction the loop is read).
+#[test]
+fn a_profile_bezier_that_turns_sharply_at_its_start_extrudes_to_a_solid() {
+    rig_fixes();
+    let profile = reversed(bezier_profile(|y, z| [2.0, y, z], sharp_leg()));
+    let body = extrude(
+        &profile,
+        [1.0, 0.0, 0.0],
+        10.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .expect("the extrude is a solid");
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    let v = body.volume(1e-10).unwrap();
+    assert!((v - 15596.287689399).abs() <= 1e-6, "{v}");
+}
+
+/// #22184's Join: the profile extruded 10 mm off the plate's top and united with it, a valid
+/// solid of 16000 + 15596.287689399 mm^3 (the extrusion touches the plate only on its cap).
+#[test]
+fn a_profile_bezier_that_turns_sharply_at_its_end_joins_its_plate() {
+    rig_fixes();
+    let profile = bezier_profile(|y, z| [2.0, y, z], sharp_leg());
+    let tool = extrude(
+        &profile,
+        [1.0, 0.0, 0.0],
+        10.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let joined = solidcore_ops::boolean::boolean(plate(), tool, solidcore_ops::BooleanOp::Union)
+        .expect("the union is a solid")
+        .expect("the union is not empty");
+    assert!(joined.check(CheckLevel::All).unwrap().is_valid());
+    let v = joined.volume(1e-10).unwrap();
+    assert!((v - 31596.287689399).abs() <= 1e-6, "{v}");
+}
+
+/// #22184's Cut: the profile extruded 2 mm into the plate and subtracted, through it; a
+/// valid solid of 16000 - 2 x 1559.6287689399 = 12880.7424621202 mm^3.
+#[test]
+fn a_profile_bezier_that_turns_sharply_at_its_end_cuts_through_its_plate() {
+    rig_fixes();
+    let profile = bezier_profile(|y, z| [2.0, y, z], sharp_leg());
+    let tool = extrude(
+        &profile,
+        [-1.0, 0.0, 0.0],
+        2.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let cut = solidcore_ops::boolean::boolean(plate(), tool, solidcore_ops::BooleanOp::Subtract)
+        .expect("the cut is a solid")
+        .expect("the cut is not empty");
+    assert!(cut.check(CheckLevel::All).unwrap().is_valid());
+    let v = cut.volume(1e-10).unwrap();
+    assert!((v - 12880.7424621202).abs() <= 1e-6, "{v}");
 }

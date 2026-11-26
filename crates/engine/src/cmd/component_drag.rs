@@ -152,9 +152,11 @@ pub(super) fn drag(s: &mut Session, p: &Value) -> Result<Value> {
     let moved: Vec<u64> = moves.iter().map(|(id, _)| *id).collect();
     if world_move != solidcraft_doc::IDENTITY {
         for (id, next) in moves {
-            s.pending_moves.remove(&id);
+            s.clear_pending_move(id);
             if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == id) {
+                let prev = o.transform;
                 o.transform = next;
+                o.adjust_base_for_direct_move(&prev, &next);
             }
         }
     }

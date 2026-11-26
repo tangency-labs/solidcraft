@@ -497,7 +497,14 @@ fn tapered_extrudes() {
     let m = measure(&b).unwrap();
     assert!(rel(m.volume, v) < 5e-4, "{} vs {v}", m.volume);
     assert!(m.bbox.max.z < 1e-6 && m.bbox.min.z > -10.0 - 1e-6, "{:?}", m.bbox);
-    assert!(extrude_tapered(&Plane::XY, &c, 10.0, 1.0, -60f64.to_radians(), crate::DraftCorner::default()).is_err(), "closes the profile");
+    // Inward 60° over 10: the circle closes to its centre at 10 / tan 60° (5.77), before the top,
+    // so the solid is the cone to that apex, π r² h / 3 (#22149).
+    let b = extrude_tapered(&Plane::XY, &c, 10.0, 1.0, -60f64.to_radians(), crate::DraftCorner::default()).unwrap();
+    let h = 10.0 / 60f64.to_radians().tan();
+    let v = PI * 100.0 * h / 3.0;
+    let m = measure(&b).unwrap();
+    assert!(rel(m.volume, v) < 5e-4, "{} vs {v}", m.volume);
+    assert!(m.bbox.min.z > -1e-6 && (m.bbox.max.z - h).abs() < 1e-6, "{:?}", m.bbox);
     // The square with a 10 × 10 square hole, 30 up, 5° inward: every wall leans in toward the
     // material's outside, so the outer frustum narrows and the hole's widens; the solid is the
     // one frustum less the other, with each wall a face of its own (four out, four in, two caps).
@@ -1375,6 +1382,35 @@ fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     assert!(!sheet.is_closed_mesh());
     assert_eq!(hit(&sheet, Vec3::new(2.0, 2.0, 4.0), Vec3::new(0.0, 0.0, -1.0)), Some((4.0, Vec3::Z)));
     assert_eq!(hit(&sheet, Vec3::new(2.0, 2.0, -4.0), Vec3::Z), Some((4.0, Vec3::new(0.0, 0.0, -1.0))));
+}
+
+/// `Body::face_line_hit` on the Ø40 × 40 cylinder about +Z, exactly, in closed form.
+/// - A line through the axis meets the side at the same distance both ways, (±20, 0, 20): the tie
+///   goes to the meeting ahead along the direction, whichever way the line points.
+/// - A line lying on the side (a ruling, here at 33° and on the side's seam) is no single place
+///   on it: `None`, not a failure. Each end meets it once, on its rim, at z = 0 and z = 40.
+#[test]
+fn a_line_meets_a_cylinders_face_ahead_on_a_tie_and_not_at_all_along_it() {
+    let b = cylinder(Vec3::ZERO, Vec3::Z, 20.0, 40.0).unwrap();
+    let side = (0..b.face_count()).find(|&f| matches!(face_surface(&b, f), Some(FaceSurface::Cylinder { .. }))).unwrap();
+    let ends: Vec<usize> = (0..b.face_count()).filter(|&f| f != side).collect();
+    assert_eq!(ends.len(), 2);
+    let centre = Vec3::new(0.0, 0.0, 20.0);
+    for (dir, ahead) in [(Vec3::X, Vec3::new(20.0, 0.0, 20.0)), (-Vec3::X, Vec3::new(-20.0, 0.0, 20.0))] {
+        let got = b.face_line_hit(side, centre, dir).unwrap().unwrap();
+        assert!(got.dist(ahead) < 1e-9, "along {dir:?}: {got:?}, not {ahead:?}");
+    }
+    for a in [33f64.to_radians(), crate::build::SEAM_ANGLE] {
+        let rim = Vec3::new(20.0 * a.cos(), 20.0 * a.sin(), 0.0);
+        for (z, dir) in [(30.0, -Vec3::Z), (10.0, Vec3::Z)] {
+            let on = rim + Vec3::new(0.0, 0.0, z);
+            assert_eq!(b.face_line_hit(side, on, dir).unwrap(), None, "at {a} rad, z = {z}");
+            let mut met: Vec<Vec3> = ends.iter().filter_map(|&f| b.face_line_hit(f, on, dir).unwrap()).collect();
+            met.sort_by(|p, q| p.z.total_cmp(&q.z));
+            assert_eq!(met.len(), 2, "at {a} rad, z = {z}: {met:?}");
+            assert!(met[0].dist(rim) < 1e-9 && met[1].dist(rim + Vec3::new(0.0, 0.0, 40.0)) < 1e-9, "at {a} rad, z = {z}: {met:?}");
+        }
+    }
 }
 
 #[test]
@@ -2581,6 +2617,20 @@ fn raise_band_refuses_a_band_as_wide_as_the_rim_and_one_that_crosses_it_in_part(
     assert!(raise_band(&tube, Vec3::new(-10.0, 0.0, 15.0), 4.0, 2.0, false).is_ok());
 }
 
+/// #11436: a tilted cut leaves a rim of ellipses, which a band cannot follow; the flat rim still takes it.
+#[test]
+fn raise_band_on_a_sloped_rim_of_ellipses_is_refused_as_not_supported_yet() {
+    let ring = Region2 { outer: Loop2::circle(Vec2::ZERO, 30.0), holes: vec![Loop2::circle(Vec2::ZERO, 22.0)] };
+    let ring = extrude(&Plane::XY, &[ring], 0.0, 20.0).unwrap().pop().unwrap();
+    let tilt = 20f64.to_radians();
+    let cut = Plane { origin: Vec3::new(0.0, 0.0, 10.0), x: Vec3::new(tilt.cos(), 0.0, -tilt.sin()), y: Vec3::Y };
+    let sloped = half_space(&ring, &cut, false).unwrap().0.unwrap();
+    let at = Vec3::new(-26.0, 0.0, 10.0 + 26.0 * tilt.tan());
+    let text = raise_band(&sloped, at, 1.5, 3.0, false).unwrap_err().to_string();
+    assert!(text.contains("not supported yet") && text.contains("ellipse"), "{text}");
+    assert!(raise_band(&ring, Vec3::new(-26.0, 0.0, 20.0), 1.5, 3.0, false).is_ok());
+}
+
 #[test]
 fn orientation_mesh_reuses_missing_face_check_at_matching_tolerance() {
     for scale in [0.001, 1.0, 1000.0] {
@@ -3091,6 +3141,66 @@ fn loft_rectangle_to_circle_pairs_each_span_on_its_own_parameter() {
     assert!(joins(&body, Vec3::new(-56.12, 0.0, 0.0), Vec3::new(-r, 0.0, 100.0)), "the x-side's middle joins the circle's 180 degree point");
 }
 
+/// A loft section at `scale`: the cubic Bézier from (20, 0) to (-20, 0) with the control points
+/// (20, 30) and (-20, 30) between, closed by the line back. The curve is given whole, or divided
+/// where `cuts` say (each the fraction of what is left of its parameter), so its pieces are that
+/// same curve.
+fn arch_section(scale: f64, cuts: &[f64]) -> Loop2 {
+    let p = |x: f64, y: f64| Vec2::new(x * scale, y * scale);
+    let (start, end) = (p(20.0, 0.0), p(-20.0, 0.0));
+    let mut rest = Seg2::Cubic { p0: start, p1: p(20.0, 30.0), p2: p(-20.0, 30.0), p3: end };
+    let mut segs = Vec::new();
+    for &t in cuts {
+        let (head, tail) = rest.split_at(t);
+        segs.push(head);
+        rest = tail;
+    }
+    segs.push(rest);
+    segs.push(Seg2::Line { a: end, b: start });
+    Loop2 { segs }
+}
+
+/// A cut across a loft's wall over a spline passes the kernel's check however the spline is
+/// divided into spans (#22319). The sections are one arch at two sizes ([`arch_section`]), so the
+/// loft is the same body for every division of the arch. Each piece of a section used to be one
+/// unit of the wall's parameter whatever its length, so where pieces of different lengths met
+/// the wall's first derivative jumped, and the trim of a cut's edge that crossed that knot line
+/// turned its corner beside the line: with the arch in pieces of 1/4 and 3/4 of its parameter,
+/// or of 1/2, 1/4, 1/8 and 1/8, the cut by a slanted plane was refused ("Bad CurveCusp").
+#[test]
+fn loft_wall_over_a_spline_takes_a_slanted_cut_however_the_spline_is_divided() {
+    // The arch encloses 720 mm2 with its line: x'(t) = -240 t (1 - t) and y(t) = 90 t (1 - t), and
+    // the integral of y (-x') over [0, 1] is 21600 / 30. The section at height z is the arch at
+    // 1 - 0.4 z / 30 of its size, so the loft holds 720 * 30 * (1 + 0.6 + 0.36) / 3 mm3.
+    let whole = 14_112.0;
+    // Everything above the plane z = 15 + x / 2, drawn on the front plane (its sketch y is -Z).
+    let above = Region2 {
+        outer: Loop2::polygon(&[Vec2::new(-100.0, 35.0), Vec2::new(100.0, -65.0), Vec2::new(100.0, -200.0), Vec2::new(-100.0, -200.0)]),
+        holes: vec![],
+    };
+    let tool = extrude(&Plane::XZ, std::slice::from_ref(&above), -100.0, 100.0).unwrap().pop().unwrap();
+    let divisions: [&[f64]; 7] = [&[], &[0.5], &[0.5, 0.5], &[0.5, 0.5, 0.5], &[0.25], &[0.45], &[0.4]];
+    let mut left: Option<f64> = None;
+    for cuts in divisions {
+        let secs = [(Plane::XY, arch_section(1.0, cuts)), (Plane::XY.offset(30.0), arch_section(0.6, cuts))];
+        let (body, _) = validating(Validation::EachStep, || loft(&secs));
+        let body = body.unwrap_or_else(|e| panic!("{cuts:?}: {e}"));
+        // One wall over the arch, one on the line, and the two caps.
+        assert_eq!(body.face_count(), 4, "{cuts:?}");
+        let volume = measure(&body).unwrap().volume;
+        assert!(rel(volume, whole) < 1e-9, "{cuts:?}: {volume}");
+        let (parts, _) = validating(Validation::EachStep, || {
+            Ok::<_, KernelError>((boolean(&body, &tool, BoolOp::Cut)?, boolean(&body, &tool, BoolOp::Intersect)?))
+        });
+        let (below, over) = parts.unwrap_or_else(|e| panic!("{cuts:?}: {e}"));
+        let (below, over) = (measure(&below.unwrap()).unwrap().volume, measure(&over.unwrap()).unwrap().volume);
+        // What the cut leaves and what it takes are the loft, however the arch is divided.
+        assert!(rel(below + over, whole) < 1e-9, "{cuts:?}: {below} + {over}");
+        let first = *left.get_or_insert(below);
+        assert!(rel(below, first) < 1e-9, "{cuts:?}: {below} against {first}");
+    }
+}
+
 /// Three sections, the first hood profile, the second, then the first again ([`HOOD_A`]): the
 /// middle one gains the vertex only the outer ones have, and that vertex pairs with theirs, so all
 /// three get the same 19 vertices and the outer two are cut alike.
@@ -3513,4 +3623,348 @@ fn whole_edge_keeps_corners_tangent_arcs_and_authored_splits_apart() {
     for &e in &ring {
         assert_eq!(whole_edge(&capped, e), ring, "ring {ring:?}");
     }
+}
+
+/// A round larger than a narrow concave round on its tangent chain is refused at once, naming
+/// that round's radius. A stem whose outline has three slight inward kinks (3, 5 and 9 degrees
+/// where its arcs meet) is joined into a bulged bar and its six corners are rounded at 2: at the
+/// kinks those rounds are concave faces 0.1 to 0.3 mm wide. A ball of 8 or of 5 does not roll
+/// inside a round of 2, so the round of the stem's foot does not fit them. The kernel found no
+/// ball on those three edges and let them pass; it went on for 18 s to refuse two of the chain's
+/// bands as overlapping, with 0.158 mm as the radius that fits.
+#[test]
+fn a_foot_round_wider_than_a_narrow_concave_round_on_its_chain_is_refused_naming_it() {
+    let bar_plane = Plane { origin: Vec3::new(0.0, 0.0, 3.0), x: Vec3::new(1.0, 0.0, 0.0), y: Vec3::new(0.0, 0.0, 1.0) };
+    let bar_loop = Loop2 {
+        segs: vec![
+            Seg2::Line { a: Vec2::new(-30.0, 0.0), b: Vec2::new(30.0, 0.0) },
+            Seg2::Line { a: Vec2::new(30.0, 0.0), b: Vec2::new(30.0, 17.5) },
+            // from (30, 17.5) through (0, 22.5) to (-30, 17.5)
+            Seg2::Arc { center: Vec2::new(0.0, -70.0), radius: 92.5, start: 1.240498971965643, sweep: 0.6605947096585074 },
+            Seg2::Line { a: Vec2::new(-30.0, 17.5), b: Vec2::new(-30.0, 0.0) },
+        ],
+    };
+    let bar = revolve(&bar_plane, &[Region2 { outer: bar_loop, holes: vec![] }], Vec2::ZERO, Vec2::new(1.0, 0.0), 2.0 * PI).unwrap().remove(0);
+    // The stem's outline: five arcs and a line, corner to corner, each arc given by the three
+    // points the sketch drew it through (its start, a point on it, its end).
+    let corners = [[21.54, -6.4], [13.71, 13.47], [-12.17, 14.52], [-21.5, -5.01], [-15.57, -15.06], [13.88, -15.91]];
+    let segs = vec![
+        // through (18.8, 4)
+        Seg2::Arc {
+            center: Vec2::new(-23.764857456221563, -12.77514513750452),
+            radius: 45.75120309514059,
+            start: 0.13979868890741112,
+            sweep: 0.4711554890184193,
+        },
+        // through (0.94, 17.9)
+        Seg2::Arc {
+            center: Vec2::new(-0.020515226704094107, -5.489318159144774),
+            radius: 23.409032304869626,
+            start: 0.9440065846664395,
+            sweep: 1.1724802229343485,
+        },
+        // through (-17.68, 5.16)
+        Seg2::Arc {
+            center: Vec2::new(39.13116330153082, -21.98152348199092),
+            radius: 62.96165954449315,
+            start: 2.5231805421562297,
+            sweep: 0.3454829737892329,
+        },
+        // through (-20.99, -11.41)
+        Seg2::Arc {
+            center: Vec2::new(-14.535971623535861, -7.675374301250519),
+            radius: 7.456668920769142,
+            start: 2.7760583061845803,
+            sweep: 1.7972107229845715,
+        },
+        Seg2::Line { a: Vec2::new(-15.57, -15.06), b: Vec2::new(13.88, -15.91) },
+        // through (20.24, -13.18)
+        Seg2::Arc {
+            center: Vec2::new(14.49239208224037, -8.563320015768795),
+            radius: 7.372159171714493,
+            start: -1.6539603698181953,
+            sweep: 1.9517884128893068,
+        },
+    ];
+    let stem_plane = Plane { origin: Vec3::new(0.0, 0.0, 65.0), ..Plane::XY };
+    let stem = extrude(&stem_plane, &[Region2 { outer: Loop2 { segs }, holes: vec![] }], -55.0, 0.0).unwrap().remove(0);
+    let body = boolean(&bar, &stem, BoolOp::Union).unwrap().unwrap();
+    let picks: Vec<Vec3> = corners.iter().map(|c| Vec3::new(c[0], c[1], 45.0)).collect();
+    let body = fillet(&body, &picks, 2.0).unwrap();
+    let chain = tangent_chain(&body, &[Vec3::new(-0.85, -15.48, 19.32)]).unwrap();
+    assert_eq!(chain.len(), 14, "the foot: six sides, six corner rounds and the bar's seam twice");
+    for r in [8.0, 5.0] {
+        let Err(KernelError::TooLarge(why)) = fillet(&body, &chain, r) else { panic!("{r}: refused as too large") };
+        assert!(why.contains("the rolling ball does not fit a face it rolls on"), "{r}: {why}");
+        assert_eq!(named_fit(&why), Some(2.0), "{r}: {why}");
+    }
+}
+
+/// Issue #19602: Boolean cut of a block with a 3.6° tilted jamb less a cylinder.
+/// When the cylinder cut creates partition faces in void space outside the material
+/// solid, SMLib export must omit void-void boundary faces without error.
+#[test]
+fn test_issue_19602_tilted_jamb_block_cylinder_cut() {
+    let planes = [
+        [-0.99812, -0.0561, -0.02475, 1.3166],
+        [1., 0., 0., 4.7812],
+        [0., 0., -1., -8.5],
+        [0., 0., 1., 27.52],
+        [0., -1., 0., -2.],
+        [0., 1., 0., 9.5],
+        [1., 0., 0., 60.],
+        [-1., 0., 0., 60.],
+        [0., 1., 0., 60.],
+        [0., -1., 0., 60.],
+        [0., 0., 1., 60.],
+        [0., 0., -1., 60.],
+    ];
+    let hs: Vec<HalfSpace> = planes
+        .iter()
+        .map(|&[a, b, c, d]: &[f64; 4]| {
+            let k = (a * a + b * b + c * c).sqrt();
+            HalfSpace { n: Vec3::new(a / k, b / k, c / k), d: d / k }
+        })
+        .collect();
+    let block = convex_polyhedron(&hs).expect("block polyhedron must build");
+    let a = [-0.05545f64, 1., -0.02618];
+    let k = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+    let arch = cylinder(Vec3::new(2.392, 2.0057, 27.5982), Vec3::new(a[0] / k, a[1] / k, a[2] / k), 4.5, 8.).expect("cylinder must build");
+    let r = boolean(&block, &arch, BoolOp::Cut);
+    assert!(r.is_ok(), "{r:?}");
+    let solid = r.unwrap().expect("cut should produce a non-empty solid");
+    assert!(solid.validity().is_empty(), "{:?}", solid.validity());
+}
+
+#[test]
+fn iso_line_crosses_a_quadratic_trim_twice_within_one_sample_step() {
+    use solidcore_record::brep as b;
+    let tol = 1e-7;
+    let c: f64 = 33.0 / 128.0;
+    let r: f64 = 1.0 / 256.0;
+    // The bottom trim is y = 1000 ((t - c)^2 - r^2), x = 1000 t.
+    // Its two roots are strictly between adjacent samples 16/64 and 17/64.
+    let y0 = 1000.0 * (c * c - r * r);
+    let y1 = 1000.0 * ((1.0 - c) * (1.0 - c) - r * r);
+    let uv = [[0.0, y0], [1000.0, y1], [1000.0, 900.0], [0.0, 900.0]];
+    let xyz = |p: [f64; 2]| [p[0], p[1], 0.0];
+    let mut edges = vec![];
+    let mut oriented = vec![];
+    for i in 0..4 {
+        let next = (i + 1) % 4;
+        let points = if i == 0 { vec![uv[i], [500.0, y0 - 1000.0 * c], uv[next]] } else { vec![uv[i], uv[next]] };
+        let knots: Vec<f64> = [vec![0.0; points.len()], vec![1.0; points.len()]].concat();
+        edges.push(b::Edge {
+            curve: b::Curve::Spline { knots: knots.clone(), points: points.iter().copied().map(xyz).collect() },
+            nurbs: None,
+            interval: [0.0, 1.0],
+            vertices: [i as u32, next as u32],
+            tolerance: tol,
+            uses: vec![b::EdgeUseRef { face: 0, r#loop: 0, position: i as u32, upper: false }],
+        });
+        oriented.push(b::OrientedEdge { edge: i as u32, forward: true, pcurve: b::Curve2::Spline { points, knots } });
+    }
+    let record = b::Brep {
+        version: b::VERSION,
+        tolerance: tol,
+        regions: vec![b::Region { shells: vec![0], void: false }],
+        shells: vec![b::Shell::Faces { faces: vec![b::OrientedFace { face: 0, forward: true }], wires: vec![] }],
+        faces: vec![b::Face {
+            surface: b::Surface::Plane { origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 1.0, 0.0] },
+            nurbs: None,
+            domain: [[0.0, 1000.0], [-1.0, 900.0]],
+            loops: vec![b::Loop::Edges { edges: oriented }],
+        }],
+        edges,
+        vertices: uv.map(|p| b::Vertex { point: xyz(p), tolerance: tol }).to_vec(),
+    };
+    let mut rational = record.clone();
+    // Weights 1, 2, 4 reparameterize the same parabola by t = 2s/(1+s).
+    let b::Loop::Edges { edges: boundary } = &mut rational.faces[0].loops[0] else { panic!("edge loop") };
+    let b::Curve2::Spline { knots, points } = &boundary[0].pcurve else { panic!("quadratic trim") };
+    let h: Vec<_> = points.iter().zip([1.0, 2.0, 4.0]).map(|(p, w)| [p[0] * w, p[1] * w, w]).collect();
+    rational.edges[0].curve = b::Curve::RationalSpline { knots: knots.clone(), homogeneous: h.iter().map(|&[x, y, w]| [x, y, 0.0, w]).collect() };
+    boundary[0].pcurve = b::Curve2::RationalSpline { knots: knots.clone(), homogeneous: h };
+    for data in [record, rational] {
+        let body = Body::from_record(data).unwrap();
+        for y in [1.0, 0.0] {
+            let pieces = iso_curves(&body, 0, Vec3::new(1000.0 * c, y, 0.0), true).unwrap();
+            let half = 1000.0 * (r * r + y / 1000.0).sqrt();
+            assert_eq!(pieces.len(), 1);
+            let b::Curve::Line { start, end } = pieces[0].0 else { panic!("expected a line") };
+            assert!((start[0] - (1000.0 * c - half)).abs() < 1e-7 && (end[0] - (1000.0 * c + half)).abs() < 1e-7);
+        }
+        assert!(iso_curves(&body, 0, Vec3::new(1000.0 * c, -0.02, 0.0), true).is_err());
+        let boundary = iso_curves(&body, 0, Vec3::new(500.0, 900.0, 0.0), true).unwrap();
+        assert_eq!(boundary.len(), 1);
+        let b::Curve::Line { start, end } = boundary[0].0 else { panic!("expected the upper boundary") };
+        assert_eq!((start, end), ([0.0, 900.0, 0.0], [1000.0, 900.0, 0.0]));
+    }
+}
+
+#[test]
+fn iso_line_across_a_round_hole_stops_at_both_sides() {
+    use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
+    let region = Region2 { outer: rect(40.0, 30.0).outer, holes: vec![Loop2::circle(Vec2::new(20.0, 15.0), 5.0).reversed()] };
+    let body = extrude(&Plane::XY, &[region], 0.0, 5.0).unwrap().pop().unwrap();
+    let (fi, face) = body.record().faces.iter().enumerate().find(|(_, f)| f.loops.len() == 2).unwrap();
+    let surface = SurfaceEval::new(face.parameters()).unwrap();
+    let center = Vec3::new(20.0, 15.0, surface.point([0.0, 0.0]).unwrap().z);
+    let uv = surface.project(center, None, 1e-7).unwrap();
+    let dir = surface.partials(uv[0], uv[1]).unwrap()[1][0].normalized().unwrap();
+    let sections = iso_curves(&body, fi, center + dir * 8.0, true).unwrap();
+    assert_eq!(sections.len(), 2);
+    for ((curve, range), end) in sections.iter().zip([1, 0]) {
+        let point = CurveEval::new(curve).unwrap().point(range[end]).unwrap();
+        assert!((point.dist(center) - 5.0).abs() < 1e-7);
+    }
+}
+
+#[test]
+fn ray_meets_exact_bounds_culls_misses_and_keeps_hits_for_solid_and_mesh() {
+    let solid = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    assert!(solid.ray_meets_exact_bounds(Vec3::new(5.0, 5.0, 50.0), Vec3::new(0.0, 0.0, -1.0)));
+    assert!(solid.ray_meets_exact_bounds(Vec3::new(5.0, 5.0, 5.0), Vec3::X));
+    assert!(!solid.ray_meets_exact_bounds(Vec3::new(5.0, 5.0, 50.0), Vec3::Z));
+    assert!(!solid.ray_meets_exact_bounds(Vec3::new(25.0, 5.0, 50.0), Vec3::new(0.0, 0.0, -1.0)));
+
+    let mesh = mesh_body(&[Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0)], &[[0, 1, 2]]).unwrap();
+    assert!(mesh.ray_meets_exact_bounds(Vec3::new(2.0, 2.0, 10.0), Vec3::new(0.0, 0.0, -1.0)));
+    assert!(!mesh.ray_meets_exact_bounds(Vec3::new(25.0, 2.0, 10.0), Vec3::new(0.0, 0.0, -1.0)));
+}
+
+/// #21519: a panic the mesher catches is one a crash report marks recovered. Two loops with
+/// corners 1e-9 apart stop the triangulation library on an assertion; the mesher's own guard
+/// catches it and returns an internal error, but the crash reports read [`guarded`], which did
+/// not count the mesher's guard, so a caught panic was reported as a crash.
+#[test]
+fn a_panic_the_mesher_catches_counts_as_guarded() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let loops = vec![
+        vec![
+            [1.999999999609, 4.000000000408],
+            [2.999999999249, 5.77e-10],
+            [1.000000000478, 2.000000000614],
+            [1.000000000991, 1.000000000228],
+            [2.000000000482, 3.99999999949],
+            [1.999999999672, -9.53e-10],
+            [3.000000000364, 0.99999999994],
+            [-1.05e-10, 3.999999999914],
+            [1.999999999286, 1.000000000788],
+        ],
+        vec![
+            [4.000000000261, 1.999999999246],
+            [1.999999999553, -4.57e-10],
+            [1.999999999469, 1.000000000877],
+            [3.999999999666, 2.000000000137],
+            [3.76e-10, 2.99999999915],
+            [4.000000000737, 3.000000000668],
+            [1.000000000447, 1.000000000422],
+            [0.999999999585, 0.999999999164],
+            [0.999999999585, 3.000000000598],
+        ],
+    ];
+    let me = std::thread::current().id();
+    let (panics, unguarded) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let (p, u) = (panics.clone(), unguarded.clone());
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |_| {
+        if std::thread::current().id() == me {
+            p.fetch_add(1, Ordering::SeqCst);
+            if !guarded() {
+                u.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    }));
+    let result = solidcore_tess::triangulate_planar(&loops);
+    std::panic::set_hook(prev);
+    assert!(matches!(&result, Err(solidcore_tess::TessError::Internal(m)) if m.contains("previous_region")), "{result:?}");
+    assert_eq!(panics.load(Ordering::SeqCst), 1, "the triangulation library panics once");
+    assert_eq!(unguarded.load(Ordering::SeqCst), 0, "the panic is inside a guard the crash reports see");
+}
+
+/// A curve chain picked by edge index walks from that edge, even where a picked point would be
+/// ambiguous: every edge of a box (each a chain of its own) at the corner all three share, and an
+/// index the body does not have is refused.
+#[test]
+fn a_curve_chain_by_edge_index_starts_from_that_edge() {
+    let b = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 20.0, 30.0)).unwrap();
+    let at_corner: Vec<usize> = [Vec3::new(5.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 15.0)].map(|p| edge_near(&b, p)).to_vec();
+    for &e in &at_corner {
+        let chain = crate::curve_chain_of_edges(&b, &[e], solidcraft_geom::TANGENT_CHAIN).unwrap();
+        assert_eq!(chain, vec![e], "edge {e}");
+    }
+    let count = b.record().edges.len();
+    assert!(crate::curve_chain_of_edges(&b, &[count], solidcraft_geom::TANGENT_CHAIN).is_err());
+    assert!(crate::curve_chain_of_edges(&b, &[], solidcraft_geom::TANGENT_CHAIN).is_err());
+}
+
+/// Whether a path of body edges lies in one plane is decided over each free-form span's whole
+/// length from its control points, not from its directions at sampled points. A degree 9 span
+/// along x whose height is the integral of `c (t - 1/8) (t - 2/8) … (t - 1)` runs level at eight
+/// of the nine points the old check sampled and rises 0.01 mm off the plane between them; it is
+/// refused. A rational span in a tilted plane with uneven weights, followed by a line in that
+/// plane, is accepted with the plane's normal, and refused once one control point is 0.001 mm
+/// off the plane.
+#[test]
+fn a_free_form_span_that_bows_out_of_plane_between_samples_has_no_plane() {
+    use crate::build::PathSeg;
+    use solidcraft_geom::bspline::HPoint;
+    const N: usize = 9;
+    let binomial = |n: usize, k: usize| (0..k).fold(1.0, |acc, i| acc * (n - i) as f64 / (i + 1) as f64);
+    // The height's derivative, power basis, lowest first: zero at t = 1/8 … 1.
+    let mut dz = vec![1.0];
+    for k in 1..=8 {
+        let mut next = vec![0.0; dz.len() + 1];
+        for (i, c) in dz.iter().enumerate() {
+            next[i] -= c * k as f64 / 8.0;
+            next[i + 1] += c;
+        }
+        dz = next;
+    }
+    let z: Vec<f64> = std::iter::once(0.0).chain(dz.iter().enumerate().map(|(i, c)| c / (i + 1) as f64)).collect();
+    // Bernstein coefficients of a power-basis polynomial of degree N or less.
+    let bernstein =
+        |a: &[f64]| -> Vec<f64> { (0..=N).map(|j| (0..=j.min(a.len() - 1)).map(|i| binomial(j, i) / binomial(N, i) * a[i]).sum()).collect() };
+    // The span bends in the plane z = 0 (`y = 10 t (1 - t)`), so that plane is the only one it
+    // can lie in, and the height lifts it off that plane.
+    let (sideways, heights) = (bernstein(&[0.0, 10.0, -10.0]), bernstein(&z));
+    let span = |scale: f64| {
+        let ctrl: Vec<HPoint> =
+            (0..=N).map(|i| HPoint::weighted(Vec3::new(40.0 * i as f64 / N as f64, sideways[i], heights[i] * scale), 1.0)).collect();
+        SpaceBezier::new(&ctrl).unwrap()
+    };
+    let flat = span(0.0);
+    let n = PathSeg::plane_normal(&[PathSeg::Bezier(flat)], 1e-6).unwrap();
+    assert!(n.cross(Vec3::Z).len() < 1e-9, "{n:?}");
+    let peak = (0..=4000).map(|i| flat.point(i as f64 / 4000.0).unwrap().z.abs()).fold(0.0, f64::max);
+    assert!(peak == 0.0);
+    let unit = span(1.0);
+    let rise = (0..=4000).map(|i| unit.point(i as f64 / 4000.0).unwrap().z.abs()).fold(0.0, f64::max);
+    let bowed = span(0.01 / rise);
+    let rise = (0..=4000).map(|i| bowed.point(i as f64 / 4000.0).unwrap().z.abs()).fold(0.0, f64::max);
+    assert!((rise - 0.01).abs() < 1e-6, "{rise}");
+    for k in 1..=8 {
+        let d = bowed.derivative(k as f64 / 8.0).unwrap();
+        assert!(d.z.abs() <= 1e-9 * d.len(), "level at {k}/8: {d:?}");
+    }
+    assert_eq!(PathSeg::plane_normal(&[PathSeg::Bezier(bowed)], 1e-6), None);
+
+    // A rational span in the plane through the origin tilted 30° about x, then a line in it.
+    let (s, c) = (30f64.to_radians().sin(), 30f64.to_radians().cos());
+    let normal = Vec3::new(0.0, -s, c);
+    let at = |u: f64, v: f64, lift: f64| Vec3::new(u, v * c, v * s) + normal * lift;
+    let tilted = |lift: f64| {
+        let pts = [at(0.0, 0.0, 0.0), at(5.0, 8.0, lift), at(15.0, -6.0, 0.0), at(20.0, 3.0, 0.0)];
+        let ctrl: Vec<HPoint> = pts.iter().zip([1.0, 3.0, 0.5, 1.0]).map(|(p, w)| HPoint::weighted(*p, w)).collect();
+        SpaceBezier::new(&ctrl).unwrap()
+    };
+    let path = |lift: f64| {
+        let b = tilted(lift);
+        vec![PathSeg::Bezier(b), PathSeg::Line { a: b.end(), b: at(30.0, 10.0, 0.0) }]
+    };
+    let n = PathSeg::plane_normal(&path(0.0), 1e-6).unwrap();
+    assert!(n.cross(normal).len() < 1e-9, "{n:?}");
+    assert_eq!(PathSeg::plane_normal(&path(1e-3), 1e-6), None);
 }

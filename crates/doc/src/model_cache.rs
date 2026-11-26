@@ -102,12 +102,14 @@ struct BodyKey {
     component: u64,
     transferred: bool,
     envelope: bool,
+    frame_member_line: Option<Arc<str>>,
     name: String,
     source_name: Option<String>,
     source_transform: [u64; 16],
 }
 
 impl BodyKey {
+    /// Deduplicate states only when their geometry, names and member provenance agree.
     fn of(b: &ModelBody) -> Self {
         let mut source_transform = [0; 16];
         for (bits, v) in source_transform.iter_mut().zip(b.source_transform.iter().flatten()) {
@@ -122,6 +124,7 @@ impl BodyKey {
             component: b.component,
             transferred: b.transferred,
             envelope: b.envelope,
+            frame_member_line: b.frame_member_line.clone(),
             name: b.name.clone(),
             source_name: b.source_name.clone(),
             source_transform,
@@ -248,7 +251,15 @@ impl Writer {
             return *i;
         }
         let names = crate::naming::names(b);
-        let info: Vec<Json> = names.info.iter().map(|i| json!([i.aliases, i.bounds, i.verified, i.synonyms])).collect();
+        // A Split Face piece's former name follows (only then, so other records read as before).
+        let info: Vec<Json> = names
+            .info
+            .iter()
+            .map(|i| match &i.former {
+                Some(former) => json!([i.aliases, i.bounds, i.verified, i.synonyms, former]),
+                None => json!([i.aliases, i.bounds, i.verified, i.synonyms]),
+            })
+            .collect();
         self.names.push(json!({"faces": *names.faces, "info": info}));
         self.names_index.insert(id, self.names.len() - 1);
         self.names.len() - 1
@@ -272,8 +283,14 @@ impl Writer {
         if b.source_transform != crate::IDENTITY {
             r["source_transform"] = json!(b.source_transform);
         }
+        if let Some(line) = &b.frame_member_line {
+            r["frame_member_line"] = json!(line.as_ref());
+        }
         if b.transferred {
             r["transferred"] = json!(true);
+        }
+        if let Ok(data) = b.round_member() {
+            r["round_member"] = serde_json::to_value(data).ok()?;
         }
         if b.envelope {
             r["envelope"] = json!(true);
@@ -381,11 +398,23 @@ impl Writer {
         let sketches = st.sketches.iter().map(|s| self.sketch(s)).collect::<Option<Vec<_>>>()?;
         let surface_sheets = st.surface_sheets.iter().map(|s| self.surface_sheet(s)).collect::<Option<Vec<_>>>()?;
         let threads = self.threads(st)?;
+        // Shape identity is process-local. Persist the decision in each timeline state,
+        // then restore its shared shape from that state's body after decoding the cache.
+        let members = st
+            .frame_members
+            .iter()
+            .map(|m| {
+                let mut record = serde_json::to_value(m).ok()?;
+                record["unmodified"] = json!(st.body(&m.body).is_some_and(|b| b.feature == m.feature && !b.transferred && m.is_unchanged(&b.body)));
+                Some(record)
+            })
+            .collect::<Option<Vec<_>>>()?;
         let r = json!({
             "bodies": runs(&bodies), "sketches": runs(&sketches), "body_counter": st.body_counter,
             "reserved_body_names": st.reserved_body_names.iter().collect::<Vec<_>>(),
             "surface_sheets": surface_sheets, "construct": serde_json::to_value(&st.construct).ok()?,
             "threads": runs(&threads),
+            "frame_members": members,
             "sketch_key_set": self.sketch_key_set(&st.sketch_keys),
             "named_faces": self.named_faces(&st.named_faces),
             "blend_edges": serde_json::to_value(&st.blend_edges).ok()?, "fitted": serde_json::to_value(&st.fitted).ok()?,
@@ -424,16 +453,48 @@ impl Model {
         self.saved(doc)
     }
 
+    /// Why [`Self::saved_if_checked`] would leave the model cache out for `doc`, if it cannot
+    /// save one right now (`None` when the model is ready to save or a feature has an error,
+    /// which the caller names specifically).
+    pub fn cache_skip_reason(&self, doc: &Document) -> Option<&'static str> {
+        if self.checking_imports() {
+            return Some("an imported file's parts were still being checked (a save once the check ends keeps it)");
+        }
+        if self.results.is_empty() {
+            return Some("the model has not been evaluated yet");
+        }
+        if self.checking_features() {
+            return Some("a feature's geometry check was still running (a save once it ends keeps it)");
+        }
+        if self.results.iter().any(|r| r.error.is_some()) {
+            return None;
+        }
+        if !self.is_current(doc) {
+            return Some("the model was not up to date with the design");
+        }
+        if has_legacy_names(doc) {
+            return Some("the design still uses legacy face or edge names");
+        }
+        if self.results.iter().any(|r| {
+            r.import_report.as_ref().is_some_and(|report| {
+                !report.checks.is_empty() && report.checks.heals().is_some_and(|h| self.import_digests.heal_digest(r.id) != Some(h.digest()))
+            })
+        }) {
+            return Some("an imported file's parts were healed after evaluation (a save once it updates keeps it)");
+        }
+        None
+    }
+
     /// [`Self::saved`] without waiting for the imports' checks: the records hold what each import
     /// found before its check, and [`PendingChecks::settle`] adds what the check finds.
     pub fn saved_now(&self, doc: &Document) -> Option<(SavedModel, PendingChecks)> {
-        // An import its checks healed is fingerprinted with its heals, which a model read back
-        // does not have: it would never be taken.
+        // Nor while the SMLib checks of features still run ([`Model::set_background_checks`]): a
+        // model kept before they pass would open with results no check has passed.
         if self.results.is_empty()
+            || self.checking_features()
             || self.results.iter().any(|r| r.error.is_some())
             || !self.is_current(doc)
             || has_legacy_names(doc)
-            || self.has_import_heals()
         {
             return None;
         }
@@ -443,7 +504,7 @@ impl Model {
             let mut pending = Vec::new();
             for (k, (feature, r)) in doc.features.iter().zip(&self.results).enumerate() {
                 if let Some(report) = r.import_report.as_ref().filter(|i| !i.checks.is_empty()) {
-                    pending.push((k, report.clone()));
+                    pending.push((k, self.import_digests.heal_digest(feature.id), report.clone()));
                 }
                 let state = w.state(&r.state).ok_or_else(|| kernel::KernelError::Invalid("not kept".into()))?;
                 let mut f = json!({"id": r.id, "fingerprint": hex(r.fingerprint), "ms": r.ms, "skipped": r.skipped, "state": state});
@@ -477,6 +538,18 @@ impl Model {
             {
                 out.insert("tolerance_heal".into(), json!(false));
             }
+            // Healed imports' digests: recorded only when any import was healed, so models without
+            // healed imports keep the same manifest layout.
+            if !self.import_digests.heals.is_empty()
+                && let Some(out) = records.as_object_mut()
+            {
+                let mut heals: Vec<(u64, String)> = self.import_digests.heals.iter().map(|(&id, (_, h))| (id, hex(h.digest()))).collect();
+                heals.sort_by_key(|(id, _)| *id);
+                out.insert("import_heals".into(), json!(heals));
+            }
+            if doc.features.iter().any(|f| matches!(f.kind, FeatureKind::FrameMember { .. } | FeatureKind::FrameCope { .. })) {
+                records["round_member_records"] = json!(1);
+            }
             Ok((SavedModel { records, bodies: w.bodies }, PendingChecks(pending)))
         })
         .ok()
@@ -484,8 +557,9 @@ impl Model {
 }
 
 /// Imports of a saved model ([`Model::saved_now`]) whose SMLib check of their parts may still
-/// be running: by feature record, the report that holds the check.
-pub struct PendingChecks(Vec<(usize, Arc<kernel::ImportReport>)>);
+/// be running: by feature record, the heal digest already evaluated into the model (if any),
+/// and the report that holds the check.
+pub struct PendingChecks(Vec<(usize, Option<u64>, Arc<kernel::ImportReport>)>);
 
 impl PendingChecks {
     /// No import's check is left to wait for.
@@ -497,16 +571,16 @@ impl PendingChecks {
     /// import's report and warning as an import that waited for its check has them. A check a
     /// token stopped leaves its record as it was.
     ///
-    /// Returns whether `saved` stands: not when a check healed a part
-    /// ([`kernel::ImportChecks::heals`]), since its states hold the import as it was first shown,
-    /// and the model evaluates it again as its healed bodies (with other fingerprints). `saved`
-    /// is then left as it was.
+    /// Returns whether `saved` stands: not when a check healed a part that the saved states do
+    /// not yet carry ([`kernel::ImportChecks::heals`]), since its states hold the import as it
+    /// was first shown, and the model evaluates it again as its healed bodies (with other
+    /// fingerprints). `saved` is then left as it was.
     #[must_use]
     pub fn settle(self, saved: &mut SavedModel) -> bool {
-        if self.0.iter().any(|(_, report)| report.settled().is_some() && report.checks.heals().is_some()) {
+        if self.0.iter().any(|(_, known, report)| report.settled().is_some() && report.checks.heals().is_some_and(|h| *known != Some(h.digest()))) {
             return false;
         }
-        for (k, report) in self.0 {
+        for (k, _, report) in self.0 {
             let Some(settled) = report.settled() else { continue };
             let Some(f) = saved.records.get_mut("features").and_then(|f| f.get_mut(k)).and_then(Json::as_object_mut) else { continue };
             match crate::eval::import_warning(&settled.issues.iter().map(|i| i.detail.as_str()).collect::<Vec<_>>()) {
@@ -521,6 +595,11 @@ impl PendingChecks {
         true
     }
 }
+
+/// A face's [`FaceInfo`] as the model cache keeps it: its aliases, bounds, whether exact, its
+/// synonyms and, for a Split Face piece, the name it had before (absent in records without one).
+#[derive(serde::Deserialize)]
+struct SavedFaceInfo(Vec<String>, std::collections::BTreeSet<String>, bool, Vec<String>, #[serde(default)] Option<String>);
 
 impl SavedModel {
     /// The states the records hold, every record checked.
@@ -537,12 +616,14 @@ impl SavedModel {
         let mut names = Vec::new();
         for n in list("names")? {
             let faces: Vec<String> = serde_json::from_value(parse(n.get("faces"))?).map_err(|_| bad("saved model: names"))?;
-            let info: Vec<(Vec<String>, std::collections::BTreeSet<String>, bool, Vec<String>)> =
-                serde_json::from_value(parse(n.get("info"))?).map_err(|_| bad("saved model: names"))?;
+            let info: Vec<SavedFaceInfo> = serde_json::from_value(parse(n.get("info"))?).map_err(|_| bad("saved model: names"))?;
             if info.len() != faces.len() {
                 return Err(bad("saved model: names"));
             }
-            let info = info.into_iter().map(|(aliases, bounds, verified, synonyms)| FaceInfo { aliases, synonyms, bounds, verified }).collect();
+            let info = info
+                .into_iter()
+                .map(|SavedFaceInfo(aliases, bounds, verified, synonyms, former)| FaceInfo { aliases, synonyms, bounds, verified, former })
+                .collect();
             names.push(Arc::new(Names { faces: Arc::new(faces), info }));
         }
         let mut sketches = Vec::new();
@@ -581,7 +662,13 @@ impl SavedModel {
                 }
                 b.source_transform = m;
             }
+            b.frame_member_line = r.get("frame_member_line").map(|v| text(Some(v)).map(Arc::from)).transpose()?;
             b.transferred = r.get("transferred").and_then(Json::as_bool).unwrap_or(false);
+            if let Some(record) = r.get("round_member") {
+                let data: crate::frame_cope::RoundMember = serde_json::from_value(record.clone()).map_err(|_| bad("saved model: round member"))?;
+                data.validate()?;
+                b.certify_round_member(data);
+            }
             b.envelope = r.get("envelope").and_then(Json::as_bool).unwrap_or(false);
             // Measured once here, so every state holding it adds it up for the cache's budget.
             b.bytes = b.body.retained_bytes();
@@ -747,11 +834,13 @@ impl SavedModel {
                 }
                 named_faces.insert(*feature, points.clone());
             }
-            Ok(ModelState {
+            let mut st = ModelState {
                 frame_bodies: Default::default(),
                 origin_frames: Default::default(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
                 sketches: ids("sketches", sketches.len())?.into_iter().filter_map(|i| sketches.get(i).cloned()).collect(),
+                // A world state's alone: a model's own state has none.
+                sketch_copies: BTreeMap::new(),
                 body_counter: index(s.get("body_counter"), usize::MAX)?,
                 reserved_body_names: s
                     .get("reserved_body_names")
@@ -771,6 +860,11 @@ impl SavedModel {
                 },
                 construct: serde_json::from_value(field("construct")?).map_err(invalid)?,
                 threads: ids("threads", threads.len())?.into_iter().filter_map(|i| threads.get(i).cloned()).collect(),
+                // Kept since frame trims (#4003); a model saved before keeps no members.
+                frame_members: match s.get("frame_members") {
+                    None => Vec::new(),
+                    v => serde_json::from_value(parse(v)?).map_err(invalid)?,
+                },
                 sketch_keys,
                 blend_edges: serde_json::from_value(field("blend_edges")?).map_err(invalid)?,
                 fitted: serde_json::from_value(field("fitted")?).map_err(invalid)?,
@@ -789,7 +883,22 @@ impl SavedModel {
                 legacy_picks: BTreeMap::new(),
                 // What a cut was drawn as is read by the evaluation that made it.
                 cut_extents: BTreeMap::new(),
-            })
+            };
+            for (member, record) in st.frame_members.iter_mut().zip(s.get("frame_members").and_then(Json::as_array).into_iter().flatten()) {
+                // A pre-identity cache cannot prove a member safe to rebuild, so re-evaluate.
+                let unmodified = record.get("unmodified").and_then(Json::as_bool).ok_or_else(|| bad("saved model: frame member identity"))?;
+                if unmodified {
+                    member.built = Some(
+                        st.bodies
+                            .iter()
+                            .find(|b| b.name == member.body && b.feature == member.feature)
+                            .ok_or_else(|| bad("saved model: frame member body"))?
+                            .body
+                            .clone(),
+                    );
+                }
+            }
+            Ok(st)
         });
         let states = built.into_iter().map(|r| r.unwrap_or_else(|| Err(bad("saved model: state"))).map(Arc::new)).collect::<Result<Vec<_>>>()?;
         Ok(states)
@@ -1054,6 +1163,12 @@ impl SavedModel {
         if let (Some(heal), Some(out)) = (self.records.get("tolerance_heal"), records.as_object_mut()) {
             out.insert("tolerance_heal".into(), heal.clone());
         }
+        if let (Some(heals), Some(out)) = (self.records.get("import_heals"), records.as_object_mut()) {
+            out.insert("import_heals".into(), heals.clone());
+        }
+        if let Some(version) = self.records.get("round_member_records") {
+            records["round_member_records"] = version.clone();
+        }
         let kept: Vec<usize> = (0..self.bodies.len()).filter(|i| kernel_used.get(*i) == Some(&true)).collect();
         let bodies = kept.iter().filter_map(|i| self.bodies.get(*i).cloned()).collect();
         Some((SavedModel { records, bodies }, kept, used))
@@ -1067,7 +1182,21 @@ impl Model {
     /// ([`Model::validation`]). Refused (an error) unless every feature's fingerprint is the one
     /// `doc` gives it now, and every record is well formed.
     pub fn adopt(doc: &Document, saved: &SavedModel) -> Result<Model> {
+        if doc.features.iter().any(|f| matches!(f.kind, FeatureKind::FrameMember { .. } | FeatureKind::FrameCope { .. }))
+            && saved.records.get("round_member_records").and_then(Json::as_u64) != Some(1)
+        {
+            return Err(bad("saved model: member records need reevaluation"));
+        }
         let mut states = saved.states()?;
+        // A saved/thinned stock marker proves only record presence, not eligibility. Inspect
+        // the originating feature before any retained certificate can be used for an export.
+        if states
+            .iter()
+            .flat_map(|state| &state.bodies)
+            .any(|body| body.round_member.is_some() && !doc.feature(body.feature).is_some_and(|f| crate::frame_cope::stock_eligible(&f.kind)))
+        {
+            return Err(bad("saved model: finished frame stock records need reevaluation"));
+        }
         let frame_bodies = Arc::new(std::sync::Mutex::new(FrameBodies::default()));
         for state in &mut states {
             Arc::make_mut(state).frame_bodies = Arc::downgrade(&frame_bodies);
@@ -1088,9 +1217,24 @@ impl Model {
         // As `evaluate` digests the context under the mode, so the next evaluation reuses these.
         // And under the tolerance heal preference it was evaluated with (on when not recorded).
         let heal = records.get("tolerance_heal").and_then(Json::as_bool).unwrap_or(true);
-        let import_digests = ImportDigests::of(doc, &ImportDigests::default(), heal);
+        let mut import_digests = ImportDigests::of(doc, &ImportDigests::default(), heal);
+        if let Some(heals) = records.get("import_heals") {
+            let entries = heals.as_array().filter(|l| l.len() <= MAX_ITEMS).ok_or_else(|| bad("saved model: import heals"))?;
+            for entry in entries {
+                let pair = entry.as_array().filter(|p| p.len() == 2).ok_or_else(|| bad("saved model: import heals"))?;
+                let id = pair.first().and_then(Json::as_u64).ok_or_else(|| bad("saved model: import heals"))?;
+                let digest = unhex(pair.get(1).unwrap_or(&Json::Null))?;
+                if digest == 0 {
+                    return Err(bad("saved model: import heals"));
+                }
+                if heal && let Some((_, step_digest)) = import_digests.steps.get(&id) {
+                    import_digests.heals.insert(id, (*step_digest, ImportHeal::Digest(digest)));
+                }
+            }
+        }
         let marker = doc.marker.unwrap_or(usize::MAX);
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
+        let shared = shared_context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let mut before = Arc::new(ModelState::default());
         // Whether `before` is the state before the feature: one the file left out only stands in.
         let mut exact = true;
@@ -1100,12 +1244,15 @@ impl Model {
         let mut prepared_states = std::collections::HashSet::new();
         // The pose-only features saved at the pose `doc` gives them: their results stand.
         let mut poses = HashMap::new();
+        let mut step_doc_owned = super::init_capture_step_doc(doc, &vals);
+        let mut resolved_joints = std::collections::BTreeMap::new();
         for (i, (f, r)) in doc.features.iter().zip(features).enumerate() {
+            let eval_doc = step_doc_owned.as_ref().unwrap_or(doc);
             let saved = unhex(r.get("fingerprint").unwrap_or(&Json::Null))?;
             // A fingerprint reads the state before its feature (where the bodies it takes lie).
             // After a state the file left out, the saved one is taken: `evaluate` works that state
             // out, checks the fingerprints after it, and evaluates again from one that differs.
-            prev = if exact { chain_fingerprint(doc, &vals, f, prev, i >= marker, &import_digests, Some(&before)) } else { saved };
+            prev = if exact { chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &import_digests, Some(&before)) } else { saved };
             if r.get("id").and_then(Json::as_u64) != Some(f.id) || saved != prev {
                 return Err(bad("saved model: the document changed"));
             }
@@ -1134,7 +1281,7 @@ impl Model {
             if exact
                 && pose_only(f)
                 && let Some(pose) = r.get("pose").map(unhex).transpose()?
-                && pose == placement_digest(doc, f, Some(&before))
+                && pose == placement_digest(eval_doc, f, Some(&before))
             {
                 poses.insert(f.id, pose);
             }
@@ -1158,13 +1305,43 @@ impl Model {
                 unkept: state.is_none(),
                 state: state.unwrap_or_else(|| before.clone()),
             };
+            // A model saved before rebuildable ordinary members were recorded (#4003) needs
+            // reevaluation for trims. Auto and path bodies intentionally emit no such record.
+            if !result.skipped
+                && !result.unkept
+                && super::frame_member::needs_trim_records(&result.state, &f.kind)?
+                && !result.state.frame_members.iter().any(|m| m.feature == f.id)
+            {
+                return Err(bad("saved model: frame members"));
+            }
             if !result.skipped {
                 exact = !result.unkept;
+                let changed = super::bodies_changed(&before, &result.state);
                 before = result.state.clone();
+                if result.error.is_none() && i < marker && !f.suppressed {
+                    super::advance_capture_step(&mut step_doc_owned, &mut resolved_joints, &vals, f, &before, changed);
+                }
             }
             results.push(result);
         }
-        let mut model = Model { results, param_errors, import_digests, context: ctx, frame_bodies, validation, heal_off: !heal, ..Model::default() };
+        // The retained-outline notes as the model is now, whatever the file kept (an older one
+        // has none; a sketch may have been renamed since).
+        for (f, r) in doc.features.iter().zip(results.iter_mut()).filter(|(_, r)| !r.skipped && !r.unkept) {
+            r.warning = crate::eval::with_retained_notes(doc, r.warning.take(), f, &r.state);
+        }
+        let resolved_occurrences = step_doc_owned.map(|d| d.occurrences.into_iter().map(|o| (o.id, o.transform)).collect()).unwrap_or_default();
+        let mut model = Model {
+            results,
+            param_errors,
+            import_digests,
+            context: ctx,
+            frame_bodies,
+            validation,
+            heal_off: !heal,
+            resolved_occurrences,
+            resolved_joints,
+            ..Model::default()
+        };
         let unkept = model.results.iter().filter(|r| r.unkept).count();
         // A pose-only feature's fingerprint leaves its pose out, so its saved result may be from
         // another pose than `doc`'s: evaluated again, with what reads none of it kept (#12139).
@@ -1185,34 +1362,57 @@ impl Model {
         // Each result where an evaluation would have put it, so an edit undone (or set back)
         // finds it again rather than evaluating the feature anew.
         let mut before = Arc::new(ModelState::default());
+        let mut cache_step_doc = super::init_capture_step_doc(doc, &vals);
+        let mut cache_joints = std::collections::BTreeMap::new();
         if let Ok(mut cache) = model.cache.lock() {
-            for (f, r) in doc.features.iter().zip(&model.results).filter(|(_, r)| !r.skipped && r.error.is_none()) {
+            for (i, (f, r)) in doc.features.iter().zip(&model.results).enumerate().filter(|(_, (_, r))| !r.skipped && r.error.is_none()) {
+                let eval_doc = cache_step_doc.as_ref().unwrap_or(doc);
                 // A pose-only feature's fingerprint leaves its pose out, so its saved result may be
                 // from another pose than `doc`'s: it is no result for `doc`'s key (#12139).
                 if pose_only(f) {
+                    let changed = super::bodies_changed(&before, &r.state);
                     before = r.state.clone();
+                    if i < marker && !f.suppressed {
+                        super::advance_capture_step(&mut cache_step_doc, &mut cache_joints, &vals, f, &before, changed);
+                    }
                     continue;
                 }
-                let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests)
-                    ^ placement_digest(doc, f, Some(&before))
-                    ^ construct_digest(doc, &vals, f, Some(&before))
-                    ^ turns_digest(doc, &vals, f).unwrap_or(0);
-                cache.states.put(
-                    cache_key(f, r.fingerprint, local, ctx, &before),
-                    CachedEval {
-                        error: None,
-                        error_code: None,
-                        warning: r.warning.clone(),
-                        import_report: r.import_report.clone(),
-                        repair: r.repair.clone(),
-                        lost_projections: None,
-                        ms: r.ms,
-                        state: r.state.clone(),
-                    },
-                    r.state.retained_bytes(),
-                    r.ms,
-                );
+                let key = EvalKey::new(eval_doc, &vals, f, r.fingerprint, ctx, shared, &before, &model.import_digests);
+                let whole = CachedEval {
+                    error: None,
+                    error_code: None,
+                    warning: crate::eval::without_retained_notes(r.warning.clone()),
+                    import_report: r.import_report.clone(),
+                    repair: r.repair.clone(),
+                    lost_projections: None,
+                    ms: r.ms,
+                    state: r.state.clone(),
+                };
+                // And what it changed, by what it read, as an evaluation keeps it: the first edit
+                // after opening then evaluates only the features that read what the edit changed,
+                // as every later edit does, not every feature after the edit. Features that name
+                // their pieces as later features pick them are left out, as is any feature whose
+                // bodies were not stamped with this key (saved by a version that keyed them
+                // otherwise, or stamped by the whole model): `stamp` would work their names out
+                // afresh, with no lineage to work them from. It is evaluated again instead.
+                if let Some((k, read)) = &key.reads
+                    && !f.shell_piece_order
+                    && let Some(change) = r.state.change_from(&before, f, read)
+                {
+                    // A change that holds whatever the bodies it did not read was stamped with the
+                    // key without them; one saved before that key, with the other.
+                    let relative = key.relative.filter(|_| change.relative().is_some());
+                    if let Some(k) = relative.into_iter().chain([*k]).find(|k| change.made_bodies_stamped(*k)) {
+                        let bytes = change.retained_bytes();
+                        cache.changes.put(k, whole.with(change), bytes, r.ms);
+                    }
+                }
+                cache.states.put(key.whole, whole, r.state.retained_bytes(), r.ms);
+                let changed = super::bodies_changed(&before, &r.state);
                 before = r.state.clone();
+                if i < marker && !f.suppressed {
+                    super::advance_capture_step(&mut cache_step_doc, &mut cache_joints, &vals, f, &before, changed);
+                }
             }
         }
         Ok(model)

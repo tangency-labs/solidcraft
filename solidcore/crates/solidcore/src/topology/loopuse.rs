@@ -105,7 +105,8 @@ use std::collections::BTreeSet;
 use std::ops::Deref;
 
 use crate::curve::curve::Curve;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::{Extent2d, SS_NONE};
@@ -399,9 +400,9 @@ pub fn set_edgeuse(b: &mut Brep, lu: LoopuseId, eu: Option<EdgeuseId>) -> Result
             }
         }
     }
-    Err(SolidError::topology_failed(
+    Err(SolidError::topology(
         OP,
-        "the edge use is not on this edge loop use",
+        TopologyFailure::EdgeUseNotOnLoopUse,
     ))
 }
 
@@ -416,7 +417,7 @@ pub fn set_edgeuse(b: &mut Brep, lu: LoopuseId, eu: Option<EdgeuseId>) -> Result
 /// 100000 steps; [`SolidError::NotFound`] for a dangling id.
 pub fn collect_edgeuses(b: &mut Brep, lu: LoopuseId, eu: Option<EdgeuseId>) -> Result<()> {
     // check state - input must be NonNULL
-    let start = eu.ok_or_else(|| SolidError::topology_missing(OP, "the edge use to start from"))?;
+    let start = eu.ok_or_else(|| SolidError::topology(OP, TopologyFailure::NoStartEdgeUse))?;
 
     // local
     let mut count: u64 = 0;
@@ -429,10 +430,16 @@ pub fn collect_edgeuses(b: &mut Brep, lu: LoopuseId, eu: Option<EdgeuseId>) -> R
     loop {
         // check state - Edgeuse must be NonNULL
         let Some(this) = cur else {
-            return Err(SolidError::topology_missing(
+            return Err(Failure::new(
                 OP,
-                "the next edge use round the loop",
-            ));
+                TopologyFailure::Defect {
+                    why: "an edge use reached on the walk round the loop has no \
+                        counter-clockwise neighbour; the kernel links the edge uses of \
+                        a loop into a closed ring before it collects them",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error());
         };
 
         // set pEdgeuse useType to SmLoopuse_TYPE and its BackPtr to this Loopuse
@@ -450,9 +457,11 @@ pub fn collect_edgeuses(b: &mut Brep, lu: LoopuseId, eu: Option<EdgeuseId>) -> R
         // reality check - error past 100k edges
         count += 1;
         if count > MAX_COLLECT_STEPS {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP,
-                "the loop has more than 100000 edge uses",
+                TopologyFailure::LoopTooLong {
+                    limit: MAX_COLLECT_STEPS,
+                },
             ));
         }
     }
@@ -1169,7 +1178,17 @@ pub(crate) fn face_notify_as(
 /// [`SolidError::NotFound`] for a dangling id.
 pub fn flip_loop_orientation(b: &mut Brep, l: LoopId) -> Result<()> {
     let (lu1, lu2) = loop_loopuses(b, l)?;
-    let lu2 = lu2.ok_or_else(|| SolidError::topology_missing(OP, "the loop's second loop use"))?;
+    let lu2 = lu2.ok_or_else(|| {
+        Failure::new(
+            OP,
+            TopologyFailure::Defect {
+                why: "the loop's loop use has no mate; the kernel makes a loop's two \
+                    loop uses as a mated pair, one on each of the face's face uses",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
     let face = match faceuse(b, lu1)? {
         Some(fu) => eu1::faceuse_face(b, fu)?,
         None => None,
@@ -1182,15 +1201,30 @@ pub fn flip_loop_orientation(b: &mut Brep, l: LoopId) -> Result<()> {
     let start2 = b.loopuse(lu2)?.start;
     if let LoopuseStart::Vertexuse(vu1) = start1 {
         // get Vertexuses for both mated Loopuses
-        let vu1 =
-            vu1.ok_or_else(|| SolidError::topology_missing(OP, "the loop use's vertex use"))?;
+        let vu1 = vu1.ok_or_else(|| {
+            Failure::new(
+                OP,
+                TopologyFailure::Defect {
+                    why: "the loop use is of the vertex kind but names no vertex use; \
+                        the kernel sets a loop use's kind and its vertex use together",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         let vu2 = match start2 {
             LoopuseStart::Vertexuse(Some(vu)) => vu,
             LoopuseStart::Vertexuse(None) | LoopuseStart::Edgeuse(None) | LoopuseStart::Unknown => {
-                return Err(SolidError::topology_missing(
+                return Err(Failure::new(
                     OP,
-                    "the mate loop use's vertex use",
-                ));
+                    TopologyFailure::Defect {
+                        why: "the mate of a vertex loop use names no vertex use; the kernel \
+                            makes the two loop uses of a vertex loop each with its vertex \
+                            use",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error());
             }
             LoopuseStart::Edgeuse(Some(_)) => {
                 return Err(null("FlipLoopOrientation: mate is not a vertex loop use"));
@@ -1213,18 +1247,30 @@ pub fn flip_loop_orientation(b: &mut Brep, l: LoopId) -> Result<()> {
     } else {
         // get first Edgeuses for both mated Loopuses
         let LoopuseStart::Edgeuse(Some(eu1_)) = start1 else {
-            return Err(SolidError::topology_missing(
+            return Err(Failure::new(
                 OP,
-                "the loop use's first edge use",
-            ));
+                TopologyFailure::Defect {
+                    why: "the loop use is not a vertex loop use and names no first edge \
+                        use; the kernel gives a loop use its first edge use when it \
+                        collects the loop's edge uses",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error());
         };
         let eu2_ = match start2 {
             LoopuseStart::Edgeuse(Some(eu)) => eu,
             LoopuseStart::Edgeuse(None) | LoopuseStart::Vertexuse(None) | LoopuseStart::Unknown => {
-                return Err(SolidError::topology_missing(
+                return Err(Failure::new(
                     OP,
-                    "the mate loop use's first edge use",
-                ));
+                    TopologyFailure::Defect {
+                        why: "the mate of an edge loop use names no first edge use; the \
+                            kernel collects the edge uses of a loop's two loop uses \
+                            together",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error());
             }
             LoopuseStart::Vertexuse(Some(_)) => {
                 return Err(null("FlipLoopOrientation: mate is not an edge loop use"));

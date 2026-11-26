@@ -22,6 +22,7 @@ use std::collections::HashMap;
 
 use super::{IDENTITY, ImportIssue, ImportedBody, IssueKind, M4, parallel};
 use crate::body::Body;
+use crate::validation::CheckFailure;
 
 /// One body to check: the first instance of a part under one class of its placements.
 pub(super) struct Job {
@@ -135,30 +136,38 @@ impl ImportHeals {
 pub(super) enum Outcome {
     /// It passes (or SMLib refuses the body outright, which the read already said).
     Passes,
-    /// It fails: why, worded for the warning.
-    NeedsRepair(String),
+    /// It fails, and what SMLib's check found ([`Outcome::why`] words it for the warning): kept
+    /// whole so the heal of the part reuses it rather than check the part again.
+    NeedsRepair(CheckFailure),
     /// It cannot run: why, worded for the warning.
     CouldNotRun(String),
     /// The token over the checks stopped it.
     Stopped,
 }
 
+impl Outcome {
+    /// Why the part needs repair, worded for the warning; `None` when it passes or was stopped.
+    fn why(&self) -> Option<String> {
+        match self {
+            Outcome::NeedsRepair(failure) => Some(format!("SMLib's check fails it: {failure}")),
+            Outcome::CouldNotRun(why) => Some(why.clone()),
+            Outcome::Passes | Outcome::Stopped => None,
+        }
+    }
+}
+
 /// Check `job`'s body under the token and validation mode of this thread.
 pub(super) fn check(job: &Job) -> Outcome {
-    let _span = solidcraft_profile::span("import", "step.check");
-    match crate::validation::failing_check(&job.body) {
-        Ok(None) => Outcome::Passes,
-        Ok(Some(failure)) => Outcome::NeedsRepair(format!("SMLib's check fails it: {failure}")),
-        Err(_) if solidcraft_smlib::stop::current().is_some_and(|s| s.is_stopped()) => Outcome::Stopped,
-        Err(e) => Outcome::CouldNotRun(format!("SMLib's check could not run: {e}")),
-    }
+    // On a worker thread: the span says which part it checks (#22473).
+    let _span = solidcraft_profile::span("import", "step.check").arg("part", &job.label);
+    check_body(&job.body)
 }
 
 /// SMLib's check of `body`, as [`check`] says it.
 fn check_body(body: &Body) -> Outcome {
     match crate::validation::failing_check(body) {
         Ok(None) => Outcome::Passes,
-        Ok(Some(failure)) => Outcome::NeedsRepair(format!("SMLib's check fails it: {failure}")),
+        Ok(Some(failure)) => Outcome::NeedsRepair(failure),
         Err(_) if solidcraft_smlib::stop::current().is_some_and(|s| s.is_stopped()) => Outcome::Stopped,
         Err(e) => Outcome::CouldNotRun(format!("SMLib's check could not run: {e}")),
     }
@@ -201,6 +210,12 @@ fn to_heal(jobs: &[Job], outcomes: &[Outcome]) -> Vec<(u64, Vec<usize>)> {
 /// instances' placements. Kept, every instance of it is the healed part placed and dressed,
 /// and each of its jobs is checked again on the healed part (at the identity, the heal's own
 /// check of the body it kept).
+///
+/// The part's own check is handed to the heal, which would otherwise run it again: it is the
+/// check of `part.body` itself. A job at the identity checks `part.body` placed there, which is
+/// that very body ([`parallel::placed`] gives a clone, which shares its SMLib form), dressed
+/// for display (the file's colours and names, a shared mesh: nothing the check reads); with no
+/// such job it is checked here, on `part.body`.
 fn heal_item(jobs: &[Job], outcomes: &[Outcome], item: u64, of: &[usize], heals: &Heals) -> ItemHeal {
     let _span = solidcraft_profile::span("import", "step.heal");
     let Some(first) = of.first().and_then(|k| jobs.get(*k)) else { return ItemHeal::default() };
@@ -209,12 +224,12 @@ fn heal_item(jobs: &[Job], outcomes: &[Outcome], item: u64, of: &[usize], heals:
         Some(k) => outcomes.get(*k).cloned().unwrap_or(Outcome::Passes),
         None => check_body(&part.body),
     };
-    match own {
-        Outcome::NeedsRepair(_) => {}
+    let own = match own {
+        Outcome::NeedsRepair(failure) => failure,
         Outcome::Stopped => return ItemHeal { stopped: true, ..ItemHeal::default() },
         Outcome::Passes | Outcome::CouldNotRun(_) => return ItemHeal::default(),
-    }
-    let (healed, note, kept, face_source) = match parallel::heal(part, item) {
+    };
+    let (healed, note, kept, face_source) = match parallel::heal(part, item, Some(&own)) {
         parallel::Healed::Kept(healed, note, kept, face_source) => (healed, note, kept, face_source),
         parallel::Healed::NotKept => return ItemHeal::default(),
         parallel::Healed::Stopped => return ItemHeal { stopped: true, ..ItemHeal::default() },
@@ -261,7 +276,7 @@ fn heal_item(jobs: &[Job], outcomes: &[Outcome], item: u64, of: &[usize], heals:
         let outcome = if job.m == IDENTITY {
             match &kept {
                 None => Outcome::Passes,
-                Some(failure) => Outcome::NeedsRepair(format!("SMLib's check fails it: {failure}")),
+                Some(failure) => Outcome::NeedsRepair(failure.clone()),
             }
         } else {
             match place(&job.m) {
@@ -356,22 +371,21 @@ fn settle(jobs: &[Job], mut outcomes: Vec<Outcome>, heals: &Heals, workers: usiz
         if let Some((kind, detail)) = notes.remove(&job.item) {
             issues.push(ImportIssue { kind, item: Some(job.item), part: job.part.clone(), paths: Vec::new(), faces: 0, times: 1, detail });
         }
-        match outcome {
-            Outcome::Passes => {}
-            Outcome::Stopped => stopped = true,
-            Outcome::NeedsRepair(why) | Outcome::CouldNotRun(why) => {
-                let msg = format!("{}: needs repair before it can be modelled: {why}", job.what);
-                let detail = if job.times > 1 { format!("{msg} (×{})", job.times) } else { msg };
-                issues.push(ImportIssue {
-                    kind: IssueKind::NeedsRepair,
-                    item: Some(job.item),
-                    part: job.part.clone(),
-                    paths: Vec::new(),
-                    faces: 0,
-                    times: job.times,
-                    detail,
-                });
-            }
+        if matches!(outcome, Outcome::Stopped) {
+            stopped = true;
+        }
+        if let Some(why) = outcome.why() {
+            let msg = format!("{}: needs repair before it can be modelled: {why}", job.what);
+            let detail = if job.times > 1 { format!("{msg} (×{})", job.times) } else { msg };
+            issues.push(ImportIssue {
+                kind: IssueKind::NeedsRepair,
+                item: Some(job.item),
+                part: job.part.clone(),
+                paths: Vec::new(),
+                faces: 0,
+                times: job.times,
+                detail,
+            });
         }
     }
     let heals = if stopped { None } else { healed };
@@ -412,12 +426,33 @@ struct Shared {
     stop: solidcraft_smlib::stop::Stop,
     settled: Mutex<Option<Settled>>,
     done: Condvar,
+    /// Called once when the run ends ([`Shared::finish`]): a window's request for the frame its
+    /// result needs, instead of polling [`ImportChecks::is_running`] while it runs.
+    wake: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl Shared {
     fn finish(&self, settled: Settled) {
+        // The lock is released before `wake` is taken: `set_wake` locks them in the other order.
         *self.settled.lock().unwrap_or_else(PoisonError::into_inner) = Some(settled);
+        let wake = self.wake.lock().unwrap_or_else(PoisonError::into_inner).take();
         self.done.notify_all();
+        if let Some(wake) = wake {
+            wake();
+        }
+    }
+
+    /// Keep `wake` for [`Shared::finish`], unless the run ended already: `false` then, and the
+    /// caller wakes itself.
+    fn set_wake(&self, wake: Arc<dyn Fn() + Send + Sync>) -> bool {
+        let mut slot = self.wake.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.settled.lock().unwrap_or_else(PoisonError::into_inner).is_some() {
+            return false;
+        }
+        if slot.is_none() {
+            *slot = Some(wake);
+        }
+        true
     }
 
     fn settled(&self) -> Option<Settled> {
@@ -471,7 +506,12 @@ impl PartialEq for ImportChecks {
 
 impl ImportChecks {
     fn shared(settled: Option<Settled>) -> (ImportChecks, Arc<Shared>) {
-        let shared = Arc::new(Shared { stop: solidcraft_smlib::stop::Stop::new(), settled: Mutex::new(settled), done: Condvar::new() });
+        let shared = Arc::new(Shared {
+            stop: solidcraft_smlib::stop::Stop::new(),
+            settled: Mutex::new(settled),
+            done: Condvar::new(),
+            wake: Mutex::new(None),
+        });
         (ImportChecks(Some(Arc::new(Handle(shared.clone())))), shared)
     }
 
@@ -537,6 +577,16 @@ impl ImportChecks {
     /// The checks are still running.
     pub fn is_running(&self) -> bool {
         self.issues().is_none()
+    }
+
+    /// Call `wake` once when the checks end, or at once if they have ended: a window asks for the
+    /// one frame the result needs, instead of asking [`Self::is_running`] every frame while they
+    /// run. A report with no run (nothing to check, or read from a saved design) wakes nothing.
+    pub fn on_end(&self, wake: Arc<dyn Fn() + Send + Sync>) {
+        let Some(handle) = &self.0 else { return };
+        if !handle.0.set_wake(wake.clone()) {
+            wake();
+        }
     }
 
     /// What the checks found, `None` while they run: a `NeedsRepair` issue for each part a check
