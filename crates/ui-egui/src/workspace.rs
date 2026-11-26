@@ -759,6 +759,9 @@ pub const SECTIONS: &[Section] = &[
             "sketch.constraint.equal",
             "sketch.constraint.parallel",
             "sketch.constraint.perpendicular",
+            // Horizontal or Vertical alone, whichever way the line runs now: in the drop-down.
+            "sketch.constraint.horizontal",
+            "sketch.constraint.vertical",
             "sketch.construction",
             "sketch.constrainer",
         ],
