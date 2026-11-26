@@ -160,7 +160,7 @@ fn common_basis([mut a, mut b]: [Curve; 2]) -> Result<[Curve; 2]> {
 /// factor of two at which a quadratic would stall. This avoids retracing any forward
 /// chord. A noncollinear chord cannot cancel the derivative; this is not a
 /// certificate against reversed matching or intersections between run curves.
-fn chord_scale([a, b]: &[Curve; 2], run: Vec3, normal: Vec3) -> Result<f64> {
+fn chord_scale(k: &Kernel, [a, b]: &[Curve; 2], run: Vec3, normal: Vec3) -> Result<f64> {
     let vector = |v: Vec3| [v.x, v.y, v.z].map(Ivl::from);
     let run = vector(run);
     let normal = vector(normal);
@@ -207,6 +207,7 @@ fn chord_scale([a, b]: &[Curve; 2], run: Vec3, normal: Vec3) -> Result<f64> {
         })
         .collect();
     while let Some((lo, hi, depth)) = todo.pop() {
+        k.check_cancelled(OP)?;
         let lower = bound(lo, hi).filter(|x| x.is_finite()).unwrap_or(0.0);
         if lower > 0.0 {
             scale = scale.min(lower);
@@ -386,7 +387,7 @@ pub fn skin_planar_g1(
     for (p, q) in a.segs.iter().zip(&b.segs) {
         k.check_cancelled(OP)?;
         let pair = compatible([section_curve(&fa, p)?, section_curve(&fb, q)?])?;
-        scale = scale.min(chord_scale(&pair, run, active_normal)?);
+        scale = scale.min(chord_scale(k, &pair, run, active_normal)?);
         walls.push(pair);
     }
     // One speed for the entire loft keeps both sides of each seam on the same curve.
@@ -506,13 +507,26 @@ mod tests {
             CPoint::new(0.0, 0.0, 2.0, 1.0),
             CPoint::new(1.0, 0.0, 0.0, 1.0),
         ]);
-        let l = chord_scale(&[a.clone(), b], Vec3::Z, Vec3::Z).unwrap();
+        let mut k = Kernel::default();
+        let l = chord_scale(&k, &[a.clone(), b], Vec3::Z, Vec3::Z).unwrap();
         // The true minimum in the max norm is (sqrt(5)−1)/2, where
         // |2t−1| = 4t(1−t). No positive value follows from the unsplit hull.
         assert!(l > 0.0 && l <= (5.0_f64.sqrt() - 1.0) / 2.0);
+        let coincident = [a.clone(), a];
         assert!(matches!(
-            chord_scale(&[a.clone(), a], Vec3::Z, Vec3::Z),
+            chord_scale(&k, &coincident, Vec3::Z, Vec3::Z),
             Err(SolidError::NotConverged { .. })
+        ));
+        // Allow the original hull but stop before the first subdivided one.
+        k.set_cancel_token(crate::CancelToken::after_polls(2));
+        assert!(matches!(
+            chord_scale(&k, &coincident, Vec3::Z, Vec3::Z),
+            Err(SolidError::Cancelled { operation: OP })
+        ));
+        k.set_cancel_token(crate::CancelToken::with_fuel(1));
+        assert!(matches!(
+            chord_scale(&k, &coincident, Vec3::Z, Vec3::Z),
+            Err(SolidError::OutOfFuel { operation: OP, .. })
         ));
     }
 

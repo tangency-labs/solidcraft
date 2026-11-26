@@ -145,6 +145,14 @@ pub struct LoftSection {
     pub segs: Vec<Seg2>,
 }
 
+/// Whether the last segment closes an already ordered chain at its first segment,
+/// in sketch coordinates. This does not check the interior joins.
+#[must_use]
+pub fn section_ends_meet(first: &Seg2, last: &Seg2, tol: f64) -> bool {
+    let gap = last.end() - first.start();
+    gap.x.hypot(gap.y) <= tol
+}
+
 /// A section as the walls are built through it: its segments, and for each the segments of the
 /// section as given ([`LoftSection::segs`] indices) it runs over.
 #[derive(Clone, Debug, PartialEq)]
@@ -2322,6 +2330,15 @@ mod tests {
             a: p(a.0, a.1),
             b: p(b.0, b.1),
         }
+    }
+
+    #[test]
+    fn ordered_section_ends_respect_the_sketch_join_tolerance() {
+        let first = line((0.0, 0.0), (1.0, 0.0));
+        let last = |dy| line((1.0, 0.0), (6e-7, dy));
+        assert!(section_ends_meet(&first, &last(7e-7), 1e-6));
+        assert!(!section_ends_meet(&first, &last(9e-7), 1e-6));
+        assert!(!section_ends_meet(&first, &last(f64::NAN), 1e-6));
     }
 
     /// The closed polygon through `pts`.

@@ -1365,13 +1365,33 @@ fn planar_g1_circle_to_slot_keeps_the_original_caps() {
     };
     let caps = [cap(&a), cap(&b)];
     for (end, sections) in [(0, [a.clone(), b.clone()]), (1, [b, a])] {
-        let (sheet, mut sources) = loft_sheet_planar_g1(&sections, end, 0.0, true).unwrap();
-        sources.sort_unstable();
-        let expected: Vec<Vec<_>> = (0..4)
-            .map(|j| if end == 0 { vec![0, j + 1] } else { vec![j, 4] })
-            .collect();
-        assert_eq!(sources, expected);
-        let (record, _) = sheet.to_record().unwrap();
+        let (record, sources) = loft_sheet_planar_g1(&sections, end, 0.0, true).unwrap();
+        assert_eq!(record.faces.len(), 4);
+        assert_eq!(sources.len(), record.faces.len());
+        let mut seen = [false; 4];
+        for (face, sources) in record.faces.iter().zip(sources) {
+            let [solidcore_record::brep::Loop::Edges { edges }] = face.loops.as_slice() else {
+                panic!("expected one edge loop per wall");
+            };
+            let mut slot_rims = edges.iter().filter_map(|edge| {
+                let [a, b] = record.edges[edge.edge as usize]
+                    .vertices
+                    .map(|v| record.vertices[v as usize].point);
+                ((a[2] - 30.0).abs() < 1e-10 && (b[2] - 30.0).abs() < 1e-10).then_some((a, b))
+            });
+            let (a, b) = slot_rims.next().unwrap();
+            assert!(slot_rims.next().is_none());
+            // The slot's four endpoint pairs uniquely identify its source segments.
+            let slot = [(0.0, -2.0), (10.0, 6.0), (0.0, 14.0), (-10.0, 6.0)]
+                .iter()
+                .position(|&(x, y)| {
+                    (a[0] + b[0] - 2.0 * x).abs() < 1e-10 && (a[1] + b[1] - 2.0 * y).abs() < 1e-10
+                })
+                .unwrap();
+            assert!(!std::mem::replace(&mut seen[slot], true));
+            let expected = if end == 0 { [0, slot + 1] } else { [slot, 4] };
+            assert_eq!(sources, expected, "sources for slot segment {slot}");
+        }
         let (sheet, _) = Body::from_record(&record, true).unwrap();
         assert_slot_rims(&sheet, &open_edges(&sheet).unwrap());
         let sewn = sew(&[&sheet, &caps[0], &caps[1]], 1e-5).unwrap();
@@ -1427,7 +1447,9 @@ fn planar_g1_keeps_caps_when_their_supporting_planes_cross() {
         };
         let cb = cap(&b);
         for crown in [0.0, 3.0] {
-            let (sheet, _) = loft_sheet_planar_g1(&[a.clone(), b.clone()], 0, crown, true).unwrap();
+            let (record, _) =
+                loft_sheet_planar_g1(&[a.clone(), b.clone()], 0, crown, true).unwrap();
+            let (sheet, _) = Body::from_record(&record, true).unwrap();
             let sewn = sew(&[&sheet, &ca, &cb], 1e-5).unwrap();
             assert!(sewn.closed && sewn.open_edges.is_empty());
             assert!(sewn.body.check(CheckLevel::All).unwrap().is_valid());

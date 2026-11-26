@@ -1096,6 +1096,19 @@ pub fn sweep_placed(
     Ok((body, placed, route))
 }
 
+/// Whether an ordered sketch chain's last and first endpoints meet within `tol`.
+/// Empty chains do not close; interior joins are not rechecked here.
+#[must_use]
+pub fn loft_section_closed(chain: &[solidcore_record::Seg2], tol: f64) -> bool {
+    use solidcore::sweep::loft_sections::section_ends_meet;
+    chain
+        .first()
+        .zip(chain.last())
+        .is_some_and(|(first, last)| {
+            section_ends_meet(&convert::seg2(first), &convert::seg2(last), tol)
+        })
+}
+
 /// A closed loft section for [`match_loft_sections`]: its sketch plane and its loop in the
 /// plane's coordinates, end to end.
 #[derive(Clone, Debug)]
@@ -1427,10 +1440,10 @@ pub fn loft_sheet(sections: &[Vec<Curve>], degree: u32) -> Result<(Body, Option<
     Ok((body, Some(faces)))
 }
 
-/// A sheet through two closed planar sections with one end tangent along their centre connector.
+/// An exported sheet through two closed planar sections, tangent at one end along their centre connector.
 /// `tangent_at` selects the section (0 or 1); `crown` scales the derivative at that end only.
-/// With `faced`, orient the walls out of the sectioned region. Face sources index the
-/// original (not split or reordered) input curves, flattened in section order.
+/// With `faced`, orient the walls out of the sectioned region. The source lists are in the
+/// returned record's face order, indexing the original curves flattened in section order.
 ///
 /// # Errors
 /// The kernel's refusals for invalid sections, a degenerate tangent or an invalid sheet.
@@ -1439,7 +1452,7 @@ pub fn loft_sheet_planar_g1(
     tangent_at: usize,
     crown: f64,
     faced: bool,
-) -> Result<(Body, Vec<Vec<usize>>)> {
+) -> Result<(solidcore_record::brep::Brep, Vec<Vec<usize>>)> {
     use solidcore::sweep::{loft_sections::LoftSection as Input, skin_planar_g1::skin_planar_g1};
     let given = sections.each_ref().map(|s| Input {
         origin: convert::vec3(s.plane.origin),
@@ -1459,7 +1472,7 @@ pub fn loft_sheet_planar_g1(
     if !report.is_valid() {
         return Err(Error::Internal(format!("loft_sheet_planar_g1: {report}")));
     }
-    let (_, order) = body.to_record()?;
+    let (record, order) = body.to_record()?;
     let mut sources: BTreeMap<FaceId, Vec<usize>> = sources.into_iter().collect();
     let faces = order
         .faces
@@ -1467,7 +1480,7 @@ pub fn loft_sheet_planar_g1(
         .map(|f| sources.remove(f))
         .collect::<Option<Vec<_>>>()
         .ok_or(Error::Exception)?;
-    Ok((body, faces))
+    Ok((record, faces))
 }
 
 /// `c` as [`loft_sheet`] skins it: a line as a NURBS line over [0, 1], any other curve as it is.

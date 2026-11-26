@@ -1300,7 +1300,7 @@ pub fn loft_sheet_with_rails_legacy_sides(sections: &[(Plane, Vec<Seg2>)], rails
 /// This distinguishes a loop from an open chain; it does not validate the section.
 #[must_use]
 pub fn loft_section_closed(chain: &[Seg2]) -> bool {
-    chain.first().zip(chain.last()).is_some_and(|(first, last)| last.end().dist(first.start()) <= 1e-6)
+    solidcore_ops::sweep::loft_section_closed(chain, 1e-6)
 }
 
 /// An uncapped loft through two closed planar sketch sections with a single G1 end. The
@@ -1310,8 +1310,7 @@ pub fn loft_section_closed(chain: &[Seg2]) -> bool {
 pub fn loft_sheet_planar_g1(sections: &[(Plane, Vec<Seg2>); 2], tangent_at: usize, crown: f64, faced: bool) -> Result<Body> {
     let sections = sections.each_ref().map(|(plane, chain)| solidcore_ops::sweep::LoftSection { plane: *plane, segs: chain.clone() });
     let ops = |e| failed(format!("surface loft: {e}"));
-    let (body, sources) = solidcore_ops::sweep::loft_sheet_planar_g1(&sections, tangent_at, crown, faced).map_err(ops)?;
-    let (r, _) = body.to_record().map_err(ops)?;
+    let (r, sources) = solidcore_ops::sweep::loft_sheet_planar_g1(&sections, tangent_at, crown, faced).map_err(ops)?;
     let h = sources.iter().map(record::profile).collect();
     sheet_of(vec![(r, h)], false, &[])
 }
