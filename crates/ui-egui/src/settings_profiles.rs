@@ -83,6 +83,7 @@ const PROFILE_KEYS: &[&str] = &[
     "maya_horizontal_zoom",
     "middle_double_click",
     "mouse_gestures",
+    "mouse_orbit_reverse",
     "nav",
     "nav_bridge_enabled",
     "nav_button_map",

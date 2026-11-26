@@ -1277,7 +1277,10 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
             };
         decide_orbit_flip(app, button, mods);
         let free = mouse_free_orbit(app);
-        orbit_drag_styled(app, rect, f64::from(delta.x), f64::from(delta.y), press, snap, true, free);
+        // The mouse's own direction; the trackpad's Shift orbit is signed where it is read, under
+        // its separate switch (#8410).
+        let sign = crate::prefs::mouse_orbit_sign(app);
+        orbit_drag_styled(app, rect, sign * f64::from(delta.x), sign * f64::from(delta.y), press, snap, true, free);
         wrap_cursor(app, ui, rect);
     } else {
         app.viewport.orbit_flip = None;

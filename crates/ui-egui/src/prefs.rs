@@ -252,6 +252,8 @@ pub struct NavPreset {
     pub middle_double_click: Option<&'static str>,
     /// Choosing the preset sets "Right drag orbits" (`None` leaves it as it is).
     pub right_drag_orbits: Option<bool>,
+    /// Choosing the preset sets "Reverse mouse orbit direction" (`None` leaves it as it is).
+    pub reverse_orbit: Option<bool>,
     pub bindings: &'static [NavBinding],
     /// While the middle button drags, holding one of these buttons too does its mode instead (NX:
     /// middle + right pans, middle + left zooms, #22063). Empty: a second button changes nothing.
@@ -278,6 +280,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
+        reverse_orbit: None,
         bindings: &[bind(Middle, NavKeys::SHIFT, Orbit), bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
         chords: &[],
     },
@@ -290,6 +293,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         // Picked here, the right button is left to the context menu and mouse gestures (#6492).
         middle_double_click: Some("fit"),
         right_drag_orbits: Some(false),
+        // SolidWorks turns the model with the pointer the other way round.
+        reverse_orbit: Some(true),
         bindings: &[
             bind(Middle, NavKeys::CTRL, Pan),
             bind(Middle, NavKeys::SHIFT, Zoom),
@@ -308,6 +313,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: true,
         middle_double_click: None,
         right_drag_orbits: None,
+        reverse_orbit: None,
         bindings: &[bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::NONE, Orbit)],
         chords: &[],
     },
@@ -321,6 +327,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: Some("fit"),
         right_drag_orbits: Some(false),
+        reverse_orbit: None,
         bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
         chords: &[(Right, Pan), (Left, Zoom)],
     },
@@ -332,6 +339,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
+        reverse_orbit: None,
         bindings: &[
             bind(Middle, NavKeys::SHIFT, Orbit),
             bind(Middle, NavKeys::CTRL, Zoom),
@@ -348,6 +356,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
+        reverse_orbit: None,
         bindings: &[
             bind(Left, NavKeys::SHIFT_ALT, Orbit),
             bind(Middle, NavKeys::SHIFT_ALT, Pan),
@@ -366,6 +375,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
+        reverse_orbit: None,
         bindings: &[
             bind(Left, NavKeys::ALT, Orbit),
             bind(Middle, NavKeys::ALT, Pan),
@@ -382,6 +392,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
+        reverse_orbit: None,
         bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
         chords: &[],
     },
@@ -393,6 +404,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
+        reverse_orbit: None,
         bindings: &[bind(Right, NavKeys::SHIFT, Pan), bind(Right, NavKeys::NONE, Orbit), bind(Middle, NavKeys::NONE, Pan)],
         chords: &[],
     },
@@ -404,6 +416,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
+        reverse_orbit: None,
         bindings: &[
             bind(Left, NavKeys::NONE, Orbit),
             bind(Right, NavKeys::SHIFT, Zoom),
@@ -421,6 +434,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
+        reverse_orbit: None,
         // Ctrl+left orbit is the drag from empty space every preset has: as a binding it would
         // also take a Ctrl+click on geometry, which adds to the selection.
         bindings: &[bind(Left, NavKeys::SHIFT_ALT, Zoom), bind(Left, NavKeys::ALT, Pan)],
@@ -434,6 +448,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
+        reverse_orbit: None,
         bindings: &[bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
         chords: &[],
     },
@@ -535,7 +550,7 @@ pub fn nav_preset(id: &str) -> &'static NavPreset {
 }
 
 /// Picks `preset` the way the Preferences page does: its bindings, wheel direction and, when the
-/// preset names them, middle double-click and "Right drag orbits".
+/// preset names them, middle double-click, "Right drag orbits" and "Reverse mouse orbit direction".
 pub fn choose_nav_preset(prefs: &mut Prefs, preset: &NavPreset) {
     prefs.nav = preset.id.into();
     prefs.zoom_reverse = preset.reverse_zoom;
@@ -544,6 +559,9 @@ pub fn choose_nav_preset(prefs: &mut Prefs, preset: &NavPreset) {
     }
     if let Some(orbits) = preset.right_drag_orbits {
         prefs.right_drag_orbits = orbits;
+    }
+    if let Some(reverse) = preset.reverse_orbit {
+        prefs.mouse_orbit_reverse = reverse;
     }
 }
 /// Stable control-channel names; presentation labels may be shorter.
@@ -2364,6 +2382,11 @@ pub fn pan_sign_y(app: &SolveApp) -> f32 {
 /// +1, or −1 when Shift with two-finger scrolling orbits the other way (#8410).
 pub fn orbit_sign(app: &SolveApp) -> f64 {
     if app.preferences.orbit_reverse { -1.0 } else { 1.0 }
+}
+
+/// +1, or −1 when dragging with a mouse button orbits the other way on both axes.
+pub fn mouse_orbit_sign(app: &SolveApp) -> f64 {
+    if app.preferences.mouse_orbit_reverse { -1.0 } else { 1.0 }
 }
 
 /// Whether the configured suppress-snap chord is held.
@@ -12996,25 +13019,36 @@ mod tests {
     }
 
     #[test]
-    fn choosing_the_solidworks_preset_frees_the_right_button_and_fits_on_middle_double_click() {
+    fn choosing_the_solidworks_preset_frees_the_right_button_and_reverses_the_orbit() {
         let none = Modifiers::default();
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         app.preferences.middle_double_click = "off".into();
         set(&mut app, &json!({"nav": "solidworks"})).unwrap();
         assert!(app.preferences.right_drag_orbits, "a saved SolidWorks preset keeps its right-drag orbit");
+        assert!(!app.preferences.mouse_orbit_reverse, "a saved SolidWorks preset keeps the orbit it was saved with");
         assert_eq!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Orbit));
         choose_nav_preset(&mut app.preferences, nav_preset("fusion"));
         let p = &app.preferences;
-        assert_eq!((p.nav.as_str(), p.zoom_reverse, p.middle_double_click.as_str(), p.right_drag_orbits), ("fusion", false, "off", true));
+        assert_eq!(
+            (p.nav.as_str(), p.zoom_reverse, p.middle_double_click.as_str(), p.right_drag_orbits, p.mouse_orbit_reverse),
+            ("fusion", false, "off", true, false)
+        );
         choose_nav_preset(&mut app.preferences, nav_preset("solidworks"));
         let p = &app.preferences;
-        assert_eq!((p.nav.as_str(), p.zoom_reverse, p.middle_double_click.as_str(), p.right_drag_orbits), ("solidworks", true, "fit", false));
+        assert_eq!(
+            (p.nav.as_str(), p.zoom_reverse, p.middle_double_click.as_str(), p.right_drag_orbits, p.mouse_orbit_reverse),
+            ("solidworks", true, "fit", false, true)
+        );
         assert_eq!(nav_mode(&app, NavButton::Right, none), None, "right drag is left to the context menu (#6492)");
         assert_eq!(nav_mode(&app, NavButton::Middle, none), Some(NavMode::Orbit));
         set(&mut app, &json!({"nav": "openscad"})).unwrap();
         assert_eq!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Pan), "only an orbiting right drag is affected");
         set(&mut app, &json!({"right_drag_orbits": true, "nav": "solidworks"})).unwrap();
         assert_eq!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Orbit), "turned back on, the right drag orbits again");
+        // A mapping that says nothing about the orbit direction leaves the switch alone.
+        app.preferences.mouse_orbit_reverse = false;
+        choose_nav_preset(&mut app.preferences, nav_preset("blender"));
+        assert!(!app.preferences.mouse_orbit_reverse);
     }
 
     #[test]
@@ -13133,6 +13167,20 @@ mod tests {
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&app.prefs());
         assert!(other.preferences.orbit_reverse);
+    }
+
+    #[test]
+    fn mouse_orbit_reverse_defaults_off_persists_and_flips_the_sign() {
+        assert!(!serde_json::from_value::<Prefs>(json!({})).unwrap().mouse_orbit_reverse);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert_eq!(mouse_orbit_sign(&app), 1.0);
+        assert_eq!(orbit_sign(&app), 1.0, "the mouse's switch leaves the trackpad's alone");
+        set(&mut app, &json!({"mouse_orbit_reverse": true})).unwrap();
+        assert_eq!(mouse_orbit_sign(&app), -1.0);
+        assert_eq!(orbit_sign(&app), 1.0, "the mouse's switch leaves the trackpad's alone");
+        let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        other.load_prefs(&app.prefs());
+        assert!(other.preferences.mouse_orbit_reverse);
     }
 
     #[test]

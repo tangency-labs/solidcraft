@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.reverse_mouse_orbit_direction": "Reverse mouse orbit direction",
+    "ui.reverse_mouse_orbit_tip": "Dragging with the mouse orbits the other way on both axes; off, the model follows the pointer"
+  },
+  "ar": {
+    "ui.reverse_mouse_orbit_direction": "عكس اتجاه تدوير العرض بالفأرة",
+    "ui.reverse_mouse_orbit_tip": "السحب بالفأرة يدوّر العرض في الاتجاه المعاكس على المحورين؛ عند إيقاف الخيار يتبع النموذج المؤشر"
+  },
+  "de": {
+    "ui.reverse_mouse_orbit_direction": "Drehrichtung der Maus umkehren",
+    "ui.reverse_mouse_orbit_tip": "Mit der Maus zu ziehen dreht die Ansicht auf beiden Achsen in die andere Richtung; aus folgt das Modell dem Zeiger"
+  },
+  "he": {
+    "ui.reverse_mouse_orbit_direction": "היפוך כיוון סיבוב המבט בעכבר",
+    "ui.reverse_mouse_orbit_tip": "גרירה בעכבר מסובבת את המבט בכיוון ההפוך בשני הצירים; כשהאפשרות כבויה, המודל עוקב אחרי הסמן"
+  },
+  "ja": {
+    "ui.reverse_mouse_orbit_direction": "マウスのオービット方向を反転",
+    "ui.reverse_mouse_orbit_tip": "マウスのドラッグで両軸とも反対方向に回転します。オフのときはモデルがポインタに追従します"
+  },
+  "ko": {
+    "ui.reverse_mouse_orbit_direction": "마우스 회전 방향 반전",
+    "ui.reverse_mouse_orbit_tip": "마우스로 끌면 두 축 모두 반대 방향으로 회전합니다. 끄면 모델이 포인터를 따라갑니다"
+  },
+  "vi": {
+    "ui.reverse_mouse_orbit_direction": "Đảo hướng xoay góc nhìn bằng chuột",
+    "ui.reverse_mouse_orbit_tip": "Kéo bằng chuột sẽ xoay góc nhìn theo hướng ngược lại trên cả hai trục; khi tắt, mô hình đi theo con trỏ"
+  },
+  "zh": {
+    "ui.reverse_mouse_orbit_direction": "反转鼠标环绕方向",
+    "ui.reverse_mouse_orbit_tip": "用鼠标拖动时两个轴都向相反方向环绕；关闭时模型跟随指针"
+  }
+}

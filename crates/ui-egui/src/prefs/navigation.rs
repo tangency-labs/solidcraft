@@ -119,6 +119,8 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 });
             });
         });
+        let reverse = setting::mouse_orbit_reverse(app, ui);
+        crate::scenario::publish_target("prefs:mouse_orbit_reverse", reverse.rect);
         let touch = setting::touchscreen_navigation(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.touchscreen.help"));
         crate::scenario::publish_target("prefs:touchscreen_navigation", touch.rect);
         if app.preferences.nav == "maya" {

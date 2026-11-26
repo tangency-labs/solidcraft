@@ -18979,6 +18979,43 @@ mod tests {
         assert_eq!(step(true, egui::Modifiers::NONE), step(false, egui::Modifiers::NONE), "a pan does not change");
     }
 
+    /// Dragging with a mouse button orbits the other way on both axes when the setting is on,
+    /// free orbit included, and pan and zoom stay as they are.
+    #[test]
+    fn reversed_mouse_orbit_turns_the_other_way_and_leaves_pan_and_zoom_alone() {
+        let drag = |reverse: bool, free_orbit: bool, ctrl: bool, shift: bool| {
+            let mut h = crate::scenario::Harness::new();
+            h.app.preferences.nav = "solidworks".into();
+            h.app.preferences.orbit_around = crate::prefs::OrbitAround::ViewCentre;
+            h.app.preferences.mouse_orbit_reverse = reverse;
+            h.app.preferences.free_orbit = free_orbit;
+            h.call("ui.view", json!({"view":"front"}));
+            let before = h.app.cam;
+            h.call("ui.drag", json!({"x0":800,"y0":500,"x1":832,"y1":508,"button":"middle","ctrl":ctrl,"shift":shift,"steps":16}));
+            (before, h.app.cam)
+        };
+        let (before, after) = drag(true, false, false, false);
+        // Orbiting around the view centre keeps a model point on screen, so the target moves; the
+        // drag's direction is the camera's orientation.
+        let mut expected = before;
+        expected.orbit(-32.0, -8.0);
+        assert_eq!((after.yaw, after.pitch, after.roll), (expected.yaw, expected.pitch, expected.roll), "both axes turn the other way");
+        let (_, forward) = drag(false, false, false, false);
+        let mut plain = before;
+        plain.orbit(32.0, 8.0);
+        assert_eq!((forward.yaw, forward.pitch, forward.roll), (plain.yaw, plain.pitch, plain.roll), "off: the model follows the pointer, as before");
+        // Free orbit applies each step's delta to the view it finds, so the expected camera is the
+        // same sixteen turns in the other direction.
+        let (free_start, free) = drag(true, true, false, false);
+        let mut free_expected = free_start;
+        for _ in 0..16 {
+            free_expected.rotate_in_view(Vec3::new(0.5 * 0.008, 2.0 * 0.008, 0.0));
+        }
+        assert!(free.back().dist(free_expected.back()) < 1e-9, "free orbit turns the other way too");
+        assert_eq!(drag(true, false, true, false).1, drag(false, false, true, false).1, "Ctrl+middle pans, which does not change");
+        assert_eq!(drag(true, false, false, true).1, drag(false, false, false, true).1, "Shift+middle zooms, which does not change");
+    }
+
     #[test]
     fn fusion_trackpad_uses_each_events_modifiers_and_can_switch_mid_gesture() {
         let mut h = crate::scenario::Harness::new();

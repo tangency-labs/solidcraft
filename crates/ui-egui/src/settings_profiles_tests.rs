@@ -40,16 +40,18 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     // Test change: show_design_view_switcher is a portable key; 110 -> 109 because the
     // wide_panel_grab key left Preferences, so one fewer portable key; 109 -> 107 because the
     // documents browser's show_document_browser and library_thumbnail_size left with it (#8206);
-    // 108 -> 109 because Turn Around adds one portable Navigation preference.
+    // 108 -> 109 because Turn Around adds one portable Navigation preference;
+    // 109 -> 110 because Reverse mouse orbit direction adds one portable Navigation preference.
     assert_eq!(
         keys.len(),
-        110,
+        111,
         "include the repeated-shortcut preference, the browser scroll wheel preferences and the centred command search among the current portable settings"
     );
     for key in [
         "nav",
         "maya_horizontal_zoom",
         "mouse_gestures",
+        "mouse_orbit_reverse",
         "radial_context_menu",
         "zoom_reverse",
         "theme",
@@ -850,6 +852,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "maya_horizontal_zoom",
         "middle_double_click",
         "mouse_gestures",
+        "mouse_orbit_reverse",
         "nav",
         "nav_bridge_enabled",
         "nav_bridge_port",
@@ -930,7 +933,8 @@ fn profile_keys_cover_the_current_portable_preferences() {
     // Test change: one more portable key, free_orbit_key (the key that makes one orbit drag free).
     // Test change: two fewer portable keys, show_document_browser and library_thumbnail_size, gone with the document browser;
     // Turn Around adds one portable Navigation preference to the 108 keys on main.
-    assert_eq!(expected.len(), 110);
+    // Test change: one more portable key, mouse_orbit_reverse (which way a mouse drag orbits).
+    assert_eq!(expected.len(), 111);
     assert_eq!(actual, expected);
 }
 
