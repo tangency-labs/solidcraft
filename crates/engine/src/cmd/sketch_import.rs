@@ -38,13 +38,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch_dxf")
         .contract(&INSERT_DXF_CONTRACT)
         .output(output_schema_for::<DrawingInserted>)
-        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the size of the drawn geometry's bounds before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); fixed?: bool (a Fix constraint on every point the drawing adds, as sketch.constraint.fix puts one; a circle's or ellipse's radius stays free; default false); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the size of the drawn geometry's bounds before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); fixed?: bool (a Fix constraint on every point the drawing adds, as sketch.constraint.fix puts one; a circle's or ellipse's radius stays free; default false); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.insert_svg", "Insert SVG", crate::checked!("sketch.insert_svg", insert_svg))
         .at("SKETCH", "INSERT")
         .icon("svg")
         .contract(&INSERT_SVG_CONTRACT)
         .output(output_schema_for::<DrawingInserted>)
-        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); size_from?: \"geometry\" (default: width and height are the bounds of the drawn geometry) | \"viewbox\" (the SVG sheet: its viewBox, else its width and height; a drawing smaller than its sheet then comes out smaller than width or height say); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's (or sheet's) middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); fixed?: bool (every point it adds gets a Fix constraint, so the drawing stays where it is put); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); size_from?: \"geometry\" (default: width and height are the bounds of the drawn geometry) | \"viewbox\" (the SVG sheet: its viewBox, else its width and height; a drawing smaller than its sheet then comes out smaller than width or height say); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's (or sheet's) middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); fixed?: bool (every point it adds gets a Fix constraint, so the drawing stays where it is put); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.insert_airfoil", "Insert Airfoil", crate::checked!("sketch.insert_airfoil", insert_airfoil))
         .at("SKETCH", "INSERT")
         .icon("airfoil")
@@ -433,6 +433,9 @@ fn point_segment_distance(p: Vec2, a: Vec2, b: Vec2) -> f64 {
 
 fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
     let (geom, (lo, hi), text, mut warnings) = read_drawing(p, cmd, svg)?;
+    // The drawing's own span, for `simplify`'s cap: `size_from` below may replace `lo` and `hi`
+    // with the SVG's sheet, which is not what is simplified.
+    let drawing_span = (hi.x - lo.x).max(hi.y - lo.y);
     // What `width`, `height` and `align: center` refer to: the drawn geometry, or the SVG sheet.
     let (lo, hi) = match str_(p, "size_from") {
         None | Some("geometry") => (lo, hi),
@@ -474,14 +477,13 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
     }
     let tol = num(p, "tolerance").filter(|t| t.is_finite() && *t > 0.0).unwrap_or(1e-4).clamp(1e-9, 10.0);
     let f = placement(pivot, Vec2::new(k, k), angle, off);
-    // `simplify` is in the drawing's place (mm), as `tolerance` is: in the file's own units it is
-    // that over the size factor, and never more than a hundredth of the drawing, so a drawing
-    // scaled down cannot be simplified away altogether.
+    // `simplify` is measured on the drawing as it is drawn, so it means the same at any size
+    // factor: the preview, imported at scale 1, then simplifies exactly as the confirmed command
+    // does. It is never more than a hundredth of the drawing's own span, so a drawing cannot be
+    // simplified away altogether.
     let simplify = num(p, "simplify").filter(|s| *s > 0.0).map(|s| s.clamp(0.0, MAX_SIMPLIFY_MM)).unwrap_or(0.0);
     let geom = if simplify > 0.0 {
-        // In the file's own units: the distance asked for over the size factor, and never more
-        // than a hundredth of the drawing's span (in its own units too).
-        let tol_file = (simplify / k).min(natural.0.max(natural.1) * 0.01);
+        let tol_file = simplify.min(drawing_span * 0.01);
         let (simplified, complete) = simplify_lines(&geom, tol_file, tol / k);
         if !complete {
             warnings.push(simplify_short_note().into());
@@ -1349,14 +1351,53 @@ EOF
             let mut s = Session::default();
             s.execute("sketch.insert_svg", &json!({"text": svg, "simplify": simplify})).unwrap()["curves"].as_u64().unwrap()
         };
-        // 1% of the 40 mm span; and the same drawing scaled down, where the file's units differ.
+        // 1% of the 40 mm span, and the same at any size factor: the window's preview imports at
+        // scale 1 and the confirmed command at the window's scale, and both must keep the same
+        // edges.
         let at_clamp = curves(0.4);
         assert_eq!(curves(100.0), at_clamp, "a distance past the clamp is the clamp");
+        assert_eq!(curves(500.0), at_clamp, "a distance past the command's own clamp is the clamp");
         assert!(at_clamp > 1, "most of the outline still comes in: {at_clamp}");
-        let mut scaled = Session::default();
-        let scaled_curves =
-            scaled.execute("sketch.insert_svg", &json!({"text": svg, "simplify": 100.0, "scale": 0.5})).unwrap()["curves"].as_u64().unwrap();
-        assert_eq!(scaled_curves, at_clamp, "the clamp is in the drawing's own units, whatever its size");
+    }
+
+    /// `simplify` is measured on the drawing as drawn, so the window's preview (imported at
+    /// scale 1) and the confirmed command (at the window's scale) keep the same edges: the
+    /// confirmed geometry is exactly the preview scaled by that factor.
+    #[test]
+    fn simplify_keeps_the_same_edges_at_any_scale() {
+        let n = 1000;
+        let mut path = String::from("M 20 0");
+        for k in 1..=n {
+            let a = std::f64::consts::PI * k as f64 / n as f64;
+            path.push_str(&format!(" L {:.6} {:.6}", 20.0 * a.cos(), 20.0 * a.sin()));
+        }
+        let svg =
+            format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40mm\" height=\"20mm\" viewBox=\"-20 0 40 20\"><path d=\"{path}\"/></svg>");
+        // The kept outline at `scale`: how many curves, its box, and the first line's start point.
+        let kept = |scale: f64| {
+            let mut s = Session::default();
+            let r = s.execute("sketch.insert_svg", &json!({"text": svg, "simplify": 0.05, "scale": scale})).unwrap();
+            let id = s.active_sketch.unwrap();
+            let sk = super::sketch_store::read(&s.doc, id).unwrap();
+            let (mut lo, mut hi, mut first) = (Vec2::new(f64::MAX, f64::MAX), Vec2::new(f64::MIN, f64::MIN), None);
+            for i in 0..sk.curves.len() {
+                if let Some(solidcraft_sketch::Shape::Line { a, b }) = sk.shape(i) {
+                    for q in [a, b] {
+                        lo = Vec2::new(lo.x.min(q.x), lo.y.min(q.y));
+                        hi = Vec2::new(hi.x.max(q.x), hi.y.max(q.y));
+                        first.get_or_insert(q);
+                    }
+                }
+            }
+            (r["curves"].as_u64().unwrap(), lo, hi, first.unwrap_or_default())
+        };
+        let (one, lo1, hi1, start1) = kept(1.0);
+        let (two, lo2, hi2, start2) = kept(2.0);
+        assert!(one > 1, "the dense half circle keeps some edges: {one}");
+        assert_eq!(one, two, "the same edges are kept at twice the size");
+        let close = |a: Vec2, b: Vec2| (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9;
+        assert!(close(start2, start1 * 2.0), "the same first point, scaled: {start1:?} vs {start2:?}");
+        assert!(close(lo2, lo1 * 2.0) && close(hi2, hi1 * 2.0), "the kept outline is twice the size: {lo1:?}..{hi1:?} vs {lo2:?}..{hi2:?}");
     }
 
     /// An SVG with far more edges than the largest sketch takes is refused with its count and

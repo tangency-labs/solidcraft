@@ -92,9 +92,10 @@ fewer segments make imports and every later edit of the sketch cheaper too.
 ### Simplifying a dense drawing on the way in
 
 The insert now takes `simplify`, the Simplify box of the Insert SVG/DXF window: a distance in mm
-within which runs of lines that meet end to end are followed by fewer lines (Douglas-Peucker,
-each removed vertex no further than that from the outline kept; arcs, circles, splines and text
-stay as drawn). It is off by default, 0 — it moves the outline by up to its value — and the
+of the drawing as it is drawn (the same at any size factor, so the window's preview at scale 1
+and the confirmed insert retain the same edges), within which runs of lines that meet end to end
+are followed by fewer lines (Douglas-Peucker, each removed vertex no further than that from the
+outline kept; arcs, circles, splines and text stay as drawn). It is off by default, 0 — it moves the outline by up to its value — and the
 window starts it at a two-hundredth of the drawing's size when the file has more edges than the
 largest sketch takes, showing it so it can be lowered to 0.
 

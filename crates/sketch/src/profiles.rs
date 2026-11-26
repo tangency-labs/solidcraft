@@ -1409,7 +1409,6 @@ const MAX_PARTS: usize = 16;
 
 /// Boxes covering a segment and everything the search samples from it.
 fn seg_boxes(s: &Seg2, cell: f64, out: &mut Vec<solidcraft_geom::Aabb2>) {
-    let parts = parts_for(s.length(), cell);
     let hull = |pts: &[Vec2]| {
         pts.iter().fold(solidcraft_geom::Aabb2::EMPTY, |mut b, p| {
             b.add(*p);
@@ -1418,6 +1417,9 @@ fn seg_boxes(s: &Seg2, cell: f64, out: &mut Vec<solidcraft_geom::Aabb2>) {
     };
     match *s {
         Seg2::Line { a, b } => {
+            // Only a line is cut: a curve's length is a numerical integral, and its box is one
+            // hull (below) or an arc's own count, so asking for it here would be wasted.
+            let parts = parts_for(s.length(), cell);
             for k in 0..parts {
                 let (t0, t1) = (k as f64 / parts as f64, (k + 1) as f64 / parts as f64);
                 out.push(hull(&[a + (b - a) * t0, a + (b - a) * t1]));

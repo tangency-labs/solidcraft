@@ -5,12 +5,17 @@
 use crate::ui_kit::BackingTooltipExt as _;
 use serde_json::{Value, json};
 use solidcore_record::{Seg2, Vec2};
+use solidcraft_engine::geom::{Seg2Geom as _, Similarity2};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, form_row};
 
 /// Largest scale the insert commands take.
 pub(crate) const MAX_SCALE: f64 = 1e5;
+
+/// The smallest join tolerance the insert commands take (mm): the preview imports with it, so it
+/// never joins ends the confirmed sketch might keep apart (see [`preview_placement`]).
+const MIN_TOLERANCE_MM: f64 = 1e-9;
 
 /// Largest Simplify distance the window offers, in mm (the command brings a bigger one inside
 /// this too).
@@ -150,32 +155,23 @@ pub fn rows(ui: &mut egui::Ui, p: &mut Place) {
     });
 }
 
-/// Where the drawing's point `q` — as the preview has it, with its middle at the sketch's origin
-/// — goes when [`Place`] puts it down. `sketch.insert_svg`'s placement (its `align: "center"`),
-/// applied to the preview instead of importing the drawing again for each value.
-pub fn placed(q: Vec2, p: &Place) -> Vec2 {
-    let (sin, cos) = p.angle.to_radians().sin_cos();
-    let (x, y) = (q.x * p.scale, q.y * p.scale);
-    Vec2::new(x * cos - y * sin + p.x, x * sin + y * cos + p.y)
+/// The window's placement as the geometry layer's similarity: scale, then turn, then move. The
+/// preview and the insert therefore move a drawing with one implementation.
+pub fn placement(p: &Place) -> Option<Similarity2> {
+    Similarity2::new(p.scale, p.angle.to_radians(), Vec2::new(p.x, p.y))
 }
 
-/// A piece of the drawing, as the preview has it, where [`Place`] puts it: a similarity keeps
-/// every piece's own kind, so lines stay lines and arcs keep their sweep.
+/// Where the drawing's point `q` — as the preview has it, with its anchor at the sketch's origin
+/// — goes when [`Place`] puts it down. The confirm command applies the same similarity to the
+/// file's coordinates.
+pub fn placed(q: Vec2, p: &Place) -> Vec2 {
+    placement(p).map_or(q, |m| m.apply(q))
+}
+
+/// A piece of the drawing, as the preview has it, where [`Place`] puts it: the similarity keeps
+/// every piece's own kind, so lines stay lines and arcs keep their sweep (exactly).
 pub fn placed_seg(seg: Seg2, place: &Place) -> Seg2 {
-    match seg {
-        Seg2::Line { a, b } => Seg2::Line { a: placed(a, place), b: placed(b, place) },
-        Seg2::Arc { center, radius, start, sweep } => {
-            Seg2::Arc { center: placed(center, place), radius: radius * place.scale, start: start + place.angle.to_radians(), sweep }
-        }
-        Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic { p0: placed(p0, place), p1: placed(p1, place), p2: placed(p2, place), p3: placed(p3, place) },
-        Seg2::Conic { a, apex, b, w } => Seg2::Conic { a: placed(a, place), apex: placed(apex, place), b: placed(b, place), w },
-        Seg2::Bezier { n, mut p } => {
-            for point in p.iter_mut().take(usize::from(n) + 1) {
-                *point = placed(*point, place);
-            }
-            Seg2::Bezier { n, p }
-        }
-    }
+    placement(place).map_or(seg, |m| seg.similar(&m))
 }
 
 /// The command the live preview runs: the drawing as it is drawn, its middle at the sketch's
@@ -190,6 +186,11 @@ pub fn preview_placement(p: &Place, cmds: &mut [(String, Value)]) {
         params["at"] = json!([0.0, 0.0]);
         params["scale"] = json!(1.0);
         params["angle"] = json!(0.0);
+        // The window imports the drawing at scale 1, so the confirmed command's join tolerance (in
+        // placed mm) cannot be reproduced exactly there: at another scale it joins a different
+        // file-unit gap. The preview keeps every end as drawn instead, rather than showing a
+        // join the confirmed sketch may not make; the gaps it shows are at most the tolerance.
+        params["tolerance"] = json!(MIN_TOLERANCE_MM);
     }
 }
 
@@ -357,13 +358,18 @@ mod tests {
         assert_eq!(shown[0].1["angle"], json!(0.0));
         assert_eq!(shown[0].1["align"], json!("center"));
         // Simplifying is not a placement: the preview imports the drawing at the window's
-        // distance, as OK does.
+        // distance, as OK does (measured on the drawing, so the same at any scale).
         assert_eq!(shown[0].1["simplify"], json!(0.2));
+        // The preview imports at scale 1, where the confirmed command's placed-mm join tolerance
+        // cannot be reproduced: it keeps every end as drawn instead of showing a join the sketch
+        // may not make.
+        assert_eq!(shown[0].1["tolerance"], json!(MIN_TOLERANCE_MM));
         // The command OK runs is untouched.
         let ok = commands(&p).unwrap();
         assert_eq!(ok[0].1["at"], json!([5.0, -3.0]));
         assert_eq!(ok[0].1["scale"], json!(2.0));
         assert_eq!(ok[0].1["angle"], json!(90.0));
+        assert!(ok[0].1.get("tolerance").is_none(), "OK keeps the command's own default: {}", ok[0].1);
     }
 
     /// A point of the drawing moves exactly as `sketch.insert_svg`'s placement moves it, and a

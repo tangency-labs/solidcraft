@@ -84,11 +84,12 @@ pub struct InsertDrawingKeys {
     /// brought inside; one that is not above 0 reads as the default). Default: 0.0001.
     #[serde(default)]
     pub tolerance: Option<f64>,
-    /// How far in mm a removed vertex may lie from the outline kept, 0 to 100 (a value outside is
-    /// brought inside, and never more than a hundredth of the drawing). Runs of consecutive
-    /// lines that meet end to end are replaced by fewer lines that follow them within it, so a
-    /// dense drawing comes in with fewer curves; arcs, circles, ellipses, splines, conics and
-    /// text stay as drawn. Default: 0, every edge as drawn.
+    /// How far in mm a removed vertex may lie from the outline kept, measured on the drawing as
+    /// it is drawn (the same at any `scale`), 0 to 100 (a value outside is brought inside, and
+    /// never more than a hundredth of the drawing). Runs of consecutive lines that meet end to
+    /// end are replaced by fewer lines that follow them within it, so a dense drawing comes in
+    /// with fewer curves; arcs, circles, ellipses, splines, conics and text stay as drawn.
+    /// Default: 0, every edge as drawn.
     #[serde(default)]
     pub simplify: Option<f64>,
     /// `true` puts a Fix constraint on every point the drawing adds (as `sketch.constraint.fix`
