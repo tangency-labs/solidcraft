@@ -153,3 +153,27 @@ fn interned_names_are_kept_and_bounded() {
     assert!(std::ptr::eq(a, intern("smlib_boolean")));
     assert_eq!(a, "smlib_boolean");
 }
+
+/// #22473: a span's arguments reach its trace event's `args`, so a trace says which part a span
+/// was for; a span without any has none, and nothing is kept while recording is off.
+#[test]
+fn a_spans_arguments_are_its_trace_events_args() {
+    let _s = serial();
+    reset();
+    drop(span("test", "unrecorded").arg("part", "a"));
+    set_enabled(true);
+    drop(span("test", "check").arg("part", "solid 'bracket'").arg("feature", 7));
+    drop(span("test", "plain"));
+    drop(span("test", "long").arg("name", "é".repeat(400)));
+    set_enabled(false);
+    let mut out = Vec::new();
+    write_chrome_trace(&mut out).unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let events = v["traceEvents"].as_array().unwrap();
+    let event = |name: &str| events.iter().find(|e| e["name"] == name && e["ph"] == "X").cloned();
+    assert!(event("unrecorded").is_none());
+    assert_eq!(event("check").unwrap()["args"], serde_json::json!({"part": "solid 'bracket'", "feature": "7"}));
+    assert!(event("plain").unwrap().get("args").is_none(), "no empty args");
+    let long = event("long").unwrap()["args"]["name"].as_str().unwrap().to_owned();
+    assert!(long.len() <= 256 && long.chars().all(|c| c == 'é'), "cut at a character boundary");
+}

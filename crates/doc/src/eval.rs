@@ -5738,8 +5738,9 @@ impl Model {
                     !self.no_cache && checks.refused_at(i).is_none() && param_names(f).iter().all(|n| !self.param_errors.contains_key(n))
                 });
                 let relative = reads.and(key.relative);
-                // Each feature computed is a profiler span named after its kind.
-                let _feature_span = solidcraft_profile::span("feature", f.kind.type_name());
+                // Each feature computed is a profiler span named after its kind, with its id and
+                // name: the spans it runs (a STEP import's) are inside it on this thread (#22473).
+                let _feature_span = solidcraft_profile::span("feature", f.kind.type_name()).arg("feature", f.id).arg("name", &f.name);
                 let before = state.clone();
                 // A kernel call that failed before this feature is not its failure.
                 kernel::failure::clear();
