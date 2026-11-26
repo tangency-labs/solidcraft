@@ -1439,7 +1439,6 @@ fn read_board(path: &str, options: &solidcraft_io::KicadOptions, paths: &KicadPa
     };
     let imported =
         solidcraft_io::read_kicad(&bytes, &board_path, options, &mut load).map_err(|e| EngineError::Other(format!("{board_path}: {e}")))?;
-    drop(load);
     Ok(KicadRead { imported, board_path, bytes, refused: refused_folders.take() })
 }
 
