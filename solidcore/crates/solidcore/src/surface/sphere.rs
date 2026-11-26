@@ -1039,6 +1039,7 @@ impl Sphere {
     ) -> Result<SurfaceIntersection> {
         let mut out = SurfaceIntersection::default();
         self.global_surface_intersect_with_into(
+            None,
             k,
             uv_domain,
             other,
@@ -1057,10 +1058,14 @@ impl Sphere {
 
     /// [`Self::global_surface_intersect_with`] into `out`, with `general` filling it.
     /// On an error `out` keeps what the failing special case appended before it, as
-    /// upstream leaves its output arrays.
+    /// upstream leaves its output arrays. `this` is the surface that holds this sphere,
+    /// when there is one: with `other` it decides the contact tolerance of the coaxial
+    /// intersection with a surface of revolution (`revolved_contact_tol`, #15049), as that
+    /// surface's own dispatch decides it, so the two orders agree.
     #[allow(clippy::too_many_arguments)] // upstream's argument list
     pub(crate) fn global_surface_intersect_with_into(
         &self,
+        this: Option<&Surface>,
         k: &Kernel,
         uv_domain: &Extent2d,
         other: &Surface,
@@ -1112,6 +1117,10 @@ impl Sphere {
                     self,
                     uv_domain,
                     approx_tol_3d,
+                    crate::surface::surf_of_revolution::p3::revolved_contact_tol(
+                        k,
+                        [this, Some(other)],
+                    ),
                     out,
                 );
                 core::mem::swap(&mut out.surface1_uv_curves, &mut out.surface2_uv_curves);

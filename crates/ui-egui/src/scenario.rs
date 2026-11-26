@@ -129,9 +129,10 @@ fn widget_near_centres(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)
     })
 }
 
-/// The app in a headless egui context.
+/// The app in a headless egui context. The app is boxed: it is hundreds of kilobytes, and a
+/// helper that returns or holds a harness would keep a copy of it in its stack frame (#21642).
 pub struct Harness {
-    pub app: SolveApp,
+    pub app: Box<SolveApp>,
     pub ctx: egui::Context,
     /// The last frame's platform output (with its accessibility tree: dialog widgets are found
     /// by their text there).
@@ -176,7 +177,7 @@ impl Harness {
         solidcraft_engine::use_import_cache_dir(std::env::temp_dir().join(format!("solidcraft-scenario-imports-{}", std::process::id())));
         solidcraft_ui_text::pin_system_language();
         let mut h = Harness {
-            app: SolveApp::new(Session::default(), Services::default()),
+            app: Box::new(SolveApp::new(Session::default(), Services::default())),
             ctx: {
                 let ctx = egui::Context::default();
                 crate::fonts::setup_bundled_fonts(&ctx);
@@ -658,7 +659,7 @@ impl Harness {
                         self.frames(1);
                     }
                 }
-                let mut old = std::mem::replace(&mut self.app, SolveApp::new(Session::default(), Services::default()));
+                let mut old = std::mem::replace(&mut *self.app, SolveApp::new(Session::default(), Services::default()));
                 if how == "close" {
                     crate::recovery_ui::close(&mut old);
                     // The desktop saves its settings on close and loads them on the next start.

@@ -2041,7 +2041,7 @@ fn edge_nurbs(b: &Brep, e: crate::topology::EdgeId) -> Result<Option<NurbsCurve>
     };
     match NurbsCurve::of(base) {
         Ok(n) => Ok(Some(n)),
-        Err(e @ SolidError::Cancelled { .. }) => Err(e),
+        Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -2057,7 +2057,7 @@ fn edge_nurbs(b: &Brep, e: crate::topology::EdgeId) -> Result<Option<NurbsCurve>
 fn point_and_tangent(cn: &NurbsCurve, s: Ivl) -> Result<Option<(Dv, Dv)>> {
     let enclosed = |found: Result<Vec<V3<Ivl>>>| match found {
         Ok(d) => Ok(Some(d)),
-        Err(e @ SolidError::Cancelled { .. }) => Err(e),
+        Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => Err(e),
         Err(_) => Ok(None),
     };
     // at a single parameter the enclosures are the rounding's only

@@ -167,6 +167,7 @@ fn de_boor(p: usize, knots: &[f64], control: &[[f64; 4]], t: f64) -> [f64; 4] {
 enum IsoCurve {
     Line { origin: P, step: P },
     Circle { o: P, x: P, y: P, r: f64 },
+    Ellipse { o: P, x: P, y: P, a: f64, b: f64 },
     BSpline { degree: usize, points: Vec<P>, weights: Vec<f64>, knots: Vec<f64> },
 }
 
@@ -175,6 +176,7 @@ impl IsoCurve {
         match self {
             IsoCurve::Line { origin, step } => add(*origin, mul(t, *step)),
             IsoCurve::Circle { o, x, y, r } => add(*o, add(mul(r * t.cos(), *x), mul(r * t.sin(), *y))),
+            IsoCurve::Ellipse { o, x, y, a, b } => add(*o, add(mul(a * t.cos(), *x), mul(b * t.sin(), *y))),
             IsoCurve::BSpline { degree, points, weights, knots } => {
                 let control: Vec<[f64; 4]> = points.iter().zip(weights).map(|(q, w)| [q[0] * w, q[1] * w, q[2] * w, *w]).collect();
                 let h = de_boor(*degree, knots, &control, t);
@@ -190,6 +192,10 @@ impl IsoCurve {
             IsoCurve::Circle { o, x, y, .. } => {
                 let d = sub(q, *o);
                 dot(d, *y).atan2(dot(d, *x))
+            }
+            IsoCurve::Ellipse { o, x, y, a, b } => {
+                let d = sub(q, *o);
+                (dot(d, *y) / b).atan2(dot(d, *x) / a)
             }
             IsoCurve::BSpline { knots, .. } => {
                 let (lo, hi) = (knots[0], knots[knots.len() - 1]);
@@ -513,6 +519,17 @@ impl File {
                     t1 -= tau;
                 }
             }
+        } else if let IsoCurve::Ellipse { .. } = curve {
+            let tau = std::f64::consts::TAU;
+            if along {
+                while t1 <= t0 + 1e-12 {
+                    t1 += tau;
+                }
+            } else {
+                while t1 >= t0 - 1e-12 {
+                    t1 -= tau;
+                }
+            }
         }
         let pieces = 64;
         let raw: Vec<(Option<f64>, f64)> =
@@ -564,6 +581,12 @@ impl File {
             "CIRCLE" => {
                 let (o, x, y, _) = self.frame(rid(&p[1]));
                 IsoCurve::Circle { o, x, y, r: real(&p[2]) }
+            }
+            "ELLIPSE" => {
+                let (o, x, y, _) = self.frame(rid(&p[1]));
+                let (a, b) = (real(&p[2]), real(&p[3]));
+                assert!(a >= b && b > 0.0, "#{id}: ELLIPSE semi_axis_1 ({a}) < semi_axis_2 ({b})");
+                IsoCurve::Ellipse { o, x, y, a, b }
             }
             "B_SPLINE_CURVE_WITH_KNOTS" => {
                 let points: Vec<P> = list(&p[2]).iter().map(|q| self.point(rid(q))).collect();
@@ -737,6 +760,17 @@ fn half_moment(curve: &IsoCurve, a: P, b: P, along: bool) -> P {
     let t0 = curve.param_of(a);
     let mut t1 = curve.param_of(b);
     if let IsoCurve::Circle { .. } = curve {
+        let tau = std::f64::consts::TAU;
+        if along {
+            while t1 <= t0 + 1e-12 {
+                t1 += tau;
+            }
+        } else {
+            while t1 >= t0 - 1e-12 {
+                t1 -= tau;
+            }
+        }
+    } else if let IsoCurve::Ellipse { .. } = curve {
         let tau = std::f64::consts::TAU;
         if along {
             while t1 <= t0 + 1e-12 {
@@ -1127,6 +1161,45 @@ fn a_cylinder_is_written_right_side_out() {
     assert_right_side_out("cylinder", &mut kernel, &mut brep, 250.0 * std::f64::consts::PI, 1e-9);
 }
 
+/// A 20 x 30 x 40 box with its four vertical edges, then all twelve, rounded R3
+/// (solidcore#3385): each round's face is a cone of no angle in the record, which STEP has no
+/// CONICAL_SURFACE for (its semi-angle must be above 0), so it is written as the cylinder it is.
+/// The four-round box reads back as one solid; the twelve-round box's corner patches are written
+/// as their NURBS, which the reader does not take back yet.
+#[test]
+fn a_rounded_box_is_written_with_cylinders_and_reads_back() {
+    use solidcore_record::brep::Curve as RC;
+    for vertical_only in [true, false] {
+        let body = solidcore_ops::make_box([0.0; 3], [20.0, 30.0, 40.0]).unwrap();
+        let (rec, order) = body.to_record().unwrap();
+        let edges: Vec<usize> = rec
+            .edges
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| {
+                !vertical_only
+                    || matches!(&e.curve, RC::Line { start, end }
+                        if (end[0] - start[0]).abs() < 1e-12 && (end[1] - start[1]).abs() < 1e-12)
+            })
+            .map(|(i, _)| i)
+            .collect();
+        let rounds = if vertical_only { 4 } else { 12 };
+        assert_eq!(edges.len(), rounds, "the box's edges to round");
+        let options = solidcore_ops::BlendOptions { contract: solidcore_ops::Contract::Proved, ..solidcore_ops::BlendOptions::default() };
+        solidcore_ops::blend_ordered(&body, &order, solidcore_ops::Blend::Round, &edges, &[3.0], &[], solidcore_ops::Corners::Filled, options)
+            .unwrap();
+        let header = solidcore_step::write::product::Header::default();
+        let text = solidcore_step::write::product::solidcore_bodies(&[("rounded box", &body)], &header).unwrap();
+        assert_eq!(text.matches("CYLINDRICAL_SURFACE").count(), rounds, "one cylinder per round");
+        assert!(!text.contains("CONICAL_SURFACE"), "a round written as a cone");
+        if vertical_only {
+            let read = solidcore_step::topology::read_solids(&p21::parse(&text).unwrap());
+            assert!(read.failures.is_empty(), "{:?}", read.failures);
+            assert_eq!(read.solids.len(), 1);
+        }
+    }
+}
+
 /// A sphere, a cone (a frustum) and a torus: their faces' loops run round closed surfaces,
 /// with seams and (the sphere's) poles.
 #[test]
@@ -1190,7 +1263,7 @@ fn an_inside_out_torus_is_written_right_side_out_and_reads_back() {
     assert!(!solid.sheet && solid.turned.is_empty(), "read back turned faces over: {:?} {:?}", solid.turned, solid.notes);
     let mut back = to_kernel_body(&mut kernel, &solid.brep, false).unwrap();
     let check = check_brep(&mut kernel, &mut back, CheckLevel::Level2).unwrap();
-    assert_eq!(check.pointers_status, 1000, "pointers");
+    assert_eq!(check.pointers, solidcore::topology::brep::validation::PointerCheck::Passed, "pointers");
     assert_eq!(check.assert_valid, Some(true), "{:?}", check.reports);
     let back_volume = brep_volume_default(&kernel, &mut back, 1e-9).unwrap();
     assert!((back_volume - expected).abs() <= 1e-9 * expected, "read-back volume {back_volume}, expected {expected}");
@@ -1517,4 +1590,59 @@ fn same_sense_follows_swapped_and_inside_out_parameterisations() {
         }
     }
     assert!(wrong.is_empty(), "same_sense against the loops: {wrong:?}");
+}
+
+/// Two equal-diameter perpendicular through-holes with intersecting axes cut into a 40 mm block
+/// (#22220): the cylinder-cylinder intersection produces analytic ellipses whose minor axis is the
+/// cylinder radius, so the writer must turn each ellipse a quarter turn to satisfy
+/// `semi_axis_1 >= semi_axis_2` (required by OpenCascade) while keeping vertices on-curve,
+/// orientation and signed volume (Steinmetz-corrected) intact.
+#[test]
+fn equal_diameter_perpendicular_intersecting_holes_are_written_valid_and_right_side_out() {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::topology::brep::p5::transform;
+    use std::f64::consts::PI;
+
+    let mut kernel = Kernel::default();
+    let r = 5.0_f64;
+    let side = 40.0_f64;
+    let block = api::create_box(&mut kernel, Point3::new(3.0, 4.0, 5.0), side, side, side).unwrap();
+    let hole_z = api::create_cylinder(&mut kernel, Point3::new(23.0, 24.0, 0.0), r, 50.0).unwrap();
+    let mut hole_x = api::create_cylinder(&mut kernel, Point3::ZERO, r, 50.0).unwrap();
+    let to_x = Axis2Placement::new(Point3::new(-2.0, 24.0, 25.0), Vec3::new(0.0, 0.0, -1.0), Vec3::new(0.0, 1.0, 0.0));
+    transform(&mut kernel, &mut hole_x, &to_x, None, false).unwrap();
+
+    let one = boolean_difference(&mut kernel, block, hole_z).unwrap();
+    let mut body = boolean_difference(&mut kernel, one, hole_x).unwrap();
+    let expected = side.powi(3) - 2.0 * PI * r * r * side + 16.0 * r.powi(3) / 3.0;
+
+    assert_right_side_out("intersecting equal holes", &mut kernel, &mut body, expected, 1e-4);
+
+    let text = write_step("intersecting equal holes", &mut kernel, &mut body);
+    let file = File { x: p21::parse(&text).unwrap() };
+    let ellipses: Vec<(f64, f64)> =
+        file.x.entities.values().filter(|e| e.name() == "ELLIPSE").map(|e| (real(&e.params()[2]), real(&e.params()[3]))).collect();
+    assert!(ellipses.len() >= 4, "expected analytic intersection ellipses, got {ellipses:?}");
+    for &(a, b) in &ellipses {
+        assert!(a >= b && b > 0.0, "ELLIPSE semi_axis_1 ({a}) < semi_axis_2 ({b})");
+    }
+
+    // Every elliptical EDGE_CURVE must keep both vertices on its normalized ELLIPSE.
+    let mut ellipse_edges = 0usize;
+    for (&id, ent) in &file.x.entities {
+        if ent.name() != "EDGE_CURVE" {
+            continue;
+        }
+        let curve = file.curve(rid(&ent.params()[3]));
+        if !matches!(curve, IsoCurve::Ellipse { .. }) {
+            continue;
+        }
+        ellipse_edges += 1;
+        for slot in [1, 2] {
+            let v = file.vertex(rid(&ent.params()[slot]));
+            let on_curve = curve.at(curve.param_of(v));
+            assert!(norm(sub(v, on_curve)) <= 1e-6, "EDGE_CURVE #{id} vertex {slot} lies off its normalized ELLIPSE");
+        }
+    }
+    assert!(ellipse_edges >= 4, "expected at least 4 elliptical EDGE_CURVEs, got {ellipse_edges}");
 }

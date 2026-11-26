@@ -460,7 +460,7 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
         }
         Sel::Body { name } => {
             let body = st.body(name)?;
-            let closed = crate::cmd::inspect::encloses_volume(&body.body);
+            let closed = body.is_closed();
             let m = body.mesh();
             let tris: Vec<[Vec3; 3]> = m.triangles.iter().filter_map(|t| m.tri(t)).collect();
             let definitions = s.model.state();
@@ -610,9 +610,9 @@ fn closest(a: &Item, b: &Item) -> Option<(Vec3, Vec3)> {
 }
 
 /// The closest points of two items on their bodies' exact B-reps: two trimmed face selections,
-/// or an edge (over its curve's own interval) against an edge, trimmed face or vertex, solved by
-/// the kernel. `None` for other pairs and for a mesh body, whose triangles are its geometry;
-/// an error where the kernel can't answer for B-rep items.
+/// an edge (over its curve's own interval) against an edge, trimmed face or vertex, or a vertex
+/// against trimmed faces, solved by the kernel. `None` for other pairs and for a mesh body, whose
+/// triangles are its geometry; an error where the kernel can't answer for B-rep items.
 fn exact_closest(st: &solidcraft_doc::ModelState, a: &Item, b: &Item) -> std::result::Result<Option<solidcraft_kernel::BodyDistance>, String> {
     use solidcraft_kernel::{BodyDistance, Members, edges_closest, faces_closest, point_closest};
     let body = |name: &str| st.body(name).map(|b| &b.body).ok_or_else(|| format!("no body named '{name}'"));
@@ -637,6 +637,9 @@ fn exact_closest(st: &solidcraft_doc::ModelState, a: &Item, b: &Item) -> std::re
         }
         (Some(Exact::Edges { body: x, edges }), Some(Exact::Point(p))) => point_closest(*p, body(x)?, Members::Edges(edges)).map(swap),
         (Some(Exact::Point(p)), Some(Exact::Edges { body: y, edges })) => point_closest(*p, body(y)?, Members::Edges(edges)),
+        // A vertex or point and a curved face: the face's exact surface as it is trimmed (#16262).
+        (Some(Exact::Faces { body: x, faces }), Some(Exact::Point(p))) => point_closest(*p, body(x)?, Members::Faces(faces)).map(swap),
+        (Some(Exact::Point(p)), Some(Exact::Faces { body: y, faces })) => point_closest(*p, body(y)?, Members::Faces(faces)),
         _ => Ok(None),
     };
     found.map_err(|e| e.to_string())
