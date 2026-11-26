@@ -171,6 +171,9 @@ jobs:
       carried: ${{ steps.paths.outputs.carried }}
       # A batch branch's base (where it leaves main), for the jobs that read a merge group's base.
       batch_base: ${{ steps.paths.outputs.batch_base }}
+      # A push to main whose commit the merge queue (or a Tickets batch) already tested and passed:
+      # Format and repository checks are skipped too, as the build jobs already are.
+      queue_tested: ${{ steps.paths.outputs.queue_tested }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -202,6 +205,7 @@ jobs:
           solidcore=false
           full=true
           packages=
+          queue_tested=false
           # Whether the NUL-separated paths in $1 reach any code: scripts/ci/affected.py selects
           # something or the whole workspace. Documentation, packaging, other workflows and the bots'
           # scripts select nothing. Pull requests and pushes to main share it.
@@ -336,7 +340,8 @@ jobs:
               packages=
               native=true
             elif [ "${tested:-0}" -gt 0 ]; then
-              echo "The merge queue already tested $PUSH_SHA: repository checks only."
+              echo "The merge queue already tested $PUSH_SHA: no checks repeated."
+              queue_tested=true
             elif tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
                 "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=push&branch=$GITHUB_REF_NAME&status=success&per_page=1" \
                 | grep -o '"head_sha": *"[0-9a-f]*"' | head -n 1 | grep -o '[0-9a-f]\{40\}') \
@@ -471,6 +476,7 @@ jobs:
             echo "solidcore=$solidcore"
             echo "carried=$carried"
             echo "batch_base=${batch_base:-}"
+            echo "queue_tested=$queue_tested"
             echo "full=$full"
             echo "quick=$quick"
             echo "packages=$packages"
@@ -478,7 +484,9 @@ jobs:
 
   checks:
     name: Format and repository checks
-    if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci')
+    # Not on a push to main the merge queue (or a batch) already tested and passed: nothing changed.
+    needs: changes
+    if: needs.changes.outputs.queue_tested != 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci')
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
     timeout-minutes: ${{ vars.CI_RUNNER && 75 || 25 }}
     steps:
@@ -1397,6 +1405,7 @@ jobs:
         env:
           CHANGES: ${{ needs.changes.result }}
           CHECKS: ${{ needs.checks.result }}
+          QUEUE_TESTED: ${{ needs.changes.outputs.queue_tested }}
           NATIVE: ${{ needs.changes.outputs.native }}
           QUICK: ${{ needs.changes.outputs.quick }}
           QUICK_COMPILE: ${{ needs.quick-compile.result }}
@@ -1433,7 +1442,11 @@ jobs:
           NO_USAGE_STATS: ${{ needs.no-usage-stats.result }}
         run: |
           test "$CHANGES" = success
-          test "$CHECKS" = success
+          if [ "$QUEUE_TESTED" = true ]; then
+            test "$CHECKS" = skipped
+          else
+            test "$CHECKS" = success
+          fi
           # An unapproved pull request: the heavy jobs are skipped on purpose.
           if [ "$QUICK" = true ]; then
             test "$QUICK_COMPILE" = success

@@ -38,7 +38,7 @@
 
 use core::cell::{Cell, RefCell};
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::error::SolidError;
 use crate::geom::context::Context;
@@ -1431,9 +1431,11 @@ pub struct Kernel {
     /// Not upstream: the memo of the procedural blends this kernel recertified as it gave a
     /// record's faces their definitions back
     /// ([`crate::surface::procedural_blend::convert::RecertifyMemo`]), on with
-    /// [`Kernel::memoize_curve_caches`]. A [`RefCell`]: it is never borrowed across a
-    /// certificate, and a hit returns what recertifying the same blend again returns.
-    pub recertify_memo: RefCell<crate::surface::procedural_blend::convert::RecertifyMemo>,
+    /// [`Kernel::memoize_curve_caches`]. Shared through an [`Arc`] (a kernel a boolean
+    /// copies for its workers keeps the certificates the parent finished: a hit returns
+    /// what recertifying the same blend again returns, so sharing it changes no answer),
+    /// and a [`Mutex`], as the copies run on their own threads.
+    pub recertify_memo: Arc<Mutex<crate::surface::procedural_blend::convert::RecertifyMemo>>,
     /// Not upstream: the fork's `thread_local` count of open blend operation scopes
     /// (`t_lOperationScopes`; [`crate::blend::fillet_section::section::OperationScope`]).
     /// Shared, so that a scope can outlive a borrow of the kernel (a fillet session holds
@@ -1468,7 +1470,7 @@ pub struct Kernel {
     /// Test-only seam of the curved coincident strip's drop ([`StripProbe`]); shared with
     /// the kernel copies an operation makes.
     #[cfg(test)]
-    pub(crate) strip_probe: Arc<std::sync::Mutex<StripProbe>>,
+    pub(crate) strip_probe: Arc<Mutex<StripProbe>>,
 }
 
 /// Test-only seam of `boolean::topology_intersector::curved_strip`
@@ -1534,7 +1536,7 @@ impl Kernel {
             blend_w_memo: RefCell::default(),
             loop_area_memo: RefCell::default(),
             check_memo: RefCell::default(),
-            recertify_memo: RefCell::default(),
+            recertify_memo: Arc::default(),
             blend_operation_scopes: Arc::default(),
             work_counters: WorkCounters::default(),
             blend_face_log: None,

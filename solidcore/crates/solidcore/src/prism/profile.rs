@@ -402,6 +402,32 @@ impl Seg2 {
         }
     }
 
+    /// Move its control geometry without changing its shape or parameter.
+    pub(crate) fn translate(&mut self, shift: Vec2) {
+        match self {
+            Self::Line { a, b } => {
+                *a += shift;
+                *b += shift;
+            }
+            Self::Arc { center, .. } => *center += shift,
+            Self::Conic { a, apex, b, .. } => {
+                for p in [a, apex, b] {
+                    *p += shift;
+                }
+            }
+            Self::Cubic { p0, p1, p2, p3 } => {
+                for p in [p0, p1, p2, p3] {
+                    *p += shift;
+                }
+            }
+            Self::Bezier { p, .. } => {
+                for q in p {
+                    *q += shift;
+                }
+            }
+        }
+    }
+
     /// The same segment run the other way.
     #[must_use]
     pub fn reversed(&self) -> Seg2 {

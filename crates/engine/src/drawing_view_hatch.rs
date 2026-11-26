@@ -32,8 +32,8 @@ use solidcraft_geom::Similarity2;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::hatch::Mark;
 use solidcraft_kernel::history::{FaceOrigin, History};
-use solidcraft_kernel::services::profile::Mark;
 use solidcraft_kernel::{Body, PlanarPiece};
 use solidcraft_viewport::hatch::{CutPart, HATCH_COLOURS, hatches as pick, seed};
 
