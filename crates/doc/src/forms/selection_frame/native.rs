@@ -6,7 +6,7 @@ use solidcraft_geom::{
     brep::eval::{CurveEval, SurfaceEval},
     tess::EvalSurface,
 };
-use solidcraft_kernel::services::pcurve;
+use solidcraft_kernel::curves::pcurve_eval;
 
 const MAX_FACES: usize = 256;
 const MAX_GUIDES: usize = 544;
@@ -227,7 +227,7 @@ impl<'a> Eval<'a> {
                     return None;
                 }
                 let parameter = bounded(bounded(parameter, edge.interval)?, pcurve.interval()?)?;
-                pcurve::eval(pcurve, parameter).filter(|uv| uv.iter().all(|v| v.is_finite()))
+                pcurve_eval(pcurve, parameter).filter(|uv| uv.iter().all(|v| v.is_finite()))
             }
         }
     }

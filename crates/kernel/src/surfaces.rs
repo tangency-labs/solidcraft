@@ -650,7 +650,7 @@ pub fn patch_edges_on_face(body: &Body, at: &[Vec3], support: &Body, face: usize
             .iter()
             .map(|&(i, forward)| {
                 let edge = body.record().edges.get(i).ok_or_else(|| invalid("supported cap edge reference"))?;
-                Ok(crate::services::pcurve::EdgeUse {
+                Ok(solidcore_ops::pcurve::EdgeUse {
                     edge: index(i)?,
                     curve: edge.parameters(),
                     interval: edge.interval,
@@ -660,7 +660,7 @@ pub fn patch_edges_on_face(body: &Body, at: &[Vec3], support: &Body, face: usize
                 })
             })
             .collect::<Result<_>>()?;
-        let mut pcurves = crate::services::pcurve::pcurves_within(&original.surface, &[uses], tolerance, Some(original.domain))
+        let mut pcurves = solidcore_ops::pcurve::pcurves_within(&original.surface, &[uses], tolerance, Some(original.domain))
             .map_err(|e| invalid(format!("supported cap pcurves: {e}")))?;
         let pcs = pcurves.pop().ok_or_else(|| invalid("supported cap pcurves are missing"))?;
         let edges = chain

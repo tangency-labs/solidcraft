@@ -927,7 +927,7 @@ mod tests {
         app.cam.target = Vec3::ZERO;
         app.cam.distance = 30.0;
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         selection::sync(&mut h.app);
         h.app.home.open = false;
         h.frames(3);

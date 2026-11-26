@@ -40,7 +40,7 @@ fn some<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = source_required)]
 pub struct InsertDrawingKeys {
-    /// The drawing itself, as text. Wins over `path`. At most 16 MiB (`MAX_DRAWING_BYTES`).
+    /// The drawing itself, as text. Wins over `path`. At most 64 MiB (`MAX_DRAWING_BYTES`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<DrawingText>,
     /// The drawing file to read (not blank, fewer than 4096 UTF-8 bytes). Used when `text` is
@@ -84,6 +84,14 @@ pub struct InsertDrawingKeys {
     /// brought inside; one that is not above 0 reads as the default). Default: 0.0001.
     #[serde(default)]
     pub tolerance: Option<f64>,
+    /// How far in mm a removed vertex may lie from the outline kept, measured on the drawing as
+    /// it is drawn (the same at any `scale`), 0 to 100 (a value outside is brought inside, and
+    /// never more than a hundredth of the drawing). Runs of consecutive lines that meet end to
+    /// end are replaced by fewer lines that follow them within it, so a dense drawing comes in
+    /// with fewer curves; arcs, circles, ellipses, splines, conics and text stay as drawn.
+    /// Default: 0, every edge as drawn.
+    #[serde(default)]
+    pub simplify: Option<f64>,
     /// `true` puts a Fix constraint on every point the drawing adds (as `sketch.constraint.fix`
     /// does), so it stays where it is put; a circle's or ellipse's radius stays free, and text and
     /// the points the sketch already had are not touched. Default: false.
@@ -862,6 +870,10 @@ pub struct DrawingBoundsResult {
     /// SVG that names no sheet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sheet: Option<DrawingBox>,
+    /// How many drawn entities the file has (lines, arcs, circles, ellipses, splines, conics and
+    /// texts): about what the insert adds curves for, so a window can tell whether the sketch
+    /// takes the drawing as drawn.
+    pub edges: usize,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

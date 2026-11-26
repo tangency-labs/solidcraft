@@ -2,7 +2,7 @@
 use crate::{DocError, Mat, Result};
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
-use solidcraft_kernel::affine;
+use solidcraft_kernel::services::form_affine as affine;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -41,7 +41,7 @@ impl Placement {
         Ok(())
     }
     pub fn point(&self, p: Vec3) -> Vec3 {
-        affine::point(&self.matrix(), p)
+        solidcraft_kernel::affine::apply_point(&self.matrix(), p.into()).into()
     }
     pub fn vector(&self, v: Vec3) -> Vec3 {
         affine::vector(&self.matrix(), v)

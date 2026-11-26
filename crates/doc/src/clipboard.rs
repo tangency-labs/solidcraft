@@ -600,10 +600,32 @@ impl crate::Feature {
             K::Align { from_frame, to_frame, .. } => {
                 for fr in [from_frame, to_frame].into_iter().flatten() {
                     if let crate::AlignFrame::Origin { origin } = fr {
+                        if let Some(sk) = origin.snap.sketch_feature_mut()
+                            && let Some(&mapped) = ids.get(sk)
+                        {
+                            *sk = mapped;
+                        }
                         for n in origin.snap.face_names_mut() {
                             *n = remap_topology(n, ids, bodies);
                         }
                     }
+                }
+            }
+            K::CapturePosition { moves, joints } => {
+                if let PlacementRemap::Clone(Some(clone)) = placements {
+                    for m in moves {
+                        if let Some(&mapped) = clone.occurrences.get(&m.occurrence) {
+                            m.occurrence = mapped;
+                        }
+                        for id in m.path.iter_mut().flatten() {
+                            if let Some(&mapped) = clone.occurrences.get(id) {
+                                *id = mapped;
+                            }
+                        }
+                    }
+                }
+                for e in joints.iter_mut().flat_map(|j| j.exprs.iter_mut()).flatten() {
+                    *e = clone_expression(e, parameters);
                 }
             }
             _ => {}

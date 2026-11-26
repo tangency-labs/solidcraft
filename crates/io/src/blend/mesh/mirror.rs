@@ -2,10 +2,10 @@
 //! switches come from the file's self-described record, not evaluated triangles.
 use super::*;
 
-use solidcraft_kernel::services::{affine, mesh_edit};
+use solidcraft_kernel::{affine, services::mesh_edit};
 
 fn point(matrix: &Matrix, point: Vec3) -> Result<Vec3> {
-    let point = affine::point(matrix, point);
+    let point: Vec3 = affine::apply_point(matrix, point.into()).into();
     if !point.is_finite() {
         return Err(bad("non-finite Mirror transform"));
     }

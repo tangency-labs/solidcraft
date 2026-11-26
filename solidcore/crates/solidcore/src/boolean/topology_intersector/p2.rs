@@ -1609,22 +1609,27 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // face round its ring, and each such pair cost a surface intersection that found
         // nothing. Only the faces those boxes pair are boxed again, and nothing is made or
         // written on the operands (a UV trim made here, before the intersections that would
-        // make it, would change what they make).
+        // make it, would change what they make): a face's missing trims are made on a copy
+        // standing for its operand, one per operand, made at its first need.
         {
             let (paired1, paired2) = loosely_paired(&boxes1, &boxes2, self.this_approx_tol_3d());
             for (faces, paired, boxes) in [
                 (&faces1, paired1, &mut boxes1),
                 (&faces2, paired2, &mut boxes2),
             ] {
+                let mut scratch = None;
                 for ((&f, paired), b) in faces.iter().zip(paired).zip(boxes.iter_mut()) {
                     k.check_cancelled(OP_INTERSECT_TOPOLOGY)?;
                     if !paired {
                         continue;
                     }
                     if let Some((arena, EntityRef::Face(face))) = brep.topology_entity(f) {
-                        if let Some(proved) =
-                            crate::query::face::p1::proved_bounding_box(k, arena, face)?
-                        {
+                        if let Some(proved) = crate::query::face::p1::proved_bounding_box(
+                            k,
+                            arena,
+                            face,
+                            &mut scratch,
+                        )? {
                             // both hold the face: so does their common part
                             *b = b.intersect(&proved).unwrap_or(proved);
                         }

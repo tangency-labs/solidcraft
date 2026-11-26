@@ -6,7 +6,7 @@ use solidcraft_geom::{
     brep::eval::CurveEval,
     tess::{from_kernel, from_kernel3, to_kernel, uv},
 };
-use solidcraft_kernel::services::pcurve;
+use solidcraft_kernel::curves::pcurve_eval;
 
 fn unsupported(reason: &str) -> DocError {
     invalid(format!("not supported yet: co-sampled Surface quilt: {reason}"))
@@ -345,7 +345,7 @@ impl Atlas<'_> {
             for (endpoint, &id) in edge.vertices.iter().enumerate() {
                 if id == vertex {
                     let parameter = edge.interval[endpoint];
-                    let uv = pcurve::eval(&use_.pcurve, parameter).ok_or_else(|| unsupported("transition vertex pcurve failed"))?;
+                    let uv = pcurve_eval(&use_.pcurve, parameter).ok_or_else(|| unsupported("transition vertex pcurve failed"))?;
                     candidates.push((uv, kernel::DisplayGuidePoint::Edge { edge: use_.edge, parameter }));
                 }
             }
@@ -437,7 +437,7 @@ impl Atlas<'_> {
         if uses.next().is_some() {
             return Err(unsupported("ambiguous anchored pcurve"));
         }
-        let uv = pcurve::eval(&use_.pcurve, parameter).ok_or_else(|| unsupported("anchored pcurve failed"))?;
+        let uv = pcurve_eval(&use_.pcurve, parameter).ok_or_else(|| unsupported("anchored pcurve failed"))?;
         let surface = self.surfaces.get(face).ok_or_else(|| unsupported("missing anchored chart"))?;
         let on = from_kernel(surface.surface.eval(uv[0], uv[1]).0);
         let mut node = Node { face, uv, point: on, anchor: Some(anchor) };
@@ -692,7 +692,7 @@ impl Atlas<'_> {
             return Err(unsupported("projection transition does not approach its known shared edge continuously"));
         }
         for (face, use_) in [(a.face, left_use), (b.face, right_use)] {
-            let parameters = pcurve::eval(&use_.pcurve, parameter).ok_or_else(|| unsupported("transition pcurve failed"))?;
+            let parameters = pcurve_eval(&use_.pcurve, parameter).ok_or_else(|| unsupported("transition pcurve failed"))?;
             let geometry = self.surfaces.get(face).ok_or_else(|| unsupported("missing transition chart"))?;
             let candidate = Node { face, uv: parameters, point: from_kernel(geometry.surface.eval(parameters[0], parameters[1]).0), anchor: None };
             if candidate.point.dist(point) > self.rounding(candidate)? {

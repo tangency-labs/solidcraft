@@ -2732,7 +2732,7 @@ mod tests {
         let (_, report, _, frames) = convert_with_selection(&authored, 0.05).unwrap();
         assert!(report.patch_roots.contains(&face));
         let frame = frames.faces[&face];
-        assert!(crate::kernel::affine::proper_axes(frame, 1e-12));
+        assert!(crate::kernel::services::form_affine::proper_axes(frame, 1e-12));
         assert!(frame[2].dist(Vec3::Z) < 1e-10, "{frame:?}");
 
         let placed =
@@ -2742,7 +2742,7 @@ mod tests {
             assert!(a.dist(b) < 1e-12);
         }
         let world = moved.faces[&face].map(|axis| placed.placement.vector(axis));
-        assert!(crate::kernel::affine::proper_axes(world, 1e-12));
+        assert!(crate::kernel::services::form_affine::proper_axes(world, 1e-12));
         assert!(world[2].dist(Vec3::X) < 1e-10);
         assert_eq!(authored, before);
 
@@ -2792,7 +2792,7 @@ mod tests {
         assert_eq!(report.patch_roots, prepared.face_owners);
         let frame = SelectionFrames::from_faces(&saved, &fitted).faces[&face];
         let (point, du, dv) = prepared.surface.derivs([0.5, 0.5]).unwrap();
-        assert!(point.is_finite() && crate::kernel::affine::proper_axes(frame, 1e-12));
+        assert!(point.is_finite() && crate::kernel::services::form_affine::proper_axes(frame, 1e-12));
         let normal = du.cross(dv).normalized().unwrap();
         assert!(frame[0].dist(du.normalized().unwrap()) < 1e-12);
         assert!(frame[2].dist(normal) < 1e-12);
@@ -2984,7 +2984,7 @@ mod tests {
         for cap in &fitted.quad_caps {
             let frame = frames.faces[&cap.face];
             let (_, du, dv) = cap.surface.derivs([0.5, 0.5]).unwrap();
-            assert!(crate::kernel::affine::proper_axes(frame, 1e-12));
+            assert!(crate::kernel::services::form_affine::proper_axes(frame, 1e-12));
             assert!(frame[0].dist(du.normalized().unwrap()) < 1e-12);
             assert!(frame[2].dist(du.cross(dv).normalized().unwrap()) < 1e-12);
         }

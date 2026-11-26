@@ -1,7 +1,7 @@
 //! World-space edit targets are mapped into a stable local control frame.
 use super::*;
 use crate::doc::{Mat, forms::Placement};
-use crate::kernel::affine::{self, Fit};
+use crate::kernel::services::form_affine::{self as affine, Fit};
 use std::collections::BTreeSet;
 
 pub(super) fn placed_surface(mut surface: SurfacePreview, placement: &Placement) -> SurfacePreview {
@@ -49,7 +49,7 @@ impl Form {
             return Err(error("move Form Surface interior guides; its CAD rim is fixed"));
         }
         let delta = Placement::from_matrix(matrix)?;
-        let placement = Placement::from_matrix(&affine::then(&self.placement.matrix(), matrix)?)?;
+        let placement = Placement::from_matrix(&crate::kernel::affine::then(&self.placement.matrix(), matrix).map_err(error)?)?;
         if self.logical.points.iter().any(|&p| {
             let p = placement.point(p);
             !p.is_finite() || p.x.abs().max(p.y.abs()).max(p.z.abs()) > 100_000.0
@@ -122,7 +122,7 @@ impl Form {
     }
     fn apply_affine(&mut self, matrix: &Mat, checkpoint: bool) -> Result<()> {
         let axes = affine::mapped_axes(matrix, self.placement.axes).ok_or_else(|| error("Form scale collapses an axis or plane"))?;
-        let placement = Placement { origin: affine::point(matrix, self.placement.origin), axes };
+        let placement = Placement { origin: crate::kernel::affine::apply_point(matrix, self.placement.origin.into()).into(), axes };
         placement.validate()?;
         let local = |v| placement.local_vector(affine::vector(matrix, self.placement.vector(v)));
         let mut definition = self.definition();
@@ -147,7 +147,7 @@ impl Form {
             }
         }
         if self.logical.points.iter().any(|&p| {
-            let p = affine::point(matrix, self.placement.point(p));
+            let p: Vec3 = crate::kernel::affine::apply_point(matrix, self.placement.point(p).into()).into();
             !p.is_finite() || p.x.abs().max(p.y.abs()).max(p.z.abs()) > 100_000.0
         }) {
             return Err(error("scaled Form controls must remain within 100000 mm"));

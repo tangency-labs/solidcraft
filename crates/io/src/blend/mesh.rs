@@ -216,7 +216,7 @@ fn to_affine(matrix: Matrix) -> Matrix {
 }
 
 fn mul(a: Matrix, b: Matrix) -> Result<Matrix> {
-    solidcraft_kernel::services::affine::then(&to_affine(b), &to_affine(a)).map(to_affine).map_err(|_| bad("invalid object transform composition"))
+    solidcraft_kernel::affine::then(&to_affine(b), &to_affine(a)).map(to_affine).map_err(|_| bad("invalid object transform composition"))
 }
 fn rotation(axis: usize, angle: f64) -> Matrix {
     let mut m = identity();

@@ -1420,6 +1420,7 @@ fn viewport_frame(app: &SolveApp, proj: &Proj, ppp: f32, key: u64) -> Frame {
         sketch_slot: sketch,
         hl_key: key,
         hl_slot: highlight,
+        hover_body: None,
         pv_key: empty_key,
         pv_slot: preview,
         pv_hide: false,

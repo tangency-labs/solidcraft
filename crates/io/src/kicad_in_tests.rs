@@ -326,6 +326,106 @@ fn drilled_pads_cut_holes_in_the_substrate() {
     assert!((measure.volume - expected).abs() < expected * 0.01, "{measure:?}");
 }
 
+/// A castellated hole (a drill centred on the board's edge) is cut as a half-hole in the edge, and
+/// the board's other drills are kept: one drill reaching the outline used to drop every drill.
+#[test]
+fn a_castellated_hole_is_a_notch_and_keeps_the_other_drills() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "castle" (at 0 5) (layer "F.Cu")
+        (pad "1" thru_hole circle (at 0 0) (size 1.6 1.6) (drill 1) (layers "*.Cu" "*.Mask")))
+      (footprint "inner" (at 10 5) (layer "F.Cu")
+        (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask"))))"#;
+    let board = parse_kicad_board(source.as_bytes(), "castle.kicad_pcb").unwrap();
+    assert_eq!(board.drills.len(), 2);
+    let mesh = kicad_board_mesh(&board, 1.6).unwrap();
+    let body = solidcraft_kernel::mesh_body(&mesh.positions, &mesh.triangles).unwrap();
+    let measure = solidcraft_kernel::measure(&body).unwrap();
+    let disc = std::f64::consts::PI * 0.25;
+    let expected = (200.0 - disc - disc / 2.0) * 1.6;
+    // Tighter than the missing half-hole (0.63 mm3), loose enough for the polygon approximation.
+    assert!((measure.volume - expected).abs() < 0.25, "{measure:?} against {expected}");
+    let mut load = |_: &str| Err("none".to_string());
+    let options = KicadOptions { representation: KicadRepresentation::Brep, ..KicadOptions::default() };
+    let imported = read_kicad(source.as_bytes(), "castle.kicad_pcb", &options, &mut load).unwrap();
+    assert!(imported.board_step.is_some(), "the board is a solid");
+    assert!(!imported.feature.warnings.iter().any(|w| w.contains("drilled holes")), "{:?}", imported.feature.warnings);
+}
+
+/// A castellated hole is cut on every edge of the board, whichever of the outline's edges the drill
+/// is centred on: a drill centred exactly on the outline (the right and bottom edges) was not found on the board and was
+/// dropped with nothing said.
+#[test]
+fn a_castellated_hole_is_cut_on_every_edge() {
+    let disc = std::f64::consts::PI;
+    let expected = (200.0 - disc / 2.0) * 1.6;
+    for (edge, at) in [("left", "0 5"), ("right", "20 5"), ("top", "10 0"), ("bottom", "10 10")] {
+        let source = format!(
+            r#"(kicad_pcb (general (thickness 1.6))
+              (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+              (footprint "castle" (at {at}) (layer "F.Cu")
+                (pad "1" thru_hole circle (at 0 0) (size 3 3) (drill 2) (layers "*.Cu" "*.Mask"))))"#
+        );
+        let board = parse_kicad_board(source.as_bytes(), "edge.kicad_pcb").unwrap();
+        let mesh = kicad_board_mesh(&board, 1.6).unwrap();
+        let body = solidcraft_kernel::mesh_body(&mesh.positions, &mesh.triangles).unwrap();
+        let volume = solidcraft_kernel::measure(&body).unwrap().volume;
+        assert!((volume - expected).abs() < expected * 0.002, "{edge} edge: {volume} against {expected}");
+        let mut load = |_: &str| Err("none".to_string());
+        let options = KicadOptions { representation: KicadRepresentation::Brep, ..KicadOptions::default() };
+        let imported = read_kicad(source.as_bytes(), "edge.kicad_pcb", &options, &mut load).unwrap();
+        assert!(imported.board_step.is_some(), "{edge} edge: the board is a solid");
+        assert!(imported.feature.warnings.is_empty(), "{edge} edge: {:?}", imported.feature.warnings);
+    }
+}
+
+/// A slot that lies wholly inside the outline, 0.1 mm from the edge, is a hole; one that reaches
+/// past the edge is a half-hole.
+#[test]
+fn a_slot_near_the_edge_is_a_notch_only_when_it_crosses_it() {
+    let outer = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(20.0, 0.0), Vec2::new(20.0, 10.0), Vec2::new(0.0, 10.0)]).ccw();
+    let inside = slot_loop(Vec2::new(0.2, 5.0), 0.2, 4.0, 0.0);
+    assert!(!drill_crosses(&outer, &inside), "0.1 mm from the edge is not a notch");
+    let across = slot_loop(Vec2::new(0.05, 5.0), 0.2, 4.0, 0.0);
+    assert!(drill_crosses(&outer, &across), "a slot over the edge is a notch");
+}
+
+/// A missing model names the folder that was searched, and the same warning from many footprints
+/// is said once with a count.
+#[test]
+fn missing_model_warnings_name_the_folder_and_repeats_are_counted() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "a" (at 5 5) (layer "F.Cu") (model "/libs/jst/JST_SH.step"))
+      (footprint "b" (at 10 5) (layer "F.Cu") (model "/libs/jst/JST_SH.step"))
+      (footprint "c" (at 15 5) (layer "F.Cu") (model "/libs/jst/JST_SH.step")))"#;
+    let mut load = |model: &str| Err(format!("{model}: No such file or directory (os error 2)"));
+    let imported = read_kicad(source.as_bytes(), "t.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    let lines: Vec<&String> = imported.feature.warnings.iter().filter(|w| w.contains("JST_SH")).collect();
+    assert_eq!(lines.len(), 1, "{:?}", imported.feature.warnings);
+    assert_eq!(lines[0].as_str(), "JST_SH.step: not found in /libs/jst (x3)");
+    // A model beside the board is named from the board, not by the folder's full path.
+    let beside = r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "a" (at 5 5) (layer "F.Cu") (model "/work/board/models/X.step")))"#;
+    let imported = read_kicad(beside.as_bytes(), "/work/board/t.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    assert!(imported.feature.warnings.iter().any(|w| w == "X.step: not found in the board's folder, models"), "{:?}", imported.feature.warnings);
+    // Windows and the browser word a missing file differently; the folder is named all the same.
+    for words in ["The system cannot find the file specified. (os error 2)", "no such file in this browser"] {
+        let mut other = |path: &str| Err(format!("{path}: {words}"));
+        let imported = read_kicad(source.as_bytes(), "t.kicad_pcb", &KicadOptions::default(), &mut other).unwrap();
+        assert!(
+            imported.feature.warnings.iter().any(|w| w == "JST_SH.step: not found in /libs/jst (x3)"),
+            "{words}: {:?}",
+            imported.feature.warnings
+        );
+    }
+    let mut unset = |_: &str| Err("unresolved environment variable `EASYEDA2KICAD`".to_string());
+    let imported = read_kicad(source.as_bytes(), "t.kicad_pcb", &KicadOptions::default(), &mut unset).unwrap();
+    let lines: Vec<&String> = imported.feature.warnings.iter().filter(|w| w.contains("EASYEDA2KICAD")).collect();
+    assert_eq!(lines.len(), 1, "{:?}", imported.feature.warnings);
+    assert!(lines[0].ends_with("(x3)"), "{lines:?}");
+}
+
 #[test]
 fn missing_model_is_warned_and_the_board_is_kept() {
     let mut load = |_: &str| Err("model file was not found".to_string());
@@ -356,6 +456,29 @@ fn skips_footprints_with_invalid_models_and_keeps_other_parts() {
 fn rejects_malformed_and_wrong_root_documents() {
     assert!(parse_kicad_board(b"(kicad_pcb (general", "bad.kicad_pcb").is_err());
     assert!(parse_kicad_board(b"(kicad_pro)", "bad.kicad_pcb").is_err());
+}
+
+#[test]
+fn a_board_over_the_old_token_cap_but_under_the_size_cap_is_read() {
+    // 4 tokens per indented `(zz 1)` line, as KiCad writes them: just over 2 000 000 tokens in
+    // about 4.5 MB, far below the size cap.
+    let mut board = String::from("(kicad_pcb (general (thickness 1.6))\n");
+    for _ in 0..500_100 {
+        board.push_str("\t\t(zz 1)\n");
+    }
+    board.push(')');
+    assert!(board.len() < MAX_KICAD_BYTES);
+    assert!(tokenize(&board).map(|t| t.len() > MIN_TOKEN_CAP).unwrap_or(false));
+    assert!(parse_kicad_board(board.as_bytes(), "big.kicad_pcb").is_ok());
+}
+
+#[test]
+fn the_token_cap_follows_the_size_and_still_refuses_dense_junk() {
+    assert_eq!(token_cap(0), MIN_TOKEN_CAP);
+    assert_eq!(token_cap(MAX_KICAD_BYTES), MAX_KICAD_BYTES / 2);
+    // One token per byte is denser than any board: refused by count, quickly.
+    let junk = format!("(kicad_pcb {})", "()".repeat(MIN_TOKEN_CAP));
+    assert!(parse_kicad_board(junk.as_bytes(), "junk.kicad_pcb").is_err());
 }
 
 #[test]
@@ -1429,8 +1552,8 @@ fn track_legs_that_continue_each_other_are_one_trace() {
         track([10.0, 10.0], [20.0, 10.0], 0.25, "F.Cu"),
     ]);
     assert_eq!(traces.len(), 1, "{traces:?}");
-    let (front, width, points) = &traces[0];
-    assert!(*front);
+    let (layer, width, points) = &traces[0];
+    assert_eq!(*layer, CopperLayer::Front);
     assert!((*width - 0.25).abs() < 1e-12);
     // Board frame: KiCad's Y is negated, and the legs are one 4-point polyline.
     assert_eq!(points, &[[0.0, 0.0], [10.0, 0.0], [10.0, -10.0], [20.0, -10.0]]);
@@ -1614,6 +1737,147 @@ fn a_pad_opens_up_for_any_hole_it_covers() {
     assert!((area - expected).abs() < 0.05, "{area} vs {expected}");
 }
 
+/// Base64 text of `bytes`, wrapped over lines the way a board file stores an embedded file.
+fn base64_wrapped(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut text = String::new();
+    for chunk in bytes.chunks(3) {
+        let n = chunk.iter().enumerate().fold(0u32, |acc, (i, b)| acc | u32::from(*b) << (16 - 8 * i));
+        for i in 0..=chunk.len() {
+            text.push(ALPHABET[(n >> (18 - 6 * i) & 63) as usize] as char);
+        }
+        text.extend(std::iter::repeat_n('=', 3 - chunk.len()));
+    }
+    let lines: Vec<&str> = text.as_bytes().chunks(76).map(|c| std::str::from_utf8(c).unwrap()).collect();
+    lines.join("\n\t\t\t")
+}
+
+/// A 10 x 20 x 30 mm box as a STEP file, packed the way KiCad embeds it (one zstd frame).
+fn packed_box_step() -> Vec<u8> {
+    let block = solidcraft_kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(10.0, 20.0, 30.0)).unwrap();
+    let text = solidcraft_kernel::step_export(&[&block], "").unwrap();
+    ruzstd::encoding::compress_to_vec(text.as_bytes(), ruzstd::encoding::CompressionLevel::Fastest)
+}
+
+/// A synthetic board with one footprint whose model is `kicad-embed://box.step`, the file stored
+/// in the board's own `embedded_files` block with `data` (base64 text) and `checksum`; the
+/// footprint lists it with `footprint_checksum`.
+fn embedded_board(data: &str, checksum: &str, footprint_checksum: &str) -> String {
+    format!(
+        r#"(kicad_pcb (version 20240108) (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (embedded_files (file (name "box.step") (type model) (checksum "{footprint_checksum}")))
+        (model "kicad-embed://box.step" (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0))))
+      (embedded_files
+        (file
+          (name "box.step")
+          (type model)
+          (data |{data}|)
+          (checksum "{checksum}"))))"#
+    )
+}
+
+fn embedded_import(source: &str) -> KicadImport {
+    let mut load = |path: &str| Err(format!("{path}: an embedded model is not looked up on disk"));
+    read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap()
+}
+
+/// KiCad 8 and later store a model inside the board and name it `kicad-embed://<name>`: the
+/// footprint's model is that file, not one found on disk.
+#[test]
+fn a_model_embedded_in_the_board_comes_in_on_its_footprint() {
+    let source = embedded_board(&base64_wrapped(&packed_box_step()), "0123456789ABCDEF0123456789ABCDEF", "0123456789abcdef0123456789abcdef");
+    let board = parse_kicad_board(source.as_bytes(), "board.kicad_pcb").unwrap();
+    assert_eq!(board.embedded_files.len(), 2, "the footprint's entry and the board's own: {:?}", board.embedded_files);
+    let imported = embedded_import(&source);
+    assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
+    assert_eq!(imported.plan.slots, vec!["box".to_string()]);
+    assert_eq!(imported.plan.places.len(), 1);
+    assert_eq!(imported.plan.places[0].name.as_deref(), Some("U1"));
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    // The model itself: a 10 x 20 x 30 mm box, in the component's own frame.
+    assert!(!meshes.is_empty(), "the embedded model's body");
+    let mut low = [f64::MAX; 3];
+    let mut high = [f64::MIN; 3];
+    for point in meshes.iter().flat_map(|m| m.positions.as_chunks::<3>().0.iter()) {
+        for axis in 0..3 {
+            low[axis] = low[axis].min(point[axis]);
+            high[axis] = high[axis].max(point[axis]);
+        }
+    }
+    let mut size: Vec<f64> = (0..3).map(|axis| high[axis] - low[axis]).collect();
+    size.sort_by(f64::total_cmp);
+    for (got, want) in size.iter().zip([10.0, 20.0, 30.0]) {
+        assert!((got - want).abs() < 1e-3, "size {size:?}");
+    }
+}
+
+/// A damaged embedded file is one warning that names it; the board and its other parts still
+/// come in, and nothing panics.
+#[test]
+fn a_corrupt_embedded_model_is_a_warning_naming_the_file() {
+    let packed = packed_box_step();
+    let mut truncated = packed.clone();
+    truncated.truncate(packed.len() / 2);
+    let cases = [
+        ("not base64", "!!!! this is not base64 !!!!".to_string(), "not base64"),
+        ("not compressed", base64_wrapped(b"ISO-10303-21; plain text, not a zstd frame"), "not compressed"),
+        ("truncated", base64_wrapped(&truncated), ""),
+        ("empty", String::new(), "corrupt"),
+    ];
+    for (what, data, want) in cases {
+        let source = embedded_board(&data, "0123456789ABCDEF0123456789ABCDEF", "0123456789ABCDEF0123456789ABCDEF");
+        let imported = embedded_import(&source);
+        let warnings = &imported.feature.warnings;
+        assert!(warnings.iter().any(|w| w.starts_with("box.step: ") && w.contains(want)), "{what}: {warnings:?}");
+        assert!(imported.plan.places.is_empty(), "{what}: no model, no placement");
+        assert!(imported.board_step.is_some(), "{what}: the board still comes in");
+    }
+}
+
+/// The checksums the board records for one file must agree; a file whose data is missing, or
+/// whose name no entry has, is a warning too.
+#[test]
+fn an_embedded_model_that_changed_or_is_missing_is_reported() {
+    let data = base64_wrapped(&packed_box_step());
+    let imported = embedded_import(&embedded_board(&data, "0123456789ABCDEF0123456789ABCDEF", "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"));
+    assert!(
+        imported.feature.warnings.iter().any(|w| w.starts_with("box.step: ") && w.contains("checksums disagree")),
+        "{:?}",
+        imported.feature.warnings
+    );
+    assert!(imported.plan.places.is_empty());
+
+    let no_data = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (embedded_files (file (name "box.step") (type model) (checksum "AB")))
+        (model "kicad-embed://box.step")
+        (model "kicad-embed://gone.step")))"#;
+    let imported = embedded_import(no_data);
+    let warnings = &imported.feature.warnings;
+    assert!(warnings.iter().any(|w| w.starts_with("box.step: ") && w.contains("holds no data")), "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.starts_with("gone.step: ") && w.contains("not in the board file")), "{warnings:?}");
+}
+
+/// A small compressed file must not grow into memory: a frame that unpacks past the limit is
+/// refused, and so is text that is not base64.
+#[test]
+fn embedded_data_is_bounded_and_decoded_strictly() {
+    let big = vec![0u8; MAX_EMBEDDED_FILE_BYTES + 1];
+    let packed = ruzstd::encoding::compress_to_vec(&big[..], ruzstd::encoding::CompressionLevel::Fastest);
+    assert!(unpack_zstd(&packed, MAX_EMBEDDED_FILE_BYTES).unwrap_err().contains("too large"));
+    assert_eq!(decode_base64("TWFu"), Some(b"Man".to_vec()));
+    assert_eq!(decode_base64("TWE="), Some(b"Ma".to_vec()));
+    assert_eq!(decode_base64("TQ"), Some(b"M".to_vec()));
+    assert_eq!(decode_base64("T"), None);
+    assert_eq!(decode_base64("TW-u"), None);
+    assert_eq!(decode_base64("TQ==="), None);
+    // An unterminated `|…|` text is an error, not a hang or a panic.
+    assert!(parse_kicad_board(b"(kicad_pcb (embedded_files (file (data |abc", "x.kicad_pcb").is_err());
+}
+
 /// A pour with a square hole, as KiCad saves a fill: one outline that runs in to the hole along a
 /// zero-width bridge, round the hole and back out along the same line.
 const BRIDGED_FILL: &str = r#"(kicad_pcb (general (thickness 1.6))
@@ -1694,4 +1958,161 @@ fn a_hatched_fill_s_thousands_of_holes_are_taken_apart_in_one_pass() {
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(text.as_bytes(), "hatched.kicad_pcb", &options, &mut load).unwrap();
     assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
+}
+
+/// A 4-layer board with a track on each copper layer and a pour on In2.
+const FOUR_LAYERS: &str = r#"(kicad_pcb (general (thickness 1.6))
+  (layers (0 "F.Cu" signal) (4 "In1.Cu" signal) (6 "In2.Cu" signal) (2 "B.Cu" signal))
+  (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+  (segment (start 1 2) (end 10 2) (width 0.3) (layer "F.Cu") (net 1))
+  (segment (start 1 3) (end 10 3) (width 0.3) (layer "In1.Cu") (net 2))
+  (segment (start 1 4) (end 10 4) (width 0.3) (layer "In2.Cu") (net 3))
+  (segment (start 1 5) (end 10 5) (width 0.3) (layer "B.Cu") (net 4))
+  (zone (net 3) (net_name "GND") (layer "In2.Cu")
+    (filled_polygon (layer "In2.Cu") (pts (xy 12 1) (xy 19 1) (xy 19 9) (xy 12 9)))))"#;
+
+/// The lowest and highest Z of a body's mesh.
+fn z_range(mesh: &solidcraft_doc::MeshData) -> (f64, f64) {
+    let zs: Vec<f64> = mesh.positions.as_chunks::<3>().0.iter().map(|p| p[2]).collect();
+    (zs.iter().copied().fold(f64::INFINITY, f64::min), zs.iter().copied().fold(f64::NEG_INFINITY, f64::max))
+}
+
+fn modelled_copper(source: &str) -> (Vec<solidcraft_doc::MeshData>, Vec<String>) {
+    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &options, &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    (meshes, imported.feature.warnings)
+}
+
+#[test]
+fn inner_copper_sits_inside_the_board_at_its_own_depth() {
+    let (meshes, warnings) = modelled_copper(FOUR_LAYERS);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let body = |name: &str| {
+        meshes.iter().find(|mesh| mesh.name == name).unwrap_or_else(|| panic!("no {name}: {:?}", meshes.iter().map(|m| &m.name).collect::<Vec<_>>()))
+    };
+    let (front, in1, in2, back) =
+        (z_range(body("Copper F.Cu")), z_range(body("Copper In1.Cu")), z_range(body("Copper In2.Cu")), z_range(body("Copper B.Cu")));
+    // The faces: the back copper is below Z = 0, the front copper above Z = 1.6.
+    assert!(back.1 <= 1e-6 && front.0 >= 1.6 - 1e-6, "{back:?} {front:?}");
+    // Evenly spaced through the board, In1 nearest the front: 1.6 * 2/3 and 1.6 * 1/3.
+    for (range, centre) in [(in1, 1.6 * 2.0 / 3.0), (in2, 1.6 / 3.0)] {
+        assert!(range.0 > 0.0 && range.1 < 1.6, "inside the board: {range:?}");
+        assert!(((range.0 + range.1) / 2.0 - centre).abs() < 1e-4, "{range:?} should be centred at {centre}");
+        assert!((range.1 - range.0 - COPPER_THICKNESS).abs() < 1e-4, "the foil keeps its thickness: {range:?}");
+    }
+    assert!(in1.0 > in2.1, "In1 is above In2: {in1:?} {in2:?}");
+    // Each layer holds only its own copper: the In2 body has the track and the pour, B.Cu has one track.
+    let ys = |mesh: &solidcraft_doc::MeshData| -> Vec<f64> { mesh.positions.as_chunks::<3>().0.iter().map(|p| p[1]).collect() };
+    assert!(ys(body("Copper B.Cu")).iter().all(|y| (*y + 5.0).abs() < 0.2), "B.Cu holds only its own track");
+    assert!(ys(body("Copper In2.Cu")).iter().any(|y| *y < -8.0), "the In2 pour is on In2");
+}
+
+#[test]
+fn an_overlay_leaves_the_inner_copper_out_and_says_so() {
+    let mut load = |_: &str| Err("not used".to_string());
+    let options = KicadOptions { components: false, silkscreen: false, ..Default::default() };
+    let imported = read_kicad(FOUR_LAYERS.as_bytes(), "board.kicad_pcb", &options, &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    let names: Vec<&str> = meshes.iter().map(|m| m.name.as_str()).collect();
+    assert!(names.contains(&"Copper F.Cu") && names.contains(&"Copper B.Cu"), "{names:?}");
+    assert!(!names.iter().any(|name| name.contains("In1") || name.contains("In2")), "{names:?}");
+    assert_eq!(imported.feature.warnings.len(), 1, "{:?}", imported.feature.warnings);
+}
+
+#[test]
+fn a_stackup_places_the_inner_layers_and_even_spacing_is_the_fallback() {
+    let source = |stackup: &str| {
+        format!(
+            r#"(kicad_pcb (general (thickness 1.6))
+  (layers (0 "F.Cu" signal) (4 "In1.Cu" signal) (6 "In2.Cu" signal) (2 "B.Cu" signal))
+  (setup {stackup})
+  (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts")))"#
+        )
+    };
+    let depths = |text: String| parse_kicad_board(text.as_bytes(), "b.kicad_pcb").unwrap().inner_layers;
+    let even = depths(source(""));
+    assert_eq!(even.len(), 2);
+    assert!((even[0].1 - 1.0 / 3.0).abs() < 1e-9 && (even[1].1 - 2.0 / 3.0).abs() < 1e-9, "{even:?}");
+    // In1 is a tenth of the way down, In2 nine tenths: 0.1 prepreg, 0.8 core, 0.1 prepreg.
+    let stackup = r#"(stackup
+      (layer "F.Cu" (type "copper") (thickness 0.035))
+      (layer "dielectric 1" (type "prepreg") (thickness 0.1))
+      (layer "In1.Cu" (type "copper") (thickness 0.01))
+      (layer "dielectric 2" (type "core") (thickness 0.78))
+      (layer "In2.Cu" (type "copper") (thickness 0.01))
+      (layer "dielectric 3" (type "prepreg") (thickness 0.1))
+      (layer "B.Cu" (type "copper") (thickness 0.035)))"#;
+    let placed = depths(source(stackup));
+    assert!((placed[0].1 - 0.105 / 1.0).abs() < 1e-9 && (placed[1].1 - 0.895).abs() < 1e-9, "{placed:?}");
+    // A stackup with sublayers is not simple: the even spacing stands.
+    let complex = stackup.replace("(thickness 0.78)", "(thickness 0.78) addsublayer (thickness 0.1)");
+    assert_eq!(depths(source(&complex)), even);
+}
+
+#[test]
+fn inner_pads_cut_inner_traces_and_a_through_pad_has_copper_on_every_layer() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (layers (0 "F.Cu" signal) (4 "In1.Cu" signal) (2 "B.Cu" signal))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (segment (start 1 5) (end 19 5) (width 0.3) (layer "In1.Cu") (net 1))
+      (footprint "part" (at 10 5) (layer "F.Cu")
+        (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask"))))"#;
+    let (meshes, warnings) = modelled_copper(source);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    // The pad's copper and the trace either side of it touch only at the pad's edge, so In1 comes
+    // back as several bodies, all named after the layer.
+    let inner: Vec<&solidcraft_doc::MeshData> = meshes.iter().filter(|mesh| mesh.name.starts_with("Copper In1.Cu")).collect();
+    assert!(inner.len() >= 2, "the trace stops at the pad: {:?}", meshes.iter().map(|m| &m.name).collect::<Vec<_>>());
+    for mesh in &inner {
+        let (low, high) = z_range(mesh);
+        assert!(low > 0.0 && high < 1.6, "{low} {high}");
+    }
+    let xs: Vec<f64> = inner.iter().flat_map(|mesh| mesh.positions.as_chunks::<3>().0.iter().map(|p| p[0])).collect();
+    assert!(xs.iter().any(|x| (*x - 10.0).abs() < 0.6), "the pad's ring is on In1");
+}
+
+#[test]
+fn only_real_inner_layer_names_count_as_copper() {
+    assert_eq!(copper_layer("In1.Cu"), Some(CopperLayer::Inner(1)));
+    assert_eq!(copper_layer("In30.Cu"), Some(CopperLayer::Inner(30)));
+    for name in ["In0.Cu", "In31.Cu", "In.Cu", "Inx.Cu", "In1.Cu ", "In+1.Cu", "F.SilkS", "In99999999999999999999.Cu"] {
+        assert_eq!(copper_layer(name), None, "{name}");
+    }
+}
+
+#[test]
+fn footprint_copper_graphics_and_wildcard_pads_reach_the_inner_layers_or_are_reported() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (layers (0 "F.Cu" signal) (4 "In1.Cu" signal) (2 "B.Cu" signal))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 10 5) (layer "F.Cu")
+        (fp_rect (start -2 -1) (end 2 1) (layer "In1.Cu") (width 0.2) (fill solid))
+        (pad "1" thru_hole circle (at 5 0) (size 1.6 1.6) (drill 0.8) (layers "*.Cu" "*.Mask"))))"#;
+    let (meshes, warnings) = modelled_copper(source);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let xs: Vec<f64> = meshes
+        .iter()
+        .filter(|mesh| mesh.name.starts_with("Copper In1.Cu"))
+        .flat_map(|mesh| mesh.positions.as_chunks::<3>().0.iter().map(|p| p[0]))
+        .collect();
+    // The rectangle spans X = 8 to 12 (its stroke reaches 0.1 mm past that); the pad's ring spans 14.2 to 15.8.
+    assert!(
+        xs.iter().any(|x| (*x - 8.0).abs() < 0.15),
+        "the footprint's rectangle is on In1: {:?}",
+        xs.iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>()
+    );
+    // A board with only wildcard pads on its inner layers still says the overlay leaves them out,
+    // and a board thinner than the foil says it has no room.
+    let mut load = |_: &str| Err("not used".to_string());
+    let overlay = KicadOptions { components: false, silkscreen: false, ..Default::default() };
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &overlay, &mut load).unwrap();
+    assert!(imported.feature.warnings.iter().any(|w| w.contains("inner copper")), "{:?}", imported.feature.warnings);
+    let thin = source.replace("(thickness 1.6)", "(thickness 0.02)");
+    let modelled = KicadOptions { copper: KicadCopper::Mesh, ..overlay };
+    let imported = read_kicad(thin.as_bytes(), "board.kicad_pcb", &modelled, &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    assert!(!meshes.iter().any(|mesh| mesh.name.contains("In1")), "no inner copper in a board thinner than the foil");
+    assert!(imported.feature.warnings.iter().any(|w| w.contains("thinner")), "{:?}", imported.feature.warnings);
 }

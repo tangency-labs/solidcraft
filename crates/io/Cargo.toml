@@ -32,7 +32,6 @@ solidcraft-sketch = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 zip = { workspace = true }
-ruzstd = { workspace = true }
 quick-xml = { workspace = true }
 gltf = { workspace = true }
 serde = { workspace = true }
@@ -56,6 +55,8 @@ cavalier_contours = { version = "0.9.0", default-features = false }
 # Sheet PDFs (src/paper/pdf.rs); flate2 also reads gzip-framed Blender documents (src/blend).
 pdf-writer = { workspace = true }
 flate2 = { workspace = true }
+# The zstd frames in KiCad boards and Blender files.
+ruzstd = { workspace = true }
 # Exported mesh file names in NFC, so one name in two Unicode forms is one file (src/urdf.rs);
 # MIT OR Apache-2.0.
 unicode-normalization = { version = "0.1.26", default-features = false }

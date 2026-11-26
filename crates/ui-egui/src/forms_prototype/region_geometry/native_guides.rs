@@ -17,7 +17,7 @@ use solidcraft_engine::{
         tess::{EvalSurface, from_kernel},
     },
 };
-use solidcraft_kernel::services::pcurve;
+use solidcraft_kernel::curves::pcurve_eval;
 use std::collections::{BTreeMap, btree_map::Entry};
 
 type Result<T> = std::result::Result<T, String>;
@@ -226,7 +226,7 @@ fn station_uv(body: &Body, face: usize, station: &DisplayGuidePoint, remaining: 
             if !a.is_finite() || !b.is_finite() || a >= b {
                 return Err("native Form station pcurve has an invalid interval".into());
             }
-            let uv = pcurve::eval(&use_.pcurve, parameter.clamp(a, b)).ok_or("native Form station pcurve does not evaluate")?;
+            let uv = pcurve_eval(&use_.pcurve, parameter.clamp(a, b)).ok_or("native Form station pcurve does not evaluate")?;
             if uv.iter().any(|value| !value.is_finite()) {
                 return Err("native Form station parameters are nonfinite".into());
             }
@@ -377,7 +377,7 @@ mod tests {
         let use_ = &edges[0];
         let native = &body.record().edges[use_.edge as usize];
         let parameter = native.interval[0] * 0.65 + native.interval[1] * 0.35;
-        let uv = pcurve::eval(&use_.pcurve, parameter).unwrap();
+        let uv = pcurve_eval(&use_.pcurve, parameter).unwrap();
         let edge_id = use_.edge;
         let target = [0.7, 0.6];
         let source = NativeGuides {

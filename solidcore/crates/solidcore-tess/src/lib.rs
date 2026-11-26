@@ -19,6 +19,8 @@
 //! - [`preview`]: a bounded coarse mesh of a decoded body;
 //! - [`eval`]: the plan evaluator's basis, partials and parameters, for clients that evaluate a
 //!   plan's forms themselves.
+//! - [`weld_symbol`]: a welding symbol's contour mark and V groove depth, the kernel's
+//!   ([`solidcore::weld_symbol`]) on the record's plane types.
 //!
 //! A display mesh decides nothing a model depends on: it is drawn, never measured.
 //!
@@ -46,6 +48,7 @@ mod spec;
 mod stats;
 mod tolerance;
 mod vec;
+pub mod weld_symbol;
 
 pub use curve::curve_points;
 pub use iso::MAX_ISOPARMS;
