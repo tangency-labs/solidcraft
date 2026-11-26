@@ -1977,6 +1977,7 @@ fn reveal_browser_at_height(h: &mut Harness, height: f32) {
 fn assert_no_pending_reveals(h: &Harness) {
     assert!(h.app.tree.reveal.is_none());
     assert!(h.app.tree.reveal_source.is_none());
+    assert!(h.app.tree.reveal_occurrence.is_none());
     assert!(h.app.tree.reveal_feature.is_none());
     assert!(h.app.tree.timeline_reveal.is_none());
     assert!(h.app.tree.view_pick.is_none());
@@ -2176,7 +2177,7 @@ fn unpresented_app_requests_have_provenance_before_a_direct_session_replacement(
     let mut h = Harness::new();
     three_bodies(&mut h);
     let document = (*h.app.session.doc).clone();
-    h.app = crate::SolveApp::new(solidcraft_engine::Session::new(document.clone()), crate::Services::default());
+    *h.app = crate::SolveApp::new(solidcraft_engine::Session::new(document.clone()), crate::Services::default());
     // Existing callers can set the public request fields before the first UI frame.
     h.app.tree.reveal = Some("Three".into());
     h.app.tree.timeline_reveal = Some(document.features[2].id);

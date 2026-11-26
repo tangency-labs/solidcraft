@@ -125,8 +125,10 @@ use crate::intersect::point_class::{
     PointClassification, Precedence,
 };
 use crate::kernel::Kernel;
-use crate::math::{Point3, Vec3, BIG_DOUBLE};
+use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::math::gamma;
+use crate::surface::surface::p4::NoObject;
+use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 use crate::topology::{edge as topo_edge, vertex as topo_vertex, VertexId};
 
@@ -2357,7 +2359,8 @@ impl<O: ClassObject> CurveClassification<O> {
             let Some(target) = edge_curve(geometry, edge)? else {
                 continue;
             };
-            let Some(unclassified) = self.ends_on_edge(k, geometry, (edge, target), &ivl)? else {
+            let Some(unclassified) = self.ends_on_edge(k, geometry, (edge, target), index, &ivl)?
+            else {
                 continue;
             };
             let xsect_tol_3d = xsect_tol_3d_from_zones(
@@ -2457,19 +2460,22 @@ impl<O: ClassObject> CurveClassification<O> {
         Ok(())
     }
 
-    /// Whether both ends of interval `ivl` lie on `edge` (see
+    /// Whether both ends of interval `ivl` (at `index`) lie on `edge` (see
     /// [`Self::classify_edge_interval`]), and for each of them, start and end, that was
     /// unclassified and lies on it its parameter on `edge`. `None` when an end is elsewhere,
     /// when neither end is classified, when an unclassified end is within the intersection
-    /// tolerance of a vertex of `edge` (it would be on that vertex, not inside the edge), or
-    /// when with an unclassified end the curve is not tangent to `edge` at both ends of the
-    /// interval ([`tangent_to_edge_at_ends`]) or not proved within that tolerance of `edge` as a
-    /// whole ([`piece_within_band`]). `edge_crv` is the curve of `edge`.
+    /// tolerance of a vertex of `edge` (it would be on that vertex, not inside the edge), when
+    /// an unclassified curve end only stopped because it exited the classifying face's own UV
+    /// domain strictly past `edge` ([`Self::end_exits_face_domain`]), or when with an
+    /// unclassified end the curve is not tangent to `edge` at both ends of the interval
+    /// ([`tangent_to_edge_at_ends`]) or not proved within that tolerance of `edge` as a whole
+    /// ([`piece_within_band`]). `edge_crv` is the curve of `edge`.
     fn ends_on_edge(
         &self,
         k: &Kernel,
         geometry: &impl ClassGeometry<O>,
         (edge, edge_crv): (O, &Curve),
+        index: usize,
         ivl: &CurveInterval<O>,
     ) -> Result<Option<[Option<f64>; 2]>> {
         let (eb, e) = edge_of(geometry, edge, "SmEdge::GetStartVertex")?;
@@ -2521,24 +2527,36 @@ impl<O: ClassObject> CurveClassification<O> {
             *flag = Some(param);
         }
         let (t0, t1) = (ivl.interval.min(), ivl.interval.max());
-        let params = match unclassified {
+        let (params, uncl_end) = match unclassified {
             [None, None] => return Ok(Some(unclassified)),
             [Some(_), Some(_)] => return Ok(None),
             // the classified end's parameter on the edge, for the proof over the interval
             [Some(s0), None] => {
                 let p = curve.evaluate_point(k, t1)?;
-                drop_onto_edge(k, geometry, (edge, edge_crv), p, xsect_tol_3d)?
-                    .map(|(_, s1)| [s0, s1])
+                let Some((_, s1)) = drop_onto_edge(k, geometry, (edge, edge_crv), p, xsect_tol_3d)?
+                else {
+                    return Ok(None);
+                };
+                ([s0, s1], (t0, s0, false))
             }
             [None, Some(s1)] => {
                 let p = curve.evaluate_point(k, t0)?;
-                drop_onto_edge(k, geometry, (edge, edge_crv), p, xsect_tol_3d)?
-                    .map(|(_, s0)| [s0, s1])
+                let Some((_, s0)) = drop_onto_edge(k, geometry, (edge, edge_crv), p, xsect_tol_3d)?
+                else {
+                    return Ok(None);
+                };
+                ([s0, s1], (t1, s1, true))
             }
         };
-        let Some(params) = params else {
+        let (t_uncl, s_uncl, at_max) = uncl_end;
+        if self.end_exits_face_domain(
+            k,
+            geometry,
+            (curve, index, t_uncl, at_max),
+            (edge_crv, s_uncl),
+        )? {
             return Ok(None);
-        };
+        }
         // A curve that crosses the edge at one end of a short interval keeps the whole piece
         // within the band too, so the piece runs along the edge only when it leaves neither
         // end across it: tangent to the edge at both
@@ -2548,6 +2566,163 @@ impl<O: ClassObject> CurveClassification<O> {
         let proved = piece_within_band(k, curve, &ivl.interval, edge_crv, params, xsect_tol_3d)?;
         Ok(proved.then_some(unclassified))
     }
+
+    /// Not upstream (#22137): whether the unclassified end `t_uncl` (`at_max` true at the upper
+    /// end of interval `index`) of `curve` only stopped there because `curve` exited the
+    /// classifying face's own UV domain across a side strictly past `edge_crv` at `s_uncl`.
+    ///
+    /// A surface-surface intersection curve is clipped to each face's UV domain, which may be
+    /// padded past the face's trim loop (for instance by STEP import). When a curve meets a
+    /// boundary edge tangentially and curves out of the face, clipping at a padded side within
+    /// the intersection tolerance leaves a short arc whose whole clipped length stays inside the
+    /// band and angle tolerance of the edge. Its unclassified end lies on that domain side
+    /// strictly past the edge while the curve's outward tangent crosses out of the domain;
+    /// promoting such an end onto the edge imprints a dangling spur into the partner face.
+    fn end_exits_face_domain(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        (curve, index, t_uncl, at_max): (&Curve, usize, f64, bool),
+        (edge_crv, s_uncl): (&Curve, f64),
+    ) -> Result<bool> {
+        let at_curve_end = if at_max {
+            index + 1 == self.size()
+        } else {
+            index == 0
+        };
+        if !at_curve_end {
+            return Ok(false);
+        }
+        let Some((fb, EntityRef::Face(f))) =
+            self.face().and_then(|face| geometry.topology_entity(face))
+        else {
+            return Ok(false);
+        };
+        let face_rec = fb.face(f)?;
+        let Some(raw_surface) = face_rec.surface.as_ref() else {
+            return Ok(false);
+        };
+        let domain = face_rec.uv_domain;
+        if domain.is_init() || domain.has_negative_area() {
+            return Ok(false);
+        }
+        let p = curve.evaluate_point(k, t_uncl)?;
+        let q = edge_crv.evaluate_point(k, s_uncl)?;
+        let d_edge = p.distance(q);
+        if !(d_edge.is_finite() && d_edge > 0.0) {
+            return Ok(false);
+        }
+        let eval = curve.evaluate(k, t_uncl, 1, !at_max, true)?;
+        let Some(&deriv) = eval.get(1) else {
+            return Ok(false);
+        };
+        let t_out = if at_max { deriv } else { -deriv };
+        if !(t_out.x.is_finite() && t_out.y.is_finite() && t_out.z.is_finite()) {
+            return Ok(false);
+        }
+        let mut surface = raw_surface.clone_for_evaluation()?;
+        let _ = surface.set_owner(None);
+        point_exits_surface_domain(k, &surface, &domain, (p, q, d_edge), t_out)
+    }
+}
+
+/// Drops `point` onto `surface` over `domain` with optional `guess_uv`, returning `None` on
+/// ordinary drop failures while propagating unported and cancellation errors.
+fn drop_uv_on_domain(
+    k: &Kernel,
+    surface: &Surface,
+    domain: &crate::geom::extent2d::Extent2d,
+    point: Point3,
+    guess_uv: Option<crate::math::Point2>,
+) -> Result<Option<crate::math::Point2>> {
+    let opts = DropPointOptions {
+        guess_uv,
+        ..DropPointOptions::default()
+    };
+    match surface.drop_point::<NoObject>(k, point, domain, &opts) {
+        Ok(d) if d.success && d.result_uv.x.is_finite() && d.result_uv.y.is_finite() => {
+            Ok(Some(d.result_uv))
+        }
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Ok(_) | Err(_) => Ok(None),
+    }
+}
+
+/// Not upstream (#22137): whether `p` lies on a boundary side of `domain` strictly past `q`
+/// (distance `d_edge` apart) while the 3D outward tangent `t_out` crosses out of `domain`
+/// across that side.
+fn point_exits_surface_domain(
+    k: &Kernel,
+    surface: &Surface,
+    domain: &crate::geom::extent2d::Extent2d,
+    (p, q, d_edge): (Point3, Point3, f64),
+    t_out: Vec3,
+) -> Result<bool> {
+    let Some(uv_p) = drop_uv_on_domain(k, surface, domain, p, None)? else {
+        return Ok(false);
+    };
+    let Some(uv_q) = drop_uv_on_domain(k, surface, domain, q, Some(uv_p))? else {
+        return Ok(false);
+    };
+    let u_left = (uv_p.x - domain.min().x).abs() <= (domain.max().x - uv_p.x).abs();
+    let v_left = (uv_p.y - domain.min().y).abs() <= (domain.max().y - uv_p.y).abs();
+    let (_, su, sv) = match surface.evaluate_1st_derivatives(k, uv_p, u_left, v_left) {
+        Ok(v) => v,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Ok(false),
+    };
+    let (g_uu, g_uv, g_vv) = (su.dot(su), su.dot(sv), sv.dot(sv));
+    let det = g_uu * g_vv - g_uv * g_uv;
+    let t_len = t_out.length();
+    if !(det.is_finite() && det > 0.0 && t_len.is_finite() && t_len > 0.0) {
+        return Ok(false);
+    }
+    let (rhs_u, rhs_v) = (t_out.dot(su), t_out.dot(sv));
+    let du_out = (g_vv * rhs_u - g_uv * rhs_v) / det;
+    let dv_out = (g_uu * rhs_v - g_uv * rhs_u) / det;
+    if !(du_out.is_finite() && dv_out.is_finite()) {
+        return Ok(false);
+    }
+    let side_tol = k.tolerances.approx_tol_3d.min(0.25 * d_edge);
+    let dir_floor = EFF_ZERO * t_len;
+    let axes = [
+        (
+            uv_p.x,
+            uv_q.x,
+            domain.min().x,
+            domain.max().x,
+            du_out,
+            su.length(),
+        ),
+        (
+            uv_p.y,
+            uv_q.y,
+            domain.min().y,
+            domain.max().y,
+            dv_out,
+            sv.length(),
+        ),
+    ];
+    for (coord_p, coord_q, lo, hi, dir_out, deriv_len) in axes {
+        if !(deriv_len.is_finite() && deriv_len > 0.0) {
+            continue;
+        }
+        // At a periodic seam `uv_q` can sit on the opposite side of the domain; require `coord_q`
+        // to stay clear of the opposite boundary so a seam wrap is never mistaken for an interior
+        // edge.
+        let exits_lo = (coord_p - lo) * deriv_len <= side_tol
+            && (coord_q - coord_p) * deriv_len > side_tol
+            && (hi - coord_q) * deriv_len > side_tol
+            && dir_out * deriv_len < -dir_floor;
+        let exits_hi = (hi - coord_p) * deriv_len <= side_tol
+            && (coord_p - coord_q) * deriv_len > side_tol
+            && (coord_q - lo) * deriv_len > side_tol
+            && dir_out * deriv_len > dir_floor;
+        if exits_lo || exits_hi {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Not upstream: whether `curve` at both ends `[t0, t1]` (`t0 < t1`) of a piece runs
@@ -5112,5 +5287,103 @@ mod tests {
         assert_eq!(cos_lower(0.0), Some(1.0 - 3.0 * ROUNDOFF));
         assert_eq!(cos_lower(FRAC_PI_2), None);
         assert_eq!(cos_lower(-1.0), None);
+    }
+
+    /// #22137: a circular arc tangent to a planar face's boundary edge, curving outside the face
+    /// and clipped at a padded UV domain side within the intersection tolerance, stays
+    /// unclassified rather than being promoted onto the edge.
+    #[test]
+    fn a_tangent_arc_clipped_at_a_padded_face_domain_is_left_alone() {
+        use crate::curve::ellipse::{Ellipse, EllipseOptions};
+        let mut k = Kernel::default();
+        let mut brep = crate::primitive::api_primitives::create_box(
+            &mut k,
+            Point3::new(0.0, -60.0, -56.0),
+            32.0,
+            120.0,
+            112.0,
+        )
+        .expect("box");
+        let mut entities = Vec::new();
+        for v in crate::topology::brep::p1::vertices(&brep, None).expect("vertices") {
+            entities.push(EntityRef::Vertex(v));
+        }
+        for e in crate::topology::brep::p1::edges(&brep, None).expect("edges") {
+            entities.push(EntityRef::Edge(e));
+        }
+        for f in crate::topology::brep::p1::faces(&brep, None).expect("faces") {
+            entities.push(EntityRef::Face(f));
+        }
+        let find_v = |b: &crate::topology::Brep, p: Point3| {
+            crate::topology::brep::p1::vertices(b, None)
+                .expect("vertices")
+                .into_iter()
+                .find(|&v| topo_vertex::point(b, v).expect("pt").distance(p) < 1e-9)
+                .expect("vertex")
+        };
+        let v_bot = find_v(&brep, Point3::new(0.0, -60.0, -56.0));
+        let v_top = find_v(&brep, Point3::new(0.0, -60.0, 56.0));
+        let v_far = find_v(&brep, Point3::new(32.0, -60.0, -56.0));
+        let faces_of = |b: &crate::topology::Brep, v| topo_vertex::faces(b, v).expect("faces");
+        let side_face = faces_of(&brep, v_bot)
+            .into_iter()
+            .find(|f| faces_of(&brep, v_top).contains(f) && faces_of(&brep, v_far).contains(f))
+            .expect("y = -60 face");
+        let edge_id = topo_vertex::edges(&brep, v_bot, Some(side_face))
+            .expect("edges")
+            .into_iter()
+            .find(|&e| {
+                [
+                    topo_edge::start_vertex(&brep, e),
+                    topo_edge::end_vertex(&brep, e),
+                ]
+                .into_iter()
+                .any(|v| v.expect("vertex") == Some(v_top))
+            })
+            .expect("x = 0 edge");
+        let pad = 3.3032e-5;
+        let mut padded = brep.face(side_face).expect("face").uv_domain;
+        padded.set_u_min(padded.min().x - pad).expect("u_min");
+        padded.set_u_max(padded.max().x + pad).expect("u_max");
+        padded.set_v_min(padded.min().y - pad).expect("v_min");
+        padded.set_v_max(padded.max().y + pad).expect("v_max");
+        brep.face_mut(side_face).expect("face").uv_domain = padded;
+        topo_edge::set_tolerance(&mut brep, edge_id, 2e-5, true, true).expect("edge tol");
+
+        let radius = 4.5_f64;
+        let sweep_deg = ((radius - pad) / radius).acos().to_degrees();
+        let arc = Curve::from(
+            Ellipse::new_circle(
+                &k,
+                Point3::new(-radius, -60.0, 45.5),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+                Extent1d::from_raw(0.0, sweep_deg),
+                radius,
+                &EllipseOptions::default(),
+            )
+            .expect("arc"),
+        );
+        let arc_ivl = arc.natural_interval();
+        let geo = BoxGeo {
+            brep,
+            entities,
+            curves: vec![arc],
+        };
+        let mut cc = CurveClassification::<H>::new(&k);
+        cc.set_curve(Some(H(geo.entities.len(), ClassObjectKind::Curve)), false);
+        cc.set_face(Some(geo.handle(EntityRef::Face(side_face))));
+        cc.set_src_zone_tol_3d(4e-5);
+        cc.set_size(&k, 1).expect("size");
+        let edge_h = geo.handle(EntityRef::Edge(edge_id));
+        let ivl = cc.at_mut(0).expect("interval");
+        ivl.interval = arc_ivl;
+        ivl.start
+            .set_class_object(PointClassType::Edge, Some(edge_h));
+        let raise = cc.classify_edge_interval(&k, &geo, 0).expect("classify");
+        assert_eq!(raise, None);
+        let ivl = cc.at(0).expect("interval");
+        assert_eq!(ivl.mid.point_class(), PointClassType::Unknown);
+        assert_eq!(ivl.end.point_class(), PointClassType::Unknown);
     }
 }

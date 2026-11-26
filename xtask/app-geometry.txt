@@ -142,8 +142,6 @@ crates/doc/src/eval.rs:seg_at cross,normalized
 crates/doc/src/eval.rs:sketch_line_plane normalized
 crates/doc/src/eval.rs:slanted_plane dot
 crates/doc/src/eval.rs:tangent_face_chain dot,normalized,triangles
-crates/doc/src/eval.rs:trim_between_planes dot
-crates/doc/src/eval.rs:trim_between_slopes dot
 crates/doc/src/eval.rs:trim_to_curved_face dot
 crates/doc/src/eval.rs:trim_to_face dot
 crates/doc/src/eval.rs:trim_to_plane dot
@@ -488,7 +486,7 @@ crates/engine/src/cmd/features.rs:axis_line_object normalized
 crates/engine/src/cmd/features.rs:beyond_coarse_sizes dot
 crates/engine/src/cmd/features.rs:edge_points dot
 crates/engine/src/cmd/features.rs:extrude_reach dot
-crates/engine/src/cmd/features.rs:hole normalized
+crates/engine/src/cmd/features.rs:hole_with normalized
 crates/engine/src/cmd/features.rs:leaving normalized
 crates/engine/src/cmd/features.rs:move_bodies normalized
 crates/engine/src/cmd/features_more.rs:align dot,normalized
@@ -843,7 +841,7 @@ crates/io/src/kicad_in.rs:clean_contour hypot
 crates/io/src/kicad_in.rs:clean_loop hypot
 crates/io/src/kicad_in.rs:extrude_regions triangles
 crates/io/src/kicad_in.rs:glyph_polyline atan2
-crates/io/src/kicad_in.rs:kicad_board_mesh triangles
+crates/io/src/kicad_in.rs:kicad_board_mesh_noted triangles
 crates/io/src/kicad_in.rs:model_body_meshes triangles
 crates/io/src/kicad_in.rs:pad_drill_points atan2
 crates/io/src/kicad_in.rs:parse_kicad_board_with atan2
@@ -1023,11 +1021,6 @@ crates/kernel/src/matchsurf.rs:match_surface dot,normalized
 crates/kernel/src/matchsurf.rs:seam_continuity dot,normalized
 crates/kernel/src/matchsurf.rs:shape dot
 crates/kernel/src/matchsurf.rs:support_faces dot
-crates/kernel/src/mesh_convert.rs:convert_prismatic_mesh cross,normalized,triangles
-crates/kernel/src/mesh_convert.rs:extrusion dot,triangles
-crates/kernel/src/mesh_convert.rs:face_loops cross,dot
-crates/kernel/src/mesh_convert.rs:faceted_solid cross,dot,normalized,triangles
-crates/kernel/src/mesh_convert.rs:weld cross,normalized,triangles
 crates/kernel/src/meshbody.rs:Body::from_packed_flat_mesh_indexed triangles
 crates/kernel/src/meshbody.rs:Body::mesh_transformed cross,normalized,triangles
 crates/kernel/src/meshbody.rs:Body::triangle_mesh triangles

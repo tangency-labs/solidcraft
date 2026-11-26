@@ -114,6 +114,8 @@ pub struct SketchPreview {
     pub sketch: std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
     pub curves: Vec<usize>,
     pub points: Vec<usize>,
+    /// The drawn 3D curves that are new or changed (a Fillet on two 3D lines, #21319).
+    pub wires: Vec<usize>,
 }
 
 /// A computed preview: the scene to draw and the bodies it stands in for.
@@ -128,6 +130,9 @@ pub struct Built {
     pub outlines: Vec<(String, Arc<Mesh>)>,
     /// Why the feature failed, when the scene only shows its tool body.
     pub error: Option<String>,
+    /// What the feature says about itself when it builds without failing (a warning of its
+    /// reply): the sheet metal hardware dialog shows it.
+    pub warning: Option<String>,
     /// Extent of what the preview shows (the view's depth range must cover it).
     pub bounds: Aabb3,
     /// The smallest and largest radius a fillet used when it reduced one too large for its edges
@@ -248,6 +253,8 @@ pub struct PreviewState {
     pub sketches: Vec<SketchPreview>,
     /// Why the current inputs don't make a feature (nothing is previewed then).
     pub error: Option<String>,
+    /// What the previewed feature warns of while it builds (see [`Built::warning`]).
+    pub warning: Option<String>,
     /// A preview is being computed.
     pub busy: bool,
     /// Extent of the preview scene.
@@ -407,6 +414,7 @@ impl PreviewState {
         self.shown_key = None;
         self.error = None;
         self.plugin_view = None;
+        self.warning = None;
         self.applied = None;
         self.stopped = None;
         self.placed = None;
@@ -498,6 +506,7 @@ impl PreviewState {
                 self.plugin_view = b.plugin_view;
                 self.active = true;
                 self.error = b.error;
+                self.warning = b.warning;
                 self.applied = b.applied;
                 self.stopped = b.stopped;
                 self.placed = b.placed;
@@ -539,6 +548,7 @@ impl PreviewState {
                 self.plugin_view = None;
                 self.sketches.clear();
                 self.error = Some(e);
+                self.warning = None;
                 self.applied = None;
                 self.stopped = None;
                 self.placed = None;
@@ -562,6 +572,7 @@ impl PreviewState {
         if self.shown_key != Some(key) {
             self.sketches.clear();
             self.error = None;
+            self.warning = None;
             // A constraint's reply says how free its part is with the inputs it was for: with other
             // picks it would describe the wrong rule, so the dialog falls back to the saved design.
             self.placed = None;
@@ -685,7 +696,7 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
             (command.clone(), params)
         };
         let fields: &[&str] = match command.as_str() {
-            "solid.extrude" => &["distance", "distance2", "to_offset"],
+            "solid.extrude" => &["distance", "distance2", "to_offset", "to_offset2"],
             "solid.offset_face" => &["distance"],
             // A radius dragged or typed: each result shows while the next computes, rather than
             // the preview holding still until the input stops changing.
@@ -807,6 +818,7 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     let pv = &mut app.preview;
     pv.set_source(source, revision);
     pv.poll(key, stream_key);
+    insert_preview_bounds(app);
     crate::dialogs_assembly::update_alignment_order(app);
     let pv = &mut app.preview;
     if pv.running.is_none() && pv.shown_key != Some(key) {
@@ -846,6 +858,35 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
     }
     crate::dialogs_frame::settle_pick(app);
+}
+
+/// The Insert SVG/DXF preview is imported once at the sketch's origin and drawn where the window
+/// has it (`paint_sketches`), so its box follows the position, size and angle too: Fit and the
+/// view's depth range see where the drawing is now, not where it was imported.
+fn insert_preview_bounds(app: &mut SolveApp) {
+    let bounds = {
+        let Some(crate::dialogs::Kind::InsertDrawing(p)) = app.dialog.as_ref().map(|d| &d.kind) else { return };
+        let (Some((w, h)), Some(plane)) = (p.natural, app.preview.sketches.first().map(|s| s.sketch.plane)) else { return };
+        // The preview holds the drawing as imported at the sketch's origin: its middle there for
+        // "middle", its file coordinates for "file origin". Its box is the drawing's own box
+        // (`middle` is its centre in the file) at that anchor.
+        let (mx, my) = p.middle.unwrap_or((0.0, 0.0));
+        let (ax, ay) = match p.align {
+            crate::dialogs_insert_drawing::Align::Origin => (0.0, 0.0),
+            crate::dialogs_insert_drawing::Align::Middle => (mx, my),
+        };
+        let mut b = Aabb3::EMPTY;
+        for (x, y) in [
+            (mx - w / 2.0 - ax, my - h / 2.0 - ay),
+            (mx + w / 2.0 - ax, my - h / 2.0 - ay),
+            (mx + w / 2.0 - ax, my + h / 2.0 - ay),
+            (mx - w / 2.0 - ax, my + h / 2.0 - ay),
+        ] {
+            b.add(plane.to_world(crate::dialogs_insert_drawing::placed(solidcore_record::Vec2::new(x, y), p)));
+        }
+        b
+    };
+    app.preview.bounds = bounds;
 }
 
 /// What tells one preview computation from another: its commands, the document revision they
@@ -958,6 +999,9 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             // fillet or an edited one: the feature the replies name).
             let features = || p.replies.iter().filter_map(|r| r.get("feature").and_then(Value::as_u64));
             b.applied = features().find_map(|id| p.after.fitted_range(id));
+            // What the features warn of while they build: the sheet metal hardware dialog says so.
+            let warnings: Vec<&str> = p.replies.iter().filter_map(|r| r.get("warning").and_then(Value::as_str)).filter(|w| !w.is_empty()).collect();
+            b.warning = (!warnings.is_empty()).then(|| warnings.join(" "));
             b.tapered = features().find_map(|id| p.after.tapered(id)).map(<[_]>::to_vec).unwrap_or_default();
             b.centrelines = crate::dialogs_frame::centrelines(&p);
             Ok(b)
@@ -1143,6 +1187,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         replaced: Vec::new(),
         outlines: Vec::new(),
         error: None,
+        warning: None,
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
@@ -1199,6 +1244,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         replaced: Vec::new(),
         outlines: Vec::new(),
         error: None,
+        warning: None,
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
@@ -1520,6 +1566,7 @@ fn build_scene(
         replaced,
         outlines,
         error: None,
+        warning: None,
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
@@ -1547,7 +1594,8 @@ fn on_surface(index: &SurfaceIndex, [a, b, c]: [Vec3; 3]) -> bool {
 const FACE_SAMPLES: usize = 24;
 
 /// What of `sketch` differs from `old`, the same sketch before a change: the curves whose shape
-/// or points moved and the points that moved (`None`: nothing did).
+/// or points moved, the points that moved and the drawn 3D curves that changed (`None`: nothing
+/// did).
 pub(crate) fn sketch_changes(
     old: Option<&solidcraft_engine::doc::SolvedSketch>,
     sketch: &std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
@@ -1574,7 +1622,20 @@ pub(crate) fn sketch_changes(
         .enumerate()
         .filter_map(|(i, p)| if old_points.get(p.id.as_str()) == Some(&p.pos) { None } else { Some(i) })
         .collect::<Vec<_>>();
-    if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
+    // Drawn 3D curves only: a linked one follows the model, which a sketch tool does not change.
+    let old_wires = old.into_iter().flat_map(|s| s.sketch.wires.iter().map(|w| (w.id.as_str(), &w.pts))).collect::<std::collections::HashMap<_, _>>();
+    let wires = sketch
+        .sketch
+        .wires
+        .iter()
+        .enumerate()
+        .filter_map(|(i, w)| if w.link.is_some() || old_wires.get(w.id.as_str()) == Some(&&w.pts) { None } else { Some(i) })
+        .collect::<Vec<_>>();
+    if indices.is_empty() && points.is_empty() && wires.is_empty() {
+        None
+    } else {
+        Some(SketchPreview { sketch: sketch.clone(), curves: indices, points, wires })
+    }
 }
 
 /// Which of the `nf` faces of `m` are new surface, i.e. not on the old mesh? Each is decided by
@@ -1729,30 +1790,54 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
     }) {
         return;
     }
+    // An Insert SVG/DXF window's preview is the drawing at the sketch's origin, moved here by
+    // the window's position, size and angle: the same placement `sketch.insert_svg` applies, so
+    // changing those moves this drawing without importing and evaluating it again.
+    let place = match app.dialog.as_ref().map(|d| &d.kind) {
+        Some(crate::dialogs::Kind::InsertDrawing(p)) => Some(p),
+        _ => None,
+    };
     let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
-    let curves: usize = app.preview.sketches.iter().map(|preview| paint_sketch(preview, painter, proj, &mut budget)).sum();
+    let curves: usize = app.preview.sketches.iter().map(|preview| paint_sketch(preview, painter, proj, &mut budget, place)).sum();
     crate::scenario::publish_count("sketch_preview_curves", curves as f64);
 }
 
-/// Draw what a change moves in a sketch, its curves and points, in the preview colour; returns
-/// how many curves it drew.
+/// Draw what a change moves in a sketch, its curves, points and 3D curves, in the preview colour;
+/// returns how many curves it drew.
 pub(crate) fn paint_sketch(
     preview: &SketchPreview,
     painter: &egui::Painter,
     proj: &crate::viewport::Proj,
     budget: &mut solidcraft_engine::render::SamplingBudget,
+    place: Option<&crate::dialogs_insert_drawing::Place>,
 ) -> usize {
     let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);
     let sketch = &preview.sketch;
+    // An Insert SVG/DXF drawing's preview is imported at the sketch's origin and put down where
+    // the window has it, so its curves and its points move together and stay what OK adds.
+    let placed: Option<Box<dyn Fn(solidcore_record::Seg2) -> solidcore_record::Seg2>> =
+        place.map(|p| Box::new(move |seg| crate::dialogs_insert_drawing::placed_seg(seg, p)) as Box<dyn Fn(_) -> _>);
     for index in &preview.curves {
-        crate::tools::paint_curve(&sketch.sketch, *index, &sketch.plane, painter, proj, stroke, budget);
+        crate::tools::paint_curve_placed(&sketch.sketch, *index, &sketch.plane, painter, proj, stroke, budget, placed.as_deref());
     }
     for index in &preview.points {
-        if let Some(point) = sketch.sketch.point(*index).and_then(|p| proj.to_screen(sketch.plane.to_world(p))) {
-            painter.circle_filled(point, 3.0, stroke.color);
+        let point = sketch.sketch.point(*index).map(|q| place.map_or(q, |p| crate::dialogs_insert_drawing::placed(q, p)));
+        if let Some(screen) = point.and_then(|q| proj.to_screen(sketch.plane.to_world(q))) {
+            painter.circle_filled(screen, 3.0, stroke.color);
         }
     }
-    preview.curves.len()
+    // A 3D point (a corner a fillet keeps) is a dot, like a point on the plane; a curve is counted.
+    let mut wires = 0;
+    for wire in preview.wires.iter().filter_map(|index| sketch.sketch.wires.get(*index)) {
+        let line: Vec<egui::Pos2> = wire.pts.iter().filter_map(|p| proj.to_screen(*p)).collect();
+        if let [point] = line.as_slice() {
+            painter.circle_filled(*point, 3.0, stroke.color);
+        } else {
+            painter.add(egui::Shape::line(line, stroke));
+            wires += 1;
+        }
+    }
+    preview.curves.len() + wires
 }
 
 #[cfg(test)]
@@ -1960,6 +2045,7 @@ mod tests {
             replaced: vec!["Lid".into()],
             outlines: Vec::new(),
             error: None,
+            warning: None,
             bounds: Aabb3::EMPTY,
             applied: None,
             tapered: Vec::new(),
