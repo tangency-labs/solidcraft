@@ -811,6 +811,7 @@ mod tests {
             bend_radius: 6.0,
             gap: 6.0,
             corner_relief: crate::sheet::ReliefShape::Notch,
+            bend_relief: crate::sheet::BendReliefShape::Rectangular,
             corner_relief_size: 10.0,
             relief_width: 6.0,
             relief_depth: 3.0,
