@@ -1271,7 +1271,7 @@ pub fn dimension_text_scale(p: &Prefs) -> f32 {
 
 /// The colour of the edge under the pointer: the preference, or the theme's hover colour.
 pub fn hover_edge_colour(p: &Prefs) -> egui::Color32 {
-    p.hover_edge_colour.map_or_else(|| Tokens::get().hover_edge, |[r, g, b]| egui::Color32::from_rgb(r, g, b))
+    p.hover_edge_colour.map_or_else(|| Tokens::get().hover_edge, |rgb| solidcraft_theme::srgb(rgb.map(|channel| f32::from(channel) / 255.0)))
 }
 
 /// How wide the edge under the pointer is drawn: the preference, or 2 when a saved value is
