@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use crate as ui_kit;
 use egui::{
     Context, LayerId, Rect, Ui,
     epaint::{ClippedShape, Shape},
@@ -7,7 +8,6 @@ use egui::{
 };
 use solidcraft_panel_layout::{Destination, Direction, InstanceId, Zone};
 use solidcraft_theme::Tokens;
-use solidcraft_ui_kit as ui_kit;
 
 use super::interaction::HostPreview;
 use super::layout::{HostLayout, HostSection};
@@ -121,7 +121,7 @@ impl DragPaint {
 #[cfg(not(target_arch = "wasm32"))]
 /// A copy of a panel's body paint from this pass, for the desktop window a
 /// drag would open it in. Like the in-app preview, it runs no second body.
-pub(crate) struct WindowCard {
+pub struct WindowCard {
     bounds: Rect,
     shapes: Vec<ClippedShape>,
 }
@@ -135,7 +135,7 @@ impl WindowCard {
     }
 
     /// Paint the panel's body at `bounds` on `ui`'s layer.
-    pub(crate) fn paint(&self, ui: &Ui, bounds: Rect) {
+    pub fn paint(&self, ui: &Ui, bounds: Rect) {
         let clip = ui.clip_rect();
         ui.ctx().graphics_mut(|graphics| {
             let list = graphics.entry(ui.layer_id());
