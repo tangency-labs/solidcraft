@@ -1921,6 +1921,7 @@ mod tests {
             corner_relief_shape: shape.map(Into::into),
             corner_relief: size.map(Into::into),
             height_from: None,
+            bend_relief_shape: None,
         };
         let saved = |document: &Document| -> Value { serde_json::from_str(&document.to_json()).unwrap() };
         // A flange that follows the rule saves neither key, and a design of format 23 opens as it was.
@@ -2137,6 +2138,9 @@ mod tests {
                         to_offset: Some("offset + 1 mm".into()),
                         from: Some(crate::FacePick(solidcore_record::Vec3::new(0.0, 0.0, 5.0))),
                         to_body_apart: false,
+                        through_all2: false,
+                        to2: None,
+                        to_offset2: None,
                         from_level: false,
                         picked_placements: Vec::new(),
                         one_sided_direction: None,

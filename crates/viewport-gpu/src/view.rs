@@ -2428,8 +2428,11 @@ impl PaletteGpu {
         let (old, new) = (self.palette.materials(), palette.materials());
         let width = PALETTE_WIDTH as usize;
         for row in 0..self.material_rows {
-            let at = |m: &[Material]| m.get(row as usize * width..((row as usize + 1) * width).min(m.len())).unwrap_or_default().to_vec();
-            if at(old) != at(new) {
+            let start = row as usize * width;
+            let end = (row as usize + 1) * width;
+            let old_row = &old[start.min(old.len())..end.min(old.len())];
+            let new_row = &new[start.min(new.len())..end.min(new.len())];
+            if old_row != new_row {
                 write_materials(queue, &self.materials, new, row, row + 1, written);
             }
         }
@@ -3022,10 +3025,14 @@ impl Batches {
             g.run(device, queue, encoder, vp, size, hidden, changed, &self.instanced, indirect, self.edges.as_mut(), hover);
             return;
         }
-        if changed && let Some(indirect) = self.indirect.as_mut() {
+        if let Some(indirect) = self.indirect.as_mut()
+            && (changed || indirect.args_missing())
+        {
             indirect.write(device, queue, &self.instanced);
         }
-        if edges_changed && let Some(edges) = self.edges.as_mut() {
+        if let Some(edges) = self.edges.as_mut()
+            && (edges_changed || edges.args_missing())
+        {
             edges.write(device, queue, &edges::Part::of_draws(&self.instanced));
         }
     }

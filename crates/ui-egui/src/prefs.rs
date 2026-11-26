@@ -811,6 +811,68 @@ impl OriginPlaneNames {
     }
 }
 
+/// Whether the browser's Origin folder shows in a design that doesn't keep its eye itself
+/// (Preferences › Design › Origin). Saved as the on/off setting it was before Automatic (`false`
+/// is Shown, `true` is Hidden), so older releases and scripts read and write it as they did.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "SavedOriginDisplay", into = "SavedOriginDisplay")]
+pub enum OriginDisplay {
+    /// Also what a value this version doesn't know reads as (`lenient`).
+    #[default]
+    Shown,
+    /// Shown until the design has a body, as the model is at the history marker.
+    Automatic,
+    Hidden,
+}
+
+impl OriginDisplay {
+    pub const ALL: [Self; 3] = [Self::Shown, Self::Automatic, Self::Hidden];
+
+    /// Its name in the Preferences (a message id).
+    pub fn label_id(self) -> &'static str {
+        match self {
+            Self::Shown => "prefs.origin_display_shown",
+            Self::Automatic => "prefs.origin_display_automatic",
+            Self::Hidden => "prefs.origin_display_hidden",
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum SavedOriginDisplay {
+    Hidden(bool),
+    Named(OriginDisplayName),
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum OriginDisplayName {
+    Shown,
+    Automatic,
+    Hidden,
+}
+
+impl From<SavedOriginDisplay> for OriginDisplay {
+    fn from(saved: SavedOriginDisplay) -> Self {
+        match saved {
+            SavedOriginDisplay::Hidden(false) | SavedOriginDisplay::Named(OriginDisplayName::Shown) => Self::Shown,
+            SavedOriginDisplay::Named(OriginDisplayName::Automatic) => Self::Automatic,
+            SavedOriginDisplay::Hidden(true) | SavedOriginDisplay::Named(OriginDisplayName::Hidden) => Self::Hidden,
+        }
+    }
+}
+
+impl From<OriginDisplay> for SavedOriginDisplay {
+    fn from(display: OriginDisplay) -> Self {
+        match display {
+            OriginDisplay::Shown => Self::Hidden(false),
+            OriginDisplay::Automatic => Self::Named(OriginDisplayName::Automatic),
+            OriginDisplay::Hidden => Self::Hidden(true),
+        }
+    }
+}
+
 /// Where a sketch dimension's value is typed (Preferences › Sketch, "Dimension values", #7246).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -2345,6 +2407,26 @@ pub fn show_mm(app: &SolveApp, v: f64, power: i32) -> String {
     format!("{:.*} {u}{sup}", length_precision(value, &app.session.doc.units, app.preferences.length_decimals), value)
 }
 
+/// Measure's optional second unit. Metric designs add inches; inch/foot designs add mm.
+/// Conversion uses the original value, including the appropriate power for area and volume.
+pub(crate) fn show_measure(app: &SolveApp, v: f64, power: i32, dual: bool) -> String {
+    let primary = show_mm(app, v, power);
+    if !dual {
+        return primary;
+    }
+    let (_, unit) = unit_scale(&app.session.doc.units);
+    let secondary = if matches!(unit, "in" | "inch" | "ft" | "foot") { "mm" } else { "in" };
+    let (scale, suffix) = unit_scale(secondary);
+    let value = v * scale.powi(power);
+    let precision = length_precision(value, secondary, app.preferences.length_decimals);
+    let sup = match power {
+        2 => "²",
+        3 => "³",
+        _ => "",
+    };
+    format!("{primary} [{value:.precision$} {suffix}{sup}]")
+}
+
 /// Numbers in millimetres, in the design's units without the unit name.
 pub fn show_mm_bare(app: &SolveApp, v: f64) -> String {
     length_number(v, &app.session.doc.units, app.preferences.length_decimals)
@@ -2938,6 +3020,7 @@ pub fn restore_space_mouse_defaults(app: &mut SolveApp) {
     p.space_mouse_model_pivot = d.space_mouse_model_pivot;
     p.space_mouse_motion = d.space_mouse_motion;
     p.space_mouse_sketch_orbit = d.space_mouse_sketch_orbit;
+    p.space_mouse_horizon_lock = d.space_mouse_horizon_lock;
 }
 
 /// The device's picture with the coordinate circles under it, and a box with a small model that
@@ -2948,6 +3031,7 @@ fn picture_and_boat(
     boat: &mut Option<crate::test_boat::Boat>,
     motion: Option<crate::space_mouse::DeviceMotion>,
     free_orbit: bool,
+    horizon_lock: bool,
     has_picture: bool,
     picture: impl FnOnce(&mut egui::Ui),
     pads: impl FnOnce(&mut egui::Ui),
@@ -2962,7 +3046,7 @@ fn picture_and_boat(
     let width = if beside { (room - PICTURE_WIDTH - gap).min(BOAT_MAX) } else { room.min(BOAT_MAX) };
     let mut boat_and_reset = |ui: &mut egui::Ui| {
         ui.vertical(|ui| {
-            crate::test_boat::show(ui, boat, motion, free_orbit, egui::vec2(width.max(0.0), BOAT_HEIGHT));
+            crate::test_boat::show(ui, boat, motion, free_orbit, horizon_lock, egui::vec2(width.max(0.0), BOAT_HEIGHT));
             if ui_kit::button(ui, solidcraft_ui_text::tr("ui.3d_mouse_reset_view"), ui_kit::Button::Normal).clicked() {
                 crate::test_boat::reset(boat);
             }
@@ -3343,6 +3427,7 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
                 "locked": app.policy.locked(),
                 "check_updates": crate::policy::check_updates(app),
                 "settings": crate::policy::in_force(app),
+                "off": app.policy.turned_off(),
             });
             if let (Some(name), Some(p)) = (app.policy.organization(), policy.as_object_mut()) {
                 p.insert("organization".into(), json!(name));
@@ -4045,9 +4130,10 @@ pub fn migrate(mut p: Prefs) -> Prefs {
         log::warn!("preferences: the 3D mouse axis assignment {:?} doesn't drive each axis once; using the default", p.space_mouse_axis_source);
         p.space_mouse_axis_source = crate::space_mouse::SAME_AXES;
     }
-    // A template this version doesn't have for that kind (a newer one's, or a saved template since removed).
+    // A template this version doesn't have for that kind (a newer one's, or a built-in since removed).
+    // A template file is kept even while it can't be read: New Drawing names it when refused.
     for (chosen, assembly) in [(&mut p.part_drawing_template, false), (&mut p.assembly_drawing_template, true)] {
-        if !is_template_for(chosen, assembly) {
+        if !is_new_drawing_template(chosen, assembly) {
             let default = template::default_for(assembly);
             log::warn!("preferences: there is no drawing template `{chosen}` for this kind of design; using `{default}`");
             *chosen = default.into();
@@ -4145,6 +4231,23 @@ fn limit_toolbar_tabs(mut p: Prefs) -> Prefs {
 /// Whether `name` is one of the built-in templates of an assembly's drawings (`assembly`) or a part's.
 pub(crate) fn is_template_for(name: &str, assembly: bool) -> bool {
     template::BUILT_INS.contains(&name) && template::assembly(name) == Some(assembly)
+}
+
+/// Whether `name` is a drawing template file's path (`drawing.template.save`'s `.scdwg`, or an older
+/// `.json`), which `drawing.create` reads as its template (#22120). It may serve either kind.
+pub(crate) fn is_template_file(name: &str) -> bool {
+    const MAX_PATH_BYTES: usize = 4096;
+    // The path as saved and as `drawing.create` reads it: a trailing space is no `.scdwg`.
+    let extension = std::path::Path::new(name).extension();
+    !name.trim().is_empty()
+        && name.len() <= MAX_PATH_BYTES
+        && extension.is_some_and(|e| e.eq_ignore_ascii_case("scdwg") || e.eq_ignore_ascii_case("json"))
+}
+
+/// Whether the template for new drawings of a part or an assembly may be `name`: one of that kind's
+/// built-ins, or a template file.
+pub(crate) fn is_new_drawing_template(name: &str, assembly: bool) -> bool {
+    is_template_for(name, assembly) || is_template_file(name)
 }
 
 /// Preferences create future windows; a missing ribbon value here uses the new default.
@@ -4296,9 +4399,9 @@ fn prepare_preferences(
     for (key, chosen, assembly) in
         [("part_drawing_template", &new.part_drawing_template, false), ("assembly_drawing_template", &new.assembly_drawing_template, true)]
     {
-        if !is_template_for(chosen, assembly) {
+        if !is_new_drawing_template(chosen, assembly) {
             let kind: Vec<&str> = template::BUILT_INS.iter().copied().filter(|name| is_template_for(name, assembly)).collect();
-            return Err(format!("`{key}` must be one of {}", kind.join(", ")));
+            return Err(format!("`{key}` must be one of {}, or a .scdwg or .json template file", kind.join(", ")));
         }
     }
     if !accepted::home_fit_size(&new) {
@@ -5371,6 +5474,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn layout_checkbox_search_results_share_a_column() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1280,"height":720}));
+        h.call("ui.prefs", json!({"language":"en","open":"General"}));
+        h.app.prefs_window.shell.filter = "search".into();
+        h.frames(5);
+
+        let first = crate::scenario::rect_of("prefs:ribbon_reveal").unwrap();
+        let second = crate::scenario::rect_of("prefs:command_search_centred").unwrap();
+        assert!((second.left() - first.left()).abs() < 0.5, "checkboxes align: {first:?}, {second:?}");
+        let gap = second.top() - first.bottom();
+        assert!((0.0..first.height()).contains(&gap), "consecutive results: {first:?}, {second:?}");
+        h.step(&json!({"click":{"handle":"prefs:command_search_centred"}})).unwrap();
+        assert!(h.app.preferences.command_search_centred);
+    }
+
     /// #16542: the Layout page's checkboxes line up in even columns, a group each for the
     /// History, the Browser and the toolbar, instead of wrapping like words: two columns in a
     /// wide window, one in a narrow one.
@@ -6008,6 +6129,7 @@ mod tests {
         p.space_mouse_model_pivot = true;
         p.space_mouse_motion = SpaceMouseMotion::TargetCamera;
         p.space_mouse_sketch_orbit = true;
+        p.space_mouse_horizon_lock = true;
         let before = h.app.preferences.clone();
         let camera = h.app.cam;
         restore_space_mouse_defaults(&mut h.app);
@@ -6020,6 +6142,7 @@ mod tests {
         assert_eq!((p.space_mouse_axis_speed, p.space_mouse_axis_source), (d.space_mouse_axis_speed, d.space_mouse_axis_source));
         assert_eq!((p.space_mouse_ghost_position, p.space_mouse_in_view), (d.space_mouse_ghost_position, d.space_mouse_in_view));
         assert_eq!((p.space_mouse_model_pivot, p.space_mouse_sketch_orbit), (d.space_mouse_model_pivot, d.space_mouse_sketch_orbit));
+        assert_eq!(p.space_mouse_horizon_lock, d.space_mouse_horizon_lock);
         assert_eq!(p.space_mouse_motion, d.space_mouse_motion);
         // Kept: the calibration (dead zone too), the buttons, the offered and adopted sets, never, enabled, the rest of the page.
         assert_eq!(p.space_mouse_calibrations, before.space_mouse_calibrations);
@@ -11622,6 +11745,56 @@ mod tests {
         assert_eq!(h.app.preferences.origin_plane_names, TopFrontRight);
     }
 
+    /// Origin visibility: the old on/off values keep their meaning both ways, Automatic is a name, an
+    /// unknown value is refused, and Cancel and Restore Defaults take the choice back.
+    #[test]
+    fn origin_visibility_keeps_the_old_on_off_values() {
+        crate::i18n::install();
+        use OriginDisplay::{Automatic, Hidden, Shown};
+        assert_eq!(Prefs::default().hide_origin, Shown);
+        for (saved, choice, written) in [
+            (json!(false), Shown, json!(false)),
+            (json!(true), Hidden, json!(true)),
+            (json!("automatic"), Automatic, json!("automatic")),
+            (json!("shown"), Shown, json!(false)),
+            (json!("hidden"), Hidden, json!(true)),
+        ] {
+            let read = lenient(&json!({"hide_origin":saved, "zoom_reverse":true}));
+            assert_eq!((read.hide_origin, read.zoom_reverse), (choice, true), "{saved}");
+            assert_eq!(serde_json::to_value(&read).unwrap()["hide_origin"], written, "{saved}");
+        }
+        for unknown in [json!("sometimes"), json!(1), json!(null), json!([true]), json!({"hidden":true})] {
+            let read = lenient(&json!({"hide_origin":unknown, "zoom_reverse":true}));
+            assert_eq!((read.hide_origin, read.zoom_reverse), (Shown, true), "{unknown}");
+        }
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        for (key, choice) in [("hidden", Hidden), ("shown", Shown), ("automatic", Automatic)] {
+            h.call("ui.prefs", json!({"open":"Design"}));
+            let handle = format!("prefs:hide_origin:{key}");
+            super::reveal_preference(&mut h, &handle);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            assert_eq!(h.app.preferences.hide_origin, choice);
+            h.call("ui.prefs", json!({"button":"ok"}));
+        }
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert_eq!(restored.preferences.hide_origin, Automatic, "the choice is saved");
+        let before = h.app.preferences.clone();
+        assert!(control(&mut h.app, &json!({"hide_origin":"sometimes", "zoom_reverse":true})).is_err());
+        assert_eq!(h.app.preferences, before, "an unknown choice fails atomically");
+        h.call("ui.prefs", json!({"open":"Design","hide_origin":true}));
+        assert_eq!(h.app.preferences.hide_origin, Hidden, "the old value still sets it");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.preferences.hide_origin, Automatic, "Cancel takes it back");
+        h.call("ui.prefs", json!({"open":"Design"}));
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert_eq!(h.app.preferences.hide_origin, Shown, "Restore Defaults");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.preferences.hide_origin, Automatic);
+    }
+
     /// The snap-suppress choice and Direct interaction read in the user's language: the classic
     /// choice's "or" was English in every language, and Direct interaction had no message.
     #[test]
@@ -12905,6 +13078,80 @@ mod tests {
         let (first, third) = (drawn("first"), drawn("third"));
         assert_eq!((first.0, third.0), (Some(Projection::First), Some(Projection::Third)));
         assert_eq!(first.1, third.1, "the projection is no undo step of its own");
+    }
+
+    /// #22120: a template file saved from a drawing can be the template new drawings of a part or an
+    /// assembly start from, set or saved so; New Drawing starts from it, and refuses naming it once it
+    /// has gone. Any other file is refused when set.
+    #[test]
+    fn new_drawings_start_from_a_preferred_template_file() {
+        use solidcraft_engine::geom::drawing_sheet::{PaperSize, SheetSize};
+        // A folder of this run's own, removed even when an assertion fails.
+        struct Scratch(std::path::PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default();
+        let scratch = Scratch(std::env::temp_dir().join(format!("solidcraft-template-pref-{}-{stamp}", std::process::id())));
+        std::fs::create_dir(&scratch.0).unwrap();
+        let dir = scratch.0.clone();
+        let file = dir.join("Shop A1.scdwg").to_string_lossy().into_owned();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+        app.run("drawing.create", json!({"template": "iso-a1-part"})).unwrap();
+        app.run("drawing.template.save", json!({"path": file})).unwrap();
+        app.run("drawing.close", json!({})).unwrap();
+        assert!(set(&mut app, &json!({"part_drawing_template": dir.join("shop.pdf").to_string_lossy()})).is_err());
+        set(&mut app, &json!({"part_drawing_template": file, "assembly_drawing_template": file})).unwrap();
+        let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        other.load_prefs(&app.prefs());
+        assert_eq!(
+            (other.preferences.part_drawing_template.as_str(), other.preferences.assembly_drawing_template.as_str()),
+            (file.as_str(), file.as_str())
+        );
+        app.run("drawing.create", json!({})).unwrap();
+        let d = app.session.drawing("test").unwrap().clone();
+        assert_eq!(d.sheets[0].sheet.size, SheetSize::Standard(PaperSize::A1), "from the file");
+        app.run("drawing.close", json!({})).unwrap();
+        let gone = dir.join("gone.scdwg").to_string_lossy().into_owned();
+        set(&mut app, &json!({"part_drawing_template": gone})).unwrap();
+        let refused = app.run("drawing.create", json!({})).unwrap_err();
+        assert!(refused.contains("gone.scdwg"), "{refused}");
+        assert_eq!(lenient(&json!({"part_drawing_template": gone})).part_drawing_template, gone, "kept while it can't be read");
+        assert!(set(&mut app, &json!({"part_drawing_template": format!("{file} ")})).is_err(), "as drawing.create would read it");
+    }
+
+    /// #22132 review: a template file chosen after Preferences was closed (Cancel or OK while the
+    /// Choose File dialog was still open) changes nothing; chosen while it is open, it is the row's.
+    #[test]
+    fn a_template_file_chosen_after_preferences_closed_is_ignored() {
+        let mut h = crate::scenario::Harness::new();
+        let answer = std::rc::Rc::new(std::cell::RefCell::new(None::<Option<String>>));
+        let response = answer.clone();
+        h.app.services.pick_open = Some(Box::new(move |_: &[&str]| {
+            let response = response.clone();
+            Box::pin(std::future::poll_fn(move |_| response.borrow_mut().take().map_or(std::task::Poll::Pending, std::task::Poll::Ready)))
+        }));
+        let file = h.dir.join("Shop A3.scdwg").to_string_lossy().into_owned();
+        let built_in = h.app.preferences.part_drawing_template.clone();
+        for close in [Some("cancel"), Some("ok"), None] {
+            h.call("ui.prefs", json!({"open": "Design"}));
+            h.frames(3);
+            h.step(&json!({"widget": "Choose File…"})).unwrap();
+            h.frames(2);
+            assert!(h.app.file_picker_busy(), "the picker waits");
+            if let Some(button) = close {
+                h.call("ui.prefs", json!({"button": button}));
+            }
+            *answer.borrow_mut() = Some(Some(file.clone()));
+            crate::file_picker::tick(&mut h.app, &h.ctx);
+            match close {
+                Some(button) => assert_eq!(h.app.preferences.part_drawing_template, built_in, "after {button}"),
+                None => assert_eq!(h.app.preferences.part_drawing_template, file, "while open"),
+            }
+        }
     }
 
     /// A new drawing is set in the interface font when that is a family, and in the built-in font
@@ -14960,7 +15207,7 @@ mod settings_search_tests {
             for (query, id, page, handle) in [
                 ("Step values with the arrow keys and the wheel", "ui.step_values", crate::prefs::PAGE_DESIGN, "prefs:step_values"),
                 ("For files from unknown programs", "prefs.stand_up_unknown", crate::prefs::PAGE_DESIGN, "prefs:stand_up_unknown"),
-                ("Hide origin by default", "ui.hide_origin_by_default", crate::prefs::PAGE_DESIGN, "prefs:hide_origin"),
+                ("Hide origin by default", "prefs.origin_display", crate::prefs::PAGE_DESIGN, "prefs:hide_origin:automatic"),
                 ("Snap to face and edge centres", "Snap to face and edge centres", crate::prefs::PAGE_TOOLS, "prefs:hole_snaps"),
                 ("Move holes by clicking or dragging", "Move holes by clicking or dragging", crate::prefs::PAGE_TOOLS, "prefs:hole_moves"),
                 ("Several holes on one face", "prefs.design_tools.hole_several", crate::prefs::PAGE_TOOLS, "prefs:hole_several"),

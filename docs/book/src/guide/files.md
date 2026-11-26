@@ -530,6 +530,11 @@ Scripts, the CLI and the control channel never get these questions. `doc.open` o
 and reports `open_elsewhere` in its result (`read_only: true` opens it read-only), and `file.save`
 over a file that changed on disk fails with an error until it is given `overwrite: true`.
 
+`solidcraft-cli run SCRIPT --save FILE` still saves when a fresh lock shows the design is open
+in another SolidCraft window. It prints a warning to standard error, even with `--quiet`.
+The other window keeps showing the design it opened. Its next save uses the changed-on-disk
+check described above.
+
 ## Designs in Git
 
 A design saved as `.json` is plain text, so Git shows what changed in it with no setup. A design
