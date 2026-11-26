@@ -28,6 +28,7 @@ mod planar_disjoint;
 pub mod point_identity;
 pub mod poly;
 pub mod poly_properties;
+pub mod same_surface;
 pub mod seam_bound;
 pub mod section_corners;
 pub mod tangent_edge;
