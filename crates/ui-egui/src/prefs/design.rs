@@ -177,6 +177,11 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 if let Some(assembly) = browse {
                     app.pick_open_for(&["scdwg", "json"], move |app, path| {
+                        // Preferences closed (Cancel or OK) while the dialog was open: its answer
+                        // belongs to nothing any more.
+                        if !app.prefs_window.shell.open {
+                            return;
+                        }
                         let Some(path) = path.filter(|path| super::is_template_file(path)) else { return };
                         let p = &mut app.preferences;
                         *(if assembly { &mut p.assembly_drawing_template } else { &mut p.part_drawing_template }) = path;

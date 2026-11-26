@@ -3936,7 +3936,8 @@ pub(crate) fn is_template_for(name: &str, assembly: bool) -> bool {
 /// `.json`), which `drawing.create` reads as its template (#22120). It may serve either kind.
 pub(crate) fn is_template_file(name: &str) -> bool {
     const MAX_PATH_BYTES: usize = 4096;
-    let extension = std::path::Path::new(name.trim()).extension();
+    // The path as saved and as `drawing.create` reads it: a trailing space is no `.scdwg`.
+    let extension = std::path::Path::new(name).extension();
     !name.trim().is_empty()
         && name.len() <= MAX_PATH_BYTES
         && extension.is_some_and(|e| e.eq_ignore_ascii_case("scdwg") || e.eq_ignore_ascii_case("json"))
@@ -12258,8 +12259,17 @@ mod tests {
     #[test]
     fn new_drawings_start_from_a_preferred_template_file() {
         use solidcraft_engine::geom::drawing_sheet::{PaperSize, SheetSize};
-        let dir = std::env::temp_dir().join(format!("solidcraft-template-pref-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        // A folder of this run's own, removed even when an assertion fails.
+        struct Scratch(std::path::PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default();
+        let scratch = Scratch(std::env::temp_dir().join(format!("solidcraft-template-pref-{}-{stamp}", std::process::id())));
+        std::fs::create_dir(&scratch.0).unwrap();
+        let dir = scratch.0.clone();
         let file = dir.join("Shop A1.scdwg").to_string_lossy().into_owned();
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
@@ -12283,7 +12293,38 @@ mod tests {
         let refused = app.run("drawing.create", json!({})).unwrap_err();
         assert!(refused.contains("gone.scdwg"), "{refused}");
         assert_eq!(lenient(&json!({"part_drawing_template": gone})).part_drawing_template, gone, "kept while it can't be read");
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(set(&mut app, &json!({"part_drawing_template": format!("{file} ")})).is_err(), "as drawing.create would read it");
+    }
+
+    /// #22132 review: a template file chosen after Preferences was closed (Cancel or OK while the
+    /// Choose File dialog was still open) changes nothing; chosen while it is open, it is the row's.
+    #[test]
+    fn a_template_file_chosen_after_preferences_closed_is_ignored() {
+        let mut h = crate::scenario::Harness::new();
+        let answer = std::rc::Rc::new(std::cell::RefCell::new(None::<Option<String>>));
+        let response = answer.clone();
+        h.app.services.pick_open = Some(Box::new(move |_: &[&str]| {
+            let response = response.clone();
+            Box::pin(std::future::poll_fn(move |_| response.borrow_mut().take().map_or(std::task::Poll::Pending, std::task::Poll::Ready)))
+        }));
+        let file = h.dir.join("Shop A3.scdwg").to_string_lossy().into_owned();
+        let built_in = h.app.preferences.part_drawing_template.clone();
+        for close in [Some("cancel"), Some("ok"), None] {
+            h.call("ui.prefs", json!({"open": "Design"}));
+            h.frames(3);
+            h.step(&json!({"widget": "Choose File…"})).unwrap();
+            h.frames(2);
+            assert!(h.app.file_picker_busy(), "the picker waits");
+            if let Some(button) = close {
+                h.call("ui.prefs", json!({"button": button}));
+            }
+            *answer.borrow_mut() = Some(Some(file.clone()));
+            crate::file_picker::tick(&mut h.app, &h.ctx);
+            match close {
+                Some(button) => assert_eq!(h.app.preferences.part_drawing_template, built_in, "after {button}"),
+                None => assert_eq!(h.app.preferences.part_drawing_template, file, "while open"),
+            }
+        }
     }
 
     /// A new drawing is set in the interface font when that is a family, and in the built-in font
