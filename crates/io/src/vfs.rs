@@ -846,6 +846,12 @@ pub fn allowing_hosts<T>(hosts: &[String], f: impl FnOnce() -> T) -> T {
     f()
 }
 
+/// The network hosts temporarily allowed on this thread via [`allowing_hosts`], to propagate to
+/// worker threads started for the same action.
+pub fn current_allowed_hosts() -> Vec<String> {
+    ONCE_HOSTS.with(|h| h.borrow().clone())
+}
+
 /// The network host of a path, when it names one (`\\host\share\x` → `host`).
 pub fn network_host(path: &str) -> Option<String> {
     match remote(path) {

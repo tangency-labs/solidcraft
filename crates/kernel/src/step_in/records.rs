@@ -280,6 +280,9 @@ pub(crate) fn records_import_with_workers(records: &ImportRecords, workers: usiz
             hidden: r.hidden,
         });
     }
+    if crate::watch::cancelled() {
+        return Err(crate::watch::cancelled_error("import"));
+    }
     Ok(StepImport {
         tree: renumbered(&records.tree, &kept, &bodies),
         bodies,

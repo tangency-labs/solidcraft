@@ -329,9 +329,12 @@ pub(super) fn prefetch_components(
     if cores <= 1 {
         return PrefetchedComponents::default();
     }
-    // Sheet metal features and body transfers can alter global sheet state or cross-component
-    // ownership; leave those timelines to sequential evaluation.
-    if doc.features.iter().take(limit).any(|f| !f.suppressed && (f.kind.is_sheet() || matches!(f.kind, FeatureKind::BodyTransfer { .. }))) {
+    // Sheet metal features, body transfers, and capture-position timelines can alter global sheet
+    // state, cross-component ownership, or mid-timeline occurrence transforms; leave those
+    // timelines to sequential evaluation.
+    if doc.has_capture_position_timeline()
+        || doc.features.iter().take(limit).any(|f| !f.suppressed && (f.kind.is_sheet() || matches!(f.kind, FeatureKind::BodyTransfer { .. })))
+    {
         return PrefetchedComponents::default();
     }
     // Find the earliest potentially cold feature index.

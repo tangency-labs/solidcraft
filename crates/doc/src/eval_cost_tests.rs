@@ -172,38 +172,75 @@ pub(crate) fn measure<R>(f: impl FnOnce() -> R) -> (R, Counts) {
 
 /// Add `delta` to this thread's [`Counts`].
 pub(crate) fn add(delta: Counts) {
+    let Counts {
+        moved,
+        digested,
+        imports_read,
+        cam_meshes,
+        mesh_digested,
+        joint_faces,
+        faces_at,
+        measures,
+        body_searches,
+        feature_searches,
+        cut,
+        cylinder_search,
+        tapped_wall,
+        miss_intersects,
+        cut_tools,
+        apart_unions,
+        surfaces,
+        flats,
+        joined_apart,
+        kept_checks,
+        detached_checks,
+        reused_checks,
+        thread_cuts,
+        grouped_thread_fallbacks,
+        hole_tools,
+        run_on_probes,
+        tight_boxes,
+        blends,
+        fit_searches,
+        classifications,
+        hole_points,
+        contact_tests,
+        join_unions,
+    } = delta;
     count(|c| {
-        c.moved += delta.moved;
-        c.digested += delta.digested;
-        c.imports_read += delta.imports_read;
-        c.cam_meshes += delta.cam_meshes;
-        c.mesh_digested += delta.mesh_digested;
-        c.joint_faces += delta.joint_faces;
-        c.faces_at += delta.faces_at;
-        c.measures += delta.measures;
-        c.body_searches += delta.body_searches;
-        c.feature_searches += delta.feature_searches;
-        c.cut += delta.cut;
-        c.cylinder_search += delta.cylinder_search;
-        c.tapped_wall += delta.tapped_wall;
-        c.miss_intersects += delta.miss_intersects;
-        c.cut_tools += delta.cut_tools;
-        c.apart_unions += delta.apart_unions;
-        c.surfaces += delta.surfaces;
-        c.flats += delta.flats;
-        c.joined_apart += delta.joined_apart;
-        c.kept_checks += delta.kept_checks;
-        c.detached_checks += delta.detached_checks;
-        c.reused_checks += delta.reused_checks;
-        c.thread_cuts += delta.thread_cuts;
-        c.grouped_thread_fallbacks += delta.grouped_thread_fallbacks;
-        c.hole_tools += delta.hole_tools;
-        c.tight_boxes += delta.tight_boxes;
-        c.blends += delta.blends;
-        c.fit_searches += delta.fit_searches;
-        c.classifications += delta.classifications;
-        c.hole_points += delta.hole_points;
-        c.contact_tests += delta.contact_tests;
+        c.moved += moved;
+        c.digested += digested;
+        c.imports_read += imports_read;
+        c.cam_meshes += cam_meshes;
+        c.mesh_digested += mesh_digested;
+        c.joint_faces += joint_faces;
+        c.faces_at += faces_at;
+        c.measures += measures;
+        c.body_searches += body_searches;
+        c.feature_searches += feature_searches;
+        c.cut += cut;
+        c.cylinder_search += cylinder_search;
+        c.tapped_wall += tapped_wall;
+        c.miss_intersects += miss_intersects;
+        c.cut_tools += cut_tools;
+        c.apart_unions += apart_unions;
+        c.surfaces += surfaces;
+        c.flats += flats;
+        c.joined_apart += joined_apart;
+        c.kept_checks += kept_checks;
+        c.detached_checks += detached_checks;
+        c.reused_checks += reused_checks;
+        c.thread_cuts += thread_cuts;
+        c.grouped_thread_fallbacks += grouped_thread_fallbacks;
+        c.hole_tools += hole_tools;
+        c.run_on_probes += run_on_probes;
+        c.tight_boxes += tight_boxes;
+        c.blends += blends;
+        c.fit_searches += fit_searches;
+        c.classifications += classifications;
+        c.hole_points += hole_points;
+        c.contact_tests += contact_tests;
+        c.join_unions += join_unions;
     });
 }
 
