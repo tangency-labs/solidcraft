@@ -1150,8 +1150,52 @@ pub fn no_window_message(error: &str, settings: Option<&Path>) -> String {
     )
 }
 
+/// The path a `file:` URL names: a desktop entry's `%u` hands local files over this way on some
+/// desktops. Only `file:///path` and `file://localhost/path`; `None` for anything else (another
+/// host, a bad escape, text that isn't UTF-8).
+pub fn file_url_path(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("file://")?;
+    let path = rest.strip_prefix("localhost").unwrap_or(rest);
+    if !path.starts_with('/') || path.contains(['?', '#']) {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(path.len());
+    let mut it = path.bytes();
+    while let Some(b) = it.next() {
+        if b == b'%' {
+            let hex = [it.next()?, it.next()?];
+            bytes.push(u8::from_str_radix(std::str::from_utf8(&hex).ok()?, 16).ok()?);
+        } else {
+            bytes.push(b);
+        }
+    }
+    if bytes.contains(&0) {
+        return None;
+    }
+    let path = String::from_utf8(bytes).ok()?;
+    // Windows: `file:///C:/designs/part.sc` names `C:/designs/part.sc`.
+    let drive = path.as_bytes().get(1..3).is_some_and(|d| d.first().is_some_and(u8::is_ascii_alphabetic) && d.get(1) == Some(&b':'));
+    Some(if cfg!(windows) && drive { path.get(1..).unwrap_or(&path).to_string() } else { path })
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn file_urls_name_local_paths() {
+        use super::file_url_path;
+        assert_eq!(file_url_path("file:///home/me/My%20part.sc").as_deref(), Some("/home/me/My part.sc"));
+        assert_eq!(file_url_path("file://localhost/tmp/a.step").as_deref(), Some("/tmp/a.step"));
+        assert_eq!(file_url_path("file:///tmp/%C3%A9.sc").as_deref(), Some("/tmp/é.sc"));
+        assert_eq!(file_url_path("file://server/share/a.sc"), None);
+        assert_eq!(file_url_path("file:///tmp/a%2"), None);
+        assert_eq!(file_url_path("file:///tmp/a%00.sc"), None);
+        assert_eq!(file_url_path("file:///tmp/a.sc?x"), None);
+        assert_eq!(file_url_path("https://example.com/a.sc"), None);
+        if cfg!(windows) {
+            assert_eq!(file_url_path("file:///C:/designs/a.sc").as_deref(), Some("C:/designs/a.sc"));
+        }
+    }
+
     use super::*;
 
     fn cards() -> Vec<AdapterChoice> {

@@ -142,7 +142,7 @@ integrate() {
     else
       icon_sed='s|^Icon=.*|Icon='"$DESK_ID"'|'
     fi
-    if { sed -e "s|^Exec=.*|Exec=\"$esc\" %F|" -e '/^TryExec=/d' -e "$icon_sed" "$src_desktop" 2>/dev/null; printf '%s\n' "$DESK_MARKER"; } >"$tmp"; then
+    if { sed -e "s|^Exec=.*|Exec=\"$esc\" %U|" -e '/^TryExec=/d' -e "$icon_sed" "$src_desktop" 2>/dev/null; printf '%s\n' "$DESK_MARKER"; } >"$tmp"; then
       if cmp -s "$tmp" "$target"; then
         rm -f "$tmp"
       else

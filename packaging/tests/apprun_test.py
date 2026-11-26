@@ -102,7 +102,19 @@ class AppRunCli(unittest.TestCase):
         self.run_apprun()
         entry = (self.home / ".local/share/applications/io.tangencylabs.solidcraft.desktop").read_text()
         self.assertIn("X-SolidCraft-Generated=true", entry)
-        self.assertIn(f'Exec="{self.image}" %F', entry)
+        self.assertIn(f'Exec="{self.image}" %U', entry)
+
+    def test_generated_entry_handles_workshop_links(self):
+        # The shipped entry registers solidcraft:// (Workshop links); the AppImage's entry keeps it
+        # and passes the link as %U.
+        shipped = (Path(__file__).resolve().parents[2] / "assets/platforms/linux/io.tangencylabs.solidcraft.desktop").read_text()
+        self.assertIn("x-scheme-handler/solidcraft;", shipped)
+        self.assertIn("Exec=solidcraft %u\n", shipped)
+        (self.appdir / "usr/share/applications/io.tangencylabs.solidcraft.desktop").write_text(shipped)
+        self.run_apprun()
+        entry = (self.home / ".local/share/applications/io.tangencylabs.solidcraft.desktop").read_text()
+        self.assertIn("x-scheme-handler/solidcraft;", entry)
+        self.assertIn(f'Exec="{self.image}" %U', entry)
 
     def test_unmarked_entry_is_never_rewritten(self):
         # A user-edited entry (no marker) survives untouched, even when the AppImage

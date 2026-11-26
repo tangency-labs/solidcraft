@@ -7,7 +7,7 @@ GenericName=3D CAD
 GenericName[ru]=3D САПР
 Comment=Parametric 3D CAD
 Comment[ru]=Параметрическая 3D САПР
-Exec=solidcraft %f
+Exec=solidcraft %u
 TryExec=solidcraft
 Icon=io.tangencylabs.solidcraft
 Terminal=false
@@ -16,6 +16,6 @@ StartupWMClass=io.tangencylabs.solidcraft
 Categories=Graphics;3DGraphics;Engineering;
 Keywords=cad;3d;parametric;sketch;step;stl;modelling;modeling;
 Keywords[ru]=cad;сапр;3d;параметрический;эскиз;step;stl;моделирование;
-MimeType=application/x-solidcraft;model/step;model/iges;model/stl;model/3mf;
+MimeType=application/x-solidcraft;model/step;model/iges;model/stl;model/3mf;x-scheme-handler/solidcraft;
 # Desktop ids of earlier releases; launchers keep pinned entries across the renames.
 X-Flatpak-RenamedFrom=ai.storyteller.solidcraft.desktop;
