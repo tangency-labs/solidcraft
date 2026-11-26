@@ -432,6 +432,27 @@ fn curve_replica_is_its_parent_moved_and_scaled() {
     at_curve(&l, 1.0, [5.0, 6.0, 0.0]);
 }
 
+/// Some writers leave the operator's description out, writing `('',axis1,axis2,local_origin,
+/// scale,axis3)` (#2340): TURNED written that way is the same replica, and an operator with no
+/// axes, or with the global ones, moves the parent by its origin, whichever way it is written.
+#[test]
+fn curve_replica_reads_an_operator_written_without_its_description() {
+    let short = "#20=CARTESIAN_POINT('',(5.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('',#5,$,#20,2.,#2);";
+    let c = curve(&format!("{short}#10=CIRCLE('',#4,10.);#11=CURVE_REPLICA('',#10,#21);"), 11, MM);
+    at_curve(&c, 0.0, [5.0, 20.0, 0.0]);
+    at_curve(&c, FRAC_PI_2, [-15.0, 0.0, 0.0]);
+    for op in ["('','',$,$,#20,$,$)", "('',$,$,#20,$,$)", "('','',#3,#5,#20,1.,#2)", "('',#3,#5,#20,1.,#2)"] {
+        let l = curve(
+            &format!(
+                "#20=CARTESIAN_POINT('',(5.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D{op};#10=LINE('',#1,#12);#12=VECTOR('',#3,3.);#11=CURVE_REPLICA('',#10,#21);"
+            ),
+            11,
+            MM,
+        );
+        at_curve(&l, 1.0, [8.0, 0.0, 0.0]);
+    }
+}
+
 #[test]
 fn curve_replica_scales_its_placement_with_the_file_units() {
     let inches = Units { len: 25.4, ang: 1.0 };

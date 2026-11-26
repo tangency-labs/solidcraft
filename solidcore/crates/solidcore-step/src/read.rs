@@ -370,13 +370,11 @@ impl<'a> Reader<'a> {
         if e.name() != "CARTESIAN_TRANSFORMATION_OPERATOR_3D" {
             return Err(format!("not supported yet: transformation {}", e.name()));
         }
-        // (name, description, axis1, axis2, local_origin, scale, axis3): the entity inherits a name
-        // from representation_item and a name and description from the functionally defined
-        // transformation.
-        let p = e.params();
+        // (axis1, axis2, local_origin, scale, axis3), after the name and the description when written.
+        let p = solidcore_record::step::product::operator_attributes(e);
         let axis = |i: usize| p.get(i).and_then(Param::as_ref_id).map(|d| self.direction(d)).transpose();
-        let z = axis(6)?.unwrap_or([0.0, 0.0, 1.0]);
-        let x = match axis(2)? {
+        let z = axis(4)?.unwrap_or([0.0, 0.0, 1.0]);
+        let x = match axis(0)? {
             Some(a) => sub(a, scale(z, dot(a, z))),
             None => {
                 let a = if z == [0.0, 0.0, 1.0] { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] };
@@ -385,11 +383,11 @@ impl<'a> Reader<'a> {
         };
         let x = unit(x, &format!("#{id} axes"))?;
         let mut y = cross(z, x);
-        if axis(3)?.is_some_and(|a| dot(a, y) < 0.0) {
+        if axis(1)?.is_some_and(|a| dot(a, y) < 0.0) {
             y = scale(y, -1.0);
         }
-        let origin = self.point(reference(p.get(4), "transformation origin")?)?;
-        let k = match p.get(5) {
+        let origin = self.point(reference(p.get(2), "transformation origin")?)?;
+        let k = match p.get(3) {
             Some(v) if v.as_f64().is_some() => num(Some(v), "transformation scale")?,
             _ => 1.0,
         };
