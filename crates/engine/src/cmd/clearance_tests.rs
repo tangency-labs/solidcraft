@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::Session;
 
@@ -612,7 +612,7 @@ fn unchecked_pairs_are_excluded_from_nearest() {
     use solidcore_record::Vec3;
     use solidcraft_geom::Aabb3;
 
-    use super::{collect_pair_results, PairContext, PairResult};
+    use super::{PairContext, PairResult, collect_pair_results};
 
     let bx = |x0: f64, x1: f64| Aabb3 { min: Vec3::new(x0, 0.0, 0.0), max: Vec3::new(x1, 10.0, 10.0) };
     // A overlaps B and D (both unchecked) and sits 5 mm clear of C; B touches C (0 mm) and D.
@@ -1061,7 +1061,7 @@ fn unchecked_pair_carries_non_boolean_distance_while_staying_excluded_from_neare
     use solidcraft_geom::Aabb3;
     use solidcraft_kernel::BodyDistance;
 
-    use super::{collect_pair_results, PairContext, PairResult};
+    use super::{PairContext, PairResult, collect_pair_results};
 
     let bx = |x0: f64, x1: f64| Aabb3 { min: Vec3::new(x0, 0.0, 0.0), max: Vec3::new(x1, 10.0, 10.0) };
     let names = ["A", "B", "C", "D"];
@@ -1106,8 +1106,8 @@ fn unchecked_pair_carries_non_boolean_distance_while_staying_excluded_from_neare
 #[test]
 fn memory_policy_scales_concurrency_chunks_and_refuses_below_headroom_floor() {
     use super::{
-        check_memory_headroom, chunk_size_for_memory, clearance_worker_limit, shape_cache_budget, DEFAULT_CHUNK_PAIRS, MAX_CLEARANCE_THREADS,
-        MAX_SHAPE_CACHE_BYTES, MIN_HEADROOM_BYTES, MIN_SHAPE_CACHE_BYTES,
+        DEFAULT_CHUNK_PAIRS, MAX_CLEARANCE_THREADS, MAX_SHAPE_CACHE_BYTES, MIN_HEADROOM_BYTES, MIN_SHAPE_CACHE_BYTES, check_memory_headroom,
+        chunk_size_for_memory, clearance_worker_limit, shape_cache_budget,
     };
 
     const GB: u64 = 1 << 30;
