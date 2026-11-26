@@ -1,0 +1,12 @@
+Updates: WR-255
+
+#### WR-255 (update, 2026-11-23). `uv_trim_corner_end_points_only` is removed; only the trims' end control points move
+
+`topology::face::p2::fix_uv_trim_curves` (upstream `sm_FixUVTrimCurves`) now always closes a face's corner UV gap by moving the two trims' ends onto the vertex's UV point (`edit_end_point`, spread over the control points next to the end as since the 2026-11-17 addendum). Upstream's path, a drop of the vertex onto each trim, a `Trim` at the drop parameter and an `EditParameterization` back over the old interval, is deleted with the flag: it slid every interior parameter of the trim off its edge's. Removed: the `Kernel::fixes` field, its doc file and name, SolidCraft's preset line, the old branch and its helpers, the flag lines in six integration tests, and the p2 unit test of the old default path. The spread test now runs the one path and asserts its bound unconditionally.
+
+- **Goldens:** 24 rows move in 7 units, each recorded in `trim_tolerance_main.tsv`:
+  - `topology.face_p3` 11, `topology.brep_p3` 4 and `topology.face_p2` 1 record the trims themselves. `uvtc_trim_rows` (goldens lib) replays each row and certifies every UV trim of the B-rep it records on its edge within the edge's tolerance (`trims_on_edges::certify_brep`, a rounded-interval bound both ways).
+  - `blend.feature_executive` 2 (`single_face_fillet1019_6`, `single_face_fillet1019_8`) and `topology.brep_local_operation` 1 (`gen0059`, its record's UV trim blocks only) are `operand_trim_rows` rows: every trim is certified on its edge and level 2 is checked against main's.
+  - `blend.fillet_executive_p3` 4: every moved mass entry is classified EQUAL against a certified enclosure (`tests/uvtc_moved_rows_are_classified.rs`).
+  - `corpus.parity` 1, `Fillet/sphere_diff_3cylinders.smb` (`tests/uvtc_corpus_row.rs`): `area` and `rt_area` are EQUAL against certified enclosures; `volume` and `rt_volume` move by one unit in the last place and are EQUAL inside an enclosure that reaches its cell budget wider than the corpus accuracy. `check` and `rt_check` stay main's: the drop tracer's clamped-sliver rule (#21353) leaves out edge 24's one-point first knot span, on which the end move alone would add three check lines.
+- **Heal:** the two `vase3` faces whose trims move are enclosed on the measured body (`heal_edge_tolerance_covers_edge_face_gap.rs`, `UVTC_AREA_CLASSES`); both areas lie inside each enclosure.

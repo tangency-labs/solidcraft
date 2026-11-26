@@ -3293,6 +3293,7 @@ fn a_flange_lays_its_sheet_out_once() {
         corner_relief_shape: None,
         corner_relief: None,
         height_from: None,
+        bend_relief_shape: None,
     };
     for p in [Vec3::new(75.0, 0.0, 2.5), Vec3::new(75.0, 100.0, 2.5), Vec3::new(0.0, 50.0, 2.5), Vec3::new(150.0, 50.0, 2.5)] {
         // The pick is named as the engine names it, on the model as it is.

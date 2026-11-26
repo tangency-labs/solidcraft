@@ -4,7 +4,7 @@
 //! [`LapOps`]), beads and contours, and the cubic pieces a curve is carried into the flat by
 //! ([`hermite`]). A fold, a bend in space and a smooth piece hold the kernel's own form.
 
-use solidcore_record::develop::{Bead, BeadForm, BeadOutline, Bend, Development, Lap, Mismatch, Rigid2, Rigid3, Sheet, Surface};
+use solidcore_record::develop::{Anchor, Bead, BeadForm, BeadOutline, Bend, Development, Lap, Mismatch, Rigid2, Rigid3, Sheet, Surface};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel_api::OpKind;
 use solidcraft_kernel_api::develop::Develop;
@@ -63,6 +63,16 @@ pub fn crossings(a: &[Seg2], b: &[Seg2]) -> Vec<(usize, f64, usize, f64, Vec2)> 
 /// The kernel's refusal, as its kind.
 pub fn offset_contour(segs: &[Seg2], depth: f64, thickness: f64, flip: bool, smooth: f64) -> Result<Vec<Seg2>, ContourRefusal> {
     kernel().offset_contour(segs, depth, thickness, flip, smooth)
+}
+
+/// Where the flat is cut at one end of a bend's zone that a tear relief parts: along the zone's
+/// end from `from` toward `to`, from `depth` back inside the panel that runs on out to the
+/// farthest corner of the ending panel's `outline` on the line square to its anchor `ends` at
+/// `at`, that panel laid in the flat by `place`. `None` when the zone's end has no way or no
+/// corner reaches past `from`.
+#[must_use]
+pub fn tear_slit(from: Vec2, to: Vec2, depth: f64, ends: &Anchor, at: f64, outline: &Loop2, place: &Rigid2) -> Option<[Vec2; 2]> {
+    kernel().tear_slit(from, to, depth, ends, at, outline, place)
 }
 
 /// A curve through `points` in order: a line where they lie on one, else a clamped cubic spline

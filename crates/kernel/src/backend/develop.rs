@@ -6,7 +6,7 @@
 use solidcore_ops::develop as ops;
 use solidcore_ops::develop::{BendOps as _, LapOps as _, Rigid2Ops as _, Rigid3Ops as _};
 use solidcore_record::brep::Curve;
-use solidcore_record::develop::{Bead, BeadForm, BeadOutline, Bend, Development, Lap, Rigid2, Rigid3, Sheet, Surface};
+use solidcore_record::develop::{Anchor, Bead, BeadForm, BeadOutline, Bend, Development, Lap, Rigid2, Rigid3, Sheet, Surface};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel_api::develop::{BeadAgainst, BeadRefusal, ContourRefusal, Develop, Folded, JointRefusal, PanelRefusal, Refusal, RuleRefusal};
 
@@ -128,6 +128,10 @@ impl Develop for Solidcore {
 
     fn offset_contour(&self, segs: &[Seg2], depth: f64, thickness: f64, flip: bool, smooth: f64) -> Result<Vec<Seg2>, ContourRefusal> {
         ops::offset_contour(segs, depth, thickness, flip, smooth).map_err(contour_refusal)
+    }
+
+    fn tear_slit(&self, from: Vec2, to: Vec2, depth: f64, ends: &Anchor, at: f64, outline: &Loop2, place: &Rigid2) -> Option<[Vec2; 2]> {
+        ops::tear_slit(from, to, depth, ends, at, outline, place)
     }
 
     fn curve_through(&self, points: &[Vec2]) -> Vec<Seg2> {

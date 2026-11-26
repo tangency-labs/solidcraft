@@ -6,7 +6,7 @@
 //! by the router; the refusals are mirrored here.
 
 use solidcore_record::brep::Curve;
-use solidcore_record::develop::{Bead, BeadForm, BeadOutline, Bend, Development, Lap, Mismatch, Rigid2, Rigid3, Sheet, Surface};
+use solidcore_record::develop::{Anchor, Bead, BeadForm, BeadOutline, Bend, Development, Lap, Mismatch, Rigid2, Rigid3, Sheet, Surface};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 
 use crate::Backend;
@@ -251,6 +251,12 @@ pub trait Develop: Backend {
     /// right of the travel, or left when `flip`; corners turning less than `smooth` radians meet on
     /// the common normal.
     fn offset_contour(&self, segs: &[Seg2], depth: f64, thickness: f64, flip: bool, smooth: f64) -> Result<Vec<Seg2>, ContourRefusal>;
+    /// Where the flat is cut at one end of a bend's zone that a tear relief parts: along the zone's
+    /// end from `from` toward `to`, from `depth` back inside the panel that runs on out to the
+    /// farthest corner of the ending panel's `outline` on the line square to its anchor `ends` at
+    /// `at`, that panel laid in the flat by `place`. `None` when the zone's end has no way or no
+    /// corner reaches past `from`.
+    fn tear_slit(&self, from: Vec2, to: Vec2, depth: f64, ends: &Anchor, at: f64, outline: &Loop2, place: &Rigid2) -> Option<[Vec2; 2]>;
     /// A curve through `points` in order: a line where they lie on one, else a clamped cubic spline
     /// through each.
     fn curve_through(&self, points: &[Vec2]) -> Vec<Seg2>;

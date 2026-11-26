@@ -775,6 +775,55 @@ fn entries_share_field_definitions_through_defs_and_ref() {
 }
 
 #[test]
+fn dialog_layout_annotations_are_checked_at_load() {
+    let with = |root: Value, extra: Value| {
+        let mut schema = json!({"type":"object","properties":{
+            "units":{"type":"string","enum":["mm","in"]},
+            "width":{"type":"number"}
+        }});
+        for (key, value) in root.as_object().unwrap() {
+            schema[key] = value.clone();
+        }
+        for (key, value) in extra.as_object().unwrap() {
+            schema["properties"]["width"][key] = value.clone();
+        }
+        let mut value = manifest();
+        value["runtime"]["entries"] = json!([{"name":"make","input_schema":schema}]);
+        parse(&value)
+    };
+    let ok = json!({"x-solidcraft-section":"Size","x-solidcraft-unit-from":"units","x-solidcraft-help":"https://example.com/size"});
+    let entry = with(json!({"x-solidcraft-sections":"collapsible"}), ok).unwrap().runtime.unwrap().entries.remove(0);
+    assert_eq!(entry.input_schema["properties"]["width"]["x-solidcraft-unit-from"], "units", "annotations reach the dialog unchanged");
+    assert!(with(json!({}), json!({"x-solidcraft-section":""})).is_ok(), "an empty heading is a divider");
+    let refused =
+        |root: Value, extra: Value, key: &str| matches!(with(root, extra), Err(HostError::InvalidManifest { field, .. }) if field.ends_with(key));
+    assert!(refused(json!({"x-solidcraft-sections":"tabs"}), json!({}), "x-solidcraft-sections"));
+    assert!(refused(json!({}), json!({"x-solidcraft-section":7}), "x-solidcraft-section"));
+    assert!(refused(json!({}), json!({"x-solidcraft-section":"x".repeat(81)}), "x-solidcraft-section"));
+    for source in [json!("missing"), json!("width"), json!(1)] {
+        assert!(refused(json!({}), json!({"x-solidcraft-unit-from":source}), "x-solidcraft-unit-from"), "{source}");
+    }
+    for url in ["https://example.com/docs#x", "https://docs.example.com:8443/a?b=1"] {
+        assert!(layout::help_url(url), "{url}");
+    }
+    // Documentation links name a domain: IP literals are refused by design.
+    for url in [
+        "https://[not-an-ip]/",
+        "https://[::1]/",
+        "https://127.0.0.1/",
+        "https://user@#topic",
+        "https://:443/",
+        "https://#topic",
+        "https://",
+        "http://example.com",
+        "https://example.com/a b",
+        "javascript:alert(1)",
+    ] {
+        assert!(refused(json!({}), json!({"x-solidcraft-help":url}), "x-solidcraft-help"), "{url}");
+    }
+}
+
+#[test]
 fn host_limits_have_typed_failures() {
     let limits = HostLimits::default();
     assert!(limits.check(&Limits::default()).is_ok());

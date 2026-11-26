@@ -357,7 +357,7 @@ fn snapshot(name: &str, mesh: &Mesh, colour: Option<[u8; 3]>, faces: &BTreeMap<u
 /// The menu a right-click on the view navigator opens: Axes and Custom, the current one
 /// marked. Custom opens the Custom View Navigator panel, which sets it on OK.
 pub(crate) fn menu_items(app: &SolveApp) -> Vec<Item> {
-    NavigatorStyle::ALL
+    let mut items: Vec<Item> = NavigatorStyle::ALL
         .into_iter()
         .map(|style| {
             let (label, icon) = match style {
@@ -370,7 +370,20 @@ pub(crate) fn menu_items(app: &SolveApp) -> Vec<Item> {
                 ""
             })
         })
-        .collect()
+        .collect();
+    // The design's own Home view (#19972): the camera as it is now, and back to the iso view.
+    items.push(Item::sep());
+    items.push(act("ui.setHome", "Set Current View as Home", "home"));
+    items.push(crate::context_menu::cmd(app, "view.reset_home", "Reset Home View"));
+    items
+}
+
+/// Make the camera as it is now the design's Home view (`view.set_home`).
+pub(crate) fn set_home(app: &mut SolveApp) {
+    let done = serde_json::to_value(app.cam).map_err(|e| e.to_string()).and_then(|camera| app.run("view.set_home", json!({ "camera": camera })));
+    if let Err(e) = done {
+        app.set_status(e, true);
+    }
 }
 
 /// A menu pick: Axes at once; Custom opens its panel, as the toolbar would.
@@ -812,7 +825,7 @@ mod tests {
             }
             let rows = items(&h.app, &Target::ViewGizmo);
             let labels: Vec<_> = rows.iter().map(|r| r.label.as_str()).collect();
-            assert_eq!(labels, ["Axes", "Custom"], "just the two types");
+            assert_eq!(labels, ["Axes", "Custom", "", "Set Current View as Home", "Reset Home View"], "the two types, then Home");
             let current: Vec<_> = rows.iter().filter(|i| i.shortcut == "current").collect();
             assert_eq!(current.len(), 1);
             assert_eq!(current[0].params.as_ref().map(|p| p["style"].clone()), Some(json!(from)));
@@ -822,6 +835,54 @@ mod tests {
         }
         assert_eq!(h.app.session.doc.to_json(), design);
         assert!(!h.app.session.has_selection(), "a right-click on the navigator selects nothing");
+    }
+
+    /// The navigator's menu sets the camera as it is now as the design's Home view, and Home goes
+    /// there instead of framing the model from the iso view, until Reset Home View (#19972).
+    #[test]
+    fn the_navigator_menu_sets_and_resets_the_home_view() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10})).unwrap();
+        h.frames(2);
+        let menu = |h: &mut crate::scenario::Harness| {
+            crate::context_menu::close(&mut h.app);
+            let c = crate::scenario::rect_of("axis_view:outer").expect("the navigator is shown").center();
+            h.call("ui.click", json!({"x": c.x, "y": c.y, "button": "right"}));
+        };
+        let home = |h: &mut crate::scenario::Harness| {
+            h.app.run("view.home", json!({})).unwrap();
+            h.frames(30);
+            h.app.cam
+        };
+        let framed = home(&mut h);
+        menu(&mut h);
+        let reset = crate::context_menu::items(&h.app, &crate::context_menu::Target::ViewGizmo);
+        assert!(reset.iter().any(|i| i.label == "Reset Home View" && !i.enabled), "nothing to reset yet");
+
+        h.app.cam.yaw = 1.1;
+        h.app.cam.pitch = -0.4;
+        h.app.cam.distance = 333.0;
+        let chosen = h.app.cam;
+        menu(&mut h);
+        assert_eq!(h.call("ui.menuPick", json!({"item": "Set Current View as Home"}))["ok"], true);
+        assert!(h.app.session.doc.home_view.is_some(), "kept with the design");
+        h.app.cam.yaw = -2.0;
+        let back = home(&mut h);
+        assert_eq!((back.yaw, back.pitch, back.distance), (chosen.yaw, chosen.pitch, chosen.distance), "Home goes to the chosen view, not fitted");
+        h.app.cam.yaw = -2.0;
+        h.call("ui.view", json!({"view": "home"}));
+        assert_eq!(
+            (h.app.cam.yaw, h.app.cam.pitch, h.app.cam.distance),
+            (chosen.yaw, chosen.pitch, chosen.distance),
+            "the control channel's Home too"
+        );
+
+        menu(&mut h);
+        assert_eq!(h.call("ui.menuPick", json!({"item": "Reset Home View"}))["ok"], true);
+        assert!(h.app.session.doc.home_view.is_none());
+        let again = home(&mut h);
+        assert_eq!((again.yaw, again.pitch, again.distance), (framed.yaw, framed.pitch, framed.distance), "the iso view framing the model again");
     }
 
     #[test]

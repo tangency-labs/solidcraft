@@ -1100,6 +1100,7 @@ fn run_rust_case(i: &Inputs) -> Result<Output, HarnessError> {
                     out.extend([0.0; 6]);
                 }
             }
+            crate::dump::body(&k, "uv_trims", &b);
             put_tols(&b, &mut out);
             put_use_states(&b, &mut out);
             for (_, eu) in b.edgeuses().iter() {
