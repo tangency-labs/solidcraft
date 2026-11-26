@@ -1533,19 +1533,12 @@ fn classify_remaining(
     Ok(())
 }
 
-fn unique<T: Copy + PartialEq>(values: &mut Vec<T>) {
+fn unique<T: Copy + Ord>(values: &mut Vec<T>) {
     // SmTArray::RemoveDuplicates retains the LAST occurrence of each entry.
     // Reverse/retain/reverse preserves precisely that order without pointer sort.
-    let mut seen = Vec::new();
+    let mut seen = BTreeSet::new();
     values.reverse();
-    values.retain(|v| {
-        if seen.contains(v) {
-            false
-        } else {
-            seen.push(*v);
-            true
-        }
-    });
+    values.retain(|v| seen.insert(*v));
     values.reverse();
 }
 
@@ -1565,16 +1558,18 @@ fn repair_lists(
     }
     let actual = bp::faces(primary, None)?;
     if actual.len() as i128 - faces.keep.len() as i128 - faces.delete.len() as i128 != 0 {
-        faces.keep.retain(|f| actual.contains(f));
-        faces.delete.retain(|f| actual.contains(f));
+        let actual_set: BTreeSet<FaceId> = actual.into_iter().collect();
+        faces.keep.retain(|f| actual_set.contains(f));
+        faces.delete.retain(|f| actual_set.contains(f));
     }
     let actual = bp::faces(other, None)?;
     if operation != BooleanOperation::PartialMerge
         && actual.len() as i128 - faces.other_keep.len() as i128 - faces.other_delete.len() as i128
             != 0
     {
-        faces.other_keep.retain(|f| actual.contains(f));
-        faces.other_delete.retain(|f| actual.contains(f));
+        let actual_set: BTreeSet<FaceId> = actual.into_iter().collect();
+        faces.other_keep.retain(|f| actual_set.contains(f));
+        faces.other_delete.retain(|f| actual_set.contains(f));
     }
     // Confused/duplicate lists only emit SE_MSG upstream; they do not fail.
     Ok(())

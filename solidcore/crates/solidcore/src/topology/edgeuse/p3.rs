@@ -1863,13 +1863,14 @@ pub(crate) fn trim_raise_distance(
     // healer raised to cover a gap leaves them as they are, as it leaves the fit)
     let fit = fit_tolerance(k, b, e)?;
     // (a bound at most half the tolerance raises nothing, whatever its value: the bisection
-    // stops tightening it there; any other is the whole bisection's, not stopped at a cutoff,
-    // so a loose enclosure is tightened as far as it goes before the edge is raised to it)
-    let raise_by =
-        match trim_deviation_bound(k, b, eu, trim, fit, [0.5 * tol, f64::INFINITY], None)? {
-            Some(bound) if bound.is_finite() => bound,
-            _ => return Ok(upstream),
-        };
+    // stops tightening it there; a bound strictly above both `2 * upstream` and the check's
+    // edge tolerance limit falls back to `upstream` at line 1877 anyway, so `over` cuts off
+    // early without bisecting to `MAX_PIECES`)
+    let over = (crate::geom::tol::LARGE_SMALL_SIZE_RATIO * b.tolerance()).max(2.0 * upstream);
+    let raise_by = match trim_deviation_bound(k, b, eu, trim, fit, [0.5 * tol, over], None)? {
+        Some(bound) if bound.is_finite() => bound,
+        _ => return Ok(upstream),
+    };
     if raise_by > 2.0 * upstream {
         // UNPROVED fallback (#18166): a `B` the B-rep check refuses as an edge tolerance is
         // the enclosure's limit, not a distance to raise to. The raise is upstream's, from
