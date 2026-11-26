@@ -143,6 +143,20 @@ impl FeatureKind {
         target_bodies.get(index).map(AsRef::as_ref)
     }
 
+    /// The body a face point slot picks a face of, when each slot names its own body: a Thread's
+    /// target faces, and the `a` and `b` faces of Surface Fillet and Surface Chamfer. The point is
+    /// named, and found again, on that body only.
+    pub fn face_slot_body(&self, slot: usize) -> Option<&str> {
+        match self {
+            FeatureKind::SurfaceFillet { a, b, .. } | FeatureKind::SurfaceChamfer { a, b, .. } => match slot {
+                0 => Some(a.body.0.as_str()),
+                1 => Some(b.body.0.as_str()),
+                _ => None,
+            },
+            _ => self.thread_target_body(slot),
+        }
+    }
+
     /// The feature's profile selections, each with its sketch.
     pub fn profile_sels_mut(&mut self) -> Vec<(u64, &mut ProfileSel)> {
         let mut v = Vec::new();

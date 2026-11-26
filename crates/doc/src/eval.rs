@@ -13566,13 +13566,13 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
         }
         let from = if k == 0 { placed.unwrap_or(*p) } else { *p };
         let scoped;
-        let input = if let Some(body) = f.kind.thread_target_body(k) {
+        let input = if let Some(body) = f.kind.face_slot_body(k) {
             scoped = ModelState { bodies: fst.bodies.iter().filter(|b| b.name == body).cloned().collect(), ..ModelState::default() };
             &scoped
         } else {
             &fst
         };
-        let body = f.kind.thread_target_body(k).or_else(|| f.kind.face_body());
+        let body = f.kind.face_slot_body(k).or_else(|| f.kind.face_body());
         // Only a thread may find a numbered piece of a round side again as its whole face (#16602).
         let hit = if matches!(f.kind, FeatureKind::Thread { .. }) {
             crate::name_lookup::locate_thread_face_on_body(input, body, n, from)
@@ -17457,11 +17457,11 @@ fn extrude_normal(doc: &Document, st: &ModelState, kind: &FeatureKind, comp: u64
 /// otherwise take the name, and evaluation would move the pick onto that body's face.
 pub fn face_point_names(doc: &Document, st: &ModelState, kind: &FeatureKind, comp: u64) -> Result<Vec<String>> {
     let pts = kind.face_points();
-    if thread_target_bodies(doc, st, kind)?.is_some() {
+    if matches!(kind, FeatureKind::SurfaceFillet { .. } | FeatureKind::SurfaceChamfer { .. }) || thread_target_bodies(doc, st, kind)?.is_some() {
         let mut names = Vec::with_capacity(pts.len());
         for (slot, point) in pts.iter().enumerate() {
             let scoped;
-            let input = if let Some(body) = kind.thread_target_body(slot) {
+            let input = if let Some(body) = kind.face_slot_body(slot) {
                 scoped = ModelState { bodies: st.bodies.iter().filter(|b| b.name == body).cloned().collect(), ..ModelState::default() };
                 &scoped
             } else {

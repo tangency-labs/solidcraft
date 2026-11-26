@@ -1104,6 +1104,9 @@ fn round_seam(
     // feature: its faces and edges are named first, and the round is named after the faces beside it.
     let rounded = sewn.traced().then(rounded.with_preserved_planar_sources(&sewn.body)?);
     let Some(before) = before else {
+        // Every trim refuses a point nearer the round than its own surface (`first` and `none`
+        // through `rounded_parts` below), before anything is written.
+        kernel::check_round_picks(&rounded.body, a.point.0, b.point.0)?;
         if let Some(slot) = st.bodies.get_mut(sewn_at) {
             *slot = ModelBody::traced_new(sewn.name, rounded, sewn.feature);
         }

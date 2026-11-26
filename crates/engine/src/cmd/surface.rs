@@ -1383,6 +1383,11 @@ mod tests {
         for extra in [json!({"distance2": 3, "angle": "30 deg"}), json!({"distance": 0}), json!({"distance": 500}), json!({"trim": "second"})] {
             assert!(mk(extra.clone()).1.is_err(), "{extra}");
         }
+        // A point inside the bevel's reach (1 mm from the seam, distance 2), with the default trim:
+        // refused, and both sheets are as they were.
+        let (s, r) = mk(json!({"a": {"body": "A", "point": [0, 1, 0]}}));
+        assert!(r.is_err());
+        assert!((area(&s, "A") - 400.0).abs() < 1e-6 && (area(&s, "B") - 400.0).abs() < 1e-6);
     }
 
     /// Surface Fillet refuses what it cannot round, without changing the design.
@@ -1408,6 +1413,8 @@ mod tests {
             json!({"a": face("A", [0.0, 5.0, 0.0]), "b": face("Far", [0.0, 0.0, 0.0]), "radius": 1}),
             // Far larger than the sheets leave room for.
             json!({"a": face("A", [0.0, 5.0, 0.0]), "b": face("B", [0.0, 0.0, 5.0]), "radius": 500}),
+            // A point inside the round's reach (1 mm from the seam, radius 2), with the default trim.
+            json!({"a": face("A", [0.0, 1.0, 0.0]), "b": face("B", [0.0, 0.0, 5.0]), "radius": 2}),
         ] {
             assert!(s.execute("surface.fillet", &p).is_err(), "{p}");
         }
