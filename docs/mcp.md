@@ -594,8 +594,54 @@ volume, mass and body count; check `ok` and `diagnostics` before applying any ca
 Apply the selected values separately with `parameters.change {changes}` if you intend to
 edit the design. Use `describe_command` for the input and output schemas.
 
-Resources: `solidcraft://design` (inspect JSON with measurements) and `solidcraft://commands`
-(the catalog).
+### Resources and subscriptions
+
+The server exposes read-only resources and advertises
+`"resources": {"subscribe": true, "listChanged": true}` in its `initialize` capabilities:
+
+| URI | MIME type | Contents |
+|---|---|---|
+| `solidcraft://design` | `application/json` | The active design (`document.inspect` with measurements) |
+| `solidcraft://commands` | `application/json` | The full command catalog (`engine.commands`) |
+
+Clients can list resources with `resources/list`, read them with `resources/read`, and follow
+changes with `resources/subscribe` and `resources/unsubscribe`:
+
+- **`resources/subscribe`** (`{"uri": "solidcraft://design"}`) registers the URI for the current
+  session and returns `{}`. Re-subscribing an already subscribed URI is idempotent. Missing or
+  non-string/empty `uri` values fail with JSON-RPC `-32602` (`Invalid params`); unknown URIs fail
+  with `-32002` (`Resource not found`). Each session allows at most 256 concurrent subscriptions
+  (exceeding the limit returns `-32602`).
+- **`resources/unsubscribe`** (`{"uri": "solidcraft://design"}`) removes the URI from the session's
+  subscriptions and returns `{}` (idempotent for known URIs that are not currently subscribed;
+  `-32602` for missing/invalid `uri`, `-32002` for unknown URIs).
+- **`notifications/resources/list_changed`** (`{"jsonrpc":"2.0","method":"notifications/resources/list_changed"}`)
+  is emitted when the active design identity changes (`new_design`, `open`, or switching tabs) or
+  when the set of bodies, sketches, or features changes (for example after `execute`, `batch`,
+  `undo`, or `redo`).
+- **`notifications/resources/updated`** (`{"jsonrpc":"2.0","method":"notifications/resources/updated","params":{"uri":"solidcraft://design"}}`)
+  is emitted for each subscribed design resource affected by a revision change (including parameter
+  edits that keep the same bodies and features). Static resources unaffected by design edits, such
+  as `solidcraft://commands`, do not receive spurious `updated` notifications on design edits.
+- **No spurious notifications:** read-only calls (`inspect_design`, `measure`, `body_topology`,
+  `list_commands`, `describe_command`, `version`, `running`, `pending`, `skill_reference`,
+  `crash_reports`), failed edits, rolled-back batches, and `check_parameters` leave the design
+  revision unchanged and emit neither notification.
+- **Live desktop changes (`--connect`):** once initialized or subscribed, `solidcraft-cli mcp`
+  also observes `document.revision` on the connected desktop app while idle, so edits made directly
+  in the SolidCraft window or by the built-in Assistant emit `notifications/resources/list_changed`
+  and `notifications/resources/updated` without waiting for the next MCP tool call.
+
+```text
+→ {"jsonrpc":"2.0","id":1,"method":"resources/subscribe","params":{"uri":"solidcraft://design"}}
+← {"jsonrpc":"2.0","id":1,"result":{}}
+→ {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"execute","arguments":{"command":"solid.box","params":{"length":10,"width":10,"height":10}}}}
+← {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"..."}]}}
+← {"jsonrpc":"2.0","method":"notifications/resources/list_changed"}
+← {"jsonrpc":"2.0","method":"notifications/resources/updated","params":{"uri":"solidcraft://design"}}
+→ {"jsonrpc":"2.0","id":3,"method":"resources/unsubscribe","params":{"uri":"solidcraft://design"}}
+← {"jsonrpc":"2.0","id":3,"result":{}}
+```
 
 Errors: an unknown tool or arguments that don't match the tool's schema are JSON-RPC
 `-32602` errors (an unknown argument's error lists the tool's arguments); an engine failure

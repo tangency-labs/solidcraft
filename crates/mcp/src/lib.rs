@@ -23,6 +23,8 @@ mod tools;
 #[cfg(not(target_arch = "wasm32"))]
 pub use backend::Auto;
 pub use backend::Backend;
+pub use backend::DesignState;
+pub use backend::DesignStructure;
 pub use backend::Headless;
 #[cfg(not(target_arch = "wasm32"))]
 pub use backend::Remote;
@@ -30,6 +32,8 @@ pub use options::COMPACT_ENV;
 pub use options::COMPACT_FLAG;
 pub use options::Options;
 pub use options::STRUCTURED_FLAG;
+pub use server::MAX_RESOURCE_SUBSCRIPTIONS;
+pub use server::NotificationSink;
 pub use server::Server;
 pub use solidcraft_mcp_server::PROTOCOL_VERSION;
 pub use solidcraft_mcp_server::SUPPORTED_VERSIONS;
