@@ -12959,11 +12959,8 @@ fn pattern_bodies(
     warning: &mut Option<String>,
 ) -> Result<()> {
     let here = doc.component_transform(f.component);
-    let prepared: Vec<Result<PreparedPatternBody>> = bodies
-        .iter()
-        .enumerate()
-        .map(|(s, n)| prepare_pattern_body(doc, f, st, &here, mats, n, placements.get(s).map(Vec::as_slice)))
-        .collect();
+    let prepared: Vec<Result<PreparedPatternBody>> =
+        bodies.iter().enumerate().map(|(s, n)| prepare_pattern_body(doc, f, st, &here, mats, n, placements.get(s).map(Vec::as_slice))).collect();
     let mut jobs: Vec<(usize, usize)> = Vec::new();
     for (s, entry) in prepared.iter().enumerate() {
         if let Ok(p) = entry {

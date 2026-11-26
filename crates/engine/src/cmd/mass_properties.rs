@@ -248,8 +248,7 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
     // Each placed body measured once, on worker threads.
     let owners = doc.model_body_components(state);
     let world_names = WorldNames::new(doc, state);
-    let placed: HashSet<u64> =
-        ids.iter().map(|id| if *id == 0 { 0 } else { occ_by_id.get(id).map_or(u64::MAX, |o| o.component) }).collect();
+    let placed: HashSet<u64> = ids.iter().map(|id| if *id == 0 { 0 } else { occ_by_id.get(id).map_or(u64::MAX, |o| o.component) }).collect();
     let measured: Vec<usize> = (0..state.bodies.len()).filter(|i| owners.get(*i).is_some_and(|c| placed.contains(c))).collect();
     let mut bodies_by_comp: HashMap<u64, Vec<usize>> = HashMap::new();
     for (k, &owner) in owners.iter().enumerate() {
