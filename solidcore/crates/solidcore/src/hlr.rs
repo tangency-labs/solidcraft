@@ -3001,7 +3001,8 @@ impl PlacementIndex {
         for (qi, (slo, shi, _)) in boxes.iter().enumerate() {
             let a = index.cell_of([slo[0] - grow, slo[1] - grow]);
             let b = index.cell_of([shi[0] + grow, shi[1] + grow]);
-            let span = (b[0] - a[0] + 1).saturating_mul(b[1] - a[1] + 1);
+            let span =
+                (b[0].saturating_sub(a[0]) + 1).saturating_mul(b[1].saturating_sub(a[1]) + 1);
             if span > 64 || entries.saturating_add(span) > 2_000_000 {
                 index.large.push(qi);
                 continue;
@@ -3032,10 +3033,10 @@ impl PlacementIndex {
     /// Candidate placement indices whose screen box may contain `screen` (each at most once).
     fn candidates(&self, screen: [f64; 2]) -> (&[usize], &[usize]) {
         let c = self.cell_of(screen);
-        let bucket = self
+        let bucket: &[usize] = self
             .buckets
             .get(c[1] * self.n + c[0])
-            .map_or(&[][..], Vec::as_slice);
+            .map_or(&[], Vec::as_slice);
         (bucket, self.large.as_slice())
     }
 }

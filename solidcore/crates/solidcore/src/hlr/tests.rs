@@ -6272,10 +6272,10 @@ fn placement_grid_matches_linear_scan_on_many_body_scene() {
     scene.push(identity(1, [0., 0., -20.]));
     let view = View::new(Vec3::new(0., 0., -1.), Vec3::new(0., 1., 0.)).unwrap();
     let opts = Options::default();
-    let ctx_indexed = context(&defs, &scene, &view, &opts, &never, &Serial).unwrap();
+    let ctx_indexed = super::context(&defs, &scene, &view, &opts, &never, &Serial).unwrap();
     let index = ctx_indexed.placement_index.as_ref().unwrap();
-    assert_eq!(index.large, vec![81]);
-    let mut ctx_linear = context(&defs, &scene, &view, &opts, &never, &Serial).unwrap();
+    assert_eq!(index.large, [81]);
+    let mut ctx_linear = super::context(&defs, &scene, &view, &opts, &never, &Serial).unwrap();
     ctx_linear.placement_index = None;
 
     for z in [-15., -25.] {
