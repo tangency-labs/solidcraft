@@ -96,7 +96,6 @@ mod loft_rails_tests;
 mod loft_region_tests;
 mod matchsurf;
 mod measure;
-mod mesh_convert;
 mod meshbody;
 #[cfg(test)]
 mod modify_history_tests;
@@ -378,7 +377,6 @@ pub use measure::measure;
 pub use measure::measure_many;
 pub use measure::measure_mass;
 pub use measure::measure_mass_many;
-pub use mesh_convert::convert_prismatic_mesh;
 pub use meshbody::MAX_TRIANGLES;
 pub use meshbody::mesh_body;
 pub use meshbody::mesh_body_with_normals;

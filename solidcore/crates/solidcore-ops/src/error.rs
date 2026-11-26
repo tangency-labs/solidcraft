@@ -3,6 +3,7 @@
 
 use solidcore::error::blend::BlendFailure;
 use solidcore::SolidError;
+use std::borrow::Cow;
 
 pub use solidcore::topology::brep::SolidTest;
 
@@ -26,6 +27,8 @@ pub enum Error {
     /// An argument refused before the kernel saw it: not finite, out of range, or an index
     /// past its list.
     Argument,
+    /// A mesh reconstruction refused this input or could not certify the fitted solid.
+    Mesh(Cow<'static, str>),
     /// The kernel reported success but the result has no faces (for a boolean: it is empty).
     Empty,
     /// An empty boolean of solids refuted by the vertex `at` of an operand, which lies where the
@@ -536,6 +539,7 @@ impl Error {
             Error::Status(..) => "Status",
             Error::Refused { .. } => "Refused",
             Error::Argument => "Argument",
+            Error::Mesh(..) => "Mesh",
             Error::Empty => "Empty",
             Error::EmptyRefuted { .. } => "EmptyRefuted",
             Error::NotSolid => "NotSolid",
@@ -1183,6 +1187,7 @@ impl std::fmt::Display for Error {
                 f,
                 "solidcore-ops was called from inside a call or the failure callback"
             ),
+            Error::Mesh(why) => write!(f, "mesh conversion: {why}"),
             Error::NotOneFoot { found } => write!(
                 f,
                 "a classification found {found} nearest points on the face's surface, where one is needed"

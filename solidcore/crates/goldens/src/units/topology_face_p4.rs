@@ -573,8 +573,15 @@ fn sector_null_deref(b: &Brep, f: FaceId, v: VertexId, e: EdgeId) -> Result<bool
     Ok(false)
 }
 
+/// The record of `i`'s op; `contact` is set to the contact codes of the solution
+/// records it prints ([`crate::util::contact_codes`]), left `None` by an op that
+/// prints none.
 #[allow(clippy::too_many_lines)]
-fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
+fn rust_record(
+    i: &Inputs,
+    mut b: Brep,
+    contact: &mut Option<Vec<i64>>,
+) -> Result<Vec<f64>, Fail> {
     let k = Kernel::default();
     let f = FaceId::from_index(i.face as u32);
     let mut o = vec![0.0];
@@ -640,6 +647,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
             ) {
                 Ok(sols) => {
                     o.extend([0.0, sols.len() as f64]);
+                    *contact = Some(crate::util::contact_codes(sols.as_slice()));
                     for s in sols.as_slice() {
                         o.push(f64::from(s.solution_type as i32));
                         o.extend(s.start.parameters.iter().take(3));
@@ -770,8 +778,17 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(r) => r,
         Err(o) => return Ok(o),
     };
-    match rust_record(&r, b) {
-        Ok(v) => Ok(Output::new().values("out", v)),
+    let mut contact = None;
+    match rust_record(&r, b, &mut contact) {
+        Ok(v) => {
+            let out = Output::new().values("out", v);
+            // the line solutions' contact codes, exact (`0` unclassified, `1` crossing,
+            // `2` touching, `3` undecided)
+            Ok(match contact {
+                Some(c) => out.ints("contact", c),
+                None => out,
+            })
+        }
         Err(Fail::Deferred(o)) => Ok(*o),
         Err(Fail::Harness(h)) => Err(h),
     }

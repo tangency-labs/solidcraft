@@ -449,6 +449,17 @@ pub struct Extent {
     /// `start_offset`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<FacePick>,
+    /// Two Sides: the second side runs through all bodies instead of `distance2`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub through_all2: bool,
+    /// Two Sides: the second side ends at the face (or vertex/point) at this point instead of
+    /// `distance2` (To Object for the second side).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to2: Option<FacePick>,
+    /// Offset past the second side's To Object face (expression; negative stops short).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "To offset 2")]
+    pub to_offset2: Option<Expr>,
     /// From Object on a face at a slant to the extrusion starts on a plane parallel to the
     /// sketch, at the level where the face meets the middle of the profiles, instead of on the
     /// face. Designs saved before From Object followed a slanted face open with it set, so they
@@ -2994,8 +3005,7 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         records: Option<std::sync::Arc<solidcraft_kernel::ImportRecords>>,
     },
-    /// Rebuild an upstream mesh as a solid: analytic planar/cylindrical faces for a
-    /// constant-section part, planar facets for any other closed mesh.
+    /// Rebuild a closed mesh as a solid with analytic faces where certified and planar facets otherwise.
     MeshConvert {
         body: BodyName,
         #[walk(length = "Tolerance")]

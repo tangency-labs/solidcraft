@@ -270,6 +270,10 @@ crate::dialog_descriptor::dialog_descriptors! {
                 symmetric_offset: bool,
                 /// Extent type All (through everything) instead of a distance.
                 all: bool,
+                /// Two Sides: the second side's Extent Type is All.
+                all2: bool,
+                /// Two Sides: the distance beyond the second side's To Object face.
+                to_offset2: String,
                 /// Thin Extrude: a wall along the picked curves (or profiles' outlines).
                 thin: bool,
                 /// The wall thickness (inside, with Two Sides).
@@ -1121,6 +1125,8 @@ impl Dialog {
                     offset_start: false,
                     symmetric_offset: false,
                     all: false,
+                    all2: false,
+                    to_offset2: String::new(),
                     thin: false,
                     wall: length_default(s, "2"),
                     wall_side: 0,
@@ -5775,8 +5781,10 @@ pub(crate) fn roll_marker(app: &mut SolveApp, marker: Option<usize>) -> Result<(
 /// The pick input an extent of To Object adds (a face, vertex or point to go to).
 const TO_OBJECT: &str = "To Object";
 const FROM_OBJECT: &str = "From Object";
+/// The pick input the second side of Two Sides adds when its extent is To Object.
+pub(crate) const TO_OBJECT2: &str = "ui.extrude_to_object_2";
 
-fn object_on(inputs: &[SelInput], label: &str) -> bool {
+pub(crate) fn object_on(inputs: &[SelInput], label: &str) -> bool {
     inputs.iter().any(|i| i.label == label)
 }
 
@@ -6922,6 +6930,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             offset_start,
             symmetric_offset,
             all,
+            all2,
+            to_offset2,
             thin,
             wall,
             wall_side,
@@ -6932,7 +6942,18 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut common = json!({"distance": distance, "direction": DIRS.get(*direction).copied().unwrap_or("positive"), "operation": OPS.get(*operation).copied().unwrap_or("new")});
             let tapered = s.doc.eval(taper, ValueKind::Angle).map(|v| v.abs() > 1e-12).unwrap_or(!taper.trim().is_empty());
             if two_sided(*direction) {
-                common["distance2"] = json!(distance2);
+                // The distance only counts for a Distance second side: text left in the hidden field
+                // of an All or To Object 2 side is not read (the command saves 0 for it).
+                if !*all2 && !object_on(&d.inputs, TO_OBJECT2) {
+                    common["distance2"] = json!(distance2);
+                }
+                if *all2 {
+                    common["through_all2"] = json!(true);
+                }
+                if object_on(&d.inputs, TO_OBJECT2) {
+                    common["to2"] = object_point(&d.inputs, TO_OBJECT2).ok_or("select the object the second side extrudes to")?;
+                    put(&mut common, &[("to_offset2", to_offset2)]);
+                }
             } else if *direction < 2 && (*taper_present || tapered) {
                 common["taper"] = json!(taper);
             }
@@ -9230,6 +9251,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 offset_start: extent.start_offset.is_some(),
                 symmetric_offset: extent.symmetric_offset,
                 all: extent.through_all,
+                all2: extent.through_all2,
+                to_offset2: extent.to_offset2.as_deref().map(str::to_string).unwrap_or_default(),
                 thin: thin.is_some(),
                 wall: thin.as_ref().map_or_else(|| length_default(s, "2"), |t| t.thickness.to_string()),
                 wall_side: thin.as_ref().map_or(0, |t| WALL_SIDES.iter().position(|w| ThinSide::parse(w) == Some(t.side)).unwrap_or(0)),
@@ -9239,7 +9262,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             // Extent references belong to the extrude's authoring frame, including free
             // points. They are not body-local picks (a reference may be on another body).
             let frame = feature_frame(s, f.component);
-            for (label, point) in [(TO_OBJECT, extent.to), (FROM_OBJECT, extent.from)] {
+            for (label, point) in [(TO_OBJECT, extent.to), (FROM_OBJECT, extent.from), (TO_OBJECT2, extent.to2)] {
                 if let Some(point) = point {
                     set_object(&mut d.inputs, &mut d.active, label, true);
                     if let Some(input) = d.inputs.iter_mut().find(|i| i.label == label) {
