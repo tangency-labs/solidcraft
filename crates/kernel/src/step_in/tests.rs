@@ -6794,18 +6794,14 @@ fn a_coil_spring_wire_with_its_surface_a_little_off_its_edges_imports_in_bounded
     }
 }
 
-/// #20686: the closely wound wire whose surface lies 0.2 % outside its edges, cut by the flat end
-/// at the bottom of its second turn, measures the volume of the wire below that plane, not more
-/// and not less: about 67.7 mm³ (the control with another pitch and cut is a different wire, so
-/// its 81 mm³ is not this one's). The expected volume is the wire's tube integrated below
-/// `z = const`: over the helix angle, the radius and the angle round the wire, with the wire's
-/// own `(R + s cos f) s` measure.
-#[test]
-fn a_coil_spring_wire_with_a_surface_off_its_edges_measures_the_wire_below_its_end_plane() {
+/// The volume of the closely wound coil wire of [`coil_wire_file`] (two turns of a tube of radius
+/// 0.55 mm round a helix of radius 7.5 mm) below the plane `z = z_end`: the wire's tube integrated
+/// over the helix angle, the radius and the angle round the wire, with the wire's own
+/// `(R + s cos f) s` measure.
+fn coil_wire_volume_below(pitch: f64, z_end: f64) -> f64 {
     use std::f64::consts::PI;
-    let (pitch, radius, tube) = (1.125_f64, 7.5_f64, 0.55_f64);
+    let (radius, tube) = (7.5_f64, 0.55_f64);
     let c = pitch / (2.0 * PI);
-    let z_end = 1.7_f64;
     let (nt, ns, nf) = (800_usize, 16_usize, 48_usize);
     let mut sum = 0.0;
     for i in 0..nt {
@@ -6820,7 +6816,18 @@ fn a_coil_spring_wire_with_a_surface_off_its_edges_measures_the_wire_below_its_e
             }
         }
     }
-    let expected = sum * (4.0 * PI / nt as f64) * (tube / ns as f64) * (2.0 * PI / nf as f64);
+    sum * (4.0 * PI / nt as f64) * (tube / ns as f64) * (2.0 * PI / nf as f64)
+}
+
+/// #20686: the closely wound wire whose surface lies 0.2 % outside its edges, cut by the flat end
+/// at the bottom of its second turn, measures the volume of the wire below that plane, not more
+/// and not less: about 67.7 mm³ (the control with another pitch and cut is a different wire, so
+/// its 81 mm³ is not this one's).
+#[test]
+fn a_coil_spring_wire_with_a_surface_off_its_edges_measures_the_wire_below_its_end_plane() {
+    let (pitch, z_end) = (1.125_f64, 1.7_f64);
+    let c = pitch / (2.0 * std::f64::consts::PI);
+    let expected = coil_wire_volume_below(pitch, z_end);
     let imported = step_import(&coil_wire_file(pitch, 22, 1.002, z_end / c)).unwrap();
     assert!(imported.bodies.len() <= 1, "{:?}", imported.warnings);
     if let Some(body) = imported.bodies.first() {
@@ -6829,6 +6836,27 @@ fn a_coil_spring_wire_with_a_surface_off_its_edges_measures_the_wire_below_its_e
         assert!(body.closed, "{:?}", imported.warnings);
         let volume = measure(&body.body).unwrap().volume;
         assert!(rel(volume, expected) < 0.01, "{volume} against {expected}");
+    }
+}
+
+/// #20575 (`17-step-spring-wire-hang-b.step`): the closely wound wire cut where its flat end
+/// stands all but tangent to the tube of the turn above (the end plane touches the tube at the
+/// cut's last vertex) comes in as one closed body of the volume of the wire below that plane, about
+/// 68 mm³, not as surfaces with the wire's wall left out for an edge "4.78 mm off the face's
+/// surface". The kernel's drop of the cut's second piece onto the surface settled on another
+/// part of the surface for stretches of the edge; the trim is followed along the surface instead.
+/// The surface on the tube and 0.2 % off it (the file's) both read.
+#[test]
+fn a_coil_spring_wire_cut_by_a_plane_tangent_to_its_tube_imports_closed() {
+    let (pitch, cut) = (1.125_f64, 8.995_466_109_045_587_f64);
+    let expected = coil_wire_volume_below(pitch, pitch / (2.0 * std::f64::consts::PI) * cut);
+    for scale in [1.0, 0.998] {
+        let imported = step_import(&coil_wire_file(pitch, 22, scale, cut)).unwrap();
+        assert_eq!(imported.bodies.len(), 1, "{scale}: {:?}", imported.warnings);
+        let body = &imported.bodies[0];
+        assert!(body.closed && body.refused.is_none(), "{scale}: {:?}", imported.warnings);
+        let volume = measure(&body.body).unwrap().volume;
+        assert!(rel(volume, expected) < 0.01, "{scale}: {volume} against {expected}");
     }
 }
 
