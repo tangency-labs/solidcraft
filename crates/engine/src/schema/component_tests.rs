@@ -51,7 +51,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<UnlockParams>(), &["component"]);
     assert_keys(input_schema_for::<HistoryVisibilityParams>(), &["component"]);
     assert_keys(input_schema_for::<CycleColorParams>(), &["component"]);
-    assert_keys(input_schema_for::<CapturePositionParams>(), &[]);
+    assert_keys(input_schema_for::<CapturePositionParams>(), &["joints", "moves", "name"]);
     assert_keys(input_schema_for::<RevertPositionParams>(), &["occurrences"]);
     assert_keys(input_schema_for::<GroundParams>(), &["grounded", "occurrence", "path"]);
     assert_keys(input_schema_for::<CopyParams>(), &["component", "in_place", "occurrence", "parent", "parent_path", "path", "translate"]);
@@ -883,7 +883,17 @@ fn the_schemas_take_what_the_occurrence_handlers_read() {
         }
     };
     let matrix: Vec<i32> = FLAT_MATRIX.to_vec();
-    takes(input_schema_for::<CapturePositionParams>(), &[(json!({}), true), (json!({"x": 1}), false)]);
+    takes(
+        input_schema_for::<CapturePositionParams>(),
+        &[
+            (json!({}), true),
+            (json!({"name": "Cap1", "moves": [{"occurrence": 1, "translate": ["10 mm", 0, 0]}]}), true),
+            (json!({"joints": [{"joint": 1, "values": [5.0], "exprs": ["5 mm"]}]}), true),
+            (json!({"moves": [{"occurrence": 1, "bogus": 1}]}), false),
+            (json!({"joints": [{"joint": 1, "bogus": 1}]}), false),
+            (json!({"x": 1}), false),
+        ],
+    );
     takes(
         input_schema_for::<RevertPositionParams>(),
         &[(json!({}), true), (json!({"occurrences": [1, 2]}), true), (json!({"occurrences": []}), false), (json!({"occurrences": ["1"]}), false)],
@@ -1167,9 +1177,11 @@ fn replies_match_the_output_schemas_of_the_occurrence_commands() {
     // Capture and Revert Position.
     let captured = run("component.capture_position", json!({}));
     assert_eq!(captured["captured"], 1, "{captured}");
+    assert!(captured["feature"].as_u64().is_some(), "{captured}");
     matches(output_schema_for::<CapturePositionResult>(), "component.capture_position", &captured);
     let captured = run("component.capture_position", json!({}));
     assert_eq!(captured["captured"], 0, "{captured}");
+    assert!(captured.get("feature").is_none(), "{captured}");
     matches(output_schema_for::<CapturePositionResult>(), "component.capture_position", &captured);
     run("occurrence.move", json!({"occurrence": pl, "capture": false, "translate": [0, 2, 0]}));
     let reverted = run("component.revert_position", json!({"occurrences": [pl]}));
