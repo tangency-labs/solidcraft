@@ -56,7 +56,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<PatchResult>)
         .params("sketch?: id|name and profiles? (planar patches of sketch regions) or profiles_3d: [indices] (the sketch's planar 3D-sketch loops, each patched in its own plane, as listed by sketch.inspect) | edges: [[x,y,z]] (points on a closed loop of a body's edges: one face on them, planar when the loop is, else a smooth B-spline surface) and body?; continuity?: g0|g1|g2|g3|g4 (edges only, default g0: how the patch meets the faces beside the loop — g1 their tangent planes, g2 also their curvature across the edges, g3 also its rate of change, g4 the change of that rate) or [{edge: [x,y,z], g: g0|g1|g2|g3|g4}] (those edges so, the rest g0) or {all, edges}; points?: [[x,y,z]] (edges only, up to 64: points the patch passes through); crown?: number −0.9…3 (default 0: only a fitted patch, whose middle becomes fuller by this many times the loop's size — the bump vanishes on the loop, so the face still meets the picked edges and the continuity across them; a loop that is planar and g0 is the exact plane whatever the crown; with points, crown needs a g1 or higher edge); name?, body_name?"),
     CommandSpec::new("surface.stitch", "Stitch", crate::checked!("surface.stitch", stitch)).begins_edit()
-        .at("SURFACE", "MODIFY")
+        .at("SURFACE", "EDIT")
         .icon("surface_stitch")
         .contract(&STITCH_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
@@ -68,13 +68,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<FeatureResult>)
         .params("bodies: [surface names]; thickness: expr (negative: against the normal); symmetric?: bool; operation?: new|join|cut|intersect; targets?"),
     CommandSpec::new("surface.extend", "Extend", crate::checked!("surface.extend", extend)).begins_edit()
-        .at("SURFACE", "MODIFY")
+        .at("SURFACE", "EDIT")
         .icon("surface_extend")
         .contract(&SURFACE_EXTEND_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("body: surface name; edges: [[x,y,z]] (points on boundary edges to push out); distance: expr (unless up_to); mode?: natural (the surface itself continued: a B-spline's end spans continued, which keeps planes and surfaces of revolution on themselves; the default) | tangent (the face continued tangent to its surface across the edge, G1) | curvature (continued keeping the surface's curvature across the edge too, G2); up_to?: plane (XY|XZ|YZ|plane name|{origin, normal}) | {body, point} (a face, its surface extended) | {body} (a whole body, where the surface first runs into any of its faces; natural only) | \"bounds\" (natural: back to the surface's own bounds, undoing a trim); neighbours?: bool (default true: the edges next to an extended edge are lengthened to meet it; false: the extension's sides run square to the edge); stays_surface?: bool (default true: a result whose shells close stays a surface body, which Stitch makes a solid; false: it becomes a solid, as features saved before it keep)"),
     CommandSpec::new("surface.trim", "Trim", crate::checked!("surface.trim", trim)).begins_edit()
-        .at("SURFACE", "MODIFY")
+        .at("SURFACE", "EDIT")
         .icon("surface_trim")
         .contract(&SURFACE_TRIM_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
@@ -134,7 +134,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<FeatureResult>)
         .params("from, to: {body, edges: [[x,y,z]]} (points on the edges of one chain of each body: two picks on the same edge is that one edge, more chain up); continuity?: [g0|g1|g2|g3, g0|g1|g2|g3] (each end, default g1: how much of the surface at the picked edges the blend repeats — the tangent plane, the curvature, or how that curvature changes); bulge?: [number, number] (default 0: how full each end leaves, -0.9 flattest to 3 fullest); align?: [[x,y,z], [x,y,z]] (a point each end leaves towards, when the faces at the picks do not say); seam?: [[x,y,z], [x,y,z]] (a point on each chain its stations start from: two closed chains otherwise pair the way that keeps the blend from twisting; an open chain starts at the end nearer its point; a closed chain blends only to a closed chain); stitch?: bool (sew the blend onto its two bodies where the boundaries meet, replacing them); name?, body_name?"),
     CommandSpec::new("surface.untrim", "Untrim", crate::checked!("surface.untrim", untrim)).begins_edit()
-        .at("SURFACE", "MODIFY")
+        .at("SURFACE", "EDIT")
         .icon("surface_untrim")
         .contract(&UNTRIM_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
