@@ -953,6 +953,7 @@ pub(crate) fn sync_production_visibility(app: &mut crate::SolveApp) -> PanelResu
     }
     let library_present = layout.instance(&InstanceId::new(Product::RenderLibrary.id())?).is_ok();
     let inspector_present = layout.instance(&InstanceId::new(Product::RenderInspector.id())?).is_ok();
+    let swapped = timeline_swap(layout, &mutations);
     drop(snapshot);
     if let Some(product) = adding {
         state.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "application panel visibility is borrowed"))?.panel_addition_attempts
@@ -963,6 +964,9 @@ pub(crate) fn sync_production_visibility(app: &mut crate::SolveApp) -> PanelResu
         mutations.sort_by_key(|mutation| !matches!(mutation, Mutation::Close { .. }));
         refresh_production(app)?;
         app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: Some(revision), mutations })?;
+        if let Some((closed, opened, in_window)) = swapped {
+            keep_timeline_place(app, &closed, &opened, in_window)?;
+        }
     }
     if reveal_library && library_present {
         app.render_workspace.view.library_focus_pending = false;
@@ -972,6 +976,59 @@ pub(crate) fn sync_production_visibility(app: &mut crate::SolveApp) -> PanelResu
     }
     sync_sketch_options(app)?;
     sync_bom(app)
+}
+
+/// History and the 2D Timeline are one timeline in two views. When `mutations` switch the
+/// view: the view that closes, the one that opens for it, and whether the timeline is in its
+/// own desktop window.
+fn timeline_swap(layout: &Layout, mutations: &[Mutation]) -> Option<(InstanceId, InstanceId, bool)> {
+    let timeline = |instance: &InstanceId| [Product::History.id(), Product::Timeline2d.id()].contains(&instance.0.as_str());
+    let closed = mutations.iter().find_map(|mutation| match mutation {
+        Mutation::Close { instance } if timeline(instance) => Some(instance),
+        _ => None,
+    })?;
+    let opened = mutations.iter().find_map(|mutation| match mutation {
+        Mutation::Open { instance, .. } if timeline(instance) && instance != closed => Some(instance),
+        _ => None,
+    })?;
+    let in_window = matches!(layout.containing(closed).ok()?.location, SectionLocation::Window { .. });
+    Some((closed.clone(), opened.clone(), in_window))
+}
+
+/// The timeline's view was switched (`timeline_swap`), and `opened` has opened where it was
+/// last: in the app, or in a desktop window it had before. The timeline stays where the user
+/// has it. Taken out of the app (`in_window`), the new view is in a window too, where
+/// `closed`'s window was: it pops out as the panel menu does, with its place in the app to
+/// return to. The 2D timeline opens at its own size; History, from the 2D timeline's wide
+/// window, as a strip of that width. Docked, a view that came back in its earlier window docks.
+fn keep_timeline_place(app: &mut crate::SolveApp, closed: &InstanceId, opened: &InstanceId, in_window: bool) -> PanelResult<()> {
+    let Some(integration) = app.panel_runtime.as_ref() else { return Ok(()) };
+    let service = integration.runtime().layout();
+    let Ok(section) = service.layout().containing(opened) else { return Ok(()) };
+    // From the 2D timeline's wide window, History stays the bar of one row it is in the
+    // bottom strip: its window keeps that window's width.
+    let strip = closed.0 == Product::Timeline2d.id() && opened.0 == Product::History.id();
+    let mutation = match (&section.location, in_window) {
+        (SectionLocation::Window { .. }, true) => {
+            integration.window_takes_place(closed, opened, strip);
+            return Ok(());
+        }
+        (SectionLocation::Window { host, .. }, false) if section.tabs.len() == 1 => Mutation::NativeClose { host: host.clone() },
+        (_, false) => return Ok(()),
+        (_, true) => {
+            // The switch has changed the layout, so the host's frame is gone: its own state
+            // has what the pop-out needs. Where panels have no desktop windows, the view
+            // stays in the app.
+            let Some((origin, reservations)) = integration.popout_context() else { return Ok(()) };
+            let Ok(destination) = super::popout_destination(service, opened, origin, reservations) else {
+                return Ok(());
+            };
+            integration.window_takes_place(closed, opened, strip);
+            Mutation::Move { instance: opened.clone(), destination }
+        }
+    };
+    app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![mutation] })?;
+    Ok(())
 }
 
 fn sync_bom(app: &mut crate::SolveApp) -> PanelResult<()> {

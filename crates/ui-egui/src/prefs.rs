@@ -7519,6 +7519,7 @@ mod tests {
             ("ui_font", json!("test font"), PAGE_APPEARANCE),
             ("layout", json!("compact"), PAGE_LAYOUT),
             ("live_panel_drag_preview", json!(false), PAGE_LAYOUT),
+            ("panel_window_title_bar", json!(false), PAGE_LAYOUT),
             ("ribbon_labels", json!(false), PAGE_LAYOUT),
             ("persistent_ribbon_pressed", json!(false), PAGE_LAYOUT),
             ("viewport_analysis_status", json!(false), PAGE_GRAPHICS),

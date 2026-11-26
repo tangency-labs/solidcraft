@@ -222,6 +222,70 @@ mod tests {
         assert_eq!(floated.height(), docked.height());
     }
 
+    /// The timeline taken out of the app stays out of it when its view is switched there: the
+    /// other view opens in a desktop window too, not back in the app's bottom strip.
+    #[test]
+    fn test_the_view_switch_keeps_a_popped_out_timeline_in_its_own_window() {
+        use solidcraft_engine::panels::{ControlId, InstanceId, LayoutAction, Mutation, Zone};
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1400, "height": 900}));
+        h.frames(3);
+        let zone = |h: &Harness, instance: &str| {
+            let layout = h.app.panel_runtime().unwrap().layout().layout().clone();
+            layout.containing(&InstanceId(instance.into())).ok().map(|section| section.location.zone())
+        };
+        // The switch, as the panel's own window runs it: its header action.
+        let switch = |h: &mut Harness, instance: &str| {
+            let action = Mutation::HeaderAction { instance: InstanceId(instance.into()), action: ControlId("timeline-view".into()) };
+            h.app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![action] }).unwrap();
+            h.frames(3);
+        };
+        assert_eq!(zone(&h, "history"), Some(Zone::Bottom));
+        // Pop History out to a desktop window, as its menu does where the desktop has them.
+        h.app.panel_runtime_mut().unwrap().set_native_adapter(Box::new(crate::panel_runtime::FakeNativeAdapter::new(true))).unwrap();
+        let pop_out = json!({"target": {"type": "instance", "id": "history"}, "destination": {"type": "new_section", "section": "history-window",
+            "index": 0, "size": {"width": 130, "height": 44}, "location": {"type": "window", "host": "history-host", "origin": {"x": 0, "y": 0},
+                "return_to": {"zone": "bottom", "index": 0, "size": {"width": 130, "height": 44}, "collapsed": false}}}});
+        h.app.run("panel.popout", pop_out).unwrap();
+        h.frames(3);
+        assert_eq!(zone(&h, "history"), Some(Zone::Window));
+
+        // To the 2D Timeline: it has a window of its own, and the app shows neither view.
+        switch(&mut h, "history");
+        assert!(h.app.preferences.timeline_2d);
+        assert_eq!(zone(&h, "timeline-2d"), Some(Zone::Window));
+        assert!(panel_rect(&h, "timeline-2d").is_none() && panel_rect(&h, "history").is_none());
+        // Its window closes to the bottom strip, where the 2D Timeline docks.
+        let layout = h.app.panel_runtime().unwrap().layout().layout().clone();
+        let section = layout.containing(&InstanceId("timeline-2d".into())).unwrap();
+        assert!(
+            matches!(&section.location, solidcraft_engine::panels::SectionLocation::Window { return_to, .. } if return_to.zone == Zone::Bottom),
+            "{:?}",
+            section.location
+        );
+
+        // And back to History: in a window again.
+        switch(&mut h, "timeline-2d");
+        assert!(!h.app.preferences.timeline_2d);
+        assert_eq!(zone(&h, "history"), Some(Zone::Window));
+        assert!(panel_rect(&h, "timeline-2d").is_none() && panel_rect(&h, "history").is_none());
+
+        // Docked again, the switch swaps the two views in the bottom strip: the 2D Timeline
+        // does not come back in the window it had.
+        let layout = h.app.panel_runtime().unwrap().layout().layout().clone();
+        let host = match &layout.containing(&InstanceId("history".into())).unwrap().location {
+            solidcraft_engine::panels::SectionLocation::Window { host, .. } => host.clone(),
+            other => panic!("{other:?}"),
+        };
+        h.app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::NativeClose { host }] }).unwrap();
+        h.frames(3);
+        assert_eq!(zone(&h, "history"), Some(Zone::Bottom));
+        switch(&mut h, "history");
+        assert_eq!(zone(&h, "timeline-2d"), Some(Zone::Bottom));
+        assert!(panel_rect(&h, "timeline-2d").is_some());
+    }
+
     /// A collapsed track's title never runs into its count badge: a short strip (a one-row
     /// timeline) gets the short title, and one too short for that shows no title.
     #[test]

@@ -114,6 +114,10 @@ macro_rules! layout_preferences {
             /// The operations under way, with their progress and Cancel, in a panel in the view's
             /// bottom-right corner. Off: a "Computing" notice and the agent's chip, as before.
             operations_panel: bool = true, PAGE_LAYOUT;
+            /// Panel windows show the app's own title bar, with a grip that drags them back over the
+            /// app and the panel's menu, and lay out like the docked panel. Off: the system's title
+            /// bar and the earlier layout. Desktop only.
+            panel_window_title_bar: bool = true, PAGE_LAYOUT;
             /// Show engine-derived persistent selection in the ribbon; off retains neutral buttons.
             persistent_ribbon_pressed: bool = true, PAGE_LAYOUT;
             /// Constraints pinned to the sketch ribbon's Constrain panel are drawn as small cells in its

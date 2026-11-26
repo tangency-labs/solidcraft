@@ -10,6 +10,7 @@ use solidcraft_panel_layout::{
 };
 
 use super::host::NativeHostAdapter;
+use crate::window_chrome::TitleBar;
 
 const MAX_MONITORS: usize = 64;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -38,6 +39,16 @@ struct Placement {
     monitor: Option<MonitorPlacement>,
 }
 
+/// What a panel's first window takes from the window of the panel it replaces.
+struct Inherited {
+    place: MonitorPlacement,
+    /// That window's content width, when the panel keeps it as a strip of one row.
+    strip: Option<f32>,
+    /// That window was full screen: this one goes full screen once it is open (`observe`).
+    full_screen: bool,
+}
+
+#[derive(Clone)]
 struct MonitorPlacement {
     name: Option<String>,
     origin: egui::Pos2,
@@ -48,11 +59,18 @@ struct MonitorPlacement {
 struct DesktopState {
     hosts: BTreeMap<HostId, Registration>,
     placement: BTreeMap<InstanceId, Placement>,
+    /// Where a panel's first window opens, when another panel's window gave it its place
+    /// (`take_place`).
+    inherited: BTreeMap<InstanceId, Inherited>,
+    /// The panels whose window is full screen now (`observe`).
+    full_screen: std::collections::BTreeSet<InstanceId>,
     monitors: Vec<NativeMonitor>,
     monitors_updated: Option<Instant>,
     /// A drag asked where a window would land since the last refresh: the
     /// monitors are needed before any panel window is open.
     landing_asked: bool,
+    /// Panel windows show the app's own title bar (with the drag-back grip), not the OS's.
+    title_bar: Option<TitleBar>,
     /// The window a drag shows for a panel; the panel's window keeps it on release.
     drop: Option<(InstanceId, egui::ViewportId)>,
     /// When this drag started asking the OS for that window.
@@ -126,20 +144,19 @@ impl DesktopNativeAdapter {
         let registration = state.hosts.get(host)?;
         let min = egui::vec2(min.width, min.height);
         let max = egui::vec2(max.width, max.height);
-        // The window a drag showed becomes an ordinary window again here.
-        let builder = crate::window_chrome::popout_viewport(egui::ViewportBuilder::default(), ctx.viewport_id())
-            .with_title(title)
-            .with_min_inner_size(min)
-            .with_max_inner_size(max)
-            .with_visible(true)
-            .with_mouse_passthrough(false)
-            .with_window_level(egui::WindowLevel::Normal);
+        let builder = state.chrome(
+            crate::window_chrome::popout_viewport(egui::ViewportBuilder::default(), ctx.viewport_id())
+                .with_title(title)
+                .with_min_inner_size(min)
+                .with_max_inner_size(max)
+                .with_visible(true),
+        );
         if registration.ready {
             return Some(builder);
         }
         let saved = state.placement.get(instance);
         let size = saved.map_or_else(|| egui::vec2(preferred.width, preferred.height), |saved| saved.size).clamp(min, max);
-        let remembered = saved.and_then(|saved| saved.monitor.as_ref());
+        let remembered = saved.and_then(|saved| saved.monitor.as_ref()).or_else(|| state.inherited.get(instance).map(|taken| &taken.place));
         let monitor = remembered.and_then(|saved| {
             state
                 .monitors
@@ -206,6 +223,19 @@ impl DesktopNativeAdapter {
         if !state.hosts.get(host).is_some_and(|registration| registration.viewport == ctx.viewport_id()) {
             return;
         }
+        // The window exists: what it took from another panel's window is used up. One that took
+        // a full-screen window's place goes full screen now, from its ordinary place: a window
+        // created full screen would have the whole screen as the place it leaves full screen to.
+        if state.inherited.remove(instance).is_some_and(|taken| taken.full_screen) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+        }
+        if ctx.input(|input| input.viewport().fullscreen == Some(true)) {
+            if state.full_screen.len() < MAX_INSTANCES {
+                state.full_screen.insert(instance.clone());
+            }
+        } else {
+            state.full_screen.remove(instance);
+        }
         let sample = ctx.input(|input| {
             let info = input.viewport();
             if info.visible() == Some(false) || info.maximized == Some(true) || info.fullscreen == Some(true) {
@@ -257,6 +287,53 @@ impl DesktopNativeAdapter {
         state.remember(instance, Placement { size, decoration, monitor });
     }
 
+    /// `to` opens its next window where `from`'s window is: one panel takes the other's place
+    /// there (History and the 2D timeline, switched in their window). At its own size; or, as
+    /// a `strip`, as wide as `from`'s window, whatever size its own last window had
+    /// (`strip_width`). It goes full screen from there, when `from`'s window is full screen.
+    pub fn take_place(&self, from: &InstanceId, to: &InstanceId, strip: bool) {
+        let mut state = self.0.borrow_mut();
+        let Some((place, width)) = state.placement.get(from).and_then(|saved| Some((saved.monitor.clone()?, saved.size.x))) else {
+            return;
+        };
+        let full_screen = state.full_screen.contains(from);
+        if strip {
+            state.placement.remove(to);
+        } else if let Some(saved) = state.placement.get_mut(to) {
+            saved.monitor = Some(place.clone());
+        }
+        if state.inherited.len() >= MAX_INSTANCES && !state.inherited.contains_key(to) {
+            state.inherited.pop_first();
+        }
+        state.inherited.insert(to.clone(), Inherited { place, strip: strip.then_some(width), full_screen });
+    }
+
+    /// The width `instance`'s next window keeps as a strip of one row (`take_place`), until
+    /// that window has a place of its own.
+    pub fn strip_width(&self, instance: &InstanceId) -> Option<f32> {
+        self.0.borrow().inherited.get(instance)?.strip
+    }
+
+    /// Panel windows show the app's own title bar (with the OS's window controls
+    /// it names), or the OS's. A window keeps the title bar it was created with,
+    /// so on a change the open panel windows are opened anew, at their places.
+    pub fn set_title_bar(&self, title_bar: Option<TitleBar>) {
+        let mut state = self.0.borrow_mut();
+        if state.title_bar == title_bar {
+            return;
+        }
+        state.title_bar = title_bar;
+        for (host, registration) in &mut state.hosts {
+            registration.viewport = next_viewport_id(host);
+            registration.startup = None;
+            registration.ready = false;
+        }
+    }
+
+    pub fn title_bar(&self) -> Option<TitleBar> {
+        self.0.borrow().title_bar
+    }
+
     /// The window a drag shows at `outer` for `instance`: the same window it
     /// will open in, but passed through by the pointer, above other windows and
     /// not activated while the drag lasts.
@@ -281,8 +358,8 @@ impl DesktopNativeAdapter {
         // panel's window on release (a window keeps the owner it was created with). Without it
         // the panel got a new window on release there, which opened behind the other windows.
         let builder = if cfg!(target_os = "macos") { crate::window_chrome::popout_viewport(builder, ctx.viewport_id()) } else { builder };
-        let builder = builder
-            .with_title(title)
+        let builder = state
+            .chrome(builder.with_title(title))
             .with_position(outer.min)
             .with_inner_size(outer.size() - state.decoration(instance))
             .with_visible(true)
@@ -337,15 +414,47 @@ impl DesktopNativeAdapter {
 }
 
 impl DesktopState {
-    /// The OS frame around a panel's content: as last seen for it, else a typical one.
+    /// The OS frame around a panel's content: none where the app's bar is the
+    /// title bar, else as last seen for it, else a typical one.
     fn decoration(&self, instance: &InstanceId) -> egui::Vec2 {
+        if self.frameless() {
+            return egui::Vec2::ZERO;
+        }
+        self.system_frame(instance)
+    }
+
+    /// The app's bar is the window's title bar: the OS draws no frame around the content.
+    fn frameless(&self) -> bool {
+        self.title_bar.is_some_and(|bar| bar.traffic_lights || bar.caption_buttons)
+    }
+
+    /// The system's frame around a panel's window, as last seen for it, else a typical one.
+    fn system_frame(&self, instance: &InstanceId) -> egui::Vec2 {
         self.placement.get(instance).map_or(DEFAULT_DECORATION, |saved| saved.decoration)
     }
 
-    fn remember(&mut self, instance: &InstanceId, placement: Placement) {
+    /// The window settings of a panel window: with the app's own title bar,
+    /// those that make it the window's. The window a drag showed becomes an
+    /// ordinary window again here.
+    fn chrome(&self, builder: egui::ViewportBuilder) -> egui::ViewportBuilder {
+        let builder = match self.title_bar {
+            Some(bar) => crate::window_chrome::own_titlebar(builder, bar.caption_buttons),
+            None => builder,
+        };
+        builder.with_mouse_passthrough(false).with_window_level(egui::WindowLevel::Normal)
+    }
+
+    fn remember(&mut self, instance: &InstanceId, mut placement: Placement) {
+        // A window with the app's own title bar has no OS frame to measure. What was
+        // seen of the system's frame stays, for when panel windows are the system's again.
+        if self.frameless() {
+            placement.decoration = self.system_frame(instance);
+        }
         if self.placement.len() >= MAX_INSTANCES && !self.placement.contains_key(instance) {
             self.placement.pop_first();
         }
+        // The panel has a place of its own now.
+        self.inherited.remove(instance);
         self.placement.insert(instance.clone(), placement);
     }
 }
