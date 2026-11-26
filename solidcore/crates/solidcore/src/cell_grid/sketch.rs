@@ -46,7 +46,9 @@ use crate::prism::profile::{Loop2, Seg2};
 use super::exact::ExactField;
 use super::free::{self, Cell as FreeCell};
 use super::gap;
-use super::region::{poly_area, poly_centroid, rotate, Bounds, Loop, Prim, Region, EPS};
+use super::region::{
+    keepout_loops, poly_area, poly_centroid, rotate, Bounds, Loop, Prim, Region, EPS,
+};
 use super::vec::Vec2Ext;
 use super::{
     check_seg, lattice_loops, push, CellGridError, CellGridPlan, CellGridSpec, CellKind, Clip,
@@ -207,7 +209,8 @@ fn self_intersection(prims: &[Prim]) -> Option<(usize, usize)> {
 /// The centroid of the region a loop of lines and arcs bounds: the polygon on the pieces' start
 /// points, and each arc's circular segment (signed by its sweep, so a concave arc takes area
 /// away) with its centroid on the bisector at `4 r sin^3(h) / (3 (2 h - sin 2 h))` from the
-/// centre, `h` half the sweep. A segment under 1e-4 radians (an area below `r^2 * 1e-13`) is left out.
+/// centre, `h` half the sweep. A shallow arc keeps its segment: `theta - sin theta` is summed as a
+/// series below 0.1 radians, where the difference would lose its digits.
 fn centroid(prims: &[Prim]) -> Vec2 {
     let pts: Vec<Vec2> = prims.iter().map(Prim::start).collect();
     let mut area = poly_area(&pts);
@@ -218,11 +221,12 @@ fn centroid(prims: &[Prim]) -> Vec2 {
         } = *p
         {
             let theta = sweep.abs();
-            if theta < 1e-4 {
+            let flat = theta_minus_sin(theta);
+            if !(flat > 0.0) {
                 continue;
             }
-            let s = 0.5 * r * r * (sweep - sweep.sin());
-            let dist = 4.0 * r * (theta / 2.0).sin().powi(3) / (3.0 * (theta - theta.sin()));
+            let s = 0.5 * r * r * flat * sweep.signum();
+            let dist = 4.0 * r * (theta / 2.0).sin().powi(3) / (3.0 * flat);
             let mid = a0 + sweep / 2.0;
             area += s;
             moment += (c + Vec2::new(mid.cos(), mid.sin()) * dist) * s;
@@ -232,6 +236,18 @@ fn centroid(prims: &[Prim]) -> Vec2 {
         moment / area
     } else {
         poly_centroid(&pts)
+    }
+}
+
+/// `theta - sin theta` for `theta >= 0`: the series `theta^3/6 - theta^5/120 + theta^7/5040 -
+/// theta^9/362880` below 0.1 (its next term is about 1e-15 of the first there), else the
+/// difference itself.
+fn theta_minus_sin(theta: f64) -> f64 {
+    if theta < 0.1 {
+        let t2 = theta * theta;
+        theta * t2 / 6.0 * (1.0 - t2 / 20.0 * (1.0 - t2 / 42.0 * (1.0 - t2 / 72.0)))
+    } else {
+        theta - theta.sin()
     }
 }
 
@@ -290,7 +306,18 @@ struct Prepared {
     /// Farthest any point of the cell is from its origin.
     reach: f64,
     area: f64,
+    /// Length of the cell's outline.
+    perimeter: f64,
     web: f64,
+}
+
+impl Prepared {
+    /// The area a clipped cell may differ from the whole cell by and still count as unchanged: a
+    /// rounding of the area, but never more than a strip of [`EPS`] along the outline, so a keep-out
+    /// notch deeper than the tolerance of a large cell is not lost.
+    fn unchanged_area(&self) -> f64 {
+        (1e-9 * self.area).min(EPS * self.perimeter)
+    }
 }
 
 /// What two neighbouring outlines that meet or nest do.
@@ -334,8 +361,9 @@ fn meet(p: &Loop, q: &Loop, dist: f64, area: f64, reach: f64) -> Meet {
     }
 }
 
-/// The lattice offsets `(di, dj)` other than `(0, 0)` with `|di * a + dj * b|` possibly at most
-/// `l`: every `dj` with `|dj| * b.y <= l`, and for each the `di` with `|x|` at most `l` along the row.
+/// The lattice offsets `(di, dj)` other than `(0, 0)` with `|di * a + dj * b|` at most `l` (and by a
+/// rounding, a few more): every `dj` with `|dj| * b.y <= l`, and for each the `di` whose point lies
+/// within `l` of the origin along the row. Only these count against [`MAX_OFFSETS`].
 fn offsets(a: Vec2, b: Vec2, l: f64) -> Result<Vec<(i64, i64)>, CellGridError> {
     let too_many = || {
         CellGridError::Layout(format!(
@@ -351,8 +379,11 @@ fn offsets(a: Vec2, b: Vec2, l: f64) -> Result<Vec<(i64, i64)>, CellGridError> {
     let mut out: Vec<(i64, i64)> = Vec::new();
     for dj in -jm..=jm {
         let shift = dj as f64 * b.x;
-        let lo = ((-l - shift) / a.x).ceil();
-        let hi = ((l - shift) / a.x).floor();
+        // Half the chord of the disc of radius `l` at this row's height, padded by a rounding.
+        let y = dj as f64 * b.y;
+        let half = (l * l - y * y).max(0.0).sqrt() * (1.0 + 1e-12) + 1e-9;
+        let lo = ((-half - shift) / a.x).ceil();
+        let hi = ((half - shift) / a.x).floor();
         let n = hi - lo + 1.0;
         if !(n >= 1.0) {
             continue;
@@ -483,6 +514,7 @@ fn prepare(cell: &SketchCell, spec: &CellGridSpec) -> Result<Prepared, CellGridE
              has (pitch_x * pitch_y): the cells would overlap; increase the pitch"
         )));
     }
+    let perimeter = even.prims.iter().map(Prim::length).sum::<f64>();
     let prepared = Prepared {
         loops: [even, odd],
         flip: cell.flip,
@@ -490,6 +522,7 @@ fn prepare(cell: &SketchCell, spec: &CellGridSpec) -> Result<Prepared, CellGridE
         b,
         reach,
         area,
+        perimeter,
         web: spec.web,
     };
     check_neighbours(&prepared)?;
@@ -614,13 +647,28 @@ pub fn plan_sketch(
     let mut warnings = Vec::new();
     let (loops, edges, flattened) = lattice_loops(field, spec, &mut warnings)?;
     let pitch = prep.a.x.max(prep.b.y);
+    let keepout = keepout_loops(&loops);
     let region = Region::from_loops(loops, pitch);
     let field_clip = spec.clip;
     let keepout_clip = spec.keepout_clip.unwrap_or(spec.clip);
     // A cell clear of every edge may still be dropped for being near a curve or inside a margin,
-    // but only when every edge's mode is `Whole`.
-    let strict = field_clip == Clip::Whole && keepout_clip == Clip::Whole;
-    let exact = (flattened || spec.margin > 0.0).then(|| ExactField::new(edges, pitch));
+    // but only by the edges whose mode is `Whole`: the field's own, or the keep-outs'.
+    let exact = (flattened || spec.margin > 0.0).then(|| {
+        let (mut field_edges, mut keepout_edges) = (Vec::new(), Vec::new());
+        let mut rest = edges.into_iter();
+        for (lp, is_keepout) in field.iter().zip(&keepout) {
+            let target = if *is_keepout {
+                &mut keepout_edges
+            } else {
+                &mut field_edges
+            };
+            target.extend(rest.by_ref().take(lp.segs.len()));
+        }
+        (
+            ExactField::new(field_edges, pitch),
+            ExactField::new(keepout_edges, pitch),
+        )
+    });
     let mut out = CellGridPlan {
         warnings,
         ..CellGridPlan::default()
@@ -661,16 +709,19 @@ pub fn plan_sketch(
             pieces.len() == 1
                 && pieces
                     .first()
-                    .is_some_and(|p| (p.1 - prep.area).abs() <= 1e-9 * prep.area)
+                    .is_some_and(|p| (p.1 - prep.area).abs() <= prep.unchanged_area())
         };
         if full {
-            if strict {
-                if let Some(ex) = &exact {
-                    let margin = spec.margin;
-                    let limit = if margin > 0.0 { margin - GRAZE } else { 0.0 };
-                    if ex.within_prims(&cl.prims, &cl.bounds(), limit, margin <= 0.0) {
-                        continue;
-                    }
+            if let Some((field_exact, keepout_exact)) = &exact {
+                let margin = spec.margin;
+                let limit = if margin > 0.0 { margin - GRAZE } else { 0.0 };
+                let close = |ex: &ExactField| {
+                    ex.within_prims(&cl.prims, &cl.bounds(), limit, margin <= 0.0)
+                };
+                if (field_clip == Clip::Whole && close(field_exact))
+                    || (keepout_clip == Clip::Whole && close(keepout_exact))
+                {
+                    continue;
                 }
             }
             push(

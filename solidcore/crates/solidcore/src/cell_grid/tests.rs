@@ -3000,6 +3000,122 @@ fn a_keep_out_may_follow_a_different_mode_than_the_field() {
 }
 
 #[test]
+fn a_keep_out_mode_of_free_leaves_the_margin_to_the_fields_own_edges() {
+    // Margin 3, field whole, keep-out free: cell i covers [12 i, 12 i + 10]. The field's edges
+    // keep the margin: i = 1..=7, 7 x 7 = 49 whole cells. A small keep-out in the gap between
+    // cells (3, 3), (4, 3), (3, 4) and (4, 4), 0.5 mm from each, drops none of them: it is free.
+    let field = [rect(0.0, 0.0, 100.0, 100.0), rect(46.5, 46.5, 47.5, 47.5)];
+    let spec = CellGridSpec {
+        margin: 3.0,
+        keepout_clip: Some(Clip::Free),
+        ..sk_spec(Clip::Whole)
+    };
+    let plan = sk_run(&field, &sk_square(), &spec);
+    assert_eq!((plan.whole, plan.partial), (49, 0));
+    assert!(plan
+        .cells
+        .iter()
+        .all(|c| (1..=7).contains(&c.i) && (1..=7).contains(&c.j)));
+    // The other way round, the keep-out's mode is whole and the field's free: the four cells
+    // within 3 mm of the keep-out go, and the 64 cells inside the field keep to its edge.
+    let spec = CellGridSpec {
+        keepout_clip: Some(Clip::Whole),
+        ..sk_spec(Clip::Free)
+    };
+    let plan = sk_run(&field, &sk_square(), &spec);
+    assert_eq!(plan.whole, 64 - 4);
+}
+
+#[test]
+fn a_notch_a_keep_out_takes_from_a_large_cell_drops_it_though_it_is_a_tiny_share_of_its_area() {
+    // Cells of 1e5 x 1e5 mm (area 1e10 mm2) on a pitch with a web of 2 between them, from cell
+    // (0, 0) at [0, 1e5]^2. A keep-out of 2 x 2 straddles the right side of cell (0, 0) at its
+    // middle, so it takes a notch of 1 x 2 = 2 mm2 from it: 2e-10 of its area, but far more than
+    // a strip of 1e-6 mm along its outline of 4e5 mm (0.4 mm2). Cells (0, 1), (1, 0) and (1, 1)
+    // are whole; cell (0, 0) is cut by a whole keep-out, so it goes.
+    let side = 1e5;
+    let field = [
+        rect(-10.0, -10.0, 2.0 * side + 12.0, 2.0 * side + 12.0),
+        rect(side - 1.0, 4.9e4, side + 1.0, 4.9e4 + 2.0),
+    ];
+    let cell = sk_cell(
+        rect(0.0, 0.0, side, side),
+        None,
+        side + 2.0,
+        side + 2.0,
+        0.0,
+    );
+    let spec = CellGridSpec {
+        anchor: v(side / 2.0, side / 2.0),
+        ..sk_spec(Clip::Whole)
+    };
+    let plan = sk_run(&field, &cell, &spec);
+    let mut kept: Vec<(i64, i64)> = plan.cells.iter().map(|c| (c.i, c.j)).collect();
+    kept.sort_unstable();
+    assert_eq!(kept, vec![(0, 1), (1, 0), (1, 1)]);
+}
+
+#[test]
+fn neighbours_are_counted_in_the_disc_of_the_reach_not_in_the_square_round_it() {
+    // A square of 10 with its origin 130 mm off, on a pitch of 12 (the web 2 apart): the reach is
+    // the corner (10, 10) seen from the origin, sqrt(140^2 + 10^2) = 140.357, so neighbours are
+    // looked for within l = 2 * 140.357 + 2 = 282.71 mm = 23.56 pitches. The square of that
+    // holds 47 x 47 = 2209 offsets, more than the 2000 allowed; the disc holds about
+    // pi * 23.56^2 = 1744. The layout is fine, so it is planned, and the cells of the field
+    // [0, 100]^2: x in [135 + 12 i, 145 + 12 i] whole for i = -11..=-4 (8 columns) and
+    // y in [5 + 12 j, 15 + 12 j] for j = 0..=7 (8 rows).
+    let cell = sk_cell(
+        rect(0.0, 0.0, 10.0, 10.0),
+        Some(v(-130.0, 0.0)),
+        12.0,
+        12.0,
+        0.0,
+    );
+    let plan = sk_run(
+        &[rect(0.0, 0.0, 100.0, 100.0)],
+        &cell,
+        &sk_spec(Clip::Whole),
+    );
+    assert_eq!((plan.whole, plan.partial), (64, 0));
+}
+
+#[test]
+fn a_very_shallow_arc_still_moves_the_default_origin_by_its_cap() {
+    // A 4e4 x 1000 rectangle whose top side is an arc of radius 5e8 mm bulging up: its sweep is
+    // 8e-5 rad (under 1e-4), its sagitta 0.4 mm. The cap has the area r^2 t^3 / 12 = 10667 mm2
+    // (t the sweep) and its centroid lies 0.2 r (t / 2)^2 = 0.16 mm above the chord, so the
+    // centroid of the cell is y = (4e7 * 500 + 10667 * 1000.16) / (4e7 + 10667) mm and x = 2e4.
+    let (r, t) = (5e8_f64, 8e-5_f64);
+    let arc = Seg2::Arc {
+        center: v(2e4, 1000.0 - r * (t / 2.0).cos()),
+        radius: r,
+        start: std::f64::consts::FRAC_PI_2 - t / 2.0,
+        sweep: t,
+    };
+    let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+    let profile = Loop2 {
+        segs: vec![
+            line(v(0.0, 0.0), v(4e4, 0.0)),
+            line(v(4e4, 0.0), arc.start()),
+            arc,
+            line(arc.end(), v(0.0, 0.0)),
+        ],
+    };
+    let cap = r * r * t * t * t / 12.0;
+    let cy = (4e7 * 500.0 + cap * (1000.0 + 0.2 * r * (t / 2.0) * (t / 2.0))) / (4e7 + cap);
+    let cell = sk_cell(profile, None, 5e4, 1100.0, 0.0);
+    let spec = CellGridSpec {
+        anchor: v(0.0, 0.0),
+        ..sk_spec(Clip::Whole)
+    };
+    let plan = sk_run(&[rect(-3e4, -2e3, 3e4, 2e3)], &cell, &spec);
+    let first = plan.cells.iter().find(|c| (c.i, c.j) == (0, 0)).unwrap();
+    let start = first.loops[0].segs[0].start();
+    assert!((start.x + 2e4).abs() < 1e-5, "{}", start.x);
+    assert!((start.y + cy).abs() < 1e-5, "{} vs {}", start.y, -cy);
+}
+
+#[test]
 fn staggered_rows_shift_by_half_a_pitch_at_a_stagger_of_one_half() {
     // b = (6, 12): row j is shifted by 6 j, so its cells start at x = 12 i + 6 j (a cell is 10
     // wide, rows 12 apart, so rows do not touch: a gap of 2 in y). In [0, 100] a row needs the
