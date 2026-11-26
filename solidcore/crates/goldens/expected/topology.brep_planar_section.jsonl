@@ -145,11 +145,13 @@
 {"case":"upstream_ellips_ts2_plane7","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28221.631724958082,28223.631724958082,397380.60942754126]],"n":49},"status":[0.0]}}
 {"case":"upstream_ellips_ts2_plane8","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
 {"case":"upstream_ellips_ts2_plane9","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
+{"case":"upstream_torus_a_plane0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28443.99995,28596.00005,408907.99925]],"n":49},"status":[0.0]}}
 {"case":"upstream_torus_a_plane1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[57285.371045672975,57587.396265528616,2158541.181020123]],"n":95},"status":[0.0]}}
 {"case":"upstream_torus_a_plane2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[114749.97665339755,115149.10287857286,9660056.157688644]],"n":187},"status":[0.0]}}
 {"case":"upstream_torus_a_plane3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
 {"case":"upstream_torus_a_plane4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[142247.4271731755,142509.8442421154,15178927.38289584]],"n":233},"status":[0.0]}}
 {"case":"upstream_torus_a_plane5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56885.317092816185,56987.396265528616,2121272.4375576694]],"n":95},"status":[0.0]}}
+{"case":"upstream_torus_a_plane6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28294.00005,28296.00005,399758.00075]],"n":49},"status":[0.0]}}
 {"case":"upstream_torus_b_plane0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
 {"case":"upstream_torus_b_plane1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
 {"case":"upstream_torus_b_plane2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
@@ -157,9 +159,10 @@
 {"case":"upstream_torus_b_plane4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
 {"case":"upstream_torus_b_plane5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
 {"case":"upstream_torus_b_plane6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
+{"case":"upstream_torus_c_plane0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[27893.99995,28846.00005,397482.9993]],"n":49},"status":[0.0]}}
 {"case":"upstream_torus_c_plane1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56185.3168261495,58015.55403805972,2117022.4035145734]],"n":95},"status":[0.0]}}
 {"case":"upstream_torus_c_plane2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56274.483012264296,57996.30655876851,2119993.703805844]],"n":95},"status":[0.0]}}
 {"case":"upstream_torus_c_plane3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
 {"case":"upstream_torus_c_plane4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[112601.9412106991,115651.84083559817,9481774.347778847]],"n":187},"status":[0.0]}}
 {"case":"upstream_torus_c_plane5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[112662.785250367,115534.85959062928,9480164.884885507]],"n":187},"status":[0.0]}}
-{"case":"upstream_torus_c_plane6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
+{"case":"upstream_torus_c_plane6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[27744.00005,28395.99995,388183.0007]],"n":49},"status":[0.0]}}
