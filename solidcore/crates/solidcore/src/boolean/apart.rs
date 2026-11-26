@@ -113,18 +113,21 @@ fn proved_apart(k: &Kernel, a: &Brep, b: &Brep) -> Result<bool> {
     let (Some(near), Some(far)) = (vertex_boxes(a, &ours)?, vertex_boxes(b, &theirs)?) else {
         return Ok(false);
     };
-    if !all_apart(&near, &far, margin) {
+    if !all_apart(k, &near, &far, margin)? {
         return Ok(false);
     }
     let (Some(near), Some(far)) = (shell_boxes(k, a, &ours)?, shell_boxes(k, b, &theirs)?) else {
         return Ok(false);
     };
-    Ok(all_apart(&near, &far, margin))
+    all_apart(k, &near, &far, margin)
 }
 
 /// Whether every box of `ours` lies farther than `margin` from every box of `theirs`: the boxes
 /// swept together along x, so only boxes whose x ranges come within `margin` are compared.
-fn all_apart(ours: &[Extent3d], theirs: &[Extent3d], margin: f64) -> bool {
+///
+/// # Errors
+/// A cancellation, polled once per box of the sweep.
+fn all_apart(k: &Kernel, ours: &[Extent3d], theirs: &[Extent3d], margin: f64) -> Result<bool> {
     // each box with its side (`theirs` or not), by least x
     let mut order: Vec<(bool, &Extent3d)> = ours
         .iter()
@@ -133,17 +136,18 @@ fn all_apart(ours: &[Extent3d], theirs: &[Extent3d], margin: f64) -> bool {
         .collect();
     order.sort_by(|p, q| p.1.min().x.total_cmp(&q.1.min().x));
     for (n, &(side, a)) in order.iter().enumerate() {
+        k.check_cancelled(OP)?;
         for &(other, b) in order.iter().skip(n + 1) {
             // sorted by least x: no later box comes within `margin` of `a`
             if b.min().x > a.max().x + margin {
                 break;
             }
             if side != other && !a.are_disjoint(b, margin) {
-                return false;
+                return Ok(false);
             }
         }
     }
-    true
+    Ok(true)
 }
 
 /// The faces of each face shell of every solid region of `b`, by shell (the infinite region's
