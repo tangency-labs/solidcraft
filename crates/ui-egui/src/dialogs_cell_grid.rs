@@ -61,6 +61,12 @@ pub struct CellGrid {
     pub sides: String,
     /// An index into [`DOT_GRIDS`]: where circle and polygon cells sit.
     pub dot_grid: usize,
+    /// A whole number picking the pattern of Voronoi cells.
+    pub seed: String,
+    /// How far Voronoi cell centres move, 0 to 1.
+    pub irregularity: String,
+    /// Rounds each corner of a Voronoi cell.
+    pub corner_radius: String,
     pub size: String,
     pub web: String,
     pub through_all: bool,
@@ -85,6 +91,9 @@ impl Default for CellGrid {
             shape: 0,
             sides: "8".into(),
             dot_grid: 0,
+            seed: "0".into(),
+            irregularity: "0.7".into(),
+            corner_radius: "0 mm".into(),
             size: "6 mm".into(),
             web: "1.5 mm".into(),
             through_all: false,
@@ -108,6 +117,10 @@ impl CellGrid {
     /// Circle and polygon cells sit on a dot grid; the other shapes tile the plane.
     fn on_dots(&self) -> bool {
         matches!(SHAPES.get(self.shape), Some(&"circle" | &"polygon"))
+    }
+
+    fn is_voronoi(&self) -> bool {
+        SHAPES.get(self.shape) == Some(&"voronoi")
     }
 
     /// The command takes a margin with whole cells only, at the field's edge and at the keep-outs:
@@ -142,7 +155,14 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, _: &[SelInput])
         app.tr("Shape"),
         "cell_grid_shape",
         &mut c.shape,
-        &[app.tr("ui.cell_grid.hexagon"), app.tr("ui.perforate_square"), app.tr("ui.cell_grid.triangle"), app.tr("ui.circle"), app.tr("ui.polygon")],
+        &[
+            app.tr("ui.cell_grid.hexagon"),
+            app.tr("ui.perforate_square"),
+            app.tr("ui.cell_grid.triangle"),
+            app.tr("ui.circle"),
+            app.tr("ui.polygon"),
+            app.tr("ui.cell_grid.voronoi"),
+        ],
     );
     let mut enter = false;
     if SHAPES.get(c.shape) == Some(&"polygon") {
@@ -156,6 +176,11 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, _: &[SelInput])
             &mut c.dot_grid,
             &[app.tr("ui.cell_grid.hexagonal"), app.tr("ui.perforate_square")],
         );
+    }
+    if c.is_voronoi() {
+        enter |= expr_row(ui, app.tr("ui.cell_grid.seed"), &mut c.seed);
+        enter |= expr_row(ui, app.tr("ui.cell_grid.irregularity"), &mut c.irregularity);
+        enter |= expr_row(ui, app.tr("ui.cell_grid.corner_radius"), &mut c.corner_radius);
     }
     enter |= expr_row(ui, app.tr("ui.cell_grid.size"), &mut c.size);
     enter |= expr_row(ui, app.tr("ui.cell_grid.web"), &mut c.web);
@@ -220,6 +245,13 @@ pub fn commands(app: &SolveApp, c: &CellGrid, inputs: &[SelInput], extra: &Map<S
         if SHAPES.get(c.shape) == Some(&"polygon") {
             args.insert("sides".into(), json!(c.sides));
         }
+        if c.is_voronoi() {
+            for (key, value) in [("seed", &c.seed), ("irregularity", &c.irregularity), ("corner_radius", &c.corner_radius)] {
+                if !value.trim().is_empty() {
+                    args.insert(key.into(), json!(value));
+                }
+            }
+        }
         if c.on_dots() {
             args.insert("dot_grid".into(), json!(DOT_GRIDS.get(c.dot_grid).copied().unwrap_or("hexagonal")));
         }
@@ -277,6 +309,9 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         shape,
         sides,
         dot_grid,
+        seed,
+        irregularity,
+        corner_radius,
         size,
         web,
         angle,
@@ -311,6 +346,9 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         },
         sides: sides.as_ref().map_or(defaults.sides, |e| shown_expr(e, ValueKind::Unitless)),
         dot_grid: usize::from(*dot_grid == DotGrid::Square),
+        seed: seed.as_ref().map_or(defaults.seed, |e| shown_expr(e, ValueKind::Unitless)),
+        irregularity: irregularity.as_ref().map_or(defaults.irregularity, |e| shown_expr(e, ValueKind::Unitless)),
+        corner_radius: corner_radius.as_ref().map_or(defaults.corner_radius, length),
         size: length(size),
         web: length(web),
         through_all: *through_all,
