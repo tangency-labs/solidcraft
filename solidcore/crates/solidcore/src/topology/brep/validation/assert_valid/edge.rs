@@ -391,7 +391,7 @@ pub(super) fn edge(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, e: EdgeId) -> 
 /// value is the one the call would return. Errors are not kept: the call runs again and
 /// returns its error again.
 #[derive(Default)]
-struct Binormals {
+pub(super) struct Binormals {
     /// The stamps the kept values were evaluated under.
     stamps: Option<crate::topology::WriteStamps>,
     /// The kept values: edge use, the parameter's bits, the binormal.
@@ -568,10 +568,26 @@ fn radial_order(
         }
         let t = extent.evaluate(0.456);
         let certified = certified.as_deref();
-        let target_eval =
-            sector_direction(k, b, target, t, binormals, step_off, step_off_dist, certified)?;
-        let radial_eval =
-            sector_direction(k, b, radial, t, binormals, step_off, step_off_dist, certified)?;
+        let target_eval = sector_direction(
+            k,
+            b,
+            target,
+            t,
+            binormals,
+            step_off,
+            step_off_dist,
+            certified,
+        )?;
+        let radial_eval = sector_direction(
+            k,
+            b,
+            radial,
+            t,
+            binormals,
+            step_off,
+            step_off_dist,
+            certified,
+        )?;
 
         // 1st iteration save variables
         if primary.is_none() {
@@ -1105,5 +1121,102 @@ mod tests {
         let cut = boolean_difference(&mut k, block, pin).unwrap();
         let (tangent, _) = tangent_edges(&k, &cut);
         assert!(tangent >= 1, "{tangent}");
+    }
+
+    /// The bodies of [`kept_binormals_are_the_evaluated_ones`]: a box, a cylinder, a box
+    /// less a cylinder resting on its face (WR-540's tangent edges) and a vendored filleted
+    /// boss, the same each call.
+    fn binormal_bodies(k: &mut Kernel) -> Vec<Brep> {
+        let corner = Point3::new(20.0, 5.0, 5.0);
+        let mut out = vec![create_box(k, corner, 15.0, 15.0, 27.5).unwrap()];
+        out.push(create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 1.5, 4.0).unwrap());
+        let cut = create_box(k, corner, 15.0, 15.0, 27.5).unwrap();
+        let pin = create_cylinder(k, Point3::new(25.0, 12.5, 22.5), 5.0, 25.0).unwrap();
+        out.push(boolean_difference(k, cut, pin).unwrap());
+        out.push(filleted_boss(k));
+        out
+    }
+
+    /// The vendored `tests/data/issue_2621_solidcraft_m10_filleted_boss.smb`: a boss with
+    /// a filleted rim.
+    fn filleted_boss(k: &mut Kernel) -> Brep {
+        use crate::geom::attribute::AttributeStore;
+        use crate::topology::api_files::read_brep_from_file;
+        use crate::topology::brep::p10::TopologyEnv;
+        use crate::topology::topology::NotifyRecords;
+        let bytes = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/issue_2621_solidcraft_m10_filleted_boss.smb"
+        ));
+        let fresh = Brep::new();
+        let mut store = AttributeStore::new();
+        let mut records = NotifyRecords::new();
+        let key_of = |e| fresh.owner_identity(e);
+        let mut env = TopologyEnv {
+            all_attributes: &[],
+            attributes: &mut store,
+            key_of: &key_of,
+            records: &mut records,
+            next_key: 1 << 50,
+        };
+        let mut b = read_brep_from_file(k, Some(bytes.to_vec()), false, false, &mut env).unwrap();
+        b.refresh_cached_topology();
+        b
+    }
+
+    /// The full check of [`binormal_bodies`] reports what it reported before the edge
+    /// check kept its binormals: no failure line on any of them.
+    #[test]
+    fn binormal_bodies_check_as_before() {
+        use crate::topology::brep::validation::{check_brep_full, CheckLevel, ValidityScope};
+        let mut k = Kernel::default();
+        for (i, mut b) in binormal_bodies(&mut k).into_iter().enumerate() {
+            let check =
+                check_brep_full(&mut k, &mut b, CheckLevel::Level2, ValidityScope::Body).unwrap();
+            assert_eq!(check.lines(), Vec::<String>::new(), "body {i}");
+        }
+    }
+
+    /// [`Binormals`] gives back, bit for bit, what `evaluate_binormal` returns on the same
+    /// body never asked before; the second asking of every loop edge use is a kept value,
+    /// and a write to the B-rep drops every kept value.
+    #[test]
+    fn kept_binormals_are_the_evaluated_ones() {
+        let mut k = Kernel::default();
+        let mut bodies = binormal_bodies(&mut k);
+        let fresh = binormal_bodies(&mut k);
+        let options = BinormalOptions::default();
+        for (b, mut fresh) in bodies.iter_mut().zip(fresh) {
+            let mut memo = Binormals::default();
+            let mut uses = Vec::new();
+            for eu in b.edgeuses().ids().collect::<Vec<_>>() {
+                if !eu1::is_loop_edgeuse(b, eu).unwrap() {
+                    continue;
+                }
+                let e = b.edgeuse(eu).unwrap().edge.unwrap();
+                uses.push((eu, b.edge(e).unwrap().interval.evaluate(0.456)));
+            }
+            assert!(!uses.is_empty());
+            for round in 0..2 {
+                for &(eu, t) in &uses {
+                    let got = memo.eval(&k, b, eu, t);
+                    let want = evaluate_binormal(&k, &mut fresh, eu, t, true, &options);
+                    assert_eq!(format!("{got:?}"), format!("{want:?}"), "round {round}");
+                    let bits = |v: crate::math::Vec3| [v.x, v.y, v.z].map(f64::to_bits);
+                    let (got, want) = (got.unwrap(), want.unwrap());
+                    assert_eq!(bits(got.binormal), bits(want.binormal));
+                    assert_eq!(bits(got.tangent), bits(want.tangent));
+                    assert_eq!(bits(got.face_normal), bits(want.face_normal));
+                    assert_eq!(bits(got.point), bits(want.point));
+                }
+            }
+            // the first evaluation on a face can build its surface's cache (a write), so
+            // only the second round is all kept values
+            assert_eq!(memo.kept.len(), uses.len());
+            let (eu, t) = uses[0];
+            b.edgeuse_mut(eu).unwrap();
+            memo.eval(&k, b, eu, t).unwrap();
+            assert_eq!(memo.kept.len(), 1, "a write kept the old values");
+        }
     }
 }
