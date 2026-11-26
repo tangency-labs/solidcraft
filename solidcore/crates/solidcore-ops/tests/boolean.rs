@@ -1097,6 +1097,7 @@ fn cusp_tools(block: &CuspBlock, seed: u32, noise: f64) -> Vec<Body> {
 /// or the merge did. With each contact read as one touch at the cusp, the cut builds
 /// whatever the rounding. Seeds whose points were 5e-10 and 1e-9 off; each failed before.
 #[test]
+#[allow(clippy::disallowed_methods)] // the oracle points' closed form, not ops computing geometry
 fn a_cusp_swept_onto_a_coaxial_cylinder_cuts_whatever_the_sketch_rounding() {
     all_fixes();
     let block = cusp_block();
