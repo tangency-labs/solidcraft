@@ -817,6 +817,26 @@ fn motion_list_round_trips_key_units_through_motion_study() {
 }
 
 #[test]
+fn automatic_explode_preview_matches_saved_views_at_each_scale() {
+    let mut s = rail();
+    run(&mut s, "explode.create", json!({"name": "__preview", "moves": [{"occurrence": "B", "translate": [0, 0, 50]}]}));
+    run(&mut s, "explode.show", json!({"view": "__preview"}));
+    let doc = s.doc.clone();
+    let pending = s.pending_moves.clone();
+    let undo = s.undo.len();
+    let preview = s.prepare_automatic_explode().unwrap();
+    for scale in [0.0, 0.125, 1.0, 2.0] {
+        let mut copy = s.scratch();
+        let saved = run(&mut copy, "explode.create", json!({"scale": scale}));
+        run(&mut copy, "explode.show", json!({"view": saved["view"]}));
+        assert_eq!(preview.placements(scale).unwrap(), copy.pending_moves, "scale {scale}");
+    }
+    assert!(std::sync::Arc::ptr_eq(&s.doc, &doc));
+    assert_eq!(s.pending_moves, pending);
+    assert_eq!(s.undo.len(), undo);
+}
+
+#[test]
 fn exploded_views_show_without_changing_the_design() {
     let mut s = rail();
     let before = s.doc.occurrences.clone();

@@ -85,6 +85,13 @@ impl NamedFace<'_> {
         self.own_cylinder().map(|c| placed(&self.offset, c))
     }
 
+    /// The face as a round end, in the component's coordinates (`None`: not a cylinder or cone).
+    pub fn round(&self, raw_pick: Vec3) -> Option<Round> {
+        let own = self.own_round()?;
+        let chosen = end_by_pick(self, &own, raw_pick);
+        Some(own.at_end(chosen, &self.offset))
+    }
+
     /// The face's centre (the middle of its outline, `outline_centre`) and outward normal (the
     /// component's coordinates), when it is planar.
     pub fn plane(&self) -> Result<Option<(Vec3, Vec3)>> {

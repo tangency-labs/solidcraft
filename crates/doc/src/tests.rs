@@ -1900,6 +1900,144 @@ fn a_body_reads_the_material_its_mass_is_computed_with() {
 }
 
 #[test]
+fn copy_lineage_resolves_seed_material_and_respects_overrides() {
+    let mut doc = Document::new("copy lineage");
+    let seed_id = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(seed_id).unwrap().body_names = vec!["Seed".into()];
+    let pat_id = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: Vec::new(),
+                pattern: PatternKind::Rectangular {
+                    dir1: crate::points::Dir(Vec3::X),
+                    count1: "3".into(),
+                    spacing1: "20 mm".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: Default::default(),
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                },
+                bodies: vec!["Seed".into()],
+                placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
+                join: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(pat_id).unwrap().body_names = vec!["Seed (2)".into(), "Seed (3)".into()];
+    let mir_id = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Origin { name: "YZ".into() },
+                bodies: vec!["Seed (2)".into()],
+                combine: false,
+                placements: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(mir_id).unwrap().body_names = vec!["Seed (2) (2)".into()];
+
+    doc.materials.insert("Seed".into(), "Steel".into());
+    assert!(!doc.has_copy_material_lineage("Seed"));
+    assert_eq!(doc.copy_seed_body("Seed (2)"), Some("Seed"));
+    assert_eq!(doc.copy_seed_body("Seed (3)"), Some("Seed"));
+    assert_eq!(doc.copy_seed_body("Seed (2) (2)"), Some("Seed (2)"));
+    assert!(doc.has_copy_material_lineage("Seed (2)"));
+    for body in ["Seed", "Seed (2)", "Seed (3)", "Seed (2) (2)"] {
+        assert_eq!(doc.body_material(body), "Steel", "{body}");
+        assert!((doc.density(body) - 7.85).abs() < 1e-9, "{body}");
+    }
+
+    // Explicit override on an intermediate copy wins for itself and its downstream copies,
+    // and survives even if the seed temporarily acquires the same material and changes again.
+    doc.materials.insert("Seed (2)".into(), "Copper".into());
+    assert_eq!(doc.body_material("Seed (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (2) (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (3)"), "Steel");
+    doc.materials.insert("Seed".into(), "Copper".into());
+    doc.materials.insert("Seed".into(), "Aluminum".into());
+    assert_eq!(doc.body_material("Seed (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (2) (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (3)"), "Aluminum");
+
+    // Explicit Default on a copy stops lineage inheritance instead of falling back to the seed.
+    doc.materials.insert("Seed (3)".into(), DEFAULT_MATERIAL.into());
+    assert_eq!(doc.resolved_body_material("Seed (3)"), Some(DEFAULT_MATERIAL));
+    assert_eq!(doc.body_material("Seed (3)"), DEFAULT_MATERIAL);
+    assert!((doc.density("Seed (3)") - DEFAULT_DENSITY).abs() < 1e-9);
+
+    // Multi-seed joined pattern: unmerged copies inherit unanimous seed material, do not guess
+    // when seeds disagree, and respect an explicit Default override.
+    let join_id = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: Vec::new(),
+                pattern: PatternKind::Rectangular {
+                    dir1: crate::points::Dir(Vec3::X),
+                    count1: "2".into(),
+                    spacing1: "30 mm".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: Default::default(),
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                },
+                bodies: vec!["A".into(), "B".into()],
+                placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
+                join: true,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(join_id).unwrap().body_names = vec!["A (2)".into()];
+    assert_eq!(doc.copy_seed_body("A (2)"), None);
+    assert!(doc.has_copy_material_lineage("A (2)"));
+    doc.materials.insert("A".into(), "Steel".into());
+    doc.materials.insert("B".into(), "Steel".into());
+    assert_eq!(doc.body_material("A (2)"), "Steel");
+    doc.materials.insert("B".into(), "Brass".into());
+    assert_eq!(doc.body_material("A (2)"), DEFAULT_MATERIAL);
+    doc.materials.insert("B".into(), "Steel".into());
+    doc.materials.insert("A (2)".into(), DEFAULT_MATERIAL.into());
+    assert_eq!(doc.body_material("A (2)"), DEFAULT_MATERIAL);
+}
+
+#[test]
 fn primitives_and_combine() {
     let mut doc = Document::new("p");
     doc.add_feature(
@@ -3486,6 +3624,32 @@ fn a_closed_control_spline_design_saves_and_reopens_unchanged() {
     let mut model = Model::new();
     model.evaluate(&reopened);
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+}
+
+/// #17752: a Hole may name the press-in hardware it is the mounting hole of. It is saved only when
+/// set (a hole without it saves as before), with the kind as its name, and an older design reads
+/// with none. The hardware's length is an expression a parameter rename follows.
+#[test]
+fn a_hole_saves_its_press_in_hardware_only_when_set() {
+    let plain = serde_json::json!({"type": "hole", "position": [0, 0, 0], "direction": [0, 0, 1], "diameter": "4.25 mm", "hole": {"type": "simple"}});
+    let kind: FeatureKind = serde_json::from_value(plain.clone()).unwrap();
+    let FeatureKind::Hole { hardware, .. } = &kind else { panic!("not a hole") };
+    assert_eq!(*hardware, None);
+    assert!(serde_json::to_value(&kind).unwrap().get("hardware").is_none(), "a hole without hardware saves no key");
+
+    let mut with = plain;
+    with["hardware"] = serde_json::json!({"kind": "flush_nut", "thread": "M4", "part": "flush-nut.m4"});
+    let kind: FeatureKind = serde_json::from_value(with.clone()).unwrap();
+    let FeatureKind::Hole { hardware: Some(h), .. } = &kind else { panic!("hardware lost") };
+    assert_eq!((h.kind, h.thread.as_str(), h.part.as_str()), (crate::hardware_catalog::HardwareKind::FlushNut, "M4", "flush-nut.m4"));
+    assert!(h.length.is_none());
+    // Saved as it was read: the hardware object is the same, and has no length key when it has none.
+    assert_eq!(serde_json::to_value(&kind).unwrap()["hardware"], with["hardware"]);
+
+    // A stud's length is an expression: the feature's inputs name it, so a parameter rename reaches it.
+    with["hardware"] = serde_json::json!({"kind": "stud", "thread": "M3", "length": "pin_len", "part": "stud.m3"});
+    let kind: FeatureKind = serde_json::from_value(with).unwrap();
+    assert!(kind.inputs().iter().any(|(label, e, _)| *label == "Hardware length" && e == "pin_len"), "{:?}", kind.inputs());
 }
 
 fn mat_close(a: &Mat, b: &Mat, tol: f64) -> bool {
