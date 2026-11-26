@@ -64,8 +64,18 @@ impl XConnection {
             None => return self.create_empty_cursor(),
         };
 
+        // SolidCraft: a missing or broken Xcursor theme can leave the bidirectional
+        // resize names (including cursor-icon's alternatives) unresolved. Try the
+        // corresponding X11 core font names last, so a working theme retains priority.
+        let legacy_resize = match cursor {
+            CursorIcon::EwResize => Some("sb_h_double_arrow"),
+            CursorIcon::NsResize => Some("sb_v_double_arrow"),
+            CursorIcon::NeswResize => Some("bottom_left_corner"),
+            CursorIcon::NwseResize => Some("bottom_right_corner"),
+            _ => None,
+        };
         let mut xcursor = 0;
-        for &name in iter::once(&cursor.name()).chain(cursor.alt_names().iter()) {
+        for &name in iter::once(&cursor.name()).chain(cursor.alt_names().iter()).chain(legacy_resize.iter()) {
             let name = CString::new(name).unwrap();
             xcursor = unsafe {
                 (self.xcursor.XcursorLibraryLoadCursor)(
