@@ -14,9 +14,8 @@ use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_3, FRAC_PI_4, PI, TAU};
 
 use solidcore_ops::prism::{
     extrude_planar_regions, fill_channel, fitted_loop, loop_crosses_itself, loop_holds,
-    planar_regions_boolean,
-    prism_equivalent, prism_section, region_area, Contour, FillFailure, FillOptions, FillSide,
-    PrismSection,
+    planar_regions_boolean, prism_equivalent, prism_section, region_area, Contour, FillFailure,
+    FillOptions, FillSide, PrismSection,
 };
 use solidcore_ops::{make_box, make_cylinder, session, Body, BooleanOp, CheckLevel, Error};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
@@ -2189,9 +2188,20 @@ fn loop_crosses_itself_at_a_bow_tie_and_along_a_shared_line() {
     assert_eq!(loop_crosses_itself(&sq, 0.0), None);
     let curvy = Loop2 {
         segs: vec![
-            Seg2::Line { a: v(0.0, 0.0), b: v(10.0, 0.0) },
-            Seg2::Cubic { p0: v(10.0, 0.0), p1: v(12.0, 5.0), p2: v(5.0, 12.0), p3: v(0.0, 10.0) },
-            Seg2::Line { a: v(0.0, 10.0), b: v(0.0, 0.0) },
+            Seg2::Line {
+                a: v(0.0, 0.0),
+                b: v(10.0, 0.0),
+            },
+            Seg2::Cubic {
+                p0: v(10.0, 0.0),
+                p1: v(12.0, 5.0),
+                p2: v(5.0, 12.0),
+                p3: v(0.0, 10.0),
+            },
+            Seg2::Line {
+                a: v(0.0, 10.0),
+                b: v(0.0, 0.0),
+            },
         ],
     };
     assert_eq!(loop_crosses_itself(&curvy, 1e-7), None);
