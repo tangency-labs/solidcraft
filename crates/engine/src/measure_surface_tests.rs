@@ -359,3 +359,23 @@ fn a_piece_of_a_sphere_with_corners_is_its_exact_area() {
     let want = TAU * 50.0 * 25.0 / 4.0;
     assert!((band - want).abs() <= want * 1e-6, "the quarter zone from z = 0 to 25 is ¼·2πR·25 = {want}: {band}");
 }
+
+/// `model.faces` lists each face of a sliced sphere at its exact area, as a pick's measure
+/// does: the flat disc at z = 12.5 is π(50² − 12.5²), not the mesh's 3413.946 (#22556).
+#[test]
+fn model_faces_lists_a_sliced_spheres_faces_at_their_exact_areas() {
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"radius": 50, "base": [0, 0, 0], "operation": "new"}));
+    run(&mut s, "solid.box", cut_at(0.0, false));
+    run(&mut s, "solid.box", cut_at(12.5, true));
+    let name = s.model.state().bodies.first().unwrap().name.clone();
+    let r = run(&mut s, "model.faces", json!({"body": name}));
+    let areas: Vec<f64> = r["faces"].as_array().unwrap().iter().filter_map(|f| f["area"].as_f64()).collect();
+    for want in [std::f64::consts::PI * (2500.0 - 156.25), std::f64::consts::PI * 2500.0] {
+        assert!(areas.iter().any(|a| (a - want).abs() <= want * 1e-6), "a flat face of area {want}: {r}");
+    }
+    let curved: f64 = TAU * 50.0 * 12.5;
+    let total: f64 = areas.iter().sum();
+    let want = curved + std::f64::consts::PI * (2500.0 - 156.25) + std::f64::consts::PI * 2500.0;
+    assert!((total - want).abs() <= want * 1e-6, "the faces add up to {want}: {r}");
+}

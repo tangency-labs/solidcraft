@@ -935,6 +935,9 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
     let names = solidcraft_doc::naming::face_names(b);
     let tol = (b.body.size() * 2e-3).max(1e-3);
     let spots = solidcraft_doc::naming::face_spots(b);
+    // A face's area comes from its exact surface and edges where they give one, as a pick's
+    // measure does (#22556): the display mesh's triangles run inside every curve.
+    let mesh = b.mesh();
     let faces = b
         .body
         .faces(tol)?
@@ -951,7 +954,7 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
                 index: f.index,
                 name: names.get(f.index).cloned(),
                 exact: solidcraft_doc::naming::face_name_exact(b, f.index),
-                area: f.area,
+                area: super::measure_exact::patch_area(&b.body, &mesh, &[f.index]).unwrap_or(f.area),
                 centroid: f.centroid.into(),
                 plane_normal: f.plane_normal.map(Into::into),
                 point: spot.map(|x| x.point.into()),
