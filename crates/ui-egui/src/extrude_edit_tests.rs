@@ -906,6 +906,32 @@ fn with_extent_all_the_value_box_has_no_number_to_step() {
     }
 }
 
+/// Two Sides gives the second side the extent types of the first (#18691): its own Extent Type
+/// row, a To Object input for it, and an edit that keeps what was saved.
+#[test]
+fn two_sides_second_side_has_its_own_extent_type() {
+    for (second, all2, to2) in [(json!({"through_all2":true}), true, false), (json!({"to2":[5,5,-20],"to_offset2":"2 mm"}), false, true)] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[0,0,-30],"body_name":"Floor"})).unwrap();
+        let mut params = json!({"distance":"5 mm","distance2":"3 mm","operation":"join","targets":["Floor"]});
+        params.as_object_mut().unwrap().extend(second.as_object().unwrap().clone());
+        let mut h = make_in(h, params);
+        open(&mut h);
+        assert!(h.widget("Extent Type 2").is_some(), "the second side's Extent Type row");
+        let d = h.app.dialog.as_ref().unwrap();
+        let crate::dialogs::Kind::Extrude { all2: shown_all2, .. } = &d.kind else { panic!("extrude") };
+        assert_eq!(*shown_all2, all2);
+        assert_eq!(d.inputs.iter().any(|i| i.label == crate::dialogs::TO_OBJECT2), to2);
+        // The hidden Distance 2 text is not read while the second side is All or To Object.
+        let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Extrude { distance2, .. }, .. }) = &mut h.app.dialog else { panic!("extrude") };
+        *distance2 = "1 +".into();
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "OK waited on the hidden Distance 2: {:?}", h.app.dialog.as_ref().map(|d| &d.error));
+        let saved = extent(&h);
+        assert_eq!((saved.through_all2, saved.to2.is_some()), (all2, to2), "OK keeps the second side's extent");
+    }
+}
+
 /// Distance 2's box in the view stays while its text does not evaluate, so a cleared box or a
 /// `-` typed first can be finished there.
 #[test]
@@ -1811,4 +1837,51 @@ fn editing_symmetric_extrude_toggles_symmetric_offset() {
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.dialog.is_none());
     assert!(extent(&h).symmetric_offset);
+}
+
+#[test]
+fn extrude_body_name_row_shows_for_new_body_and_a_typed_name_is_sent() {
+    use crate::dialogs::{Kind, apply_commands};
+    let shows = |h: &Harness| {
+        let label = solidcraft_ui_text::tr("ui.body_name");
+        h.output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label) && !n.is_disabled())
+    };
+    let sent = |h: &Harness| {
+        // A refusal (a Cut with nothing to cut) sends nothing, so no name either.
+        let (cmd, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).ok()?.into_iter().next()?;
+        // An edit is a `timeline.redefine` with the feature's parameters under `params`.
+        let params = if cmd == "timeline.redefine" { params.get("params")?.clone() } else { params };
+        params.get("body_name").and_then(Value::as_str).map(str::to_string)
+    };
+    let mut h = make(json!({}));
+    // Editing shows the name the body has, and keeps it.
+    open(&mut h);
+    assert!(shows(&h));
+    assert_eq!(sent(&h).as_deref(), Some("Main"));
+    // Join and Cut hide the row and send no name.
+    for operation in [1, 2] {
+        if let Some(Kind::Extrude { operation: op, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *op = operation;
+        }
+        h.frames(2);
+        assert!(!shows(&h), "operation {operation}");
+        assert_eq!(sent(&h), None, "operation {operation}");
+    }
+    // A cleared name sends none, as before; a typed one is sent trimmed.
+    if let Some(Kind::Extrude { operation, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *operation = 0;
+    }
+    let dialog = h.app.dialog.as_mut().unwrap();
+    dialog.extra.insert("body_name".into(), json!(""));
+    assert_eq!(sent(&h), None);
+    h.app.dialog.as_mut().unwrap().extra.insert("body_name".into(), json!(" Slab "));
+    h.frames(2);
+    assert!(shows(&h));
+    assert_eq!(sent(&h).as_deref(), Some("Slab"));
 }

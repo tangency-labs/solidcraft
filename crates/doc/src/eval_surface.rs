@@ -170,6 +170,13 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     let tool = kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?);
                     kernel::extend_surface(&mb.body, &crate::plain(edges), &at(kernel::ExtendLimit::UpTo(&tool)))?
                 }
+                Some(crate::ExtendTo::Body(target)) => {
+                    if target == body {
+                        return Err(DocError::Invalid("a surface can't extend up to itself".into()));
+                    }
+                    let tb = st.body(target).ok_or_else(|| DocError::Unknown(format!("body `{target}`")))?;
+                    kernel::extend_surface(&mb.body, &crate::plain(edges), &at(kernel::ExtendLimit::UpToBody(&tb.body)))?
+                }
                 Some(crate::ExtendTo::Face(t)) => {
                     let tb = st.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
                     let face = crate::appearance::face_index_at(tb, t.point.0)
@@ -329,8 +336,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
                 f,
             )?;
-            if extent.through_all || extent.from.is_some() || extent.symmetric_offset {
-                return Err(DocError::Invalid("not supported yet: a surface extrude through all, from an object, or with symmetric offset".into()));
+            if extent.through_all || extent.through_all2 || extent.to2.is_some() || extent.from.is_some() || extent.symmetric_offset {
+                return Err(DocError::Invalid(
+                    "not supported yet: a surface extrude through all, from an object, or with symmetric offset".into(),
+                ));
             }
             if *to_next && extent.to.is_some() {
                 return Err(DocError::Invalid("a surface extrude goes To Next or To Object, not both".into()));
@@ -371,7 +380,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 None if *to_next => sheet_to_next(doc, f, st, &ss, &chains, extent, off)?,
                 None => {
                     let d = val(vals, &extent.distance, Kind::Length)?;
-                    let (a, b) = extent_sides(vals, extent, d, extent.direction)?;
+                    let (a, b) = extent_sides(vals, extent, d, extent.direction, None)?;
                     kernel::extrude_sheet(&ss.plane, &chains, a + off, b + off)?
                 }
             };
@@ -760,7 +769,7 @@ fn sheet_to_object(
         if (end - start).abs() < 1e-9 {
             return Err(DocError::Invalid("the To object is where the surface extrude starts".into()));
         }
-        let (a, b) = extent_sides(vals, extent, end - start, crate::Direction::Positive)?;
+        let (a, b) = extent_sides(vals, extent, end - start, crate::Direction::Positive, None)?;
         return Ok(kernel::extrude_sheet(plane, chains, a + start, b + start)?);
     };
     if to_offset.abs() > 1e-9 {

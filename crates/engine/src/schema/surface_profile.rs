@@ -57,7 +57,7 @@ pub struct SurfaceExtrudeParams {
     /// Draft angle of the walls, the profile being the section at the start (positive: outward,
     /// so the far end is larger; negative: inward). Closed profiles and closed loops of curves
     /// only; a profile's holes lean the other way, as on `solid.extrude`'s solid, whose side walls
-    /// these are. One side only, and not with `to`.
+    /// these are. One side only, and not with `to` or `to_next`.
     #[serde(default)]
     pub taper: Option<AngleExpr>,
     /// How the taper closes a sharp corner of the profile.

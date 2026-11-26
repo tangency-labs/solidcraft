@@ -2212,6 +2212,8 @@ fn occurrence_rows_inner(
         let names = app.session.occurrence_bodies(path, true).unwrap_or_default();
         if !offer_bodies(app, &names, Take::Toggle) {
             click_select(app, r.how.as_ref(), Some(Sel::Occurrence { path: path.to_vec() }));
+        } else if let Some(d) = app.dialog.as_mut() {
+            crate::dialogs_assembly::picked_whole_component(d, &names);
         }
     }
     if rename_here {
@@ -2813,8 +2815,12 @@ pub struct CanvasPanel {
     pub canvas: u64,
     pub calibrate: bool,
     pub straighten: bool,
-    /// Trace Region: the click on the image sets `a`, then Trace runs `canvas.to_sketch` there.
+    /// Trace Region: a click on the image picks the region (`points`), then Trace runs
+    /// `canvas.to_sketch` there.
     pub trace: bool,
+    /// Trace Region: the points picked, in mm on the canvas plane. A click replaces them, Ctrl+click
+    /// adds one; Trace takes the union of their regions.
+    pub points: Vec<[f64; 2]>,
     /// Trace Region: how far a colour may differ from the clicked one (percent, 0 to 100).
     pub tolerance: f64,
     /// Undo depth when the panel opened.
@@ -2849,6 +2855,7 @@ impl CanvasPanel {
             calibrate,
             straighten: false,
             trace: false,
+            points: Vec::new(),
             tolerance: 20.0,
             depth: app.session.undo.len(),
             a,

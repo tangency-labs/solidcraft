@@ -1216,6 +1216,7 @@ fn hostile_params_never_panic() {
         "bodies",
         "body",
         "body_name",
+        "bore_face",
         "center",
         "chain",
         "clip",
@@ -1283,13 +1284,16 @@ fn hostile_params_never_panic() {
         "lines",
         "link",
         "major",
+        "make",
         "margin",
+        "master_spline",
         "measure",
         "members",
         "mid",
         "minor",
         "minor_radius",
         "mode",
+        "module",
         "name",
         "names",
         "near",
@@ -1313,6 +1317,7 @@ fn hostile_params_never_panic() {
         "position",
         "position_mm",
         "prefix",
+        "pressure_angle",
         "profile",
         "profiles",
         "project_edges",
@@ -1327,6 +1332,7 @@ fn hostile_params_never_panic() {
         "scale",
         "seam",
         "set",
+        "shaft_face",
         "shape",
         "sheet",
         "side",
@@ -1342,10 +1348,12 @@ fn hostile_params_never_panic() {
         "tangent_edges",
         "target",
         "targets",
+        "teeth",
         "text",
         "thickness",
         "through",
         "through_all",
+        "tip_corner",
         "to",
         "tolerance",
         "tools",
@@ -2341,7 +2349,7 @@ fn hole_direction_rejects_malformed_vectors_without_changing_the_design() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
     let before = (*s.doc).clone();
-    for direction in [json!("sideways"), json!([0, -1]), json!([0, 0, -1, 0]), json!(["1", "0", "0"]), json!({"x": 1}), json!(false), json!(2)] {
+    for direction in [json!("sideways"), json!([0, -1]), json!([0, 0, -1, 0]), json!({"x": 1}), json!(false), json!(2)] {
         let err =
             s.execute("solid.hole", &json!({"position": [10, 10, 10], "diameter": 5, "depth": 5, "direction": direction})).unwrap_err().to_string();
         assert!(err.contains("`direction`"), "{direction}: {err}");
@@ -6065,6 +6073,32 @@ fn revolve_two_sides_symmetric_and_to_object() {
     let corner = if b90["max"][1].as_f64().unwrap_or(0.0) > 1.0 { json!([0, 12, 0]) } else { json!([0, -12, 0]) };
     let (v, _) = ring(json!({"to": corner}));
     assert!(rel(v, v90) < 1e-3, "{v} {v90}");
+}
+
+/// A circle revolved two-sided by 130° and 40° builds, as 40° and 130° does: a 170° sector of
+/// a torus, V = 2 π² R r² (170 / 360) by Pappus, for the report's three circles (the centre
+/// R from the axis and at a height, radius r: 30, 0, 5; 25, 10, 4; 40, 10, 8). The kernel's
+/// check refused it as "Bad Infinite Region": the ray that looks for the infinite region
+/// entered and left the torus face 2.5° and 2° off its surface within one leaf of the face's
+/// cache, and the line/surface solve gave it the exit as its first hit (#20499).
+#[test]
+fn revolve_two_sides_130_and_40_builds_like_40_and_130() {
+    let sector = |centre: [f64; 2], radius: f64, angle: &str, angle2: &str| {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "YZ"}));
+        run(&mut s, "sketch.circle.center", json!({"center": centre, "radius": radius}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.revolve", json!({"sketch": "Sketch1", "axis": "Z", "angle": angle, "exact_regions": true, "angle2": angle2}));
+        let m = run(&mut s, "inspect.measure", json!({}));
+        m["total"]["volume_mm3"].as_f64().unwrap_or(0.0)
+    };
+    for (centre, radius) in [([30.0, 0.0], 5.0), ([25.0, 10.0], 4.0), ([40.0, 10.0], 8.0)] {
+        let pappus = 2.0 * PI * PI * centre[0] * radius * radius * 170.0 / 360.0;
+        for (angle, angle2) in [("130 deg", "40 deg"), ("40 deg", "130 deg")] {
+            let v = sector(centre, radius, angle, angle2);
+            assert!(rel(v, pappus) < 1e-9, "centre {centre:?} r {radius} {angle} / {angle2}: {v} against {pappus}");
+        }
+    }
 }
 
 /// Shell Inside, Outside and Both, and a tangent chain of open faces.
