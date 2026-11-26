@@ -324,6 +324,7 @@ pub const DOCUMENTED: &[&str] = &[
     "surface.extend",
     "surface.extrude",
     "surface.fair",
+    "surface.fillet",
     "surface.loft",
     "surface.match",
     "surface.midsurface",

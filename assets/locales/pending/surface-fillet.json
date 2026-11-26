@@ -1,0 +1,26 @@
+{
+  "en": {
+    "help.surface.fillet": "Rounds the seam between two surface bodies with a rolling ball: each surface is cut where the other meets it, the kept pieces are sewn together and the seam is filleted. The points you pick choose the side of each surface to keep."
+  },
+  "de": {
+    "help.surface.fillet": "Rundet die Naht zwischen zwei Flächenkörpern mit einer rollenden Kugel: Jede Fläche wird dort geschnitten, wo die andere sie trifft, die behaltenen Teile werden vernäht und die Naht verrundet. Die gewählten Punkte bestimmen, welche Seite jeder Fläche bleibt."
+  },
+  "ar": {
+    "help.surface.fillet": "يدوّر الدرز بين جسمين سطحيين بكرة متدحرجة: يُقطع كل سطح حيث يلتقي به الآخر، وتُخاط القطع المتبقية معًا ثم يُدوَّر الدرز. تحدد النقاط التي تختارها الجانب المحتفظ به من كل سطح."
+  },
+  "he": {
+    "help.surface.fillet": "מעגל את התפר בין שני גופי משטח בכדור מתגלגל: כל משטח נחתך במקום שבו השני פוגש אותו, החלקים שנשארו נתפרים והתפר מעוגל. הנקודות שבחרת קובעות איזה צד של כל משטח נשמר."
+  },
+  "ja": {
+    "help.surface.fillet": "2つのサーフェスボディの継ぎ目を転がるボールで丸めます。各サーフェスは相手と交わる位置でカットされ、残った部分が縫い合わされて継ぎ目にフィレットがかかります。選んだ点で、各サーフェスの残す側が決まります。"
+  },
+  "ko": {
+    "help.surface.fillet": "두 서피스 바디 사이의 이음새를 구르는 공으로 둥글게 만듭니다. 각 서피스는 다른 서피스와 만나는 곳에서 잘리고, 남은 조각이 꿰매져 이음새에 필렛이 만들어집니다. 선택한 점이 각 서피스에서 남길 쪽을 정합니다."
+  },
+  "vi": {
+    "help.surface.fillet": "Bo tròn đường nối giữa hai thân bề mặt bằng một quả cầu lăn: mỗi bề mặt được cắt tại nơi bề mặt kia gặp nó, các phần giữ lại được khâu lại và đường nối được bo tròn. Các điểm bạn chọn quyết định phía nào của mỗi bề mặt được giữ."
+  },
+  "zh": {
+    "help.surface.fillet": "用滚球对两个曲面体之间的接缝进行倒圆：每个曲面在另一曲面与其相交处被裁剪，保留的部分缝合在一起，再对接缝倒圆。所选的点决定每个曲面保留哪一侧。"
+  }
+}

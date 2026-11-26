@@ -2777,6 +2777,19 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         extend: bool,
     },
+    /// A rolling-ball fillet between two surface bodies (#769): `a` and `b` each name one face
+    /// of a surface body, by a point on it; the two bodies cut each other where their surfaces
+    /// meet, each keeping the side its point is on (`extend` extends one that stops short of the
+    /// other to meet it), are sewn into `a.body` (`b.body` is then gone), and the seam between
+    /// them is rounded with a fillet of `radius`.
+    SurfaceFillet {
+        a: FaceAt,
+        b: FaceAt,
+        #[walk(length = "Radius")]
+        radius: Expr,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        extend: bool,
+    },
     Move {
         bodies: Vec<BodyName>,
         #[walk(length = ["X distance", "Y distance", "Z distance"])]
@@ -3945,6 +3958,7 @@ impl FeatureKind {
             FeatureKind::Stitch { .. } => "StitchFeature",
             FeatureKind::Thicken { .. } => "ThickenFeature",
             FeatureKind::SurfaceTrim { .. } => "TrimFeature",
+            FeatureKind::SurfaceFillet { .. } => "SurfaceFilletFeature",
             FeatureKind::SurfaceExtend { .. } => "ExtendFeature",
             FeatureKind::SurfaceRuled { .. } => "RuledSurfaceFeature",
             FeatureKind::Unstitch { .. } => "UnstitchFeature",
@@ -4045,6 +4059,7 @@ impl FeatureKind {
             FeatureKind::SurfaceMatch { .. } => "surface_match",
             FeatureKind::SurfaceFair { .. } => "surface_fair",
             FeatureKind::SurfaceTrim { .. } => "surface_trim",
+            FeatureKind::SurfaceFillet { .. } => "surface_fillet",
             FeatureKind::Move { .. } => "move",
             FeatureKind::Import { .. } => "import",
             FeatureKind::MeshConvert { .. } => "mesh_convert",
@@ -4136,6 +4151,7 @@ impl FeatureKind {
             "StitchFeature" => "stitch",
             "ThickenFeature" => "thicken",
             "TrimFeature" => "surface_trim",
+            "SurfaceFilletFeature" => "surface_fillet",
             "ExtendFeature" => "surface_extend",
             "RuledSurfaceFeature" => "surface_ruled",
             "UnstitchFeature" => "unstitch",
@@ -4235,6 +4251,7 @@ impl FeatureKind {
             FeatureKind::Stitch { .. } => "Stitch",
             FeatureKind::Thicken { .. } => "Thicken",
             FeatureKind::SurfaceTrim { .. } => "Trim",
+            FeatureKind::SurfaceFillet { .. } => "SurfaceFillet",
             FeatureKind::SurfaceExtend { .. } => "Extend",
             FeatureKind::SurfaceRuled { .. } => "RuledSurface",
             FeatureKind::Unstitch { .. } => "Unstitch",

@@ -3,7 +3,7 @@
 //! `surface_offset`, `surface_ruled`, `surface_untrim`).
 
 use super::*;
-use crate::{RuledCorners, RuledMode, SheetSection};
+use crate::{FaceAt, RuledCorners, RuledMode, SheetSection};
 use solidcore_record::Seg2;
 
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
@@ -84,6 +84,13 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 return Err(DocError::Invalid("pick the surfaces to thicken".into()));
             }
             apply_traced(doc, st, f, tools, *operation, &crate::plain(targets))
+        }
+        FeatureKind::SurfaceFillet { a, b, radius, extend } => {
+            let r = val(vals, radius, Kind::Length)?;
+            if !(r.is_finite() && r > 0.0) {
+                return Err(DocError::Invalid("Surface Fillet: the radius must be positive".into()));
+            }
+            fillet_surfaces(st, a, b, r, *extend)
         }
         FeatureKind::SurfaceTrim { body, plane, tool, tool_body, keep, keep_more, curves, with, keep_with, stitch, extend } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
@@ -1039,6 +1046,31 @@ fn boundary_frames(
         out.push(Boundary { frames, order: orders.get(side).copied().unwrap_or(solidcraft_kernel::Continuity::G1) });
     }
     Ok(out)
+}
+
+/// Surface Fillet: the two surfaces of `a` and `b` cut each other (each keeping the side its point
+/// is on) and sewn into one body, the seam between them rounded by `r`. The result takes the place
+/// of `a`'s body, and `b`'s is gone.
+fn fillet_surfaces(st: &mut ModelState, a: &FaceAt, b: &FaceAt, r: f64, extend: bool) -> Result<()> {
+    let i = st.bodies.iter().position(|x| x.name == a.body.0).ok_or_else(|| DocError::Unknown(format!("body `{}`", a.body)))?;
+    mutual_trim(st, i, &b.body.0, kernel::TrimKeep::Side(a.point.0), &[b.point.0], true, extend)?;
+    let Some(sewn) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+    // Each surface is one face and they are sewn along their seam: the edges two faces share.
+    let seams: Vec<usize> = sewn.body.record().edges.iter().enumerate().filter(|(_, e)| e.uses.len() == 2).map(|(k, _)| k).collect();
+    if seams.is_empty() {
+        return Err(DocError::Invalid("Surface Fillet: the two surfaces don't meet along an edge".into()));
+    }
+    let mut picks = Vec::with_capacity(seams.len());
+    for k in seams {
+        let Some(p) = kernel::edge_middle(&sewn.body, k)? else { return Err(DocError::Invalid("Surface Fillet: a seam has no middle".into())) };
+        picks.push(p);
+    }
+    let rounded = kernel::fillet(&sewn.body, &picks, r)?;
+    let rounded = Traced::step(rounded, &[&sewn.traced()]);
+    if let Some(slot) = st.bodies.get_mut(i) {
+        *slot = ModelBody::traced_new(sewn.name, rounded, sewn.feature);
+    }
+    Ok(())
 }
 
 /// Mutual Trim: the body at `i` and `other` trimmed by each other (each keeping its picks), the
