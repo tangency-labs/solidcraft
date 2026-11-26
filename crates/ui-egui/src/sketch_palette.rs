@@ -29,9 +29,9 @@ thread_local! {
     static MODE: Cell<(u8, Option<u64>)> = const { Cell::new((0, None)) };
 }
 
-/// Option keys and existing localized labels. The five primary design rows are selected below;
+/// Option keys and existing localized labels. The primary design rows are selected below;
 /// the remaining display options live in More. Point/profile labels share the dialog IDs.
-pub const TOGGLES: [(&str, &str); 10] = [
+pub const TOGGLES: &[(&str, &str)] = &[
     ("grid", "Sketch Grid"),
     ("snap", "Snap"),
     ("slice", "Slice"),
@@ -41,6 +41,7 @@ pub const TOGGLES: [(&str, &str); 10] = [
     ("show_constraints", "Constraints"),
     ("show_projected", "Projected Geometries"),
     ("show_construction", "Construction Geometries"),
+    ("show_control_polygons", "sketch.show_control_polygons"),
     ("sketch_3d", "3D Sketch"),
 ];
 
@@ -417,8 +418,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     };
     let status = constraint_status(remaining, solved, geometry);
     let fraction = constrained_fraction(remaining, total, solved && geometry);
-    let option_label =
-        |label: &'static str| if matches!(label, "ui.profile" | "ui.points") { solidcraft_ui_text::tr(label) } else { app.tr_label(label) };
+    let option_label = |label: &'static str| {
+        if matches!(label, "ui.profile" | "ui.points" | "sketch.show_control_polygons") { solidcraft_ui_text::tr(label) } else { app.tr_label(label) }
+    };
     let more = solidcraft_ui_text::tr("ui.palette_more");
     let shown = |key: &str| match key {
         "grid" => !opts.hide_grid,
@@ -430,6 +432,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         "show_constraints" => !opts.hide_constraints,
         "show_projected" => !opts.hide_projected,
         "show_construction" => !opts.hide_construction,
+        "show_control_polygons" => !opts.hide_control_polygons,
         "sketch_3d" => opts.three_d,
         _ => false,
     };
@@ -448,6 +451,10 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let image_tool = image_tool(app);
     let framing = app.preferences.frame_images_in_sketch;
     let mut frame_image = false;
+    // The 3-Point Arc's tangent snap (#20719): a mode of that tool, so it is here and not in
+    // Preferences; kept for the next time the tool runs.
+    let arc_snap = app.preferences.sketch_arc_tangent_snap;
+    let mut arc_snap_clicked = false;
     let has_curves = !selected_curves(app).is_empty();
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
     // A construction line tool that takes a length has a line type of its own, which the Line
@@ -500,6 +507,10 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .collect();
                 let section = ui.vertical(|ui| crate::ui_kit::tool_choices(ui, app.tr_label(family.label), current, &choices));
                 crate::scenario::publish_rect("sketch_palette:feature_options", section.response.rect);
+                if current == "sketch.arc.three_point" {
+                    arc_snap_clicked =
+                        crate::ui_kit::checkbox_row(ui, "arc_tangent_snap", solidcraft_ui_text::tr("ui.palette_arc_tangent_snap"), arc_snap);
+                }
                 section.inner
             });
             start = section.flatten();
@@ -546,7 +557,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             row_types.get(1).copied().unwrap_or(false),
         );
         crate::ui_kit::section(ui, "more", more, false, |ui| {
-            for (key, label) in TOGGLES {
+            for &(key, label) in TOGGLES {
                 if !["show_constraints", "show_dimensions", "show_points", "snap"].contains(&key)
                     && crate::ui_kit::checkbox_row(ui, key, option_label(label), shown(key))
                 {
@@ -627,6 +638,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     if frame_image {
         app.preferences.frame_images_in_sketch = !framing;
     }
+    if arc_snap_clicked {
+        app.preferences.sketch_arc_tangent_snap = !arc_snap;
+    }
     if let Some(id) = start {
         app.start(id);
     }
@@ -669,7 +683,7 @@ mod tests {
         let more = crate::scenario::handle_at("sketch_palette:options_fold").unwrap();
         h.call("ui.click", json!({"x":more.x,"y":more.y}));
         let active = h.app.session.active_sketch.unwrap();
-        for (key, _) in TOGGLES {
+        for &(key, _) in TOGGLES {
             let before = h.app.session.doc.to_json();
             let undo = h.app.session.undo.len();
             let at = crate::scenario::handle_at(&format!("sketch_palette:toggle:{key}")).unwrap();

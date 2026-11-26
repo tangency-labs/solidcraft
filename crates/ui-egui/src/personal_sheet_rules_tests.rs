@@ -123,7 +123,7 @@ fn a_personal_rule_saved_in_one_design_is_added_to_another_by_ok() {
             "sheet.manage_rules".to_string(),
             json!({"name":"CRS 1.6","active":true,"thickness":"1.6 mm","k_factor":"0.42","bend_radius":"1.6 mm","relief_width":"Thickness",
                 "relief_depth":"Thickness * 0.5","corner_relief":"Thickness * 4.0","hem_gap":"0.01 mm","gap":"Thickness",
-                "corner_relief_shape":"notch","angle_display":"bend"})
+                "corner_relief_shape":"notch","bend_relief_shape":"rectangular","angle_display":"bend"})
         )]
     );
     other.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();

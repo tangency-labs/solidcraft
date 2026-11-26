@@ -667,6 +667,62 @@ fn emboss_and_deboss_on_a_face() {
 }
 
 #[test]
+fn projected_emboss_on_a_full_revolve_changes_only_the_sketch_side() {
+    use solidcore_record::Vec3;
+    use solidcraft_kernel::PointClass;
+
+    // The flat top keeps the spline wall clear of the revolve axis. The mark is 6 by 4 mm.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,0,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"Profile"}));
+    run(&mut s, "sketch.spline.control_point", json!({"points":[[20,0],[20,20],[10,30],[5,30]]}));
+    run(&mut s, "sketch.line", json!({"points":[[5,30],[0,30],[0,0],[20,0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":"y","angle":"360 deg","operation":"new","body_name":"Dome"}));
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,-60,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"Mark"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[-3,8],"p1":[3,12]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    // At z = 10 the cubic has radius 19.08248 mm. Offsetting its meridian by 1 mm along
+    // the outward unit normal gives radius 20.10069 mm at the same height.
+    let points = [Vec3::new(0.0, -20.08, 10.0), Vec3::new(0.0, 19.5, 10.0), Vec3::new(0.0, -20.12, 10.0)];
+    let classes = |s: &Session| s.model.state().body("Dome").unwrap().body.classify_points(&points).unwrap();
+    assert_eq!(classes(&s), [PointClass::Outside; 3]);
+    run(
+        &mut s,
+        "solid.emboss",
+        json!({"sketch":"Mark","depth":1,"face":[12.790737518975714,-14.613635681307521,7.741993784911808],"targets":"Dome"}),
+    );
+    assert_eq!(classes(&s), [PointClass::Inside, PointClass::Outside, PointClass::Outside]);
+    assert_eq!(s.model.state().body("Dome").unwrap().body.shell_count(), 1);
+}
+
+#[test]
+fn projected_emboss_keeps_a_tilted_profile_that_already_fit() {
+    use solidcore_record::Vec3;
+    use solidcraft_kernel::PointClass;
+
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,0,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"Profile"}));
+    run(&mut s, "sketch.line", json!({"points":[[20,0],[10,30],[0,30],[0,0],[20,0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":"y","angle":"360 deg","operation":"new","body_name":"Cone"}));
+    let root = 17.0_f64.sqrt();
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,-60,0],"x_dir":[1,0,0],"y_dir":[0,-1.0/root,4.0/root]},"name":"Mark"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[-3,-11],"p1":[3,-8]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    // The tilt takes the mark over the lower rim on the picked side, but it fully crosses
+    // the far wall. The whole slab separates the prism, so emboss already built both patches.
+    // Both witnesses are between the original radius 20 - z/3 and its 1 mm normal offset.
+    let points = [Vec3::new(0.0, -20.6, 0.4), Vec3::new(0.0, 17.0, 10.0)];
+    let classes = |s: &Session| s.model.state().body("Cone").unwrap().body.classify_points(&points).unwrap();
+    assert_eq!(classes(&s), [PointClass::Outside; 2]);
+    run(&mut s, "solid.emboss", json!({"sketch":"Mark","depth":1,"face":[0,-52.0/3.0,8],"targets":"Cone"}));
+    assert_eq!(classes(&s), [PointClass::Inside; 2]);
+    assert_eq!(s.model.state().body("Cone").unwrap().body.shell_count(), 1);
+}
+
+#[test]
 fn overlapping_text_glyphs_deboss_and_emboss() {
     // #20422: negative letter_spacing crosses curved glyph outlines, leaving vertical self-touching
     // polynomial spline edges across sequential profile booleans. Both with and without an explicit
@@ -733,6 +789,164 @@ fn emboss_face_off_the_part_says_how_far() {
     let e = s.execute("solid.emboss", &json!({"sketch": "Logo", "depth": 1, "face": [40, 15, 5]})).unwrap_err().to_string();
     assert!(e.contains("lies on faces of 2 bodies (A, B): name one in `targets`"), "{e}");
     run(&mut s, "solid.emboss", json!({"sketch": "Logo", "depth": 1, "face": [20, 15, 10]}));
+}
+
+/// Whether `p` is in the material of body `name`.
+fn in_body(s: &Session, name: &str, p: [f64; 3]) -> bool {
+    let state = s.model.state();
+    let mesh = state.body(name).unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap();
+    mesh.contains(solidcore_record::Vec3::new(p[0], p[1], p[2]))
+}
+
+/// The point at `radius` from the Z axis and height `z`, `theta` radians round from +Y towards
+/// -X: where the tests probe a mark wrapped round a wall about Z.
+fn round_z(radius: f64, theta: f64, z: f64) -> [f64; 3] {
+    [-radius * theta.sin(), radius * theta.cos(), z]
+}
+
+/// `Block`, 40 x 30 x 10, and `Logo`, a sketch on its top (x along X, y along Y) with one
+/// rectangle from `p0` to `p1`.
+fn block_logo(p0: [f64; 2], p1: [f64; 2]) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Logo"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": p0, "p1": p1}));
+    run(&mut s, "sketch.finish", json!({}));
+    s
+}
+
+/// #20386: an Emboss places its profiles itself, by a shift along the sketch's x and y, on a
+/// picked face and without one. The sketch stays where it is.
+#[test]
+fn emboss_offsets_shift_the_profiles() {
+    for face in [true, false] {
+        let mut s = block_logo([5., 5.], [15., 15.]);
+        let mut p = json!({"sketch": "Logo", "depth": 2, "offset_x": 10, "offset_y": "5 mm"});
+        if face {
+            p["face"] = json!([20, 15, 10]);
+        }
+        run(&mut s, "solid.emboss", p);
+        assert!(rel(volume(&mut s), 12000.0 + 200.0) < 1e-6, "face {face}: {}", volume(&mut s));
+        // The square is raised over x 15..25 and y 10..20, not over 5..15 where it is drawn.
+        assert!(in_body(&s, "Block", [20., 15., 11.]), "face {face}");
+        assert!(!in_body(&s, "Block", [7., 7., 11.]), "face {face}");
+    }
+}
+
+/// #20386: the angle turns the profiles counter-clockwise in the sketch, about the middle of
+/// their bounds.
+#[test]
+fn emboss_angle_turns_the_profiles_about_their_middle() {
+    // A 20 x 6 bar about (20, 13), turned 30°: its right end swings up to (28.66, 18).
+    let mut s = block_logo([10., 10.], [30., 16.]);
+    run(&mut s, "solid.emboss", json!({"sketch": "Logo", "depth": 2, "face": [20, 13, 10], "angle": 30}));
+    assert!(rel(volume(&mut s), 12000.0 + 240.0) < 1e-6, "{}", volume(&mut s));
+    assert!(in_body(&s, "Block", [20., 13., 11.]), "the middle stays");
+    assert!(in_body(&s, "Block", [28., 17.5, 11.]), "the right end goes up");
+    assert!(!in_body(&s, "Block", [28., 8.5, 11.]), "and not down");
+    assert!(!in_body(&s, "Block", [29., 13., 11.]), "it has left where it is drawn");
+}
+
+/// #20386: the offsets run along the sketch's x and y whatever the angle, and the turn is about
+/// the profiles' own middle wherever the offsets put them.
+#[test]
+fn emboss_offsets_are_not_turned_with_the_profiles() {
+    // The bar turned a quarter about (20, 13) covers x 17..23, y 3..23; 5 along x: x 22..28.
+    let mut s = block_logo([10., 10.], [30., 16.]);
+    run(&mut s, "solid.emboss", json!({"sketch": "Logo", "depth": 2, "angle": "90 deg", "offset_x": 5}));
+    assert!(rel(volume(&mut s), 12000.0 + 240.0) < 1e-6, "{}", volume(&mut s));
+    assert!(in_body(&s, "Block", [25., 5., 11.]) && in_body(&s, "Block", [25., 21., 11.]));
+    assert!(!in_body(&s, "Block", [19., 5., 11.]), "shifted along x");
+    assert!(!in_body(&s, "Block", [20., 26., 11.]), "not along y, as a shift turned with the bar would be");
+}
+
+/// #20386: an offset puts lettering where writing it there would: the same solid, counters and
+/// all, as the text moved in its sketch gives.
+#[test]
+fn emboss_offsets_give_what_moving_the_text_in_its_sketch_gives() {
+    let lettered = |at: [f64; 2], offsets: Option<[f64; 2]>| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Text"}));
+        run(&mut s, "sketch.text", json!({"text": "R8", "at": at, "height": 6}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"sketch": "Text", "depth": 1, "face": [30, 20, 10]});
+        if let Some([x, y]) = offsets {
+            p["offset_x"] = json!(x);
+            p["offset_y"] = json!(y);
+        }
+        run(&mut s, "solid.emboss", p);
+        let m = s.model.state().body("Plate").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure();
+        (m.volume, m.centroid)
+    };
+    let (moved, written) = (lettered([5., 8.], Some([12., 9.])), lettered([17., 17.], None));
+    assert!(written.0 > 24000.0 + 1.0, "the lettering is raised: {}", written.0);
+    assert!(rel(moved.0, written.0) < 1e-7 && moved.1.dist(written.1) < 1e-6, "moved {moved:?}, written {written:?}");
+    // Left where it is drawn, the same lettering leaves the plate's centre of mass elsewhere.
+    let drawn = lettered([5., 8.], None);
+    assert!(drawn.1.dist(written.1) > 1e-4, "drawn {drawn:?}, written {written:?}");
+}
+
+/// #20386: the offsets and the angle are saved only when given, are built again from the file,
+/// and follow the parameters they name.
+#[test]
+fn emboss_placement_is_saved_only_when_given_and_follows_its_parameters() {
+    let mut s = block_logo([5., 5.], [15., 15.]);
+    run(&mut s, "solid.emboss", json!({"sketch": "Logo", "depth": 2, "name": "Plain"}));
+    let plain = serde_json::to_string(&s.doc.find_feature("Plain").unwrap().kind).unwrap();
+    assert!(["\"offset_x\"", "\"offset_y\"", "\"angle\""].iter().all(|key| !plain.contains(*key)), "{plain}");
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "parameters.add", json!({"name": "shift", "expression": "10 mm"}));
+    run(&mut s, "solid.emboss", json!({"sketch": "Logo", "depth": 2, "offset_x": "shift", "angle": "45 deg", "name": "Placed"}));
+    let placed = serde_json::to_string(&s.doc.find_feature("Placed").unwrap().kind).unwrap();
+    assert!(placed.contains("\"offset_x\"") && placed.contains("\"angle\"") && !placed.contains("\"offset_y\""), "{placed}");
+    let mut loaded = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Default::default() };
+    loaded.refresh();
+    assert!(loaded.model.results.iter().all(|f| f.error.is_none()), "{:?}", loaded.model.results);
+    assert_eq!(loaded.doc.find_feature("Placed").unwrap().kind, s.doc.find_feature("Placed").unwrap().kind);
+    // The square turned 45° about (10, 10) is a diamond reaching 7.07 each way; 10 along x puts
+    // its middle at (20, 10).
+    for session in [&s, &loaded] {
+        assert!(in_body(session, "Block", [20., 16., 11.]), "the diamond's top");
+        assert!(!in_body(session, "Block", [24.5, 14.5, 11.]), "the square's corner is cut off");
+    }
+    run(&mut loaded, "parameters.change", json!({"name": "shift", "expression": "20 mm"}));
+    assert!(loaded.model.results.iter().all(|f| f.error.is_none()), "{:?}", loaded.model.results);
+    assert!(in_body(&loaded, "Block", [30., 16., 11.]) && !in_body(&loaded, "Block", [20., 16., 11.]));
+    assert!(rel(volume(&mut loaded), 12000.0 + 200.0) < 1e-6, "{}", volume(&mut loaded));
+}
+
+/// #20386: an offset is a length and the angle an angle; the refusal names the input and leaves
+/// the design as it was.
+#[test]
+fn emboss_placement_refuses_a_wrong_unit_by_name() {
+    let mut s = block_logo([5., 5.], [15., 15.]);
+    let saved = s.doc.to_json();
+    for (key, value) in [("offset_x", "30 deg"), ("offset_y", "30 deg"), ("angle", "5 mm")] {
+        let mut p = json!({"sketch": "Logo", "depth": 2});
+        p[key] = json!(value);
+        let e = s.execute("solid.emboss", &p).unwrap_err().to_string();
+        assert!(e.contains(&format!("{key}: ")), "{key}: {e}");
+        assert_eq!(s.doc.to_json(), saved, "{key}");
+    }
+}
+
+/// #20957: a placement input that is given but is not a number or an expression is refused by
+/// name, with the check off too, rather than read as left out. `null` is the input left out.
+#[test]
+fn emboss_placement_refuses_a_value_it_cannot_read() {
+    let mut s = block_logo([5., 5.], [15., 15.]);
+    let saved = s.doc.to_json();
+    for (key, value) in [("offset_x", json!(true)), ("offset_y", json!({"mm": 2})), ("angle", json!("")), ("angle", json!([45]))] {
+        let mut p = json!({"sketch": "Logo", "depth": 2});
+        p[key] = value.clone();
+        let e = s.execute("solid.emboss", &p).unwrap_err().to_string();
+        assert!(e.contains(&format!("`{key}` must be a number or an expression")), "{key} {value}: {e}");
+        assert_eq!(s.doc.to_json(), saved, "{key} {value}");
+    }
+    run(&mut s, "solid.emboss", json!({"sketch": "Logo", "depth": 2, "offset_x": null, "offset_y": null, "angle": null}));
+    assert!(rel(volume(&mut s), 12000.0 + 200.0) < 1e-6, "{}", volume(&mut s));
+    assert!(in_body(&s, "Block", [10., 10., 11.]), "raised where it is drawn");
 }
 
 fn cylinder_badge() -> Session {
@@ -828,6 +1042,78 @@ fn cylinder_emboss_accepts_a_pick_on_either_half_of_the_wall() {
         }
         assert!((volumes[0] - volumes[1]).abs() < 1e-6, "{mode}: {volumes:?}");
     }
+}
+
+/// #20386: on a wrap the offset along the sketch's x slides the profile round the wall by that
+/// arc length, and the one along its y slides it along the axis.
+#[test]
+fn cylinder_emboss_offsets_slide_the_wrap_round_and_along_the_wall() {
+    let mut s = cylinder_badge();
+    let before = exact_cylinder_volume(&s);
+    run(&mut s, "solid.emboss", json!({"sketch":"Badge","face":[0,10,7.5],"depth":1,"targets":["Sleeve"],"offset_x":3,"offset_y":5}));
+    assert!((exact_cylinder_volume(&s) - before - 21.0).abs() < 0.02, "{}", exact_cylinder_volume(&s) - before);
+    assert_eq!(s.model.state().body("Sleeve").unwrap().body.shell_count(), 1);
+    // The badge, drawn 2 either side of the tangent line and 5..10 up, covers 1..5 of arc
+    // (0.1..0.5 rad towards the sketch's x, which is -X here) and 10..15 up.
+    let on_wall = |theta: f64, z: f64| round_z(10.5, theta, z);
+    assert!(in_body(&s, "Sleeve", on_wall(0.3, 12.5)));
+    assert!(!in_body(&s, "Sleeve", on_wall(0.15, 7.5)), "not at the height it is drawn at");
+    assert!(!in_body(&s, "Sleeve", on_wall(-0.15, 12.5)), "nor round where it is drawn");
+}
+
+/// #20386: with no face picked, the wall is found from where the offsets put the profiles: a
+/// badge drawn above the sleeve and brought down onto its wall wraps.
+#[test]
+fn cylinder_auto_inference_follows_the_offsets() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":10,"height":20,"body_name":"Sleeve"}));
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[-1,0,0],"y_dir":[0,0,1]},"name":"High"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[-2,25],"p1":[2,30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = exact_cylinder_volume(&s);
+    run(&mut s, "solid.emboss", json!({"sketch":"High","depth":1,"offset_y":-20,"name":"Lowered"}));
+    let feature = s.doc.find_feature("Lowered").unwrap();
+    assert!(matches!(&feature.kind, solidcraft_doc::FeatureKind::Emboss { face: Some(face), .. } if face.body == "Sleeve"), "{:?}", feature.kind);
+    assert!((exact_cylinder_volume(&s) - before - 21.0).abs() < 0.02, "{}", exact_cylinder_volume(&s) - before);
+    assert!(in_body(&s, "Sleeve", [0., 10.5, 7.5]));
+}
+
+/// `Half`, the half with y above 0 of a cylinder of radius 20 and height 30, and `Mark`, a 6 x 5
+/// rectangle on a plane 10 clear of its wall (x round the wall, y along the axis).
+fn half_round_mark() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 30, "body_name": "Half"}));
+    run(&mut s, "solid.box", json!({"corner": [-25, -50, -5], "length": 50, "width": 50, "height": 40, "operation": "cut", "targets": ["Half"]}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 30, 0], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Mark"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-3, 5], "p1": [3, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    s
+}
+
+/// #20386, the report's own case: on a partial cylinder wall, where the profile is projected,
+/// the offsets move it round and along the wall and the angle turns it.
+#[test]
+fn emboss_placement_on_a_partial_cylinder_wall() {
+    let on_wall = |theta: f64, z: f64| round_z(20.5, theta, z);
+    let fine_volume =
+        |s: &Session| s.model.state().body("Half").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
+    let mut s = half_round_mark();
+    let before = fine_volume(&s);
+    run(&mut s, "solid.emboss", json!({"sketch": "Mark", "face": [0, 20, 15], "depth": 1, "offset_x": 4, "offset_y": 10}));
+    // A flat 6 x 5 patch through the 1 mm above the wall: a little over 30.
+    let added = fine_volume(&s) - before;
+    assert!(added > 29.0 && added < 31.5, "{added}");
+    // 4 along the sketch's x is 0.2 rad round a wall of radius 20; 10 along its y is 10 up.
+    assert!(in_body(&s, "Half", on_wall(0.2, 17.5)));
+    assert!(!in_body(&s, "Half", on_wall(0.0, 7.5)), "it has left where it is drawn");
+
+    // A quarter turn stands the 6 x 5 mark up: 5 round the wall and 6 along it, about (0, 7.5).
+    let mut s = half_round_mark();
+    run(&mut s, "solid.emboss", json!({"sketch": "Mark", "face": [0, 20, 15], "depth": 1, "angle": 90}));
+    let added = fine_volume(&s) - before;
+    assert!(added > 29.0 && added < 31.5, "{added}");
+    assert!(in_body(&s, "Half", on_wall(0.0, 10.25)), "taller");
+    assert!(!in_body(&s, "Half", on_wall(0.14, 7.5)), "and narrower");
 }
 
 #[test]
@@ -3143,19 +3429,19 @@ fn a_square_ended_coil_refuses_turns_that_overlap() {
     run(&mut s, "solid.coil", coil(2.002));
 }
 
-fn clockwise_coil_bbox(clockwise: bool) -> Value {
+fn clockwise_coil_bbox(clockwise: bool, reversed: bool) -> Value {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
     run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 0.25, "pitch": 8, "clockwise": clockwise}));
+    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 0.25, "pitch": 8, "clockwise": clockwise, "reversed": reversed}));
     measure(&mut s)["bodies"][0]["bbox"].clone()
 }
 
 #[test]
 fn a_sketch_coil_clockwise_is_the_mirror_image() {
-    let right = clockwise_coil_bbox(false);
-    let left = clockwise_coil_bbox(true);
+    let right = clockwise_coil_bbox(false, false);
+    let left = clockwise_coil_bbox(true, false);
     let at = |v: &Value, k: &str, i: usize| v[k][i].as_f64().unwrap_or(f64::NAN);
     assert!((at(&right, "min", 0) + at(&left, "max", 0)).abs() < 1e-6, "{right} {left}");
     assert!((at(&right, "max", 0) + at(&left, "min", 0)).abs() < 1e-6, "{right} {left}");
@@ -3163,6 +3449,158 @@ fn a_sketch_coil_clockwise_is_the_mirror_image() {
         assert!((at(&right, "min", i) - at(&left, "min", i)).abs() < 1e-6, "{right} {left}");
         assert!((at(&right, "max", i) - at(&left, "max", i)).abs() < 1e-6, "{right} {left}");
     }
+}
+
+/// Reversed keeps the coil's hand: the reversed quarter turn from a profile on +Y is the forward
+/// one turned half a turn about Y (x and z negated, y kept), a rotation and not a mirror. A
+/// mirror in XY (z negated alone) would change the hand.
+#[test]
+fn coil_reverse_keeps_the_hand_and_grows_the_other_way() {
+    let at = |v: &Value, k: &str, i: usize| v[k][i].as_f64().unwrap_or(f64::NAN);
+    for clockwise in [false, true] {
+        let forward = clockwise_coil_bbox(clockwise, false);
+        let backward = clockwise_coil_bbox(clockwise, true);
+        for i in [0, 2] {
+            assert!((at(&forward, "min", i) + at(&backward, "max", i)).abs() < 1e-5, "axis {i}: {forward} {backward}");
+            assert!((at(&forward, "max", i) + at(&backward, "min", i)).abs() < 1e-5, "axis {i}: {forward} {backward}");
+        }
+        for key in ["min", "max"] {
+            assert!((at(&forward, key, 1) - at(&backward, key, 1)).abs() < 1e-5, "{forward} {backward}");
+        }
+        assert!(at(&forward, "max", 0) - at(&forward, "min", 0) > 1.0, "the quarter turn spans x, so x tells the hand: {forward}");
+    }
+}
+
+#[test]
+fn coil_reverse_changes_propagation_independently_of_clockwise() {
+    for sketch in [false, true] {
+        for clockwise in [false, true] {
+            for reversed in [false, true] {
+                let mut s = Session::default();
+                let mut params = json!({"axis":"Z","revolutions":1,"pitch":8,"clockwise":clockwise,"reversed":reversed});
+                if sketch {
+                    run(&mut s, "sketch.create", json!({"plane":"XZ","name":"Section"}));
+                    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[10,-0.5],"p1":[11,0.5]}));
+                    run(&mut s, "sketch.finish", json!({}));
+                    params["sketch"] = json!("Section");
+                } else {
+                    params["diameter"] = json!(20);
+                    params["section_size"] = json!(1);
+                }
+                run(&mut s, "solid.coil", params);
+                let bbox = measure(&mut s)["bodies"][0]["bbox"].clone();
+                let expected = if reversed { [-8.5, 0.5] } else { [-0.5, 8.5] };
+                for (key, want) in ["min", "max"].into_iter().zip(expected) {
+                    assert!(
+                        (bbox[key][2].as_f64().unwrap() - want).abs() < 1e-5,
+                        "sketch={sketch}, clockwise={clockwise}, reversed={reversed}: {bbox}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn coil_accepts_the_same_axis_reference_forms_as_revolve() {
+    for (axis, kind) in [
+        (json!({"type":"world","axis":"Z"}), "world"),
+        (json!({"origin":[30,0,0],"dir":[0,0,1]}), "line"),
+        (json!({"sketch":"Centerline","curve":"l1"}), "sketch_line"),
+        (json!({"face":[34,0,3]}), "model"),
+        (json!({"edge":[34,0,0]}), "model"),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius":4,"height":6,"base":[30,0,0],"body_name":"Stock"}));
+        run(&mut s, "sketch.create", json!({"plane":"XZ","name":"Centerline"}));
+        run(&mut s, "sketch.line", json!({"points":[[30,0],[30,10]]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.coil", json!({"axis":axis,"diameter":20,"section_size":1,"revolutions":1,"pitch":8,"name":"Spring"}));
+        let saved = serde_json::to_value(&s.doc.find_feature("Spring").unwrap().kind).unwrap();
+        assert_eq!(saved["axis_ref"]["type"], kind);
+    }
+}
+
+/// Two moved components: A's box is placed where B's box is drawn, so B's unplaced edge passes
+/// through the world point picked on A's placed edge. The Coil names its pick in the world, where
+/// it finds it, so it winds about A's edge, not B's placed edge far away.
+#[test]
+fn a_coil_edge_pick_is_named_where_the_moved_edge_is() {
+    let mut s = Session::default();
+    for (name, base, shift) in [("A", 0, 50), ("B", 50, 100)] {
+        let c = run(&mut s, "component.create", json!({"name":name,"grounded":false}))["component"].as_u64().unwrap();
+        run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"body_name":name}));
+        if base != 0 {
+            run(&mut s, "solid.move", json!({"bodies":[name],"translate":[base,0,0]}));
+        }
+        run(&mut s, "component.activate", json!({"component":"root"}));
+        let occurrence = s.doc.occurrence_of(c).unwrap().id;
+        run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[shift,0,0]}));
+    }
+    let bbox = |s: &mut Session, name: &str| {
+        let m = measure(s);
+        let body = m["bodies"].as_array().unwrap().iter().find(|b| b["name"] == name).unwrap_or_else(|| panic!("{name}: {m}")).clone();
+        let read = |key: &str, i: usize| body["bbox"][key][i].as_f64().unwrap();
+        ([read("min", 0), read("min", 1)], [read("max", 0), read("max", 1)])
+    };
+    let (a_min, _) = bbox(&mut s, "A");
+    let (b_min, _) = bbox(&mut s, "B");
+    // B's unplaced box is where A's placed box is: the pick is on both, B's placed box is 100 away.
+    assert!((b_min[0] - a_min[0] - 100.0).abs() < 1e-6, "{a_min:?} {b_min:?}");
+    run(
+        &mut s,
+        "solid.coil",
+        json!({"axis":{"edge":[a_min[0], a_min[1], 1]},"diameter":6,"section_size":0.5,"revolutions":1,"pitch":4,"body_name":"Winding"}),
+    );
+    let (min, max) = bbox(&mut s, "Winding");
+    let centre = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
+    assert!((centre[0] - a_min[0]).abs() < 0.5 && (centre[1] - a_min[1]).abs() < 0.5, "the Coil winds about A's edge: {centre:?}, {a_min:?}");
+
+    // A second placement of A has the same edge names: the pick on it finds that placement's edge.
+    let a = s.doc.find_component("A").unwrap();
+    let copy = run(&mut s, "occurrence.copy", json!({"component":a,"translate":[30,0,0]}))["occurrence"].as_u64().unwrap();
+    let second = [a_min[0] + 30.0, a_min[1]];
+    run(
+        &mut s,
+        "solid.coil",
+        json!({"axis":{"edge":[second[0], second[1], 1]},"diameter":6,"section_size":0.5,"revolutions":1,"pitch":4,"body_name":"Second"}),
+    );
+    let (min, max) = bbox(&mut s, "Second");
+    let centre = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
+    assert!((centre[0] - second[0]).abs() < 0.5 && (centre[1] - second[1]).abs() < 0.5, "the Coil winds about A's second placement: {centre:?}");
+
+    // Moved off the picked point, the second placement keeps its Coil: the pick names its placement.
+    run(&mut s, "occurrence.move", json!({"occurrence":copy,"translate":[12,0,0]}));
+    let (min, max) = bbox(&mut s, "Second");
+    let centre = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
+    assert!((centre[0] - second[0] - 12.0).abs() < 0.5 && (centre[1] - second[1]).abs() < 0.5, "the Coil follows the moved placement: {centre:?}");
+}
+
+#[test]
+fn a_coil_follows_its_named_axis_after_redefinition_and_save() {
+    use solidcraft_doc::FeatureKind;
+    let mut s = Session::default();
+    let axis = |x| json!({"a":{"point":[x,0,0]},"b":{"point":[x,0,10]},"name":"Spin"});
+    run(&mut s, "construct.axis.two_points", axis(30));
+    run(&mut s, "solid.coil", json!({"axis":"Spin","diameter":20,"section_size":1,"revolutions":1,"pitch":8,"reversed":true,"name":"Spring"}));
+    let bounds = |s: &mut Session| measure(s)["bodies"][0]["bbox"].clone();
+    let before = bounds(&mut s);
+    run(&mut s, "timeline.redefine", json!({"feature":"Spin","command":"construct.axis.two_points","params":axis(40)}));
+    let after = bounds(&mut s);
+    for key in ["min", "max"] {
+        assert!((after[key][0].as_f64().unwrap() - before[key][0].as_f64().unwrap() - 10.0).abs() < 1e-5);
+    }
+    run(&mut s, "timeline.rename", json!({"feature":"Spin","name":"RenamedSpin"}));
+    let value = serde_json::to_value(&s.doc).unwrap();
+    let loaded: solidcraft_doc::Document = serde_json::from_value(value).unwrap();
+    match &loaded.find_feature("Spring").unwrap().kind {
+        FeatureKind::Coil { axis_ref, reversed, .. } => {
+            assert!(matches!(axis_ref, Some(solidcraft_doc::AxisRef::Construction { name }) if name.as_ref() == "RenamedSpin"));
+            assert!(*reversed);
+        }
+        other => panic!("expected coil: {other:?}"),
+    }
+    assert!(s.execute("solid.coil", &json!({"axis":"Missing","diameter":20,"section_size":1,"revolutions":1,"pitch":8})).is_err());
 }
 
 #[test]
@@ -4048,6 +4486,62 @@ fn a_narrow_profile_across_a_wall_along_the_extrusion_keeps_the_trim_to_the_body
         outside * 10.0,
         0.2 * 2.0
     );
+}
+
+/// #19532: a dome on a box top adds two thirds of its base times its height, and it is kept when
+/// the design is saved and read back.
+#[test]
+fn a_dome_on_a_box_top_adds_two_thirds_of_its_base_times_its_height_and_survives_a_save() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Stock"}));
+    run(&mut s, "solid.dome", json!({"face":[5,5,10],"height":5,"name":"Cap"}));
+    let want = 1000.0 + 2.0 / 3.0 * 100.0 * 5.0;
+    assert!((body_volume(&s, "Stock") - want).abs() < 1e-3, "{}", body_volume(&s, "Stock"));
+    assert!(s.model.results.iter().all(|f| f.error.is_none()), "{:?}", s.model.results);
+    let mut loaded = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Default::default() };
+    loaded.refresh();
+    assert!(loaded.model.results.iter().all(|f| f.error.is_none()), "{:?}", loaded.model.results);
+    assert!((body_volume(&loaded, "Stock") - want).abs() < 1e-3, "{}", body_volume(&loaded, "Stock"));
+}
+
+/// #19532: the dome's face is the box top whatever the box's height is, so changing the height
+/// parameter rebuilds the dome on the new top.
+#[test]
+fn a_dome_follows_its_face_when_the_box_height_parameter_changes() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"box_h","expression":"10 mm"}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":"box_h","body_name":"Stock"}));
+    run(&mut s, "solid.dome", json!({"face":[5,5,10],"height":5}));
+    run(&mut s, "parameters.change", json!({"name":"box_h","expression":"20 mm"}));
+    assert!(s.model.results.iter().all(|f| f.error.is_none()), "{:?}", s.model.results);
+    let want = 10.0 * 10.0 * 20.0 + 2.0 / 3.0 * 100.0 * 5.0;
+    assert!((body_volume(&s, "Stock") - want).abs() < 1e-3, "{}", body_volume(&s, "Stock"));
+}
+
+/// #19532: every refusal of a dome comes back as the command's error, and the design stays as it
+/// was.
+#[test]
+fn every_dome_refusal_is_a_command_error_and_changes_nothing() {
+    let box_cases = [
+        (json!({"face":[5,5,10],"height":0}), "the height must be positive"),
+        (json!({"face":[5,5,10],"height":-2}), "the height must be positive"),
+        (json!({"face":[5,5,10],"height":5,"shape":"spherical"}), "a spherical dome needs a circular face"),
+        (json!({"face":[5,5,10],"height":5,"reverse":true}), "not supported yet"),
+        (json!({"face":[5,5,10],"height":5,"shape":"cone"}), "unknown shape `cone`"),
+        (json!({"height":5}), "`face` must be a point"),
+    ];
+    for (params, message) in box_cases {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Stock"}));
+        let e = s.execute("solid.dome", &params);
+        assert!(e.as_ref().is_err_and(|e| e.to_string().contains(message)), "{params}: {e:?}");
+        assert!((body_volume(&s, "Stock") - 1000.0).abs() < 1e-6, "{params}");
+    }
+    let mut ball = Session::default();
+    run(&mut ball, "solid.sphere", json!({"radius":5,"center":[0,0,0],"operation":"new","body_name":"Ball"}));
+    let e = ball.execute("solid.dome", &json!({"face":[0,0,5],"height":2}));
+    assert!(e.as_ref().is_err_and(|e| e.to_string().contains("the face is not planar")), "{e:?}");
+    assert!(ball.model.results.iter().all(|f| f.error.is_none()), "{:?}", ball.model.results);
 }
 
 /// A 3° draft on a pocket wall whose vertical corners carry 4 mm rounds drafts the wall with the

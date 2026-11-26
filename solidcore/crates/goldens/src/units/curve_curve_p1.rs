@@ -870,6 +870,8 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 test_span_accuracy(
                     &k,
                     &c,
+                    // the curve's natural interval, the length upstream reads
+                    c.natural_interval().length(),
                     *lt,
                     [v3(*lp), v3(*ld)],
                     *ct,

@@ -38,5 +38,10 @@
     "cmd.view_pan_mode": "平移模式",
     "cmd.view_orbit_mode": "环绕模式",
     "cmd.view_zoom_mode": "缩放模式"
+  },
+  "fr": {
+    "cmd.view_pan_mode": "Mode panoramique",
+    "cmd.view_orbit_mode": "Mode orbite",
+    "cmd.view_zoom_mode": "Mode zoom"
   }
 }
