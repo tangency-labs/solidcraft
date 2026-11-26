@@ -993,6 +993,34 @@ fn revolved_edge_almost_square_to_the_axis_reads_back() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// A profile arc that bows out of its chord by less than a micrometre (radius 140, chord 0.01,
+/// sagitta 9e-8) revolves into a body that measures and splits (#15385). Before, Revolve wrote
+/// its face as a torus whose NURBS form the torus recogniser does not find (a tube swept over
+/// 4e-3 degrees), so the body did not read back ("a NURBS form that is not its analytic
+/// surface") and Split Body failed with it. The profile is a cylinder of radius 20 up to the arc
+/// and a cone to the apex at 40: its volume is theirs less the arc's segment swept round the
+/// axis (Pappus, 7.5e-8 mm3). Split 10 along the axis, the lower half is the cylinder of height
+/// 10. The 1e-6 relative bound is that of `revolved_edge_almost_square_to_the_axis_reads_back`.
+#[test]
+fn a_profile_arc_almost_straight_revolves_into_a_body_that_splits() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 40], [0, 0], [20, 0], [20, 20]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [160, 20.005], "start": [20, 20.01], "end": [20, 20]}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 20.01], [0, 40]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"axis": "l1", "angle": "360 deg", "body_name": "B"}));
+    let whole = 33_518.699_218_625_91;
+    let v = volume(&mut s);
+    assert!(rel(v, whole) < 1e-6, "revolved: volume {v}, want {whole}");
+    // the sketch's y runs along -Z
+    run(&mut s, "solid.split_body", json!({"body": "B", "plane": {"origin": [0, 0, -10], "normal": [0, 0, 1]}}));
+    let part = |s: &Session, b: &str| s.model.state().body(b).unwrap().measure().unwrap().volume;
+    let (low, high) = (part(&s, "B"), part(&s, "B (1)"));
+    let cylinder = PI * 400.0 * 10.0;
+    assert!(rel(low, cylinder) < 1e-6 && rel(high, whole - cylinder) < 1e-6, "split: {low} + {high}, want {cylinder} + {}", whole - cylinder);
+}
+
 /// A spherical shell (a half ring between two arcs, both radial lines on the axis) revolved on a
 /// sketch plane that does not pass through the origin: the body is the shell, as it is on XY.
 /// Before, built in place, it measured a third too large (truck tessellates the degenerate faces
