@@ -113,7 +113,8 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, shop: &mut usize) {
             crate::scenario::publish_handle(&format!("dialog:shop_presets:{action}"), response.rect.center());
             response.clicked()
         };
-        ui.horizontal_wrapped(|ui| {
+        // One under another: in a row they widen the window past its fields.
+        ui.vertical(|ui| {
             if button(ui, "save", tr("ui.shop_presets_save"), shown.is_some() && state.naming.is_none()) {
                 state.naming = Some(String::new());
                 state.error = None;
