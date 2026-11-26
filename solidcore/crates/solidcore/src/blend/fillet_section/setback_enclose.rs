@@ -258,20 +258,40 @@ fn inside_piece(u: &[f64], k: usize, x: Ivl, side: i32) -> bool {
     (side > 0 || a <= x.lo) && (side < 0 || x.hi <= b)
 }
 
-/// Whether `[lo, hi]` lies in the closed knot span `[u_k, u_{k+1}]` of a curve of degree
-/// `p` with `n` control points, to its rounding, the first piece continued below the
-/// domain's start and the last above its end.
-fn inside_span(u: &[f64], p: usize, n: usize, k: usize, lo: f64, hi: f64) -> bool {
+/// How far (3D) a definition's stations may lie past its leader's end: the leader is cut to
+/// the stations, and the cut (`BSplineCurve::trim`) moves an end onto a knot only within
+/// `100 · scaled_zero` of it or, on a rational curve, where the span it cuts off collapses
+/// to a pole, its control points within `ZONE_TOL_3D / 10` of each other (check test #15):
+/// either way the stations past the cut end lie within this of its end point.
+const PAST_LEADER_END: f64 = crate::geom::tol::ZONE_TOL_3D / 10.0;
+
+/// Whether `[lo, hi]` lies in the closed knot span `[u_k, u_{k+1}]` of `edge`, to its
+/// rounding; the first piece continued below the domain's start and the last above its
+/// end while the continued piece stays within [`PAST_LEADER_END`] of the end point.
+///
+/// # Errors
+///
+/// A cancel.
+fn inside_span(edge: &NurbsCurve, k: usize, lo: f64, hi: f64) -> Result<bool> {
+    let u = &edge.u;
     let (a, b) = (knot(u, k as isize), knot(u, k as isize + 1));
     // a span between two of the piece's knots is held by an interval rounded outward, a few
     // ulps past them: on those the piece's polynomial is the edge's continuation (at a knot
     // the edge is continuous), so the proof stands for the piece's own s. Anything more
-    // crosses into another piece, except past a domain end: no piece lies there, and the
-    // definition evaluates its leader past its ends as the end piece continued (its
-    // out-of-bounds evaluation, as `derivs_over` continues the end pieces), so the end
-    // piece's polynomial there is the definition's own edge
+    // crosses into another piece, except past a domain end, where no piece lies: the
+    // certificate's evaluator (`span`, `derivs_over`) continues the end piece there, and a
+    // definition's stations lie past its leader's end only as far as the leader's cut
+    // shortened it ([`PAST_LEADER_END`]), so the proof is taken that far and no farther
     let slack = |x: f64| 8.0 * f64::EPSILON * x.abs().max(1.0);
-    (k == p || a - slack(a) <= lo) && (k + 1 >= n || hi <= b + slack(b))
+    let reaches = |end: f64, past: f64| -> Result<bool> {
+        let (Some(e), Some(q)) = (edge_at(edge, end)?, edge_at(edge, past)?) else {
+            return Ok(false);
+        };
+        Ok(dot3(sub3(q[0], e[0]), sub3(q[0], e[0])).sqrt() <= PAST_LEADER_END)
+    };
+    let below = a - slack(a) <= lo || (k == edge.p && reaches(a, lo)?);
+    let above = hi <= b + slack(b) || (k + 1 >= edge.n && reaches(b, hi)?);
+    Ok(below && above)
 }
 
 /// A failed evaluation proves nothing (`Ok(None)`); a cancel ends the operation.
@@ -384,7 +404,7 @@ fn chebyshev<const N: usize>(
 fn edge_models(edge: &NurbsCurve, at: Span) -> Result<Option<[V3<Ft>; 3]>> {
     let piece = span(&edge.u, edge.p, edge.n, at.m);
     let s = at.interval();
-    if !inside_span(&edge.u, edge.p, edge.n, piece, s.lo, s.hi) {
+    if !inside_span(edge, piece, s.lo, s.hi)? {
         return Ok(None);
     }
     let Some(d) = proved(curve_derivs_tm(edge, at.m, at.delta, 2, piece))? else {
@@ -2040,24 +2060,35 @@ mod tests {
             .is_some());
     }
 
-    /// A span reaching past the edge's end runs on its end piece continued, which is the
-    /// definition's own edge there (its leader is evaluated past its ends as itself): a
-    /// rational quadratic's every parameter maps onto its conic, so past the quarter rim's end
-    /// the edge is still the circle of radius 5, and the foot on the plate at setback 6 is at
-    /// radius 11 along its radial, as inside. A station at an end vertex lies there: the
-    /// vertex dropped on the extended edge lands some tens of ulps past the end (6.7e-15 at
-    /// the side vertex of the enclosure front's chain with rounds of 6), past the rounding
-    /// slack a knot inside the edge allows.
+    /// A span reaching past the edge's end runs on its end piece continued, as the
+    /// certificate's evaluator continues it, as far as a definition's stations may lie past
+    /// its leader's cut end ([`PAST_LEADER_END`], 1e-6): a rational quadratic's every
+    /// parameter maps onto its conic, so past the quarter rim's end the edge is still the
+    /// circle of radius 5, and the foot on the plate at setback 6 is at radius 11 along its
+    /// radial, as inside. A station at an end vertex lies there: the vertex dropped on the
+    /// extended edge lands some tens of ulps past the end (6.7e-15 at the side vertex of the
+    /// enclosure front's chain with rounds of 6), past the rounding slack a knot inside the
+    /// edge allows. A span reaching twice the bound past the end proves nothing.
     #[test]
-    fn a_span_past_the_edge_s_end_is_the_end_piece_continued() {
+    fn a_span_past_the_edge_s_end_is_the_end_piece_continued_that_far() {
         let k = Kernel::default();
         let edge = rim(90.0);
         let end = knot(&edge.u, edge.n as isize);
-        for past in [1e-14, 1e-3] {
-            let at = Span {
-                m: end - 0.01 + 0.5 * past,
-                delta: 0.01 + 0.5 * past,
-            };
+        let speed = {
+            let c = edge_at(&edge, end).unwrap().unwrap();
+            dot3(c[1], c[1]).sqrt()
+        };
+        let at_past = |past: f64| Span {
+            m: end - 0.01 + 0.5 * past,
+            delta: 0.01 + 0.5 * past,
+        };
+        let reach = |past: f64| {
+            let (e, q) = (radial(&edge, end).0, radial(&edge, end + past).0);
+            dot3(sub3(q, e), sub3(q, e)).sqrt()
+        };
+        for past in [1e-14, 0.5 * PAST_LEADER_END / speed] {
+            assert!(reach(past) < PAST_LEADER_END, "{past}");
+            let at = at_past(past);
             let (_, r) = radial(&edge, at.m);
             let plate = station(
                 &k,
@@ -2081,6 +2112,14 @@ mod tests {
                 );
             }
         }
+        let past = 2.0 * PAST_LEADER_END / speed;
+        assert!(reach(past) > PAST_LEADER_END);
+        let at = at_past(past);
+        let (_, r) = radial(&edge, at.m);
+        let x = uv_of(&plane(), [11.0 * r[0], 11.0 * r[1], 0.0]);
+        assert!(enclose_foot(&k, &plane(), &edge, 6.0, at, x)
+            .unwrap()
+            .is_none());
     }
 
     /// A hole of radius 5 in a plate z = 0, chamfered 6: on the plate the foot is at radius
