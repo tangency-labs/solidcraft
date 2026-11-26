@@ -95,7 +95,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          their own beside it (in parts only a part's contents are rows of their own, but not a folded part's or a purchased one's, \
          and of an inseparable one's only its purchased parts are), so the rows add up to the assembly; a reference placement \
          adds nothing; null when nothing in it has a body, a body can't be measured or the row's definitions differ); path?: write \
-         a .csv (columns item, part_number, description, revision, count, definition, material, quantity, finish) or .json file (children as \
+         a .csv (columns item, part_number, description, revision, count, definition, material, quantity, finish, and mass_g with mass) or .json file (children as \
          items 1.1, 1.2…); format?: csv|json (default from the path). Each placement counts as \
          its occurrence's bom_type, else its component's: phantom has no row (what it holds counts here; its own bodies, \
          if it has any, are a row of their own), reference counts nowhere, purchased and inseparable are one row (in flat, an inseparable one's purchased parts are listed too, under it with group_children and a part number); placements \
@@ -440,10 +440,15 @@ fn row_json(row: &Row, item: &[u32], mass: bool, numbered: bool, nested: bool) -
 
 /// The bill of materials as CSV: fixed columns, every field quoted, and a field a spreadsheet
 /// would run as a formula written as text; each row followed by the rows listed under it. A column
-/// added later goes at the end, so the others keep their places.
-fn csv(list: &Bom) -> String {
+/// added later goes at the end, so the others keep their places. With `mass`, `mass_g` ends each
+/// row: the row's mass in grams in the text JSON writes, empty where JSON has null.
+fn csv(list: &Bom, mass: bool) -> String {
     let quote = solidcraft_doc::csv::quoted;
     let mut out = ["item", "part_number", "description", "revision", "count", "definition", "material", "quantity", "finish"].map(quote).join(",");
+    if mass {
+        out.push(',');
+        out.push_str(&quote("mass_g"));
+    }
     out.push('\n');
     for (item, r) in list.rows_deep() {
         let (item, count, definition, material) = (bom::item_text(&item), r.count.to_string(), r.names.join("; "), r.materials.join("; "));
@@ -454,6 +459,15 @@ fn csv(list: &Bom) -> String {
         };
         let fields: [&str; 9] = [&item, &r.part_number, &r.description, &r.revision, &count, &definition, &material, &quantity, &r.finish];
         out.push_str(&fields.map(quote).join(","));
+        if mass {
+            // The text JSON writes for the same mass (`1290.0`, `1.29e-9`), so both files agree.
+            let text = match grams(r.mass) {
+                number @ Value::Number(_) => serde_json::to_string(&number).unwrap_or_default(),
+                _ => String::new(),
+            };
+            out.push(',');
+            out.push_str(&quote(&text));
+        }
         out.push('\n');
     }
     out
@@ -481,7 +495,7 @@ fn bom(s: &mut Session, p: &Value) -> Result<Value> {
             None => return Err(bad(cmd, "`path` must end in .csv or .json, or give `format`")),
         };
         let text = match format.as_str() {
-            "csv" => csv(&list),
+            "csv" => csv(&list, request.mass),
             "json" => {
                 let mut file = json!({"rows": rows, "total_occurrences": list.total.occurrences});
                 if request.mass {
