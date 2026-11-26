@@ -187,6 +187,7 @@
 //! | [`TopologyFailure::TooFewEdgeuses`] | `SM_ERR` |
 //! | [`TopologyFailure::TooFewSurfaces`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::TooManyOutputSlots`] | `SM_ERR_OUT_OF_MEMORY` |
+//! | [`TopologyFailure::TouchPointNotClassified`] | `SM_ERR` |
 //! | [`TopologyFailure::TrimBoundaryNotBuilt`] | `SM_ERR` |
 //! | [`TopologyFailure::TrimCurveOffEnd`] | `SM_ERR` |
 //! | [`TopologyFailure::UnknownShellType`] | `SM_ERR` |
@@ -887,6 +888,10 @@ pub enum TopologyFailure {
         /// A number of slots below this fits.
         fits_below: u64,
     },
+    /// A planar section's touch point (the plane touching a face at a point) could not be
+    /// classified on its face; the classification's error is kept as the cause. Class
+    /// `failed`.
+    TouchPointNotClassified,
     /// The face's oriented trim boundary could not be built; the builder's error is kept as the
     /// cause.
     TrimBoundaryNotBuilt,
@@ -1171,6 +1176,7 @@ impl TopologyFailure {
             | Self::SurfaceNotTransformable { .. }
             | Self::TestVectorZero
             | Self::TooFewEdgeuses { .. }
+            | Self::TouchPointNotClassified
             | Self::TrimBoundaryNotBuilt
             | Self::TrimCurveOffEnd { .. }
             | Self::UnknownShellType { .. }
@@ -1831,6 +1837,9 @@ impl core::fmt::Display for TopologyFailure {
                 f,
                 "{asked} curve output slots were asked for; fewer than {fits_below} fit"
             ),
+            Self::TouchPointNotClassified => {
+                f.write_str("the section's touch point could not be classified on its face")
+            }
             Self::TrimBoundaryNotBuilt => {
                 f.write_str("the face's trim boundary could not be built")
             }
@@ -2756,6 +2765,11 @@ mod tests {
             (TopologyFailure::RayHitsAtStart, SM_ERR, ErrorKind::Failed),
             (
                 TopologyFailure::TrimBoundaryNotBuilt,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                TopologyFailure::TouchPointNotClassified,
                 SM_ERR,
                 ErrorKind::Failed,
             ),
