@@ -46,6 +46,7 @@ mod reseam;
 pub(crate) mod seams;
 mod slivers;
 mod touching;
+mod tracked;
 mod wound;
 
 /// Most control points in one direction of a schema spline.
@@ -1759,6 +1760,11 @@ impl<'t> Assembly<'t> {
         };
         let mut pcs =
             pcurve::pcurves_within(&surface, &uses_of(&self.edges, &edge_loops, made.as_ref())?, fit, box_on_form).map_err(|e| e.to_string())?;
+        // A spline face's trim that lies far off its edge (the kernel's drop settled on another part
+        // of the surface) is made again by following the edge along the surface.
+        if form.is_none() {
+            tracked::retrack(&surface, &self.edges, &edge_loops, &mut pcs)?;
+        }
         // Each loop's uses are moved by whole turns (four form parameters) to run on from one
         // another, on the form that does not close.
         if wound {
