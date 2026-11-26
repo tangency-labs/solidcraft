@@ -5556,6 +5556,11 @@ impl Renderer {
         tris(pass, &res.pbr, &m.pbr);
         if !cb.product {
             res.clouds.paint(pass, &res.cloud_pipes, tally);
+            // Clouds use a pipeline layout with only 2 bind groups, which invalidates groups 1 and 2
+            // for the lit pipeline that follows. Rebind access and AO maps so later triangles read
+            // valid data (#16048).
+            pass.set_bind_group(1, &res.access_bind, &[]);
+            pass.set_bind_group(2, &res.ao.maps.bind, &[]);
         }
         in_moving(pass, &|pass, mv| tris(pass, &res.pbr, &mv.pbr));
         block_class(pass, &res.pbr_palette, TriClass::Pbr);
