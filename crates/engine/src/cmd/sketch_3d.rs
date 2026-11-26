@@ -19,13 +19,14 @@ use super::{CommandSpec, in_sketch};
 use crate::params::{bad, vec3};
 use crate::schema::sketch::Constrained;
 use crate::schema::sketch_3d::{
-    AlongAxisParams, AlongAxisResult, Arc3dParams, AxisName, ControlSpline3dParams, Curves3dResult, Line3dParams, Move3dParams, Move3dResult,
-    OnPlaneParams, OnPlaneResult, POINT3_MUST, Point3dParams, Point3dResult, Spline3dParams, point3_coordinates,
+    AlongAxisParams, AlongAxisResult, Arc3dParams, AxisName, ControlSpline3dParams, Create3dParams, Create3dResult, Curves3dResult, Line3dParams,
+    Move3dParams, Move3dResult, OnPlaneParams, OnPlaneResult, POINT3_MUST, Point3dParams, Point3dResult, Spline3dParams, point3_coordinates,
 };
 use crate::schema::sketch_dimension::DimensionResult;
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
+const CREATE3D_CONTRACT: TypedContract<Create3dParams> = TypedContract::new();
 const LINE3D_CONTRACT: TypedContract<Line3dParams> = TypedContract::new();
 const SPLINE3D_CONTRACT: TypedContract<Spline3dParams> = TypedContract::new();
 const CONTROL_SPLINE3D_CONTRACT: TypedContract<ControlSpline3dParams> = TypedContract::new();
@@ -36,6 +37,12 @@ const ALONG_AXIS_CONTRACT: TypedContract<AlongAxisParams> = TypedContract::new()
 const ON_PLANE_CONTRACT: TypedContract<OnPlaneParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("sketch.create3d", "3D Sketch", crate::checked!("sketch.create3d", create3d))
+        .begins_edit()
+        .icon("sketch3d")
+        .contract(&CREATE3D_CONTRACT)
+        .output(output_schema_for::<Create3dResult>)
+        .params("name?; view?: open Model view id (defaults to focused or most recent Model). Starts a 3D sketch with no plane to choose: a new sketch with 3D Sketch on, opened for editing, so sketch.line3d, sketch.spline3d, sketch.arc3d and sketch.point3d draw in it at once. It rests on the active component's XY origin plane and its curves may leave that plane. One undo step"),
     CommandSpec::new("sketch.line3d", "3D Line", crate::checked!("sketch.line3d", line3d))
         .icon("line")
         .enabled(in_sketch_3d)
@@ -204,6 +211,28 @@ fn inverse_owner_frame(s: &Session, p: &Value, cmd: &str) -> Result<solidcraft_d
     }
     let frame = if owner == s.active_component { s.active_component_frame() } else { s.placed_document().component_transform(owner) };
     solidcraft_doc::mat_inverse(&frame).ok_or_else(|| bad(cmd, "the sketch owner placement is not invertible"))
+}
+
+/// `sketch.create3d`: a new sketch with 3D Sketch on, with no plane to choose. A sketch always
+/// has a plane, so this one rests on the XY origin plane of the active component: a click in
+/// empty space lands there, and nothing new is saved in the design.
+fn create3d(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.create3d";
+    s.requested_sketch_view(p, cmd)?;
+    // Only the keys this command takes reach `sketch.create`'s builder: a stray `plane` or
+    // `project_edges` must not turn this into a sketch on a face.
+    let mut keys = serde_json::Map::new();
+    for key in ["name", "view"] {
+        if let Some(value) = p.get(key) {
+            keys.insert(key.into(), value.clone());
+        }
+    }
+    let made = super::sketch::sketch_on_plane(s, &Value::Object(keys), solidcraft_doc::PlaneRef::Origin { name: "XY".into() }, None)?;
+    sketch_store::update(s, made.sketch, |_, _, sk| {
+        sk.view.three_d = true;
+        Ok(())
+    })?;
+    reply(cmd, Create3dResult { sketching_view: made.sketching_view, sketch: made.sketch, name: made.name, param_warnings: Vec::new() })
 }
 
 fn line3d(s: &mut Session, p: &Value) -> Result<Value> {

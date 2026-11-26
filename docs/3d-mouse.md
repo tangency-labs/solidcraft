@@ -51,6 +51,23 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="256f", TAG+="uaccess"
 SUBSYSTEM=="hidraw", KERNELS=="0005:256F:*", TAG+="uaccess"
 ```
 
+When [`smed`](https://github.com/thomschlie/smed), the SpaceMouse Enterprise driver daemon, runs (its socket
+`$XDG_RUNTIME_DIR/smed/api.sock`), Automatic reads the 3D mouse through it before anything else;
+**Driver** under Advanced can pick it, spacenavd or the device itself. A smed that does not answer
+within a second is left as one that refused, and asked again later. smed reports every
+key by 3Dconnexion's id, beyond the 32 a HID bitmask holds (the Enterprise's Tab and Space are 175
+and 176), and tells a short press from one held past the device's long-press threshold. The Buttons
+section then shows two jobs in each key's row, under **Press** and **Held**; a key whose held job
+is **As a short press** does its short job when held, and one that holds Shift, Ctrl or Alt has no
+held job, since the modifier stays held for as long as the key is down. The SpaceMouse Enterprise
+starts with the jobs printed on its keys, and T, R and F held give the bottom, left and back views;
+read without smed, its keys start with no job, as before. The first time a device is read through
+smed, it takes over the calibration and button jobs saved for it read directly (smed passes its axes
+on unchanged and numbers its keys the same way), where it has none of its own; long jobs start from
+the defaults, and the direct settings stay for when it is read directly again. smed keeps the
+rotation lock: its Lock key or **Rotation lock** in the Buttons section switches it, the key's LED
+shows it, and the view then only pans and zooms.
+
 Older SpaceNavigators use Logitech's vendor id `046d`, so add a rule with their product id (see
 `lsusb`) instead of matching every Logitech device. A homemade device needs a rule with its own
 vendor and product id. Reload with `sudo udevadm control --reload && sudo udevadm trigger`, then

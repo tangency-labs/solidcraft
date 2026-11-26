@@ -208,7 +208,10 @@ pub(super) fn build(k: &mut Kernel, mesh: &TriMesh) -> Result<Brep> {
     let mut body = topology::build(k, faces, &shells, &regions)?;
     let check = check_brep(k, &mut body, CheckLevel::Level0)?;
     if !is_manifold_solid(&body)?
-        || !matches!(check.pointers, crate::topology::brep::validation::PointerCheck::Passed)
+        || !matches!(
+            check.pointers,
+            crate::topology::brep::validation::PointerCheck::Passed
+        )
         || check.assert_valid != Some(true)
     {
         return Err(invalid("faceted solid did not pass validity checks"));

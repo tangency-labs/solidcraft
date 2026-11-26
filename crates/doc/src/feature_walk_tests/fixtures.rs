@@ -237,6 +237,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             json!({"type": "surface_blend", "from": {"body": "B", "edges": [o]}, "to": {"body": "C", "edges": [o]}, "align": [o, o], "seam": [o, o]}),
         ),
         ("surface_offset", json!({"type": "surface_offset", "faces": [o], "distance": "soff.distance", "tolerance": "soff.tolerance"})),
+        (
+            "surface_midsurface",
+            json!({"type": "surface_midsurface", "faces": [o, o], "max_thickness": "smid.max_thickness", "min_thickness": "smid.min_thickness",
+                "suppress_holes_below": "smid.suppress_holes_below"}),
+        ),
         // The Class-A surface family (surface.blend/boundary/match/fair).
         (
             "surface_blend",
@@ -295,7 +300,7 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
         "extrude" | "extrude_thin" | "revolve" | "sweep" | "sweep_options" | "pipe" | "coil" | "cell_grid" | "thicken" => json!({"targets": ["B"]}),
         "fillet_constant" | "fillet_chord" | "fillet_curvature" | "fillet_variable" | "fillet_spline" | "chamfer" | "shell" | "dome" | "draft"
         | "offset_face" | "delete_face" | "replace_face" | "sheet_flange" | "sheet_hem" | "sheet_perforate" | "sheet_path" | "sheet_tab"
-        | "sheet_unfold" | "boss" | "lip" | "snap_fit" | "rest" | "surface_offset" => {
+        | "sheet_unfold" | "boss" | "lip" | "snap_fit" | "rest" | "surface_offset" | "surface_midsurface" => {
             json!({"body": "B"})
         }
         "sheet_bead" => json!({"body": "B"}),

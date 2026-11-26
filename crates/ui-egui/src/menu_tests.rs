@@ -3107,6 +3107,75 @@ fn the_history_bar_feature_menu_is_reported_and_picked() {
     assert!(h.app.session.doc.feature(id).is_none(), "the features after the marker are deleted");
 }
 
+#[test]
+fn control_polygon_menu_makes_the_spline_sides_pickable() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    let spline =
+        h.app.run("sketch.spline.control_point", json!({"points":[[0,0],[0,60],[80,60],[80,0]]})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+    h.app.session.selection = vec![solidcraft_engine::Sel::SketchCurve { id: spline.clone(), sketch: None }];
+    let item = context_menu::items(&h.app, &Target::Viewport)
+        .into_iter()
+        .find(|item| item.id == "sketch.spline.control_polygon")
+        .expect("the spline offers Add Control Polygon");
+    context_menu::run_item(&mut h.app, &item, pos2(400.0, 300.0));
+    let st = h.app.session.model.state();
+    let side = st
+        .sketch(sketch)
+        .unwrap()
+        .sketch
+        .curves
+        .iter()
+        .filter(|curve| curve.spline_control_polygon_of.as_deref() == Some(spline.as_str()))
+        .nth(1)
+        .unwrap()
+        .id
+        .clone();
+    h.app.session.selection.clear();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(3);
+    h.step(&json!({"click":{"sketch":[25,60]}})).unwrap();
+    assert!(
+        h.app.session.selection.iter().any(|item| matches!(item, solidcraft_engine::Sel::SketchCurve { id, .. } if id == &side)),
+        "{:?}",
+        h.app.session.selection
+    );
+}
+
+#[test]
+fn drawn_control_polygon_uses_the_palette_checkbox() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.options", json!({"snap":false})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.spline.control_point"})).unwrap();
+    for point in [[0, 0], [0, 30], [40, 30], [40, 0]] {
+        h.step(&json!({"click":{"sketch":point}})).unwrap();
+    }
+    h.step(&json!({"click":{"sketch":[40,0]},"button":"right"})).unwrap();
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.settle();
+    let check = |h: &crate::scenario::Harness, shown: bool| {
+        let state = h.app.session.model.state();
+        let sk = &state.sketch(sketch).unwrap().sketch;
+        let guides: Vec<_> = (0..sk.curves.len()).filter(|&index| sk.is_control_polygon_segment(index)).collect();
+        assert_eq!(guides.len(), 3);
+        assert_eq!(!sk.view.hide_control_polygons, shown);
+        assert!(guides.iter().all(|&index| solidcraft_engine::view::sketch_curve_visible(sk, index) == shown));
+    };
+    check(&h, true);
+    h.step(&json!({"click":{"handle":"sketch_palette:options_fold"}})).unwrap();
+    h.settle();
+    for shown in [false, true] {
+        h.step(&json!({"click":{"handle":"sketch_palette:toggle:show_control_polygons"}})).unwrap();
+        h.settle();
+        check(&h, shown);
+    }
+}
+
 /// A right-click menu taller than the window (a spline with stored tangent handles in a short
 /// window) stays inside the window and scrolls: its last rows start below the window's bottom
 /// edge, and a click on the full-width bar at its bottom brings them into view. A window that

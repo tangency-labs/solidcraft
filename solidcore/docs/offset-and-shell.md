@@ -186,17 +186,28 @@ unbuilt result was non-manifold.
 Q = X⁴ − d w² X H + d² w⁴ K, with X² = |A_u × A_v|² and H, K built from the first and second
 fundamental forms' homogeneous coefficients. Since A_u × A_v carries a factor w, the bracket
 X′⁴ − d X′ H′ + d² w² K′ of the same sign is what is bounded, four times deg w lower in each
-parameter: q0 − X′ q1 with q0 = X′⁴ + d² w² K′, q1 = d H′ and x2 = X′². The forms are built with
-the patch moved to its own frame, which leaves them unchanged, and carry a running error bound
-through their construction and every quartering (`bernstein::Bounded`), so their rounding follows
-the patch's size, not its distance from the origin. The bound starts from each patch's net as the
-Bezier decomposition computed it; the decomposition's own rounding is not counted. A patch is
-certified when the coefficients' ranges, widened by that bound, keep it above 0, and a form that
-is not finite certifies nothing. Each patch's bound is subdivided into quarters on an explicit
-stack, at most `MAX_REGULARITY_PATCHES` (20,000); a patch whose middle value is negative is a fold
-once the face's own partials prove it in interval arithmetic (otherwise it is subdivided), and a
+parameter: q0 − X′ q1 with q0 = X′⁴ + d² w² K′, q1 = d H′ and x2 = X′² (the code and Figure 2
+write X′ as X). The forms are built with the patch moved to its own frame, which leaves them
+unchanged, and carry a running error bound through their construction and every quartering
+(`bernstein::Bounded`), so their rounding follows the patch's size, not its distance from the
+origin. The bound starts from each patch's net as the Bezier decomposition computed it; the
+decomposition's own rounding is not counted. A patch is certified when the coefficients' ranges,
+widened by that bound, keep it above 0, or, where q1 ≥ 0, when its lower bound with X′ under its
+tangent, X′ ≤ (x2 + c²) / (2c) for any c > 0, has its Bernstein coefficients above their rounding
+(Figure 2); a form that is not finite certifies nothing. The ranges bound the two terms apart and
+close linearly as a patch shrinks; the tangent bound is one polynomial and closes quadratically,
+so a wall close to a round's radius is certified without subdividing. Where q1 changes sign or is
+negative, only the ranges apply. Each patch's bound is subdivided into quarters on an explicit
+stack, at most `MAX_REGULARITY_PATCHES` (20,000); a patch whose middle value is negative is a
+fold once the face's own partials prove it in interval arithmetic (otherwise it is subdivided),
+and a
 budget run out is refused too, since a face not proved regular is not built. A pole (a normal that
 vanishes) never certifies, so it is refused the same way.
+
+![Left: across one patch, q0 rises from 1 to 1.3 and X q1 from 0.86 to 1.12, always below q0; the least value of q0 lies below the largest of X q1, a shaded overlap. Right: the curve X = √x2 and its tangent line at c², which lies above the curve and touches it at c.](offset-and-shell/regularity-bound.svg)
+
+*Figure 2. Look at the shaded overlap: Q is positive at every point of the patch, yet the two
+ranges overlap, so the ranges certify nothing; under the tangent Q is bounded by one polynomial.*
 
 **The size named.** `largest` (`largest_wall`) and the collapse radius (`least_radius`) are the
 least radius of curvature on the displaced side, found on a 9 × 9 grid of each patch and refined by
@@ -242,7 +253,7 @@ ops, so a body with room that no sample finds is refused.
 
 ![Two rows of five boxes. Row 1, the one construction: S1 face offsets (built), then S2 mitres, then S3 arrangement, then S4 cavity rule by winding numbers, then S5 extraction, each open. Row 2, today's executive: face offsets, then mitres by extension and intersection, then the merge, then implicit offsets replaced, then the shell's boolean difference or the thicken's merge and stitch.](offset-and-shell/stages.svg)
 
-*Figure 2. Read each row left to right: row 1 is the design in `offset/construction.rs`, of which
+*Figure 3. Read each row left to right: row 1 is the design in `offset/construction.rs`, of which
 only S1 exists; row 2 is what runs, with S1 called from inside it.*
 
 ### 5.1 The five stages
@@ -303,13 +314,13 @@ vertices running on into each other along one curve.
 
 ![A convex edge between faces F and G with sector angle α. Each face's offset by d is drawn; F's offset is extended past F's edge until it meets G's offset at M. The reach r from the edge to M's foot is marked, and one more d past it.](offset-and-shell/mitre-reach.svg)
 
-*Figure 3. Look at M: F's offset must reach r past F's side to meet G's, and the extension goes d
+*Figure 4. Look at M: F's offset must reach r past F's side to meet G's, and the extension goes d
 further so the meeting crosses the extended surface's side instead of touching it.*
 
 With `extend_convex_edges` (set by every ops call, `offset_options`), the executive extends each
 face's surface and intersects neighbouring offsets instead of filling convex edges with rounds
 (`do_solid_offset` dispatches to `do_extended_offset`, `offset_executive/p2.rs`):
-- **The reach** (`offset_executive/reach.rs`, `extension_reach`): Figure 3's r on the tangent
+- **The reach** (`offset_executive/reach.rs`, `extension_reach`): Figure 4's r on the tangent
   planes, with d_G = 0 for a face that does not move, solved for both edges at a corner, sampled
   at 8 intervals an edge; the largest, plus one offset (`record_extension_reach`, `p1.rs`). It is
   a first-order margin, not a certificate.

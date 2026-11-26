@@ -2673,6 +2673,14 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
         dialog.changed |= dialog.revalidated;
         return;
     }
+    if let Some(messages) = reply.pointer("/result/messages").and_then(Value::as_array) {
+        for m in messages {
+            let level = m.get("level").and_then(Value::as_str).unwrap_or("info");
+            let text = m.get("message").and_then(Value::as_str).unwrap_or_default();
+            let is_error = level == "error";
+            app.messages.push(text, is_error, crate::now_ms());
+        }
+    }
     if dialog.writes.is_some() {
         let path = reply.pointer("/result/path").and_then(Value::as_str).unwrap_or_default().to_owned();
         let notes: Vec<String> =
@@ -2700,7 +2708,17 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
         open_requested_forms(app, &reply, source_guard);
         return;
     }
-    let done = solidcraft_ui_text::format("ui.plugin_dialog_done", &[("entry", &dialog.label)]);
+    let mut done = solidcraft_ui_text::format("ui.plugin_dialog_done", &[("entry", &dialog.label)]);
+    if let Some(last_warn) = reply
+        .pointer("/result/messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .rfind(|m| m.get("level").and_then(Value::as_str) == Some("warn") || m.get("level").and_then(Value::as_str) == Some("error"))
+        .and_then(|m| m.get("message").and_then(Value::as_str))
+    {
+        done = format!("{done} · {last_warn}");
+    }
     app.plugin_menu.dialogs.remove(at);
     app.set_status(done, false);
     open_requested_forms(app, &reply, source_guard);

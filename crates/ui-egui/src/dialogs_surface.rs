@@ -60,11 +60,13 @@ crate::dialog_descriptor::dialog_descriptors! {
         } => json!({"order": MATCH_CONTINUITY.get(*order).map_or("g2", |(_, word)| *word)});
         ; custom {
             /// `direction`: an index into [`EXTRUDE_SIDES`]; `to_object`: the extent is To Object
-            /// (the To Object input holds the pick), with `to_offset` past it (empty: none).
+            /// (the To Object input holds the pick), with `to_offset` past it (empty: none);
+            /// `to_next`: the extent is To Next (each wall runs on until it meets a body).
             Extrude {
                 distance: String,
                 direction: usize,
                 to_object: bool,
+                to_next: bool,
                 to_offset: String,
             },
             /// `axis`: a stored {origin, dir} axis, used while no axis is picked.
@@ -154,6 +156,8 @@ impl Surf {
             // Extending to an object has no distance to drag.
             Surf::Extend { to_object: true, .. } => return None,
             Surf::Extrude { to_object: true, to_offset, .. } => ("To Offset", ValueKind::Length, to_offset),
+            // To Next has no length to type or drag: the bodies in the way end the walls.
+            Surf::Extrude { to_next: true, .. } => return None,
             Surf::Extend { distance, .. } | Surf::Extrude { distance, .. } | Surf::Offset { distance, .. } | Surf::Ruled { distance, .. } => {
                 ("Distance", ValueKind::Length, distance)
             }
@@ -235,6 +239,13 @@ const EXTENTS: [&str; 2] = ["Distance", "To Object"];
 /// what `surface.extend`'s `up_to` takes.
 const EXTEND_TO: &str = "To Object";
 
+/// How far a surface extrude goes: a distance, to a picked face or point, or to the first body
+/// in the way.
+const EXTRUDE_EXTENTS: [&str; 3] = ["Distance", "To Object", "To Next"];
+
+/// The sides To Next offers: an index into [`EXTRUDE_SIDES`] for each (no Symmetric).
+const TO_NEXT_SIDES: [usize; 2] = [0, 2];
+
 /// The sides a surface extrude goes to (labels, and the `direction` parameter).
 const EXTRUDE_SIDES: [(&str, &str); 3] = [("One Side", "positive"), ("Symmetric", "symmetric"), ("Flipped", "negative")];
 
@@ -289,9 +300,13 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
 /// The dialog for a surface command.
 pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let k = match id {
-        "surface.extrude" => {
-            Surf::Extrude { distance: crate::dialogs::length_default(&app.session, "10"), direction: 0, to_object: false, to_offset: String::new() }
-        }
+        "surface.extrude" => Surf::Extrude {
+            distance: crate::dialogs::length_default(&app.session, "10"),
+            direction: 0,
+            to_object: false,
+            to_next: false,
+            to_offset: String::new(),
+        },
         "surface.revolve" => Surf::Revolve { angle: "360 deg".into(), symmetric: false, axis: None },
         "surface.sweep" => Surf::Sweep(crate::dialogs_sweep::SweepOpts::default()),
         "surface.loft" => Surf::Loft { rail_fit: 0 },
@@ -378,17 +393,36 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf, inputs: &mut Vec<SelInput>, active:
             });
             ui_kit::options(ui, "ruled_options", &mut [("Flip", flip)]);
         }
-        Surf::Extrude { distance, direction, to_object, to_offset } => {
-            let mut extent = usize::from(*to_object);
+        Surf::Extrude { distance, direction, to_object, to_next, to_offset } => {
+            let mut extent = if *to_object {
+                1
+            } else if *to_next {
+                2
+            } else {
+                0
+            };
             form_row(ui, "Extent Type", |ui| {
-                combo(ui, "se_ext", &EXTENTS, &mut extent);
+                combo(ui, "se_ext", &EXTRUDE_EXTENTS, &mut extent);
             });
             *to_object = extent == 1;
+            *to_next = extent == 2;
             // The To Object input, the same one Extrude picks its object in.
             crate::dialogs::set_to_object(inputs, active, *to_object);
             if *to_object {
                 // To Object goes one way, toward the object.
                 enter |= expr_row(ui, "To Offset", to_offset);
+            } else if *to_next {
+                // To Next goes one way, along the normal or flipped: no length to type.
+                let mut side = usize::from(*direction == 2);
+                form_row(ui, "Direction", |ui| {
+                    ui_kit::segmented(
+                        ui,
+                        &mut side,
+                        &TO_NEXT_SIDES.map(|i| EXTRUDE_SIDES.get(i).map_or("", |(label, _)| *label)),
+                        Default::default(),
+                    );
+                });
+                *direction = TO_NEXT_SIDES.get(side).copied().unwrap_or(0);
             } else {
                 enter |= expr_row(ui, "Distance", distance);
                 form_row(ui, "Direction", |ui| {
@@ -643,10 +677,13 @@ fn chains(app: &SolveApp, picks: &[Sel]) -> Result<Vec<Chain>, String> {
 pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let need = |i: usize, what: &str| if items(inputs, i).is_empty() { Err(format!("select {what} first")) } else { Ok(()) };
     let (cmd, mut p) = match k {
-        Surf::Extrude { distance, direction, to_object, to_offset } => {
+        Surf::Extrude { distance, direction, to_object, to_next, to_offset } => {
             need(0, "profiles or curves to extrude")?;
             let mut p = sheet_picks(app, items(inputs, 0))?;
-            if *to_object {
+            if *to_next {
+                p["to_next"] = json!(true);
+                p["direction"] = json!(if *direction == 2 { "negative" } else { "positive" });
+            } else if *to_object {
                 p["to"] = crate::dialogs::to_object_point(inputs).ok_or("select the face or point to extrude to")?;
                 if !to_offset.trim().is_empty() {
                     p["to_offset"] = json!(to_offset);
@@ -1189,7 +1226,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             let fill = std::iter::once(picked).chain(crate::dialogs_sweep::rail_sels(rails, s.active_sketch)).collect();
             (Surf::Loft { rail_fit: crate::dialogs_sweep::rail_fit_index(*rail_fit) }, fill)
         }
-        FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent } => {
+        FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent, to_next } => {
             let sels = sheet_sels(app, sketch.0, profiles.as_ref(), curves);
             let direction = match extent.direction {
                 Direction::Positive => 0,
@@ -1197,9 +1234,11 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 Direction::Negative => 2,
             };
             let k = Surf::Extrude {
-                distance: extent.distance.to_string(),
+                // To Next saves no length: Distance, if chosen instead, starts at the usual one.
+                distance: if *to_next { crate::dialogs::length_default(&app.session, "10") } else { extent.distance.to_string() },
                 direction,
                 to_object: extent.to.is_some(),
+                to_next: *to_next,
                 to_offset: extent.to_offset.as_deref().map(str::to_string).unwrap_or_default(),
             };
             let mut ins = inputs(&k);
@@ -1309,8 +1348,18 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             (if matches!(kind, FeatureKind::Unstitch { .. }) { Surf::Unstitch } else { Surf::ReverseNormal }, vec![sels])
         }
         FeatureKind::Stitch { bodies, .. } => (Surf::simple_restore(kind)?, vec![bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect()]),
-        FeatureKind::Thicken { bodies, .. } => {
-            (Surf::simple_restore(kind)?, vec![bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect()])
+        FeatureKind::Thicken { bodies, targets, .. } => {
+            // An edit keeps the bodies the Thicken was told to change, as Pipe's does.
+            let k = Surf::simple_restore(kind)?;
+            let mut ins = inputs(&k);
+            if let Some(inp) = ins.first_mut() {
+                inp.items = bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
+            }
+            let mut extra = Map::new();
+            if !targets.is_empty() {
+                extra.insert("targets".into(), json!(targets));
+            }
+            return Some((Kind::Surface(k), ins, extra));
         }
         FeatureKind::SurfaceExtend { edges, mode, up_to, neighbours, .. } => {
             // The dialog edits the edges and the distance or the plane or face they go up to; the
