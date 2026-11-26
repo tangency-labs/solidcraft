@@ -61,6 +61,24 @@ fn file_name(app: &SolveApp, form: ExportForm, sheet: Option<u64>) -> String {
     }
 }
 
+/// How many objects `outside` names, each once: the `outside_sheet` of a `drawing.export` or
+/// `drawing.print` reply. A view listed twice (outside its drawing space, and its centre marks off
+/// the paper) is one object. None for a reply without the list, as another export's.
+pub(crate) fn outside_count(outside: &Value) -> usize {
+    let objects = outside.as_array().into_iter().flatten().map(|finding| finding["object"].to_string());
+    objects.collect::<std::collections::HashSet<_>>().len()
+}
+
+/// The status once an export is written to `path`, with `reply` what the command answered: where it
+/// is, and how many objects lie outside the sheet when any do. The file is written either way.
+pub(crate) fn saved_status(path: &str, reply: &Value) -> String {
+    match outside_count(&reply["outside_sheet"]) {
+        0 => solidcraft_ui_text::format("ui.saved_to", &[("path", path)]),
+        1 => solidcraft_ui_text::format("ui.drawing_export.saved_outside_one", &[("path", path)]),
+        count => solidcraft_ui_text::format("ui.drawing_export.saved_outside_other", &[("path", path), ("count", &count.to_string())]),
+    }
+}
+
 /// Ask where to write it, then write it in the background.
 pub(crate) fn export(app: &mut SolveApp, form: ExportForm) {
     let sheet = active_sheet(app);
@@ -124,9 +142,23 @@ pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::scenario::Harness;
+
+    /// Puts a table of each of `kinds` off the paper of the sheet shown: how many objects
+    /// `drawing.check` then lists as outside their sheet, each once.
+    pub(crate) fn tables_put_off_the_paper(app: &mut SolveApp, kinds: &[&str]) -> usize {
+        let sheet = app.session.drawing("test").unwrap().sheets[0].id;
+        for kind in kinds {
+            app.run("drawing.table.add", json!({"sheet": ids::encode(sheet), "kind": kind, "set": {"place": {"at": [-500, 100]}}})).unwrap();
+        }
+        let checked = app.run("drawing.check", json!({})).unwrap();
+        let outside = checked["findings"].as_array().unwrap().iter().filter(|f| f["kind"] == "outside_sheet");
+        let objects: std::collections::HashSet<String> = outside.map(|f| f["object"].to_string()).collect();
+        assert_eq!(objects.len(), kinds.len(), "{checked}");
+        objects.len()
+    }
 
     fn wait_for_export(h: &mut Harness) {
         let began = std::time::Instant::now();
@@ -171,6 +203,37 @@ mod tests {
         let text = String::from_utf8_lossy(&bytes);
         assert!(bytes.starts_with(b"%PDF-") && text.contains("/Count 2"), "two pages");
         assert!(h.app.drawing_workspace.options.is_none(), "the panel closes");
+        let path = h.dir.join("drawing.pdf").to_string_lossy().into_owned();
+        let said = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+        assert_eq!(said, solidcraft_ui_text::format("ui.saved_to", &[("path", &path)]), "nothing off the sheet: the status as it was");
+    }
+
+    /// With two tables off the paper the file is still written, and the status line says how many
+    /// objects lie outside the sheet.
+    #[test]
+    fn an_export_says_how_many_objects_lie_outside_the_sheet() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        super::super::enter(&mut h.app, true).unwrap();
+        h.frames(4);
+        h.app.run("drawing.create", json!({})).unwrap();
+        h.frames(4);
+        let count = tables_put_off_the_paper(&mut h.app, &["parts_list", "revision"]);
+        h.app.ui.tab = "DRAWING REVIEW".into();
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"button:drawing.export"}})).unwrap();
+        h.frames(4);
+        let path = h.dir.join("outside.pdf").to_string_lossy().into_owned();
+        let chosen = path.clone();
+        h.app.services.pick_save = Some(Box::new(move |_, _| Box::pin(std::future::ready(Some(chosen.clone())))));
+        h.step(&json!({"click":{"handle":"drawing:export:go"}})).unwrap();
+        wait_for_export(&mut h);
+        assert!(std::fs::read(&path).unwrap().starts_with(b"%PDF-"), "the file is still written");
+        let key = if count == 1 { "ui.drawing_export.saved_outside_one" } else { "ui.drawing_export.saved_outside_other" };
+        let said = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+        assert_eq!(said, solidcraft_ui_text::format(key, &[("path", &path), ("count", &count.to_string())]));
+        assert!(said.contains(&path) && said.contains(&count.to_string()), "{said}");
     }
 
     /// The parameters each choice gives `drawing.export`.
