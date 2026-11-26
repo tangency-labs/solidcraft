@@ -316,10 +316,34 @@ struct SharedReads {
 #[derive(Default)]
 struct SharedReadsState {
     ready: std::collections::HashMap<ReadKey, ReadOnce>,
-    in_flight: std::collections::HashMap<ReadKey, std::thread::ThreadId>,
-    waiting_on: std::collections::HashMap<std::thread::ThreadId, std::thread::ThreadId>,
-    /// Directed wait edges `parent -> active child worker` while `parent` joins nested work.
-    join_edges: std::collections::HashMap<std::thread::ThreadId, Vec<std::thread::ThreadId>>,
+    /// Key -> `(owner_thread, owner_pool_depth_when_claimed)`.
+    in_flight: std::collections::HashMap<ReadKey, (std::thread::ThreadId, usize)>,
+    /// Waiter -> `(owner_thread, owner_claim_depth)`.
+    waiting_on: std::collections::HashMap<std::thread::ThreadId, (std::thread::ThreadId, usize)>,
+    /// Directed wait edges `parent -> (active child worker, parent pool depth)` while `parent` joins
+    /// nested work. A parent claim acquired at depth `d` can only block behind children spawned at
+    /// depth `s > d`; claims made inside the parent's own `map_on_threads` job have `d == s` and
+    /// release before `parent` joins those siblings.
+    join_edges: std::collections::HashMap<std::thread::ThreadId, Vec<(std::thread::ThreadId, usize)>>,
+    /// Nesting depth of active `map_on_threads` pools currently executing on each thread.
+    pool_depth: std::collections::HashMap<std::thread::ThreadId, usize>,
+}
+
+struct PoolDepthGuard {
+    shared: SharedReadCache,
+    tid: std::thread::ThreadId,
+}
+
+impl Drop for PoolDepthGuard {
+    fn drop(&mut self) {
+        let mut st = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(depth) = st.pool_depth.get_mut(&self.tid) {
+            *depth = depth.saturating_sub(1);
+            if *depth == 0 {
+                st.pool_depth.remove(&self.tid);
+            }
+        }
+    }
 }
 
 enum ReadAcquire {
@@ -371,18 +395,25 @@ impl SharedReads {
         }
     }
 
-    fn register_join(&self, parent: std::thread::ThreadId, child: std::thread::ThreadId) {
+    fn enter_pool(self: &SharedReadCache, parent: std::thread::ThreadId) -> (usize, PoolDepthGuard) {
+        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = st.pool_depth.entry(parent).or_insert(0);
+        *entry += 1;
+        (*entry, PoolDepthGuard { shared: self.clone(), tid: parent })
+    }
+
+    fn register_join(&self, parent: std::thread::ThreadId, child: std::thread::ThreadId, pool_depth: usize) {
         if parent != child {
             let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            st.join_edges.entry(parent).or_default().push(child);
+            st.join_edges.entry(parent).or_default().push((child, pool_depth));
         }
     }
 
-    fn unregister_join(&self, parent: std::thread::ThreadId, child: std::thread::ThreadId) {
+    fn unregister_join(&self, parent: std::thread::ThreadId, child: std::thread::ThreadId, pool_depth: usize) {
         if parent != child {
             let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(children) = st.join_edges.get_mut(&parent) {
-                if let Some(pos) = children.iter().position(|&t| t == child) {
+                if let Some(pos) = children.iter().position(|&e| e == (child, pool_depth)) {
                     children.swap_remove(pos);
                 }
                 if children.is_empty() {
@@ -392,23 +423,29 @@ impl SharedReads {
         }
     }
 
-    /// Whether `me` is reachable from `owner` in the combined wait-for graph (`waiting_on` U
-    /// `join_edges`), meaning waiting on `owner` would form a deadlock cycle.
-    fn would_cycle(st: &SharedReadsState, owner: std::thread::ThreadId, me: std::thread::ThreadId) -> bool {
-        let mut stack = vec![owner];
-        let mut visited = std::collections::HashSet::new();
-        while let Some(cur) = stack.pop() {
+    /// Whether `me` is reachable from `(owner, owner_claim_depth)` in the combined wait-for graph
+    /// (`waiting_on` U depth-filtered `join_edges`), meaning waiting on `owner` would form a
+    /// deadlock cycle.
+    fn would_cycle(st: &SharedReadsState, owner: std::thread::ThreadId, owner_claim_depth: usize, me: std::thread::ThreadId) -> bool {
+        let mut stack = vec![(owner, owner_claim_depth)];
+        let mut min_seen: std::collections::HashMap<std::thread::ThreadId, usize> = std::collections::HashMap::new();
+        while let Some((cur, min_depth)) = stack.pop() {
             if cur == me {
                 return true;
             }
-            if !visited.insert(cur) {
+            if min_seen.get(&cur).is_some_and(|&prev| prev <= min_depth) {
                 continue;
             }
-            if let Some(&next) = st.waiting_on.get(&cur) {
-                stack.push(next);
+            min_seen.insert(cur, min_depth);
+            if let Some(&(next, next_depth)) = st.waiting_on.get(&cur) {
+                stack.push((next, next_depth));
             }
             if let Some(children) = st.join_edges.get(&cur) {
-                stack.extend(children.iter().copied());
+                for &(child, spawn_depth) in children {
+                    if spawn_depth > min_depth {
+                        stack.push((child, 0));
+                    }
+                }
             }
         }
         false
@@ -421,16 +458,17 @@ impl SharedReads {
             if let Some(val) = st.ready.get(key) {
                 return ReadAcquire::Ready(Box::new(val.clone()));
             }
-            if let Some(&owner) = st.in_flight.get(key) {
-                if Self::would_cycle(&st, owner, me) {
+            if let Some(&(owner, owner_depth)) = st.in_flight.get(key) {
+                if Self::would_cycle(&st, owner, owner_depth, me) {
                     return ReadAcquire::Bypass;
                 }
-                st.waiting_on.insert(me, owner);
+                st.waiting_on.insert(me, (owner, owner_depth));
                 st = self.done.wait(st).unwrap_or_else(|e| e.into_inner());
                 st.waiting_on.remove(&me);
                 continue;
             }
-            st.in_flight.insert(key.clone(), me);
+            let my_depth = st.pool_depth.get(&me).copied().unwrap_or(0);
+            st.in_flight.insert(key.clone(), (me, my_depth));
             return ReadAcquire::Claimed(ReadClaim { shared: self.clone(), key: Some(key.clone()) });
         }
     }
@@ -511,7 +549,7 @@ fn reading_read_acquire(key: &ReadKey) -> ReadAcquire {
 /// calling thread.
 struct BranchReading {
     saved: Option<Reading>,
-    join_edge: Option<(SharedReadCache, std::thread::ThreadId, std::thread::ThreadId)>,
+    join_edge: Option<(SharedReadCache, std::thread::ThreadId, std::thread::ThreadId, usize)>,
 }
 
 impl BranchReading {
@@ -521,11 +559,12 @@ impl BranchReading {
         budget: usize,
         read: Option<SharedReadCache>,
         parent_tid: std::thread::ThreadId,
+        pool_depth: usize,
     ) -> Self {
         let me = std::thread::current().id();
-        let join_edge = read.as_ref().filter(|_| me != parent_tid).map(|cache| {
-            cache.register_join(parent_tid, me);
-            (cache.clone(), parent_tid, me)
+        let join_edge = read.as_ref().filter(|_| me != parent_tid && pool_depth > 0).map(|cache| {
+            cache.register_join(parent_tid, me, pool_depth);
+            (cache.clone(), parent_tid, me, pool_depth)
         });
         let branch = Reading { opening, which, refused: 0, outside: 0, again: 0, budget, read };
         let saved = READING.with(|r| r.replace(branch));
@@ -537,8 +576,8 @@ impl BranchReading {
             let b = r.borrow();
             (b.refused, b.outside, b.again)
         });
-        if let Some((cache, parent, child)) = self.join_edge.take() {
-            cache.unregister_join(parent, child);
+        if let Some((cache, parent, child, pool_depth)) = self.join_edge.take() {
+            cache.unregister_join(parent, child, pool_depth);
         }
         if let Some(saved) = self.saved.take() {
             READING.with(|r| *r.borrow_mut() = saved);
@@ -549,8 +588,8 @@ impl BranchReading {
 
 impl Drop for BranchReading {
     fn drop(&mut self) {
-        if let Some((cache, parent, child)) = self.join_edge.take() {
-            cache.unregister_join(parent, child);
+        if let Some((cache, parent, child, pool_depth)) = self.join_edge.take() {
+            cache.unregister_join(parent, child, pool_depth);
         }
         if let Some(saved) = self.saved.take() {
             READING.with(|r| *r.borrow_mut() = saved);
@@ -759,6 +798,10 @@ pub(super) fn read_left_out_bodies(
             let allowed_hosts = solidcraft_io::vfs::current_allowed_hosts();
             // Workers start unconfined: carry the caller's file scope so linked reads stay inside it.
             let scope = solidcraft_io::vfs::current_scope();
+            let (pool_depth, _pool_guard) = shared_read.as_ref().map_or((0, None), |c| {
+                let (d, g) = c.enter_pool(parent_tid);
+                (d, Some(g))
+            });
             let done = solidcraft_kernel::map_on_threads(&jobs, workers, |job| -> LeftOutJobOut {
                 solidcraft_io::vfs::scoped(scope.clone(), || {
                     solidcraft_io::vfs::allowing_hosts(&allowed_hosts, || {
@@ -783,8 +826,14 @@ pub(super) fn read_left_out_bodies(
                                     }
                                 }
                                 LeftOutJob::Design { link_indices, key, file, configuration } => {
-                                    let branch =
-                                        BranchReading::enter(parent_opening.clone(), parent_which, child_budget, shared_read.clone(), parent_tid);
+                                    let branch = BranchReading::enter(
+                                        parent_opening.clone(),
+                                        parent_which,
+                                        child_budget,
+                                        shared_read.clone(),
+                                        parent_tid,
+                                        pool_depth,
+                                    );
                                     let (read, evals, reuses) = match reading_read_acquire(key) {
                                         ReadAcquire::Ready(read) => (*read, 0usize, 0usize),
                                         ReadAcquire::Claimed(claim) => {
@@ -2528,6 +2577,10 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             let allowed_hosts = solidcraft_io::vfs::current_allowed_hosts();
             // Workers start unconfined: carry the caller's file scope so linked reads stay inside it.
             let scope = solidcraft_io::vfs::current_scope();
+            let (pool_depth, _pool_guard) = shared_read.as_ref().map_or((0, None), |c| {
+                let (d, g) = c.enter_pool(parent_tid);
+                (d, Some(g))
+            });
             let evaluated = solidcraft_kernel::map_on_threads(&jobs, workers, |job| -> SourceJobOut {
                 solidcraft_io::vfs::scoped(scope.clone(), || {
                     solidcraft_io::vfs::allowing_hosts(&allowed_hosts, || {
@@ -2542,7 +2595,8 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                                     reuses: 0,
                                 };
                             }
-                            let branch = BranchReading::enter(parent_opening.clone(), parent_which, child_budget, shared_read.clone(), parent_tid);
+                            let branch =
+                                BranchReading::enter(parent_opening.clone(), parent_which, child_budget, shared_read.clone(), parent_tid, pool_depth);
                             let run = || {
                                 source_bodies(&job.file, &job.bytes, &job.link, job.flat, validation).map(|(read, _)| read).map_err(|e| e.to_string())
                             };
