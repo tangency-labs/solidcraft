@@ -77,6 +77,8 @@ pub static COMMANDS: &[CommandSpec] = &[
             "direction?: positive|negative|symmetric (distance is total thickness, split evenly around the start plane); ",
             "convention?: total_distance|legacy_per_side (how a symmetric distance is read; default total_distance, split evenly around the start plane; legacy_per_side: the distance on each side, as older symmetric extrudes keep); ",
             "distance2?: expr (Two Sides: a second distance on the side direction leaves free, the first side may be through_all or to; with direction: negative the first side goes against the normal and distance2 along it; a negative distance only turns its own side over); ",
+            "through_all2?: bool (Two Sides: the second side runs through all, instead of distance2); ",
+            "to2?: [x,y,z] (Two Sides: the second side ends at that face, vertex or point, instead of distance2) with to_offset2?: expr (past it); ",
             "start_offset?: expr (along the sketch normal, also with direction: negative); ",
             "symmetric_offset?: bool (with direction: symmetric and start_offset: offset both sides symmetrically away from the sketch plane, leaving a clearance gap); ",
             "to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); ",
@@ -249,7 +251,8 @@ pub static COMMANDS: &[CommandSpec] = &[
             "extent1?, extent2?: expr (greater than zero); ",
             "copy_at_end1?, copy_at_end2?: bool (spacing_extent: one more copy exactly at the extent's end when the spacing doesn't divide it, so only the last gap is shorter); ",
             "alignment?, alignment2?: left|center|right (default right; counts include the original); ",
-            "reversed?, reversed2?: bool (Flip)",
+            "reversed?, reversed2?: bool (Flip); ",
+            "join?: bool (join the bodies copied from and their copies where they touch or overlap; copies that touch nothing stay bodies of their own; default false)",
         )),
     CommandSpec::new("solid.pattern.circular", "Circular Pattern", crate::checked!("solid.pattern.circular", pattern_circ)).begins_edit()
         .at("SOLID", "CREATE")
@@ -262,7 +265,8 @@ pub static COMMANDS: &[CommandSpec] = &[
             "count; ",
             "angle? (default 360 deg; partial arcs include both ends); ",
             "alignment?: left|center|right (default right; original stays fixed); ",
-            "reversed?: bool (Flip; selects the extra side for even centered counts)",
+            "reversed?: bool (Flip; selects the extra side for even centered counts); ",
+            "join?: bool (join the bodies copied from and their copies where they touch or overlap; copies that touch nothing stay bodies of their own; default false)",
         )),
     CommandSpec::new("solid.pattern.path", "Pattern on Path", crate::checked!("solid.pattern.path", pattern_path)).begins_edit()
         .at("SOLID", "CREATE")
@@ -273,6 +277,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "features: [names] | bodies: [names]; ",
             "path_sketch: sketch; ",
             "path: [curve ids in order]; ",
+            "path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves, starting at the chain's end nearest the first point, or a closed chain at its point nearest the first point); ",
             "count; ",
             "spacing (between instances) | distance (first to last); ",
             "start?: expr (start point: how far along the path the original sits, the copies measured on from there; default 0, the path's start) | start_fraction?: expr (the start point as 0…1 of the path's length, kept as the path changes); ",
@@ -285,7 +290,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&MIRROR_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(concat!(
-            "features: [names] | bodies: [names] (combine?: join with the original); ",
+            "features: [names] | bodies: [names] (combine?: join with the original; placements?: [[occurrence ids]] one per body to pick exact placements); ",
             "plane: XY|XZ|YZ|construction plane name or id|{origin, normal}|{origin, x_dir, y_dir} (origin coordinates may be length expressions; the mirror follows them, or a construction plane)",
         )),
     CommandSpec::new("solid.hole", "Hole", hole).begins_edit()
@@ -319,7 +324,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("pipe")
         .contract(&PIPE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("path_sketch: sketch; path: [curve ids in order]; diameter: expr; wall?: expr (hollow); operation?, targets?, name?, body_name?"),
+        .params("path_sketch: sketch; path: [curve ids in order]; path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); diameter: expr; wall?: expr (hollow); operation?, targets?, name?, body_name?"),
     CommandSpec::new("solid.bounding_solid", "Bounding Solid", crate::checked!("solid.bounding_solid", bounding_solid)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("bounding_solid")
@@ -721,7 +726,7 @@ pub(super) fn feature_sketch(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
 /// Profiles picked by index or point are stored by the curve ids of each profile's outer loop
 /// as the sketch is now solved, so they follow the geometry when parameters move it. A pick
 /// whose curves would not find that same profile again (two profiles bounded by the same
-/// curves) stays as given. Curve picks are checked: one that names no profile, or several, is
+/// curves) stays as given: by its points, or by its indices. Curve picks are checked: one that names no profile, or several, is
 /// refused now rather than failing later.
 ///
 /// `exact` keeps each index or point pick to the region it names. Otherwise a pick on a drawn
@@ -737,6 +742,7 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
         if matches!(sel, ProfileSel::Indices { indices } if indices.is_empty()) {
             continue;
         }
+        let mut given_points = None;
         let indices = match sel {
             ProfileSel::Indices { indices } => {
                 let have = ss.profiles.len();
@@ -762,6 +768,7 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
                 if let Some(i) = indices.iter().find(|i| !seen.insert(**i)) {
                     return Err(EngineError::Other(format!("two profile points pick the same profile ({i}) in {}", ss.name)));
                 }
+                given_points = Some(points.clone());
                 indices
             }
             ProfileSel::Curves { loops } => {
@@ -796,8 +803,16 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
             }
             ProfileSel::All => continue,
         };
-        let picked = if exact { indices } else { drawn_profile_regions(ss, &indices) };
+        let picked = if exact { indices.clone() } else { drawn_profile_regions(ss, &indices) };
         let captured = solidcraft_doc::capture_profile_selection(ss, &picked)?;
+        // Twins (regions the curves around them can't tell apart, such as the halves of a lens a
+        // line cuts) are captured by their numbers, which name other regions or none once a
+        // parameter changes the sketch's regions. A pick by points keeps its points instead: each
+        // finds the region it lies in (#22390).
+        let captured = match (captured, given_points) {
+            (ProfileSel::Indices { .. }, Some(points)) if picked == indices => ProfileSel::Points { points },
+            (captured, _) => captured,
+        };
         *sel = match captured {
             ProfileSel::OffsetBoundaries { associations }
                 if associations.iter().any(|id| {
@@ -1328,8 +1343,11 @@ type FaceProfile = (u64, Option<ProfileSel>, Option<String>);
 /// physical material and appearance, so it is still made of what the body was. A piece that
 /// already has its own (kept under its name from before) keeps it.
 fn carry_looks(s: &mut Session, pieces: &[(String, String)]) {
+    let inherited_material = |doc: &solidcraft_doc::Document, from: &str| {
+        doc.resolved_body_material(from).filter(|m| *m != solidcraft_doc::DEFAULT_MATERIAL).map(str::to_string)
+    };
     let needs = |piece: &str, from: &str| {
-        (!s.doc.materials.contains_key(piece) && s.doc.materials.contains_key(from))
+        (!s.doc.materials.contains_key(piece) && inherited_material(&s.doc, from).is_some())
             || (!s.doc.appearances.bodies.contains_key(piece) && s.doc.appearances.bodies.contains_key(from))
     };
     if !pieces.iter().any(|(piece, from)| needs(piece, from)) {
@@ -1338,7 +1356,7 @@ fn carry_looks(s: &mut Session, pieces: &[(String, String)]) {
     let doc = s.doc_mut();
     for (piece, from) in pieces {
         if !doc.materials.contains_key(piece)
-            && let Some(material) = doc.materials.get(from).cloned()
+            && let Some(material) = inherited_material(doc, from)
         {
             doc.materials.insert(piece.clone(), material);
         }
@@ -1817,7 +1835,24 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         Some("symmetric") => Direction::Symmetric,
         Some(o) => return Err(bad(cmd, format!("unknown direction `{o}`"))),
     };
-    let distance2 = expr(p, "distance2");
+    // The second side of Two Sides takes the extent types of the first (#18691). Its distance is
+    // then unused, and kept as 0 as the first side's is.
+    let through_all2 = bool_(p, "through_all2").unwrap_or(false);
+    let to2 = p.get("to2");
+    if to2.is_some() && to2.and_then(vec3).is_none() {
+        return Err(bad(cmd, "`to2` must be a point [x, y, z] on the face, vertex or point the second side extrudes to"));
+    }
+    if through_all2 && to2.is_some() {
+        return Err(bad(cmd, "give `through_all2` or `to2` for the second side, not both"));
+    }
+    if (through_all2 || to2.is_some()) && direction == Direction::Symmetric {
+        return Err(bad(cmd, "`through_all2` and `to2` are for Two Sides: give direction positive or negative, not symmetric"));
+    }
+    let to_offset2 = expr(p, "to_offset2");
+    if let Some(d) = &to_offset2 {
+        check_expr(s, d, Kind::Length, cmd, "to_offset2")?;
+    }
+    let distance2 = if through_all2 || to2.is_some() { Some(expr(p, "distance2").unwrap_or_else(|| "0".into())) } else { expr(p, "distance2") };
     if let Some(d) = &distance2 {
         check_expr(s, d, Kind::Length, cmd, "distance2")?;
     }
@@ -1854,6 +1889,9 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         to_offset: expr(p, "to_offset"),
         from: p.get("from").and_then(vec3).map(FacePick),
         to_body_apart,
+        through_all2,
+        to2: to2.and_then(vec3).map(FacePick),
+        to_offset2,
         from_level: false,
         picked_placements: Vec::new(),
         one_sided_direction: None,
@@ -3305,38 +3343,53 @@ fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd
     copy_keeps_appearance_for(s, id, sources, None, cmd)
 }
 
-/// Copy each source body's body-level appearance and physical material onto its copies created by
-/// feature `id`. Bodies in `preserve` keep any explicit assignment they already have (#21245).
+/// Pair each copy body made by feature `id` with its seed body name in `sources`, reading the
+/// feature's own evaluation result (so later features that consume or join a copy do not break
+/// alignment) and skipping sources the pattern left out.
+pub(super) fn copy_pairs_for(s: &Session, id: u64, sources: &[String]) -> Option<Vec<(String, String)>> {
+    let state = s.model.result(id).filter(|r| r.error.is_none() && !r.skipped).map(|r| r.state.clone()).unwrap_or_else(|| s.model.state());
+    let left_out = state.pattern_left_out(id);
+    let active_sources: Vec<&String> = sources.iter().enumerate().filter(|(i, _)| !left_out.contains(i)).map(|(_, src)| src).collect();
+    let copies: Vec<String> = state.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
+    let each = copies.len().checked_div(active_sources.len()).filter(|each| *each > 0 && each * active_sources.len() == copies.len())?;
+    let mut pairs = Vec::with_capacity(copies.len());
+    for (source, group) in active_sources.into_iter().zip(copies.chunks(each)) {
+        for copy in group {
+            pairs.push((copy.clone(), source.clone()));
+        }
+    }
+    Some(pairs)
+}
+
+/// Copy each source body's body-level appearance and collision shape onto its copies created by
+/// feature `id`. Physical material is inherited dynamically via
+/// [`solidcraft_doc::Document::resolved_body_material`], so copies only carry an entry in
+/// `doc.materials` when explicitly overridden; re-seeding a copy clears any stale override from
+/// its previous seed so it and its downstream copies inherit from the new seed.
 pub(super) fn copy_keeps_appearance_for(
     s: &mut Session,
     id: u64,
     sources: &[String],
-    preserve: Option<&std::collections::HashSet<String>>,
+    previous_sources: Option<&std::collections::HashMap<String, String>>,
     cmd: &str,
 ) -> Result<()> {
-    let copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
-    let each = copies.len().checked_div(sources.len()).filter(|each| *each > 0 && each * sources.len() == copies.len());
-    let Some(each) = each else {
+    let Some(pairs) = copy_pairs_for(s, id, sources) else {
         return Err(bad(cmd, "the copy did not make the same number of bodies for each body it copied"));
     };
-    for (source, copies) in sources.iter().zip(copies.chunks(each)) {
-        for copy in copies {
-            if preserve.is_some_and(|existing| existing.contains(copy)) {
-                continue;
-            }
-            if let Some(look) = s.doc.appearances.bodies.get(source).cloned() {
+    for (copy, source) in pairs {
+        let same_source = previous_sources.and_then(|prev| prev.get(&copy)).is_some_and(|old| old == &source);
+        if !(same_source && s.doc.appearances.bodies.contains_key(&copy)) {
+            if let Some(look) = s.doc.appearances.bodies.get(&source).cloned() {
                 s.doc_mut().appearances.bodies.insert(copy.clone(), look);
-            } else {
-                s.doc_mut().appearances.bodies.remove(copy);
+            } else if !same_source {
+                s.doc_mut().appearances.bodies.remove(&copy);
             }
-            if let Some(material) = s.doc.materials.get(source).cloned() {
-                s.doc_mut().materials.insert(copy.clone(), material);
-            } else {
-                s.doc_mut().materials.remove(copy);
-            }
-            if let Some(shape) = s.doc.collision_shapes.get(source).copied() {
-                s.doc_mut().collision_shapes.insert(copy.clone(), shape);
-            }
+        }
+        if !same_source && s.doc.materials.contains_key(&copy) {
+            s.doc_mut().materials.remove(&copy);
+        }
+        if !same_source && let Some(shape) = s.doc.collision_shapes.get(&source).copied() {
+            s.doc_mut().collision_shapes.insert(copy, shape);
         }
     }
     Ok(())
@@ -3412,13 +3465,20 @@ fn finish_pattern(
     p: &Value,
     features: Vec<solidcraft_doc::FeatureId>,
     pattern: solidcraft_doc::PatternKind,
-    (bodies, placements): (Vec<String>, Vec<Vec<u64>>),
+    ResolvedBodies { bodies, placements, warning }: ResolvedBodies,
 ) -> Result<Value> {
     let comps = string_list(UNKNOWN_COMMAND, p, "components")?;
     let paths = pattern_occurrences(p, "pattern (components)")?;
+    let join = match p.get("join") {
+        None | Some(Value::Null) => false,
+        Some(v) => v.as_bool().ok_or_else(|| bad("pattern", "`join` must be true or false"))?,
+    };
+    if join && !(comps.is_empty() && paths.is_empty()) {
+        return Err(bad("pattern", "`join` joins bodies: a pattern of components places occurrences, which are not joined"));
+    }
     if comps.is_empty() && paths.is_empty() {
         let copied = bodies.clone();
-        let reply = add_feature(
+        let mut reply = add_feature(
             s,
             p,
             FeatureKind::Pattern {
@@ -3428,13 +3488,17 @@ fn finish_pattern(
                 placements,
                 components: Vec::new(),
                 occurrences: Vec::new(),
+                join,
             },
         )?;
         // The pattern is added either way: when it made no copies (the feature failed to
         // evaluate) or an uneven number of them, there is nothing to tell the copies apart by
         // and they keep no look, as before. (Appearance copy from main.)
-        if !copied.is_empty() {
+        if !copied.is_empty() && (!join || copied.len() == 1) {
             let _ = copy_keeps_appearance(s, &reply, &copied, "pattern");
+        }
+        if let Some(note) = warning {
+            append_reply_warning(&mut reply, &note);
         }
         return Ok(reply);
     }
@@ -3459,7 +3523,7 @@ fn finish_pattern(
         let mut reply = add_feature(
             s,
             p,
-            FeatureKind::Pattern { features, pattern, bodies: Vec::new(), placements: Vec::new(), components, occurrences: Vec::new() },
+            FeatureKind::Pattern { features, pattern, bodies: Vec::new(), placements: Vec::new(), components, occurrences: Vec::new(), join: false },
         )?;
         let made = s
             .doc
@@ -3514,28 +3578,34 @@ fn pattern_occurrences(p: &Value, cmd: &str) -> Result<Vec<Vec<u64>>> {
     Ok(paths)
 }
 
-/// The bodies a pattern copies and the placement each was picked at.
-type PatternBodies = (Vec<String>, Vec<Vec<u64>>);
+/// The bodies a mirror or pattern copies, the placement each was picked at, and any warning about
+/// bare names that resolved to the first of several placements.
+struct ResolvedBodies {
+    bodies: Vec<String>,
+    placements: Vec<Vec<u64>>,
+    warning: Option<String>,
+}
 
 /// What a pattern copies: features (replayed), bodies (`bodies: [names]`), or components
 /// (`components: [names]`, or `occurrences: [paths]` for particular placements, placed again as
 /// occurrences). A body may be named as a placement of its part shows it (its world name, as the
-/// view and the Browser name it): it is copied where that placement shows it, as a mirror copies
-/// it.
-fn pattern_sources(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<solidcraft_doc::FeatureId>, PatternBodies)> {
+/// view and the Browser name it, or explicitly qualified as `NAME (Occ:1)`): it is copied where
+/// that placement shows it, as a mirror copies it.
+fn pattern_sources(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<solidcraft_doc::FeatureId>, ResolvedBodies)> {
+    let empty = || ResolvedBodies { bodies: Vec::new(), placements: Vec::new(), warning: None };
     if !string_list(cmd, p, "components")?.is_empty() || !pattern_occurrences(p, cmd)?.is_empty() {
-        return Ok((Vec::new(), (Vec::new(), Vec::new())));
+        return Ok((Vec::new(), empty()));
     }
     let bodies = string_list(cmd, p, "bodies")?;
     if bodies.is_empty() {
-        return Ok((source_features(s, p, cmd)?, (Vec::new(), Vec::new())));
+        return Ok((source_features(s, p, cmd)?, empty()));
     }
-    let (bodies, placements) = placed_bodies(s, bodies, cmd)?;
+    let resolved = placed_bodies(s, bodies, cmd)?;
     let st = s.model.state();
-    if let Some(b) = bodies.iter().find(|b| st.body(b).is_none()) {
+    if let Some(b) = resolved.bodies.iter().find(|b| st.body(b).is_none()) {
         return Err(bad(cmd, format!("no body `{b}`")));
     }
-    Ok((Vec::new(), (bodies, placements)))
+    Ok((Vec::new(), resolved))
 }
 
 fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3680,11 +3750,17 @@ fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
 fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.pattern.path";
     let (features, bodies) = pattern_sources(s, p, cmd)?;
-    let path_sketch = sketch_id(s, p.get("path_sketch").or_else(|| p.get("sketch")), cmd, "path_sketch")?;
-    let path = string_list(cmd, p, "path")?;
-    if path.is_empty() || path.len() > 1000 {
-        return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
-    }
+    // The path is a chain of a body's edges (#16084) or the curves of a sketch.
+    let (path_sketch, path, path_body, path_edges) = if p.get("path_body").is_some_and(|b| !b.is_null()) {
+        one_sketch_path(s, p, cmd)?
+    } else {
+        let path_sketch = sketch_id(s, p.get("path_sketch").or_else(|| p.get("sketch")), cmd, "path_sketch")?;
+        let path = string_list(cmd, p, "path")?;
+        if path.is_empty() || path.len() > 1000 {
+            return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
+        }
+        (path_sketch, path, None, Vec::new())
+    };
     let count = req_expr(cmd, p, "count")?;
     check_count(s, &count, cmd, "count")?;
     let (spacing, extent) = match (expr(p, "spacing"), expr(p, "distance")) {
@@ -3721,6 +3797,8 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
     let pattern = solidcraft_doc::PatternKind::Path {
         path_sketch: SketchId(path_sketch),
         path,
+        path_body,
+        path_edges,
         count,
         spacing,
         extent,
@@ -3736,22 +3814,34 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
 fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.mirror";
     let bodies = string_list(cmd, p, "bodies")?;
+    let explicit_placements = body_placements(p, cmd)?;
+    if !explicit_placements.is_empty() && bodies.is_empty() {
+        return Err(bad(cmd, "`placements` requires `bodies`"));
+    }
     let features = if bodies.is_empty() { source_features(s, p, cmd)? } else { Vec::new() };
     let plane = plane_param(s, p.get("plane"), cmd)?;
     let combine = bool_(p, "combine").unwrap_or(false);
-    let (bodies, placements) = placed_bodies(s, bodies, cmd)?;
-    let reply =
+    let ResolvedBodies { bodies, placements, warning } = if explicit_placements.is_empty() {
+        placed_bodies(s, bodies, cmd)?
+    } else {
+        resolve_explicit_placements(s, bodies, explicit_placements, cmd)?
+    };
+    let mut reply =
         add_feature(s, p, FeatureKind::Mirror { features, plane, bodies: bodies.iter().cloned().map(BodyName).collect(), combine, placements })?;
     if !combine {
         super::print_face::copies_keep_print_faces(s, &reply, &bodies);
         copies_keep_looks(s, &reply, &bodies)?;
     }
+    if let Some(note) = warning {
+        append_reply_warning(&mut reply, &note);
+    }
     Ok(reply)
 }
 
-/// Copies are made of what the bodies they were made from are: each takes its source's physical
-/// material and body/face appearances, unless it has its own (kept under its name from before). The copies
-/// are the bodies feature `reply` made, in the order of `sources`, as
+/// Copies are made of what the bodies they were made from are: each takes its source's body and
+/// face appearances, unless it has its own (kept under its name from before). Physical material is
+/// inherited dynamically via [`solidcraft_doc::Document::resolved_body_material`]. The copies are
+/// the bodies feature `reply` made, in the order of `sources`, as
 /// [`super::print_face::copies_keep_print_faces`] takes them.
 fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) -> Result<()> {
     let Some(id) = reply.get("feature").and_then(Value::as_u64) else { return Ok(()) };
@@ -3806,20 +3896,12 @@ fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) -> Resu
             });
         }
     }
-    let needs = |copy: &str, from: &str| {
-        (!s.doc.materials.contains_key(copy) && s.doc.materials.contains_key(from))
-            || (!s.doc.appearances.bodies.contains_key(copy) && s.doc.appearances.bodies.contains_key(from))
-    };
+    let needs = |copy: &str, from: &str| !s.doc.appearances.bodies.contains_key(copy) && s.doc.appearances.bodies.contains_key(from);
     if faces.is_empty() && !pairs.iter().any(|(copy, from)| needs(copy, from)) {
         return Ok(());
     }
     let doc = s.doc_mut();
     for (copy, from) in pairs {
-        if !doc.materials.contains_key(&copy)
-            && let Some(material) = doc.materials.get(&from).cloned()
-        {
-            doc.materials.insert(copy.clone(), material);
-        }
         if !doc.appearances.bodies.contains_key(&copy)
             && let Some(look) = doc.appearances.bodies.get(&from).cloned()
         {
@@ -3889,26 +3971,235 @@ impl Session {
     }
 }
 
-/// Bodies picked where the viewport shows them: each world name ("Body1", or "Body1 (Occ:2)"
-/// for a further instance) becomes its component's body name, with the occurrence path of the
-/// placement it was picked at (where the copy goes). Names stay as they are, and no placement is
-/// kept, while every body is in the active component and every component in place, or when one
-/// of them is not a body.
-fn placed_bodies(s: &Session, names: Vec<String>, cmd: &str) -> Result<(Vec<String>, Vec<Vec<u64>>)> {
-    if names.is_empty() || s.doc.occurrences.is_empty() {
-        return Ok((names, Vec::new()));
+type BodyFrameEntry = (String, String, u64, Vec<u64>, solidcraft_doc::Mat);
+
+/// Attach a command-level warning to a feature reply without overwriting an evaluator warning.
+fn append_reply_warning(reply: &mut Value, note: &str) {
+    let Some(obj) = reply.as_object_mut() else { return };
+    match obj.get("warning").and_then(Value::as_str) {
+        Some(existing) if !existing.is_empty() => {
+            obj.insert("warning".into(), Value::String(format!("{existing}; {note}")));
+        }
+        _ => {
+            obj.insert("warning".into(), Value::String(note.to_string()));
+        }
+    }
+}
+
+/// Explicit per-body placement paths (`placements`: list of occurrence-id paths from the root,
+/// each `[]` for a root body or `[occ_id, ...]`), empty when omitted or `null`.
+fn body_placements(p: &Value, cmd: &str) -> Result<Vec<Vec<u64>>> {
+    let list = match p.get("placements") {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(list) => list,
+    };
+    let want = || bad(cmd, "`placements` must list occurrence paths, each a list of occurrence ids");
+    let paths: Vec<Vec<u64>> = list
+        .as_array()
+        .ok_or_else(want)?
+        .iter()
+        .map(|path| path.as_array().and_then(|ids| ids.iter().map(Value::as_u64).collect::<Option<Vec<u64>>>()))
+        .collect::<Option<_>>()
+        .ok_or_else(want)?;
+    if paths.len() > 10_000 {
+        return Err(bad(cmd, "`placements` must list at most 10000 occurrence paths"));
+    }
+    let max_len = solidcraft_doc::MAX_PLACEMENT_DEPTH + 1;
+    if paths.iter().any(|path| path.len() > max_len) {
+        return Err(bad(cmd, format!("each placement path must list at most {max_len} occurrence ids")));
+    }
+    Ok(paths)
+}
+
+/// Occurrence id -> occurrence name lookup built once per resolution.
+fn occurrence_names(doc: &solidcraft_doc::Document) -> std::collections::HashMap<u64, &str> {
+    let mut map = std::collections::HashMap::with_capacity(doc.occurrences.len());
+    for o in &doc.occurrences {
+        map.entry(o.id).or_insert(o.name.as_str());
+    }
+    map
+}
+
+/// Occurrence path label (`Part:1` or `Sub:1/Part:2`) for a non-empty occurrence path.
+fn occurrence_path_label(occ_names: &std::collections::HashMap<u64, &str>, path: &[u64]) -> Option<String> {
+    if path.is_empty() {
+        return None;
+    }
+    let names: Option<Vec<&str>> = path.iter().map(|id| occ_names.get(id).copied()).collect();
+    Some(names?.join("/"))
+}
+
+/// Explicitly occurrence-qualified body label (`NAME (Occ:1)` or `NAME (Sub:1/Occ:1)`).
+fn qualified_body_name(occ_names: &std::collections::HashMap<u64, &str>, own: &str, path: &[u64]) -> Option<String> {
+    Some(format!("{own} ({})", occurrence_path_label(occ_names, path)?))
+}
+
+/// Actionable name for a placement of `own`: uses `world` when already qualified, else
+/// `NAME (Occ:1)` when that label uniquely identifies this placement among `frames`, else `world`.
+fn placement_display_name(
+    occ_names: &std::collections::HashMap<u64, &str>,
+    frames: &[BodyFrameEntry],
+    world: &str,
+    own: &str,
+    path: &[u64],
+) -> String {
+    if world != own {
+        return world.to_string();
+    }
+    if let Some(label) = qualified_body_name(occ_names, own, path) {
+        let unique = frames.iter().filter(|(_, o, _, p, _)| qualified_body_name(occ_names, o, p).as_deref() == Some(label.as_str())).count() == 1
+            && !frames.iter().any(|(w, ..)| w == &label);
+        if unique {
+            return label;
+        }
+    }
+    world.to_string()
+}
+
+/// Actionable list of placement names for `own`, capped so large assemblies stay readable.
+fn format_placement_choices(occ_names: &std::collections::HashMap<u64, &str>, frames: &[BodyFrameEntry], own: &str) -> String {
+    const LIMIT: usize = 8;
+    let matches: Vec<String> = frames
+        .iter()
+        .filter(|(_, frame_own, ..)| frame_own == own)
+        .map(|(world, frame_own, _, path, _)| format!("`{}`", placement_display_name(occ_names, frames, world, frame_own, path)))
+        .collect();
+    if matches.len() <= LIMIT {
+        matches.join(", ")
+    } else {
+        let head = matches.iter().take(LIMIT).cloned().collect::<Vec<_>>().join(", ");
+        format!("{head}, … ({} total)", matches.len())
+    }
+}
+
+/// Match a body name against placed frames: exact world name first (`Body1`, `Body1 (Occ:2)`,
+/// fallback `@occ[...]`), then an unambiguous explicit occurrence-qualified name (`Body1 (Occ:1)`).
+fn find_placed_frame<'a>(
+    occ_names: &std::collections::HashMap<u64, &str>,
+    frames: &'a [BodyFrameEntry],
+    name: &str,
+    cmd: &str,
+) -> Result<Option<(&'a BodyFrameEntry, bool)>> {
+    if let Some(entry) = frames.iter().find(|(world, ..)| world == name) {
+        let bare = entry.0 == entry.1;
+        return Ok(Some((entry, bare)));
+    }
+    let mut qualified = frames.iter().filter(|(_, own, _, path, _)| qualified_body_name(occ_names, own, path).as_deref() == Some(name));
+    let Some(first) = qualified.next() else { return Ok(None) };
+    if qualified.next().is_some() {
+        let choices = format_placement_choices(occ_names, frames, &first.1);
+        let hint = if cmd == "solid.mirror" { " or pass `placements`" } else { "" };
+        return Err(bad(cmd, format!("`{name}` matches more than one placement: name one of {choices}{hint}")));
+    }
+    Ok(Some((first, false)))
+}
+
+/// Resolve explicit `(body, placement)` pairs given via `bodies` + `placements`: each path must
+/// be an active placement showing its body's component, and duplicate `(body, placement)` pairs
+/// are refused.
+fn resolve_explicit_placements(s: &Session, names: Vec<String>, placements: Vec<Vec<u64>>, cmd: &str) -> Result<ResolvedBodies> {
+    if placements.len() != names.len() {
+        return Err(bad(cmd, "`placements` must have one occurrence path per entry in `bodies`"));
+    }
+    let st = s.model.state();
+    let frames = s.doc.body_frames_with_source(&st);
+    let occ_names = occurrence_names(&s.doc);
+    let mut resolved_bodies = Vec::with_capacity(names.len());
+    let mut resolved_paths = Vec::with_capacity(placements.len());
+    let mut seen: std::collections::BTreeSet<(String, Vec<u64>)> = std::collections::BTreeSet::new();
+    for (name, path) in names.into_iter().zip(placements) {
+        let (at, _) = s.doc.path_placement(&path).ok_or_else(|| bad(cmd, format!("no placement {path:?}")))?;
+        let own = if let Some(mb) = st.body(&name) {
+            if s.doc.model_body_component(mb) != at {
+                return Err(bad(cmd, format!("placement {path:?} does not show body `{name}`")));
+            }
+            mb.name.clone()
+        } else if let Some(((_, own, component, matched_path, _), _)) = find_placed_frame(&occ_names, &frames, &name, cmd)? {
+            if matched_path != &path {
+                return Err(bad(cmd, format!("body `{name}` is at placement {matched_path:?}, not {path:?}")));
+            }
+            if *component != at {
+                return Err(bad(cmd, format!("placement {path:?} does not show body `{name}`")));
+            }
+            own.clone()
+        } else {
+            return Err(bad(cmd, format!("no body `{name}`")));
+        };
+        if !seen.insert((own.clone(), path.clone())) {
+            return Err(bad(cmd, format!("body `{own}` was listed more than once at placement {path:?}")));
+        }
+        resolved_bodies.push(own);
+        resolved_paths.push(path);
+    }
+    shown_as_placed(s, resolved_bodies.iter().cloned().zip(resolved_paths.iter().map(Vec::as_slice)), cmd)?;
+    Ok(ResolvedBodies { bodies: resolved_bodies, placements: resolved_paths, warning: None })
+}
+
+/// Bodies picked where the viewport shows them: each world name ("Body1", "Body1 (Occ:2)"
+/// for a further instance, or explicitly qualified "Body1 (Occ:1)") becomes its component's body
+/// name, with the occurrence path of the placement it was picked at (where the copy goes). Names
+/// stay as they are, and no placement is kept, while every body is in the active component and
+/// every component in place, or when one of them is not a body. Duplicate picks of the same
+/// body at the same placement are refused, and bare names that resolve to the first of several
+/// placements emit a warning naming all placements.
+fn placed_bodies(s: &Session, names: Vec<String>, cmd: &str) -> Result<ResolvedBodies> {
+    if names.is_empty() {
+        return Ok(ResolvedBodies { bodies: names, placements: Vec::new(), warning: None });
+    }
+    if s.doc.occurrences.is_empty() {
+        let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for name in &names {
+            if !seen.insert(name.as_str()) {
+                return Err(bad(cmd, format!("body `{name}` was listed more than once")));
+            }
+        }
+        return Ok(ResolvedBodies { bodies: names, placements: Vec::new(), warning: None });
     }
     let frames = s.doc.body_frames_with_source(&s.model.state());
-    let mut picked = Vec::with_capacity(names.len());
+    let occ_names = occurrence_names(&s.doc);
+    let mut picked: Vec<(String, u64, Vec<u64>, bool)> = Vec::with_capacity(names.len());
     for name in &names {
-        let Some((_, own, component, path, _)) = frames.iter().find(|(world, ..)| world == name) else { return Ok((names, Vec::new())) };
-        picked.push((own.clone(), *component, path.clone()));
+        let Some(((_, own, component, path, _), bare)) = find_placed_frame(&occ_names, &frames, name, cmd)? else {
+            return Ok(ResolvedBodies { bodies: names, placements: Vec::new(), warning: None });
+        };
+        picked.push((own.clone(), *component, path.clone(), bare));
     }
-    if !crate::frames::placed(s) && picked.iter().all(|(_, component, _)| *component == s.active_component) {
-        return Ok((names, Vec::new()));
+    let mut placement_counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for (_, own, ..) in &frames {
+        *placement_counts.entry(own.as_str()).or_default() += 1;
     }
-    shown_as_placed(s, picked.iter().map(|(own, _, path)| (own.clone(), path.as_slice())), cmd)?;
-    Ok(picked.into_iter().map(|(own, _, path)| (own, path)).unzip())
+    let hint =
+        if cmd == "solid.mirror" { "qualify each with its occurrence name or pass `placements`" } else { "qualify each with its occurrence name" };
+    let mut seen: std::collections::BTreeSet<(&str, &[u64])> = std::collections::BTreeSet::new();
+    for (own, _, path, _) in &picked {
+        let count = placement_counts.get(own.as_str()).copied().unwrap_or(0);
+        if !seen.insert((own.as_str(), path.as_slice())) {
+            if count > 1 {
+                let at = occurrence_path_label(&occ_names, path).unwrap_or_else(|| format!("{path:?}"));
+                let choices = format_placement_choices(&occ_names, &frames, own);
+                return Err(bad(cmd, format!("body `{own}` was listed more than once at the same placement (`{at}`); {hint} ({choices})")));
+            }
+            return Err(bad(cmd, format!("body `{own}` was listed more than once")));
+        }
+    }
+    let mut warnings = Vec::new();
+    let mut warned_owns: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for (own, _, path, bare) in &picked {
+        let count = placement_counts.get(own.as_str()).copied().unwrap_or(0);
+        if *bare && count > 1 && warned_owns.insert(own.as_str()) {
+            let at = occurrence_path_label(&occ_names, path).unwrap_or_else(|| format!("{path:?}"));
+            let choices = format_placement_choices(&occ_names, &frames, own);
+            warnings.push(format!("body `{own}` appears in {count} placements ({choices}); used the first (`{at}`) — {hint} to choose another"));
+        }
+    }
+    let warning = (!warnings.is_empty()).then(|| warnings.join("; "));
+    if !crate::frames::placed(s) && picked.iter().all(|(_, component, _, _)| *component == s.active_component) {
+        let bodies = picked.into_iter().map(|(own, ..)| own).collect();
+        return Ok(ResolvedBodies { bodies, placements: Vec::new(), warning });
+    }
+    shown_as_placed(s, picked.iter().map(|(own, _, path, _)| (own.clone(), path.as_slice())), cmd)?;
+    let (bodies, placements) = picked.into_iter().map(|(own, _, path, _)| (own, path)).unzip();
+    Ok(ResolvedBodies { bodies, placements, warning })
 }
 
 /// Refuses a picked placement (`what` names it, with its occurrence path from the root) that the
@@ -3976,12 +4267,16 @@ pub(crate) fn explicit_plane(o: &Value, origin: Vec3) -> Option<solidcore_record
 /// explicit plane `{origin, x_dir, y_dir}` / `{origin, normal}`. Every command that takes a
 /// plane reads it here.
 pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<solidcraft_doc::PlaneRef> {
+    plane_param_named(s, v, cmd, "plane")
+}
+
+pub(super) fn plane_param_named(s: &Session, v: Option<&Value>, cmd: &str, key: &str) -> Result<solidcraft_doc::PlaneRef> {
     use solidcraft_doc::PlaneRef;
     const WANT: &str = PLANE_FORMS;
     let construction = |r: &str| match s.doc.find_feature(r) {
         Some(f) if matches!(f.kind, FeatureKind::ConstructionPlane { .. }) => Ok(PlaneRef::Construction { feature: f.id.into(), placement: None }),
-        Some(f) => Err(bad(cmd, format!("`{}` is not a construction plane (a plane is {WANT})", f.name))),
-        None => Err(bad(cmd, format!("no plane `{r}` (a plane is {WANT})"))),
+        Some(f) => Err(bad(cmd, format!("`{key}`: `{}` is not a construction plane (a plane is {WANT})", f.name))),
+        None => Err(bad(cmd, format!("`{key}`: no plane `{r}` (a plane is {WANT})"))),
     };
     match v {
         Some(Value::String(n)) if solidcore_record::Plane::named(n.trim()).is_some() => {
@@ -3991,7 +4286,7 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
                 return Err(bad(
                     cmd,
                     format!(
-                        "plane `{}` is ambiguous: an origin-plane alias and a construction plane; use `{}` for the origin plane, construction plane feature id {}, or an explicit {{origin, normal}} plane",
+                        "`{key}`: plane `{}` is ambiguous: an origin-plane alias and a construction plane; use `{}` for the origin plane, construction plane feature id {}, or an explicit {{origin, normal}} plane",
                         n.trim(),
                         origin_plane_alias(n).unwrap_or("XY"),
                         f.id
@@ -4014,7 +4309,7 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
         }
         Some(Value::Number(id)) => match id.as_u64() {
             Some(id) => construction(&id.to_string()),
-            None => Err(bad(cmd, format!("`plane` must be {WANT}"))),
+            None => Err(bad(cmd, format!("`{key}` must be {WANT}"))),
         },
         Some(o @ Value::Object(_)) => {
             // The origin's coordinates are numbers or length expressions; expressions are kept,
@@ -4025,13 +4320,13 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
             };
             let at = |e: &str| s.doc.eval(e, Kind::Length).unwrap_or(0.0);
             let here = Vec3::new(at(&origin[0]), at(&origin[1]), at(&origin[2]));
-            let plane = explicit_plane(o, here).ok_or_else(|| bad(cmd, "plane needs x_dir and y_dir, or normal"))?;
+            let plane = explicit_plane(o, here).ok_or_else(|| bad(cmd, format!("`{key}` needs x_dir and y_dir, or normal")))?;
             if origin.iter().all(|e| solidcraft_doc::expr::is_literal(e)) {
                 return Ok(PlaneRef::Custom { plane });
             }
             Ok(PlaneRef::Placed { origin, x_dir: plane.x, y_dir: plane.y })
         }
-        _ => Err(bad(cmd, format!("`plane` must be {WANT}"))),
+        _ => Err(bad(cmd, format!("`{key}` must be {WANT}"))),
     }
 }
 
@@ -4493,7 +4788,12 @@ fn beyond_coarse_sizes(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<(f
 }
 
 fn hole(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "solid.hole";
+    hole_with(s, p, "solid.hole", None)
+}
+
+/// A hole: `solid.hole`'s, or the mounting hole of press-in hardware (`sheet.hardware`, #17752),
+/// which names its `hardware` and has no thread of its own.
+pub(super) fn hole_with(s: &mut Session, p: &Value, cmd: &'static str, hardware: Option<solidcraft_doc::Hardware>) -> Result<Value> {
     // At sketch points: the holes go perpendicular to the sketch and follow its points.
     let points = match (p.get("sketch"), p.get("points"), p.get("position")) {
         (Some(_), Some(_), _) | (Some(_), None, None) => {
@@ -4816,6 +5116,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             to: to.map(FacePick),
             references,
             old_surface_start,
+            hardware,
         },
     )
 }
@@ -5045,7 +5346,7 @@ fn draft(s: &mut Session, p: &Value) -> Result<Value> {
     let picked = faces_body(s, p, &faces);
     let angle = req_expr(cmd, p, "angle")?;
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
-    let neutral = plane_param(s, p.get("neutral"), cmd)?;
+    let neutral = plane_param_named(s, p.get("neutral"), cmd, "neutral")?;
     let (vals, _) = s.doc.param_values();
     let pl = s.doc.resolve_plane_in(&vals, &neutral, 0, s.active_component, Some(&s.model.state()))?;
     let pull = p.get("pull").and_then(vec3).unwrap_or_else(|| pl.normal());
@@ -5171,6 +5472,21 @@ pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<
         })
         .collect::<Result<Vec<_>>>()?;
     Ok((path_sketch, path, None, Vec::new()))
+}
+
+/// [`sweep_path`] for a feature whose path is curves of its path sketch only (Pipe, Pattern
+/// on Path): each entry as its curve id. A curve of another sketch is refused.
+fn one_sketch_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<String>, Option<BodyName>, Vec<Position>)> {
+    let (path_sketch, path, path_body, path_edges) = sweep_path(s, p, cmd)?;
+    let path = path
+        .into_iter()
+        .map(|e| match e {
+            solidcraft_doc::PathEntry::OfPathSketch(id) => Ok(id),
+            solidcraft_doc::PathEntry::OfSketch { sketch, curve } if sketch.0 == path_sketch => Ok(curve),
+            solidcraft_doc::PathEntry::OfSketch { .. } => Err(bad(cmd, "the path's curves must all be in `path_sketch`")),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok((path_sketch, path, path_body, path_edges))
 }
 
 /// The points on the edges of a sweep's path (`path_edges`), one on each edge of the chain.
@@ -5548,11 +5864,8 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.pipe";
-    let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
-    let path = string_list(cmd, p, "path")?;
-    if path.is_empty() {
-        return Err(bad(cmd, "`path` must list curve ids"));
-    }
+    // The path is a chain of a body's edges (#16084) or the curves of a sketch, as a sweep's.
+    let (path_sketch, path, path_body, path_edges) = one_sketch_path(s, p, cmd)?;
     let diameter = req_expr(cmd, p, "diameter")?;
     check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
     let wall = expr(p, "wall");
@@ -5567,6 +5880,8 @@ fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
         FeatureKind::Pipe {
             path_sketch: SketchId(path_sketch),
             path,
+            path_body,
+            path_edges,
             diameter,
             wall,
             operation: operation(p, cmd)?,

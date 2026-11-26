@@ -1064,12 +1064,14 @@ fn a_freeform_corner_keeps_what_its_line_side_and_its_partner_point_hold() {
     // of its own: a fixed partner keeps its point.
     let mut s = new_sketch();
     let l = curves(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false})))[0].clone();
-    let c = curves(&run(&mut s, "sketch.conic", json!({"start": [10, 0], "apex": [20, 5], "end": [20, 10], "rho": 0.5})))[0].clone();
-    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{l}.end"), "b": format!("{c}.start")}));
+    let c =
+        curves(&run(&mut s, "sketch.conic", json!({"start": [10, 0], "apex": [20, 5], "end": [20, 10], "rho": 0.5, "connect": false})))[0].clone();
     let mut k = sk(&s);
+    let end = k.resolve_point(&format!("{l}.end")).unwrap();
     let partner = k.resolve_point(&format!("{c}.start")).unwrap();
     let id = k.points[partner].id.clone();
     k.points[partner].fixed = true;
+    k.add_constraint(solidcraft_sketch::ConstraintKind::Coincident { p: end, q: partner }, None).unwrap();
     super::weld_corner(&mut k, &json!({"a": l, "b": c}));
     let kept = k.point_index(&id).expect("the fixed partner stays");
     assert!(k.points[kept].fixed);
@@ -1219,8 +1221,19 @@ fn a_3d_fillet_radius_can_be_edited_and_a_fixed_corner_stays_as_a_point() {
 fn a_fillet_rounds_several_3d_corners_with_one_radius() {
     let mut s = new_sketch_3d();
     let c = curves(&run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [100, 0, 0], [100, 0, 80], [100, 60, 80]]})));
+    // The length of the middle line holds both corners.
+    run(&mut s, "sketch.dimension", json!({"entities": [c[1]], "value": 80}));
     let r = run(&mut s, "sketch.fillet", json!({"points": [{"a": c[0], "b": c[1]}, {"a": c[1], "b": c[2]}], "radius": 15}));
     assert!(wires_solved(&s), "{r}");
+    // It now measures between the two kept corner points, and the reply names it once.
+    let length = sk(&s)
+        .wire_constraints
+        .iter()
+        .find(|x| matches!(x.kind, solidcraft_sketch::WireConstraintKind::Distance { .. }))
+        .map(|x| x.id.clone())
+        .expect("the length dimension is kept");
+    assert_eq!(r["moved_to_virtual_corner"], json!([length]), "{r}");
+    assert_eq!(r["virtual_corners"].as_array().map(Vec::len), Some(2), "{r}");
     let arcs = curves(&r);
     assert_eq!(arcs.len(), 2);
     assert!(near3(arc3(&s, &arcs[0]).center, [85.0, 0.0, 15.0]) && near3(arc3(&s, &arcs[1]).center, [100.0, 15.0, 65.0]));
