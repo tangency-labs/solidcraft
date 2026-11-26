@@ -2434,6 +2434,62 @@ mod tests {
         assert_flushed(&h, d);
     }
 
+    /// The seam both the solver's trace and its re-trace go through,
+    /// [`FilletIntersector::do_point_intersection`], traces a chamfer of setbacks at its
+    /// stations, never by marching its offsets (at 0, whose feet are apart by design): through
+    /// the rail ends at s = 0 and 1 the stations, rails and chord are the closed form's as
+    /// above, the given points processed, and the intersector says it traced stations. Given
+    /// points out of order are refused as the station trace refuses them (not with a march's
+    /// error), and the intersector says so there too: the solver's trace reads that to return
+    /// the refusal, with no cusp recovery.
+    #[test]
+    fn point_intersection_of_a_chamfer_of_setbacks_traces_its_stations() {
+        use crate::intersect::surface_intersector::p4::PointIntersectionOptions;
+        let d = [1.0, 0.5];
+        for given_s in [&[0.0, 1.0][..], &[0.2, 0.6, 0.4][..]] {
+            let mut h = half_rim(d);
+            let given: Vec<TsectPnt> = given_s.iter().map(|&s| given_at(&mut h, s, d)).collect();
+            let [s0, s1] = &h.surfaces;
+            let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, FilletGeomId> =
+                FilletIntersector::new(&h.k, s0, &h.domains[0], s1, &h.domains[1], None).unwrap();
+            let ids: Vec<TsectId> = given
+                .iter()
+                .map(|p| fi.base.base.alloc_point(p.clone()))
+                .collect();
+            let surfaces = [
+                fi.base.base.surface(SrfIndex::First),
+                fi.base.base.surface(SrfIndex::Second),
+            ];
+            let mut solver = IntersectorSolver::new(&mut h.fs, surfaces).unwrap();
+            let opts = PointIntersectionOptions {
+                extend_before_start: false,
+                extend_after_end: false,
+                start_direction: None,
+                end_direction: None,
+                approx_tol_3d: Some(1.0e-3),
+                ang_tol_rad: None,
+            };
+            let r = fi.do_point_intersection(&mut solver, &mut h.pseudo, &h.k, &ids, &opts);
+            assert!(fi.traced_stations());
+            if given_s.len() == 2 {
+                r.unwrap();
+                for &id in &ids {
+                    assert!(fi.base.base.point(id).unwrap().curve_parameter >= 0.0);
+                }
+                assert_flushed(&h, d);
+            } else {
+                let err = r.expect_err("refused");
+                assert_eq!(
+                    err.blend_failure(),
+                    Some(&BlendFailure::Solver(SolverFailure::StationsNotMonotone {
+                        index: 2
+                    })),
+                    "{err:?}"
+                );
+            }
+        }
+    }
+
     /// Extensions both ways from given points inside the edge (s = 0.3 and 0.6): steps of
     /// the larger setback until foot 0 has moved 5 setbacks, so the trace ends
     /// [`extension_reach`] past each given point's foot 0 (above), the given points

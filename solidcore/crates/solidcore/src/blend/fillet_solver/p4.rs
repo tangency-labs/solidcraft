@@ -2900,6 +2900,13 @@ fn c4_trace(
         if stat.is_err() && ops.solver().status == FilStatus::Unprocessed {
             ops.solver_mut().set_status(FilStatus::SurfTracingFailure);
         }
+        // (not upstream, #13710) a trace at the solver's own stations (a chamfer of
+        // setbacks) has no cusp to step past: its failure is its refusal, never a pass to
+        // recover from (whose recovery reads a centre line the failed trace never made)
+        let stat = match stat {
+            Err(e) if fi.traced_stations() => return Err(e),
+            stat => stat,
+        };
         let flushed = fi.take_flush_outcome();
         unmade.after_pass(flushed.unmade, flushed.made, stat);
         // Check all points, after the first one, to make sure

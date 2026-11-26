@@ -114,7 +114,9 @@
 //! - **A solver's own stations.** (not upstream, #13710) Where the solver has stations of
 //!   its own ([`FilletSolverOps::station_leader`], a chamfer of setbacks), step 5a solves
 //!   the span's middle station at the share of its ends' s, never on a plane (whose
-//!   adjusting retry may solve another s).
+//!   adjusting retry may solve another s), and `DoPointIntersection` traces at those
+//!   stations instead of marching the offsets' intersection
+//!   ([`FilletIntersector::traced_stations`] says so).
 //! - **Loops.** `FlushCurve`'s span equalisation stops once the knot count exceeds
 //!   three times its start, as upstream; each pass at most doubles it. The skin's
 //!   stations are added in at most `SKIN_ROUNDS` rounds and to at most
@@ -1244,6 +1246,9 @@ pub struct FilletIntersector<'s, 't, O, G> {
     /// Not upstream (tangency-labs/solidcraft#16686): what the [`Self::flush_curve`]s did
     /// to their fillet geometry since [`Self::take_flush_outcome`] last read it.
     flush_outcome: FlushOutcome,
+    /// Not upstream (#13710): the last [`Self::do_point_intersection`] traced at the
+    /// solver's own stations ([`Self::traced_stations`]).
+    traced_stations: bool,
 }
 
 /// Not upstream (tangency-labs/solidcraft#16686): what [`FilletIntersector::flush_curve`]s
@@ -1287,6 +1292,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             curr_fillet_touch_boundary: false,
             self_intersect: false,
             flush_outcome: FlushOutcome::default(),
+            traced_stations: false,
         })
     }
 
@@ -1323,6 +1329,14 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
     /// the last call did to their fillet geometry; clears it.
     pub fn take_flush_outcome(&mut self) -> FlushOutcome {
         std::mem::take(&mut self.flush_outcome)
+    }
+
+    /// Not upstream (#13710): whether the last [`Self::do_point_intersection`] traced at
+    /// its solver's own stations ([`Self::do_station_intersection`], a chamfer of setbacks)
+    /// rather than marching the offset surfaces' intersection, whatever its outcome.
+    #[must_use]
+    pub const fn traced_stations(&self) -> bool {
+        self.traced_stations
     }
 
     /// [`Self::flush_curve`], noting any error exit as the geometry left unmade
@@ -3195,9 +3209,17 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
     /// `FlushCurve` stores the traced curves in the current (else the solver's last)
     /// fillet geometry of `pseudo`.
     ///
+    /// Not upstream (#13710): a solver with stations of its own
+    /// ([`FilletSolverOps::station_leader`], a chamfer of setbacks, whose feet never meet as
+    /// a ball's centre) is traced at them instead ([`Self::do_station_intersection`]
+    /// through `points`, extended as asked, at the asked tolerances; the trace runs the
+    /// way the points do, so the start and end directions are not used), and
+    /// [`Self::traced_stations`] says so afterwards.
+    ///
     /// # Errors
     ///
-    /// As the base `DoPointIntersection`, with the errors of the overrides.
+    /// As the base `DoPointIntersection`, with the errors of the overrides; for a solver
+    /// with stations, those of [`Self::do_station_intersection`].
     pub fn do_point_intersection<S: FilletSolverOps<FilletGeom = G>>(
         &mut self,
         solver: &mut S,
@@ -3206,6 +3228,21 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         points: &[TsectId],
         opts: &PointIntersectionOptions,
     ) -> Result<IntersectionCurve> {
+        self.traced_stations = false;
+        if solver.station_leader(k)?.is_some() {
+            self.traced_stations = true;
+            let stations = StationTraceOptions {
+                extend_before_start: opts.extend_before_start,
+                extend_after_end: opts.extend_after_end,
+                // `None` keeps the intersector's own, as for the march
+                approx_tol_3d: Some(
+                    opts.approx_tol_3d
+                        .unwrap_or(self.base.base.this_approx_tol_3d),
+                ),
+                ang_tol_rad: opts.ang_tol_rad,
+            };
+            return self.do_station_intersection(solver, pseudo, k, points, &stations);
+        }
         do_point_intersection_with(
             &mut FilletDispatch {
                 intersector: self,
