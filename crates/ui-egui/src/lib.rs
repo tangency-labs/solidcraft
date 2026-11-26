@@ -2697,10 +2697,19 @@ impl SolveApp {
             self.repeat_last();
             return;
         }
-        // Modify ▸ Delete deletes what is selected, as the Delete key does (#9079); with nothing
-        // selected it says what to pick instead of running with no features.
+        // Modify ▸ Delete deletes what is selected, as the Delete key does (#9079). With nothing
+        // selected it opens Delete in its Bodies mode, beside Faces (#22513), or with no body to
+        // pick says what to pick instead of running with no features.
         if id == "timeline.delete" {
             if delete::nothing_to_delete(self) && self.tree.picked_timeline_groups.is_empty() {
+                if self.session.active_sketch.is_none()
+                    && self.dialog.is_none()
+                    && self.tool.is_none()
+                    && !crate::open_meshing::session_world(&self.session).bodies.is_empty()
+                {
+                    self.start("solid.remove");
+                    return;
+                }
                 self.set_status(self.tr("ui.delete_select_first"), false);
             } else if !timeline_left::delete_selected_folders(self) {
                 delete::delete_selection(self);

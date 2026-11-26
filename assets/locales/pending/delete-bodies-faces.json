@@ -1,0 +1,29 @@
+{
+  "en": {
+    "ui.delete_mode": "Delete"
+  },
+  "ar": {
+    "ui.delete_mode": "حذف"
+  },
+  "de": {
+    "ui.delete_mode": "Löschen"
+  },
+  "he": {
+    "ui.delete_mode": "מחיקה"
+  },
+  "ja": {
+    "ui.delete_mode": "削除"
+  },
+  "ko": {
+    "ui.delete_mode": "삭제"
+  },
+  "ru": {
+    "ui.delete_mode": "Удалить"
+  },
+  "vi": {
+    "ui.delete_mode": "Xóa"
+  },
+  "zh": {
+    "ui.delete_mode": "删除"
+  }
+}

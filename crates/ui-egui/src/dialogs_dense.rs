@@ -429,6 +429,30 @@ fn choose_fillet_type(extra: &mut serde_json::Map<String, Value>, index: usize, 
     }
 }
 
+/// Delete's two modes, side by side at the top of Remove and Delete Face (#22513): Bodies removes
+/// whole bodies, Faces takes faces out and heals the gap. Choosing the other mode turns the dialog
+/// into the other command, its picks starting again. An edit of either feature keeps its command.
+fn delete_mode_row(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
+    let faces = match d.kind {
+        Kind::Remove => false,
+        Kind::DeleteFaces => true,
+        _ => return,
+    };
+    if d.editing.is_some() {
+        return;
+    }
+    let mut selected = usize::from(faces);
+    let changed = form_row(ui, "ui.delete_mode", |ui| ui_kit::segmented(ui, &mut selected, &["Bodies", "Faces"], Default::default()));
+    if !changed || selected == usize::from(faces) {
+        return;
+    }
+    let Some(other) = Dialog::for_command(app, if selected == 1 { "face.delete" } else { "solid.remove" }) else { return };
+    d.kind = other.kind;
+    d.inputs = other.inputs;
+    d.active = 0;
+    d.error = None;
+}
+
 /// The dialog's form: its hints, inputs and value rows. True when Enter was pressed in a field.
 pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let t = Tokens::get();
@@ -483,6 +507,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         ui_kit::text(ui, &hint, ui_kit::Text::Hint("auto"));
     }
     placement_row(d, ui, app);
+    delete_mode_row(app, d, ui);
     crate::dialogs_sweep::grow_loft_rails(d);
     if crate::hole_refs::takes(d) {
         // Each reference edge with its distance (#37, #6380).

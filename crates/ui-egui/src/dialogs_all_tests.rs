@@ -3210,3 +3210,24 @@ fn a_pattern_of_whole_components_bodies_offers_and_places_the_components() {
     assert_eq!(h.app.session.doc.occurrences.len(), occurrences + 4);
     assert_eq!(h.app.session.model.state().bodies.len(), 2);
 }
+
+/// #22513: Delete offers Bodies and Faces side by side. Modify ▸ Delete with nothing selected opens
+/// it in its Bodies mode (Remove); Faces turns it into Delete Face, which heals the gap, its pick
+/// taking faces; Bodies turns it back.
+#[test]
+fn delete_switches_between_bodies_and_faces() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"})).unwrap();
+    h.app.run("select.clear", json!({})).unwrap();
+    h.app.start("timeline.delete");
+    h.frames(3);
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Remove)), "Bodies first");
+    h.step(&json!({"click": {"handle": "dialog:ui.delete_mode:Faces"}})).unwrap();
+    h.frames(3);
+    let d = h.app.dialog.as_ref().expect("still open");
+    assert!(matches!(d.kind, Kind::DeleteFaces), "Faces is Delete Face");
+    assert!(d.inputs.first().is_some_and(|i| i.accept & crate::selection::FACES != 0), "it picks faces");
+    h.step(&json!({"click": {"handle": "dialog:ui.delete_mode:Bodies"}})).unwrap();
+    h.frames(3);
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Remove)), "and back to Bodies");
+}
