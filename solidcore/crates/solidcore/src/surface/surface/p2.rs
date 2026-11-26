@@ -4299,6 +4299,11 @@ impl Surface {
             SurfaceKind::Torus(t) => {
                 // (each special case resets the outputs on entry)
                 *out = SurfaceIntersection::default();
+                // (not upstream, #15049) the generators' contact where both are faces'
+                let contact = crate::surface::surf_of_revolution::p3::revolved_contact_tol(
+                    k,
+                    [Some(self), Some(other)],
+                );
                 // IntersectWithSphere / IntersectWithCone: a planar generator, else
                 // the general intersection
                 let revolved = |other: &dyn Revolved, out: &mut SurfaceIntersection| {
@@ -4312,6 +4317,7 @@ impl Surface {
                         other,
                         other_uv_domain,
                         approx_tol_3d,
+                        contact,
                         out,
                     )
                 };
@@ -4337,6 +4343,7 @@ impl Surface {
                         o.as_ref(),
                         other_uv_domain,
                         approx_tol_3d,
+                        contact,
                         out,
                     )?,
                     _ => true,

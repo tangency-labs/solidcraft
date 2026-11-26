@@ -866,6 +866,35 @@ What the port does today:
   them had no vertex to end on (a plate cut by notches whose entry arcs are tangent to its
   side). The touch is taken only along an end that the requested part of the wall holds and
   where its line meets the plane's own patch; else the crossing stays.
+- **A cusp swept onto a face.** A profile whose arc runs tangentially into its line at a
+  corner (a cusp) has two edges there that stay within the tolerance of each other for
+  `√(2rτ)` past the corner, about 0.02 mm at r = 30, and swept, two faces as close.
+  Where the line sweeps onto a face of the other body, every contact near the cusp is a
+  tangency, and its crossings lie `√(2rδ)` off it, δ the rounding by which the two bodies
+  overlap there: a sketch read back from a face a few billionths of a millimetre off put
+  them 3e-5 to 2.5e-4 from the cusp, within the tolerance of both of the tool's edges, and
+  a vertex there split one edge while the intersection ran along the other (the imprint
+  failed with no vertex at an edge definition's end, or the merge with a vertex that is no
+  end of its edge; #15049). Three sites now read each such contact as one touch:
+  - Two surfaces of revolution about one axis meet in one circle per meeting of their
+    generators in a plane through the axis (`intersect_revolved_into`,
+    `surface/surf_of_revolution/p3.rs`). Where both are faces' surfaces the generators are
+    intersected at `contact_tol_3d` (`revolved_contact_tol`), so a circle and a line in its
+    plane a hair less than tangent touch at one point, moved to a generator's end on the
+    stretch between the two crossings as above, and the surfaces touch along one circle.
+  - A crossing or near-tangent curve of a face pair that runs beside the pair's tangent
+    curve is the other edge of the same contact and goes (`crossing_beside_tangent_contact`,
+    `topology/face/p3.rs`): between two zeros a distance D apart the surfaces' separation is
+    to second order a quadratic, no larger than `θD/4` with θ the angle of their normals
+    at the zeros, and where that is within the tolerance the band between the curves is
+    one contact, as the cap rule reads a closed crossing (WR-79). D is proved on
+    enclosures (`curve_runs_along`) and at most a thousand times the tolerance; θ is read
+    at samples, as the cap rule reads it.
+  - A point with no curve classified onto a circle edge of one body and a line edge of the
+    other in its plane, the line a hair inside the circle, is their touch
+    (`touch_of_edges`, `line_touch`, `proto_topology/p3.rs`), as two such circles' is.
+
+  Bare surfaces and curves keep upstream's zero contact.
 
 **The refusal that names a tangent contact.** The kernel's boolean has none today. The `ssi` crate
 refuses a contact it cannot prove with `Error::Tangent`, code `BOOLEAN_TANGENT`, carrying where it

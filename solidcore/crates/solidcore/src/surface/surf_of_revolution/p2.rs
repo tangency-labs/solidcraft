@@ -76,7 +76,7 @@ use super::p1::{
     gen_adjust_step_interval, gen_base, gen_base_mut, gen_max_analytic_domain, gen_step_interval,
     not_b_spline, SurfOfRevolution, SweepIsoFn,
 };
-use super::p3::intersect_revolved_into;
+use super::p3::{intersect_revolved_into, revolved_contact_tol};
 
 const OP_ADJUST: &str = "surface::surf_of_revolution::p2::SurfOfRevolution::adjust_step_uv_domain";
 const OP_STEP_INV: &str = "surface::surf_of_revolution::p2::SurfOfRevolution::step_inversion";
@@ -1000,6 +1000,7 @@ impl SurfOfRevolution {
                     c.as_ref(),
                     other_uv_domain,
                     approx_tol_3d,
+                    revolved_contact_tol(k, [Some(this), Some(other)]),
                     out,
                 )?;
             }
@@ -1011,6 +1012,7 @@ impl SurfOfRevolution {
                     o.as_ref(),
                     other_uv_domain,
                     approx_tol_3d,
+                    revolved_contact_tol(k, [Some(this), Some(other)]),
                     out,
                 )?;
             }
@@ -1021,6 +1023,7 @@ impl SurfOfRevolution {
                     o.as_ref(),
                     other_uv_domain,
                     approx_tol_3d,
+                    revolved_contact_tol(k, [Some(this), Some(other)]),
                     out,
                 )?;
             }

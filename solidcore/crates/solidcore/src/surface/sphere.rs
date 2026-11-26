@@ -1112,6 +1112,7 @@ impl Sphere {
                     self,
                     uv_domain,
                     approx_tol_3d,
+                    0.0,
                     out,
                 );
                 core::mem::swap(&mut out.surface1_uv_curves, &mut out.surface2_uv_curves);
