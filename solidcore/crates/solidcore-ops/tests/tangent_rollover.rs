@@ -1909,6 +1909,7 @@ fn four_edge_recess_floor_vertex(mirrored: bool) -> Body {
 /// check on an unprocessed extended vertex, failing with status 1001.
 #[test]
 fn a_chamfer_on_an_edge_meeting_a_four_edge_recess_floor_vertex_builds() {
+    use solidcore_ops::{chamfer_sides_facing, ChamferSecond};
     // Half-space x + y + z < 15 (or its mirror x - y + z < -5) touches the upper wall only at V
     // and removes integral_0^5 (15 - z)^2 / 2 dz = (15^3 - 10^3) / 6 = 2375 / 6 from the slab.
     let expected_input = 3000.0 - 2375.0 / 6.0;
