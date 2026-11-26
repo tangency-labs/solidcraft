@@ -274,13 +274,13 @@ pub fn proposed_spot_diameter(thicknesses: &[f64]) -> Result<f64> {
     Ok(5.0 * thicknesses.iter().fold(f64::INFINITY, |m, &t| m.min(t)).sqrt())
 }
 
-fn positive(v: f64) -> bool {
+pub(crate) fn positive(v: f64) -> bool {
     v.is_finite() && v > 0.0
 }
 
 /// The first and the last sheet's thickness; refuses fewer than two sheets, or a thickness that is
 /// not finite and positive.
-fn check_sheets(thicknesses: &[f64]) -> Result<(f64, f64)> {
+pub(crate) fn check_sheets(thicknesses: &[f64]) -> Result<(f64, f64)> {
     let [first, .., last] = *thicknesses else {
         return bad("fewer than two sheets");
     };
