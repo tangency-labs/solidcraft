@@ -1081,18 +1081,15 @@ fn a_body_goes_to_the_record_and_back_in_record_order() {
     ));
 }
 
-/// A real boundary crossing the cylinder's base cut must be split on both rims. The
-/// 90-degree, radius-5, height-3 sheet becomes two 45-degree faces on one shell, sharing
-/// the new ruling; its four original boundaries become six pieces, none discarded.
-#[test]
-fn periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell() {
+/// A 90-degree sheet of a radius-`r`, height-`h` rational cylinder whose trims are lifted
+/// across the base cut: its parameters run 3.5 .. 4.5, so both rims and the sheet cross it.
+fn seam_crossing_sheet(r: f64, h: f64) -> solidcore_record::brep::Brep {
     use solidcore_record::brep::{
         Brep as Record, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace,
         Region, Shell, Surface, Vertex, VERSION,
     };
 
-    all_fixes();
-    let (r, h, w) = (5.0, 3.0, std::f64::consts::FRAC_1_SQRT_2);
+    let w = std::f64::consts::FRAC_1_SQRT_2;
     let ring = [
         [r, 0.0, 1.0],
         [r * w, r * w, w],
@@ -1182,7 +1179,7 @@ fn periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell() {
             },
         })
         .collect();
-    let source = Record {
+    Record {
         version: VERSION,
         tolerance: 1e-6,
         regions: vec![Region {
@@ -1204,7 +1201,19 @@ fn periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell() {
         }],
         edges,
         vertices,
-    };
+    }
+}
+
+/// A real boundary crossing the cylinder's base cut must be split on both rims. The
+/// 90-degree, radius-5, height-3 sheet becomes two 45-degree faces on one shell, sharing
+/// the new ruling; its four original boundaries become six pieces, none discarded.
+#[test]
+fn periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell() {
+    use solidcore_record::brep::Curve;
+
+    all_fixes();
+    let (r, h) = (5.0, 3.0);
+    let source = seam_crossing_sheet(r, h);
     crate::record_check::validate(&source).unwrap();
     crate::record_check::agreement(&source).unwrap();
     let (completed, origins) = crate::pcurve::complete_periodic_seams(&source)
@@ -1256,6 +1265,43 @@ fn periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell() {
     let (body, _) = Body::from_record(&completed, true).unwrap();
     let check = body.check(CheckLevel::All).unwrap();
     assert!(check.is_valid(), "{check}");
+}
+
+/// #21379: a seam edit that fails part way, after it has changed the completion's copy of the
+/// body, leaves the record as imported. That record passed the import's checks before the
+/// completion started, so it stands, as it does when the completed body cannot be made a
+/// record: the import keeps the body with its lifted trims rather than leaving it out. A
+/// cancellation is still the caller's.
+#[test]
+fn periodic_seam_completion_that_fails_part_way_keeps_the_record_as_imported() {
+    use crate::pcurve::seam_faults::{EditFault, FAULT};
+    use crate::pcurve::{
+        complete_periodic_seams, complete_periodic_seams_noted, PeriodicSeamError,
+    };
+
+    all_fixes();
+    let source = seam_crossing_sheet(5.0, 3.0);
+    // Without a fault the edit splits the sheet in two, so the failures below come after the
+    // body was changed.
+    let (completed, _) = complete_periodic_seams(&source).unwrap().unwrap();
+    assert_eq!(completed.faces.len(), 2);
+    FAULT.set(EditFault::Defect);
+    let failed = complete_periodic_seams_noted(&source);
+    FAULT.set(EditFault::Cancelled);
+    let cancelled = complete_periodic_seams(&source);
+    FAULT.set(EditFault::Nothing);
+    // The import is told why the body keeps its imported trims.
+    let (kept, why) = failed.unwrap();
+    assert!(kept.is_none());
+    let why = why.unwrap();
+    assert!(
+        why.contains("failed part way") && why.contains("left a trim crossing the base period"),
+        "{why}"
+    );
+    assert!(
+        matches!(&cancelled, Err(PeriodicSeamError::Topology(e)) if e.is_cancelled()),
+        "{cancelled:?}"
+    );
 }
 
 /// #20575: a seam whose pcurve overshoots the base cut by a sliver (a surface fitted a little
