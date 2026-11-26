@@ -28,20 +28,47 @@ pub(crate) fn stitch(body: &Body, tolerance: f64) -> Result<(Body, bool)> {
     ops_as("SmBrep::StitchFaces", &[("brep", body)], super::blend::refused, || solidcore_ops::stitch::stitch(body.copy()?, tolerance))
 }
 
-/// `smlib_merge_faces`: `SmBrep::RemoveTopologicalEdgesAndVertices` on a copy of `body`, keeping
-/// the edges nearest `keep` (each within `tolerance`); then `finish` (faces left, and a solid in
-/// gives a manifold solid).
-pub(crate) fn merge_faces(body: &Body, keep: &[[f64; 3]], tolerance: f64) -> Result<Body> {
-    if !points_ok(keep, true) || !tolerance_ok(tolerance) {
-        return Err(Error::Argument);
-    }
+enum Keep<'a> {
+    Points(&'a [[f64; 3]], f64),
+    Indices(&'a [usize]),
+}
+
+/// Shared body of [`merge_faces`] and [`merge_faces_keeping_edges`]: runs
+/// `SmBrep::RemoveTopologicalEdgesAndVertices` on a copy of `body`, keeping the edges `keep`
+/// selects; then `finish` (faces left, and a solid in gives a manifold solid).
+fn merge_faces_with(body: &Body, keep: Keep<'_>) -> Result<Body> {
     on_copy("SmBrep::RemoveTopologicalEdgesAndVertices", body, |k, mut b| {
-        let kept = if keep.is_empty() {
-            Vec::new()
-        } else {
-            match pick_edges(k, &b, keep, tolerance)? {
-                Ok((edges, _)) => edges,
-                Err(m) => return Ok(Err(edge_miss(m))),
+        let kept = match keep {
+            Keep::Points(pts, tolerance) => {
+                if pts.is_empty() {
+                    Vec::new()
+                } else {
+                    match pick_edges(k, &b, pts, tolerance)? {
+                        Ok((edges, _)) => edges,
+                        Err(m) => return Ok(Err(edge_miss(m))),
+                    }
+                }
+            }
+            Keep::Indices(indices) => {
+                if indices.is_empty() {
+                    Vec::new()
+                } else {
+                    let all = b.edge_list();
+                    let mut seen = vec![false; all.len()];
+                    let mut kept = Vec::new();
+                    for &idx in indices {
+                        let Some(&edge_id) = all.get(idx) else {
+                            return Ok(Err(Error::Argument));
+                        };
+                        if let Some(flag) = seen.get_mut(idx)
+                            && !*flag
+                        {
+                            *flag = true;
+                            kept.push(edge_id);
+                        }
+                    }
+                    kept
+                }
             }
         };
         let solid_in = is_manifold_solid(&b)?;
@@ -52,4 +79,25 @@ pub(crate) fn merge_faces(body: &Body, keep: &[[f64; 3]], tolerance: f64) -> Res
         b.refresh_cached_topology();
         finish(k, b, solid_in)
     })
+}
+
+/// `smlib_merge_faces`: `SmBrep::RemoveTopologicalEdgesAndVertices` on a copy of `body`, keeping
+/// the edges nearest `keep` (each within `tolerance`); then `finish` (faces left, and a solid in
+/// gives a manifold solid).
+pub(crate) fn merge_faces(body: &Body, keep: &[[f64; 3]], tolerance: f64) -> Result<Body> {
+    if !points_ok(keep, true) || !tolerance_ok(tolerance) {
+        return Err(Error::Argument);
+    }
+    merge_faces_with(body, Keep::Points(keep, tolerance))
+}
+
+/// `SmBrep::RemoveTopologicalEdgesAndVertices` on a copy of `body`, keeping the edges at
+/// indices `keep` in SMLib's edge order (`Brep::edge_list`). Unlike [`merge_faces`], this names
+/// edges by topology index rather than 3D proximity, so it is not capped at `MAX_POINTS`, cannot
+/// be ambiguous when another edge passes near a midpoint, and avoids the `O(|keep| * |edges|)`
+/// closest-point search.
+///
+/// Refuses any out-of-range index with [`Error::Argument`].
+pub(crate) fn merge_faces_keeping_edges(body: &Body, keep: &[usize]) -> Result<Body> {
+    merge_faces_with(body, Keep::Indices(keep))
 }

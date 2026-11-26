@@ -497,7 +497,14 @@ fn tapered_extrudes() {
     let m = measure(&b).unwrap();
     assert!(rel(m.volume, v) < 5e-4, "{} vs {v}", m.volume);
     assert!(m.bbox.max.z < 1e-6 && m.bbox.min.z > -10.0 - 1e-6, "{:?}", m.bbox);
-    assert!(extrude_tapered(&Plane::XY, &c, 10.0, 1.0, -60f64.to_radians(), crate::DraftCorner::default()).is_err(), "closes the profile");
+    // Inward 60° over 10: the circle closes to its centre at 10 / tan 60° (5.77), before the top,
+    // so the solid is the cone to that apex, π r² h / 3 (#22149).
+    let b = extrude_tapered(&Plane::XY, &c, 10.0, 1.0, -60f64.to_radians(), crate::DraftCorner::default()).unwrap();
+    let h = 10.0 / 60f64.to_radians().tan();
+    let v = PI * 100.0 * h / 3.0;
+    let m = measure(&b).unwrap();
+    assert!(rel(m.volume, v) < 5e-4, "{} vs {v}", m.volume);
+    assert!(m.bbox.min.z > -1e-6 && (m.bbox.max.z - h).abs() < 1e-6, "{:?}", m.bbox);
     // The square with a 10 × 10 square hole, 30 up, 5° inward: every wall leans in toward the
     // material's outside, so the outer frustum narrows and the hole's widens; the solid is the
     // one frustum less the other, with each wall a face of its own (four out, four in, two caps).
@@ -3134,6 +3141,66 @@ fn loft_rectangle_to_circle_pairs_each_span_on_its_own_parameter() {
     assert!(joins(&body, Vec3::new(-56.12, 0.0, 0.0), Vec3::new(-r, 0.0, 100.0)), "the x-side's middle joins the circle's 180 degree point");
 }
 
+/// A loft section at `scale`: the cubic Bézier from (20, 0) to (-20, 0) with the control points
+/// (20, 30) and (-20, 30) between, closed by the line back. The curve is given whole, or divided
+/// where `cuts` say (each the fraction of what is left of its parameter), so its pieces are that
+/// same curve.
+fn arch_section(scale: f64, cuts: &[f64]) -> Loop2 {
+    let p = |x: f64, y: f64| Vec2::new(x * scale, y * scale);
+    let (start, end) = (p(20.0, 0.0), p(-20.0, 0.0));
+    let mut rest = Seg2::Cubic { p0: start, p1: p(20.0, 30.0), p2: p(-20.0, 30.0), p3: end };
+    let mut segs = Vec::new();
+    for &t in cuts {
+        let (head, tail) = rest.split_at(t);
+        segs.push(head);
+        rest = tail;
+    }
+    segs.push(rest);
+    segs.push(Seg2::Line { a: end, b: start });
+    Loop2 { segs }
+}
+
+/// A cut across a loft's wall over a spline passes the kernel's check however the spline is
+/// divided into spans (#22319). The sections are one arch at two sizes ([`arch_section`]), so the
+/// loft is the same body for every division of the arch. Each piece of a section used to be one
+/// unit of the wall's parameter whatever its length, so where pieces of different lengths met
+/// the wall's first derivative jumped, and the trim of a cut's edge that crossed that knot line
+/// turned its corner beside the line: with the arch in pieces of 1/4 and 3/4 of its parameter,
+/// or of 1/2, 1/4, 1/8 and 1/8, the cut by a slanted plane was refused ("Bad CurveCusp").
+#[test]
+fn loft_wall_over_a_spline_takes_a_slanted_cut_however_the_spline_is_divided() {
+    // The arch encloses 720 mm2 with its line: x'(t) = -240 t (1 - t) and y(t) = 90 t (1 - t), and
+    // the integral of y (-x') over [0, 1] is 21600 / 30. The section at height z is the arch at
+    // 1 - 0.4 z / 30 of its size, so the loft holds 720 * 30 * (1 + 0.6 + 0.36) / 3 mm3.
+    let whole = 14_112.0;
+    // Everything above the plane z = 15 + x / 2, drawn on the front plane (its sketch y is -Z).
+    let above = Region2 {
+        outer: Loop2::polygon(&[Vec2::new(-100.0, 35.0), Vec2::new(100.0, -65.0), Vec2::new(100.0, -200.0), Vec2::new(-100.0, -200.0)]),
+        holes: vec![],
+    };
+    let tool = extrude(&Plane::XZ, std::slice::from_ref(&above), -100.0, 100.0).unwrap().pop().unwrap();
+    let divisions: [&[f64]; 7] = [&[], &[0.5], &[0.5, 0.5], &[0.5, 0.5, 0.5], &[0.25], &[0.45], &[0.4]];
+    let mut left: Option<f64> = None;
+    for cuts in divisions {
+        let secs = [(Plane::XY, arch_section(1.0, cuts)), (Plane::XY.offset(30.0), arch_section(0.6, cuts))];
+        let (body, _) = validating(Validation::EachStep, || loft(&secs));
+        let body = body.unwrap_or_else(|e| panic!("{cuts:?}: {e}"));
+        // One wall over the arch, one on the line, and the two caps.
+        assert_eq!(body.face_count(), 4, "{cuts:?}");
+        let volume = measure(&body).unwrap().volume;
+        assert!(rel(volume, whole) < 1e-9, "{cuts:?}: {volume}");
+        let (parts, _) = validating(Validation::EachStep, || {
+            Ok::<_, KernelError>((boolean(&body, &tool, BoolOp::Cut)?, boolean(&body, &tool, BoolOp::Intersect)?))
+        });
+        let (below, over) = parts.unwrap_or_else(|e| panic!("{cuts:?}: {e}"));
+        let (below, over) = (measure(&below.unwrap()).unwrap().volume, measure(&over.unwrap()).unwrap().volume);
+        // What the cut leaves and what it takes are the loft, however the arch is divided.
+        assert!(rel(below + over, whole) < 1e-9, "{cuts:?}: {below} + {over}");
+        let first = *left.get_or_insert(below);
+        assert!(rel(below, first) < 1e-9, "{cuts:?}: {below} against {first}");
+    }
+}
+
 /// Three sections, the first hood profile, the second, then the first again ([`HOOD_A`]): the
 /// middle one gains the vertex only the outer ones have, and that vertex pairs with theirs, so all
 /// three get the same 19 vertices and the outer two are cut alike.
@@ -3631,6 +3698,42 @@ fn a_foot_round_wider_than_a_narrow_concave_round_on_its_chain_is_refused_naming
         assert!(why.contains("the rolling ball does not fit a face it rolls on"), "{r}: {why}");
         assert_eq!(named_fit(&why), Some(2.0), "{r}: {why}");
     }
+}
+
+/// Issue #19602: Boolean cut of a block with a 3.6° tilted jamb less a cylinder.
+/// When the cylinder cut creates partition faces in void space outside the material
+/// solid, SMLib export must omit void-void boundary faces without error.
+#[test]
+fn test_issue_19602_tilted_jamb_block_cylinder_cut() {
+    let planes = [
+        [-0.99812, -0.0561, -0.02475, 1.3166],
+        [1., 0., 0., 4.7812],
+        [0., 0., -1., -8.5],
+        [0., 0., 1., 27.52],
+        [0., -1., 0., -2.],
+        [0., 1., 0., 9.5],
+        [1., 0., 0., 60.],
+        [-1., 0., 0., 60.],
+        [0., 1., 0., 60.],
+        [0., -1., 0., 60.],
+        [0., 0., 1., 60.],
+        [0., 0., -1., 60.],
+    ];
+    let hs: Vec<HalfSpace> = planes
+        .iter()
+        .map(|&[a, b, c, d]: &[f64; 4]| {
+            let k = (a * a + b * b + c * c).sqrt();
+            HalfSpace { n: Vec3::new(a / k, b / k, c / k), d: d / k }
+        })
+        .collect();
+    let block = convex_polyhedron(&hs).expect("block polyhedron must build");
+    let a = [-0.05545f64, 1., -0.02618];
+    let k = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+    let arch = cylinder(Vec3::new(2.392, 2.0057, 27.5982), Vec3::new(a[0] / k, a[1] / k, a[2] / k), 4.5, 8.).expect("cylinder must build");
+    let r = boolean(&block, &arch, BoolOp::Cut);
+    assert!(r.is_ok(), "{r:?}");
+    let solid = r.unwrap().expect("cut should produce a non-empty solid");
+    assert!(solid.validity().is_empty(), "{:?}", solid.validity());
 }
 
 #[test]
