@@ -1535,6 +1535,9 @@ impl Session {
         let disabled_plugins = self.disabled_plugins.clone();
         let plugin_limits = self.plugin_limits;
         let mut plugin_state = self.plugin_state.clone();
+        // A file the design that comes in was opened from named for Update Links stays the user's
+        // choice (a KiCad board opened with `doc.open`).
+        plugin_state.linked_files.extend(fresh.plugin_state.linked_files.iter().cloned());
         for package in plugin_state.panels.values_mut() {
             for data in package.data.values_mut() {
                 *data = Default::default();

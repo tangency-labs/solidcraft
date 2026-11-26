@@ -291,3 +291,18 @@ fn a_board_that_cannot_be_read_again_keeps_its_bodies() {
     assert_eq!(s.doc.links.len(), 1, "the link stays");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+#[test]
+fn the_window_keeps_the_board_it_was_asked_to_open_as_allowed() {
+    // The window opens a file in a scratch session and takes its design over: the board the caller
+    // named stays one Update Links may read again, wherever it is.
+    let path = board_file("live-link-window", 2.0);
+    let mut scratch = Session::default();
+    run(&mut scratch, "doc.open", json!({"path": path.to_string_lossy()}));
+    let mut window = Session::default();
+    window.replace_design(scratch);
+    rewrite_board(&path, 30.5);
+    let done = run(&mut window, "component.update_links", json!({}));
+    assert_eq!(done["updated"].as_array().map(Vec::len), Some(1), "{done}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
