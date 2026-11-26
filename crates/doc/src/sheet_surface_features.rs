@@ -3651,7 +3651,7 @@ fn fill_bites(region: &Region2, at: Vec2, reach: f64) -> Region2 {
 /// `region` with the corner `from`, where its side leaves the anchor line `(o, d)` (a point and
 /// its direction), replaced by the points `path`, listed from the anchor's end to the side's; the
 /// two straight edges there run to the path's ends. None where `from` is no corner between two
-/// straight edges.
+/// straight edges, or where the new outline would cross itself.
 fn foot_moved(region: &Region2, from: Vec2, path: &[Vec2], (o, d): (Vec2, Vec2), tol: f64) -> Option<Region2> {
     let mut segs = region.outer.segs.clone();
     let n = segs.len();
@@ -3660,7 +3660,7 @@ fn foot_moved(region: &Region2, from: Vec2, path: &[Vec2], (o, d): (Vec2, Vec2),
     let (Seg2::Line { a: p, .. }, Seg2::Line { b: q, .. }) = (*segs.get(k)?, *segs.get(next)?) else { return None };
     // The loop comes to the corner along the anchor, or along the side.
     let mut chain = vec![p];
-    if (p - o).cross(d).abs() <= tol {
+    if solidcraft_kernel::planar::on_line(p.into(), o.into(), d.into(), tol) {
         chain.extend_from_slice(path);
     } else {
         chain.extend(path.iter().rev());
@@ -3671,7 +3671,8 @@ fn foot_moved(region: &Region2, from: Vec2, path: &[Vec2], (o, d): (Vec2, Vec2),
     let last = lines.pop()?;
     *segs.get_mut(next)? = last;
     segs.splice(k..=k, lines);
-    Some(Region2 { outer: Loop2 { segs }, holes: region.holes.clone() })
+    let outer = Loop2 { segs };
+    (!crossed(&outer)).then(|| Region2 { outer, holes: region.holes.clone() })
 }
 
 fn cross_lines((p, u): (Vec2, Vec2), (q, w): (Vec2, Vec2)) -> Option<Vec2> {
@@ -4006,5 +4007,17 @@ mod tests {
             assert_eq!(e, why, "length {length}, gap {gap}");
             assert!(sheet == before, "length {length}, gap {gap}: the sheet changed");
         }
+    }
+
+    /// A side's foot moved up the bend's end must not leave an outline that crosses itself: here
+    /// the side, from (5/7, 0) on the anchor to (8/7, -1), would follow the bend's end from (2, 0)
+    /// down to (2, -3), across the edge from (8/7, -1) to (10, -1) the outline keeps.
+    #[test]
+    fn a_moved_foot_that_would_cross_the_outline_is_refused() {
+        let pts = [(20.0, 0.0), (5.0 / 7.0, 0.0), (8.0 / 7.0, -1.0), (10.0, -1.0), (10.0, -10.0), (20.0, -10.0)].map(|(x, y)| Vec2::new(x, y));
+        let segs = (0..pts.len()).map(|i| Seg2::Line { a: pts[i], b: pts[(i + 1) % pts.len()] }).collect();
+        let region = Region2 { outer: Loop2 { segs }, holes: vec![] };
+        let path = [Vec2::new(2.0, 0.0), Vec2::new(2.0, -3.0), Vec2::new(2.0, -3.0)];
+        assert!(super::foot_moved(&region, pts[1], &path, (Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0)), 1e-9).is_none());
     }
 }
