@@ -581,18 +581,7 @@ fn the_gate_refuses_and_limits() {
 fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
     // Distinct designs: what counts is which `Arc` a snapshot holds.
     let doc = |_: usize| Arc::new(solidcraft_engine::doc::Document::default());
-    let snap = |d: &Arc<solidcraft_engine::doc::Document>| solidcraft_engine::Snapshot {
-        label: String::new(),
-        doc: d.clone(),
-        active_sketch: None,
-        sketching_view: None,
-        sketch_restore_marker: None,
-        active_sheet_sketch: None,
-        pending_moves: Default::default(),
-        part: None,
-        visibility: Default::default(),
-        section: None,
-    };
+    let snap = |d: &Arc<solidcraft_engine::doc::Document>| solidcraft_engine::Snapshot::with_doc(d.clone());
     let docs: Vec<_> = (0..6).map(doc).collect();
     // The turn began at depth 3 with docs[3]; the history then lost its oldest step.
     let start = UndoMark { depth: 3, top: Some(Box::new(snap(&docs[2]))) };
@@ -629,7 +618,11 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
     assert_eq!((undo.len(), undo[2].label.as_str()), (3, ""));
     // A full history of steps that all kept one design (section steps): the turn's steps follow
     // the step on top at its start.
-    let step = |i: usize| solidcraft_engine::Snapshot { label: i.to_string(), ..snap(&docs[3]) };
+    let step = |i: usize| {
+        let mut s = snap(&docs[3]);
+        s.label = i.to_string();
+        s
+    };
     let start = UndoMark::of(&[step(1), step(2), step(3)]);
     let mut undo = vec![step(3), step(4), step(5)];
     assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 2);
