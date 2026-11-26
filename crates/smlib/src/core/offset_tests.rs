@@ -16,7 +16,7 @@ use solidcore::geom::vector3d::Vec3;
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::sweep::api_brep::create_linear_sweep;
 
-use super::offset::{draft, mark_moved, moved_faces, offset_faces, offset_sheet, refused, shell, thicken};
+use super::offset::{draft, mark_moved, moved_faces, offset_faces, offset_sheet, offset_solid, refused, shell, thicken};
 use super::{Body, area, bounds, counts, make_box, make_cylinder, make_sphere, run, to_arrays, volume};
 use crate::export::native;
 use crate::{BooleanOp, Error};
@@ -161,6 +161,8 @@ enum Op {
     Thicken(Shape, f64, bool),
     /// `Brep::offset_sheet`: distance.
     OffsetSheet(Shape, f64),
+    /// `Brep::offset_solid`: distance, round.
+    OffsetSolid(Shape, f64, bool),
     /// `Brep::draft`: faces, neutral origin, neutral normal, pull, angle.
     Draft(Shape, Vec<[f64; 3]>, [f64; 3], [f64; 3], [f64; 3], f64),
 }
@@ -241,6 +243,32 @@ fn case(name: &str) -> Case {
         // each face moved out 1 along its normal, the convex edges extended, gives the block
         // (a + 2d)(b + 2d)(c + 2d) of six planes, from -d to (a, b, c) + d.
         "offset_sheet_a_solid" => c(Op::OffsetSheet(BLOCK, 1.0), Expect::Solid(32.0 * 22.0 * 12.0, [-1.0, -1.0, -1.0], [31.0, 21.0, 11.0])),
+        // A closed solid grown 1, the convex edges extended: the block (a + 2d)(b + 2d)(c + 2d),
+        // from -d to (a, b, c) + d.
+        "offset_solid_sharp" => c(Op::OffsetSolid(BLOCK, 1.0, false), Expect::Solid(32.0 * 22.0 * 12.0, [-1.0, -1.0, -1.0], [31.0, 21.0, 11.0])),
+        // Shrunk 1, sharp: (a - 2d)(b - 2d)(c - 2d), from d to (a, b, c) - d.
+        "offset_solid_shrunk" => c(Op::OffsetSolid(BLOCK, -1.0, false), Expect::Solid(28.0 * 18.0 * 8.0, [1.0, 1.0, 1.0], [29.0, 19.0, 9.0])),
+        // Grown 1 with the convex edges rounded: every point within d of the block (Steiner's
+        // formula for a box): abc + 2(ab + bc + ca) d + π (a + b + c) d² + (4/3) π d³; the six
+        // faces moved out, a quarter cylinder along each edge, an eighth of the ball at each
+        // corner. Its bounds are the sharp offset's.
+        "offset_solid_round" => c(
+            Op::OffsetSolid(BLOCK, 1.0, true),
+            Expect::Solid(ABC + 2.0 * 1100.0 + PI * 60.0 + 4.0 / 3.0 * PI, [-1.0, -1.0, -1.0], [31.0, 21.0, 11.0]),
+        ),
+        // A cylinder r 5, h 10 grown d = 1, rounded: the side moved out, π (r + d)² h; the caps
+        // moved out, 2 π r² d; at each rim a quarter disc of radius d (area π d² / 4, centroid
+        // 4d / (3π) out from the rim) turned about the axis, 2 π (r + 4d / (3π)) π d² / 4 by Pappus.
+        "offset_solid_round_cylinder" => {
+            let (r, h, d) = (5.0, 10.0, 1.0);
+            let rim = 2.0 * PI * (r + 4.0 * d / (3.0 * PI)) * PI * d * d / 4.0;
+            c(
+                Op::OffsetSolid(Shape::Cylinder([0.0; 3], r, h), d, true),
+                Expect::Solid(PI * (r + d) * (r + d) * h + 2.0 * PI * r * r * d + 2.0 * rim, [-6.0, -6.0, -1.0], [6.0, 6.0, 11.0]),
+            )
+        }
+        // A sheet is not a closed solid.
+        "offset_solid_of_a_sheet" => c(Op::OffsetSolid(PLATE, 1.0, false), Expect::Fails(Error::Argument)),
         // The top moved out 2: abc + d·ab.
         "offset_faces_top_out" => c(Op::OffsetFaces(BLOCK, vec![TOP], 2.0), Expect::Volume(ABC + 2.0 * 600.0)),
         // The top moved in 10, as deep as the block: nothing left behind it.
@@ -376,6 +404,7 @@ fn on_core(name: &str, c: &Case) -> crate::Result<Body> {
         Op::OffsetFaces(s, points, d) => offset_faces(&s.core(), points, tol, *d),
         Op::Thicken(s, t, sym) => thicken(&s.core(), *t, *sym),
         Op::OffsetSheet(s, d) => offset_sheet(&s.core(), *d),
+        Op::OffsetSolid(s, d, round) => offset_solid(&s.core(), *d, *round),
         Op::Draft(s, points, o, n, pull, angle) => draft(&s.core(), points, tol, *o, *n, *pull, *angle),
     }
 }
@@ -472,6 +501,11 @@ cases!(
     offset_sheet_a_solid,
     offset_sheet_a_sphere,
     offset_sheet_a_sphere_to_its_centre,
+    offset_solid_sharp,
+    offset_solid_shrunk,
+    offset_solid_round,
+    offset_solid_round_cylinder,
+    offset_solid_of_a_sheet,
     offset_faces_top_out,
     offset_faces_through,
     draft_box_sides,
@@ -852,4 +886,15 @@ fn a_wall_thicker_than_its_face_curves_is_refused_naming_the_largest() {
     let largest: f64 = largest.parse().unwrap();
     assert!((largest - 10.0).abs() < 1e-9, "{largest}");
     assert!(thicken(&sheet, 2.0, false).is_ok() && thicken(&sheet, -2.0, false).is_ok());
+}
+
+/// A draft direction of no length is refused as an argument before any face is picked, even with
+/// a point that would pick no face: the direction is the first thing wrong.
+#[test]
+fn a_draft_with_no_neutral_normal_is_refused_before_its_pick() {
+    let b = make_box([0.0; 3], [10.0; 3]).unwrap();
+    let z = [0.0, 0.0, 1.0];
+    for (normal, pull) in [([0.0; 3], z), (z, [0.0; 3])] {
+        assert_eq!(draft(&b, &[[50.0, 50.0, 50.0]], TOL, [0.0; 3], normal, pull, 0.1).err(), Some(Error::Argument));
+    }
 }

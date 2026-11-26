@@ -1,0 +1,42 @@
+{
+  "en": {
+    "ui.insert_drawing.file_origin": "File origin",
+    "ui.insert_drawing.middle": "Middle",
+    "ui.insert_drawing.place_by": "Place by"
+  },
+  "de": {
+    "ui.insert_drawing.file_origin": "Dateiursprung",
+    "ui.insert_drawing.middle": "Mitte",
+    "ui.insert_drawing.place_by": "Platzieren nach"
+  },
+  "ko": {
+    "ui.insert_drawing.file_origin": "파일 원점",
+    "ui.insert_drawing.middle": "가운데",
+    "ui.insert_drawing.place_by": "배치 기준"
+  },
+  "ar": {
+    "ui.insert_drawing.file_origin": "أصل الملف",
+    "ui.insert_drawing.middle": "المنتصف",
+    "ui.insert_drawing.place_by": "الوضع حسب"
+  },
+  "he": {
+    "ui.insert_drawing.file_origin": "ראשית הקובץ",
+    "ui.insert_drawing.middle": "אמצע",
+    "ui.insert_drawing.place_by": "מיקום לפי"
+  },
+  "ja": {
+    "ui.insert_drawing.file_origin": "ファイルの原点",
+    "ui.insert_drawing.middle": "中央",
+    "ui.insert_drawing.place_by": "配置の基準"
+  },
+  "vi": {
+    "ui.insert_drawing.file_origin": "Gốc tệp",
+    "ui.insert_drawing.middle": "Giữa",
+    "ui.insert_drawing.place_by": "Đặt theo"
+  },
+  "zh": {
+    "ui.insert_drawing.file_origin": "文件原点",
+    "ui.insert_drawing.middle": "中心",
+    "ui.insert_drawing.place_by": "放置依据"
+  }
+}

@@ -261,6 +261,67 @@ interface ui-provider {
 | Limits | 8 panels per plugin. 512 widgets per layout. 1 MiB of data per panel. Tables and trees scroll virtually, up to 100,000 rows. Charts: 8 series, 20,000 points. |
 | Design-changed listeners (phase 3) | A panel can name entries that re-run when the design changes, so a read-only check refreshes its list as the user works. Declared in the manifest, for example `"listeners": [{"entry": "refresh", "on": ["design.changed"]}]`, and listed on the approval screen. Read-only: a listener entry may call only read commands and update its own panel with `ui.set-data`; it never edits the design or writes files. It runs only while the plugin's panel or workspace is open, never in the background. Debounced: one call per finished batch of changes, at most the rate of `control.subscribe`'s `design.changed` (about 10 a second), and changes that finish while a call is still running are folded together, not queued: when that call returns, the host makes one more call if anything changed meanwhile, so the panel always ends on the latest design. A failing listener never fails the edit that triggered it; its error shows in its own panel. The first version carries a plain "the design changed" signal and no hooks on other user actions; typed events can come later from comparing document snapshots. Asked for in [#1221 (2026-10-19)](https://github.com/tangency-labs/solidcraft/issues/1221#issuecomment-6278997181), a parameter change re-running a slice, and [#1221 (2026-11-17)](https://github.com/tangency-labs/solidcraft/issues/1221#issuecomment-6962128558), a release check whose list shrinks as problems are fixed. |
 
+An opt-in background role is specified in [RFC 0002 section 6d](0002-plugins.md#6d-background-plugins).
+It can receive the same phase 3 design-changed signal with panels closed, under separate idle and call budgets.
+Ordinary panel listeners keep the open-panel lifetime above; neither kind may edit from an event callback.
+
+### 1a. Layouts that change at run time
+
+Section 1 fixes a panel's layout at install time and changes only its data. That covers a table of tools or a list of operations, but not a workspace whose editors depend on what is selected: an operation list where a pocket row opens one set of fields and a drilling row another, or a setup that gains a fixture section. Asked for in [#1221 (2026-11-20)](https://github.com/tangency-labs/solidcraft/issues/1221#issuecomment-7040940413).
+
+Two additions cover it, both still host-drawn from reviewed widget kinds, so a plugin never paints and never ships UI code:
+
+1. **`repeat`, for layouts that follow data.** A `repeat` node names a data path holding a list and a template subtree. The host draws the template once per list item, with the template's paths relative to that item. Adding, removing or reordering items is then an ordinary `set-data`, with no layout call. A row's kind can choose between templates (`templates` keyed by a field of the item, for example `/ops/3/kind`), so a pocket row and a drilling row each get their own fields.
+2. **`update-layout`, for structural changes data can't express.** Nodes may carry a `key`, unique within the panel's layout (a template's keys are unique within that template); a layout or an update that would give two nodes the same key is refused with a typed error. An operation names its node with a `node-ref`: the node's `key`, and for a node inside repeated rows the chain of rows it lies in, outermost first, each as the key of its `repeat` node and the row's index in that list. So nested repeats, two repeats bound to the same data path, and the same template key in two rows are never ambiguous; a `node-ref` whose rows don't lead to exactly one node is refused with a typed error. A plugin sends a list of operations on keyed nodes: insert a subtree under a parent at an index, remove a node, move it, or replace one node's widget. The host applies one call's operations together: an invalid operation (unknown key, a cycle, an unreviewed widget kind, a limit exceeded) refuses the whole call with a typed error and leaves the layout as it was.
+
+```wit
+interface ui {
+  // Additions to section 1. `node` gains an optional key:
+  //   record node { key: option<string>, widget: widget }
+  // and `widget` gains:
+  //   repeat(repeat-spec),
+
+  record repeat-spec {
+    /// Data path of the list, for example "/ops".
+    bind: string,
+    /// Field of each item that picks its template; absent: one template.
+    kind-field: option<string>,
+    /// Template subtrees by kind ("" for the only one), as node indexes.
+    templates: list<tuple<string, u32>>,
+  }
+
+  /// A node to act on: `key` alone for a node of the static layout; for a node inside
+  /// repeated rows, `rows` from the outermost in: each its `repeat` node's key and the row's
+  /// index in that list.
+  record node-ref { key: string, rows: list<tuple<string, u32>> }
+
+  variant layout-op {
+    /// Insert the subtree `nodes` (its first node is its root) under `parent` at `index`.
+    insert(insert-spec),
+    remove(node-ref),
+    move(move-spec),
+    replace(replace-spec),
+  }
+
+  record insert-spec { parent: node-ref, index: u32, nodes: list<node> }
+  record move-spec { node: node-ref, parent: node-ref, index: u32 }
+  record replace-spec { node: node-ref, widget: widget }
+
+  /// Change a panel's layout. Applied with its data, at most once per frame.
+  update-layout: func(panel: string, ops: list<layout-op>) -> result<_, plugin-error>;
+}
+```
+
+| | |
+|---|---|
+| Updates | `update-layout` and `set-data` from one entry are merged together and drawn in the same frame, in the order they were sent. They belong to the entry's command transaction: if the entry fails or is cancelled, both are rolled back, as panel data is today. |
+| Events | `ui-event` gains `key: option<string>`, the key of the node the user acted on, and for a widget inside a `repeat`, `path` names the item (`/ops/3/depth`). The plugin never needs to track node indexes. |
+| Rate | Changes are sent when something changes, never per frame. At most 10 layout updates per second per panel are applied. An update over that rate is not refused: it waits, merged with any later updates and with the `set-data` sent after it, until the panel may take one again, so the order in which layout and data were sent is kept and the panel always ends on the latest of both. No plugin code runs while the host draws. |
+| Limits | The section 1 limits apply to the layout after each update: 512 widgets per layout, counting every repeated row as drawn (virtual scrolling still applies to tables and trees), and a nesting depth of 16. At most 64 operations per call. A `set-data` that would make a `repeat` draw more than the widget limit is refused with the same typed error as an oversized layout, and the panel keeps its earlier data and layout; it is checked when the data is merged, so a list that grows past the limit fails there, not later while drawing. |
+| Review | Only widget kinds already reviewed can appear, in a static layout, a template or an inserted subtree. `repeat` and keyed updates are host behaviour, reviewed once with 1280x720 pictures like any other widget. |
+| Versions | `ui-version` goes to 2. A plugin that uses neither addition keeps working unchanged, and a host that predates them refuses the plugin with "update SolidCraft" when it declares `ui@0.2`. |
+| Web | The same declarations and updates draw in the web build, like the rest of section 1. |
+
 ## 2. Workspaces
 
 Today the app has two workspaces, `Design` and `Render` (`ui.workspace`, and the `WorkspaceId` in the panel layout). A plugin workspace adds a third kind, `plugin:<id>/<workspace>`. It uses the same switcher, the same layout memory and the same `ui.workspace` command.
@@ -520,7 +581,7 @@ An independent plugin, `manufacture`, built outside the repo. It asks only for `
 | When | What |
 |---|---|
 | Phase 2 (with importers and exporters) | File format slots (section 4). Per-design plugin data with the missing-plugin fallback (section 5). Long jobs in the operations panel (section 6). Panels with forms, buttons, lists and tables, docked in the shared host (section 1). The `craft:plugin` rename and `buffers`. Web: the same declarations drawn by the web build. |
-| Phase 3 | Workspaces (section 2). Viewport overlays with picking, timeline and scrubber (section 3). Trees and charts. Design-changed listeners for open panels (section 1). A reference Manufacturing plugin outside the repo, used as the end-to-end test. |
+| Phase 3 | Workspaces (section 2). Viewport overlays with picking, timeline and scrubber (section 3). Trees and charts. Design-changed listeners for open panels (section 1). Layouts that change at run time (section 1a). A reference Manufacturing plugin outside the repo, used as the end-to-end test. |
 | Later | Plugin icons (if agreed), Monty or Rhai on the same surface, and a per-plugin network permission. Parametric plugin features stay in their own phase, as in RFC 0002. |
 
 Phase 1 ([#15112](https://github.com/tangency-labs/solidcraft/pull/15112), led by @raykholo) targets `command-plugin` and is unchanged apart from the package name.

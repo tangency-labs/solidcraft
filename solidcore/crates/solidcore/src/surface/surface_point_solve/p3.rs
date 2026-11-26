@@ -49,22 +49,31 @@ use crate::surface::surface::p2::MAX_GEOMETRY_NESTING;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
 
-/// The iteration's status and termination reason (`FindNextStep`).
+/// Whether the iteration's step failed, and its termination reason (`FindNextStep`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NextStep {
-    /// Zero for success, otherwise the upstream `SmStatus` code.
-    pub status: i32,
-    /// The reason, including when `status` reports a failure.
+    /// The step failed: [`TerminationReason::UnableToConverge`] (upstream's
+    /// `SM_ERR_NOT_CONVERGING`) or [`TerminationReason::OutOfBounds`] (its
+    /// `SM_ERR_OUTSIDE_OF_DOMAIN`). [`TerminationReason::OutOfBounds`] is also the reason of
+    /// a step that did not fail, so the reason alone does not say which.
+    pub failed: bool,
+    /// The reason, including when the step failed.
     pub reason: TerminationReason,
 }
 
 impl NextStep {
     const fn success(reason: TerminationReason) -> Self {
-        Self { status: 0, reason }
+        Self {
+            failed: false,
+            reason,
+        }
     }
 
-    const fn failure(status: i32, reason: TerminationReason) -> Self {
-        Self { status, reason }
+    const fn failure(reason: TerminationReason) -> Self {
+        Self {
+            failed: true,
+            reason,
+        }
     }
 }
 
@@ -239,7 +248,7 @@ impl SurfPtSolveStepper<'_> {
     /// # Errors
     ///
     /// Missing dependencies and evaluation errors. Ordinary iteration failure is
-    /// represented by [`NextStep::status`] so its reason is retained.
+    /// represented by [`NextStep::failed`] so its reason is retained.
     pub fn find_next_step(&mut self, k: &Kernel, previous: &mut Self) -> Result<NextStep> {
         use TerminationReason::{
             FoundAnswerConverged as Converged, OutOfBounds, StillIterating, UnableToConverge,
@@ -335,7 +344,7 @@ impl SurfPtSolveStepper<'_> {
             return Ok(if nr.bound_hits_u() != 0 || nr.bound_hits_v() != 0 {
                 NextStep::success(OutOfBounds)
             } else {
-                NextStep::failure(1022, UnableToConverge)
+                NextStep::failure(UnableToConverge)
             });
         }
         let norm = if self.base.solver_op() == SolverOperation::Normalize {
@@ -350,7 +359,7 @@ impl SurfPtSolveStepper<'_> {
         {
             self.assign(&plane);
             return Ok(if self.pushing_boundary(tight)?.0 {
-                NextStep::failure(1020, OutOfBounds)
+                NextStep::failure(OutOfBounds)
             } else {
                 NextStep::success(Converged)
             });
@@ -363,7 +372,7 @@ impl SurfPtSolveStepper<'_> {
         {
             self.assign(&nr);
             return Ok(if self.pushing_boundary(tight)?.0 {
-                NextStep::failure(1020, OutOfBounds)
+                NextStep::failure(OutOfBounds)
             } else {
                 NextStep::success(Converged)
             });
@@ -396,7 +405,7 @@ impl SurfPtSolveStepper<'_> {
                 {
                     NextStep::success(OutOfBounds)
                 } else {
-                    NextStep::failure(1022, UnableToConverge)
+                    NextStep::failure(UnableToConverge)
                 },
             );
         }
@@ -651,7 +660,7 @@ impl Surface {
                 }
             }
 
-            if step.status != 0 || reason != StillIterating {
+            if step.failed || reason != StillIterating {
                 break;
             }
             curr.assign(&next);

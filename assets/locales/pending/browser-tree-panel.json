@@ -46,5 +46,11 @@
     "help.view.browser": "설계의 구성요소, 바디 및 스케치를 담은 브라우저 트리 패널을 표시하거나 숨깁니다. 자체 메뉴에서 닫은 뒤 브라우저를 되살릴 때 사용합니다.",
     "prefs.layout_page.browser_tree": "브라우저 트리",
     "prefs.layout_page.browser_tree_note": "설계의 구성요소, 바디 및 스케치를 담은 브라우저 트리 패널을 표시합니다."
+  },
+  "fr": {
+    "cmd.view_browser": "Arborescence de l’explorateur",
+    "help.view.browser": "Affiche ou masque le panneau de l’arborescence de l’explorateur, qui contient les composants, les corps et les esquisses de la conception. Utilisez cette commande pour réafficher l’explorateur après l’avoir fermé depuis son propre menu.",
+    "prefs.layout_page.browser_tree": "Arborescence de l’explorateur",
+    "prefs.layout_page.browser_tree_note": "Afficher le panneau de l’arborescence de l’explorateur contenant les composants, les corps et les esquisses de la conception."
   }
 }
