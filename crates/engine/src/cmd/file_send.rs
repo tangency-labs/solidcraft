@@ -115,7 +115,9 @@ fn write_in_folder(s: &mut Session, r: &Send<'_>) -> Result<Value> {
     if let Some(copy) = &r.copy {
         // The file the user keeps: named after the design, in their folder, and the slicer opens it.
         let stem = slicer_files::copy_stem(&s.doc.name);
-        let (file, numbered, version) = if copy.overwrite {
+        // Replacing is for the user's own kept copy: never for the file that is open in SolidCraft.
+        let overwrite = copy.overwrite && !is_open_file(s, &copy.dir, &stem, ext);
+        let (file, numbered, version) = if overwrite {
             let (file, numbered) =
                 slicer_files::write_copy(&copy.dir, &stem, ext, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", copy.dir.display())))?;
             (file, numbered, None)
@@ -143,6 +145,16 @@ fn write_in_folder(s: &mut Session, r: &Send<'_>) -> Result<Value> {
     let mut out = json!({"path": file.to_string_lossy(), "bytes": bytes.len(), "format": ext, "numbered": numbered, "stl_fallback": fell_back});
     laid.report(&mut out);
     Ok(out)
+}
+
+/// Whether `<dir>/<stem>.<ext>` is the file the design was opened from or last saved to.
+fn is_open_file(s: &Session, dir: &std::path::Path, stem: &str, ext: &str) -> bool {
+    let Some(open) = s.path.as_deref() else { return false };
+    let want = dir.join(format!("{stem}.{ext}"));
+    match (std::fs::canonicalize(open), std::fs::canonicalize(&want)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => std::path::Path::new(open) == want,
+    }
 }
 
 /// The bytes to send: the bodies as a mesh, as STEP, or a copy of the design file.
@@ -200,6 +212,11 @@ fn send_app(s: &mut Session, r: &Send<'_>) -> Result<Value> {
     let written = if out.get("stl_fallback").and_then(Value::as_bool) == Some(true) { "stl" } else { format };
     let design = slicer_files::copy_stem(&s.doc.name);
     let Some(obj) = out.as_object_mut() else { return Ok(out) };
+    // A 3MF that could not be written is an STL: an app that does not take it is not started.
+    if !app.target.accepts(written) {
+        obj.insert("app_error".into(), json!(format!("{} does not take {written}; the file is kept at {path}", app.target.name)));
+        return Ok(out);
+    }
     // What is started, with its real values, whether or not it starts.
     if let Ok(argv) = apps::argv(&app, std::path::Path::new(&path), &design, written) {
         obj.insert("command".into(), json!(argv));
@@ -375,6 +392,22 @@ mod tests {
             design: true,
             wait_ms: 0,
         }
+    }
+
+    #[test]
+    fn replace_file_never_replaces_the_file_that_is_open() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-send-open-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Part"})).unwrap();
+        let open = dir.join(format!("{}.sc", slicer_files::copy_stem(&s.doc.name)));
+        std::fs::write(&open, b"the saved design").unwrap();
+        s.path = Some(open.to_string_lossy().into_owned());
+        let out = write_in_folder(&mut s, &design_send(Some(Copy { dir: dir.clone(), overwrite: true }))).unwrap();
+        assert_eq!(std::fs::read(&open).unwrap(), b"the saved design", "the open file is untouched");
+        assert!(out["path"].as_str().unwrap().ends_with("-v1.sc") && out["version"] == 1, "{out}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

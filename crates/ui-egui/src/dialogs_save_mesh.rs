@@ -74,8 +74,8 @@ pub struct SaveMesh {
 /// The formats an app can take, as shown and as `file.send_to_app` names them.
 static APP_FORMATS: [(&str, &str); 5] =
     [("3MF", "3mf"), ("3MF with face tags", "3mf-tagged"), ("STEP", "step"), ("STL", "stl"), ("SolidCraft design (.sc)", "sc")];
-/// How many times the window looks for a started app's early exit, 200 ms apart.
-const EXIT_LOOKS: u32 = 25;
+/// How long the window looks for a started app's early exit.
+const EXIT_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Send to App's own state in the dialog. Its chosen app is `SaveMesh::slicer` (an app's id).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -112,7 +112,8 @@ pub struct AppExit {
     pid: u32,
     name: String,
     path: String,
-    looks: u32,
+    /// When to stop looking.
+    until: web_time::Instant,
 }
 
 impl SaveMesh {
@@ -707,6 +708,10 @@ pub fn commands(k: &SaveMesh, inputs: &[SelInput]) -> Result<Vec<(String, Value)
         return Err(solidcraft_ui_text::tr("ui.save_mesh_pick_bodies").into());
     }
     if k.app.on {
+        // The Add app… form is open: Send would start the app chosen before it and drop the form.
+        if k.app.adding.is_some() {
+            return Err(solidcraft_ui_text::tr("ui.send_app_adding").into());
+        }
         if k.slicer.is_empty() {
             return Err(solidcraft_ui_text::tr("ui.send_app_none").into());
         }
@@ -759,6 +764,9 @@ pub fn ready(inputs: &[SelInput]) -> bool {
 
 /// [`ready`] for the dialog as it is: a copy of the design file sent to an app needs no body.
 pub fn ready_for(k: &SaveMesh, inputs: &[SelInput]) -> bool {
+    if k.app.on && k.app.adding.is_some() {
+        return false;
+    }
     (k.app.on && k.app.format == "sc") || ready(inputs)
 }
 
@@ -1081,7 +1089,7 @@ fn send_to_app(app: &mut SolveApp, params: Value) {
     if let Some(pid) = started {
         let name = result.get("app").and_then(Value::as_str).unwrap_or_default().to_string();
         let path = result.get("path").and_then(Value::as_str).unwrap_or_default().to_string();
-        app.app_exit = Some(AppExit { pid, name, path, looks: 0 });
+        app.app_exit = Some(AppExit { pid, name, path, until: web_time::Instant::now() + EXIT_WINDOW });
     }
 }
 
@@ -1107,7 +1115,14 @@ fn report_app(app: &mut SolveApp, result: &Value) {
     if result.get("stl_fallback").and_then(Value::as_bool) == Some(true) {
         line = format!("{line}. {}", solidcraft_ui_text::tr("ui.slicer_stl_fallback"));
     }
-    app.set_status(line, false);
+    // Bodies the exporter left out are named, in a warning that stays until it is dismissed.
+    let warnings: Vec<&str> =
+        result.get("warnings").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+    if warnings.is_empty() {
+        app.set_status(line, false);
+    } else {
+        app.set_status_sticky(format!("{line}\n{}", warnings.join("\n")));
+    }
 }
 
 /// Per frame: look for the exit of the app just started. One that ended with an error is said in
@@ -1122,11 +1137,7 @@ pub fn tick_app_exit(app: &mut SolveApp, ctx: &egui::Context) {
         }
         return;
     }
-    let done = app.app_exit.as_mut().is_some_and(|w| {
-        w.looks += 1;
-        w.looks >= EXIT_LOOKS
-    });
-    if done {
+    if app.app_exit.as_ref().is_some_and(|w| web_time::Instant::now() >= w.until) {
         app.app_exit = None;
     } else {
         ctx.request_repaint_after(std::time::Duration::from_millis(200));
@@ -1813,6 +1824,22 @@ mod tests {
         assert_eq!(commands(&k, std::slice::from_ref(&none)).unwrap()[0].1, json!({"target": "viewer", "format": "sc"}));
         k.slicer = String::new();
         assert!(commands(&k, std::slice::from_ref(&input)).is_err(), "an app has to be chosen");
+        // While the Add app… form is open, Send is off and sends nothing.
+        let mut adding = app_dialog("viewer", "sc");
+        adding.app.adding = Some(AddApp::default());
+        assert!(!ready_for(&adding, std::slice::from_ref(&none)) && !ready_for(&adding, std::slice::from_ref(&input)));
+        assert!(commands(&adding, std::slice::from_ref(&input)).is_err());
+        adding.app.adding = None;
+        assert!(ready_for(&adding, std::slice::from_ref(&none)));
+    }
+
+    #[test]
+    fn the_status_of_an_app_send_names_what_the_export_left_out() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        report_app(&mut app, &json!({"path": "/t/x.3mf", "app": "Viewer", "command": ["/v", "/t/x.3mf"], "format": "3mf"}));
+        assert!(app.status.as_ref().is_some_and(|s| s.0.contains("Viewer") && !s.0.contains("Pin")));
+        report_app(&mut app, &json!({"path": "/t/x.3mf", "app": "Viewer", "format": "3mf", "warnings": ["Pin: could not be meshed, left out"]}));
+        assert!(app.status.as_ref().is_some_and(|s| s.0.contains("Viewer") && s.0.contains("Pin: could not be meshed")), "{:?}", app.status);
     }
 
     #[cfg(unix)]

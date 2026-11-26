@@ -79,7 +79,8 @@ fn fake_app(tag: &str, args: &[&str], formats: &[&str]) -> (std::path::PathBuf, 
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let (script, seen) = (dir.join("fakeapp"), dir.join("seen"));
-    let body = format!("#!/bin/sh\npwd >> {seen}\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> {seen}; done\n", seen = seen.display());
+    let seen_path = crate::slicers::test_support::sh_quote(&seen);
+    let body = format!("#!/bin/sh\npwd >> {seen_path}\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> {seen_path}; done\n");
     std::fs::write(&script, body).unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     let target = AppTarget {
@@ -136,6 +137,9 @@ fn replies_match_the_output_schema_for_each_format_and_the_app_gets_one_argument
     assert!(lines[step_run - 1].contains(' '), "the title with its spaces is one argument: {lines:?}");
     // The folder it ran in holds the file.
     assert!(lines[step_run - 2].ends_with("kept folder"), "{lines:?}");
+    for path in [replies[0]["path"].as_str(), replies[2]["path"].as_str()].into_iter().flatten() {
+        let _ = std::fs::remove_file(path);
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -178,5 +182,6 @@ fn a_failing_app_is_reported_with_its_exit_code() {
     assert_eq!(r["exited"], true);
     assert!(r["app_error"].as_str().is_some_and(|e| e.contains("code 7")), "{r}");
     assert!(std::path::Path::new(r["path"].as_str().unwrap()).exists(), "the file is saved either way");
+    let _ = std::fs::remove_file(r["path"].as_str().unwrap());
     let _ = std::fs::remove_dir_all(&dir);
 }

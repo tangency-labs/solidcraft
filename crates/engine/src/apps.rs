@@ -186,8 +186,21 @@ pub fn argv(app: &Resolved, file: &Path, design: &str, format: &str) -> Result<V
     let file = file.to_string_lossy().into_owned();
     let vars = Vars { file: &file, name: design, dir: &dir, format };
     let mut out = app.command.clone();
+    let mut expanded = Vec::new();
     for arg in &app.target.args {
-        out.push(expand_arg(arg, Some(&vars))?);
+        expanded.push((arg == "{file}", expand_arg(arg, Some(&vars))?));
+    }
+    if out.first().is_some_and(|p| p == "open") {
+        // `open -a <bundle>` takes what follows as documents to open, and passes only what follows
+        // `--args` to the application: the file alone stays a document, the rest go after `--args`.
+        out.extend(expanded.iter().filter(|(is_file, _)| *is_file).map(|(_, a)| a.clone()));
+        let rest: Vec<String> = expanded.into_iter().filter(|(is_file, _)| !*is_file).map(|(_, a)| a).collect();
+        if !rest.is_empty() {
+            out.push("--args".into());
+            out.extend(rest);
+        }
+    } else {
+        out.extend(expanded.into_iter().map(|(_, a)| a));
     }
     Ok(out)
 }
@@ -401,6 +414,19 @@ mod tests {
         assert_eq!(preview("/usr/bin/syncapp", &args, "sc").unwrap(), r#"/usr/bin/syncapp "--title=My part" "/home/me/My part-v1.sc""#);
         assert!(preview("/x", &["{path}".to_string()], "sc").is_err());
         assert_eq!(command_text(&["a".to_string(), "b c".to_string()]), "a \"b c\"");
+    }
+
+    #[test]
+    fn a_macos_bundle_gets_the_file_as_a_document_and_the_other_arguments_after_args() {
+        let bundle = |args: &[&str]| Resolved {
+            target: target("/Applications/Viewer.app", args),
+            command: vec!["open".into(), "-a".into(), "/Applications/Viewer.app".into()],
+        };
+        let file = Path::new("/t/x.sc");
+        let plain = argv(&bundle(&["{file}"]), file, "d", "sc").unwrap();
+        assert_eq!(plain, ["open", "-a", "/Applications/Viewer.app", "/t/x.sc"].map(String::from), "the file alone still opens as a document");
+        let titled = argv(&bundle(&["--title={name}", "{file}"]), file, "My part", "sc").unwrap();
+        assert_eq!(titled, ["open", "-a", "/Applications/Viewer.app", "/t/x.sc", "--args", "--title=My part"].map(String::from));
     }
 
     #[test]

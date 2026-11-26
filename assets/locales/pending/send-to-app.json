@@ -25,7 +25,8 @@
     "cmd.file_send_to_app": "Send to App",
     "cmd.file_apps": "Send to App Targets",
     "help.file.send_to_app": "Sends the design, or the bodies you pick, to a program you added, in a format it takes, and shows the command it ran. Use it to hand your model to a viewer, a CAM tool or a sync app.",
-    "ui.send_app_pick_title": "Choose the app"
+    "ui.send_app_pick_title": "Choose the app",
+    "ui.send_app_adding": "Finish adding the app, or choose Back, before sending."
   },
   "de": {
     "ui.send_app_label": "App",
@@ -53,7 +54,8 @@
     "cmd.file_send_to_app": "An App senden",
     "cmd.file_apps": "Ziele für An App senden",
     "help.file.send_to_app": "Sendet den Entwurf oder die gewählten Körper in einem Format, das es annimmt, an ein hinzugefügtes Programm und zeigt den ausgeführten Befehl. Damit gibst du dein Modell an einen Viewer, ein CAM-Werkzeug oder eine Sync-App weiter.",
-    "ui.send_app_pick_title": "App auswählen"
+    "ui.send_app_pick_title": "App auswählen",
+    "ui.send_app_adding": "Schließe das Hinzufügen der App ab oder wähle Zurück, bevor du sendest."
   },
   "ja": {
     "ui.send_app_label": "アプリ",
@@ -81,7 +83,8 @@
     "cmd.file_send_to_app": "アプリに送る",
     "cmd.file_apps": "アプリに送る: 送り先",
     "help.file.send_to_app": "デザイン、または選んだボディを、追加したプログラムが受け付ける形式で送り、実行したコマンドを表示します。ビューア、CAM ツール、同期アプリへモデルを渡すときに使います。",
-    "ui.send_app_pick_title": "アプリを選択"
+    "ui.send_app_pick_title": "アプリを選択",
+    "ui.send_app_adding": "送信する前に、アプリの追加を完了するか「戻る」を選んでください。"
   },
   "zh": {
     "ui.send_app_label": "应用",
@@ -109,7 +112,8 @@
     "cmd.file_send_to_app": "发送到应用",
     "cmd.file_apps": "发送到应用的目标",
     "help.file.send_to_app": "把设计或你选的实体，以它接受的格式发送到你添加的程序，并显示所运行的命令。可用来把模型交给查看器、CAM 工具或同步应用。",
-    "ui.send_app_pick_title": "选择应用"
+    "ui.send_app_pick_title": "选择应用",
+    "ui.send_app_adding": "发送前请先完成添加应用，或选择“返回”。"
   },
   "ko": {
     "ui.send_app_label": "앱",
@@ -137,7 +141,8 @@
     "cmd.file_send_to_app": "앱으로 보내기",
     "cmd.file_apps": "앱으로 보내기 대상",
     "help.file.send_to_app": "설계 또는 고른 바디를 추가한 프로그램이 받는 형식으로 보내고, 실행한 명령을 보여 줍니다. 뷰어, CAM 도구, 동기화 앱으로 모델을 넘길 때 쓰세요.",
-    "ui.send_app_pick_title": "앱 선택"
+    "ui.send_app_pick_title": "앱 선택",
+    "ui.send_app_adding": "보내기 전에 앱 추가를 마치거나 뒤로를 선택하세요."
   },
   "vi": {
     "ui.send_app_label": "Ứng dụng",
@@ -165,7 +170,8 @@
     "cmd.file_send_to_app": "Gửi tới ứng dụng",
     "cmd.file_apps": "Đích của Gửi tới ứng dụng",
     "help.file.send_to_app": "Gửi thiết kế, hoặc các thân bạn chọn, tới một chương trình bạn đã thêm, theo định dạng nó nhận, và hiển thị lệnh đã chạy. Dùng để đưa mô hình sang trình xem, công cụ CAM hoặc ứng dụng đồng bộ.",
-    "ui.send_app_pick_title": "Chọn ứng dụng"
+    "ui.send_app_pick_title": "Chọn ứng dụng",
+    "ui.send_app_adding": "Hãy hoàn tất việc thêm ứng dụng, hoặc chọn Quay lại, trước khi gửi."
   },
   "ar": {
     "ui.send_app_label": "التطبيق",
@@ -193,7 +199,8 @@
     "cmd.file_send_to_app": "إرسال إلى تطبيق",
     "cmd.file_apps": "أهداف الإرسال إلى تطبيق",
     "help.file.send_to_app": "يرسل التصميم أو الأجسام التي تختارها إلى برنامج أضفته، بصيغة يقبلها، ويعرض الأمر الذي نُفّذ. استخدمه لتسليم نموذجك إلى عارض أو أداة CAM أو تطبيق مزامنة.",
-    "ui.send_app_pick_title": "اختر التطبيق"
+    "ui.send_app_pick_title": "اختر التطبيق",
+    "ui.send_app_adding": "أكمل إضافة التطبيق أو اختر رجوع قبل الإرسال."
   },
   "he": {
     "ui.send_app_label": "אפליקציה",
@@ -221,6 +228,7 @@
     "cmd.file_send_to_app": "שלח לאפליקציה",
     "cmd.file_apps": "יעדים לשליחה לאפליקציה",
     "help.file.send_to_app": "שולח את התכנון, או את הגופים שבחרת, לתוכנה שהוספת, בפורמט שהיא מקבלת, ומציג את הפקודה שהורצה. שימושי להעברת הדגם לצופה, לכלי CAM או לאפליקציית סנכרון.",
-    "ui.send_app_pick_title": "בחר אפליקציה"
+    "ui.send_app_pick_title": "בחר אפליקציה",
+    "ui.send_app_adding": "סיים להוסיף את האפליקציה או בחר חזרה לפני השליחה."
   }
 }
