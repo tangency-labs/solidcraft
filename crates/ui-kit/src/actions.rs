@@ -170,7 +170,7 @@ pub fn quiet_icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &s
     icon_button_presentation(ui, rect, icon, label, None, IconPresentation::Quiet)
 }
 
-/// A quiet action whose glyph brightens without painting a hover background.
+/// A 22-point glyph that brightens without painting a hover background.
 pub fn bare_icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str) -> Response {
     icon_button_presentation(ui, rect, icon, label, None, IconPresentation::Bare)
 }
@@ -201,7 +201,6 @@ fn icon_button_presentation(
     presentation: IconPresentation,
 ) -> Response {
     let t = Tokens::get();
-    let quiet = matches!(presentation, IconPresentation::Quiet | IconPresentation::Bare);
     let response = ui.interact(rect, ui.make_persistent_id(("icon_button", icon, label)), egui::Sense::click());
     if response.clicked() {
         response.request_focus();
@@ -212,11 +211,15 @@ fn icon_button_presentation(
     let paint = if presentation == IconPresentation::Mirrored { crate::icons::paint_ink_mirrored } else { crate::icons::paint_ink };
     paint(
         ui.painter(),
-        if quiet { egui::Rect::from_center_size(rect.center(), vec2(t.space_12, t.space_12)) } else { rect.shrink(t.form_icon_inset) },
+        match presentation {
+            IconPresentation::Bare => egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(22.0_f32.min(rect.width()).min(rect.height()))),
+            IconPresentation::Quiet => egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(t.space_12)),
+            _ => rect.shrink(t.form_icon_inset),
+        },
         icon,
         ink.unwrap_or(if response.hovered() || response.has_focus() {
             t.form_ink
-        } else if quiet {
+        } else if presentation == IconPresentation::Quiet {
             t.form_dim.lerp_to_gamma(t.control_fill, 0.35)
         } else {
             t.form_dim
