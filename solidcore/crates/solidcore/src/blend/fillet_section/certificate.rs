@@ -4681,6 +4681,29 @@ mod tests {
         assert_eq!(a, b);
     }
 
+    /// An order past the highest a `Partials` holds is refused with a typed error before
+    /// any table is sized by it (`lk + 1` overflowed at `usize::MAX`); the highest order
+    /// itself, and the line solve's orders 0 to 2, still enclose.
+    #[test]
+    fn an_order_past_max_k_is_refused_before_allocating() {
+        use super::super::series::MAX_K;
+        use crate::geom::nurbs_enclosure::nurbs_partials_over_box_about;
+        let n = cubic_with_knot(1);
+        let about = [0.5, 0.5, 0.0];
+        for lk in [MAX_K + 1, usize::MAX] {
+            let r = nurbs_partials_over_box_about(&n, 0.9, 1.1, 0.2, 0.3, lk, 0, about);
+            assert!(
+                matches!(r, Err(SolidError::Unsupported { .. })),
+                "order {lk}: {r:?}"
+            );
+            let r = nurbs_partials_over_piece(&n, 3, 1, 0.9, 1.0, 0.2, 0.3, lk);
+            assert!(matches!(r, Err(SolidError::Unsupported { .. })), "{r:?}");
+        }
+        for lk in [0, 1, 2, MAX_K] {
+            assert!(nurbs_partials_over_box_about(&n, 0.9, 1.1, 0.2, 0.3, lk, 0, about).is_ok());
+        }
+    }
+
     #[test]
     fn a_box_across_a_knot_line_is_enclosed_piece_by_piece() {
         let n = cubic_with_knot(1);

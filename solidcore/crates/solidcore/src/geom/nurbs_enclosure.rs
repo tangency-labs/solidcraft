@@ -16,13 +16,15 @@
 //! | [`nurbs_partials_over_piece`], [`nurbs_partials_over_piece_about`], `partials_over_piece` | `sm_NurbsPartialsOverPiece` (the fork's) |
 //! | [`nurbs_partials_over_box`], `knot_cuts`, `below_continuity`, `partials_hull` | (not upstream) |
 //!
-//! Deviations: none from where they were; the errors keep the operation name they had
-//! there, so no message changes. Knots and nets are read by checked indices (a knot or a
+//! Deviations: none from where they were, but one refusal: an order past `MAX_K` (the
+//! highest a `Partials` holds, which the fork never asked for) is refused before any table
+//! is sized by it. The errors keep the operation name they had there, so no message
+//! changes. Knots and nets are read by checked indices (a knot or a
 //! coordinate outside reads NaN, which shows in the result). No recursion.
 
 use crate::blend::fillet_section::certificate::no_part_of_the_box;
 use crate::blend::fillet_section::interval::Ivl;
-use crate::blend::fillet_section::series::{v_hull, V3, VZ};
+use crate::blend::fillet_section::series::{v_hull, MAX_K, V3, VZ};
 use crate::blend::fillet_section::station::{ders_basis, knot, span, Nurbs, Partials};
 use crate::error::blend::{BlendFailure, SectionProof};
 use crate::error::{Result, SolidError};
@@ -60,7 +62,8 @@ pub(crate) const IZ: Ivl = Ivl::new(0.0, 0.0);
 /// # Errors
 ///
 /// `SM_ERR` where the weights are not proved positive over the box ("a face's weights are
-/// not positive over a box").
+/// not positive over a box"); [`SolidError::Unsupported`] for an order `lk` past
+/// [`MAX_K`], the highest a [`Partials`] holds.
 #[allow(clippy::too_many_arguments)]
 pub fn nurbs_partials_over_piece(
     cn: &Nurbs,
@@ -127,6 +130,14 @@ pub(crate) fn partials_over_piece(
     weights: Option<Ivl>,
     shift: Shift,
 ) -> Result<Partials<Ivl>> {
+    // A Partials holds the orders up to MAX_K; a higher one is refused before any table
+    // is sized by it (an order near usize::MAX would overflow `lk + 1` or loop for ever).
+    if lk > MAX_K {
+        return Err(SolidError::Unsupported {
+            operation: OP,
+            reason: "partial derivatives past the highest order an enclosure holds",
+        });
+    }
     let um = 0.5 * (ua + ub);
     let vm = 0.5 * (va + vb);
     let nu = ders_basis(&cn.u, ku, cn.p, Ivl::from(um), cn.p);
@@ -343,8 +354,11 @@ pub(crate) fn knot_cuts(
 /// strictly inside it, each part enclosed on its own polynomial piece
 /// ([`nurbs_partials_over_piece`] over the part, its closed span), and the enclosures'
 /// hull. Every point of the box lies in some closed part, where that piece is the face, so
-/// the hull holds, at every point, each partial the face has there (on a knot line, from
-/// either side): an enclosure point by point, whatever the continuity. A use that also
+/// the hull holds, at every point, each partial the face has there: an enclosure point by
+/// point, whatever the continuity. On a knot line strictly inside the box, and for a box
+/// of zero width on a knot line, it holds the partials from either side; a box of nonzero
+/// width that ends on a knot line holds there only the partials from its own side (the
+/// piece the box lies on), not the other piece's one-sided values. A use that also
 /// integrates over the box (a mean-value form) needs the face continuous to some order
 /// across the lines it crosses: a crossed line where the face's continuity (degree minus
 /// the knot's multiplicity) is below `continuity` is refused, as is a box past the knots'
@@ -414,7 +428,9 @@ pub(crate) fn below_continuity(knots: &[f64], p: usize, x: f64, continuity: usiz
 
 /// [`nurbs_partials_over_box`] of the surface moved by `−about`
 /// ([`nurbs_partials_over_piece_about`] on each part): the partials of `S − about`, far
-/// narrower than those of `S` where the box lies far from the origin. Not upstream.
+/// narrower than those of `S` where the box lies far from the origin, with the same
+/// contract on knot lines (an endpoint of a box of nonzero width takes its own side's
+/// piece). Not upstream.
 ///
 /// # Errors
 ///
