@@ -253,6 +253,15 @@ impl Searched {
     }
 }
 
+/// As-built: a component picked whole, by its Browser row or selected when the dialog opened.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WholeComponent {
+    /// The placement that was picked: the occurrence ids from the root.
+    pub path: Vec<u64>,
+    /// Its bodies, those of its sub-components included.
+    pub bodies: Vec<String>,
+}
+
 /// The Joint and As-built Joint dialogs.
 #[derive(Clone, Debug)]
 pub struct JointForm {
@@ -309,10 +318,10 @@ pub struct JointForm {
     alignment_primary_cache: [Option<JointOrigin>; 2],
     /// Backend A/B -> primary UI row, captured when this creation dialog opens.
     pub primary_order: [usize; 2],
-    /// As-built: the bodies of each component picked whole (its Browser row, or the component
-    /// selected when the dialog opened). They are one side, not parts to separate; a record goes
-    /// once any of its bodies leaves Components.
-    pub whole_components: Vec<Vec<String>>,
+    /// As-built: each component picked whole (its Browser row, or the component selected when
+    /// the dialog opened). Its bodies are one side, not parts to separate; a record goes once any
+    /// of its bodies leaves Components.
+    pub whole_components: Vec<WholeComponent>,
 }
 
 impl JointForm {
@@ -1514,10 +1523,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
         }
         Asm::Joint(f) => {
             let picked = sel_items(inputs, 0);
-            f.whole_components.retain(|bodies| bodies.iter().all(|b| picked.contains(&Sel::Body { name: b.clone() })));
+            f.whole_components.retain(|w| w.bodies.iter().all(|b| picked.contains(&Sel::Body { name: b.clone() })));
             // As-built: two components picked, the position comes next. Counted as OK counts
-            // them: a component with two bodies is one.
-            if f.as_built && *active == 0 && occurrences(&app.session, picked).len() >= 2 {
+            // them: a component with two bodies, or with a sub-component, is one.
+            if f.as_built && *active == 0 && occurrences(&app.session, picked, &f.whole_components).len() >= 2 {
                 *active = 1;
             }
             // Picks that make no joint say why, under them, and offer the way out (#1239).
@@ -2635,7 +2644,8 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
     let occs: Vec<Option<u64>> =
         bodies.iter().map(|b| placement_of_body(&app.session, b).map(|path| solidcraft_engine::doc::joints::origin_anchor(doc, &path).0)).collect();
     // As-built: one component picked whole is one side, and the second is still to come (#21842).
-    let whole = f.as_built && f.whole_components.iter().any(|w| w.iter().all(|b| bodies.contains(b)) && bodies.iter().all(|b| w.contains(b)));
+    let whole =
+        f.as_built && f.whole_components.iter().any(|w| w.bodies.iter().all(|b| bodies.contains(b)) && bodies.iter().all(|b| w.bodies.contains(b)));
     if whole {
         return None;
     }
@@ -2704,26 +2714,31 @@ fn side_occurrence(s: &Session, pick: &Sel) -> Option<u64> {
     }
 }
 
-/// As-built: a component was picked whole, as these bodies. Kept while Components holds them all.
-pub(crate) fn picked_whole_component(d: &mut Dialog, bodies: &[String]) {
+/// As-built: the component placed at `path` was picked whole, as these bodies. Kept while
+/// Components holds them all.
+pub(crate) fn picked_whole_component(d: &mut Dialog, path: &[u64], bodies: &[String]) {
     let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { return };
     let held = d.inputs.first().is_some_and(|i| bodies.iter().all(|b| i.items.contains(&Sel::Body { name: b.clone() })));
-    if f.as_built && held && !bodies.is_empty() && !f.whole_components.iter().any(|w| w == bodies) {
-        f.whole_components.push(bodies.to_vec());
+    let whole = WholeComponent { path: path.to_vec(), bodies: bodies.to_vec() };
+    if f.as_built && held && !bodies.is_empty() && !f.whole_components.contains(&whole) {
+        f.whole_components.push(whole);
     }
 }
 
 /// As-built with fewer than two components in Components: they are still being picked.
 pub(crate) fn as_built_wants_components(s: &Session, d: &Dialog) -> bool {
-    matches!(&d.kind, Kind::Assembly(Asm::Joint(f)) if f.as_built) && occurrences(s, sel_items(&d.inputs, 0)).len() < 2
+    matches!(&d.kind, Kind::Assembly(Asm::Joint(f)) if f.as_built && occurrences(s, sel_items(&d.inputs, 0), &f.whole_components).len() < 2)
 }
 
-/// The occurrences of picked bodies (deduplicated, in pick order).
-fn occurrences(s: &Session, items: &[Sel]) -> Vec<u64> {
+/// The occurrences of picked bodies (deduplicated, in pick order). A body of a component picked
+/// whole counts as that component, also when a sub-component places it; where two whole picks
+/// hold it, as the inner one.
+fn occurrences(s: &Session, items: &[Sel], whole: &[WholeComponent]) -> Vec<u64> {
     let mut out = Vec::new();
     for x in items {
-        if let Sel::Body { name } = x
-            && let Some(o) = occurrence_of_body(s, name)
+        let Sel::Body { name } = x else { continue };
+        let picked = whole.iter().filter(|w| w.bodies.contains(name)).max_by_key(|w| w.path.len()).and_then(|w| w.path.last().copied());
+        if let Some(o) = picked.or_else(|| occurrence_of_body(s, name))
             && !out.contains(&o)
         {
             out.push(o);
@@ -2835,7 +2850,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 return Ok(out);
             }
             if f.as_built {
-                let occs = occurrences(s, sel_items(inputs, 0));
+                let occs = occurrences(s, sel_items(inputs, 0), &f.whole_components);
                 if occs.len() != 2 {
                     return Err("select two components".into());
                 }
@@ -2887,7 +2902,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         }
         Asm::RigidGroup => {
             let items = sel_items(inputs, 0);
-            let occs = occurrences(s, items);
+            let occs = occurrences(s, items, &[]);
             if occs.len() < 2 {
                 if occs.len() == 1 && items.len() > 1 && items.iter().all(|x| matches!(x, Sel::Body { .. })) {
                     return Err(solidcraft_ui_text::format(

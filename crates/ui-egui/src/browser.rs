@@ -2298,7 +2298,7 @@ fn occurrence_rows_inner(
         if !offer_bodies(app, &names, Take::Toggle) {
             click_select(app, r.how.as_ref(), Some(Sel::Occurrence { path: path.to_vec() }));
         } else if let Some(d) = app.dialog.as_mut() {
-            crate::dialogs_assembly::picked_whole_component(d, &names);
+            crate::dialogs_assembly::picked_whole_component(d, path, &names);
         }
     }
     if rename_here {

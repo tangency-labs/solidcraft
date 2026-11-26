@@ -2477,7 +2477,11 @@ fn stand_and_umbrella() -> (crate::scenario::Harness, u64, u64) {
 }
 
 fn click_row(h: &mut crate::scenario::Harness, occurrence: u64) {
-    let at = h.call("ui.at", json!({"occurrence": [occurrence], "control": "row"}));
+    click_row_at(h, &[occurrence]);
+}
+
+fn click_row_at(h: &mut crate::scenario::Harness, path: &[u64]) {
+    let at = h.call("ui.at", json!({"occurrence": path, "control": "row"}));
     assert_eq!(at["ok"], true, "{at}");
     let clicked = h.call("ui.click", json!({"x": at["result"][0], "y": at["result"][1]}));
     assert_eq!(clicked["ok"], true, "{clicked}");
@@ -2517,6 +2521,61 @@ fn as_built_takes_a_two_body_component_as_one() {
         assert_eq!(c[0].0, "joint.as_built");
         assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(stand), json!(umbrella)));
     }
+}
+
+/// A component that holds a sub-component, picked by its Browser row or selected when As-Built
+/// starts, is one component: the body its sub-component places counts as the picked component,
+/// so Components waits for the second one. The sub-component picked by its own row is itself.
+#[test]
+fn as_built_takes_a_component_with_a_sub_component_as_one() {
+    let nested = || {
+        let mut h = crate::scenario::Harness::new();
+        let component = |h: &mut crate::scenario::Harness, name: &str, corner: [f64; 3]| {
+            let occ = h.app.run("component.create", json!({ "name": name })).unwrap()["occurrence"].as_u64().unwrap();
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": corner, "operation": "new_body"})).unwrap();
+            occ
+        };
+        let outer = component(&mut h, "Outer", [0.0, 0.0, 0.0]);
+        let inner = component(&mut h, "Inner", [0.0, 0.0, 10.0]);
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        let other = component(&mut h, "Other", [40.0, 0.0, 0.0]);
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.preferences.browser_components_open = true;
+        h.frames(3);
+        assert_eq!(h.app.session.occurrence_bodies(&[outer], true).unwrap().len(), 2, "Outer holds Inner's body too");
+        assert_eq!(h.app.session.occurrence_bodies(&[outer, inner], true).unwrap().len(), 1);
+        (h, outer, inner, other)
+    };
+    for preselected in [false, true] {
+        let (mut h, outer, _, other) = nested();
+        if preselected {
+            h.app.session.selection = vec![Sel::Occurrence { path: vec![outer] }];
+        }
+        h.app.start("joint.as_built");
+        h.frames(2);
+        if !preselected {
+            click_row(&mut h, outer);
+        }
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[0].items.len(), 2, "Outer's body and Inner's");
+        assert_eq!(d.active, 0, "one component: Components stays active (preselected {preselected})");
+        assert_eq!(as_built_hint(&h), None, "nothing to split (preselected {preselected})");
+        assert_eq!(apply_commands(&h.app, d).unwrap_err(), "select two components", "preselected {preselected}");
+        click_row(&mut h, other);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.active, 1, "two components: Position is next");
+        let c = apply_commands(&h.app, d).unwrap();
+        assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(outer), json!(other)));
+    }
+    let (mut h, outer, inner, other) = nested();
+    h.app.start("joint.as_built");
+    h.frames(2);
+    click_row_at(&mut h, &[outer, inner]);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "Inner's body alone");
+    click_row(&mut h, other);
+    let d = h.app.dialog.as_ref().unwrap();
+    let c = apply_commands(&h.app, d).unwrap();
+    assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(inner), json!(other)), "the sub-component by its own row");
 }
 
 /// #21842: the hint stays for its own case, the bodies of one component picked one by one, and a

@@ -1524,7 +1524,7 @@ impl Dialog {
                             inp.items.push(body);
                         }
                     }
-                    crate::dialogs_assembly::picked_whole_component(&mut d, &whole);
+                    crate::dialogs_assembly::picked_whole_component(&mut d, path, &whole);
                 }
                 continue;
             }
