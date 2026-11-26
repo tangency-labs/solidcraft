@@ -124,24 +124,32 @@ fn issue_3012_cut_of_filleted_boxes_a_sliver_apart() {
                 (expected - v).abs() < 1e-8,
                 "dx {dx} reversed {reversed}: {v} vs {expected} ({exact} ends exact)"
             );
+            // Each cap is a planar face whose edges bound the section above. Taken over its own
+            // trims, which run within the edges' tolerance of them, a cap's area was dx^2 / 2
+            // short (-0.5000, -0.5000 and -0.5015 dx^2 at 1e-4, 1e-3 and 1e-2, #16854); closed
+            // onto its edges, as the volume is (#16735), it is the section.
+            let caps: Vec<f64> = (0..rec.faces.len())
+                .map(|i| r.face_area(&order, i, 1e-10).unwrap())
+                .filter(|a| (a - section).abs() < 1e-3 * section)
+                .collect();
+            assert_eq!(caps.len(), 2, "dx {dx} reversed {reversed}: caps {caps:?}");
+            for cap in caps {
+                assert!(
+                    (cap - section).abs() < 1e-3 * dx * dx,
+                    "dx {dx} reversed {reversed}: cap {cap} vs section {section}"
+                );
+            }
             // Every face of the sliver: the two flat sides (26 x 10 each), the four fillets (a
             // quarter turn of R2 by 10 each), the two caps, each the section above, and a strip
             // dx by 10 at each exact end. A fillet face the sector skipped and a neighbouring
             // edge put in the wrong region would add or drop 31.4. A fillet cut dx of arc short
-            // of its tangent end is 10 dx short. The area routine takes each cap over its trims,
-            // which enclose dx^2 / 2 less than the cap's edges (MEASURED: -0.5000, -0.5000
-            // and -0.5015 dx^2 per cap at 1e-4, 1e-3 and 1e-2; not derived, the same class of
-            // defect #16735 closed for the volume; tracked in #16854), so the area is dx^2
-            // short of the faces.
-            // Up to a second-order term (measured 0.02 dx^2 at most: the arcs are not straight)
-            // and the area routine's slack of 1e-7 (measured 4e-8).
+            // of its tangent end is 10 dx short.
             let faces = 2.0 * 26.0 * 10.0 + 4.0 * FRAC_PI_2 * 2.0 * 10.0 + 2.0 * section;
             let ends = exact as f64 * strip - cut * 10.0 * dx;
-            let trims_short = dx * dx;
             let area = r.area(1e-8).unwrap();
             assert!(
-                (area - (faces + ends - trims_short)).abs() < 0.05 * dx * dx + 1e-7,
-                "dx {dx} reversed {reversed}: area {area} vs {faces} + {ends} - dx^2"
+                (area - (faces + ends)).abs() < 0.05 * dx * dx + 1e-7,
+                "dx {dx} reversed {reversed}: area {area} vs {faces} + {ends}"
             );
             let (k, mut brep) = kernel_copy(&r);
             // What the fix does: every vertex of the result, the four tangent ends among them,
