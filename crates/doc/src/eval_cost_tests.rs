@@ -4678,6 +4678,15 @@ fn a_healed_import_keeps_its_model_cache_across_save_and_open() {
     // Settle the heal and evaluate so the model carries the healed body.
     assert!(model.settle_import_checks_under(true));
     model.evaluate(&doc);
+    // That evaluation reads the import again with its heal, which starts a fresh SMLib check of
+    // its parts on a kernel thread; a save keeps no model while one runs (#20133). Wait for it
+    // to end, as a save once the check ends would.
+    for r in &model.results {
+        if let Some(report) = &r.import_report {
+            report.checks.wait();
+        }
+    }
+    assert!(!model.checking_imports());
     assert!(model.has_import_heals());
     assert!(model.cache_skip_reason(&doc).is_none(), "{:?}", model.cache_skip_reason(&doc));
     let healed_fp = model.result(import).unwrap().fingerprint;
