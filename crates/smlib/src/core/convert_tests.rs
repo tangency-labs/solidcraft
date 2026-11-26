@@ -421,3 +421,230 @@ fn a_hole_cut_a_hair_across_a_torus_seam_comes_back() {
     let v = volume(&again, 1e-9).unwrap();
     assert!(rel(v, want) < 1e-9, "joined: {v} vs {want}");
 }
+
+/// The tool that ends a tooth space in a cutter's curve: a section in the plane z = 40 whose floor
+/// is `arc_deg` degrees of the circle of radius 13.725 about the z axis, with two walls up to 16
+/// from that axis and a top, turned a quarter turn about a line in its plane `cutter_radius` above
+/// the floor. The floor sweeps a torus of which the tube shows only those degrees.
+fn run_out_tool(arc_deg: f64, cutter_radius: f64) -> Body {
+    use std::f64::consts::FRAC_PI_2;
+
+    use crate::sweeps::Curve;
+    let (root, out_to, z) = (13.725_f64, 16.0_f64, 40.0);
+    let half = (0.5 * arc_deg).to_radians();
+    let at = |a: f64| [root * a.cos(), root * a.sin(), z];
+    let (after, before) = (at(FRAC_PI_2 + half), at(FRAC_PI_2 - half));
+    let (high_before, high_after) = ([before[0], out_to, z], [after[0], out_to, z]);
+    let line = |start, end| Curve::Line { start, end };
+    let profile = [
+        // from the corner after the space to the one before it: clockwise seen from +z
+        Curve::Arc {
+            center: [0.0, 0.0, z],
+            axis: [0.0, 0.0, -1.0],
+            reference: [(FRAC_PI_2 + half).cos(), (FRAC_PI_2 + half).sin(), 0.0],
+            radius: root,
+            start: 0.0,
+            end: 2.0 * half,
+        },
+        line(before, high_before),
+        line(high_before, high_after),
+        line(high_after, after),
+    ];
+    super::sweep::revolve(&profile, [0.0, root + cutter_radius, z], [1.0, 0.0, 0.0], FRAC_PI_2, true).unwrap()
+}
+
+/// What [`a_torus_showing_a_short_arc_of_its_tube_comes_back_a_valid_body`] says of the floor that
+/// comes back, beside the body passing its own check.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Floor {
+    /// Nothing more: the arc is near where one reading gives way to another.
+    Any,
+    /// The torus of the arrays' own frame and radii, to rounding.
+    ItsOwnTorus,
+    /// No torus but its own: its exact NURBS form (the arrays that come back name no torus), or the
+    /// torus of the arrays' own frame and radii where the kernel can lay that one on the form.
+    ItsFormOrItsOwnTorus,
+}
+
+/// A torus of which the tube shows a short arc comes back from its arrays as a body that passes its
+/// own check, alone and cut out of a shaft, however short the arc. SMLib's test works a torus back
+/// out of the NURBS form, which a short arc does not fix: a 1.2 degree arc came back 1e-10 to 1e-9
+/// off its form and the check refused it in some places ("Bad Analytic and NURB Evaluate"), and one
+/// under about 0.3 degrees was refused outright ("a NURBS form that is not its analytic surface").
+/// Where the form is off the torus found (1.2 degrees), the face is the torus of the arrays' own
+/// frame and radii, to rounding. Where none is found (0.05 degrees), the face is no torus but its
+/// own: it is its exact form, or the arrays' torus where the kernel can lay that one on so short a
+/// form.
+#[test]
+fn a_torus_showing_a_short_arc_of_its_tube_comes_back_a_valid_body() {
+    use crate::check::CheckLevel;
+    use crate::flat::{FACE_TORUS_AXIS, FACE_TORUS_MAJOR_RADIUS, FACE_TORUS_MINOR_RADIUS, FACE_TORUS_ORIGIN, FACE_TORUS_REF_DIRECTION};
+    let cases = [
+        (5.0, 25.0, Floor::Any),
+        (2.0, 25.0, Floor::Any),
+        (1.2, 25.0, Floor::ItsOwnTorus),
+        (1.2, 40.0, Floor::ItsOwnTorus),
+        (0.6, 25.0, Floor::Any),
+        (0.3, 25.0, Floor::Any),
+        (0.1, 25.0, Floor::Any),
+        (0.05, 40.0, Floor::ItsFormOrItsOwnTorus),
+    ];
+    for (arc_deg, cutter_radius, floor) in cases {
+        let at = format!("a {arc_deg} degree arc, cutter radius {cutter_radius}");
+        let tool = run_out_tool(arc_deg, cutter_radius);
+        let arrays = to_arrays(&tool).unwrap();
+        let made = &arrays.reals[&FACE_TORUS_MAJOR_RADIUS];
+        assert_eq!(made.len(), 1, "{at}: the floor is one torus");
+        assert!(rel(made[0], 13.725 + cutter_radius) < 1e-12, "{at}: major radius {}", made[0]);
+        let back = from_arrays(&arrays).unwrap();
+        let again = to_arrays(&back).unwrap();
+        // how many tori the arrays that come back name: the floor, or none where it is its form
+        let named = again.reals.get(&FACE_TORUS_MAJOR_RADIUS).map_or(0, Vec::len);
+        if floor == Floor::ItsOwnTorus || (floor == Floor::ItsFormOrItsOwnTorus && named > 0) {
+            for id in [FACE_TORUS_ORIGIN, FACE_TORUS_AXIS, FACE_TORUS_REF_DIRECTION, FACE_TORUS_MAJOR_RADIUS, FACE_TORUS_MINOR_RADIUS] {
+                let (was, is) = (&arrays.reals[&id], &again.reals[&id]);
+                assert_eq!(was.len(), is.len(), "{at}: array {id}");
+                for (a, b) in was.iter().zip(is) {
+                    assert!((a - b).abs() <= 8.0 * f64::EPSILON * (1.0 + a.abs()), "{at}: array {id}: {a} came back {b}");
+                }
+            }
+        }
+        assert!(super::check(&back, CheckLevel::All).unwrap().is_valid(), "{at}: the tool");
+        let shaft = make_cylinder([0.0; 3], 15.75, 60.0).unwrap();
+        let cut = boolean(&shaft, &back, BooleanOp::Subtract).unwrap().unwrap();
+        let cut = from_arrays(&to_arrays(&cut).unwrap()).unwrap();
+        assert!(super::check(&cut, CheckLevel::All).unwrap().is_valid(), "{at}: the shaft cut with it");
+    }
+}
+
+/// Arrays that name a torus a thousandth off its NURBS form do not put that torus on the form: the
+/// body comes back with the torus its form is (major radius 10), as before.
+#[test]
+fn a_torus_named_off_its_form_is_not_put_on_the_form() {
+    use crate::flat::FACE_TORUS_MAJOR_RADIUS;
+    let mut arrays = to_arrays(&make_torus([1.0, -1.0, 0.5], 10.0, 3.0).unwrap()).unwrap();
+    for r in arrays.reals.get_mut(&FACE_TORUS_MAJOR_RADIUS).unwrap() {
+        *r += 1e-3;
+    }
+    let again = to_arrays(&from_arrays(&arrays).unwrap()).unwrap();
+    let radii = &again.reals[&FACE_TORUS_MAJOR_RADIUS];
+    assert!(!radii.is_empty() && radii.iter().all(|r| (r - 10.0).abs() < 1e-9), "{radii:?}");
+}
+
+/// What the record of `body` writes for each face on an implicit offset surface, which it cannot
+/// hold (#21926).
+#[derive(Debug)]
+struct StandIn {
+    /// The face's index.
+    face: usize,
+    /// The tolerance the record states for the face: the face's tolerance on its import.
+    stated: f64,
+    /// The farthest the written spline lies from the face's surface at the same parameters, on a
+    /// 61 x 61 grid over the face's parameter box (at least its distance from the face there).
+    sampled: f64,
+    /// The certified bound of the distance from the offset of the kernel's certified net of it
+    /// within half the stated tolerance, at every parameter; `None` unless that net is the
+    /// spline written, coordinate for coordinate.
+    certified: Option<f64>,
+}
+
+/// Each offset face of `body` and its spline in `body`'s record, read back as the app reads a
+/// record ([`import::arrays`]).
+fn offset_stand_ins(body: &Body) -> Vec<StandIn> {
+    let rec = record(&to_arrays(body).unwrap());
+    let back = from_arrays(&import::arrays(&rec, true).unwrap()).unwrap();
+    let stated: Vec<f64> = super::with_body("face tolerances", &back, |_, b| {
+        let mut t = Vec::new();
+        for &f in b.face_list() {
+            t.push(b.face(f)?.tolerance);
+        }
+        Ok(Some(t))
+    })
+    .unwrap()
+    .unwrap();
+    // each offset face's index, its certified net and bound, and its points on the grid
+    let offsets = super::with_body("offset faces", body, |k, b| {
+        let mut out = Vec::new();
+        for (i, &f) in b.face_list().iter().enumerate() {
+            let face = b.face(f)?;
+            let (Some(s), Some(&t)) = (face.surface.as_ref(), stated.get(i)) else { continue };
+            let Some((net, bound)) = solidcore_ops::offset::certified_offset_net(k, s, t / 2.0)? else { continue };
+            let d = face.uv_domain;
+            let mut grid = Vec::new();
+            for a in 0..=60 {
+                for c in 0..=60 {
+                    let at = |lo: f64, hi: f64, n: i32| lo + (hi - lo) * f64::from(n) / 60.0;
+                    let uv = solidcore::Point2::new(at(d.u_min(), d.u_max(), a), at(d.v_min(), d.v_max(), c));
+                    grid.push((uv, s.evaluate_point(k, uv)?));
+                }
+            }
+            out.push((i, net, bound, grid));
+        }
+        Ok(Some(out))
+    })
+    .unwrap()
+    .unwrap();
+    super::with_body("stand-ins", &back, |k, b| {
+        let mut out = Vec::new();
+        for (i, net, bound, grid) in &offsets {
+            let written = b.face(b.face_list()[*i])?.surface.clone().unwrap();
+            let mut sampled: f64 = 0.0;
+            for (uv, p) in grid {
+                sampled = sampled.max((written.evaluate_point(k, *uv)? - *p).length());
+            }
+            let nurb = |s| super::convert::bspline_surface_part(k, s).unwrap().and_then(|p| p.gw_nurb().cloned()).unwrap();
+            let same = super::convert::same_nurbs(&nurb(&written), &nurb(net), 0.0);
+            out.push(StandIn { face: *i, stated: stated[*i], sampled, certified: same.then_some(*bound) });
+        }
+        Ok(Some(out))
+    })
+    .unwrap()
+    .unwrap()
+}
+
+/// The largest edge tolerance `body`'s record writes (EDGE_TOLERANCE is twice the tolerance).
+fn largest_edge_tolerance(body: &Body) -> f64 {
+    to_arrays(body).unwrap().reals[&crate::flat::EDGE_TOLERANCE].iter().fold(0.0, |m: f64, &t| m.max(t / 2.0))
+}
+
+/// #21926: the fin of `examples/regressions/fins_joined_into_their_hub.json` without its trim, a
+/// sheet lofted between two straight sections that twist, thickened 1.2 about itself: six faces,
+/// one of them on an implicit offset surface (the sheet moved back 0.6), every tolerance 1e-5. A
+/// closed shell 0.2 inward (the kernel's, not through the record) keeps that face on it, with its
+/// tolerance of 1e-5, and raises edge tolerances to about 3.2e-5. The record's spline for the
+/// face was fitted to half the largest tolerance and came 1.56e-5 off the face. It is now the
+/// kernel's net of the offset certified within half the face's own tolerance: within the 1e-5 the
+/// record states for the face at every parameter, and so at every point sampled. The thickened
+/// body, whose spline was within its face's tolerance before (1.8e-6 sampled), is the control.
+#[test]
+fn an_offset_face_is_written_within_the_tolerance_its_record_states() {
+    use crate::sweeps::Curve;
+    let line = |start: [f64; 3], end: [f64; 3]| vec![Curve::Line { start, end }];
+    let sheet = super::sweep::loft(
+        &[
+            line([-9.641814145318946, 0.0, -16.68578720333266], [9.641814145300943, 0.0, 6.29554609021679]),
+            line([-12.990381056768296, 30.0, -12.5], [12.9903810567683, 30.0, 2.5]),
+        ],
+        1,
+        false,
+    )
+    .unwrap();
+    let fin = super::offset::thicken(&sheet, 1.2, true).unwrap();
+    let shelled = Body::from_kernel(super::run("shell_brep", |k| super::offset::shell_brep_full(k, &fin.kernel(), -0.2, &[])).unwrap());
+    let mut written = Vec::new();
+    for (name, body, faces) in [("thickened", &fin, [6, 12, 8]), ("shelled", &shelled, [12, 24, 16])] {
+        assert_eq!(counts(body).unwrap(), faces, "{name}");
+        let stand_ins = offset_stand_ins(body);
+        let [s] = stand_ins.as_slice() else { panic!("{name}: one offset face, not {stand_ins:?}") };
+        assert_eq!((s.face, s.stated), (5, 1e-5), "{name}: {s:?}");
+        assert!(s.sampled <= s.stated, "{name}: the spline is outside the face's tolerance: {s:?}");
+        written.extend(stand_ins.into_iter().map(|s| (name, s)));
+    }
+    for (name, s) in written {
+        let bound = s.certified.unwrap_or_else(|| panic!("{name}: the written spline is not the certified net: {s:?}"));
+        assert!(bound <= s.stated / 2.0, "{name}: {s:?}");
+    }
+    // the shell raised edge tolerances past twice the face's: half the largest is past the face's
+    let largest = largest_edge_tolerance(&shelled);
+    assert!(largest > 2.0 * 1e-5 && largest_edge_tolerance(&fin) == 1e-5, "{largest}");
+}

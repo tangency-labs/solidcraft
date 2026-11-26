@@ -1482,6 +1482,55 @@ fn loop_holds_a_point_on_an_edge_line_off_the_loop() {
     assert_eq!(loop_holds(&sq, v(5.0, 0.0)), None);
 }
 
+/// The distance to a loop's segment is exact for a line and an arc and none for a free-form
+/// curve, so a caller measuring a clearance to a loop knows which segments it could not measure.
+#[test]
+fn segment_distance_is_exact_for_lines_and_arcs_and_none_for_curves() {
+    use solidcore_ops::prism::segment_distance;
+    let line = Seg2::Line {
+        a: v(0.0, 0.0),
+        b: v(10.0, 0.0),
+    };
+    assert_eq!(segment_distance(&line, v(5.0, 3.0)), Some(3.0));
+    assert_eq!(segment_distance(&line, v(-3.0, 4.0)), Some(5.0));
+    let arc = Seg2::Arc {
+        center: v(0.0, 0.0),
+        radius: 5.0,
+        start: 0.0,
+        sweep: FRAC_PI_2,
+    };
+    assert_eq!(segment_distance(&arc, v(10.0, 0.0)), Some(5.0));
+    let curve = Seg2::Cubic {
+        p0: v(0.0, 0.0),
+        p1: v(1.0, 2.0),
+        p2: v(3.0, 2.0),
+        p3: v(4.0, 0.0),
+    };
+    assert_eq!(segment_distance(&curve, v(2.0, 5.0)), None);
+    assert_eq!(segment_distance(&line, v(f64::NAN, 0.0)), None);
+    // A whole circle hole is the distance to its rim: the sheet's holes are measured so.
+    let hole = Loop2::circle(v(30.0, 40.0), 2.125);
+    let to_rim = hole
+        .segs
+        .iter()
+        .filter_map(|s| segment_distance(s, v(30.0, 36.0)))
+        .fold(f64::INFINITY, f64::min);
+    assert!((to_rim - (4.0 - 2.125)).abs() < 1e-12, "{to_rim}");
+}
+
+/// A hole in the flat is one hole when its centre and radius agree within the tolerance, and a note
+/// naming it stands beside it, level with its centre.
+#[test]
+fn a_hole_is_told_from_another_and_named_beside_itself() {
+    use solidcore_ops::prism::{note_beside, same_circle};
+    let hole = (v(30.0, 40.0), 2.125);
+    assert!(same_circle(hole, (v(30.0 + 5e-7, 40.0), 2.125), 1e-6));
+    assert!(!same_circle(hole, (v(30.0 + 2e-6, 40.0), 2.125), 1e-6));
+    assert!(!same_circle(hole, (v(30.0, 40.0), 2.125 + 2e-6), 1e-6));
+    let at = note_beside(hole, 3.0);
+    assert_eq!((at.x, at.y), (30.0 + 2.125 + 1.5, 40.0 - 1.5));
+}
+
 #[test]
 fn directed_planar_sweep_preserves_record_coordinates() {
     let center = v(10.0, 20.0);
@@ -1970,6 +2019,46 @@ fn a_face_strays_across_a_direction_by_its_tilt_over_its_own_size() {
         .unwrap();
     let sin = 1e-3 / (1.0 + 1e-6_f64).sqrt();
     close(tilted, 2.0 * 10.0 * sin, "ruled, tilted");
+}
+
+/// #3384: a prism on a flat segment (an arc of sagitta 1.5e-4 or 5e-4 over a chord of 0.2 or 40,
+/// its centre 33.3 or 4e5 below the chord's middle at the world origin) writes its record, its
+/// two caps, its flat wall and its arc's wall, and reads back. On main its record was refused:
+/// the arc's NURBS was "off its own frame and radii".
+#[test]
+fn a_prism_on_a_flat_segment_writes_its_record() {
+    all_fixes();
+    for (h, cy) in [
+        (0.1_f64, -33.3_f64),
+        (20.0, -(4e5_f64 * 4e5 - 400.0).sqrt()),
+    ] {
+        let r = h.hypot(cy);
+        let start = (-cy).atan2(h);
+        let segment = Region2 {
+            outer: Loop2 {
+                segs: vec![
+                    Seg2::Arc {
+                        center: Vec2::new(0.0, cy),
+                        radius: r,
+                        start,
+                        sweep: (-cy).atan2(-h) - start,
+                    },
+                    Seg2::Line {
+                        a: Vec2::new(-h, 0.0),
+                        b: Vec2::new(h, 0.0),
+                    },
+                ],
+            },
+            holes: vec![],
+        };
+        let body = extrude_planar_regions(&Plane::XY, &[segment], 0.0, 10.0)
+            .unwrap_or_else(|e| panic!("h = {h}: {e:?}"));
+        let (record, _) = body
+            .to_record()
+            .unwrap_or_else(|e| panic!("h = {h}: {e:?}"));
+        assert_eq!(record.faces.len(), 4, "h = {h}: {:?}", record.faces);
+        Body::from_record(&record, true).unwrap_or_else(|e| panic!("h = {h}: {e:?}"));
+    }
 }
 
 #[test]

@@ -77,7 +77,25 @@ static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 /// A stalled regular-file read cannot be interrupted portably. Limit detached reads globally;
 /// their permits remain occupied until the OS returns, even after the dialog stops waiting.
 const MAX_PREFIX_READS: usize = 2;
+#[cfg(not(test))]
 static PREFIX_READS: std::sync::OnceLock<Arc<AtomicUsize>> = std::sync::OnceLock::new();
+
+// Each unit test runs its dialog hooks on its own thread. Detached reads retain
+// their Arc, so their permits still count until the read completes.
+#[cfg(test)]
+std::thread_local! {
+    static PREFIX_READS: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
+}
+
+#[cfg(not(test))]
+fn prefix_reads() -> Arc<AtomicUsize> {
+    PREFIX_READS.get_or_init(|| Arc::new(AtomicUsize::new(0))).clone()
+}
+
+#[cfg(test)]
+fn prefix_reads() -> Arc<AtomicUsize> {
+    PREFIX_READS.with(Arc::clone)
+}
 
 struct PrefixPermit(Arc<AtomicUsize>);
 impl Drop for PrefixPermit {
@@ -398,7 +416,7 @@ impl<H: PluginHost> design_state::Host for State<H> {
     }
 }
 impl<H: PluginHost> log::Host for State<H> {
-    fn log(&mut self, _level: log::Level, message: String) {
+    fn log(&mut self, level: log::Level, message: String) {
         if self.check().is_err() {
             return;
         }
@@ -407,7 +425,20 @@ impl<H: PluginHost> log::Host for State<H> {
             self.fail(limit("log size"));
             return;
         }
-        self.host.log(&message.chars().filter(|c| !c.is_control()).collect::<String>());
+        let clean: String = message.chars().filter(|c| !c.is_control()).collect();
+        match level {
+            log::Level::Debug => ::log::debug!(target: "craft_plugin_wasm", "{clean}"),
+            log::Level::Info => ::log::info!(target: "craft_plugin_wasm", "{clean}"),
+            log::Level::Warn => ::log::warn!(target: "craft_plugin_wasm", "{clean}"),
+            log::Level::Error => ::log::error!(target: "craft_plugin_wasm", "{clean}"),
+        }
+        let host_level = match level {
+            log::Level::Debug => craft_plugin::LogLevel::Debug,
+            log::Level::Info => craft_plugin::LogLevel::Info,
+            log::Level::Warn => craft_plugin::LogLevel::Warn,
+            log::Level::Error => craft_plugin::LogLevel::Error,
+        };
+        self.host.log_level(host_level, &clean);
     }
 }
 impl<H: PluginHost> control::Host for State<H> {
@@ -1864,7 +1895,7 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
             Ok((dir, size, prefix))
         };
         let (dir, size, prefix) = if let Some(end) = dialog_deadline {
-            let reply = start_prefix_read(PREFIX_READS.get_or_init(|| Arc::new(AtomicUsize::new(0))).clone(), open)?;
+            let reply = start_prefix_read(prefix_reads(), open)?;
             wait_prefix(&reply, end).map_err(|e| with_limits(e, runtime.limits.deadline_ms))?
         } else {
             open()?

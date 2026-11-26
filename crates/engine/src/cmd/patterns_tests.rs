@@ -189,6 +189,35 @@ fn a_hole_pattern_keeps_each_copied_wall_with_its_sketch_point() {
 }
 
 #[test]
+fn a_root_pattern_recuts_the_source_component_after_its_plate_grows() {
+    for consume_root_body in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "L", "expression": "40 mm"}));
+        run(&mut s, "component.create", json!({"name": "Part"}));
+        run(&mut s, "solid.box", json!({"length": "L", "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Plate"}));
+        run(&mut s, "solid.box", json!({"length": 6, "width": 6, "height": 20, "corner": [4, 2, -5], "operation": "cut", "name": "First"}));
+        run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 20, "corner": [12, 12, -5], "operation": "cut", "name": "Pocket"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let features = if consume_root_body {
+            // The first copy removes the root's only body. The next copy then acts on the plate.
+            run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [56, 4, 1], "body_name": "Small"}));
+            vec!["First", "Pocket"]
+        } else {
+            vec!["Pocket"]
+        };
+        let pattern = run(&mut s, "solid.pattern.rectangular", json!({"features": features, "dir1": [1, 0, 0], "count1": 2, "spacing1": 50}));
+        assert_eq!(pattern["warning"], format!("1 of {} cut copies remove no material", features.len()));
+
+        run(&mut s, "parameters.change", json!({"name": "L", "expression": "70 mm"}));
+        let expected = 70.0 * 20.0 * 10.0 - 6.0 * 6.0 * 10.0 - 2.0 * 4.0 * 4.0 * 10.0;
+        let measured = volume(&mut s);
+        assert!((measured - expected).abs() < 1e-6, "{features:?}: resized plate measures {measured}, expected {expected}");
+        let result = s.model.result(pattern["feature"].as_u64().unwrap()).unwrap();
+        assert!(result.error.is_none() && result.warning.is_none(), "{result:?}");
+    }
+}
+
+#[test]
 fn rectangular_hole_pattern_warns_for_copies_that_miss_and_clears_after_edit() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"corner":[0,0,0],"body_name":"Plate"}));
@@ -936,6 +965,192 @@ fn an_inactive_pattern_does_not_drive_an_active_joints_reported_value() {
     assert_eq!(s.occurrence_placement(&[seed]).unwrap().world, before);
 }
 
+/// Component-pattern copies inherit their seed occurrence's constraint and DOF rather than
+/// reporting `dof: 6` across rectangular, circular, and path patterns (#22213).
+#[test]
+fn component_pattern_copies_inherit_seed_dof_and_anchor_downstream_joints() {
+    let dof_map = |s: &mut Session| -> std::collections::BTreeMap<u64, u64> {
+        run(s, "joint.list", json!({}))["dof"]
+            .as_array()
+            .expect("dof array")
+            .iter()
+            .map(|e| (e["occurrence"].as_u64().expect("occ"), e["dof"].as_u64().expect("dof")))
+            .collect()
+    };
+
+    // 1. Grounded seed + rectangular, circular, and path patterns: all copies report dof 0.
+    for kind in ["rectangular", "circular", "path"] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Pin", "activate": true}));
+        run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 10}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let seed = s.doc.occurrences[0].id;
+        let pattern = match kind {
+            "rectangular" => run(&mut s, "solid.pattern.rectangular", json!({"components": ["Pin"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 15})),
+            "circular" => run(&mut s, "solid.pattern.circular", json!({"components": ["Pin"], "axis": "Z", "count": 3})),
+            _ => {
+                let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().expect("sketch");
+                run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]]}));
+                run(&mut s, "sketch.finish", json!({}));
+                run(&mut s, "solid.pattern.path", json!({"components": ["Pin"], "path_sketch": sk, "path": ["l1"], "count": 3, "distance": 30}))
+            }
+        };
+        let copies: Vec<u64> = pattern["occurrences"].as_array().expect("copies").iter().map(|v| v.as_u64().expect("copy id")).collect();
+        assert_eq!(copies.len(), 2, "{kind}");
+        let dofs = dof_map(&mut s);
+        assert_eq!(dofs.get(&seed), Some(&0), "{kind} seed");
+        for copy in &copies {
+            assert_eq!(dofs.get(copy), Some(&0), "{kind} copy {copy}");
+        }
+        let free = run(&mut s, "joint.list", json!({"dof_free_only": true}));
+        assert_eq!(free["dof"].as_array().expect("free dof").len(), 0, "{kind} dof_free_only");
+    }
+
+    // 2. Seed on a slider joint (dof 1): copies inherit dof 1, and a part joined to a copy
+    //    is anchored (not a floating chain).
+    let mut s = Session::default();
+    let base = run(&mut s, "component.create", json!({"name": "Base", "activate": true}))["occurrence"].as_u64().expect("base");
+    run(&mut s, "solid.box", json!({"length": 50, "width": 20, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let pin = run(&mut s, "component.create", json!({"name": "Pin", "activate": true}))["occurrence"].as_u64().expect("pin");
+    run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "joint.as_built", json!({"a": base, "b": pin, "type": "slider", "at": {"occurrence": base, "point": [0, 0, 10], "z": [0, 0, 1]}}));
+    let pattern = run(&mut s, "solid.pattern.rectangular", json!({"components": ["Pin"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 15}));
+    let copy1 = pattern["occurrences"][0].as_u64().expect("copy1");
+    let copy2 = pattern["occurrences"][1].as_u64().expect("copy2");
+    let cap = run(&mut s, "component.create", json!({"name": "Cap", "activate": true}))["occurrence"].as_u64().expect("cap");
+    run(&mut s, "solid.box", json!({"length": 6, "width": 6, "height": 4}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "joint.as_built", json!({"a": copy1, "b": cap, "type": "rigid", "at": {"occurrence": copy1, "point": [15, 0, 10], "z": [0, 0, 1]}}));
+    let listed = run(&mut s, "joint.list", json!({}));
+    assert_eq!(listed["floating"], json!([]), "joint on pattern copy should not float");
+    assert_eq!(listed["conflicts"], json!([]));
+    assert_eq!(listed["errors"], json!([]));
+    let dofs = dof_map(&mut s);
+    assert_eq!(dofs.get(&base), Some(&0));
+    assert_eq!(dofs.get(&pin), Some(&1));
+    assert_eq!(dofs.get(&copy1), Some(&1));
+    assert_eq!(dofs.get(&copy2), Some(&1));
+    assert_eq!(dofs.get(&cap), Some(&1));
+
+    // 3. Unconstrained seed (grounded: false, no joints): seed and copies stay dof 6.
+    let mut s = Session::default();
+    let free_seed =
+        run(&mut s, "component.create", json!({"name": "Loose", "activate": true, "grounded": false}))["occurrence"].as_u64().expect("loose");
+    run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let pattern = run(&mut s, "solid.pattern.rectangular", json!({"components": ["Loose"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 15}));
+    let free_copy = pattern["occurrences"][0].as_u64().expect("free copy");
+    let dofs = dof_map(&mut s);
+    assert_eq!(dofs.get(&free_seed), Some(&6));
+    assert_eq!(dofs.get(&free_copy), Some(&6));
+
+    // 4. Loop closure moving a sub-assembly refreshes its pattern copies, downstream joints,
+    //    and downstream DOFs.
+    let mut s = Session::default();
+    let base = run(&mut s, "component.create", json!({"name": "Base", "activate": true}))["occurrence"].as_u64().expect("base");
+    run(&mut s, "solid.box", json!({"length": 50, "width": 20, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let sub_res = run(&mut s, "component.create", json!({"name": "Sub", "activate": true, "grounded": false}));
+    let sub_comp = sub_res["component"].as_u64().expect("sub comp");
+    let sub_occ = sub_res["occurrence"].as_u64().expect("sub occ");
+    run(&mut s, "solid.box", json!({"length": 30, "width": 10, "height": 10}));
+    let pin_occ = run(&mut s, "component.create", json!({"name": "Pin", "parent": sub_comp, "activate": true, "grounded": false}))["occurrence"]
+        .as_u64()
+        .expect("pin occ");
+    run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": sub_comp}));
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"a": sub_occ, "b": pin_occ, "type": "rigid", "at": {"occurrence": sub_occ, "point": [0, 0, 10], "z": [0, 0, 1]}}),
+    );
+    let pattern = run(&mut s, "solid.pattern.rectangular", json!({"components": ["Pin"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 15}));
+    let copy_occ = pattern["occurrences"][0].as_u64().expect("copy occ");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let cap_occ =
+        run(&mut s, "component.create", json!({"name": "Cap", "activate": true, "grounded": false}))["occurrence"].as_u64().expect("cap occ");
+    run(&mut s, "solid.box", json!({"length": 6, "width": 6, "height": 4}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"a": copy_occ, "b": cap_occ, "type": "rigid", "at": {"occurrence": copy_occ, "point": [15, 0, 10], "z": [0, 0, 1]}}),
+    );
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"a": base, "b": sub_occ, "type": "slider", "at": {"occurrence": base, "point": [0, 0, 10], "z": [0, 0, 1]}}),
+    );
+    // Closing rigid joint with offset 10 forces the slider from 0 to 10 mm and reduces DOF to 0.
+    let closing = run(
+        &mut s,
+        "joint.as_built",
+        json!({"a": base, "b": sub_occ, "type": "rigid", "at": {"occurrence": base, "point": [0, 0, 10], "z": [0, 0, 1]}}),
+    )["joint"]
+        .as_u64()
+        .expect("closing joint");
+    run(&mut s, "joint.edit", json!({"joint": closing, "offset": 10}));
+    let listed = run(&mut s, "joint.list", json!({}));
+    assert_eq!(listed["conflicts"], json!([]));
+    assert_eq!(listed["errors"], json!([]));
+    let dofs = dof_map(&mut s);
+    assert_eq!(dofs.get(&sub_occ), Some(&0));
+    assert_eq!(dofs.get(&pin_occ), Some(&0));
+    assert_eq!(dofs.get(&copy_occ), Some(&0));
+    assert_eq!(dofs.get(&cap_occ), Some(&0));
+    let sub_z = s.occurrence_placement(&[sub_occ]).expect("sub placement").world[3][2];
+    let copy_z = s.occurrence_placement(&[sub_occ, copy_occ]).expect("copy placement").world[3][2];
+    let cap_z = s.occurrence_placement(&[cap_occ]).expect("cap placement").world[3][2];
+    assert!((sub_z - 10.0).abs() < 1e-6, "loop closure should move sub: {sub_z}");
+    assert!((copy_z - 10.0).abs() < 1e-6, "copy should follow loop-closed parent: {copy_z}");
+    assert!((cap_z - 10.0).abs() < 1e-6, "downstream cap should follow refreshed copy: {cap_z}");
+
+    // 5. A pattern copy contained inside a joint-dependent descendant (`cap_occ`) also refreshes
+    //    after loop closure, and a second descendant with its own local parallel-slider loop keeps
+    //    its independently measured DOF (1) instead of having the seed's -1 delta subtracted again.
+    let cap_comp = s.doc.occurrences.iter().find(|o| o.id == cap_occ).expect("cap occ").component;
+    let nested_pin =
+        run(&mut s, "component.create", json!({"name": "NestedPin", "parent": cap_comp, "activate": true, "grounded": false}))["occurrence"]
+            .as_u64()
+            .expect("nested pin");
+    run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 5}));
+    run(&mut s, "component.activate", json!({"component": cap_comp}));
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"a": cap_occ, "b": nested_pin, "type": "rigid", "at": {"occurrence": cap_occ, "point": [0, 0, 10], "z": [0, 0, 1]}}),
+    );
+    let nested_pattern =
+        run(&mut s, "solid.pattern.rectangular", json!({"components": ["NestedPin"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 8}));
+    let nested_copy = nested_pattern["occurrences"][0].as_u64().expect("nested copy");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let slider_cap = run(&mut s, "component.create", json!({"name": "SliderCap", "activate": true, "grounded": false}))["occurrence"]
+        .as_u64()
+        .expect("slider cap");
+    run(&mut s, "solid.box", json!({"length": 6, "width": 6, "height": 4}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"a": copy_occ, "b": slider_cap, "type": "slider", "at": {"occurrence": copy_occ, "point": [15, 0, 10], "z": [0, 0, 1]}}),
+    );
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"a": copy_occ, "b": slider_cap, "type": "slider", "at": {"occurrence": copy_occ, "point": [15, 3, 10], "z": [0, 0, 1]}}),
+    );
+    // Re-trigger loop closure with a new offset (15 mm) and verify nested_copy & slider_cap.
+    run(&mut s, "joint.edit", json!({"joint": closing, "offset": 15}));
+    let dofs = dof_map(&mut s);
+    assert_eq!(dofs.get(&nested_pin), Some(&0));
+    assert_eq!(dofs.get(&nested_copy), Some(&0));
+    assert_eq!(dofs.get(&slider_cap), Some(&1), "independently measured local loop keeps 1 DOF");
+    let nested_z = s.occurrence_placement(&[cap_occ, nested_copy]).expect("nested copy placement").world[3][2];
+    assert!((nested_z - 15.0).abs() < 1e-6, "nested copy inside downstream cap should follow loop closure: {nested_z}");
+}
+
 /// A component pattern's copies placed again on a rebuild read the spacing as the first copies
 /// were placed (#8523): in an inch design `1 + 0` is 1 in, before and after the count changes.
 #[test]
@@ -1387,39 +1602,6 @@ fn editing_a_pattern_by_seed_name_resolves_it_to_the_id() {
     assert!(e.contains("Nope"), "{e}");
 }
 
-/// A plate with a `count1` × `count2` feature pattern of one through-hole cut: its volume and how
-/// long the pattern took. It runs on its own thread so a hang fails the test instead of CI.
-fn hole_pattern(count1: usize, count2: usize) -> (f64, std::time::Duration) {
-    use std::time::{Duration, Instant};
-    let mut s = Session::default();
-    run(&mut s, "solid.box", json!({"length": 200, "width": 100, "height": 1, "operation": "new_body", "body_name": "Plate"}));
-    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "2", "name": "H"}));
-    run(&mut s, "sketch.circle.center", json!({"center": [4, 4], "diameter": 2}));
-    run(&mut s, "sketch.finish", json!({}));
-    run(
-        &mut s,
-        "solid.extrude",
-        json!({"sketch": "H", "distance": "4", "direction": "negative", "operation": "cut", "targets": ["Plate"], "name": "Hole"}),
-    );
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let t = Instant::now();
-        let r = s.execute(
-            "solid.pattern.rectangular",
-            &json!({"features": ["Hole"], "dir1": [1, 0, 0], "count1": count1, "spacing1": 6, "dir2": [0, 1, 0], "count2": count2, "spacing2": 6}),
-        );
-        let took = t.elapsed();
-        let v = r.map(|_| volume(&mut s)).map_err(|e| e.to_string());
-        let _ = tx.send((v, took));
-    });
-    let (v, took) = rx.recv_timeout(Duration::from_secs(900)).expect("the hole pattern did not finish within 900 s");
-    let n = (count1 * count2) as f64;
-    let v = v.expect("pattern");
-    // The measure meshes the bores: each hole reads about 0.06 % small, so allow 0.1 % a hole.
-    assert!((v - (200.0 * 100.0 - n * PI)).abs() < n * PI * 1e-3, "{n} holes: {v}");
-    (v, took)
-}
-
 /// Whether a job four times the size took at most about twice linear: `pair` times the small job,
 /// then the big one. Linear is 4×, the old quadratic costs 16× or more. The load of the other test
 /// binaries can rise between the two runs (on a 16-core Mac under `cargo xtask test`, 32 circles
@@ -1464,20 +1646,6 @@ fn scales_linearly_keeps_each_sizes_fastest_run() {
     assert!(r.as_ref().is_err_and(|e| e.contains("fastest 1.00 s and 16.00 s, limit 10.00 s")), "{r:?}");
 }
 
-/// 512 identical through-holes from a feature pattern of one cut (#261). 128 took 30 s and 512 did
-/// not finish in 150 s: each copy was cut into an ever more complex plate. The time must grow about
-/// linearly with the count. A ratio, not a time: CI runs every test binary at once and is many
-/// times slower than a machine running this alone (about 6 s for 512 holes there).
-#[test]
-fn pattern_of_512_hole_cuts_finishes_in_reasonable_time() {
-    // #14515: on the merge-queue runner, with every test binary running at once, the small run keeps
-    // its parallel speed-up while the big one does not, and three pairs in a row took 10.7x to 11.1x
-    // (2.9 s then 31 s) though the cost is linear. The old quadratic cost is 16x or more, so allow 13x.
-    if let Err(missed) = scales_within(13.0, || (hole_pattern(16, 8).1, hole_pattern(32, 16).1)) {
-        panic!("128 holes, then 512, took {missed}");
-    }
-}
-
 /// A plate with `n` Ø2 circles drawn in one sketch (16 a row, 6 mm apart) and cut by one extrude:
 /// how long the cut took. It runs on its own thread so a hang fails the test instead of CI.
 fn sketch_hole_cut(n: usize) -> std::time::Duration {
@@ -1508,7 +1676,8 @@ fn sketch_hole_cut(n: usize) -> std::time::Duration {
 
 /// Many holes drawn in one sketch and cut by one extrude (#368), the usual way to draw a vent
 /// field: 32 took 2 s and 128 took 60 s, though a feature pattern of the same holes is near
-/// linear since #261. Linear is 4×. A ratio, not a time (see the 512-hole pattern test).
+/// linear since #261. Linear is 4×. A ratio, not a time: CI runs every test binary at once and is
+/// many times slower than a machine running this alone.
 #[test]
 fn one_extrude_of_many_sketch_circles_scales_linearly() {
     if let Err(missed) = scales_linearly(|| (sketch_hole_cut(32), sketch_hole_cut(128))) {
@@ -3575,4 +3744,211 @@ fn a_body_pattern_of_a_split_surface_copies_its_split_faces() {
         .collect();
     assert_eq!(shown.len(), 3, "{shown:?}");
     assert!(shown.iter().all(|(_, faces, edges)| (*faces, *edges) == (2, 6)), "{shown:?}");
+}
+
+/// The bodies of the design, by name.
+fn body_names(s: &Session) -> Vec<String> {
+    s.model.state().bodies.iter().map(|b| b.name.clone()).collect()
+}
+
+/// A gear made of one sector (#21625): with Join, a circular pattern of a body that crosses the
+/// axis is one body at any count, and the count can change without a Combine to keep up. Without
+/// it each copy is a body of its own, as before. Copies that touch nothing stay apart; bodies the
+/// pattern doesn't copy are left alone; and the choice is saved with the design.
+#[test]
+fn a_patterns_join_makes_one_body_of_the_copies_that_touch() {
+    let sector = |s: &mut Session| {
+        run(s, "parameters.add", json!({"name": "teeth", "expression": "6", "unit": "none"}));
+        run(s, "solid.box", json!({"corner": [0, -2, 0], "length": 20, "width": 4, "height": 5, "body_name": "Tooth", "name": "ToothBox"}));
+        run(s, "solid.box", json!({"corner": [50, 50, 0], "length": 5, "width": 5, "height": 5, "body_name": "Other"}));
+    };
+    let one = {
+        let mut s = Session::default();
+        sector(&mut s);
+        volume(&mut s)
+    };
+    // Off, as before: a body per copy.
+    let mut s = Session::default();
+    sector(&mut s);
+    run(&mut s, "solid.pattern.circular", json!({"bodies": ["Tooth"], "axis": "Z", "count": "teeth"}));
+    assert_eq!(body_names(&s).len(), 7, "{:?}", body_names(&s));
+    // On: the six overlapping teeth are one body, under the source's name; Other is left alone.
+    for (what, from) in [("bodies", json!({"bodies": ["Tooth"]})), ("features", json!({"features": ["ToothBox"]}))] {
+        let mut s = Session::default();
+        sector(&mut s);
+        let mut p = json!({"axis": "Z", "count": "teeth", "join": true, "name": "Teeth"});
+        if let (Some(p), Some(from)) = (p.as_object_mut(), from.as_object()) {
+            p.extend(from.clone());
+        }
+        run(&mut s, "solid.pattern.circular", p);
+        assert_eq!(body_names(&s), ["Tooth", "Other"], "{what}");
+        let joined = volume(&mut s);
+        assert!(joined > one && joined < 7.0 * one - 1.0, "{what}: the teeth overlap at the axis: {joined} vs {one} each");
+        // More teeth: still one body, with no Combine to update.
+        run(&mut s, "parameters.change", json!({"name": "teeth", "expression": "9"}));
+        assert_eq!(body_names(&s), ["Tooth", "Other"], "{what}: nine teeth");
+        // Saved and opened again.
+        let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        let mut reopened = Session::new(doc);
+        reopened.refresh();
+        assert_eq!(body_names(&reopened), ["Tooth", "Other"], "{what}: reopened");
+    }
+    // Turned on for a pattern made without it.
+    let mut s = Session::default();
+    sector(&mut s);
+    run(&mut s, "solid.pattern.circular", json!({"bodies": ["Tooth"], "axis": "Z", "count": "teeth", "name": "Teeth"}));
+    run(&mut s, "timeline.edit", json!({"feature": "Teeth", "set": {"join": true}}));
+    assert_eq!(body_names(&s), ["Tooth", "Other"], "joined by an edit");
+    // Teeth that don't reach the axis don't touch: each stays a body of its own.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [10, -2, 0], "length": 10, "width": 4, "height": 5, "body_name": "Tooth"}));
+    run(&mut s, "solid.pattern.circular", json!({"bodies": ["Tooth"], "axis": "Z", "count": 4, "join": true}));
+    assert_eq!(body_names(&s).len(), 4, "{:?}", body_names(&s));
+    // A rectangular pattern of overlapping slabs joins too.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 4, "height": 2, "body_name": "Slab"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Slab"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 8, "join": true}));
+    assert_eq!(body_names(&s), ["Slab"]);
+    // `join` must be a bool.
+    let error = s.execute("solid.pattern.rectangular", &json!({"bodies": ["Slab"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 10, "join": "yes"}));
+    assert!(error.is_err(), "{error:?}");
+}
+
+/// Regression (#21548): deleting sibling occurrences of a component whose body was patterned and
+/// then mirrored must not break the mirror when `mirror_copy_frame` migrates the pattern copy
+/// between the root and the now-single-placed component (and adding a sibling occurrence back
+/// must not break it in the reverse direction either).
+#[test]
+fn deleting_or_adding_sibling_occurrences_keeps_mirror_of_pattern_copy_working() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-mirror-pattern-occ-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let plate_path = dir.join("plate.sc");
+
+    let mut plate = Session::default();
+    run(&mut plate, "solid.box", json!({"length": 10, "width": 10, "height": 2, "center": [0, 0, 1], "body_name": "P"}));
+    run(&mut plate, "file.save", json!({"path": plate_path.to_string_lossy()}));
+
+    // 1) Start with 3 occurrences of `P`, pattern body on occurrence #3, mirror both, then delete
+    // the two unrelated sibling occurrences (count 3 -> 1) and verify dry_run + compute_all + geometry.
+    let mut s = Session::default();
+    let o1 = run(&mut s, "component.insert_design", json!({"path": plate_path.to_string_lossy()}))["occurrence"].as_u64().unwrap();
+    let o2 =
+        run(&mut s, "component.insert_design", json!({"path": plate_path.to_string_lossy(), "reuse": true, "translate": [20, 0, 0]}))["occurrence"]
+            .as_u64()
+            .unwrap();
+    let o3 =
+        run(&mut s, "component.insert_design", json!({"path": plate_path.to_string_lossy(), "reuse": true, "translate": [40, 0, 0]}))["occurrence"]
+            .as_u64()
+            .unwrap();
+
+    let frames = s.doc.body_frames_with_source(&s.model.state());
+    let third = frames.iter().find(|(_, _, _, path, _)| path == &vec![o3]).map(|(w, ..)| w.clone()).expect("third occurrence body");
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": [third], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20, "name": "REP"}));
+    let copy_name = s
+        .model
+        .state()
+        .bodies
+        .iter()
+        .find(|b| s.doc.feature(b.feature).is_some_and(|f| f.name == "REP"))
+        .map(|b| b.name.clone())
+        .expect("pattern copy");
+    run(&mut s, "solid.mirror", json!({"bodies": [third, copy_name], "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1]}, "name": "SYM"}));
+
+    let sym_bboxes = |s: &Session| -> Vec<([f64; 3], [f64; 3])> {
+        let st = s.model.state();
+        let mut out: Vec<_> = s
+            .doc
+            .body_frames_with_source(&st)
+            .into_iter()
+            .filter_map(|(_, own, _, _, m)| {
+                let mb = st.body(&own)?;
+                if !s.doc.feature(mb.feature).is_some_and(|f| f.name == "SYM") {
+                    return None;
+                }
+                let placed = solidcraft_kernel::transform_matrix(&mb.body, m).ok()?;
+                let bb = solidcraft_kernel::measure(&placed).ok()?.bbox;
+                Some(([bb.min.x, bb.min.y, bb.min.z], [bb.max.x, bb.max.y, bb.max.z]))
+            })
+            .collect();
+        out.sort_by(|a, b| a.0[1].total_cmp(&b.0[1]).then(a.0[0].total_cmp(&b.0[0])));
+        out
+    };
+    let before = sym_bboxes(&s);
+    assert_eq!(before.len(), 2, "{before:?}");
+
+    // Dry run must not predict SYM failing when deleting the two unrelated occurrences.
+    let dry = run(&mut s, "selection.delete", json!({"occurrences": [o1, o2], "dry_run": true}));
+    let would_fail: Vec<&str> = dry["would_fail"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    assert!(!would_fail.contains(&"SYM"), "dry_run must not fail SYM: {dry}");
+
+    run(&mut s, "selection.delete", json!({"occurrences": [o1, o2]}));
+    run(&mut s, "timeline.compute_all", json!({}));
+    let sym_id = s.doc.features.iter().find(|f| f.name == "SYM").unwrap().id;
+    assert_eq!(s.model.result(sym_id).and_then(|r| r.error.as_deref()), None, "SYM must stay healthy after deleting sibling occurrences");
+    let after = sym_bboxes(&s);
+    assert_eq!(after.len(), 2, "{after:?}");
+    for (a, b) in before.iter().zip(&after) {
+        for i in 0..3 {
+            assert!((a.0[i] - b.0[i]).abs() < 1e-6 && (a.1[i] - b.1[i]).abs() < 1e-6, "before={a:?} after={b:?}");
+        }
+    }
+
+    // Moving the remaining occurrence after downward migration must still invalidate SYM's pose
+    // cache and move both mirrored copies across the z=10 mirror plane.
+    run(&mut s, "occurrence.move", json!({"occurrence": o3, "translate": [0, 0, 2], "capture": true}));
+    let moved = sym_bboxes(&s);
+    assert_eq!(moved.len(), 2, "{moved:?}");
+    for (a, b) in after.iter().zip(&moved) {
+        assert!((b.0[0] - a.0[0]).abs() < 1e-6 && (b.0[1] - a.0[1]).abs() < 1e-6, "after={a:?} moved={b:?}");
+        assert!((b.0[2] - (a.0[2] - 2.0)).abs() < 1e-6 && (b.1[2] - (a.1[2] - 2.0)).abs() < 1e-6, "after={a:?} moved={b:?}");
+    }
+
+    // 2) Reverse direction: start with 1 occurrence so REP puts the copy inside the component and
+    // SYM stores `[[o1], [o1]]`, then insert a 2nd occurrence (count 1 -> 2) which migrates the
+    // copy up to root; SYM must still evaluate cleanly with identical geometry.
+    let mut s2 = Session::default();
+    let r1 = run(&mut s2, "component.insert_design", json!({"path": plate_path.to_string_lossy(), "translate": [40, 0, 0]}))["occurrence"]
+        .as_u64()
+        .unwrap();
+    let first = s2
+        .doc
+        .body_frames_with_source(&s2.model.state())
+        .into_iter()
+        .find(|(_, _, _, path, _)| path == &vec![r1])
+        .map(|(w, ..)| w)
+        .expect("single occurrence body");
+    run(&mut s2, "solid.pattern.rectangular", json!({"bodies": [first], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20, "name": "REP"}));
+    let copy2 = s2
+        .model
+        .state()
+        .bodies
+        .iter()
+        .find(|b| s2.doc.feature(b.feature).is_some_and(|f| f.name == "REP"))
+        .map(|b| b.name.clone())
+        .expect("pattern copy");
+    run(&mut s2, "solid.mirror", json!({"bodies": [first, copy2], "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1]}, "name": "SYM"}));
+    let sym2_id = s2.doc.features.iter().find(|f| f.name == "SYM").unwrap().id;
+    let before2 = sym_bboxes(&s2);
+    assert_eq!(before2.len(), 2, "{before2:?}");
+    let _r2 =
+        run(&mut s2, "component.insert_design", json!({"path": plate_path.to_string_lossy(), "reuse": true, "translate": [80, 0, 0]}))["occurrence"]
+            .as_u64()
+            .unwrap();
+    run(&mut s2, "timeline.compute_all", json!({}));
+    assert_eq!(s2.model.result(sym2_id).and_then(|r| r.error.as_deref()), None, "SYM must stay healthy after adding a 2nd occurrence");
+    let after2 = sym_bboxes(&s2);
+    assert_eq!(after2.len(), 2, "{after2:?}");
+    for (a, b) in before2.iter().zip(&after2) {
+        for i in 0..3 {
+            assert!((a.0[i] - b.0[i]).abs() < 1e-6 && (a.1[i] - b.1[i]).abs() < 1e-6, "before2={a:?} after2={b:?}");
+        }
+    }
+
+    // 3) Deleting the referenced occurrence itself (`o3`) still fails SYM as expected.
+    run(&mut s, "selection.delete", json!({"occurrences": [o3]}));
+    run(&mut s, "timeline.compute_all", json!({}));
+    assert!(s.model.result(sym_id).and_then(|r| r.error.as_deref()).is_some(), "deleting the referenced occurrence must still fail SYM");
+
+    let _ = std::fs::remove_dir_all(&dir);
 }

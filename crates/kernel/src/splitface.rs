@@ -706,6 +706,26 @@ pub fn split_body_by_faces(body: &Body, sheet: &Body, face: usize, faces: &[usiz
     Ok(parts)
 }
 
+/// Split a body with every face of the surface body `sheet` exactly as it is, never extended,
+/// where that cuts it through (#13303): `face` gives the sides, as [`split_body_by_faces`].
+/// `None` when the sheet does not cut the body into closed solids (it misses it, or ends inside
+/// it): one of several surface bodies may cross only some of the pieces the others leave, and
+/// the body never comes back with a slit. Each part's history is over `[body]`.
+pub fn split_body_by_sheet_where_it_cuts(body: &Body, sheet: &Body, face: usize) -> Result<Option<Vec<Body>>> {
+    let _span = solidcraft_profile::span("kernel", "split_body_by_sheet_where_it_cuts");
+    body.require_brep(SPLIT_BODY)?;
+    sheet.require_brep("a split tool")?;
+    if !sheet.is_surface() {
+        return Err(invalid("a solid cannot split as a whole surface body"));
+    }
+    if face >= sheet.face_count() {
+        return Err(invalid(format!("the tool body has no face {face}")));
+    }
+    let faces: Vec<usize> = (0..sheet.face_count()).collect();
+    let parts = split_by_sheet(body, sheet, face, &faces)?;
+    Ok(closed_solids(&parts)?.then_some(parts))
+}
+
 /// Whether `parts` are two or more parts, each one closed manifold solid (SMLib's exact
 /// topological test): a split that cut the body through.
 fn closed_solids(parts: &[Body]) -> Result<bool> {
@@ -1238,6 +1258,27 @@ mod tests {
         let e = split_body_by_faces(&cube, &sheet, first, &[]).unwrap_err().to_string();
         assert!(e.contains("do not cut the body through"), "{e}");
         assert!(split_body_by_faces(&cube, &sheet, first, &[7]).is_err());
+    }
+
+    /// One of several surface bodies splitting a body cuts the pieces it crosses and leaves the
+    /// others (#13303). The bent sheet of the test above cuts the cube 0…10 into 437.5 and 562.5.
+    /// A flat sheet at y = 5 that ends at x = 5, inside the cube, only nicks it, and a flat sheet
+    /// at y = 20 misses it: both leave it alone (`None`), never with a slit. A solid is refused.
+    #[test]
+    fn a_whole_surface_body_splits_where_it_cuts_and_leaves_what_it_misses() {
+        let p = |x: f64, y: f64| Vec2::new(x, y);
+        let bent = vec![Seg2::Line { a: p(-3.0, 5.0), b: p(5.0, 5.0) }, Seg2::Line { a: p(5.0, 5.0), b: p(13.0, 9.0) }];
+        let bent = crate::extrude_sheet(&Plane::XY, &[bent], -5.0, 15.0).unwrap();
+        let cube = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let parts = split_body_by_sheet_where_it_cuts(&cube, &bent, 0).unwrap().unwrap();
+        let v = volumes(&parts);
+        assert!(v.len() == 2 && rel(v[0], 437.5) < 1e-9 && rel(v[1], 562.5) < 1e-9, "{v:?}");
+        assert!(parts.iter().all(|b| b.smlib().unwrap().is_manifold_solid().unwrap()));
+        for line in [Seg2::Line { a: p(-3.0, 5.0), b: p(5.0, 5.0) }, Seg2::Line { a: p(-3.0, 20.0), b: p(13.0, 20.0) }] {
+            let sheet = crate::extrude_sheet(&Plane::XY, &[vec![line]], -5.0, 15.0).unwrap();
+            assert!(split_body_by_sheet_where_it_cuts(&cube, &sheet, 0).unwrap().is_none());
+        }
+        assert!(split_body_by_sheet_where_it_cuts(&cube, &cube, 0).is_err());
     }
 
     /// A face of a creased sheet whose smooth part ends inside the body cuts with the whole sheet
