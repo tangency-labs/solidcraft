@@ -120,6 +120,8 @@ const DIGESTS: &[(&str, &str)] = &[
     ("solidcore/crates/solidcore-step/tests/fixtures/closed-spline-cylinder.step", "2b7d457b87394f2c"),
     ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "902c8f135a031308"),
     ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "7e5ec3041433853c"),
+    ("solidcore/crates/solidcore-step/tests/fixtures/rounded-cube-conic-corners.step", "48265d82ba693827"),
+    ("solidcore/crates/solidcore-step/tests/fixtures/ruled-spline-patch-reparametrised.step", "454f82396c90f4ed"),
     ("solidcore/crates/solidcore-step/tests/fixtures/stepped_tapered_hole.step", "580fd86750a6eb21"),
     ("tests/kernel-cases/import/1721-closed-bspline-tube-face/input.step", "30a183e14f3b58b3"),
     ("tests/kernel-cases/import/2043-outer-bound-opposing-surface-sense/input.step", "d8c5f6b3ce4ea3cf"),
