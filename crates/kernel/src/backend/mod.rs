@@ -14,6 +14,7 @@ mod cell_grid;
 mod exchange;
 mod frames;
 mod modelling;
+mod projection;
 mod query;
 
 use crate::body::Body;
