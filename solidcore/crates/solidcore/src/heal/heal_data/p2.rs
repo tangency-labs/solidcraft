@@ -106,10 +106,10 @@ use crate::geom::hash_table::{
     gap_histogram_index, FindPairsOptions, ObjsInVoxels, GAP_HISTOGRAM_BUCKETS,
 };
 use crate::geom::tol::{
-    approx_tol_3d, brep_calc_edge_zone_tol_3d, brep_calc_face_zone_tol_3d,
-    brep_calc_vertex_zone_tol_3d, brep_model_size_estimate, brep_size_calc_gap_zone_tol_3d,
-    brep_size_zone_tol_3d, context_model_size_estimate, gap_gain, set_brep_model_size_estimate,
-    size_estimate_to_zone_tol_3d, zone_tol3d, SmallTopoType, LARGE_SMALL_SIZE_RATIO, USE_DEFAULT,
+    brep_calc_edge_zone_tol_3d, brep_calc_face_zone_tol_3d, brep_calc_vertex_zone_tol_3d,
+    brep_model_size_estimate, brep_size_calc_gap_zone_tol_3d, brep_size_zone_tol_3d,
+    context_model_size_estimate, gap_gain, set_brep_model_size_estimate,
+    size_estimate_to_zone_tol_3d, zone_tol3d, LARGE_SMALL_SIZE_RATIO, USE_DEFAULT,
 };
 use crate::heal::face_props::{
     FaceProps, HealerOpType, LoopObject, MixedLinkType, PropStage, Tri, TriedLinkType,
@@ -534,13 +534,14 @@ impl EdgeProps {
 
     /// `SetProps_Metadata`: sets the edge, its index, its tolerances, interval, curve,
     /// approximate length (5 samples), natural interval and the degenerate and
-    /// uncontained flags.
+    /// uncontained flags. The degenerate flag is certified ([`degenerate_edge`]), not
+    /// upstream's sampled `IsDegenerate`.
     ///
     /// # Errors
     ///
-    /// [`SolidError::NotFound`] for a dangling edge; [`SolidError::InvalidInput`] for
-    /// an edge without curve (upstream dereferences null); those of the curve's
-    /// `ApproximateLength` and `IsDegenerate`.
+    /// [`SolidError::NotFound`] for a dangling edge or vertex; [`SolidError::InvalidInput`]
+    /// for an edge without curve (upstream dereferences null); those of the curve's
+    /// `ApproximateLength`.
     pub fn set_props_metadata(
         &mut self,
         k: &Kernel,
@@ -548,9 +549,6 @@ impl EdgeProps {
         edge_id: EdgeId,
         edge_index: u64,
     ) -> Result<()> {
-        // locals
-        let approx_tol_3d = approx_tol_3d(k, SmallTopoType::NormalSize);
-
         // set property member values
         self.edge = Some(edge_id);
         self.edge_index = edge_index;
@@ -571,9 +569,8 @@ impl EdgeProps {
             .0;
         self.natural_interval = curve.natural_interval();
 
-        // Bad Degen Edge
-        self.bad_degen_edge =
-            Tri::from(curve.is_degenerate(k, approx_tol_3d, Some(&self.edge_interval))?);
+        // Bad Degen Edge (certified, not upstream's sampled `IsDegenerate`)
+        self.bad_degen_edge = Tri::from(degenerate_edge(b, edge_id, self.zone_tol_3d)?);
 
         // Bad UnContained Edge
         self.bad_uncontained_edge = Tri::from(
@@ -3614,6 +3611,44 @@ fn plus_net_bound(g: f64, net_off: f64) -> Option<f64> {
     }
     let sum = (Ivl::from(g) + Ivl::from(net_off)).hi;
     sum.is_finite().then_some(sum)
+}
+
+/// Whether edge `e` is degenerate (`m_bBadDegenEdge`): its whole curve is certified within
+/// `tol`, the edge's tolerance, of the point its squeeze puts its vertices at
+/// ([`short_edge_bound`]: interval enclosures of the whole curve, against the midpoint of its
+/// two vertices), or for a closed edge of its one vertex. A curve with no enclosure, or one that
+/// reaches farther, is not shown degenerate, nor is an edge without its vertices (there is no
+/// point to squeeze it into), and a NaN bound or tolerance is not within.
+///
+/// Not upstream: `SetProps_Metadata` asks the curve's sampled `IsDegenerate` against the
+/// context's approximation tolerance, so an edge shorter than its own, larger tolerance was not
+/// degenerate, and one longer than its own, smaller tolerance was.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling edge or vertex; `InvalidInput` for an edge without
+/// a curve.
+fn degenerate_edge(b: &Brep, e: EdgeId, tol: f64) -> Result<bool> {
+    use crate::heal::stitch::bounds::curve_to_point;
+    use crate::heal::tolerance_defects::short_edge_bound;
+
+    let (Some(v), Some(w)) = edge::start_end_vertices(b, e)? else {
+        return Ok(false);
+    };
+    let bound = if v == w {
+        let curve = edge::curve(b, e)?
+            .ok_or_else(|| SolidError::invalid_input(OP_EDGE, "edge without curve"))?;
+        match curve_to_point(curve, &edge::interval(b, e)?, vertex::point(b, v)?) {
+            Ok(bound) if bound.is_finite() => bound,
+            _ => return Ok(false),
+        }
+    } else {
+        match short_edge_bound(b, e, None)? {
+            Ok(bound) => bound,
+            Err(_) => return Ok(false),
+        }
+    };
+    Ok(bound <= tol)
 }
 
 #[cfg(test)]

@@ -1462,11 +1462,11 @@ fn ridge_block(size: f64, ridge: f64, tols: Tols) -> Record {
 }
 
 /// The healer's degenerate-edge test is certified against the edge's own tolerance (#17738): on
-/// a 0.1 block, whose size class takes a body tolerance of 1e-6, a ridge 3e-6 long lies 1.5e-6
-/// from its midpoint at best, farther than its 1e-6 tolerance, so it is a real edge and the
-/// healed body is the record's. The sampled test read the context's approximation tolerance
-/// (5e-6), called the ridge degenerate and squeezed it into one end, which left the four edges
-/// at the other 3e-6 off their vertex.
+/// a 0.1 block read with tolerances of 1e-6, a ridge 4.5e-6 long lies at least 2.25e-6 from its
+/// midpoint, farther than its tolerance (1e-6 as read, 2e-6 once the healer has set the body's
+/// from its size class), so it is a real edge and the healed body is the record's. The sampled
+/// test read the context's approximation tolerance (5e-6), called the ridge degenerate and
+/// squeezed it into one end, which left the four edges at the other 4.5e-6 off their vertex.
 #[test]
 fn the_healer_keeps_an_edge_longer_than_its_tolerance() {
     let tols = Tols {
@@ -1474,7 +1474,7 @@ fn the_healer_keeps_an_edge_longer_than_its_tolerance() {
         edge: 1e-6,
         vertex: 1e-6,
     };
-    let rec = ridge_block(0.1, 3e-6, tols);
+    let rec = ridge_block(0.1, 4.5e-6, tols);
     let (trusted, _) = Body::from_record(&rec, true).unwrap();
     assert_eq!(failed(&trusted), [0u32; 0]);
     // an untrusted record is healed as it is built; its order is known only when the healer
@@ -1482,10 +1482,15 @@ fn the_healer_keeps_an_edge_longer_than_its_tolerance() {
     let (healed, _) = Body::from_record(&rec, false).unwrap();
     assert_eq!(healed.counts().unwrap(), [5, 9, 6]);
     assert_eq!(failed(&healed), [0u32; 0]);
+    // the healer sets the body's tolerance from its size class; no edge or vertex was grown
+    // past it to cover a squeeze
     let (after, _) = healed.to_record().unwrap();
-    assert!(after.edges.iter().all(|e| e.tolerance <= 1e-6), "{after:?}");
     assert!(
-        after.vertices.iter().all(|v| v.tolerance <= 1e-6),
+        after.edges.iter().all(|e| e.tolerance <= after.tolerance)
+            && after
+                .vertices
+                .iter()
+                .all(|v| v.tolerance <= after.tolerance),
         "{after:?}"
     );
 }
