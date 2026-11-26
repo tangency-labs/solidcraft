@@ -28,6 +28,8 @@ pub const CORNER: f64 = 1e-6;
 /// A straight edge between two flat faces, and the directions into each face square to it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StraightWedge {
+    /// The edge.
+    pub edge: EdgeId,
     /// The edge's start vertex.
     pub start: Point3,
     /// The edge's end vertex.
@@ -140,6 +142,7 @@ pub fn straight_wedge(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<Option<Stra
         }
     }
     Ok(Some(StraightWedge {
+        edge: e,
         start,
         end,
         along,

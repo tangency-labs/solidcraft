@@ -19,9 +19,10 @@
 
 use crate::blend::carried_face::plane_normal;
 use crate::blend::straight_wedge::{straight_wedge, StraightWedge};
+use crate::math::EFF_ZERO;
 use crate::query::brep::{calculate_bounding_box, BoundingBoxOptions};
 use crate::query::face::p1::point_on_face;
-use crate::topology::{vertex, EdgeId};
+use crate::topology::{edge, vertex, EdgeId, VertexId};
 use crate::{Brep, Kernel, Point3, Result, Vec3};
 
 /// The blend a run-out carries on.
@@ -269,6 +270,21 @@ fn fits(k: &Kernel, b: &mut Brep, w: &StraightWedge, reach: f64, tolerance: f64)
     if !curved_end {
         return Ok(false);
     }
+    // an edge another edge goes on from tangentially (the section of an earlier round running
+    // out along a face of it) is not one a narrow round or cove cuts across: the prism would
+    // cross that round in a crease, so it is the executives' to settle or refuse
+    for (v, on) in w.vertices.into_iter().zip([w.along * -1.0, w.along]) {
+        for other in vertex::edges(b, v, None)? {
+            if other == w.edge {
+                continue;
+            }
+            if let Some(out) = leaving_tangent(k, b, other, v)? {
+                if out.dot(on) >= TANGENT {
+                    return Ok(false);
+                }
+            }
+        }
+    }
     let length = (w.end - w.start).length();
     let inset = reach.min(length * 0.5);
     for (&face, &into) in w.faces.iter().zip(&w.into) {
@@ -285,6 +301,35 @@ fn fits(k: &Kernel, b: &mut Brep, w: &StraightWedge, reach: f64, tolerance: f64)
 
 /// How many steps along the edge [`fits`] tries the contact lines at.
 const SAMPLES: u32 = 16;
+
+/// The least cosine between an edge's line and another edge leaving its end for [`fits`] to
+/// take the other edge as going on from it tangentially: within about half a degree.
+const TANGENT: f64 = 0.99996;
+
+/// The unit tangent of `e` at its end on `v`, pointing away from `v`, or `None` where the edge
+/// has no curve or its derivative there vanishes.
+fn leaving_tangent(k: &Kernel, b: &Brep, e: EdgeId, v: VertexId) -> Result<Option<Vec3>> {
+    let Some(curve) = edge::curve(b, e)? else {
+        return Ok(None);
+    };
+    let interval = edge::interval(b, e)?;
+    let at_start = edge::start_vertex(b, e)? == Some(v);
+    let t = if at_start {
+        interval.min()
+    } else {
+        interval.max()
+    };
+    let derivatives = curve.evaluate(k, t, 1, true, true)?;
+    let Some(&d) = derivatives.get(1) else {
+        return Ok(None);
+    };
+    let d = if at_start { d } else { d * -1.0 };
+    let len = d.length();
+    if !(len > EFF_ZERO && len.is_finite()) {
+        return Ok(None);
+    }
+    Ok(Some(d * (1.0 / len)))
+}
 
 /// The least distance between the line through `p` along unit `u` and the line through `q`
 /// along unit `v`.
