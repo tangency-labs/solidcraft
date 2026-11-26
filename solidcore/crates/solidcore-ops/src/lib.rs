@@ -194,6 +194,7 @@ pub use measure::FaceCentroid;
 pub use measure::FaceRayHit;
 pub use measure::GapSample;
 pub use measure::MassPropertiesEstimate;
+pub use measure::MaterialSides;
 pub use measure::MembersClosest;
 pub use measure::Normal;
 pub use measure::PointClass;
