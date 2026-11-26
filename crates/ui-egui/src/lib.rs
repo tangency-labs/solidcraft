@@ -1714,6 +1714,12 @@ impl SolveApp {
             self.ui.layout = p.layout;
             self.preferences = p;
         }
+        // 0.43 removed the cube navigator (#17003), and a cube saved before reads as the signed
+        // axes. Said once: the next save keeps the axes, so the note doesn't come back (#19749).
+        if v.pointer("/preferences/navigator_style").and_then(Value::as_str) == Some("cube") {
+            let note = self.tr("ui.navigator.cube_removed").to_string();
+            self.set_status(note, false);
+        }
         // Before a design given at start opens: its paths follow the network preferences.
         prefs::sync_surface_analysis(self);
         crate::plugins::sync_policy(self);

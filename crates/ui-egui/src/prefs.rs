@@ -11670,6 +11670,27 @@ mod tests {
         assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
     }
 
+    /// Preferences saved with the cube navigator, gone since 0.43, say once why the signed axes
+    /// show instead (#19749); the axes are what they save, so a later start says nothing.
+    #[test]
+    fn a_saved_cube_navigator_says_once_that_the_signed_axes_replace_it() {
+        let note = |app: &SolveApp| app.messages.iter().filter(|m| m.text == app.tr("ui.navigator.cube_removed")).count();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.load_prefs(&json!({"preferences": {"navigator_style": "cube", "length_decimals": 4}}).to_string());
+        assert_eq!(app.preferences.navigator_style, NavigatorStyle::Axes);
+        assert_eq!(note(&app), 1);
+        assert_eq!(app.status.as_ref().map(|s| s.0.as_str()), Some(app.tr("ui.navigator.cube_removed")));
+        let saved = app.prefs();
+        let mut again = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        again.load_prefs(&saved);
+        assert_eq!(note(&again), 0, "{saved}");
+        for style in ["axes", "custom", "zigzag"] {
+            let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+            other.load_prefs(&json!({"preferences": {"navigator_style": style}}).to_string());
+            assert_eq!(note(&other), 0, "{style}");
+        }
+    }
+
     #[test]
     fn navigator_picker_preserves_axes_and_follows_preferences_transactions() {
         let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
