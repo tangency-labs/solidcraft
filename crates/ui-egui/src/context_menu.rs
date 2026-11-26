@@ -2019,7 +2019,8 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     let mut c: Vec<Item> = solidcraft_engine::command_specs()
         .into_iter()
         .filter(|spec| spec.tab == "SKETCH" && spec.panel == "CONSTRAINTS" && spec.id != "sketch.constraint.fix")
-        .filter(|spec| align.is_empty() || spec.id != "sketch.constraint.horizontal_vertical")
+        // Two points, or a point and a line, have their own Horizontal and Vertical rows (`align`).
+        .filter(|spec| align.is_empty() || !matches!(spec.id, "sketch.constraint.horizontal" | "sketch.constraint.vertical"))
         .filter(|spec| spec.selection.is_some() && spec.disabled_refusal(&app.session).is_none())
         .filter_map(|spec| {
             solidcraft_engine::sketch_selection::params_for(spec.id, &app.session, &geometry).map(|params| cmd(app, spec.id, spec.label).with(params))
@@ -2045,7 +2046,7 @@ fn legacy_constraint_order(l: usize, r: usize, p: usize, curves: usize, n: usize
     const ALIGN: [&str; 2] = ["ui.horizontalConstraint", "ui.verticalConstraint"];
     let mut order = Vec::new();
     if l == 1 && n == 1 {
-        order.push("sketch.constraint.horizontal_vertical");
+        order.extend(["sketch.constraint.horizontal", "sketch.constraint.vertical"]);
     }
     if p == 2 && n == 2 {
         order.push("sketch.constraint.coincident");

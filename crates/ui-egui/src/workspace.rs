@@ -365,14 +365,18 @@ pub fn feature_icon_accent(kind: &str, icon: &str) -> Option<&'static str> {
     TAB_ACCENTS.icon_accent(tab)
 }
 
-/// Reading order of the compact, three-column constraint gallery. Icons come from each spec.
+/// Order of the compact constraint gallery. Icons come from each spec. The first six fill a
+/// 3 x 2 grid row by row and the rest further columns top to bottom, so Horizontal sits above
+/// Vertical and Perpendicular above Collinear in the fourth column.
 pub const CONSTRAINT_GALLERY: &[&str] = &[
-    "sketch.constraint.horizontal_vertical",
+    "sketch.constraint.horizontal",
     "sketch.constraint.coincident",
     "sketch.constraint.tangent",
+    "sketch.constraint.vertical",
     "sketch.constraint.equal",
     "sketch.constraint.parallel",
     "sketch.constraint.perpendicular",
+    "sketch.constraint.collinear",
 ];
 
 /// Whether a Constrain-panel command is drawn as a small grid cell: the default gallery and any
@@ -485,7 +489,8 @@ const CONFIGURE: &[&str] = &["parameters.change", "config.table", "config.config
 /// itself after every edit, so a Solve button (and the search hit for it) only confuses; drawn 3D
 /// points are moved with the triad that appears when one is clicked, not a Move button. People
 /// reset every toolbar tab from Customize Toolbar, which asks first; the command never asks.
-pub const AGENT_ONLY: &[&str] = &["sketch.solve", "sketch.move3d", "view.toolbar_reset_all"];
+/// Horizontal/Vertical picks the nearer way by itself: people use Horizontal or Vertical.
+pub const AGENT_ONLY: &[&str] = &["sketch.constraint.horizontal_vertical", "sketch.solve", "sketch.move3d", "view.toolbar_reset_all"];
 
 pub const SECTIONS: &[Section] = &[
     Section {
@@ -736,15 +741,17 @@ pub const SECTIONS: &[Section] = &[
     Section {
         tab: "SKETCH",
         panel: "CONSTRAIN",
-        promoted: 7,
+        promoted: 9,
         ids: &[
             "sketch.dimension",
-            "sketch.constraint.horizontal_vertical",
+            "sketch.constraint.horizontal",
+            "sketch.constraint.vertical",
             "sketch.constraint.coincident",
             "sketch.constraint.tangent",
             "sketch.constraint.equal",
             "sketch.constraint.parallel",
             "sketch.constraint.perpendicular",
+            "sketch.constraint.collinear",
             "sketch.construction",
             "sketch.constrainer",
         ],
@@ -938,7 +945,6 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("sketch.cancel", "Cancel"),
     ("sketch.circle.center", "Circle"),
     ("sketch.constraint.coincident", "Coincident"),
-    ("sketch.constraint.horizontal_vertical", "Horiz./Vert."),
     ("sketch.construction_line", "X-Lines"),
     ("sketch.create", "New Sketch"),
     ("sketch.dimension", "Dimension"),
@@ -1328,7 +1334,7 @@ pub fn legacy_buttons(tab: &str, panel: &str) -> Vec<&'static str> {
             tab,
         ),
         ("SKETCH", "PATTERN") => (&["sketch.mirror", "sketch.pattern.rectangular", "sketch.pattern.circular"], 3, tab),
-        ("SKETCH", "CONSTRAINTS") => (&[], 6, tab),
+        ("SKETCH", "CONSTRAINTS") => (&["sketch.constraint.horizontal", "sketch.constraint.vertical", "sketch.constraint.collinear"], 8, tab),
         ("SOLID", "CONFIGURE") => (&["parameters.change", "config.table"], 2, tab),
         ("SOLID" | "SHEET METAL" | "PLASTIC", "ASSEMBLE") => (&["component.create", "joint.create", "joint.as_built"], 3, tab),
         ("SHEET METAL", "CREATE") => (&["sketch.create", "sheet.flange", "sheet.flat_pattern"], 3, tab),
@@ -1675,7 +1681,7 @@ mod tests {
         }
         for (s, (cmds, n)) in lists {
             assert!(
-                n <= 4 || (s.tab == "SKETCH" && ((s.panel == "CONSTRAIN" && n == 7) || (s.panel == "CREATE" && n == 5))),
+                n <= 4 || (s.tab == "SKETCH" && ((s.panel == "CONSTRAIN" && n == 9) || (s.panel == "CREATE" && n == 5))),
                 "{}/{} promotes {n} commands",
                 s.tab,
                 s.panel

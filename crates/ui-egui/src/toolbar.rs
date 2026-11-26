@@ -6833,13 +6833,17 @@ mod ribbon_gallery_tests {
             assert!(cell.left() > dimension.right());
             cells.push(cell);
         }
-        for row in cells.chunks(3) {
+        for row in cells[..6].chunks(3) {
             assert!(row.windows(2).all(|pair| pair[0].right() < pair[1].left() && pair[0].top() == pair[1].top()));
         }
         for col in 0..3 {
             assert_eq!(cells[col].left(), cells[col + 3].left());
             assert!(cells[col].bottom() < cells[col + 3].top());
         }
+        // The two after the first six fill a fourth column, so both rows have four.
+        assert_eq!(cells.len(), 8);
+        assert_eq!((cells[6].top(), cells[7].top(), cells[7].left()), (cells[0].top(), cells[3].top(), cells[6].left()));
+        assert!(cells[6].left() > cells[2].right());
         h.step(&json!({"click":{"handle":"ribbon:constraint:sketch.constraint.equal"}})).unwrap();
         assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.constraint.equal"));
         h.step(&json!({"key":"Escape"})).unwrap();
@@ -6851,7 +6855,7 @@ mod ribbon_gallery_tests {
         assert!(rect_of("ribbon:constraint:sketch.constraint.equal").is_some());
     }
 
-    /// Constraints the user pins join the small-cell grid after the default six, in pin order,
+    /// Constraints the user pins join the small-cell grid after the default eight, in pin order,
     /// and the grid grows a column; the preference off keeps them full-size buttons.
     #[test]
     fn pinned_constraints_are_small_grid_cells() {
@@ -6868,12 +6872,10 @@ mod ribbon_gallery_tests {
         let midpoint = rect_of("ribbon:constraint:sketch.constraint.midpoint").unwrap();
         let fix = rect_of("ribbon:constraint:sketch.constraint.fix").unwrap();
         assert_eq!(midpoint.size(), first.size());
-        // Eight cells in two rows of four: the defaults keep their places, the pins fill column four.
+        // Ten cells in two rows of five: the defaults keep their places, the pins fill column five.
         assert_eq!(rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[0])), Some(first));
-        assert_eq!(
-            (midpoint.top(), midpoint.left() - 27.0),
-            (first.top(), rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[2])).unwrap().left())
-        );
+        let seventh = rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[6])).unwrap();
+        assert_eq!((midpoint.top(), midpoint.left() - 27.0), (first.top(), seventh.left()));
         assert_eq!((fix.top(), fix.left()), (last.top(), midpoint.left()));
         h.step(&json!({"click":{"handle":"ribbon:constraint:sketch.constraint.midpoint"}})).unwrap();
         assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.constraint.midpoint"));
