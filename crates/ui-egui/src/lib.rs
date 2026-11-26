@@ -3370,8 +3370,19 @@ impl SolveApp {
     }
 
     /// Does starting `id` open a tool or a dialog?
-    fn interactive(&self, id: &str) -> bool {
+    pub(crate) fn interactive(&self, id: &str) -> bool {
         tools::Tool::for_command(id).is_some() || dialogs::Dialog::for_command(self, id).is_some()
+    }
+
+    /// Does `start` do something of its own with `id`, rather than run it with no values: open a
+    /// tool or a dialog, go to its settings in the Render workspace, or give it its values (a
+    /// toggle's new state, the selection)? Command search lists such a command (#9734).
+    pub(crate) fn starts_its_own_way(&self, id: &str) -> bool {
+        STARTED_WITH_VALUES.contains(&id)
+            || STARTED_BY_PREFIX.iter().any(|prefix| id.starts_with(prefix))
+            || toolbar::file_menu_row(id).is_some()
+            || render_workspace::ribbon_starts(id)
+            || self.interactive(id)
     }
 
     /// The ribbon has no sketch argument: use one unambiguous sketch pick, otherwise ask.
@@ -4356,7 +4367,7 @@ impl SolveApp {
         if !matches!(solidcraft_kernel::services::measure::points_meet(up.into(), to_up.into(), 1e-9), Ok(true)) {
             return animation.around_screen_up(None);
         }
-        let angle = solidcraft_kernel::services::affine::signed_unit_angle(up.into(), back.into(), to_back.into()).ok();
+        let angle = solidcraft_kernel::affine::signed_unit_angle(up.into(), back.into(), to_back.into()).ok();
         animation.around_screen_up(angle)
     }
 
@@ -5354,3 +5365,34 @@ pub fn now_ms() -> f64 {
 mod picker_test_support;
 #[cfg(test)]
 mod test_support;
+
+/// Commands that `SolveApp::start` runs with values it works out itself (a toggle's new state,
+/// the selected component or body), or offers a menu of (the selection filter's mode), although
+/// their schema requires them. Command search lists
+/// them (#9734); `start_special_cases_stay_in_command_search` keeps this list in step with
+/// `start`.
+const STARTED_WITH_VALUES: &[&str] = &[
+    "body.print_face",
+    "browser.visibility",
+    "component.move_features",
+    "component.relink",
+    "drawing.sketch.create",
+    "occurrence.properties",
+    "select.filter",
+    "select.mode",
+    "sketch.toggle_diameter",
+    "sketch.toggle_driven",
+    "tab.view.move_to_window",
+    "view.ambient_occlusion",
+    "view.angle_readout",
+    "view.layout",
+    "view.origin_axes_across_view",
+    "view.perspective",
+    "view.render_focus",
+    "view.scale_bar",
+    "view.shots_strip",
+];
+
+/// Command id prefixes `SolveApp::start` handles as a group (Settings profiles open Preferences
+/// on their page), so command search lists their commands too (#9734).
+const STARTED_BY_PREFIX: &[&str] = &["settings.profile."];
