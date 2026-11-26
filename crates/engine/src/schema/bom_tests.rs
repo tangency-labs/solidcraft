@@ -18,7 +18,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ComponentMetadataParams>(), &["component"]);
     assert_keys(
         input_schema_for::<ComponentMetadataSetParams>(),
-        &["bom_quantity", "bom_type", "component", "description", "material", "part_number", "properties", "revision", "values", "virtual"],
+        &["bom_quantity", "bom_type", "component", "description", "finish", "material", "part_number", "properties", "revision", "values", "virtual"],
     );
 }
 

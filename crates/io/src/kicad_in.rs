@@ -22,7 +22,8 @@ use crate::{IoError, Result};
 
 /// Largest KiCad board file read.
 pub const MAX_KICAD_BYTES: usize = 128 << 20;
-const MAX_TOKENS: usize = 2_000_000;
+/// Token cap for a small file; a larger file may hold as many tokens as `token_cap` allows.
+const MIN_TOKEN_CAP: usize = 2_000_000;
 const MAX_DEPTH: usize = 128;
 const MAX_FOOTPRINTS: usize = 100_000;
 /// Fields kept per footprint for its text variables.
@@ -1234,16 +1235,31 @@ fn near2(a: [f64; 2], b: [f64; 2]) -> bool {
 /// Make a mesh body for the board: its largest (or several) closed outlines, with board cutouts
 /// and drilled holes removed. `thickness` is in millimetres.
 pub fn kicad_board_mesh(board: &KicadBoard, thickness: f64) -> Result<crate::MeshObject> {
+    kicad_board_mesh_noted(board, thickness, &mut Vec::new())
+}
+
+/// [`kicad_board_mesh`], also saying in `notes` which drills could not be cut as a notch (kept as
+/// holes) and whether the drilled holes were lost altogether.
+fn kicad_board_mesh_noted(board: &KicadBoard, thickness: f64, notes: &mut Vec<String>) -> Result<crate::MeshObject> {
     if !thickness.is_finite() || thickness <= 0.0 || thickness > 1000.0 {
         return Err(IoError::Invalid("KiCad board thickness must be finite and between 0 and 1000 mm".into()));
     }
     let loops = outline_loops(board)?;
-    let regions = regions_from_loops(loops.clone(), Some(&board.drills));
-    let parts = extrude_regions(&regions, 0.0, thickness).or_else(|_| {
-        // A drill that touches a cutout can defeat the profile: keep the board and lose the holes.
-        let regions = regions_from_loops(loops, None);
-        extrude_regions(&regions, 0.0, thickness)
-    })?;
+    let mut cut_notes = Vec::new();
+    let regions = regions_from_loops_noted(loops.clone(), Some(&board.drills), &mut cut_notes);
+    let parts = match extrude_regions(&regions, 0.0, thickness) {
+        Ok(parts) => {
+            notes.append(&mut cut_notes);
+            parts
+        }
+        Err(_) => {
+            // A drill that touches a cutout can defeat the profile: keep the board and lose the holes.
+            if !board.drills.is_empty() {
+                notes.push("the board's drilled holes could not be cut: the board is built without them".into());
+            }
+            extrude_regions(&regions_from_loops(loops, None), 0.0, thickness)?
+        }
+    };
     // One body: the board's areas, at the height it stands at.
     let mut mesh = solidcraft_geom::Mesh::default();
     for part in &parts {
@@ -1260,14 +1276,19 @@ pub fn kicad_board_mesh(board: &KicadBoard, thickness: f64) -> Result<crate::Mes
 
 /// The board substrate as exact solids, exported as a STEP file: the engine adds it as an Import
 /// feature, so its faces and edges can be picked and used like any other body.
-fn board_solid(board: &KicadBoard, thickness: f64) -> Result<String> {
+fn board_solid(board: &KicadBoard, thickness: f64) -> Result<(String, bool, Vec<String>)> {
     let loops = outline_loops(board)?;
-    let regions = regions_from_loops(loops.clone(), Some(&board.drills));
+    let mut notes = Vec::new();
+    let regions = regions_from_loops_noted(loops.clone(), Some(&board.drills), &mut notes);
     // SMLib's check of each extrusion runs here: a board with drills it refuses is built without them.
     let checked = |regions: &[Region2]| {
         solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || extrude_regions_bodies(regions, 0.0, thickness)).0
     };
-    let bodies = checked(&regions).or_else(|_| checked(&regions_from_loops(loops, None)))?;
+    let mut holes_lost = false;
+    let bodies = checked(&regions).or_else(|_| {
+        holes_lost = !board.drills.is_empty();
+        checked(&regions_from_loops(loops, None))
+    })?;
     if bodies.is_empty() {
         return Err(IoError::Invalid("the board has no closed outline to build".into()));
     }
@@ -1289,7 +1310,7 @@ fn board_solid(board: &KicadBoard, thickness: f64) -> Result<String> {
             crate::MAX_STEP_BYTES >> 20
         )));
     }
-    Ok(step)
+    Ok((step, holes_lost, notes))
 }
 
 /// The import's steps on one scale of a thousand units: starting, the board parsed, its
@@ -1317,18 +1338,24 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
     let mut board_step = None;
     if options.representation == KicadRepresentation::Brep {
         match board_solid(&board, thickness) {
-            Ok(step) => board_step = Some(step),
+            Ok((step, holes_lost, notes)) => {
+                warnings.extend(notes);
+                if holes_lost {
+                    warnings.push("the board's drilled holes could not be cut: the board is built without them".into());
+                }
+                board_step = Some(step);
+            }
             Err(error) => {
                 // A profile the kernel cannot build (or a drill touching a cutout) must not lose
                 // the board: it comes in as the mesh it used to be.
                 warnings.push(format!("the board is a mesh: {error}"));
-                let board_mesh = kicad_board_mesh(&board, thickness)?;
+                let board_mesh = kicad_board_mesh_noted(&board, thickness, &mut warnings)?;
                 meshes.push(mesh_data(board_mesh.name, board_mesh.positions, board_mesh.triangles, board_mesh.color));
                 plan.bodies.push(None);
             }
         }
     } else {
-        let board_mesh = kicad_board_mesh(&board, thickness)?;
+        let board_mesh = kicad_board_mesh_noted(&board, thickness, &mut warnings)?;
         meshes.push(mesh_data(board_mesh.name, board_mesh.positions, board_mesh.triangles, board_mesh.color));
         plan.bodies.push(None);
     }
@@ -1365,7 +1392,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                 let file = match load(&model.path) {
                     Ok(file) => file,
                     Err(reason) => {
-                        warnings.push(format!("{}: {}", model_label(&model.path), short_reason(&reason)));
+                        warnings.push(load_failure(&model.path, &reason, Path::new(file).parent()));
                         continue;
                     }
                 };
@@ -1486,6 +1513,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
         }
     }
     report_import(5);
+    let warnings = collapse_repeats(warnings);
     let body_names: Vec<String> = meshes.iter().map(|mesh| mesh.name.clone()).collect();
     let file_name = Path::new(file).file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
     let feature = crate::MeshFeature {
@@ -1534,6 +1562,71 @@ fn unzip_stpz(bytes: &[u8]) -> std::result::Result<Vec<u8>, String> {
         return Err("the model file is too large".into());
     }
     Ok(out)
+}
+
+/// The warning for a model that could not be read. The loader's reason starts with the path it
+/// tried (`<path>: no such file or directory (os error 2)`): a missing file says which folder was
+/// searched, in words rather than the operating system's, so the reader knows where to look.
+fn load_failure(reference: &str, reason: &str, board_folder: Option<&Path>) -> String {
+    let label = model_label(reference);
+    // One variable that is not set leaves out every model that names it: one line for all of them.
+    if reason.starts_with("unresolved environment variable") {
+        return format!("{reason}: the models that name it are left out (set it in the environment or in KiCad's Configure Paths)");
+    }
+    if let Some((head, tail)) = reason.split_once(": ")
+        && (head.contains('\\') || head.contains('/'))
+        && is_missing_file(tail)
+    {
+        let searched = Path::new(head).parent();
+        // A folder under the board's own is named from the board, so a long personal path is not repeated.
+        let folder = match (searched, board_folder.filter(|dir| !dir.as_os_str().is_empty())) {
+            (Some(dir), Some(board)) => match dir.strip_prefix(board) {
+                Ok(rest) if rest.as_os_str().is_empty() => "the board's folder".to_string(),
+                Ok(rest) => format!("the board's folder, {}", rest.to_string_lossy()),
+                Err(_) => dir.to_string_lossy().into_owned(),
+            },
+            (Some(dir), None) => dir.to_string_lossy().into_owned(),
+            (None, _) => String::new(),
+        };
+        if !folder.is_empty() {
+            return format!("{label}: not found in {folder}");
+        }
+    }
+    format!("{label}: {}", short_reason(reason))
+}
+
+/// Whether an operating system's or the browser's error says the file is not there, whatever the
+/// platform's words: Linux and macOS say "no such file or directory", Windows "cannot find the file
+/// specified" (or "cannot find the path"), the browser "no such file in this browser", and all of
+/// them carry the code `os error 2` or `3` where the system gives one.
+fn is_missing_file(tail: &str) -> bool {
+    let tail = tail.to_ascii_lowercase();
+    tail.starts_with("no such file")
+        || tail.contains("cannot find the file")
+        || tail.contains("cannot find the path")
+        || tail.contains("(os error 2)")
+        || tail.contains("(os error 3)")
+}
+
+/// Identical warnings said once, with how many there were: a board with fifty footprints of one
+/// missing model gives one line, not fifty. The first occurrence keeps its place.
+fn collapse_repeats(warnings: Vec<String>) -> Vec<String> {
+    let mut order: Vec<String> = Vec::new();
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for warning in warnings {
+        let count = counts.entry(warning.clone()).or_insert(0);
+        if *count == 0 {
+            order.push(warning);
+        }
+        *count += 1;
+    }
+    order
+        .into_iter()
+        .map(|warning| match counts.get(&warning).copied().unwrap_or(1) {
+            1 => warning,
+            n => format!("{warning} (x{n})"),
+        })
+        .collect()
 }
 
 /// A model's name as a warning shows it: its file name, not the whole resolved path.
@@ -1793,6 +1886,12 @@ fn clean_loop(points: &[[f64; 2]]) -> Option<Loop2> {
 /// Classify closed contours by containment (even depth is solid, odd is a cutout) and cut the
 /// given drills from the region that holds them.
 fn regions_from_loops(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>) -> Vec<Region2> {
+    regions_from_loops_noted(loops, drills, &mut Vec::new())
+}
+
+/// [`regions_from_loops`], also noting in `notes` each drill at the board's edge that could not be
+/// cut as a notch (it is then kept as a hole).
+fn regions_from_loops_noted(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>, notes: &mut Vec<String>) -> Vec<Region2> {
     let areas: Vec<f64> = loops.iter().map(|l| l.signed_area().abs()).collect();
     let samples: Vec<Vec2> = loops.iter().map(loop_sample).collect();
     let mut parents: Vec<Option<usize>> = vec![None; loops.len()];
@@ -1832,7 +1931,10 @@ fn regions_from_loops(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>) -> Vec<R
             let center = Vec2::new(drill.center[0], drill.center[1]);
             let mut best: Option<usize> = None;
             for (i, (_, region)) in regions.iter().enumerate() {
-                if region.outer.contains(center)
+                // A centre exactly on the outline counts as on the board: `contains` answers for
+                // one side of an edge only, which dropped the drills on the other two edges.
+                let on_board = region.outer.contains(center) || distance_to_loop(&region.outer, center).is_some_and(|d| d < 1e-6);
+                if on_board
                     && !region.holes.iter().any(|h| h.contains(center))
                     && best.is_none_or(|b| region.outer.signed_area().abs() < regions[b].1.outer.signed_area().abs())
                 {
@@ -1845,11 +1947,108 @@ fn regions_from_loops(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>) -> Vec<R
             let hole =
                 if (size[0] - size[1]).abs() <= 1e-6 { Loop2::circle_from(center, r, 0.0) } else { slot_loop(center, size[0], size[1], drill.angle) };
             if let Some((_, region)) = regions.get_mut(i) {
+                // A drill that reaches the board's edge (a castellated hole) is a notch in the
+                // outline, not a hole inside it.
+                let reach = size[0].max(size[1]) * 0.5 + 1e-6;
+                if distance_to_loop(&region.outer, center).is_some_and(|d| d < reach) {
+                    if !drill_crosses(&region.outer, &hole) {
+                        // Wholly inside the outline, only near it: an ordinary hole.
+                        region.holes.push(hole.reversed());
+                        continue;
+                    }
+                    if let Some(notched) = notch_loop(&region.outer, &hole, center) {
+                        region.outer = notched;
+                        continue;
+                    }
+                    notes.push(format!(
+                        "the drill at ({:.3}, {:.3}) mm reaches the board's edge but could not be cut as a half-hole: it is kept as a hole",
+                        center.x, -center.y
+                    ));
+                }
                 region.holes.push(hole.reversed());
             }
         }
     }
     regions.into_iter().map(|(_, r)| r).collect()
+}
+
+/// How far `p` is from the loop's boundary (the loop drawn as a polyline).
+fn distance_to_loop(loop_: &Loop2, p: Vec2) -> Option<f64> {
+    let points = loop_.polyline(CURVE_TOLERANCE);
+    let n = points.len();
+    if n < 2 {
+        return None;
+    }
+    let mut best = f64::INFINITY;
+    for i in 0..n {
+        let (a, b) = (points[i], points[(i + 1) % n]);
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        let len2 = dx * dx + dy * dy;
+        let t = if len2 > 0.0 { (((p.x - a.x) * dx + (p.y - a.y) * dy) / len2).clamp(0.0, 1.0) } else { 0.0 };
+        let (ex, ey) = (p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+        best = best.min((ex * ex + ey * ey).sqrt());
+    }
+    best.is_finite().then_some(best)
+}
+
+/// A closed polyline through the loop's points (curves drawn as lines).
+fn loop_to_pline(loop_: &Loop2) -> Option<cavalier_contours::polyline::Polyline<f64>> {
+    use cavalier_contours::polyline::{PlineSource, PlineSourceMut, Polyline};
+    let mut pl = Polyline::<f64>::new_closed();
+    for point in loop_.polyline(CURVE_TOLERANCE) {
+        pl.add(point.x, point.y, 0.0);
+    }
+    (pl.vertex_count() >= 3).then_some(pl)
+}
+
+fn pline_to_loop(pl: &cavalier_contours::polyline::Polyline<f64>) -> Option<Loop2> {
+    use cavalier_contours::polyline::PlineSource;
+    let points: Vec<Vec2> = (0..pl.vertex_count()).map(|i| pl.at(i)).map(|v| Vec2::new(v.x, v.y)).collect();
+    (points.len() >= 3).then(|| Loop2::polygon(&points).ccw())
+}
+
+/// Whether the drill, in its own pose, reaches past the outline (or onto it): a half-hole rather
+/// than a hole that merely lies near the edge.
+fn drill_crosses(outer: &Loop2, drill: &Loop2) -> bool {
+    drill.polyline(CURVE_TOLERANCE).iter().any(|p| !outer.contains(*p))
+}
+
+/// The outline with `drill` cut out of its edge: one outline when the cut leaves one piece.
+///
+/// A drill centred on an edge can put polygon vertices exactly on that edge, which the boolean
+/// refuses as touching input. So when a cut fails, the drill polygon is turned a very small angle
+/// (at most 0.006 rad, about a hundredth of a millimetre at the end of a 4 mm slot) about its
+/// centre, which moves every vertex off the edge, and tried again. Only a drill that crosses the
+/// outline in its specified pose gets here (see [`drill_crosses`]).
+fn notch_loop(outer: &Loop2, drill: &Loop2, center: Vec2) -> Option<Loop2> {
+    use cavalier_contours::polyline::{BooleanOp, PlineSource, PlineSourceMut};
+    let mut a = loop_to_pline(outer)?;
+    if a.area() < 0.0 {
+        a.invert_direction_mut();
+    }
+    let points = drill.polyline(CURVE_TOLERANCE);
+    for turn in [0.0_f64, 0.001, -0.0023, 0.0057] {
+        let (sin, cos) = turn.sin_cos();
+        let mut b = cavalier_contours::polyline::Polyline::<f64>::new_closed();
+        for p in &points {
+            let (dx, dy) = (p.x - center.x, p.y - center.y);
+            b.add(center.x + dx * cos - dy * sin, center.y + dx * sin + dy * cos, 0.0);
+        }
+        if b.vertex_count() < 3 {
+            return None;
+        }
+        if b.area() < 0.0 {
+            b.invert_direction_mut();
+        }
+        let result = a.boolean(&b, BooleanOp::Not);
+        if result.pos_plines.len() == 1
+            && result.neg_plines.is_empty()
+            && let Some(notched) = result.pos_plines.first().and_then(|r| pline_to_loop(&r.pline))
+        {
+            return Some(notched);
+        }
+    }
+    None
 }
 
 /// A slot (stadium) of `width` × `height` about `center`, its width turned to point along `angle`
@@ -3735,23 +3934,43 @@ fn numbers_but(expr: &Expr<'_>, minimum: usize, skip: &str) -> std::result::Resu
     Ok(values)
 }
 
+/// The most tokens a board of `len` bytes may hold: one per two bytes, with `MIN_TOKEN_CAP` as the
+/// floor. KiCad indents every line, so a real board has well over two bytes per token (about 2.5 at
+/// the densest); a board under `MAX_KICAD_BYTES` is therefore not refused for its token count, and
+/// only denser input (a run of bare parentheses is one token per byte) is. The size cap bounds the
+/// memory: at most `MAX_KICAD_BYTES / 2` tokens.
+fn token_cap(len: usize) -> usize {
+    MIN_TOKEN_CAP.max(len / 2)
+}
+
+/// Push one token, refusing the board first when the vector already holds `cap` tokens, so it never
+/// grows (and reallocates) past the cap.
+fn push_token<'a>(tokens: &mut Vec<Token<'a>>, cap: usize, token: Token<'a>) -> Result<()> {
+    if tokens.len() >= cap {
+        return Err(IoError::Invalid(format!("KiCad PCB has more than {cap} s-expression tokens")));
+    }
+    tokens.push(token);
+    Ok(())
+}
+
 fn tokenize(source: &str) -> Result<Vec<Token<'_>>> {
+    let cap = token_cap(source.len());
     let mut tokens = Vec::new();
     let mut index = 0usize;
     while index < source.len() {
         let byte = source.as_bytes().get(index).copied().unwrap_or_default();
         match byte {
             b'(' => {
-                tokens.push(Token::Open);
+                push_token(&mut tokens, cap, Token::Open)?;
                 index += 1;
             }
             b')' => {
-                tokens.push(Token::Close);
+                push_token(&mut tokens, cap, Token::Close)?;
                 index += 1;
             }
             b'"' => {
                 let (value, next) = quoted(source, index + 1)?;
-                tokens.push(Token::String(value));
+                push_token(&mut tokens, cap, Token::String(value))?;
                 index = next;
             }
             b';' => {
@@ -3768,11 +3987,8 @@ fn tokenize(source: &str) -> Result<Vec<Token<'_>>> {
                     index += 1;
                 }
                 let word = source.get(start..index).ok_or_else(|| IoError::Invalid("invalid UTF-8 boundary in KiCad PCB".into()))?;
-                tokens.push(Token::Atom(word));
+                push_token(&mut tokens, cap, Token::Atom(word))?;
             }
-        }
-        if tokens.len() > MAX_TOKENS {
-            return Err(IoError::Invalid(format!("KiCad PCB has more than {MAX_TOKENS} s-expression tokens")));
         }
     }
     Ok(tokens)
@@ -3828,7 +4044,7 @@ impl<'a> Parser<'a> {
             return Err(IoError::Invalid(format!("KiCad PCB nesting exceeds {MAX_DEPTH}")));
         }
         self.nodes = self.nodes.saturating_add(1);
-        if self.nodes > MAX_TOKENS {
+        if self.nodes > self.tokens.len() {
             return Err(IoError::Invalid("KiCad PCB has too many s-expression nodes".into()));
         }
         match self.tokens.get(self.next).cloned() {

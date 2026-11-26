@@ -326,6 +326,106 @@ fn drilled_pads_cut_holes_in_the_substrate() {
     assert!((measure.volume - expected).abs() < expected * 0.01, "{measure:?}");
 }
 
+/// A castellated hole (a drill centred on the board's edge) is cut as a half-hole in the edge, and
+/// the board's other drills are kept: one drill reaching the outline used to drop every drill.
+#[test]
+fn a_castellated_hole_is_a_notch_and_keeps_the_other_drills() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "castle" (at 0 5) (layer "F.Cu")
+        (pad "1" thru_hole circle (at 0 0) (size 1.6 1.6) (drill 1) (layers "*.Cu" "*.Mask")))
+      (footprint "inner" (at 10 5) (layer "F.Cu")
+        (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask"))))"#;
+    let board = parse_kicad_board(source.as_bytes(), "castle.kicad_pcb").unwrap();
+    assert_eq!(board.drills.len(), 2);
+    let mesh = kicad_board_mesh(&board, 1.6).unwrap();
+    let body = solidcraft_kernel::mesh_body(&mesh.positions, &mesh.triangles).unwrap();
+    let measure = solidcraft_kernel::measure(&body).unwrap();
+    let disc = std::f64::consts::PI * 0.25;
+    let expected = (200.0 - disc - disc / 2.0) * 1.6;
+    // Tighter than the missing half-hole (0.63 mm3), loose enough for the polygon approximation.
+    assert!((measure.volume - expected).abs() < 0.25, "{measure:?} against {expected}");
+    let mut load = |_: &str| Err("none".to_string());
+    let options = KicadOptions { representation: KicadRepresentation::Brep, ..KicadOptions::default() };
+    let imported = read_kicad(source.as_bytes(), "castle.kicad_pcb", &options, &mut load).unwrap();
+    assert!(imported.board_step.is_some(), "the board is a solid");
+    assert!(!imported.feature.warnings.iter().any(|w| w.contains("drilled holes")), "{:?}", imported.feature.warnings);
+}
+
+/// A castellated hole is cut on every edge of the board, whichever of the outline's edges the drill
+/// is centred on: a drill centred exactly on the outline (the right and bottom edges) was not found on the board and was
+/// dropped with nothing said.
+#[test]
+fn a_castellated_hole_is_cut_on_every_edge() {
+    let disc = std::f64::consts::PI;
+    let expected = (200.0 - disc / 2.0) * 1.6;
+    for (edge, at) in [("left", "0 5"), ("right", "20 5"), ("top", "10 0"), ("bottom", "10 10")] {
+        let source = format!(
+            r#"(kicad_pcb (general (thickness 1.6))
+              (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+              (footprint "castle" (at {at}) (layer "F.Cu")
+                (pad "1" thru_hole circle (at 0 0) (size 3 3) (drill 2) (layers "*.Cu" "*.Mask"))))"#
+        );
+        let board = parse_kicad_board(source.as_bytes(), "edge.kicad_pcb").unwrap();
+        let mesh = kicad_board_mesh(&board, 1.6).unwrap();
+        let body = solidcraft_kernel::mesh_body(&mesh.positions, &mesh.triangles).unwrap();
+        let volume = solidcraft_kernel::measure(&body).unwrap().volume;
+        assert!((volume - expected).abs() < expected * 0.002, "{edge} edge: {volume} against {expected}");
+        let mut load = |_: &str| Err("none".to_string());
+        let options = KicadOptions { representation: KicadRepresentation::Brep, ..KicadOptions::default() };
+        let imported = read_kicad(source.as_bytes(), "edge.kicad_pcb", &options, &mut load).unwrap();
+        assert!(imported.board_step.is_some(), "{edge} edge: the board is a solid");
+        assert!(imported.feature.warnings.is_empty(), "{edge} edge: {:?}", imported.feature.warnings);
+    }
+}
+
+/// A slot that lies wholly inside the outline, 0.1 mm from the edge, is a hole; one that reaches
+/// past the edge is a half-hole.
+#[test]
+fn a_slot_near_the_edge_is_a_notch_only_when_it_crosses_it() {
+    let outer = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(20.0, 0.0), Vec2::new(20.0, 10.0), Vec2::new(0.0, 10.0)]).ccw();
+    let inside = slot_loop(Vec2::new(0.2, 5.0), 0.2, 4.0, 0.0);
+    assert!(!drill_crosses(&outer, &inside), "0.1 mm from the edge is not a notch");
+    let across = slot_loop(Vec2::new(0.05, 5.0), 0.2, 4.0, 0.0);
+    assert!(drill_crosses(&outer, &across), "a slot over the edge is a notch");
+}
+
+/// A missing model names the folder that was searched, and the same warning from many footprints
+/// is said once with a count.
+#[test]
+fn missing_model_warnings_name_the_folder_and_repeats_are_counted() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "a" (at 5 5) (layer "F.Cu") (model "/libs/jst/JST_SH.step"))
+      (footprint "b" (at 10 5) (layer "F.Cu") (model "/libs/jst/JST_SH.step"))
+      (footprint "c" (at 15 5) (layer "F.Cu") (model "/libs/jst/JST_SH.step")))"#;
+    let mut load = |model: &str| Err(format!("{model}: No such file or directory (os error 2)"));
+    let imported = read_kicad(source.as_bytes(), "t.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    let lines: Vec<&String> = imported.feature.warnings.iter().filter(|w| w.contains("JST_SH")).collect();
+    assert_eq!(lines.len(), 1, "{:?}", imported.feature.warnings);
+    assert_eq!(lines[0].as_str(), "JST_SH.step: not found in /libs/jst (x3)");
+    // A model beside the board is named from the board, not by the folder's full path.
+    let beside = r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "a" (at 5 5) (layer "F.Cu") (model "/work/board/models/X.step")))"#;
+    let imported = read_kicad(beside.as_bytes(), "/work/board/t.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    assert!(imported.feature.warnings.iter().any(|w| w == "X.step: not found in the board's folder, models"), "{:?}", imported.feature.warnings);
+    // Windows and the browser word a missing file differently; the folder is named all the same.
+    for words in ["The system cannot find the file specified. (os error 2)", "no such file in this browser"] {
+        let mut other = |path: &str| Err(format!("{path}: {words}"));
+        let imported = read_kicad(source.as_bytes(), "t.kicad_pcb", &KicadOptions::default(), &mut other).unwrap();
+        assert!(
+            imported.feature.warnings.iter().any(|w| w == "JST_SH.step: not found in /libs/jst (x3)"),
+            "{words}: {:?}",
+            imported.feature.warnings
+        );
+    }
+    let mut unset = |_: &str| Err("unresolved environment variable `EASYEDA2KICAD`".to_string());
+    let imported = read_kicad(source.as_bytes(), "t.kicad_pcb", &KicadOptions::default(), &mut unset).unwrap();
+    let lines: Vec<&String> = imported.feature.warnings.iter().filter(|w| w.contains("EASYEDA2KICAD")).collect();
+    assert_eq!(lines.len(), 1, "{:?}", imported.feature.warnings);
+    assert!(lines[0].ends_with("(x3)"), "{lines:?}");
+}
+
 #[test]
 fn missing_model_is_warned_and_the_board_is_kept() {
     let mut load = |_: &str| Err("model file was not found".to_string());
@@ -356,6 +456,29 @@ fn skips_footprints_with_invalid_models_and_keeps_other_parts() {
 fn rejects_malformed_and_wrong_root_documents() {
     assert!(parse_kicad_board(b"(kicad_pcb (general", "bad.kicad_pcb").is_err());
     assert!(parse_kicad_board(b"(kicad_pro)", "bad.kicad_pcb").is_err());
+}
+
+#[test]
+fn a_board_over_the_old_token_cap_but_under_the_size_cap_is_read() {
+    // 4 tokens per indented `(zz 1)` line, as KiCad writes them: just over 2 000 000 tokens in
+    // about 4.5 MB, far below the size cap.
+    let mut board = String::from("(kicad_pcb (general (thickness 1.6))\n");
+    for _ in 0..500_100 {
+        board.push_str("\t\t(zz 1)\n");
+    }
+    board.push(')');
+    assert!(board.len() < MAX_KICAD_BYTES);
+    assert!(tokenize(&board).map(|t| t.len() > MIN_TOKEN_CAP).unwrap_or(false));
+    assert!(parse_kicad_board(board.as_bytes(), "big.kicad_pcb").is_ok());
+}
+
+#[test]
+fn the_token_cap_follows_the_size_and_still_refuses_dense_junk() {
+    assert_eq!(token_cap(0), MIN_TOKEN_CAP);
+    assert_eq!(token_cap(MAX_KICAD_BYTES), MAX_KICAD_BYTES / 2);
+    // One token per byte is denser than any board: refused by count, quickly.
+    let junk = format!("(kicad_pcb {})", "()".repeat(MIN_TOKEN_CAP));
+    assert!(parse_kicad_board(junk.as_bytes(), "junk.kicad_pcb").is_err());
 }
 
 #[test]

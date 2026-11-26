@@ -448,6 +448,7 @@ plain!(
     Vec<u8>,
     Vec<usize>,
     Vec<solidcore::query::brep::FaceHit>,
+    Vec<Vec<[f64; 3]>>,
     Brep,
 );
 

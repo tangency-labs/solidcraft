@@ -11,6 +11,8 @@ workspace = true
 [dependencies]
 # The record's data types only (points, planes, regions, the body record and its history): the body format.
 solidcore-record = { workspace = true }
+# CADIR, cadmpeg's neutral CAD model: what the exchange family reads records from and writes them into.
+cadmpeg-ir = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 
