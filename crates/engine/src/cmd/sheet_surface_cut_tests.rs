@@ -157,6 +157,22 @@ fn a_large_base_flange_keeps_a_small_corner_round_in_the_body_and_flat() {
     assert_eq!(dxf_entities(&mut s), (4, 1, 0));
 }
 
+/// A round in an inside corner of a cut-out through the sheet (#20612) gives the corner some of
+/// its material back: it is an arc of the cut-out in the flat, as a round on a corner of the
+/// sheet's outline is, and the sheet unfolds and folds again with it.
+#[test]
+fn a_round_in_an_inside_corner_of_a_cut_out_is_an_arc_of_the_cut_out() {
+    let mut s = plate();
+    engrave(&mut s, "Pocket", T, [30.0, 20.0], [60.0, 40.0], T, true);
+    run(&mut s, "solid.fillet", json!({"edges": [[30, 20, 1]], "radius": 3, "tangent_chain": false}));
+    let want = (100.0 * 60.0 - 30.0 * 20.0 + (1.0 - PI / 4.0) * 9.0) * T;
+    assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", exact_volume(&s));
+    assert_eq!(dxf_entities(&mut s), (8, 1, 0));
+    run(&mut s, "sheet.unfold", json!({}));
+    run(&mut s, "sheet.refold", json!({}));
+    assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", exact_volume(&s));
+}
+
 /// What a sheet can't keep is refused, and the sheet stays as it was: a blind drill point and a
 /// chamfered face edge (walls not square to the sheet), a notch through a bend from the edge.
 #[test]
