@@ -2823,6 +2823,7 @@ pub fn face_intersect_breps_cached(
         uv_curves1 = r.surface1_uv_curves;
         uv_curves2 = r.surface2_uv_curves;
         curve_types = r.curve_types;
+        curve_own_edges.clear();
 
         // A crossing curve that bounds a cap within the tolerance is a touch at the
         // B-rep's tolerance (not upstream; WR-79, #2412): it becomes the touching point at
