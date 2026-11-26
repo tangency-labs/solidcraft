@@ -85,126 +85,42 @@ fn face_at(body: &Body, rec: &Brep, at: Vec3) -> Result<(usize, Vec3)> {
 }
 
 /// The face's loop moved `w` into the face (to the left of its edges, as a face's boundary has
-/// its inside on the left), corners mitred where the offsets don't already meet.
+/// its inside on the left), as the kernel moves a closed profile in the face's plane
+/// ([`solidcore_ops::develop::offset_closed_contour`]): each line shifted and each arc's radius
+/// changed, the moved pieces meeting again at every corner (at a sharp one beside an arc, where
+/// the moved curves cross).
 fn offset_loop(pieces: &[Piece], n: Vec3, w: f64, tol: f64) -> Result<Vec<Piece>> {
-    let left = |a: Vec3, b: Vec3| n.cross(b - a).normalized();
-    let mut out: Vec<Piece> = Vec::new();
-    for p in pieces {
-        out.push(match p.arc {
-            None => {
-                let l = left(p.a, p.b).ok_or_else(|| fail("zero edge"))?;
-                p.moved(l * w)
-            }
-            Some(arc) => {
-                // Each point moves along its radius, to the left: towards the centre of an arc
-                // turning counter-clockwise, away from that of one turning clockwise.
-                let r = p.a.dist(arc.centre);
-                let shift = if arc.sweep > 0.0 { -w } else { w };
-                if r + shift <= tol {
-                    return Err(fail("the offset closes an arc"));
-                }
-                let moved = |q: Vec3| arc.centre + (q - arc.centre) * ((r + shift) / r);
-                Piece { a: moved(p.a), b: moved(p.b), arc: Some(arc) }
-            }
-        });
-    }
-    // Joints: where the offsets don't meet (sharp corners), the pieces are extended or cut back to
-    // their crossing.
-    let k = out.len();
-    let mut turned = vec![false; k];
-    for i in 0..k {
-        let j = (i + 1) % k;
-        let (Some(pi), Some(pj)) = (out.get(i).copied(), out.get(j).copied()) else { continue };
-        if pi.b.dist(pj.a) < tol {
-            if let Some(x) = out.get_mut(j) {
-                x.a = pi.b;
-            }
-            continue;
-        }
-        match (pi.arc, pj.arc) {
-            (None, None) => {
-                let (d1, d2) = (pi.b - pi.a, pj.b - pj.a);
-                let w0 = pj.a - pi.a;
-                let cr = d1.cross(d2);
-                let den = cr.len2();
-                if den < 1e-24 {
-                    return Err(fail("parallel edges at a corner"));
-                }
-                let t = w0.cross(d2).dot(cr) / den;
-                let x = pi.a + d1 * t;
-                if let Some(e) = out.get_mut(i) {
-                    e.b = x;
-                }
-                if let Some(e) = out.get_mut(j) {
-                    e.a = x;
-                }
-            }
-            _ => {
-                // An arc at the corner: the moved line and circle (or the two moved circles)
-                // cross nearest the old corner, and both pieces end there.
-                let corner = pieces.get(j).map(|p| p.a).ok_or_else(|| fail("piece"))?;
-                // Far enough past a line's ends: both pieces and both circles across, and the width.
-                let size = |p: &Piece| p.a.dist(p.b) + p.arc.map_or(0.0, |arc| 2.0 * p.a.dist(arc.centre));
-                let reach = size(&pi) + size(&pj) + 2.0 * w.abs();
-                let x = carriers_cross(&pi, &pj, n, corner, reach)
-                    .ok_or_else(|| fail("an arc meeting another edge at a corner the band's edge can't go round"))?;
-                if let Some(e) = out.get_mut(i) {
-                    e.b = x;
-                }
-                if let Some(e) = out.get_mut(j) {
-                    e.a = x;
-                }
-                for m in [i, j] {
-                    if let Some(t) = turned.get_mut(m) {
-                        *t = true;
-                    }
-                }
-            }
-        }
-    }
-    // An arc cut back or carried on at a corner turns through a new angle, the same way round.
-    for (p, _) in out.iter_mut().zip(&turned).filter(|(_, t)| **t) {
-        let Some(arc) = p.arc.as_mut() else { continue };
-        let (x, y) = (p.a - arc.centre, p.b - arc.centre);
-        let tau = std::f64::consts::TAU;
-        let mut sweep = n.dot(x.cross(y)).atan2(x.dot(y));
-        sweep += ((arc.sweep - sweep) / tau).round() * tau;
-        // Turned the other way, or left shorter than the model's tolerance along the circle.
-        if sweep * arc.sweep <= 0.0 || sweep.abs() * x.len() <= tol {
-            return Err(fail("the offset swallows an arc"));
-        }
-        arc.sweep = sweep;
-    }
-    Ok(out)
-}
-
-/// Where the carriers of two moved pieces cross (a line's line, an arc's circle), the crossing
-/// nearest `near`, as the kernel finds it ([`solidcore_ops::develop::crossings`]) in the face's
-/// plane (normal `n`): each arc as its whole circle, each line carried on past both its ends by
-/// `reach`, farther than a crossing near the corner can lie.
-fn carriers_cross(p: &Piece, q: &Piece, n: Vec3, near: Vec3, reach: f64) -> Option<Vec3> {
-    let plane = Plane::from_normal(near, n)?;
-    let carrier = |s: &Piece| -> Option<Seg2> {
-        let (a, b) = (plane.to_local(s.a), plane.to_local(s.b));
-        match s.arc {
-            None => {
-                let len = a.dist(b);
-                if !(len > 0.0 && len.is_finite()) {
-                    return None;
-                }
-                let on = (b - a) * (reach / len);
-                Some(Seg2::Line { a: a - on, b: b + on })
-            }
-            Some(arc) => {
-                Some(Seg2::Arc { center: plane.to_local(arc.centre), radius: s.a.dist(arc.centre), start: 0.0, sweep: std::f64::consts::TAU })
-            }
-        }
-    };
-    let (cp, cq) = (carrier(p)?, carrier(q)?);
-    let corner = plane.to_local(near);
-    let x = solidcore_ops::develop::crossings(&[cp], &[cq]).into_iter().map(|c| c.4).min_by(|x, y| x.dist(corner).total_cmp(&y.dist(corner)))?;
-    let x = plane.to_world(x);
-    x.is_finite().then_some(x)
+    use solidcore_ops::develop::{ContourRefusal, offset_closed_contour};
+    let origin = pieces.first().map(|p| p.a).ok_or_else(|| fail("piece"))?;
+    let plane = Plane::from_normal(origin, n).ok_or_else(|| fail("rim plane"))?;
+    // A corner turning through an angle parts the moved ends by about `w` times it: where that
+    // stays within the model's tolerance the corner is smooth, and the moved pieces meet on the
+    // common normal.
+    let smooth = tol / w.abs();
+    let segs = offset_closed_contour(&profile(pieces, &plane)?.segs, w, 0.0, false, smooth).map_err(|e| {
+        fail(match e {
+            ContourRefusal::ZeroLength => "zero edge",
+            ContourRefusal::TurnsBack => "parallel edges at a corner",
+            ContourRefusal::CornersMiss => "an arc meeting another edge at a corner the band's edge can't go round",
+            ContourRefusal::LineTooShort => "the offset swallows an edge",
+            ContourRefusal::RadiusTooSmall => "the offset closes an arc",
+            ContourRefusal::ArcTooShort => "the offset swallows an arc",
+        })
+    })?;
+    // Back on the face: each piece from where it starts to where the next one does.
+    let starts: Vec<Vec3> = segs.iter().map(|s| plane.to_world(s.start())).collect();
+    segs.iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let (Some(&a), Some(&b)) = (starts.get(i), starts.get((i + 1) % segs.len())) else { return Err(fail("piece")) };
+            let arc = match *s {
+                Seg2::Line { .. } => None,
+                Seg2::Arc { center, sweep, .. } => Some(Arc { centre: plane.to_world(center), sweep }),
+                _ => return Err(fail("piece")),
+            };
+            Ok(Piece { a, b, arc })
+        })
+        .collect()
 }
 
 /// The pieces of a loop (seen from outside the body, whose normal is `n`), from its record edges:
