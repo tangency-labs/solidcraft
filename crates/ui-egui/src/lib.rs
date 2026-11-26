@@ -424,6 +424,7 @@ pub mod tool_modifiers;
 pub mod toolbar;
 pub mod toolbar_custom;
 pub mod tools;
+mod touchpad_auto;
 pub use solidcraft_ui_kit as ui_kit;
 #[cfg(test)]
 mod ui_kit_guard_tests;
@@ -1038,6 +1039,8 @@ pub struct SolveApp {
     held_pen_release: Option<egui::Pos2>,
     /// A synthetic press is held: its drag never moves the real cursor (`navigation::wrap_cursor`).
     pub(crate) synthetic_press: bool,
+    /// The preset the user chose, while the Touchpad preset stands in for it (`touchpad_auto`).
+    pub(crate) touchpad_borrowed: Option<String>,
     control_rx: Option<Receiver<ControlRequest>>,
     /// The app's control channel turned on and off from the settings ([`control_switch`]).
     pub control_switch: control_switch::ControlSwitch,
@@ -1337,6 +1340,7 @@ impl SolveApp {
             pen_release: None,
             held_pen_release: None,
             synthetic_press: false,
+            touchpad_borrowed: None,
             control_rx: None,
             control_switch: Default::default(),
             agent_chat: Default::default(),
@@ -1627,6 +1631,12 @@ impl SolveApp {
             && let Some(obj) = v.as_object_mut()
         {
             obj.insert(panel_runtime::PREFERENCES_KEY.into(), layout);
+        }
+        // A Touchpad preset borrowed while the touchpad is in use is never saved (#22442).
+        if let Some(chosen) = touchpad_auto::saved_nav(self)
+            && let Some(prefs) = v.get_mut("preferences").and_then(Value::as_object_mut)
+        {
+            prefs.insert("nav".into(), json!(chosen));
         }
         // While the Preferences dialog is open the file holds what Cancel would restore: a change
         // that was never applied must not reach disk through the periodic save, a quit or a
@@ -4624,6 +4634,8 @@ impl SolveApp {
         ui_kit::install_keyboard_focus(ctx);
         // A setting the organization's policy sets keeps its value, whatever changed it.
         policy::enforce(self);
+        let (device, buttons_down) = ctx.input(|i| (touchpad_auto::device(&i.events), i.pointer.any_down()));
+        touchpad_auto::follow(self, device, buttons_down);
         // Shortcuts run here, before `ui` installs the language scope: a tool started by its
         // key must build its translated hint in the user's language, not in English.
         let _language = solidcraft_ui_text::scope(&self.preferences.language);

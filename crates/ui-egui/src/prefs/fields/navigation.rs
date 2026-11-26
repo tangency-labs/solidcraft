@@ -102,6 +102,9 @@ macro_rules! navigation_preferences {
             right_drag_orbits: bool = true, PAGE_NAVIGATION => check_tr("nav.right_drag_orbits.label");
             /// Spread discrete wheel input across frames (off: apply each event immediately).
             smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");
+            /// A touchpad scroll or pinch borrows the Touchpad preset; a mouse wheel notch or middle
+            /// press gives the chosen one back (#22442). Off by default: the preset never changes.
+            touchpad_auto_preset: bool = false, PAGE_NAVIGATION => check_tr("nav.touchpad_auto.label");
             /// Touchscreen drags orbit/pan; off preserves the mouse mapping's selection behavior.
             touchscreen_navigation: bool = false, PAGE_NAVIGATION => check_tr("nav.touchscreen.label");
             /// Two-finger trackpad scroll pans (off: it zooms like the wheel); pinch always zooms.
