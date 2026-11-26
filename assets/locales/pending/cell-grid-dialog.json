@@ -25,7 +25,7 @@
     "error.cell_grid_profiles": "Pick the sketch profiles to fill with cells",
     "error.cell_grid_one_sketch": "Pick profiles of one sketch: a cell grid fills one sketch",
     "error.cell_grid_anchor": "The anchor point is not in the model any more: pick another or empty the field",
-    "help.solid.cell_grid": "Cuts a grid of hexagon, square, triangle, circle or polygon cells out of a part, inside a sketch's profiles. Use it for vents, speaker grilles and lighter plates."
+    "help.solid.cell_grid": "Cuts a grid of hexagon, square, triangle, circle, polygon or voronoi cells out of a part, inside a sketch's profiles. Use it for vents, speaker grilles and lighter plates."
   },
   "ar": {
     "ui.cell_grid_title": "شبكة خلايا",
@@ -53,7 +53,7 @@
     "error.cell_grid_profiles": "اختر مقاطع الرسم التي تُملأ بالخلايا",
     "error.cell_grid_one_sketch": "اختر مقاطع رسم واحد: شبكة الخلايا تملأ رسمًا واحدًا",
     "error.cell_grid_anchor": "نقطة الارتكاز لم تعد في النموذج: اختر نقطة أخرى أو أفرغ الحقل",
-    "help.solid.cell_grid": "يقطع شبكة من الخلايا السداسية أو المربعة أو المثلثة أو الدائرية أو المضلعة من قطعة، داخل مقاطع رسم. استخدمه لفتحات التهوية وشبكات مكبرات الصوت والألواح الأخف."
+    "help.solid.cell_grid": "يقطع شبكة من الخلايا السداسية أو المربعة أو المثلثة أو الدائرية أو المضلعة أو خلايا فورونوي من قطعة، داخل مقاطع رسم. استخدمه لفتحات التهوية وشبكات مكبرات الصوت والألواح الأخف."
   },
   "de": {
     "ui.cell_grid_title": "ZELLRASTER",
@@ -81,7 +81,7 @@
     "error.cell_grid_profiles": "Wählen Sie die Skizzenprofile, die mit Zellen gefüllt werden",
     "error.cell_grid_one_sketch": "Wählen Sie Profile einer einzigen Skizze: ein Zellraster füllt eine Skizze",
     "error.cell_grid_anchor": "Der Ankerpunkt ist nicht mehr im Modell: Wählen Sie einen anderen oder leeren Sie das Feld",
-    "help.solid.cell_grid": "Schneidet ein Raster aus Sechseck-, Quadrat-, Dreieck-, Kreis- oder Vieleckzellen aus einem Teil, innerhalb der Profile einer Skizze. Für Lüftungsschlitze, Lautsprechergitter und leichtere Platten."
+    "help.solid.cell_grid": "Schneidet ein Raster aus Sechseck-, Quadrat-, Dreieck-, Kreis-, Vieleck- oder Voronoi-Zellen aus einem Teil, innerhalb der Profile einer Skizze. Für Lüftungsschlitze, Lautsprechergitter und leichtere Platten."
   },
   "he": {
     "ui.cell_grid_title": "רשת תאים",
@@ -109,7 +109,7 @@
     "error.cell_grid_profiles": "בחרו את פרופילי השרטוט שימולאו בתאים",
     "error.cell_grid_one_sketch": "בחרו פרופילים של שרטוט אחד: רשת תאים ממלאת שרטוט אחד",
     "error.cell_grid_anchor": "נקודת העיגון כבר לא נמצאת במודל: בחרו אחרת או רוקנו את השדה",
-    "help.solid.cell_grid": "חותך מחלק רשת של תאים משושים, ריבועיים, משולשים, עגולים או מצולעים, בתוך הפרופילים של שרטוט. שימושי לפתחי אוורור, רשתות רמקול ולוחות קלים יותר."
+    "help.solid.cell_grid": "חותך מחלק רשת של תאים משושים, ריבועיים, משולשים, עגולים, מצולעים או תאי וורונוי, בתוך הפרופילים של שרטוט. שימושי לפתחי אוורור, רשתות רמקול ולוחות קלים יותר."
   },
   "ja": {
     "ui.cell_grid_title": "セルグリッド",
@@ -137,7 +137,7 @@
     "error.cell_grid_profiles": "セルで埋めるスケッチのプロファイルを選択してください",
     "error.cell_grid_one_sketch": "1つのスケッチのプロファイルを選択してください: セルグリッドは1つのスケッチを埋めます",
     "error.cell_grid_anchor": "アンカー点がモデルにありません: 別の点を選択するか、欄を空にしてください",
-    "help.solid.cell_grid": "スケッチのプロファイルの内側に、六角形・正方形・三角形・円・多角形のセルのグリッドを部品から切り抜きます。通気口、スピーカーグリル、軽量化したプレートに使います。"
+    "help.solid.cell_grid": "スケッチのプロファイルの内側に、六角形・正方形・三角形・円・多角形・ボロノイのセルのグリッドを部品から切り抜きます。通気口、スピーカーグリル、軽量化したプレートに使います。"
   },
   "ko": {
     "ui.cell_grid_title": "셀 그리드",
@@ -165,7 +165,7 @@
     "error.cell_grid_profiles": "셀로 채울 스케치 프로파일을 선택하세요",
     "error.cell_grid_one_sketch": "한 스케치의 프로파일을 선택하세요: 셀 그리드는 스케치 하나를 채웁니다",
     "error.cell_grid_anchor": "앵커 점이 더 이상 모델에 없습니다: 다른 점을 선택하거나 칸을 비우세요",
-    "help.solid.cell_grid": "스케치 프로파일 안에서 육각형, 정사각형, 삼각형, 원 또는 다각형 셀의 그리드를 부품에서 잘라냅니다. 통풍구, 스피커 그릴, 더 가벼운 판에 사용합니다."
+    "help.solid.cell_grid": "스케치 프로파일 안에서 육각형, 정사각형, 삼각형, 원, 다각형 또는 보로노이 셀의 그리드를 부품에서 잘라냅니다. 통풍구, 스피커 그릴, 더 가벼운 판에 사용합니다."
   },
   "nb": {
     "ui.cell_grid_title": "CELLERUTENETT",
@@ -193,7 +193,7 @@
     "error.cell_grid_profiles": "Velg skisseprofilene som skal fylles med celler",
     "error.cell_grid_one_sketch": "Velg profiler fra én skisse: et cellerutenett fyller én skisse",
     "error.cell_grid_anchor": "Ankerpunktet finnes ikke lenger i modellen: velg et annet eller tøm feltet",
-    "help.solid.cell_grid": "Skjærer et rutenett av sekskant-, kvadrat-, trekant-, sirkel- eller mangekantceller ut av en del, innenfor profilene i en skisse. Bruk det til lufteåpninger, høyttalergitter og lettere plater."
+    "help.solid.cell_grid": "Skjærer et rutenett av sekskant-, kvadrat-, trekant-, sirkel-, mangekant- eller voronoiceller ut av en del, innenfor profilene i en skisse. Bruk det til lufteåpninger, høyttalergitter og lettere plater."
   },
   "vi": {
     "ui.cell_grid_title": "LƯỚI Ô",
@@ -221,7 +221,7 @@
     "error.cell_grid_profiles": "Chọn các biên dạng phác thảo cần lấp đầy bằng ô",
     "error.cell_grid_one_sketch": "Chọn các biên dạng của một phác thảo: lưới ô lấp đầy một phác thảo",
     "error.cell_grid_anchor": "Điểm neo không còn trong mô hình: chọn điểm khác hoặc để trống ô",
-    "help.solid.cell_grid": "Cắt một lưới ô lục giác, vuông, tam giác, tròn hoặc đa giác khỏi chi tiết, bên trong các biên dạng của bản phác. Dùng cho lỗ thông gió, lưới loa và tấm nhẹ hơn."
+    "help.solid.cell_grid": "Cắt một lưới ô lục giác, vuông, tam giác, tròn, đa giác hoặc Voronoi khỏi chi tiết, bên trong các biên dạng của bản phác. Dùng cho lỗ thông gió, lưới loa và tấm nhẹ hơn."
   },
   "zh": {
     "ui.cell_grid_title": "单元格栅",
@@ -249,6 +249,6 @@
     "error.cell_grid_profiles": "请选择要填充单元的草图轮廓",
     "error.cell_grid_one_sketch": "请选择同一草图的轮廓：单元格栅只填充一个草图",
     "error.cell_grid_anchor": "锚点已不在模型中：请另选一点或清空该栏",
-    "help.solid.cell_grid": "在草图轮廓内，从零件上切出六边形、正方形、三角形、圆形或多边形单元组成的格栅。用于通风口、扬声器网罩和减重板。"
+    "help.solid.cell_grid": "在草图轮廓内，从零件上切出六边形、正方形、三角形、圆形、多边形或沃罗诺伊单元组成的格栅。用于通风口、扬声器网罩和减重板。"
   }
 }

@@ -1,5 +1,5 @@
 //! Cell grids: fills the area of a sketch with cells of one shape (hexagons, squares, triangles,
-//! circles or regular polygons) and returns the cells as closed 2D loops, with the counts and the
+//! circles, regular polygons or irregular voronoi cells) and returns the cells as closed 2D loops, with the counts and the
 //! open area. This is the pure planning half of the cell grid feature: it knows a field and the
 //! grid's parameters, not a body, a command or a cut.
 //!
@@ -18,6 +18,14 @@
 //! indices. Two fields with the same shape, size, web, angle and anchor therefore get the same
 //! lattice, which is how a grid split over two parts lines up. With `angle` 0 a hexagon is
 //! flat-top; the other shapes follow the same pattern (see [`CellShape`]).
+//!
+//! # Voronoi cells
+//! [`CellShape::Voronoi`] starts from the hexagon lattice's centres and moves each by a
+//! pseudo-random step that depends only on `seed` and the cell's indices, up to
+//! `irregularity * p / 2`. A cell is the part of the plane nearer its centre than any other,
+//! drawn in by half the web, with its corners rounded by `corner_radius`. The same seed gives the
+//! same pattern on every field, so these grids line up across parts as the regular ones do.
+//! Voronoi cells have no lattice lines to snap to and act as `Whole` under [`Clip::Snap`].
 //!
 //! # Clipping, at a field's edge
 //! The field as drawn is the limit: no mode puts a cell outside it or over a keep-out.
