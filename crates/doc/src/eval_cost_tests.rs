@@ -6512,3 +6512,55 @@ fn shape_index_matches_same_shape_for_lazy_moved_and_ready_bodies() {
         assert_eq!(after.added_bytes(before), 0);
     }
 }
+
+/// Fast-path model renames (`rename_body`, `rename_feature`, `rename_param`) update results
+/// in place without evaluating any feature, so they must clear `last_recomputed` and
+/// `last_restored` from the preceding evaluation just as `evaluate_shared` does on reuse.
+#[test]
+fn fast_path_model_renames_clear_last_recomputed() {
+    let mut doc = Document::new("rename clears last_recomputed");
+    doc.set_param("w", "10 mm", Some("mm"), None).unwrap();
+    let feature = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "w".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(feature).unwrap().body_names = vec!["Body1".into()];
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 1);
+
+    let mut renamed_param = doc.clone();
+    renamed_param.rename_param("w", "plate_w").unwrap();
+    assert!(model.rename_param(&doc, &renamed_param, "w", "plate_w"));
+    assert_eq!((model.last_recomputed, model.last_restored), (0, 0));
+
+    let mut grown = renamed_param.clone();
+    grown.set_param("plate_w", "20 mm", Some("mm"), None).unwrap();
+    model.evaluate(&grown);
+    assert_eq!(model.last_recomputed, 1);
+
+    let mut renamed_feature = grown.clone();
+    renamed_feature.feature_mut(feature).unwrap().name = "BasePlate".into();
+    assert!(model.rename_feature(&renamed_feature, feature));
+    assert_eq!((model.last_recomputed, model.last_restored), (0, 0));
+
+    let mut taller = renamed_feature.clone();
+    taller.set_param("plate_w", "30 mm", Some("mm"), None).unwrap();
+    model.evaluate(&taller);
+    assert_eq!(model.last_recomputed, 1);
+
+    let mut renamed_body = taller.clone();
+    renamed_body.feature_mut(feature).unwrap().body_names = vec!["PlateBody".into()];
+    assert!(model.rename_body(&renamed_body, "Body1", "PlateBody"));
+    assert_eq!((model.last_recomputed, model.last_restored), (0, 0));
+}

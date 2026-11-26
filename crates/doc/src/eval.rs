@@ -6646,6 +6646,8 @@ impl Model {
             r.state = state;
         }
         self.refingerprint(doc);
+        self.last_recomputed = 0;
+        self.last_restored = 0;
         true
     }
 
@@ -6696,6 +6698,8 @@ impl Model {
             }
         }
         self.refingerprint(doc);
+        self.last_recomputed = 0;
+        self.last_restored = 0;
         true
     }
 
@@ -6788,6 +6792,8 @@ impl Model {
             r.state = state;
         }
         self.refingerprint(doc);
+        self.last_recomputed = 0;
+        self.last_restored = 0;
         true
     }
 
