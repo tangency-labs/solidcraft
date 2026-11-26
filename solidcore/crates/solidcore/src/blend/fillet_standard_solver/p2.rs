@@ -283,6 +283,7 @@ fn as_sm_err(e: SolidError, op: &'static str) -> SolidError {
         e if e.is_not_certified() => e,
         SolidError::Unported { .. }
         | SolidError::Cancelled { .. }
+        | SolidError::OutOfFuel { .. }
         | SolidError::InvalidInput { .. }
         | SolidError::PortInvariant { .. } => e,
         _ => Failure::new(op, BlendFailure::Solver(SolverFailure::JacobianNotLoaded))

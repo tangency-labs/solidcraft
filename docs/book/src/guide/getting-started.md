@@ -116,19 +116,37 @@ command-line paths outside Documents may need a specific additional filesystem p
 
 ### Linux Snap
 
-On Ubuntu and other distributions with snapd:
+On Ubuntu and other distributions with snapd, download the latest release's
+[Snap package for x86-64](https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.snap)
+or [Snap package for ARM64](https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-aarch64.snap).
+Open a terminal in the download folder and install the package for your computer.
+
+For x86-64:
 
 ```sh
-sudo snap install solidcraft
+sudo snap install --dangerous ./solidcraft-linux-x86_64.snap
+```
+
+For ARM64:
+
+```sh
+sudo snap install --dangerous ./solidcraft-linux-aarch64.snap
+```
+
+`--dangerous` is required for a local package without a Snap Store signature. These installs
+do not update automatically. Check the [releases page](https://github.com/tangency-labs/solidcraft/releases)
+for newer packages.
+
+After installation:
+
+```sh
 solidcraft                # or open SolidCraft from the app menu
 solidcraft.cli --version  # the CLI, for scripts and `solidcraft.cli mcp`
 ```
 
 The snap can open designs in your home folder (not hidden folders) and, through the file
 chooser, anywhere else. For USB drives and other mounted disks, run
-`sudo snap connect solidcraft:removable-media` once. A release's `.snap` file installs without
-the store with `sudo snap install --dangerous ./solidcraft-VERSION-linux-ARCH.snap`; it then
-doesn't update automatically.
+`sudo snap connect solidcraft:removable-media` once.
 
 ## Web
 

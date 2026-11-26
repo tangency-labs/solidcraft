@@ -13,11 +13,11 @@ use std::sync::Arc;
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.sketch.create", "Create Sheet Sketch", crate::checked!("drawing.sketch.create", create)).begins_edit()
-        .in_drawing().doc_only().icon("sketch")
+        .in_drawing().enabled(in_drawing_workspace).doc_only().icon("sketch")
         .contract(&contract::CREATE).output(output_schema_for::<contract::Reading>)
         .params("owner: exact sheet or drawing-view id in the open drawing; name?: text; view?: open Sheet tile displaying the owner's sheet. Hosted calls default to the focused or most recent matching Sheet tile and return sketching_view; headless calls omit view and have no tile owner. Creates and enters one sketch: a sheet's in paper XY millimetres, a drawing view's in model millimetres in its plane; one drawing undo step."),
     CommandSpec::new("drawing.sketch.edit", "Edit Sheet Sketch", crate::checked!("drawing.sketch.edit", edit)).begins_edit()
-        .in_drawing().doc_only().noundo().icon("sketch")
+        .in_drawing().enabled(in_drawing_workspace).doc_only().noundo().icon("sketch")
         .contract(&contract::EDIT).output(output_schema_for::<contract::Reading>)
         .params("sketch: exact encoded sketch id in the open drawing; view?: matching open Sheet tile (headless calls omit it). Returns sketching_view for hosted edits, distinct from the encoded drawing view in the reply's view field. Enters that sketch (a sheet's in paper XY millimetres, a drawing view's in model millimetres in its plane) without changing its data or the source design."),
     CommandSpec::new("drawing.sketch.inspect", "Inspect Sheet Sketch", crate::checked!("drawing.sketch.inspect", inspect))
@@ -26,6 +26,27 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("sketch?: exact encoded id, else the active sheet sketch. Reports resolved points in its owner's frame (paper millimetres for a sheet's sketch, model millimetres in the view's plane for a view's) and local entity ids without adopting the solution."),
 
 ];
+
+/// A sheet sketch is started or entered only where the sketch tools work on it (#19860): not while
+/// the model has the focus ([`Session::model_focus`], the Design and Render workspaces, #19179),
+/// where the shared tools, Finish and Cancel work on the model's sketch and would say no sketch is
+/// being edited.
+fn in_drawing_workspace(s: &Session) -> std::result::Result<(), String> {
+    if s.model_focus {
+        return Err("a sheet sketch is edited in the Drawing workspace: switch to Drawing first".into());
+    }
+    Ok(())
+}
+
+/// The same refusal, asked before the session finishes an open edit for the command
+/// ([`Session::execute`]): refused, `drawing.sketch.create` and `drawing.sketch.edit` leave the
+/// model's open sketch as it was.
+pub(crate) fn refuse_outside_drawing(s: &Session, spec: &CommandSpec) -> Result<()> {
+    if matches!(spec.id, "drawing.sketch.create" | "drawing.sketch.edit") {
+        in_drawing_workspace(s).map_err(|why| crate::EngineError::Disabled(spec.id.to_string(), why))?;
+    }
+    Ok(())
+}
 
 fn parsed<T: DeserializeOwned>(cmd: &str, p: &Value) -> Result<T> {
     T::deserialize(p).map_err(|e| bad(cmd, e.to_string()))
