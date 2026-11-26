@@ -540,6 +540,49 @@ mod tests {
         );
     }
 
+    /// A circle of radius 10 cut by the chord y = −6, run counter-clockwise: the long arc from
+    /// (8, −6) round to (−8, −6), sweeping π + 2·atan2(6, 8), then the chord back. Moved 7.875
+    /// inside, the circle has radius 2.125 and the chord is y = 1.875, crossing at (±1, 1.875):
+    /// the arc is now the short one from atan2(1.875, 1) to atan2(1.875, −1), not a whole turn
+    /// longer.
+    #[test]
+    fn a_long_arc_cut_short_by_its_corners_keeps_less_than_a_turn() {
+        let k = 6f64.atan2(8.0);
+        let cut = [
+            Seg2::Arc {
+                center: Vec2::ZERO,
+                radius: 10.0,
+                start: -k,
+                sweep: PI + 2.0 * k,
+            },
+            Seg2::Line {
+                a: Vec2::new(-8.0, -6.0),
+                b: Vec2::new(8.0, -6.0),
+            },
+        ];
+        let out = offset_closed_contour(&cut, 7.875, 0.0, false, SMOOTH).unwrap();
+        let [Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        }, Seg2::Line { a, b }] = out[..]
+        else {
+            panic!("{out:?}")
+        };
+        let begin = 1.875f64.atan2(1.0);
+        assert_eq!((center, radius), (Vec2::ZERO, 2.125));
+        assert!(
+            (start - begin).abs() < 1e-12
+                && (sweep - (1.875f64.atan2(-1.0) - begin)).abs() < 1e-12,
+            "{start} {sweep}"
+        );
+        assert!(
+            a.dist(Vec2::new(-1.0, 1.875)) < 1e-12 && b.dist(Vec2::new(1.0, 1.875)) < 1e-12,
+            "{a:?} {b:?}"
+        );
+    }
+
     /// A lens of two arcs of radius 5 run counter-clockwise: about (0, 3) from (−4, 0) to (4, 0),
     /// then about (0, −3) back, where the loop closes at a sharp corner. Moved 1 inside, both
     /// circles have radius 4 and cross at (±√7, 0): each arc runs between those, the lower from
