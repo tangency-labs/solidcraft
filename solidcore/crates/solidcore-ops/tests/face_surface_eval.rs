@@ -272,3 +272,31 @@ fn a_face_past_the_records_is_refused() {
         Err(Error::Argument)
     ));
 }
+
+#[test]
+fn two_faces_on_one_plane_are_one_surface_inside_their_box_and_an_inverted_box_is_refused() {
+    use solidcore_ops::face_surface::{same_surface, Analytic};
+    let floor = Analytic::Plane {
+        point: [0.0, 0.0, 0.0],
+        normal: [0.0, 0.0, 1.0],
+    };
+    // the same plane given by another point and the other way round
+    let under = Analytic::Plane {
+        point: [7.0, -2.0, 0.0],
+        normal: [0.0, 0.0, -3.0],
+    };
+    // 1e-5 above it
+    let above = Analytic::Plane {
+        point: [0.0, 0.0, 1e-5],
+        normal: [0.0, 0.0, 1.0],
+    };
+    let (lo, hi) = ([-10.0, -10.0, -1.0], [10.0, 10.0, 1.0]);
+    assert!(same_surface(floor, under, 1e-9, lo, hi).unwrap());
+    assert!(!same_surface(floor, above, 1e-6, lo, hi).unwrap());
+    assert!(same_surface(floor, above, 2e-5, lo, hi).unwrap());
+    // the corners the other way round are not a box
+    assert!(matches!(
+        same_surface(floor, under, 1e-9, hi, lo),
+        Err(Error::Refused { .. })
+    ));
+}

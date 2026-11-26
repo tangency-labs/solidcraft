@@ -2377,6 +2377,9 @@ fn merge_brep_in(
 
     // for faces and their loops
     let faces = p1::faces(other, None)?;
+    // Faces whose surface kind changes under `add_analytics` may change UV
+    // parameterisation, so their surface-dependent gap caches are left reset.
+    let mut reparameterized_faces = std::collections::BTreeSet::new();
     for &f in &faces {
         let fu1 = other
             .face(f)?
@@ -2428,6 +2431,12 @@ fn merge_brep_in(
         } else {
             face_surf.copy(k)?
         };
+        if add_analytics
+            && core::mem::discriminant(face_surf.kind())
+                != core::mem::discriminant(new_surface.kind())
+        {
+            reparameterized_faces.insert(f);
+        }
         let owner = (env.key_of)(EntityRef::Face(new_f));
         *new_surface.owner_mut() = Some(owner);
         let (rect, dom, ftol) = (
@@ -2820,10 +2829,60 @@ fn merge_brep_in(
             let vu = src
                 .vertexuse
                 .and_then(|x| mapped(EntityRef::Vertexuse(x), &map, as_vertexuse));
+            // Preserve valid cached gaps across exact geometry copies (#21432),
+            // remapping entity ids to the destination B-rep so callers (such as
+            // `update_tolerances_after_boolean` after a copy) do not re-measure
+            // untouched edges.
+            let keep_face_cache = reparameterized_faces.is_empty()
+                || eu1::face(other, eu)
+                    .ok()
+                    .flatten()
+                    .is_none_or(|f| !reparameterized_faces.contains(&f));
+            let max_edge_face_gap = if keep_face_cache {
+                src.max_edge_face_gap
+                    .edgeuse
+                    .and_then(|u| mapped(EntityRef::Edgeuse(u), &map, as_edgeuse))
+                    .map(|mapped_eu| {
+                        let mut gap = src.max_edge_face_gap;
+                        gap.edgeuse = Some(mapped_eu);
+                        gap
+                    })
+            } else {
+                None
+            };
+            let edge_ccw_edge_gap = if src.edge_ccw_edge_gap.is_init()
+                && src.edge_ccw_edge_gap.edgeuse0 == Some(eu)
+                && src.edge_ccw_edge_gap.edgeuse1 == src.ccw
+            {
+                match (
+                    src.edge_ccw_edge_gap
+                        .edgeuse0
+                        .and_then(|u| mapped(EntityRef::Edgeuse(u), &map, as_edgeuse)),
+                    src.edge_ccw_edge_gap
+                        .edgeuse1
+                        .and_then(|u| mapped(EntityRef::Edgeuse(u), &map, as_edgeuse)),
+                ) {
+                    (Some(e0), Some(e1)) => {
+                        let mut gap = src.edge_ccw_edge_gap;
+                        gap.edgeuse0 = Some(e0);
+                        gap.edgeuse1 = Some(e1);
+                        Some(gap)
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
             let x = b.edgeuse_mut(new_eu)?;
             x.ccw = ccw;
             x.cw = cw;
             x.vertexuse = vu;
+            if let Some(gap) = max_edge_face_gap {
+                x.max_edge_face_gap = gap;
+            }
+            if let Some(gap) = edge_ccw_edge_gap {
+                x.edge_ccw_edge_gap = gap;
+            }
         }
         // the edge record's vertex pair (`GetVertex` reads it through the edge uses)
         let new_e = mapped(EntityRef::Edge(e), &map, |x| match x {
@@ -2851,6 +2910,52 @@ fn merge_brep_in(
         });
         if let (Some(va), Some(vc)) = (va, vc) {
             b.edge_mut(new_e)?.vertices = [va, vc];
+        }
+    }
+
+    // vertexuses: cached gaps and UV point (remapped now that every vertex use is in `map`)
+    for &v in &vertices {
+        for vu in vertex::vertexuses(other, v)? {
+            let new_vu = mapped(EntityRef::Vertexuse(vu), &map, as_vertexuse)
+                .ok_or_else(|| null_deref("unmapped vertex use"))?;
+            let src = other.vertexuse(vu)?;
+            let keep_face_cache = reparameterized_faces.is_empty()
+                || vertexuse::faceuse(other, vu)
+                    .ok()
+                    .flatten()
+                    .and_then(|fu| other.faceuse(fu).ok()?.face)
+                    .is_none_or(|f| !reparameterized_faces.contains(&f));
+            let vertex_edge_gap = src
+                .vertex_edge_gap
+                .vertexuse
+                .and_then(|u| mapped(EntityRef::Vertexuse(u), &map, as_vertexuse))
+                .map(|mapped_vu| {
+                    let mut gap = src.vertex_edge_gap;
+                    gap.vertexuse = Some(mapped_vu);
+                    gap
+                });
+            let vertex_face_gap = if keep_face_cache {
+                src.vertex_face_gap
+                    .vertexuse
+                    .and_then(|u| mapped(EntityRef::Vertexuse(u), &map, as_vertexuse))
+                    .map(|mapped_vu| {
+                        let mut gap = src.vertex_face_gap;
+                        gap.vertexuse = Some(mapped_vu);
+                        gap
+                    })
+            } else {
+                None
+            };
+            let x = b.vertexuse_mut(new_vu)?;
+            if let Some(gap) = vertex_edge_gap {
+                x.vertex_edge_gap = gap;
+            }
+            if let Some(gap) = vertex_face_gap {
+                x.vertex_face_gap = gap;
+            }
+            if keep_face_cache {
+                x.uv_point = src.uv_point;
+            }
         }
     }
 
