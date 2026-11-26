@@ -1,7 +1,6 @@
 # unit	case	key	index	class	body (see OTHER in trim_tolerance.rs)
 blend.fillet_executive_p3	real-box-fillet1v-r3-shell-closed	shell_geometry	61	rounding	0
 blend.fillet_executive_p3	real-box-fillet4v-r3-shell-closed	shell_geometry	66	rounding	0
-blend.fillet_executive_p3	real-box-fillet4v-r3-shell-closed	shell_geometry	78	rounding	0
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	0	integration	0
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	10	integration	0
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	11	integration	0
@@ -9,13 +8,6 @@ blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	3	in
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	4	integration	0
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	8	integration	0
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	9	integration	0
-offset.offset_executive_p2	api_shell_cylinder_r5_top_open_tol_1e6	result.geometry	1	vertex-box	0
-offset.offset_executive_p2	api_shell_cylinder_r5_top_open_tol_1e6	result.geometry	2	vertex-box	0
-offset.offset_executive_p2	api_shell_cylinder_r5_top_open_tol_1e6	result.geometry	3	vertex-box	0
-offset.offset_executive_p2	api_shell_cylinder_top_extend_merge_in	result.geometry	1	vertex-box	0
-offset.offset_executive_p2	api_shell_cylinder_top_extend_merge_in	result.geometry	2	vertex-box	0
-offset.offset_executive_p2	api_shell_cylinder_top_face	result.geometry	1	vertex-box	0
-offset.offset_executive_p2	api_shell_cylinder_top_face	result.geometry	2	vertex-box	0
 query.brep	gen0269	steps	38	padding	0
 query.brep	gen0269	steps	39	padding	0
 query.brep	gen0269	steps	41	padding	0

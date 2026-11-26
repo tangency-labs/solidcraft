@@ -260,13 +260,22 @@ fn each_patterned_copy_takes_its_own_sketch() {
     }
 }
 
+/// A piece of a face split on purpose takes a sketch by the name Split Face gave it (the face's,
+/// with the piece's side of the tool), and follows that piece when the split moves.
 #[test]
-fn a_piece_of_a_face_split_on_purpose_still_needs_a_fixed_plane() {
+fn a_piece_of_a_face_split_on_purpose_takes_a_sketch_by_its_own_name() {
     let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "at", "expression": "5 mm"}));
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Modified"}));
-    run(&mut s, "solid.split_face", json!({"body": "Modified", "faces": [[5, 5, 10]], "plane": {"origin": [5, 0, 0], "normal": [1, 0, 0]}}));
-    let error = s.execute("sketch.create", &json!({"plane": {"face": [2.5, 5, 10]}})).unwrap_err().to_string();
-    assert!(error.contains("fixed:true"), "{error}");
+    run(&mut s, "solid.split_face", json!({"body": "Modified", "faces": [[5, 5, 10]], "plane": {"origin": ["at", 0, 0], "normal": [1, 0, 0]}}));
+    sketch_on(&mut s, [2.5, 5., 10.], "Low");
+    let (plane, certificate) = healthy(&s, "Low");
+    assert_eq!(certificate, Some(FaceCertificate::Lineage));
+    assert!((plane.origin.z - 10.).abs() < 1e-9 && (plane.normal().z - 1.).abs() < 1e-9, "{plane:?}");
+    run(&mut s, "parameters.change", json!({"name": "at", "expression": "7 mm"}));
+    no_errors(&s);
+    healthy(&s, "Low");
+    healthy(&reopened(&s), "Low");
 }
 
 /// Offset Face raises one piece of a split top: the pieces no longer share a plane, so each

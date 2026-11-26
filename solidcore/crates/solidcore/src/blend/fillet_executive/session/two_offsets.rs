@@ -145,7 +145,8 @@ fn on_plane(b: &crate::Brep, u: EdgeuseId) -> Result<bool> {
 /// An edge between planes keeps its own wedge: it holds there all along, so the sizes do. On
 /// any other edge the wedge is the chain's edges' between planes, so its offsets are theirs;
 /// where those differ no one pair of offsets holds the sizes on them all, and the edge keeps
-/// its own. Without one it is the narrowest of the chain, whose offsets are the smallest, so
+/// its own and reports the conflicting planar wedges. Without a planar reference it is the
+/// narrowest of the chain, whose offsets are the smallest, so
 /// the setbacks are nowhere much past the sizes asked; unequal sizes can fold at it
 /// ([`unfolded_wedge`]).
 fn chain_wedge(
@@ -153,13 +154,13 @@ fn chain_wedge(
     between_planes: &[bool],
     index: usize,
     alike: impl Fn(usize) -> Result<bool>,
-) -> Result<f64> {
+) -> Result<(f64, bool)> {
     let own = wedges
         .get(index)
         .copied()
         .ok_or_else(|| defect(OP_ALONG, ONE_PER_EDGE))?;
     if between_planes.get(index).copied().unwrap_or(false) {
-        return Ok(own);
+        return Ok((own, false));
     }
     let mut anchor: Option<f64> = None;
     let mut narrowest = own;
@@ -174,13 +175,13 @@ fn chain_wedge(
             // the rounding of an angle measured from two unit vectors
             let room = 64.0 * f64::EPSILON / w.sin();
             match anchor {
-                Some(a) if (a - w).abs() > room => return Ok(own),
+                Some(a) if (a - w).abs() > room => return Ok((own, true)),
                 Some(_) => {}
                 None => anchor = Some(w),
             }
         }
     }
-    Ok(anchor.unwrap_or(narrowest))
+    Ok((anchor.unwrap_or(narrowest), false))
 }
 
 /// The wedge a chamfer of setbacks `setbacks` is measured at, on a chain measured at `narrowest`
@@ -249,6 +250,18 @@ impl FilletSession<'_> {
         second: &[f64],
         generators: &[FilletSurfaceGenerator],
     ) -> Result<()> {
+        self.prepare_two_offsets(k, edges, first, second, generators, &[])
+    }
+
+    fn prepare_two_offsets(
+        &mut self,
+        k: &Kernel,
+        edges: &[EdgeId],
+        first: &[f64],
+        second: &[f64],
+        generators: &[FilletSurfaceGenerator],
+        chamfers: &[Option<ChamferDefinition>],
+    ) -> Result<()> {
         check_lists(
             OP,
             edges.len(),
@@ -256,6 +269,7 @@ impl FilletSession<'_> {
                 (first.len(), false),
                 (second.len(), false),
                 (generators.len(), false),
+                (chamfers.len(), true),
             ],
         )?;
         let live_edges = crate::topology::brep::edges(self.target(), None)?;
@@ -287,15 +301,41 @@ impl FilletSession<'_> {
         for (index, &id) in edges.iter().enumerate() {
             let edgeuse = self.blendable_edgeuse(k, id)?;
             let approx_tol = 4.0 * edge::tolerance(self.target(), id)?;
-            let solver = self.new_constant_radius_solver_with_second(
-                k,
-                edgeuse,
-                value(OP, first, index)?,
-                value(OP, second, index)?,
-                approx_tol,
-                20.0 * (crate::math::PI / 180.0),
-                TANGENCY,
-            )?;
+            let chamfer = if chamfers.is_empty() {
+                None
+            } else {
+                value(OP, chamfers, index)?
+            };
+            let r1 = value(OP, first, index)?;
+            let angle = 20.0 * (crate::math::PI / 180.0);
+            let solver = if chamfer
+                .and_then(ChamferDefinition::constant_setback)
+                .is_some()
+            {
+                // The constant-distance solver seeds a radius of chord / sqrt(2).
+                // Use the radius from this edge's reference wedge as the seed.
+                self.new_constant_distance_solver(
+                    k,
+                    edgeuse,
+                    r1 * std::f64::consts::SQRT_2,
+                    approx_tol,
+                    angle,
+                    TANGENCY,
+                )?
+            } else {
+                self.new_constant_radius_solver_with_second(
+                    k,
+                    edgeuse,
+                    r1,
+                    value(OP, second, index)?,
+                    approx_tol,
+                    angle,
+                    TANGENCY,
+                )?
+            };
+            if chamfer.is_some() {
+                self.objects.solver_mut(solver)?.base_mut().chamfer = chamfer;
+            }
             self.load_solver(k, solver)?;
             let generator = match shared {
                 Some(generator) => generator,
@@ -314,14 +354,14 @@ impl FilletSession<'_> {
     /// of one size on a tangent chain ([`chains_among`]) are one chamfer, measured at the
     /// wedge of its edges between planes, else at the narrowest of its wedges at which no
     /// station folds ([`unfolded_wedge`]), so their rails meet where they run on into each
-    /// other. Then prepared as [`Self::prepare_per_edge_two_offsets`] with the linear
-    /// section, and the solver keeps the sizes: the
+    /// other. If the planar wedges require different offsets, a symmetric chamfer on
+    /// the intervening curved faces keeps its setback at every station. The linear
+    /// section joins its rails and the solver keeps the sizes: the
     /// chamfer's surface is its definition, the
     /// chord of order 0, and keeps them too. A distance is along the edge's blend edge
     /// use's face (support 1) or its radial mate's (support 2); an angle is to support 1.
-    /// Between planes the sizes hold all along the edge; on a curved face, where the wedge
-    /// was measured, and elsewhere along the edge they drift (the module's page of
-    /// [`crate::surface::procedural_blend::chamfer`]). Not upstream (solidcore's, #2486).
+    /// With fixed offsets on a curved face, the sizes hold where the wedge was
+    /// measured ([`crate::surface::procedural_blend::chamfer`]). Not upstream (solidcore's, #2486).
     ///
     /// # Errors
     ///
@@ -458,7 +498,7 @@ impl FilletSession<'_> {
         let mut widest: Vec<Option<f64>> = vec![None; edges.len()];
         for index in 0..edges.len() {
             if knife.get(index).copied().unwrap_or(false) {
-                measured.push(0.0);
+                measured.push((0.0, false));
                 continue;
             }
             let size = value(OP_ALONG, sizes, index)?;
@@ -467,11 +507,17 @@ impl FilletSession<'_> {
                     && !knife.get(other).copied().unwrap_or(false)
                     && value(OP_ALONG, sizes, other)? == size)
             };
-            let mut wedge = chain_wedge(&wedges, &between_planes, index, alike)?;
+            let (mut wedge, conflicting_planes) =
+                chain_wedge(&wedges, &between_planes, index, alike)?;
             let mut on_chain = Vec::new();
+            let mut uniform = true;
             for other in 0..edges.len() {
                 if alike(other)? {
                     on_chain.push(other);
+                } else if chains.get(index) == chains.get(other) {
+                    // A differently sized chamfer or a knife edge still has a fixed
+                    // offset at a Join. Keep the existing compatibility check there.
+                    uniform = false;
                 }
             }
             let planes = |i: &usize| between_planes.get(*i).copied().unwrap_or(false);
@@ -507,7 +553,13 @@ impl FilletSession<'_> {
                     wedge = unfolded_wedge(wedge, [d1, d2], opens, margin);
                 }
             }
-            measured.push(wedge);
+            // Different planar wedges cannot share an offset while retaining the requested
+            // setback. Between these anchors a curved edge solves the offset at each station
+            // so it meets the planar rails at their common wedge, even on a shifted side seam.
+            let stationwise = conflicting_planes
+                && uniform
+                && matches!(size, ChamferSize::Distances([a, b]) if a == b);
+            measured.push((wedge, stationwise));
         }
         let mut chamfers = Vec::new();
         let mut knives = Vec::new();
@@ -559,7 +611,7 @@ impl FilletSession<'_> {
                 knives.push(id);
                 continue;
             }
-            let wedge = measured
+            let (wedge, stationwise) = measured
                 .get(index)
                 .copied()
                 .ok_or_else(|| defect(OP_ALONG, ONE_PER_EDGE))?;
@@ -606,32 +658,21 @@ impl FilletSession<'_> {
             let [r1, r2] = chamfer.offsets().map_err(|_| size_invalid(id))?;
             first.push(r1);
             second.push(r2);
-            chamfers.push(Some(chamfer));
+            chamfers.push(Some(if stationwise {
+                chamfer.at_every_station()?
+            } else {
+                chamfer
+            }));
         }
         let offsets: Vec<[f64; 2]> = first.iter().zip(&second).map(|(&a, &b)| [a, b]).collect();
-        let solvers_before = self.objects.solvers.len();
-        self.prepare_per_edge_two_offsets(
+        self.prepare_two_offsets(
             k,
             edges,
             &first,
             &second,
             &[FilletSurfaceGenerator::Linear],
+            &chamfers,
         )?;
-        // the solvers just made, one per edge in order: each keeps its edge's sizes
-        let made: Vec<usize> = (solvers_before..self.objects.solvers.len())
-            .filter(|&i| matches!(self.objects.solvers.get(i), Some(Some(_))))
-            .collect();
-        if made.len() != chamfers.len() {
-            return Err(defect(
-                OP_ALONG,
-                "the two-offset preparation makes one solver per edge, each one blendable",
-            ));
-        }
-        for (i, chamfer) in made.into_iter().zip(chamfers) {
-            if let Some(Some(solver)) = self.objects.solvers.get_mut(i) {
-                solver.base_mut().chamfer = chamfer;
-            }
-        }
         self.objects.knife_chamfers.extend(knives);
         Ok(offsets)
     }
@@ -800,21 +841,24 @@ mod tests {
         // none between planes: the narrowest, whichever edge asks
         let w = [1.0, 1.5, 1.2];
         for i in 0..3 {
-            assert_eq!(chain_wedge(&w, &[false; 3], i, all).unwrap(), 1.0);
+            assert_eq!(chain_wedge(&w, &[false; 3], i, all).unwrap(), (1.0, false));
         }
         // one between planes: its wedge on the others, narrower or wider than their own
         let planes = [false, false, true];
-        assert_eq!(chain_wedge(&w, &planes, 0, all).unwrap(), 1.2);
-        assert_eq!(chain_wedge(&w, &planes, 1, all).unwrap(), 1.2);
-        assert_eq!(chain_wedge(&w, &planes, 2, all).unwrap(), 1.2);
+        assert_eq!(chain_wedge(&w, &planes, 0, all).unwrap(), (1.2, false));
+        assert_eq!(chain_wedge(&w, &planes, 1, all).unwrap(), (1.2, false));
+        assert_eq!(chain_wedge(&w, &planes, 2, all).unwrap(), (1.2, false));
         // two between planes of different wedges: no one pair, each keeps its own
         let planes = [false, true, true];
-        assert_eq!(chain_wedge(&w, &planes, 0, all).unwrap(), 1.0);
-        assert_eq!(chain_wedge(&w, &planes, 1, all).unwrap(), 1.5);
-        assert_eq!(chain_wedge(&w, &planes, 2, all).unwrap(), 1.2);
+        assert_eq!(chain_wedge(&w, &planes, 0, all).unwrap(), (1.0, true));
+        assert_eq!(chain_wedge(&w, &planes, 1, all).unwrap(), (1.5, false));
+        assert_eq!(chain_wedge(&w, &planes, 2, all).unwrap(), (1.2, false));
         // an edge of another chain or size does not count
         let alone = |other: usize| Ok(other != 0);
-        assert_eq!(chain_wedge(&w, &[false; 3], 1, alone).unwrap(), 1.2);
+        assert_eq!(
+            chain_wedge(&w, &[false; 3], 1, alone).unwrap(),
+            (1.2, false)
+        );
     }
 
     /// The setback along a face at wedge `w` of a chamfer measured at `a`.

@@ -754,6 +754,29 @@ fn trim_circle_makes_an_arc_and_a_profile() {
     assert!(close(a[0], std::f64::consts::PI * 50.0), "{a:?}");
 }
 
+/// The same break given as `points` (the point the picked line ends at) separates the curves too.
+#[test]
+fn break_points_at_a_shared_point_separates_the_curves_that_meet_there() {
+    let mut s = new_sketch();
+    let chain = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0], [20, 10]]}))["curves"]);
+    let (first, second) = (chain[0].clone(), chain[1].clone());
+    let shared_end = |s: &Session, id: &str| {
+        let sk = sketch(s);
+        sk.curves[sk.curve_index(id).unwrap()].kind.ends().unwrap()
+    };
+    let (_, shared) = shared_end(&s, &first);
+    assert_eq!(shared_end(&s, &second).0, shared, "the chain shares its corner");
+
+    let out = run(&mut s, "sketch.break", json!({"curve": second, "points": [[20, 0]]}));
+    assert_eq!(ids(&out["curves"]), vec![second.clone()], "{out}");
+    let (own, _) = shared_end(&s, &second);
+    let (_, kept) = shared_end(&s, &first);
+    assert_eq!(kept, shared, "the first line keeps the point");
+    assert_ne!(own, shared, "the second line has its own end");
+    let sk = sketch(&s);
+    assert!(sk.point(own).unwrap().dist(Vec2::new(20.0, 0.0)) < 1e-9, "the second line stays put");
+}
+
 /// Trimming half of a center rectangle's diagonal left two points at the centre, one held by
 /// nothing: dragging a corner pulled them apart. Either diagonal, the half that stays ends on the
 /// one centre point, which stays where the diagonals cross.

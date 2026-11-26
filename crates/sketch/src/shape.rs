@@ -5,7 +5,7 @@ use std::f64::consts::TAU;
 
 use solidcore_record::{Seg2, Vec2};
 
-use crate::model::{CurveKind, Sketch};
+use crate::model::{ConstraintKind, CurveKind, Sketch};
 
 /// A curve of the sketch as an analytic shape for splitting.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -264,6 +264,373 @@ impl Shape {
     }
 }
 
+/// Dominant axis (`"horizontal"` or `"vertical"`) of the segment from `a` to `b`.
+pub fn axis_mode_between(a: Vec2, b: Vec2) -> &'static str {
+    let d = b - a;
+    if d.x.abs() >= d.y.abs() { "horizontal" } else { "vertical" }
+}
+
+/// Unit direction from `from` toward `to`, or `None` when points coincide or are non-finite.
+pub fn unit_direction(from: Vec2, to: Vec2) -> Option<Vec2> {
+    (from.is_finite() && to.is_finite()).then(|| (to - from).normalized()).flatten()
+}
+
+/// Intersection between two infinite 2D lines `(p0, d0)` and `(p1, d1)`.
+pub fn intersect_infinite_lines(p0: Vec2, d0: Vec2, p1: Vec2, d1: Vec2) -> Option<Vec2> {
+    if !(p0.is_finite() && d0.is_finite() && p1.is_finite() && d1.is_finite()) {
+        return None;
+    }
+    let u0 = d0.normalized()?;
+    let u1 = d1.normalized()?;
+    let a = Shape::Line { a: p0, b: p0 + u0 };
+    let b = Shape::Line { a: p1, b: p1 + u1 };
+    intersections(&a, &b).into_iter().find(|q| q.is_finite())
+}
+
+/// Where extension ray `(ext_origin, ext_dir)` meets infinite line `(origin, dir)` ahead of
+/// `ext_origin` within `max_dist` of `near`.
+pub fn intersect_extension_ray(origin: Vec2, dir: Vec2, ext_origin: Vec2, ext_dir: Vec2, near: Vec2, max_dist: f64) -> Option<Vec2> {
+    if !near.is_finite() || !max_dist.is_finite() || max_dist < 0.0 {
+        return None;
+    }
+    let ext_u = ext_dir.normalized()?;
+    let q = intersect_infinite_lines(origin, dir, ext_origin, ext_u)?;
+    ((q - ext_origin).dot(ext_u) > 1e-6 && q.dist(near) <= max_dist).then_some(q)
+}
+
+/// Closest intersection between curve `ci` of `sk` and infinite line `(origin, dir)` near `near`
+/// within `max_dist`.
+pub fn intersect_curve_with_line(sk: &Sketch, ci: usize, origin: Vec2, dir: Vec2, near: Vec2, max_dist: f64) -> Option<Vec2> {
+    if !(origin.is_finite() && dir.is_finite() && near.is_finite() && max_dist.is_finite() && max_dist >= 0.0) {
+        return None;
+    }
+    let u = dir.normalized()?;
+    let line = Shape::Line { a: origin, b: origin + u };
+    let mut best: Option<(f64, Vec2)> = None;
+    let mut offer = |q: Vec2| {
+        if q.is_finite() {
+            let d = q.dist(near);
+            if d <= max_dist && best.is_none_or(|b| d < b.0) {
+                best = Some((d, q));
+            }
+        }
+    };
+    if let Some(sh) = sk.shape(ci) {
+        let infinite = sk.curves.get(ci).is_some_and(|c| c.infinite);
+        for q in intersections_within(&line, &sh, 1e-6) {
+            if snap_distance(&sh, infinite, q) <= ON_CURVE {
+                offer(q);
+            }
+        }
+    } else if sk.curves.get(ci).is_some_and(|c| c.kind.is_freeform()) {
+        for w in sk.polyline(ci).windows(2) {
+            let seg = Shape::Line { a: w[0], b: w[1] };
+            for q in intersections(&line, &seg) {
+                if seg.dist(q) <= ON_CURVE {
+                    offer(q);
+                }
+            }
+        }
+    }
+    best.map(|(_, q)| q)
+}
+
+/// Whether `pt` lies on the rim of circle or arc `curve_id` in `sk`.
+pub fn is_on_circle_rim(sk: &Sketch, curve_id: &str, pt: Vec2) -> bool {
+    if !pt.is_finite() {
+        return false;
+    }
+    let Some(ci) = sk.curve_index(curve_id) else { return false };
+    let (Some(o), Some(r)) = (sk.center(ci), sk.radius(ci)) else { return false };
+    (pt.dist(o) - r).abs() <= 1e-6 * r.max(1.0)
+}
+
+/// Whether `p` projects onto segment `a..b` within `margin` past either endpoint.
+pub fn point_on_segment_within(a: Vec2, b: Vec2, p: Vec2, margin: f64) -> bool {
+    if !(a.is_finite() && b.is_finite() && p.is_finite() && margin.is_finite()) {
+        return false;
+    }
+    let Some(dir) = (b - a).normalized() else { return false };
+    let len = a.dist(b);
+    let s = (p - a).dot(dir);
+    s >= -margin && s <= len + margin
+}
+
+fn already_tangent(sk: &Sketch, c1: usize, c2: usize) -> bool {
+    c1 == c2
+        || sk
+            .constraints
+            .iter()
+            .any(|c| !c.driven && matches!(c.kind, ConstraintKind::Tangent { a, b } if (a == c1 && b == c2) || (a == c2 && b == c1)))
+}
+
+/// Closest curve-to-curve tangent drag snap for a dragged line or resized circle/arc.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TangentDragHit {
+    pub target: String,
+    pub at: Vec2,
+    pub offset: Vec2,
+    pub gap: f64,
+}
+
+/// Find the nearest curve-to-curve tangent snap for dragging `dragged_entity` (a line moved by
+/// `delta`, or a circle/arc resized toward `cursor`), within `curve_tol` of tangency and
+/// `cursor_tol` of `cursor`. Curves using any point in `exclude` or already tangent to
+/// `dragged_entity` are skipped.
+pub fn find_tangent_drag(
+    sk: &Sketch,
+    dragged_entity: &str,
+    cursor: Vec2,
+    delta: Vec2,
+    exclude: &[usize],
+    curve_tol: f64,
+    cursor_tol: f64,
+) -> Option<TangentDragHit> {
+    if !(cursor.is_finite() && delta.is_finite() && curve_tol.is_finite() && curve_tol > 0.0 && cursor_tol.is_finite() && cursor_tol > 0.0) {
+        return None;
+    }
+    let dragged_ci = sk.curve_index(dragged_entity)?;
+    let dragged_curve = sk.curves.get(dragged_ci)?;
+    let mut best: Option<TangentDragHit> = None;
+    let mut offer = |hit: TangentDragHit| {
+        if best.as_ref().is_none_or(|b| hit.gap < b.gap) {
+            best = Some(hit);
+        }
+    };
+    match dragged_curve.kind {
+        CurveKind::Line { a, b } => {
+            let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b)) else { return None };
+            let (a_m, b_m) = (pa + delta, pb + delta);
+            let dir = (b_m - a_m).normalized()?;
+            let n = dir.perp();
+            for (c_idx, cu) in sk.curves.iter().enumerate() {
+                if c_idx == dragged_ci
+                    || !matches!(cu.kind, CurveKind::Circle { .. } | CurveKind::Arc { .. })
+                    || exclude.iter().any(|&p| cu.kind.uses(p))
+                    || already_tangent(sk, dragged_ci, c_idx)
+                {
+                    continue;
+                }
+                let (Some(o), Some(r)) = (sk.center(c_idx), sk.radius(c_idx)) else { continue };
+                if r <= 1e-6 {
+                    continue;
+                }
+                let sd = (o - a_m).dot(n);
+                if sd.abs() <= 1e-6 {
+                    continue;
+                }
+                let gap = (sd.abs() - r).abs();
+                if gap >= curve_tol {
+                    continue;
+                }
+                let tan_pt = o - n * (sd.signum() * r);
+                let foot = o - n * sd;
+                let on_arc = sk.shape(c_idx).is_none_or(|sh| sh.dist(tan_pt) < 1e-4);
+                if !on_arc || tan_pt.dist(cursor) > cursor_tol {
+                    continue;
+                }
+                let offset = tan_pt - foot;
+                if !point_on_segment_within(a_m + offset, b_m + offset, tan_pt, curve_tol) {
+                    continue;
+                }
+                offer(TangentDragHit { target: cu.id.clone(), at: tan_pt, offset, gap });
+            }
+        }
+        CurveKind::Circle { .. } | CurveKind::Arc { .. } => {
+            let o = sk.center(dragged_ci)?;
+            let r_new = cursor.dist(o);
+            let radial = (cursor - o).normalized()?;
+            for (c_idx, cu) in sk.curves.iter().enumerate() {
+                if c_idx == dragged_ci || exclude.iter().any(|&p| cu.kind.uses(p)) || already_tangent(sk, dragged_ci, c_idx) {
+                    continue;
+                }
+                match cu.kind {
+                    CurveKind::Line { a, b } => {
+                        let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b)) else { continue };
+                        let Some(dir) = (pb - pa).normalized() else { continue };
+                        let n = dir.perp();
+                        let sd = (o - pa).dot(n);
+                        let r_tan = sd.abs();
+                        let gap = (r_new - r_tan).abs();
+                        if r_tan <= 1e-6 || gap >= curve_tol {
+                            continue;
+                        }
+                        let foot = o - n * sd;
+                        if !point_on_segment_within(pa, pb, foot, curve_tol) || foot.dist(cursor) > cursor_tol {
+                            continue;
+                        }
+                        let offset = radial * (r_tan - r_new);
+                        offer(TangentDragHit { target: cu.id.clone(), at: foot, offset, gap });
+                    }
+                    CurveKind::Circle { .. } | CurveKind::Arc { .. } => {
+                        let (Some(o2), Some(r2)) = (sk.center(c_idx), sk.radius(c_idx)) else { continue };
+                        let d_c = o.dist(o2);
+                        if r2 <= 1e-6 || d_c <= 1e-6 {
+                            continue;
+                        }
+                        let u = (o2 - o) / d_c;
+                        for (r_tan, tan_pt) in [(d_c - r2, o2 - u * r2), (d_c + r2, o2 + u * r2), (r2 - d_c, o2 - u * r2)] {
+                            if r_tan <= 1e-6 {
+                                continue;
+                            }
+                            let gap = (r_new - r_tan).abs();
+                            if gap >= curve_tol || tan_pt.dist(cursor) > cursor_tol {
+                                continue;
+                            }
+                            let on_arc = sk.shape(c_idx).is_none_or(|sh| sh.dist(tan_pt) < 1e-4);
+                            if !on_arc {
+                                continue;
+                            }
+                            let offset = radial * (r_tan - r_new);
+                            offer(TangentDragHit { target: cu.id.clone(), at: tan_pt, offset, gap });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+    best
+}
+
+/// Whether two curves in `sk` (line–circle/arc or circle/arc–circle/arc) are geometrically tangent
+/// within `tol`.
+pub fn curves_tangent_within(sk: &Sketch, first: &str, second: &str, tol: f64) -> bool {
+    if !tol.is_finite() || tol < 0.0 {
+        return false;
+    }
+    let (Some(c1), Some(c2)) = (sk.curve_index(first), sk.curve_index(second)) else { return false };
+    let (Some(cu1), Some(cu2)) = (sk.curves.get(c1), sk.curves.get(c2)) else { return false };
+    let line_circle_ok = |line_c: usize, circ_c: usize| -> bool {
+        let Some(CurveKind::Line { a, b }) = sk.curves.get(line_c).map(|c| &c.kind) else { return false };
+        let (Some(pa), Some(pb), Some(o), Some(r)) = (sk.point(*a), sk.point(*b), sk.center(circ_c), sk.radius(circ_c)) else {
+            return false;
+        };
+        let Some(dir) = (pb - pa).normalized() else { return false };
+        let sd = (o - pa).dot(dir.perp()).abs();
+        (sd - r).abs() <= tol
+    };
+    match (&cu1.kind, &cu2.kind) {
+        (CurveKind::Line { .. }, CurveKind::Circle { .. } | CurveKind::Arc { .. }) => line_circle_ok(c1, c2),
+        (CurveKind::Circle { .. } | CurveKind::Arc { .. }, CurveKind::Line { .. }) => line_circle_ok(c2, c1),
+        (CurveKind::Circle { .. } | CurveKind::Arc { .. }, CurveKind::Circle { .. } | CurveKind::Arc { .. }) => {
+            let (Some(o1), Some(r1), Some(o2), Some(r2)) = (sk.center(c1), sk.radius(c1), sk.center(c2), sk.radius(c2)) else {
+                return false;
+            };
+            let d = o1.dist(o2);
+            (d - (r1 + r2)).abs() <= tol || (d - (r1 - r2).abs()).abs() <= tol
+        }
+        _ => false,
+    }
+}
+
+/// Kind of line-based drawing inference computed from existing sketch lines.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineInferenceKind {
+    Parallel,
+    Perpendicular,
+    Extension,
+}
+
+/// Geometric result of a line direction or extension inference.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LineInference {
+    pub kind: LineInferenceKind,
+    pub curve: String,
+    pub at: Vec2,
+    pub dist: f64,
+    pub guide: (Vec2, Vec2),
+}
+
+fn line_ends(sk: &Sketch, c: usize) -> Option<(Vec2, Vec2)> {
+    match sk.curves.get(c)?.kind {
+        CurveKind::Line { a, b } => Some((sk.point(a)?, sk.point(b)?)),
+        _ => None,
+    }
+}
+
+/// Parallel or perpendicular direction inferred from existing non-axis lines in `sk`, starting at
+/// `prev` with cursor `lp` within `tol`.
+pub fn infer_line_direction(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<LineInference> {
+    if !(prev.is_finite() && lp.is_finite() && tol.is_finite() && tol > 0.0) {
+        return None;
+    }
+    let v = lp - prev;
+    if v.len() < tol * 2.0 {
+        return None;
+    }
+    let mut best: Option<LineInference> = None;
+    let mut offer = |i: LineInference| {
+        if best.as_ref().is_none_or(|b| i.dist < b.dist) {
+            best = Some(i);
+        }
+    };
+    for (i, c) in sk.curves.iter().enumerate() {
+        if c.construction && c.link.is_none() {
+            continue;
+        }
+        let Some((a, b)) = line_ends(sk, i) else { continue };
+        let Some(dir) = (b - a).normalized() else { continue };
+        // Axis-aligned directions are the H/V snaps' business.
+        let axis = dir.x.abs() < 1e-9 || dir.y.abs() < 1e-9;
+        let touches = a.dist(prev) < 1e-9 || b.dist(prev) < 1e-9;
+        for (kind, d) in [(LineInferenceKind::Parallel, dir), (LineInferenceKind::Perpendicular, dir.perp())] {
+            if axis || (kind == LineInferenceKind::Parallel && touches) {
+                continue;
+            }
+            let t = v.dot(d);
+            let at = prev + d * t;
+            let e = at.dist(lp);
+            if e < tol {
+                offer(LineInference {
+                    kind,
+                    curve: c.id.clone(),
+                    at,
+                    dist: e,
+                    guide: (prev - d * (t.signum() * tol * 6.0), at + d * (t.signum() * tol * 6.0)),
+                });
+            }
+        }
+    }
+    best
+}
+
+/// Point locus along the infinite extension of an existing line in `sk` beyond its ends, when
+/// drawing from `prev` toward `lp` within `tol`.
+pub fn infer_line_extension(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<LineInference> {
+    if !(prev.is_finite() && lp.is_finite() && tol.is_finite() && tol > 0.0) {
+        return None;
+    }
+    let v = lp - prev;
+    if v.len() < tol * 2.0 {
+        return None;
+    }
+    let mut best: Option<LineInference> = None;
+    for (i, c) in sk.curves.iter().enumerate() {
+        if c.construction && c.link.is_none() {
+            continue;
+        }
+        let Some((a, b)) = line_ends(sk, i) else { continue };
+        let Some(dir) = (b - a).normalized() else { continue };
+        let touches = a.dist(prev) < 1e-9 || b.dist(prev) < 1e-9;
+        let s = (lp - a).dot(dir);
+        let len = a.dist(b);
+        if !(-tol..=len + tol).contains(&s) {
+            let at = a + dir * s;
+            let e = at.dist(lp);
+            if e < tol * 0.8 && !touches {
+                let from = if s < 0.0 { a } else { b };
+                let dist = e * 0.9;
+                if best.as_ref().is_none_or(|b| dist < b.dist) {
+                    best = Some(LineInference { kind: LineInferenceKind::Extension, curve: c.id.clone(), at, dist, guide: (from, at) });
+                }
+            }
+        }
+    }
+    best
+}
+
 impl Sketch {
     /// The nearest crossing of two analytic curves, respecting infinite construction lines.
     pub fn nearest_crossing(&self, a: usize, b: usize, near: Vec2) -> Option<Vec2> {
@@ -401,5 +768,75 @@ mod intersection_snap_tests {
         assert!(nearest_curve_intersection(&sk, Vec2::new(f64::NAN, 0.0), 1.0).is_none());
         assert!(nearest_curve_intersection(&sk, v(0.0, 0.0), 0.0).is_none());
         assert!(nearest_curve_intersection(&sk, v(0.0, 0.0), f64::INFINITY).is_none());
+    }
+
+    #[test]
+    fn snap_line_intersection_and_direction_helpers_work() {
+        assert_eq!(axis_mode_between(v(0.0, 0.0), v(10.0, 3.0)), "horizontal");
+        assert_eq!(axis_mode_between(v(0.0, 0.0), v(2.0, 10.0)), "vertical");
+        assert!(unit_direction(v(1.0, 1.0), v(1.0, 1.0)).is_none());
+        let dir = unit_direction(v(0.0, 0.0), v(3.0, 4.0)).expect("unit dir");
+        assert!((dir.x - 0.6).abs() < 1e-9 && (dir.y - 0.8).abs() < 1e-9);
+
+        let hit = intersect_infinite_lines(v(0.0, 10.0), v(1.0, 0.0), v(25.0, 0.0), v(0.0, 1.0)).expect("crossing");
+        assert!(hit.dist(v(25.0, 10.0)) < 1e-9);
+        assert!(intersect_infinite_lines(v(0.0, 0.0), v(1.0, 0.0), v(0.0, 5.0), v(2.0, 0.0)).is_none());
+        assert!(intersect_extension_ray(v(0.0, 10.0), v(1.0, 0.0), v(25.0, 0.0), v(0.0, 1.0), v(25.0, 10.0), 1.0).is_some());
+        assert!(intersect_extension_ray(v(0.0, 10.0), v(1.0, 0.0), v(25.0, 20.0), v(0.0, 1.0), v(25.0, 10.0), 1.0).is_none());
+
+        let mut sk = Sketch::new();
+        let ci = sk.add_circle(v(0.0, 0.0), 10.0, None, None).unwrap();
+        assert!(is_on_circle_rim(&sk, &sk.curves[ci].id, v(10.0, 0.0)));
+        assert!(!is_on_circle_rim(&sk, &sk.curves[ci].id, v(5.0, 0.0)));
+        let q = intersect_curve_with_line(&sk, ci, v(0.0, 0.0), v(1.0, 0.0), v(9.5, 0.2), 2.0).expect("circle hit");
+        assert!(q.dist(v(10.0, 0.0)) < 1e-6);
+    }
+
+    #[test]
+    fn tangent_drag_and_tangency_check_helpers_work() {
+        assert!(point_on_segment_within(v(0.0, 0.0), v(10.0, 0.0), v(5.0, 2.0), 0.5));
+        assert!(!point_on_segment_within(v(0.0, 0.0), v(10.0, 0.0), v(12.0, 0.0), 0.5));
+        assert!(!point_on_segment_within(v(0.0, 0.0), v(0.0, 0.0), v(0.0, 0.0), 0.5));
+
+        let mut sk = Sketch::new();
+        let _ = sk.add_line(v(0.0, 10.0), v(40.0, 10.0), None, None, Some("l1"));
+        let _ = sk.add_circle(v(20.0, 0.0), 10.0, None, Some("c1"));
+        assert!(curves_tangent_within(&sk, "l1", "c1", 1e-6));
+
+        let hit = find_tangent_drag(&sk, "l1", v(20.0, 10.3), v(0.0, 0.3), &[], 0.6, 2.4).expect("line tangent drag");
+        assert_eq!(hit.target, "c1");
+        assert!(hit.at.dist(v(20.0, 10.0)) < 1e-6);
+        assert!((hit.offset.y + 0.3).abs() < 1e-6);
+        assert!(find_tangent_drag(&sk, "l1", v(35.0, 10.3), v(0.0, 0.3), &[], 0.6, 2.4).is_none());
+
+        let mut sk2 = Sketch::new();
+        let _ = sk2.add_circle(v(0.0, 0.0), 8.0, None, Some("c1"));
+        let _ = sk2.add_circle(v(20.0, 0.0), 10.0, None, Some("c2"));
+        assert!(!curves_tangent_within(&sk2, "c1", "c2", 1e-3));
+        let hit2 = find_tangent_drag(&sk2, "c1", v(9.8, 0.0), Vec2::ZERO, &[], 0.6, 2.4).expect("circle tangent drag");
+        assert_eq!(hit2.target, "c2");
+        assert!(hit2.at.dist(v(10.0, 0.0)) < 1e-6);
+        assert!((hit2.offset.x - 0.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn line_direction_and_extension_inference_helpers_work() {
+        let mut sk = Sketch::new();
+        let _ = sk.add_line(v(0.0, 0.0), v(10.0, 10.0), None, None, Some("l1"));
+
+        let par = infer_line_direction(&sk, v(0.0, 20.0), v(10.2, 29.9), 0.5).expect("parallel");
+        assert_eq!(par.kind, LineInferenceKind::Parallel);
+        assert_eq!(par.curve, "l1");
+        assert!((par.at - v(0.0, 20.0)).cross(v(1.0, 1.0)).abs() < 1e-9);
+
+        let perp = infer_line_direction(&sk, v(0.0, 20.0), v(10.1, 10.0), 0.5).expect("perpendicular");
+        assert_eq!(perp.kind, LineInferenceKind::Perpendicular);
+
+        let ext = infer_line_extension(&sk, v(30.0, 15.0), v(20.1, 19.9), 0.5).expect("extension");
+        assert_eq!(ext.kind, LineInferenceKind::Extension);
+        assert!((ext.at.x - ext.at.y).abs() < 1e-9 && ext.at.x > 10.0);
+
+        assert!(infer_line_direction(&sk, v(f64::NAN, 0.0), v(10.0, 10.0), 0.5).is_none());
+        assert!(infer_line_extension(&sk, v(0.0, 0.0), v(20.0, 20.0), 0.0).is_none());
     }
 }

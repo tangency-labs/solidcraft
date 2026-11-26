@@ -13,10 +13,10 @@
 //! Each request is attempted once per edge use or face. That fallback can revisit
 //! earlier candidates with raised tolerances and has quadratic worst-case work in
 //! the number of requests. Cache handles are mapped explicitly; no B-rep copy is kept.
-//! With `UpstreamFixes::brep_ray_classifies_current_trims` (WR-732), the tree of a
-//! face whose loops close is built with its current trims while the body is edited,
-//! or the classification is `SolidError::FaceTrimsUnavailable` (upstream skips the
-//! trims then); so is one meeting a face whose loops are open mid-edit.
+//! While the body is edited, the tree of a face whose loops close is built with its
+//! current trims, or the classification is `SolidError::FaceTrimsUnavailable`
+//! (upstream skips the trims then; WR-732); so is one meeting a face whose loops are
+//! open mid-edit.
 
 mod live;
 pub(crate) use live::{
@@ -186,10 +186,9 @@ fn prepare_surface_cache(
 /// until its first `GetTree`. (Upstream reuses a cache an earlier call built, with the
 /// built tree's bits; the port keeps no record of that.)
 ///
-/// Deviation (WR-732, #2503), only with
-/// [`crate::kernel::UpstreamFixes::brep_ray_classifies_current_trims`]: the tree of a
-/// face whose loops close ([`loops_close`]) is built against its current trims even
-/// while the B-rep is being edited ([`MappedCacheFace::implanting_while_editing`]).
+/// Deviation (WR-732, #2503): the tree of a face whose loops close ([`loops_close`])
+/// is built against its current trims even while the B-rep is being edited
+/// ([`MappedCacheFace::implanting_while_editing`]).
 /// Upstream builds it untrimmed then, and answers right only when it reuses a cache
 /// it built before the edit. Such a face whose trims then fail to implant is
 /// [`SolidError::FaceTrimsUnavailable`]: the untrimmed surface would give a wrong
@@ -209,7 +208,7 @@ fn face_surface_cache(
         .clone_for_evaluation()?;
     // WR-732: while editing, classify against the face's current trims; a face whose
     // loops are open has no boundary to implant, and no answer
-    let editing = k.fixes.brep_ray_classifies_current_trims && b.editing_enabled();
+    let editing = b.editing_enabled();
     let unavailable = SolidError::FaceTrimsUnavailable {
         operation: OP,
         entity: EntityRef::Face(face),
@@ -227,6 +226,7 @@ fn face_surface_cache(
     let trims_failed = |e: SolidError| match e {
         e @ (SolidError::Unported { .. }
         | SolidError::Cancelled { .. }
+        | SolidError::OutOfFuel { .. }
         | SolidError::PreparationRequired { .. }) => e,
         _ if editing => unavailable.clone(),
         e => e,

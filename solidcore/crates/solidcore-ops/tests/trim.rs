@@ -10,7 +10,7 @@ use std::f64::consts::PI;
 
 use solidcore_ops::sweep::{extrude, planar_faces, project_curves, Curve, DraftCorner};
 use solidcore_ops::trim::{
-    remove_faces, split_face_by_curves, trim_by_dropped_curves, Region, MAX_PICKS,
+    remove_faces, split_face_by_curves, trim_by_dropped_curves, trim_sheet, Region, MAX_PICKS,
 };
 use solidcore_ops::{Body, Error, Order};
 
@@ -139,6 +139,147 @@ fn an_open_curve_inside_the_face_is_refused() {
         Some(Error::CurveDoesNotCut)
     );
     assert_eq!(b.counts().unwrap()[0], 1, "the sheet stays as it was");
+}
+
+/// The sheet follows y=3 up to x=5, then y=3+0.4(x-5). It cuts the square into
+/// area 5*3+5*(3+5)/2=35 below and 65 above. Extending either face alone is wrong.
+#[test]
+fn a_complete_sheet_cuts_regions_without_extending_its_faces() {
+    let target = planar_faces(&square(0.0, 10.0, 0.0)).unwrap();
+    let cutter = extrude(
+        &[
+            line([-5.0, 3.0, -5.0], [5.0, 3.0, -5.0]),
+            line([5.0, 3.0, -5.0], [15.0, 7.0, -5.0]),
+        ],
+        [0.0, 0.0, 1.0],
+        10.0,
+        0.0,
+        DraftCorner::Tangent,
+        false,
+    )
+    .unwrap();
+    assert_eq!(cutter.counts().unwrap()[0], 2);
+    for (points, expected) in [
+        (vec![[2.0, 1.0, 0.0]], 35.0),
+        (vec![[2.0, 9.0, 0.0]], 65.0),
+        (vec![[2.0, 1.0, 0.0], [2.0, 9.0, 0.0]], 100.0),
+    ] {
+        let kept = trim_sheet(&target, &cutter, &points).unwrap();
+        assert!(
+            rel(area(&kept), expected) < 1e-9,
+            "{} vs {expected}",
+            area(&kept)
+        );
+    }
+    assert_eq!(target.counts().unwrap()[0], 1);
+    assert_eq!(cutter.counts().unwrap()[0], 2);
+}
+
+/// A target of two separate sheets in one body (as a surface extrude of several profiles
+/// makes): the walls x in [0, 10], z in [0, 10] at y = 0 and y = 5, each a shell. The sheet
+/// z = 4 cuts each wall into 10*4 = 40 below and 10*6 = 60 above; a wall with no point picked
+/// is discarded whole. Each kept piece is one rectangle of its wall, its own shell: one face,
+/// four edges and four vertices, at the wall's corners on its side of z = 4 and the two points
+/// where z = 4 crosses the wall's sides x = 0 and x = 10.
+#[test]
+fn a_complete_sheet_trims_a_target_of_several_separate_sheets() {
+    // The corners of wall `y` from height `z0` to `z1`.
+    let corners =
+        |y: f64, z0: f64, z1: f64| vec![[0.0, y, z0], [10.0, y, z0], [10.0, y, z1], [0.0, y, z1]];
+    let wall = |y: f64| {
+        planar_faces(&polygon(&[
+            [0.0, y, 0.0],
+            [10.0, y, 0.0],
+            [10.0, y, 10.0],
+            [0.0, y, 10.0],
+        ]))
+        .unwrap()
+    };
+    let (a, b) = (wall(0.0), wall(5.0));
+    let target = solidcore_ops::stitch::gather(&[&a, &b]).unwrap();
+    assert_eq!(target.counts().unwrap()[0], 2);
+    let cutter = planar_faces(&polygon(&[
+        [-5.0, -5.0, 4.0],
+        [15.0, -5.0, 4.0],
+        [15.0, 10.0, 4.0],
+        [-5.0, 10.0, 4.0],
+    ]))
+    .unwrap();
+    for (points, expected, pieces) in [
+        (vec![[2.0, 0.0, 1.0]], 40.0, vec![corners(0.0, 0.0, 4.0)]),
+        (
+            vec![[2.0, 0.0, 1.0], [2.0, 5.0, 1.0]],
+            80.0,
+            vec![corners(0.0, 0.0, 4.0), corners(5.0, 0.0, 4.0)],
+        ),
+        (
+            vec![[2.0, 0.0, 1.0], [2.0, 5.0, 9.0]],
+            100.0,
+            vec![corners(0.0, 0.0, 4.0), corners(5.0, 4.0, 10.0)],
+        ),
+    ] {
+        let kept = trim_sheet(&target, &cutter, &points).unwrap();
+        assert!(
+            rel(area(&kept), expected) < 1e-9,
+            "{points:?}: {} vs {expected}",
+            area(&kept)
+        );
+        let n = pieces.len();
+        assert_eq!(kept.counts().unwrap(), [n, 4 * n, 4 * n], "{points:?}");
+        let (record, _) = kept.to_record().unwrap();
+        assert_eq!(record.shells.len(), n, "{points:?}: one shell per piece");
+        let mut want: Vec<[f64; 3]> = pieces.concat();
+        for v in &record.vertices {
+            let i = want
+                .iter()
+                .position(|w| (0..3).all(|k| (v.point[k] - w[k]).abs() < 1e-9))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{points:?}: vertex {:?} is no corner of a kept piece",
+                        v.point
+                    )
+                });
+            want.swap_remove(i);
+        }
+        assert!(want.is_empty(), "{points:?}: corners not found {want:?}");
+    }
+    assert_eq!(target.counts().unwrap()[0], 2, "the target stays as it was");
+}
+
+#[test]
+fn whole_sheet_trim_refuses_non_cuts_and_ambiguous_or_hostile_picks() {
+    let target = planar_faces(&square(0.0, 10.0, 0.0)).unwrap();
+    let cutter = planar_faces(&polygon(&[
+        [-5.0, 3.0, -5.0],
+        [15.0, 3.0, -5.0],
+        [15.0, 3.0, 5.0],
+        [-5.0, 3.0, 5.0],
+    ]))
+    .unwrap();
+    assert_eq!(
+        trim_sheet(&target, &cutter, &[]).err(),
+        Some(Error::Argument)
+    );
+    assert_eq!(
+        trim_sheet(&target, &cutter, &[[f64::NAN, 0.0, 0.0]]).err(),
+        Some(Error::Argument)
+    );
+    assert!(matches!(
+        trim_sheet(&target, &cutter, &[[2.0, 3.0, 0.0]]),
+        Err(Error::Unsupported(_))
+    ));
+    let far = planar_faces(&square(0.0, 10.0, 20.0)).unwrap();
+    assert_eq!(
+        trim_sheet(&target, &far, &[[2.0, 1.0, 0.0]]).err(),
+        Some(Error::CurveDoesNotCut)
+    );
+    let solid = solidcore_ops::make_box([0.0; 3], [1.0; 3]).unwrap();
+    for (a, b) in [(&target, &solid), (&solid, &cutter), (&target, &target)] {
+        assert_eq!(
+            trim_sheet(a, b, &[[2.0, 1.0, 0.0]]).err(),
+            Some(Error::Argument)
+        );
+    }
 }
 
 #[test]
@@ -399,13 +540,14 @@ fn a_dropped_curve_past_a_faces_boundary_is_cut_at_the_boundary() {
 
 /// On a whole cylinder (radius 10 about Z, 40 high, with its two flat ends) the wall is one
 /// face closed on its seam, the ruling at y = 0, x = 10. A slot drawn facing the wall from
-/// +y, -x or -y lies clear of the seam and cuts out [`slot_area_on_cylinder`]'s piece, within
-/// the bound of [`a_slot_dropped_onto_a_half_cylinder_cuts_out_its_closed_form_area`]; the flat
-/// ends, on which the dropped slot bounds nothing, stay whole. Facing the wall from +x the
-/// slot's round ends cross the seam, and the kernel's drop does not follow a curve round a
-/// seam: it gives them no curve. That is refused with its reason, never cut as half a slot.
+/// +y, -x or -y lies clear of the seam and cuts out [`slot_area_on_cylinder`]'s piece as one
+/// face, within the bound of [`a_slot_dropped_onto_a_half_cylinder_cuts_out_its_closed_form_area`];
+/// the flat ends, on which the dropped slot bounds nothing, stay whole. Facing the wall from +x
+/// the slot's round ends cross the seam (#20836): the drop splits them cleanly on the seam, so
+/// the cut keeps the slot as two faces joined along the body's seam edge (still one region,
+/// since the seam is not a cut line) with the same closed-form area.
 #[test]
-fn a_slot_across_a_closed_faces_seam_is_refused_and_one_clear_of_it_cuts() {
+fn a_slot_across_a_closed_faces_seam_cuts_like_one_clear_of_it() {
     let (r, a, d) = (10.0_f64, 3.0_f64, 20.0_f64);
     let can = solidcore_ops::make_cylinder([0.0; 3], r, 40.0).unwrap();
     assert_eq!(can.counts().unwrap()[0], 3, "a wall and two ends");
@@ -428,20 +570,25 @@ fn a_slot_across_a_closed_faces_seam_is_refused_and_one_clear_of_it_cuts() {
             end(12.0, PI),
         ]
     };
-    for n in [[0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]] {
+    for (n, want_faces) in [
+        ([0.0, 1.0], 1),
+        ([-1.0, 0.0], 1),
+        ([0.0, -1.0], 1),
+        ([1.0, 0.0], 2),
+    ] {
         let foot = [n[0] * r, n[1] * r, 20.0];
         let kept = trim_by_dropped_curves(&can, &[facing(n).to_vec()], &[foot], TOL).unwrap();
-        assert_eq!(kept.counts().unwrap()[0], 1, "{n:?}: the piece alone");
+        assert_eq!(
+            kept.counts().unwrap()[0],
+            want_faces,
+            "{n:?}: expected {want_faces} face(s)"
+        );
         assert!(
             (area(&kept) - inside).abs() < TOL * 2.0 * PI * a,
             "{n:?}: inside {} against {inside}",
             area(&kept)
         );
     }
-    assert!(matches!(
-        trim_by_dropped_curves(&can, &[facing([1.0, 0.0]).to_vec()], &[[r, 0.0, 20.0]], TOL),
-        Err(Error::Unsupported(_))
-    ));
     assert_eq!(can.counts().unwrap()[0], 3, "the cylinder stays as it was");
 }
 

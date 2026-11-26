@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Tangent constraint</title>
+  <path d="M14.35 11.82L41.62 27.57L41.62 56.82L14.35 41.07Z" fill="#b8c3cf"/>
+  <path d="M46.5 24.76L41.62 27.57L41.62 56.82L46.5 54Z" fill="#8e9faf"/>
+  <path d="M19.22 9L46.5 24.76L41.62 27.57L14.35 11.82Z" fill="#e2e8ef"/>
+  <path d="M19.22 9L46.5 24.76L46.5 54L41.62 56.82L14.35 41.07L14.35 11.82Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M14.35 11.82L41.62 27.57L46.5 24.76" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M41.62 27.57L41.62 56.82" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M31.66 12.38L31.66 41.63A9 5.2 0 0 0 49.66 41.63L49.66 12.38Z" fill="#b8c3cf"/>
+  <path d="M43.8 12.38L43.8 46.5A9 5.2 0 0 0 49.66 41.63L49.66 12.38Z" fill="#8e9faf"/>
+  <path d="M31.66 12.38L31.66 41.63A9 5.2 0 0 0 49.66 41.63L49.66 12.38Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M31.66 12.38A9 5.2 0 1 0 49.66 12.38A9 5.2 0 1 0 31.66 12.38Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M31.66 12.38L31.66 41.63" fill="none" stroke="#ffffff" stroke-width="4.75" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M31.66 12.38L31.66 41.63" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>
