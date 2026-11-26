@@ -416,12 +416,12 @@ const SIDE_TOL: f64 = 1e-9;
 /// The side of each curve of `profile`'s outer loop that the profile lies on. The outer loop
 /// runs counter-clockwise, with the region on its left; each piece is matched to the one curve of
 /// the loop whose line or circle it lies on, and the kernel says which side of that curve the
-/// region is on (`sketch_arc::left_side_along_line`, `left_side_inside_circle`). `None` when a
+/// region is on (`planar::left_side_along_line`, `left_side_inside_circle`). `None` when a
 /// curve is not a line, an arc or a circle, a piece lies on no curve of the loop or on several, or
 /// the region lies on both sides of one curve.
 fn curve_sides(sketch: &solidcraft_sketch::Sketch, profile: &solidcraft_sketch::Profile) -> Option<std::collections::BTreeMap<String, CurveSide>> {
     use solidcore_record::Seg2;
-    use solidcraft_kernel::services::sketch_arc;
+    use solidcraft_kernel::planar;
     use solidcraft_sketch::CurveKind;
     enum Carrier {
         Line([f64; 2], [f64; 2]),
@@ -444,7 +444,7 @@ fn curve_sides(sketch: &solidcraft_sketch::Sketch, profile: &solidcraft_sketch::
                 CurveKind::Circle { c, r } => Carrier::Circle(at(c)?, r),
                 CurveKind::Arc { c, a, .. } => {
                     let center = at(c)?;
-                    Carrier::Circle(center, sketch_arc::distance(center, at(a)?))
+                    Carrier::Circle(center, planar::distance(center, at(a)?))
                 }
                 _ => return None,
             };
@@ -456,14 +456,14 @@ fn curve_sides(sketch: &solidcraft_sketch::Sketch, profile: &solidcraft_sketch::
         let mut on = carriers.iter().filter_map(|(id, carrier)| {
             let side = match (seg, carrier) {
                 (Seg2::Line { a, b }, Carrier::Line(p, q)) => {
-                    if sketch_arc::left_side_along_line((*a).into(), (*b).into(), *p, *q, SIDE_TOL)? {
+                    if planar::left_side_along_line((*a).into(), (*b).into(), *p, *q, SIDE_TOL)? {
                         CurveSide::Left
                     } else {
                         CurveSide::Right
                     }
                 }
                 (Seg2::Arc { center, radius, sweep, .. }, Carrier::Circle(c, r)) => {
-                    if sketch_arc::left_side_inside_circle((*center).into(), *radius, *sweep, *c, *r, SIDE_TOL)? {
+                    if planar::left_side_inside_circle((*center).into(), *radius, *sweep, *c, *r, SIDE_TOL)? {
                         CurveSide::Inside
                     } else {
                         CurveSide::Outside
