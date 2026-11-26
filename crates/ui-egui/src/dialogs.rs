@@ -8594,15 +8594,31 @@ pub(crate) fn round_axis(s: &Session, sel: &Sel) -> Option<(Vec3, Vec3)> {
     o.is_finite().then(|| (o, solidcraft_engine::doc::construct::canonical_dir(d)))
 }
 
-/// An axis pick that the command keeps as a reference to the model (`{edge|face: [x,y,z]}`), so
-/// the feature follows the edge or face: a circular edge, or a cylinder, cone or torus face.
-/// Straight edges stay a fixed line, as they always have.
+/// An axis pick that the command keeps as a reference to the model (`{edge: [x,y,z]}`, or a face
+/// as `{type: face, at, name}`), so the feature follows the edge or face: a circular edge, or a
+/// cylinder, cone or torus face. Straight edges stay a fixed line, as they always have.
 fn round_axis_ref(app: &SolveApp, sel: &Sel) -> Option<Value> {
     round_axis(&app.session, sel)?;
     match sel {
         Sel::Edge { .. } if !is_straight_edge(&app.session, sel) => construct_ref(app, sel).ok(),
-        Sel::Face { .. } => construct_ref(app, sel).ok(),
+        Sel::Face { body, index, point } => Some(clicked_face_ref(app, body, *index, *point)),
         _ => None,
+    }
+}
+
+/// A clicked face as a reference by its name as well as its point. Where two faces touch at the
+/// point (two cylinders along their common line), the point alone names the first body's face
+/// there, and the axis is then the other face's (#20586). A face without a name keeps its point.
+fn clicked_face_ref(app: &SolveApp, body: &str, index: usize, point: Vec3) -> Value {
+    let state = crate::open_meshing::session_world(&app.session);
+    let name = state
+        .body(body)
+        .filter(|b| !b.body.is_mesh())
+        .and_then(|b| solidcraft_engine::doc::naming::face_names(b).get(index).cloned())
+        .filter(|name| !name.is_empty());
+    match name {
+        Some(name) => json!({"type": "face", "at": pt(point), "name": name}),
+        None => json!({"face": pt(point)}),
     }
 }
 
