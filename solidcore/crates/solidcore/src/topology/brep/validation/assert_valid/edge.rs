@@ -32,7 +32,9 @@
 //! point back to its edge as the fork's check reads it.
 //! Only `SmBSplineCurve`, parabola and hyperbola checks take it; a line has too few
 //! control points for a zero-speed end and an ellipse's conic segments have no
-//! coincident end control points.
+//! coincident end control points. Not upstream: one edge's check evaluates each edge
+//! use's binormal at a parameter once while the B-rep is unwritten (`Binormals`): the
+//! edge-use check, the radial walk and the radial order read the same ones.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -304,8 +306,11 @@ pub(super) fn edge(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, e: EdgeId) -> 
     rtn &= cx
         .rep
         .this_bool(b, C, this, 3, !need || !edgeuses.is_empty())?;
+    // not upstream: the binormals this edge's check evaluates, each kept while the
+    // B-rep is unwritten (see [`Binormals`])
+    let mut binormals = Binormals::default();
     for &eu in &edgeuses {
-        rtn &= edgeuse(k, b, cx, eu)?;
+        rtn &= edgeuse(k, b, cx, eu, &mut binormals)?;
     }
 
     let edge_tol = tedge::tolerance(b, e)?;
@@ -370,11 +375,55 @@ pub(super) fn edge(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, e: EdgeId) -> 
 
     // radial ordering of the faceuses round a manifold or spine edge
     if tedge::is_manifold(b, e)? || tedge::is_spine(b, e)? {
-        rtn &= radial_order(k, b, cx, e, &vertices)?;
+        rtn &= radial_order(k, b, cx, e, &vertices, &mut binormals)?;
     }
 
     // all done
     Ok(rtn)
+}
+
+/// Not upstream: the binormals of one edge's check, `evaluate_binormal(eu, t, use_3d_only:
+/// true, default options)` keyed by edge use and parameter. The edge-use check, the radial
+/// walk's tie test and the radial order's sector directions each read the binormal of the
+/// same edge use at the same parameter; a kept value is given back only while the B-rep's
+/// [`Brep::write_stamps`] equal those it was evaluated under, and only a call that wrote
+/// nothing is kept. `evaluate_binormal` reads only the kernel and the B-rep, so a kept
+/// value is the one the call would return. Errors are not kept: the call runs again and
+/// returns its error again.
+#[derive(Default)]
+pub(super) struct Binormals {
+    /// The stamps the kept values were evaluated under.
+    stamps: Option<crate::topology::WriteStamps>,
+    /// The kept values: edge use, the parameter's bits, the binormal.
+    kept: Vec<(EdgeuseId, u64, crate::topology::edgeuse::p2::BinormalEval)>,
+}
+
+impl Binormals {
+    /// `evaluate_binormal(k, b, eu, t, true, &BinormalOptions::default())`, reusing the
+    /// value kept for `eu` at `t` while the B-rep is unwritten.
+    fn eval(
+        &mut self,
+        k: &Kernel,
+        b: &mut Brep,
+        eu: EdgeuseId,
+        t: f64,
+    ) -> Result<crate::topology::edgeuse::p2::BinormalEval> {
+        let stamps = b.write_stamps();
+        if self.stamps.as_ref() != Some(&stamps) {
+            self.kept.clear();
+            self.stamps = None;
+        }
+        let bits = t.to_bits();
+        if let Some(&(_, _, eval)) = self.kept.iter().find(|x| x.0 == eu && x.1 == bits) {
+            return Ok(eval);
+        }
+        let eval = evaluate_binormal(k, b, eu, t, true, &BinormalOptions::default())?;
+        if b.write_stamps() == stamps {
+            self.stamps = Some(stamps);
+            self.kept.push((eu, bits, eval));
+        }
+        Ok(eval)
+    }
 }
 
 /// The edge curve's point at `t` (`m_pCurve->EvaluatePoint`).
@@ -393,13 +442,13 @@ fn sector_direction(
     b: &mut Brep,
     eu: EdgeuseId,
     t: f64,
-    options: BinormalOptions,
+    binormals: &mut Binormals,
     step_off: bool,
     step_off_dist: f64,
     certified: Option<&[(EdgeuseId, crate::math::Vec3)]>,
 ) -> Result<crate::topology::edgeuse::p2::BinormalEval> {
     use crate::topology::edgeuse::p2::{evaluate_binormal_step_off, StepOffOptions};
-    let mut eval = evaluate_binormal(k, b, eu, t, true, &options)?;
+    let mut eval = binormals.eval(k, b, eu, t)?;
     if let Some(&(_, dir)) = certified.and_then(|c| c.iter().find(|(u, _)| *u == eu)) {
         eval.binormal = dir;
         return Ok(eval);
@@ -436,6 +485,7 @@ fn radial_order(
     cx: &mut Cx<'_>,
     e: EdgeId,
     vertices: &[Option<crate::topology::VertexId>],
+    binormals: &mut Binormals,
 ) -> Result<bool> {
     const C: i64 = class::EDGE;
     let this = EntityRef::Edge(e);
@@ -452,7 +502,6 @@ fn radial_order(
     let mut primary_tangent = Point3::UNDEF;
     let circle = Extent1d::from_min_max(0.0, 360.0);
     let bound = b.edge(e)?.edgeuses.len() + 1;
-    let options = BinormalOptions::default();
 
     // Must watch out for zero sectors: coincident faces.
     let mut have_nonzero_angle = false;
@@ -478,8 +527,8 @@ fn radial_order(
         if !eu1::is_loop_edgeuse(b, eu)? || !eu1::is_loop_edgeuse(b, rad)? {
             break;
         }
-        let b0 = crate::error::ignored(evaluate_binormal(k, b, eu, seq_param, true, &options))?;
-        let b1 = crate::error::ignored(evaluate_binormal(k, b, rad, seq_param, true, &options))?;
+        let b0 = crate::error::ignored(binormals.eval(k, b, eu, seq_param))?;
+        let b1 = crate::error::ignored(binormals.eval(k, b, rad, seq_param))?;
         let mut tie = false;
         if let (Some(b0), Some(b1)) = (b0, b1) {
             if let (Ok(u0), Ok(u1)) = (b0.binormal.unitize(), b1.binormal.unitize()) {
@@ -519,10 +568,26 @@ fn radial_order(
         }
         let t = extent.evaluate(0.456);
         let certified = certified.as_deref();
-        let target_eval =
-            sector_direction(k, b, target, t, options, step_off, step_off_dist, certified)?;
-        let radial_eval =
-            sector_direction(k, b, radial, t, options, step_off, step_off_dist, certified)?;
+        let target_eval = sector_direction(
+            k,
+            b,
+            target,
+            t,
+            binormals,
+            step_off,
+            step_off_dist,
+            certified,
+        )?;
+        let radial_eval = sector_direction(
+            k,
+            b,
+            radial,
+            t,
+            binormals,
+            step_off,
+            step_off_dist,
+            certified,
+        )?;
 
         // 1st iteration save variables
         if primary.is_none() {
@@ -757,6 +822,7 @@ pub(super) fn edgeuse(
     b: &mut Brep,
     cx: &mut Cx<'_>,
     eu: EdgeuseId,
+    binormals: &mut Binormals,
 ) -> Result<bool> {
     const C: i64 = class::EDGEUSE;
     let this = EntityRef::Edgeuse(eu);
@@ -913,10 +979,9 @@ pub(super) fn edgeuse(
                 rtn &= cx.rep.this_bool(b, C, this, 24, ok)?;
 
                 if let (Some(r), Some(_), true) = (radial, mate, geo) {
-                    let options = BinormalOptions::default();
                     let t = extent.evaluate(0.456);
-                    let target = evaluate_binormal(k, b, eu, t, true, &options)?;
-                    let radial_eval = evaluate_binormal(k, b, r, t, true, &options)?;
+                    let target = binormals.eval(k, b, eu, t)?;
+                    let radial_eval = binormals.eval(k, b, r, t)?;
 
                     // tangent sector orientation consistency (no new UV trim curves)
                     let tangent_sector = crate::topology::edgeuse::p2::is_tangent_sector(
@@ -1056,5 +1121,102 @@ mod tests {
         let cut = boolean_difference(&mut k, block, pin).unwrap();
         let (tangent, _) = tangent_edges(&k, &cut);
         assert!(tangent >= 1, "{tangent}");
+    }
+
+    /// The bodies of [`kept_binormals_are_the_evaluated_ones`]: a box, a cylinder, a box
+    /// less a cylinder resting on its face (WR-540's tangent edges) and a vendored filleted
+    /// boss, the same each call.
+    fn binormal_bodies(k: &mut Kernel) -> Vec<Brep> {
+        let corner = Point3::new(20.0, 5.0, 5.0);
+        let mut out = vec![create_box(k, corner, 15.0, 15.0, 27.5).unwrap()];
+        out.push(create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 1.5, 4.0).unwrap());
+        let cut = create_box(k, corner, 15.0, 15.0, 27.5).unwrap();
+        let pin = create_cylinder(k, Point3::new(25.0, 12.5, 22.5), 5.0, 25.0).unwrap();
+        out.push(boolean_difference(k, cut, pin).unwrap());
+        out.push(filleted_boss(k));
+        out
+    }
+
+    /// The vendored `tests/data/issue_2621_solidcraft_m10_filleted_boss.smb`: a boss with
+    /// a filleted rim.
+    fn filleted_boss(k: &mut Kernel) -> Brep {
+        use crate::geom::attribute::AttributeStore;
+        use crate::topology::api_files::read_brep_from_file;
+        use crate::topology::brep::p10::TopologyEnv;
+        use crate::topology::topology::NotifyRecords;
+        let bytes = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/issue_2621_solidcraft_m10_filleted_boss.smb"
+        ));
+        let fresh = Brep::new();
+        let mut store = AttributeStore::new();
+        let mut records = NotifyRecords::new();
+        let key_of = |e| fresh.owner_identity(e);
+        let mut env = TopologyEnv {
+            all_attributes: &[],
+            attributes: &mut store,
+            key_of: &key_of,
+            records: &mut records,
+            next_key: 1 << 50,
+        };
+        let mut b = read_brep_from_file(k, Some(bytes.to_vec()), false, false, &mut env).unwrap();
+        b.refresh_cached_topology();
+        b
+    }
+
+    /// The full check of [`binormal_bodies`] reports what it reported before the edge
+    /// check kept its binormals: no failure line on any of them.
+    #[test]
+    fn binormal_bodies_check_as_before() {
+        use crate::topology::brep::validation::{check_brep_full, CheckLevel, ValidityScope};
+        let mut k = Kernel::default();
+        for (i, mut b) in binormal_bodies(&mut k).into_iter().enumerate() {
+            let check =
+                check_brep_full(&mut k, &mut b, CheckLevel::Level2, ValidityScope::Body).unwrap();
+            assert_eq!(check.lines(), Vec::<String>::new(), "body {i}");
+        }
+    }
+
+    /// [`Binormals`] gives back, bit for bit, what `evaluate_binormal` returns on the same
+    /// body never asked before; the second asking of every loop edge use is a kept value,
+    /// and a write to the B-rep drops every kept value.
+    #[test]
+    fn kept_binormals_are_the_evaluated_ones() {
+        let mut k = Kernel::default();
+        let mut bodies = binormal_bodies(&mut k);
+        let fresh = binormal_bodies(&mut k);
+        let options = BinormalOptions::default();
+        for (b, mut fresh) in bodies.iter_mut().zip(fresh) {
+            let mut memo = Binormals::default();
+            let mut uses = Vec::new();
+            for eu in b.edgeuses().ids().collect::<Vec<_>>() {
+                if !eu1::is_loop_edgeuse(b, eu).unwrap() {
+                    continue;
+                }
+                let e = b.edgeuse(eu).unwrap().edge.unwrap();
+                uses.push((eu, b.edge(e).unwrap().interval.evaluate(0.456)));
+            }
+            assert!(!uses.is_empty());
+            for round in 0..2 {
+                for &(eu, t) in &uses {
+                    let got = memo.eval(&k, b, eu, t);
+                    let want = evaluate_binormal(&k, &mut fresh, eu, t, true, &options);
+                    assert_eq!(format!("{got:?}"), format!("{want:?}"), "round {round}");
+                    let bits = |v: crate::math::Vec3| [v.x, v.y, v.z].map(f64::to_bits);
+                    let (got, want) = (got.unwrap(), want.unwrap());
+                    assert_eq!(bits(got.binormal), bits(want.binormal));
+                    assert_eq!(bits(got.tangent), bits(want.tangent));
+                    assert_eq!(bits(got.face_normal), bits(want.face_normal));
+                    assert_eq!(bits(got.point), bits(want.point));
+                }
+            }
+            // the first evaluation on a face can build its surface's cache (a write), so
+            // only the second round is all kept values
+            assert_eq!(memo.kept.len(), uses.len());
+            let (eu, t) = uses[0];
+            b.edgeuse_mut(eu).unwrap();
+            memo.eval(&k, b, eu, t).unwrap();
+            assert_eq!(memo.kept.len(), 1, "a write kept the old values");
+        }
     }
 }
